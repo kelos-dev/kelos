@@ -16,8 +16,12 @@ jobs:
           username: gjkim42
           password: ${{ secrets.DOCKERHUB_AXON_TOKEN }}
 
-      - name: Build image
-        run: make image
+      - name: Build images
+        run: |
+          make image WHAT=cmd/manager
+          make image WHAT=claude-code
 
-      - name: Push image
-        run: make push
+      - name: Push images
+        run: |
+          make push WHAT=cmd/manager
+          make push WHAT=claude-code

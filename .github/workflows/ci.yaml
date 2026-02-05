@@ -69,7 +69,7 @@ jobs:
           cluster_name: kind
 
       - name: Build controller image
-        run: make image WHAT=cmd/manager VERSION=e2e
+        run: make image WHAT=cmd/axon-controller VERSION=e2e
 
       - name: Load images into kind
         run: kind load docker-image gjkim42/axon-controller:e2e

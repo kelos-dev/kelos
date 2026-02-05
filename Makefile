@@ -1,11 +1,7 @@
 # Image configuration
+REGISTRY ?= gjkim42
 VERSION ?= latest
-
-ifeq ($(WHAT),claude-code)
-IMG = gjkim42/claude-code:$(VERSION)
-else ifeq ($(WHAT),cmd/manager)
-IMG = gjkim42/axon-controller:$(VERSION)
-endif
+IMAGE_DIRS ?= cmd/axon-controller claude-code
 
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.31.0
@@ -80,15 +76,19 @@ build: ## Build binaries (use WHAT=cmd/axon to build specific binary).
 
 .PHONY: run
 run: ## Run a controller from your host.
-	go run ./cmd/manager
+	go run ./cmd/axon-controller
 
 .PHONY: image
-image: ## Build docker image (WHAT=cmd/manager or WHAT=claude-code).
-	docker build -t ${IMG} -f $(WHAT)/Dockerfile .
+image: ## Build docker images (use WHAT to build specific image).
+	@for dir in $(or $(WHAT),$(IMAGE_DIRS)); do \
+		docker build -t $(REGISTRY)/$$(basename $$dir):$(VERSION) -f $$dir/Dockerfile .; \
+	done
 
 .PHONY: push
-push: ## Push docker image (WHAT=cmd/manager or WHAT=claude-code).
-	docker push ${IMG}
+push: ## Push docker images (use WHAT to push specific image).
+	@for dir in $(or $(WHAT),$(IMAGE_DIRS)); do \
+		docker push $(REGISTRY)/$$(basename $$dir):$(VERSION); \
+	done
 
 .PHONY: clean
 clean: ## Clean build artifacts.

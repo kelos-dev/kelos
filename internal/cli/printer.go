@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"text/tabwriter"
 	"time"
 
 	"k8s.io/apimachinery/pkg/util/duration"
+	"sigs.k8s.io/yaml"
 
 	axonv1alpha1 "github.com/gjkim42/axon/api/v1alpha1"
 )
@@ -57,4 +59,22 @@ func printTaskDetail(w io.Writer, t *axonv1alpha1.Task) {
 
 func printField(w io.Writer, label, value string) {
 	fmt.Fprintf(w, "%-20s%s\n", label+":", value)
+}
+
+func printYAML(w io.Writer, obj interface{}) error {
+	data, err := yaml.Marshal(obj)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(data)
+	return err
+}
+
+func printJSON(w io.Writer, obj interface{}) error {
+	data, err := json.MarshalIndent(obj, "", "  ")
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(w, string(data))
+	return err
 }

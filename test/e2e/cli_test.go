@@ -57,6 +57,18 @@ var _ = Describe("CLI", func() {
 		output := axonOutput("get", "task", cliTaskName)
 		Expect(output).To(ContainSubstring("Succeeded"))
 
+		By("verifying YAML output for a single task")
+		output = axonOutput("get", "task", cliTaskName, "-o", "yaml")
+		Expect(output).To(ContainSubstring("apiVersion: axon.io/v1alpha1"))
+		Expect(output).To(ContainSubstring("kind: Task"))
+		Expect(output).To(ContainSubstring("name: " + cliTaskName))
+
+		By("verifying JSON output for a single task")
+		output = axonOutput("get", "task", cliTaskName, "-o", "json")
+		Expect(output).To(ContainSubstring(`"apiVersion": "axon.io/v1alpha1"`))
+		Expect(output).To(ContainSubstring(`"kind": "Task"`))
+		Expect(output).To(ContainSubstring(`"name": "` + cliTaskName + `"`))
+
 		By("verifying task logs via CLI")
 		logs := axonOutput("logs", cliTaskName)
 		Expect(logs).NotTo(BeEmpty())
@@ -122,6 +134,22 @@ var _ = Describe("get", func() {
 
 	It("should fail for a nonexistent task", func() {
 		axonFail("get", "task", "nonexistent-task-name")
+	})
+
+	It("should output task list in YAML format", func() {
+		output := axonOutput("get", "tasks", "-o", "yaml")
+		Expect(output).To(ContainSubstring("apiVersion: axon.io/v1alpha1"))
+		Expect(output).To(ContainSubstring("kind: TaskList"))
+	})
+
+	It("should output task list in JSON format", func() {
+		output := axonOutput("get", "tasks", "-o", "json")
+		Expect(output).To(ContainSubstring(`"apiVersion": "axon.io/v1alpha1"`))
+		Expect(output).To(ContainSubstring(`"kind": "TaskList"`))
+	})
+
+	It("should fail with unknown output format", func() {
+		axonFail("get", "tasks", "-o", "invalid")
 	})
 })
 

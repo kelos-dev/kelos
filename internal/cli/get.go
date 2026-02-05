@@ -27,12 +27,18 @@ func newGetCommand(cfg *ClientConfig) *cobra.Command {
 }
 
 func newGetTaskCommand(cfg *ClientConfig) *cobra.Command {
-	return &cobra.Command{
+	var output string
+
+	cmd := &cobra.Command{
 		Use:     "task [name]",
 		Aliases: []string{"tasks"},
 		Short:   "List tasks or get details of a specific task",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if output != "" && output != "yaml" && output != "json" {
+				return fmt.Errorf("unknown output format %q: must be one of yaml, json", output)
+			}
+
 			cl, ns, err := cfg.NewClient()
 			if err != nil {
 				return err
@@ -45,16 +51,38 @@ func newGetTaskCommand(cfg *ClientConfig) *cobra.Command {
 				if err := cl.Get(ctx, client.ObjectKey{Name: args[0], Namespace: ns}, task); err != nil {
 					return fmt.Errorf("getting task: %w", err)
 				}
-				printTaskDetail(os.Stdout, task)
-				return nil
+
+				task.SetGroupVersionKind(axonv1alpha1.GroupVersion.WithKind("Task"))
+				switch output {
+				case "yaml":
+					return printYAML(os.Stdout, task)
+				case "json":
+					return printJSON(os.Stdout, task)
+				default:
+					printTaskDetail(os.Stdout, task)
+					return nil
+				}
 			}
 
 			taskList := &axonv1alpha1.TaskList{}
 			if err := cl.List(ctx, taskList, client.InNamespace(ns)); err != nil {
 				return fmt.Errorf("listing tasks: %w", err)
 			}
-			printTaskTable(os.Stdout, taskList.Items)
-			return nil
+
+			taskList.SetGroupVersionKind(axonv1alpha1.GroupVersion.WithKind("TaskList"))
+			switch output {
+			case "yaml":
+				return printYAML(os.Stdout, taskList)
+			case "json":
+				return printJSON(os.Stdout, taskList)
+			default:
+				printTaskTable(os.Stdout, taskList.Items)
+				return nil
+			}
 		},
 	}
+
+	cmd.Flags().StringVarP(&output, "output", "o", "", "Output format (yaml or json)")
+
+	return cmd
 }

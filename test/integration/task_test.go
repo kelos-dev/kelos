@@ -11,8 +11,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	axonv1alpha1 "github.com/gjkim/axon/api/v1alpha1"
-	"github.com/gjkim/axon/internal/controller"
+	axonv1alpha1 "github.com/gjkim42/axon/api/v1alpha1"
+	"github.com/gjkim42/axon/internal/controller"
 )
 
 func logJobSpec(job *batchv1.Job) {

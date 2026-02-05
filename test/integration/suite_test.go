@@ -16,8 +16,8 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	axonv1alpha1 "github.com/gjkim/axon/api/v1alpha1"
-	"github.com/gjkim/axon/internal/controller"
+	axonv1alpha1 "github.com/gjkim42/axon/api/v1alpha1"
+	"github.com/gjkim42/axon/internal/controller"
 )
 
 var (

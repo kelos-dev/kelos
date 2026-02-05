@@ -55,6 +55,12 @@ kubectl apply -f https://raw.githubusercontent.com/gjkim42/axon/main/install-crd
 kubectl apply -f https://raw.githubusercontent.com/gjkim42/axon/main/install.yaml
 ```
 
+### Install the CLI
+
+```bash
+go install github.com/gjkim42/axon/cmd/axon@latest
+```
+
 ### Run Your First Task
 
 1. Create a Secret with your OAuth token:

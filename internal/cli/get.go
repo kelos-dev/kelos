@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	axonv1alpha1 "github.com/gjkim/axon/api/v1alpha1"
+	axonv1alpha1 "github.com/gjkim42/axon/api/v1alpha1"
 )
 
 func newGetCommand(cfg *ClientConfig) *cobra.Command {

@@ -10,7 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	axonv1alpha1 "github.com/gjkim/axon/api/v1alpha1"
+	axonv1alpha1 "github.com/gjkim42/axon/api/v1alpha1"
 )
 
 func newLogsCommand(cfg *ClientConfig) *cobra.Command {

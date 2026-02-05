@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	axonv1alpha1 "github.com/gjkim/axon/api/v1alpha1"
+	axonv1alpha1 "github.com/gjkim42/axon/api/v1alpha1"
 )
 
 func newDeleteCommand(cfg *ClientConfig) *cobra.Command {

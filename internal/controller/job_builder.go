@@ -49,6 +49,8 @@ func (b *JobBuilder) Build(task *axonv1alpha1.Task) (*batchv1.Job, error) {
 func (b *JobBuilder) buildClaudeCodeJob(task *axonv1alpha1.Task) (*batchv1.Job, error) {
 	args := []string{
 		"--dangerously-skip-permissions",
+		"--output-format", "stream-json",
+		"--verbose",
 		"-p", task.Spec.Prompt,
 	}
 

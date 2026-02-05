@@ -78,25 +78,35 @@ oauthToken: <your-oauth-token>
 2. Run a task:
 
 ```bash
-axon run -p "Create a hello world program in Python" -w
+axon run -p "Create a hello world program in Python"
 ```
 
 Axon auto-creates the Kubernetes secret from your token.
 
-3. Watch it go:
+3. Stream the logs:
+
+```bash
+axon logs <task-name> -f
+```
 
 ```
-NAME              TYPE          PHASE      AGE
-task-a1b2c        claude-code   Pending    0s
-task-a1b2c        claude-code   Running    3s
-task-a1b2c        claude-code   Succeeded  42s
+[init] model=claude-sonnet-4-20250514
+
+--- Turn 1 ---
+I'll create a hello world program in Python.
+[tool] Write
+
+--- Turn 2 ---
+The file has been created.
+
+[result] completed (2 turns, $0.0035)
 ```
 
 Run against a git repo:
 
 ```bash
 axon run -p "Add unit tests" \
-  --workspace-repo https://github.com/your-org/repo.git --workspace-ref main -w
+  --workspace-repo https://github.com/your-org/repo.git --workspace-ref main
 ```
 
 <details>
@@ -232,15 +242,15 @@ The `axon` CLI lets you manage tasks without writing YAML.
 # Initialize a config file
 axon init
 
-# Run a task and watch its status
-axon run -p "Refactor auth to use JWT" -w
+# Run a task
+axon run -p "Refactor auth to use JWT"
 
 # Run against a git repo
 axon run -p "Add unit tests" \
-  --workspace-repo https://github.com/your-org/repo.git --workspace-ref main -w
+  --workspace-repo https://github.com/your-org/repo.git --workspace-ref main
 
 # Override config file defaults with CLI flags
-axon run -p "Fix bug" --secret other-secret --credential-type api-key -w
+axon run -p "Fix bug" --secret other-secret --credential-type api-key
 
 # List tasks
 axon get tasks

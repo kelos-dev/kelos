@@ -13,6 +13,7 @@ import (
 
 const cliTaskName = "e2e-cli-test-task"
 const cliWorkspaceTaskName = "e2e-cli-workspace-task"
+const cliFollowTaskName = "e2e-cli-follow-task"
 
 var _ = Describe("CLI", func() {
 	BeforeEach(func() {
@@ -20,6 +21,7 @@ var _ = Describe("CLI", func() {
 		kubectl("delete", "secret", "claude-credentials", "--ignore-not-found")
 		kubectl("delete", "task", cliTaskName, "--ignore-not-found")
 		kubectl("delete", "task", cliWorkspaceTaskName, "--ignore-not-found")
+		kubectl("delete", "task", cliFollowTaskName, "--ignore-not-found")
 	})
 
 	AfterEach(func() {
@@ -27,11 +29,13 @@ var _ = Describe("CLI", func() {
 			By("collecting debug info on failure")
 			debugTask(cliTaskName)
 			debugTask(cliWorkspaceTaskName)
+			debugTask(cliFollowTaskName)
 		}
 
 		By("cleaning up test resources")
 		kubectl("delete", "task", cliTaskName, "--ignore-not-found")
 		kubectl("delete", "task", cliWorkspaceTaskName, "--ignore-not-found")
+		kubectl("delete", "task", cliFollowTaskName, "--ignore-not-found")
 		kubectl("delete", "secret", "claude-credentials", "--ignore-not-found")
 	})
 
@@ -80,6 +84,28 @@ var _ = Describe("CLI", func() {
 		By("verifying task is no longer listed")
 		output = axonOutput("get", "tasks")
 		Expect(output).NotTo(ContainSubstring(cliTaskName))
+	})
+
+	It("should follow logs from task creation with -f", func() {
+		By("creating OAuth credentials secret")
+		Expect(kubectlWithInput("", "create", "secret", "generic", "claude-credentials",
+			"--from-literal=CLAUDE_CODE_OAUTH_TOKEN="+oauthToken)).To(Succeed())
+
+		By("creating a Task and immediately following logs")
+		axon("run",
+			"-p", "Print 'Hello from follow test' to stdout",
+			"--secret", "claude-credentials",
+			"--credential-type", "oauth",
+			"--name", cliFollowTaskName,
+		)
+
+		stdout, stderr := axonOutputWithStderr("logs", cliFollowTaskName, "-f")
+		By("verifying stderr contains streaming status")
+		Expect(stderr).To(ContainSubstring("Streaming container (claude-code) logs..."))
+		By("verifying stderr contains result summary")
+		Expect(stderr).To(ContainSubstring("[result]"))
+		By("verifying stdout contains log output")
+		Expect(stdout).NotTo(BeEmpty())
 	})
 
 	It("should run a Task with workspace to completion", func() {
@@ -178,6 +204,16 @@ func axonOutput(args ...string) string {
 	err := cmd.Run()
 	Expect(err).NotTo(HaveOccurred())
 	return strings.TrimSpace(out.String())
+}
+
+func axonOutputWithStderr(args ...string) (string, string) {
+	cmd := exec.Command(axonBin(), args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	Expect(err).NotTo(HaveOccurred())
+	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String())
 }
 
 func axonFail(args ...string) {

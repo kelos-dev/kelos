@@ -103,6 +103,8 @@ var _ = Describe("Task Controller", func() {
 			Expect(container.Name).To(Equal("claude-code"))
 			Expect(container.Args).To(ContainElements(
 				"--dangerously-skip-permissions",
+				"--output-format", "stream-json",
+				"--verbose",
 				"-p", "Create a hello world program",
 				"--model", "claude-sonnet-4-20250514",
 			))

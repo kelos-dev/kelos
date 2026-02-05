@@ -11,15 +11,15 @@ RUN go mod download
 COPY . .
 
 # Build
-RUN make build WHAT=cmd/manager
+RUN make build WHAT=cmd/axon-controller
 
 # Runtime stage
 FROM gcr.io/distroless/static:nonroot
 
 WORKDIR /
 
-COPY --from=builder /workspace/bin/manager .
+COPY --from=builder /workspace/bin/axon-controller .
 
 USER 65532:65532
 
-ENTRYPOINT ["/manager"]
+ENTRYPOINT ["/axon-controller"]

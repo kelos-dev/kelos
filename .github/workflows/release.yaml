@@ -17,11 +17,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_AXON_TOKEN }}
 
       - name: Build images
-        run: |
-          make image WHAT=cmd/manager
-          make image WHAT=claude-code
+        run: make image
 
       - name: Push images
-        run: |
-          make push WHAT=cmd/manager
-          make push WHAT=claude-code
+        run: make push

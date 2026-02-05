@@ -61,7 +61,7 @@ metadata:
   name: ` + taskName + `
 spec:
   type: claude-code
-  model: haiku
+  model: ` + testModel + `
   prompt: "Print 'Hello from Axon e2e test' to stdout"
   credentials:
     type: oauth
@@ -122,6 +122,7 @@ metadata:
   name: ` + workspaceTaskName + `
 spec:
   type: claude-code
+  model: ` + testModel + `
   prompt: "Run 'git log --oneline -1' and print the output"
   credentials:
     type: oauth

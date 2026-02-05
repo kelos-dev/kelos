@@ -45,6 +45,7 @@ var _ = Describe("CLI", func() {
 			"-p", "Print 'Hello from Axon CLI e2e test' to stdout",
 			"--secret", "claude-credentials",
 			"--credential-type", "oauth",
+			"--model", testModel,
 			"--name", cliTaskName,
 		)
 
@@ -91,6 +92,7 @@ var _ = Describe("CLI", func() {
 			"-p", "Run 'git log --oneline -1' and print the output",
 			"--secret", "claude-credentials",
 			"--credential-type", "oauth",
+			"--model", testModel,
 			"--workspace-repo", "https://github.com/gjkim42/axon.git",
 			"--workspace-ref", "main",
 			"--name", cliWorkspaceTaskName,

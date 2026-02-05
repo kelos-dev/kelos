@@ -8,6 +8,8 @@ import (
 	. "github.com/onsi/gomega"
 )
 
+const testModel = "haiku"
+
 var oauthToken string
 
 func TestE2E(t *testing.T) {

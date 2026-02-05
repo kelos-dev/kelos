@@ -80,6 +80,22 @@ spec:
               type:
                 description: Type specifies the agent type (e.g., claude-code).
                 type: string
+              workspace:
+                description: Workspace optionally specifies a git repository for the
+                  agent to work in.
+                properties:
+                  ref:
+                    description: |-
+                      Ref is the git reference to checkout (branch, tag, or commit SHA).
+                      Defaults to the repository's default branch if not specified.
+                    type: string
+                  repo:
+                    description: Repo is the git repository URL to clone.
+                    pattern: ^(https?://|git://|git@).*
+                    type: string
+                required:
+                - repo
+                type: object
             required:
             - credentials
             - prompt

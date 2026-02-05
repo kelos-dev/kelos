@@ -57,17 +57,17 @@ kubectl apply -f https://raw.githubusercontent.com/gjkim42/axon/main/install.yam
 
 ### Run Your First Task
 
-1. Create a Secret with your Anthropic API key:
+1. Create a Secret with your OAuth token:
 
 ```bash
-kubectl create secret generic anthropic-api-key \
-  --from-literal=ANTHROPIC_API_KEY=<your-api-key>
+kubectl create secret generic claude-oauth \
+  --from-literal=CLAUDE_CODE_OAUTH_TOKEN=<your-oauth-token>
 ```
 
 2. Run a task:
 
 ```bash
-axon run -p "Create a hello world program in Python" --secret anthropic-api-key -w
+axon run -p "Create a hello world program in Python" --credential-type oauth --secret claude-oauth -w
 ```
 
 3. Watch it go:
@@ -82,7 +82,7 @@ task-a1b2c        claude-code   Succeeded  42s
 Run against a git repo:
 
 ```bash
-axon run -p "Add unit tests" --secret anthropic-api-key \
+axon run -p "Add unit tests" --credential-type oauth --secret claude-oauth \
   --workspace-repo https://github.com/your-org/repo.git --workspace-ref main -w
 ```
 
@@ -98,9 +98,9 @@ spec:
   type: claude-code
   prompt: "Create a hello world program in Python"
   credentials:
-    type: api-key
+    type: oauth
     secretRef:
-      name: anthropic-api-key
+      name: claude-oauth
 ```
 
 ```bash
@@ -119,14 +119,14 @@ Add `spec.workspace` to clone a repo before the agent starts:
 </details>
 
 <details>
-<summary>Using OAuth instead of an API key</summary>
+<summary>Using an API key instead of OAuth</summary>
 
 ```bash
-kubectl create secret generic claude-oauth \
-  --from-literal=CLAUDE_CODE_OAUTH_TOKEN=<your-oauth-token>
+kubectl create secret generic anthropic-api-key \
+  --from-literal=ANTHROPIC_API_KEY=<your-api-key>
 ```
 
-Then pass `--credential-type oauth --secret claude-oauth` to `axon run`, or set `spec.credentials.type: oauth` in YAML.
+Then pass `--secret anthropic-api-key` to `axon run` (api-key is the default credential type), or set `spec.credentials.type: api-key` in YAML.
 
 </details>
 
@@ -187,10 +187,10 @@ The `axon` CLI lets you manage tasks without writing YAML.
 
 ```bash
 # Run a task and watch its status
-axon run -p "Refactor auth to use JWT" --secret anthropic-api-key -w
+axon run -p "Refactor auth to use JWT" --credential-type oauth --secret claude-oauth -w
 
 # Run against a git repo
-axon run -p "Add unit tests" --secret anthropic-api-key \
+axon run -p "Add unit tests" --credential-type oauth --secret claude-oauth \
   --workspace-repo https://github.com/your-org/repo.git --workspace-ref main -w
 
 # List tasks

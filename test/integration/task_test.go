@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	axonv1alpha1 "github.com/gjkim/axon/api/v1alpha1"
+	"github.com/gjkim/axon/internal/controller"
 )
 
 func logJobSpec(job *batchv1.Job) {
@@ -235,6 +236,158 @@ var _ = Describe("Task Controller", func() {
 			Expect(container.Env[0].Name).To(Equal("CLAUDE_CODE_OAUTH_TOKEN"))
 			Expect(container.Env[0].ValueFrom.SecretKeyRef.Name).To(Equal("claude-oauth"))
 			Expect(container.Env[0].ValueFrom.SecretKeyRef.Key).To(Equal("CLAUDE_CODE_OAUTH_TOKEN"))
+		})
+	})
+
+	Context("When creating a Task with workspace and ref", func() {
+		It("Should create a Job with init container and workspace volume", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-task-workspace-ref",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with API key")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+			By("Creating a Task with workspace and ref")
+			task := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace-ref",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "Fix the bug",
+					Credentials: axonv1alpha1.Credentials{
+						Type: axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{
+							Name: "anthropic-api-key",
+						},
+					},
+					Workspace: &axonv1alpha1.Workspace{
+						Repo: "https://github.com/example/repo.git",
+						Ref:  "main",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, task)).Should(Succeed())
+
+			By("Verifying a Job is created")
+			jobLookupKey := types.NamespacedName{Name: task.Name, Namespace: ns.Name}
+			createdJob := &batchv1.Job{}
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, jobLookupKey, createdJob)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Logging the Job spec")
+			logJobSpec(createdJob)
+
+			By("Verifying the init container")
+			Expect(createdJob.Spec.Template.Spec.InitContainers).To(HaveLen(1))
+			initContainer := createdJob.Spec.Template.Spec.InitContainers[0]
+			Expect(initContainer.Name).To(Equal("git-clone"))
+			Expect(initContainer.Image).To(Equal(controller.GitCloneImage))
+			Expect(initContainer.Args).To(Equal([]string{
+				"clone", "--branch", "main", "--single-branch", "--depth", "1",
+				"--", "https://github.com/example/repo.git", "/workspace/repo",
+			}))
+
+			By("Verifying the workspace volume")
+			Expect(createdJob.Spec.Template.Spec.Volumes).To(HaveLen(1))
+			Expect(createdJob.Spec.Template.Spec.Volumes[0].Name).To(Equal(controller.WorkspaceVolumeName))
+			Expect(createdJob.Spec.Template.Spec.Volumes[0].EmptyDir).NotTo(BeNil())
+
+			By("Verifying the init container volume mount")
+			Expect(initContainer.VolumeMounts).To(HaveLen(1))
+			Expect(initContainer.VolumeMounts[0].Name).To(Equal(controller.WorkspaceVolumeName))
+			Expect(initContainer.VolumeMounts[0].MountPath).To(Equal(controller.WorkspaceMountPath))
+
+			By("Verifying the main container volume mount and workingDir")
+			mainContainer := createdJob.Spec.Template.Spec.Containers[0]
+			Expect(mainContainer.VolumeMounts).To(HaveLen(1))
+			Expect(mainContainer.VolumeMounts[0].Name).To(Equal(controller.WorkspaceVolumeName))
+			Expect(mainContainer.VolumeMounts[0].MountPath).To(Equal(controller.WorkspaceMountPath))
+			Expect(mainContainer.WorkingDir).To(Equal("/workspace/repo"))
+		})
+	})
+
+	Context("When creating a Task with workspace without ref", func() {
+		It("Should create a Job with git clone args omitting --branch", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-task-workspace-noref",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with API key")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+			By("Creating a Task with workspace but no ref")
+			task := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace-noref",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "Review the code",
+					Credentials: axonv1alpha1.Credentials{
+						Type: axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{
+							Name: "anthropic-api-key",
+						},
+					},
+					Workspace: &axonv1alpha1.Workspace{
+						Repo: "https://github.com/example/repo.git",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, task)).Should(Succeed())
+
+			By("Verifying a Job is created")
+			jobLookupKey := types.NamespacedName{Name: task.Name, Namespace: ns.Name}
+			createdJob := &batchv1.Job{}
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, jobLookupKey, createdJob)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Logging the Job spec")
+			logJobSpec(createdJob)
+
+			By("Verifying the init container args omit --branch")
+			Expect(createdJob.Spec.Template.Spec.InitContainers).To(HaveLen(1))
+			initContainer := createdJob.Spec.Template.Spec.InitContainers[0]
+			Expect(initContainer.Args).To(Equal([]string{
+				"clone", "--single-branch", "--depth", "1",
+				"--", "https://github.com/example/repo.git", "/workspace/repo",
+			}))
 		})
 	})
 })

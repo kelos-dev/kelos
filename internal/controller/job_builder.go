@@ -16,6 +16,15 @@ const (
 
 	// AgentTypeClaudeCode is the agent type for Claude Code.
 	AgentTypeClaudeCode = "claude-code"
+
+	// GitCloneImage is the image used for cloning git repositories.
+	GitCloneImage = "alpine/git:v2.47.2"
+
+	// WorkspaceVolumeName is the name of the workspace volume.
+	WorkspaceVolumeName = "workspace"
+
+	// WorkspaceMountPath is the mount path for the workspace volume.
+	WorkspaceMountPath = "/workspace"
 )
 
 // JobBuilder constructs Kubernetes Jobs for Tasks.
@@ -78,6 +87,47 @@ func (b *JobBuilder) buildClaudeCodeJob(task *axonv1alpha1.Task) (*batchv1.Job, 
 
 	backoffLimit := int32(0)
 
+	mainContainer := corev1.Container{
+		Name:  "claude-code",
+		Image: ClaudeCodeImage,
+		Args:  args,
+		Env:   envVars,
+	}
+
+	var initContainers []corev1.Container
+	var volumes []corev1.Volume
+
+	if task.Spec.Workspace != nil {
+		volume := corev1.Volume{
+			Name: WorkspaceVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		}
+		volumes = append(volumes, volume)
+
+		volumeMount := corev1.VolumeMount{
+			Name:      WorkspaceVolumeName,
+			MountPath: WorkspaceMountPath,
+		}
+
+		cloneArgs := []string{"clone"}
+		if task.Spec.Workspace.Ref != "" {
+			cloneArgs = append(cloneArgs, "--branch", task.Spec.Workspace.Ref)
+		}
+		cloneArgs = append(cloneArgs, "--single-branch", "--depth", "1", "--", task.Spec.Workspace.Repo, WorkspaceMountPath+"/repo")
+
+		initContainers = append(initContainers, corev1.Container{
+			Name:         "git-clone",
+			Image:        GitCloneImage,
+			Args:         cloneArgs,
+			VolumeMounts: []corev1.VolumeMount{volumeMount},
+		})
+
+		mainContainer.VolumeMounts = []corev1.VolumeMount{volumeMount}
+		mainContainer.WorkingDir = WorkspaceMountPath + "/repo"
+	}
+
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      task.Name,
@@ -101,15 +151,10 @@ func (b *JobBuilder) buildClaudeCodeJob(task *axonv1alpha1.Task) (*batchv1.Job, 
 					},
 				},
 				Spec: corev1.PodSpec{
-					RestartPolicy: corev1.RestartPolicyNever,
-					Containers: []corev1.Container{
-						{
-							Name:  "claude-code",
-							Image: ClaudeCodeImage,
-							Args:  args,
-							Env:   envVars,
-						},
-					},
+					RestartPolicy:  corev1.RestartPolicyNever,
+					InitContainers: initContainers,
+					Volumes:        volumes,
+					Containers:     []corev1.Container{mainContainer},
 				},
 			},
 		},

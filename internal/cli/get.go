@@ -16,7 +16,8 @@ func newGetCommand(cfg *ClientConfig) *cobra.Command {
 		Use:   "get",
 		Short: "Get resources",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("must specify a resource type; use `axon get task`")
+			cmd.Help()
+			return fmt.Errorf("must specify a resource type")
 		},
 	}
 

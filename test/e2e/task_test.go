@@ -57,6 +57,7 @@ metadata:
   name: ` + taskName + `
 spec:
   type: claude-code
+  model: haiku
   prompt: "Print 'Hello from Axon e2e test' to stdout"
   credentials:
     type: oauth

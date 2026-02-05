@@ -200,7 +200,7 @@ axon run -p "Add unit tests" --credential-type oauth --secret claude-oauth \
   --workspace-repo https://github.com/your-org/repo.git --workspace-ref main -w
 
 # List tasks
-axon get
+axon get tasks
 
 # View logs (follow mode)
 axon logs my-task -f

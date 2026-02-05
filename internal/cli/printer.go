@@ -8,7 +8,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/duration"
 
-	axonv1alpha1 "github.com/gjkim/axon/api/v1alpha1"
+	axonv1alpha1 "github.com/gjkim42/axon/api/v1alpha1"
 )
 
 func printTaskTable(w io.Writer, tasks []axonv1alpha1.Task) {

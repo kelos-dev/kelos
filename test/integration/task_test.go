@@ -308,6 +308,16 @@ var _ = Describe("Task Controller", func() {
 				"--", "https://github.com/example/repo.git", "/workspace/repo",
 			}))
 
+			By("Verifying the init container runs as claude user")
+			Expect(initContainer.SecurityContext).NotTo(BeNil())
+			Expect(initContainer.SecurityContext.RunAsUser).NotTo(BeNil())
+			Expect(*initContainer.SecurityContext.RunAsUser).To(Equal(controller.ClaudeCodeUID))
+
+			By("Verifying the pod security context sets FSGroup")
+			Expect(createdJob.Spec.Template.Spec.SecurityContext).NotTo(BeNil())
+			Expect(createdJob.Spec.Template.Spec.SecurityContext.FSGroup).NotTo(BeNil())
+			Expect(*createdJob.Spec.Template.Spec.SecurityContext.FSGroup).To(Equal(controller.ClaudeCodeUID))
+
 			By("Verifying the workspace volume")
 			Expect(createdJob.Spec.Template.Spec.Volumes).To(HaveLen(1))
 			Expect(createdJob.Spec.Template.Spec.Volumes[0].Name).To(Equal(controller.WorkspaceVolumeName))
@@ -390,6 +400,16 @@ var _ = Describe("Task Controller", func() {
 				"clone", "--single-branch", "--depth", "1",
 				"--", "https://github.com/example/repo.git", "/workspace/repo",
 			}))
+
+			By("Verifying the init container runs as claude user")
+			Expect(initContainer.SecurityContext).NotTo(BeNil())
+			Expect(initContainer.SecurityContext.RunAsUser).NotTo(BeNil())
+			Expect(*initContainer.SecurityContext.RunAsUser).To(Equal(controller.ClaudeCodeUID))
+
+			By("Verifying the pod security context sets FSGroup")
+			Expect(createdJob.Spec.Template.Spec.SecurityContext).NotTo(BeNil())
+			Expect(createdJob.Spec.Template.Spec.SecurityContext.FSGroup).NotTo(BeNil())
+			Expect(*createdJob.Spec.Template.Spec.SecurityContext.FSGroup).To(Equal(controller.ClaudeCodeUID))
 		})
 	})
 })

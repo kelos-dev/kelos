@@ -25,14 +25,22 @@ const (
 
 	// WorkspaceMountPath is the mount path for the workspace volume.
 	WorkspaceMountPath = "/workspace"
+
+	// ClaudeCodeUID is the UID of the claude user in the claude-code
+	// container image (claude-code/Dockerfile). This must be kept in sync
+	// with the Dockerfile.
+	ClaudeCodeUID = int64(1100)
 )
 
 // JobBuilder constructs Kubernetes Jobs for Tasks.
-type JobBuilder struct{}
+type JobBuilder struct {
+	ClaudeCodeImage           string
+	ClaudeCodeImagePullPolicy corev1.PullPolicy
+}
 
 // NewJobBuilder creates a new JobBuilder.
 func NewJobBuilder() *JobBuilder {
-	return &JobBuilder{}
+	return &JobBuilder{ClaudeCodeImage: ClaudeCodeImage}
 }
 
 // Build creates a Job for the given Task.
@@ -88,18 +96,25 @@ func (b *JobBuilder) buildClaudeCodeJob(task *axonv1alpha1.Task) (*batchv1.Job, 
 	}
 
 	backoffLimit := int32(0)
+	claudeCodeUID := ClaudeCodeUID
 
 	mainContainer := corev1.Container{
-		Name:  "claude-code",
-		Image: ClaudeCodeImage,
-		Args:  args,
-		Env:   envVars,
+		Name:            "claude-code",
+		Image:           b.ClaudeCodeImage,
+		ImagePullPolicy: b.ClaudeCodeImagePullPolicy,
+		Args:            args,
+		Env:             envVars,
 	}
 
 	var initContainers []corev1.Container
 	var volumes []corev1.Volume
+	var podSecurityContext *corev1.PodSecurityContext
 
 	if task.Spec.Workspace != nil {
+		podSecurityContext = &corev1.PodSecurityContext{
+			FSGroup: &claudeCodeUID,
+		}
+
 		volume := corev1.Volume{
 			Name: WorkspaceVolumeName,
 			VolumeSource: corev1.VolumeSource{
@@ -124,6 +139,9 @@ func (b *JobBuilder) buildClaudeCodeJob(task *axonv1alpha1.Task) (*batchv1.Job, 
 			Image:        GitCloneImage,
 			Args:         cloneArgs,
 			VolumeMounts: []corev1.VolumeMount{volumeMount},
+			SecurityContext: &corev1.SecurityContext{
+				RunAsUser: &claudeCodeUID,
+			},
 		})
 
 		mainContainer.VolumeMounts = []corev1.VolumeMount{volumeMount}
@@ -153,10 +171,11 @@ func (b *JobBuilder) buildClaudeCodeJob(task *axonv1alpha1.Task) (*batchv1.Job, 
 					},
 				},
 				Spec: corev1.PodSpec{
-					RestartPolicy:  corev1.RestartPolicyNever,
-					InitContainers: initContainers,
-					Volumes:        volumes,
-					Containers:     []corev1.Container{mainContainer},
+					RestartPolicy:   corev1.RestartPolicyNever,
+					SecurityContext: podSecurityContext,
+					InitContainers:  initContainers,
+					Volumes:         volumes,
+					Containers:      []corev1.Container{mainContainer},
 				},
 			},
 		},

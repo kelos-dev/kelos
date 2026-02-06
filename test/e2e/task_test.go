@@ -123,7 +123,7 @@ metadata:
 spec:
   type: claude-code
   model: ` + testModel + `
-  prompt: "Run 'git log --oneline -1' and print the output"
+  prompt: "Create a file called 'test.txt' with the content 'hello' in the current directory and print 'done'"
   credentials:
     type: oauth
     secretRef:
@@ -151,6 +151,11 @@ spec:
 		By("getting Job logs")
 		logs := kubectlOutput("logs", "job/"+workspaceTaskName)
 		GinkgoWriter.Printf("Job logs:\n%s\n", logs)
+
+		By("verifying no permission errors in logs")
+		Expect(logs).NotTo(ContainSubstring("permission denied"))
+		Expect(logs).NotTo(ContainSubstring("Permission denied"))
+		Expect(logs).NotTo(ContainSubstring("EACCES"))
 	})
 })
 

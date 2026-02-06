@@ -12,6 +12,8 @@ type WorkItem struct {
 	Labels   []string
 	Comments string
 	Kind     string // "Issue" or "PR"
+	Time     string // Cron trigger time (RFC3339)
+	Schedule string // Cron schedule expression
 }
 
 // Source discovers work items from an external system.

@@ -22,6 +22,17 @@ type When struct {
 	// GitHubIssues discovers issues from a GitHub repository.
 	// +optional
 	GitHubIssues *GitHubIssues `json:"githubIssues,omitempty"`
+
+	// Cron triggers task spawning on a cron schedule.
+	// +optional
+	Cron *Cron `json:"cron,omitempty"`
+}
+
+// Cron triggers task spawning on a cron schedule.
+type Cron struct {
+	// Schedule is a cron expression (e.g., "0 9 * * 1" for every Monday at 9am).
+	// +kubebuilder:validation:Required
+	Schedule string `json:"schedule"`
 }
 
 // GitHubIssues discovers issues from a GitHub repository.

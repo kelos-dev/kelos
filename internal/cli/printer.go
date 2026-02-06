@@ -62,6 +62,8 @@ func printTaskSpawnerTable(w io.Writer, spawners []axonv1alpha1.TaskSpawner) {
 		source := ""
 		if s.Spec.When.GitHubIssues != nil && s.Spec.When.GitHubIssues.WorkspaceRef != nil {
 			source = s.Spec.When.GitHubIssues.WorkspaceRef.Name
+		} else if s.Spec.When.Cron != nil {
+			source = "cron: " + s.Spec.When.Cron.Schedule
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%s\n",
 			s.Name, source, s.Status.Phase,
@@ -89,6 +91,9 @@ func printTaskSpawnerDetail(w io.Writer, ts *axonv1alpha1.TaskSpawner) {
 		if len(gh.Labels) > 0 {
 			printField(w, "Labels", fmt.Sprintf("%v", gh.Labels))
 		}
+	} else if ts.Spec.When.Cron != nil {
+		printField(w, "Source", "Cron")
+		printField(w, "Schedule", ts.Spec.When.Cron.Schedule)
 	}
 	printField(w, "Task Type", ts.Spec.TaskTemplate.Type)
 	if ts.Spec.TaskTemplate.Model != "" {

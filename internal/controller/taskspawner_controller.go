@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -92,6 +93,15 @@ func (r *TaskSpawnerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			Name:      gh.WorkspaceRef.Name,
 		}, &ws); err != nil {
 			logger.Error(err, "Unable to fetch Workspace for TaskSpawner", "workspace", gh.WorkspaceRef.Name)
+			if apierrors.IsNotFound(err) {
+				ts.Status.Phase = axonv1alpha1.TaskSpawnerPhaseFailed
+				ts.Status.Message = fmt.Sprintf("Workspace %q not found", gh.WorkspaceRef.Name)
+				if updateErr := r.Status().Update(ctx, &ts); updateErr != nil {
+					logger.Error(updateErr, "Unable to update TaskSpawner status")
+					return ctrl.Result{}, updateErr
+				}
+				return ctrl.Result{}, nil
+			}
 			return ctrl.Result{}, err
 		}
 		workspace = &ws.Spec

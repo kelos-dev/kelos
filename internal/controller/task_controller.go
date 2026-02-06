@@ -129,6 +129,7 @@ func (r *TaskReconciler) createJob(ctx context.Context, task *axonv1alpha1.Task)
 				task.Status.Message = fmt.Sprintf("Workspace %q not found", task.Spec.WorkspaceRef.Name)
 				if updateErr := r.Status().Update(ctx, task); updateErr != nil {
 					logger.Error(updateErr, "Unable to update Task status")
+					return ctrl.Result{}, updateErr
 				}
 				return ctrl.Result{}, nil
 			}

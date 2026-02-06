@@ -384,4 +384,57 @@ var _ = Describe("TaskSpawner Controller", func() {
 			}, time.Second*2, interval).Should(Equal(1))
 		})
 	})
+
+	Context("When creating a TaskSpawner with a nonexistent workspace", func() {
+		It("Should fail with a meaningful error", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-taskspawner-no-workspace",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a TaskSpawner referencing a nonexistent Workspace")
+			ts := &axonv1alpha1.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-spawner-no-workspace",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpawnerSpec{
+					When: axonv1alpha1.When{
+						GitHubIssues: &axonv1alpha1.GitHubIssues{
+							WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+								Name: "nonexistent-workspace",
+							},
+						},
+					},
+					TaskTemplate: axonv1alpha1.TaskTemplate{
+						Type: "claude-code",
+						Credentials: axonv1alpha1.Credentials{
+							Type: axonv1alpha1.CredentialTypeOAuth,
+							SecretRef: axonv1alpha1.SecretReference{
+								Name: "claude-credentials",
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ts)).Should(Succeed())
+
+			By("Verifying the TaskSpawner phase is Failed")
+			tsLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
+			createdTS := &axonv1alpha1.TaskSpawner{}
+
+			Eventually(func() axonv1alpha1.TaskSpawnerPhase {
+				err := k8sClient.Get(ctx, tsLookupKey, createdTS)
+				if err != nil {
+					return ""
+				}
+				return createdTS.Status.Phase
+			}, timeout, interval).Should(Equal(axonv1alpha1.TaskSpawnerPhaseFailed))
+
+			Expect(createdTS.Status.Message).To(ContainSubstring("nonexistent-workspace"))
+		})
+	})
 })

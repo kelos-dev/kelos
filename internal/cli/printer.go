@@ -91,9 +91,6 @@ func printTaskSpawnerDetail(w io.Writer, ts *axonv1alpha1.TaskSpawner) {
 	if ts.Spec.TaskTemplate.Model != "" {
 		printField(w, "Model", ts.Spec.TaskTemplate.Model)
 	}
-	if ts.Spec.When.GitHubIssues != nil && ts.Spec.When.GitHubIssues.WorkspaceRef != nil {
-		printField(w, "Workspace", ts.Spec.When.GitHubIssues.WorkspaceRef.Name)
-	}
 	printField(w, "Poll Interval", ts.Spec.PollInterval)
 	if ts.Status.DeploymentName != "" {
 		printField(w, "Deployment", ts.Status.DeploymentName)

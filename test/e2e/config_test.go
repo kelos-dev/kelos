@@ -69,7 +69,7 @@ var _ = Describe("Config", func() {
 		Expect(output).To(ContainSubstring("Workspace Repo"))
 
 		By("deleting task via CLI")
-		axon("delete", configTaskName)
+		axon("delete", "task", configTaskName)
 	})
 
 	It("should allow CLI flags to override config file", func() {
@@ -98,7 +98,7 @@ var _ = Describe("Config", func() {
 		Expect(output).To(ContainSubstring("main"))
 
 		By("deleting task via CLI")
-		axon("delete", configOverrideTaskName)
+		axon("delete", "task", configOverrideTaskName)
 	})
 
 	It("should run a Task with workspace token from config file", func() {
@@ -130,7 +130,7 @@ var _ = Describe("Config", func() {
 		Expect(output).To(ContainSubstring("Workspace Secret"))
 
 		By("deleting task via CLI")
-		axon("delete", configGitHubTaskName)
+		axon("delete", "task", configGitHubTaskName)
 	})
 
 	It("should initialize config file via init command", func() {

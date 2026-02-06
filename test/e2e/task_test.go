@@ -159,6 +159,82 @@ spec:
 	})
 })
 
+const githubTaskName = "e2e-test-github-task"
+
+var _ = Describe("Task with workspace and secretRef", func() {
+	BeforeEach(func() {
+		if githubToken == "" {
+			Skip("GITHUB_TOKEN not set, skipping GitHub e2e tests")
+		}
+
+		By("cleaning up existing resources")
+		kubectl("delete", "secret", "claude-credentials", "--ignore-not-found")
+		kubectl("delete", "secret", "workspace-credentials", "--ignore-not-found")
+		kubectl("delete", "task", githubTaskName, "--ignore-not-found")
+	})
+
+	AfterEach(func() {
+		if CurrentSpecReport().Failed() {
+			By("collecting debug info on failure")
+			debugTask(githubTaskName)
+		}
+
+		By("cleaning up test resources")
+		kubectl("delete", "task", githubTaskName, "--ignore-not-found")
+		kubectl("delete", "secret", "claude-credentials", "--ignore-not-found")
+		kubectl("delete", "secret", "workspace-credentials", "--ignore-not-found")
+	})
+
+	It("should run a Task with gh CLI available and GITHUB_TOKEN injected", func() {
+		By("creating OAuth credentials secret")
+		Expect(kubectlWithInput("", "create", "secret", "generic", "claude-credentials",
+			"--from-literal=CLAUDE_CODE_OAUTH_TOKEN="+oauthToken)).To(Succeed())
+
+		By("creating workspace credentials secret")
+		Expect(kubectlWithInput("", "create", "secret", "generic", "workspace-credentials",
+			"--from-literal=GITHUB_TOKEN="+githubToken)).To(Succeed())
+
+		By("creating a Task with workspace and secretRef")
+		taskYAML := `apiVersion: axon.io/v1alpha1
+kind: Task
+metadata:
+  name: ` + githubTaskName + `
+spec:
+  type: claude-code
+  model: ` + testModel + `
+  prompt: "Run 'gh auth status' and print the output"
+  credentials:
+    type: oauth
+    secretRef:
+      name: claude-credentials
+  workspace:
+    repo: https://github.com/gjkim42/axon.git
+    ref: main
+    secretRef:
+      name: workspace-credentials
+`
+		Expect(kubectlWithInput(taskYAML, "apply", "-f", "-")).To(Succeed())
+
+		By("waiting for Job to be created")
+		Eventually(func() error {
+			return kubectlWithInput("", "get", "job", githubTaskName)
+		}, 30*time.Second, time.Second).Should(Succeed())
+
+		By("waiting for Job to complete")
+		Eventually(func() error {
+			return kubectlWithInput("", "wait", "--for=condition=complete", "job/"+githubTaskName, "--timeout=10s")
+		}, 5*time.Minute, 10*time.Second).Should(Succeed())
+
+		By("verifying Task status is Succeeded")
+		output := kubectlOutput("get", "task", githubTaskName, "-o", "jsonpath={.status.phase}")
+		Expect(output).To(Equal("Succeeded"))
+
+		By("getting Job logs")
+		logs := kubectlOutput("logs", "job/"+githubTaskName)
+		GinkgoWriter.Printf("Job logs:\n%s\n", logs)
+	})
+})
+
 func kubectl(args ...string) {
 	cmd := exec.Command("kubectl", args...)
 	cmd.Stdout = GinkgoWriter

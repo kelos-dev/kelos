@@ -39,6 +39,9 @@ func printTaskDetail(w io.Writer, t *axonv1alpha1.Task) {
 		if t.Spec.Workspace.Ref != "" {
 			printField(w, "Workspace Ref", t.Spec.Workspace.Ref)
 		}
+		if t.Spec.Workspace.SecretRef != nil {
+			printField(w, "Workspace Secret", t.Spec.Workspace.SecretRef.Name)
+		}
 	}
 	if t.Status.JobName != "" {
 		printField(w, "Job", t.Status.JobName)

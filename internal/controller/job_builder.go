@@ -95,6 +95,26 @@ func (b *JobBuilder) buildClaudeCodeJob(task *axonv1alpha1.Task) (*batchv1.Job, 
 		})
 	}
 
+	var workspaceEnvVars []corev1.EnvVar
+	if task.Spec.Workspace != nil && task.Spec.Workspace.SecretRef != nil {
+		secretKeyRef := &corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{
+				Name: task.Spec.Workspace.SecretRef.Name,
+			},
+			Key: "GITHUB_TOKEN",
+		}
+		githubTokenEnv := corev1.EnvVar{
+			Name:      "GITHUB_TOKEN",
+			ValueFrom: &corev1.EnvVarSource{SecretKeyRef: secretKeyRef},
+		}
+		ghTokenEnv := corev1.EnvVar{
+			Name:      "GH_TOKEN",
+			ValueFrom: &corev1.EnvVarSource{SecretKeyRef: secretKeyRef},
+		}
+		envVars = append(envVars, githubTokenEnv, ghTokenEnv)
+		workspaceEnvVars = append(workspaceEnvVars, githubTokenEnv, ghTokenEnv)
+	}
+
 	backoffLimit := int32(0)
 	claudeCodeUID := ClaudeCodeUID
 
@@ -138,6 +158,7 @@ func (b *JobBuilder) buildClaudeCodeJob(task *axonv1alpha1.Task) (*batchv1.Job, 
 			Name:         "git-clone",
 			Image:        GitCloneImage,
 			Args:         cloneArgs,
+			Env:          workspaceEnvVars,
 			VolumeMounts: []corev1.VolumeMount{volumeMount},
 			SecurityContext: &corev1.SecurityContext{
 				RunAsUser: &claudeCodeUID,

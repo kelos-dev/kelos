@@ -337,6 +337,109 @@ var _ = Describe("Task Controller", func() {
 		})
 	})
 
+	Context("When creating a Task with workspace and secretRef", func() {
+		It("Should create a Job with GITHUB_TOKEN env var in both init and main containers", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-task-workspace-secret",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with API key")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+			By("Creating a Secret with GITHUB_TOKEN")
+			ghSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "github-token",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"GITHUB_TOKEN": "test-gh-token",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ghSecret)).Should(Succeed())
+
+			By("Creating a Task with workspace and secretRef")
+			task := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace-secret",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "Create a PR",
+					Credentials: axonv1alpha1.Credentials{
+						Type: axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{
+							Name: "anthropic-api-key",
+						},
+					},
+					Workspace: &axonv1alpha1.Workspace{
+						Repo: "https://github.com/example/repo.git",
+						Ref:  "main",
+						SecretRef: &axonv1alpha1.SecretReference{
+							Name: "github-token",
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, task)).Should(Succeed())
+
+			By("Verifying a Job is created")
+			jobLookupKey := types.NamespacedName{Name: task.Name, Namespace: ns.Name}
+			createdJob := &batchv1.Job{}
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, jobLookupKey, createdJob)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Logging the Job spec")
+			logJobSpec(createdJob)
+
+			By("Verifying the main container has ANTHROPIC_API_KEY, GITHUB_TOKEN, and GH_TOKEN env vars")
+			mainContainer := createdJob.Spec.Template.Spec.Containers[0]
+			Expect(mainContainer.Env).To(HaveLen(3))
+			Expect(mainContainer.Env[0].Name).To(Equal("ANTHROPIC_API_KEY"))
+			Expect(mainContainer.Env[0].ValueFrom.SecretKeyRef.Name).To(Equal("anthropic-api-key"))
+			Expect(mainContainer.Env[1].Name).To(Equal("GITHUB_TOKEN"))
+			Expect(mainContainer.Env[1].ValueFrom.SecretKeyRef.Name).To(Equal("github-token"))
+			Expect(mainContainer.Env[1].ValueFrom.SecretKeyRef.Key).To(Equal("GITHUB_TOKEN"))
+			Expect(mainContainer.Env[2].Name).To(Equal("GH_TOKEN"))
+			Expect(mainContainer.Env[2].ValueFrom.SecretKeyRef.Name).To(Equal("github-token"))
+			Expect(mainContainer.Env[2].ValueFrom.SecretKeyRef.Key).To(Equal("GITHUB_TOKEN"))
+
+			By("Verifying the init container has GITHUB_TOKEN and GH_TOKEN env vars")
+			Expect(createdJob.Spec.Template.Spec.InitContainers).To(HaveLen(1))
+			initContainer := createdJob.Spec.Template.Spec.InitContainers[0]
+			Expect(initContainer.Env).To(HaveLen(2))
+			Expect(initContainer.Env[0].Name).To(Equal("GITHUB_TOKEN"))
+			Expect(initContainer.Env[0].ValueFrom.SecretKeyRef.Name).To(Equal("github-token"))
+			Expect(initContainer.Env[0].ValueFrom.SecretKeyRef.Key).To(Equal("GITHUB_TOKEN"))
+			Expect(initContainer.Env[1].Name).To(Equal("GH_TOKEN"))
+			Expect(initContainer.Env[1].ValueFrom.SecretKeyRef.Name).To(Equal("github-token"))
+			Expect(initContainer.Env[1].ValueFrom.SecretKeyRef.Key).To(Equal("GITHUB_TOKEN"))
+
+			By("Verifying the init container still does shallow clone")
+			Expect(initContainer.Args).To(Equal([]string{
+				"clone", "--branch", "main", "--single-branch", "--depth", "1",
+				"--", "https://github.com/example/repo.git", "/workspace/repo",
+			}))
+		})
+	})
+
 	Context("When creating a Task with workspace without ref", func() {
 		It("Should create a Job with git clone args omitting --branch", func() {
 			By("Creating a namespace")

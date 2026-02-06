@@ -21,8 +21,9 @@ type Config struct {
 
 // WorkspaceConfig holds workspace-related configuration.
 type WorkspaceConfig struct {
-	Repo string `json:"repo,omitempty"`
-	Ref  string `json:"ref,omitempty"`
+	Repo  string `json:"repo,omitempty"`
+	Ref   string `json:"ref,omitempty"`
+	Token string `json:"token,omitempty"`
 }
 
 // DefaultConfigPath returns the default config file path (~/.axon/config.yaml).

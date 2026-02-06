@@ -56,6 +56,11 @@ type Workspace struct {
 	// Defaults to the repository's default branch if not specified.
 	// +optional
 	Ref string `json:"ref,omitempty"`
+
+	// SecretRef optionally references a Secret containing a GITHUB_TOKEN
+	// for git authentication and GitHub CLI (gh) operations.
+	// +optional
+	SecretRef *SecretReference `json:"secretRef,omitempty"`
 }
 
 // TaskSpec defines the desired state of Task.

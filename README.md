@@ -123,6 +123,23 @@ axon run -p "Add unit tests" \
   --workspace-repo https://github.com/your-org/repo.git --workspace-ref main
 ```
 
+Have the agent create a PR — add a GitHub token to your config:
+
+```yaml
+# ~/.axon/config.yaml
+oauthToken: <your-oauth-token>
+workspace:
+  repo: https://github.com/your-org/repo.git
+  ref: main
+  token: <your-github-token>  # enables git push and gh CLI
+```
+
+```bash
+axon run -p "Fix the bug described in issue #42 and open a PR with the fix"
+```
+
+The `gh` CLI and `GITHUB_TOKEN` are available inside the agent container, so the agent can push branches and create PRs autonomously.
+
 <details>
 <summary>Using kubectl and YAML instead of the CLI</summary>
 
@@ -153,6 +170,16 @@ Add `spec.workspace` to clone a repo before the agent starts:
     ref: main
 ```
 
+Add `spec.workspace.secretRef` to inject a `GITHUB_TOKEN` for git push and `gh` CLI:
+
+```yaml
+  workspace:
+    repo: https://github.com/your-org/your-repo.git
+    ref: main
+    secretRef:
+      name: github-token  # Secret with key GITHUB_TOKEN
+```
+
 </details>
 
 <details>
@@ -175,7 +202,7 @@ Or pass `--secret` to `axon run` with a pre-created secret (api-key is the defau
 | Safe Autonomy | Agents run with `--dangerously-skip-permissions` inside isolated, ephemeral Pods |
 | Scale Out | Run hundreds of agents in parallel — Kubernetes handles scheduling |
 | CI-Native | Trigger agents from any pipeline via `kubectl`, Helm, Argo, or your own tooling |
-| Git Workspace | Clone a repo into the agent's working directory via `spec.workspace` |
+| Git Workspace | Clone a repo into the agent's working directory via `spec.workspace`, with optional `GITHUB_TOKEN` for private repos and PR creation |
 | Config File | Set token, model, namespace, and workspace in `~/.axon/config.yaml` — secrets are auto-created |
 | TaskSpawner | Automatically create Tasks from GitHub Issues (or other sources) via a long-running spawner |
 | CLI | `axon init`, `axon run`, `axon get`, `axon logs`, `axon delete` — manage tasks without writing YAML |
@@ -209,6 +236,7 @@ Or pass `--secret` to `axon run` with a pre-created secret (api-key is the defau
 | `spec.model` | Model override (e.g., `claude-sonnet-4-20250514`) | No |
 | `spec.workspace.repo` | Git repository URL to clone (HTTPS, git://, or SSH) | No |
 | `spec.workspace.ref` | Branch, tag, or commit SHA to checkout (defaults to repo's default branch) | No |
+| `spec.workspace.secretRef.name` | Secret containing `GITHUB_TOKEN` for git auth and `gh` CLI | No |
 
 ### TaskSpawner Spec
 
@@ -279,6 +307,7 @@ namespace: my-namespace
 workspace:
   repo: https://github.com/org/repo.git
   ref: main
+  token: <your-github-token>  # optional, for git push and gh CLI
 ```
 
 | Field | Description |
@@ -291,6 +320,7 @@ workspace:
 | `namespace` | Default Kubernetes namespace |
 | `workspace.repo` | Default git repository URL to clone |
 | `workspace.ref` | Default git reference to checkout |
+| `workspace.token` | GitHub token — Axon auto-creates the Kubernetes secret and injects `GITHUB_TOKEN` |
 
 **Precedence:** `--secret` flag > `secret` in config > `oauthToken`/`apiKey` in config.
 

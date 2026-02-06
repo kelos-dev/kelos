@@ -11,6 +11,7 @@ import (
 
 const configTaskName = "e2e-config-test-task"
 const configOverrideTaskName = "e2e-config-override-task"
+const configGitHubTaskName = "e2e-config-test-task-gh"
 
 var _ = Describe("Config", func() {
 	var configPath string
@@ -18,8 +19,10 @@ var _ = Describe("Config", func() {
 	BeforeEach(func() {
 		By("cleaning up existing resources")
 		kubectl("delete", "secret", "axon-credentials", "--ignore-not-found")
+		kubectl("delete", "secret", "axon-workspace-credentials", "--ignore-not-found")
 		kubectl("delete", "task", configTaskName, "--ignore-not-found")
 		kubectl("delete", "task", configOverrideTaskName, "--ignore-not-found")
+		kubectl("delete", "task", configGitHubTaskName, "--ignore-not-found")
 	})
 
 	AfterEach(func() {
@@ -27,12 +30,15 @@ var _ = Describe("Config", func() {
 			By("collecting debug info on failure")
 			debugTask(configTaskName)
 			debugTask(configOverrideTaskName)
+			debugTask(configGitHubTaskName)
 		}
 
 		By("cleaning up test resources")
 		kubectl("delete", "task", configTaskName, "--ignore-not-found")
 		kubectl("delete", "task", configOverrideTaskName, "--ignore-not-found")
+		kubectl("delete", "task", configGitHubTaskName, "--ignore-not-found")
 		kubectl("delete", "secret", "axon-credentials", "--ignore-not-found")
+		kubectl("delete", "secret", "axon-workspace-credentials", "--ignore-not-found")
 		if configPath != "" {
 			os.Remove(configPath)
 		}
@@ -93,6 +99,38 @@ var _ = Describe("Config", func() {
 
 		By("deleting task via CLI")
 		axon("delete", configOverrideTaskName)
+	})
+
+	It("should run a Task with workspace token from config file", func() {
+		if githubToken == "" {
+			Skip("GITHUB_TOKEN not set, skipping GitHub e2e tests")
+		}
+
+		By("writing a temp config file with oauthToken and workspace token")
+		dir := GinkgoT().TempDir()
+		configPath = filepath.Join(dir, "config.yaml")
+		configContent := "oauthToken: " + oauthToken + "\nworkspace:\n  repo: https://github.com/gjkim42/axon.git\n  ref: main\n  token: " + githubToken + "\n"
+		Expect(os.WriteFile(configPath, []byte(configContent), 0o644)).To(Succeed())
+
+		By("creating a Task via CLI using config defaults")
+		axon("run",
+			"-p", "Run 'gh auth status' and print the output",
+			"--config", configPath,
+			"--name", configGitHubTaskName,
+		)
+
+		By("waiting for Job to complete")
+		Eventually(func() error {
+			return kubectlWithInput("", "wait", "--for=condition=complete", "job/"+configGitHubTaskName, "--timeout=10s")
+		}, 5*time.Minute, 10*time.Second).Should(Succeed())
+
+		By("verifying task status via CLI get")
+		output := axonOutput("get", "task", configGitHubTaskName)
+		Expect(output).To(ContainSubstring("Succeeded"))
+		Expect(output).To(ContainSubstring("Workspace Secret"))
+
+		By("deleting task via CLI")
+		axon("delete", configGitHubTaskName)
 	})
 
 	It("should initialize config file via init command", func() {

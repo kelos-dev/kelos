@@ -93,6 +93,17 @@ spec:
                     description: Repo is the git repository URL to clone.
                     pattern: ^(https?://|git://|git@).*
                     type: string
+                  secretRef:
+                    description: |-
+                      SecretRef optionally references a Secret containing a GITHUB_TOKEN
+                      for git authentication and GitHub CLI (gh) operations.
+                    properties:
+                      name:
+                        description: Name is the name of the secret.
+                        type: string
+                    required:
+                    - name
+                    type: object
                 required:
                 - repo
                 type: object
@@ -244,6 +255,17 @@ spec:
                         description: Repo is the git repository URL to clone.
                         pattern: ^(https?://|git://|git@).*
                         type: string
+                      secretRef:
+                        description: |-
+                          SecretRef optionally references a Secret containing a GITHUB_TOKEN
+                          for git authentication and GitHub CLI (gh) operations.
+                        properties:
+                          name:
+                            description: Name is the name of the secret.
+                            type: string
+                        required:
+                        - name
+                        type: object
                     required:
                     - repo
                     type: object

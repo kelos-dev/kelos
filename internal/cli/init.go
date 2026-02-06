@@ -27,6 +27,7 @@ oauthToken: ""
 # workspace:
 #   repo: https://github.com/org/repo.git
 #   ref: main
+#   token: ""  # GitHub token for git auth and gh CLI (optional)
 
 # Advanced: provide your own Kubernetes secret directly
 # secret: ""

@@ -71,6 +71,14 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 				}
 			}
 
+			var workspaceSecret string
+			if cfg.Config != nil && cfg.Config.Workspace.Token != "" {
+				if err := ensureCredentialSecret(cfg, "axon-workspace-credentials", "GITHUB_TOKEN", cfg.Config.Workspace.Token); err != nil {
+					return err
+				}
+				workspaceSecret = "axon-workspace-credentials"
+			}
+
 			if secret == "" {
 				return fmt.Errorf("no credentials configured (set oauthToken/apiKey in config file, or use --secret flag)")
 			}
@@ -106,6 +114,11 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 				task.Spec.Workspace = &axonv1alpha1.Workspace{
 					Repo: workspaceRepo,
 					Ref:  workspaceRef,
+				}
+				if workspaceSecret != "" {
+					task.Spec.Workspace.SecretRef = &axonv1alpha1.SecretReference{
+						Name: workspaceSecret,
+					}
 				}
 			}
 

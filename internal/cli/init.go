@@ -23,8 +23,15 @@ oauthToken: ""
 # Default namespace (optional)
 # namespace: default
 
-# Default workspace (name of Workspace resource, optional)
-# workspace: my-workspace
+# Default workspace (optional)
+# Reference an existing Workspace resource by name:
+# workspace:
+#   name: my-workspace
+# Or specify inline (CLI auto-creates the Workspace resource):
+# workspace:
+#   repo: https://github.com/org/repo.git
+#   ref: main
+#   token: ""  # GitHub token for git auth and gh CLI (optional)
 
 # Advanced: provide your own Kubernetes secret directly
 # secret: ""

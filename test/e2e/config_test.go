@@ -20,6 +20,8 @@ var _ = Describe("Config", func() {
 		kubectl("delete", "secret", "axon-credentials", "--ignore-not-found")
 		kubectl("delete", "task", configTaskName, "--ignore-not-found")
 		kubectl("delete", "task", configOverrideTaskName, "--ignore-not-found")
+		kubectl("delete", "workspace", "axon-workspace", "--ignore-not-found")
+		kubectl("delete", "workspace", "e2e-config-ws-override", "--ignore-not-found")
 	})
 
 	AfterEach(func() {
@@ -32,6 +34,8 @@ var _ = Describe("Config", func() {
 		By("cleaning up test resources")
 		kubectl("delete", "task", configTaskName, "--ignore-not-found")
 		kubectl("delete", "task", configOverrideTaskName, "--ignore-not-found")
+		kubectl("delete", "workspace", "axon-workspace", "--ignore-not-found")
+		kubectl("delete", "workspace", "e2e-config-ws-override", "--ignore-not-found")
 		kubectl("delete", "secret", "axon-credentials", "--ignore-not-found")
 		if configPath != "" {
 			os.Remove(configPath)
@@ -39,21 +43,10 @@ var _ = Describe("Config", func() {
 	})
 
 	It("should run a Task using config file defaults", func() {
-		By("creating a Workspace resource")
-		wsYAML := `apiVersion: axon.io/v1alpha1
-kind: Workspace
-metadata:
-  name: e2e-config-workspace
-spec:
-  repo: https://github.com/gjkim42/axon.git
-  ref: main
-`
-		Expect(kubectlWithInput(wsYAML, "apply", "-f", "-")).To(Succeed())
-
-		By("writing a temp config file with oauthToken and workspace name")
+		By("writing a temp config file with oauthToken and inline workspace")
 		dir := GinkgoT().TempDir()
 		configPath = filepath.Join(dir, "config.yaml")
-		configContent := "oauthToken: " + oauthToken + "\nworkspace: e2e-config-workspace\n"
+		configContent := "oauthToken: " + oauthToken + "\nworkspace:\n  repo: https://github.com/gjkim42/axon.git\n  ref: main\n"
 		Expect(os.WriteFile(configPath, []byte(configContent), 0o644)).To(Succeed())
 
 		By("creating a Task via CLI using config defaults (no --secret or --credential-type)")
@@ -75,21 +68,11 @@ spec:
 
 		By("deleting task via CLI")
 		axon("delete", "task", configTaskName)
-		kubectl("delete", "workspace", "e2e-config-workspace", "--ignore-not-found")
+		kubectl("delete", "workspace", "axon-workspace", "--ignore-not-found")
 	})
 
 	It("should allow CLI flags to override config file", func() {
-		By("creating Workspace resources")
-		wsYAML := `apiVersion: axon.io/v1alpha1
-kind: Workspace
-metadata:
-  name: e2e-config-ws-default
-spec:
-  repo: https://github.com/gjkim42/axon.git
-  ref: v0.0.0
-`
-		Expect(kubectlWithInput(wsYAML, "apply", "-f", "-")).To(Succeed())
-
+		By("creating a Workspace resource for override")
 		overrideWsYAML := `apiVersion: axon.io/v1alpha1
 kind: Workspace
 metadata:
@@ -100,10 +83,10 @@ spec:
 `
 		Expect(kubectlWithInput(overrideWsYAML, "apply", "-f", "-")).To(Succeed())
 
-		By("writing a temp config file with oauthToken and a workspace")
+		By("writing a temp config file with oauthToken and inline workspace (bad ref)")
 		dir := GinkgoT().TempDir()
 		configPath = filepath.Join(dir, "config.yaml")
-		configContent := "oauthToken: " + oauthToken + "\nworkspace: e2e-config-ws-default\n"
+		configContent := "oauthToken: " + oauthToken + "\nworkspace:\n  repo: https://github.com/gjkim42/axon.git\n  ref: v0.0.0\n"
 		Expect(os.WriteFile(configPath, []byte(configContent), 0o644)).To(Succeed())
 
 		By("creating a Task with CLI flag overriding config workspace")
@@ -125,7 +108,6 @@ spec:
 
 		By("deleting task via CLI")
 		axon("delete", "task", configOverrideTaskName)
-		kubectl("delete", "workspace", "e2e-config-ws-default", "--ignore-not-found")
 		kubectl("delete", "workspace", "e2e-config-ws-override", "--ignore-not-found")
 	})
 

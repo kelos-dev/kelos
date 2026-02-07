@@ -116,31 +116,42 @@ The file has been created.
 [result] completed (2 turns, $0.0035)
 ```
 
-Run against a git repo:
+Run against a git repo — add `workspace` to your config:
+
+```yaml
+# ~/.axon/config.yaml
+oauthToken: <your-oauth-token>
+workspace:
+  repo: https://github.com/your-org/repo.git
+  ref: main
+```
+
+```bash
+axon run -p "Add unit tests"
+```
+
+Axon auto-creates the Workspace resource from your config.
+
+Have the agent create a PR — add a `token` to your workspace config:
+
+```yaml
+workspace:
+  repo: https://github.com/your-org/repo.git
+  ref: main
+  token: <your-github-token>
+```
+
+```bash
+axon run -p "Fix the bug described in issue #42 and open a PR with the fix"
+```
+
+The `gh` CLI and `GITHUB_TOKEN` are available inside the agent container, so the agent can push branches and create PRs autonomously.
+
+Or reference an existing Workspace resource with `--workspace`:
 
 ```bash
 axon run -p "Add unit tests" --workspace my-workspace
 ```
-
-Have the agent create a PR — add `secretRef` to your Workspace resource:
-
-```yaml
-apiVersion: axon.io/v1alpha1
-kind: Workspace
-metadata:
-  name: my-workspace
-spec:
-  repo: https://github.com/your-org/repo.git
-  ref: main
-  secretRef:
-    name: github-token  # Secret with key GITHUB_TOKEN
-```
-
-```bash
-axon run -p "Fix the bug described in issue #42 and open a PR with the fix" --workspace my-workspace
-```
-
-The `gh` CLI and `GITHUB_TOKEN` are available inside the agent container, so the agent can push branches and create PRs autonomously.
 
 <details>
 <summary>Using kubectl and YAML instead of the CLI</summary>
@@ -306,20 +317,54 @@ oauthToken: <your-oauth-token>
 # or: apiKey: <your-api-key>
 model: claude-sonnet-4-5-20250929
 namespace: my-namespace
-workspace: my-workspace
 ```
+
+#### Credentials
 
 | Field | Description |
 |-------|-------------|
 | `oauthToken` | OAuth token — Axon auto-creates the Kubernetes secret |
 | `apiKey` | API key — Axon auto-creates the Kubernetes secret |
-| `secret` | (Advanced) Provide your own pre-created Kubernetes secret |
+| `secret` | (Advanced) Use a pre-created Kubernetes secret |
 | `credentialType` | Credential type when using `secret` (`api-key` or `oauth`) |
-| `model` | Default model override |
-| `namespace` | Default Kubernetes namespace |
-| `workspace` | Name of a Workspace resource to use |
 
 **Precedence:** `--secret` flag > `secret` in config > `oauthToken`/`apiKey` in config.
+
+#### Workspace
+
+The `workspace` field supports two forms:
+
+**Reference an existing Workspace resource by name:**
+
+```yaml
+workspace:
+  name: my-workspace
+```
+
+**Specify inline — Axon auto-creates the Workspace resource and secret:**
+
+```yaml
+workspace:
+  repo: https://github.com/your-org/repo.git
+  ref: main
+  token: <your-github-token>  # optional, for private repos and gh CLI
+```
+
+| Field | Description |
+|-------|-------------|
+| `workspace.name` | Name of an existing Workspace resource |
+| `workspace.repo` | Git repository URL — Axon auto-creates a Workspace resource |
+| `workspace.ref` | Git reference (branch, tag, or commit SHA) |
+| `workspace.token` | GitHub token — Axon auto-creates the secret and injects `GITHUB_TOKEN` |
+
+If both `name` and `repo` are set, `name` takes precedence. The `--workspace` CLI flag overrides all config values.
+
+#### Other Settings
+
+| Field | Description |
+|-------|-------------|
+| `model` | Default model override |
+| `namespace` | Default Kubernetes namespace |
 
 ### CLI
 

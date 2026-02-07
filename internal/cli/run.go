@@ -42,8 +42,8 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 				if !cmd.Flags().Changed("model") && c.Model != "" {
 					model = c.Model
 				}
-				if !cmd.Flags().Changed("workspace") && c.Workspace != "" {
-					workspace = c.Workspace
+				if !cmd.Flags().Changed("workspace") && c.Workspace.Name != "" {
+					workspace = c.Workspace.Name
 				}
 			}
 
@@ -74,6 +74,45 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 			cl, ns, err := cfg.NewClient()
 			if err != nil {
 				return err
+			}
+
+			// Auto-create Workspace CR from inline config if no --workspace flag.
+			if workspace == "" && cfg.Config != nil && cfg.Config.Workspace.Repo != "" {
+				wsCfg := cfg.Config.Workspace
+				wsName := "axon-workspace"
+				ws := &axonv1alpha1.Workspace{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      wsName,
+						Namespace: ns,
+					},
+					Spec: axonv1alpha1.WorkspaceSpec{
+						Repo: wsCfg.Repo,
+						Ref:  wsCfg.Ref,
+					},
+				}
+				if wsCfg.Token != "" {
+					if err := ensureCredentialSecret(cfg, "axon-workspace-credentials", "GITHUB_TOKEN", wsCfg.Token); err != nil {
+						return err
+					}
+					ws.Spec.SecretRef = &axonv1alpha1.SecretReference{
+						Name: "axon-workspace-credentials",
+					}
+				}
+				ctx := context.Background()
+				if err := cl.Create(ctx, ws); err != nil {
+					if !apierrors.IsAlreadyExists(err) {
+						return fmt.Errorf("creating workspace: %w", err)
+					}
+					existing := &axonv1alpha1.Workspace{}
+					if err := cl.Get(ctx, client.ObjectKey{Name: wsName, Namespace: ns}, existing); err != nil {
+						return fmt.Errorf("fetching existing workspace: %w", err)
+					}
+					existing.Spec = ws.Spec
+					if err := cl.Update(ctx, existing); err != nil {
+						return fmt.Errorf("updating workspace: %w", err)
+					}
+				}
+				workspace = wsName
 			}
 
 			if name == "" {

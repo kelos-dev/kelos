@@ -249,52 +249,7 @@ TaskSpawner polls for new issues matching your filters and creates a Task for ea
 
 This is a real-world TaskSpawner that picks up every open issue, investigates it, opens (or updates) a PR, self-reviews, and ensures CI passes — fully autonomously. When the agent can't make progress, it labels the issue `axon/needs-input` and stops. Remove the label to re-queue it.
 
-```yaml
-apiVersion: axon.io/v1alpha1
-kind: TaskSpawner
-metadata:
-  name: axon-workers
-spec:
-  when:
-    githubIssues:
-      excludeLabels:
-        - axon/needs-input
-      workspaceRef:
-        name: axon-workspace
-  taskTemplate:
-    type: claude-code
-    credentials:
-      type: oauth
-      secretRef:
-        name: axon-credentials
-    promptTemplate: |
-      You are a coding agent that works within the ephemeral container environment.
-      The changes you've made to your file system will disappear after the task is done.
-      You either
-      - create a PR to fix the issue
-      - update an existing PR to fix the issue
-      - comment on the issue or the PR if you cannot fix it
-
-      Rules:
-      - You always create a branch named axon-task-#{{.Number}} for each issue #{{.Number}}.
-      - The PR should be labeled with generated-by-axon label.
-
-      Task:
-      - 1. Investigate the issue #{{.Number}} and its PR if exists.
-      - 2. Checkout the branch named axon-task-#{{.Number}} (if exists) or create a new branch from the default branch.
-        - Rebase the branch if needed, e.g. there is a conflict with the default branch in the PR.
-      - 3. Create a commit that fixes the issue.
-      - 4. /review the PR and get feedbacks from the PR to refine the patch.
-      - 5. Make sure the PR passes all CI tests.
-
-      Add axon/needs-input label to the issue if you need any input from the issue author.
-      e.g.
-        - The PR is ready for review, please take a look.
-        - Commented on the issue(or PR) for more information.
-        - If you cannot make any progress on the issue, explain why.
-        - ...
-  pollInterval: 1m
-```
+See [`singularity/axon-workers.yaml`](singularity/axon-workers.yaml) for the full manifest.
 
 The key pattern here is `excludeLabels: [axon/needs-input]` — this creates a feedback loop where the agent works autonomously until it needs human input, then pauses. Removing the label re-queues the issue on the next poll.
 

@@ -167,6 +167,8 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 
 	cmd.MarkFlagRequired("prompt")
 
+	_ = cmd.RegisterFlagCompletionFunc("credential-type", cobra.FixedCompletions([]string{"api-key", "oauth"}, cobra.ShellCompDirectiveNoFileComp))
+
 	return cmd
 }
 

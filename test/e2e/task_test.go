@@ -90,6 +90,67 @@ spec:
 	})
 })
 
+const makeTaskName = "e2e-test-make-task"
+
+var _ = Describe("Task with make available", func() {
+	BeforeEach(func() {
+		By("cleaning up existing resources")
+		kubectl("delete", "secret", "claude-credentials", "--ignore-not-found")
+		kubectl("delete", "task", makeTaskName, "--ignore-not-found")
+	})
+
+	AfterEach(func() {
+		if CurrentSpecReport().Failed() {
+			By("collecting debug info on failure")
+			debugTask(makeTaskName)
+		}
+
+		By("cleaning up test resources")
+		kubectl("delete", "task", makeTaskName, "--ignore-not-found")
+		kubectl("delete", "secret", "claude-credentials", "--ignore-not-found")
+	})
+
+	It("should have make command available in claude-code container", func() {
+		By("creating OAuth credentials secret")
+		Expect(kubectlWithInput("", "create", "secret", "generic", "claude-credentials",
+			"--from-literal=CLAUDE_CODE_OAUTH_TOKEN="+oauthToken)).To(Succeed())
+
+		By("creating a Task that uses make")
+		taskYAML := `apiVersion: axon.io/v1alpha1
+kind: Task
+metadata:
+  name: ` + makeTaskName + `
+spec:
+  type: claude-code
+  model: ` + testModel + `
+  prompt: "Run 'make --version' and print the output"
+  credentials:
+    type: oauth
+    secretRef:
+      name: claude-credentials
+`
+		Expect(kubectlWithInput(taskYAML, "apply", "-f", "-")).To(Succeed())
+
+		By("waiting for Job to be created")
+		Eventually(func() error {
+			return kubectlWithInput("", "get", "job", makeTaskName)
+		}, 30*time.Second, time.Second).Should(Succeed())
+
+		By("waiting for Job to complete")
+		Eventually(func() error {
+			return kubectlWithInput("", "wait", "--for=condition=complete", "job/"+makeTaskName, "--timeout=10s")
+		}, 5*time.Minute, 10*time.Second).Should(Succeed())
+
+		By("verifying Task status is Succeeded")
+		output := kubectlOutput("get", "task", makeTaskName, "-o", "jsonpath={.status.phase}")
+		Expect(output).To(Equal("Succeeded"))
+
+		By("getting Job logs")
+		logs := kubectlOutput("logs", "job/"+makeTaskName)
+		GinkgoWriter.Printf("Job logs:\n%s\n", logs)
+	})
+})
+
 const workspaceTaskName = "e2e-test-workspace-task"
 
 var _ = Describe("Task with workspace", func() {

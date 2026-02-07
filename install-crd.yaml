@@ -166,6 +166,9 @@ spec:
     - jsonPath: .status.totalTasksCreated
       name: Tasks
       type: integer
+    - jsonPath: .status.activeTasks
+      name: Active
+      type: integer
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -194,6 +197,14 @@ spec:
           spec:
             description: TaskSpawnerSpec defines the desired state of TaskSpawner.
             properties:
+              maxConcurrency:
+                description: |-
+                  MaxConcurrency limits the maximum number of concurrently running (non-terminal) Tasks.
+                  When the limit is reached, the spawner skips creating new Tasks until existing ones complete.
+                  If unset or zero, there is no concurrency limit.
+                format: int32
+                minimum: 0
+                type: integer
               pollInterval:
                 default: 5m
                 description: PollInterval is how often to poll the source for new
@@ -308,6 +319,10 @@ spec:
           status:
             description: TaskSpawnerStatus defines the observed state of TaskSpawner.
             properties:
+              activeTasks:
+                description: ActiveTasks is the number of non-terminal Tasks currently
+                  managed by this spawner.
+                type: integer
               deploymentName:
                 description: DeploymentName is the name of the Deployment running
                   the spawner.

@@ -92,8 +92,6 @@ func main() {
 }
 
 func runCycle(ctx context.Context, cl client.Client, key types.NamespacedName, githubOwner, githubRepo string) error {
-	log := ctrl.Log.WithName("spawner")
-
 	var ts axonv1alpha1.TaskSpawner
 	if err := cl.Get(ctx, key, &ts); err != nil {
 		return fmt.Errorf("fetching TaskSpawner: %w", err)
@@ -102,6 +100,17 @@ func runCycle(ctx context.Context, cl client.Client, key types.NamespacedName, g
 	src, err := buildSource(&ts, githubOwner, githubRepo)
 	if err != nil {
 		return fmt.Errorf("building source: %w", err)
+	}
+
+	return runCycleWithSource(ctx, cl, key, src)
+}
+
+func runCycleWithSource(ctx context.Context, cl client.Client, key types.NamespacedName, src source.Source) error {
+	log := ctrl.Log.WithName("spawner")
+
+	var ts axonv1alpha1.TaskSpawner
+	if err := cl.Get(ctx, key, &ts); err != nil {
+		return fmt.Errorf("fetching TaskSpawner: %w", err)
 	}
 
 	items, err := src.Discover(ctx)
@@ -122,8 +131,12 @@ func runCycle(ctx context.Context, cl client.Client, key types.NamespacedName, g
 	}
 
 	existingTasks := make(map[string]bool)
+	activeTasks := 0
 	for _, t := range existingTaskList.Items {
 		existingTasks[t.Name] = true
+		if t.Status.Phase != axonv1alpha1.TaskPhaseSucceeded && t.Status.Phase != axonv1alpha1.TaskPhaseFailed {
+			activeTasks++
+		}
 	}
 
 	var newItems []source.WorkItem
@@ -136,6 +149,14 @@ func runCycle(ctx context.Context, cl client.Client, key types.NamespacedName, g
 
 	newTasksCreated := 0
 	for _, item := range newItems {
+		// Check max concurrency limit before creating each task
+		if ts.Spec.MaxConcurrency != nil && *ts.Spec.MaxConcurrency > 0 {
+			if activeTasks >= int(*ts.Spec.MaxConcurrency) {
+				log.Info("Max concurrency reached, skipping remaining items", "activeTasks", activeTasks, "maxConcurrency", *ts.Spec.MaxConcurrency)
+				break
+			}
+		}
+
 		taskName := fmt.Sprintf("%s-%s", ts.Name, item.ID)
 
 		prompt, err := source.RenderPrompt(ts.Spec.TaskTemplate.PromptTemplate, item)
@@ -174,8 +195,9 @@ func runCycle(ctx context.Context, cl client.Client, key types.NamespacedName, g
 			continue
 		}
 
-		log.Info("created Task", "task", taskName, "item", item.ID)
+		log.Info("Created Task", "task", taskName, "item", item.ID)
 		newTasksCreated++
+		activeTasks++
 	}
 
 	// Update status in a single batch
@@ -188,7 +210,8 @@ func runCycle(ctx context.Context, cl client.Client, key types.NamespacedName, g
 	ts.Status.LastDiscoveryTime = &now
 	ts.Status.TotalDiscovered = len(items)
 	ts.Status.TotalTasksCreated += newTasksCreated
-	ts.Status.Message = fmt.Sprintf("Discovered %d items, created %d tasks total", ts.Status.TotalDiscovered, ts.Status.TotalTasksCreated)
+	ts.Status.ActiveTasks = activeTasks
+	ts.Status.Message = fmt.Sprintf("Discovered %d items, created %d tasks total, %d active", ts.Status.TotalDiscovered, ts.Status.TotalTasksCreated, activeTasks)
 
 	if err := cl.Status().Update(ctx, &ts); err != nil {
 		return fmt.Errorf("updating TaskSpawner status: %w", err)

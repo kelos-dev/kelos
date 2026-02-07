@@ -12,6 +12,7 @@ spec:
   taskTemplate:
     model: opus
     type: claude-code
+    ttlSecondsAfterFinished: 3600
     credentials:
       type: oauth
       secretRef:

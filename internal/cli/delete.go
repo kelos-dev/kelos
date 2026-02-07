@@ -27,7 +27,7 @@ func newDeleteCommand(cfg *ClientConfig) *cobra.Command {
 }
 
 func newDeleteTaskCommand(cfg *ClientConfig) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:     "task <name>",
 		Aliases: []string{"tasks"},
 		Short:   "Delete a task",
@@ -52,4 +52,8 @@ func newDeleteTaskCommand(cfg *ClientConfig) *cobra.Command {
 			return nil
 		},
 	}
+
+	cmd.ValidArgsFunction = completeTaskNames(cfg)
+
+	return cmd
 }

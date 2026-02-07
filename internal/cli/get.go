@@ -28,7 +28,7 @@ func newGetCommand(cfg *ClientConfig) *cobra.Command {
 }
 
 func newGetTaskSpawnerCommand(cfg *ClientConfig) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:     "taskspawner [name]",
 		Aliases: []string{"taskspawners", "ts"},
 		Short:   "List task spawners or get details of a specific task spawner",
@@ -58,6 +58,10 @@ func newGetTaskSpawnerCommand(cfg *ClientConfig) *cobra.Command {
 			return nil
 		},
 	}
+
+	cmd.ValidArgsFunction = completeTaskSpawnerNames(cfg)
+
+	return cmd
 }
 
 func newGetTaskCommand(cfg *ClientConfig) *cobra.Command {
@@ -117,6 +121,9 @@ func newGetTaskCommand(cfg *ClientConfig) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&output, "output", "o", "", "Output format (yaml or json)")
+
+	cmd.ValidArgsFunction = completeTaskNames(cfg)
+	_ = cmd.RegisterFlagCompletionFunc("output", cobra.FixedCompletions([]string{"yaml", "json"}, cobra.ShellCompDirectiveNoFileComp))
 
 	return cmd
 }

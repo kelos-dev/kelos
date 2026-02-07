@@ -68,6 +68,8 @@ func newLogsCommand(cfg *ClientConfig) *cobra.Command {
 
 	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "follow log output")
 
+	cmd.ValidArgsFunction = completeTaskNames(cfg)
+
 	return cmd
 }
 

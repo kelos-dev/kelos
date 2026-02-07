@@ -108,7 +108,7 @@ axon logs <task-name> -f
 
 --- Turn 1 ---
 I'll create a hello world program in Python.
-[tool] Write
+[tool] Write: hello.py
 
 --- Turn 2 ---
 The file has been created.

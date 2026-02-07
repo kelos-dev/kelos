@@ -56,8 +56,37 @@ jobs:
       - name: Integration Test
         run: make test-integration
 
+  build-e2e-image:
+    if: github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'ok-to-test')
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        image:
+          - what: cmd/axon-controller
+            name: axon-controller
+          - what: cmd/axon-spawner
+            name: axon-spawner
+          - what: claude-code
+            name: claude-code
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: make image WHAT=${{ matrix.image.what }} VERSION=e2e
+
+      - name: Save image
+        run: docker save gjkim42/${{ matrix.image.name }}:e2e -o ${{ matrix.image.name }}.tar
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e2e-image-${{ matrix.image.name }}
+          path: ${{ matrix.image.name }}.tar
+          retention-days: 1
+
   test-e2e:
     if: github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'ok-to-test')
+    needs: build-e2e-image
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -70,17 +99,17 @@ jobs:
         with:
           cluster_name: kind
 
-      - name: Build images
-        run: |
-          make image WHAT=cmd/axon-controller VERSION=e2e
-          make image WHAT=cmd/axon-spawner VERSION=e2e
-          make image WHAT=claude-code VERSION=e2e
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: e2e-image-*
+          merge-multiple: true
 
       - name: Load images into kind
         run: |
-          kind load docker-image gjkim42/axon-controller:e2e
-          kind load docker-image gjkim42/axon-spawner:e2e
-          kind load docker-image gjkim42/claude-code:e2e
+          for image in axon-controller axon-spawner claude-code; do
+            docker load -i ${image}.tar
+            kind load docker-image gjkim42/${image}:e2e
+          done
 
       - name: Build CLI
         run: make build WHAT=cmd/axon

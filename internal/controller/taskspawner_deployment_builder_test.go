@@ -11,32 +11,32 @@ func TestParseGitHubOwnerRepo(t *testing.T) {
 	}{
 		{
 			name:      "HTTPS URL",
-			repoURL:   "https://github.com/gjkim42/axon.git",
-			wantOwner: "gjkim42",
+			repoURL:   "https://github.com/axon-core/axon.git",
+			wantOwner: "axon-core",
 			wantRepo:  "axon",
 		},
 		{
 			name:      "HTTPS URL without .git",
-			repoURL:   "https://github.com/gjkim42/axon",
-			wantOwner: "gjkim42",
+			repoURL:   "https://github.com/axon-core/axon",
+			wantOwner: "axon-core",
 			wantRepo:  "axon",
 		},
 		{
 			name:      "HTTPS URL with trailing slash",
-			repoURL:   "https://github.com/gjkim42/axon/",
-			wantOwner: "gjkim42",
+			repoURL:   "https://github.com/axon-core/axon/",
+			wantOwner: "axon-core",
 			wantRepo:  "axon",
 		},
 		{
 			name:      "SSH URL",
-			repoURL:   "git@github.com:gjkim42/axon.git",
-			wantOwner: "gjkim42",
+			repoURL:   "git@github.com:axon-core/axon.git",
+			wantOwner: "axon-core",
 			wantRepo:  "axon",
 		},
 		{
 			name:      "SSH URL without .git",
-			repoURL:   "git@github.com:gjkim42/axon",
-			wantOwner: "gjkim42",
+			repoURL:   "git@github.com:axon-core/axon",
+			wantOwner: "axon-core",
 			wantRepo:  "axon",
 		},
 		{

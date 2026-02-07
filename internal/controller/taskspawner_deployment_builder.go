@@ -9,12 +9,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	axonv1alpha1 "github.com/gjkim42/axon/api/v1alpha1"
+	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
 )
 
 const (
 	// DefaultSpawnerImage is the default image for the spawner binary.
-	DefaultSpawnerImage = "gjkim42/axon-spawner:latest"
+	DefaultSpawnerImage = "axon-core/axon-spawner:latest"
 
 	// SpawnerServiceAccount is the service account used by spawner Deployments.
 	SpawnerServiceAccount = "axon-spawner"

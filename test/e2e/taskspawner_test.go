@@ -55,7 +55,7 @@ kind: Workspace
 metadata:
   name: e2e-spawner-workspace
 spec:
-  repo: https://github.com/gjkim42/axon.git
+  repo: https://github.com/axon-core/axon.git
   ref: main
   secretRef:
     name: github-token
@@ -109,7 +109,7 @@ kind: Workspace
 metadata:
   name: e2e-spawner-workspace
 spec:
-  repo: https://github.com/gjkim42/axon.git
+  repo: https://github.com/axon-core/axon.git
 `
 		Expect(kubectlWithInput(wsYAML, "apply", "-f", "-")).To(Succeed())
 

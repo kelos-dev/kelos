@@ -1,4 +1,4 @@
-module github.com/gjkim42/axon
+module github.com/axon-core/axon
 
 go 1.25.0
 

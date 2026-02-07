@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/gjkim42/axon/internal/cli"
+	"github.com/axon-core/axon/internal/cli"
 )
 
 func main() {

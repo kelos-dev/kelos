@@ -7,12 +7,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	axonv1alpha1 "github.com/gjkim42/axon/api/v1alpha1"
+	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
 )
 
 const (
 	// ClaudeCodeImage is the default image for Claude Code agent.
-	ClaudeCodeImage = "gjkim42/claude-code:latest"
+	ClaudeCodeImage = "axoncore/claude-code:latest"
 
 	// AgentTypeClaudeCode is the agent type for Claude Code.
 	AgentTypeClaudeCode = "claude-code"

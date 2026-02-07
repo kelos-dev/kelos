@@ -10,8 +10,8 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
-	axonv1alpha1 "github.com/gjkim42/axon/api/v1alpha1"
-	"github.com/gjkim42/axon/internal/cli"
+	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
+	"github.com/axon-core/axon/internal/cli"
 )
 
 func writeEnvtestKubeconfig() string {

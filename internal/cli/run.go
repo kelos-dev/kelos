@@ -13,7 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/rand"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	axonv1alpha1 "github.com/gjkim42/axon/api/v1alpha1"
+	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
 )
 
 func newRunCommand(cfg *ClientConfig) *cobra.Command {

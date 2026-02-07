@@ -6,7 +6,7 @@ set -o pipefail
 
 make image
 make push
-go install github.com/gjkim42/axon/cmd/axon
+go install github.com/axon-core/axon/cmd/axon
 
 kubectl apply -f install-crd.yaml
 kubectl apply -f install.yaml

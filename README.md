@@ -57,15 +57,12 @@ AI coding agents are most powerful when they run fully autonomous — no permiss
 
 ## How It Works
 
-```mermaid
-flowchart LR
-    T1["Task: refactor auth"] --> AC[Axon]
-    T2["Task: add tests"] --> AC
-    T3["Task: update docs"] --> AC
-
-    AC --> P1[Isolated Pod] --> S1[Succeeded]
-    AC --> P2[Isolated Pod] --> S2[Succeeded]
-    AC --> P3[Isolated Pod] --> F3[Failed]
+```
+ Task: refactor auth ──┐                ┌──▶ Isolated Pod ──▶ Succeeded
+                       ├──▶  Axon  ─────┼──▶ Isolated Pod ──▶ Succeeded
+ Task: add tests ──────┤                └──▶ Isolated Pod ──▶ Failed
+                       │
+ Task: update docs ────┘
 ```
 
 You apply a Task, Axon runs it as an isolated Job with `--dangerously-skip-permissions`, and tracks it through `Pending → Running → Succeeded/Failed`. Currently supported agents: **Claude Code**.
@@ -75,12 +72,13 @@ You apply a Task, Axon runs it as an isolated Job with `--dangerously-skip-permi
 
 TaskSpawner watches external sources (e.g., GitHub Issues) and automatically creates Tasks for each discovered item.
 
-```mermaid
-flowchart LR
-    TS["TaskSpawner"] -- "polls" --> GH["GitHub Issues"]
-    GH -- "new issues" --> TS
-    TS -- "creates" --> T1["Task: fix-bugs-1"]
-    TS -- "creates" --> T2["Task: fix-bugs-2"]
+```
+                    polls         new issues
+ TaskSpawner ─────────────▶ GitHub Issues
+      │        ◀─────────────
+      │
+      ├──creates──▶ Task: fix-bugs-1
+      └──creates──▶ Task: fix-bugs-2
 ```
 
 </details>
@@ -248,6 +246,26 @@ TaskSpawner polls for new issues matching your filters and creates a Task for ea
 ### Autonomous issue-fixing pipeline
 
 This is a real-world TaskSpawner that picks up every open issue, investigates it, opens (or updates) a PR, self-reviews, and ensures CI passes — fully autonomously. When the agent can't make progress, it labels the issue `axon/needs-input` and stops. Remove the label to re-queue it.
+
+```
+ ┌──────────────────────────────────────────────────────────────────┐
+ │                        Feedback Loop                             │
+ │                                                                  │
+ │  ┌─────────────┐  polls  ┌────────────────┐                     │
+ │  │ TaskSpawner │───────▶ │ GitHub Issues  │                     │
+ │  └──────┬──────┘         │ (open, no      │                     │
+ │         │                │  needs-input)  │                     │
+ │         │ creates        └────────────────┘                     │
+ │         ▼                                                       │
+ │  ┌─────────────┐  runs   ┌─────────────┐  opens PR   ┌───────┐ │
+ │  │    Task     │───────▶ │    Agent    │────────────▶│ Human │ │
+ │  └─────────────┘  in Pod │   (Claude)  │  or labels  │Review │ │
+ │                          └─────────────┘  needs-input└───┬───┘ │
+ │                                                          │     │
+ │                                           removes label ─┘     │
+ │                                           (re-queues issue)    │
+ └────────────────────────────────────────────────────────────────┘
+```
 
 See [`self-development/axon-workers.yaml`](self-development/axon-workers.yaml) for the full manifest.
 
@@ -459,10 +477,8 @@ make image              # build docker image
 
 - **Task dependencies** — chain tasks so one waits for another to finish before starting, enabling agent pipelines in pure Kubernetes.
 
-```mermaid
-flowchart LR
-    T1["Task: scaffold service"] --> T2["Task: write tests"]
-    T2 --> T3["Task: generate docs"]
+```
+ Task: scaffold service ──▶ Task: write tests ──▶ Task: generate docs
 ```
 
 ## Contributing

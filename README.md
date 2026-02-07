@@ -249,7 +249,7 @@ TaskSpawner polls for new issues matching your filters and creates a Task for ea
 
 This is a real-world TaskSpawner that picks up every open issue, investigates it, opens (or updates) a PR, self-reviews, and ensures CI passes — fully autonomously. When the agent can't make progress, it labels the issue `axon/needs-input` and stops. Remove the label to re-queue it.
 
-See [`singularity/axon-workers.yaml`](singularity/axon-workers.yaml) for the full manifest.
+See [`self-development/axon-workers.yaml`](self-development/axon-workers.yaml) for the full manifest.
 
 The key pattern here is `excludeLabels: [axon/needs-input]` — this creates a feedback loop where the agent works autonomously until it needs human input, then pauses. Removing the label re-queues the issue on the next poll.
 

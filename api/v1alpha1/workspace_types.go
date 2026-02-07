@@ -20,6 +20,14 @@ type WorkspaceSpec struct {
 	// authentication and GitHub CLI (gh) operations.
 	// +optional
 	SecretRef *SecretReference `json:"secretRef,omitempty"`
+
+	// GitUser is the user name to configure for git commits.
+	// +optional
+	GitUser string `json:"gitUser,omitempty"`
+
+	// GitEmail is the email address to configure for git commits.
+	// +optional
+	GitEmail string `json:"gitEmail,omitempty"`
 }
 
 // +kubebuilder:object:root=true

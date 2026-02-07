@@ -554,6 +554,260 @@ var _ = Describe("Task Controller", func() {
 		})
 	})
 
+	Context("When creating a Task with workspace gitUser and gitEmail", func() {
+		It("Should create a Job with a git-config init container", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-task-workspace-gituser",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with API key")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+			By("Creating a Workspace resource with gitUser and gitEmail")
+			ws := &axonv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace-gituser",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.WorkspaceSpec{
+					Repo:     "https://github.com/example/repo.git",
+					Ref:      "main",
+					GitUser:  "Test User",
+					GitEmail: "test@example.com",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
+
+			By("Creating a Task with workspace ref")
+			task := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace-gituser",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "Fix the bug",
+					Credentials: axonv1alpha1.Credentials{
+						Type: axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{
+							Name: "anthropic-api-key",
+						},
+					},
+					WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						Name: "test-workspace-gituser",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, task)).Should(Succeed())
+
+			By("Verifying a Job is created")
+			jobLookupKey := types.NamespacedName{Name: task.Name, Namespace: ns.Name}
+			createdJob := &batchv1.Job{}
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, jobLookupKey, createdJob)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Logging the Job spec")
+			logJobSpec(createdJob)
+
+			By("Verifying the init containers include git-clone and git-config")
+			Expect(createdJob.Spec.Template.Spec.InitContainers).To(HaveLen(2))
+			gitCloneContainer := createdJob.Spec.Template.Spec.InitContainers[0]
+			Expect(gitCloneContainer.Name).To(Equal("git-clone"))
+
+			gitConfigContainer := createdJob.Spec.Template.Spec.InitContainers[1]
+			Expect(gitConfigContainer.Name).To(Equal("git-config"))
+			Expect(gitConfigContainer.Image).To(Equal(controller.GitCloneImage))
+			Expect(gitConfigContainer.Command).To(Equal([]string{"sh", "-c",
+				`git config user.name "$1" && git config user.email "$2"`}))
+			Expect(gitConfigContainer.Args).To(Equal([]string{"--", "Test User", "test@example.com"}))
+			Expect(gitConfigContainer.WorkingDir).To(Equal("/workspace/repo"))
+
+			By("Verifying the git-config container runs as claude user")
+			Expect(gitConfigContainer.SecurityContext).NotTo(BeNil())
+			Expect(gitConfigContainer.SecurityContext.RunAsUser).NotTo(BeNil())
+			Expect(*gitConfigContainer.SecurityContext.RunAsUser).To(Equal(controller.ClaudeCodeUID))
+
+			By("Verifying the git-config container has volume mount")
+			Expect(gitConfigContainer.VolumeMounts).To(HaveLen(1))
+			Expect(gitConfigContainer.VolumeMounts[0].Name).To(Equal(controller.WorkspaceVolumeName))
+			Expect(gitConfigContainer.VolumeMounts[0].MountPath).To(Equal(controller.WorkspaceMountPath))
+		})
+	})
+
+	Context("When creating a Task with workspace gitUser only", func() {
+		It("Should create a git-config init container with only user.name", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-task-workspace-gituser-only",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with API key")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+			By("Creating a Workspace resource with only gitUser")
+			ws := &axonv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace-gituser-only",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.WorkspaceSpec{
+					Repo:    "https://github.com/example/repo.git",
+					GitUser: "Test User",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
+
+			By("Creating a Task with workspace ref")
+			task := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace-gituser-only",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "Fix the bug",
+					Credentials: axonv1alpha1.Credentials{
+						Type: axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{
+							Name: "anthropic-api-key",
+						},
+					},
+					WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						Name: "test-workspace-gituser-only",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, task)).Should(Succeed())
+
+			By("Verifying a Job is created")
+			jobLookupKey := types.NamespacedName{Name: task.Name, Namespace: ns.Name}
+			createdJob := &batchv1.Job{}
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, jobLookupKey, createdJob)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Logging the Job spec")
+			logJobSpec(createdJob)
+
+			By("Verifying git-config init container configures only user.name")
+			Expect(createdJob.Spec.Template.Spec.InitContainers).To(HaveLen(2))
+			gitConfigContainer := createdJob.Spec.Template.Spec.InitContainers[1]
+			Expect(gitConfigContainer.Name).To(Equal("git-config"))
+			Expect(gitConfigContainer.Command).To(Equal([]string{"sh", "-c",
+				`git config user.name "$1"`}))
+			Expect(gitConfigContainer.Args).To(Equal([]string{"--", "Test User"}))
+		})
+	})
+
+	Context("When creating a Task with workspace gitEmail only", func() {
+		It("Should create a git-config init container with only user.email", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-task-workspace-gitemail-only",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with API key")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+			By("Creating a Workspace resource with only gitEmail")
+			ws := &axonv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace-gitemail-only",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.WorkspaceSpec{
+					Repo:     "https://github.com/example/repo.git",
+					GitEmail: "test@example.com",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
+
+			By("Creating a Task with workspace ref")
+			task := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace-gitemail-only",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "Fix the bug",
+					Credentials: axonv1alpha1.Credentials{
+						Type: axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{
+							Name: "anthropic-api-key",
+						},
+					},
+					WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						Name: "test-workspace-gitemail-only",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, task)).Should(Succeed())
+
+			By("Verifying a Job is created")
+			jobLookupKey := types.NamespacedName{Name: task.Name, Namespace: ns.Name}
+			createdJob := &batchv1.Job{}
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, jobLookupKey, createdJob)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Logging the Job spec")
+			logJobSpec(createdJob)
+
+			By("Verifying git-config init container configures only user.email")
+			Expect(createdJob.Spec.Template.Spec.InitContainers).To(HaveLen(2))
+			gitConfigContainer := createdJob.Spec.Template.Spec.InitContainers[1]
+			Expect(gitConfigContainer.Name).To(Equal("git-config"))
+			Expect(gitConfigContainer.Command).To(Equal([]string{"sh", "-c",
+				`git config user.email "$1"`}))
+			Expect(gitConfigContainer.Args).To(Equal([]string{"--", "test@example.com"}))
+		})
+	})
+
 	Context("When creating a Task with a nonexistent workspace", func() {
 		It("Should fail with a meaningful error", func() {
 			By("Creating a namespace")

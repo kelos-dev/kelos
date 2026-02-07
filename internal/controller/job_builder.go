@@ -174,6 +174,35 @@ func (b *JobBuilder) buildClaudeCodeJob(task *axonv1alpha1.Task, workspace *axon
 
 		initContainers = append(initContainers, initContainer)
 
+		if workspace.GitUser != "" || workspace.GitEmail != "" {
+			var gitConfigCmd string
+			var gitConfigArgs []string
+			switch {
+			case workspace.GitUser != "" && workspace.GitEmail != "":
+				gitConfigCmd = `git config user.name "$1" && git config user.email "$2"`
+				gitConfigArgs = []string{"--", workspace.GitUser, workspace.GitEmail}
+			case workspace.GitUser != "":
+				gitConfigCmd = `git config user.name "$1"`
+				gitConfigArgs = []string{"--", workspace.GitUser}
+			default:
+				gitConfigCmd = `git config user.email "$1"`
+				gitConfigArgs = []string{"--", workspace.GitEmail}
+			}
+
+			gitConfigContainer := corev1.Container{
+				Name:         "git-config",
+				Image:        GitCloneImage,
+				Command:      []string{"sh", "-c", gitConfigCmd},
+				Args:         gitConfigArgs,
+				WorkingDir:   WorkspaceMountPath + "/repo",
+				VolumeMounts: []corev1.VolumeMount{volumeMount},
+				SecurityContext: &corev1.SecurityContext{
+					RunAsUser: &claudeCodeUID,
+				},
+			}
+			initContainers = append(initContainers, gitConfigContainer)
+		}
+
 		mainContainer.VolumeMounts = []corev1.VolumeMount{volumeMount}
 		mainContainer.WorkingDir = WorkspaceMountPath + "/repo"
 	}

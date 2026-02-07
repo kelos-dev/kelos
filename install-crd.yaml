@@ -338,6 +338,12 @@ spec:
           spec:
             description: WorkspaceSpec defines the desired state of Workspace.
             properties:
+              gitEmail:
+                description: GitEmail is the email address to configure for git commits.
+                type: string
+              gitUser:
+                description: GitUser is the user name to configure for git commits.
+                type: string
               ref:
                 description: |-
                   Ref is the git reference to checkout (branch, tag, or commit SHA).

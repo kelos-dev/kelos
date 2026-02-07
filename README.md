@@ -6,34 +6,72 @@
 [![Go Version](https://img.shields.io/github/go-mod/go-version/gjkim42/axon)](https://github.com/gjkim42/axon)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
+Axon is a Kubernetes controller that runs AI coding agents (like Claude Code) in isolated, ephemeral Pods with full autonomy. You get the speed of `--dangerously-skip-permissions` without the risk — and the ability to fan out hundreds of agents in parallel across repos and CI pipelines.
+
+## Demo
+
+<!-- TODO: Replace with a GIF or asciinema recording -->
+
+```bash
+# 1. Initialize your config
+$ axon init
+# Edit ~/.axon/config.yaml with your token and workspace
+
+# 2. Run a task against your repo
+$ axon run -p "Fix the bug described in issue #42 and open a PR with the fix"
+task/fix-issue-42-xyz created
+
+# 3. Stream the logs
+$ axon logs fix-issue-42-xyz -f
+[init] model=claude-sonnet-4-20250514
+
+--- Turn 1 ---
+Let me investigate issue #42...
+[tool] Bash: gh issue view 42
+
+--- Turn 2 ---
+I see the problem. The auth middleware does not handle expired tokens.
+[tool] Edit
+
+...
+
+--- Turn 8 ---
+PR created: https://github.com/your-org/repo/pull/123
+
+[result] completed (8 turns, $0.12)
+```
+
+See [Examples](#examples) for a full autonomous issue-fixing pipeline.
+
 ## Why Axon?
 
-AI coding agents like Claude Code are most powerful when they run with `--dangerously-skip-permissions` — no human in the loop, fully autonomous. But on your laptop, that flag lives up to its name: the agent can touch your filesystem, network, and everything else on the host. And there's no easy way to fan out dozens of agents across repos, or plug them into a CI pipeline.
+AI coding agents are most powerful when they run fully autonomous — no permission prompts, no human in the loop. But on your laptop, that means the agent can touch your filesystem, network, and everything else on the host. And there's no easy way to fan out dozens of agents across repos or plug them into CI.
 
-**Kubernetes solves both problems at once.** Inside a Pod, "dangerously skip permissions" isn't dangerous anymore — the agent gets full autonomy *within* an isolated, ephemeral container while the blast radius stays at zero for the host. And because it's Kubernetes, you get parallelism, scheduling, and CI integration for free.
-
-Axon is the controller that ties it together. Define what you want the agent to do, and Axon runs it as an isolated Job with `--dangerously-skip-permissions` enabled by default.
+**Kubernetes solves both problems at once.** Inside a Pod, "dangerously skip permissions" isn't dangerous anymore — the agent gets full autonomy *within* an isolated, ephemeral container while the blast radius stays at zero for the host.
 
 - **Safe autonomy** — agents run with `--dangerously-skip-permissions` inside isolated, ephemeral Pods. Full speed, zero risk to the host.
 - **Scale out** — launch hundreds of agents in parallel across repositories. Kubernetes handles scheduling and resource management.
 - **CI-native** — trigger agents from any pipeline. A Task is just a Kubernetes resource — create it with `kubectl`, Helm, Argo, or your own tooling.
 - **Observable** — watch agents move through `Pending → Running → Succeeded/Failed` with kubectl.
-- **Simple** — one CRD, one controller, zero dependencies beyond a running cluster.
+- **Simple** — a handful of CRDs, one controller, zero dependencies beyond a running cluster.
 
 ## How It Works
 
 ```mermaid
 flowchart LR
-    T1["Task: refactor auth"] --> AC[Axon Controller]
+    T1["Task: refactor auth"] --> AC[Axon]
     T2["Task: add tests"] --> AC
     T3["Task: update docs"] --> AC
 
-    AC --> J1[Job 1] --> P1["Pod 1 (--dangerously-skip-permissions)"] --> S1[Succeeded]
-    AC --> J2[Job 2] --> P2["Pod 2 (--dangerously-skip-permissions)"] --> S2[Succeeded]
-    AC --> J3[Job 3] --> P3["Pod 3 (--dangerously-skip-permissions)"] --> F3[Failed]
+    AC --> P1[Isolated Pod] --> S1[Succeeded]
+    AC --> P2[Isolated Pod] --> S2[Succeeded]
+    AC --> P3[Isolated Pod] --> F3[Failed]
 ```
 
-### TaskSpawner — Automatic Task Creation from External Sources
+You apply a Task, Axon runs it as an isolated Job with `--dangerously-skip-permissions`, and tracks it through `Pending → Running → Succeeded/Failed`. Currently supported agents: **Claude Code**.
+
+<details>
+<summary>TaskSpawner — Automatic Task Creation from External Sources</summary>
 
 TaskSpawner watches external sources (e.g., GitHub Issues) and automatically creates Tasks for each discovered item.
 
@@ -45,15 +83,7 @@ flowchart LR
     TS -- "creates" --> T2["Task: fix-bugs-2"]
 ```
 
----
-
-1. You **apply a Task** manifest with a prompt, agent type, credential reference, and optionally a git repo to clone.
-2. The **Axon controller** creates a Kubernetes **Job**.
-3. If a workspace is specified, an **init container clones the repo**. Then the agent Pod starts with `--dangerously-skip-permissions`.
-4. The agent runs **fully autonomous** inside the container — no permission prompts, no risk to the host.
-5. Axon **tracks status** (phase, pod name, timestamps, messages). Delete the Task and the Job + Pod are automatically cleaned up via owner references.
-
-Currently supported agents: **Claude Code** (`claude-code`).
+</details>
 
 ## Quick Start
 
@@ -62,95 +92,28 @@ Currently supported agents: **Claude Code** (`claude-code`).
 - Kubernetes cluster (1.28+)
 - kubectl configured
 
-### Install
+### 1. Install Axon
 
 ```bash
 kubectl apply -f https://raw.githubusercontent.com/gjkim42/axon/main/install-crd.yaml
 kubectl apply -f https://raw.githubusercontent.com/gjkim42/axon/main/install.yaml
 ```
 
-### Install the CLI
+### 2. Install the CLI
 
 ```bash
 go install github.com/gjkim42/axon/cmd/axon@latest
 ```
 
-### Run Your First Task
-
-1. Initialize a config file:
+### 3. Run Your First Task
 
 ```bash
 axon init
-```
+# Edit ~/.axon/config.yaml with your token:
+#   oauthToken: <your-oauth-token>
 
-Edit `~/.axon/config.yaml` with your token:
-
-```yaml
-oauthToken: <your-oauth-token>
-```
-
-2. Run a task:
-
-```bash
 axon run -p "Create a hello world program in Python"
-```
-
-Axon auto-creates the Kubernetes secret from your token.
-
-3. Stream the logs:
-
-```bash
 axon logs <task-name> -f
-```
-
-```
-[init] model=claude-sonnet-4-20250514
-
---- Turn 1 ---
-I'll create a hello world program in Python.
-[tool] Write: hello.py
-
---- Turn 2 ---
-The file has been created.
-
-[result] completed (2 turns, $0.0035)
-```
-
-Run against a git repo — add `workspace` to your config:
-
-```yaml
-# ~/.axon/config.yaml
-oauthToken: <your-oauth-token>
-workspace:
-  repo: https://github.com/your-org/repo.git
-  ref: main
-```
-
-```bash
-axon run -p "Add unit tests"
-```
-
-Axon auto-creates the Workspace resource from your config.
-
-Have the agent create a PR — add a `token` to your workspace config:
-
-```yaml
-workspace:
-  repo: https://github.com/your-org/repo.git
-  ref: main
-  token: <your-github-token>
-```
-
-```bash
-axon run -p "Fix the bug described in issue #42 and open a PR with the fix"
-```
-
-The `gh` CLI and `GITHUB_TOKEN` are available inside the agent container, so the agent can push branches and create PRs autonomously.
-
-Or reference an existing Workspace resource with `--workspace`:
-
-```bash
-axon run -p "Add unit tests" --workspace my-workspace
 ```
 
 <details>
@@ -207,6 +170,134 @@ Or pass `--secret` to `axon run` with a pre-created secret (api-key is the defau
 
 </details>
 
+## Examples
+
+### Run against a git repo
+
+Add `workspace` to your config:
+
+```yaml
+# ~/.axon/config.yaml
+oauthToken: <your-oauth-token>
+workspace:
+  repo: https://github.com/your-org/repo.git
+  ref: main
+```
+
+```bash
+axon run -p "Add unit tests"
+```
+
+Axon auto-creates the Workspace resource from your config.
+
+Or reference an existing Workspace resource with `--workspace`:
+
+```bash
+axon run -p "Add unit tests" --workspace my-workspace
+```
+
+### Create PRs automatically
+
+Add a `token` to your workspace config:
+
+```yaml
+workspace:
+  repo: https://github.com/your-org/repo.git
+  ref: main
+  token: <your-github-token>
+```
+
+```bash
+axon run -p "Fix the bug described in issue #42 and open a PR with the fix"
+```
+
+The `gh` CLI and `GITHUB_TOKEN` are available inside the agent container, so the agent can push branches and create PRs autonomously.
+
+### Auto-fix GitHub issues with TaskSpawner
+
+Create a TaskSpawner to automatically turn GitHub issues into agent tasks:
+
+```yaml
+apiVersion: axon.io/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: fix-bugs
+spec:
+  when:
+    githubIssues:
+      workspaceRef:
+        name: my-workspace
+      labels: [bug]
+      state: open
+  taskTemplate:
+    type: claude-code
+    credentials:
+      type: oauth
+      secretRef:
+        name: claude-credentials
+    promptTemplate: "Fix: {{.Title}}\n{{.Body}}"
+  pollInterval: 5m
+```
+
+```bash
+kubectl apply -f taskspawner.yaml
+```
+
+TaskSpawner polls for new issues matching your filters and creates a Task for each one.
+
+### Autonomous issue-fixing pipeline
+
+This is a real-world TaskSpawner that picks up every open issue, investigates it, opens (or updates) a PR, self-reviews, and ensures CI passes — fully autonomously. When the agent can't make progress, it labels the issue `axon/needs-input` and stops. Remove the label to re-queue it.
+
+```yaml
+apiVersion: axon.io/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: axon-workers
+spec:
+  when:
+    githubIssues:
+      excludeLabels:
+        - axon/needs-input
+      workspaceRef:
+        name: axon-workspace
+  taskTemplate:
+    type: claude-code
+    credentials:
+      type: oauth
+      secretRef:
+        name: axon-credentials
+    promptTemplate: |
+      You are a coding agent that works within the ephemeral container environment.
+      The changes you've made to your file system will disappear after the task is done.
+      You either
+      - create a PR to fix the issue
+      - update an existing PR to fix the issue
+      - comment on the issue or the PR if you cannot fix it
+
+      Rules:
+      - You always create a branch named axon-task-#{{.Number}} for each issue #{{.Number}}.
+      - The PR should be labeled with generated-by-axon label.
+
+      Task:
+      - 1. Investigate the issue #{{.Number}} and its PR if exists.
+      - 2. Checkout the branch named axon-task-#{{.Number}} (if exists) or create a new branch from the default branch.
+        - Rebase the branch if needed, e.g. there is a conflict with the default branch in the PR.
+      - 3. Create a commit that fixes the issue.
+      - 4. /review the PR and get feedbacks from the PR to refine the patch.
+      - 5. Make sure the PR passes all CI tests.
+
+      Add axon/needs-input label to the issue if you need any input from the issue author.
+      e.g.
+        - The PR is ready for review, please take a look.
+        - Commented on the issue(or PR) for more information.
+        - If you cannot make any progress on the issue, explain why.
+        - ...
+  pollInterval: 1m
+```
+
+The key pattern here is `excludeLabels: [axon/needs-input]` — this creates a feedback loop where the agent works autonomously until it needs human input, then pauses. Removing the label re-queues the issue on the next poll.
+
 ## Features
 
 | Feature | Details |
@@ -237,7 +328,8 @@ Or pass `--secret` to `axon run` with a pre-created secret (api-key is the defau
 
 ## Reference
 
-### Task Spec
+<details>
+<summary><strong>Task Spec</strong></summary>
 
 | Field | Description | Required |
 |-------|-------------|----------|
@@ -248,7 +340,10 @@ Or pass `--secret` to `axon run` with a pre-created secret (api-key is the defau
 | `spec.model` | Model override (e.g., `claude-sonnet-4-20250514`) | No |
 | `spec.workspaceRef.name` | Name of a Workspace resource to use | No |
 
-### Workspace Spec
+</details>
+
+<details>
+<summary><strong>Workspace Spec</strong></summary>
 
 | Field | Description | Required |
 |-------|-------------|----------|
@@ -256,12 +351,16 @@ Or pass `--secret` to `axon run` with a pre-created secret (api-key is the defau
 | `spec.ref` | Branch, tag, or commit SHA to checkout (defaults to repo's default branch) | No |
 | `spec.secretRef.name` | Secret containing `GITHUB_TOKEN` for git auth and `gh` CLI | No |
 
-### TaskSpawner Spec
+</details>
+
+<details>
+<summary><strong>TaskSpawner Spec</strong></summary>
 
 | Field | Description | Required |
 |-------|-------------|----------|
 | `spec.when.githubIssues.workspaceRef.name` | Workspace resource (repo URL, auth, and clone target for spawned Tasks) | Yes |
 | `spec.when.githubIssues.labels` | Filter issues by labels | No |
+| `spec.when.githubIssues.excludeLabels` | Exclude issues with these labels | No |
 | `spec.when.githubIssues.state` | Filter by state: `open`, `closed`, `all` (default: `open`) | No |
 | `spec.taskTemplate.type` | Agent type (`claude-code`) | Yes |
 | `spec.taskTemplate.credentials` | Credentials for the agent (same as Task) | Yes |
@@ -269,34 +368,10 @@ Or pass `--secret` to `axon run` with a pre-created secret (api-key is the defau
 | `spec.taskTemplate.promptTemplate` | Go text/template for prompt (`{{.Title}}`, `{{.Body}}`, `{{.Number}}`, etc.) | No |
 | `spec.pollInterval` | How often to poll the source (default: `5m`) | No |
 
-<details>
-<summary>Example TaskSpawner YAML</summary>
-
-```yaml
-apiVersion: axon.io/v1alpha1
-kind: TaskSpawner
-metadata:
-  name: fix-bugs
-spec:
-  when:
-    githubIssues:
-      workspaceRef:
-        name: my-workspace
-      labels: [bug]
-      state: open
-  taskTemplate:
-    type: claude-code
-    credentials:
-      type: oauth
-      secretRef:
-        name: claude-credentials
-    promptTemplate: "Fix: {{.Title}}\n{{.Body}}"
-  pollInterval: 5m
-```
-
 </details>
 
-### Task Status
+<details>
+<summary><strong>Task Status</strong></summary>
 
 | Field | Description |
 |-------|-------------|
@@ -307,7 +382,10 @@ spec:
 | `status.completionTime` | When the Task completed |
 | `status.message` | Additional information about the current status |
 
-### Configuration
+</details>
+
+<details>
+<summary><strong>Configuration</strong></summary>
 
 Axon reads defaults from `~/.axon/config.yaml` (override with `--config`). CLI flags always take precedence over config file values.
 
@@ -366,7 +444,10 @@ If both `name` and `repo` are set, `name` takes precedence. The `--workspace` CL
 | `model` | Default model override |
 | `namespace` | Default Kubernetes namespace |
 
-### CLI
+</details>
+
+<details>
+<summary><strong>CLI</strong></summary>
 
 The `axon` CLI lets you manage tasks without writing YAML.
 
@@ -395,6 +476,8 @@ axon logs my-task -f
 # Delete a task
 axon delete my-task
 ```
+
+</details>
 
 ## Uninstall
 

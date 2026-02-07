@@ -21,7 +21,7 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/yaml"
 
-	"github.com/gjkim42/axon/internal/manifests"
+	"github.com/axon-core/axon/internal/manifests"
 )
 
 const fieldManager = "axon"

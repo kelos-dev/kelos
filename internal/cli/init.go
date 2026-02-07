@@ -9,7 +9,7 @@ import (
 )
 
 const configTemplate = `# Axon configuration file
-# See: https://github.com/gjkim42/axon
+# See: https://github.com/axon-core/axon
 
 # OAuth token (axon auto-creates the Kubernetes secret for you)
 oauthToken: ""

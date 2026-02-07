@@ -15,7 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	axonv1alpha1 "github.com/gjkim42/axon/api/v1alpha1"
+	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
 )
 
 const (

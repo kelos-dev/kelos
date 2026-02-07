@@ -3,7 +3,7 @@ package cli
 import (
 	"testing"
 
-	"github.com/gjkim42/axon/internal/manifests"
+	"github.com/axon-core/axon/internal/manifests"
 )
 
 func TestParseManifests_SingleDocument(t *testing.T) {

@@ -13,8 +13,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	axonv1alpha1 "github.com/gjkim42/axon/api/v1alpha1"
-	"github.com/gjkim42/axon/internal/cli"
+	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
+	"github.com/axon-core/axon/internal/cli"
 )
 
 // clearNamespaceFinalizers removes finalizers from the axon-system namespace

@@ -121,7 +121,7 @@ kind: Workspace
 metadata:
   name: e2e-cli-workspace
 spec:
-  repo: https://github.com/gjkim42/axon.git
+  repo: https://github.com/axon-core/axon.git
   ref: main
 `
 		Expect(kubectlWithInput(wsYAML, "apply", "-f", "-")).To(Succeed())

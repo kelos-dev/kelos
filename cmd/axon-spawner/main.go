@@ -18,8 +18,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	axonv1alpha1 "github.com/gjkim42/axon/api/v1alpha1"
-	"github.com/gjkim42/axon/internal/source"
+	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
+	"github.com/axon-core/axon/internal/source"
 )
 
 var scheme = runtime.NewScheme()

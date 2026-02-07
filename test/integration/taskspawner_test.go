@@ -11,8 +11,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	axonv1alpha1 "github.com/gjkim42/axon/api/v1alpha1"
-	"github.com/gjkim42/axon/internal/controller"
+	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
+	"github.com/axon-core/axon/internal/controller"
 )
 
 var _ = Describe("TaskSpawner Controller", func() {
@@ -38,7 +38,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: axonv1alpha1.WorkspaceSpec{
-					Repo: "https://github.com/gjkim42/axon.git",
+					Repo: "https://github.com/axon-core/axon.git",
 					Ref:  "main",
 				},
 			}
@@ -170,7 +170,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: axonv1alpha1.WorkspaceSpec{
-					Repo: "https://github.com/gjkim42/axon.git",
+					Repo: "https://github.com/axon-core/axon.git",
 					Ref:  "main",
 					SecretRef: &axonv1alpha1.SecretReference{
 						Name: "github-token",
@@ -241,7 +241,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: axonv1alpha1.WorkspaceSpec{
-					Repo: "https://github.com/gjkim42/axon.git",
+					Repo: "https://github.com/axon-core/axon.git",
 				},
 			}
 			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
@@ -312,7 +312,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: axonv1alpha1.WorkspaceSpec{
-					Repo: "https://github.com/gjkim42/axon.git",
+					Repo: "https://github.com/axon-core/axon.git",
 				},
 			}
 			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
@@ -402,7 +402,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: axonv1alpha1.WorkspaceSpec{
-					Repo: "https://github.com/gjkim42/axon.git",
+					Repo: "https://github.com/axon-core/axon.git",
 					Ref:  "main",
 				},
 			}

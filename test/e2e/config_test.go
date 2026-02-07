@@ -46,7 +46,7 @@ var _ = Describe("Config", func() {
 		By("writing a temp config file with oauthToken and inline workspace")
 		dir := GinkgoT().TempDir()
 		configPath = filepath.Join(dir, "config.yaml")
-		configContent := "oauthToken: " + oauthToken + "\nworkspace:\n  repo: https://github.com/gjkim42/axon.git\n  ref: main\n"
+		configContent := "oauthToken: " + oauthToken + "\nworkspace:\n  repo: https://github.com/axon-core/axon.git\n  ref: main\n"
 		Expect(os.WriteFile(configPath, []byte(configContent), 0o644)).To(Succeed())
 
 		By("creating a Task via CLI using config defaults (no --secret or --credential-type)")
@@ -78,7 +78,7 @@ kind: Workspace
 metadata:
   name: e2e-config-ws-override
 spec:
-  repo: https://github.com/gjkim42/axon.git
+  repo: https://github.com/axon-core/axon.git
   ref: main
 `
 		Expect(kubectlWithInput(overrideWsYAML, "apply", "-f", "-")).To(Succeed())
@@ -86,7 +86,7 @@ spec:
 		By("writing a temp config file with oauthToken and inline workspace (bad ref)")
 		dir := GinkgoT().TempDir()
 		configPath = filepath.Join(dir, "config.yaml")
-		configContent := "oauthToken: " + oauthToken + "\nworkspace:\n  repo: https://github.com/gjkim42/axon.git\n  ref: v0.0.0\n"
+		configContent := "oauthToken: " + oauthToken + "\nworkspace:\n  repo: https://github.com/axon-core/axon.git\n  ref: v0.0.0\n"
 		Expect(os.WriteFile(configPath, []byte(configContent), 0o644)).To(Succeed())
 
 		By("creating a Task with CLI flag overriding config workspace")

@@ -6,7 +6,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	axonv1alpha1 "github.com/gjkim42/axon/api/v1alpha1"
+	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
 )
 
 func TestTTLExpired(t *testing.T) {

@@ -2,8 +2,8 @@
 
 **Run autonomous AI agents safely — at scale, in CI, on Kubernetes.**
 
-[![CI](https://github.com/gjkim42/axon/actions/workflows/ci.yaml/badge.svg)](https://github.com/gjkim42/axon/actions/workflows/ci.yaml)
-[![Go Version](https://img.shields.io/github/go-mod/go-version/gjkim42/axon)](https://github.com/gjkim42/axon)
+[![CI](https://github.com/axon-core/axon/actions/workflows/ci.yaml/badge.svg)](https://github.com/axon-core/axon/actions/workflows/ci.yaml)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/axon-core/axon)](https://github.com/axon-core/axon)
 [![License](https://img.shields.io/badge/License-BSL%201.1-blue.svg)](LICENSE)
 
 Axon is a Kubernetes controller that runs AI coding agents (like Claude Code) in isolated, ephemeral Pods with full autonomy. You get the speed of `--dangerously-skip-permissions` without the risk — and the ability to fan out hundreds of agents in parallel across repos and CI pipelines.
@@ -93,7 +93,7 @@ TaskSpawner watches external sources (e.g., GitHub Issues) and automatically cre
 ### 1. Install the CLI
 
 ```bash
-go install github.com/gjkim42/axon/cmd/axon@latest
+go install github.com/axon-core/axon/cmd/axon@latest
 ```
 
 ### 2. Install Axon

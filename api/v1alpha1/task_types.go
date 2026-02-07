@@ -70,6 +70,9 @@ type TaskSpec struct {
 	// execution (either Succeeded or Failed). If set, the Task will be
 	// automatically deleted after the given number of seconds once it reaches
 	// a terminal phase, allowing TaskSpawner to create a new Task.
+	// If this field is unset, the Task will not be automatically deleted.
+	// If this field is set to zero, the Task will be eligible to be deleted
+	// immediately after it finishes.
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty"`

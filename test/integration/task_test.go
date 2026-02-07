@@ -636,6 +636,156 @@ var _ = Describe("Task Controller", func() {
 		})
 	})
 
+	Context("When creating a Task with TTL of zero", func() {
+		It("Should delete the Task immediately after it finishes", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-task-ttl-zero",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with API key")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+			By("Creating a Task with TTL=0")
+			ttl := int32(0)
+			task := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-task-ttl-zero",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "Create a hello world program",
+					Credentials: axonv1alpha1.Credentials{
+						Type: axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{
+							Name: "anthropic-api-key",
+						},
+					},
+					TTLSecondsAfterFinished: &ttl,
+				},
+			}
+			Expect(k8sClient.Create(ctx, task)).Should(Succeed())
+
+			taskLookupKey := types.NamespacedName{Name: task.Name, Namespace: ns.Name}
+			createdTask := &axonv1alpha1.Task{}
+
+			By("Verifying a Job is created")
+			jobLookupKey := types.NamespacedName{Name: task.Name, Namespace: ns.Name}
+			createdJob := &batchv1.Job{}
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, jobLookupKey, createdJob)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Simulating Job completion")
+			Eventually(func() error {
+				if err := k8sClient.Get(ctx, jobLookupKey, createdJob); err != nil {
+					return err
+				}
+				createdJob.Status.Succeeded = 1
+				return k8sClient.Status().Update(ctx, createdJob)
+			}, timeout, interval).Should(Succeed())
+
+			By("Verifying the Task is deleted immediately after finishing")
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, taskLookupKey, createdTask)
+				return err != nil
+			}, timeout, interval).Should(BeTrue())
+		})
+	})
+
+	Context("When creating a Task without TTL", func() {
+		It("Should not delete the Task after it finishes", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-task-no-ttl",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with API key")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+			By("Creating a Task without TTL")
+			task := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-task-no-ttl",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "Create a hello world program",
+					Credentials: axonv1alpha1.Credentials{
+						Type: axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{
+							Name: "anthropic-api-key",
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, task)).Should(Succeed())
+
+			taskLookupKey := types.NamespacedName{Name: task.Name, Namespace: ns.Name}
+			createdTask := &axonv1alpha1.Task{}
+
+			By("Verifying a Job is created")
+			jobLookupKey := types.NamespacedName{Name: task.Name, Namespace: ns.Name}
+			createdJob := &batchv1.Job{}
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, jobLookupKey, createdJob)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Simulating Job completion")
+			Eventually(func() error {
+				if err := k8sClient.Get(ctx, jobLookupKey, createdJob); err != nil {
+					return err
+				}
+				createdJob.Status.Succeeded = 1
+				return k8sClient.Status().Update(ctx, createdJob)
+			}, timeout, interval).Should(Succeed())
+
+			By("Verifying Task reaches Succeeded")
+			Eventually(func() axonv1alpha1.TaskPhase {
+				err := k8sClient.Get(ctx, taskLookupKey, createdTask)
+				if err != nil {
+					return ""
+				}
+				return createdTask.Status.Phase
+			}, timeout, interval).Should(Equal(axonv1alpha1.TaskPhaseSucceeded))
+
+			By("Verifying the Task is NOT deleted after waiting")
+			Consistently(func() error {
+				return k8sClient.Get(ctx, taskLookupKey, createdTask)
+			}, 3*time.Second, interval).Should(Succeed())
+		})
+	})
+
 	Context("When creating a Task with a nonexistent workspace", func() {
 		It("Should fail with a meaningful error", func() {
 			By("Creating a namespace")

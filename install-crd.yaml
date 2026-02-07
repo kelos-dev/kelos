@@ -83,6 +83,9 @@ spec:
                   execution (either Succeeded or Failed). If set, the Task will be
                   automatically deleted after the given number of seconds once it reaches
                   a terminal phase, allowing TaskSpawner to create a new Task.
+                  If this field is unset, the Task will not be automatically deleted.
+                  If this field is set to zero, the Task will be eligible to be deleted
+                  immediately after it finishes.
                 format: int32
                 minimum: 0
                 type: integer
@@ -237,6 +240,9 @@ spec:
                       execution (either Succeeded or Failed). If set, spawned Tasks will be
                       automatically deleted after the given number of seconds once they reach
                       a terminal phase, allowing TaskSpawner to create a new Task.
+                      If this field is unset, spawned Tasks will not be automatically deleted.
+                      If this field is set to zero, spawned Tasks will be eligible to be deleted
+                      immediately after they finish.
                     format: int32
                     minimum: 0
                     type: integer

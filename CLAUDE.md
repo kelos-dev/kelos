@@ -8,7 +8,8 @@
 - **Logging conventions.** Start log messages with capital letters and do not end with punctuation.
 
 ## Key Makefile Targets
-- `make verify` — run all verification checks (lint, fmt, vet, etc.)
+- `make verify` — run all verification checks (lint, fmt, vet, etc.), it will
+fail if there is unstaged changes.
 - `make update` — update all generated files
 - tests:
   - `make test` — run all unit tests

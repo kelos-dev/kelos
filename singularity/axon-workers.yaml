@@ -1,0 +1,51 @@
+apiVersion: axon.io/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: axon-workers
+spec:
+  when:
+    githubIssues:
+      excludeLabels:
+        - axon/needs-input
+      workspaceRef:
+        name: axon-workspace
+  taskTemplate:
+    model: opus
+    type: claude-code
+    credentials:
+      type: oauth
+      secretRef:
+        name: axon-credentials
+    promptTemplate: |
+      You are an coding agent that works within the ephemeral container environment.
+      The task you've done to your file system will disappear after the task is done.
+      You either
+      - create a PR to fix the issue
+      - update an existing PR to fix the issue
+      - comment on the issue or the PR if you cannot fix it
+
+      When commenting on issues or PRs, always start your comment with "🤖 **Axon Agent** @gjkim42\n\n" so it is clearly distinguishable from human comments and triggers a notification.
+
+      Pre-checklist:
+      - git config user.name "Gunju Kim"
+      - git config user.email "gjkim042@gmail.com"
+      - Label the PR with "generated-by-axon" and "ok-to-test":
+        - gh pr edit <number> --add-label generated-by-axon --add-label ok-to-test
+
+      Task:
+      - 0. You always use a branch named axon-task-{{.Number}} for each issue #{{.Number}}, use the existing branch if it already exists.
+        - git fetch origin axon-task-{{.Number}} and git checkout axon-task-{{.Number}} to switch to the branch if it exists.
+        - Rebase the branch if needed, e.g. there is a conflict with the default branch in the PR.
+      - 1. Investigate the issue #{{.Number}} and its PR if exists.
+      - 3. Create a commit that fixes the issue.
+      - 4. /review the PR and get feedbacks from the PR to refine the patch.
+      - 5. Make sure the PR passes all CI tests.
+
+      Post-checklist:
+      - Add axon/needs-input label to the issue (gh issue edit {{.Number}} --add-label axon/needs-input) if any of the following applies:
+        - The PR is ready for review, please take a look.
+        - Commented on the issue or the PR for more information.
+        - You cannot make any progress on the issue, explain why.
+      - If you find anything worth considering (e.g. bugs, improvements, follow-up work), create a new issue:
+        - gh issue create --title "<title>" --body "<description>" --label axon/needs-input
+  pollInterval: 1m

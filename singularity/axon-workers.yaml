@@ -34,9 +34,10 @@ spec:
         - gh pr edit <number> --add-label generated-by-axon --add-label ok-to-test
 
       Task:
-      - 0. You always use a branch named axon-task-{{.Number}} for each issue #{{.Number}}, use the existing branch if it already exists.
-        - git fetch origin axon-task-{{.Number}} and git checkout axon-task-{{.Number}} to switch to the branch if it exists.
-        - Rebase the branch if needed, e.g. there is a conflict with the default branch in the PR.
+      - 0. Set up your working branch axon-task-{{.Number}}. Run this exactly:
+        ```
+        git fetch origin axon-task-{{.Number}} 2>/dev/null && git checkout -B axon-task-{{.Number}} origin/axon-task-{{.Number}} && git rebase main || git checkout -b axon-task-{{.Number}} main
+        ```
       - 1. Investigate the issue #{{.Number}} and its PR if exists.
       - 3. Create a commit that fixes the issue.
       - 4. /review the PR and get feedbacks from the PR to refine the patch.

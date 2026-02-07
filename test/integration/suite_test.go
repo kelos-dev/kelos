@@ -82,8 +82,19 @@ var _ = BeforeSuite(func() {
 		Expect(err).NotTo(HaveOccurred())
 	}()
 
-	// Wait for cache to sync
-	time.Sleep(100 * time.Millisecond)
+	// Wait for the manager cache to sync before running any tests
+	Expect(mgr.GetCache().WaitForCacheSync(ctx)).To(BeTrue())
+
+	// Verify all CRDs are fully established by attempting to list each custom resource type
+	Eventually(func() error {
+		return k8sClient.List(ctx, &axonv1alpha1.TaskList{})
+	}, 30*time.Second, 100*time.Millisecond).Should(Succeed())
+	Eventually(func() error {
+		return k8sClient.List(ctx, &axonv1alpha1.TaskSpawnerList{})
+	}, 30*time.Second, 100*time.Millisecond).Should(Succeed())
+	Eventually(func() error {
+		return k8sClient.List(ctx, &axonv1alpha1.WorkspaceList{})
+	}, 30*time.Second, 100*time.Millisecond).Should(Succeed())
 })
 
 var _ = AfterSuite(func() {

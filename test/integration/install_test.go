@@ -70,10 +70,16 @@ func restoreCRDs(kubeconfigPath string) {
 	reinstall.SetArgs([]string{"install", "--kubeconfig", kubeconfigPath})
 	Expect(reinstall.Execute()).To(Succeed())
 
-	// Wait for CRDs to be fully established before subsequent tests
-	// can create custom resources. We verify by attempting to list Tasks.
+	// Wait for all CRDs to be fully established before subsequent tests
+	// can create custom resources. We verify by attempting to list each type.
 	Eventually(func() error {
 		return k8sClient.List(ctx, &axonv1alpha1.TaskList{})
+	}, 30*time.Second, 100*time.Millisecond).Should(Succeed())
+	Eventually(func() error {
+		return k8sClient.List(ctx, &axonv1alpha1.TaskSpawnerList{})
+	}, 30*time.Second, 100*time.Millisecond).Should(Succeed())
+	Eventually(func() error {
+		return k8sClient.List(ctx, &axonv1alpha1.WorkspaceList{})
 	}, 30*time.Second, 100*time.Millisecond).Should(Succeed())
 
 	deleteControllerResources()

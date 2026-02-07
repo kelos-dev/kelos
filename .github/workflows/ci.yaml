@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, labeled]
 
 jobs:
   build:
@@ -56,6 +57,7 @@ jobs:
         run: make test-integration
 
   test-e2e:
+    if: github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'ok-to-test')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

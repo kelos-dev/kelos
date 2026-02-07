@@ -1,5 +1,5 @@
 # Image configuration
-REGISTRY ?= axoncore
+REGISTRY ?= gjkim42
 VERSION ?= latest
 IMAGE_DIRS ?= cmd/axon-controller cmd/axon-spawner claude-code
 

@@ -266,7 +266,7 @@ spec:
         runAsNonRoot: true
       containers:
         - name: manager
-          image: axon-core/axon-controller:latest
+          image: gjkim42/axon-controller:latest
           args:
             - --leader-elect
           securityContext:

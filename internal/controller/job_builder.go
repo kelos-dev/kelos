@@ -12,7 +12,7 @@ import (
 
 const (
 	// ClaudeCodeImage is the default image for Claude Code agent.
-	ClaudeCodeImage = "axoncore/claude-code:latest"
+	ClaudeCodeImage = "gjkim42/claude-code:latest"
 
 	// AgentTypeClaudeCode is the agent type for Claude Code.
 	AgentTypeClaudeCode = "claude-code"

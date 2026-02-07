@@ -14,7 +14,7 @@ import (
 
 const (
 	// DefaultSpawnerImage is the default image for the spawner binary.
-	DefaultSpawnerImage = "axon-core/axon-spawner:latest"
+	DefaultSpawnerImage = "gjkim42/axon-spawner:latest"
 
 	// SpawnerServiceAccount is the service account used by spawner Deployments.
 	SpawnerServiceAccount = "axon-spawner"

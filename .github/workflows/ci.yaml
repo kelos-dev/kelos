@@ -78,8 +78,8 @@ jobs:
 
       - name: Load images into kind
         run: |
-          kind load docker-image axon-core/axon-controller:e2e
-          kind load docker-image axon-core/axon-spawner:e2e
+          kind load docker-image gjkim42/axon-controller:e2e
+          kind load docker-image gjkim42/axon-spawner:e2e
           kind load docker-image gjkim42/claude-code:e2e
 
       - name: Build CLI
@@ -88,8 +88,8 @@ jobs:
       - name: Deploy controller
         run: |
           bin/axon install
-          kubectl set image deployment/axon-controller-manager manager=axon-core/axon-controller:e2e -n axon-system
-          kubectl patch deployment axon-controller-manager -n axon-system -p '{"spec":{"template":{"spec":{"containers":[{"name":"manager","imagePullPolicy":"Never","args":["--leader-elect","--spawner-image=axon-core/axon-spawner:e2e","--spawner-image-pull-policy=Never","--claude-code-image=gjkim42/claude-code:e2e","--claude-code-image-pull-policy=Never"]}]}}}}'
+          kubectl set image deployment/axon-controller-manager manager=gjkim42/axon-controller:e2e -n axon-system
+          kubectl patch deployment axon-controller-manager -n axon-system -p '{"spec":{"template":{"spec":{"containers":[{"name":"manager","imagePullPolicy":"Never","args":["--leader-elect","--spawner-image=gjkim42/axon-spawner:e2e","--spawner-image-pull-policy=Never","--claude-code-image=gjkim42/claude-code:e2e","--claude-code-image-pull-policy=Never"]}]}}}}'
           kubectl wait --for=condition=available deployment/axon-controller-manager -n axon-system --timeout=120s
 
       - name: E2E Test

@@ -152,7 +152,7 @@ func (b *JobBuilder) buildClaudeCodeJob(task *axonv1alpha1.Task, workspace *axon
 		if workspace.Ref != "" {
 			cloneArgs = append(cloneArgs, "--branch", workspace.Ref)
 		}
-		cloneArgs = append(cloneArgs, "--depth", "1", "--", workspace.Repo, WorkspaceMountPath+"/repo")
+		cloneArgs = append(cloneArgs, "--no-single-branch", "--depth", "1", "--", workspace.Repo, WorkspaceMountPath+"/repo")
 
 		initContainer := corev1.Container{
 			Name:         "git-clone",

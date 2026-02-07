@@ -458,6 +458,83 @@ var _ = Describe("TaskSpawner Controller", func() {
 		})
 	})
 
+	Context("When pod template annotations are stale", func() {
+		It("Should remove stale annotations on reconciliation", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-taskspawner-stale-ann",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Workspace")
+			ws := &axonv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace-stale-ann",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/gjkim42/axon.git",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
+
+			By("Creating a TaskSpawner")
+			ts := &axonv1alpha1.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-spawner-stale-ann",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpawnerSpec{
+					When: axonv1alpha1.When{
+						GitHubIssues: &axonv1alpha1.GitHubIssues{
+							WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+								Name: "test-workspace-stale-ann",
+							},
+						},
+					},
+					TaskTemplate: axonv1alpha1.TaskTemplate{
+						Type: "claude-code",
+						Credentials: axonv1alpha1.Credentials{
+							Type: axonv1alpha1.CredentialTypeOAuth,
+							SecretRef: axonv1alpha1.SecretReference{
+								Name: "claude-credentials",
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ts)).Should(Succeed())
+
+			By("Waiting for the Deployment to be created")
+			deployLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
+			createdDeploy := &appsv1.Deployment{}
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, deployLookupKey, createdDeploy)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Adding a stale annotation to the pod template")
+			Expect(k8sClient.Get(ctx, deployLookupKey, createdDeploy)).Should(Succeed())
+			if createdDeploy.Spec.Template.Annotations == nil {
+				createdDeploy.Spec.Template.Annotations = map[string]string{}
+			}
+			createdDeploy.Spec.Template.Annotations["stale-key"] = "stale-value"
+			Expect(k8sClient.Update(ctx, createdDeploy)).Should(Succeed())
+
+			By("Verifying the stale annotation is removed after reconciliation")
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, deployLookupKey, createdDeploy)
+				if err != nil {
+					return false
+				}
+				_, hasStale := createdDeploy.Spec.Template.Annotations["stale-key"]
+				return !hasStale
+			}, timeout, interval).Should(BeTrue())
+		})
+	})
+
 	Context("When creating a TaskSpawner with a nonexistent workspace", func() {
 		It("Should fail with a meaningful error", func() {
 			By("Creating a namespace")

@@ -21,12 +21,16 @@ const (
 
 	// SpawnerClusterRole is the ClusterRole referenced by spawner RoleBindings.
 	SpawnerClusterRole = "axon-spawner-role"
+
+	// ControllerImageAnnotation is the pod template annotation used to track the controller image.
+	ControllerImageAnnotation = "axon.io/controller-image"
 )
 
 // DeploymentBuilder constructs Kubernetes Deployments for TaskSpawners.
 type DeploymentBuilder struct {
 	SpawnerImage           string
 	SpawnerImagePullPolicy corev1.PullPolicy
+	ControllerImage        string
 }
 
 // NewDeploymentBuilder creates a new DeploymentBuilder.
@@ -75,6 +79,11 @@ func (b *DeploymentBuilder) Build(ts *axonv1alpha1.TaskSpawner, workspace *axonv
 		"axon.io/taskspawner":          ts.Name,
 	}
 
+	podAnnotations := map[string]string{}
+	if b.ControllerImage != "" {
+		podAnnotations[ControllerImageAnnotation] = b.ControllerImage
+	}
+
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      ts.Name,
@@ -88,7 +97,8 @@ func (b *DeploymentBuilder) Build(ts *axonv1alpha1.TaskSpawner, workspace *axonv
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: labels,
+					Labels:      labels,
+					Annotations: podAnnotations,
 				},
 				Spec: corev1.PodSpec{
 					ServiceAccountName: SpawnerServiceAccount,

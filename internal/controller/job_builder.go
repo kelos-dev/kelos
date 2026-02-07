@@ -17,6 +17,12 @@ const (
 	// AgentTypeClaudeCode is the agent type for Claude Code.
 	AgentTypeClaudeCode = "claude-code"
 
+	// CodexImage is the default image for Codex agent.
+	CodexImage = "gjkim42/codex:latest"
+
+	// AgentTypeCodex is the agent type for Codex.
+	AgentTypeCodex = "codex"
+
 	// GitCloneImage is the image used for cloning git repositories.
 	GitCloneImage = "alpine/git:v2.47.2"
 
@@ -30,17 +36,26 @@ const (
 	// container image (claude-code/Dockerfile). This must be kept in sync
 	// with the Dockerfile.
 	ClaudeCodeUID = int64(1100)
+
+	// CodexUID is the UID of the codex user in the codex container image
+	// (codex/Dockerfile). This must be kept in sync with the Dockerfile.
+	CodexUID = int64(1200)
 )
 
 // JobBuilder constructs Kubernetes Jobs for Tasks.
 type JobBuilder struct {
 	ClaudeCodeImage           string
 	ClaudeCodeImagePullPolicy corev1.PullPolicy
+	CodexImage                string
+	CodexImagePullPolicy      corev1.PullPolicy
 }
 
 // NewJobBuilder creates a new JobBuilder.
 func NewJobBuilder() *JobBuilder {
-	return &JobBuilder{ClaudeCodeImage: ClaudeCodeImage}
+	return &JobBuilder{
+		ClaudeCodeImage: ClaudeCodeImage,
+		CodexImage:      CodexImage,
+	}
 }
 
 // Build creates a Job for the given Task.
@@ -48,6 +63,8 @@ func (b *JobBuilder) Build(task *axonv1alpha1.Task, workspace *axonv1alpha1.Work
 	switch task.Spec.Type {
 	case AgentTypeClaudeCode:
 		return b.buildClaudeCodeJob(task, workspace)
+	case AgentTypeCodex:
+		return b.buildCodexJob(task, workspace)
 	default:
 		return nil, fmt.Errorf("unsupported agent type: %s", task.Spec.Type)
 	}
@@ -162,6 +179,155 @@ func (b *JobBuilder) buildClaudeCodeJob(task *axonv1alpha1.Task, workspace *axon
 			VolumeMounts: []corev1.VolumeMount{volumeMount},
 			SecurityContext: &corev1.SecurityContext{
 				RunAsUser: &claudeCodeUID,
+			},
+		}
+
+		if workspace.SecretRef != nil {
+			initContainer.Command = []string{"sh", "-c",
+				`exec git -c credential.helper='!f() { echo "username=x-access-token"; echo "password=$GITHUB_TOKEN"; }; f' "$@"`,
+			}
+			initContainer.Args = append([]string{"--"}, cloneArgs...)
+		}
+
+		initContainers = append(initContainers, initContainer)
+
+		mainContainer.VolumeMounts = []corev1.VolumeMount{volumeMount}
+		mainContainer.WorkingDir = WorkspaceMountPath + "/repo"
+	}
+
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      task.Name,
+			Namespace: task.Namespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/name":       "axon",
+				"app.kubernetes.io/component":  "task",
+				"app.kubernetes.io/managed-by": "axon-controller",
+				"axon.io/task":                 task.Name,
+			},
+		},
+		Spec: batchv1.JobSpec{
+			BackoffLimit: &backoffLimit,
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"app.kubernetes.io/name":       "axon",
+						"app.kubernetes.io/component":  "task",
+						"app.kubernetes.io/managed-by": "axon-controller",
+						"axon.io/task":                 task.Name,
+					},
+				},
+				Spec: corev1.PodSpec{
+					RestartPolicy:   corev1.RestartPolicyNever,
+					SecurityContext: podSecurityContext,
+					InitContainers:  initContainers,
+					Volumes:         volumes,
+					Containers:      []corev1.Container{mainContainer},
+				},
+			},
+		},
+	}
+
+	return job, nil
+}
+
+// buildCodexJob creates a Job for Codex agent.
+func (b *JobBuilder) buildCodexJob(task *axonv1alpha1.Task, workspace *axonv1alpha1.WorkspaceSpec) (*batchv1.Job, error) {
+	args := []string{
+		"exec",
+		"--full-auto",
+		"--json",
+		task.Spec.Prompt,
+	}
+
+	if task.Spec.Model != "" {
+		args = append(args, "-m", task.Spec.Model)
+	}
+
+	var envVars []corev1.EnvVar
+
+	switch task.Spec.Credentials.Type {
+	case axonv1alpha1.CredentialTypeAPIKey:
+		envVars = append(envVars, corev1.EnvVar{
+			Name: "OPENAI_API_KEY",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: task.Spec.Credentials.SecretRef.Name,
+					},
+					Key: "OPENAI_API_KEY",
+				},
+			},
+		})
+	}
+
+	var workspaceEnvVars []corev1.EnvVar
+	if workspace != nil && workspace.SecretRef != nil {
+		secretKeyRef := &corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{
+				Name: workspace.SecretRef.Name,
+			},
+			Key: "GITHUB_TOKEN",
+		}
+		githubTokenEnv := corev1.EnvVar{
+			Name:      "GITHUB_TOKEN",
+			ValueFrom: &corev1.EnvVarSource{SecretKeyRef: secretKeyRef},
+		}
+		ghTokenEnv := corev1.EnvVar{
+			Name:      "GH_TOKEN",
+			ValueFrom: &corev1.EnvVarSource{SecretKeyRef: secretKeyRef},
+		}
+		envVars = append(envVars, githubTokenEnv, ghTokenEnv)
+		workspaceEnvVars = append(workspaceEnvVars, githubTokenEnv, ghTokenEnv)
+	}
+
+	backoffLimit := int32(0)
+	codexUID := CodexUID
+
+	mainContainer := corev1.Container{
+		Name:            "codex",
+		Image:           b.CodexImage,
+		ImagePullPolicy: b.CodexImagePullPolicy,
+		Args:            args,
+		Env:             envVars,
+	}
+
+	var initContainers []corev1.Container
+	var volumes []corev1.Volume
+	var podSecurityContext *corev1.PodSecurityContext
+
+	if workspace != nil {
+		podSecurityContext = &corev1.PodSecurityContext{
+			FSGroup: &codexUID,
+		}
+
+		volume := corev1.Volume{
+			Name: WorkspaceVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		}
+		volumes = append(volumes, volume)
+
+		volumeMount := corev1.VolumeMount{
+			Name:      WorkspaceVolumeName,
+			MountPath: WorkspaceMountPath,
+		}
+
+		cloneArgs := []string{"clone"}
+		if workspace.Ref != "" {
+			cloneArgs = append(cloneArgs, "--branch", workspace.Ref)
+		}
+		cloneArgs = append(cloneArgs, "--no-single-branch", "--depth", "1", "--", workspace.Repo, WorkspaceMountPath+"/repo")
+
+		initContainer := corev1.Container{
+			Name:         "git-clone",
+			Image:        GitCloneImage,
+			Args:         cloneArgs,
+			Env:          workspaceEnvVars,
+			VolumeMounts: []corev1.VolumeMount{volumeMount},
+			SecurityContext: &corev1.SecurityContext{
+				RunAsUser: &codexUID,
 			},
 		}
 

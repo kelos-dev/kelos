@@ -32,6 +32,8 @@ func main() {
 	var probeAddr string
 	var claudeCodeImage string
 	var claudeCodeImagePullPolicy string
+	var codexImage string
+	var codexImagePullPolicy string
 	var spawnerImage string
 	var spawnerImagePullPolicy string
 
@@ -42,6 +44,8 @@ func main() {
 			"Enabling this will ensure there is only one active controller manager.")
 	flag.StringVar(&claudeCodeImage, "claude-code-image", controller.ClaudeCodeImage, "The image to use for Claude Code agent containers.")
 	flag.StringVar(&claudeCodeImagePullPolicy, "claude-code-image-pull-policy", "", "The image pull policy for Claude Code agent containers (e.g., Always, Never, IfNotPresent).")
+	flag.StringVar(&codexImage, "codex-image", controller.CodexImage, "The image to use for Codex agent containers.")
+	flag.StringVar(&codexImagePullPolicy, "codex-image-pull-policy", "", "The image pull policy for Codex agent containers (e.g., Always, Never, IfNotPresent).")
 	flag.StringVar(&spawnerImage, "spawner-image", controller.DefaultSpawnerImage, "The image to use for spawner Deployments.")
 	flag.StringVar(&spawnerImagePullPolicy, "spawner-image-pull-policy", "", "The image pull policy for spawner Deployments (e.g., Always, Never, IfNotPresent).")
 
@@ -67,6 +71,8 @@ func main() {
 	jobBuilder := controller.NewJobBuilder()
 	jobBuilder.ClaudeCodeImage = claudeCodeImage
 	jobBuilder.ClaudeCodeImagePullPolicy = corev1.PullPolicy(claudeCodeImagePullPolicy)
+	jobBuilder.CodexImage = codexImage
+	jobBuilder.CodexImagePullPolicy = corev1.PullPolicy(codexImagePullPolicy)
 	if err = (&controller.TaskReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),

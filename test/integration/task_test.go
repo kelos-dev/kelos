@@ -786,6 +786,229 @@ var _ = Describe("Task Controller", func() {
 		})
 	})
 
+	Context("When creating a Codex Task with API key credentials", func() {
+		It("Should create a Job with Codex agent configuration", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-codex-apikey",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with OpenAI API key")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "openai-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"OPENAI_API_KEY": "test-openai-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+			By("Creating a Codex Task")
+			task := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-codex-task",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   "codex",
+					Prompt: "Create a hello world program",
+					Credentials: axonv1alpha1.Credentials{
+						Type: axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{
+							Name: "openai-api-key",
+						},
+					},
+					Model: "o3",
+				},
+			}
+			Expect(k8sClient.Create(ctx, task)).Should(Succeed())
+
+			taskLookupKey := types.NamespacedName{Name: task.Name, Namespace: ns.Name}
+			createdTask := &axonv1alpha1.Task{}
+
+			By("Verifying the Task has a finalizer")
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, taskLookupKey, createdTask)
+				if err != nil {
+					return false
+				}
+				for _, f := range createdTask.Finalizers {
+					if f == "axon.io/finalizer" {
+						return true
+					}
+				}
+				return false
+			}, timeout, interval).Should(BeTrue())
+
+			By("Verifying a Job is created")
+			jobLookupKey := types.NamespacedName{Name: task.Name, Namespace: ns.Name}
+			createdJob := &batchv1.Job{}
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, jobLookupKey, createdJob)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Logging the Job spec")
+			logJobSpec(createdJob)
+
+			By("Verifying the Job spec")
+			Expect(createdJob.Spec.Template.Spec.Containers).To(HaveLen(1))
+			container := createdJob.Spec.Template.Spec.Containers[0]
+			Expect(container.Name).To(Equal("codex"))
+			Expect(container.Args).To(ContainElements(
+				"exec",
+				"--full-auto",
+				"--json",
+				"Create a hello world program",
+				"-m", "o3",
+			))
+
+			By("Verifying the Job has OpenAI API key env var")
+			Expect(container.Env).To(HaveLen(1))
+			Expect(container.Env[0].Name).To(Equal("OPENAI_API_KEY"))
+			Expect(container.Env[0].ValueFrom.SecretKeyRef.Name).To(Equal("openai-api-key"))
+			Expect(container.Env[0].ValueFrom.SecretKeyRef.Key).To(Equal("OPENAI_API_KEY"))
+
+			By("Verifying the Job has owner reference")
+			Expect(createdJob.OwnerReferences).To(HaveLen(1))
+			Expect(createdJob.OwnerReferences[0].Name).To(Equal(task.Name))
+			Expect(createdJob.OwnerReferences[0].Kind).To(Equal("Task"))
+
+			By("Verifying Task status has JobName")
+			Eventually(func() string {
+				err := k8sClient.Get(ctx, taskLookupKey, createdTask)
+				if err != nil {
+					return ""
+				}
+				return createdTask.Status.JobName
+			}, timeout, interval).Should(Equal(task.Name))
+		})
+	})
+
+	Context("When creating a Codex Task with workspace", func() {
+		It("Should create a Job with init container and workspace volume", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-codex-workspace",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with OpenAI API key")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "openai-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"OPENAI_API_KEY": "test-openai-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+			By("Creating a Secret with GITHUB_TOKEN")
+			ghSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "github-token",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"GITHUB_TOKEN": "test-gh-token",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ghSecret)).Should(Succeed())
+
+			By("Creating a Workspace resource with secretRef")
+			ws := &axonv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-codex-workspace",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/example/repo.git",
+					Ref:  "main",
+					SecretRef: &axonv1alpha1.SecretReference{
+						Name: "github-token",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
+
+			By("Creating a Codex Task with workspace ref")
+			task := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-codex-workspace",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   "codex",
+					Prompt: "Fix the bug",
+					Credentials: axonv1alpha1.Credentials{
+						Type: axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{
+							Name: "openai-api-key",
+						},
+					},
+					WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						Name: "test-codex-workspace",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, task)).Should(Succeed())
+
+			By("Verifying a Job is created")
+			jobLookupKey := types.NamespacedName{Name: task.Name, Namespace: ns.Name}
+			createdJob := &batchv1.Job{}
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, jobLookupKey, createdJob)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Logging the Job spec")
+			logJobSpec(createdJob)
+
+			By("Verifying the main container has OPENAI_API_KEY, GITHUB_TOKEN, and GH_TOKEN env vars")
+			mainContainer := createdJob.Spec.Template.Spec.Containers[0]
+			Expect(mainContainer.Name).To(Equal("codex"))
+			Expect(mainContainer.Env).To(HaveLen(3))
+			Expect(mainContainer.Env[0].Name).To(Equal("OPENAI_API_KEY"))
+			Expect(mainContainer.Env[0].ValueFrom.SecretKeyRef.Name).To(Equal("openai-api-key"))
+			Expect(mainContainer.Env[1].Name).To(Equal("GITHUB_TOKEN"))
+			Expect(mainContainer.Env[1].ValueFrom.SecretKeyRef.Name).To(Equal("github-token"))
+			Expect(mainContainer.Env[2].Name).To(Equal("GH_TOKEN"))
+			Expect(mainContainer.Env[2].ValueFrom.SecretKeyRef.Name).To(Equal("github-token"))
+
+			By("Verifying the init container")
+			Expect(createdJob.Spec.Template.Spec.InitContainers).To(HaveLen(1))
+			initContainer := createdJob.Spec.Template.Spec.InitContainers[0]
+			Expect(initContainer.Name).To(Equal("git-clone"))
+
+			By("Verifying the init container runs as codex user")
+			Expect(initContainer.SecurityContext).NotTo(BeNil())
+			Expect(initContainer.SecurityContext.RunAsUser).NotTo(BeNil())
+			Expect(*initContainer.SecurityContext.RunAsUser).To(Equal(controller.CodexUID))
+
+			By("Verifying the pod security context sets FSGroup for codex")
+			Expect(createdJob.Spec.Template.Spec.SecurityContext).NotTo(BeNil())
+			Expect(createdJob.Spec.Template.Spec.SecurityContext.FSGroup).NotTo(BeNil())
+			Expect(*createdJob.Spec.Template.Spec.SecurityContext.FSGroup).To(Equal(controller.CodexUID))
+
+			By("Verifying the workspace volume and mount")
+			Expect(createdJob.Spec.Template.Spec.Volumes).To(HaveLen(1))
+			Expect(createdJob.Spec.Template.Spec.Volumes[0].Name).To(Equal(controller.WorkspaceVolumeName))
+			Expect(mainContainer.VolumeMounts).To(HaveLen(1))
+			Expect(mainContainer.WorkingDir).To(Equal("/workspace/repo"))
+		})
+	})
+
 	Context("When creating a Task with a nonexistent workspace", func() {
 		It("Should fail with a meaningful error", func() {
 			By("Creating a namespace")

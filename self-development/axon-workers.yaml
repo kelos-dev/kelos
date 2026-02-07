@@ -44,7 +44,7 @@ spec:
       - 5. Make sure the PR passes all CI tests.
 
       Post-checklist:
-      - Add axon/needs-input label to the issue (gh issue edit {{.Number}} --add-label axon/needs-input) if any of the following applies:
+      - Add axon/needs-input label to the issue (gh issue edit {{.Number}} --add-label axon/needs-input) and leave a comment for the reason if any of the following applies:
         - The PR is ready for review, please take a look.
         - Commented on the issue or the PR for more information.
         - You cannot make any progress on the issue, explain why.

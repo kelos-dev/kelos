@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -81,7 +82,27 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	}
 
 	// Update status based on Job status
-	return r.updateStatus(ctx, &task, &job)
+	result, err := r.updateStatus(ctx, &task, &job)
+	if err != nil {
+		return result, err
+	}
+
+	// Check TTL expiration for finished Tasks
+	if expired, requeueAfter := r.ttlExpired(&task); expired {
+		logger.Info("Deleting Task due to TTL expiration", "task", task.Name)
+		if err := r.Delete(ctx, &task); err != nil {
+			logger.Error(err, "Unable to delete expired Task")
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	} else if requeueAfter > 0 {
+		// Requeue to check TTL expiration later
+		if result.RequeueAfter == 0 || requeueAfter < result.RequeueAfter {
+			result.RequeueAfter = requeueAfter
+		}
+	}
+
+	return result, nil
 }
 
 // handleDeletion handles Task deletion.
@@ -226,6 +247,29 @@ func (r *TaskReconciler) updateStatus(ctx context.Context, task *axonv1alpha1.Ta
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// ttlExpired checks whether a finished Task has exceeded its TTL.
+// It returns (true, 0) if the Task should be deleted now, or (false, duration)
+// if the Task should be requeued after the given duration.
+func (r *TaskReconciler) ttlExpired(task *axonv1alpha1.Task) (bool, time.Duration) {
+	if task.Spec.TTLSecondsAfterFinished == nil {
+		return false, 0
+	}
+	if task.Status.Phase != axonv1alpha1.TaskPhaseSucceeded && task.Status.Phase != axonv1alpha1.TaskPhaseFailed {
+		return false, 0
+	}
+	if task.Status.CompletionTime == nil {
+		return false, 0
+	}
+
+	ttl := time.Duration(*task.Spec.TTLSecondsAfterFinished) * time.Second
+	expireAt := task.Status.CompletionTime.Add(ttl)
+	remaining := time.Until(expireAt)
+	if remaining <= 0 {
+		return true, 0
+	}
+	return false, remaining
 }
 
 // SetupWithManager sets up the controller with the Manager.

@@ -22,6 +22,8 @@ func newDeleteCommand(cfg *ClientConfig) *cobra.Command {
 	}
 
 	cmd.AddCommand(newDeleteTaskCommand(cfg))
+	cmd.AddCommand(newDeleteWorkspaceCommand(cfg))
+	cmd.AddCommand(newDeleteTaskSpawnerCommand(cfg))
 
 	return cmd
 }
@@ -54,6 +56,70 @@ func newDeleteTaskCommand(cfg *ClientConfig) *cobra.Command {
 	}
 
 	cmd.ValidArgsFunction = completeTaskNames(cfg)
+
+	return cmd
+}
+
+func newDeleteWorkspaceCommand(cfg *ClientConfig) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "workspace <name>",
+		Aliases: []string{"workspaces", "ws"},
+		Short:   "Delete a workspace",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cl, ns, err := cfg.NewClient()
+			if err != nil {
+				return err
+			}
+
+			ws := &axonv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      args[0],
+					Namespace: ns,
+				},
+			}
+
+			if err := cl.Delete(context.Background(), ws); err != nil {
+				return fmt.Errorf("deleting workspace: %w", err)
+			}
+			fmt.Fprintf(os.Stdout, "workspace/%s deleted\n", args[0])
+			return nil
+		},
+	}
+
+	cmd.ValidArgsFunction = completeWorkspaceNames(cfg)
+
+	return cmd
+}
+
+func newDeleteTaskSpawnerCommand(cfg *ClientConfig) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "taskspawner <name>",
+		Aliases: []string{"taskspawners", "ts"},
+		Short:   "Delete a task spawner",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cl, ns, err := cfg.NewClient()
+			if err != nil {
+				return err
+			}
+
+			ts := &axonv1alpha1.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      args[0],
+					Namespace: ns,
+				},
+			}
+
+			if err := cl.Delete(context.Background(), ts); err != nil {
+				return fmt.Errorf("deleting task spawner: %w", err)
+			}
+			fmt.Fprintf(os.Stdout, "taskspawner/%s deleted\n", args[0])
+			return nil
+		},
+	}
+
+	cmd.ValidArgsFunction = completeTaskSpawnerNames(cfg)
 
 	return cmd
 }

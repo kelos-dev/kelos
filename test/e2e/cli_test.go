@@ -160,6 +160,55 @@ spec:
 	})
 })
 
+var _ = Describe("create workspace", func() {
+	const wsName = "e2e-create-ws"
+
+	BeforeEach(func() {
+		kubectl("delete", "workspace", wsName, "--ignore-not-found")
+	})
+
+	AfterEach(func() {
+		kubectl("delete", "workspace", wsName, "--ignore-not-found")
+	})
+
+	It("should create and manage a workspace via CLI", func() {
+		By("creating a Workspace via CLI")
+		axon("create", "workspace", wsName,
+			"--repo", "https://github.com/gjkim42/axon.git",
+			"--ref", "main",
+		)
+
+		By("verifying workspace is listed")
+		output := axonOutput("get", "workspace")
+		Expect(output).To(ContainSubstring(wsName))
+
+		By("verifying workspace detail")
+		output = axonOutput("get", "workspace", wsName)
+		Expect(output).To(ContainSubstring(wsName))
+		Expect(output).To(ContainSubstring("https://github.com/gjkim42/axon.git"))
+		Expect(output).To(ContainSubstring("main"))
+
+		By("verifying YAML output")
+		output = axonOutput("get", "workspace", wsName, "-o", "yaml")
+		Expect(output).To(ContainSubstring("apiVersion: axon.io/v1alpha1"))
+		Expect(output).To(ContainSubstring("kind: Workspace"))
+		Expect(output).To(ContainSubstring("name: " + wsName))
+
+		By("verifying JSON output")
+		output = axonOutput("get", "workspace", wsName, "-o", "json")
+		Expect(output).To(ContainSubstring(`"apiVersion": "axon.io/v1alpha1"`))
+		Expect(output).To(ContainSubstring(`"kind": "Workspace"`))
+		Expect(output).To(ContainSubstring(`"name": "` + wsName + `"`))
+
+		By("deleting workspace via CLI")
+		axon("delete", "workspace", wsName)
+
+		By("verifying workspace is no longer listed")
+		output = axonOutput("get", "workspaces")
+		Expect(output).NotTo(ContainSubstring(wsName))
+	})
+})
+
 var _ = Describe("delete", func() {
 	It("should fail without a resource type", func() {
 		axonFail("delete")
@@ -167,6 +216,62 @@ var _ = Describe("delete", func() {
 
 	It("should fail for a nonexistent task", func() {
 		axonFail("delete", "task", "nonexistent-task-name")
+	})
+
+	It("should fail for a nonexistent workspace", func() {
+		axonFail("delete", "workspace", "nonexistent-workspace-name")
+	})
+
+	It("should fail for a nonexistent taskspawner", func() {
+		axonFail("delete", "taskspawner", "nonexistent-spawner-name")
+	})
+})
+
+var _ = Describe("get workspace", func() {
+	It("should succeed with 'workspaces' alias", func() {
+		axonOutput("get", "workspaces")
+	})
+
+	It("should succeed with 'ws' alias", func() {
+		axonOutput("get", "ws")
+	})
+
+	It("should succeed with 'workspace' subcommand", func() {
+		axonOutput("get", "workspace")
+	})
+
+	It("should fail for a nonexistent workspace", func() {
+		axonFail("get", "workspace", "nonexistent-workspace-name")
+	})
+
+	It("should output workspace list in YAML format", func() {
+		output := axonOutput("get", "workspaces", "-o", "yaml")
+		Expect(output).To(ContainSubstring("apiVersion: axon.io/v1alpha1"))
+		Expect(output).To(ContainSubstring("kind: WorkspaceList"))
+	})
+
+	It("should output workspace list in JSON format", func() {
+		output := axonOutput("get", "workspaces", "-o", "json")
+		Expect(output).To(ContainSubstring(`"apiVersion": "axon.io/v1alpha1"`))
+		Expect(output).To(ContainSubstring(`"kind": "WorkspaceList"`))
+	})
+
+	It("should fail with unknown output format", func() {
+		axonFail("get", "workspaces", "-o", "invalid")
+	})
+})
+
+var _ = Describe("create", func() {
+	It("should fail without a resource type", func() {
+		axonFail("create")
+	})
+
+	It("should fail when creating workspace without repo", func() {
+		axonFail("create", "workspace", "some-name")
+	})
+
+	It("should fail when creating taskspawner without workspace", func() {
+		axonFail("create", "taskspawner", "some-name", "--secret", "sec")
 	})
 })
 

@@ -65,6 +65,13 @@ type TaskSpec struct {
 	// WorkspaceRef optionally references a Workspace resource for the agent to work in.
 	// +optional
 	WorkspaceRef *WorkspaceReference `json:"workspaceRef,omitempty"`
+
+	// TTLSecondsAfterFinished limits the lifetime of a Task that has finished
+	// execution (either Succeeded or Failed). If set, the Task will be
+	// automatically deleted after the given number of seconds once it reaches
+	// a terminal phase, allowing TaskSpawner to create a new Task.
+	// +optional
+	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty"`
 }
 
 // TaskStatus defines the observed state of Task.

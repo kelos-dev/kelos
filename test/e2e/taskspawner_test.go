@@ -73,6 +73,7 @@ spec:
       workspaceRef:
         name: e2e-spawner-workspace
       labels: [bug]
+      excludeLabels: [axon/needs-input]
       state: open
   taskTemplate:
     type: claude-code

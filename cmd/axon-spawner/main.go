@@ -200,11 +200,12 @@ func buildSource(ts *axonv1alpha1.TaskSpawner, owner, repo string) (source.Sourc
 	if ts.Spec.When.GitHubIssues != nil {
 		gh := ts.Spec.When.GitHubIssues
 		return &source.GitHubSource{
-			Owner:  owner,
-			Repo:   repo,
-			Labels: gh.Labels,
-			State:  gh.State,
-			Token:  os.Getenv("GITHUB_TOKEN"),
+			Owner:         owner,
+			Repo:          repo,
+			Labels:        gh.Labels,
+			ExcludeLabels: gh.ExcludeLabels,
+			State:         gh.State,
+			Token:         os.Getenv("GITHUB_TOKEN"),
 		}, nil
 	}
 

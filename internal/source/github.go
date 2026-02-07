@@ -25,13 +25,14 @@ const (
 
 // GitHubSource discovers issues from a GitHub repository.
 type GitHubSource struct {
-	Owner   string
-	Repo    string
-	Labels  []string
-	State   string
-	Token   string
-	BaseURL string
-	Client  *http.Client
+	Owner         string
+	Repo          string
+	Labels        []string
+	ExcludeLabels []string
+	State         string
+	Token         string
+	BaseURL       string
+	Client        *http.Client
 }
 
 type githubIssue struct {
@@ -71,6 +72,8 @@ func (s *GitHubSource) Discover(ctx context.Context) ([]WorkItem, error) {
 		return nil, err
 	}
 
+	issues = s.filterIssues(issues)
+
 	var items []WorkItem
 	for _, issue := range issues {
 		var labels []string
@@ -95,6 +98,32 @@ func (s *GitHubSource) Discover(ctx context.Context) ([]WorkItem, error) {
 	}
 
 	return items, nil
+}
+
+func (s *GitHubSource) filterIssues(issues []githubIssue) []githubIssue {
+	if len(s.ExcludeLabels) == 0 {
+		return issues
+	}
+
+	excluded := make(map[string]struct{}, len(s.ExcludeLabels))
+	for _, l := range s.ExcludeLabels {
+		excluded[l] = struct{}{}
+	}
+
+	filtered := make([]githubIssue, 0, len(issues))
+	for _, issue := range issues {
+		skip := false
+		for _, l := range issue.Labels {
+			if _, ok := excluded[l.Name]; ok {
+				skip = true
+				break
+			}
+		}
+		if !skip {
+			filtered = append(filtered, issue)
+		}
+	}
+	return filtered
 }
 
 func (s *GitHubSource) fetchAllIssues(ctx context.Context) ([]githubIssue, error) {

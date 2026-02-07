@@ -235,6 +235,12 @@ spec:
                   githubIssues:
                     description: GitHubIssues discovers issues from a GitHub repository.
                     properties:
+                      excludeLabels:
+                        description: ExcludeLabels filters out issues that have any
+                          of these labels (client-side).
+                        items:
+                          type: string
+                        type: array
                       labels:
                         description: Labels filters issues by labels.
                         items:

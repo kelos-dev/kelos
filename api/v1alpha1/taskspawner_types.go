@@ -36,6 +36,10 @@ type GitHubIssues struct {
 	// +optional
 	Labels []string `json:"labels,omitempty"`
 
+	// ExcludeLabels filters out issues that have any of these labels (client-side).
+	// +optional
+	ExcludeLabels []string `json:"excludeLabels,omitempty"`
+
 	// State filters issues by state (open, closed, all). Defaults to open.
 	// +kubebuilder:validation:Enum=open;closed;all
 	// +kubebuilder:default=open

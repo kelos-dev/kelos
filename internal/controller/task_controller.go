@@ -91,6 +91,9 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	if expired, requeueAfter := r.ttlExpired(&task); expired {
 		logger.Info("Deleting Task due to TTL expiration", "task", task.Name)
 		if err := r.Delete(ctx, &task); err != nil {
+			if apierrors.IsNotFound(err) {
+				return ctrl.Result{}, nil
+			}
 			logger.Error(err, "Unable to delete expired Task")
 			return ctrl.Result{}, err
 		}

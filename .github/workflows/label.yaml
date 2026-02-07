@@ -4,6 +4,9 @@ on:
   issues:
     types: [opened, labeled, unlabeled]
 
+permissions:
+  issues: write
+
 jobs:
   triage-label:
     runs-on: ubuntu-latest

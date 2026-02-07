@@ -316,7 +316,7 @@ var _ = Describe("Task Controller", func() {
 			Expect(initContainer.Name).To(Equal("git-clone"))
 			Expect(initContainer.Image).To(Equal(controller.GitCloneImage))
 			Expect(initContainer.Args).To(Equal([]string{
-				"clone", "--branch", "main", "--depth", "1",
+				"clone", "--branch", "main", "--no-single-branch", "--depth", "1",
 				"--", "https://github.com/example/repo.git", "/workspace/repo",
 			}))
 
@@ -460,7 +460,7 @@ var _ = Describe("Task Controller", func() {
 			Expect(initContainer.Command).To(HaveLen(3))
 			Expect(initContainer.Command[0]).To(Equal("sh"))
 			Expect(initContainer.Args).To(Equal([]string{
-				"--", "clone", "--branch", "main", "--depth", "1",
+				"--", "clone", "--branch", "main", "--no-single-branch", "--depth", "1",
 				"--", "https://github.com/example/repo.git", "/workspace/repo",
 			}))
 		})
@@ -538,7 +538,7 @@ var _ = Describe("Task Controller", func() {
 			Expect(createdJob.Spec.Template.Spec.InitContainers).To(HaveLen(1))
 			initContainer := createdJob.Spec.Template.Spec.InitContainers[0]
 			Expect(initContainer.Args).To(Equal([]string{
-				"clone", "--depth", "1",
+				"clone", "--no-single-branch", "--depth", "1",
 				"--", "https://github.com/example/repo.git", "/workspace/repo",
 			}))
 

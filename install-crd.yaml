@@ -77,6 +77,14 @@ spec:
               prompt:
                 description: Prompt is the task prompt to send to the agent.
                 type: string
+              ttlSecondsAfterFinished:
+                description: |-
+                  TTLSecondsAfterFinished limits the lifetime of a Task that has finished
+                  execution (Succeeded or Failed). If this field is set, the Task will be
+                  automatically deleted after the given number of seconds after it finishes.
+                  If this field is unset, the Task won't be automatically deleted.
+                format: int32
+                type: integer
               type:
                 description: Type specifies the agent type (e.g., claude-code).
                 type: string
@@ -222,6 +230,12 @@ spec:
                       PromptTemplate is a Go text/template for rendering the task prompt.
                       Available variables: {{.Number}}, {{.Title}}, {{.Body}}, {{.URL}}, {{.Comments}}, {{.Labels}}, {{.Kind}}.
                     type: string
+                  ttlSecondsAfterFinished:
+                    description: TTLSecondsAfterFinished limits the lifetime of a Task
+                      that has finished execution (Succeeded or Failed). Propagated
+                      to spawned Tasks.
+                    format: int32
+                    type: integer
                   type:
                     description: Type specifies the agent type (e.g., claude-code).
                     type: string

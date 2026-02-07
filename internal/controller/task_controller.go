@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -26,6 +27,15 @@ type TaskReconciler struct {
 	client.Client
 	Scheme     *runtime.Scheme
 	JobBuilder *JobBuilder
+	// Now returns the current time. It can be overridden in tests.
+	Now func() time.Time
+}
+
+func (r *TaskReconciler) now() time.Time {
+	if r.Now != nil {
+		return r.Now()
+	}
+	return time.Now()
 }
 
 // +kubebuilder:rbac:groups=axon.io,resources=tasks,verbs=get;list;watch;create;update;patch;delete
@@ -51,6 +61,11 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	// Handle deletion
 	if !task.DeletionTimestamp.IsZero() {
 		return r.handleDeletion(ctx, &task)
+	}
+
+	// Check TTL and delete the Task if it has expired
+	if result, expired := r.checkTTL(ctx, &task); expired {
+		return result, nil
 	}
 
 	// Add finalizer if not present
@@ -110,6 +125,45 @@ func (r *TaskReconciler) handleDeletion(ctx context.Context, task *axonv1alpha1.
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// checkTTL checks if the Task has expired based on its TTL and deletes it if so.
+// It returns true if the Task was expired (and deletion was initiated or scheduled).
+func (r *TaskReconciler) checkTTL(ctx context.Context, task *axonv1alpha1.Task) (ctrl.Result, bool) {
+	logger := log.FromContext(ctx)
+
+	if task.Spec.TTLSecondsAfterFinished == nil {
+		return ctrl.Result{}, false
+	}
+
+	if task.Status.Phase != axonv1alpha1.TaskPhaseSucceeded && task.Status.Phase != axonv1alpha1.TaskPhaseFailed {
+		return ctrl.Result{}, false
+	}
+
+	if task.Status.CompletionTime == nil {
+		return ctrl.Result{}, false
+	}
+
+	ttl := time.Duration(*task.Spec.TTLSecondsAfterFinished) * time.Second
+	expireAt := task.Status.CompletionTime.Time.Add(ttl)
+	now := r.now()
+
+	if now.Before(expireAt) {
+		remaining := expireAt.Sub(now)
+		logger.Info("Task TTL not yet expired, requeueing", "remaining", remaining)
+		return ctrl.Result{RequeueAfter: remaining}, true
+	}
+
+	logger.Info("Task TTL expired, deleting", "task", task.Name)
+	if err := r.Delete(ctx, task); err != nil {
+		if apierrors.IsNotFound(err) {
+			return ctrl.Result{}, true
+		}
+		logger.Error(err, "Unable to delete expired Task")
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, true
+	}
+
+	return ctrl.Result{}, true
 }
 
 // createJob creates a Job for the Task.
@@ -223,6 +277,12 @@ func (r *TaskReconciler) updateStatus(ctx context.Context, task *axonv1alpha1.Ta
 			logger.Error(err, "unable to update Task status")
 			return ctrl.Result{}, err
 		}
+	}
+
+	// If the Task has finished and has a TTL, requeue to handle cleanup
+	if task.Spec.TTLSecondsAfterFinished != nil &&
+		(task.Status.Phase == axonv1alpha1.TaskPhaseSucceeded || task.Status.Phase == axonv1alpha1.TaskPhaseFailed) {
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	return ctrl.Result{}, nil

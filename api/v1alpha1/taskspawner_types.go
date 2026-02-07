@@ -71,6 +71,11 @@ type TaskTemplate struct {
 	// Available variables: {{.Number}}, {{.Title}}, {{.Body}}, {{.URL}}, {{.Comments}}, {{.Labels}}, {{.Kind}}.
 	// +optional
 	PromptTemplate string `json:"promptTemplate,omitempty"`
+
+	// TTLSecondsAfterFinished limits the lifetime of a Task that has finished
+	// execution (Succeeded or Failed). Propagated to spawned Tasks.
+	// +optional
+	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty"`
 }
 
 // TaskSpawnerSpec defines the desired state of TaskSpawner.

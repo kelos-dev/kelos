@@ -153,10 +153,11 @@ func runCycle(ctx context.Context, cl client.Client, key types.NamespacedName, g
 				},
 			},
 			Spec: axonv1alpha1.TaskSpec{
-				Type:        ts.Spec.TaskTemplate.Type,
-				Prompt:      prompt,
-				Credentials: ts.Spec.TaskTemplate.Credentials,
-				Model:       ts.Spec.TaskTemplate.Model,
+				Type:                    ts.Spec.TaskTemplate.Type,
+				Prompt:                  prompt,
+				Credentials:             ts.Spec.TaskTemplate.Credentials,
+				Model:                   ts.Spec.TaskTemplate.Model,
+				TTLSecondsAfterFinished: ts.Spec.TaskTemplate.TTLSecondsAfterFinished,
 			},
 		}
 

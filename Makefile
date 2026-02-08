@@ -55,19 +55,8 @@ update: controller-gen ## Run all generators and formatters.
 
 .PHONY: verify
 verify: controller-gen ## Verify everything is up-to-date and correct.
-	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
-	$(CONTROLLER_GEN) crd paths="./..." output:crd:stdout > install-crd.yaml
-	cp install-crd.yaml internal/manifests/install-crd.yaml
-	cp install.yaml internal/manifests/install.yaml
-	go fmt ./...
-	go mod tidy
+	@hack/verify.sh $(CONTROLLER_GEN)
 	go vet ./...
-	go mod tidy -diff
-	@if [ -n "$$(git status --porcelain)" ]; then \
-		echo "Error: Generated files are out of date. Run 'make update' and commit the changes."; \
-		git status --porcelain; \
-		exit 1; \
-	fi
 
 ##@ Build
 

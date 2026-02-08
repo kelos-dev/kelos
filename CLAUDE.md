@@ -9,8 +9,7 @@
 - **Commit messages.** Do not include PR links in commit messages.
 
 ## Key Makefile Targets
-- `make verify` — run all verification checks (lint, fmt, vet, etc.), it will
-fail if there is unstaged changes.
+- `make verify` — run all verification checks (lint, fmt, vet, etc.).
 - `make update` — update all generated files
 - tests:
   - `make test` — run all unit tests

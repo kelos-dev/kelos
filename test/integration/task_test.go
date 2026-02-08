@@ -786,6 +786,88 @@ var _ = Describe("Task Controller", func() {
 		})
 	})
 
+	Context("When creating a Task with custom runAsUser and workspace", func() {
+		It("Should use the custom UID for FSGroup and init container RunAsUser", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-task-run-as-user",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with API key")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+			By("Creating a Workspace resource")
+			ws := &axonv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/example/repo.git",
+					Ref:  "main",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
+
+			By("Creating a Task with custom runAsUser")
+			customUID := int64(1000)
+			task := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-run-as-user",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "Fix the bug",
+					Credentials: axonv1alpha1.Credentials{
+						Type: axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{
+							Name: "anthropic-api-key",
+						},
+					},
+					WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						Name: "test-workspace",
+					},
+					RunAsUser: &customUID,
+				},
+			}
+			Expect(k8sClient.Create(ctx, task)).Should(Succeed())
+
+			By("Verifying a Job is created")
+			jobLookupKey := types.NamespacedName{Name: task.Name, Namespace: ns.Name}
+			createdJob := &batchv1.Job{}
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, jobLookupKey, createdJob)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Verifying the init container runs as custom user")
+			Expect(createdJob.Spec.Template.Spec.InitContainers).To(HaveLen(1))
+			initContainer := createdJob.Spec.Template.Spec.InitContainers[0]
+			Expect(initContainer.SecurityContext).NotTo(BeNil())
+			Expect(initContainer.SecurityContext.RunAsUser).NotTo(BeNil())
+			Expect(*initContainer.SecurityContext.RunAsUser).To(Equal(customUID))
+
+			By("Verifying the pod security context uses custom FSGroup")
+			Expect(createdJob.Spec.Template.Spec.SecurityContext).NotTo(BeNil())
+			Expect(createdJob.Spec.Template.Spec.SecurityContext.FSGroup).NotTo(BeNil())
+			Expect(*createdJob.Spec.Template.Spec.SecurityContext.FSGroup).To(Equal(customUID))
+		})
+	})
+
 	Context("When creating a Task with a nonexistent workspace", func() {
 		It("Should fail with a meaningful error", func() {
 			By("Creating a namespace")

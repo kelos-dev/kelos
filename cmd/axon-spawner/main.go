@@ -158,6 +158,7 @@ func runCycle(ctx context.Context, cl client.Client, key types.NamespacedName, g
 				Credentials:             ts.Spec.TaskTemplate.Credentials,
 				Model:                   ts.Spec.TaskTemplate.Model,
 				TTLSecondsAfterFinished: ts.Spec.TaskTemplate.TTLSecondsAfterFinished,
+				RunAsUser:               ts.Spec.TaskTemplate.RunAsUser,
 			},
 		}
 

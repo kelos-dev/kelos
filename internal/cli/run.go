@@ -26,6 +26,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 		name           string
 		watch          bool
 		workspace      string
+		runAsUser      int64
 	)
 
 	cmd := &cobra.Command{
@@ -143,6 +144,10 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 				}
 			}
 
+			if cmd.Flags().Changed("run-as-user") {
+				task.Spec.RunAsUser = &runAsUser
+			}
+
 			ctx := context.Background()
 			if err := cl.Create(ctx, task); err != nil {
 				return fmt.Errorf("creating task: %w", err)
@@ -163,6 +168,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 	cmd.Flags().StringVar(&model, "model", "", "model override")
 	cmd.Flags().StringVar(&name, "name", "", "task name (auto-generated if omitted)")
 	cmd.Flags().StringVar(&workspace, "workspace", "", "name of Workspace resource to use")
+	cmd.Flags().Int64Var(&runAsUser, "run-as-user", 0, "UID for pod FSGroup and init container RunAsUser (omit to use default 1100)")
 	cmd.Flags().BoolVarP(&watch, "watch", "w", false, "watch task status after creation")
 
 	cmd.MarkFlagRequired("prompt")

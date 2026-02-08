@@ -77,6 +77,15 @@ spec:
               prompt:
                 description: Prompt is the task prompt to send to the agent.
                 type: string
+              runAsUser:
+                description: |-
+                  RunAsUser specifies the UID to use for the pod's FSGroup and the
+                  workspace init container's RunAsUser when a workspace is present.
+                  This allows custom agent images that run as a different user to
+                  access workspace files. Defaults to 1100 (ClaudeCodeUID) if not set.
+                format: int64
+                minimum: 0
+                type: integer
               ttlSecondsAfterFinished:
                 description: |-
                   TTLSecondsAfterFinished limits the lifetime of a Task that has finished
@@ -234,6 +243,15 @@ spec:
                       PromptTemplate is a Go text/template for rendering the task prompt.
                       Available variables: {{.Number}}, {{.Title}}, {{.Body}}, {{.URL}}, {{.Comments}}, {{.Labels}}, {{.Kind}}.
                     type: string
+                  runAsUser:
+                    description: |-
+                      RunAsUser specifies the UID to use for the pod's FSGroup and the
+                      workspace init container's RunAsUser when a workspace is present.
+                      This allows custom agent images that run as a different user to
+                      access workspace files. Defaults to 1100 (ClaudeCodeUID) if not set.
+                    format: int64
+                    minimum: 0
+                    type: integer
                   ttlSecondsAfterFinished:
                     description: |-
                       TTLSecondsAfterFinished limits the lifetime of a Task that has finished

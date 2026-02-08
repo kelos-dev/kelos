@@ -93,6 +93,14 @@ type TaskTemplate struct {
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty"`
+
+	// RunAsUser specifies the UID to use for the pod's FSGroup and the
+	// workspace init container's RunAsUser when a workspace is present.
+	// This allows custom agent images that run as a different user to
+	// access workspace files. Defaults to 1100 (ClaudeCodeUID) if not set.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	RunAsUser *int64 `json:"runAsUser,omitempty"`
 }
 
 // TaskSpawnerSpec defines the desired state of TaskSpawner.

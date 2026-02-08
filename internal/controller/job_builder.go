@@ -116,7 +116,10 @@ func (b *JobBuilder) buildClaudeCodeJob(task *axonv1alpha1.Task, workspace *axon
 	}
 
 	backoffLimit := int32(0)
-	claudeCodeUID := ClaudeCodeUID
+	uid := ClaudeCodeUID
+	if task.Spec.RunAsUser != nil {
+		uid = *task.Spec.RunAsUser
+	}
 
 	mainContainer := corev1.Container{
 		Name:            "claude-code",
@@ -132,7 +135,7 @@ func (b *JobBuilder) buildClaudeCodeJob(task *axonv1alpha1.Task, workspace *axon
 
 	if workspace != nil {
 		podSecurityContext = &corev1.PodSecurityContext{
-			FSGroup: &claudeCodeUID,
+			FSGroup: &uid,
 		}
 
 		volume := corev1.Volume{
@@ -161,7 +164,7 @@ func (b *JobBuilder) buildClaudeCodeJob(task *axonv1alpha1.Task, workspace *axon
 			Env:          workspaceEnvVars,
 			VolumeMounts: []corev1.VolumeMount{volumeMount},
 			SecurityContext: &corev1.SecurityContext{
-				RunAsUser: &claudeCodeUID,
+				RunAsUser: &uid,
 			},
 		}
 

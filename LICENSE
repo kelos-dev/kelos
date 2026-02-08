@@ -5,7 +5,17 @@ Parameters
 
 Licensor:             Gunju Kim
 Licensed Work:        Axon. The Licensed Work is (c) 2025 Gunju Kim.
-Additional Use Grant: None
+Additional Use Grant: You may use the Licensed Work in production,
+                      provided that such use does not include:
+                      (a) developing a product or service that is primarily
+                          intended as a framework, platform, or toolkit
+                          for building AI agents or automated software
+                          systems, where such product or service competes
+                          with or serves as a substitute for the Licensed
+                          Work; or
+                      (b) offering the Licensed Work, or any derivative
+                          work thereof, to third parties as a commercial
+                          hosted or managed service.
 Change Date:          2030-02-07
 Change License:       Apache License, Version 2.0
 

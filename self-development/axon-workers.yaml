@@ -36,7 +36,7 @@ spec:
       Task:
       - 0. Set up your working branch axon-task-{{.Number}}. Run this exactly:
         ```
-        git fetch origin axon-task-{{.Number}} 2>/dev/null && git checkout -B axon-task-{{.Number}} origin/axon-task-{{.Number}} && git rebase main || git checkout -b axon-task-{{.Number}} main
+        git fetch --unshallow; git fetch origin axon-task-{{.Number}} && git checkout -B axon-task-{{.Number}} origin/axon-task-{{.Number}} && git rebase main || git checkout -b axon-task-{{.Number}} main
         ```
       - 1. Check if a PR already exists for branch axon-task-{{.Number}}.
 

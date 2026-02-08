@@ -6,6 +6,7 @@
 - **For CI/release workflows**, always use existing Makefile targets rather than reimplementing build logic in YAML.
 - **Better tests.** Always try to add or improve tests(including integration, e2e) when modifying code.
 - **Logging conventions.** Start log messages with capital letters and do not end with punctuation.
+- **Commit messages.** Do not include PR links in commit messages.
 
 ## Key Makefile Targets
 - `make verify` — run all verification checks (lint, fmt, vet, etc.), it will

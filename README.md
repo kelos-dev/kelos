@@ -41,7 +41,7 @@ PR created: https://github.com/your-org/repo/pull/123
 [result] completed (8 turns, $0.12)
 ```
 
-See [Examples](#examples) for a full autonomous issue-fixing pipeline.
+See [Examples](#examples) for a full autonomous self-development pipeline.
 
 ## Why Axon?
 

@@ -10,6 +10,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -160,10 +161,16 @@ func (r *TaskReconciler) createJob(ctx context.Context, task *axonv1alpha1.Task)
 	job, err := r.JobBuilder.Build(task, workspace)
 	if err != nil {
 		logger.Error(err, "unable to build Job")
-		task.Status.Phase = axonv1alpha1.TaskPhaseFailed
-		task.Status.Message = fmt.Sprintf("Failed to build Job: %v", err)
-		if updateErr := r.Status().Update(ctx, task); updateErr != nil {
-			logger.Error(updateErr, "unable to update Task status")
+		updateErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			if getErr := r.Get(ctx, client.ObjectKeyFromObject(task), task); getErr != nil {
+				return getErr
+			}
+			task.Status.Phase = axonv1alpha1.TaskPhaseFailed
+			task.Status.Message = fmt.Sprintf("Failed to build Job: %v", err)
+			return r.Status().Update(ctx, task)
+		})
+		if updateErr != nil {
+			logger.Error(updateErr, "Unable to update Task status")
 		}
 		return ctrl.Result{}, err
 	}
@@ -185,10 +192,15 @@ func (r *TaskReconciler) createJob(ctx context.Context, task *axonv1alpha1.Task)
 	logger.Info("created Job", "job", job.Name)
 
 	// Update status
-	task.Status.Phase = axonv1alpha1.TaskPhasePending
-	task.Status.JobName = job.Name
-	if err := r.Status().Update(ctx, task); err != nil {
-		logger.Error(err, "unable to update Task status")
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		if getErr := r.Get(ctx, client.ObjectKeyFromObject(task), task); getErr != nil {
+			return getErr
+		}
+		task.Status.Phase = axonv1alpha1.TaskPhasePending
+		task.Status.JobName = job.Name
+		return r.Status().Update(ctx, task)
+	}); err != nil {
+		logger.Error(err, "Unable to update Task status")
 		return ctrl.Result{}, err
 	}
 
@@ -199,49 +211,70 @@ func (r *TaskReconciler) createJob(ctx context.Context, task *axonv1alpha1.Task)
 func (r *TaskReconciler) updateStatus(ctx context.Context, task *axonv1alpha1.Task, job *batchv1.Job) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	// Find pod name
+	// Discover pod name for the task
+	var podName string
 	if task.Status.PodName == "" {
 		var pods corev1.PodList
 		if err := r.List(ctx, &pods, client.InNamespace(task.Namespace), client.MatchingLabels{
 			"axon.io/task": task.Name,
 		}); err == nil && len(pods.Items) > 0 {
-			task.Status.PodName = pods.Items[0].Name
+			podName = pods.Items[0].Name
 		}
 	}
 
-	// Update phase based on Job status
-	var statusChanged bool
+	// Determine the new phase based on Job status
+	var newPhase axonv1alpha1.TaskPhase
+	var newMessage string
+	var setStartTime, setCompletionTime bool
 
 	if job.Status.Active > 0 {
 		if task.Status.Phase != axonv1alpha1.TaskPhaseRunning {
-			task.Status.Phase = axonv1alpha1.TaskPhaseRunning
-			now := metav1.Now()
-			task.Status.StartTime = &now
-			statusChanged = true
+			newPhase = axonv1alpha1.TaskPhaseRunning
+			setStartTime = true
 		}
 	} else if job.Status.Succeeded > 0 {
 		if task.Status.Phase != axonv1alpha1.TaskPhaseSucceeded {
-			task.Status.Phase = axonv1alpha1.TaskPhaseSucceeded
-			now := metav1.Now()
-			task.Status.CompletionTime = &now
-			task.Status.Message = "Task completed successfully"
-			statusChanged = true
+			newPhase = axonv1alpha1.TaskPhaseSucceeded
+			newMessage = "Task completed successfully"
+			setCompletionTime = true
 		}
 	} else if job.Status.Failed > 0 {
 		if task.Status.Phase != axonv1alpha1.TaskPhaseFailed {
-			task.Status.Phase = axonv1alpha1.TaskPhaseFailed
-			now := metav1.Now()
-			task.Status.CompletionTime = &now
-			task.Status.Message = "Task failed"
-			statusChanged = true
+			newPhase = axonv1alpha1.TaskPhaseFailed
+			newMessage = "Task failed"
+			setCompletionTime = true
 		}
 	}
 
-	if statusChanged {
-		if err := r.Status().Update(ctx, task); err != nil {
-			logger.Error(err, "unable to update Task status")
-			return ctrl.Result{}, err
+	podNameChanged := podName != "" && task.Status.PodName != podName
+	phaseChanged := newPhase != ""
+
+	if !phaseChanged && !podNameChanged {
+		return ctrl.Result{}, nil
+	}
+
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		if getErr := r.Get(ctx, client.ObjectKeyFromObject(task), task); getErr != nil {
+			return getErr
 		}
+		if podNameChanged {
+			task.Status.PodName = podName
+		}
+		if phaseChanged {
+			task.Status.Phase = newPhase
+			task.Status.Message = newMessage
+			now := metav1.Now()
+			if setStartTime {
+				task.Status.StartTime = &now
+			}
+			if setCompletionTime {
+				task.Status.CompletionTime = &now
+			}
+		}
+		return r.Status().Update(ctx, task)
+	}); err != nil {
+		logger.Error(err, "Unable to update Task status")
+		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{}, nil

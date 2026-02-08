@@ -11,6 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -94,9 +95,16 @@ func (r *TaskSpawnerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}, &ws); err != nil {
 			logger.Error(err, "Unable to fetch Workspace for TaskSpawner", "workspace", gh.WorkspaceRef.Name)
 			if apierrors.IsNotFound(err) {
-				ts.Status.Phase = axonv1alpha1.TaskSpawnerPhaseFailed
-				ts.Status.Message = fmt.Sprintf("Workspace %q not found", gh.WorkspaceRef.Name)
-				if updateErr := r.Status().Update(ctx, &ts); updateErr != nil {
+				workspaceRefName := gh.WorkspaceRef.Name
+				updateErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+					if getErr := r.Get(ctx, req.NamespacedName, &ts); getErr != nil {
+						return getErr
+					}
+					ts.Status.Phase = axonv1alpha1.TaskSpawnerPhaseFailed
+					ts.Status.Message = fmt.Sprintf("Workspace %q not found", workspaceRefName)
+					return r.Status().Update(ctx, &ts)
+				})
+				if updateErr != nil {
 					logger.Error(updateErr, "Unable to update TaskSpawner status")
 					return ctrl.Result{}, updateErr
 				}
@@ -120,12 +128,17 @@ func (r *TaskSpawnerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	// Update status with deployment name if not set
 	if ts.Status.DeploymentName != deploy.Name {
-		ts.Status.DeploymentName = deploy.Name
-		if ts.Status.Phase == "" {
-			ts.Status.Phase = axonv1alpha1.TaskSpawnerPhasePending
-		}
-		if err := r.Status().Update(ctx, &ts); err != nil {
-			logger.Error(err, "unable to update TaskSpawner status")
+		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			if getErr := r.Get(ctx, req.NamespacedName, &ts); getErr != nil {
+				return getErr
+			}
+			ts.Status.DeploymentName = deploy.Name
+			if ts.Status.Phase == "" {
+				ts.Status.Phase = axonv1alpha1.TaskSpawnerPhasePending
+			}
+			return r.Status().Update(ctx, &ts)
+		}); err != nil {
+			logger.Error(err, "Unable to update TaskSpawner status")
 			return ctrl.Result{}, err
 		}
 	}
@@ -173,10 +186,15 @@ func (r *TaskSpawnerReconciler) createDeployment(ctx context.Context, ts *axonv1
 	logger.Info("created Deployment", "deployment", deploy.Name)
 
 	// Update status
-	ts.Status.Phase = axonv1alpha1.TaskSpawnerPhasePending
-	ts.Status.DeploymentName = deploy.Name
-	if err := r.Status().Update(ctx, ts); err != nil {
-		logger.Error(err, "unable to update TaskSpawner status")
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		if getErr := r.Get(ctx, client.ObjectKeyFromObject(ts), ts); getErr != nil {
+			return getErr
+		}
+		ts.Status.Phase = axonv1alpha1.TaskSpawnerPhasePending
+		ts.Status.DeploymentName = deploy.Name
+		return r.Status().Update(ctx, ts)
+	}); err != nil {
+		logger.Error(err, "Unable to update TaskSpawner status")
 		return ctrl.Result{}, err
 	}
 

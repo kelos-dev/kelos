@@ -40,6 +40,8 @@ var _ = Describe("TaskSpawner", func() {
 		kubectl("delete", "secret", "claude-credentials", "--ignore-not-found")
 	})
 
+	// This test requires at least one open GitHub issue in axon-core/axon
+	// with the "do-not-remove/e2e-anchor" label. See issue #117.
 	It("should create a spawner Deployment and discover issues", func() {
 		By("creating GitHub token secret")
 		Expect(kubectlWithInput("", "create", "secret", "generic", "github-token",

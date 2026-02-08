@@ -242,7 +242,7 @@ kubectl apply -f taskspawner.yaml
 
 TaskSpawner polls for new issues matching your filters and creates a Task for each one.
 
-### Autonomous issue-fixing pipeline
+### Autonomous self-development pipeline
 
 This is a real-world TaskSpawner that picks up every open issue, investigates it, opens (or updates) a PR, self-reviews, and ensures CI passes — fully autonomously. When the agent can't make progress, it labels the issue `axon/needs-input` and stops. Remove the label to re-queue it.
 

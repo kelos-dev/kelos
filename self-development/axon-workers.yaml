@@ -38,10 +38,20 @@ spec:
         ```
         git fetch origin axon-task-{{.Number}} 2>/dev/null && git checkout -B axon-task-{{.Number}} origin/axon-task-{{.Number}} && git rebase main || git checkout -b axon-task-{{.Number}} main
         ```
-      - 1. Investigate the issue #{{.Number}} and its PR if exists.
-      - 3. Create a commit that fixes the issue.
-      - 4. /review the PR and get feedbacks from the PR to refine the patch.
-      - 5. Make sure the PR passes all CI tests.
+      - 1. Check if a PR already exists for branch axon-task-{{.Number}}.
+
+      If a PR already exists:
+      - 2a. Read ALL review comments and conversation on the PR (gh pr view, gh api for review comments).
+      - 3a. Read the existing diff (git diff main...HEAD) to understand what has already been done. Do NOT start over or rewrite from scratch.
+      - 4a. Make only the incremental changes needed to address review feedback or remaining issues. Preserve existing work.
+      - 5a. /review the PR to verify your changes address the feedback, then iterate if needed.
+      - 6a. Make sure the PR passes all CI tests.
+
+      If no PR exists:
+      - 2b. Investigate the issue #{{.Number}}.
+      - 3b. Create a commit that fixes the issue.
+      - 4b. Create a PR and /review it to get feedback, then iterate to address the feedback.
+      - 5b. Make sure the PR passes all CI tests.
 
       Post-checklist:
       - Add axon/needs-input label to the issue (gh issue edit {{.Number}} --add-label axon/needs-input) and leave a comment for the reason if any of the following applies:

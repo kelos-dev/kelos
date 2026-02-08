@@ -786,6 +786,189 @@ var _ = Describe("Task Controller", func() {
 		})
 	})
 
+	Context("When creating a Task with MCP servers", func() {
+		It("Should create a Job with MCP config init container and volume", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-task-mcp",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with API key")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+			By("Creating a Task with MCP servers")
+			task := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-mcp-task",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "Use the MCP tools",
+					Credentials: axonv1alpha1.Credentials{
+						Type: axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{
+							Name: "anthropic-api-key",
+						},
+					},
+					MCPServers: []axonv1alpha1.MCPServer{
+						{
+							Name:      "my-api",
+							Transport: axonv1alpha1.MCPTransportHTTP,
+							Target:    "https://api.example.com/mcp",
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, task)).Should(Succeed())
+
+			By("Verifying a Job is created")
+			jobLookupKey := types.NamespacedName{Name: task.Name, Namespace: ns.Name}
+			createdJob := &batchv1.Job{}
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, jobLookupKey, createdJob)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Logging the Job spec")
+			logJobSpec(createdJob)
+
+			By("Verifying the MCP config init container")
+			Expect(createdJob.Spec.Template.Spec.InitContainers).To(HaveLen(1))
+			initContainer := createdJob.Spec.Template.Spec.InitContainers[0]
+			Expect(initContainer.Name).To(Equal("mcp-config"))
+			Expect(initContainer.Image).To(Equal(controller.MCPInitImage))
+
+			By("Verifying the init container runs as claude user")
+			Expect(initContainer.SecurityContext).NotTo(BeNil())
+			Expect(initContainer.SecurityContext.RunAsUser).NotTo(BeNil())
+			Expect(*initContainer.SecurityContext.RunAsUser).To(Equal(controller.ClaudeCodeUID))
+
+			By("Verifying the MCP config volume")
+			Expect(createdJob.Spec.Template.Spec.Volumes).To(HaveLen(1))
+			Expect(createdJob.Spec.Template.Spec.Volumes[0].Name).To(Equal(controller.MCPConfigVolumeName))
+			Expect(createdJob.Spec.Template.Spec.Volumes[0].EmptyDir).NotTo(BeNil())
+
+			By("Verifying the init container volume mount")
+			Expect(initContainer.VolumeMounts).To(HaveLen(1))
+			Expect(initContainer.VolumeMounts[0].Name).To(Equal(controller.MCPConfigVolumeName))
+			Expect(initContainer.VolumeMounts[0].MountPath).To(Equal(controller.MCPConfigMountPath))
+
+			By("Verifying the main container volume mount")
+			mainContainer := createdJob.Spec.Template.Spec.Containers[0]
+			Expect(mainContainer.VolumeMounts).To(HaveLen(1))
+			Expect(mainContainer.VolumeMounts[0].Name).To(Equal(controller.MCPConfigVolumeName))
+			Expect(mainContainer.VolumeMounts[0].MountPath).To(Equal(controller.MCPConfigMountPath))
+
+			By("Verifying --mcp-config flag in container args")
+			Expect(mainContainer.Args).To(ContainElements("--mcp-config", controller.MCPConfigFilePath))
+		})
+	})
+
+	Context("When creating a Task with MCP servers and workspace", func() {
+		It("Should create a Job with both MCP config and workspace volumes", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-task-mcp-workspace",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with API key")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+			By("Creating a Workspace resource")
+			ws := &axonv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace-mcp",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/example/repo.git",
+					Ref:  "main",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
+
+			By("Creating a Task with MCP servers and workspace")
+			task := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-mcp-workspace-task",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "Use MCP tools in workspace",
+					Credentials: axonv1alpha1.Credentials{
+						Type: axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{
+							Name: "anthropic-api-key",
+						},
+					},
+					WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						Name: "test-workspace-mcp",
+					},
+					MCPServers: []axonv1alpha1.MCPServer{
+						{
+							Name:      "my-api",
+							Transport: axonv1alpha1.MCPTransportHTTP,
+							Target:    "https://api.example.com/mcp",
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, task)).Should(Succeed())
+
+			By("Verifying a Job is created")
+			jobLookupKey := types.NamespacedName{Name: task.Name, Namespace: ns.Name}
+			createdJob := &batchv1.Job{}
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, jobLookupKey, createdJob)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Logging the Job spec")
+			logJobSpec(createdJob)
+
+			By("Verifying both init containers")
+			Expect(createdJob.Spec.Template.Spec.InitContainers).To(HaveLen(2))
+			Expect(createdJob.Spec.Template.Spec.InitContainers[0].Name).To(Equal("mcp-config"))
+			Expect(createdJob.Spec.Template.Spec.InitContainers[1].Name).To(Equal("git-clone"))
+
+			By("Verifying both volumes")
+			Expect(createdJob.Spec.Template.Spec.Volumes).To(HaveLen(2))
+
+			By("Verifying the main container has both volume mounts")
+			mainContainer := createdJob.Spec.Template.Spec.Containers[0]
+			Expect(mainContainer.VolumeMounts).To(HaveLen(2))
+			Expect(mainContainer.WorkingDir).To(Equal("/workspace/repo"))
+		})
+	})
+
 	Context("When creating a Task with a nonexistent workspace", func() {
 		It("Should fail with a meaningful error", func() {
 			By("Creating a namespace")

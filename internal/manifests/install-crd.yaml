@@ -71,6 +71,54 @@ spec:
                 - secretRef
                 - type
                 type: object
+              mcpServers:
+                description: MCPServers is an optional list of MCP servers to use
+                  as plugins.
+                items:
+                  description: MCPServer defines an MCP server that the coding agent
+                    can use as a plugin.
+                  properties:
+                    args:
+                      description: Args is an optional list of arguments for stdio
+                        transport.
+                      items:
+                        type: string
+                      type: array
+                    env:
+                      additionalProperties:
+                        type: string
+                      description: Env is an optional map of environment variables
+                        for the MCP server.
+                      type: object
+                    headers:
+                      additionalProperties:
+                        type: string
+                      description: Headers is an optional map of HTTP headers for
+                        http/sse transport.
+                      type: object
+                    name:
+                      description: Name is the unique name of the MCP server.
+                      type: string
+                    target:
+                      description: |-
+                        Target is the command (for stdio) or URL (for http/sse).
+                        For stdio, this is the command and arguments to run (e.g., "npx -y @example/server").
+                        For http/sse, this is the URL to connect to (e.g., "https://api.example.com/mcp").
+                      type: string
+                    transport:
+                      description: Transport specifies the transport type (stdio,
+                        http, or sse).
+                      enum:
+                      - stdio
+                      - http
+                      - sse
+                      type: string
+                  required:
+                  - name
+                  - target
+                  - transport
+                  type: object
+                type: array
               model:
                 description: Model optionally overrides the default model.
                 type: string
@@ -226,6 +274,54 @@ spec:
                     - secretRef
                     - type
                     type: object
+                  mcpServers:
+                    description: MCPServers is an optional list of MCP servers to
+                      use as plugins for spawned Tasks.
+                    items:
+                      description: MCPServer defines an MCP server that the coding
+                        agent can use as a plugin.
+                      properties:
+                        args:
+                          description: Args is an optional list of arguments for stdio
+                            transport.
+                          items:
+                            type: string
+                          type: array
+                        env:
+                          additionalProperties:
+                            type: string
+                          description: Env is an optional map of environment variables
+                            for the MCP server.
+                          type: object
+                        headers:
+                          additionalProperties:
+                            type: string
+                          description: Headers is an optional map of HTTP headers
+                            for http/sse transport.
+                          type: object
+                        name:
+                          description: Name is the unique name of the MCP server.
+                          type: string
+                        target:
+                          description: |-
+                            Target is the command (for stdio) or URL (for http/sse).
+                            For stdio, this is the command and arguments to run (e.g., "npx -y @example/server").
+                            For http/sse, this is the URL to connect to (e.g., "https://api.example.com/mcp").
+                          type: string
+                        transport:
+                          description: Transport specifies the transport type (stdio,
+                            http, or sse).
+                          enum:
+                          - stdio
+                          - http
+                          - sse
+                          type: string
+                      required:
+                      - name
+                      - target
+                      - transport
+                      type: object
+                    type: array
                   model:
                     description: Model optionally overrides the default model.
                     type: string

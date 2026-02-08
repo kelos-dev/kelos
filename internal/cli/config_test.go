@@ -175,6 +175,63 @@ func TestLoadConfig_WorkspaceInline(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_MCPServers(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `mcpServers:
+  my-api:
+    transport: http
+    target: https://api.example.com/mcp
+  local-tool:
+    transport: stdio
+    target: npx
+    args:
+      - "-y"
+      - "@example/server"
+    env:
+      API_KEY: secret
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.MCPServers) != 2 {
+		t.Fatalf("expected 2 MCP servers, got %d", len(cfg.MCPServers))
+	}
+
+	api, ok := cfg.MCPServers["my-api"]
+	if !ok {
+		t.Fatal("expected 'my-api' MCP server")
+	}
+	if api.Transport != "http" {
+		t.Errorf("my-api.Transport = %q, want %q", api.Transport, "http")
+	}
+	if api.Target != "https://api.example.com/mcp" {
+		t.Errorf("my-api.Target = %q, want %q", api.Target, "https://api.example.com/mcp")
+	}
+
+	tool, ok := cfg.MCPServers["local-tool"]
+	if !ok {
+		t.Fatal("expected 'local-tool' MCP server")
+	}
+	if tool.Transport != "stdio" {
+		t.Errorf("local-tool.Transport = %q, want %q", tool.Transport, "stdio")
+	}
+	if tool.Target != "npx" {
+		t.Errorf("local-tool.Target = %q, want %q", tool.Target, "npx")
+	}
+	if len(tool.Args) != 2 || tool.Args[0] != "-y" || tool.Args[1] != "@example/server" {
+		t.Errorf("local-tool.Args = %v, want [-y @example/server]", tool.Args)
+	}
+	if tool.Env["API_KEY"] != "secret" {
+		t.Errorf("local-tool.Env[API_KEY] = %q, want %q", tool.Env["API_KEY"], "secret")
+	}
+}
+
 func TestLoadConfig_APIKey(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")

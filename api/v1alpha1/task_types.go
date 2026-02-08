@@ -44,6 +44,48 @@ type Credentials struct {
 	SecretRef SecretReference `json:"secretRef"`
 }
 
+// MCPTransportType defines the transport type for an MCP server.
+type MCPTransportType string
+
+const (
+	// MCPTransportStdio connects to an MCP server via stdio.
+	MCPTransportStdio MCPTransportType = "stdio"
+	// MCPTransportHTTP connects to an MCP server via HTTP.
+	MCPTransportHTTP MCPTransportType = "http"
+	// MCPTransportSSE connects to an MCP server via Server-Sent Events.
+	MCPTransportSSE MCPTransportType = "sse"
+)
+
+// MCPServer defines an MCP server that the coding agent can use as a plugin.
+type MCPServer struct {
+	// Name is the unique name of the MCP server.
+	// +kubebuilder:validation:Required
+	Name string `json:"name"`
+
+	// Transport specifies the transport type (stdio, http, or sse).
+	// +kubebuilder:validation:Enum=stdio;http;sse
+	// +kubebuilder:validation:Required
+	Transport MCPTransportType `json:"transport"`
+
+	// Target is the command (for stdio) or URL (for http/sse).
+	// For stdio, this is the command and arguments to run (e.g., "npx -y @example/server").
+	// For http/sse, this is the URL to connect to (e.g., "https://api.example.com/mcp").
+	// +kubebuilder:validation:Required
+	Target string `json:"target"`
+
+	// Args is an optional list of arguments for stdio transport.
+	// +optional
+	Args []string `json:"args,omitempty"`
+
+	// Env is an optional map of environment variables for the MCP server.
+	// +optional
+	Env map[string]string `json:"env,omitempty"`
+
+	// Headers is an optional map of HTTP headers for http/sse transport.
+	// +optional
+	Headers map[string]string `json:"headers,omitempty"`
+}
+
 // TaskSpec defines the desired state of Task.
 type TaskSpec struct {
 	// Type specifies the agent type (e.g., claude-code).
@@ -65,6 +107,10 @@ type TaskSpec struct {
 	// WorkspaceRef optionally references a Workspace resource for the agent to work in.
 	// +optional
 	WorkspaceRef *WorkspaceReference `json:"workspaceRef,omitempty"`
+
+	// MCPServers is an optional list of MCP servers to use as plugins.
+	// +optional
+	MCPServers []MCPServer `json:"mcpServers,omitempty"`
 
 	// TTLSecondsAfterFinished limits the lifetime of a Task that has finished
 	// execution (either Succeeded or Failed). If set, the Task will be

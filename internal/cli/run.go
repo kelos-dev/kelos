@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -26,6 +27,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 		name           string
 		watch          bool
 		workspace      string
+		mcpServerFlags []string
 	)
 
 	cmd := &cobra.Command{
@@ -115,6 +117,40 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 				workspace = wsName
 			}
 
+			// Parse MCP servers from CLI flags.
+			mcpServers, err := parseMCPServerFlags(mcpServerFlags)
+			if err != nil {
+				return err
+			}
+
+			// Merge MCP servers from config file (CLI flags take precedence).
+			if cfg.Config != nil && len(cfg.Config.MCPServers) > 0 {
+				cliNames := make(map[string]bool, len(mcpServers))
+				for _, s := range mcpServers {
+					cliNames[s.Name] = true
+				}
+				for name, sc := range cfg.Config.MCPServers {
+					if cliNames[name] {
+						continue
+					}
+					transport := axonv1alpha1.MCPTransportType(sc.Transport)
+					switch transport {
+					case axonv1alpha1.MCPTransportStdio, axonv1alpha1.MCPTransportHTTP, axonv1alpha1.MCPTransportSSE:
+						// valid
+					default:
+						return fmt.Errorf("invalid transport %q for MCP server %q in config: must be stdio, http, or sse", sc.Transport, name)
+					}
+					mcpServers = append(mcpServers, axonv1alpha1.MCPServer{
+						Name:      name,
+						Transport: transport,
+						Target:    sc.Target,
+						Args:      sc.Args,
+						Env:       sc.Env,
+						Headers:   sc.Headers,
+					})
+				}
+			}
+
 			if name == "" {
 				name = "task-" + rand.String(5)
 			}
@@ -133,7 +169,8 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 							Name: secret,
 						},
 					},
-					Model: model,
+					Model:      model,
+					MCPServers: mcpServers,
 				},
 			}
 
@@ -163,6 +200,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 	cmd.Flags().StringVar(&model, "model", "", "model override")
 	cmd.Flags().StringVar(&name, "name", "", "task name (auto-generated if omitted)")
 	cmd.Flags().StringVar(&workspace, "workspace", "", "name of Workspace resource to use")
+	cmd.Flags().StringArrayVar(&mcpServerFlags, "mcp-server", nil, `MCP server in "name=type:target" format (e.g., "my-api=http:https://api.example.com/mcp")`)
 	cmd.Flags().BoolVarP(&watch, "watch", "w", false, "watch task status after creation")
 
 	cmd.MarkFlagRequired("prompt")
@@ -191,6 +229,51 @@ func watchTask(ctx context.Context, cl client.Client, name, namespace string) er
 
 		time.Sleep(2 * time.Second)
 	}
+}
+
+// parseMCPServerFlags parses --mcp-server flag values in "name=type:target" format.
+// For example: "my-api=http:https://api.example.com/mcp" or "tool=stdio:npx -y @example/server"
+func parseMCPServerFlags(flags []string) ([]axonv1alpha1.MCPServer, error) {
+	if len(flags) == 0 {
+		return nil, nil
+	}
+
+	var servers []axonv1alpha1.MCPServer
+	for _, f := range flags {
+		eqIdx := strings.Index(f, "=")
+		if eqIdx < 1 {
+			return nil, fmt.Errorf("invalid --mcp-server format %q: expected \"name=type:target\"", f)
+		}
+		name := f[:eqIdx]
+		rest := f[eqIdx+1:]
+
+		colonIdx := strings.Index(rest, ":")
+		if colonIdx < 1 {
+			return nil, fmt.Errorf("invalid --mcp-server format %q: expected \"name=type:target\"", f)
+		}
+		transportStr := rest[:colonIdx]
+		target := rest[colonIdx+1:]
+
+		if target == "" {
+			return nil, fmt.Errorf("invalid --mcp-server format %q: target cannot be empty", f)
+		}
+
+		transport := axonv1alpha1.MCPTransportType(transportStr)
+		switch transport {
+		case axonv1alpha1.MCPTransportStdio, axonv1alpha1.MCPTransportHTTP, axonv1alpha1.MCPTransportSSE:
+			// valid
+		default:
+			return nil, fmt.Errorf("invalid --mcp-server transport %q: must be stdio, http, or sse", transportStr)
+		}
+
+		servers = append(servers, axonv1alpha1.MCPServer{
+			Name:      name,
+			Transport: transport,
+			Target:    target,
+		})
+	}
+
+	return servers, nil
 }
 
 // ensureCredentialSecret creates or updates a Secret with the given credential key and value.

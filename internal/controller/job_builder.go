@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -30,6 +32,18 @@ const (
 	// container image (claude-code/Dockerfile). This must be kept in sync
 	// with the Dockerfile.
 	ClaudeCodeUID = int64(1100)
+
+	// MCPConfigVolumeName is the name of the volume for MCP config.
+	MCPConfigVolumeName = "mcp-config"
+
+	// MCPConfigMountPath is the mount path for the MCP config volume.
+	MCPConfigMountPath = "/home/claude/.mcp"
+
+	// MCPConfigFilePath is the full path to the MCP config file.
+	MCPConfigFilePath = MCPConfigMountPath + "/mcp.json"
+
+	// MCPInitImage is the image used by the MCP config init container.
+	MCPInitImage = "busybox:1.37"
 )
 
 // JobBuilder constructs Kubernetes Jobs for Tasks.
@@ -118,17 +132,46 @@ func (b *JobBuilder) buildClaudeCodeJob(task *axonv1alpha1.Task, workspace *axon
 	backoffLimit := int32(0)
 	claudeCodeUID := ClaudeCodeUID
 
-	mainContainer := corev1.Container{
-		Name:            "claude-code",
-		Image:           b.ClaudeCodeImage,
-		ImagePullPolicy: b.ClaudeCodeImagePullPolicy,
-		Args:            args,
-		Env:             envVars,
-	}
-
 	var initContainers []corev1.Container
 	var volumes []corev1.Volume
+	var mainVolumeMounts []corev1.VolumeMount
 	var podSecurityContext *corev1.PodSecurityContext
+
+	if len(task.Spec.MCPServers) > 0 {
+		mcpConfig, err := buildMCPConfig(task.Spec.MCPServers)
+		if err != nil {
+			return nil, fmt.Errorf("building MCP config: %w", err)
+		}
+
+		mcpConfigB64 := base64.StdEncoding.EncodeToString([]byte(mcpConfig))
+
+		mcpVolume := corev1.Volume{
+			Name: MCPConfigVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		}
+		volumes = append(volumes, mcpVolume)
+
+		mcpVolumeMount := corev1.VolumeMount{
+			Name:      MCPConfigVolumeName,
+			MountPath: MCPConfigMountPath,
+		}
+
+		mcpInitContainer := corev1.Container{
+			Name:         "mcp-config",
+			Image:        MCPInitImage,
+			Command:      []string{"sh", "-c", fmt.Sprintf("echo '%s' | base64 -d > %s", mcpConfigB64, MCPConfigFilePath)},
+			VolumeMounts: []corev1.VolumeMount{mcpVolumeMount},
+			SecurityContext: &corev1.SecurityContext{
+				RunAsUser: &claudeCodeUID,
+			},
+		}
+		initContainers = append(initContainers, mcpInitContainer)
+
+		mainVolumeMounts = append(mainVolumeMounts, mcpVolumeMount)
+		args = append(args, "--mcp-config", MCPConfigFilePath)
+	}
 
 	if workspace != nil {
 		podSecurityContext = &corev1.PodSecurityContext{
@@ -174,8 +217,22 @@ func (b *JobBuilder) buildClaudeCodeJob(task *axonv1alpha1.Task, workspace *axon
 
 		initContainers = append(initContainers, initContainer)
 
-		mainContainer.VolumeMounts = []corev1.VolumeMount{volumeMount}
-		mainContainer.WorkingDir = WorkspaceMountPath + "/repo"
+		mainVolumeMounts = append(mainVolumeMounts, volumeMount)
+	}
+
+	var workingDir string
+	if workspace != nil {
+		workingDir = WorkspaceMountPath + "/repo"
+	}
+
+	mainContainer := corev1.Container{
+		Name:            "claude-code",
+		Image:           b.ClaudeCodeImage,
+		ImagePullPolicy: b.ClaudeCodeImagePullPolicy,
+		Args:            args,
+		Env:             envVars,
+		VolumeMounts:    mainVolumeMounts,
+		WorkingDir:      workingDir,
 	}
 
 	job := &batchv1.Job{
@@ -212,4 +269,61 @@ func (b *JobBuilder) buildClaudeCodeJob(task *axonv1alpha1.Task, workspace *axon
 	}
 
 	return job, nil
+}
+
+// mcpConfigEntry represents a single MCP server entry in the Claude Code MCP config format.
+type mcpConfigEntry struct {
+	Command string            `json:"command,omitempty"`
+	Args    []string          `json:"args,omitempty"`
+	URL     string            `json:"url,omitempty"`
+	Type    string            `json:"type,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+}
+
+// buildMCPConfig generates a Claude Code MCP config JSON string from a list of MCPServer specs.
+func buildMCPConfig(servers []axonv1alpha1.MCPServer) (string, error) {
+	mcpServers := make(map[string]mcpConfigEntry, len(servers))
+
+	for _, s := range servers {
+		if _, exists := mcpServers[s.Name]; exists {
+			return "", fmt.Errorf("duplicate MCP server name: %s", s.Name)
+		}
+
+		entry := mcpConfigEntry{}
+
+		switch s.Transport {
+		case axonv1alpha1.MCPTransportStdio:
+			entry.Command = s.Target
+			entry.Args = s.Args
+		case axonv1alpha1.MCPTransportHTTP:
+			entry.Type = "http"
+			entry.URL = s.Target
+		case axonv1alpha1.MCPTransportSSE:
+			entry.Type = "sse"
+			entry.URL = s.Target
+		default:
+			return "", fmt.Errorf("unsupported MCP transport type: %s", s.Transport)
+		}
+
+		if len(s.Env) > 0 {
+			entry.Env = s.Env
+		}
+		if len(s.Headers) > 0 {
+			entry.Headers = s.Headers
+		}
+
+		mcpServers[s.Name] = entry
+	}
+
+	config := map[string]interface{}{
+		"mcpServers": mcpServers,
+	}
+
+	data, err := json.Marshal(config)
+	if err != nil {
+		return "", fmt.Errorf("marshaling MCP config: %w", err)
+	}
+
+	return string(data), nil
 }

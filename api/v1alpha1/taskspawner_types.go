@@ -83,6 +83,10 @@ type TaskTemplate struct {
 	// +optional
 	PromptTemplate string `json:"promptTemplate,omitempty"`
 
+	// MCPServers is an optional list of MCP servers to use as plugins for spawned Tasks.
+	// +optional
+	MCPServers []MCPServer `json:"mcpServers,omitempty"`
+
 	// TTLSecondsAfterFinished limits the lifetime of a Task that has finished
 	// execution (either Succeeded or Failed). If set, spawned Tasks will be
 	// automatically deleted after the given number of seconds once they reach

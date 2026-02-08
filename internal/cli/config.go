@@ -8,15 +8,25 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+// MCPServerConfig holds configuration for a single MCP server.
+type MCPServerConfig struct {
+	Transport string            `json:"transport"`
+	Target    string            `json:"target"`
+	Args      []string          `json:"args,omitempty"`
+	Env       map[string]string `json:"env,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty"`
+}
+
 // Config holds configuration loaded from the axon config file.
 type Config struct {
-	OAuthToken     string          `json:"oauthToken,omitempty"`
-	APIKey         string          `json:"apiKey,omitempty"`
-	Secret         string          `json:"secret,omitempty"`
-	CredentialType string          `json:"credentialType,omitempty"`
-	Model          string          `json:"model,omitempty"`
-	Namespace      string          `json:"namespace,omitempty"`
-	Workspace      WorkspaceConfig `json:"workspace,omitempty"`
+	OAuthToken     string                     `json:"oauthToken,omitempty"`
+	APIKey         string                     `json:"apiKey,omitempty"`
+	Secret         string                     `json:"secret,omitempty"`
+	CredentialType string                     `json:"credentialType,omitempty"`
+	Model          string                     `json:"model,omitempty"`
+	Namespace      string                     `json:"namespace,omitempty"`
+	Workspace      WorkspaceConfig            `json:"workspace,omitempty"`
+	MCPServers     map[string]MCPServerConfig `json:"mcpServers,omitempty"`
 }
 
 // WorkspaceConfig holds workspace-related configuration.

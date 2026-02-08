@@ -17,6 +17,7 @@ import (
 
 	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
 	"github.com/axon-core/axon/internal/source"
+	"github.com/axon-core/axon/internal/spawner"
 )
 
 type fakeSource struct {
@@ -114,7 +115,7 @@ func TestRunCycleWithSource_NoMaxConcurrency(t *testing.T) {
 		},
 	}
 
-	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+	if err := spawner.RunCycleWithSource(context.Background(), cl, key, src); err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
@@ -141,7 +142,7 @@ func TestRunCycleWithSource_MaxConcurrencyLimitsCreation(t *testing.T) {
 		},
 	}
 
-	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+	if err := spawner.RunCycleWithSource(context.Background(), cl, key, src); err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
@@ -173,7 +174,7 @@ func TestRunCycleWithSource_MaxConcurrencyWithExistingActiveTasks(t *testing.T) 
 		},
 	}
 
-	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+	if err := spawner.RunCycleWithSource(context.Background(), cl, key, src); err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
@@ -205,7 +206,7 @@ func TestRunCycleWithSource_CompletedTasksDontCountTowardsLimit(t *testing.T) {
 		},
 	}
 
-	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+	if err := spawner.RunCycleWithSource(context.Background(), cl, key, src); err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
@@ -231,7 +232,7 @@ func TestRunCycleWithSource_MaxConcurrencyZeroMeansNoLimit(t *testing.T) {
 		},
 	}
 
-	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+	if err := spawner.RunCycleWithSource(context.Background(), cl, key, src); err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
@@ -260,7 +261,7 @@ func TestRunCycleWithSource_MaxConcurrencyAlreadyAtLimit(t *testing.T) {
 		},
 	}
 
-	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+	if err := spawner.RunCycleWithSource(context.Background(), cl, key, src); err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
@@ -290,7 +291,7 @@ func TestRunCycleWithSource_ActiveTasksStatusUpdated(t *testing.T) {
 		},
 	}
 
-	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+	if err := spawner.RunCycleWithSource(context.Background(), cl, key, src); err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 

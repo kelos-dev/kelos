@@ -7,9 +7,9 @@ spec:
     githubIssues:
       excludeLabels:
         - axon/needs-input
-      workspaceRef:
-        name: axon-workspace
   taskTemplate:
+    workspaceRef:
+      name: axon-workspace
     model: opus
     type: claude-code
     ttlSecondsAfterFinished: 3600

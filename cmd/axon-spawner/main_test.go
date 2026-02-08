@@ -63,9 +63,7 @@ func newTaskSpawner(name, namespace string, maxConcurrency *int32) *axonv1alpha1
 		},
 		Spec: axonv1alpha1.TaskSpawnerSpec{
 			When: axonv1alpha1.When{
-				GitHubIssues: &axonv1alpha1.GitHubIssues{
-					WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "test-ws"},
-				},
+				GitHubIssues: &axonv1alpha1.GitHubIssues{},
 			},
 			TaskTemplate: axonv1alpha1.TaskTemplate{
 				Type: "claude-code",
@@ -73,6 +71,7 @@ func newTaskSpawner(name, namespace string, maxConcurrency *int32) *axonv1alpha1
 					Type:      axonv1alpha1.CredentialTypeOAuth,
 					SecretRef: axonv1alpha1.SecretReference{Name: "creds"},
 				},
+				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "test-ws"},
 			},
 			MaxConcurrency: maxConcurrency,
 		},

@@ -222,12 +222,12 @@ metadata:
 spec:
   when:
     githubIssues:
-      workspaceRef:
-        name: my-workspace
       labels: [bug]
       state: open
   taskTemplate:
     type: claude-code
+    workspaceRef:
+      name: my-workspace
     credentials:
       type: oauth
       secretRef:
@@ -330,7 +330,7 @@ The key pattern here is `excludeLabels: [axon/needs-input]` — this creates a f
 
 | Field | Description | Required |
 |-------|-------------|----------|
-| `spec.when.githubIssues.workspaceRef.name` | Workspace resource (repo URL, auth, and clone target for spawned Tasks) | Yes |
+| `spec.taskTemplate.workspaceRef.name` | Workspace resource (repo URL, auth, and clone target for spawned Tasks) | Yes (when using githubIssues) |
 | `spec.when.githubIssues.labels` | Filter issues by labels | No |
 | `spec.when.githubIssues.excludeLabels` | Exclude issues with these labels | No |
 | `spec.when.githubIssues.state` | Filter by state: `open`, `closed`, `all` (default: `open`) | No |

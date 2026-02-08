@@ -186,8 +186,8 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 			},
 		}
 
-		if gh := ts.Spec.When.GitHubIssues; gh != nil && gh.WorkspaceRef != nil {
-			task.Spec.WorkspaceRef = gh.WorkspaceRef
+		if ts.Spec.TaskTemplate.WorkspaceRef != nil {
+			task.Spec.WorkspaceRef = ts.Spec.TaskTemplate.WorkspaceRef
 		}
 
 		if err := cl.Create(ctx, task); err != nil {

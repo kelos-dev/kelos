@@ -160,7 +160,7 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.when.githubIssues.workspaceRef.name
+    - jsonPath: .spec.taskTemplate.workspaceRef.name
       name: Workspace
       type: string
     - jsonPath: .status.phase
@@ -272,6 +272,18 @@ spec:
                   type:
                     description: Type specifies the agent type (e.g., claude-code).
                     type: string
+                  workspaceRef:
+                    description: |-
+                      WorkspaceRef references the Workspace that defines the repository.
+                      Required when using githubIssues source; optional for other sources.
+                      When set, spawned Tasks inherit this workspace reference.
+                    properties:
+                      name:
+                        description: Name is the name of the Workspace resource.
+                        type: string
+                    required:
+                    - name
+                    type: object
                 required:
                 - credentials
                 - type
@@ -320,24 +332,16 @@ spec:
                         items:
                           type: string
                         type: array
-                      workspaceRef:
-                        description: WorkspaceRef references the Workspace that defines
-                          the GitHub repository.
-                        properties:
-                          name:
-                            description: Name is the name of the Workspace resource.
-                            type: string
-                        required:
-                        - name
-                        type: object
-                    required:
-                    - workspaceRef
                     type: object
                 type: object
             required:
             - taskTemplate
             - when
             type: object
+            x-kubernetes-validations:
+            - message: taskTemplate.workspaceRef is required when using githubIssues
+                source
+              rule: '!has(self.when.githubIssues) || has(self.taskTemplate.workspaceRef)'
           status:
             description: TaskSpawnerStatus defines the observed state of TaskSpawner.
             properties:

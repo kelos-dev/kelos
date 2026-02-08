@@ -72,13 +72,13 @@ metadata:
 spec:
   when:
     githubIssues:
-      workspaceRef:
-        name: e2e-spawner-workspace
       labels: [do-not-remove/e2e-anchor]
       excludeLabels: [e2e-exclude-placeholder]
       state: open
   taskTemplate:
     type: claude-code
+    workspaceRef:
+      name: e2e-spawner-workspace
     credentials:
       type: oauth
       secretRef:
@@ -122,11 +122,11 @@ metadata:
   name: ` + taskSpawnerName + `
 spec:
   when:
-    githubIssues:
-      workspaceRef:
-        name: e2e-spawner-workspace
+    githubIssues: {}
   taskTemplate:
     type: claude-code
+    workspaceRef:
+      name: e2e-spawner-workspace
     credentials:
       type: oauth
       secretRef:

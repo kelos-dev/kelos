@@ -36,13 +36,10 @@ type Cron struct {
 }
 
 // GitHubIssues discovers issues from a GitHub repository.
-// The repository owner and name are derived from the workspace's repo URL.
+// The repository owner and name are derived from the workspace's repo URL
+// specified in taskTemplate.workspaceRef.
 // If the workspace has a secretRef, it is used for GitHub API authentication.
 type GitHubIssues struct {
-	// WorkspaceRef references the Workspace that defines the GitHub repository.
-	// +kubebuilder:validation:Required
-	WorkspaceRef *WorkspaceReference `json:"workspaceRef"`
-
 	// Types specifies which item types to discover: "issues", "pulls", or both.
 	// +kubebuilder:validation:Items:Enum=issues;pulls
 	// +kubebuilder:default={"issues"}
@@ -84,6 +81,12 @@ type TaskTemplate struct {
 	// +optional
 	Image string `json:"image,omitempty"`
 
+	// WorkspaceRef references the Workspace that defines the repository.
+	// Required when using githubIssues source; optional for other sources.
+	// When set, spawned Tasks inherit this workspace reference.
+	// +optional
+	WorkspaceRef *WorkspaceReference `json:"workspaceRef,omitempty"`
+
 	// PromptTemplate is a Go text/template for rendering the task prompt.
 	// Available variables: {{.Number}}, {{.Title}}, {{.Body}}, {{.URL}}, {{.Comments}}, {{.Labels}}, {{.Kind}}.
 	// +optional
@@ -102,6 +105,7 @@ type TaskTemplate struct {
 }
 
 // TaskSpawnerSpec defines the desired state of TaskSpawner.
+// +kubebuilder:validation:XValidation:rule="!has(self.when.githubIssues) || has(self.taskTemplate.workspaceRef)",message="taskTemplate.workspaceRef is required when using githubIssues source"
 type TaskSpawnerSpec struct {
 	// When defines the conditions that trigger task spawning.
 	// +kubebuilder:validation:Required
@@ -157,7 +161,7 @@ type TaskSpawnerStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="Workspace",type=string,JSONPath=`.spec.when.githubIssues.workspaceRef.name`
+// +kubebuilder:printcolumn:name="Workspace",type=string,JSONPath=`.spec.taskTemplate.workspaceRef.name`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Active",type=integer,JSONPath=`.status.activeTasks`
 // +kubebuilder:printcolumn:name="Discovered",type=integer,JSONPath=`.status.totalDiscovered`

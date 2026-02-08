@@ -53,9 +53,6 @@ var _ = Describe("TaskSpawner Controller", func() {
 				Spec: axonv1alpha1.TaskSpawnerSpec{
 					When: axonv1alpha1.When{
 						GitHubIssues: &axonv1alpha1.GitHubIssues{
-							WorkspaceRef: &axonv1alpha1.WorkspaceReference{
-								Name: "test-workspace",
-							},
 							State: "open",
 						},
 					},
@@ -66,6 +63,9 @@ var _ = Describe("TaskSpawner Controller", func() {
 							SecretRef: axonv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
+						},
+						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+							Name: "test-workspace",
 						},
 					},
 					PollInterval: "5m",
@@ -187,11 +187,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 				},
 				Spec: axonv1alpha1.TaskSpawnerSpec{
 					When: axonv1alpha1.When{
-						GitHubIssues: &axonv1alpha1.GitHubIssues{
-							WorkspaceRef: &axonv1alpha1.WorkspaceReference{
-								Name: "test-workspace-token",
-							},
-						},
+						GitHubIssues: &axonv1alpha1.GitHubIssues{},
 					},
 					TaskTemplate: axonv1alpha1.TaskTemplate{
 						Type: "claude-code",
@@ -200,6 +196,9 @@ var _ = Describe("TaskSpawner Controller", func() {
 							SecretRef: axonv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
+						},
+						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+							Name: "test-workspace-token",
 						},
 					},
 				},
@@ -254,11 +253,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 				},
 				Spec: axonv1alpha1.TaskSpawnerSpec{
 					When: axonv1alpha1.When{
-						GitHubIssues: &axonv1alpha1.GitHubIssues{
-							WorkspaceRef: &axonv1alpha1.WorkspaceReference{
-								Name: "test-workspace-delete",
-							},
-						},
+						GitHubIssues: &axonv1alpha1.GitHubIssues{},
 					},
 					TaskTemplate: axonv1alpha1.TaskTemplate{
 						Type: "claude-code",
@@ -267,6 +262,9 @@ var _ = Describe("TaskSpawner Controller", func() {
 							SecretRef: axonv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
+						},
+						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+							Name: "test-workspace-delete",
 						},
 					},
 				},
@@ -325,11 +323,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 				},
 				Spec: axonv1alpha1.TaskSpawnerSpec{
 					When: axonv1alpha1.When{
-						GitHubIssues: &axonv1alpha1.GitHubIssues{
-							WorkspaceRef: &axonv1alpha1.WorkspaceReference{
-								Name: "test-workspace-idempotent",
-							},
-						},
+						GitHubIssues: &axonv1alpha1.GitHubIssues{},
 					},
 					TaskTemplate: axonv1alpha1.TaskTemplate{
 						Type: "claude-code",
@@ -338,6 +332,9 @@ var _ = Describe("TaskSpawner Controller", func() {
 							SecretRef: axonv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
+						},
+						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+							Name: "test-workspace-idempotent",
 						},
 					},
 				},
@@ -417,9 +414,6 @@ var _ = Describe("TaskSpawner Controller", func() {
 				Spec: axonv1alpha1.TaskSpawnerSpec{
 					When: axonv1alpha1.When{
 						GitHubIssues: &axonv1alpha1.GitHubIssues{
-							WorkspaceRef: &axonv1alpha1.WorkspaceReference{
-								Name: "test-workspace-types",
-							},
 							Types: []string{"issues", "pulls"},
 							State: "open",
 						},
@@ -431,6 +425,9 @@ var _ = Describe("TaskSpawner Controller", func() {
 							SecretRef: axonv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
+						},
+						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+							Name: "test-workspace-types",
 						},
 					},
 					PollInterval: "5m",
@@ -476,11 +473,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 				},
 				Spec: axonv1alpha1.TaskSpawnerSpec{
 					When: axonv1alpha1.When{
-						GitHubIssues: &axonv1alpha1.GitHubIssues{
-							WorkspaceRef: &axonv1alpha1.WorkspaceReference{
-								Name: "nonexistent-workspace",
-							},
-						},
+						GitHubIssues: &axonv1alpha1.GitHubIssues{},
 					},
 					TaskTemplate: axonv1alpha1.TaskTemplate{
 						Type: "claude-code",
@@ -489,6 +482,9 @@ var _ = Describe("TaskSpawner Controller", func() {
 							SecretRef: axonv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
+						},
+						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+							Name: "nonexistent-workspace",
 						},
 					},
 				},
@@ -569,9 +565,6 @@ var _ = Describe("TaskSpawner Controller", func() {
 				Spec: axonv1alpha1.TaskSpawnerSpec{
 					When: axonv1alpha1.When{
 						GitHubIssues: &axonv1alpha1.GitHubIssues{
-							WorkspaceRef: &axonv1alpha1.WorkspaceReference{
-								Name: "test-workspace-maxconc",
-							},
 							State: "open",
 						},
 					},
@@ -582,6 +575,9 @@ var _ = Describe("TaskSpawner Controller", func() {
 							SecretRef: axonv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
+						},
+						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+							Name: "test-workspace-maxconc",
 						},
 					},
 					PollInterval:   "5m",

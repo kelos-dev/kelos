@@ -161,10 +161,10 @@ func newCreateTaskSpawnerCommand(cfg *ClientConfig) *cobra.Command {
 			}
 
 			if workspace != "" {
+				ts.Spec.TaskTemplate.WorkspaceRef = &axonv1alpha1.WorkspaceReference{
+					Name: workspace,
+				}
 				ts.Spec.When.GitHubIssues = &axonv1alpha1.GitHubIssues{
-					WorkspaceRef: &axonv1alpha1.WorkspaceReference{
-						Name: workspace,
-					},
 					State: state,
 				}
 			} else {

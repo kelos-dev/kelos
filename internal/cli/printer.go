@@ -60,8 +60,12 @@ func printTaskSpawnerTable(w io.Writer, spawners []axonv1alpha1.TaskSpawner) {
 	for _, s := range spawners {
 		age := duration.HumanDuration(time.Since(s.CreationTimestamp.Time))
 		source := ""
-		if s.Spec.When.GitHubIssues != nil && s.Spec.When.GitHubIssues.WorkspaceRef != nil {
-			source = s.Spec.When.GitHubIssues.WorkspaceRef.Name
+		if s.Spec.When.GitHubIssues != nil {
+			if s.Spec.TaskTemplate.WorkspaceRef != nil {
+				source = s.Spec.TaskTemplate.WorkspaceRef.Name
+			} else {
+				source = "GitHub Issues"
+			}
 		} else if s.Spec.When.Cron != nil {
 			source = "cron: " + s.Spec.When.Cron.Schedule
 		}
@@ -76,12 +80,12 @@ func printTaskSpawnerDetail(w io.Writer, ts *axonv1alpha1.TaskSpawner) {
 	printField(w, "Name", ts.Name)
 	printField(w, "Namespace", ts.Namespace)
 	printField(w, "Phase", string(ts.Status.Phase))
+	if ts.Spec.TaskTemplate.WorkspaceRef != nil {
+		printField(w, "Workspace", ts.Spec.TaskTemplate.WorkspaceRef.Name)
+	}
 	if ts.Spec.When.GitHubIssues != nil {
 		gh := ts.Spec.When.GitHubIssues
 		printField(w, "Source", "GitHub Issues")
-		if gh.WorkspaceRef != nil {
-			printField(w, "Workspace", gh.WorkspaceRef.Name)
-		}
 		if len(gh.Types) > 0 {
 			printField(w, "Types", fmt.Sprintf("%v", gh.Types))
 		}

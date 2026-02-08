@@ -85,19 +85,19 @@ func (r *TaskSpawnerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
-	// Resolve workspace for GitHub Issues source
+	// Resolve workspace if workspaceRef is set in taskTemplate
 	var workspace *axonv1alpha1.WorkspaceSpec
-	if gh := ts.Spec.When.GitHubIssues; gh != nil && gh.WorkspaceRef != nil {
+	if ts.Spec.TaskTemplate.WorkspaceRef != nil {
 		var ws axonv1alpha1.Workspace
 		if err := r.Get(ctx, client.ObjectKey{
 			Namespace: ts.Namespace,
-			Name:      gh.WorkspaceRef.Name,
+			Name:      ts.Spec.TaskTemplate.WorkspaceRef.Name,
 		}, &ws); err != nil {
 			if apierrors.IsNotFound(err) {
-				logger.Info("Workspace not found yet, requeuing", "workspace", gh.WorkspaceRef.Name)
+				logger.Info("Workspace not found yet, requeuing", "workspace", ts.Spec.TaskTemplate.WorkspaceRef.Name)
 				return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 			}
-			logger.Error(err, "Unable to fetch Workspace for TaskSpawner", "workspace", gh.WorkspaceRef.Name)
+			logger.Error(err, "Unable to fetch Workspace for TaskSpawner", "workspace", ts.Spec.TaskTemplate.WorkspaceRef.Name)
 			return ctrl.Result{}, err
 		}
 		workspace = &ws.Spec

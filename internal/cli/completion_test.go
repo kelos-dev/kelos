@@ -16,7 +16,10 @@ func TestValidArgsFunctionWired(t *testing.T) {
 	}{
 		{"get task", []string{"get", "task"}},
 		{"get taskspawner", []string{"get", "taskspawner"}},
+		{"get workspace", []string{"get", "workspace"}},
 		{"delete task", []string{"delete", "task"}},
+		{"delete workspace", []string{"delete", "workspace"}},
+		{"delete taskspawner", []string{"delete", "taskspawner"}},
 		{"logs", []string{"logs"}},
 	}
 
@@ -39,6 +42,7 @@ func TestCompletionWithInvalidKubeconfig(t *testing.T) {
 	}{
 		{"completeTaskNames", completeTaskNames(cfg)},
 		{"completeTaskSpawnerNames", completeTaskSpawnerNames(cfg)},
+		{"completeWorkspaceNames", completeWorkspaceNames(cfg)},
 	}
 
 	for _, tt := range fns {
@@ -63,6 +67,7 @@ func TestCompletionSkipsAfterFirstArg(t *testing.T) {
 	}{
 		{"completeTaskNames", completeTaskNames(cfg)},
 		{"completeTaskSpawnerNames", completeTaskSpawnerNames(cfg)},
+		{"completeWorkspaceNames", completeWorkspaceNames(cfg)},
 	}
 
 	for _, tt := range fns {
@@ -112,6 +117,49 @@ func TestFlagCompletionCredentialType(t *testing.T) {
 	}
 	if !strings.Contains(output, "oauth") {
 		t.Errorf("expected oauth in credential-type completions, got %q", output)
+	}
+	if !strings.Contains(output, ":4") {
+		t.Errorf("expected ShellCompDirectiveNoFileComp (:4) in output, got %q", output)
+	}
+}
+
+func TestFlagCompletionCreateTaskSpawnerCredentialType(t *testing.T) {
+	root := NewRootCommand()
+
+	root.SetArgs([]string{"__complete", "create", "taskspawner", "--credential-type", ""})
+	out := &strings.Builder{}
+	root.SetOut(out)
+	root.Execute()
+
+	output := out.String()
+	if !strings.Contains(output, "api-key") {
+		t.Errorf("expected api-key in credential-type completions, got %q", output)
+	}
+	if !strings.Contains(output, "oauth") {
+		t.Errorf("expected oauth in credential-type completions, got %q", output)
+	}
+	if !strings.Contains(output, ":4") {
+		t.Errorf("expected ShellCompDirectiveNoFileComp (:4) in output, got %q", output)
+	}
+}
+
+func TestFlagCompletionCreateTaskSpawnerState(t *testing.T) {
+	root := NewRootCommand()
+
+	root.SetArgs([]string{"__complete", "create", "taskspawner", "--state", ""})
+	out := &strings.Builder{}
+	root.SetOut(out)
+	root.Execute()
+
+	output := out.String()
+	if !strings.Contains(output, "open") {
+		t.Errorf("expected open in state completions, got %q", output)
+	}
+	if !strings.Contains(output, "closed") {
+		t.Errorf("expected closed in state completions, got %q", output)
+	}
+	if !strings.Contains(output, "all") {
+		t.Errorf("expected all in state completions, got %q", output)
 	}
 	if !strings.Contains(output, ":4") {
 		t.Errorf("expected ShellCompDirectiveNoFileComp (:4) in output, got %q", output)

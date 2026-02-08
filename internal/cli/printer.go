@@ -113,6 +113,28 @@ func printTaskSpawnerDetail(w io.Writer, ts *axonv1alpha1.TaskSpawner) {
 	}
 }
 
+func printWorkspaceTable(w io.Writer, workspaces []axonv1alpha1.Workspace) {
+	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(tw, "NAME\tREPO\tREF\tAGE")
+	for _, ws := range workspaces {
+		age := duration.HumanDuration(time.Since(ws.CreationTimestamp.Time))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", ws.Name, ws.Spec.Repo, ws.Spec.Ref, age)
+	}
+	tw.Flush()
+}
+
+func printWorkspaceDetail(w io.Writer, ws *axonv1alpha1.Workspace) {
+	printField(w, "Name", ws.Name)
+	printField(w, "Namespace", ws.Namespace)
+	printField(w, "Repo", ws.Spec.Repo)
+	if ws.Spec.Ref != "" {
+		printField(w, "Ref", ws.Spec.Ref)
+	}
+	if ws.Spec.SecretRef != nil {
+		printField(w, "Secret", ws.Spec.SecretRef.Name)
+	}
+}
+
 func printField(w io.Writer, label, value string) {
 	fmt.Fprintf(w, "%-20s%s\n", label+":", value)
 }

@@ -164,6 +164,113 @@ spec:
 	})
 })
 
+const cronTaskSpawnerName = "e2e-cron-spawner"
+
+var _ = Describe("Cron TaskSpawner", func() {
+	BeforeEach(func() {
+		By("cleaning up existing resources")
+		kubectl("delete", "taskspawner", cronTaskSpawnerName, "--ignore-not-found")
+		kubectl("delete", "secret", "claude-credentials", "--ignore-not-found")
+	})
+
+	AfterEach(func() {
+		if CurrentSpecReport().Failed() {
+			By("collecting debug info on failure")
+			GinkgoWriter.Println("=== Debug: Cron TaskSpawner status ===")
+			kubectl("get", "taskspawner", cronTaskSpawnerName, "-o", "yaml")
+			GinkgoWriter.Println("=== Debug: Deployment status ===")
+			kubectl("get", "deployment", cronTaskSpawnerName, "-o", "yaml")
+			GinkgoWriter.Println("=== Debug: Controller logs ===")
+			kubectl("logs", "-n", "axon-system", "deployment/axon-controller-manager", "--tail=50")
+		}
+
+		By("cleaning up test resources")
+		kubectl("delete", "taskspawner", cronTaskSpawnerName, "--ignore-not-found")
+		kubectl("delete", "secret", "claude-credentials", "--ignore-not-found")
+	})
+
+	It("should create a spawner Deployment and discover cron ticks", func() {
+		By("creating OAuth credentials secret")
+		Expect(kubectlWithInput("", "create", "secret", "generic", "claude-credentials",
+			"--from-literal=CLAUDE_CODE_OAUTH_TOKEN="+oauthToken)).To(Succeed())
+
+		By("creating a cron TaskSpawner with every-minute schedule")
+		tsYAML := `apiVersion: axon.io/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: ` + cronTaskSpawnerName + `
+spec:
+  when:
+    cron:
+      schedule: "* * * * *"
+  taskTemplate:
+    type: claude-code
+    model: ` + testModel + `
+    credentials:
+      type: oauth
+      secretRef:
+        name: claude-credentials
+    promptTemplate: "Cron triggered at {{.Time}} (schedule: {{.Schedule}}). Print 'Hello from cron'"
+  pollInterval: 1m
+`
+		Expect(kubectlWithInput(tsYAML, "apply", "-f", "-")).To(Succeed())
+
+		By("waiting for Deployment to become available")
+		Eventually(func() error {
+			return kubectlWithInput("", "wait", "--for=condition=available", "deployment/"+cronTaskSpawnerName, "--timeout=10s")
+		}, 2*time.Minute, 10*time.Second).Should(Succeed())
+
+		By("waiting for TaskSpawner phase to become Running")
+		Eventually(func() string {
+			return kubectlOutput("get", "taskspawner", cronTaskSpawnerName, "-o", "jsonpath={.status.phase}")
+		}, 3*time.Minute, 10*time.Second).Should(Equal("Running"))
+
+		By("verifying at least one Task was created")
+		Eventually(func() string {
+			return kubectlOutput("get", "tasks", "-l", "axon.io/taskspawner="+cronTaskSpawnerName, "-o", "name")
+		}, 3*time.Minute, 10*time.Second).ShouldNot(BeEmpty())
+	})
+
+	It("should be accessible via CLI with cron source info", func() {
+		By("creating a cron TaskSpawner")
+		tsYAML := `apiVersion: axon.io/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: ` + cronTaskSpawnerName + `
+spec:
+  when:
+    cron:
+      schedule: "0 9 * * 1"
+  taskTemplate:
+    type: claude-code
+    credentials:
+      type: oauth
+      secretRef:
+        name: claude-credentials
+  pollInterval: 5m
+`
+		Expect(kubectlWithInput(tsYAML, "apply", "-f", "-")).To(Succeed())
+
+		By("verifying axon get taskspawners lists it")
+		output := axonOutput("get", "taskspawners")
+		Expect(output).To(ContainSubstring(cronTaskSpawnerName))
+
+		By("verifying axon get taskspawner shows cron detail")
+		output = axonOutput("get", "taskspawner", cronTaskSpawnerName)
+		Expect(output).To(ContainSubstring(cronTaskSpawnerName))
+		Expect(output).To(ContainSubstring("Cron"))
+		Expect(output).To(ContainSubstring("0 9 * * 1"))
+
+		By("deleting via kubectl")
+		kubectl("delete", "taskspawner", cronTaskSpawnerName)
+
+		By("verifying it disappears from list")
+		Eventually(func() string {
+			return axonOutput("get", "taskspawners")
+		}, 30*time.Second, time.Second).ShouldNot(ContainSubstring(cronTaskSpawnerName))
+	})
+})
+
 var _ = Describe("get taskspawner", func() {
 	It("should succeed with 'taskspawners' alias", func() {
 		axonOutput("get", "taskspawners")

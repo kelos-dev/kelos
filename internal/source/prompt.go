@@ -43,6 +43,8 @@ func RenderPrompt(promptTemplate string, item WorkItem) (string, error) {
 		Labels   string
 		Comments string
 		Kind     string
+		Time     string
+		Schedule string
 	}{
 		ID:       item.ID,
 		Number:   item.Number,
@@ -52,6 +54,8 @@ func RenderPrompt(promptTemplate string, item WorkItem) (string, error) {
 		Labels:   strings.Join(item.Labels, ", "),
 		Comments: item.Comments,
 		Kind:     kind,
+		Time:     item.Time,
+		Schedule: item.Schedule,
 	}
 
 	var buf bytes.Buffer

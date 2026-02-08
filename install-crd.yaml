@@ -256,6 +256,16 @@ spec:
               when:
                 description: When defines the conditions that trigger task spawning.
                 properties:
+                  cron:
+                    description: Cron triggers task spawning on a cron schedule.
+                    properties:
+                      schedule:
+                        description: Schedule is a cron expression (e.g., "0 9 * *
+                          1" for every Monday at 9am).
+                        type: string
+                    required:
+                    - schedule
+                    type: object
                   githubIssues:
                     description: GitHubIssues discovers issues from a GitHub repository.
                     properties:

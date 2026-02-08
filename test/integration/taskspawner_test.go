@@ -510,4 +510,101 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(createdTS.Status.Message).To(ContainSubstring("nonexistent-workspace"))
 		})
 	})
+
+	Context("When creating a TaskSpawner with Cron source", func() {
+		It("Should create a Deployment and update status", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-taskspawner-cron",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a TaskSpawner with cron source")
+			ts := &axonv1alpha1.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-spawner-cron",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpawnerSpec{
+					When: axonv1alpha1.When{
+						Cron: &axonv1alpha1.Cron{
+							Schedule: "0 9 * * 1",
+						},
+					},
+					TaskTemplate: axonv1alpha1.TaskTemplate{
+						Type: "claude-code",
+						Credentials: axonv1alpha1.Credentials{
+							Type: axonv1alpha1.CredentialTypeOAuth,
+							SecretRef: axonv1alpha1.SecretReference{
+								Name: "claude-credentials",
+							},
+						},
+					},
+					PollInterval: "5m",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ts)).Should(Succeed())
+
+			tsLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
+			createdTS := &axonv1alpha1.TaskSpawner{}
+
+			By("Verifying the TaskSpawner has a finalizer")
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, tsLookupKey, createdTS)
+				if err != nil {
+					return false
+				}
+				for _, f := range createdTS.Finalizers {
+					if f == "axon.io/taskspawner-finalizer" {
+						return true
+					}
+				}
+				return false
+			}, timeout, interval).Should(BeTrue())
+
+			By("Verifying a Deployment is created")
+			deployLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
+			createdDeploy := &appsv1.Deployment{}
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, deployLookupKey, createdDeploy)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Verifying the Deployment labels")
+			Expect(createdDeploy.Labels["axon.io/taskspawner"]).To(Equal(ts.Name))
+
+			By("Verifying the Deployment spec")
+			Expect(createdDeploy.Spec.Template.Spec.Containers).To(HaveLen(1))
+			container := createdDeploy.Spec.Template.Spec.Containers[0]
+			Expect(container.Name).To(Equal("spawner"))
+			Expect(container.Image).To(Equal(controller.DefaultSpawnerImage))
+			Expect(container.Args).To(ConsistOf(
+				"--taskspawner-name="+ts.Name,
+				"--taskspawner-namespace="+ns.Name,
+			))
+
+			By("Verifying the Deployment has no env vars (cron needs no secrets)")
+			Expect(container.Env).To(BeEmpty())
+
+			By("Verifying the Deployment has owner reference")
+			Expect(createdDeploy.OwnerReferences).To(HaveLen(1))
+			Expect(createdDeploy.OwnerReferences[0].Name).To(Equal(ts.Name))
+			Expect(createdDeploy.OwnerReferences[0].Kind).To(Equal("TaskSpawner"))
+
+			By("Verifying TaskSpawner status has deploymentName")
+			Eventually(func() string {
+				err := k8sClient.Get(ctx, tsLookupKey, createdTS)
+				if err != nil {
+					return ""
+				}
+				return createdTS.Status.DeploymentName
+			}, timeout, interval).Should(Equal(ts.Name))
+
+			By("Verifying TaskSpawner phase is Pending")
+			Expect(createdTS.Status.Phase).To(Equal(axonv1alpha1.TaskSpawnerPhasePending))
+		})
+	})
 })

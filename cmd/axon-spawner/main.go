@@ -211,6 +211,19 @@ func buildSource(ts *axonv1alpha1.TaskSpawner, owner, repo string) (source.Sourc
 		}, nil
 	}
 
+	if ts.Spec.When.Cron != nil {
+		var lastDiscovery time.Time
+		if ts.Status.LastDiscoveryTime != nil {
+			lastDiscovery = ts.Status.LastDiscoveryTime.Time
+		} else {
+			lastDiscovery = ts.CreationTimestamp.Time
+		}
+		return &source.CronSource{
+			Schedule:          ts.Spec.When.Cron.Schedule,
+			LastDiscoveryTime: lastDiscovery,
+		}, nil
+	}
+
 	return nil, fmt.Errorf("no source configured in TaskSpawner %s/%s", ts.Namespace, ts.Name)
 }
 

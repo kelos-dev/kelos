@@ -78,6 +78,12 @@ type TaskTemplate struct {
 	// +optional
 	Model string `json:"model,omitempty"`
 
+	// Image optionally overrides the default agent container image.
+	// Custom images must implement the agent image interface
+	// (see docs/agent-image-interface.md).
+	// +optional
+	Image string `json:"image,omitempty"`
+
 	// PromptTemplate is a Go text/template for rendering the task prompt.
 	// Available variables: {{.Number}}, {{.Title}}, {{.Body}}, {{.URL}}, {{.Comments}}, {{.Labels}}, {{.Kind}}.
 	// +optional

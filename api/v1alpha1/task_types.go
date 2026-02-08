@@ -62,6 +62,12 @@ type TaskSpec struct {
 	// +optional
 	Model string `json:"model,omitempty"`
 
+	// Image optionally overrides the default agent container image.
+	// Custom images must implement the agent image interface
+	// (see docs/agent-image-interface.md).
+	// +optional
+	Image string `json:"image,omitempty"`
+
 	// WorkspaceRef optionally references a Workspace resource for the agent to work in.
 	// +optional
 	WorkspaceRef *WorkspaceReference `json:"workspaceRef,omitempty"`

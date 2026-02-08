@@ -26,10 +26,11 @@ const (
 	// WorkspaceMountPath is the mount path for the workspace volume.
 	WorkspaceMountPath = "/workspace"
 
-	// ClaudeCodeUID is the UID of the claude user in the claude-code
-	// container image (claude-code/Dockerfile). This must be kept in sync
-	// with the Dockerfile.
-	ClaudeCodeUID = int64(1100)
+	// ClaudeCodeUID is the UID shared between the git-clone init
+	// container and the agent container. Custom agent images must run
+	// as this UID so that both containers can read and write the
+	// workspace. This must be kept in sync with claude-code/Dockerfile.
+	ClaudeCodeUID = int64(61100)
 )
 
 // JobBuilder constructs Kubernetes Jobs for Tasks.
@@ -55,18 +56,20 @@ func (b *JobBuilder) Build(task *axonv1alpha1.Task, workspace *axonv1alpha1.Work
 
 // buildClaudeCodeJob creates a Job for Claude Code agent.
 func (b *JobBuilder) buildClaudeCodeJob(task *axonv1alpha1.Task, workspace *axonv1alpha1.WorkspaceSpec) (*batchv1.Job, error) {
-	args := []string{
-		"--dangerously-skip-permissions",
-		"--output-format", "stream-json",
-		"--verbose",
-		"-p", task.Spec.Prompt,
-	}
-
-	if task.Spec.Model != "" {
-		args = append(args, "--model", task.Spec.Model)
+	image := b.ClaudeCodeImage
+	if task.Spec.Image != "" {
+		image = task.Spec.Image
 	}
 
 	var envVars []corev1.EnvVar
+
+	// Set AXON_MODEL for all agent containers.
+	if task.Spec.Model != "" {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "AXON_MODEL",
+			Value: task.Spec.Model,
+		})
+	}
 
 	switch task.Spec.Credentials.Type {
 	case axonv1alpha1.CredentialTypeAPIKey:
@@ -120,9 +123,10 @@ func (b *JobBuilder) buildClaudeCodeJob(task *axonv1alpha1.Task, workspace *axon
 
 	mainContainer := corev1.Container{
 		Name:            "claude-code",
-		Image:           b.ClaudeCodeImage,
+		Image:           image,
 		ImagePullPolicy: b.ClaudeCodeImagePullPolicy,
-		Args:            args,
+		Command:         []string{"/axon_entrypoint.sh"},
+		Args:            []string{task.Spec.Prompt},
 		Env:             envVars,
 	}
 

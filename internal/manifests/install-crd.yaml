@@ -71,6 +71,12 @@ spec:
                 - secretRef
                 - type
                 type: object
+              image:
+                description: |-
+                  Image optionally overrides the default agent container image.
+                  Custom images must implement the agent image interface
+                  (see docs/agent-image-interface.md).
+                type: string
               model:
                 description: Model optionally overrides the default model.
                 type: string
@@ -237,6 +243,12 @@ spec:
                     - secretRef
                     - type
                     type: object
+                  image:
+                    description: |-
+                      Image optionally overrides the default agent container image.
+                      Custom images must implement the agent image interface
+                      (see docs/agent-image-interface.md).
+                    type: string
                   model:
                     description: Model optionally overrides the default model.
                     type: string

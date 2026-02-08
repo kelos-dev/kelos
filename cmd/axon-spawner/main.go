@@ -181,6 +181,7 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 				Prompt:                  prompt,
 				Credentials:             ts.Spec.TaskTemplate.Credentials,
 				Model:                   ts.Spec.TaskTemplate.Model,
+				Image:                   ts.Spec.TaskTemplate.Image,
 				TTLSecondsAfterFinished: ts.Spec.TaskTemplate.TTLSecondsAfterFinished,
 			},
 		}

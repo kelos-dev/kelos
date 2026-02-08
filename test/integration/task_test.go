@@ -101,18 +101,15 @@ var _ = Describe("Task Controller", func() {
 			Expect(createdJob.Spec.Template.Spec.Containers).To(HaveLen(1))
 			container := createdJob.Spec.Template.Spec.Containers[0]
 			Expect(container.Name).To(Equal("claude-code"))
-			Expect(container.Args).To(ContainElements(
-				"--dangerously-skip-permissions",
-				"--output-format", "stream-json",
-				"--verbose",
-				"-p", "Create a hello world program",
-				"--model", "claude-sonnet-4-20250514",
-			))
+			Expect(container.Command).To(Equal([]string{"/axon_entrypoint.sh"}))
+			Expect(container.Args).To(Equal([]string{"Create a hello world program"}))
 
-			By("Verifying the Job has API key env var")
-			Expect(container.Env).To(HaveLen(1))
-			Expect(container.Env[0].Name).To(Equal("ANTHROPIC_API_KEY"))
-			Expect(container.Env[0].ValueFrom.SecretKeyRef.Name).To(Equal("anthropic-api-key"))
+			By("Verifying the Job has AXON_MODEL and API key env vars")
+			Expect(container.Env).To(HaveLen(2))
+			Expect(container.Env[0].Name).To(Equal("AXON_MODEL"))
+			Expect(container.Env[0].Value).To(Equal("claude-sonnet-4-20250514"))
+			Expect(container.Env[1].Name).To(Equal("ANTHROPIC_API_KEY"))
+			Expect(container.Env[1].ValueFrom.SecretKeyRef.Name).To(Equal("anthropic-api-key"))
 
 			By("Verifying the Job has owner reference")
 			Expect(createdJob.OwnerReferences).To(HaveLen(1))
@@ -232,8 +229,12 @@ var _ = Describe("Task Controller", func() {
 			By("Logging the Job spec")
 			logJobSpec(createdJob)
 
-			By("Verifying the Job has OAuth token env var")
+			By("Verifying the Job uses uniform interface")
 			container := createdJob.Spec.Template.Spec.Containers[0]
+			Expect(container.Command).To(Equal([]string{"/axon_entrypoint.sh"}))
+			Expect(container.Args).To(Equal([]string{"Create a hello world program"}))
+
+			By("Verifying the Job has OAuth token env var")
 			Expect(container.Env).To(HaveLen(1))
 			Expect(container.Env[0].Name).To(Equal("CLAUDE_CODE_OAUTH_TOKEN"))
 			Expect(container.Env[0].ValueFrom.SecretKeyRef.Name).To(Equal("claude-oauth"))
@@ -433,8 +434,12 @@ var _ = Describe("Task Controller", func() {
 			By("Logging the Job spec")
 			logJobSpec(createdJob)
 
-			By("Verifying the main container has ANTHROPIC_API_KEY, GITHUB_TOKEN, and GH_TOKEN env vars")
+			By("Verifying the main container uses uniform interface")
 			mainContainer := createdJob.Spec.Template.Spec.Containers[0]
+			Expect(mainContainer.Command).To(Equal([]string{"/axon_entrypoint.sh"}))
+			Expect(mainContainer.Args).To(Equal([]string{"Create a PR"}))
+
+			By("Verifying the main container has ANTHROPIC_API_KEY, GITHUB_TOKEN, and GH_TOKEN env vars")
 			Expect(mainContainer.Env).To(HaveLen(3))
 			Expect(mainContainer.Env[0].Name).To(Equal("ANTHROPIC_API_KEY"))
 			Expect(mainContainer.Env[0].ValueFrom.SecretKeyRef.Name).To(Equal("anthropic-api-key"))
@@ -783,6 +788,101 @@ var _ = Describe("Task Controller", func() {
 			Consistently(func() error {
 				return k8sClient.Get(ctx, taskLookupKey, createdTask)
 			}, 3*time.Second, interval).Should(Succeed())
+		})
+	})
+
+	Context("When creating a Task with a custom image and workspace", func() {
+		It("Should create a Job using the custom image with uniform interface", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-task-custom-image",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with API key")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+			By("Creating a Workspace resource")
+			ws := &axonv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/example/repo.git",
+					Ref:  "main",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
+
+			By("Creating a Task with custom image")
+			task := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-custom-image",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "Fix the bug",
+					Credentials: axonv1alpha1.Credentials{
+						Type: axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{
+							Name: "anthropic-api-key",
+						},
+					},
+					Model: "gpt-4",
+					Image: "my-custom-agent:v1",
+					WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						Name: "test-workspace",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, task)).Should(Succeed())
+
+			By("Verifying a Job is created")
+			jobLookupKey := types.NamespacedName{Name: task.Name, Namespace: ns.Name}
+			createdJob := &batchv1.Job{}
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, jobLookupKey, createdJob)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Logging the Job spec")
+			logJobSpec(createdJob)
+
+			By("Verifying the custom image is used with uniform interface")
+			container := createdJob.Spec.Template.Spec.Containers[0]
+			Expect(container.Image).To(Equal("my-custom-agent:v1"))
+			Expect(container.Command).To(Equal([]string{"/axon_entrypoint.sh"}))
+			Expect(container.Args).To(Equal([]string{"Fix the bug"}))
+
+			By("Verifying AXON_MODEL is set")
+			Expect(container.Env).To(HaveLen(2))
+			Expect(container.Env[0].Name).To(Equal("AXON_MODEL"))
+			Expect(container.Env[0].Value).To(Equal("gpt-4"))
+
+			By("Verifying workspace volume mount and working dir")
+			Expect(container.VolumeMounts).To(HaveLen(1))
+			Expect(container.VolumeMounts[0].Name).To(Equal(controller.WorkspaceVolumeName))
+			Expect(container.WorkingDir).To(Equal("/workspace/repo"))
+
+			By("Verifying init container runs as shared UID")
+			Expect(createdJob.Spec.Template.Spec.InitContainers).To(HaveLen(1))
+			initContainer := createdJob.Spec.Template.Spec.InitContainers[0]
+			Expect(initContainer.SecurityContext.RunAsUser).NotTo(BeNil())
+			Expect(*initContainer.SecurityContext.RunAsUser).To(Equal(controller.ClaudeCodeUID))
 		})
 	})
 

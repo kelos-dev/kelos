@@ -71,10 +71,7 @@ jobs:
           cluster_name: kind
 
       - name: Build images
-        run: |
-          make image WHAT=cmd/axon-controller VERSION=e2e
-          make image WHAT=cmd/axon-spawner VERSION=e2e
-          make image WHAT=claude-code VERSION=e2e
+        run: make image VERSION=e2e
 
       - name: Load images into kind
         run: |

@@ -226,6 +226,7 @@ spec:
         name: my-workspace
       labels: [bug]
       state: open
+      pollInterval: 5m
   taskTemplate:
     type: claude-code
     credentials:
@@ -233,7 +234,6 @@ spec:
       secretRef:
         name: claude-credentials
     promptTemplate: "Fix: {{.Title}}\n{{.Body}}"
-  pollInterval: 5m
 ```
 
 ```bash
@@ -334,11 +334,12 @@ The key pattern here is `excludeLabels: [axon/needs-input]` — this creates a f
 | `spec.when.githubIssues.labels` | Filter issues by labels | No |
 | `spec.when.githubIssues.excludeLabels` | Exclude issues with these labels | No |
 | `spec.when.githubIssues.state` | Filter by state: `open`, `closed`, `all` (default: `open`) | No |
+| `spec.when.githubIssues.pollInterval` | How often to poll the GitHub API (default: `5m`) | No |
+| `spec.when.cron.schedule` | Cron expression (e.g., `0 9 * * 1`) | Yes (for cron) |
 | `spec.taskTemplate.type` | Agent type (`claude-code`) | Yes |
 | `spec.taskTemplate.credentials` | Credentials for the agent (same as Task) | Yes |
 | `spec.taskTemplate.model` | Model override | No |
 | `spec.taskTemplate.promptTemplate` | Go text/template for prompt (`{{.Title}}`, `{{.Body}}`, `{{.Number}}`, etc.) | No |
-| `spec.pollInterval` | How often to poll the source (default: `5m`) | No |
 
 </details>
 

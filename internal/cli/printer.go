@@ -91,6 +91,9 @@ func printTaskSpawnerDetail(w io.Writer, ts *axonv1alpha1.TaskSpawner) {
 		if len(gh.Labels) > 0 {
 			printField(w, "Labels", fmt.Sprintf("%v", gh.Labels))
 		}
+		if gh.PollInterval != "" {
+			printField(w, "Poll Interval", gh.PollInterval)
+		}
 	} else if ts.Spec.When.Cron != nil {
 		printField(w, "Source", "Cron")
 		printField(w, "Schedule", ts.Spec.When.Cron.Schedule)
@@ -99,7 +102,6 @@ func printTaskSpawnerDetail(w io.Writer, ts *axonv1alpha1.TaskSpawner) {
 	if ts.Spec.TaskTemplate.Model != "" {
 		printField(w, "Model", ts.Spec.TaskTemplate.Model)
 	}
-	printField(w, "Poll Interval", ts.Spec.PollInterval)
 	if ts.Status.DeploymentName != "" {
 		printField(w, "Deployment", ts.Status.DeploymentName)
 	}

@@ -83,8 +83,8 @@ func main() {
 			continue
 		}
 
-		interval := parsePollInterval(ts.Spec.PollInterval)
-		log.Info("sleeping until next cycle", "interval", interval)
+		interval := pollIntervalFor(&ts)
+		log.Info("Sleeping until next cycle", "interval", interval)
 		if done := sleepOrDone(ctx, interval); done {
 			return
 		}
@@ -225,6 +225,19 @@ func buildSource(ts *axonv1alpha1.TaskSpawner, owner, repo string) (source.Sourc
 	}
 
 	return nil, fmt.Errorf("no source configured in TaskSpawner %s/%s", ts.Namespace, ts.Name)
+}
+
+// pollIntervalFor returns the poll interval for the given TaskSpawner.
+// For GitHub sources the interval is read from spec.when.githubIssues.pollInterval
+// (defaulting to 5m). Cron sources always use a fixed 1m interval because ticks
+// are discovered retrospectively so no ticks are missed regardless of interval.
+func pollIntervalFor(ts *axonv1alpha1.TaskSpawner) time.Duration {
+	if gh := ts.Spec.When.GitHubIssues; gh != nil {
+		return parsePollInterval(gh.PollInterval)
+	}
+	// Cron: use a fixed 1-minute interval. Ticks are discovered
+	// retrospectively so no ticks are missed.
+	return 1 * time.Minute
 }
 
 func parsePollInterval(s string) time.Duration {

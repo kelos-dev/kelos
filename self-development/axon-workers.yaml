@@ -9,6 +9,7 @@ spec:
         - axon/needs-input
       workspaceRef:
         name: axon-workspace
+      pollInterval: 1m
   taskTemplate:
     model: opus
     type: claude-code
@@ -50,4 +51,3 @@ spec:
         - You cannot make any progress on the issue, explain why.
       - If you find anything worth considering (e.g. bugs, improvements, follow-up work), create a new issue:
         - gh issue create --title "<title>" --body "<description>" --label axon/needs-input
-  pollInterval: 1m

@@ -18,6 +18,8 @@ const (
 
 // When defines the conditions that trigger task spawning.
 // Exactly one field must be set.
+// +kubebuilder:validation:MinProperties=1
+// +kubebuilder:validation:MaxProperties=1
 type When struct {
 	// GitHubIssues discovers issues from a GitHub repository.
 	// +optional
@@ -62,6 +64,11 @@ type GitHubIssues struct {
 	// +kubebuilder:default=open
 	// +optional
 	State string `json:"state,omitempty"`
+
+	// PollInterval is how often to poll the GitHub API for new items (e.g., "5m"). Defaults to "5m".
+	// +kubebuilder:default="5m"
+	// +optional
+	PollInterval string `json:"pollInterval,omitempty"`
 }
 
 // TaskTemplate defines the template for spawned Tasks.
@@ -104,11 +111,6 @@ type TaskSpawnerSpec struct {
 	// TaskTemplate defines the template for spawned Tasks.
 	// +kubebuilder:validation:Required
 	TaskTemplate TaskTemplate `json:"taskTemplate"`
-
-	// PollInterval is how often to poll the source for new items (e.g., "5m"). Defaults to "5m".
-	// +kubebuilder:default="5m"
-	// +optional
-	PollInterval string `json:"pollInterval,omitempty"`
 }
 
 // TaskSpawnerStatus defines the observed state of TaskSpawner.

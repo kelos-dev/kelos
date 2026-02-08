@@ -102,6 +102,11 @@ var _ = Describe("Completion", func() {
 					Namespace: ns.Name,
 				},
 				Spec: axonv1alpha1.TaskSpawnerSpec{
+					When: axonv1alpha1.When{
+						Cron: &axonv1alpha1.Cron{
+							Schedule: "0 9 * * 1",
+						},
+					},
 					TaskTemplate: axonv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: axonv1alpha1.Credentials{

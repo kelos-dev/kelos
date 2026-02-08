@@ -194,11 +194,6 @@ spec:
           spec:
             description: TaskSpawnerSpec defines the desired state of TaskSpawner.
             properties:
-              pollInterval:
-                default: 5m
-                description: PollInterval is how often to poll the source for new
-                  items (e.g., "5m"). Defaults to "5m".
-                type: string
               taskTemplate:
                 description: TaskTemplate defines the template for spawned Tasks.
                 properties:
@@ -255,6 +250,8 @@ spec:
                 type: object
               when:
                 description: When defines the conditions that trigger task spawning.
+                maxProperties: 1
+                minProperties: 1
                 properties:
                   cron:
                     description: Cron triggers task spawning on a cron schedule.
@@ -280,6 +277,11 @@ spec:
                         items:
                           type: string
                         type: array
+                      pollInterval:
+                        default: 5m
+                        description: PollInterval is how often to poll the GitHub
+                          API for new items (e.g., "5m"). Defaults to "5m".
+                        type: string
                       state:
                         default: open
                         description: State filters issues by state (open, closed,

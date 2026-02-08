@@ -77,6 +77,7 @@ spec:
       labels: [do-not-remove/e2e-anchor]
       excludeLabels: [e2e-exclude-placeholder]
       state: open
+      pollInterval: 1m
   taskTemplate:
     type: claude-code
     credentials:
@@ -84,7 +85,6 @@ spec:
       secretRef:
         name: claude-credentials
     promptTemplate: "Fix: {{.Title}}\n{{.Body}}"
-  pollInterval: 1m
 `
 		Expect(kubectlWithInput(tsYAML, "apply", "-f", "-")).To(Succeed())
 
@@ -125,13 +125,13 @@ spec:
     githubIssues:
       workspaceRef:
         name: e2e-spawner-workspace
+      pollInterval: 5m
   taskTemplate:
     type: claude-code
     credentials:
       type: oauth
       secretRef:
         name: claude-credentials
-  pollInterval: 5m
 `
 		Expect(kubectlWithInput(tsYAML, "apply", "-f", "-")).To(Succeed())
 
@@ -213,7 +213,6 @@ spec:
       secretRef:
         name: claude-credentials
     promptTemplate: "Cron triggered at {{.Time}} (schedule: {{.Schedule}}). Print 'Hello from cron'"
-  pollInterval: 1m
 `
 		Expect(kubectlWithInput(tsYAML, "apply", "-f", "-")).To(Succeed())
 
@@ -249,7 +248,6 @@ spec:
       type: oauth
       secretRef:
         name: claude-credentials
-  pollInterval: 5m
 `
 		Expect(kubectlWithInput(tsYAML, "apply", "-f", "-")).To(Succeed())
 

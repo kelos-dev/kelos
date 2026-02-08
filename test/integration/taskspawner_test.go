@@ -56,7 +56,8 @@ var _ = Describe("TaskSpawner Controller", func() {
 							WorkspaceRef: &axonv1alpha1.WorkspaceReference{
 								Name: "test-workspace",
 							},
-							State: "open",
+							State:        "open",
+							PollInterval: "5m",
 						},
 					},
 					TaskTemplate: axonv1alpha1.TaskTemplate{
@@ -68,7 +69,6 @@ var _ = Describe("TaskSpawner Controller", func() {
 							},
 						},
 					},
-					PollInterval: "5m",
 				},
 			}
 			Expect(k8sClient.Create(ctx, ts)).Should(Succeed())
@@ -420,8 +420,9 @@ var _ = Describe("TaskSpawner Controller", func() {
 							WorkspaceRef: &axonv1alpha1.WorkspaceReference{
 								Name: "test-workspace-types",
 							},
-							Types: []string{"issues", "pulls"},
-							State: "open",
+							Types:        []string{"issues", "pulls"},
+							State:        "open",
+							PollInterval: "5m",
 						},
 					},
 					TaskTemplate: axonv1alpha1.TaskTemplate{
@@ -433,7 +434,6 @@ var _ = Describe("TaskSpawner Controller", func() {
 							},
 						},
 					},
-					PollInterval: "5m",
 				},
 			}
 			Expect(k8sClient.Create(ctx, ts)).Should(Succeed())
@@ -511,6 +511,97 @@ var _ = Describe("TaskSpawner Controller", func() {
 		})
 	})
 
+	Context("When creating a TaskSpawner with no source in When", func() {
+		It("Should be rejected by validation", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-taskspawner-no-source",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a TaskSpawner with empty When")
+			ts := &axonv1alpha1.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-spawner-no-source",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpawnerSpec{
+					When: axonv1alpha1.When{},
+					TaskTemplate: axonv1alpha1.TaskTemplate{
+						Type: "claude-code",
+						Credentials: axonv1alpha1.Credentials{
+							Type: axonv1alpha1.CredentialTypeOAuth,
+							SecretRef: axonv1alpha1.SecretReference{
+								Name: "claude-credentials",
+							},
+						},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, ts)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("when"))
+		})
+	})
+
+	Context("When creating a TaskSpawner with both sources in When", func() {
+		It("Should be rejected by validation", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-taskspawner-both-sources",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Workspace")
+			ws := &axonv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace-both",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/axon-core/axon.git",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
+
+			By("Creating a TaskSpawner with both githubIssues and cron")
+			ts := &axonv1alpha1.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-spawner-both-sources",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpawnerSpec{
+					When: axonv1alpha1.When{
+						GitHubIssues: &axonv1alpha1.GitHubIssues{
+							WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+								Name: "test-workspace-both",
+							},
+						},
+						Cron: &axonv1alpha1.Cron{
+							Schedule: "0 9 * * 1",
+						},
+					},
+					TaskTemplate: axonv1alpha1.TaskTemplate{
+						Type: "claude-code",
+						Credentials: axonv1alpha1.Credentials{
+							Type: axonv1alpha1.CredentialTypeOAuth,
+							SecretRef: axonv1alpha1.SecretReference{
+								Name: "claude-credentials",
+							},
+						},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, ts)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("when"))
+		})
+	})
+
 	Context("When creating a TaskSpawner with Cron source", func() {
 		It("Should create a Deployment and update status", func() {
 			By("Creating a namespace")
@@ -542,7 +633,6 @@ var _ = Describe("TaskSpawner Controller", func() {
 							},
 						},
 					},
-					PollInterval: "5m",
 				},
 			}
 			Expect(k8sClient.Create(ctx, ts)).Should(Succeed())

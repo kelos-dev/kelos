@@ -3,8 +3,10 @@ package controller
 import (
 	"testing"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
 )
 
 func TestParseGitHubOwnerRepo(t *testing.T) {
@@ -238,6 +240,138 @@ func TestBuildDeploymentWithEnterpriseURL(t *testing.T) {
 				if found != tt.wantAPIBaseURLArg {
 					t.Errorf("Got arg %q, want %q", found, tt.wantAPIBaseURLArg)
 				}
+			}
+		})
+	}
+}
+
+func TestDeploymentBuilderControllerImageAnnotation(t *testing.T) {
+	ts := &axonv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-spawner",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpawnerSpec{
+			When: axonv1alpha1.When{
+				Cron: &axonv1alpha1.Cron{Schedule: "0 9 * * 1"},
+			},
+		},
+	}
+
+	t.Run("annotation set when ControllerImage is provided", func(t *testing.T) {
+		b := &DeploymentBuilder{
+			SpawnerImage:    DefaultSpawnerImage,
+			ControllerImage: "gjkim42/axon-controller:v1.0.0",
+		}
+		deploy := b.Build(ts, nil)
+		ann := deploy.Spec.Template.Annotations
+		if ann == nil {
+			t.Fatal("expected pod template annotations to be set")
+		}
+		if got := ann[ControllerImageAnnotation]; got != "gjkim42/axon-controller:v1.0.0" {
+			t.Errorf("annotation %q = %q, want %q", ControllerImageAnnotation, got, "gjkim42/axon-controller:v1.0.0")
+		}
+	})
+
+	t.Run("no annotation when ControllerImage is empty", func(t *testing.T) {
+		b := &DeploymentBuilder{
+			SpawnerImage: DefaultSpawnerImage,
+		}
+		deploy := b.Build(ts, nil)
+		ann := deploy.Spec.Template.Annotations
+		if ann != nil {
+			t.Errorf("expected nil pod template annotations, got %v", ann)
+		}
+	})
+}
+
+func TestDeploymentBuilderImagePullPolicy(t *testing.T) {
+	ts := &axonv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-spawner",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpawnerSpec{
+			When: axonv1alpha1.When{
+				Cron: &axonv1alpha1.Cron{Schedule: "0 9 * * 1"},
+			},
+		},
+	}
+
+	b := &DeploymentBuilder{
+		SpawnerImage:           DefaultSpawnerImage,
+		SpawnerImagePullPolicy: corev1.PullAlways,
+	}
+	deploy := b.Build(ts, nil)
+
+	container := deploy.Spec.Template.Spec.Containers[0]
+	if container.ImagePullPolicy != corev1.PullAlways {
+		t.Errorf("ImagePullPolicy = %q, want %q", container.ImagePullPolicy, corev1.PullAlways)
+	}
+}
+
+func TestEqualAnnotations(t *testing.T) {
+	tests := []struct {
+		name string
+		a    map[string]string
+		b    map[string]string
+		want bool
+	}{
+		{
+			name: "both nil",
+			a:    nil,
+			b:    nil,
+			want: true,
+		},
+		{
+			name: "both empty",
+			a:    map[string]string{},
+			b:    map[string]string{},
+			want: true,
+		},
+		{
+			name: "nil vs empty",
+			a:    nil,
+			b:    map[string]string{},
+			want: true,
+		},
+		{
+			name: "equal",
+			a:    map[string]string{"key": "value"},
+			b:    map[string]string{"key": "value"},
+			want: true,
+		},
+		{
+			name: "different values",
+			a:    map[string]string{"key": "v1"},
+			b:    map[string]string{"key": "v2"},
+			want: false,
+		},
+		{
+			name: "different keys",
+			a:    map[string]string{"key1": "value"},
+			b:    map[string]string{"key2": "value"},
+			want: false,
+		},
+		{
+			name: "extra key in b",
+			a:    map[string]string{"key": "value"},
+			b:    map[string]string{"key": "value", "extra": "val"},
+			want: false,
+		},
+		{
+			name: "empty string vs missing key",
+			a:    map[string]string{"key": ""},
+			b:    nil,
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := equalAnnotations(tt.a, tt.b)
+			if got != tt.want {
+				t.Errorf("equalAnnotations(%v, %v) = %v, want %v", tt.a, tt.b, got, tt.want)
 			}
 		})
 	}

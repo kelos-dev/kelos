@@ -269,6 +269,7 @@ spec:
           image: gjkim42/axon-controller:latest
           args:
             - --leader-elect
+            - --controller-image=gjkim42/axon-controller:latest
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

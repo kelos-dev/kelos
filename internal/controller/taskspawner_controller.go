@@ -195,7 +195,7 @@ func (r *TaskSpawnerReconciler) updateDeployment(ctx context.Context, ts *axonv1
 
 	desired := r.DeploymentBuilder.Build(ts, workspace)
 
-	// Compare container spec (image, args, env)
+	// Compare container spec (image, pull policy, args, env) and pod template annotations
 	if len(deploy.Spec.Template.Spec.Containers) == 0 {
 		return nil
 	}
@@ -203,16 +203,20 @@ func (r *TaskSpawnerReconciler) updateDeployment(ctx context.Context, ts *axonv1
 	target := desired.Spec.Template.Spec.Containers[0]
 
 	needsUpdate := current.Image != target.Image ||
+		current.ImagePullPolicy != target.ImagePullPolicy ||
 		!equalStringSlices(current.Args, target.Args) ||
-		!equalEnvVars(current.Env, target.Env)
+		!equalEnvVars(current.Env, target.Env) ||
+		!equalAnnotations(deploy.Spec.Template.Annotations, desired.Spec.Template.Annotations)
 
 	if !needsUpdate {
 		return nil
 	}
 
 	deploy.Spec.Template.Spec.Containers[0].Image = target.Image
+	deploy.Spec.Template.Spec.Containers[0].ImagePullPolicy = target.ImagePullPolicy
 	deploy.Spec.Template.Spec.Containers[0].Args = target.Args
 	deploy.Spec.Template.Spec.Containers[0].Env = target.Env
+	deploy.Spec.Template.Annotations = desired.Spec.Template.Annotations
 
 	if err := r.Update(ctx, deploy); err != nil {
 		return err
@@ -258,6 +262,19 @@ func equalEnvVars(a, b []corev1.EnvVar) bool {
 					return false
 				}
 			}
+		}
+	}
+	return true
+}
+
+func equalAnnotations(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, va := range a {
+		vb, ok := b[k]
+		if !ok || va != vb {
+			return false
 		}
 	}
 	return true

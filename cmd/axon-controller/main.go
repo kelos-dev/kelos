@@ -38,6 +38,7 @@ func main() {
 	var geminiImagePullPolicy string
 	var spawnerImage string
 	var spawnerImagePullPolicy string
+	var controllerImage string
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -52,6 +53,7 @@ func main() {
 	flag.StringVar(&geminiImagePullPolicy, "gemini-image-pull-policy", "", "The image pull policy for Gemini CLI agent containers (e.g., Always, Never, IfNotPresent).")
 	flag.StringVar(&spawnerImage, "spawner-image", controller.DefaultSpawnerImage, "The image to use for spawner Deployments.")
 	flag.StringVar(&spawnerImagePullPolicy, "spawner-image-pull-policy", "", "The image pull policy for spawner Deployments (e.g., Always, Never, IfNotPresent).")
+	flag.StringVar(&controllerImage, "controller-image", "", "The controller image, used to trigger spawner rolling updates on upgrades.")
 
 	opts := zap.Options{
 		Development: true,
@@ -91,6 +93,7 @@ func main() {
 	deploymentBuilder := controller.NewDeploymentBuilder()
 	deploymentBuilder.SpawnerImage = spawnerImage
 	deploymentBuilder.SpawnerImagePullPolicy = corev1.PullPolicy(spawnerImagePullPolicy)
+	deploymentBuilder.ControllerImage = controllerImage
 	if err = (&controller.TaskSpawnerReconciler{
 		Client:            mgr.GetClient(),
 		Scheme:            mgr.GetScheme(),

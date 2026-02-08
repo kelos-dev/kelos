@@ -109,6 +109,13 @@ type TaskSpawnerSpec struct {
 	// +kubebuilder:default="5m"
 	// +optional
 	PollInterval string `json:"pollInterval,omitempty"`
+
+	// MaxConcurrency limits the number of concurrently running (non-terminal) Tasks.
+	// When the limit is reached, the spawner skips creating new Tasks until
+	// existing ones complete. If unset or zero, there is no concurrency limit.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	MaxConcurrency *int32 `json:"maxConcurrency,omitempty"`
 }
 
 // TaskSpawnerStatus defines the observed state of TaskSpawner.
@@ -129,6 +136,10 @@ type TaskSpawnerStatus struct {
 	// +optional
 	TotalTasksCreated int `json:"totalTasksCreated,omitempty"`
 
+	// ActiveTasks is the number of currently active (non-terminal) Tasks.
+	// +optional
+	ActiveTasks int `json:"activeTasks,omitempty"`
+
 	// LastDiscoveryTime is the last time the source was polled.
 	// +optional
 	LastDiscoveryTime *metav1.Time `json:"lastDiscoveryTime,omitempty"`
@@ -142,6 +153,7 @@ type TaskSpawnerStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Workspace",type=string,JSONPath=`.spec.when.githubIssues.workspaceRef.name`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Active",type=integer,JSONPath=`.status.activeTasks`
 // +kubebuilder:printcolumn:name="Discovered",type=integer,JSONPath=`.status.totalDiscovered`
 // +kubebuilder:printcolumn:name="Tasks",type=integer,JSONPath=`.status.totalTasksCreated`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`

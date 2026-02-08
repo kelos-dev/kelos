@@ -511,6 +511,100 @@ var _ = Describe("TaskSpawner Controller", func() {
 		})
 	})
 
+	Context("When creating a TaskSpawner with maxConcurrency", func() {
+		It("Should store maxConcurrency in spec and activeTasks in status", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-taskspawner-maxconc",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Workspace")
+			ws := &axonv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace-maxconc",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/axon-core/axon.git",
+					Ref:  "main",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
+
+			By("Creating a TaskSpawner with maxConcurrency=3")
+			maxConc := int32(3)
+			ts := &axonv1alpha1.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-spawner-maxconc",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpawnerSpec{
+					When: axonv1alpha1.When{
+						GitHubIssues: &axonv1alpha1.GitHubIssues{
+							WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+								Name: "test-workspace-maxconc",
+							},
+							State: "open",
+						},
+					},
+					TaskTemplate: axonv1alpha1.TaskTemplate{
+						Type: "claude-code",
+						Credentials: axonv1alpha1.Credentials{
+							Type: axonv1alpha1.CredentialTypeOAuth,
+							SecretRef: axonv1alpha1.SecretReference{
+								Name: "claude-credentials",
+							},
+						},
+					},
+					PollInterval:   "5m",
+					MaxConcurrency: &maxConc,
+				},
+			}
+			Expect(k8sClient.Create(ctx, ts)).Should(Succeed())
+
+			By("Verifying maxConcurrency is stored in spec")
+			tsLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
+			createdTS := &axonv1alpha1.TaskSpawner{}
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, tsLookupKey, createdTS)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+			Expect(createdTS.Spec.MaxConcurrency).NotTo(BeNil())
+			Expect(*createdTS.Spec.MaxConcurrency).To(Equal(int32(3)))
+
+			By("Verifying a Deployment is created")
+			deployLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
+			createdDeploy := &appsv1.Deployment{}
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, deployLookupKey, createdDeploy)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Updating activeTasks in status")
+			Eventually(func() error {
+				err := k8sClient.Get(ctx, tsLookupKey, createdTS)
+				if err != nil {
+					return err
+				}
+				createdTS.Status.ActiveTasks = 2
+				return k8sClient.Status().Update(ctx, createdTS)
+			}, timeout, interval).Should(Succeed())
+
+			By("Verifying activeTasks is stored in status")
+			updatedTS := &axonv1alpha1.TaskSpawner{}
+			Eventually(func() int {
+				err := k8sClient.Get(ctx, tsLookupKey, updatedTS)
+				if err != nil {
+					return -1
+				}
+				return updatedTS.Status.ActiveTasks
+			}, timeout, interval).Should(Equal(2))
+		})
+	})
+
 	Context("When creating a TaskSpawner with Cron source", func() {
 		It("Should create a Deployment and update status", func() {
 			By("Creating a namespace")

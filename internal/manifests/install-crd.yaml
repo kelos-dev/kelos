@@ -160,6 +160,9 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
+    - jsonPath: .status.activeTasks
+      name: Active
+      type: integer
     - jsonPath: .status.totalDiscovered
       name: Discovered
       type: integer
@@ -194,6 +197,14 @@ spec:
           spec:
             description: TaskSpawnerSpec defines the desired state of TaskSpawner.
             properties:
+              maxConcurrency:
+                description: |-
+                  MaxConcurrency limits the number of concurrently running (non-terminal) Tasks.
+                  When the limit is reached, the spawner skips creating new Tasks until
+                  existing ones complete. If unset or zero, there is no concurrency limit.
+                format: int32
+                minimum: 0
+                type: integer
               pollInterval:
                 default: 5m
                 description: PollInterval is how often to poll the source for new
@@ -318,6 +329,10 @@ spec:
           status:
             description: TaskSpawnerStatus defines the observed state of TaskSpawner.
             properties:
+              activeTasks:
+                description: ActiveTasks is the number of currently active (non-terminal)
+                  Tasks.
+                type: integer
               deploymentName:
                 description: DeploymentName is the name of the Deployment running
                   the spawner.

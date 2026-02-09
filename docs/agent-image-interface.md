@@ -36,6 +36,7 @@ Axon sets the following reserved environment variables on agent containers:
 | `GITHUB_TOKEN` | GitHub token for workspace access | When workspace has a `secretRef` |
 | `GH_TOKEN` | GitHub token for `gh` CLI (github.com) | When workspace has a `secretRef` and repo is on github.com |
 | `GH_ENTERPRISE_TOKEN` | GitHub token for `gh` CLI (GitHub Enterprise) | When workspace has a `secretRef` and repo is on a GitHub Enterprise host |
+| `GH_HOST` | Hostname for GitHub Enterprise | When repo is on a GitHub Enterprise host |
 
 ### 4. User ID
 

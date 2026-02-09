@@ -139,7 +139,7 @@ To adapt these examples for your own repository:
 
 3. **Customize the prompt:**
    - Edit `spec.taskTemplate.promptTemplate` to match your workflow
-   - Available template variables: `{{.Number}}`, `{{.Title}}`, `{{.Body}}`, `{{.URL}}`
+   - Available template variables: `{{.Number}}`, `{{.Title}}`, `{{.Body}}`, `{{.URL}}`, `{{.Comments}}`, `{{.Labels}}`, `{{.Kind}}`
 
 4. **Set the polling interval:**
    ```yaml

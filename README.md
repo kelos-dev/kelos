@@ -310,7 +310,9 @@ The key pattern here is `excludeLabels: [axon/needs-input]` — this creates a f
 | `spec.credentials.type` | `api-key` or `oauth` | Yes |
 | `spec.credentials.secretRef.name` | Secret name with credentials | Yes |
 | `spec.model` | Model override (e.g., `claude-sonnet-4-20250514`) | No |
+| `spec.image` | Custom agent image override | No |
 | `spec.workspaceRef.name` | Name of a Workspace resource to use | No |
+| `spec.ttlSecondsAfterFinished` | Auto-delete task after N seconds (0 for immediate) | No |
 
 </details>
 
@@ -337,8 +339,11 @@ The key pattern here is `excludeLabels: [axon/needs-input]` — this creates a f
 | `spec.taskTemplate.type` | Agent type (`claude-code`, `codex`, or `gemini`) | Yes |
 | `spec.taskTemplate.credentials` | Credentials for the agent (same as Task) | Yes |
 | `spec.taskTemplate.model` | Model override | No |
+| `spec.taskTemplate.image` | Custom agent image override | No |
 | `spec.taskTemplate.promptTemplate` | Go text/template for prompt (`{{.Title}}`, `{{.Body}}`, `{{.Number}}`, etc.) | No |
+| `spec.taskTemplate.ttlSecondsAfterFinished` | Auto-delete spawned tasks after N seconds | No |
 | `spec.pollInterval` | How often to poll the source (default: `5m`) | No |
+| `spec.maxConcurrency` | Limit max concurrent running tasks | No |
 
 </details>
 
@@ -352,6 +357,21 @@ The key pattern here is `excludeLabels: [axon/needs-input]` — this creates a f
 | `status.podName` | Name of the Pod running the Task |
 | `status.startTime` | When the Task started running |
 | `status.completionTime` | When the Task completed |
+| `status.message` | Additional information about the current status |
+
+</details>
+
+<details>
+<summary><strong>TaskSpawner Status</strong></summary>
+
+| Field | Description |
+|-------|-------------|
+| `status.phase` | Current phase: `Pending`, `Running`, or `Failed` |
+| `status.deploymentName` | Name of the Deployment running the spawner |
+| `status.totalDiscovered` | Total number of items discovered from the source |
+| `status.totalTasksCreated` | Total number of Tasks created by this spawner |
+| `status.activeTasks` | Number of currently active (non-terminal) Tasks |
+| `status.lastDiscoveryTime` | Last time the source was polled |
 | `status.message` | Additional information about the current status |
 
 </details>
@@ -413,6 +433,7 @@ If both `name` and `repo` are set, `name` takes precedence. The `--workspace` CL
 
 | Field | Description |
 |-------|-------------|
+| `type` | Default agent type (`claude-code`, `codex`, or `gemini`) |
 | `model` | Default model override |
 | `namespace` | Default Kubernetes namespace |
 

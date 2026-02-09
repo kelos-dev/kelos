@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -14,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
@@ -189,8 +191,27 @@ func resourceClient(mapper meta.RESTMapper, dyn dynamic.Interface, obj *unstruct
 	return dyn.Resource(mapping.Resource), nil
 }
 
+// waitForDeletion polls until the given resource is fully deleted or the
+// context is cancelled. Server-side apply on a resource that still carries a
+// deletionTimestamp succeeds but the resource continues to be deleted, leaving
+// the API unavailable. Waiting avoids this race.
+func waitForDeletion(ctx context.Context, rc dynamic.ResourceInterface, name string) error {
+	return wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 60*time.Second, true, func(ctx context.Context) (bool, error) {
+		_, err := rc.Get(ctx, name, metav1.GetOptions{})
+		if errors.IsNotFound(err) {
+			return true, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return false, nil
+	})
+}
+
 // applyManifests parses multi-document YAML and applies each object using
-// server-side apply.
+// server-side apply. If an existing resource is being deleted (has a
+// deletionTimestamp), it waits for deletion to complete before applying to
+// prevent the applied resource from being garbage collected.
 func applyManifests(ctx context.Context, dc discovery.DiscoveryInterface, dyn dynamic.Interface, data []byte) error {
 	objs, err := parseManifests(data)
 	if err != nil {
@@ -205,6 +226,21 @@ func applyManifests(ctx context.Context, dc discovery.DiscoveryInterface, dyn dy
 		if err != nil {
 			return err
 		}
+
+		// Check if the resource is being deleted. If so, wait for
+		// deletion to finish before applying; otherwise server-side
+		// apply succeeds but the resource is still removed.
+		existing, err := rc.Get(ctx, obj.GetName(), metav1.GetOptions{})
+		if err != nil && !errors.IsNotFound(err) {
+			return fmt.Errorf("checking %s %s: %w", obj.GetKind(), obj.GetName(), err)
+		}
+		if err == nil && existing.GetDeletionTimestamp() != nil {
+			fmt.Fprintf(os.Stdout, "Waiting for %s %s to be deleted\n", obj.GetKind(), obj.GetName())
+			if err := waitForDeletion(ctx, rc, obj.GetName()); err != nil {
+				return fmt.Errorf("waiting for %s %s to be deleted: %w", obj.GetKind(), obj.GetName(), err)
+			}
+		}
+
 		objData, err := yaml.Marshal(obj.Object)
 		if err != nil {
 			return fmt.Errorf("marshaling %s %s: %w", obj.GetKind(), obj.GetName(), err)

@@ -2,7 +2,15 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"testing"
+	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 
 	"github.com/axon-core/axon/internal/manifests"
 	"github.com/axon-core/axon/internal/version"
@@ -255,5 +263,49 @@ func TestVersionCommand(t *testing.T) {
 	cmd.SetArgs([]string{"version"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("version command failed: %v", err)
+	}
+}
+
+func TestWaitForDeletion_AlreadyGone(t *testing.T) {
+	scheme := runtime.NewScheme()
+	client := dynamicfake.NewSimpleDynamicClient(scheme)
+
+	gvr := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "configmaps"}
+	rc := client.Resource(gvr).Namespace("default")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := waitForDeletion(ctx, rc, "nonexistent"); err != nil {
+		t.Fatalf("unexpected error waiting for already-deleted resource: %v", err)
+	}
+}
+
+func TestWaitForDeletion_EventuallyDeleted(t *testing.T) {
+	scheme := runtime.NewScheme()
+
+	obj := &unstructured.Unstructured{}
+	obj.SetGroupVersionKind(schema.GroupVersionKind{Group: "", Version: "v1", Kind: "ConfigMap"})
+	obj.SetName("test-cm")
+	obj.SetNamespace("default")
+	now := metav1.Now()
+	obj.SetDeletionTimestamp(&now)
+
+	client := dynamicfake.NewSimpleDynamicClient(scheme, obj)
+
+	gvr := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "configmaps"}
+	rc := client.Resource(gvr).Namespace("default")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Delete the object asynchronously to simulate eventual deletion.
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		_ = rc.Delete(context.Background(), "test-cm", metav1.DeleteOptions{})
+	}()
+
+	if err := waitForDeletion(ctx, rc, "test-cm"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

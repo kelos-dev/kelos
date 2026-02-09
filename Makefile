@@ -3,6 +3,13 @@ REGISTRY ?= gjkim42
 VERSION ?= latest
 IMAGE_DIRS ?= cmd/axon-controller cmd/axon-spawner claude-code codex
 
+# Version injection for the axon CLI – only set ldflags when an explicit
+# version is given so that dev builds fall through to runtime/debug info.
+VERSION_PKG = github.com/axon-core/axon/internal/version
+ifneq ($(VERSION),latest)
+LDFLAGS ?= -X $(VERSION_PKG).Version=$(VERSION)
+endif
+
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.31.0
 
@@ -64,7 +71,7 @@ verify: controller-gen ## Verify everything is up-to-date and correct.
 build: ## Build binaries (use WHAT=cmd/axon to build specific binary).
 	@for dir in $$(go list ./$(or $(WHAT),cmd/...)); do \
 		bin_name=$$(basename $$dir); \
-		CGO_ENABLED=0 go build -o bin/$$bin_name $$dir; \
+		CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/$$bin_name $$dir; \
 	done
 
 .PHONY: run

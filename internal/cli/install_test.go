@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/axon-core/axon/internal/manifests"
+	"github.com/axon-core/axon/internal/version"
 )
 
 func TestParseManifests_SingleDocument(t *testing.T) {
@@ -188,5 +190,70 @@ func TestUninstallCommand_RejectsExtraArgs(t *testing.T) {
 	cmd.SetArgs([]string{"uninstall", "extra-arg"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error when extra arguments are provided")
+	}
+}
+
+func TestVersionedManifest_Latest(t *testing.T) {
+	original := version.Version
+	defer func() { version.Version = original }()
+
+	version.Version = "latest"
+	data := []byte("image: gjkim42/axon-controller:latest")
+	result := versionedManifest(data)
+	if !bytes.Equal(result, data) {
+		t.Errorf("expected manifest unchanged for latest version, got %s", string(result))
+	}
+}
+
+func TestVersionedManifest_Tagged(t *testing.T) {
+	original := version.Version
+	defer func() { version.Version = original }()
+
+	version.Version = "v0.1.0"
+	data := []byte("image: gjkim42/axon-controller:latest")
+	result := versionedManifest(data)
+	expected := []byte("image: gjkim42/axon-controller:v0.1.0")
+	if !bytes.Equal(result, expected) {
+		t.Errorf("expected %s, got %s", string(expected), string(result))
+	}
+}
+
+func TestVersionedManifest_MultipleImages(t *testing.T) {
+	original := version.Version
+	defer func() { version.Version = original }()
+
+	version.Version = "v0.2.0"
+	data := []byte(`image: gjkim42/axon-controller:latest
+args:
+  - --spawner-image=gjkim42/axon-spawner:latest
+  - --claude-code-image=gjkim42/claude-code:latest`)
+	result := versionedManifest(data)
+	if bytes.Contains(result, []byte(":latest")) {
+		t.Errorf("expected all :latest tags to be replaced, got %s", string(result))
+	}
+	if !bytes.Contains(result, []byte(":v0.2.0")) {
+		t.Errorf("expected :v0.2.0 tags in result, got %s", string(result))
+	}
+}
+
+func TestVersionedManifest_EmbeddedController(t *testing.T) {
+	original := version.Version
+	defer func() { version.Version = original }()
+
+	version.Version = "v1.0.0"
+	result := versionedManifest(manifests.InstallController)
+	if bytes.Contains(result, []byte(":latest")) {
+		t.Error("Expected all :latest tags to be replaced in embedded controller manifest")
+	}
+	if !bytes.Contains(result, []byte(":v1.0.0")) {
+		t.Error("Expected :v1.0.0 tags in versioned controller manifest")
+	}
+}
+
+func TestVersionCommand(t *testing.T) {
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{"version"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("version command failed: %v", err)
 	}
 }

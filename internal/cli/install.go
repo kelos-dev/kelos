@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/axon-core/axon/internal/manifests"
+	"github.com/axon-core/axon/internal/version"
 )
 
 const fieldManager = "axon"
@@ -53,8 +54,9 @@ func newInstallCommand(cfg *ClientConfig) *cobra.Command {
 				return fmt.Errorf("installing CRDs: %w", err)
 			}
 
-			fmt.Fprintf(os.Stdout, "Installing axon controller\n")
-			if err := applyManifests(ctx, dc, dyn, manifests.InstallController); err != nil {
+			controllerManifest := versionedManifest(manifests.InstallController)
+			fmt.Fprintf(os.Stdout, "Installing axon controller (version: %s)\n", version.Version)
+			if err := applyManifests(ctx, dc, dyn, controllerManifest); err != nil {
 				return fmt.Errorf("installing controller: %w", err)
 			}
 
@@ -64,6 +66,16 @@ func newInstallCommand(cfg *ClientConfig) *cobra.Command {
 	}
 
 	return cmd
+}
+
+// versionedManifest replaces ":latest" image tags with the current version
+// tag in the controller manifest. When the version is "latest" (development
+// builds), the manifest is returned as-is.
+func versionedManifest(data []byte) []byte {
+	if version.Version == "latest" {
+		return data
+	}
+	return bytes.ReplaceAll(data, []byte(":latest"), []byte(":"+version.Version))
 }
 
 func newUninstallCommand(cfg *ClientConfig) *cobra.Command {

@@ -47,6 +47,7 @@ func NewRootCommand() *cobra.Command {
 		newInitCommand(cfg),
 		newInstallCommand(cfg),
 		newUninstallCommand(cfg),
+		newVersionCommand(),
 	)
 
 	return cmd

@@ -3,6 +3,7 @@ name: Release
 on:
   push:
     branches: [main]
+    tags: ["v*"]
 
 jobs:
   release:
@@ -16,8 +17,23 @@ jobs:
           username: gjkim42
           password: ${{ secrets.DOCKERHUB_AXON_TOKEN }}
 
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=latest" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build images
-        run: make image
+        run: make image VERSION=${{ steps.version.outputs.version }}
 
       - name: Push images
-        run: make push
+        run: make push VERSION=${{ steps.version.outputs.version }}
+
+      - name: Push latest tags for releases
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          make image VERSION=latest
+          make push VERSION=latest

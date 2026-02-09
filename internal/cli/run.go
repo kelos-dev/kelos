@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"reflect"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -28,6 +29,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 		watch          bool
 		workspace      string
 		dryRun         bool
+		yes            bool
 	)
 
 	cmd := &cobra.Command{
@@ -60,7 +62,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 				if token := cfg.Config.OAuthToken; token != "" {
 					if !dryRun {
 						oauthKey := oauthSecretKey(agentType)
-						if err := ensureCredentialSecret(cfg, "axon-credentials", oauthKey, token); err != nil {
+						if err := ensureCredentialSecret(cfg, "axon-credentials", oauthKey, token, yes); err != nil {
 							return err
 						}
 					}
@@ -69,7 +71,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 				} else if key := cfg.Config.APIKey; key != "" {
 					if !dryRun {
 						apiKey := apiKeySecretKey(agentType)
-						if err := ensureCredentialSecret(cfg, "axon-credentials", apiKey, key); err != nil {
+						if err := ensureCredentialSecret(cfg, "axon-credentials", apiKey, key, yes); err != nil {
 							return err
 						}
 					}
@@ -108,7 +110,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 						},
 					}
 					if wsCfg.Token != "" {
-						if err := ensureCredentialSecret(cfg, "axon-workspace-credentials", "GITHUB_TOKEN", wsCfg.Token); err != nil {
+						if err := ensureCredentialSecret(cfg, "axon-workspace-credentials", "GITHUB_TOKEN", wsCfg.Token, yes); err != nil {
 							return err
 						}
 						ws.Spec.SecretRef = &axonv1alpha1.SecretReference{
@@ -124,9 +126,20 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 						if err := cl.Get(ctx, client.ObjectKey{Name: wsName, Namespace: ns}, existing); err != nil {
 							return fmt.Errorf("fetching existing workspace: %w", err)
 						}
-						existing.Spec = ws.Spec
-						if err := cl.Update(ctx, existing); err != nil {
-							return fmt.Errorf("updating workspace: %w", err)
+						if !reflect.DeepEqual(existing.Spec, ws.Spec) {
+							if !yes {
+								ok, confirmErr := confirmOverride(fmt.Sprintf("workspace/%s", wsName))
+								if confirmErr != nil {
+									return confirmErr
+								}
+								if !ok {
+									return fmt.Errorf("aborted")
+								}
+							}
+							existing.Spec = ws.Spec
+							if err := cl.Update(ctx, existing); err != nil {
+								return fmt.Errorf("updating workspace: %w", err)
+							}
 						}
 					}
 					workspace = wsName
@@ -191,6 +204,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 	cmd.Flags().StringVar(&workspace, "workspace", "", "name of Workspace resource to use")
 	cmd.Flags().BoolVarP(&watch, "watch", "w", false, "watch task status after creation")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print the resource that would be created without submitting it")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation prompts")
 
 	cmd.MarkFlagRequired("prompt")
 
@@ -248,7 +262,10 @@ func oauthSecretKey(agentType string) string {
 }
 
 // ensureCredentialSecret creates or updates a Secret with the given credential key and value.
-func ensureCredentialSecret(cfg *ClientConfig, name, key, value string) error {
+// If skipConfirm is false and the secret already exists with different data, the user is
+// prompted before overriding. If the existing secret already contains the desired key/value
+// and no other keys, the update is skipped.
+func ensureCredentialSecret(cfg *ClientConfig, name, key, value string, skipConfirm bool) error {
 	cs, ns, err := cfg.NewClientset()
 	if err != nil {
 		return err
@@ -274,6 +291,23 @@ func ensureCredentialSecret(cfg *ClientConfig, name, key, value string) error {
 	}
 	if err != nil {
 		return fmt.Errorf("checking credentials secret: %w", err)
+	}
+
+	// Skip update if the existing secret already has the exact same data.
+	if len(existing.Data) == 1 {
+		if v, ok := existing.Data[key]; ok && string(v) == value {
+			return nil
+		}
+	}
+
+	if !skipConfirm {
+		ok, err := confirmOverride(fmt.Sprintf("secret/%s", name))
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("aborted")
+		}
 	}
 
 	// Update existing secret, clearing stale keys.

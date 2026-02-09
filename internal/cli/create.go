@@ -35,6 +35,7 @@ func newCreateWorkspaceCommand(cfg *ClientConfig) *cobra.Command {
 		secret string
 		token  string
 		dryRun bool
+		yes    bool
 	)
 
 	cmd := &cobra.Command{
@@ -65,7 +66,7 @@ func newCreateWorkspaceCommand(cfg *ClientConfig) *cobra.Command {
 			if token != "" {
 				secretName := name + "-credentials"
 				if !dryRun {
-					if err := ensureCredentialSecret(cfg, secretName, "GITHUB_TOKEN", token); err != nil {
+					if err := ensureCredentialSecret(cfg, secretName, "GITHUB_TOKEN", token, yes); err != nil {
 						return err
 					}
 				}
@@ -98,6 +99,7 @@ func newCreateWorkspaceCommand(cfg *ClientConfig) *cobra.Command {
 	cmd.Flags().StringVar(&secret, "secret", "", "secret name containing GITHUB_TOKEN for git authentication")
 	cmd.Flags().StringVar(&token, "token", "", "GitHub token (auto-creates a secret)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print the resource that would be created without submitting it")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation prompts")
 
 	cmd.MarkFlagRequired("name")
 	cmd.MarkFlagRequired("repo")

@@ -266,7 +266,7 @@ This is a real-world TaskSpawner that picks up every open issue, investigates it
  └────────────────────────────────────────────────────────────────┘
 ```
 
-See [`self-development/axon-workers.yaml`](self-development/axon-workers.yaml) for the full manifest.
+See [`self-development/axon-workers.yaml`](self-development/axon-workers.yaml) for the full manifest and the [`self-development/` README](self-development/README.md) for setup instructions.
 
 The key pattern here is `excludeLabels: [axon/needs-input]` — this creates a feedback loop where the agent works autonomously until it needs human input, then pauses. Removing the label re-queues the issue on the next poll.
 

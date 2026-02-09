@@ -5,6 +5,8 @@ metadata:
 spec:
   when:
     githubIssues:
+      labels:
+        - actor/axon
       excludeLabels:
         - axon/needs-input
   taskTemplate:

@@ -106,3 +106,35 @@ jobs:
                 if (e.status !== 404) throw e;
               }
             }
+
+  actor-label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add or remove needs-actor label
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const item = context.payload.issue || context.payload.pull_request;
+            const labels = item.labels.map(l => l.name);
+            const hasActor = labels.some(l => l.startsWith('actor/'));
+            const hasNeedsActor = labels.includes('needs-actor');
+
+            if (!hasActor && !hasNeedsActor) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: item.number,
+                labels: ['needs-actor'],
+              });
+            } else if (hasActor && hasNeedsActor) {
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: item.number,
+                  name: 'needs-actor',
+                });
+              } catch (e) {
+                if (e.status !== 404) throw e;
+              }
+            }

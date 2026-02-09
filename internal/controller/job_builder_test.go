@@ -296,7 +296,7 @@ func TestBuildClaudeCodeJob_CustomImageWithWorkspace(t *testing.T) {
 	}
 }
 
-func TestBuildClaudeCodeJob_EnterpriseWorkspaceSetsGHHost(t *testing.T) {
+func TestBuildClaudeCodeJob_EnterpriseWorkspaceSetsGHHostAndEnterpriseToken(t *testing.T) {
 	builder := NewJobBuilder()
 	task := &axonv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
@@ -326,29 +326,52 @@ func TestBuildClaudeCodeJob_EnterpriseWorkspaceSetsGHHost(t *testing.T) {
 	}
 
 	container := job.Spec.Template.Spec.Containers[0]
-	var ghHostValue string
+	envMap := map[string]string{}
 	for _, env := range container.Env {
-		if env.Name == "GH_HOST" {
-			ghHostValue = env.Value
+		if env.Value != "" {
+			envMap[env.Name] = env.Value
+		} else {
+			envMap[env.Name] = "(from-secret)"
 		}
 	}
-	if ghHostValue != "github.example.com" {
-		t.Errorf("Expected GH_HOST = %q, got %q", "github.example.com", ghHostValue)
+
+	// GH_HOST should be set for enterprise.
+	if envMap["GH_HOST"] != "github.example.com" {
+		t.Errorf("Expected GH_HOST = %q, got %q", "github.example.com", envMap["GH_HOST"])
+	}
+	// GH_ENTERPRISE_TOKEN should be set instead of GH_TOKEN for enterprise hosts.
+	if _, ok := envMap["GH_ENTERPRISE_TOKEN"]; !ok {
+		t.Error("Expected GH_ENTERPRISE_TOKEN to be set for enterprise workspace")
+	}
+	if _, ok := envMap["GH_TOKEN"]; ok {
+		t.Error("GH_TOKEN should not be set for enterprise workspace")
+	}
+	// GITHUB_TOKEN should still be set (used for git credential helper).
+	if _, ok := envMap["GITHUB_TOKEN"]; !ok {
+		t.Error("Expected GITHUB_TOKEN to be set for enterprise workspace")
 	}
 
 	initContainer := job.Spec.Template.Spec.InitContainers[0]
-	var initGHHostValue string
+	initEnvMap := map[string]string{}
 	for _, env := range initContainer.Env {
-		if env.Name == "GH_HOST" {
-			initGHHostValue = env.Value
+		if env.Value != "" {
+			initEnvMap[env.Name] = env.Value
+		} else {
+			initEnvMap[env.Name] = "(from-secret)"
 		}
 	}
-	if initGHHostValue != "github.example.com" {
-		t.Errorf("Expected init container GH_HOST = %q, got %q", "github.example.com", initGHHostValue)
+	if initEnvMap["GH_HOST"] != "github.example.com" {
+		t.Errorf("Expected init container GH_HOST = %q, got %q", "github.example.com", initEnvMap["GH_HOST"])
+	}
+	if _, ok := initEnvMap["GH_ENTERPRISE_TOKEN"]; !ok {
+		t.Error("Expected GH_ENTERPRISE_TOKEN in init container for enterprise workspace")
+	}
+	if _, ok := initEnvMap["GH_TOKEN"]; ok {
+		t.Error("GH_TOKEN should not be set in init container for enterprise workspace")
 	}
 }
 
-func TestBuildClaudeCodeJob_GithubComWorkspaceNoGHHost(t *testing.T) {
+func TestBuildClaudeCodeJob_GithubComWorkspaceUsesGHToken(t *testing.T) {
 	builder := NewJobBuilder()
 	task := &axonv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
@@ -367,6 +390,9 @@ func TestBuildClaudeCodeJob_GithubComWorkspaceNoGHHost(t *testing.T) {
 
 	workspace := &axonv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/my-org/my-repo.git",
+		SecretRef: &axonv1alpha1.SecretReference{
+			Name: "github-token",
+		},
 	}
 
 	job, err := builder.Build(task, workspace)
@@ -375,10 +401,26 @@ func TestBuildClaudeCodeJob_GithubComWorkspaceNoGHHost(t *testing.T) {
 	}
 
 	container := job.Spec.Template.Spec.Containers[0]
+	envMap := map[string]string{}
 	for _, env := range container.Env {
-		if env.Name == "GH_HOST" {
-			t.Error("GH_HOST should not be set for github.com workspace")
+		if env.Value != "" {
+			envMap[env.Name] = env.Value
+		} else {
+			envMap[env.Name] = "(from-secret)"
 		}
+	}
+
+	// GH_HOST should NOT be set for github.com.
+	if _, ok := envMap["GH_HOST"]; ok {
+		t.Error("GH_HOST should not be set for github.com workspace")
+	}
+	// GH_TOKEN should be set for github.com.
+	if _, ok := envMap["GH_TOKEN"]; !ok {
+		t.Error("Expected GH_TOKEN to be set for github.com workspace")
+	}
+	// GH_ENTERPRISE_TOKEN should NOT be set for github.com.
+	if _, ok := envMap["GH_ENTERPRISE_TOKEN"]; ok {
+		t.Error("GH_ENTERPRISE_TOKEN should not be set for github.com workspace")
 	}
 }
 

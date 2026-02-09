@@ -141,6 +141,19 @@ func (b *JobBuilder) buildAgentJob(task *axonv1alpha1.Task, workspace *axonv1alp
 	}
 
 	var workspaceEnvVars []corev1.EnvVar
+	var isEnterprise bool
+	if workspace != nil {
+		host, _, _ := parseGitHubRepo(workspace.Repo)
+		isEnterprise = host != "" && host != "github.com"
+
+		if isEnterprise {
+			// Set GH_HOST for GitHub Enterprise so that gh CLI targets the correct host.
+			ghHostEnv := corev1.EnvVar{Name: "GH_HOST", Value: host}
+			envVars = append(envVars, ghHostEnv)
+			workspaceEnvVars = append(workspaceEnvVars, ghHostEnv)
+		}
+	}
+
 	if workspace != nil && workspace.SecretRef != nil {
 		secretKeyRef := &corev1.SecretKeySelector{
 			LocalObjectReference: corev1.LocalObjectReference{
@@ -152,22 +165,21 @@ func (b *JobBuilder) buildAgentJob(task *axonv1alpha1.Task, workspace *axonv1alp
 			Name:      "GITHUB_TOKEN",
 			ValueFrom: &corev1.EnvVarSource{SecretKeyRef: secretKeyRef},
 		}
+		envVars = append(envVars, githubTokenEnv)
+		workspaceEnvVars = append(workspaceEnvVars, githubTokenEnv)
+
+		// gh CLI uses GH_TOKEN for github.com and GH_ENTERPRISE_TOKEN for
+		// GitHub Enterprise Server hosts.
+		ghTokenName := "GH_TOKEN"
+		if isEnterprise {
+			ghTokenName = "GH_ENTERPRISE_TOKEN"
+		}
 		ghTokenEnv := corev1.EnvVar{
-			Name:      "GH_TOKEN",
+			Name:      ghTokenName,
 			ValueFrom: &corev1.EnvVarSource{SecretKeyRef: secretKeyRef},
 		}
-		envVars = append(envVars, githubTokenEnv, ghTokenEnv)
-		workspaceEnvVars = append(workspaceEnvVars, githubTokenEnv, ghTokenEnv)
-	}
-
-	// Set GH_HOST for GitHub Enterprise so that gh CLI targets the correct host.
-	if workspace != nil {
-		host, _, _ := parseGitHubRepo(workspace.Repo)
-		if host != "" && host != "github.com" {
-			ghHostEnv := corev1.EnvVar{Name: "GH_HOST", Value: host}
-			envVars = append(envVars, ghHostEnv)
-			workspaceEnvVars = append(workspaceEnvVars, ghHostEnv)
-		}
+		envVars = append(envVars, ghTokenEnv)
+		workspaceEnvVars = append(workspaceEnvVars, ghTokenEnv)
 	}
 
 	backoffLimit := int32(0)

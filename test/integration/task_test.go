@@ -970,28 +970,42 @@ var _ = Describe("Task Controller", func() {
 			By("Logging the Job spec")
 			logJobSpec(createdJob)
 
-			By("Verifying the main container has GH_HOST env var for enterprise host")
+			By("Verifying the main container has GH_HOST and GH_ENTERPRISE_TOKEN env vars for enterprise host")
 			mainContainer := createdJob.Spec.Template.Spec.Containers[0]
-			var ghHostFound bool
+			var ghHostFound, ghEnterpriseTokenFound bool
 			for _, env := range mainContainer.Env {
 				if env.Name == "GH_HOST" {
 					ghHostFound = true
 					Expect(env.Value).To(Equal("github.example.com"))
 				}
+				if env.Name == "GH_ENTERPRISE_TOKEN" {
+					ghEnterpriseTokenFound = true
+					Expect(env.ValueFrom.SecretKeyRef.Name).To(Equal("github-token"))
+					Expect(env.ValueFrom.SecretKeyRef.Key).To(Equal("GITHUB_TOKEN"))
+				}
+				Expect(env.Name).NotTo(Equal("GH_TOKEN"), "GH_TOKEN should not be set for enterprise workspace")
 			}
 			Expect(ghHostFound).To(BeTrue(), "Expected GH_HOST env var in main container")
+			Expect(ghEnterpriseTokenFound).To(BeTrue(), "Expected GH_ENTERPRISE_TOKEN env var in main container")
 
-			By("Verifying the init container has GH_HOST env var")
+			By("Verifying the init container has GH_HOST and GH_ENTERPRISE_TOKEN env vars")
 			Expect(createdJob.Spec.Template.Spec.InitContainers).To(HaveLen(1))
 			initContainer := createdJob.Spec.Template.Spec.InitContainers[0]
-			var initGHHostFound bool
+			var initGHHostFound, initGHEnterpriseTokenFound bool
 			for _, env := range initContainer.Env {
 				if env.Name == "GH_HOST" {
 					initGHHostFound = true
 					Expect(env.Value).To(Equal("github.example.com"))
 				}
+				if env.Name == "GH_ENTERPRISE_TOKEN" {
+					initGHEnterpriseTokenFound = true
+					Expect(env.ValueFrom.SecretKeyRef.Name).To(Equal("github-token"))
+					Expect(env.ValueFrom.SecretKeyRef.Key).To(Equal("GITHUB_TOKEN"))
+				}
+				Expect(env.Name).NotTo(Equal("GH_TOKEN"), "GH_TOKEN should not be set in init container for enterprise workspace")
 			}
 			Expect(initGHHostFound).To(BeTrue(), "Expected GH_HOST env var in init container")
+			Expect(initGHEnterpriseTokenFound).To(BeTrue(), "Expected GH_ENTERPRISE_TOKEN env var in init container")
 		})
 	})
 

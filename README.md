@@ -489,7 +489,6 @@ The `axon` CLI lets you manage the full lifecycle without writing YAML.
 |---------|-------------|
 | `axon run` | Create and run a new Task |
 | `axon create workspace` | Create a Workspace resource |
-| `axon create taskspawner` | Create a TaskSpawner resource |
 | `axon get <resource>` | List resources (`tasks`, `taskspawners`, `workspaces`) |
 | `axon delete <resource> <name>` | Delete a resource |
 | `axon logs <task-name> [-f]` | View or stream logs from a task |

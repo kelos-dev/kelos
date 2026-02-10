@@ -201,89 +201,16 @@ func TestCreateWorkspaceCommand_DryRun_WithToken(t *testing.T) {
 	}
 }
 
-func TestCreateTaskSpawnerCommand_DryRun(t *testing.T) {
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(cfgPath, []byte("secret: my-secret\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+func TestCreateCommand_NoTaskSpawnerSubcommand(t *testing.T) {
+	root := NewRootCommand()
+	root.SetArgs([]string{"create", "taskspawner", "--name", "test"})
 
-	cmd := NewRootCommand()
-	cmd.SetArgs([]string{
-		"create", "taskspawner", "my-spawner",
-		"--config", cfgPath,
-		"--dry-run",
-		"--workspace", "my-ws",
-		"--namespace", "test-ns",
-	})
+	// Silence usage output from cobra.
+	root.SilenceUsage = true
 
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	if err := cmd.Execute(); err != nil {
-		w.Close()
-		os.Stdout = old
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	w.Close()
-	os.Stdout = old
-	var out bytes.Buffer
-	out.ReadFrom(r)
-	output := out.String()
-
-	if !strings.Contains(output, "kind: TaskSpawner") {
-		t.Errorf("expected 'kind: TaskSpawner' in output, got:\n%s", output)
-	}
-	if !strings.Contains(output, "name: my-spawner") {
-		t.Errorf("expected 'name: my-spawner' in output, got:\n%s", output)
-	}
-	if !strings.Contains(output, "my-secret") {
-		t.Errorf("expected secret name in output, got:\n%s", output)
-	}
-	if strings.Contains(output, "created") {
-		t.Errorf("dry-run should not print 'created' message, got:\n%s", output)
-	}
-}
-
-func TestCreateTaskSpawnerCommand_DryRun_Cron(t *testing.T) {
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(cfgPath, []byte("secret: my-secret\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	cmd := NewRootCommand()
-	cmd.SetArgs([]string{
-		"create", "taskspawner", "cron-spawner",
-		"--config", cfgPath,
-		"--dry-run",
-		"--schedule", "*/5 * * * *",
-		"--namespace", "test-ns",
-	})
-
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	if err := cmd.Execute(); err != nil {
-		w.Close()
-		os.Stdout = old
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	w.Close()
-	os.Stdout = old
-	var out bytes.Buffer
-	out.ReadFrom(r)
-	output := out.String()
-
-	if !strings.Contains(output, "kind: TaskSpawner") {
-		t.Errorf("expected 'kind: TaskSpawner' in output, got:\n%s", output)
-	}
-	if !strings.Contains(output, "*/5 * * * *") {
-		t.Errorf("expected cron schedule in output, got:\n%s", output)
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected error when running 'create taskspawner', but got none")
 	}
 }
 
@@ -307,29 +234,6 @@ func TestCreateWorkspaceCommand_MissingName(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "workspace name is required") {
 		t.Errorf("expected 'workspace name is required' error, got: %v", err)
-	}
-}
-
-func TestCreateTaskSpawnerCommand_MissingName(t *testing.T) {
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(cfgPath, []byte("secret: my-secret\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	cmd := NewRootCommand()
-	cmd.SetArgs([]string{
-		"create", "taskspawner",
-		"--config", cfgPath,
-		"--workspace", "my-ws",
-	})
-
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected error when name is missing")
-	}
-	if !strings.Contains(err.Error(), "task spawner name is required") {
-		t.Errorf("expected 'task spawner name is required' error, got: %v", err)
 	}
 }
 

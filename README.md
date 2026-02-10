@@ -102,16 +102,29 @@ go install github.com/axon-core/axon/cmd/axon@latest
 axon install
 ```
 
-### 3. Run Your First Task
+### 3. Initialize Your Config
 
 ```bash
 axon init
-# Edit ~/.axon/config.yaml with your token:
+# Edit ~/.axon/config.yaml with your token and workspace:
 #   oauthToken: <your-oauth-token>
+#   workspace:
+#     repo: https://github.com/your-org/your-repo.git
+#     ref: main
+#     token: <github-token>  # optional, for private repos and pushing changes
+```
 
-axon run -p "Create a hello world program in Python"
+### 4. Run Your First Task
+
+```bash
+axon run -p "Add a hello world program in Python"
 axon logs <task-name> -f
 ```
+
+The agent clones your repo, makes changes, and can push a branch or open a PR.
+
+> **Note:** Without a workspace, the agent runs in an ephemeral pod — any files it
+> creates are lost when the pod terminates. Set up a workspace to get persistent results.
 
 <details>
 <summary>Using kubectl and YAML instead of the CLI</summary>

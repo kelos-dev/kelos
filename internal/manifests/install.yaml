@@ -12,145 +12,108 @@ kind: ServiceAccount
 metadata:
   name: axon-controller
   namespace: axon-system
+# BEGIN GENERATED: controller-rbac
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: axon-controller-role
 rules:
-  # Tasks
-  - apiGroups:
-      - axon.io
-    resources:
-      - tasks
-    verbs:
-      - create
-      - delete
-      - get
-      - list
-      - patch
-      - update
-      - watch
-  - apiGroups:
-      - axon.io
-    resources:
-      - tasks/status
-    verbs:
-      - get
-      - patch
-      - update
-  - apiGroups:
-      - axon.io
-    resources:
-      - tasks/finalizers
-    verbs:
-      - update
-  # TaskSpawners
-  - apiGroups:
-      - axon.io
-    resources:
-      - taskspawners
-    verbs:
-      - create
-      - delete
-      - get
-      - list
-      - patch
-      - update
-      - watch
-  - apiGroups:
-      - axon.io
-    resources:
-      - taskspawners/status
-    verbs:
-      - get
-      - patch
-      - update
-  - apiGroups:
-      - axon.io
-    resources:
-      - taskspawners/finalizers
-    verbs:
-      - update
-  # Workspaces
-  - apiGroups:
-      - axon.io
-    resources:
-      - workspaces
-    verbs:
-      - get
-      - list
-      - watch
-  # Jobs
-  - apiGroups:
-      - batch
-    resources:
-      - jobs
-    verbs:
-      - create
-      - delete
-      - get
-      - list
-      - patch
-      - update
-      - watch
-  # Deployments
-  - apiGroups:
-      - apps
-    resources:
-      - deployments
-    verbs:
-      - create
-      - delete
-      - get
-      - list
-      - patch
-      - update
-      - watch
-  # Pods (for status and log reading)
-  - apiGroups:
-      - ""
-    resources:
-      - pods
-    verbs:
-      - get
-      - list
-      - watch
-  - apiGroups:
-      - ""
-    resources:
-      - pods/log
-    verbs:
-      - get
-  # Secrets (for token mounting)
-  - apiGroups:
-      - ""
-    resources:
-      - secrets
-    verbs:
-      - get
-      - list
-      - watch
-  # ServiceAccounts (for spawner RBAC setup)
-  - apiGroups:
-      - ""
-    resources:
-      - serviceaccounts
-    verbs:
-      - get
-      - list
-      - watch
-      - create
-  # RoleBindings (for spawner RBAC setup)
-  - apiGroups:
-      - rbac.authorization.k8s.io
-    resources:
-      - rolebindings
-    verbs:
-      - get
-      - list
-      - watch
-      - create
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods/log
+  verbs:
+  - get
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - axon.io
+  resources:
+  - tasks
+  - taskspawners
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - axon.io
+  resources:
+  - tasks/finalizers
+  - taskspawners/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - axon.io
+  resources:
+  - tasks/status
+  - taskspawners/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - axon.io
+  resources:
+  - workspaces
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - rolebindings
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+# END GENERATED: controller-rbac
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole

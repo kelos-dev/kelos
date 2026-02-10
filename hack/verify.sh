@@ -15,6 +15,7 @@ cd "${REPO_ROOT}"
 # Files explicitly written by the update / verify pipeline.
 GENERATED_FILES=(
   install-crd.yaml
+  install.yaml
   internal/manifests/install-crd.yaml
   internal/manifests/install.yaml
   api/v1alpha1/zz_generated.deepcopy.go
@@ -37,9 +38,7 @@ done
 # 2. Run the generators (same commands as `make update`).
 # ---------------------------------------------------------------------------
 ${CONTROLLER_GEN} object:headerFile="hack/boilerplate.go.txt" paths="./..."
-${CONTROLLER_GEN} crd paths="./..." output:crd:stdout > install-crd.yaml
-cp install-crd.yaml internal/manifests/install-crd.yaml
-cp install.yaml internal/manifests/install.yaml
+hack/update-install-manifest.sh "${CONTROLLER_GEN}"
 
 # ---------------------------------------------------------------------------
 # 3. Compare generated files and restore originals.

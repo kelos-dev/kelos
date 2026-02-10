@@ -359,6 +359,12 @@ func TestInstallCommand_DryRun(t *testing.T) {
 	if !strings.Contains(output, "Deployment") {
 		t.Errorf("expected Deployment manifest in dry-run output, got:\n%s", output[:min(len(output), 500)])
 	}
+	if !strings.Contains(output, "name: axon-controller-role") {
+		t.Errorf("expected controller ClusterRole in dry-run output, got:\n%s", output[:min(len(output), 500)])
+	}
+	if !strings.Contains(output, "- rolebindings") {
+		t.Errorf("expected rolebindings RBAC rule in dry-run output, got:\n%s", output[:min(len(output), 500)])
+	}
 	// Should not contain installation messages.
 	if strings.Contains(output, "Installing axon") {
 		t.Errorf("dry-run should not print installation messages, got:\n%s", output[:min(len(output), 500)])

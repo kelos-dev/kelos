@@ -54,9 +54,7 @@ test-e2e: ginkgo ## Run e2e tests (requires cluster and CLAUDE_CODE_OAUTH_TOKEN)
 .PHONY: update
 update: controller-gen ## Run all generators and formatters.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
-	$(CONTROLLER_GEN) crd paths="./..." output:crd:stdout > install-crd.yaml
-	cp install-crd.yaml internal/manifests/install-crd.yaml
-	cp install.yaml internal/manifests/install.yaml
+	hack/update-install-manifest.sh $(CONTROLLER_GEN)
 	go fmt ./...
 	go mod tidy
 

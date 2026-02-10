@@ -36,8 +36,7 @@ var _ = Describe("CLI Workspace Commands", func() {
 
 			By("Creating a workspace via CLI")
 			err := runCLI(kubeconfigPath, ns.Name,
-				"create", "workspace",
-				"--name", "my-ws",
+				"create", "workspace", "my-ws",
 				"--repo", "https://github.com/org/repo.git",
 				"--ref", "main",
 			)
@@ -89,8 +88,7 @@ var _ = Describe("CLI Workspace Commands", func() {
 
 			By("Creating a workspace with --secret flag")
 			err := runCLI(kubeconfigPath, ns.Name,
-				"create", "workspace",
-				"--name", "secret-ws",
+				"create", "workspace", "secret-ws",
 				"--repo", "https://github.com/org/repo.git",
 				"--secret", "my-gh-secret",
 			)
@@ -118,8 +116,7 @@ var _ = Describe("CLI Workspace Commands", func() {
 
 			By("Creating a workspace via CLI with 'ws' alias")
 			err := runCLI(kubeconfigPath, ns.Name,
-				"create", "ws",
-				"--name", "alias-ws",
+				"create", "ws", "alias-ws",
 				"--repo", "https://github.com/org/repo.git",
 			)
 			Expect(err).NotTo(HaveOccurred())

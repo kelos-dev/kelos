@@ -255,8 +255,7 @@ var _ = Describe("workspace CRUD", func() {
 
 	It("should create, get, and delete a workspace", func() {
 		By("creating a workspace via CLI")
-		axon("create", "workspace",
-			"--name", wsName,
+		axon("create", "workspace", wsName,
 			"--repo", "https://github.com/axon-core/axon.git",
 			"--ref", "main",
 		)

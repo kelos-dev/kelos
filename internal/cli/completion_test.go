@@ -17,6 +17,8 @@ func TestValidArgsFunctionWired(t *testing.T) {
 		{"get task", []string{"get", "task"}},
 		{"get taskspawner", []string{"get", "taskspawner"}},
 		{"get workspace", []string{"get", "workspace"}},
+		{"create workspace", []string{"create", "workspace"}},
+		{"create taskspawner", []string{"create", "taskspawner"}},
 		{"delete task", []string{"delete", "task"}},
 		{"delete workspace", []string{"delete", "workspace"}},
 		{"delete taskspawner", []string{"delete", "taskspawner"}},

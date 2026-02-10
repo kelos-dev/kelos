@@ -29,7 +29,6 @@ func newCreateCommand(cfg *ClientConfig) *cobra.Command {
 
 func newCreateWorkspaceCommand(cfg *ClientConfig) *cobra.Command {
 	var (
-		name   string
 		repo   string
 		ref    string
 		secret string
@@ -39,10 +38,21 @@ func newCreateWorkspaceCommand(cfg *ClientConfig) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:     "workspace",
+		Use:     "workspace <name>",
 		Aliases: []string{"ws"},
 		Short:   "Create a workspace",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return fmt.Errorf("workspace name is required\nUsage: %s", cmd.Use)
+			}
+			if len(args) > 1 {
+				return fmt.Errorf("too many arguments: expected 1 workspace name, got %d\nUsage: %s", len(args), cmd.Use)
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+
 			if secret != "" && token != "" {
 				return fmt.Errorf("cannot specify both --secret and --token")
 			}
@@ -93,7 +103,6 @@ func newCreateWorkspaceCommand(cfg *ClientConfig) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&name, "name", "", "workspace name (required)")
 	cmd.Flags().StringVar(&repo, "repo", "", "git repository URL (required)")
 	cmd.Flags().StringVar(&ref, "ref", "", "git reference (branch, tag, or commit SHA)")
 	cmd.Flags().StringVar(&secret, "secret", "", "secret name containing GITHUB_TOKEN for git authentication")
@@ -101,15 +110,15 @@ func newCreateWorkspaceCommand(cfg *ClientConfig) *cobra.Command {
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print the resource that would be created without submitting it")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation prompts")
 
-	cmd.MarkFlagRequired("name")
 	cmd.MarkFlagRequired("repo")
+
+	cmd.ValidArgsFunction = completeWorkspaceNames(cfg)
 
 	return cmd
 }
 
 func newCreateTaskSpawnerCommand(cfg *ClientConfig) *cobra.Command {
 	var (
-		name           string
 		workspace      string
 		secret         string
 		credentialType string
@@ -121,10 +130,21 @@ func newCreateTaskSpawnerCommand(cfg *ClientConfig) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:     "taskspawner",
+		Use:     "taskspawner <name>",
 		Aliases: []string{"ts"},
 		Short:   "Create a task spawner",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return fmt.Errorf("task spawner name is required\nUsage: %s", cmd.Use)
+			}
+			if len(args) > 1 {
+				return fmt.Errorf("too many arguments: expected 1 task spawner name, got %d\nUsage: %s", len(args), cmd.Use)
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+
 			if workspace == "" && schedule == "" {
 				return fmt.Errorf("must specify either --workspace (for GitHub issues source) or --schedule (for cron source)")
 			}
@@ -200,7 +220,6 @@ func newCreateTaskSpawnerCommand(cfg *ClientConfig) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&name, "name", "", "task spawner name (required)")
 	cmd.Flags().StringVar(&workspace, "workspace", "", "workspace name (for GitHub issues source)")
 	cmd.Flags().StringVar(&secret, "secret", "", "secret name with credentials")
 	cmd.Flags().StringVar(&credentialType, "credential-type", "api-key", "credential type (api-key or oauth)")
@@ -210,7 +229,7 @@ func newCreateTaskSpawnerCommand(cfg *ClientConfig) *cobra.Command {
 	cmd.Flags().StringVar(&promptTemplate, "prompt-template", "", "Go text/template for rendering the task prompt")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print the resource that would be created without submitting it")
 
-	cmd.MarkFlagRequired("name")
+	cmd.ValidArgsFunction = completeTaskSpawnerNames(cfg)
 
 	_ = cmd.RegisterFlagCompletionFunc("credential-type", cobra.FixedCompletions([]string{"api-key", "oauth"}, cobra.ShellCompDirectiveNoFileComp))
 	_ = cmd.RegisterFlagCompletionFunc("state", cobra.FixedCompletions([]string{"open", "closed", "all"}, cobra.ShellCompDirectiveNoFileComp))

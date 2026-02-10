@@ -117,10 +117,9 @@ func TestCreateWorkspaceCommand_DryRun(t *testing.T) {
 
 	cmd := NewRootCommand()
 	cmd.SetArgs([]string{
-		"create", "workspace",
+		"create", "workspace", "my-ws",
 		"--config", cfgPath,
 		"--dry-run",
-		"--name", "my-ws",
 		"--repo", "https://github.com/org/repo.git",
 		"--ref", "main",
 		"--secret", "gh-token",
@@ -172,10 +171,9 @@ func TestCreateWorkspaceCommand_DryRun_WithToken(t *testing.T) {
 
 	cmd := NewRootCommand()
 	cmd.SetArgs([]string{
-		"create", "workspace",
+		"create", "workspace", "my-ws",
 		"--config", cfgPath,
 		"--dry-run",
-		"--name", "my-ws",
 		"--repo", "https://github.com/org/repo.git",
 		"--token", "ghp_test123",
 		"--namespace", "test-ns",
@@ -212,10 +210,9 @@ func TestCreateTaskSpawnerCommand_DryRun(t *testing.T) {
 
 	cmd := NewRootCommand()
 	cmd.SetArgs([]string{
-		"create", "taskspawner",
+		"create", "taskspawner", "my-spawner",
 		"--config", cfgPath,
 		"--dry-run",
-		"--name", "my-spawner",
 		"--workspace", "my-ws",
 		"--namespace", "test-ns",
 	})
@@ -259,10 +256,9 @@ func TestCreateTaskSpawnerCommand_DryRun_Cron(t *testing.T) {
 
 	cmd := NewRootCommand()
 	cmd.SetArgs([]string{
-		"create", "taskspawner",
+		"create", "taskspawner", "cron-spawner",
 		"--config", cfgPath,
 		"--dry-run",
-		"--name", "cron-spawner",
 		"--schedule", "*/5 * * * *",
 		"--namespace", "test-ns",
 	})
@@ -288,6 +284,52 @@ func TestCreateTaskSpawnerCommand_DryRun_Cron(t *testing.T) {
 	}
 	if !strings.Contains(output, "*/5 * * * *") {
 		t.Errorf("expected cron schedule in output, got:\n%s", output)
+	}
+}
+
+func TestCreateWorkspaceCommand_MissingName(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{
+		"create", "workspace",
+		"--config", cfgPath,
+		"--repo", "https://github.com/org/repo.git",
+	})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when name is missing")
+	}
+	if !strings.Contains(err.Error(), "workspace name is required") {
+		t.Errorf("expected 'workspace name is required' error, got: %v", err)
+	}
+}
+
+func TestCreateTaskSpawnerCommand_MissingName(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("secret: my-secret\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{
+		"create", "taskspawner",
+		"--config", cfgPath,
+		"--workspace", "my-ws",
+	})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when name is missing")
+	}
+	if !strings.Contains(err.Error(), "task spawner name is required") {
+		t.Errorf("expected 'task spawner name is required' error, got: %v", err)
 	}
 }
 

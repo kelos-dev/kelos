@@ -362,6 +362,9 @@ func TestRunCycleWithSource_PluginsArePropagated(t *testing.T) {
 	if task.Spec.Plugins[1].Name != "another-plugin" {
 		t.Errorf("Expected plugin name %q, got %q", "another-plugin", task.Spec.Plugins[1].Name)
 	}
+	if task.Spec.Plugins[1].ConfigMapRef.Name != "another-plugin-cm" {
+		t.Errorf("Expected ConfigMap name %q, got %q", "another-plugin-cm", task.Spec.Plugins[1].ConfigMapRef.Name)
+	}
 }
 
 func TestRunCycleWithSource_ActiveTasksStatusUpdated(t *testing.T) {

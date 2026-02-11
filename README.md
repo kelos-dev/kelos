@@ -10,10 +10,8 @@ Axon is a Kubernetes controller that runs AI coding agents (Claude Code, OpenAI 
 
 ## Demo
 
-Here is an example of running a task and streaming the logs:
-
 ```bash
-# 1. Initialize your config
+# Initialize your config
 $ axon init
 # Edit ~/.axon/config.yaml with your token and workspace:
 #   oauthToken: <your-oauth-token>
@@ -21,30 +19,9 @@ $ axon init
 #     repo: https://github.com/your-org/your-repo.git
 #     ref: main
 #     token: <github-token>
-
-# 2. Run a task against your repo
-$ axon run -p "Fix the bug described in issue #42 and open a PR with the fix"
-task/fix-issue-42-xyz created
-
-# 3. Stream the logs
-$ axon logs fix-issue-42-xyz -f
-[init] model=claude-sonnet-4-20250514
-
---- Turn 1 ---
-Let me investigate issue #42...
-[tool] Bash: gh issue view 42
-
---- Turn 2 ---
-I see the problem. The auth middleware does not handle expired tokens.
-[tool] Edit
-
-...
-
---- Turn 8 ---
-PR created: https://github.com/your-org/repo/pull/123
-
-[result] completed (8 turns, $0.12)
 ```
+
+https://github.com/user-attachments/assets/b45228ef-4885-4103-8edf-97de1a32c6db
 
 See [Examples](#examples) for a full autonomous self-development pipeline.
 

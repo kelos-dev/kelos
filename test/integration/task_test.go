@@ -467,6 +467,8 @@ var _ = Describe("Task Controller", func() {
 			By("Verifying the init container uses credential helper for git auth")
 			Expect(initContainer.Command).To(HaveLen(3))
 			Expect(initContainer.Command[0]).To(Equal("sh"))
+			Expect(initContainer.Command[2]).To(ContainSubstring("git -c credential.helper="))
+			Expect(initContainer.Command[2]).To(ContainSubstring("git -C /workspace/repo config credential.helper"))
 			Expect(initContainer.Args).To(Equal([]string{
 				"--", "clone", "--branch", "main", "--no-single-branch", "--depth", "1",
 				"--", "https://github.com/example/repo.git", "/workspace/repo",

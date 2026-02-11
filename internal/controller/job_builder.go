@@ -251,8 +251,12 @@ func (b *JobBuilder) buildAgentJob(task *axonv1alpha1.Task, workspace *axonv1alp
 		}
 
 		if workspace.SecretRef != nil {
+			credentialHelper := `!f() { echo "username=x-access-token"; echo "password=$GITHUB_TOKEN"; }; f`
 			initContainer.Command = []string{"sh", "-c",
-				`exec git -c credential.helper='!f() { echo "username=x-access-token"; echo "password=$GITHUB_TOKEN"; }; f' "$@"`,
+				fmt.Sprintf(
+					`git -c credential.helper='%s' "$@" && git -C %s/repo config credential.helper '%s'`,
+					credentialHelper, WorkspaceMountPath, credentialHelper,
+				),
 			}
 			initContainer.Args = append([]string{"--"}, cloneArgs...)
 		}

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"strings"
 	"testing"
 
 	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
@@ -293,6 +294,55 @@ func TestBuildClaudeCodeJob_CustomImageWithWorkspace(t *testing.T) {
 	}
 	if envMap["AXON_MODEL"] != "gpt-4" {
 		t.Errorf("AXON_MODEL value: expected %q, got %q", "gpt-4", envMap["AXON_MODEL"])
+	}
+}
+
+func TestBuildClaudeCodeJob_WorkspaceWithSecretRefPersistsCredentialHelper(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-persist-cred",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix the code",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &axonv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/example/repo.git",
+		Ref:  "main",
+		SecretRef: &axonv1alpha1.SecretReference{
+			Name: "github-token",
+		},
+	}
+
+	job, err := builder.Build(task, workspace)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	initContainer := job.Spec.Template.Spec.InitContainers[0]
+
+	// Verify the init container command uses sh -c.
+	if len(initContainer.Command) != 3 || initContainer.Command[0] != "sh" || initContainer.Command[1] != "-c" {
+		t.Fatalf("Expected command [sh -c ...], got %v", initContainer.Command)
+	}
+
+	script := initContainer.Command[2]
+
+	// The script must clone with an inline credential helper AND persist it
+	// to the repo config so the agent container can authenticate with git.
+	if !strings.Contains(script, "git -c credential.helper=") {
+		t.Error("Expected init container script to include inline credential helper for clone")
+	}
+	if !strings.Contains(script, "git -C "+WorkspaceMountPath+"/repo config credential.helper") {
+		t.Error("Expected init container script to persist credential helper in repo config")
 	}
 }
 

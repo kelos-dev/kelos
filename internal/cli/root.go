@@ -48,6 +48,7 @@ func NewRootCommand() *cobra.Command {
 		newInstallCommand(cfg),
 		newUninstallCommand(cfg),
 		newVersionCommand(),
+		newVizCommand(cfg),
 	)
 
 	return cmd

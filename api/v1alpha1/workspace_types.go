@@ -16,8 +16,9 @@ type WorkspaceSpec struct {
 	// +optional
 	Ref string `json:"ref,omitempty"`
 
-	// SecretRef references a Secret containing a GITHUB_TOKEN key for git
-	// authentication and GitHub CLI (gh) operations.
+	// SecretRef references a Secret containing credentials for git
+	// authentication and API operations. The Secret should contain a
+	// GITHUB_TOKEN key for GitHub, or a BITBUCKET_TOKEN key for Bitbucket Data Center.
 	// +optional
 	SecretRef *SecretReference `json:"secretRef,omitempty"`
 }

@@ -35,12 +35,18 @@ func main() {
 	var githubOwner string
 	var githubRepo string
 	var githubAPIBaseURL string
+	var bitbucketDCBaseURL string
+	var bitbucketDCProject string
+	var bitbucketDCRepo string
 
 	flag.StringVar(&name, "taskspawner-name", "", "Name of the TaskSpawner to manage")
 	flag.StringVar(&namespace, "taskspawner-namespace", "", "Namespace of the TaskSpawner")
 	flag.StringVar(&githubOwner, "github-owner", "", "GitHub repository owner")
 	flag.StringVar(&githubRepo, "github-repo", "", "GitHub repository name")
 	flag.StringVar(&githubAPIBaseURL, "github-api-base-url", "", "GitHub API base URL for enterprise servers (e.g. https://github.example.com/api/v3)")
+	flag.StringVar(&bitbucketDCBaseURL, "bitbucket-dc-base-url", "", "Bitbucket Data Center base URL (e.g. https://bitbucket.example.com)")
+	flag.StringVar(&bitbucketDCProject, "bitbucket-dc-project", "", "Bitbucket Data Center project key")
+	flag.StringVar(&bitbucketDCRepo, "bitbucket-dc-repo", "", "Bitbucket Data Center repository slug")
 
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
@@ -72,8 +78,17 @@ func main() {
 
 	log.Info("starting spawner", "taskspawner", key)
 
+	sourceOpts := sourceOptions{
+		githubOwner:        githubOwner,
+		githubRepo:         githubRepo,
+		githubAPIBaseURL:   githubAPIBaseURL,
+		bitbucketDCBaseURL: bitbucketDCBaseURL,
+		bitbucketDCProject: bitbucketDCProject,
+		bitbucketDCRepo:    bitbucketDCRepo,
+	}
+
 	for {
-		if err := runCycle(ctx, cl, key, githubOwner, githubRepo, githubAPIBaseURL); err != nil {
+		if err := runCycle(ctx, cl, key, sourceOpts); err != nil {
 			log.Error(err, "discovery cycle failed")
 		}
 
@@ -93,13 +108,22 @@ func main() {
 	}
 }
 
-func runCycle(ctx context.Context, cl client.Client, key types.NamespacedName, githubOwner, githubRepo, githubAPIBaseURL string) error {
+type sourceOptions struct {
+	githubOwner        string
+	githubRepo         string
+	githubAPIBaseURL   string
+	bitbucketDCBaseURL string
+	bitbucketDCProject string
+	bitbucketDCRepo    string
+}
+
+func runCycle(ctx context.Context, cl client.Client, key types.NamespacedName, opts sourceOptions) error {
 	var ts axonv1alpha1.TaskSpawner
 	if err := cl.Get(ctx, key, &ts); err != nil {
 		return fmt.Errorf("fetching TaskSpawner: %w", err)
 	}
 
-	src, err := buildSource(&ts, githubOwner, githubRepo, githubAPIBaseURL)
+	src, err := buildSource(&ts, opts)
 	if err != nil {
 		return fmt.Errorf("building source: %w", err)
 	}
@@ -227,18 +251,29 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 	return nil
 }
 
-func buildSource(ts *axonv1alpha1.TaskSpawner, owner, repo, apiBaseURL string) (source.Source, error) {
+func buildSource(ts *axonv1alpha1.TaskSpawner, opts sourceOptions) (source.Source, error) {
 	if ts.Spec.When.GitHubIssues != nil {
 		gh := ts.Spec.When.GitHubIssues
 		return &source.GitHubSource{
-			Owner:         owner,
-			Repo:          repo,
+			Owner:         opts.githubOwner,
+			Repo:          opts.githubRepo,
 			Types:         gh.Types,
 			Labels:        gh.Labels,
 			ExcludeLabels: gh.ExcludeLabels,
 			State:         gh.State,
 			Token:         os.Getenv("GITHUB_TOKEN"),
-			BaseURL:       apiBaseURL,
+			BaseURL:       opts.githubAPIBaseURL,
+		}, nil
+	}
+
+	if ts.Spec.When.BitbucketDataCenterPRs != nil {
+		bb := ts.Spec.When.BitbucketDataCenterPRs
+		return &source.BitbucketDataCenterSource{
+			BaseURL: opts.bitbucketDCBaseURL,
+			Project: opts.bitbucketDCProject,
+			Repo:    opts.bitbucketDCRepo,
+			State:   bb.State,
+			Token:   os.Getenv("BITBUCKET_TOKEN"),
 		}, nil
 	}
 

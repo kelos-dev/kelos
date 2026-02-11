@@ -1,0 +1,14 @@
+apiVersion: axon.io/v1alpha1
+kind: Workspace
+metadata:
+  name: my-workspace
+spec:
+  # TODO: Replace with your Bitbucket Data Center repository URL
+  # Supported formats:
+  #   - https://bitbucket.example.com/scm/PROJECT/repo.git
+  #   - https://bitbucket.example.com/projects/PROJECT/repos/repo
+  #   - git@bitbucket.example.com:PROJECT/repo.git
+  repo: https://bitbucket.example.com/scm/PROJ/my-repo.git
+  ref: main
+  secretRef:
+    name: bitbucket-token

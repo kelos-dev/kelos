@@ -769,7 +769,7 @@ spec:
                   workspaceRef:
                     description: |-
                       WorkspaceRef references the Workspace that defines the repository.
-                      Required when using githubIssues source; optional for other sources.
+                      Required when using githubIssues or bitbucketDataCenterPRs source; optional for other sources.
                       When set, spawned Tasks inherit this workspace reference.
                     properties:
                       name:
@@ -785,6 +785,21 @@ spec:
               when:
                 description: When defines the conditions that trigger task spawning.
                 properties:
+                  bitbucketDataCenterPRs:
+                    description: BitbucketDataCenterPRs discovers pull requests from
+                      a Bitbucket Data Center repository.
+                    properties:
+                      state:
+                        default: OPEN
+                        description: State filters pull requests by state (OPEN, MERGED,
+                          DECLINED, ALL). Defaults to OPEN.
+                        enum:
+                        - OPEN
+                        - MERGED
+                        - DECLINED
+                        - ALL
+                        type: string
+                    type: object
                   cron:
                     description: Cron triggers task spawning on a cron schedule.
                     properties:
@@ -836,6 +851,9 @@ spec:
             - message: taskTemplate.workspaceRef is required when using githubIssues
                 source
               rule: '!has(self.when.githubIssues) || has(self.taskTemplate.workspaceRef)'
+            - message: taskTemplate.workspaceRef is required when using bitbucketDataCenterPRs
+                source
+              rule: '!has(self.when.bitbucketDataCenterPRs) || has(self.taskTemplate.workspaceRef)'
           status:
             description: TaskSpawnerStatus defines the observed state of TaskSpawner.
             properties:
@@ -922,8 +940,9 @@ spec:
                 type: string
               secretRef:
                 description: |-
-                  SecretRef references a Secret containing a GITHUB_TOKEN key for git
-                  authentication and GitHub CLI (gh) operations.
+                  SecretRef references a Secret containing credentials for git
+                  authentication and API operations. The Secret should contain a
+                  GITHUB_TOKEN key for GitHub, or a BITBUCKET_TOKEN key for Bitbucket Data Center.
                 properties:
                   name:
                     description: Name is the name of the secret.

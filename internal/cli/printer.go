@@ -72,6 +72,12 @@ func printTaskSpawnerTable(w io.Writer, spawners []axonv1alpha1.TaskSpawner) {
 			} else {
 				source = "GitHub Issues"
 			}
+		} else if s.Spec.When.BitbucketDataCenterPRs != nil {
+			if s.Spec.TaskTemplate.WorkspaceRef != nil {
+				source = s.Spec.TaskTemplate.WorkspaceRef.Name
+			} else {
+				source = "Bitbucket DC PRs"
+			}
 		} else if s.Spec.When.Cron != nil {
 			source = "cron: " + s.Spec.When.Cron.Schedule
 		}
@@ -100,6 +106,12 @@ func printTaskSpawnerDetail(w io.Writer, ts *axonv1alpha1.TaskSpawner) {
 		}
 		if len(gh.Labels) > 0 {
 			printField(w, "Labels", fmt.Sprintf("%v", gh.Labels))
+		}
+	} else if ts.Spec.When.BitbucketDataCenterPRs != nil {
+		bb := ts.Spec.When.BitbucketDataCenterPRs
+		printField(w, "Source", "Bitbucket DC PRs")
+		if bb.State != "" {
+			printField(w, "State", bb.State)
 		}
 	} else if ts.Spec.When.Cron != nil {
 		printField(w, "Source", "Cron")

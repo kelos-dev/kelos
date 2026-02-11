@@ -1,0 +1,30 @@
+apiVersion: axon.io/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: review-prs
+spec:
+  when:
+    bitbucketDataCenterPRs:
+      state: OPEN
+  taskTemplate:
+    type: claude-code
+    workspaceRef:
+      name: my-workspace
+    credentials:
+      type: oauth
+      secretRef:
+        name: claude-credentials
+    promptTemplate: |
+      Review the following Bitbucket Data Center pull request and provide feedback.
+
+      PR #{{.Number}}: {{.Title}}
+
+      {{.Body}}
+      {{- if .Comments}}
+
+      Existing comments:
+      {{.Comments}}
+      {{- end}}
+    ttlSecondsAfterFinished: 3600
+  pollInterval: 5m
+  maxConcurrency: 3

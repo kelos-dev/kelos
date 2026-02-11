@@ -242,3 +242,133 @@ func TestBuildDeploymentWithEnterpriseURL(t *testing.T) {
 		})
 	}
 }
+
+func TestParseBitbucketDCRepo(t *testing.T) {
+	tests := []struct {
+		name        string
+		repoURL     string
+		wantBaseURL string
+		wantProject string
+		wantRepo    string
+	}{
+		{
+			name:        "SCM clone URL",
+			repoURL:     "https://bitbucket.example.com/scm/PROJ/my-repo.git",
+			wantBaseURL: "https://bitbucket.example.com",
+			wantProject: "PROJ",
+			wantRepo:    "my-repo",
+		},
+		{
+			name:        "SCM clone URL without .git",
+			repoURL:     "https://bitbucket.example.com/scm/PROJ/my-repo",
+			wantBaseURL: "https://bitbucket.example.com",
+			wantProject: "PROJ",
+			wantRepo:    "my-repo",
+		},
+		{
+			name:        "Browse-style URL",
+			repoURL:     "https://bitbucket.example.com/projects/PROJ/repos/my-repo",
+			wantBaseURL: "https://bitbucket.example.com",
+			wantProject: "PROJ",
+			wantRepo:    "my-repo",
+		},
+		{
+			name:        "SSH URL",
+			repoURL:     "git@bitbucket.example.com:PROJ/my-repo.git",
+			wantBaseURL: "https://bitbucket.example.com",
+			wantProject: "PROJ",
+			wantRepo:    "my-repo",
+		},
+		{
+			name:        "SSH URL with port",
+			repoURL:     "ssh://git@bitbucket.example.com:7999/PROJ/my-repo.git",
+			wantBaseURL: "https://bitbucket.example.com",
+			wantProject: "PROJ",
+			wantRepo:    "my-repo",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			baseURL, project, repo := parseBitbucketDCRepo(tt.repoURL)
+			if baseURL != tt.wantBaseURL {
+				t.Errorf("baseURL = %q, want %q", baseURL, tt.wantBaseURL)
+			}
+			if project != tt.wantProject {
+				t.Errorf("project = %q, want %q", project, tt.wantProject)
+			}
+			if repo != tt.wantRepo {
+				t.Errorf("repo = %q, want %q", repo, tt.wantRepo)
+			}
+		})
+	}
+}
+
+func TestBuildDeploymentWithBitbucketDC(t *testing.T) {
+	builder := NewDeploymentBuilder()
+
+	ts := &axonv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-spawner-bb",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpawnerSpec{
+			When: axonv1alpha1.When{
+				BitbucketDataCenterPRs: &axonv1alpha1.BitbucketDataCenterPRs{
+					State: "OPEN",
+				},
+			},
+		},
+	}
+
+	workspace := &axonv1alpha1.WorkspaceSpec{
+		Repo: "https://bitbucket.example.com/scm/PROJ/my-repo.git",
+		SecretRef: &axonv1alpha1.SecretReference{
+			Name: "bb-token",
+		},
+	}
+
+	dep := builder.Build(ts, workspace)
+	args := dep.Spec.Template.Spec.Containers[0].Args
+	env := dep.Spec.Template.Spec.Containers[0].Env
+
+	// Check args
+	expectedArgs := map[string]bool{
+		"--taskspawner-name=test-spawner-bb":                    false,
+		"--taskspawner-namespace=default":                       false,
+		"--bitbucket-dc-base-url=https://bitbucket.example.com": false,
+		"--bitbucket-dc-project=PROJ":                           false,
+		"--bitbucket-dc-repo=my-repo":                           false,
+	}
+	for _, arg := range args {
+		if _, ok := expectedArgs[arg]; ok {
+			expectedArgs[arg] = true
+		}
+	}
+	for arg, found := range expectedArgs {
+		if !found {
+			t.Errorf("Expected arg %q not found in %v", arg, args)
+		}
+	}
+
+	// Should NOT have github-related args
+	for _, arg := range args {
+		if len(arg) > 15 && arg[:15] == "--github-owner=" {
+			t.Errorf("Unexpected github-owner arg: %s", arg)
+		}
+	}
+
+	// Check env
+	if len(env) != 1 {
+		t.Fatalf("Expected 1 env var, got %d", len(env))
+	}
+	if env[0].Name != "BITBUCKET_TOKEN" {
+		t.Errorf("Expected env var BITBUCKET_TOKEN, got %s", env[0].Name)
+	}
+	if env[0].ValueFrom.SecretKeyRef.Name != "bb-token" {
+		t.Errorf("Expected secret name bb-token, got %s", env[0].ValueFrom.SecretKeyRef.Name)
+	}
+	if env[0].ValueFrom.SecretKeyRef.Key != "BITBUCKET_TOKEN" {
+		t.Errorf("Expected secret key BITBUCKET_TOKEN, got %s", env[0].ValueFrom.SecretKeyRef.Key)
+	}
+}

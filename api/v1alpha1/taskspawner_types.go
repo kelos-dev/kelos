@@ -23,6 +23,10 @@ type When struct {
 	// +optional
 	GitHubIssues *GitHubIssues `json:"githubIssues,omitempty"`
 
+	// BitbucketDataCenterPRs discovers pull requests from a Bitbucket Data Center repository.
+	// +optional
+	BitbucketDataCenterPRs *BitbucketDataCenterPRs `json:"bitbucketDataCenterPRs,omitempty"`
+
 	// Cron triggers task spawning on a cron schedule.
 	// +optional
 	Cron *Cron `json:"cron,omitempty"`
@@ -61,6 +65,18 @@ type GitHubIssues struct {
 	State string `json:"state,omitempty"`
 }
 
+// BitbucketDataCenterPRs discovers pull requests from a Bitbucket Data Center repository.
+// The project key and repository slug are derived from the workspace's repo URL
+// specified in taskTemplate.workspaceRef.
+// If the workspace has a secretRef, the BITBUCKET_TOKEN key is used for API authentication.
+type BitbucketDataCenterPRs struct {
+	// State filters pull requests by state (OPEN, MERGED, DECLINED, ALL). Defaults to OPEN.
+	// +kubebuilder:validation:Enum=OPEN;MERGED;DECLINED;ALL
+	// +kubebuilder:default=OPEN
+	// +optional
+	State string `json:"state,omitempty"`
+}
+
 // TaskTemplate defines the template for spawned Tasks.
 type TaskTemplate struct {
 	// Type specifies the agent type (e.g., claude-code).
@@ -83,7 +99,7 @@ type TaskTemplate struct {
 	Image string `json:"image,omitempty"`
 
 	// WorkspaceRef references the Workspace that defines the repository.
-	// Required when using githubIssues source; optional for other sources.
+	// Required when using githubIssues or bitbucketDataCenterPRs source; optional for other sources.
 	// When set, spawned Tasks inherit this workspace reference.
 	// +optional
 	WorkspaceRef *WorkspaceReference `json:"workspaceRef,omitempty"`
@@ -111,6 +127,7 @@ type TaskTemplate struct {
 
 // TaskSpawnerSpec defines the desired state of TaskSpawner.
 // +kubebuilder:validation:XValidation:rule="!has(self.when.githubIssues) || has(self.taskTemplate.workspaceRef)",message="taskTemplate.workspaceRef is required when using githubIssues source"
+// +kubebuilder:validation:XValidation:rule="!has(self.when.bitbucketDataCenterPRs) || has(self.taskTemplate.workspaceRef)",message="taskTemplate.workspaceRef is required when using bitbucketDataCenterPRs source"
 type TaskSpawnerSpec struct {
 	// When defines the conditions that trigger task spawning.
 	// +kubebuilder:validation:Required

@@ -37,7 +37,7 @@ func NewDeploymentBuilder() *DeploymentBuilder {
 
 // Build creates a Deployment for the given TaskSpawner.
 // The workspace parameter provides the repository URL and optional secretRef
-// for GitHub API authentication.
+// for API authentication (GitHub or Bitbucket Data Center).
 func (b *DeploymentBuilder) Build(ts *axonv1alpha1.TaskSpawner, workspace *axonv1alpha1.WorkspaceSpec) *appsv1.Deployment {
 	replicas := int32(1)
 
@@ -47,7 +47,28 @@ func (b *DeploymentBuilder) Build(ts *axonv1alpha1.TaskSpawner, workspace *axonv
 	}
 
 	var envVars []corev1.EnvVar
-	if workspace != nil {
+	if workspace != nil && ts.Spec.When.BitbucketDataCenterPRs != nil {
+		baseURL, project, repoSlug := parseBitbucketDCRepo(workspace.Repo)
+		args = append(args,
+			"--bitbucket-dc-base-url="+baseURL,
+			"--bitbucket-dc-project="+project,
+			"--bitbucket-dc-repo="+repoSlug,
+		)
+
+		if workspace.SecretRef != nil {
+			envVars = append(envVars, corev1.EnvVar{
+				Name: "BITBUCKET_TOKEN",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: workspace.SecretRef.Name,
+						},
+						Key: "BITBUCKET_TOKEN",
+					},
+				},
+			})
+		}
+	} else if workspace != nil {
 		host, owner, repo := parseGitHubRepo(workspace.Repo)
 		args = append(args,
 			"--github-owner="+owner,
@@ -155,4 +176,42 @@ func gitHubAPIBaseURL(host string) string {
 		return ""
 	}
 	return (&url.URL{Scheme: "https", Host: host, Path: "/api/v3"}).String()
+}
+
+// bbdcSCMRepoRe matches Bitbucket DC SCM-style clone URLs: https://host/scm/PROJECT/repo.git
+var bbdcSCMRepoRe = regexp.MustCompile(`(https?://[^/]+)/scm/([^/]+)/([^/.]+)`)
+
+// bbdcProjectsRepoRe matches Bitbucket DC browse-style URLs: https://host/projects/PROJECT/repos/repo
+var bbdcProjectsRepoRe = regexp.MustCompile(`(https?://[^/]+)/projects/([^/]+)/repos/([^/.]+)`)
+
+// bbdcSSHRepoRe matches Bitbucket DC SSH-style URLs: git@host:PROJECT/repo.git or ssh://git@host/PROJECT/repo.git
+var bbdcSSHRepoRe = regexp.MustCompile(`(?:ssh://)?git@([^:/]+)(?::\d+)?[:/]([^/]+)/([^/.]+)`)
+
+// parseBitbucketDCRepo extracts the base URL, project key, and repository slug
+// from a Bitbucket Data Center repository URL.
+// Supports:
+//   - HTTPS SCM clone URL: https://bitbucket.example.com/scm/PROJECT/repo.git
+//   - HTTPS browse URL: https://bitbucket.example.com/projects/PROJECT/repos/repo
+//   - SSH URL: git@bitbucket.example.com:PROJECT/repo.git
+//   - SSH URL with port: ssh://git@bitbucket.example.com:7999/PROJECT/repo.git
+func parseBitbucketDCRepo(repoURL string) (baseURL, project, repo string) {
+	repoURL = strings.TrimSuffix(repoURL, ".git")
+
+	if m := bbdcSCMRepoRe.FindStringSubmatch(repoURL); len(m) == 4 {
+		return m[1], m[2], m[3]
+	}
+	if m := bbdcProjectsRepoRe.FindStringSubmatch(repoURL); len(m) == 4 {
+		return m[1], m[2], m[3]
+	}
+	if m := bbdcSSHRepoRe.FindStringSubmatch(repoURL); len(m) == 4 {
+		return "https://" + m[1], m[2], m[3]
+	}
+
+	// Fallback: try splitting by '/' and taking last two segments
+	parts := strings.Split(strings.TrimSuffix(repoURL, "/"), "/")
+	if len(parts) >= 2 {
+		return "", parts[len(parts)-2], parts[len(parts)-1]
+	}
+
+	return "", "", fmt.Sprintf("unknown-repo-%s", repoURL)
 }

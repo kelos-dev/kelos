@@ -105,7 +105,12 @@ func newTask(name, namespace, spawnerName string, phase axonv1alpha1.TaskPhase) 
 func TestBuildSource_GitHubIssuesWithBaseURL(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 
-	src, err := buildSource(ts, "my-org", "my-repo", "https://github.example.com/api/v3")
+	opts := sourceOptions{
+		githubOwner:      "my-org",
+		githubRepo:       "my-repo",
+		githubAPIBaseURL: "https://github.example.com/api/v3",
+	}
+	src, err := buildSource(ts, opts)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -128,7 +133,11 @@ func TestBuildSource_GitHubIssuesWithBaseURL(t *testing.T) {
 func TestBuildSource_GitHubIssuesDefaultBaseURL(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 
-	src, err := buildSource(ts, "axon-core", "axon", "")
+	opts := sourceOptions{
+		githubOwner: "axon-core",
+		githubRepo:  "axon",
+	}
+	src, err := buildSource(ts, opts)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -139,6 +148,57 @@ func TestBuildSource_GitHubIssuesDefaultBaseURL(t *testing.T) {
 	}
 	if ghSrc.BaseURL != "" {
 		t.Errorf("BaseURL = %q, want empty (defaults to api.github.com)", ghSrc.BaseURL)
+	}
+}
+
+func TestBuildSource_BitbucketDataCenterPRs(t *testing.T) {
+	ts := &axonv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "spawner",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpawnerSpec{
+			When: axonv1alpha1.When{
+				BitbucketDataCenterPRs: &axonv1alpha1.BitbucketDataCenterPRs{
+					State: "OPEN",
+				},
+			},
+			TaskTemplate: axonv1alpha1.TaskTemplate{
+				Type: "claude-code",
+				Credentials: axonv1alpha1.Credentials{
+					Type:      axonv1alpha1.CredentialTypeOAuth,
+					SecretRef: axonv1alpha1.SecretReference{Name: "creds"},
+				},
+				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "test-ws"},
+			},
+		},
+	}
+
+	opts := sourceOptions{
+		bitbucketDCBaseURL: "https://bitbucket.example.com",
+		bitbucketDCProject: "PROJ",
+		bitbucketDCRepo:    "my-repo",
+	}
+	src, err := buildSource(ts, opts)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	bbSrc, ok := src.(*source.BitbucketDataCenterSource)
+	if !ok {
+		t.Fatalf("Expected *source.BitbucketDataCenterSource, got %T", src)
+	}
+	if bbSrc.BaseURL != "https://bitbucket.example.com" {
+		t.Errorf("BaseURL = %q, want %q", bbSrc.BaseURL, "https://bitbucket.example.com")
+	}
+	if bbSrc.Project != "PROJ" {
+		t.Errorf("Project = %q, want %q", bbSrc.Project, "PROJ")
+	}
+	if bbSrc.Repo != "my-repo" {
+		t.Errorf("Repo = %q, want %q", bbSrc.Repo, "my-repo")
+	}
+	if bbSrc.State != "OPEN" {
+		t.Errorf("State = %q, want %q", bbSrc.State, "OPEN")
 	}
 }
 

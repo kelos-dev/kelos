@@ -626,6 +626,196 @@ var _ = Describe("TaskSpawner Controller", func() {
 		})
 	})
 
+	Context("When creating a TaskSpawner with Bitbucket Data Center PRs source", func() {
+		It("Should create a Deployment with Bitbucket DC args", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-taskspawner-bbdc",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Workspace with Bitbucket DC repo URL")
+			ws := &axonv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace-bbdc",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.WorkspaceSpec{
+					Repo: "https://bitbucket.example.com/scm/PROJ/my-repo.git",
+					Ref:  "main",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
+
+			By("Creating a TaskSpawner with Bitbucket DC PRs source")
+			ts := &axonv1alpha1.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-spawner-bbdc",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpawnerSpec{
+					When: axonv1alpha1.When{
+						BitbucketDataCenterPRs: &axonv1alpha1.BitbucketDataCenterPRs{
+							State: "OPEN",
+						},
+					},
+					TaskTemplate: axonv1alpha1.TaskTemplate{
+						Type: "claude-code",
+						Credentials: axonv1alpha1.Credentials{
+							Type: axonv1alpha1.CredentialTypeOAuth,
+							SecretRef: axonv1alpha1.SecretReference{
+								Name: "claude-credentials",
+							},
+						},
+						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+							Name: "test-workspace-bbdc",
+						},
+					},
+					PollInterval: "5m",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ts)).Should(Succeed())
+
+			tsLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
+			createdTS := &axonv1alpha1.TaskSpawner{}
+
+			By("Verifying the TaskSpawner has a finalizer")
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, tsLookupKey, createdTS)
+				if err != nil {
+					return false
+				}
+				for _, f := range createdTS.Finalizers {
+					if f == "axon.io/taskspawner-finalizer" {
+						return true
+					}
+				}
+				return false
+			}, timeout, interval).Should(BeTrue())
+
+			By("Verifying a Deployment is created")
+			deployLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
+			createdDeploy := &appsv1.Deployment{}
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, deployLookupKey, createdDeploy)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Verifying the Deployment spec has Bitbucket DC args")
+			Expect(createdDeploy.Spec.Template.Spec.Containers).To(HaveLen(1))
+			container := createdDeploy.Spec.Template.Spec.Containers[0]
+			Expect(container.Name).To(Equal("spawner"))
+			Expect(container.Image).To(Equal(controller.DefaultSpawnerImage))
+			Expect(container.Args).To(ConsistOf(
+				"--taskspawner-name="+ts.Name,
+				"--taskspawner-namespace="+ns.Name,
+				"--bitbucket-dc-base-url=https://bitbucket.example.com",
+				"--bitbucket-dc-project=PROJ",
+				"--bitbucket-dc-repo=my-repo",
+			))
+
+			By("Verifying the Deployment has no env vars (no secretRef)")
+			Expect(container.Env).To(BeEmpty())
+
+			By("Verifying TaskSpawner status has deploymentName")
+			Eventually(func() string {
+				err := k8sClient.Get(ctx, tsLookupKey, createdTS)
+				if err != nil {
+					return ""
+				}
+				return createdTS.Status.DeploymentName
+			}, timeout, interval).Should(Equal(ts.Name))
+
+			By("Verifying TaskSpawner phase is Pending")
+			Expect(createdTS.Status.Phase).To(Equal(axonv1alpha1.TaskSpawnerPhasePending))
+		})
+	})
+
+	Context("When creating a TaskSpawner with Bitbucket DC and secretRef", func() {
+		It("Should create a Deployment with BITBUCKET_TOKEN env var", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-taskspawner-bbdc-token",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with Bitbucket token")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "bitbucket-token",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"BITBUCKET_TOKEN": "test-bitbucket-token",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+			By("Creating a Workspace with secretRef")
+			ws := &axonv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace-bbdc-token",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.WorkspaceSpec{
+					Repo: "https://bitbucket.example.com/scm/PROJ/my-repo.git",
+					Ref:  "main",
+					SecretRef: &axonv1alpha1.SecretReference{
+						Name: "bitbucket-token",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
+
+			By("Creating a TaskSpawner")
+			ts := &axonv1alpha1.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-spawner-bbdc-token",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpawnerSpec{
+					When: axonv1alpha1.When{
+						BitbucketDataCenterPRs: &axonv1alpha1.BitbucketDataCenterPRs{},
+					},
+					TaskTemplate: axonv1alpha1.TaskTemplate{
+						Type: "claude-code",
+						Credentials: axonv1alpha1.Credentials{
+							Type: axonv1alpha1.CredentialTypeOAuth,
+							SecretRef: axonv1alpha1.SecretReference{
+								Name: "claude-credentials",
+							},
+						},
+						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+							Name: "test-workspace-bbdc-token",
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ts)).Should(Succeed())
+
+			By("Verifying a Deployment is created")
+			deployLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
+			createdDeploy := &appsv1.Deployment{}
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, deployLookupKey, createdDeploy)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Verifying the Deployment has BITBUCKET_TOKEN env var")
+			container := createdDeploy.Spec.Template.Spec.Containers[0]
+			Expect(container.Env).To(HaveLen(1))
+			Expect(container.Env[0].Name).To(Equal("BITBUCKET_TOKEN"))
+			Expect(container.Env[0].ValueFrom.SecretKeyRef.Name).To(Equal("bitbucket-token"))
+			Expect(container.Env[0].ValueFrom.SecretKeyRef.Key).To(Equal("BITBUCKET_TOKEN"))
+		})
+	})
+
 	Context("When creating a TaskSpawner with Cron source", func() {
 		It("Should create a Deployment and update status", func() {
 			By("Creating a namespace")

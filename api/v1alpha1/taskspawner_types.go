@@ -88,6 +88,13 @@ type TaskTemplate struct {
 	// +optional
 	WorkspaceRef *WorkspaceReference `json:"workspaceRef,omitempty"`
 
+	// Plugins specifies Claude Code plugins to load into the agent.
+	// Each plugin references a ConfigMap that is mounted into the container
+	// and passed via --plugin-dir to the claude CLI.
+	// This field is only applicable when type is "claude-code".
+	// +optional
+	Plugins []Plugin `json:"plugins,omitempty"`
+
 	// PromptTemplate is a Go text/template for rendering the task prompt.
 	// Available variables: {{.ID}}, {{.Number}}, {{.Title}}, {{.Body}}, {{.URL}}, {{.Comments}}, {{.Labels}}, {{.Kind}}, {{.Time}}, {{.Schedule}}.
 	// +optional

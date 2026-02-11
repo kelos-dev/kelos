@@ -28,6 +28,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 		name           string
 		watch          bool
 		workspace      string
+		plugins        []string
 		dryRun         bool
 		yes            bool
 	)
@@ -175,6 +176,15 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 				}
 			}
 
+			for _, p := range plugins {
+				task.Spec.Plugins = append(task.Spec.Plugins, axonv1alpha1.Plugin{
+					Name: p,
+					ConfigMapRef: axonv1alpha1.ConfigMapReference{
+						Name: p,
+					},
+				})
+			}
+
 			task.SetGroupVersionKind(axonv1alpha1.GroupVersion.WithKind("Task"))
 
 			if dryRun {
@@ -202,6 +212,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 	cmd.Flags().StringVar(&image, "image", "", "custom agent image (must implement agent image interface)")
 	cmd.Flags().StringVar(&name, "name", "", "task name (auto-generated if omitted)")
 	cmd.Flags().StringVar(&workspace, "workspace", "", "name of Workspace resource to use")
+	cmd.Flags().StringArrayVar(&plugins, "plugin", nil, "ConfigMap name containing a Claude Code plugin (can be specified multiple times)")
 	cmd.Flags().BoolVarP(&watch, "watch", "w", false, "watch task status after creation")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print the resource that would be created without submitting it")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation prompts")

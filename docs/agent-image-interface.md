@@ -29,6 +29,7 @@ Axon sets the following reserved environment variables on agent containers:
 | Variable | Description | Always set? |
 |---|---|---|
 | `AXON_MODEL` | The model name to use | Only when `model` is specified in the Task |
+| `AXON_PLUGINS` | Comma-separated list of plugin directory mount paths | Only when `plugins` is specified in the Task |
 | `ANTHROPIC_API_KEY` | API key for Anthropic (`claude-code` agent, api-key credential type) | When credential type is `api-key` and agent type is `claude-code` |
 | `CODEX_API_KEY` | API key for OpenAI Codex (`codex` agent, api-key or oauth credential type) | When agent type is `codex` |
 | `GEMINI_API_KEY` | API key for Google Gemini (`gemini` agent, api-key or oauth credential type) | When agent type is `gemini` |

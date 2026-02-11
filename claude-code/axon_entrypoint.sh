@@ -23,6 +23,14 @@ if [ -n "${AXON_MODEL:-}" ]; then
     ARGS+=("--model" "$AXON_MODEL")
 fi
 
+# Load Claude Code plugins specified via AXON_PLUGINS (comma-separated paths).
+if [ -n "${AXON_PLUGINS:-}" ]; then
+    IFS=',' read -ra PLUGIN_DIRS <<< "$AXON_PLUGINS"
+    for dir in "${PLUGIN_DIRS[@]}"; do
+        ARGS+=("--plugin-dir" "$dir")
+    done
+fi
+
 claude "${ARGS[@]}"
 AGENT_EXIT_CODE=$?
 

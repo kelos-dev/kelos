@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -46,6 +47,9 @@ const (
 
 	// ClaudeCodeUID is an alias for AgentUID for backward compatibility.
 	ClaudeCodeUID = AgentUID
+
+	// PluginMountPath is the base mount path for plugin volumes.
+	PluginMountPath = "/plugins"
 )
 
 // JobBuilder constructs Kubernetes Jobs for Tasks.
@@ -199,6 +203,37 @@ func (b *JobBuilder) buildAgentJob(task *axonv1alpha1.Task, workspace *axonv1alp
 		workspaceEnvVars = append(workspaceEnvVars, ghTokenEnv)
 	}
 
+	// Mount plugin ConfigMaps and set AXON_PLUGINS env var.
+	var pluginVolumes []corev1.Volume
+	var pluginMounts []corev1.VolumeMount
+	if len(task.Spec.Plugins) > 0 {
+		var pluginPaths []string
+		for _, plugin := range task.Spec.Plugins {
+			volName := "plugin-" + plugin.Name
+			mountPath := PluginMountPath + "/" + plugin.Name
+			pluginVolumes = append(pluginVolumes, corev1.Volume{
+				Name: volName,
+				VolumeSource: corev1.VolumeSource{
+					ConfigMap: &corev1.ConfigMapVolumeSource{
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: plugin.ConfigMapRef.Name,
+						},
+					},
+				},
+			})
+			pluginMounts = append(pluginMounts, corev1.VolumeMount{
+				Name:      volName,
+				MountPath: mountPath,
+				ReadOnly:  true,
+			})
+			pluginPaths = append(pluginPaths, mountPath)
+		}
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "AXON_PLUGINS",
+			Value: strings.Join(pluginPaths, ","),
+		})
+	}
+
 	backoffLimit := int32(0)
 	agentUID := AgentUID
 
@@ -209,10 +244,11 @@ func (b *JobBuilder) buildAgentJob(task *axonv1alpha1.Task, workspace *axonv1alp
 		Command:         []string{"/axon_entrypoint.sh"},
 		Args:            []string{task.Spec.Prompt},
 		Env:             envVars,
+		VolumeMounts:    pluginMounts,
 	}
 
 	var initContainers []corev1.Container
-	var volumes []corev1.Volume
+	volumes := pluginVolumes
 	var podSecurityContext *corev1.PodSecurityContext
 
 	if workspace != nil {
@@ -259,7 +295,7 @@ func (b *JobBuilder) buildAgentJob(task *axonv1alpha1.Task, workspace *axonv1alp
 
 		initContainers = append(initContainers, initContainer)
 
-		mainContainer.VolumeMounts = []corev1.VolumeMount{volumeMount}
+		mainContainer.VolumeMounts = append(mainContainer.VolumeMounts, volumeMount)
 		mainContainer.WorkingDir = WorkspaceMountPath + "/repo"
 	}
 

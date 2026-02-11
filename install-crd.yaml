@@ -80,6 +80,40 @@ spec:
               model:
                 description: Model optionally overrides the default model.
                 type: string
+              plugins:
+                description: |-
+                  Plugins specifies Claude Code plugins to load into the agent.
+                  Each plugin references a ConfigMap that is mounted into the container
+                  and passed via --plugin-dir to the claude CLI.
+                  This field is only applicable when type is "claude-code".
+                items:
+                  description: |-
+                    Plugin specifies a Claude Code plugin to load into the agent container.
+                    The referenced ConfigMap is mounted as a directory and passed to the
+                    agent via --plugin-dir.
+                  properties:
+                    configMapRef:
+                      description: |-
+                        ConfigMapRef references a ConfigMap containing the plugin files.
+                        The ConfigMap is mounted as a read-only directory at /plugins/<name>.
+                      properties:
+                        name:
+                          description: Name is the name of the ConfigMap.
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    name:
+                      description: |-
+                        Name is a unique identifier for this plugin within the Task.
+                        It is used as the subdirectory name under /plugins/ inside the container.
+                      pattern: ^[a-z0-9]([a-z0-9\-]*[a-z0-9])?$
+                      type: string
+                  required:
+                  - configMapRef
+                  - name
+                  type: object
+                type: array
               prompt:
                 description: Prompt is the task prompt to send to the agent.
                 type: string
@@ -263,6 +297,40 @@ spec:
                   model:
                     description: Model optionally overrides the default model.
                     type: string
+                  plugins:
+                    description: |-
+                      Plugins specifies Claude Code plugins to load into the agent.
+                      Each plugin references a ConfigMap that is mounted into the container
+                      and passed via --plugin-dir to the claude CLI.
+                      This field is only applicable when type is "claude-code".
+                    items:
+                      description: |-
+                        Plugin specifies a Claude Code plugin to load into the agent container.
+                        The referenced ConfigMap is mounted as a directory and passed to the
+                        agent via --plugin-dir.
+                      properties:
+                        configMapRef:
+                          description: |-
+                            ConfigMapRef references a ConfigMap containing the plugin files.
+                            The ConfigMap is mounted as a read-only directory at /plugins/<name>.
+                          properties:
+                            name:
+                              description: Name is the name of the ConfigMap.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        name:
+                          description: |-
+                            Name is a unique identifier for this plugin within the Task.
+                            It is used as the subdirectory name under /plugins/ inside the container.
+                          pattern: ^[a-z0-9]([a-z0-9\-]*[a-z0-9])?$
+                          type: string
+                      required:
+                      - configMapRef
+                      - name
+                      type: object
+                    type: array
                   promptTemplate:
                     description: |-
                       PromptTemplate is a Go text/template for rendering the task prompt.

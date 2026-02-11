@@ -313,6 +313,57 @@ func TestRunCycleWithSource_MaxConcurrencyAlreadyAtLimit(t *testing.T) {
 	}
 }
 
+func TestRunCycleWithSource_PluginsArePropagated(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	ts.Spec.TaskTemplate.Plugins = []axonv1alpha1.Plugin{
+		{
+			Name: "my-plugin",
+			ConfigMapRef: axonv1alpha1.ConfigMapReference{
+				Name: "my-plugin-cm",
+			},
+		},
+		{
+			Name: "another-plugin",
+			ConfigMapRef: axonv1alpha1.ConfigMapReference{
+				Name: "another-plugin-cm",
+			},
+		},
+	}
+	cl, key := setupTest(t, ts)
+
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{ID: "1", Title: "Item 1"},
+		},
+	}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var taskList axonv1alpha1.TaskList
+	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatalf("Listing tasks: %v", err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task, got %d", len(taskList.Items))
+	}
+
+	task := taskList.Items[0]
+	if len(task.Spec.Plugins) != 2 {
+		t.Fatalf("Expected 2 plugins, got %d", len(task.Spec.Plugins))
+	}
+	if task.Spec.Plugins[0].Name != "my-plugin" {
+		t.Errorf("Expected plugin name %q, got %q", "my-plugin", task.Spec.Plugins[0].Name)
+	}
+	if task.Spec.Plugins[0].ConfigMapRef.Name != "my-plugin-cm" {
+		t.Errorf("Expected ConfigMap name %q, got %q", "my-plugin-cm", task.Spec.Plugins[0].ConfigMapRef.Name)
+	}
+	if task.Spec.Plugins[1].Name != "another-plugin" {
+		t.Errorf("Expected plugin name %q, got %q", "another-plugin", task.Spec.Plugins[1].Name)
+	}
+}
+
 func TestRunCycleWithSource_ActiveTasksStatusUpdated(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", int32Ptr(5))
 	existingTasks := []axonv1alpha1.Task{

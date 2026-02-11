@@ -937,3 +937,209 @@ func TestBuildClaudeCodeJob_UnsupportedType(t *testing.T) {
 		t.Fatal("Expected error for unsupported agent type, got nil")
 	}
 }
+
+func TestBuildClaudeCodeJob_WithPlugins(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-plugins",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix the bug",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			},
+			Plugins: []axonv1alpha1.Plugin{
+				{
+					Name: "my-plugin",
+					ConfigMapRef: axonv1alpha1.ConfigMapReference{
+						Name: "my-plugin-cm",
+					},
+				},
+				{
+					Name: "another-plugin",
+					ConfigMapRef: axonv1alpha1.ConfigMapReference{
+						Name: "another-plugin-cm",
+					},
+				},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	// Verify plugin volumes are created.
+	volumeMap := map[string]string{}
+	for _, vol := range job.Spec.Template.Spec.Volumes {
+		if vol.ConfigMap != nil {
+			volumeMap[vol.Name] = vol.ConfigMap.Name
+		}
+	}
+	if volumeMap["plugin-my-plugin"] != "my-plugin-cm" {
+		t.Errorf("Expected volume plugin-my-plugin with ConfigMap my-plugin-cm, got %q", volumeMap["plugin-my-plugin"])
+	}
+	if volumeMap["plugin-another-plugin"] != "another-plugin-cm" {
+		t.Errorf("Expected volume plugin-another-plugin with ConfigMap another-plugin-cm, got %q", volumeMap["plugin-another-plugin"])
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+
+	// Verify plugin volume mounts.
+	mountMap := map[string]string{}
+	for _, mount := range container.VolumeMounts {
+		mountMap[mount.Name] = mount.MountPath
+	}
+	if mountMap["plugin-my-plugin"] != "/plugins/my-plugin" {
+		t.Errorf("Expected mount at /plugins/my-plugin, got %q", mountMap["plugin-my-plugin"])
+	}
+	if mountMap["plugin-another-plugin"] != "/plugins/another-plugin" {
+		t.Errorf("Expected mount at /plugins/another-plugin, got %q", mountMap["plugin-another-plugin"])
+	}
+
+	// Verify plugin mounts are read-only.
+	for _, mount := range container.VolumeMounts {
+		if mount.Name == "plugin-my-plugin" || mount.Name == "plugin-another-plugin" {
+			if !mount.ReadOnly {
+				t.Errorf("Expected plugin mount %q to be read-only", mount.Name)
+			}
+		}
+	}
+
+	// Verify AXON_PLUGINS env var.
+	foundPlugins := false
+	for _, env := range container.Env {
+		if env.Name == "AXON_PLUGINS" {
+			foundPlugins = true
+			expected := "/plugins/my-plugin,/plugins/another-plugin"
+			if env.Value != expected {
+				t.Errorf("AXON_PLUGINS value: expected %q, got %q", expected, env.Value)
+			}
+		}
+	}
+	if !foundPlugins {
+		t.Error("Expected AXON_PLUGINS env var to be set")
+	}
+}
+
+func TestBuildClaudeCodeJob_PluginsWithWorkspace(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-plugins-ws",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix the bug",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			},
+			Plugins: []axonv1alpha1.Plugin{
+				{
+					Name: "my-plugin",
+					ConfigMapRef: axonv1alpha1.ConfigMapReference{
+						Name: "my-plugin-cm",
+					},
+				},
+			},
+		},
+	}
+
+	workspace := &axonv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/example/repo.git",
+		Ref:  "main",
+	}
+
+	job, err := builder.Build(task, workspace)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+
+	// Should have both plugin and workspace volume mounts.
+	mountMap := map[string]string{}
+	for _, mount := range container.VolumeMounts {
+		mountMap[mount.Name] = mount.MountPath
+	}
+	if mountMap["plugin-my-plugin"] != "/plugins/my-plugin" {
+		t.Errorf("Expected plugin mount at /plugins/my-plugin, got %q", mountMap["plugin-my-plugin"])
+	}
+	if mountMap[WorkspaceVolumeName] != WorkspaceMountPath {
+		t.Errorf("Expected workspace mount at %s, got %q", WorkspaceMountPath, mountMap[WorkspaceVolumeName])
+	}
+
+	// Should have both plugin and workspace volumes.
+	volumeNames := map[string]bool{}
+	for _, vol := range job.Spec.Template.Spec.Volumes {
+		volumeNames[vol.Name] = true
+	}
+	if !volumeNames["plugin-my-plugin"] {
+		t.Error("Expected plugin-my-plugin volume")
+	}
+	if !volumeNames[WorkspaceVolumeName] {
+		t.Error("Expected workspace volume")
+	}
+
+	// Working dir should still be set.
+	if container.WorkingDir != WorkspaceMountPath+"/repo" {
+		t.Errorf("Expected workingDir %q, got %q", WorkspaceMountPath+"/repo", container.WorkingDir)
+	}
+
+	// AXON_PLUGINS should be set.
+	foundPlugins := false
+	for _, env := range container.Env {
+		if env.Name == "AXON_PLUGINS" {
+			foundPlugins = true
+		}
+	}
+	if !foundPlugins {
+		t.Error("Expected AXON_PLUGINS env var to be set")
+	}
+}
+
+func TestBuildClaudeCodeJob_NoPlugins(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-no-plugins",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Hello",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+
+	// AXON_PLUGINS should NOT be set when no plugins specified.
+	for _, env := range container.Env {
+		if env.Name == "AXON_PLUGINS" {
+			t.Error("AXON_PLUGINS should not be set when no plugins are specified")
+		}
+	}
+
+	// No plugin volumes should be created.
+	for _, vol := range job.Spec.Template.Spec.Volumes {
+		if vol.ConfigMap != nil {
+			t.Errorf("Unexpected ConfigMap volume %q when no plugins specified", vol.Name)
+		}
+	}
+}

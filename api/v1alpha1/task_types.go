@@ -44,6 +44,28 @@ type Credentials struct {
 	SecretRef SecretReference `json:"secretRef"`
 }
 
+// Plugin specifies a Claude Code plugin to load into the agent container.
+// The referenced ConfigMap is mounted as a directory and passed to the
+// agent via --plugin-dir.
+type Plugin struct {
+	// Name is a unique identifier for this plugin within the Task.
+	// It is used as the subdirectory name under /plugins/ inside the container.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9\-]*[a-z0-9])?$`
+	Name string `json:"name"`
+
+	// ConfigMapRef references a ConfigMap containing the plugin files.
+	// The ConfigMap is mounted as a read-only directory at /plugins/<name>.
+	// +kubebuilder:validation:Required
+	ConfigMapRef ConfigMapReference `json:"configMapRef"`
+}
+
+// ConfigMapReference refers to a ConfigMap.
+type ConfigMapReference struct {
+	// Name is the name of the ConfigMap.
+	Name string `json:"name"`
+}
+
 // TaskSpec defines the desired state of Task.
 type TaskSpec struct {
 	// Type specifies the agent type (e.g., claude-code).
@@ -72,6 +94,13 @@ type TaskSpec struct {
 	// WorkspaceRef optionally references a Workspace resource for the agent to work in.
 	// +optional
 	WorkspaceRef *WorkspaceReference `json:"workspaceRef,omitempty"`
+
+	// Plugins specifies Claude Code plugins to load into the agent.
+	// Each plugin references a ConfigMap that is mounted into the container
+	// and passed via --plugin-dir to the claude CLI.
+	// This field is only applicable when type is "claude-code".
+	// +optional
+	Plugins []Plugin `json:"plugins,omitempty"`
 
 	// TTLSecondsAfterFinished limits the lifetime of a Task that has finished
 	// execution (either Succeeded or Failed). If set, the Task will be

@@ -4,6 +4,110 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.0
+  name: agentconfigs.axon.io
+spec:
+  group: axon.io
+  names:
+    kind: AgentConfig
+    listKind: AgentConfigList
+    plural: agentconfigs
+    singular: agentconfig
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: AgentConfig is the Schema for the agentconfigs API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: AgentConfigSpec defines the desired state of AgentConfig.
+            properties:
+              agentsMD:
+                description: |-
+                  AgentsMD is written to the agent's instruction file
+                  (e.g., ~/.claude/CLAUDE.md for Claude Code).
+                  This is additive and does not overwrite the repo's own instruction files.
+                type: string
+              plugins:
+                description: |-
+                  Plugins defines Claude Code plugins to inject via --plugin-dir.
+                  Each plugin is mounted as a separate plugin directory.
+                  Only applicable to claude-code type agents; other agents ignore this.
+                items:
+                  description: PluginSpec defines a Claude Code plugin bundle.
+                  properties:
+                    agents:
+                      description: |-
+                        Agents defines sub-agents for this plugin.
+                        Each becomes agents/<name>.md in the plugin directory.
+                      items:
+                        description: AgentDefinition defines a Claude Code sub-agent.
+                        properties:
+                          content:
+                            type: string
+                          name:
+                            minLength: 1
+                            type: string
+                        required:
+                        - content
+                        - name
+                        type: object
+                      type: array
+                    name:
+                      description: |-
+                        Name is the plugin name. Used as the plugin directory name
+                        and for namespacing in Claude Code (e.g., <name>:skill-name).
+                      minLength: 1
+                      type: string
+                    skills:
+                      description: |-
+                        Skills defines skills for this plugin.
+                        Each becomes skills/<name>/SKILL.md in the plugin directory.
+                      items:
+                        description: SkillDefinition defines a Claude Code skill (slash
+                          command).
+                        properties:
+                          content:
+                            type: string
+                          name:
+                            minLength: 1
+                            type: string
+                        required:
+                        - content
+                        - name
+                        type: object
+                      type: array
+                  required:
+                  - name
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.0
   name: tasks.axon.io
 spec:
   group: axon.io
@@ -49,6 +153,15 @@ spec:
           spec:
             description: TaskSpec defines the desired state of Task.
             properties:
+              agentConfigRef:
+                description: AgentConfigRef references an AgentConfig resource.
+                properties:
+                  name:
+                    description: Name is the name of the AgentConfig resource.
+                    type: string
+                required:
+                - name
+                type: object
               credentials:
                 description: Credentials specifies how to authenticate with the agent.
                 properties:
@@ -469,6 +582,17 @@ spec:
               taskTemplate:
                 description: TaskTemplate defines the template for spawned Tasks.
                 properties:
+                  agentConfigRef:
+                    description: |-
+                      AgentConfigRef references an AgentConfig resource.
+                      When set, spawned Tasks inherit this agent config reference.
+                    properties:
+                      name:
+                        description: Name is the name of the AgentConfig resource.
+                        type: string
+                    required:
+                    - name
+                    type: object
                   credentials:
                     description: Credentials specifies how to authenticate with the
                       agent.
@@ -911,6 +1035,31 @@ spec:
           spec:
             description: WorkspaceSpec defines the desired state of Workspace.
             properties:
+              files:
+                description: |-
+                  Files are written into the cloned repository before the agent starts.
+                  This can be used to inject plugin-like assets such as skills
+                  (for example, ".claude/skills/<name>/SKILL.md") and instruction files
+                  like "CLAUDE.md" or "AGENTS.md".
+                items:
+                  description: |-
+                    WorkspaceFile defines a file to write into the cloned repository before the
+                    agent container starts.
+                  properties:
+                    content:
+                      description: Content is the file content to write.
+                      type: string
+                    path:
+                      description: |-
+                        Path is the relative file path inside the repository (for example,
+                        ".claude/skills/reviewer/SKILL.md" or "CLAUDE.md").
+                      minLength: 1
+                      type: string
+                  required:
+                  - content
+                  - path
+                  type: object
+                type: array
               ref:
                 description: |-
                   Ref is the git reference to checkout (branch, tag, or commit SHA).

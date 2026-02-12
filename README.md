@@ -10,11 +10,12 @@ Axon is an orchestration framework that turns AI coding agents into scalable, au
 
 ## Framework Core
 
-Axon is built on three main primitives that enable sophisticated agent orchestration:
+Axon is built on four main primitives that enable sophisticated agent orchestration:
 
 1.  **Tasks**: Ephemeral units of work that wrap an AI agent run.
 2.  **Workspaces**: Persistent or ephemeral environments (git repos) where agents operate.
-3.  **TaskSpawners**: Orchestration engines that react to external triggers (GitHub, Cron) to automatically manage agent lifecycles.
+3.  **AgentConfigs**: Reusable bundles of agent instructions and plugins.
+4.  **TaskSpawners**: Orchestration engines that react to external triggers (GitHub, Cron) to automatically manage agent lifecycles.
 
 ## Demo
 
@@ -213,6 +214,67 @@ axon run -p "Fix the bug described in issue #42 and open a PR with the fix"
 
 The `gh` CLI and `GITHUB_TOKEN` are available inside the agent container, so the agent can push branches and create PRs autonomously.
 
+### Inject agent instructions and plugins
+
+Use `AgentConfig` to bundle agent instructions and Claude Code plugins. Tasks reference it via `agentConfigRef`:
+
+```yaml
+apiVersion: axon.io/v1alpha1
+kind: AgentConfig
+metadata:
+  name: my-config
+spec:
+  agentsMD: |
+    Follow TDD. Always write tests first.
+  plugins:
+    - name: team-tools
+      skills:
+        - name: deploy
+          content: |
+            ---
+            name: deploy
+            description: Deploy the application
+            ---
+            Deploy instructions here...
+      agents:
+        - name: reviewer
+          content: |
+            ---
+            name: reviewer
+            description: Code review specialist
+            ---
+            You are a code reviewer...
+```
+
+Reference it from a Task:
+
+```yaml
+apiVersion: axon.io/v1alpha1
+kind: Task
+metadata:
+  name: my-task
+spec:
+  type: claude-code
+  prompt: "Fix the bug"
+  credentials:
+    type: oauth
+    secretRef:
+      name: claude-oauth
+  workspaceRef:
+    name: my-workspace
+  agentConfigRef:
+    name: my-config
+```
+
+Or via the CLI:
+
+```bash
+axon run -p "Fix the bug" --agents-md "Follow TDD" --skill deploy=@skills/deploy.md --agent reviewer=@agents/reviewer.md
+```
+
+- `agentsMD` is written to `~/.claude/CLAUDE.md` (user-level, additive with the repo's own files)
+- `plugins` are mounted as plugin directories and passed via `--plugin-dir`
+
 ### Auto-fix GitHub issues with TaskSpawner
 
 Create a TaskSpawner to automatically turn GitHub issues into agent tasks:
@@ -342,6 +404,7 @@ The [`examples/`](examples/) directory contains self-contained, ready-to-apply Y
 | `spec.model` | Model override (e.g., `claude-sonnet-4-20250514`) | No |
 | `spec.image` | Custom agent image override (see [Agent Image Interface](docs/agent-image-interface.md)) | No |
 | `spec.workspaceRef.name` | Name of a Workspace resource to use | No |
+| `spec.agentConfigRef.name` | Name of an AgentConfig resource to use | No |
 | `spec.ttlSecondsAfterFinished` | Auto-delete task after N seconds (0 for immediate) | No |
 
 </details>
@@ -354,6 +417,21 @@ The [`examples/`](examples/) directory contains self-contained, ready-to-apply Y
 | `spec.repo` | Git repository URL to clone (HTTPS, git://, or SSH) | Yes |
 | `spec.ref` | Branch, tag, or commit SHA to checkout (defaults to repo's default branch) | No |
 | `spec.secretRef.name` | Secret containing `GITHUB_TOKEN` for git auth and `gh` CLI | No |
+| `spec.files[]` | Files to inject into the cloned repository before the agent starts | No |
+
+</details>
+
+<details>
+<summary><strong>AgentConfig Spec</strong></summary>
+
+| Field | Description | Required |
+|-------|-------------|----------|
+| `spec.agentsMD` | Agent instructions written to `~/.claude/CLAUDE.md` (additive with repo files) | No |
+| `spec.plugins[].name` | Plugin name (used as directory name and namespace) | Yes (per plugin) |
+| `spec.plugins[].skills[].name` | Skill name (becomes `skills/<name>/SKILL.md`) | Yes (per skill) |
+| `spec.plugins[].skills[].content` | Skill content (markdown with frontmatter) | Yes (per skill) |
+| `spec.plugins[].agents[].name` | Agent name (becomes `agents/<name>.md`) | Yes (per agent) |
+| `spec.plugins[].agents[].content` | Agent content (markdown with frontmatter) | Yes (per agent) |
 
 </details>
 
@@ -372,6 +450,7 @@ The [`examples/`](examples/) directory contains self-contained, ready-to-apply Y
 | `spec.taskTemplate.credentials` | Credentials for the agent (same as Task) | Yes |
 | `spec.taskTemplate.model` | Model override | No |
 | `spec.taskTemplate.image` | Custom agent image override (see [Agent Image Interface](docs/agent-image-interface.md)) | No |
+| `spec.taskTemplate.agentConfigRef.name` | Name of an AgentConfig resource for spawned Tasks | No |
 | `spec.taskTemplate.promptTemplate` | Go text/template for prompt (see [template variables](#prompttemplate-variables) below) | No |
 | `spec.taskTemplate.ttlSecondsAfterFinished` | Auto-delete spawned tasks after N seconds | No |
 | `spec.pollInterval` | How often to poll the source (default: `5m`) | No |

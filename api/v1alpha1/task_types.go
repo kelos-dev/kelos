@@ -98,6 +98,10 @@ type TaskSpec struct {
 	// +optional
 	WorkspaceRef *WorkspaceReference `json:"workspaceRef,omitempty"`
 
+	// AgentConfigRef references an AgentConfig resource.
+	// +optional
+	AgentConfigRef *AgentConfigReference `json:"agentConfigRef,omitempty"`
+
 	// TTLSecondsAfterFinished limits the lifetime of a Task that has finished
 	// execution (either Succeeded or Failed). If set, the Task will be
 	// automatically deleted after the given number of seconds once it reaches

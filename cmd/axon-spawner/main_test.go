@@ -347,6 +347,40 @@ func TestRunCycleWithSource_ActiveTasksStatusUpdated(t *testing.T) {
 
 func int64Ptr(v int64) *int64 { return &v }
 
+func TestRunCycleWithSource_AgentConfigRefForwarded(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	ts.Spec.TaskTemplate.AgentConfigRef = &axonv1alpha1.AgentConfigReference{
+		Name: "my-config",
+	}
+	cl, key := setupTest(t, ts)
+
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{ID: "1", Title: "Item 1"},
+		},
+	}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var taskList axonv1alpha1.TaskList
+	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatalf("Listing tasks: %v", err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task, got %d", len(taskList.Items))
+	}
+
+	task := taskList.Items[0]
+	if task.Spec.AgentConfigRef == nil {
+		t.Fatal("Expected AgentConfigRef to be forwarded to spawned Task")
+	}
+	if task.Spec.AgentConfigRef.Name != "my-config" {
+		t.Errorf("Expected AgentConfigRef.Name %q, got %q", "my-config", task.Spec.AgentConfigRef.Name)
+	}
+}
+
 func TestRunCycleWithSource_PodOverridesForwarded(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 	ts.Spec.TaskTemplate.PodOverrides = &axonv1alpha1.PodOverrides{

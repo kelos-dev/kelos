@@ -196,6 +196,10 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 			task.Spec.WorkspaceRef = ts.Spec.TaskTemplate.WorkspaceRef
 		}
 
+		if ts.Spec.TaskTemplate.AgentConfigRef != nil {
+			task.Spec.AgentConfigRef = ts.Spec.TaskTemplate.AgentConfigRef
+		}
+
 		if err := cl.Create(ctx, task); err != nil {
 			if apierrors.IsAlreadyExists(err) {
 				log.Info("Task already exists, skipping", "task", taskName)

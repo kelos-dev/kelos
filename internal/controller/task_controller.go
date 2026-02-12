@@ -46,6 +46,7 @@ type TaskReconciler struct {
 // +kubebuilder:rbac:groups=axon.io,resources=tasks/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=axon.io,resources=tasks/finalizers,verbs=update
 // +kubebuilder:rbac:groups=axon.io,resources=workspaces,verbs=get;list;watch
+// +kubebuilder:rbac:groups=axon.io,resources=agentconfigs,verbs=get;list;watch
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods/log,verbs=get
@@ -193,7 +194,24 @@ func (r *TaskReconciler) createJob(ctx context.Context, task *axonv1alpha1.Task)
 		}
 	}
 
-	job, err := r.JobBuilder.Build(task, workspace)
+	var agentConfig *axonv1alpha1.AgentConfigSpec
+	if task.Spec.AgentConfigRef != nil {
+		var ac axonv1alpha1.AgentConfig
+		if err := r.Get(ctx, client.ObjectKey{
+			Namespace: task.Namespace,
+			Name:      task.Spec.AgentConfigRef.Name,
+		}, &ac); err != nil {
+			if apierrors.IsNotFound(err) {
+				logger.Info("AgentConfig not found yet, requeuing", "agentConfig", task.Spec.AgentConfigRef.Name)
+				return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+			}
+			logger.Error(err, "Unable to fetch AgentConfig", "agentConfig", task.Spec.AgentConfigRef.Name)
+			return ctrl.Result{}, err
+		}
+		agentConfig = &ac.Spec
+	}
+
+	job, err := r.JobBuilder.Build(task, workspace, agentConfig)
 	if err != nil {
 		logger.Error(err, "unable to build Job")
 		updateErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {

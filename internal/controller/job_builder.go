@@ -1,7 +1,10 @@
 package controller
 
 import (
+	"encoding/base64"
 	"fmt"
+	"path"
+	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -38,6 +41,12 @@ const (
 	// WorkspaceMountPath is the mount path for the workspace volume.
 	WorkspaceMountPath = "/workspace"
 
+	// PluginVolumeName is the name of the plugin volume.
+	PluginVolumeName = "axon-plugin"
+
+	// PluginMountPath is the mount path for the plugin volume.
+	PluginMountPath = "/axon/plugin"
+
 	// AgentUID is the UID shared between the git-clone init
 	// container and the agent container. Custom agent images must run
 	// as this UID so that both containers can read and write the
@@ -68,14 +77,14 @@ func NewJobBuilder() *JobBuilder {
 }
 
 // Build creates a Job for the given Task.
-func (b *JobBuilder) Build(task *axonv1alpha1.Task, workspace *axonv1alpha1.WorkspaceSpec) (*batchv1.Job, error) {
+func (b *JobBuilder) Build(task *axonv1alpha1.Task, workspace *axonv1alpha1.WorkspaceSpec, agentConfig *axonv1alpha1.AgentConfigSpec) (*batchv1.Job, error) {
 	switch task.Spec.Type {
 	case AgentTypeClaudeCode:
-		return b.buildAgentJob(task, workspace, b.ClaudeCodeImage, b.ClaudeCodeImagePullPolicy)
+		return b.buildAgentJob(task, workspace, agentConfig, b.ClaudeCodeImage, b.ClaudeCodeImagePullPolicy)
 	case AgentTypeCodex:
-		return b.buildAgentJob(task, workspace, b.CodexImage, b.CodexImagePullPolicy)
+		return b.buildAgentJob(task, workspace, agentConfig, b.CodexImage, b.CodexImagePullPolicy)
 	case AgentTypeGemini:
-		return b.buildAgentJob(task, workspace, b.GeminiImage, b.GeminiImagePullPolicy)
+		return b.buildAgentJob(task, workspace, agentConfig, b.GeminiImage, b.GeminiImagePullPolicy)
 	default:
 		return nil, fmt.Errorf("unsupported agent type: %s", task.Spec.Type)
 	}
@@ -112,7 +121,7 @@ func oauthEnvVar(agentType string) string {
 }
 
 // buildAgentJob creates a Job for the given agent type.
-func (b *JobBuilder) buildAgentJob(task *axonv1alpha1.Task, workspace *axonv1alpha1.WorkspaceSpec, defaultImage string, pullPolicy corev1.PullPolicy) (*batchv1.Job, error) {
+func (b *JobBuilder) buildAgentJob(task *axonv1alpha1.Task, workspace *axonv1alpha1.WorkspaceSpec, agentConfig *axonv1alpha1.AgentConfigSpec, defaultImage string, pullPolicy corev1.PullPolicy) (*batchv1.Job, error) {
 	image := defaultImage
 	if task.Spec.Image != "" {
 		image = task.Spec.Image
@@ -263,8 +272,64 @@ func (b *JobBuilder) buildAgentJob(task *axonv1alpha1.Task, workspace *axonv1alp
 
 		initContainers = append(initContainers, initContainer)
 
+		if len(workspace.Files) > 0 {
+			injectionScript, err := buildWorkspaceFileInjectionScript(workspace.Files)
+			if err != nil {
+				return nil, err
+			}
+
+			injectionContainer := corev1.Container{
+				Name:         "workspace-files",
+				Image:        GitCloneImage,
+				Command:      []string{"sh", "-c", injectionScript},
+				VolumeMounts: []corev1.VolumeMount{volumeMount},
+				SecurityContext: &corev1.SecurityContext{
+					RunAsUser: &agentUID,
+				},
+			}
+			initContainers = append(initContainers, injectionContainer)
+		}
+
 		mainContainer.VolumeMounts = []corev1.VolumeMount{volumeMount}
 		mainContainer.WorkingDir = WorkspaceMountPath + "/repo"
+	}
+
+	// Inject AgentConfig: agentsMD env var and plugin volume/init container.
+	if agentConfig != nil {
+		if agentConfig.AgentsMD != "" {
+			mainContainer.Env = append(mainContainer.Env, corev1.EnvVar{
+				Name:  "AXON_AGENTS_MD",
+				Value: agentConfig.AgentsMD,
+			})
+		}
+
+		if len(agentConfig.Plugins) > 0 {
+			volumes = append(volumes, corev1.Volume{
+				Name:         PluginVolumeName,
+				VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+			})
+
+			script, err := buildPluginSetupScript(agentConfig.Plugins)
+			if err != nil {
+				return nil, fmt.Errorf("invalid plugin configuration: %w", err)
+			}
+			initContainers = append(initContainers, corev1.Container{
+				Name:    "plugin-setup",
+				Image:   GitCloneImage,
+				Command: []string{"sh", "-c", script},
+				VolumeMounts: []corev1.VolumeMount{
+					{Name: PluginVolumeName, MountPath: PluginMountPath},
+				},
+				SecurityContext: &corev1.SecurityContext{RunAsUser: &agentUID},
+			})
+
+			mainContainer.VolumeMounts = append(mainContainer.VolumeMounts,
+				corev1.VolumeMount{Name: PluginVolumeName, MountPath: PluginMountPath})
+			mainContainer.Env = append(mainContainer.Env, corev1.EnvVar{
+				Name:  "AXON_PLUGIN_DIR",
+				Value: PluginMountPath,
+			})
+		}
 	}
 
 	// Apply PodOverrides before constructing the Job so all overrides
@@ -336,4 +401,106 @@ func (b *JobBuilder) buildAgentJob(task *axonv1alpha1.Task, workspace *axonv1alp
 	}
 
 	return job, nil
+}
+
+func buildWorkspaceFileInjectionScript(files []axonv1alpha1.WorkspaceFile) (string, error) {
+	lines := []string{"set -eu"}
+
+	for _, file := range files {
+		relativePath, err := sanitizeWorkspaceFilePath(file.Path)
+		if err != nil {
+			return "", fmt.Errorf("invalid workspace file path %q: %w", file.Path, err)
+		}
+
+		targetPath := WorkspaceMountPath + "/repo/" + relativePath
+		contentBase64 := base64.StdEncoding.EncodeToString([]byte(file.Content))
+
+		lines = append(lines,
+			"target="+shellQuote(targetPath),
+			`mkdir -p "$(dirname "$target")"`,
+			fmt.Sprintf("printf '%%s' %s | base64 -d > \"$target\"", shellQuote(contentBase64)),
+		)
+	}
+
+	return strings.Join(lines, "\n"), nil
+}
+
+func sanitizeWorkspaceFilePath(filePath string) (string, error) {
+	if strings.TrimSpace(filePath) == "" {
+		return "", fmt.Errorf("path is empty")
+	}
+	if strings.Contains(filePath, `\`) {
+		return "", fmt.Errorf("path must use forward slashes")
+	}
+
+	cleanPath := path.Clean(filePath)
+	if cleanPath == "." {
+		return "", fmt.Errorf("path resolves to current directory")
+	}
+	if strings.HasPrefix(cleanPath, "/") {
+		return "", fmt.Errorf("absolute paths are not allowed")
+	}
+	if cleanPath == ".." || strings.HasPrefix(cleanPath, "../") {
+		return "", fmt.Errorf("path escapes repository root")
+	}
+
+	return cleanPath, nil
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
+}
+
+// sanitizeComponentName validates that a plugin, skill, or agent name is safe
+// for use as a path component. It rejects empty names, path separators, and
+// traversal attempts.
+func sanitizeComponentName(name, kind string) error {
+	if name == "" {
+		return fmt.Errorf("%s name is empty", kind)
+	}
+	if strings.ContainsAny(name, "/\\") {
+		return fmt.Errorf("%s name %q contains path separators", kind, name)
+	}
+	if name == "." || name == ".." {
+		return fmt.Errorf("%s name %q is a path traversal", kind, name)
+	}
+	return nil
+}
+
+func buildPluginSetupScript(plugins []axonv1alpha1.PluginSpec) (string, error) {
+	lines := []string{"set -eu"}
+
+	for _, plugin := range plugins {
+		if err := sanitizeComponentName(plugin.Name, "plugin"); err != nil {
+			return "", err
+		}
+
+		for _, skill := range plugin.Skills {
+			if err := sanitizeComponentName(skill.Name, "skill"); err != nil {
+				return "", err
+			}
+			dir := path.Join(PluginMountPath, plugin.Name, "skills", skill.Name)
+			target := path.Join(dir, "SKILL.md")
+			contentBase64 := base64.StdEncoding.EncodeToString([]byte(skill.Content))
+			lines = append(lines,
+				fmt.Sprintf("mkdir -p %s", shellQuote(dir)),
+				fmt.Sprintf("printf '%%s' %s | base64 -d > %s", shellQuote(contentBase64), shellQuote(target)),
+			)
+		}
+
+		for _, agent := range plugin.Agents {
+			if err := sanitizeComponentName(agent.Name, "agent"); err != nil {
+				return "", err
+			}
+			dir := path.Join(PluginMountPath, plugin.Name, "agents")
+			target := path.Join(dir, agent.Name+".md")
+			contentBase64 := base64.StdEncoding.EncodeToString([]byte(agent.Content))
+			lines = append(lines,
+				fmt.Sprintf("mkdir -p %s", shellQuote(dir)),
+				fmt.Sprintf("printf '%%s' %s | base64 -d > %s", shellQuote(contentBase64), shellQuote(target)),
+			)
+		}
+	}
+
+	return strings.Join(lines, "\n"), nil
 }

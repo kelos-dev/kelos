@@ -23,6 +23,19 @@ if [ -n "${AXON_MODEL:-}" ]; then
     ARGS+=("--model" "$AXON_MODEL")
 fi
 
+# Write user-level instructions (additive, no conflict with repo)
+if [ -n "${AXON_AGENTS_MD:-}" ]; then
+    mkdir -p ~/.claude
+    printf '%s' "$AXON_AGENTS_MD" > ~/.claude/CLAUDE.md
+fi
+
+# Pass each plugin directory via --plugin-dir
+if [ -n "${AXON_PLUGIN_DIR:-}" ] && [ -d "${AXON_PLUGIN_DIR}" ]; then
+    for dir in "${AXON_PLUGIN_DIR}"/*/; do
+        [ -d "$dir" ] && ARGS+=("--plugin-dir" "$dir")
+    done
+fi
+
 claude "${ARGS[@]}"
 AGENT_EXIT_CODE=$?
 

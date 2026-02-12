@@ -67,6 +67,15 @@ rules:
 - apiGroups:
   - axon.io
   resources:
+  - agentconfigs
+  - workspaces
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - axon.io
+  resources:
   - tasks
   - taskspawners
   verbs:
@@ -93,14 +102,6 @@ rules:
   - get
   - patch
   - update
-- apiGroups:
-  - axon.io
-  resources:
-  - workspaces
-  verbs:
-  - get
-  - list
-  - watch
 - apiGroups:
   - batch
   resources:

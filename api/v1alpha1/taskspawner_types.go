@@ -88,6 +88,11 @@ type TaskTemplate struct {
 	// +optional
 	WorkspaceRef *WorkspaceReference `json:"workspaceRef,omitempty"`
 
+	// AgentConfigRef references an AgentConfig resource.
+	// When set, spawned Tasks inherit this agent config reference.
+	// +optional
+	AgentConfigRef *AgentConfigReference `json:"agentConfigRef,omitempty"`
+
 	// PromptTemplate is a Go text/template for rendering the task prompt.
 	// Available variables: {{.ID}}, {{.Number}}, {{.Title}}, {{.Body}}, {{.URL}}, {{.Comments}}, {{.Labels}}, {{.Kind}}, {{.Time}}, {{.Schedule}}.
 	// +optional

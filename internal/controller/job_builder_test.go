@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -28,7 +29,7 @@ func TestBuildClaudeCodeJob_DefaultImage(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil)
+	job, err := builder.Build(task, nil, nil)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -84,7 +85,7 @@ func TestBuildClaudeCodeJob_CustomImage(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil)
+	job, err := builder.Build(task, nil, nil)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -138,7 +139,7 @@ func TestBuildClaudeCodeJob_NoModel(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil)
+	job, err := builder.Build(task, nil, nil)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -175,7 +176,7 @@ func TestBuildClaudeCodeJob_WorkspaceWithRef(t *testing.T) {
 		Ref:  "main",
 	}
 
-	job, err := builder.Build(task, workspace)
+	job, err := builder.Build(task, workspace, nil)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -220,6 +221,114 @@ func TestBuildClaudeCodeJob_WorkspaceWithRef(t *testing.T) {
 	}
 }
 
+func TestBuildClaudeCodeJob_WorkspaceWithInjectedFiles(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-workspace-files",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Inject plugin files",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	skillContent := "---\nname: reviewer\n---\nUse this skill for reviews\n"
+	agentsContent := "Follow these team guidelines\n"
+	workspace := &axonv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/example/repo.git",
+		Ref:  "main",
+		Files: []axonv1alpha1.WorkspaceFile{
+			{
+				Path:    ".claude/skills/reviewer/SKILL.md",
+				Content: skillContent,
+			},
+			{
+				Path:    "AGENTS.md",
+				Content: agentsContent,
+			},
+		},
+	}
+
+	job, err := builder.Build(task, workspace, nil)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	if len(job.Spec.Template.Spec.InitContainers) != 2 {
+		t.Fatalf("Expected 2 init containers (clone + injection), got %d", len(job.Spec.Template.Spec.InitContainers))
+	}
+
+	injection := job.Spec.Template.Spec.InitContainers[1]
+	if injection.Name != "workspace-files" {
+		t.Fatalf("Expected second init container name %q, got %q", "workspace-files", injection.Name)
+	}
+	if injection.Image != GitCloneImage {
+		t.Errorf("Expected injection image %q, got %q", GitCloneImage, injection.Image)
+	}
+	if len(injection.Command) != 3 || injection.Command[0] != "sh" || injection.Command[1] != "-c" {
+		t.Fatalf("Expected injection command [sh -c ...], got %v", injection.Command)
+	}
+
+	script := injection.Command[2]
+	if !strings.Contains(script, WorkspaceMountPath+"/repo/.claude/skills/reviewer/SKILL.md") {
+		t.Errorf("Expected script to target injected skill path, got script: %s", script)
+	}
+	if !strings.Contains(script, WorkspaceMountPath+"/repo/AGENTS.md") {
+		t.Errorf("Expected script to target AGENTS.md path, got script: %s", script)
+	}
+
+	skillBase64 := base64.StdEncoding.EncodeToString([]byte(skillContent))
+	if !strings.Contains(script, skillBase64) {
+		t.Error("Expected script to include base64-encoded skill content")
+	}
+	agentsBase64 := base64.StdEncoding.EncodeToString([]byte(agentsContent))
+	if !strings.Contains(script, agentsBase64) {
+		t.Error("Expected script to include base64-encoded AGENTS.md content")
+	}
+}
+
+func TestBuildClaudeCodeJob_WorkspaceWithInjectedFilesInvalidPath(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-workspace-files-invalid",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Inject plugin files",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &axonv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/example/repo.git",
+		Files: []axonv1alpha1.WorkspaceFile{
+			{
+				Path:    "../AGENTS.md",
+				Content: "invalid",
+			},
+		},
+	}
+
+	_, err := builder.Build(task, workspace, nil)
+	if err == nil {
+		t.Fatal("Expected Build() to fail for invalid workspace file path")
+	}
+	if !strings.Contains(err.Error(), "invalid workspace file path") {
+		t.Errorf("Expected invalid path error, got: %v", err)
+	}
+}
+
 func TestBuildClaudeCodeJob_CustomImageWithWorkspace(t *testing.T) {
 	builder := NewJobBuilder()
 	task := &axonv1alpha1.Task{
@@ -246,7 +355,7 @@ func TestBuildClaudeCodeJob_CustomImageWithWorkspace(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, workspace)
+	job, err := builder.Build(task, workspace, nil)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -324,7 +433,7 @@ func TestBuildClaudeCodeJob_WorkspaceWithSecretRefPersistsCredentialHelper(t *te
 		},
 	}
 
-	job, err := builder.Build(task, workspace)
+	job, err := builder.Build(task, workspace, nil)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -372,7 +481,7 @@ func TestBuildClaudeCodeJob_EnterpriseWorkspaceSetsGHHostAndEnterpriseToken(t *t
 		},
 	}
 
-	job, err := builder.Build(task, workspace)
+	job, err := builder.Build(task, workspace, nil)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -447,7 +556,7 @@ func TestBuildClaudeCodeJob_GithubComWorkspaceUsesGHToken(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, workspace)
+	job, err := builder.Build(task, workspace, nil)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -494,7 +603,7 @@ func TestBuildCodexJob_DefaultImage(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil)
+	job, err := builder.Build(task, nil, nil)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -578,7 +687,7 @@ func TestBuildCodexJob_CustomImage(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil)
+	job, err := builder.Build(task, nil, nil)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -622,7 +731,7 @@ func TestBuildCodexJob_WithWorkspace(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, workspace)
+	job, err := builder.Build(task, workspace, nil)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -685,7 +794,7 @@ func TestBuildCodexJob_OAuthCredentials(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil)
+	job, err := builder.Build(task, nil, nil)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -735,7 +844,7 @@ func TestBuildGeminiJob_DefaultImage(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil)
+	job, err := builder.Build(task, nil, nil)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -822,7 +931,7 @@ func TestBuildGeminiJob_CustomImage(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil)
+	job, err := builder.Build(task, nil, nil)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -866,7 +975,7 @@ func TestBuildGeminiJob_WithWorkspace(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, workspace)
+	job, err := builder.Build(task, workspace, nil)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -932,7 +1041,7 @@ func TestBuildGeminiJob_OAuthCredentials(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil)
+	job, err := builder.Build(task, nil, nil)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -984,7 +1093,7 @@ func TestBuildClaudeCodeJob_UnsupportedType(t *testing.T) {
 		},
 	}
 
-	_, err := builder.Build(task, nil)
+	_, err := builder.Build(task, nil, nil)
 	if err == nil {
 		t.Fatal("Expected error for unsupported agent type, got nil")
 	}
@@ -1021,7 +1130,7 @@ func TestBuildJob_PodOverridesResources(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil)
+	job, err := builder.Build(task, nil, nil)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1066,7 +1175,7 @@ func TestBuildJob_PodOverridesActiveDeadlineSeconds(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil)
+	job, err := builder.Build(task, nil, nil)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1103,7 +1212,7 @@ func TestBuildJob_PodOverridesEnv(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil)
+	job, err := builder.Build(task, nil, nil)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1154,7 +1263,7 @@ func TestBuildJob_PodOverridesEnvBuiltinPrecedence(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil)
+	job, err := builder.Build(task, nil, nil)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1200,7 +1309,7 @@ func TestBuildJob_PodOverridesNodeSelector(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil)
+	job, err := builder.Build(task, nil, nil)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1248,7 +1357,7 @@ func TestBuildJob_PodOverridesAllFields(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil)
+	job, err := builder.Build(task, nil, nil)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1300,7 +1409,7 @@ func TestBuildJob_NoPodOverrides(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil)
+	job, err := builder.Build(task, nil, nil)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1320,5 +1429,404 @@ func TestBuildJob_NoPodOverrides(t *testing.T) {
 	// No NodeSelector.
 	if job.Spec.Template.Spec.NodeSelector != nil {
 		t.Error("Expected no NodeSelector when PodOverrides is nil")
+	}
+}
+
+func TestBuildJob_AgentConfigAgentsMD(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-agentsmd",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	agentConfig := &axonv1alpha1.AgentConfigSpec{
+		AgentsMD: "Follow TDD. Always write tests first.",
+	}
+
+	job, err := builder.Build(task, nil, agentConfig)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+
+	// AXON_AGENTS_MD should be set.
+	foundAgentsMD := false
+	for _, env := range container.Env {
+		if env.Name == "AXON_AGENTS_MD" {
+			foundAgentsMD = true
+			if env.Value != "Follow TDD. Always write tests first." {
+				t.Errorf("AXON_AGENTS_MD value: expected %q, got %q", "Follow TDD. Always write tests first.", env.Value)
+			}
+		}
+	}
+	if !foundAgentsMD {
+		t.Error("Expected AXON_AGENTS_MD env var to be set")
+	}
+
+	// No plugin volume or init containers should be created.
+	if len(job.Spec.Template.Spec.Volumes) != 0 {
+		t.Errorf("Expected no volumes, got %d", len(job.Spec.Template.Spec.Volumes))
+	}
+	if len(job.Spec.Template.Spec.InitContainers) != 0 {
+		t.Errorf("Expected no init containers, got %d", len(job.Spec.Template.Spec.InitContainers))
+	}
+}
+
+func TestBuildJob_AgentConfigPlugins(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-plugins",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	agentConfig := &axonv1alpha1.AgentConfigSpec{
+		Plugins: []axonv1alpha1.PluginSpec{
+			{
+				Name: "team-tools",
+				Skills: []axonv1alpha1.SkillDefinition{
+					{Name: "deploy", Content: "Deploy instructions here"},
+				},
+				Agents: []axonv1alpha1.AgentDefinition{
+					{Name: "reviewer", Content: "You are a code reviewer"},
+				},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, agentConfig)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	// Should have plugin volume.
+	foundPluginVolume := false
+	for _, v := range job.Spec.Template.Spec.Volumes {
+		if v.Name == PluginVolumeName {
+			foundPluginVolume = true
+			if v.VolumeSource.EmptyDir == nil {
+				t.Error("Expected EmptyDir volume source for plugin volume")
+			}
+		}
+	}
+	if !foundPluginVolume {
+		t.Error("Expected plugin volume to be created")
+	}
+
+	// Should have plugin-setup init container.
+	if len(job.Spec.Template.Spec.InitContainers) != 1 {
+		t.Fatalf("Expected 1 init container, got %d", len(job.Spec.Template.Spec.InitContainers))
+	}
+	initContainer := job.Spec.Template.Spec.InitContainers[0]
+	if initContainer.Name != "plugin-setup" {
+		t.Errorf("Expected init container name %q, got %q", "plugin-setup", initContainer.Name)
+	}
+	if initContainer.Image != GitCloneImage {
+		t.Errorf("Expected init container image %q, got %q", GitCloneImage, initContainer.Image)
+	}
+
+	// Verify script contains expected paths.
+	script := initContainer.Command[2]
+	if !strings.Contains(script, PluginMountPath+"/team-tools/skills/deploy/SKILL.md") {
+		t.Errorf("Expected script to target skill path, got: %s", script)
+	}
+	if !strings.Contains(script, PluginMountPath+"/team-tools/agents/reviewer.md") {
+		t.Errorf("Expected script to target agent path, got: %s", script)
+	}
+
+	// Verify base64-encoded content in script.
+	skillBase64 := base64.StdEncoding.EncodeToString([]byte("Deploy instructions here"))
+	if !strings.Contains(script, skillBase64) {
+		t.Error("Expected script to include base64-encoded skill content")
+	}
+	agentBase64 := base64.StdEncoding.EncodeToString([]byte("You are a code reviewer"))
+	if !strings.Contains(script, agentBase64) {
+		t.Error("Expected script to include base64-encoded agent content")
+	}
+
+	// Main container should have plugin volume mount.
+	container := job.Spec.Template.Spec.Containers[0]
+	foundPluginMount := false
+	for _, vm := range container.VolumeMounts {
+		if vm.Name == PluginVolumeName && vm.MountPath == PluginMountPath {
+			foundPluginMount = true
+		}
+	}
+	if !foundPluginMount {
+		t.Error("Expected plugin volume mount on main container")
+	}
+
+	// AXON_PLUGIN_DIR should be set.
+	envMap := map[string]string{}
+	for _, env := range container.Env {
+		if env.Value != "" {
+			envMap[env.Name] = env.Value
+		}
+	}
+	if envMap["AXON_PLUGIN_DIR"] != PluginMountPath {
+		t.Errorf("Expected AXON_PLUGIN_DIR=%q, got %q", PluginMountPath, envMap["AXON_PLUGIN_DIR"])
+	}
+}
+
+func TestBuildJob_AgentConfigFull(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-full-config",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	agentConfig := &axonv1alpha1.AgentConfigSpec{
+		AgentsMD: "Follow TDD",
+		Plugins: []axonv1alpha1.PluginSpec{
+			{
+				Name: "tools",
+				Skills: []axonv1alpha1.SkillDefinition{
+					{Name: "deploy", Content: "Deploy content"},
+				},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, agentConfig)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+	envMap := map[string]string{}
+	for _, env := range container.Env {
+		if env.Value != "" {
+			envMap[env.Name] = env.Value
+		}
+	}
+
+	// Both env vars should be set.
+	if envMap["AXON_AGENTS_MD"] != "Follow TDD" {
+		t.Errorf("Expected AXON_AGENTS_MD=%q, got %q", "Follow TDD", envMap["AXON_AGENTS_MD"])
+	}
+	if envMap["AXON_PLUGIN_DIR"] != PluginMountPath {
+		t.Errorf("Expected AXON_PLUGIN_DIR=%q, got %q", PluginMountPath, envMap["AXON_PLUGIN_DIR"])
+	}
+
+	// Should have plugin volume and init container.
+	if len(job.Spec.Template.Spec.Volumes) != 1 {
+		t.Errorf("Expected 1 volume, got %d", len(job.Spec.Template.Spec.Volumes))
+	}
+	if len(job.Spec.Template.Spec.InitContainers) != 1 {
+		t.Errorf("Expected 1 init container, got %d", len(job.Spec.Template.Spec.InitContainers))
+	}
+}
+
+func TestBuildJob_AgentConfigWithWorkspace(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-config-ws",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &axonv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/example/repo.git",
+		Ref:  "main",
+	}
+
+	agentConfig := &axonv1alpha1.AgentConfigSpec{
+		AgentsMD: "Follow TDD",
+		Plugins: []axonv1alpha1.PluginSpec{
+			{
+				Name: "tools",
+				Skills: []axonv1alpha1.SkillDefinition{
+					{Name: "deploy", Content: "Deploy content"},
+				},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, workspace, agentConfig)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	// Should have both workspace and plugin volumes.
+	if len(job.Spec.Template.Spec.Volumes) != 2 {
+		t.Errorf("Expected 2 volumes (workspace + plugin), got %d", len(job.Spec.Template.Spec.Volumes))
+	}
+
+	// Should have git-clone + plugin-setup init containers.
+	if len(job.Spec.Template.Spec.InitContainers) != 2 {
+		t.Errorf("Expected 2 init containers (git-clone + plugin-setup), got %d", len(job.Spec.Template.Spec.InitContainers))
+	}
+
+	// Main container should have both volume mounts.
+	container := job.Spec.Template.Spec.Containers[0]
+	if len(container.VolumeMounts) != 2 {
+		t.Errorf("Expected 2 volume mounts, got %d", len(container.VolumeMounts))
+	}
+
+	// Working dir should be set from workspace.
+	if container.WorkingDir != WorkspaceMountPath+"/repo" {
+		t.Errorf("Expected workingDir %q, got %q", WorkspaceMountPath+"/repo", container.WorkingDir)
+	}
+}
+
+func TestBuildJob_AgentConfigWithoutWorkspace(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-config-no-ws",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	agentConfig := &axonv1alpha1.AgentConfigSpec{
+		AgentsMD: "Follow TDD",
+	}
+
+	job, err := builder.Build(task, nil, agentConfig)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+
+	// Should work without workspace.
+	envMap := map[string]string{}
+	for _, env := range container.Env {
+		if env.Value != "" {
+			envMap[env.Name] = env.Value
+		}
+	}
+	if envMap["AXON_AGENTS_MD"] != "Follow TDD" {
+		t.Errorf("Expected AXON_AGENTS_MD=%q, got %q", "Follow TDD", envMap["AXON_AGENTS_MD"])
+	}
+
+	// No workspace volume.
+	if len(job.Spec.Template.Spec.Volumes) != 0 {
+		t.Errorf("Expected no volumes, got %d", len(job.Spec.Template.Spec.Volumes))
+	}
+
+	// No working dir.
+	if container.WorkingDir != "" {
+		t.Errorf("Expected empty workingDir, got %q", container.WorkingDir)
+	}
+}
+
+func TestBuildJob_AgentConfigPluginNamePathTraversal(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-traversal",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	tests := []struct {
+		name       string
+		config     *axonv1alpha1.AgentConfigSpec
+		wantErrStr string
+	}{
+		{
+			name: "plugin name with slash",
+			config: &axonv1alpha1.AgentConfigSpec{
+				Plugins: []axonv1alpha1.PluginSpec{
+					{Name: "../../etc", Skills: []axonv1alpha1.SkillDefinition{{Name: "s", Content: "c"}}},
+				},
+			},
+			wantErrStr: "path separators",
+		},
+		{
+			name: "skill name with slash",
+			config: &axonv1alpha1.AgentConfigSpec{
+				Plugins: []axonv1alpha1.PluginSpec{
+					{Name: "ok", Skills: []axonv1alpha1.SkillDefinition{{Name: "../evil", Content: "c"}}},
+				},
+			},
+			wantErrStr: "path separators",
+		},
+		{
+			name: "agent name dot-dot",
+			config: &axonv1alpha1.AgentConfigSpec{
+				Plugins: []axonv1alpha1.PluginSpec{
+					{Name: "ok", Agents: []axonv1alpha1.AgentDefinition{{Name: "..", Content: "c"}}},
+				},
+			},
+			wantErrStr: "path traversal",
+		},
+		{
+			name: "plugin name is dot",
+			config: &axonv1alpha1.AgentConfigSpec{
+				Plugins: []axonv1alpha1.PluginSpec{
+					{Name: ".", Skills: []axonv1alpha1.SkillDefinition{{Name: "s", Content: "c"}}},
+				},
+			},
+			wantErrStr: "path traversal",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := builder.Build(task, nil, tt.config)
+			if err == nil {
+				t.Fatal("Expected Build() to fail for path traversal, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.wantErrStr) {
+				t.Errorf("Expected error containing %q, got: %v", tt.wantErrStr, err)
+			}
+		})
 	}
 }

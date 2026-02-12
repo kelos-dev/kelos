@@ -15,6 +15,16 @@ spec:
       type: oauth
       secretRef:
         name: axon-credentials
+    podOverrides:
+      resources:
+        requests:
+          cpu: "250m"
+          memory: "512Mi"
+          ephemeral-storage: "1Gi"
+        limits:
+          cpu: "1"
+          memory: "2Gi"
+          ephemeral-storage: "4Gi"
     promptTemplate: |
       You are a developer experience tester for the Axon framework — a Kubernetes-native controller that runs autonomous AI coding agents.
       You are running in an ephemeral container environment. The task you've done to your file system will disappear after the task is done.

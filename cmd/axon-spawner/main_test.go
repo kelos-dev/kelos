@@ -347,6 +347,36 @@ func TestRunCycleWithSource_ActiveTasksStatusUpdated(t *testing.T) {
 
 func int64Ptr(v int64) *int64 { return &v }
 
+func TestRunCycleWithSource_ImageForwarded(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	ts.Spec.TaskTemplate.Image = "my-custom-agent:v1"
+	cl, key := setupTest(t, ts)
+
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{ID: "1", Title: "Item 1"},
+		},
+	}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	// Verify the created Task has Image forwarded from the TaskTemplate.
+	var taskList axonv1alpha1.TaskList
+	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatalf("Listing tasks: %v", err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task, got %d", len(taskList.Items))
+	}
+
+	task := taskList.Items[0]
+	if task.Spec.Image != "my-custom-agent:v1" {
+		t.Errorf("Expected Image %q, got %q", "my-custom-agent:v1", task.Spec.Image)
+	}
+}
+
 func TestRunCycleWithSource_PodOverridesForwarded(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 	ts.Spec.TaskTemplate.PodOverrides = &axonv1alpha1.PodOverrides{

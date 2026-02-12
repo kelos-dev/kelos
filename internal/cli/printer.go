@@ -42,6 +42,9 @@ func printTaskDetail(w io.Writer, t *axonv1alpha1.Task) {
 	if t.Spec.Model != "" {
 		printField(w, "Model", t.Spec.Model)
 	}
+	if t.Spec.Image != "" {
+		printField(w, "Image", t.Spec.Image)
+	}
 	if t.Spec.WorkspaceRef != nil {
 		printField(w, "Workspace", t.Spec.WorkspaceRef.Name)
 	}
@@ -126,6 +129,9 @@ func printTaskSpawnerDetail(w io.Writer, ts *axonv1alpha1.TaskSpawner) {
 	printField(w, "Task Type", ts.Spec.TaskTemplate.Type)
 	if ts.Spec.TaskTemplate.Model != "" {
 		printField(w, "Model", ts.Spec.TaskTemplate.Model)
+	}
+	if ts.Spec.TaskTemplate.Image != "" {
+		printField(w, "Image", ts.Spec.TaskTemplate.Image)
 	}
 	printField(w, "Poll Interval", ts.Spec.PollInterval)
 	if ts.Status.DeploymentName != "" {

@@ -298,6 +298,205 @@ func TestPrintWorkspaceDetail(t *testing.T) {
 	}
 }
 
+func TestPrintTaskDetail(t *testing.T) {
+	now := metav1.Now()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-task",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   "claude-code",
+			Prompt: "Fix the bug",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			},
+			Model: "claude-sonnet-4-20250514",
+			Image: "my-custom-agent:v1",
+			WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+				Name: "my-workspace",
+			},
+		},
+		Status: axonv1alpha1.TaskStatus{
+			Phase:          axonv1alpha1.TaskPhaseSucceeded,
+			JobName:        "my-task",
+			PodName:        "my-task-abc123",
+			StartTime:      &now,
+			CompletionTime: &now,
+			Message:        "Task completed",
+			Outputs:        []string{"branch: fix-branch", "https://github.com/org/repo/pull/1"},
+		},
+	}
+
+	var buf bytes.Buffer
+	printTaskDetail(&buf, task)
+	output := buf.String()
+
+	for _, expected := range []string{
+		"my-task",
+		"claude-code",
+		"Succeeded",
+		"Fix the bug",
+		"my-secret",
+		"api-key",
+		"claude-sonnet-4-20250514",
+		"my-custom-agent:v1",
+		"my-workspace",
+		"my-task-abc123",
+		"Task completed",
+		"branch: fix-branch",
+		"https://github.com/org/repo/pull/1",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Errorf("expected %q in output, got %q", expected, output)
+		}
+	}
+}
+
+func TestPrintTaskDetailWithoutOptionalFields(t *testing.T) {
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "minimal-task",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   "claude-code",
+			Prompt: "Hello",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	printTaskDetail(&buf, task)
+	output := buf.String()
+
+	if !strings.Contains(output, "minimal-task") {
+		t.Errorf("expected task name in output, got %q", output)
+	}
+	if strings.Contains(output, "Model:") {
+		t.Errorf("expected no Model field when model is empty, got %q", output)
+	}
+	if strings.Contains(output, "Image:") {
+		t.Errorf("expected no Image field when image is empty, got %q", output)
+	}
+	if strings.Contains(output, "Workspace:") {
+		t.Errorf("expected no Workspace field when workspaceRef is nil, got %q", output)
+	}
+}
+
+func TestPrintTaskSpawnerDetail(t *testing.T) {
+	now := metav1.Now()
+	ts := &axonv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-spawner",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpawnerSpec{
+			When: axonv1alpha1.When{
+				GitHubIssues: &axonv1alpha1.GitHubIssues{
+					Types:  []string{"issues", "pulls"},
+					State:  "open",
+					Labels: []string{"bug", "help-wanted"},
+				},
+			},
+			TaskTemplate: axonv1alpha1.TaskTemplate{
+				Type: "claude-code",
+				Credentials: axonv1alpha1.Credentials{
+					Type:      axonv1alpha1.CredentialTypeOAuth,
+					SecretRef: axonv1alpha1.SecretReference{Name: "creds"},
+				},
+				Model: "claude-sonnet-4-20250514",
+				Image: "my-custom-agent:v2",
+				WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+					Name: "my-workspace",
+				},
+			},
+			PollInterval: "10m",
+		},
+		Status: axonv1alpha1.TaskSpawnerStatus{
+			Phase:             axonv1alpha1.TaskSpawnerPhaseRunning,
+			DeploymentName:    "my-spawner",
+			TotalDiscovered:   10,
+			TotalTasksCreated: 5,
+			LastDiscoveryTime: &now,
+			Message:           "Discovered 10 items",
+		},
+	}
+
+	var buf bytes.Buffer
+	printTaskSpawnerDetail(&buf, ts)
+	output := buf.String()
+
+	for _, expected := range []string{
+		"my-spawner",
+		"Running",
+		"my-workspace",
+		"GitHub Issues",
+		"claude-code",
+		"claude-sonnet-4-20250514",
+		"my-custom-agent:v2",
+		"10m",
+		"10",
+		"5",
+		"Discovered 10 items",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Errorf("expected %q in output, got %q", expected, output)
+		}
+	}
+}
+
+func TestPrintTaskSpawnerDetailWithoutOptionalFields(t *testing.T) {
+	ts := &axonv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "minimal-spawner",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpawnerSpec{
+			When: axonv1alpha1.When{
+				Cron: &axonv1alpha1.Cron{
+					Schedule: "0 9 * * 1",
+				},
+			},
+			TaskTemplate: axonv1alpha1.TaskTemplate{
+				Type: "codex",
+				Credentials: axonv1alpha1.Credentials{
+					Type:      axonv1alpha1.CredentialTypeAPIKey,
+					SecretRef: axonv1alpha1.SecretReference{Name: "creds"},
+				},
+			},
+			PollInterval: "5m",
+		},
+		Status: axonv1alpha1.TaskSpawnerStatus{
+			Phase: axonv1alpha1.TaskSpawnerPhasePending,
+		},
+	}
+
+	var buf bytes.Buffer
+	printTaskSpawnerDetail(&buf, ts)
+	output := buf.String()
+
+	if !strings.Contains(output, "minimal-spawner") {
+		t.Errorf("expected spawner name in output, got %q", output)
+	}
+	if !strings.Contains(output, "Cron") {
+		t.Errorf("expected Cron source in output, got %q", output)
+	}
+	if !strings.Contains(output, "0 9 * * 1") {
+		t.Errorf("expected schedule in output, got %q", output)
+	}
+	if strings.Contains(output, "Model:") {
+		t.Errorf("expected no Model field when model is empty, got %q", output)
+	}
+	if strings.Contains(output, "Image:") {
+		t.Errorf("expected no Image field when image is empty, got %q", output)
+	}
+}
+
 func TestPrintWorkspaceDetailWithoutOptionalFields(t *testing.T) {
 	ws := &axonv1alpha1.Workspace{
 		ObjectMeta: metav1.ObjectMeta{

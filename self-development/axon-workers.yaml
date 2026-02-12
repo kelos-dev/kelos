@@ -11,7 +11,7 @@ spec:
         - axon/needs-input
   taskTemplate:
     workspaceRef:
-      name: axon-workspace
+      name: axon-agent
     model: opus
     type: claude-code
     ttlSecondsAfterFinished: 3600

@@ -1,7 +1,7 @@
 # Image configuration
 REGISTRY ?= gjkim42
 VERSION ?= latest
-IMAGE_DIRS ?= cmd/axon-controller cmd/axon-spawner claude-code codex gemini
+IMAGE_DIRS ?= cmd/axon-controller cmd/axon-spawner cmd/axon-token-refresher claude-code codex gemini
 
 # Version injection for the axon CLI – only set ldflags when an explicit
 # version is given so that dev builds fall through to runtime/debug info.

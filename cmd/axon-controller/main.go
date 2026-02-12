@@ -15,6 +15,7 @@ import (
 
 	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
 	"github.com/axon-core/axon/internal/controller"
+	"github.com/axon-core/axon/internal/githubapp"
 )
 
 var (
@@ -39,6 +40,8 @@ func main() {
 	var geminiImagePullPolicy string
 	var spawnerImage string
 	var spawnerImagePullPolicy string
+	var tokenRefresherImage string
+	var tokenRefresherImagePullPolicy string
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -53,6 +56,8 @@ func main() {
 	flag.StringVar(&geminiImagePullPolicy, "gemini-image-pull-policy", "", "The image pull policy for Gemini CLI agent containers (e.g., Always, Never, IfNotPresent).")
 	flag.StringVar(&spawnerImage, "spawner-image", controller.DefaultSpawnerImage, "The image to use for spawner Deployments.")
 	flag.StringVar(&spawnerImagePullPolicy, "spawner-image-pull-policy", "", "The image pull policy for spawner Deployments (e.g., Always, Never, IfNotPresent).")
+	flag.StringVar(&tokenRefresherImage, "token-refresher-image", controller.DefaultTokenRefresherImage, "The image to use for the token refresher sidecar.")
+	flag.StringVar(&tokenRefresherImagePullPolicy, "token-refresher-image-pull-policy", "", "The image pull policy for the token refresher sidecar (e.g., Always, Never, IfNotPresent).")
 
 	opts := zap.Options{
 		Development: true,
@@ -87,10 +92,11 @@ func main() {
 	jobBuilder.GeminiImage = geminiImage
 	jobBuilder.GeminiImagePullPolicy = corev1.PullPolicy(geminiImagePullPolicy)
 	if err = (&controller.TaskReconciler{
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
-		JobBuilder: jobBuilder,
-		Clientset:  clientset,
+		Client:      mgr.GetClient(),
+		Scheme:      mgr.GetScheme(),
+		JobBuilder:  jobBuilder,
+		Clientset:   clientset,
+		TokenClient: githubapp.NewTokenClient(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Task")
 		os.Exit(1)
@@ -99,6 +105,8 @@ func main() {
 	deploymentBuilder := controller.NewDeploymentBuilder()
 	deploymentBuilder.SpawnerImage = spawnerImage
 	deploymentBuilder.SpawnerImagePullPolicy = corev1.PullPolicy(spawnerImagePullPolicy)
+	deploymentBuilder.TokenRefresherImage = tokenRefresherImage
+	deploymentBuilder.TokenRefresherImagePullPolicy = corev1.PullPolicy(tokenRefresherImagePullPolicy)
 	if err = (&controller.TaskSpawnerReconciler{
 		Client:            mgr.GetClient(),
 		Scheme:            mgr.GetScheme(),

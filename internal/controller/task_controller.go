@@ -19,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
+	"github.com/axon-core/axon/internal/githubapp"
 )
 
 const (
@@ -35,9 +36,10 @@ const (
 // TaskReconciler reconciles a Task object.
 type TaskReconciler struct {
 	client.Client
-	Scheme     *runtime.Scheme
-	JobBuilder *JobBuilder
-	Clientset  kubernetes.Interface
+	Scheme      *runtime.Scheme
+	JobBuilder  *JobBuilder
+	Clientset   kubernetes.Interface
+	TokenClient *githubapp.TokenClient
 }
 
 // +kubebuilder:rbac:groups=axon.io,resources=tasks,verbs=get;list;watch;create;update;patch;delete
@@ -47,6 +49,7 @@ type TaskReconciler struct {
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods/log,verbs=get
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update
 
 // Reconcile handles Task reconciliation.
 func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -167,6 +170,27 @@ func (r *TaskReconciler) createJob(ctx context.Context, task *axonv1alpha1.Task)
 			return ctrl.Result{}, err
 		}
 		workspace = &ws.Spec
+
+		// Handle GitHub App authentication
+		if workspace.SecretRef != nil {
+			resolvedWorkspace, err := r.resolveGitHubAppToken(ctx, task, workspace)
+			if err != nil {
+				logger.Error(err, "Unable to resolve GitHub App token")
+				updateErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+					if getErr := r.Get(ctx, client.ObjectKeyFromObject(task), task); getErr != nil {
+						return getErr
+					}
+					task.Status.Phase = axonv1alpha1.TaskPhaseFailed
+					task.Status.Message = fmt.Sprintf("Failed to resolve GitHub token: %v", err)
+					return r.Status().Update(ctx, task)
+				})
+				if updateErr != nil {
+					logger.Error(updateErr, "Unable to update Task status")
+				}
+				return ctrl.Result{}, nil
+			}
+			workspace = resolvedWorkspace
+		}
 	}
 
 	job, err := r.JobBuilder.Build(task, workspace)
@@ -216,6 +240,80 @@ func (r *TaskReconciler) createJob(ctx context.Context, task *axonv1alpha1.Task)
 	}
 
 	return ctrl.Result{Requeue: true}, nil
+}
+
+// resolveGitHubAppToken checks if the workspace secret is a GitHub App secret,
+// and if so, generates an installation token and creates a new secret with
+// the GITHUB_TOKEN key. Returns a modified workspace spec pointing to the
+// generated secret.
+func (r *TaskReconciler) resolveGitHubAppToken(ctx context.Context, task *axonv1alpha1.Task, workspace *axonv1alpha1.WorkspaceSpec) (*axonv1alpha1.WorkspaceSpec, error) {
+	logger := log.FromContext(ctx)
+
+	var secret corev1.Secret
+	if err := r.Get(ctx, client.ObjectKey{
+		Namespace: task.Namespace,
+		Name:      workspace.SecretRef.Name,
+	}, &secret); err != nil {
+		return nil, fmt.Errorf("fetching workspace secret %q: %w", workspace.SecretRef.Name, err)
+	}
+
+	if !githubapp.IsGitHubApp(secret.Data) {
+		return workspace, nil
+	}
+
+	if r.TokenClient == nil {
+		return nil, fmt.Errorf("GitHub App secret detected but TokenClient is not configured")
+	}
+
+	logger.Info("Detected GitHub App secret, generating installation token", "secret", workspace.SecretRef.Name)
+
+	creds, err := githubapp.ParseCredentials(secret.Data)
+	if err != nil {
+		return nil, fmt.Errorf("parsing GitHub App credentials: %w", err)
+	}
+
+	tokenResp, err := r.TokenClient.GenerateInstallationToken(ctx, creds)
+	if err != nil {
+		return nil, fmt.Errorf("generating installation token: %w", err)
+	}
+
+	// Create a new secret with the generated token, owned by the Task
+	tokenSecretName := task.Name + "-github-token"
+	tokenSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      tokenSecretName,
+			Namespace: task.Namespace,
+		},
+		StringData: map[string]string{
+			"GITHUB_TOKEN": tokenResp.Token,
+		},
+	}
+
+	if err := controllerutil.SetControllerReference(task, tokenSecret, r.Scheme); err != nil {
+		return nil, fmt.Errorf("setting owner reference on token secret: %w", err)
+	}
+
+	if err := r.Create(ctx, tokenSecret); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return nil, fmt.Errorf("creating token secret: %w", err)
+		}
+		// Update existing secret
+		existing := &corev1.Secret{}
+		if err := r.Get(ctx, client.ObjectKey{Name: tokenSecretName, Namespace: task.Namespace}, existing); err != nil {
+			return nil, fmt.Errorf("fetching existing token secret: %w", err)
+		}
+		existing.StringData = tokenSecret.StringData
+		if err := r.Update(ctx, existing); err != nil {
+			return nil, fmt.Errorf("updating token secret: %w", err)
+		}
+	}
+
+	// Return a modified workspace spec that points to the generated token secret
+	resolved := *workspace
+	resolved.SecretRef = &axonv1alpha1.SecretReference{
+		Name: tokenSecretName,
+	}
+	return &resolved, nil
 }
 
 // updateStatus updates Task status based on Job status.

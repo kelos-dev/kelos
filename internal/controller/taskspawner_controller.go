@@ -18,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
+	"github.com/axon-core/axon/internal/githubapp"
 )
 
 const (
@@ -87,29 +88,50 @@ func (r *TaskSpawnerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	// Resolve workspace if workspaceRef is set in taskTemplate
 	var workspace *axonv1alpha1.WorkspaceSpec
+	var isGitHubApp bool
 	if ts.Spec.TaskTemplate.WorkspaceRef != nil {
+		workspaceRefName := ts.Spec.TaskTemplate.WorkspaceRef.Name
 		var ws axonv1alpha1.Workspace
 		if err := r.Get(ctx, client.ObjectKey{
 			Namespace: ts.Namespace,
-			Name:      ts.Spec.TaskTemplate.WorkspaceRef.Name,
+			Name:      workspaceRefName,
 		}, &ws); err != nil {
 			if apierrors.IsNotFound(err) {
-				logger.Info("Workspace not found yet, requeuing", "workspace", ts.Spec.TaskTemplate.WorkspaceRef.Name)
+				logger.Info("Workspace not found yet, requeuing", "workspace", workspaceRefName)
 				return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 			}
-			logger.Error(err, "Unable to fetch Workspace for TaskSpawner", "workspace", ts.Spec.TaskTemplate.WorkspaceRef.Name)
+			logger.Error(err, "Unable to fetch Workspace for TaskSpawner", "workspace", workspaceRefName)
 			return ctrl.Result{}, err
 		}
 		workspace = &ws.Spec
+
+		// Detect GitHub App auth
+		if workspace.SecretRef != nil {
+			var secret corev1.Secret
+			if err := r.Get(ctx, client.ObjectKey{
+				Namespace: ts.Namespace,
+				Name:      workspace.SecretRef.Name,
+			}, &secret); err != nil {
+				if !apierrors.IsNotFound(err) {
+					logger.Error(err, "Unable to fetch workspace secret", "secret", workspace.SecretRef.Name)
+					return ctrl.Result{}, err
+				}
+			} else {
+				isGitHubApp = githubapp.IsGitHubApp(secret.Data)
+				if isGitHubApp {
+					logger.Info("Detected GitHub App secret for TaskSpawner", "secret", workspace.SecretRef.Name)
+				}
+			}
+		}
 	}
 
 	// Create Deployment if it doesn't exist
 	if !deployExists {
-		return r.createDeployment(ctx, &ts, workspace)
+		return r.createDeployment(ctx, &ts, workspace, isGitHubApp)
 	}
 
 	// Update Deployment if spec changed
-	if err := r.updateDeployment(ctx, &ts, &deploy, workspace); err != nil {
+	if err := r.updateDeployment(ctx, &ts, &deploy, workspace, isGitHubApp); err != nil {
 		logger.Error(err, "unable to update Deployment")
 		return ctrl.Result{}, err
 	}
@@ -152,10 +174,10 @@ func (r *TaskSpawnerReconciler) handleDeletion(ctx context.Context, ts *axonv1al
 }
 
 // createDeployment creates a Deployment for the TaskSpawner.
-func (r *TaskSpawnerReconciler) createDeployment(ctx context.Context, ts *axonv1alpha1.TaskSpawner, workspace *axonv1alpha1.WorkspaceSpec) (ctrl.Result, error) {
+func (r *TaskSpawnerReconciler) createDeployment(ctx context.Context, ts *axonv1alpha1.TaskSpawner, workspace *axonv1alpha1.WorkspaceSpec, isGitHubApp bool) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	deploy := r.DeploymentBuilder.Build(ts, workspace)
+	deploy := r.DeploymentBuilder.Build(ts, workspace, isGitHubApp)
 
 	// Set owner reference
 	if err := controllerutil.SetControllerReference(ts, deploy, r.Scheme); err != nil {
@@ -190,10 +212,10 @@ func (r *TaskSpawnerReconciler) createDeployment(ctx context.Context, ts *axonv1
 }
 
 // updateDeployment updates the Deployment to match the desired spec if it has drifted.
-func (r *TaskSpawnerReconciler) updateDeployment(ctx context.Context, ts *axonv1alpha1.TaskSpawner, deploy *appsv1.Deployment, workspace *axonv1alpha1.WorkspaceSpec) error {
+func (r *TaskSpawnerReconciler) updateDeployment(ctx context.Context, ts *axonv1alpha1.TaskSpawner, deploy *appsv1.Deployment, workspace *axonv1alpha1.WorkspaceSpec, isGitHubApp bool) error {
 	logger := log.FromContext(ctx)
 
-	desired := r.DeploymentBuilder.Build(ts, workspace)
+	desired := r.DeploymentBuilder.Build(ts, workspace, isGitHubApp)
 
 	// Compare container spec (image, args, env)
 	if len(deploy.Spec.Template.Spec.Containers) == 0 {

@@ -8,7 +8,7 @@ spec:
       schedule: "0 */12 * * *"
   taskTemplate:
     workspaceRef:
-      name: axon-workspace
+      name: axon-agent
     model: opus
     type: claude-code
     credentials:

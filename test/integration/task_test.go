@@ -1,7 +1,11 @@
 package integration
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -1283,6 +1287,134 @@ var _ = Describe("Task Controller", func() {
 				err := k8sClient.Get(ctx, jobLookupKey, createdJob)
 				return err == nil
 			}, timeout, interval).Should(BeTrue())
+		})
+	})
+
+	Context("When creating a Task with workspace using GitHub App secret", func() {
+		It("Should create a generated token Secret and Job referencing it", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-task-github-app",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with API key")
+			credSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, credSecret)).Should(Succeed())
+
+			By("Generating a test RSA key for GitHub App")
+			privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+			Expect(err).NotTo(HaveOccurred())
+			keyPEM := pem.EncodeToMemory(&pem.Block{
+				Type:  "RSA PRIVATE KEY",
+				Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
+			})
+
+			By("Creating a Secret with GitHub App credentials")
+			ghAppSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "github-app-creds",
+					Namespace: ns.Name,
+				},
+				Data: map[string][]byte{
+					"appID":          []byte("12345"),
+					"installationID": []byte("67890"),
+					"privateKey":     keyPEM,
+				},
+			}
+			Expect(k8sClient.Create(ctx, ghAppSecret)).Should(Succeed())
+
+			By("Creating a Workspace with GitHub App secretRef")
+			ws := &axonv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace-app",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/example/repo.git",
+					Ref:  "main",
+					SecretRef: &axonv1alpha1.SecretReference{
+						Name: "github-app-creds",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
+
+			By("Creating a Task with workspace ref")
+			task := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-task-github-app",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "Fix the bug",
+					Credentials: axonv1alpha1.Credentials{
+						Type: axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{
+							Name: "anthropic-api-key",
+						},
+					},
+					WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						Name: "test-workspace-app",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, task)).Should(Succeed())
+
+			By("Verifying a generated token Secret is created")
+			tokenSecretKey := types.NamespacedName{
+				Name:      task.Name + "-github-token",
+				Namespace: ns.Name,
+			}
+			tokenSecret := &corev1.Secret{}
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, tokenSecretKey, tokenSecret)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			Expect(tokenSecret.Data).To(HaveKey("GITHUB_TOKEN"))
+			Expect(string(tokenSecret.Data["GITHUB_TOKEN"])).To(Equal("ghs_mock_installation_token"))
+
+			By("Verifying the token Secret has owner reference to the Task")
+			Expect(tokenSecret.OwnerReferences).To(HaveLen(1))
+			Expect(tokenSecret.OwnerReferences[0].Name).To(Equal(task.Name))
+			Expect(tokenSecret.OwnerReferences[0].Kind).To(Equal("Task"))
+
+			By("Verifying a Job is created")
+			jobLookupKey := types.NamespacedName{Name: task.Name, Namespace: ns.Name}
+			createdJob := &batchv1.Job{}
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, jobLookupKey, createdJob)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Logging the Job spec")
+			logJobSpec(createdJob)
+
+			By("Verifying the Job references the generated token Secret, not the App Secret")
+			mainContainer := createdJob.Spec.Template.Spec.Containers[0]
+			var githubTokenEnv *corev1.EnvVar
+			for i, env := range mainContainer.Env {
+				if env.Name == "GITHUB_TOKEN" {
+					githubTokenEnv = &mainContainer.Env[i]
+					break
+				}
+			}
+			Expect(githubTokenEnv).NotTo(BeNil())
+			Expect(githubTokenEnv.ValueFrom.SecretKeyRef.Name).To(Equal(task.Name + "-github-token"))
+			Expect(githubTokenEnv.ValueFrom.SecretKeyRef.Key).To(Equal("GITHUB_TOKEN"))
 		})
 	})
 })

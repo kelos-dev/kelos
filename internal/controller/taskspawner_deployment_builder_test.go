@@ -220,7 +220,7 @@ func TestBuildDeploymentWithEnterpriseURL(t *testing.T) {
 			workspace := &axonv1alpha1.WorkspaceSpec{
 				Repo: tt.repoURL,
 			}
-			dep := builder.Build(ts, workspace)
+			dep := builder.Build(ts, workspace, false)
 			args := dep.Spec.Template.Spec.Containers[0].Args
 
 			found := ""
@@ -240,5 +240,121 @@ func TestBuildDeploymentWithEnterpriseURL(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDeploymentBuilder_GitHubApp(t *testing.T) {
+	builder := NewDeploymentBuilder()
+	ts := &axonv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-spawner",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpawnerSpec{
+			When: axonv1alpha1.When{
+				GitHubIssues: &axonv1alpha1.GitHubIssues{},
+			},
+			TaskTemplate: axonv1alpha1.TaskTemplate{
+				Type:         "claude-code",
+				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "ws"},
+			},
+		},
+	}
+	workspace := &axonv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/axon-core/axon.git",
+		SecretRef: &axonv1alpha1.SecretReference{
+			Name: "github-app-creds",
+		},
+	}
+
+	deploy := builder.Build(ts, workspace, true)
+
+	if len(deploy.Spec.Template.Spec.Containers) != 2 {
+		t.Fatalf("expected 2 containers, got %d", len(deploy.Spec.Template.Spec.Containers))
+	}
+
+	spawner := deploy.Spec.Template.Spec.Containers[0]
+	refresher := deploy.Spec.Template.Spec.Containers[1]
+
+	if spawner.Name != "spawner" {
+		t.Errorf("first container name = %q, want %q", spawner.Name, "spawner")
+	}
+	if refresher.Name != "token-refresher" {
+		t.Errorf("second container name = %q, want %q", refresher.Name, "token-refresher")
+	}
+
+	found := false
+	for _, arg := range spawner.Args {
+		if arg == "--github-token-file=/shared/token/GITHUB_TOKEN" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("spawner args missing --github-token-file flag: %v", spawner.Args)
+	}
+
+	for _, env := range spawner.Env {
+		if env.Name == "GITHUB_TOKEN" {
+			t.Error("spawner should not have GITHUB_TOKEN env var in GitHub App mode")
+		}
+	}
+
+	if len(deploy.Spec.Template.Spec.Volumes) != 2 {
+		t.Fatalf("expected 2 volumes, got %d", len(deploy.Spec.Template.Spec.Volumes))
+	}
+
+	if len(refresher.Env) != 2 {
+		t.Fatalf("token-refresher expected 2 env vars, got %d", len(refresher.Env))
+	}
+	if refresher.Env[0].Name != "APP_ID" {
+		t.Errorf("first env var = %q, want %q", refresher.Env[0].Name, "APP_ID")
+	}
+	if refresher.Env[1].Name != "INSTALLATION_ID" {
+		t.Errorf("second env var = %q, want %q", refresher.Env[1].Name, "INSTALLATION_ID")
+	}
+}
+
+func TestDeploymentBuilder_PAT(t *testing.T) {
+	builder := NewDeploymentBuilder()
+	ts := &axonv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-spawner",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpawnerSpec{
+			When: axonv1alpha1.When{
+				GitHubIssues: &axonv1alpha1.GitHubIssues{},
+			},
+			TaskTemplate: axonv1alpha1.TaskTemplate{
+				Type:         "claude-code",
+				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "ws"},
+			},
+		},
+	}
+	workspace := &axonv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/axon-core/axon.git",
+		SecretRef: &axonv1alpha1.SecretReference{
+			Name: "github-token",
+		},
+	}
+
+	deploy := builder.Build(ts, workspace, false)
+
+	if len(deploy.Spec.Template.Spec.Containers) != 1 {
+		t.Fatalf("expected 1 container, got %d", len(deploy.Spec.Template.Spec.Containers))
+	}
+
+	spawner := deploy.Spec.Template.Spec.Containers[0]
+
+	if len(spawner.Env) != 1 {
+		t.Fatalf("expected 1 env var, got %d", len(spawner.Env))
+	}
+	if spawner.Env[0].Name != "GITHUB_TOKEN" {
+		t.Errorf("env var name = %q, want %q", spawner.Env[0].Name, "GITHUB_TOKEN")
+	}
+
+	if len(deploy.Spec.Template.Spec.Volumes) != 0 {
+		t.Errorf("expected 0 volumes, got %d", len(deploy.Spec.Template.Spec.Volumes))
 	}
 }

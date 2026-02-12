@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
 )
@@ -29,16 +30,23 @@ func newDeleteCommand(cfg *ClientConfig) *cobra.Command {
 }
 
 func newDeleteTaskCommand(cfg *ClientConfig) *cobra.Command {
+	var all bool
+
 	cmd := &cobra.Command{
-		Use:     "task <name>",
+		Use:     "task [name]",
 		Aliases: []string{"tasks"},
 		Short:   "Delete a task",
 		Args: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
-				return fmt.Errorf("task name is required\nUsage: %s", cmd.Use)
+			if all && len(args) > 0 {
+				return fmt.Errorf("cannot specify task name with --all")
 			}
-			if len(args) > 1 {
-				return fmt.Errorf("too many arguments: expected 1 task name, got %d\nUsage: %s", len(args), cmd.Use)
+			if !all {
+				if len(args) == 0 {
+					return fmt.Errorf("task name is required (or use --all)\nUsage: %s", cmd.Use)
+				}
+				if len(args) > 1 {
+					return fmt.Errorf("too many arguments: expected 1 task name, got %d\nUsage: %s", len(args), cmd.Use)
+				}
 			}
 			return nil
 		},
@@ -46,6 +54,26 @@ func newDeleteTaskCommand(cfg *ClientConfig) *cobra.Command {
 			cl, ns, err := cfg.NewClient()
 			if err != nil {
 				return err
+			}
+
+			ctx := context.Background()
+
+			if all {
+				taskList := &axonv1alpha1.TaskList{}
+				if err := cl.List(ctx, taskList, client.InNamespace(ns)); err != nil {
+					return fmt.Errorf("listing tasks: %w", err)
+				}
+				if len(taskList.Items) == 0 {
+					fmt.Fprintln(os.Stdout, "No tasks found")
+					return nil
+				}
+				for i := range taskList.Items {
+					if err := cl.Delete(ctx, &taskList.Items[i]); err != nil {
+						return fmt.Errorf("deleting task %s: %w", taskList.Items[i].Name, err)
+					}
+					fmt.Fprintf(os.Stdout, "task/%s deleted\n", taskList.Items[i].Name)
+				}
+				return nil
 			}
 
 			task := &axonv1alpha1.Task{
@@ -55,7 +83,7 @@ func newDeleteTaskCommand(cfg *ClientConfig) *cobra.Command {
 				},
 			}
 
-			if err := cl.Delete(context.Background(), task); err != nil {
+			if err := cl.Delete(ctx, task); err != nil {
 				return fmt.Errorf("deleting task: %w", err)
 			}
 			fmt.Fprintf(os.Stdout, "task/%s deleted\n", args[0])
@@ -63,22 +91,30 @@ func newDeleteTaskCommand(cfg *ClientConfig) *cobra.Command {
 		},
 	}
 
+	cmd.Flags().BoolVar(&all, "all", false, "Delete all tasks in the namespace")
 	cmd.ValidArgsFunction = completeTaskNames(cfg)
 
 	return cmd
 }
 
 func newDeleteWorkspaceCommand(cfg *ClientConfig) *cobra.Command {
+	var all bool
+
 	cmd := &cobra.Command{
-		Use:     "workspace <name>",
+		Use:     "workspace [name]",
 		Aliases: []string{"workspaces", "ws"},
 		Short:   "Delete a workspace",
 		Args: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
-				return fmt.Errorf("workspace name is required\nUsage: %s", cmd.Use)
+			if all && len(args) > 0 {
+				return fmt.Errorf("cannot specify workspace name with --all")
 			}
-			if len(args) > 1 {
-				return fmt.Errorf("too many arguments: expected 1 workspace name, got %d\nUsage: %s", len(args), cmd.Use)
+			if !all {
+				if len(args) == 0 {
+					return fmt.Errorf("workspace name is required (or use --all)\nUsage: %s", cmd.Use)
+				}
+				if len(args) > 1 {
+					return fmt.Errorf("too many arguments: expected 1 workspace name, got %d\nUsage: %s", len(args), cmd.Use)
+				}
 			}
 			return nil
 		},
@@ -86,6 +122,26 @@ func newDeleteWorkspaceCommand(cfg *ClientConfig) *cobra.Command {
 			cl, ns, err := cfg.NewClient()
 			if err != nil {
 				return err
+			}
+
+			ctx := context.Background()
+
+			if all {
+				wsList := &axonv1alpha1.WorkspaceList{}
+				if err := cl.List(ctx, wsList, client.InNamespace(ns)); err != nil {
+					return fmt.Errorf("listing workspaces: %w", err)
+				}
+				if len(wsList.Items) == 0 {
+					fmt.Fprintln(os.Stdout, "No workspaces found")
+					return nil
+				}
+				for i := range wsList.Items {
+					if err := cl.Delete(ctx, &wsList.Items[i]); err != nil {
+						return fmt.Errorf("deleting workspace %s: %w", wsList.Items[i].Name, err)
+					}
+					fmt.Fprintf(os.Stdout, "workspace/%s deleted\n", wsList.Items[i].Name)
+				}
+				return nil
 			}
 
 			ws := &axonv1alpha1.Workspace{
@@ -95,7 +151,7 @@ func newDeleteWorkspaceCommand(cfg *ClientConfig) *cobra.Command {
 				},
 			}
 
-			if err := cl.Delete(context.Background(), ws); err != nil {
+			if err := cl.Delete(ctx, ws); err != nil {
 				return fmt.Errorf("deleting workspace: %w", err)
 			}
 			fmt.Fprintf(os.Stdout, "workspace/%s deleted\n", args[0])
@@ -103,22 +159,30 @@ func newDeleteWorkspaceCommand(cfg *ClientConfig) *cobra.Command {
 		},
 	}
 
+	cmd.Flags().BoolVar(&all, "all", false, "Delete all workspaces in the namespace")
 	cmd.ValidArgsFunction = completeWorkspaceNames(cfg)
 
 	return cmd
 }
 
 func newDeleteTaskSpawnerCommand(cfg *ClientConfig) *cobra.Command {
+	var all bool
+
 	cmd := &cobra.Command{
-		Use:     "taskspawner <name>",
+		Use:     "taskspawner [name]",
 		Aliases: []string{"taskspawners", "ts"},
 		Short:   "Delete a task spawner",
 		Args: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 {
-				return fmt.Errorf("task spawner name is required\nUsage: %s", cmd.Use)
+			if all && len(args) > 0 {
+				return fmt.Errorf("cannot specify task spawner name with --all")
 			}
-			if len(args) > 1 {
-				return fmt.Errorf("too many arguments: expected 1 task spawner name, got %d\nUsage: %s", len(args), cmd.Use)
+			if !all {
+				if len(args) == 0 {
+					return fmt.Errorf("task spawner name is required (or use --all)\nUsage: %s", cmd.Use)
+				}
+				if len(args) > 1 {
+					return fmt.Errorf("too many arguments: expected 1 task spawner name, got %d\nUsage: %s", len(args), cmd.Use)
+				}
 			}
 			return nil
 		},
@@ -128,6 +192,26 @@ func newDeleteTaskSpawnerCommand(cfg *ClientConfig) *cobra.Command {
 				return err
 			}
 
+			ctx := context.Background()
+
+			if all {
+				tsList := &axonv1alpha1.TaskSpawnerList{}
+				if err := cl.List(ctx, tsList, client.InNamespace(ns)); err != nil {
+					return fmt.Errorf("listing task spawners: %w", err)
+				}
+				if len(tsList.Items) == 0 {
+					fmt.Fprintln(os.Stdout, "No task spawners found")
+					return nil
+				}
+				for i := range tsList.Items {
+					if err := cl.Delete(ctx, &tsList.Items[i]); err != nil {
+						return fmt.Errorf("deleting task spawner %s: %w", tsList.Items[i].Name, err)
+					}
+					fmt.Fprintf(os.Stdout, "taskspawner/%s deleted\n", tsList.Items[i].Name)
+				}
+				return nil
+			}
+
 			ts := &axonv1alpha1.TaskSpawner{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      args[0],
@@ -135,7 +219,7 @@ func newDeleteTaskSpawnerCommand(cfg *ClientConfig) *cobra.Command {
 				},
 			}
 
-			if err := cl.Delete(context.Background(), ts); err != nil {
+			if err := cl.Delete(ctx, ts); err != nil {
 				return fmt.Errorf("deleting task spawner: %w", err)
 			}
 			fmt.Fprintf(os.Stdout, "taskspawner/%s deleted\n", args[0])
@@ -143,6 +227,7 @@ func newDeleteTaskSpawnerCommand(cfg *ClientConfig) *cobra.Command {
 		},
 	}
 
+	cmd.Flags().BoolVar(&all, "all", false, "Delete all task spawners in the namespace")
 	cmd.ValidArgsFunction = completeTaskSpawnerNames(cfg)
 
 	return cmd

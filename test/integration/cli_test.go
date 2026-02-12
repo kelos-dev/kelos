@@ -9,6 +9,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
 	"github.com/axon-core/axon/internal/cli"
@@ -168,6 +169,190 @@ var _ = Describe("CLI Workspace Commands", func() {
 			Expect(output).To(ContainSubstring("ws-alpha"))
 			Expect(output).To(ContainSubstring("ws-beta"))
 			Expect(output).To(ContainSubstring(":4"))
+		})
+	})
+})
+
+var _ = Describe("CLI Delete All Commands", func() {
+	Context("When deleting all tasks via CLI", func() {
+		It("Should delete all tasks in the namespace", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-cli-delete-all-tasks",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			kubeconfigPath := writeEnvtestKubeconfig()
+
+			By("Creating multiple tasks directly")
+			for _, name := range []string{"task-a", "task-b", "task-c"} {
+				task := &axonv1alpha1.Task{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      name,
+						Namespace: ns.Name,
+					},
+					Spec: axonv1alpha1.TaskSpec{
+						Type:   "claude-code",
+						Prompt: "test",
+						Credentials: axonv1alpha1.Credentials{
+							Type: axonv1alpha1.CredentialTypeAPIKey,
+							SecretRef: axonv1alpha1.SecretReference{
+								Name: "test-secret",
+							},
+						},
+					},
+				}
+				Expect(k8sClient.Create(ctx, task)).Should(Succeed())
+			}
+
+			By("Deleting all tasks via CLI")
+			err := runCLI(kubeconfigPath, ns.Name, "delete", "task", "--all")
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Verifying all tasks are deleted")
+			Eventually(func() int {
+				taskList := &axonv1alpha1.TaskList{}
+				Expect(k8sClient.List(ctx, taskList, client.InNamespace(ns.Name))).To(Succeed())
+				count := 0
+				for _, t := range taskList.Items {
+					if t.DeletionTimestamp == nil {
+						count++
+					}
+				}
+				return count
+			}, 10*time.Second, 250*time.Millisecond).Should(Equal(0))
+		})
+	})
+
+	Context("When deleting all workspaces via CLI", func() {
+		It("Should delete all workspaces in the namespace", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-cli-delete-all-ws",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			kubeconfigPath := writeEnvtestKubeconfig()
+
+			By("Creating multiple workspaces directly")
+			for _, name := range []string{"ws-a", "ws-b"} {
+				ws := &axonv1alpha1.Workspace{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      name,
+						Namespace: ns.Name,
+					},
+					Spec: axonv1alpha1.WorkspaceSpec{
+						Repo: "https://github.com/org/repo.git",
+					},
+				}
+				Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
+			}
+
+			By("Deleting all workspaces via CLI")
+			err := runCLI(kubeconfigPath, ns.Name, "delete", "workspace", "--all")
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Verifying all workspaces are deleted")
+			Eventually(func() int {
+				wsList := &axonv1alpha1.WorkspaceList{}
+				Expect(k8sClient.List(ctx, wsList, client.InNamespace(ns.Name))).To(Succeed())
+				return len(wsList.Items)
+			}, 10*time.Second, 250*time.Millisecond).Should(Equal(0))
+		})
+	})
+
+	Context("When deleting all task spawners via CLI", func() {
+		It("Should delete all task spawners in the namespace", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-cli-delete-all-ts",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			kubeconfigPath := writeEnvtestKubeconfig()
+
+			By("Creating multiple task spawners directly")
+			for _, name := range []string{"ts-a", "ts-b"} {
+				ts := &axonv1alpha1.TaskSpawner{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      name,
+						Namespace: ns.Name,
+					},
+					Spec: axonv1alpha1.TaskSpawnerSpec{
+						TaskTemplate: axonv1alpha1.TaskTemplate{
+							Type: "claude-code",
+							Credentials: axonv1alpha1.Credentials{
+								Type: axonv1alpha1.CredentialTypeAPIKey,
+								SecretRef: axonv1alpha1.SecretReference{
+									Name: "test-secret",
+								},
+							},
+						},
+					},
+				}
+				Expect(k8sClient.Create(ctx, ts)).Should(Succeed())
+			}
+
+			By("Deleting all task spawners via CLI")
+			err := runCLI(kubeconfigPath, ns.Name, "delete", "taskspawner", "--all")
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Verifying all task spawners are deleted")
+			Eventually(func() bool {
+				tsList := &axonv1alpha1.TaskSpawnerList{}
+				Expect(k8sClient.List(ctx, tsList, client.InNamespace(ns.Name))).To(Succeed())
+				for _, ts := range tsList.Items {
+					if ts.DeletionTimestamp == nil {
+						return false
+					}
+				}
+				return true
+			}, 10*time.Second, 250*time.Millisecond).Should(BeTrue())
+		})
+	})
+
+	Context("When using --all with a name argument", func() {
+		It("Should return an error for task", func() {
+			kubeconfigPath := writeEnvtestKubeconfig()
+			err := runCLI(kubeconfigPath, "default", "delete", "task", "some-task", "--all")
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("cannot specify task name with --all"))
+		})
+
+		It("Should return an error for workspace", func() {
+			kubeconfigPath := writeEnvtestKubeconfig()
+			err := runCLI(kubeconfigPath, "default", "delete", "workspace", "some-ws", "--all")
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("cannot specify workspace name with --all"))
+		})
+
+		It("Should return an error for taskspawner", func() {
+			kubeconfigPath := writeEnvtestKubeconfig()
+			err := runCLI(kubeconfigPath, "default", "delete", "taskspawner", "some-ts", "--all")
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("cannot specify task spawner name with --all"))
+		})
+	})
+
+	Context("When using --all on empty namespace", func() {
+		It("Should succeed with no tasks", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-cli-delete-all-empty",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			kubeconfigPath := writeEnvtestKubeconfig()
+			err := runCLI(kubeconfigPath, ns.Name, "delete", "task", "--all")
+			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 })

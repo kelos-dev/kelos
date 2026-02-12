@@ -105,7 +105,7 @@ func newTask(name, namespace, spawnerName string, phase axonv1alpha1.TaskPhase) 
 func TestBuildSource_GitHubIssuesWithBaseURL(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 
-	src, err := buildSource(ts, "my-org", "my-repo", "https://github.example.com/api/v3")
+	src, err := buildSource(ts, "my-org", "my-repo", "https://github.example.com/api/v3", "")
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestBuildSource_GitHubIssuesWithBaseURL(t *testing.T) {
 func TestBuildSource_GitHubIssuesDefaultBaseURL(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 
-	src, err := buildSource(ts, "axon-core", "axon", "")
+	src, err := buildSource(ts, "axon-core", "axon", "", "")
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}

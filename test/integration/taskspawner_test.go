@@ -1,6 +1,10 @@
 package integration
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -720,6 +724,148 @@ var _ = Describe("TaskSpawner Controller", func() {
 
 			By("Verifying TaskSpawner phase is Pending")
 			Expect(createdTS.Status.Phase).To(Equal(axonv1alpha1.TaskSpawnerPhasePending))
+		})
+	})
+
+	Context("When creating a TaskSpawner with GitHub App workspace", func() {
+		It("Should create a Deployment with token-refresher sidecar", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-taskspawner-github-app",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Generating a test RSA key for GitHub App")
+			privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+			Expect(err).NotTo(HaveOccurred())
+			keyPEM := pem.EncodeToMemory(&pem.Block{
+				Type:  "RSA PRIVATE KEY",
+				Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
+			})
+
+			By("Creating a Secret with GitHub App credentials")
+			ghAppSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "github-app-creds",
+					Namespace: ns.Name,
+				},
+				Data: map[string][]byte{
+					"appID":          []byte("12345"),
+					"installationID": []byte("67890"),
+					"privateKey":     keyPEM,
+				},
+			}
+			Expect(k8sClient.Create(ctx, ghAppSecret)).Should(Succeed())
+
+			By("Creating a Workspace with GitHub App secretRef")
+			ws := &axonv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace-app",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/axon-core/axon.git",
+					Ref:  "main",
+					SecretRef: &axonv1alpha1.SecretReference{
+						Name: "github-app-creds",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
+
+			By("Creating a TaskSpawner")
+			ts := &axonv1alpha1.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-spawner-app",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpawnerSpec{
+					When: axonv1alpha1.When{
+						GitHubIssues: &axonv1alpha1.GitHubIssues{
+							State: "open",
+						},
+					},
+					TaskTemplate: axonv1alpha1.TaskTemplate{
+						Type: "claude-code",
+						Credentials: axonv1alpha1.Credentials{
+							Type: axonv1alpha1.CredentialTypeOAuth,
+							SecretRef: axonv1alpha1.SecretReference{
+								Name: "claude-credentials",
+							},
+						},
+						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+							Name: "test-workspace-app",
+						},
+					},
+					PollInterval: "5m",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ts)).Should(Succeed())
+
+			By("Verifying a Deployment is created")
+			deployLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
+			createdDeploy := &appsv1.Deployment{}
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, deployLookupKey, createdDeploy)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Verifying the Deployment has 2 containers (spawner + token-refresher)")
+			Expect(createdDeploy.Spec.Template.Spec.Containers).To(HaveLen(2))
+
+			spawner := createdDeploy.Spec.Template.Spec.Containers[0]
+			Expect(spawner.Name).To(Equal("spawner"))
+
+			refresher := createdDeploy.Spec.Template.Spec.Containers[1]
+			Expect(refresher.Name).To(Equal("token-refresher"))
+			Expect(refresher.Image).To(Equal(controller.DefaultTokenRefresherImage))
+
+			By("Verifying the spawner has --github-token-file flag")
+			Expect(spawner.Args).To(ContainElement("--github-token-file=/shared/token/GITHUB_TOKEN"))
+
+			By("Verifying the spawner does NOT have GITHUB_TOKEN env var")
+			for _, env := range spawner.Env {
+				Expect(env.Name).NotTo(Equal("GITHUB_TOKEN"))
+			}
+
+			By("Verifying the token-refresher has APP_ID and INSTALLATION_ID env vars")
+			Expect(refresher.Env).To(HaveLen(2))
+			Expect(refresher.Env[0].Name).To(Equal("APP_ID"))
+			Expect(refresher.Env[0].ValueFrom.SecretKeyRef.Name).To(Equal("github-app-creds"))
+			Expect(refresher.Env[0].ValueFrom.SecretKeyRef.Key).To(Equal("appID"))
+			Expect(refresher.Env[1].Name).To(Equal("INSTALLATION_ID"))
+			Expect(refresher.Env[1].ValueFrom.SecretKeyRef.Name).To(Equal("github-app-creds"))
+			Expect(refresher.Env[1].ValueFrom.SecretKeyRef.Key).To(Equal("installationID"))
+
+			By("Verifying the Deployment has 2 volumes")
+			Expect(createdDeploy.Spec.Template.Spec.Volumes).To(HaveLen(2))
+
+			var tokenVol, secretVol *corev1.Volume
+			for i, v := range createdDeploy.Spec.Template.Spec.Volumes {
+				switch v.Name {
+				case "github-token":
+					tokenVol = &createdDeploy.Spec.Template.Spec.Volumes[i]
+				case "github-app-secret":
+					secretVol = &createdDeploy.Spec.Template.Spec.Volumes[i]
+				}
+			}
+			Expect(tokenVol).NotTo(BeNil())
+			Expect(tokenVol.EmptyDir).NotTo(BeNil())
+			Expect(secretVol).NotTo(BeNil())
+			Expect(secretVol.Secret).NotTo(BeNil())
+			Expect(secretVol.Secret.SecretName).To(Equal("github-app-creds"))
+
+			By("Verifying the spawner mounts the shared token volume (read-only)")
+			Expect(spawner.VolumeMounts).To(HaveLen(1))
+			Expect(spawner.VolumeMounts[0].Name).To(Equal("github-token"))
+			Expect(spawner.VolumeMounts[0].MountPath).To(Equal("/shared/token"))
+			Expect(spawner.VolumeMounts[0].ReadOnly).To(BeTrue())
+
+			By("Verifying the token-refresher mounts both volumes")
+			Expect(refresher.VolumeMounts).To(HaveLen(2))
 		})
 	})
 })

@@ -101,6 +101,11 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 				// Auto-create Workspace CR from inline config if no --workspace flag.
 				if workspace == "" && cfg.Config != nil && cfg.Config.Workspace.Repo != "" {
 					wsCfg := cfg.Config.Workspace
+
+					if wsCfg.Token != "" && wsCfg.GitHubApp != nil {
+						return fmt.Errorf("workspace config must specify either token or githubApp, not both")
+					}
+
 					wsName := "axon-workspace"
 					ws := &axonv1alpha1.Workspace{
 						ObjectMeta: metav1.ObjectMeta{
@@ -114,6 +119,13 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 					}
 					if wsCfg.Token != "" {
 						if err := ensureCredentialSecret(cfg, "axon-workspace-credentials", "GITHUB_TOKEN", wsCfg.Token, yes); err != nil {
+							return err
+						}
+						ws.Spec.SecretRef = &axonv1alpha1.SecretReference{
+							Name: "axon-workspace-credentials",
+						}
+					} else if wsCfg.GitHubApp != nil {
+						if err := ensureGitHubAppSecret(cfg, "axon-workspace-credentials", wsCfg.GitHubApp, yes); err != nil {
 							return err
 						}
 						ws.Spec.SecretRef = &axonv1alpha1.SecretReference{
@@ -299,6 +311,62 @@ func oauthSecretKey(agentType string) string {
 	default:
 		return "CLAUDE_CODE_OAUTH_TOKEN"
 	}
+}
+
+// ensureGitHubAppSecret creates or updates a Secret with GitHub App credentials.
+// If skipConfirm is false and the secret already exists, the user is prompted
+// before overriding.
+func ensureGitHubAppSecret(cfg *ClientConfig, name string, appCfg *GitHubAppConfig, skipConfirm bool) error {
+	privateKey, err := os.ReadFile(appCfg.PrivateKeyPath)
+	if err != nil {
+		return fmt.Errorf("reading private key file %s: %w", appCfg.PrivateKeyPath, err)
+	}
+
+	cs, ns, err := cfg.NewClientset()
+	if err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: ns,
+		},
+		StringData: map[string]string{
+			"appID":          appCfg.AppID,
+			"installationID": appCfg.InstallationID,
+			"privateKey":     string(privateKey),
+		},
+	}
+
+	existing, err := cs.CoreV1().Secrets(ns).Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		if _, err := cs.CoreV1().Secrets(ns).Create(ctx, secret, metav1.CreateOptions{}); err != nil {
+			return fmt.Errorf("creating GitHub App secret: %w", err)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("checking GitHub App secret: %w", err)
+	}
+
+	if !skipConfirm {
+		ok, err := confirmOverride(fmt.Sprintf("secret/%s", name))
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("aborted")
+		}
+	}
+
+	existing.Data = nil
+	existing.StringData = secret.StringData
+	if _, err := cs.CoreV1().Secrets(ns).Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("updating GitHub App secret: %w", err)
+	}
+	return nil
 }
 
 // ensureCredentialSecret creates or updates a Secret with the given credential key and value.

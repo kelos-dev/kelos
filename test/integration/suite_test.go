@@ -2,6 +2,9 @@ package integration
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
@@ -18,14 +21,16 @@ import (
 
 	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
 	"github.com/axon-core/axon/internal/controller"
+	"github.com/axon-core/axon/internal/githubapp"
 )
 
 var (
-	cfg       *rest.Config
-	k8sClient client.Client
-	testEnv   *envtest.Environment
-	ctx       context.Context
-	cancel    context.CancelFunc
+	cfg              *rest.Config
+	k8sClient        client.Client
+	testEnv          *envtest.Environment
+	ctx              context.Context
+	cancel           context.CancelFunc
+	mockGitHubServer *httptest.Server
 )
 
 func TestIntegration(t *testing.T) {
@@ -56,16 +61,30 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
 
+	// Set up mock GitHub token endpoint for integration tests
+	mockGitHubServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"token":      "ghs_mock_installation_token",
+			"expires_at": time.Now().Add(1 * time.Hour).UTC().Format(time.RFC3339),
+		})
+	}))
+
 	// Start controller manager
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme: scheme.Scheme,
 	})
 	Expect(err).NotTo(HaveOccurred())
 
+	tokenClient := githubapp.NewTokenClient()
+	tokenClient.BaseURL = mockGitHubServer.URL
+	tokenClient.Client = mockGitHubServer.Client()
+
 	err = (&controller.TaskReconciler{
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
-		JobBuilder: controller.NewJobBuilder(),
+		Client:      mgr.GetClient(),
+		Scheme:      mgr.GetScheme(),
+		JobBuilder:  controller.NewJobBuilder(),
+		TokenClient: tokenClient,
 	}).SetupWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 
@@ -99,6 +118,9 @@ var _ = BeforeSuite(func() {
 
 var _ = AfterSuite(func() {
 	cancel()
+	if mockGitHubServer != nil {
+		mockGitHubServer.Close()
+	}
 	By("tearing down the test environment")
 	err := testEnv.Stop()
 	Expect(err).NotTo(HaveOccurred())

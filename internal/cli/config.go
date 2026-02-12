@@ -24,10 +24,18 @@ type Config struct {
 // If Name is set, it references an existing Workspace CR.
 // If Repo is set, the CLI auto-creates a Workspace CR.
 type WorkspaceConfig struct {
-	Name  string `json:"name,omitempty"`
-	Repo  string `json:"repo,omitempty"`
-	Ref   string `json:"ref,omitempty"`
-	Token string `json:"token,omitempty"`
+	Name      string           `json:"name,omitempty"`
+	Repo      string           `json:"repo,omitempty"`
+	Ref       string           `json:"ref,omitempty"`
+	Token     string           `json:"token,omitempty"`
+	GitHubApp *GitHubAppConfig `json:"githubApp,omitempty"`
+}
+
+// GitHubAppConfig holds GitHub App credentials for workspace authentication.
+type GitHubAppConfig struct {
+	AppID          string `json:"appID"`
+	InstallationID string `json:"installationID"`
+	PrivateKeyPath string `json:"privateKeyPath"`
 }
 
 // DefaultConfigPath returns the default config file path (~/.axon/config.yaml).

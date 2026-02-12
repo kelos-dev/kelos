@@ -23,12 +23,13 @@ Create a Workspace that points to your repository:
 apiVersion: axon.io/v1alpha1
 kind: Workspace
 metadata:
-  name: axon-workspace
+  name: axon-agent
 spec:
   repo: https://github.com/your-org/your-repo.git
   ref: main
   secretRef:
     name: github-token  # For pushing branches and creating PRs
+  # or authenticate with githubApp
 ```
 
 ### 2. GitHub Token Secret
@@ -80,12 +81,13 @@ kubectl apply -f - <<EOF
 apiVersion: axon.io/v1alpha1
 kind: Workspace
 metadata:
-  name: axon-workspace
+  name: axon-agent
 spec:
   repo: https://github.com/your-org/your-repo.git
   ref: main
   secretRef:
     name: github-token
+  # or authenticate with githubApp
 EOF
 
 # Then deploy the TaskSpawner

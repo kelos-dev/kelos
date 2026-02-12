@@ -41,6 +41,26 @@ oauthToken: ""
 # credentialType: oauth
 `
 
+func printNextSteps(configPath string) {
+	fmt.Fprintln(os.Stdout, "")
+	fmt.Fprintln(os.Stdout, "Next steps:")
+	fmt.Fprintln(os.Stdout, "")
+	fmt.Fprintln(os.Stdout, "1. Get your credentials:")
+	fmt.Fprintln(os.Stdout, "   • For Claude Code (OAuth): https://claude.ai/settings/developer")
+	fmt.Fprintln(os.Stdout, "   • For API access (API key): https://console.anthropic.com/settings/keys")
+	fmt.Fprintln(os.Stdout, "")
+	fmt.Fprintln(os.Stdout, "2. Edit the config file and add your token:")
+	fmt.Fprintf(os.Stdout, "   %s\n", configPath)
+	fmt.Fprintln(os.Stdout, "")
+	fmt.Fprintln(os.Stdout, "3. Install Axon (if not already installed):")
+	fmt.Fprintln(os.Stdout, "   axon install")
+	fmt.Fprintln(os.Stdout, "")
+	fmt.Fprintln(os.Stdout, "4. Run your first task:")
+	fmt.Fprintln(os.Stdout, "   axon run -p \"Create a hello world program in Python\"")
+	fmt.Fprintln(os.Stdout, "   axon logs <task-name> -f")
+	fmt.Fprintln(os.Stdout, "")
+}
+
 func newInitCommand(_ *ClientConfig) *cobra.Command {
 	var force bool
 
@@ -72,6 +92,7 @@ func newInitCommand(_ *ClientConfig) *cobra.Command {
 			}
 
 			fmt.Fprintf(os.Stdout, "Config file created: %s\n", path)
+			printNextSteps(path)
 			return nil
 		},
 	}

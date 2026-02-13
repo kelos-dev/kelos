@@ -97,6 +97,7 @@ func main() {
 		JobBuilder:  jobBuilder,
 		Clientset:   clientset,
 		TokenClient: githubapp.NewTokenClient(),
+		Recorder:    mgr.GetEventRecorderFor("axon-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Task")
 		os.Exit(1)
@@ -111,6 +112,7 @@ func main() {
 		Client:            mgr.GetClient(),
 		Scheme:            mgr.GetScheme(),
 		DeploymentBuilder: deploymentBuilder,
+		Recorder:          mgr.GetEventRecorderFor("axon-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "TaskSpawner")
 		os.Exit(1)

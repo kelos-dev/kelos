@@ -11,6 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -30,6 +31,7 @@ type TaskSpawnerReconciler struct {
 	client.Client
 	Scheme            *runtime.Scheme
 	DeploymentBuilder *DeploymentBuilder
+	Recorder          record.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=axon.io,resources=taskspawners,verbs=get;list;watch;create;update;patch;delete
@@ -39,6 +41,7 @@ type TaskSpawnerReconciler struct {
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 // Reconcile handles TaskSpawner reconciliation.
 func (r *TaskSpawnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -50,6 +53,7 @@ func (r *TaskSpawnerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, nil
 		}
 		logger.Error(err, "unable to fetch TaskSpawner")
+		reconcileErrorsTotal.WithLabelValues("taskspawner").Inc()
 		return ctrl.Result{}, err
 	}
 
@@ -98,6 +102,7 @@ func (r *TaskSpawnerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}, &ws); err != nil {
 			if apierrors.IsNotFound(err) {
 				logger.Info("Workspace not found yet, requeuing", "workspace", workspaceRefName)
+				r.recordEvent(&ts, corev1.EventTypeWarning, "WorkspaceNotFound", "Workspace %s not found", workspaceRefName)
 				return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 			}
 			logger.Error(err, "Unable to fetch Workspace for TaskSpawner", "workspace", workspaceRefName)
@@ -194,6 +199,7 @@ func (r *TaskSpawnerReconciler) createDeployment(ctx context.Context, ts *axonv1
 	}
 
 	logger.Info("created Deployment", "deployment", deploy.Name)
+	r.recordEvent(ts, corev1.EventTypeNormal, "DeploymentCreated", "Created spawner Deployment %s", deploy.Name)
 
 	// Update status
 	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
@@ -241,6 +247,7 @@ func (r *TaskSpawnerReconciler) updateDeployment(ctx context.Context, ts *axonv1
 	}
 
 	logger.Info("updated Deployment", "deployment", deploy.Name)
+	r.recordEvent(ts, corev1.EventTypeNormal, "DeploymentUpdated", "Updated spawner Deployment %s", deploy.Name)
 	return nil
 }
 
@@ -345,6 +352,13 @@ func (r *TaskSpawnerReconciler) ensureSpawnerRBAC(ctx context.Context, namespace
 	}
 
 	return nil
+}
+
+// recordEvent records a Kubernetes Event on the given object if a Recorder is configured.
+func (r *TaskSpawnerReconciler) recordEvent(obj runtime.Object, eventType, reason, messageFmt string, args ...interface{}) {
+	if r.Recorder != nil {
+		r.Recorder.Eventf(obj, eventType, reason, messageFmt, args...)
+	}
 }
 
 // SetupWithManager sets up the controller with the Manager.

@@ -17,11 +17,26 @@ import (
 
 	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
 	"github.com/axon-core/axon/internal/controller"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func logJobSpec(job *batchv1.Job) {
 	spec, _ := json.MarshalIndent(job.Spec, "", "  ")
 	GinkgoWriter.Printf("\n=== Job Spec ===\n%s\n================\n", spec)
+}
+
+func findEvent(namespace, involvedObjectName, reason string) *corev1.Event {
+	eventList := &corev1.EventList{}
+	err := k8sClient.List(ctx, eventList, client.InNamespace(namespace))
+	if err != nil {
+		return nil
+	}
+	for i, event := range eventList.Items {
+		if event.InvolvedObject.Name == involvedObjectName && event.Reason == reason {
+			return &eventList.Items[i]
+		}
+	}
+	return nil
 }
 
 var _ = Describe("Task Controller", func() {
@@ -1415,6 +1430,202 @@ var _ = Describe("Task Controller", func() {
 			Expect(githubTokenEnv).NotTo(BeNil())
 			Expect(githubTokenEnv.ValueFrom.SecretKeyRef.Name).To(Equal(task.Name + "-github-token"))
 			Expect(githubTokenEnv.ValueFrom.SecretKeyRef.Key).To(Equal("GITHUB_TOKEN"))
+		})
+	})
+
+	Context("When a Task goes through its lifecycle", func() {
+		It("Should emit Kubernetes Events for key state transitions", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-task-events",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with API key")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+			By("Creating a Task")
+			task := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-task-events",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "Test events",
+					Credentials: axonv1alpha1.Credentials{
+						Type: axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{
+							Name: "anthropic-api-key",
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, task)).Should(Succeed())
+
+			taskLookupKey := types.NamespacedName{Name: task.Name, Namespace: ns.Name}
+			createdTask := &axonv1alpha1.Task{}
+			jobLookupKey := types.NamespacedName{Name: task.Name, Namespace: ns.Name}
+			createdJob := &batchv1.Job{}
+
+			By("Waiting for Job to be created")
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, jobLookupKey, createdJob)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Verifying TaskCreated event is emitted")
+			Eventually(func() *corev1.Event {
+				return findEvent(ns.Name, task.Name, "TaskCreated")
+			}, timeout, interval).ShouldNot(BeNil())
+
+			createdEvent := findEvent(ns.Name, task.Name, "TaskCreated")
+			Expect(createdEvent.Type).To(Equal(corev1.EventTypeNormal))
+			Expect(createdEvent.Message).To(ContainSubstring("Created Job"))
+
+			By("Simulating Job running")
+			Eventually(func() error {
+				if err := k8sClient.Get(ctx, jobLookupKey, createdJob); err != nil {
+					return err
+				}
+				createdJob.Status.Active = 1
+				return k8sClient.Status().Update(ctx, createdJob)
+			}, timeout, interval).Should(Succeed())
+
+			By("Verifying Task status is Running")
+			Eventually(func() axonv1alpha1.TaskPhase {
+				err := k8sClient.Get(ctx, taskLookupKey, createdTask)
+				if err != nil {
+					return ""
+				}
+				return createdTask.Status.Phase
+			}, timeout, interval).Should(Equal(axonv1alpha1.TaskPhaseRunning))
+
+			By("Verifying TaskRunning event is emitted")
+			Eventually(func() *corev1.Event {
+				return findEvent(ns.Name, task.Name, "TaskRunning")
+			}, timeout, interval).ShouldNot(BeNil())
+
+			runningEvent := findEvent(ns.Name, task.Name, "TaskRunning")
+			Expect(runningEvent.Type).To(Equal(corev1.EventTypeNormal))
+
+			By("Simulating Job completion")
+			Eventually(func() error {
+				if err := k8sClient.Get(ctx, jobLookupKey, createdJob); err != nil {
+					return err
+				}
+				createdJob.Status.Active = 0
+				createdJob.Status.Succeeded = 1
+				return k8sClient.Status().Update(ctx, createdJob)
+			}, timeout, interval).Should(Succeed())
+
+			By("Verifying Task status is Succeeded")
+			Eventually(func() axonv1alpha1.TaskPhase {
+				err := k8sClient.Get(ctx, taskLookupKey, createdTask)
+				if err != nil {
+					return ""
+				}
+				return createdTask.Status.Phase
+			}, timeout, interval).Should(Equal(axonv1alpha1.TaskPhaseSucceeded))
+
+			By("Verifying TaskSucceeded event is emitted")
+			Eventually(func() *corev1.Event {
+				return findEvent(ns.Name, task.Name, "TaskSucceeded")
+			}, timeout, interval).ShouldNot(BeNil())
+
+			succeededEvent := findEvent(ns.Name, task.Name, "TaskSucceeded")
+			Expect(succeededEvent.Type).To(Equal(corev1.EventTypeNormal))
+		})
+	})
+
+	Context("When a Task fails", func() {
+		It("Should emit a TaskFailed warning event", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-task-events-failed",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with API key")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+			By("Creating a Task")
+			task := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-task-fail-event",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "Test failure event",
+					Credentials: axonv1alpha1.Credentials{
+						Type: axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{
+							Name: "anthropic-api-key",
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, task)).Should(Succeed())
+
+			jobLookupKey := types.NamespacedName{Name: task.Name, Namespace: ns.Name}
+			createdJob := &batchv1.Job{}
+
+			By("Waiting for Job to be created")
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, jobLookupKey, createdJob)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Simulating Job failure")
+			Eventually(func() error {
+				if err := k8sClient.Get(ctx, jobLookupKey, createdJob); err != nil {
+					return err
+				}
+				createdJob.Status.Failed = 1
+				return k8sClient.Status().Update(ctx, createdJob)
+			}, timeout, interval).Should(Succeed())
+
+			By("Verifying Task status is Failed")
+			taskLookupKey := types.NamespacedName{Name: task.Name, Namespace: ns.Name}
+			createdTask := &axonv1alpha1.Task{}
+			Eventually(func() axonv1alpha1.TaskPhase {
+				err := k8sClient.Get(ctx, taskLookupKey, createdTask)
+				if err != nil {
+					return ""
+				}
+				return createdTask.Status.Phase
+			}, timeout, interval).Should(Equal(axonv1alpha1.TaskPhaseFailed))
+
+			By("Verifying TaskFailed event is emitted")
+			Eventually(func() *corev1.Event {
+				return findEvent(ns.Name, task.Name, "TaskFailed")
+			}, timeout, interval).ShouldNot(BeNil())
+
+			failedEvent := findEvent(ns.Name, task.Name, "TaskFailed")
+			Expect(failedEvent.Type).To(Equal(corev1.EventTypeWarning))
 		})
 	})
 })

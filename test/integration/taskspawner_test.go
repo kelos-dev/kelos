@@ -873,4 +873,83 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(refresher.VolumeMounts).To(HaveLen(2))
 		})
 	})
+
+	Context("When a TaskSpawner creates a Deployment", func() {
+		It("Should emit a DeploymentCreated event", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-taskspawner-events",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Workspace")
+			ws := &axonv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace-events",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/axon-core/axon.git",
+					Ref:  "main",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
+
+			By("Creating a TaskSpawner")
+			ts := &axonv1alpha1.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-spawner-events",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpawnerSpec{
+					When: axonv1alpha1.When{
+						GitHubIssues: &axonv1alpha1.GitHubIssues{
+							State: "open",
+						},
+					},
+					TaskTemplate: axonv1alpha1.TaskTemplate{
+						Type: "claude-code",
+						Credentials: axonv1alpha1.Credentials{
+							Type: axonv1alpha1.CredentialTypeOAuth,
+							SecretRef: axonv1alpha1.SecretReference{
+								Name: "claude-credentials",
+							},
+						},
+						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+							Name: "test-workspace-events",
+						},
+					},
+					PollInterval: "5m",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ts)).Should(Succeed())
+
+			By("Waiting for the Deployment to be created")
+			deployLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
+			createdDeploy := &appsv1.Deployment{}
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, deployLookupKey, createdDeploy)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Verifying DeploymentCreated event is emitted")
+			Eventually(func() bool {
+				eventList := &corev1.EventList{}
+				err := k8sClient.List(ctx, eventList, client.InNamespace(ns.Name))
+				if err != nil {
+					return false
+				}
+				for _, event := range eventList.Items {
+					if event.InvolvedObject.Name == ts.Name && event.Reason == "DeploymentCreated" {
+						Expect(event.Type).To(Equal(corev1.EventTypeNormal))
+						Expect(event.Message).To(ContainSubstring("Created spawner Deployment"))
+						return true
+					}
+				}
+				return false
+			}, timeout, interval).Should(BeTrue())
+		})
+	})
 })

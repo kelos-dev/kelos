@@ -85,6 +85,7 @@ var _ = BeforeSuite(func() {
 		Scheme:      mgr.GetScheme(),
 		JobBuilder:  controller.NewJobBuilder(),
 		TokenClient: tokenClient,
+		Recorder:    mgr.GetEventRecorderFor("axon-controller"),
 	}).SetupWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 
@@ -92,6 +93,7 @@ var _ = BeforeSuite(func() {
 		Client:            mgr.GetClient(),
 		Scheme:            mgr.GetScheme(),
 		DeploymentBuilder: controller.NewDeploymentBuilder(),
+		Recorder:          mgr.GetEventRecorderFor("axon-controller"),
 	}).SetupWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 

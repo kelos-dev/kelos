@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -40,6 +41,7 @@ type TaskReconciler struct {
 	JobBuilder  *JobBuilder
 	Clientset   kubernetes.Interface
 	TokenClient *githubapp.TokenClient
+	Recorder    record.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=axon.io,resources=tasks,verbs=get;list;watch;create;update;patch;delete
@@ -51,6 +53,7 @@ type TaskReconciler struct {
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods/log,verbs=get
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 // Reconcile handles Task reconciliation.
 func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -62,6 +65,7 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			return ctrl.Result{}, nil
 		}
 		logger.Error(err, "unable to fetch Task")
+		reconcileErrorsTotal.WithLabelValues("task").Inc()
 		return ctrl.Result{}, err
 	}
 
@@ -106,6 +110,7 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	// Check TTL expiration for finished Tasks
 	if expired, requeueAfter := r.ttlExpired(&task); expired {
 		logger.Info("Deleting Task due to TTL expiration", "task", task.Name)
+		r.recordEvent(&task, corev1.EventTypeNormal, "TaskExpired", "Deleting Task due to TTL expiration")
 		if err := r.Delete(ctx, &task); err != nil {
 			if apierrors.IsNotFound(err) {
 				return ctrl.Result{}, nil
@@ -177,6 +182,7 @@ func (r *TaskReconciler) createJob(ctx context.Context, task *axonv1alpha1.Task)
 			resolvedWorkspace, err := r.resolveGitHubAppToken(ctx, task, workspace)
 			if err != nil {
 				logger.Error(err, "Unable to resolve GitHub App token")
+				r.recordEvent(task, corev1.EventTypeWarning, "GitHubTokenFailed", "Failed to resolve GitHub token: %v", err)
 				updateErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 					if getErr := r.Get(ctx, client.ObjectKeyFromObject(task), task); getErr != nil {
 						return getErr
@@ -214,6 +220,7 @@ func (r *TaskReconciler) createJob(ctx context.Context, task *axonv1alpha1.Task)
 	job, err := r.JobBuilder.Build(task, workspace, agentConfig)
 	if err != nil {
 		logger.Error(err, "unable to build Job")
+		r.recordEvent(task, corev1.EventTypeWarning, "JobBuildFailed", "Failed to build Job: %v", err)
 		updateErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 			if getErr := r.Get(ctx, client.ObjectKeyFromObject(task), task); getErr != nil {
 				return getErr
@@ -243,6 +250,8 @@ func (r *TaskReconciler) createJob(ctx context.Context, task *axonv1alpha1.Task)
 	}
 
 	logger.Info("created Job", "job", job.Name)
+	r.recordEvent(task, corev1.EventTypeNormal, "TaskCreated", "Created Job %s for task", job.Name)
+	taskCreatedTotal.WithLabelValues(task.Namespace, task.Spec.Type).Inc()
 
 	// Update status
 	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
@@ -358,18 +367,23 @@ func (r *TaskReconciler) updateStatus(ctx context.Context, task *axonv1alpha1.Ta
 		if task.Status.Phase != axonv1alpha1.TaskPhaseRunning {
 			newPhase = axonv1alpha1.TaskPhaseRunning
 			setStartTime = true
+			r.recordEvent(task, corev1.EventTypeNormal, "TaskRunning", "Task started running")
 		}
 	} else if job.Status.Succeeded > 0 {
 		if task.Status.Phase != axonv1alpha1.TaskPhaseSucceeded {
 			newPhase = axonv1alpha1.TaskPhaseSucceeded
 			newMessage = "Task completed successfully"
 			setCompletionTime = true
+			r.recordEvent(task, corev1.EventTypeNormal, "TaskSucceeded", "Task completed successfully")
+			taskCompletedTotal.WithLabelValues(task.Namespace, task.Spec.Type, string(axonv1alpha1.TaskPhaseSucceeded)).Inc()
 		}
 	} else if job.Status.Failed > 0 {
 		if task.Status.Phase != axonv1alpha1.TaskPhaseFailed {
 			newPhase = axonv1alpha1.TaskPhaseFailed
 			newMessage = "Task failed"
 			setCompletionTime = true
+			r.recordEvent(task, corev1.EventTypeWarning, "TaskFailed", "Task failed")
+			taskCompletedTotal.WithLabelValues(task.Namespace, task.Spec.Type, string(axonv1alpha1.TaskPhaseFailed)).Inc()
 		}
 	}
 
@@ -429,7 +443,18 @@ func (r *TaskReconciler) updateStatus(ctx context.Context, task *axonv1alpha1.Ta
 		return r.Status().Update(ctx, task)
 	}); err != nil {
 		logger.Error(err, "Unable to update Task status")
+		reconcileErrorsTotal.WithLabelValues("task").Inc()
 		return ctrl.Result{}, err
+	}
+
+	// Record task duration when completion time is set and we have a start time
+	if setCompletionTime && task.Status.StartTime != nil {
+		duration := task.Status.CompletionTime.Time.Sub(task.Status.StartTime.Time).Seconds()
+		taskDurationSeconds.WithLabelValues(task.Namespace, task.Spec.Type, string(newPhase)).Observe(duration)
+	}
+
+	if setCompletionTime && outputs != nil {
+		r.recordEvent(task, corev1.EventTypeNormal, "OutputsCaptured", "Captured %d outputs from agent", len(outputs))
 	}
 
 	// Requeue to retry output capture when the initial attempt got nothing
@@ -489,6 +514,13 @@ func (r *TaskReconciler) readOutputs(ctx context.Context, namespace, podName, co
 	}
 
 	return ParseOutputs(string(data))
+}
+
+// recordEvent records a Kubernetes Event on the given object if a Recorder is configured.
+func (r *TaskReconciler) recordEvent(obj runtime.Object, eventType, reason, messageFmt string, args ...interface{}) {
+	if r.Recorder != nil {
+		r.Recorder.Eventf(obj, eventType, reason, messageFmt, args...)
+	}
 }
 
 // SetupWithManager sets up the controller with the Manager.

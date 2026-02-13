@@ -158,6 +158,8 @@ func streamAgentLogs(ctx context.Context, cs *kubernetes.Clientset, namespace, p
 			return ParseAndFormatCodexLogs(stream, os.Stdout, os.Stderr)
 		case "gemini":
 			return ParseAndFormatGeminiLogs(stream, os.Stdout, os.Stderr)
+		case "opencode":
+			return ParseAndFormatOpenCodeLogs(stream, os.Stdout, os.Stderr)
 		default:
 			return ParseAndFormatLogs(stream, os.Stdout, os.Stderr)
 		}

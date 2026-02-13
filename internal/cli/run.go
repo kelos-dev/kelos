@@ -18,6 +18,20 @@ import (
 	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
 )
 
+// credentialNone is a reserved value for apiKey or oauthToken in the config
+// file that indicates an empty credential. This is useful for agents like
+// OpenCode that support free-tier models requiring no authentication.
+const credentialNone = "none"
+
+// resolveCredentialValue returns the actual credential value to store in the
+// secret. The reserved value "none" maps to an empty string.
+func resolveCredentialValue(v string) string {
+	if v == credentialNone {
+		return ""
+	}
+	return v
+}
+
 func newRunCommand(cfg *ClientConfig) *cobra.Command {
 	var (
 		prompt         string
@@ -69,7 +83,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 				if token := cfg.Config.OAuthToken; token != "" {
 					if !dryRun {
 						oauthKey := oauthSecretKey(agentType)
-						if err := ensureCredentialSecret(cfg, "axon-credentials", oauthKey, token, yes); err != nil {
+						if err := ensureCredentialSecret(cfg, "axon-credentials", oauthKey, resolveCredentialValue(token), yes); err != nil {
 							return err
 						}
 					}
@@ -78,7 +92,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 				} else if key := cfg.Config.APIKey; key != "" {
 					if !dryRun {
 						apiKey := apiKeySecretKey(agentType)
-						if err := ensureCredentialSecret(cfg, "axon-credentials", apiKey, key, yes); err != nil {
+						if err := ensureCredentialSecret(cfg, "axon-credentials", apiKey, resolveCredentialValue(key), yes); err != nil {
 							return err
 						}
 					}
@@ -332,7 +346,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 	cmd.MarkFlagRequired("prompt")
 
 	_ = cmd.RegisterFlagCompletionFunc("credential-type", cobra.FixedCompletions([]string{"api-key", "oauth"}, cobra.ShellCompDirectiveNoFileComp))
-	_ = cmd.RegisterFlagCompletionFunc("type", cobra.FixedCompletions([]string{"claude-code", "codex", "gemini"}, cobra.ShellCompDirectiveNoFileComp))
+	_ = cmd.RegisterFlagCompletionFunc("type", cobra.FixedCompletions([]string{"claude-code", "codex", "gemini", "opencode"}, cobra.ShellCompDirectiveNoFileComp))
 
 	return cmd
 }
@@ -366,6 +380,8 @@ func apiKeySecretKey(agentType string) string {
 		return "CODEX_API_KEY"
 	case "gemini":
 		return "GEMINI_API_KEY"
+	case "opencode":
+		return "OPENCODE_API_KEY"
 	default:
 		return "ANTHROPIC_API_KEY"
 	}
@@ -379,6 +395,8 @@ func oauthSecretKey(agentType string) string {
 		return "CODEX_API_KEY"
 	case "gemini":
 		return "GEMINI_API_KEY"
+	case "opencode":
+		return "OPENCODE_API_KEY"
 	default:
 		return "CLAUDE_CODE_OAUTH_TOKEN"
 	}

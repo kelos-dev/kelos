@@ -1220,6 +1220,100 @@ var _ = Describe("Task Controller", func() {
 		})
 	})
 
+	Context("When creating an OpenCode Task with API key credentials", func() {
+		It("Should create a Job with OPENCODE_API_KEY env var", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-task-opencode-apikey",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with OpenCode API key")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "opencode-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"OPENCODE_API_KEY": "test-opencode-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+			By("Creating an OpenCode Task")
+			task := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-opencode-task",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   "opencode",
+					Prompt: "Fix the bug",
+					Credentials: axonv1alpha1.Credentials{
+						Type: axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{
+							Name: "opencode-api-key",
+						},
+					},
+					Model: "anthropic/claude-sonnet-4-20250514",
+				},
+			}
+			Expect(k8sClient.Create(ctx, task)).Should(Succeed())
+
+			taskLookupKey := types.NamespacedName{Name: task.Name, Namespace: ns.Name}
+			createdTask := &axonv1alpha1.Task{}
+
+			By("Verifying the Task has a finalizer")
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, taskLookupKey, createdTask)
+				if err != nil {
+					return false
+				}
+				for _, f := range createdTask.Finalizers {
+					if f == "axon.io/finalizer" {
+						return true
+					}
+				}
+				return false
+			}, timeout, interval).Should(BeTrue())
+
+			By("Verifying a Job is created")
+			jobLookupKey := types.NamespacedName{Name: task.Name, Namespace: ns.Name}
+			createdJob := &batchv1.Job{}
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, jobLookupKey, createdJob)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Logging the Job spec")
+			logJobSpec(createdJob)
+
+			By("Verifying the Job spec")
+			Expect(createdJob.Spec.Template.Spec.Containers).To(HaveLen(1))
+			container := createdJob.Spec.Template.Spec.Containers[0]
+			Expect(container.Name).To(Equal("opencode"))
+			Expect(container.Image).To(Equal(controller.OpenCodeImage))
+			Expect(container.Command).To(Equal([]string{"/axon_entrypoint.sh"}))
+			Expect(container.Args).To(Equal([]string{"Fix the bug"}))
+
+			By("Verifying the Job has AXON_MODEL and OPENCODE_API_KEY env vars")
+			Expect(container.Env).To(HaveLen(2))
+			Expect(container.Env[0].Name).To(Equal("AXON_MODEL"))
+			Expect(container.Env[0].Value).To(Equal("anthropic/claude-sonnet-4-20250514"))
+			Expect(container.Env[1].Name).To(Equal("OPENCODE_API_KEY"))
+			Expect(container.Env[1].ValueFrom.SecretKeyRef.Name).To(Equal("opencode-api-key"))
+			Expect(container.Env[1].ValueFrom.SecretKeyRef.Key).To(Equal("OPENCODE_API_KEY"))
+
+			By("Verifying the Job has owner reference")
+			Expect(createdJob.OwnerReferences).To(HaveLen(1))
+			Expect(createdJob.OwnerReferences[0].Name).To(Equal(task.Name))
+			Expect(createdJob.OwnerReferences[0].Kind).To(Equal("Task"))
+		})
+	})
+
 	Context("When creating a Task with a nonexistent workspace", func() {
 		It("Should not create a Job and keep retrying", func() {
 			By("Creating a namespace")

@@ -73,7 +73,7 @@ type PodOverrides struct {
 type TaskSpec struct {
 	// Type specifies the agent type (e.g., claude-code).
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=claude-code;codex;gemini
+	// +kubebuilder:validation:Enum=claude-code;codex;gemini;opencode
 	Type string `json:"type"`
 
 	// Prompt is the task prompt to send to the agent.

@@ -65,8 +65,67 @@ func TestRunCommand_DryRun(t *testing.T) {
 	}
 }
 
+func TestResolveCredentialValue(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"none", ""},
+		{"", ""},
+		{"my-api-key", "my-api-key"},
+	}
+	for _, tt := range tests {
+		got := resolveCredentialValue(tt.input)
+		if got != tt.want {
+			t.Errorf("resolveCredentialValue(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestRunCommand_DryRun_OpenCodeNoneAPIKey(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	cfg := "apiKey: none\ntype: opencode\n"
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{
+		"run",
+		"--config", cfgPath,
+		"--dry-run",
+		"--prompt", "hello",
+		"--name", "none-task",
+		"--namespace", "test-ns",
+	})
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	if err := cmd.Execute(); err != nil {
+		w.Close()
+		os.Stdout = old
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	w.Close()
+	os.Stdout = old
+	var out bytes.Buffer
+	out.ReadFrom(r)
+	output := out.String()
+
+	if !strings.Contains(output, "type: opencode") {
+		t.Errorf("expected 'type: opencode' in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "axon-credentials") {
+		t.Errorf("expected 'axon-credentials' secret reference in output, got:\n%s", output)
+	}
+}
+
 func TestRunCommand_DryRun_AgentType(t *testing.T) {
-	for _, agentType := range []string{"claude-code", "codex", "gemini"} {
+	for _, agentType := range []string{"claude-code", "codex", "gemini", "opencode"} {
 		t.Run(agentType, func(t *testing.T) {
 			dir := t.TempDir()
 			cfgPath := filepath.Join(dir, "config.yaml")

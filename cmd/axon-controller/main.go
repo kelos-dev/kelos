@@ -38,6 +38,8 @@ func main() {
 	var codexImagePullPolicy string
 	var geminiImage string
 	var geminiImagePullPolicy string
+	var openCodeImage string
+	var openCodeImagePullPolicy string
 	var spawnerImage string
 	var spawnerImagePullPolicy string
 	var tokenRefresherImage string
@@ -54,6 +56,8 @@ func main() {
 	flag.StringVar(&codexImagePullPolicy, "codex-image-pull-policy", "", "The image pull policy for Codex agent containers (e.g., Always, Never, IfNotPresent).")
 	flag.StringVar(&geminiImage, "gemini-image", controller.GeminiImage, "The image to use for Gemini CLI agent containers.")
 	flag.StringVar(&geminiImagePullPolicy, "gemini-image-pull-policy", "", "The image pull policy for Gemini CLI agent containers (e.g., Always, Never, IfNotPresent).")
+	flag.StringVar(&openCodeImage, "opencode-image", controller.OpenCodeImage, "The image to use for OpenCode agent containers.")
+	flag.StringVar(&openCodeImagePullPolicy, "opencode-image-pull-policy", "", "The image pull policy for OpenCode agent containers (e.g., Always, Never, IfNotPresent).")
 	flag.StringVar(&spawnerImage, "spawner-image", controller.DefaultSpawnerImage, "The image to use for spawner Deployments.")
 	flag.StringVar(&spawnerImagePullPolicy, "spawner-image-pull-policy", "", "The image pull policy for spawner Deployments (e.g., Always, Never, IfNotPresent).")
 	flag.StringVar(&tokenRefresherImage, "token-refresher-image", controller.DefaultTokenRefresherImage, "The image to use for the token refresher sidecar.")
@@ -91,6 +95,8 @@ func main() {
 	jobBuilder.CodexImagePullPolicy = corev1.PullPolicy(codexImagePullPolicy)
 	jobBuilder.GeminiImage = geminiImage
 	jobBuilder.GeminiImagePullPolicy = corev1.PullPolicy(geminiImagePullPolicy)
+	jobBuilder.OpenCodeImage = openCodeImage
+	jobBuilder.OpenCodeImagePullPolicy = corev1.PullPolicy(openCodeImagePullPolicy)
 	if err = (&controller.TaskReconciler{
 		Client:      mgr.GetClient(),
 		Scheme:      mgr.GetScheme(),

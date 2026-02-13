@@ -453,6 +453,7 @@ spec:
                 - claude-code
                 - codex
                 - gemini
+                - opencode
                 type: string
               workspaceRef:
                 description: WorkspaceRef optionally references a Workspace resource
@@ -889,6 +890,7 @@ spec:
                     - claude-code
                     - codex
                     - gemini
+                    - opencode
                     type: string
                   workspaceRef:
                     description: |-

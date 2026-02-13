@@ -8,7 +8,9 @@
 
 set -euo pipefail
 
-CONTROLLER_GEN="${1:?Usage: verify.sh <controller-gen-binary>}"
+CONTROLLER_GEN="${1:?Usage: verify.sh <controller-gen-binary> <yamlfmt-binary> <shfmt-binary>}"
+YAMLFMT="${2:?Usage: verify.sh <controller-gen-binary> <yamlfmt-binary> <shfmt-binary>}"
+SHFMT="${3:?Usage: verify.sh <controller-gen-binary> <yamlfmt-binary> <shfmt-binary>}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
@@ -78,6 +80,26 @@ fi
 if ! go mod tidy -diff >/dev/null 2>&1; then
   echo "ERROR: go.mod/go.sum are out of date. Run 'go mod tidy'"
   go mod tidy -diff 2>&1 || true
+  ret=1
+fi
+
+# ---------------------------------------------------------------------------
+# 6. Verify yaml formatting (yamlfmt -lint exits non-zero if changes are
+#    needed without modifying files).
+# ---------------------------------------------------------------------------
+if ! "${YAMLFMT}" -lint . >/dev/null 2>&1; then
+  echo "ERROR: YAML files are not properly formatted:"
+  "${YAMLFMT}" -lint . 2>&1 || true
+  ret=1
+fi
+
+# ---------------------------------------------------------------------------
+# 7. Verify shell script formatting (shfmt -d exits non-zero if changes are
+#    needed without modifying files).
+# ---------------------------------------------------------------------------
+if ! find . -name '*.sh' -not -path './bin/*' -exec "${SHFMT}" -d -i 2 -ci {} + >/dev/null 2>&1; then
+  echo "ERROR: Shell scripts are not properly formatted:"
+  find . -name '*.sh' -not -path './bin/*' -exec "${SHFMT}" -d -i 2 -ci {} + 2>&1 || true
   ret=1
 fi
 

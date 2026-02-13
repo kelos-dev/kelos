@@ -98,13 +98,13 @@ TMPDIR="$(mktemp -d)"
 trap 'rm -rf "${TMPDIR}"' EXIT
 
 # Regenerate CRDs before syncing manifests.
-"${CONTROLLER_GEN}" crd paths="./..." output:crd:stdout > install-crd.yaml
+"${CONTROLLER_GEN}" crd paths="./..." output:crd:stdout >install-crd.yaml
 
 RBAC_FILE="${TMPDIR}/rbac.yaml"
 GOCACHE="${TMPDIR}/go-build-cache" "${CONTROLLER_GEN}" \
   rbac:roleName=axon-controller-role \
   paths="./..." \
-  output:rbac:stdout > "${RBAC_FILE}"
+  output:rbac:stdout >"${RBAC_FILE}"
 
 awk -v start="${START_MARKER}" -v end="${END_MARKER}" -v rbac="${RBAC_FILE}" '
 $0 == start {
@@ -124,7 +124,7 @@ $0 == end {
 !in_generated_block {
   print
 }
-' install.yaml > "${TMPDIR}/install.yaml"
+' install.yaml >"${TMPDIR}/install.yaml"
 
 validate_manifest_resources "${TMPDIR}/install.yaml"
 

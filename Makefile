@@ -52,15 +52,17 @@ test-e2e: ginkgo ## Run e2e tests (requires cluster and CLAUDE_CODE_OAUTH_TOKEN)
 	$(GINKGO) -v --timeout 10m ./test/e2e/...
 
 .PHONY: update
-update: controller-gen ## Run all generators and formatters.
+update: controller-gen yamlfmt shfmt ## Run all generators and formatters.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
 	hack/update-install-manifest.sh $(CONTROLLER_GEN)
 	go fmt ./...
 	go mod tidy
+	$(YAMLFMT) .
+	find . -name '*.sh' -not -path './bin/*' -exec $(SHFMT) -w -i 2 -ci {} +
 
 .PHONY: verify
-verify: controller-gen ## Verify everything is up-to-date and correct.
-	@hack/verify.sh $(CONTROLLER_GEN)
+verify: controller-gen yamlfmt shfmt ## Verify everything is up-to-date and correct.
+	@hack/verify.sh $(CONTROLLER_GEN) $(YAMLFMT) $(SHFMT)
 	go vet ./...
 
 ##@ Build
@@ -102,6 +104,8 @@ clean: ## Clean build artifacts.
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GINKGO ?= $(LOCALBIN)/ginkgo
+YAMLFMT ?= $(LOCALBIN)/yamlfmt
+SHFMT ?= $(LOCALBIN)/shfmt
 
 .PHONY: controller-gen
 controller-gen: $(CONTROLLER_GEN)
@@ -117,3 +121,13 @@ $(ENVTEST): $(LOCALBIN)
 ginkgo: $(GINKGO)
 $(GINKGO): $(LOCALBIN)
 	test -s $(LOCALBIN)/ginkgo || GOBIN=$(LOCALBIN) go install github.com/onsi/ginkgo/v2/ginkgo
+
+.PHONY: yamlfmt
+yamlfmt: $(YAMLFMT)
+$(YAMLFMT): $(LOCALBIN)
+	test -s $(LOCALBIN)/yamlfmt || GOBIN=$(LOCALBIN) go install github.com/google/yamlfmt/cmd/yamlfmt
+
+.PHONY: shfmt
+shfmt: $(SHFMT)
+$(SHFMT): $(LOCALBIN)
+	test -s $(LOCALBIN)/shfmt || GOBIN=$(LOCALBIN) go install mvdan.cc/sh/v3/cmd/shfmt

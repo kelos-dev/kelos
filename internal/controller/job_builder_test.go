@@ -1076,6 +1076,265 @@ func TestBuildGeminiJob_OAuthCredentials(t *testing.T) {
 	}
 }
 
+func TestBuildOpenCodeJob_DefaultImage(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-opencode",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeOpenCode,
+			Prompt: "Fix the bug",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "opencode-secret"},
+			},
+			Model: "anthropic/claude-sonnet-4-20250514",
+		},
+	}
+
+	job, err := builder.Build(task, nil, nil)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+
+	// Default opencode image should be used.
+	if container.Image != OpenCodeImage {
+		t.Errorf("Expected image %q, got %q", OpenCodeImage, container.Image)
+	}
+
+	// Container name should match the agent type.
+	if container.Name != AgentTypeOpenCode {
+		t.Errorf("Expected container name %q, got %q", AgentTypeOpenCode, container.Name)
+	}
+
+	// Command should be /axon_entrypoint.sh (uniform interface).
+	if len(container.Command) != 1 || container.Command[0] != "/axon_entrypoint.sh" {
+		t.Errorf("Expected command [/axon_entrypoint.sh], got %v", container.Command)
+	}
+
+	// Args should be just the prompt.
+	if len(container.Args) != 1 || container.Args[0] != "Fix the bug" {
+		t.Errorf("Expected args [Fix the bug], got %v", container.Args)
+	}
+
+	// AXON_MODEL should be set.
+	foundAxonModel := false
+	for _, env := range container.Env {
+		if env.Name == "AXON_MODEL" {
+			foundAxonModel = true
+			if env.Value != "anthropic/claude-sonnet-4-20250514" {
+				t.Errorf("AXON_MODEL value: expected %q, got %q", "anthropic/claude-sonnet-4-20250514", env.Value)
+			}
+		}
+	}
+	if !foundAxonModel {
+		t.Error("Expected AXON_MODEL env var to be set")
+	}
+
+	// OPENCODE_API_KEY should be set (not ANTHROPIC_API_KEY, CODEX_API_KEY, or GEMINI_API_KEY).
+	foundOpenCodeKey := false
+	for _, env := range container.Env {
+		if env.Name == "OPENCODE_API_KEY" {
+			foundOpenCodeKey = true
+			if env.ValueFrom == nil || env.ValueFrom.SecretKeyRef == nil {
+				t.Error("Expected OPENCODE_API_KEY to reference a secret")
+			} else {
+				if env.ValueFrom.SecretKeyRef.Name != "opencode-secret" {
+					t.Errorf("Expected secret name %q, got %q", "opencode-secret", env.ValueFrom.SecretKeyRef.Name)
+				}
+				if env.ValueFrom.SecretKeyRef.Key != "OPENCODE_API_KEY" {
+					t.Errorf("Expected secret key %q, got %q", "OPENCODE_API_KEY", env.ValueFrom.SecretKeyRef.Key)
+				}
+			}
+		}
+		if env.Name == "ANTHROPIC_API_KEY" {
+			t.Error("ANTHROPIC_API_KEY should not be set for opencode agent type")
+		}
+		if env.Name == "CODEX_API_KEY" {
+			t.Error("CODEX_API_KEY should not be set for opencode agent type")
+		}
+		if env.Name == "GEMINI_API_KEY" {
+			t.Error("GEMINI_API_KEY should not be set for opencode agent type")
+		}
+	}
+	if !foundOpenCodeKey {
+		t.Error("Expected OPENCODE_API_KEY env var to be set")
+	}
+}
+
+func TestBuildOpenCodeJob_CustomImage(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-opencode-custom",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeOpenCode,
+			Prompt: "Refactor the module",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "opencode-secret"},
+			},
+			Image: "my-opencode:v2",
+		},
+	}
+
+	job, err := builder.Build(task, nil, nil)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+
+	// Custom image should be used.
+	if container.Image != "my-opencode:v2" {
+		t.Errorf("Expected image %q, got %q", "my-opencode:v2", container.Image)
+	}
+
+	// Command should be /axon_entrypoint.sh.
+	if len(container.Command) != 1 || container.Command[0] != "/axon_entrypoint.sh" {
+		t.Errorf("Expected command [/axon_entrypoint.sh], got %v", container.Command)
+	}
+}
+
+func TestBuildOpenCodeJob_WithWorkspace(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-opencode-ws",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeOpenCode,
+			Prompt: "Fix the code",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "opencode-secret"},
+			},
+			Model: "anthropic/claude-sonnet-4-20250514",
+		},
+	}
+
+	workspace := &axonv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/example/repo.git",
+		Ref:  "main",
+		SecretRef: &axonv1alpha1.SecretReference{
+			Name: "github-token",
+		},
+	}
+
+	job, err := builder.Build(task, workspace, nil)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+
+	// Should have workspace volume mount and working dir.
+	if container.WorkingDir != WorkspaceMountPath+"/repo" {
+		t.Errorf("Expected workingDir %q, got %q", WorkspaceMountPath+"/repo", container.WorkingDir)
+	}
+	if len(container.VolumeMounts) != 1 {
+		t.Fatalf("Expected 1 volume mount, got %d", len(container.VolumeMounts))
+	}
+
+	// Should have OPENCODE_API_KEY (not ANTHROPIC_API_KEY), AXON_MODEL, GITHUB_TOKEN, GH_TOKEN.
+	envMap := map[string]string{}
+	for _, env := range container.Env {
+		if env.Value != "" {
+			envMap[env.Name] = env.Value
+		} else {
+			envMap[env.Name] = "(from-secret)"
+		}
+	}
+	for _, name := range []string{"AXON_MODEL", "OPENCODE_API_KEY", "GITHUB_TOKEN", "GH_TOKEN"} {
+		if _, ok := envMap[name]; !ok {
+			t.Errorf("Expected env var %q to be set", name)
+		}
+	}
+	if _, ok := envMap["ANTHROPIC_API_KEY"]; ok {
+		t.Error("ANTHROPIC_API_KEY should not be set for opencode agent type")
+	}
+	if _, ok := envMap["CODEX_API_KEY"]; ok {
+		t.Error("CODEX_API_KEY should not be set for opencode agent type")
+	}
+	if _, ok := envMap["GEMINI_API_KEY"]; ok {
+		t.Error("GEMINI_API_KEY should not be set for opencode agent type")
+	}
+
+	// Verify init container and FSGroup.
+	if len(job.Spec.Template.Spec.InitContainers) != 1 {
+		t.Fatalf("Expected 1 init container, got %d", len(job.Spec.Template.Spec.InitContainers))
+	}
+	initContainer := job.Spec.Template.Spec.InitContainers[0]
+	if initContainer.SecurityContext == nil || initContainer.SecurityContext.RunAsUser == nil {
+		t.Fatal("Expected init container SecurityContext.RunAsUser to be set")
+	}
+	if *initContainer.SecurityContext.RunAsUser != AgentUID {
+		t.Errorf("Expected RunAsUser %d, got %d", AgentUID, *initContainer.SecurityContext.RunAsUser)
+	}
+}
+
+func TestBuildOpenCodeJob_OAuthCredentials(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-opencode-oauth",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeOpenCode,
+			Prompt: "Review the code",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeOAuth,
+				SecretRef: axonv1alpha1.SecretReference{Name: "opencode-oauth"},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, nil)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+
+	// OPENCODE_API_KEY should be set for opencode oauth.
+	foundOpenCodeKey := false
+	for _, env := range container.Env {
+		if env.Name == "OPENCODE_API_KEY" {
+			foundOpenCodeKey = true
+			if env.ValueFrom == nil || env.ValueFrom.SecretKeyRef == nil {
+				t.Error("Expected OPENCODE_API_KEY to reference a secret")
+			} else {
+				if env.ValueFrom.SecretKeyRef.Name != "opencode-oauth" {
+					t.Errorf("Expected secret name %q, got %q", "opencode-oauth", env.ValueFrom.SecretKeyRef.Name)
+				}
+				if env.ValueFrom.SecretKeyRef.Key != "OPENCODE_API_KEY" {
+					t.Errorf("Expected secret key %q, got %q", "OPENCODE_API_KEY", env.ValueFrom.SecretKeyRef.Key)
+				}
+			}
+		}
+		if env.Name == "CLAUDE_CODE_OAUTH_TOKEN" {
+			t.Error("CLAUDE_CODE_OAUTH_TOKEN should not be set for opencode agent type")
+		}
+		if env.Name == "CODEX_API_KEY" {
+			t.Error("CODEX_API_KEY should not be set for opencode agent type")
+		}
+		if env.Name == "GEMINI_API_KEY" {
+			t.Error("GEMINI_API_KEY should not be set for opencode agent type")
+		}
+	}
+	if !foundOpenCodeKey {
+		t.Error("Expected OPENCODE_API_KEY env var to be set")
+	}
+}
+
 func TestBuildClaudeCodeJob_UnsupportedType(t *testing.T) {
 	builder := NewJobBuilder()
 	task := &axonv1alpha1.Task{

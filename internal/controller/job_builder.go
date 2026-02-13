@@ -23,6 +23,9 @@ const (
 	// GeminiImage is the default image for Google Gemini CLI agent.
 	GeminiImage = "gjkim42/gemini:latest"
 
+	// OpenCodeImage is the default image for OpenCode agent.
+	OpenCodeImage = "gjkim42/opencode:latest"
+
 	// AgentTypeClaudeCode is the agent type for Claude Code.
 	AgentTypeClaudeCode = "claude-code"
 
@@ -31,6 +34,9 @@ const (
 
 	// AgentTypeGemini is the agent type for Google Gemini CLI.
 	AgentTypeGemini = "gemini"
+
+	// AgentTypeOpenCode is the agent type for OpenCode.
+	AgentTypeOpenCode = "opencode"
 
 	// GitCloneImage is the image used for cloning git repositories.
 	GitCloneImage = "alpine/git:v2.47.2"
@@ -65,6 +71,8 @@ type JobBuilder struct {
 	CodexImagePullPolicy      corev1.PullPolicy
 	GeminiImage               string
 	GeminiImagePullPolicy     corev1.PullPolicy
+	OpenCodeImage             string
+	OpenCodeImagePullPolicy   corev1.PullPolicy
 }
 
 // NewJobBuilder creates a new JobBuilder.
@@ -73,6 +81,7 @@ func NewJobBuilder() *JobBuilder {
 		ClaudeCodeImage: ClaudeCodeImage,
 		CodexImage:      CodexImage,
 		GeminiImage:     GeminiImage,
+		OpenCodeImage:   OpenCodeImage,
 	}
 }
 
@@ -85,6 +94,8 @@ func (b *JobBuilder) Build(task *axonv1alpha1.Task, workspace *axonv1alpha1.Work
 		return b.buildAgentJob(task, workspace, agentConfig, b.CodexImage, b.CodexImagePullPolicy)
 	case AgentTypeGemini:
 		return b.buildAgentJob(task, workspace, agentConfig, b.GeminiImage, b.GeminiImagePullPolicy)
+	case AgentTypeOpenCode:
+		return b.buildAgentJob(task, workspace, agentConfig, b.OpenCodeImage, b.OpenCodeImagePullPolicy)
 	default:
 		return nil, fmt.Errorf("unsupported agent type: %s", task.Spec.Type)
 	}
@@ -102,6 +113,10 @@ func apiKeyEnvVar(agentType string) string {
 		// GEMINI_API_KEY is the environment variable that the gemini CLI
 		// reads for API key authentication.
 		return "GEMINI_API_KEY"
+	case AgentTypeOpenCode:
+		// OPENCODE_API_KEY is the environment variable that the opencode
+		// entrypoint reads for API key authentication.
+		return "OPENCODE_API_KEY"
 	default:
 		return "ANTHROPIC_API_KEY"
 	}
@@ -115,6 +130,8 @@ func oauthEnvVar(agentType string) string {
 		return "CODEX_API_KEY"
 	case AgentTypeGemini:
 		return "GEMINI_API_KEY"
+	case AgentTypeOpenCode:
+		return "OPENCODE_API_KEY"
 	default:
 		return "CLAUDE_CODE_OAUTH_TOKEN"
 	}

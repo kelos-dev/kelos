@@ -397,7 +397,7 @@ The [`examples/`](examples/) directory contains self-contained, ready-to-apply Y
 
 | Field | Description | Required |
 |-------|-------------|----------|
-| `spec.type` | Agent type (`claude-code`, `codex`, or `gemini`) | Yes |
+| `spec.type` | Agent type (`claude-code`, `codex`, `gemini`, or `opencode`) | Yes |
 | `spec.prompt` | Task prompt for the agent | Yes |
 | `spec.credentials.type` | `api-key` or `oauth` | Yes |
 | `spec.credentials.secretRef.name` | Secret name with credentials | Yes |
@@ -446,7 +446,7 @@ The [`examples/`](examples/) directory contains self-contained, ready-to-apply Y
 | `spec.when.githubIssues.state` | Filter by state: `open`, `closed`, `all` (default: `open`) | No |
 | `spec.when.githubIssues.types` | Filter by type: `issues`, `pulls` (default: `issues`) | No |
 | `spec.when.cron.schedule` | Cron schedule expression (e.g., `"0 * * * *"`) | Yes (when using cron) |
-| `spec.taskTemplate.type` | Agent type (`claude-code`, `codex`, or `gemini`) | Yes |
+| `spec.taskTemplate.type` | Agent type (`claude-code`, `codex`, `gemini`, or `opencode`) | Yes |
 | `spec.taskTemplate.credentials` | Credentials for the agent (same as Task) | Yes |
 | `spec.taskTemplate.model` | Model override | No |
 | `spec.taskTemplate.image` | Custom agent image override (see [Agent Image Interface](docs/agent-image-interface.md)) | No |
@@ -525,8 +525,8 @@ namespace: my-namespace
 
 | Field | Description |
 |-------|-------------|
-| `oauthToken` | OAuth token — Axon auto-creates the Kubernetes secret |
-| `apiKey` | API key — Axon auto-creates the Kubernetes secret |
+| `oauthToken` | OAuth token — Axon auto-creates the Kubernetes secret. Use `none` for an empty credential |
+| `apiKey` | API key — Axon auto-creates the Kubernetes secret. Use `none` for an empty credential (e.g., free-tier OpenCode models) |
 | `secret` | (Advanced) Use a pre-created Kubernetes secret |
 | `credentialType` | Credential type when using `secret` (`api-key` or `oauth`) |
 
@@ -565,7 +565,7 @@ If both `name` and `repo` are set, `name` takes precedence. The `--workspace` CL
 
 | Field | Description |
 |-------|-------------|
-| `type` | Default agent type (`claude-code`, `codex`, or `gemini`) |
+| `type` | Default agent type (`claude-code`, `codex`, `gemini`, or `opencode`) |
 | `model` | Default model override |
 | `namespace` | Default Kubernetes namespace |
 

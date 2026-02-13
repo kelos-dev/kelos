@@ -1758,6 +1758,141 @@ func TestBuildJob_AgentConfigWithoutWorkspace(t *testing.T) {
 	}
 }
 
+func TestBuildJob_AgentConfigCodex(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-codex-agentconfig",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeCodex,
+			Prompt: "Fix issue",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	agentConfig := &axonv1alpha1.AgentConfigSpec{
+		AgentsMD: "Follow TDD. Always write tests first.",
+		Plugins: []axonv1alpha1.PluginSpec{
+			{
+				Name: "team-tools",
+				Skills: []axonv1alpha1.SkillDefinition{
+					{Name: "deploy", Content: "Deploy instructions here"},
+				},
+				Agents: []axonv1alpha1.AgentDefinition{
+					{Name: "reviewer", Content: "You are a code reviewer"},
+				},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, agentConfig)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+	envMap := map[string]string{}
+	for _, env := range container.Env {
+		if env.Value != "" {
+			envMap[env.Name] = env.Value
+		}
+	}
+
+	// AXON_AGENTS_MD should be set for codex tasks.
+	if envMap["AXON_AGENTS_MD"] != "Follow TDD. Always write tests first." {
+		t.Errorf("Expected AXON_AGENTS_MD=%q, got %q", "Follow TDD. Always write tests first.", envMap["AXON_AGENTS_MD"])
+	}
+
+	// AXON_PLUGIN_DIR should be set for codex tasks.
+	if envMap["AXON_PLUGIN_DIR"] != PluginMountPath {
+		t.Errorf("Expected AXON_PLUGIN_DIR=%q, got %q", PluginMountPath, envMap["AXON_PLUGIN_DIR"])
+	}
+
+	// Should have plugin volume and init container.
+	if len(job.Spec.Template.Spec.Volumes) != 1 {
+		t.Errorf("Expected 1 volume, got %d", len(job.Spec.Template.Spec.Volumes))
+	}
+	if len(job.Spec.Template.Spec.InitContainers) != 1 {
+		t.Errorf("Expected 1 init container, got %d", len(job.Spec.Template.Spec.InitContainers))
+	}
+
+	// Container name should be the agent type.
+	if container.Name != AgentTypeCodex {
+		t.Errorf("Expected container name %q, got %q", AgentTypeCodex, container.Name)
+	}
+}
+
+func TestBuildJob_AgentConfigGemini(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-gemini-agentconfig",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeGemini,
+			Prompt: "Fix issue",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	agentConfig := &axonv1alpha1.AgentConfigSpec{
+		AgentsMD: "Use conventional commits.",
+		Plugins: []axonv1alpha1.PluginSpec{
+			{
+				Name: "ci-tools",
+				Skills: []axonv1alpha1.SkillDefinition{
+					{Name: "lint", Content: "Run linter before committing"},
+				},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, agentConfig)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+	envMap := map[string]string{}
+	for _, env := range container.Env {
+		if env.Value != "" {
+			envMap[env.Name] = env.Value
+		}
+	}
+
+	// AXON_AGENTS_MD should be set for gemini tasks.
+	if envMap["AXON_AGENTS_MD"] != "Use conventional commits." {
+		t.Errorf("Expected AXON_AGENTS_MD=%q, got %q", "Use conventional commits.", envMap["AXON_AGENTS_MD"])
+	}
+
+	// AXON_PLUGIN_DIR should be set for gemini tasks.
+	if envMap["AXON_PLUGIN_DIR"] != PluginMountPath {
+		t.Errorf("Expected AXON_PLUGIN_DIR=%q, got %q", PluginMountPath, envMap["AXON_PLUGIN_DIR"])
+	}
+
+	// Should have plugin volume and init container.
+	if len(job.Spec.Template.Spec.Volumes) != 1 {
+		t.Errorf("Expected 1 volume, got %d", len(job.Spec.Template.Spec.Volumes))
+	}
+	if len(job.Spec.Template.Spec.InitContainers) != 1 {
+		t.Errorf("Expected 1 init container, got %d", len(job.Spec.Template.Spec.InitContainers))
+	}
+
+	// Container name should be the agent type.
+	if container.Name != AgentTypeGemini {
+		t.Errorf("Expected container name %q, got %q", AgentTypeGemini, container.Name)
+	}
+}
+
 func TestBuildJob_AgentConfigPluginNamePathTraversal(t *testing.T) {
 	builder := NewJobBuilder()
 	task := &axonv1alpha1.Task{

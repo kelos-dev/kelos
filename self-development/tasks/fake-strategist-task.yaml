@@ -1,0 +1,72 @@
+apiVersion: axon.io/v1alpha1
+kind: Task
+metadata:
+  generateName: axon-fake-strategist-manual-
+  labels:
+    axon.run/type: fake-strategist-manual
+spec:
+  workspaceRef:
+    name: axon-agent
+  model: opus
+  type: claude-code
+  ttlSecondsAfterFinished: 3600
+  credentials:
+    type: oauth
+    secretRef:
+      name: axon-credentials
+  prompt: |
+    You are a strategic product thinker for the Axon framework — a Kubernetes-native controller that runs autonomous AI coding agents.
+    You are running in an ephemeral container environment. The task you've done to your file system will disappear after the task is done.
+    You either create a PR, create an issue, or comment on an existing issue to persist your work.
+
+    Your goal is to find new and better ways to use Axon — expanding its reach, improving its workflows, and identifying opportunities for growth.
+
+    When commenting on issues or PRs, always start your comment with "🤖 **Axon Agent** @gjkim42\n\n" so it is clearly distinguishable from human comments and triggers a notification.
+
+    Pre-checklist:
+    - git config user.name "Gunju Kim"
+    - git config user.email "gjkim042@gmail.com"
+
+    Task:
+    Pick ONE of the following areas to focus on (choose the one most likely to produce valuable, actionable insights):
+
+    1. **New Use Cases**
+       - Explore what types of projects, teams, or industries could benefit from Axon
+       - Look at trending developer workflows and identify where autonomous agents could help
+       - Propose example TaskSpawner configs for new use cases
+       - Consider both technical and non-technical audiences
+
+    2. **Workflow Improvements**
+       - Analyze existing self-development configs in `self-development/`
+       - Suggest better patterns, prompts, or automation flows
+       - Identify inefficiencies or gaps in current autonomous workflows
+       - Propose improvements backed by concrete examples
+
+    3. **Integration Opportunities**
+       - Identify tools and platforms Axon could integrate with (CI systems, monitoring, chat ops, etc.)
+       - Evaluate how Axon could fit into existing developer toolchains
+       - Propose specific integration designs with example configs
+       - Consider ecosystem partners and complementary projects
+
+    4. **New CRDs & API Extensions**
+       - Review existing CRDs and identify limitations or missing features
+       - Propose new Custom Resource Definitions that would expand Axon's capabilities
+       - Suggest extensions to existing CRDs with concrete use cases
+       - Consider backward compatibility and incremental adoption
+
+    Actions:
+    - Create a GitHub issue with your findings and proposals:
+      gh issue create --title "<title>" --body "<description>" --label generated-by-axon --label axon/needs-input
+    - If you can propose a small, concrete change, create a PR:
+      BRANCH="axon-fake-strategist-manual-${GITHUB_RUN_ID}"
+      git checkout -b "${BRANCH}"
+      # ... make changes ...
+      git push -u origin "${BRANCH}"
+      gh pr create --title "<title>" --body "<description>" --label generated-by-axon --label ok-to-test
+    - Prefer well-researched issues with clear proposals over broad, vague suggestions
+
+    Constraints:
+    - Focus on ONE area per run, do it thoroughly
+    - Do not create duplicate issues — check existing issues first with `gh issue list`
+    - Back proposals with evidence: read the codebase, check existing issues, and reference real examples
+    - Keep changes minimal and focused

@@ -1,0 +1,80 @@
+name: Run Fake Strategist
+
+on:
+  workflow_dispatch:
+    inputs:
+      namespace:
+        description: Kubernetes namespace for Axon resources
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: fake-strategist-gke
+  cancel-in-progress: false
+
+jobs:
+  run-fake-strategist:
+    runs-on: ubuntu-latest
+    env:
+      AXON_NAMESPACE: ${{ inputs.namespace || vars.AXON_NAMESPACE || 'default' }}
+      GCP_PROJECT_ID: gjkim-400213
+      GKE_CLUSTER_NAME: gjkim
+      GKE_CLUSTER_LOCATION: asia-northeast3
+      GCP_SERVICE_ACCOUNT_EMAIL: axon-core-axon-gh-action@gjkim-400213.iam.gserviceaccount.com
+      GCP_WORKLOAD_IDENTITY_PROVIDER: projects/317215297044/locations/global/workloadIdentityPools/github/providers/axon
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Configure GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.GKE_CLUSTER_NAME }}
+          location: ${{ env.GKE_CLUSTER_LOCATION }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Create strategist task if none active
+        id: create_task
+        run: |
+          set -euo pipefail
+
+          existing_task="$(
+            kubectl get tasks.axon.io -n "${AXON_NAMESPACE}" -l axon.run/type=fake-strategist-manual -o json \
+              | jq -r '.items[] | select(.status.phase == "Pending" or .status.phase == "Running") | .metadata.name' \
+              | head -n1
+          )"
+
+          if [[ -n "${existing_task}" ]]; then
+            echo "action=skipped" >> "$GITHUB_OUTPUT"
+            echo "task_name=${existing_task}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          task_name="$(
+            kubectl create -n "${AXON_NAMESPACE}" -f self-development/tasks/fake-strategist-task.yaml -o jsonpath='{.metadata.name}'
+          )"
+
+          echo "action=created" >> "$GITHUB_OUTPUT"
+          echo "task_name=${task_name}" >> "$GITHUB_OUTPUT"
+
+      - name: Print task result
+        env:
+          TASK_ACTION: ${{ steps.create_task.outputs.action }}
+          TASK_NAME: ${{ steps.create_task.outputs.task_name }}
+        run: |
+          set -euo pipefail
+          if [[ "${TASK_ACTION}" == "skipped" ]]; then
+            echo "Fake strategist task already active: ${TASK_NAME} in namespace ${AXON_NAMESPACE}"
+          else
+            echo "Created fake strategist task: ${TASK_NAME} in namespace ${AXON_NAMESPACE}"
+            echo "Check status with: kubectl get task ${TASK_NAME} -n ${AXON_NAMESPACE} -o yaml"
+          fi

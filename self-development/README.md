@@ -63,6 +63,27 @@ kubectl create secret generic axon-credentials \
 
 ## Deploying the Examples
 
+## Run one-off fake strategist task
+
+Run it either manually or from GitHub Actions.
+
+Manual:
+
+```bash
+kubectl apply -f self-development/tasks/fake-strategist-task.yaml
+```
+
+GitHub Actions:
+
+1. Open `Actions` -> `Run Fake Strategist`
+2. Click `Run workflow` (optionally set `namespace`)
+
+The target cluster must already have:
+
+- Axon installed
+- `Workspace` named `axon-agent`
+- Secret `axon-credentials`
+
 ### axon-workers.yaml
 
 This TaskSpawner picks up open GitHub issues labeled with `actor/axon` and creates autonomous agent tasks to fix them.

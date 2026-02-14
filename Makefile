@@ -94,6 +94,18 @@ push: ## Push docker images (use WHAT to push specific image).
 		docker push $(REGISTRY)/$$(basename $$dir):$(VERSION); \
 	done
 
+RELEASE_PLATFORMS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
+
+.PHONY: release-binaries
+release-binaries: ## Cross-compile CLI binaries for release and generate checksums.
+	@for platform in $(RELEASE_PLATFORMS); do \
+		os=$${platform%/*}; \
+		arch=$${platform#*/}; \
+		GOOS=$$os GOARCH=$$arch $(MAKE) build WHAT=cmd/axon; \
+		mv bin/axon "bin/axon-$${os}-$${arch}"; \
+	done
+	@cd bin && sha256sum axon-* > checksums.txt
+
 .PHONY: clean
 clean: ## Clean build artifacts.
 	rm -rf bin/

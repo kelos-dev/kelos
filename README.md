@@ -112,6 +112,14 @@ TaskSpawner watches external sources (e.g., GitHub Issues) and automatically cre
 
 ### 1. Install the CLI
 
+Download a pre-built binary from the [latest GitHub release](https://github.com/axon-core/axon/releases/latest):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/axon-core/axon/main/hack/install.sh | bash
+```
+
+Alternatively, install from source:
+
 ```bash
 go install github.com/axon-core/axon/cmd/axon@latest
 ```

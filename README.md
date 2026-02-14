@@ -34,6 +34,35 @@ https://github.com/user-attachments/assets/837cd8d5-4071-42dd-be32-114c649386ff
 
 See [Examples](#examples) for a full autonomous self-development pipeline.
 
+## Table of Contents
+
+- [Framework Core](#framework-core)
+- [Demo](#demo)
+- [Why Axon?](#why-axon)
+- [How It Works](#how-it-works)
+- [Quick Start](#quick-start)
+  - [Prerequisites](#prerequisites)
+  - [1. Install the CLI](#1-install-the-cli)
+  - [2. Install Axon](#2-install-axon)
+  - [3. Initialize Your Config](#3-initialize-your-config)
+  - [4. Run Your First Task](#4-run-your-first-task)
+- [Examples](#examples)
+  - [Run against a git repo](#run-against-a-git-repo)
+  - [Create PRs automatically](#create-prs-automatically)
+  - [Inject agent instructions and plugins](#inject-agent-instructions-and-plugins)
+  - [Auto-fix GitHub issues with TaskSpawner](#auto-fix-github-issues-with-taskspawner)
+  - [Run tasks on a schedule (Cron)](#run-tasks-on-a-schedule-cron)
+  - [Autonomous self-development pipeline](#autonomous-self-development-pipeline)
+  - [Copy-paste YAML manifests](#copy-paste-yaml-manifests)
+- [Framework Capabilities](#framework-capabilities)
+- [Orchestration Patterns](#orchestration-patterns)
+- [Reference](#reference)
+- [Uninstall](#uninstall)
+- [Development](#development)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [License](#license)
+
 ## Why Axon?
 
 AI coding agents are evolving from interactive CLI tools into autonomous background workers. Axon provides the necessary infrastructure to manage this transition at scale.

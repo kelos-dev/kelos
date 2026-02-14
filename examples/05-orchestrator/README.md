@@ -31,8 +31,12 @@ prompt to reference dependency outputs:
 
 ```yaml
 prompt: |
-  API research: {{ index .Deps "research-api-design" "Outputs" }}
-  Data model:   {{ index .Deps "research-data-model" "Results" "schema" }}
+  # Iterate over output lines
+  {{ range (index .Deps "research-api-design" "Outputs") }}- {{ . }}
+  {{ end }}
+
+  # Access a specific structured result by key
+  Schema: {{ index .Deps "research-data-model" "Results" "schema" }}
 ```
 
 Available template data per dependency:

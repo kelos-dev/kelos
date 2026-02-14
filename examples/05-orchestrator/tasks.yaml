@@ -13,7 +13,8 @@ spec:
   credentials:
     type: api-key
     secretRef:
-      name: anthropic-api-key
+      name: orchestrator-api-key
+
 ---
 apiVersion: axon.io/v1alpha1
 kind: Task
@@ -28,7 +29,7 @@ spec:
   credentials:
     type: api-key
     secretRef:
-      name: anthropic-api-key
+      name: orchestrator-api-key
 
 ---
 ### Stage 2 — Orchestrator task that synthesizes results from stage 1
@@ -46,14 +47,16 @@ spec:
     You are the orchestrator. Two research tasks have completed:
 
     ## API Design Research
-    {{ index .Deps "research-api-design" "Outputs" }}
+    {{ range (index .Deps "research-api-design" "Outputs") }}- {{ . }}
+    {{ end }}
 
     ## Data Model Research
-    {{ index .Deps "research-data-model" "Outputs" }}
+    {{ range (index .Deps "research-data-model" "Outputs") }}- {{ . }}
+    {{ end }}
 
     Combine both into a single, coherent design document for a bookstore API.
     Include the data model, endpoint list, and example request/response pairs.
   credentials:
     type: api-key
     secretRef:
-      name: anthropic-api-key
+      name: orchestrator-api-key

@@ -15,7 +15,7 @@ spec:
     credentials:
       type: oauth
       secretRef:
-        name: claude-credentials
+        name: claude-oauth-token
     promptTemplate: |
       Fix the following GitHub issue and open a PR with the fix.
 

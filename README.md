@@ -182,7 +182,7 @@ spec:
   credentials:
     type: oauth
     secretRef:
-      name: claude-oauth
+      name: claude-oauth-token
   workspaceRef:
     name: my-workspace
 ```
@@ -297,7 +297,7 @@ spec:
   credentials:
     type: oauth
     secretRef:
-      name: claude-oauth
+      name: claude-oauth-token
   workspaceRef:
     name: my-workspace
   agentConfigRef:
@@ -338,7 +338,7 @@ spec:
     credentials:
       type: oauth
       secretRef:
-        name: claude-credentials
+        name: claude-oauth-token
     promptTemplate: "Fix: {{.Title}}\n{{.Body}}"
   pollInterval: 5m
 ```
@@ -369,7 +369,7 @@ spec:
     credentials:
       type: oauth
       secretRef:
-        name: claude-credentials
+        name: claude-oauth-token
     promptTemplate: "Run the full test suite and fix any flakes."
 ```
 

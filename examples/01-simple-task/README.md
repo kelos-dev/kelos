@@ -34,8 +34,11 @@ kubectl get tasks -w
 4. **Stream the agent logs:**
 
 ```bash
-kubectl logs -l job-name=simple-task -f
+axon logs simple-task -f
 ```
+
+> **Tip:** You can also use `kubectl logs -l job-name=simple-task -f` for direct
+> Kubernetes access.
 
 5. **Cleanup:**
 

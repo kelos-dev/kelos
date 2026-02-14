@@ -5,7 +5,9 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
 	"github.com/axon-core/axon/test/e2e/framework"
 )
 
@@ -18,20 +20,20 @@ var _ = Describe("Task", func() {
 			"CLAUDE_CODE_OAUTH_TOKEN="+oauthToken)
 
 		By("creating a Task")
-		taskYAML := `apiVersion: axon.io/v1alpha1
-kind: Task
-metadata:
-  name: basic-task
-spec:
-  type: claude-code
-  model: ` + testModel + `
-  prompt: "Print 'Hello from Axon e2e test' to stdout"
-  credentials:
-    type: oauth
-    secretRef:
-      name: claude-credentials
-`
-		f.ApplyYAML(taskYAML)
+		f.CreateTask(&axonv1alpha1.Task{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "basic-task",
+			},
+			Spec: axonv1alpha1.TaskSpec{
+				Type:   "claude-code",
+				Model:  testModel,
+				Prompt: "Print 'Hello from Axon e2e test' to stdout",
+				Credentials: axonv1alpha1.Credentials{
+					Type:      axonv1alpha1.CredentialTypeOAuth,
+					SecretRef: axonv1alpha1.SecretReference{Name: "claude-credentials"},
+				},
+			},
+		})
 
 		By("waiting for Job to be created")
 		f.WaitForJobCreation("basic-task")
@@ -57,20 +59,20 @@ var _ = Describe("Task with make available", func() {
 			"CLAUDE_CODE_OAUTH_TOKEN="+oauthToken)
 
 		By("creating a Task that uses make")
-		taskYAML := `apiVersion: axon.io/v1alpha1
-kind: Task
-metadata:
-  name: make-task
-spec:
-  type: claude-code
-  model: ` + testModel + `
-  prompt: "Run 'make --version' and print the output"
-  credentials:
-    type: oauth
-    secretRef:
-      name: claude-credentials
-`
-		f.ApplyYAML(taskYAML)
+		f.CreateTask(&axonv1alpha1.Task{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "make-task",
+			},
+			Spec: axonv1alpha1.TaskSpec{
+				Type:   "claude-code",
+				Model:  testModel,
+				Prompt: "Run 'make --version' and print the output",
+				Credentials: axonv1alpha1.Credentials{
+					Type:      axonv1alpha1.CredentialTypeOAuth,
+					SecretRef: axonv1alpha1.SecretReference{Name: "claude-credentials"},
+				},
+			},
+		})
 
 		By("waiting for Job to be created")
 		f.WaitForJobCreation("make-task")
@@ -96,33 +98,32 @@ var _ = Describe("Task with workspace", func() {
 			"CLAUDE_CODE_OAUTH_TOKEN="+oauthToken)
 
 		By("creating a Workspace resource")
-		wsYAML := `apiVersion: axon.io/v1alpha1
-kind: Workspace
-metadata:
-  name: e2e-workspace
-spec:
-  repo: https://github.com/axon-core/axon.git
-  ref: main
-`
-		f.ApplyYAML(wsYAML)
+		f.CreateWorkspace(&axonv1alpha1.Workspace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "e2e-workspace",
+			},
+			Spec: axonv1alpha1.WorkspaceSpec{
+				Repo: "https://github.com/axon-core/axon.git",
+				Ref:  "main",
+			},
+		})
 
 		By("creating a Task with workspace ref")
-		taskYAML := `apiVersion: axon.io/v1alpha1
-kind: Task
-metadata:
-  name: ws-task
-spec:
-  type: claude-code
-  model: ` + testModel + `
-  prompt: "Create a file called 'test.txt' with the content 'hello' in the current directory and print 'done'"
-  credentials:
-    type: oauth
-    secretRef:
-      name: claude-credentials
-  workspaceRef:
-    name: e2e-workspace
-`
-		f.ApplyYAML(taskYAML)
+		f.CreateTask(&axonv1alpha1.Task{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "ws-task",
+			},
+			Spec: axonv1alpha1.TaskSpec{
+				Type:   "claude-code",
+				Model:  testModel,
+				Prompt: "Create a file called 'test.txt' with the content 'hello' in the current directory and print 'done'",
+				Credentials: axonv1alpha1.Credentials{
+					Type:      axonv1alpha1.CredentialTypeOAuth,
+					SecretRef: axonv1alpha1.SecretReference{Name: "claude-credentials"},
+				},
+				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "e2e-workspace"},
+			},
+		})
 
 		By("waiting for Job to be created")
 		f.WaitForJobCreation("ws-task")
@@ -153,33 +154,32 @@ var _ = Describe("Task output capture", func() {
 			"CLAUDE_CODE_OAUTH_TOKEN="+oauthToken)
 
 		By("creating a Workspace resource")
-		wsYAML := `apiVersion: axon.io/v1alpha1
-kind: Workspace
-metadata:
-  name: e2e-outputs-workspace
-spec:
-  repo: https://github.com/axon-core/axon.git
-  ref: main
-`
-		f.ApplyYAML(wsYAML)
+		f.CreateWorkspace(&axonv1alpha1.Workspace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "e2e-outputs-workspace",
+			},
+			Spec: axonv1alpha1.WorkspaceSpec{
+				Repo: "https://github.com/axon-core/axon.git",
+				Ref:  "main",
+			},
+		})
 
 		By("creating a Task with workspace ref")
-		taskYAML := `apiVersion: axon.io/v1alpha1
-kind: Task
-metadata:
-  name: outputs-task
-spec:
-  type: claude-code
-  model: ` + testModel + `
-  prompt: "Run 'git branch --show-current' and print the output, then say done"
-  credentials:
-    type: oauth
-    secretRef:
-      name: claude-credentials
-  workspaceRef:
-    name: e2e-outputs-workspace
-`
-		f.ApplyYAML(taskYAML)
+		f.CreateTask(&axonv1alpha1.Task{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "outputs-task",
+			},
+			Spec: axonv1alpha1.TaskSpec{
+				Type:   "claude-code",
+				Model:  testModel,
+				Prompt: "Run 'git branch --show-current' and print the output, then say done",
+				Credentials: axonv1alpha1.Credentials{
+					Type:      axonv1alpha1.CredentialTypeOAuth,
+					SecretRef: axonv1alpha1.SecretReference{Name: "claude-credentials"},
+				},
+				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "e2e-outputs-workspace"},
+			},
+		})
 
 		By("waiting for Job to be created")
 		f.WaitForJobCreation("outputs-task")
@@ -197,8 +197,8 @@ spec:
 		Expect(logs).To(ContainSubstring("branch: main"))
 
 		By("verifying Outputs field is populated in Task status")
-		outputsJSON := f.KubectlOutput("get", "task", "outputs-task", "-o", "jsonpath={.status.outputs}")
-		Expect(outputsJSON).To(ContainSubstring("branch: main"))
+		outputs := f.GetTaskOutputs("outputs-task")
+		Expect(outputs).To(ContainSubstring("branch: main"))
 	})
 })
 
@@ -221,35 +221,33 @@ var _ = Describe("Task with workspace and secretRef", func() {
 			"GITHUB_TOKEN="+githubToken)
 
 		By("creating a Workspace resource with secretRef")
-		wsYAML := `apiVersion: axon.io/v1alpha1
-kind: Workspace
-metadata:
-  name: e2e-github-workspace
-spec:
-  repo: https://github.com/axon-core/axon.git
-  ref: main
-  secretRef:
-    name: workspace-credentials
-`
-		f.ApplyYAML(wsYAML)
+		f.CreateWorkspace(&axonv1alpha1.Workspace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "e2e-github-workspace",
+			},
+			Spec: axonv1alpha1.WorkspaceSpec{
+				Repo:      "https://github.com/axon-core/axon.git",
+				Ref:       "main",
+				SecretRef: &axonv1alpha1.SecretReference{Name: "workspace-credentials"},
+			},
+		})
 
 		By("creating a Task with workspace ref")
-		taskYAML := `apiVersion: axon.io/v1alpha1
-kind: Task
-metadata:
-  name: github-task
-spec:
-  type: claude-code
-  model: ` + testModel + `
-  prompt: "Run 'gh auth status' and print the output"
-  credentials:
-    type: oauth
-    secretRef:
-      name: claude-credentials
-  workspaceRef:
-    name: e2e-github-workspace
-`
-		f.ApplyYAML(taskYAML)
+		f.CreateTask(&axonv1alpha1.Task{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "github-task",
+			},
+			Spec: axonv1alpha1.TaskSpec{
+				Type:   "claude-code",
+				Model:  testModel,
+				Prompt: "Run 'gh auth status' and print the output",
+				Credentials: axonv1alpha1.Credentials{
+					Type:      axonv1alpha1.CredentialTypeOAuth,
+					SecretRef: axonv1alpha1.SecretReference{Name: "claude-credentials"},
+				},
+				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "e2e-github-workspace"},
+			},
+		})
 
 		By("waiting for Job to be created")
 		f.WaitForJobCreation("github-task")
@@ -275,24 +273,24 @@ var _ = Describe("Task cleanup on failure", func() {
 			"CLAUDE_CODE_OAUTH_TOKEN="+oauthToken)
 
 		By("creating a Task")
-		taskYAML := `apiVersion: axon.io/v1alpha1
-kind: Task
-metadata:
-  name: cleanup-task
-spec:
-  type: claude-code
-  model: ` + testModel + `
-  prompt: "Print 'Hello' to stdout"
-  credentials:
-    type: oauth
-    secretRef:
-      name: claude-credentials
-`
-		f.ApplyYAML(taskYAML)
+		f.CreateTask(&axonv1alpha1.Task{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "cleanup-task",
+			},
+			Spec: axonv1alpha1.TaskSpec{
+				Type:   "claude-code",
+				Model:  testModel,
+				Prompt: "Print 'Hello' to stdout",
+				Credentials: axonv1alpha1.Credentials{
+					Type:      axonv1alpha1.CredentialTypeOAuth,
+					SecretRef: axonv1alpha1.SecretReference{Name: "claude-credentials"},
+				},
+			},
+		})
 
 		By("verifying resources exist in the namespace")
-		Eventually(func() string {
-			return f.KubectlOutput("get", "tasks", "-o", "name")
-		}, 30*time.Second, time.Second).Should(ContainSubstring("cleanup-task"))
+		Eventually(func() []string {
+			return f.ListTaskNames("")
+		}, 30*time.Second, time.Second).Should(ContainElement("cleanup-task"))
 	})
 })

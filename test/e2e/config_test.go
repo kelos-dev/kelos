@@ -7,7 +7,9 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
 	"github.com/axon-core/axon/test/e2e/framework"
 )
 
@@ -42,15 +44,15 @@ var _ = Describe("Config", func() {
 
 	It("should allow CLI flags to override config file", func() {
 		By("creating a Workspace resource for override")
-		overrideWsYAML := `apiVersion: axon.io/v1alpha1
-kind: Workspace
-metadata:
-  name: e2e-config-ws-override
-spec:
-  repo: https://github.com/axon-core/axon.git
-  ref: main
-`
-		f.ApplyYAML(overrideWsYAML)
+		f.CreateWorkspace(&axonv1alpha1.Workspace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "e2e-config-ws-override",
+			},
+			Spec: axonv1alpha1.WorkspaceSpec{
+				Repo: "https://github.com/axon-core/axon.git",
+				Ref:  "main",
+			},
+		})
 
 		By("writing a temp config file with oauthToken and inline workspace (bad ref)")
 		dir := GinkgoT().TempDir()
@@ -124,8 +126,8 @@ var _ = Describe("Config with namespace", func() {
 		)
 
 		By("verifying task exists in the framework namespace")
-		Eventually(func() string {
-			return f.KubectlOutput("get", "tasks", "-o", "name")
-		}, 30*time.Second, time.Second).Should(ContainSubstring("ns-config-task"))
+		Eventually(func() []string {
+			return f.ListTaskNames("")
+		}, 30*time.Second, time.Second).Should(ContainElement("ns-config-task"))
 	})
 })

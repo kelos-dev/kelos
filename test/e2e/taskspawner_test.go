@@ -5,7 +5,9 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
 	"github.com/axon-core/axon/test/e2e/framework"
 )
 
@@ -30,86 +32,92 @@ var _ = Describe("TaskSpawner", func() {
 			"CLAUDE_CODE_OAUTH_TOKEN="+oauthToken)
 
 		By("creating a Workspace resource with secretRef")
-		wsYAML := `apiVersion: axon.io/v1alpha1
-kind: Workspace
-metadata:
-  name: e2e-spawner-workspace
-spec:
-  repo: https://github.com/axon-core/axon.git
-  ref: main
-  secretRef:
-    name: github-token
-`
-		f.ApplyYAML(wsYAML)
+		f.CreateWorkspace(&axonv1alpha1.Workspace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "e2e-spawner-workspace",
+			},
+			Spec: axonv1alpha1.WorkspaceSpec{
+				Repo:      "https://github.com/axon-core/axon.git",
+				Ref:       "main",
+				SecretRef: &axonv1alpha1.SecretReference{Name: "github-token"},
+			},
+		})
 
 		By("creating a TaskSpawner")
-		tsYAML := `apiVersion: axon.io/v1alpha1
-kind: TaskSpawner
-metadata:
-  name: spawner
-spec:
-  when:
-    githubIssues:
-      labels: [do-not-remove/e2e-anchor]
-      excludeLabels: [e2e-exclude-placeholder]
-      state: open
-  taskTemplate:
-    type: claude-code
-    workspaceRef:
-      name: e2e-spawner-workspace
-    credentials:
-      type: oauth
-      secretRef:
-        name: claude-credentials
-    promptTemplate: "Fix: {{.Title}}\n{{.Body}}"
-  pollInterval: 1m
-`
-		f.ApplyYAML(tsYAML)
+		f.CreateTaskSpawner(&axonv1alpha1.TaskSpawner{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "spawner",
+			},
+			Spec: axonv1alpha1.TaskSpawnerSpec{
+				When: axonv1alpha1.When{
+					GitHubIssues: &axonv1alpha1.GitHubIssues{
+						Labels:        []string{"do-not-remove/e2e-anchor"},
+						ExcludeLabels: []string{"e2e-exclude-placeholder"},
+						State:         "open",
+					},
+				},
+				TaskTemplate: axonv1alpha1.TaskTemplate{
+					Type: "claude-code",
+					WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						Name: "e2e-spawner-workspace",
+					},
+					Credentials: axonv1alpha1.Credentials{
+						Type:      axonv1alpha1.CredentialTypeOAuth,
+						SecretRef: axonv1alpha1.SecretReference{Name: "claude-credentials"},
+					},
+					PromptTemplate: "Fix: {{.Title}}\n{{.Body}}",
+				},
+				PollInterval: "1m",
+			},
+		})
 
 		By("waiting for Deployment to become available")
 		f.WaitForDeploymentAvailable("spawner")
 
 		By("waiting for TaskSpawner phase to become Running")
 		Eventually(func() string {
-			return f.KubectlOutput("get", "taskspawner", "spawner", "-o", "jsonpath={.status.phase}")
+			return f.GetTaskSpawnerPhase("spawner")
 		}, 3*time.Minute, 10*time.Second).Should(Equal("Running"))
 
 		By("verifying at least one Task was created")
-		Eventually(func() string {
-			return f.KubectlOutput("get", "tasks", "-l", "axon.io/taskspawner=spawner", "-o", "name")
+		Eventually(func() []string {
+			return f.ListTaskNames("axon.io/taskspawner=spawner")
 		}, 3*time.Minute, 10*time.Second).ShouldNot(BeEmpty())
 	})
 
 	It("should be accessible via CLI", func() {
 		By("creating a Workspace resource")
-		wsYAML := `apiVersion: axon.io/v1alpha1
-kind: Workspace
-metadata:
-  name: e2e-spawner-workspace
-spec:
-  repo: https://github.com/axon-core/axon.git
-`
-		f.ApplyYAML(wsYAML)
+		f.CreateWorkspace(&axonv1alpha1.Workspace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "e2e-spawner-workspace",
+			},
+			Spec: axonv1alpha1.WorkspaceSpec{
+				Repo: "https://github.com/axon-core/axon.git",
+			},
+		})
 
 		By("creating a TaskSpawner")
-		tsYAML := `apiVersion: axon.io/v1alpha1
-kind: TaskSpawner
-metadata:
-  name: spawner
-spec:
-  when:
-    githubIssues: {}
-  taskTemplate:
-    type: claude-code
-    workspaceRef:
-      name: e2e-spawner-workspace
-    credentials:
-      type: oauth
-      secretRef:
-        name: claude-credentials
-  pollInterval: 5m
-`
-		f.ApplyYAML(tsYAML)
+		f.CreateTaskSpawner(&axonv1alpha1.TaskSpawner{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "spawner",
+			},
+			Spec: axonv1alpha1.TaskSpawnerSpec{
+				When: axonv1alpha1.When{
+					GitHubIssues: &axonv1alpha1.GitHubIssues{},
+				},
+				TaskTemplate: axonv1alpha1.TaskTemplate{
+					Type: "claude-code",
+					WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						Name: "e2e-spawner-workspace",
+					},
+					Credentials: axonv1alpha1.Credentials{
+						Type:      axonv1alpha1.CredentialTypeOAuth,
+						SecretRef: axonv1alpha1.SecretReference{Name: "claude-credentials"},
+					},
+				},
+				PollInterval: "5m",
+			},
+		})
 
 		By("verifying axon get taskspawners lists it")
 		output := framework.AxonOutput("get", "taskspawners", "-n", f.Namespace)
@@ -132,8 +140,8 @@ spec:
 		Expect(output).To(ContainSubstring(`"kind": "TaskSpawner"`))
 		Expect(output).To(ContainSubstring(`"name": "spawner"`))
 
-		By("deleting via kubectl")
-		f.KubectlInNs("delete", "taskspawner", "spawner")
+		By("deleting the TaskSpawner")
+		f.DeleteTaskSpawner("spawner")
 
 		By("verifying it disappears from list")
 		Eventually(func() string {
@@ -151,59 +159,65 @@ var _ = Describe("Cron TaskSpawner", func() {
 			"CLAUDE_CODE_OAUTH_TOKEN="+oauthToken)
 
 		By("creating a cron TaskSpawner with every-minute schedule")
-		tsYAML := `apiVersion: axon.io/v1alpha1
-kind: TaskSpawner
-metadata:
-  name: cron-spawner
-spec:
-  when:
-    cron:
-      schedule: "* * * * *"
-  taskTemplate:
-    type: claude-code
-    model: ` + testModel + `
-    credentials:
-      type: oauth
-      secretRef:
-        name: claude-credentials
-    promptTemplate: "Cron triggered at {{.Time}} (schedule: {{.Schedule}}). Print 'Hello from cron'"
-  pollInterval: 1m
-`
-		f.ApplyYAML(tsYAML)
+		f.CreateTaskSpawner(&axonv1alpha1.TaskSpawner{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "cron-spawner",
+			},
+			Spec: axonv1alpha1.TaskSpawnerSpec{
+				When: axonv1alpha1.When{
+					Cron: &axonv1alpha1.Cron{
+						Schedule: "* * * * *",
+					},
+				},
+				TaskTemplate: axonv1alpha1.TaskTemplate{
+					Type:  "claude-code",
+					Model: testModel,
+					Credentials: axonv1alpha1.Credentials{
+						Type:      axonv1alpha1.CredentialTypeOAuth,
+						SecretRef: axonv1alpha1.SecretReference{Name: "claude-credentials"},
+					},
+					PromptTemplate: "Cron triggered at {{.Time}} (schedule: {{.Schedule}}). Print 'Hello from cron'",
+				},
+				PollInterval: "1m",
+			},
+		})
 
 		By("waiting for Deployment to become available")
 		f.WaitForDeploymentAvailable("cron-spawner")
 
 		By("waiting for TaskSpawner phase to become Running")
 		Eventually(func() string {
-			return f.KubectlOutput("get", "taskspawner", "cron-spawner", "-o", "jsonpath={.status.phase}")
+			return f.GetTaskSpawnerPhase("cron-spawner")
 		}, 3*time.Minute, 10*time.Second).Should(Equal("Running"))
 
 		By("verifying at least one Task was created")
-		Eventually(func() string {
-			return f.KubectlOutput("get", "tasks", "-l", "axon.io/taskspawner=cron-spawner", "-o", "name")
+		Eventually(func() []string {
+			return f.ListTaskNames("axon.io/taskspawner=cron-spawner")
 		}, 3*time.Minute, 10*time.Second).ShouldNot(BeEmpty())
 	})
 
 	It("should be accessible via CLI with cron source info", func() {
 		By("creating a cron TaskSpawner")
-		tsYAML := `apiVersion: axon.io/v1alpha1
-kind: TaskSpawner
-metadata:
-  name: cron-spawner
-spec:
-  when:
-    cron:
-      schedule: "0 9 * * 1"
-  taskTemplate:
-    type: claude-code
-    credentials:
-      type: oauth
-      secretRef:
-        name: claude-credentials
-  pollInterval: 5m
-`
-		f.ApplyYAML(tsYAML)
+		f.CreateTaskSpawner(&axonv1alpha1.TaskSpawner{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "cron-spawner",
+			},
+			Spec: axonv1alpha1.TaskSpawnerSpec{
+				When: axonv1alpha1.When{
+					Cron: &axonv1alpha1.Cron{
+						Schedule: "0 9 * * 1",
+					},
+				},
+				TaskTemplate: axonv1alpha1.TaskTemplate{
+					Type: "claude-code",
+					Credentials: axonv1alpha1.Credentials{
+						Type:      axonv1alpha1.CredentialTypeOAuth,
+						SecretRef: axonv1alpha1.SecretReference{Name: "claude-credentials"},
+					},
+				},
+				PollInterval: "5m",
+			},
+		})
 
 		By("verifying axon get taskspawners lists it")
 		output := framework.AxonOutput("get", "taskspawners", "-n", f.Namespace)
@@ -215,8 +229,8 @@ spec:
 		Expect(output).To(ContainSubstring("Cron"))
 		Expect(output).To(ContainSubstring("0 9 * * 1"))
 
-		By("deleting via kubectl")
-		f.KubectlInNs("delete", "taskspawner", "cron-spawner")
+		By("deleting the TaskSpawner")
+		f.DeleteTaskSpawner("cron-spawner")
 
 		By("verifying it disappears from list")
 		Eventually(func() string {

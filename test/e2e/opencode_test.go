@@ -3,7 +3,9 @@ package e2e
 import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
 	"github.com/axon-core/axon/test/e2e/framework"
 )
 
@@ -19,20 +21,20 @@ var _ = Describe("OpenCode Task", func() {
 			"OPENCODE_API_KEY=")
 
 		By("creating an OpenCode Task")
-		taskYAML := `apiVersion: axon.io/v1alpha1
-kind: Task
-metadata:
-  name: opencode-task
-spec:
-  type: opencode
-  model: ` + openCodeTestModel + `
-  prompt: "Print 'Hello from OpenCode e2e test' to stdout"
-  credentials:
-    type: api-key
-    secretRef:
-      name: opencode-credentials
-`
-		f.ApplyYAML(taskYAML)
+		f.CreateTask(&axonv1alpha1.Task{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "opencode-task",
+			},
+			Spec: axonv1alpha1.TaskSpec{
+				Type:   "opencode",
+				Model:  openCodeTestModel,
+				Prompt: "Print 'Hello from OpenCode e2e test' to stdout",
+				Credentials: axonv1alpha1.Credentials{
+					Type:      axonv1alpha1.CredentialTypeAPIKey,
+					SecretRef: axonv1alpha1.SecretReference{Name: "opencode-credentials"},
+				},
+			},
+		})
 
 		By("waiting for Job to be created")
 		f.WaitForJobCreation("opencode-task")

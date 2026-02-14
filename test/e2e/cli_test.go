@@ -5,7 +5,9 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
 	"github.com/axon-core/axon/test/e2e/framework"
 )
 
@@ -87,15 +89,15 @@ var _ = Describe("CLI", func() {
 			"CLAUDE_CODE_OAUTH_TOKEN="+oauthToken)
 
 		By("creating a Workspace resource")
-		wsYAML := `apiVersion: axon.io/v1alpha1
-kind: Workspace
-metadata:
-  name: e2e-cli-workspace
-spec:
-  repo: https://github.com/axon-core/axon.git
-  ref: main
-`
-		f.ApplyYAML(wsYAML)
+		f.CreateWorkspace(&axonv1alpha1.Workspace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "e2e-cli-workspace",
+			},
+			Spec: axonv1alpha1.WorkspaceSpec{
+				Repo: "https://github.com/axon-core/axon.git",
+				Ref:  "main",
+			},
+		})
 
 		By("creating a Task with workspace via CLI")
 		framework.Axon("run",

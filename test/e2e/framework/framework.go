@@ -2,8 +2,10 @@ package framework
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -11,6 +13,16 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
+
+	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
+	axonclientset "github.com/axon-core/axon/pkg/generated/clientset/versioned"
 )
 
 // Framework provides a per-test namespace environment for e2e tests,
@@ -23,6 +35,12 @@ type Framework struct {
 	// Namespace is the Kubernetes namespace created for the current test.
 	// It is set during BeforeEach and cleared during AfterEach.
 	Namespace string
+
+	// Clientset is a standard Kubernetes clientset for the test cluster.
+	Clientset kubernetes.Interface
+
+	// AxonClientset is a generated typed clientset for axon.io resources.
+	AxonClientset axonclientset.Interface
 }
 
 // NewFramework creates a new Framework and registers Ginkgo lifecycle
@@ -47,11 +65,28 @@ func (f *Framework) beforeEach() {
 		f.Namespace = strings.TrimRight(f.Namespace[:63], "-")
 	}
 
+	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+	cfg, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		loadingRules, &clientcmd.ConfigOverrides{},
+	).ClientConfig()
+	Expect(err).NotTo(HaveOccurred(), "Failed to get kubeconfig")
+
+	cs, err := kubernetes.NewForConfig(cfg)
+	Expect(err).NotTo(HaveOccurred(), "Failed to create kubernetes clientset")
+	f.Clientset = cs
+
+	ac, err := axonclientset.NewForConfig(cfg)
+	Expect(err).NotTo(HaveOccurred(), "Failed to create axon clientset")
+	f.AxonClientset = ac
+
 	By(fmt.Sprintf("Creating test namespace %s", f.Namespace))
-	cmd := exec.Command("kubectl", "create", "namespace", f.Namespace)
-	cmd.Stdout = GinkgoWriter
-	cmd.Stderr = GinkgoWriter
-	Expect(cmd.Run()).To(Succeed())
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: f.Namespace,
+		},
+	}
+	_, err = f.Clientset.CoreV1().Namespaces().Create(context.TODO(), ns, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "Failed to create namespace")
 }
 
 // randomSuffix returns a random hex string of the given length.
@@ -75,111 +110,236 @@ func (f *Framework) afterEach() {
 	}
 
 	if CurrentSpecReport().Failed() {
-		By("Collecting debug info on failure")
-		f.Kubectl("get", "all", "-n", f.Namespace, "-o", "wide")
-		f.Kubectl("get", "tasks.axon.io", "-n", f.Namespace, "-o", "yaml")
-		f.Kubectl("get", "taskspawners.axon.io", "-n", f.Namespace, "-o", "yaml")
-		f.Kubectl("logs", "-n", "axon-system", "deployment/axon-controller-manager", "--tail=50")
+		f.collectDebugInfo()
 	}
 
 	By(fmt.Sprintf("Deleting test namespace %s", f.Namespace))
-	f.Kubectl("delete", "namespace", f.Namespace, "--ignore-not-found")
+	err := f.Clientset.CoreV1().Namespaces().Delete(context.TODO(), f.Namespace, metav1.DeleteOptions{})
+	if err != nil {
+		fmt.Fprintf(GinkgoWriter, "Warning: failed to delete namespace %s: %v\n", f.Namespace, err)
+	}
 
 	f.Namespace = ""
 }
 
-// Kubectl executes a kubectl command with output directed to GinkgoWriter.
-// It does NOT fail the test on error (fire-and-forget).
-func (f *Framework) Kubectl(args ...string) {
-	cmd := exec.Command("kubectl", args...)
-	cmd.Stdout = GinkgoWriter
-	cmd.Stderr = GinkgoWriter
-	_ = cmd.Run()
-}
+// collectDebugInfo logs diagnostic information on test failure.
+func (f *Framework) collectDebugInfo() {
+	By("Collecting debug info on failure")
+	ctx := context.TODO()
 
-// KubectlInNs executes a kubectl command scoped to the test namespace.
-// It does NOT fail the test on error (fire-and-forget).
-func (f *Framework) KubectlInNs(args ...string) {
-	nsArgs := make([]string, 0, len(args)+2)
-	nsArgs = append(nsArgs, "-n", f.Namespace)
-	nsArgs = append(nsArgs, args...)
-	f.Kubectl(nsArgs...)
-}
-
-// KubectlWithInput executes a kubectl command with optional stdin and
-// returns an error. The command is scoped to the test namespace.
-func (f *Framework) KubectlWithInput(input string, args ...string) error {
-	nsArgs := make([]string, 0, len(args)+2)
-	nsArgs = append(nsArgs, "-n", f.Namespace)
-	nsArgs = append(nsArgs, args...)
-	cmd := exec.Command("kubectl", nsArgs...)
-	if input != "" {
-		cmd.Stdin = strings.NewReader(input)
+	// List tasks
+	tasks, err := f.AxonClientset.ApiV1alpha1().Tasks(f.Namespace).List(ctx, metav1.ListOptions{})
+	if err == nil {
+		for _, t := range tasks.Items {
+			fmt.Fprintf(GinkgoWriter, "Task %s: phase=%s\n", t.Name, t.Status.Phase)
+		}
 	}
-	cmd.Stdout = GinkgoWriter
-	cmd.Stderr = GinkgoWriter
-	return cmd.Run()
-}
 
-// KubectlOutput executes a kubectl command scoped to the test namespace
-// and returns its stdout. It fails the test on error.
-func (f *Framework) KubectlOutput(args ...string) string {
-	nsArgs := make([]string, 0, len(args)+2)
-	nsArgs = append(nsArgs, "-n", f.Namespace)
-	nsArgs = append(nsArgs, args...)
-	cmd := exec.Command("kubectl", nsArgs...)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = os.Stderr
-	err := cmd.Run()
-	Expect(err).NotTo(HaveOccurred())
-	return strings.TrimSpace(out.String())
+	// List taskspawners
+	spawners, err := f.AxonClientset.ApiV1alpha1().TaskSpawners(f.Namespace).List(ctx, metav1.ListOptions{})
+	if err == nil {
+		for _, s := range spawners.Items {
+			fmt.Fprintf(GinkgoWriter, "TaskSpawner %s: phase=%s\n", s.Name, s.Status.Phase)
+		}
+	}
+
+	// List pods
+	pods, err := f.Clientset.CoreV1().Pods(f.Namespace).List(ctx, metav1.ListOptions{})
+	if err == nil {
+		for _, p := range pods.Items {
+			fmt.Fprintf(GinkgoWriter, "Pod %s: phase=%s\n", p.Name, p.Status.Phase)
+		}
+	}
+
+	// List jobs
+	jobs, err := f.Clientset.BatchV1().Jobs(f.Namespace).List(ctx, metav1.ListOptions{})
+	if err == nil {
+		for _, j := range jobs.Items {
+			fmt.Fprintf(GinkgoWriter, "Job %s: active=%d succeeded=%d failed=%d\n",
+				j.Name, j.Status.Active, j.Status.Succeeded, j.Status.Failed)
+		}
+	}
+
+	// Controller manager logs (best-effort)
+	managerPods, err := f.Clientset.CoreV1().Pods("axon-system").List(ctx, metav1.ListOptions{
+		LabelSelector: "control-plane=controller-manager",
+	})
+	if err == nil {
+		tailLines := int64(50)
+		for _, p := range managerPods.Items {
+			req := f.Clientset.CoreV1().Pods("axon-system").GetLogs(p.Name, &corev1.PodLogOptions{
+				TailLines: &tailLines,
+			})
+			stream, err := req.Stream(ctx)
+			if err != nil {
+				continue
+			}
+			logBytes, _ := io.ReadAll(stream)
+			stream.Close()
+			fmt.Fprintf(GinkgoWriter, "Controller manager logs (%s):\n%s\n", p.Name, string(logBytes))
+		}
+	}
 }
 
 // CreateSecret creates a generic secret from literal key-value pairs
 // in the test namespace.
 func (f *Framework) CreateSecret(name string, literals ...string) {
-	args := []string{"create", "secret", "generic", name}
+	data := make(map[string][]byte)
 	for _, l := range literals {
-		args = append(args, "--from-literal="+l)
+		parts := strings.SplitN(l, "=", 2)
+		Expect(parts).To(HaveLen(2), "Literal must be in key=value format: %s", l)
+		data[parts[0]] = []byte(parts[1])
 	}
-	Expect(f.KubectlWithInput("", args...)).To(Succeed())
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: f.Namespace,
+		},
+		Data: data,
+	}
+	_, err := f.Clientset.CoreV1().Secrets(f.Namespace).Create(context.TODO(), secret, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "Failed to create secret %s", name)
 }
 
-// ApplyYAML applies the given YAML manifest in the test namespace.
-func (f *Framework) ApplyYAML(yaml string) {
-	Expect(f.KubectlWithInput(yaml, "apply", "-f", "-")).To(Succeed())
+// CreateTask creates a Task in the test namespace using the axon clientset.
+func (f *Framework) CreateTask(task *axonv1alpha1.Task) {
+	if task.Namespace == "" {
+		task.Namespace = f.Namespace
+	}
+	_, err := f.AxonClientset.ApiV1alpha1().Tasks(task.Namespace).Create(context.TODO(), task, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "Failed to create task %s", task.Name)
+}
+
+// CreateWorkspace creates a Workspace in the test namespace using the axon clientset.
+func (f *Framework) CreateWorkspace(ws *axonv1alpha1.Workspace) {
+	if ws.Namespace == "" {
+		ws.Namespace = f.Namespace
+	}
+	_, err := f.AxonClientset.ApiV1alpha1().Workspaces(ws.Namespace).Create(context.TODO(), ws, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "Failed to create workspace %s", ws.Name)
+}
+
+// CreateTaskSpawner creates a TaskSpawner in the test namespace using the axon clientset.
+func (f *Framework) CreateTaskSpawner(ts *axonv1alpha1.TaskSpawner) {
+	if ts.Namespace == "" {
+		ts.Namespace = f.Namespace
+	}
+	_, err := f.AxonClientset.ApiV1alpha1().TaskSpawners(ts.Namespace).Create(context.TODO(), ts, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "Failed to create taskspawner %s", ts.Name)
+}
+
+// DeleteTask deletes a Task by name from the test namespace using the axon clientset.
+func (f *Framework) DeleteTask(name string) {
+	err := f.AxonClientset.ApiV1alpha1().Tasks(f.Namespace).Delete(context.TODO(), name, metav1.DeleteOptions{})
+	Expect(err).NotTo(HaveOccurred(), "Failed to delete task %s", name)
+}
+
+// DeleteWorkspace deletes a Workspace by name from the test namespace using the axon clientset.
+func (f *Framework) DeleteWorkspace(name string) {
+	err := f.AxonClientset.ApiV1alpha1().Workspaces(f.Namespace).Delete(context.TODO(), name, metav1.DeleteOptions{})
+	Expect(err).NotTo(HaveOccurred(), "Failed to delete workspace %s", name)
+}
+
+// DeleteTaskSpawner deletes a TaskSpawner by name from the test namespace using the axon clientset.
+func (f *Framework) DeleteTaskSpawner(name string) {
+	err := f.AxonClientset.ApiV1alpha1().TaskSpawners(f.Namespace).Delete(context.TODO(), name, metav1.DeleteOptions{})
+	Expect(err).NotTo(HaveOccurred(), "Failed to delete taskspawner %s", name)
 }
 
 // WaitForJobCreation waits for a Job with the given name to appear.
 func (f *Framework) WaitForJobCreation(name string) {
 	Eventually(func() error {
-		return f.KubectlWithInput("", "get", "job", name)
+		_, err := f.Clientset.BatchV1().Jobs(f.Namespace).Get(context.TODO(), name, metav1.GetOptions{})
+		return err
 	}, 30*time.Second, time.Second).Should(Succeed())
 }
 
 // WaitForJobCompletion waits for a Job to reach the complete condition.
 func (f *Framework) WaitForJobCompletion(name string) {
-	Eventually(func() error {
-		return f.KubectlWithInput("", "wait", "--for=condition=complete", "job/"+name, "--timeout=10s")
-	}, 5*time.Minute, 10*time.Second).Should(Succeed())
+	Eventually(func() bool {
+		job, err := f.Clientset.BatchV1().Jobs(f.Namespace).Get(context.TODO(), name, metav1.GetOptions{})
+		if err != nil {
+			return false
+		}
+		for _, c := range job.Status.Conditions {
+			if c.Type == batchv1.JobComplete && c.Status == corev1.ConditionTrue {
+				return true
+			}
+		}
+		return false
+	}, 5*time.Minute, 10*time.Second).Should(BeTrue())
 }
 
 // WaitForDeploymentAvailable waits for a Deployment to reach the available condition.
 func (f *Framework) WaitForDeploymentAvailable(name string) {
-	Eventually(func() error {
-		return f.KubectlWithInput("", "wait", "--for=condition=available", "deployment/"+name, "--timeout=10s")
-	}, 2*time.Minute, 10*time.Second).Should(Succeed())
+	Eventually(func() bool {
+		deploy, err := f.Clientset.AppsV1().Deployments(f.Namespace).Get(context.TODO(), name, metav1.GetOptions{})
+		if err != nil {
+			return false
+		}
+		for _, c := range deploy.Status.Conditions {
+			if c.Type == appsv1.DeploymentAvailable && c.Status == corev1.ConditionTrue {
+				return true
+			}
+		}
+		return false
+	}, 2*time.Minute, 10*time.Second).Should(BeTrue())
 }
 
 // GetTaskPhase returns the phase of a Task.
 func (f *Framework) GetTaskPhase(name string) string {
-	return f.KubectlOutput("get", "task", name, "-o", "jsonpath={.status.phase}")
+	task, err := f.AxonClientset.ApiV1alpha1().Tasks(f.Namespace).Get(context.TODO(), name, metav1.GetOptions{})
+	Expect(err).NotTo(HaveOccurred(), "Failed to get task %s", name)
+	return string(task.Status.Phase)
 }
 
-// GetJobLogs returns the logs of a Job.
+// GetTaskOutputs returns the outputs of a Task as a joined string.
+func (f *Framework) GetTaskOutputs(name string) string {
+	task, err := f.AxonClientset.ApiV1alpha1().Tasks(f.Namespace).Get(context.TODO(), name, metav1.GetOptions{})
+	Expect(err).NotTo(HaveOccurred(), "Failed to get task %s", name)
+	return strings.Join(task.Status.Outputs, "\n")
+}
+
+// GetTaskSpawnerPhase returns the phase of a TaskSpawner.
+func (f *Framework) GetTaskSpawnerPhase(name string) string {
+	ts, err := f.AxonClientset.ApiV1alpha1().TaskSpawners(f.Namespace).Get(context.TODO(), name, metav1.GetOptions{})
+	Expect(err).NotTo(HaveOccurred(), "Failed to get taskspawner %s", name)
+	return string(ts.Status.Phase)
+}
+
+// ListTaskNames returns the names of all Tasks matching the given label selector.
+func (f *Framework) ListTaskNames(labelSelector string) []string {
+	tasks, err := f.AxonClientset.ApiV1alpha1().Tasks(f.Namespace).List(context.TODO(), metav1.ListOptions{
+		LabelSelector: labelSelector,
+	})
+	Expect(err).NotTo(HaveOccurred(), "Failed to list tasks")
+	var names []string
+	for _, t := range tasks.Items {
+		names = append(names, t.Name)
+	}
+	return names
+}
+
+// GetJobLogs returns the logs of a Job's pod.
 func (f *Framework) GetJobLogs(name string) string {
-	return f.KubectlOutput("logs", "job/"+name)
+	ctx := context.TODO()
+
+	// Find the pod for this job
+	pods, err := f.Clientset.CoreV1().Pods(f.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "job-name=" + name,
+	})
+	Expect(err).NotTo(HaveOccurred(), "Failed to list pods for job %s", name)
+	Expect(pods.Items).NotTo(BeEmpty(), "No pods found for job %s", name)
+
+	req := f.Clientset.CoreV1().Pods(f.Namespace).GetLogs(pods.Items[0].Name, &corev1.PodLogOptions{})
+	stream, err := req.Stream(ctx)
+	Expect(err).NotTo(HaveOccurred(), "Failed to get logs for job %s", name)
+	defer stream.Close()
+
+	var buf bytes.Buffer
+	_, err = io.Copy(&buf, stream)
+	Expect(err).NotTo(HaveOccurred(), "Failed to read logs for job %s", name)
+	return buf.String()
 }
 
 // AxonBin returns the path to the axon binary.

@@ -15,6 +15,7 @@ Ready-to-use patterns and YAML manifests for orchestrating AI agents with Axon. 
 | [02-task-with-workspace](02-task-with-workspace/) | Run a Task that clones a git repo and can create PRs |
 | [03-taskspawner-github-issues](03-taskspawner-github-issues/) | Automatically create Tasks from labeled GitHub issues |
 | [04-taskspawner-cron](04-taskspawner-cron/) | Run agent tasks on a cron schedule |
+| [05-orchestrator](05-orchestrator/) | Fan-out/fan-in pattern with `dependsOn` and prompt templates |
 
 ## How to Use
 

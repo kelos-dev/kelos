@@ -13,6 +13,7 @@ import (
 	. "github.com/onsi/gomega"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -2214,6 +2215,164 @@ var _ = Describe("Task Controller", func() {
 
 			mainContainer := jobB.Spec.Template.Spec.Containers[0]
 			Expect(mainContainer.Args[0]).To(Equal("Review branch feature-456"))
+		})
+	})
+
+	Context("When creating an orchestrator Task with multiple dependencies (fan-out/fan-in)", func() {
+		It("Should wait for all dependencies before creating its Job", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-task-orchestrator",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with API key")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+			By("Creating two independent upstream tasks (fan-out)")
+			taskAlpha := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "orch-alpha",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "Research alpha topic",
+					Credentials: axonv1alpha1.Credentials{
+						Type:      axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{Name: "anthropic-api-key"},
+					},
+				},
+			}
+			taskBeta := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "orch-beta",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "Research beta topic",
+					Credentials: axonv1alpha1.Credentials{
+						Type:      axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{Name: "anthropic-api-key"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, taskAlpha)).Should(Succeed())
+			Expect(k8sClient.Create(ctx, taskBeta)).Should(Succeed())
+
+			By("Creating orchestrator task that depends on both (fan-in)")
+			orchestrator := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "orch-synthesize",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:      "claude-code",
+					DependsOn: []string{"orch-alpha", "orch-beta"},
+					Prompt:    "Synthesize results from alpha and beta",
+					Credentials: axonv1alpha1.Credentials{
+						Type:      axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{Name: "anthropic-api-key"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, orchestrator)).Should(Succeed())
+
+			By("Verifying orchestrator enters Waiting phase")
+			orchKey := types.NamespacedName{Name: "orch-synthesize", Namespace: ns.Name}
+			Eventually(func() axonv1alpha1.TaskPhase {
+				var t axonv1alpha1.Task
+				if err := k8sClient.Get(ctx, orchKey, &t); err != nil {
+					return ""
+				}
+				return t.Status.Phase
+			}, timeout, interval).Should(Equal(axonv1alpha1.TaskPhaseWaiting))
+
+			By("Verifying orchestrator Job does not exist yet")
+			orchJobKey := types.NamespacedName{Name: "orch-synthesize", Namespace: ns.Name}
+			Consistently(func() bool {
+				var job batchv1.Job
+				return apierrors.IsNotFound(k8sClient.Get(ctx, orchJobKey, &job))
+			}, "2s", interval).Should(BeTrue())
+
+			By("Completing only Task Alpha — orchestrator should remain Waiting")
+			jobAlphaKey := types.NamespacedName{Name: "orch-alpha", Namespace: ns.Name}
+			var jobAlpha batchv1.Job
+			Eventually(func() bool {
+				return k8sClient.Get(ctx, jobAlphaKey, &jobAlpha) == nil
+			}, timeout, interval).Should(BeTrue())
+			Eventually(func() error {
+				if err := k8sClient.Get(ctx, jobAlphaKey, &jobAlpha); err != nil {
+					return err
+				}
+				jobAlpha.Status.Succeeded = 1
+				return k8sClient.Status().Update(ctx, &jobAlpha)
+			}, timeout, interval).Should(Succeed())
+
+			alphaKey := types.NamespacedName{Name: "orch-alpha", Namespace: ns.Name}
+			Eventually(func() axonv1alpha1.TaskPhase {
+				var t axonv1alpha1.Task
+				if err := k8sClient.Get(ctx, alphaKey, &t); err != nil {
+					return ""
+				}
+				return t.Status.Phase
+			}, timeout, interval).Should(Equal(axonv1alpha1.TaskPhaseSucceeded))
+
+			By("Verifying orchestrator still has no Job (one dep remaining)")
+			Consistently(func() bool {
+				var job batchv1.Job
+				return apierrors.IsNotFound(k8sClient.Get(ctx, orchJobKey, &job))
+			}, "2s", interval).Should(BeTrue())
+
+			By("Completing Task Beta — orchestrator should now start")
+			jobBetaKey := types.NamespacedName{Name: "orch-beta", Namespace: ns.Name}
+			var jobBeta batchv1.Job
+			Eventually(func() bool {
+				return k8sClient.Get(ctx, jobBetaKey, &jobBeta) == nil
+			}, timeout, interval).Should(BeTrue())
+			Eventually(func() error {
+				if err := k8sClient.Get(ctx, jobBetaKey, &jobBeta); err != nil {
+					return err
+				}
+				jobBeta.Status.Succeeded = 1
+				return k8sClient.Status().Update(ctx, &jobBeta)
+			}, timeout, interval).Should(Succeed())
+
+			betaKey := types.NamespacedName{Name: "orch-beta", Namespace: ns.Name}
+			Eventually(func() axonv1alpha1.TaskPhase {
+				var t axonv1alpha1.Task
+				if err := k8sClient.Get(ctx, betaKey, &t); err != nil {
+					return ""
+				}
+				return t.Status.Phase
+			}, timeout, interval).Should(Equal(axonv1alpha1.TaskPhaseSucceeded))
+
+			By("Verifying orchestrator Job is created after all dependencies succeed")
+			var orchJob batchv1.Job
+			Eventually(func() bool {
+				return k8sClient.Get(ctx, orchJobKey, &orchJob) == nil
+			}, 2*timeout, interval).Should(BeTrue())
+
+			By("Verifying orchestrator task transitions out of Waiting")
+			Eventually(func() axonv1alpha1.TaskPhase {
+				var t axonv1alpha1.Task
+				if err := k8sClient.Get(ctx, orchKey, &t); err != nil {
+					return ""
+				}
+				return t.Status.Phase
+			}, timeout, interval).ShouldNot(Equal(axonv1alpha1.TaskPhaseWaiting))
 		})
 	})
 })

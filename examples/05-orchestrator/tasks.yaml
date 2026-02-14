@@ -1,0 +1,59 @@
+### Stage 1 — Independent research tasks (run in parallel)
+
+apiVersion: axon.io/v1alpha1
+kind: Task
+metadata:
+  name: research-api-design
+spec:
+  type: claude-code
+  prompt: |
+    Research best practices for designing a REST API for a bookstore.
+    Cover endpoint naming, pagination, error responses, and versioning.
+    Be concise — produce a bullet-point summary.
+  credentials:
+    type: api-key
+    secretRef:
+      name: anthropic-api-key
+---
+apiVersion: axon.io/v1alpha1
+kind: Task
+metadata:
+  name: research-data-model
+spec:
+  type: claude-code
+  prompt: |
+    Design a data model for a bookstore application.
+    Include entities for books, authors, categories, and inventory.
+    Output the schema as a concise list of tables and columns.
+  credentials:
+    type: api-key
+    secretRef:
+      name: anthropic-api-key
+
+---
+### Stage 2 — Orchestrator task that synthesizes results from stage 1
+
+apiVersion: axon.io/v1alpha1
+kind: Task
+metadata:
+  name: synthesize-design
+spec:
+  type: claude-code
+  dependsOn:
+    - research-api-design
+    - research-data-model
+  prompt: |
+    You are the orchestrator. Two research tasks have completed:
+
+    ## API Design Research
+    {{ index .Deps "research-api-design" "Outputs" }}
+
+    ## Data Model Research
+    {{ index .Deps "research-data-model" "Outputs" }}
+
+    Combine both into a single, coherent design document for a bookstore API.
+    Include the data model, endpoint list, and example request/response pairs.
+  credentials:
+    type: api-key
+    secretRef:
+      name: anthropic-api-key

@@ -14,7 +14,7 @@ Axon is built on four main primitives that enable sophisticated agent orchestrat
 
 1.  **Tasks**: Ephemeral units of work that wrap an AI agent run.
 2.  **Workspaces**: Persistent or ephemeral environments (git repos) where agents operate.
-3.  **AgentConfigs**: Reusable bundles of agent instructions and plugins.
+3.  **AgentConfigs**: Reusable bundles of agent instructions (`AGENTS.md`, `CLAUDE.md`) and plugins (skills and agents).
 4.  **TaskSpawners**: Orchestration engines that react to external triggers (GitHub, Cron) to automatically manage agent lifecycles.
 
 ## Demo
@@ -253,7 +253,7 @@ The `gh` CLI and `GITHUB_TOKEN` are available inside the agent container, so the
 
 ### Inject agent instructions and plugins
 
-Use `AgentConfig` to bundle agent instructions and Claude Code plugins. Tasks reference it via `agentConfigRef`:
+Use `AgentConfig` to bundle project-wide instructions (like `AGENTS.md` or `CLAUDE.md`) and Claude Code plugins (skills and agents). Tasks reference it via `agentConfigRef`:
 
 ```yaml
 apiVersion: axon.io/v1alpha1
@@ -262,6 +262,7 @@ metadata:
   name: my-config
 spec:
   agentsMD: |
+    # Project Rules
     Follow TDD. Always write tests first.
   plugins:
     - name: team-tools
@@ -306,11 +307,15 @@ spec:
 Or via the CLI:
 
 ```bash
-axon run -p "Fix the bug" --agents-md "Follow TDD" --skill deploy=@skills/deploy.md --agent reviewer=@agents/reviewer.md
+# Inject instructions and plugins from local files
+axon run -p "Fix the bug" \
+  --agents-md @AGENTS.md \
+  --skill deploy=@skills/deploy.md \
+  --agent reviewer=@agents/reviewer.md
 ```
 
-- `agentsMD` is written to `~/.claude/CLAUDE.md` (user-level, additive with the repo's own files)
-- `plugins` are mounted as plugin directories and passed via `--plugin-dir`
+- `agentsMD` is written to `~/.claude/CLAUDE.md` (user-level, additive with the repo's own instructions like `AGENTS.md` or `CLAUDE.md`).
+- `plugins` are mounted as plugin directories and passed via `--plugin-dir`.
 
 ### Auto-fix GitHub issues with TaskSpawner
 
@@ -463,7 +468,7 @@ The [`examples/`](examples/) directory contains self-contained, ready-to-apply Y
 
 | Field | Description | Required |
 |-------|-------------|----------|
-| `spec.agentsMD` | Agent instructions written to `~/.claude/CLAUDE.md` (additive with repo files) | No |
+| `spec.agentsMD` | Agent instructions (e.g. `AGENTS.md`, `CLAUDE.md`) written to `~/.claude/CLAUDE.md` (additive with repo files) | No |
 | `spec.plugins[].name` | Plugin name (used as directory name and namespace) | Yes (per plugin) |
 | `spec.plugins[].skills[].name` | Skill name (becomes `skills/<name>/SKILL.md`) | Yes (per skill) |
 | `spec.plugins[].skills[].content` | Skill content (markdown with frontmatter) | Yes (per skill) |

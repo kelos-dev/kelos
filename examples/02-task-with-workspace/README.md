@@ -39,8 +39,11 @@ kubectl get tasks -w
 5. **Stream the agent logs:**
 
 ```bash
-kubectl logs -l job-name=add-tests -f
+axon logs add-tests -f
 ```
+
+> **Tip:** You can also use `kubectl logs -l job-name=add-tests -f` for direct
+> Kubernetes access.
 
 6. **Cleanup:**
 

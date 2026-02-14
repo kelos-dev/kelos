@@ -1,0 +1,199 @@
+name: Squash Axon Worker Commits
+
+on:
+  issue_comment:
+    types:
+      - created
+  pull_request_review_comment:
+    types:
+      - created
+  pull_request_review:
+    types:
+      - submitted
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+  id-token: write
+
+concurrency:
+  group: squash-axon-worker-commits-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  squash-axon-worker-commits:
+    if: contains(github.event.comment.body || github.event.review.body || '', '/squash-commits')
+    runs-on: ubuntu-latest
+    env:
+      AXON_NAMESPACE: ${{ vars.AXON_NAMESPACE || 'default' }}
+      GCP_PROJECT_ID: gjkim-400213
+      GKE_CLUSTER_NAME: gjkim
+      GKE_CLUSTER_LOCATION: asia-northeast3
+      GCP_SERVICE_ACCOUNT_EMAIL: axon-core-axon-gh-action@gjkim-400213.iam.gserviceaccount.com
+      GCP_WORKLOAD_IDENTITY_PROVIDER: projects/317215297044/locations/global/workloadIdentityPools/github/providers/axon
+    steps:
+      - name: Determine if reset is requested
+        id: gate
+        uses: actions/github-script@v7
+        with:
+          script: |
+            function extractClosingIssueNumbers(text, owner, repo) {
+              const regex = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+(?:https?:\/\/github\.com\/([^\/\s]+)\/([^\/\s]+)\/issues\/(\d+)|([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)#(\d+)|#(\d+))/gim
+              const numbers = []
+              let match
+              while ((match = regex.exec(text || "")) !== null) {
+                if (match[7]) {
+                  numbers.push(Number(match[7]))
+                  continue
+                }
+                const fullOwner = (match[1] || match[4] || "").toLowerCase()
+                const fullRepo = (match[2] || match[5] || "").toLowerCase()
+                if (fullOwner === owner.toLowerCase() && fullRepo === repo.toLowerCase()) {
+                  numbers.push(Number(match[3] || match[6]))
+                }
+              }
+              return [...new Set(numbers)].filter((n) => Number.isInteger(n) && n > 0)
+            }
+
+            const commenter = context.payload.comment?.user?.login || context.payload.review?.user?.login || ""
+            if (!commenter) {
+              core.info("Ignoring /squash-commits with unknown commenter")
+              core.setOutput("should_reset", "false")
+              return
+            }
+
+            let permission = ""
+            try {
+              const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                username: commenter,
+              })
+              permission = (data.permission || "").toLowerCase()
+            } catch (error) {
+              core.info(`Failed to resolve commenter permission for ${commenter}: ${error.message}`)
+              core.setOutput("should_reset", "false")
+              return
+            }
+
+            if (permission !== "admin") {
+              core.info(`Ignoring /squash-commits from non-admin user ${commenter} (permission=${permission || "unknown"})`)
+              core.setOutput("should_reset", "false")
+              return
+            }
+
+            const issue = context.payload.issue
+            const pullRequest = context.payload.pull_request
+
+            // This command only makes sense on a PR (it squashes commits on a branch)
+            if (issue && !issue.pull_request) {
+              core.info("This command must be used on a pull request, not an issue")
+              core.setOutput("should_reset", "false")
+              return
+            }
+
+            const prNumber = pullRequest?.number || issue?.number
+            if (!prNumber) {
+              core.info("Could not determine PR number from event payload")
+              core.setOutput("should_reset", "false")
+              return
+            }
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            })
+
+            const referencedIssues = extractClosingIssueNumbers(pr.body || "", context.repo.owner, context.repo.repo)
+            if (referencedIssues.length === 0) {
+              core.info(`PR #${prNumber} does not declare a fixed issue in this repository`)
+              core.setOutput("should_reset", "false")
+              return
+            }
+
+            core.info(`Squash requested on PR #${prNumber} (branch: ${pr.head.ref}) for issue #${referencedIssues[0]}`)
+            core.setOutput("should_reset", "true")
+            core.setOutput("target_issue_number", String(referencedIssues[0]))
+            core.setOutput("target_pr_number", String(prNumber))
+            core.setOutput("target_branch", pr.head.ref)
+
+      - name: Checkout repository
+        if: steps.gate.outputs.should_reset == 'true'
+        uses: actions/checkout@v4
+
+      - name: Generate task manifest from template
+        id: manifest
+        if: steps.gate.outputs.should_reset == 'true'
+        env:
+          BRANCH: ${{ steps.gate.outputs.target_branch }}
+          PR_NUMBER: ${{ steps.gate.outputs.target_pr_number }}
+          ISSUE_NUMBER: ${{ steps.gate.outputs.target_issue_number }}
+        run: |
+          set -euo pipefail
+          MANIFEST_PATH="${RUNNER_TEMP}/squash-task.yaml"
+          export BRANCH PR_NUMBER ISSUE_NUMBER
+          envsubst '${BRANCH} ${PR_NUMBER} ${ISSUE_NUMBER}' \
+            < self-development/tasks/squash-commits-task.yaml > "${MANIFEST_PATH}"
+          echo "manifest_path=${MANIFEST_PATH}" >> "${GITHUB_OUTPUT}"
+
+      - name: Authenticate to Google Cloud
+        if: steps.gate.outputs.should_reset == 'true'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Configure GKE credentials
+        if: steps.gate.outputs.should_reset == 'true'
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.GKE_CLUSTER_NAME }}
+          location: ${{ env.GKE_CLUSTER_LOCATION }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Remove existing worker task
+        if: steps.gate.outputs.should_reset == 'true'
+        env:
+          TARGET_ISSUE_NUMBER: ${{ steps.gate.outputs.target_issue_number }}
+        run: |
+          set -euo pipefail
+          task_name="axon-workers-${TARGET_ISSUE_NUMBER}"
+          kubectl delete task.axon.io "${task_name}" -n "${AXON_NAMESPACE}" --ignore-not-found=true
+          echo "Removed task ${task_name} in namespace ${AXON_NAMESPACE} for target issue #${TARGET_ISSUE_NUMBER}"
+
+      - name: Add axon/needs-input label to issue
+        if: steps.gate.outputs.should_reset == 'true'
+        uses: actions/github-script@v7
+        env:
+          TARGET_ISSUE_NUMBER: ${{ steps.gate.outputs.target_issue_number }}
+        with:
+          script: |
+            const label = "axon/needs-input"
+            const targetIssueNumber = Number(process.env.TARGET_ISSUE_NUMBER || "0")
+
+            if (!Number.isInteger(targetIssueNumber) || targetIssueNumber <= 0) {
+              core.info("No valid target issue number, skipping label addition")
+              return
+            }
+
+            try {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: targetIssueNumber,
+                labels: [label],
+              })
+              core.info(`Added label ${label} to issue #${targetIssueNumber}`)
+            } catch (error) {
+              core.warning(`Failed to add label ${label} to issue #${targetIssueNumber}: ${error.message}`)
+            }
+
+      - name: Create squash task
+        if: steps.gate.outputs.should_reset == 'true'
+        env:
+          MANIFEST_PATH: ${{ steps.manifest.outputs.manifest_path }}
+        run: |
+          set -euo pipefail
+          task_name="$(kubectl create -n "${AXON_NAMESPACE}" -f "${MANIFEST_PATH}" -o jsonpath='{.metadata.name}')"
+          echo "Created squash task: ${task_name} in namespace ${AXON_NAMESPACE}"

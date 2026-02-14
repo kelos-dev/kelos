@@ -1,0 +1,68 @@
+apiVersion: axon.io/v1alpha1
+kind: Task
+metadata:
+  name: axon-workers-${ISSUE_NUMBER}
+  labels:
+    axon.run/type: squash-commits
+spec:
+  workspaceRef:
+    name: axon-agent
+  model: sonnet
+  type: claude-code
+  ttlSecondsAfterFinished: 3600
+  credentials:
+    type: oauth
+    secretRef:
+      name: axon-credentials
+  podOverrides:
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+        ephemeral-storage: 4Gi
+      limits:
+        cpu: "1"
+        memory: 2Gi
+        ephemeral-storage: 4Gi
+  prompt: |
+    You are a coding agent that works within the ephemeral container environment.
+
+    Pre-checklist:
+    - git config user.name "Gunju Kim"
+    - git config user.email "gjkim042@gmail.com"
+
+    Task:
+    Rebase and squash all commits on PR #${PR_NUMBER} (branch: ${BRANCH}) on top of origin/main.
+
+    Steps:
+    1. Check out the branch and fetch full history:
+       git fetch --unshallow
+       git fetch origin main
+       git checkout ${BRANCH}
+
+    2. Rebase the branch on origin/main:
+       git rebase origin/main
+
+    3. Squash all commits after origin/main into a single commit:
+       - Find the merge base with: git merge-base origin/main HEAD
+       - Count commits after the merge base
+       - If there is only 1 commit, skip squashing
+       - Otherwise, use git reset --soft to the merge base, then create a single commit with the first commit's message
+
+    4. Update the commit message if needed:
+       - Read the issue #${ISSUE_NUMBER} to understand what was done
+       - Read the PR #${PR_NUMBER} description
+       - If the current commit message does not accurately describe the changes, amend it with a better message
+       - Keep the commit message concise (one line, under 72 characters)
+
+    5. Force push the result:
+       git push --force-with-lease origin ${BRANCH}
+
+    6. Update the PR #${PR_NUMBER} description if needed:
+       - If the PR description does not accurately describe the changes, update it using gh pr edit
+       - Make sure the PR body still contains "Closes #${ISSUE_NUMBER}" or equivalent
+
+    Important:
+    - Do NOT start any new development work
+    - Do NOT modify any code
+    - Only rebase, squash commits, and update descriptions as needed

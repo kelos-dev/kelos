@@ -56,14 +56,18 @@ spec:
       - 2a. Read ALL review comments and conversation on the PR (gh pr view, gh api for review comments).
       - 3a. Read the existing diff (git diff main...HEAD) to understand what has already been done. Do NOT start over or rewrite from scratch.
       - 4a. Make only the incremental changes needed to address review feedback or remaining issues. Preserve existing work.
-      - 5a. /review the PR to verify your changes address the feedback, then iterate if needed.
-      - 6a. Make sure the PR passes all CI tests.
+      - 5a. Commit and push your changes to origin axon-task-{{.Number}}.
+      - 6a. /review the PR to verify your changes address the feedback. If changes are needed, make them, commit and push, then /review again. Repeat until the review passes.
+      - 7a. Update the PR title and description to reflect the final diff.
+      - 8a. Make sure the PR passes all CI tests.
 
       If no PR exists:
       - 2b. Investigate the issue #{{.Number}}.
       - 3b. Create a commit that fixes the issue.
-      - 4b. Create a PR and /review it to get feedback, then iterate to address the feedback.
-      - 5b. Make sure the PR passes all CI tests.
+      - 4b. Push your branch to origin axon-task-{{.Number}}.
+      - 5b. Create a PR, then /review it. If changes are needed, make them, commit and push, then /review again. Repeat until the review passes.
+      - 6b. Update the PR title and description to reflect the final diff.
+      - 7b. Make sure the PR passes all CI tests.
 
       Post-checklist:
       - Add axon/needs-input label to the issue (gh issue edit {{.Number}} --add-label axon/needs-input) and leave a comment for the reason if any of the following applies:

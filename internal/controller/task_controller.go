@@ -1,9 +1,11 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"text/template"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -17,7 +19,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
 	"github.com/axon-core/axon/internal/githubapp"
@@ -98,6 +102,13 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 	// Create Job if it doesn't exist
 	if !jobExists {
+		if len(task.Spec.DependsOn) > 0 {
+			ready, result, err := r.checkDependencies(ctx, &task)
+			if err != nil || !ready {
+				return result, err
+			}
+		}
+
 		return r.createJob(ctx, &task)
 	}
 
@@ -217,7 +228,9 @@ func (r *TaskReconciler) createJob(ctx context.Context, task *axonv1alpha1.Task)
 		agentConfig = &ac.Spec
 	}
 
-	job, err := r.JobBuilder.Build(task, workspace, agentConfig)
+	resolvedPrompt := r.resolvePromptTemplate(ctx, task)
+
+	job, err := r.JobBuilder.Build(task, workspace, agentConfig, resolvedPrompt)
 	if err != nil {
 		logger.Error(err, "unable to build Job")
 		r.recordEvent(task, corev1.EventTypeWarning, "JobBuildFailed", "Failed to build Job: %v", err)
@@ -523,10 +536,199 @@ func (r *TaskReconciler) recordEvent(obj runtime.Object, eventType, reason, mess
 	}
 }
 
+// checkDependencies verifies that all tasks listed in DependsOn have succeeded.
+// Returns (ready, result, error). ready=true means all dependencies succeeded.
+func (r *TaskReconciler) checkDependencies(ctx context.Context, task *axonv1alpha1.Task) (bool, ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	// Cycle detection only on first check (skip if already Waiting)
+	if task.Status.Phase != axonv1alpha1.TaskPhaseWaiting {
+		if err := r.detectCycle(ctx, task); err != nil {
+			logger.Info("Circular dependency detected", "task", task.Name, "error", err)
+			updateErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				if getErr := r.Get(ctx, client.ObjectKeyFromObject(task), task); getErr != nil {
+					return getErr
+				}
+				task.Status.Phase = axonv1alpha1.TaskPhaseFailed
+				task.Status.Message = fmt.Sprintf("Circular dependency detected: %v", err)
+				now := metav1.Now()
+				task.Status.CompletionTime = &now
+				return r.Status().Update(ctx, task)
+			})
+			if updateErr != nil {
+				logger.Error(updateErr, "Unable to update Task status")
+			}
+			r.recordEvent(task, corev1.EventTypeWarning, "DependencyFailed", "Circular dependency detected")
+			return false, ctrl.Result{}, nil
+		}
+	}
+
+	for _, depName := range task.Spec.DependsOn {
+		var depTask axonv1alpha1.Task
+		if err := r.Get(ctx, client.ObjectKey{
+			Namespace: task.Namespace, Name: depName,
+		}, &depTask); err != nil {
+			if apierrors.IsNotFound(err) {
+				logger.Info("Dependency not found yet, waiting", "dependency", depName)
+				r.setWaitingPhase(ctx, task, fmt.Sprintf("Waiting for dependency %q to be created", depName))
+				return false, ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+			}
+			return false, ctrl.Result{}, err
+		}
+
+		if depTask.Status.Phase == axonv1alpha1.TaskPhaseFailed {
+			logger.Info("Dependency failed", "dependency", depName)
+			updateErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				if getErr := r.Get(ctx, client.ObjectKeyFromObject(task), task); getErr != nil {
+					return getErr
+				}
+				task.Status.Phase = axonv1alpha1.TaskPhaseFailed
+				task.Status.Message = fmt.Sprintf("Dependency %q failed", depName)
+				now := metav1.Now()
+				task.Status.CompletionTime = &now
+				return r.Status().Update(ctx, task)
+			})
+			if updateErr != nil {
+				logger.Error(updateErr, "Unable to update Task status")
+			}
+			r.recordEvent(task, corev1.EventTypeWarning, "DependencyFailed", "Dependency %q failed", depName)
+			taskCompletedTotal.WithLabelValues(task.Namespace, task.Spec.Type, string(axonv1alpha1.TaskPhaseFailed)).Inc()
+			return false, ctrl.Result{}, nil
+		}
+
+		if depTask.Status.Phase != axonv1alpha1.TaskPhaseSucceeded {
+			logger.Info("Dependency not ready", "dependency", depName, "phase", depTask.Status.Phase)
+			r.setWaitingPhase(ctx, task, fmt.Sprintf("Waiting for dependency %q", depName))
+			return false, ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		}
+	}
+
+	return true, ctrl.Result{}, nil
+}
+
+// detectCycle walks the dependency graph from the given task and returns an
+// error if a cycle is detected.
+func (r *TaskReconciler) detectCycle(ctx context.Context, task *axonv1alpha1.Task) error {
+	visited := make(map[string]bool)
+	return r.walkDeps(ctx, task.Namespace, task.Name, visited)
+}
+
+func (r *TaskReconciler) walkDeps(ctx context.Context, namespace, name string, visited map[string]bool) error {
+	if visited[name] {
+		return fmt.Errorf("cycle involves %q", name)
+	}
+	visited[name] = true
+
+	var t axonv1alpha1.Task
+	if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &t); err != nil {
+		return nil // Cannot detect cycle if task doesn't exist yet
+	}
+
+	for _, dep := range t.Spec.DependsOn {
+		if err := r.walkDeps(ctx, namespace, dep, visited); err != nil {
+			return err
+		}
+	}
+
+	visited[name] = false
+	return nil
+}
+
+// setWaitingPhase updates the task phase to Waiting with the given message.
+func (r *TaskReconciler) setWaitingPhase(ctx context.Context, task *axonv1alpha1.Task, message string) {
+	logger := log.FromContext(ctx)
+	updateErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		if getErr := r.Get(ctx, client.ObjectKeyFromObject(task), task); getErr != nil {
+			return getErr
+		}
+		if task.Status.Phase == axonv1alpha1.TaskPhaseWaiting && task.Status.Message == message {
+			return nil
+		}
+		task.Status.Phase = axonv1alpha1.TaskPhaseWaiting
+		task.Status.Message = message
+		return r.Status().Update(ctx, task)
+	})
+	if updateErr != nil {
+		logger.Error(updateErr, "Unable to update Task status to Waiting")
+	}
+}
+
+// resolvePromptTemplate resolves Go template references in the prompt using
+// dependency outputs. Falls back to the raw prompt on any error.
+func (r *TaskReconciler) resolvePromptTemplate(ctx context.Context, task *axonv1alpha1.Task) string {
+	logger := log.FromContext(ctx)
+
+	if len(task.Spec.DependsOn) == 0 {
+		return task.Spec.Prompt
+	}
+
+	deps := make(map[string]interface{})
+	for _, depName := range task.Spec.DependsOn {
+		var depTask axonv1alpha1.Task
+		if err := r.Get(ctx, client.ObjectKey{
+			Namespace: task.Namespace, Name: depName,
+		}, &depTask); err != nil {
+			logger.Info("Failed to fetch dependency for prompt template, using raw prompt", "dependency", depName, "error", err)
+			return task.Spec.Prompt
+		}
+		deps[depName] = map[string]interface{}{
+			"Outputs": depTask.Status.Outputs,
+			"Name":    depName,
+		}
+	}
+
+	tmpl, err := template.New("prompt").Option("missingkey=error").Parse(task.Spec.Prompt)
+	if err != nil {
+		logger.Info("Failed to parse prompt template, using raw prompt", "error", err)
+		return task.Spec.Prompt
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, map[string]interface{}{"Deps": deps}); err != nil {
+		logger.Info("Failed to execute prompt template, using raw prompt", "error", err)
+		return task.Spec.Prompt
+	}
+	return buf.String()
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *TaskReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&axonv1alpha1.Task{}).
 		Owns(&batchv1.Job{}).
+		Watches(&axonv1alpha1.Task{}, handler.EnqueueRequestsFromMapFunc(r.enqueueDependentTasks)).
 		Complete(r)
+}
+
+// enqueueDependentTasks returns reconcile requests for tasks that depend on the
+// given task. This ensures dependent tasks are reconciled immediately when a
+// dependency reaches a terminal phase, instead of waiting for a requeue timer.
+func (r *TaskReconciler) enqueueDependentTasks(ctx context.Context, obj client.Object) []reconcile.Request {
+	task, ok := obj.(*axonv1alpha1.Task)
+	if !ok {
+		return nil
+	}
+
+	// Only trigger when a task reaches a terminal phase
+	if task.Status.Phase != axonv1alpha1.TaskPhaseSucceeded && task.Status.Phase != axonv1alpha1.TaskPhaseFailed {
+		return nil
+	}
+
+	var taskList axonv1alpha1.TaskList
+	if err := r.List(ctx, &taskList, client.InNamespace(task.Namespace)); err != nil {
+		return nil
+	}
+
+	var requests []reconcile.Request
+	for _, t := range taskList.Items {
+		for _, dep := range t.Spec.DependsOn {
+			if dep == task.Name {
+				requests = append(requests, reconcile.Request{
+					NamespacedName: client.ObjectKeyFromObject(&t),
+				})
+				break
+			}
+		}
+	}
+	return requests
 }

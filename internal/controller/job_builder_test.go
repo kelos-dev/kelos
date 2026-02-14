@@ -29,7 +29,7 @@ func TestBuildClaudeCodeJob_DefaultImage(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil, nil)
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestBuildClaudeCodeJob_CustomImage(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil, nil)
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestBuildClaudeCodeJob_NoModel(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil, nil)
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestBuildClaudeCodeJob_WorkspaceWithRef(t *testing.T) {
 		Ref:  "main",
 	}
 
-	job, err := builder.Build(task, workspace, nil)
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -255,7 +255,7 @@ func TestBuildClaudeCodeJob_WorkspaceWithInjectedFiles(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, workspace, nil)
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -320,7 +320,7 @@ func TestBuildClaudeCodeJob_WorkspaceWithInjectedFilesInvalidPath(t *testing.T) 
 		},
 	}
 
-	_, err := builder.Build(task, workspace, nil)
+	_, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
 	if err == nil {
 		t.Fatal("Expected Build() to fail for invalid workspace file path")
 	}
@@ -355,7 +355,7 @@ func TestBuildClaudeCodeJob_CustomImageWithWorkspace(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, workspace, nil)
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -433,7 +433,7 @@ func TestBuildClaudeCodeJob_WorkspaceWithSecretRefPersistsCredentialHelper(t *te
 		},
 	}
 
-	job, err := builder.Build(task, workspace, nil)
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -481,7 +481,7 @@ func TestBuildClaudeCodeJob_EnterpriseWorkspaceSetsGHHostAndEnterpriseToken(t *t
 		},
 	}
 
-	job, err := builder.Build(task, workspace, nil)
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -556,7 +556,7 @@ func TestBuildClaudeCodeJob_GithubComWorkspaceUsesGHToken(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, workspace, nil)
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -603,7 +603,7 @@ func TestBuildCodexJob_DefaultImage(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil, nil)
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -687,7 +687,7 @@ func TestBuildCodexJob_CustomImage(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil, nil)
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -731,7 +731,7 @@ func TestBuildCodexJob_WithWorkspace(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, workspace, nil)
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -794,7 +794,7 @@ func TestBuildCodexJob_OAuthCredentials(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil, nil)
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -844,7 +844,7 @@ func TestBuildGeminiJob_DefaultImage(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil, nil)
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -931,7 +931,7 @@ func TestBuildGeminiJob_CustomImage(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil, nil)
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -975,7 +975,7 @@ func TestBuildGeminiJob_WithWorkspace(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, workspace, nil)
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1041,7 +1041,7 @@ func TestBuildGeminiJob_OAuthCredentials(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil, nil)
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1094,7 +1094,7 @@ func TestBuildOpenCodeJob_DefaultImage(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil, nil)
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1184,7 +1184,7 @@ func TestBuildOpenCodeJob_CustomImage(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil, nil)
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1228,7 +1228,7 @@ func TestBuildOpenCodeJob_WithWorkspace(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, workspace, nil)
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1297,7 +1297,7 @@ func TestBuildOpenCodeJob_OAuthCredentials(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil, nil)
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1352,7 +1352,7 @@ func TestBuildClaudeCodeJob_UnsupportedType(t *testing.T) {
 		},
 	}
 
-	_, err := builder.Build(task, nil, nil)
+	_, err := builder.Build(task, nil, nil, task.Spec.Prompt)
 	if err == nil {
 		t.Fatal("Expected error for unsupported agent type, got nil")
 	}
@@ -1389,7 +1389,7 @@ func TestBuildJob_PodOverridesResources(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil, nil)
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1434,7 +1434,7 @@ func TestBuildJob_PodOverridesActiveDeadlineSeconds(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil, nil)
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1471,7 +1471,7 @@ func TestBuildJob_PodOverridesEnv(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil, nil)
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1522,7 +1522,7 @@ func TestBuildJob_PodOverridesEnvBuiltinPrecedence(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil, nil)
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1568,7 +1568,7 @@ func TestBuildJob_PodOverridesNodeSelector(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil, nil)
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1616,7 +1616,7 @@ func TestBuildJob_PodOverridesAllFields(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil, nil)
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1668,7 +1668,7 @@ func TestBuildJob_NoPodOverrides(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil, nil)
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1712,7 +1712,7 @@ func TestBuildJob_AgentConfigAgentsMD(t *testing.T) {
 		AgentsMD: "Follow TDD. Always write tests first.",
 	}
 
-	job, err := builder.Build(task, nil, agentConfig)
+	job, err := builder.Build(task, nil, agentConfig, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1773,7 +1773,7 @@ func TestBuildJob_AgentConfigPlugins(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil, agentConfig)
+	job, err := builder.Build(task, nil, agentConfig, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1876,7 +1876,7 @@ func TestBuildJob_AgentConfigFull(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil, agentConfig)
+	job, err := builder.Build(task, nil, agentConfig, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1940,7 +1940,7 @@ func TestBuildJob_AgentConfigWithWorkspace(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, workspace, agentConfig)
+	job, err := builder.Build(task, workspace, agentConfig, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -1988,7 +1988,7 @@ func TestBuildJob_AgentConfigWithoutWorkspace(t *testing.T) {
 		AgentsMD: "Follow TDD",
 	}
 
-	job, err := builder.Build(task, nil, agentConfig)
+	job, err := builder.Build(task, nil, agentConfig, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -2049,7 +2049,7 @@ func TestBuildJob_AgentConfigCodex(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil, agentConfig)
+	job, err := builder.Build(task, nil, agentConfig, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -2115,7 +2115,7 @@ func TestBuildJob_AgentConfigGemini(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil, agentConfig)
+	job, err := builder.Build(task, nil, agentConfig, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -2184,7 +2184,7 @@ func TestBuildJob_AgentConfigOpenCode(t *testing.T) {
 		},
 	}
 
-	job, err := builder.Build(task, nil, agentConfig)
+	job, err := builder.Build(task, nil, agentConfig, task.Spec.Prompt)
 	if err != nil {
 		t.Fatalf("Build() returned error: %v", err)
 	}
@@ -2283,7 +2283,7 @@ func TestBuildJob_AgentConfigPluginNamePathTraversal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := builder.Build(task, nil, tt.config)
+			_, err := builder.Build(task, nil, tt.config, task.Spec.Prompt)
 			if err == nil {
 				t.Fatal("Expected Build() to fail for path traversal, got nil")
 			}

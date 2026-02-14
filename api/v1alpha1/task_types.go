@@ -27,6 +27,8 @@ const (
 	TaskPhaseSucceeded TaskPhase = "Succeeded"
 	// TaskPhaseFailed means the Task has failed.
 	TaskPhaseFailed TaskPhase = "Failed"
+	// TaskPhaseWaiting means the Task is waiting for dependencies.
+	TaskPhaseWaiting TaskPhase = "Waiting"
 )
 
 // SecretReference refers to a Secret containing credentials.
@@ -102,6 +104,10 @@ type TaskSpec struct {
 	// +optional
 	AgentConfigRef *AgentConfigReference `json:"agentConfigRef,omitempty"`
 
+	// DependsOn lists Task names that must succeed before this Task starts.
+	// +optional
+	DependsOn []string `json:"dependsOn,omitempty"`
+
 	// TTLSecondsAfterFinished limits the lifetime of a Task that has finished
 	// execution (either Succeeded or Failed). If set, the Task will be
 	// automatically deleted after the given number of seconds once it reaches
@@ -155,6 +161,7 @@ type TaskStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Type",type=string,JSONPath=`.spec.type`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Depends On",type=string,JSONPath=`.spec.dependsOn`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Task is the Schema for the tasks API.

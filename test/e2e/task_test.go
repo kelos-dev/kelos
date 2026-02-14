@@ -264,6 +264,64 @@ var _ = Describe("Task with workspace and secretRef", func() {
 	})
 })
 
+var _ = Describe("Task dependency chain", func() {
+	f := framework.NewFramework("deps")
+
+	It("should start dependent task only after dependency succeeds", func() {
+		By("creating OAuth credentials secret")
+		f.CreateSecret("claude-credentials",
+			"CLAUDE_CODE_OAUTH_TOKEN="+oauthToken)
+
+		By("creating Task A")
+		f.CreateTask(&axonv1alpha1.Task{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "dep-chain-a",
+			},
+			Spec: axonv1alpha1.TaskSpec{
+				Type:   "claude-code",
+				Model:  testModel,
+				Prompt: "Print 'Task A done' to stdout",
+				Credentials: axonv1alpha1.Credentials{
+					Type:      axonv1alpha1.CredentialTypeOAuth,
+					SecretRef: axonv1alpha1.SecretReference{Name: "claude-credentials"},
+				},
+			},
+		})
+
+		By("creating Task B that depends on Task A")
+		f.CreateTask(&axonv1alpha1.Task{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "dep-chain-b",
+			},
+			Spec: axonv1alpha1.TaskSpec{
+				Type:      "claude-code",
+				Model:     testModel,
+				Prompt:    "Print 'Task B done' to stdout",
+				DependsOn: []string{"dep-chain-a"},
+				Credentials: axonv1alpha1.Credentials{
+					Type:      axonv1alpha1.CredentialTypeOAuth,
+					SecretRef: axonv1alpha1.SecretReference{Name: "claude-credentials"},
+				},
+			},
+		})
+
+		By("verifying Task B enters Waiting phase while Task A runs")
+		Eventually(func() string {
+			return f.GetTaskPhase("dep-chain-b")
+		}, 30*time.Second, time.Second).Should(Equal("Waiting"))
+
+		By("waiting for Task A to complete")
+		f.WaitForJobCreation("dep-chain-a")
+		f.WaitForJobCompletion("dep-chain-a")
+		Expect(f.GetTaskPhase("dep-chain-a")).To(Equal("Succeeded"))
+
+		By("waiting for Task B to start and complete after Task A succeeds")
+		f.WaitForJobCreation("dep-chain-b")
+		f.WaitForJobCompletion("dep-chain-b")
+		Expect(f.GetTaskPhase("dep-chain-b")).To(Equal("Succeeded"))
+	})
+})
+
 var _ = Describe("Task cleanup on failure", func() {
 	f := framework.NewFramework("cleanup")
 

@@ -93,6 +93,10 @@ type TaskTemplate struct {
 	// +optional
 	AgentConfigRef *AgentConfigReference `json:"agentConfigRef,omitempty"`
 
+	// DependsOn lists Task names that spawned Tasks depend on.
+	// +optional
+	DependsOn []string `json:"dependsOn,omitempty"`
+
 	// PromptTemplate is a Go text/template for rendering the task prompt.
 	// Available variables: {{.ID}}, {{.Number}}, {{.Title}}, {{.Body}}, {{.URL}}, {{.Comments}}, {{.Labels}}, {{.Kind}}, {{.Time}}, {{.Schedule}}.
 	// +optional

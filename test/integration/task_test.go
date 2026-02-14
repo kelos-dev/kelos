@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -1720,6 +1721,393 @@ var _ = Describe("Task Controller", func() {
 
 			failedEvent := findEvent(ns.Name, task.Name, "TaskFailed")
 			Expect(failedEvent.Type).To(Equal(corev1.EventTypeWarning))
+		})
+	})
+
+	Context("When creating a Task with dependsOn", func() {
+		It("Should wait for dependency to succeed before creating Job", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-task-depends-on",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with API key")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+			By("Creating dependency Task A")
+			taskA := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "task-a",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "Do something",
+					Credentials: axonv1alpha1.Credentials{
+						Type:      axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{Name: "anthropic-api-key"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, taskA)).Should(Succeed())
+
+			By("Creating Task B that depends on Task A")
+			taskB := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "task-b",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:      "claude-code",
+					Prompt:    "Continue work",
+					DependsOn: []string{"task-a"},
+					Credentials: axonv1alpha1.Credentials{
+						Type:      axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{Name: "anthropic-api-key"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, taskB)).Should(Succeed())
+
+			By("Verifying Task B enters Waiting phase")
+			taskBKey := types.NamespacedName{Name: "task-b", Namespace: ns.Name}
+			Eventually(func() axonv1alpha1.TaskPhase {
+				var t axonv1alpha1.Task
+				if err := k8sClient.Get(ctx, taskBKey, &t); err != nil {
+					return ""
+				}
+				return t.Status.Phase
+			}, timeout, interval).Should(Equal(axonv1alpha1.TaskPhaseWaiting))
+
+			By("Verifying no Job is created for Task B while dependency is not met")
+			jobBKey := types.NamespacedName{Name: "task-b", Namespace: ns.Name}
+			Consistently(func() bool {
+				var job batchv1.Job
+				return k8sClient.Get(ctx, jobBKey, &job) != nil
+			}, 3*time.Second, interval).Should(BeTrue())
+
+			By("Simulating Task A succeeding (update its Job status)")
+			jobAKey := types.NamespacedName{Name: "task-a", Namespace: ns.Name}
+			var jobA batchv1.Job
+			Eventually(func() bool {
+				return k8sClient.Get(ctx, jobAKey, &jobA) == nil
+			}, timeout, interval).Should(BeTrue())
+
+			Eventually(func() error {
+				if err := k8sClient.Get(ctx, jobAKey, &jobA); err != nil {
+					return err
+				}
+				jobA.Status.Active = 1
+				return k8sClient.Status().Update(ctx, &jobA)
+			}, timeout, interval).Should(Succeed())
+
+			Eventually(func() error {
+				if err := k8sClient.Get(ctx, jobAKey, &jobA); err != nil {
+					return err
+				}
+				jobA.Status.Active = 0
+				jobA.Status.Succeeded = 1
+				return k8sClient.Status().Update(ctx, &jobA)
+			}, timeout, interval).Should(Succeed())
+
+			By("Verifying Task A reaches Succeeded")
+			taskAKey := types.NamespacedName{Name: "task-a", Namespace: ns.Name}
+			Eventually(func() axonv1alpha1.TaskPhase {
+				var t axonv1alpha1.Task
+				if err := k8sClient.Get(ctx, taskAKey, &t); err != nil {
+					return ""
+				}
+				return t.Status.Phase
+			}, timeout, interval).Should(Equal(axonv1alpha1.TaskPhaseSucceeded))
+
+			By("Verifying Task B Job is eventually created")
+			Eventually(func() bool {
+				var job batchv1.Job
+				return k8sClient.Get(ctx, jobBKey, &job) == nil
+			}, 2*timeout, interval).Should(BeTrue())
+		})
+	})
+
+	Context("When a dependency Task fails", func() {
+		It("Should fail the dependent Task", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-task-dep-fail",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with API key")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+			By("Creating dependency Task A")
+			taskA := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "dep-task-a",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "Do something",
+					Credentials: axonv1alpha1.Credentials{
+						Type:      axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{Name: "anthropic-api-key"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, taskA)).Should(Succeed())
+
+			By("Creating Task B that depends on Task A")
+			taskB := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "dep-task-b",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:      "claude-code",
+					Prompt:    "Continue work",
+					DependsOn: []string{"dep-task-a"},
+					Credentials: axonv1alpha1.Credentials{
+						Type:      axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{Name: "anthropic-api-key"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, taskB)).Should(Succeed())
+
+			By("Simulating Task A failure")
+			jobAKey := types.NamespacedName{Name: "dep-task-a", Namespace: ns.Name}
+			var jobA batchv1.Job
+			Eventually(func() bool {
+				return k8sClient.Get(ctx, jobAKey, &jobA) == nil
+			}, timeout, interval).Should(BeTrue())
+
+			Eventually(func() error {
+				if err := k8sClient.Get(ctx, jobAKey, &jobA); err != nil {
+					return err
+				}
+				jobA.Status.Failed = 1
+				return k8sClient.Status().Update(ctx, &jobA)
+			}, timeout, interval).Should(Succeed())
+
+			By("Verifying Task A reaches Failed")
+			taskAKey := types.NamespacedName{Name: "dep-task-a", Namespace: ns.Name}
+			Eventually(func() axonv1alpha1.TaskPhase {
+				var t axonv1alpha1.Task
+				if err := k8sClient.Get(ctx, taskAKey, &t); err != nil {
+					return ""
+				}
+				return t.Status.Phase
+			}, timeout, interval).Should(Equal(axonv1alpha1.TaskPhaseFailed))
+
+			By("Verifying Task B transitions to Failed with dependency message")
+			taskBKey := types.NamespacedName{Name: "dep-task-b", Namespace: ns.Name}
+			Eventually(func() axonv1alpha1.TaskPhase {
+				var t axonv1alpha1.Task
+				if err := k8sClient.Get(ctx, taskBKey, &t); err != nil {
+					return ""
+				}
+				return t.Status.Phase
+			}, 2*timeout, interval).Should(Equal(axonv1alpha1.TaskPhaseFailed))
+
+			var taskBFinal axonv1alpha1.Task
+			Expect(k8sClient.Get(ctx, taskBKey, &taskBFinal)).Should(Succeed())
+			Expect(taskBFinal.Status.Message).To(ContainSubstring("dep-task-a"))
+		})
+	})
+
+	Context("When creating Tasks with circular dependencies", func() {
+		It("Should fail with cycle detection message", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-task-cycle",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with API key")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+			By("Creating Task A that depends on Task B")
+			taskA := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "cycle-task-a",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:      "claude-code",
+					Prompt:    "Task A",
+					DependsOn: []string{"cycle-task-b"},
+					Credentials: axonv1alpha1.Credentials{
+						Type:      axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{Name: "anthropic-api-key"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, taskA)).Should(Succeed())
+
+			By("Creating Task B that depends on Task A")
+			taskB := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "cycle-task-b",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:      "claude-code",
+					Prompt:    "Task B",
+					DependsOn: []string{"cycle-task-a"},
+					Credentials: axonv1alpha1.Credentials{
+						Type:      axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{Name: "anthropic-api-key"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, taskB)).Should(Succeed())
+
+			By("Verifying at least one task fails with circular dependency message")
+			Eventually(func() bool {
+				var tA axonv1alpha1.Task
+				var tB axonv1alpha1.Task
+				k8sClient.Get(ctx, types.NamespacedName{Name: "cycle-task-a", Namespace: ns.Name}, &tA)
+				k8sClient.Get(ctx, types.NamespacedName{Name: "cycle-task-b", Namespace: ns.Name}, &tB)
+				aFailed := tA.Status.Phase == axonv1alpha1.TaskPhaseFailed && tA.Status.Message != "" && strings.Contains(tA.Status.Message, "Circular dependency")
+				bFailed := tB.Status.Phase == axonv1alpha1.TaskPhaseFailed && tB.Status.Message != "" && strings.Contains(tB.Status.Message, "Circular dependency")
+				return aFailed || bFailed
+			}, 2*timeout, interval).Should(BeTrue())
+		})
+	})
+
+	Context("When creating a Task with prompt template referencing dependency outputs", func() {
+		It("Should resolve template in Job prompt", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-task-prompt-tmpl",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with API key")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+			By("Creating Task A and simulating it succeeding with outputs")
+			taskA := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "tmpl-task-a",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "Generate outputs",
+					Credentials: axonv1alpha1.Credentials{
+						Type:      axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{Name: "anthropic-api-key"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, taskA)).Should(Succeed())
+
+			jobAKey := types.NamespacedName{Name: "tmpl-task-a", Namespace: ns.Name}
+			var jobA batchv1.Job
+			Eventually(func() bool {
+				return k8sClient.Get(ctx, jobAKey, &jobA) == nil
+			}, timeout, interval).Should(BeTrue())
+
+			Eventually(func() error {
+				if err := k8sClient.Get(ctx, jobAKey, &jobA); err != nil {
+					return err
+				}
+				jobA.Status.Succeeded = 1
+				return k8sClient.Status().Update(ctx, &jobA)
+			}, timeout, interval).Should(Succeed())
+
+			taskAKey := types.NamespacedName{Name: "tmpl-task-a", Namespace: ns.Name}
+			Eventually(func() axonv1alpha1.TaskPhase {
+				var t axonv1alpha1.Task
+				if err := k8sClient.Get(ctx, taskAKey, &t); err != nil {
+					return ""
+				}
+				return t.Status.Phase
+			}, timeout, interval).Should(Equal(axonv1alpha1.TaskPhaseSucceeded))
+
+			By("Manually setting outputs on Task A")
+			Eventually(func() error {
+				var t axonv1alpha1.Task
+				if err := k8sClient.Get(ctx, taskAKey, &t); err != nil {
+					return err
+				}
+				t.Status.Outputs = []string{"branch: feature-123", "pr: https://github.com/org/repo/pull/1"}
+				return k8sClient.Status().Update(ctx, &t)
+			}, timeout, interval).Should(Succeed())
+
+			By("Creating Task B with prompt template")
+			taskB := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "tmpl-task-b",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:      "claude-code",
+					Prompt:    `Review outputs: {{ index .Deps "tmpl-task-a" "Outputs" }}`,
+					DependsOn: []string{"tmpl-task-a"},
+					Credentials: axonv1alpha1.Credentials{
+						Type:      axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{Name: "anthropic-api-key"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, taskB)).Should(Succeed())
+
+			By("Verifying Task B Job is created with resolved prompt")
+			jobBKey := types.NamespacedName{Name: "tmpl-task-b", Namespace: ns.Name}
+			var jobB batchv1.Job
+			Eventually(func() bool {
+				return k8sClient.Get(ctx, jobBKey, &jobB) == nil
+			}, 2*timeout, interval).Should(BeTrue())
+
+			mainContainer := jobB.Spec.Template.Spec.Containers[0]
+			Expect(mainContainer.Args[0]).To(ContainSubstring("branch: feature-123"))
 		})
 	})
 })

@@ -85,17 +85,18 @@ func NewJobBuilder() *JobBuilder {
 	}
 }
 
-// Build creates a Job for the given Task.
-func (b *JobBuilder) Build(task *axonv1alpha1.Task, workspace *axonv1alpha1.WorkspaceSpec, agentConfig *axonv1alpha1.AgentConfigSpec) (*batchv1.Job, error) {
+// Build creates a Job for the given Task. The prompt parameter is the
+// resolved prompt text (which may have been expanded from a template).
+func (b *JobBuilder) Build(task *axonv1alpha1.Task, workspace *axonv1alpha1.WorkspaceSpec, agentConfig *axonv1alpha1.AgentConfigSpec, prompt string) (*batchv1.Job, error) {
 	switch task.Spec.Type {
 	case AgentTypeClaudeCode:
-		return b.buildAgentJob(task, workspace, agentConfig, b.ClaudeCodeImage, b.ClaudeCodeImagePullPolicy)
+		return b.buildAgentJob(task, workspace, agentConfig, b.ClaudeCodeImage, b.ClaudeCodeImagePullPolicy, prompt)
 	case AgentTypeCodex:
-		return b.buildAgentJob(task, workspace, agentConfig, b.CodexImage, b.CodexImagePullPolicy)
+		return b.buildAgentJob(task, workspace, agentConfig, b.CodexImage, b.CodexImagePullPolicy, prompt)
 	case AgentTypeGemini:
-		return b.buildAgentJob(task, workspace, agentConfig, b.GeminiImage, b.GeminiImagePullPolicy)
+		return b.buildAgentJob(task, workspace, agentConfig, b.GeminiImage, b.GeminiImagePullPolicy, prompt)
 	case AgentTypeOpenCode:
-		return b.buildAgentJob(task, workspace, agentConfig, b.OpenCodeImage, b.OpenCodeImagePullPolicy)
+		return b.buildAgentJob(task, workspace, agentConfig, b.OpenCodeImage, b.OpenCodeImagePullPolicy, prompt)
 	default:
 		return nil, fmt.Errorf("unsupported agent type: %s", task.Spec.Type)
 	}
@@ -138,7 +139,7 @@ func oauthEnvVar(agentType string) string {
 }
 
 // buildAgentJob creates a Job for the given agent type.
-func (b *JobBuilder) buildAgentJob(task *axonv1alpha1.Task, workspace *axonv1alpha1.WorkspaceSpec, agentConfig *axonv1alpha1.AgentConfigSpec, defaultImage string, pullPolicy corev1.PullPolicy) (*batchv1.Job, error) {
+func (b *JobBuilder) buildAgentJob(task *axonv1alpha1.Task, workspace *axonv1alpha1.WorkspaceSpec, agentConfig *axonv1alpha1.AgentConfigSpec, defaultImage string, pullPolicy corev1.PullPolicy, prompt string) (*batchv1.Job, error) {
 	image := defaultImage
 	if task.Spec.Image != "" {
 		image = task.Spec.Image
@@ -233,7 +234,7 @@ func (b *JobBuilder) buildAgentJob(task *axonv1alpha1.Task, workspace *axonv1alp
 		Image:           image,
 		ImagePullPolicy: pullPolicy,
 		Command:         []string{"/axon_entrypoint.sh"},
-		Args:            []string{task.Spec.Prompt},
+		Args:            []string{prompt},
 		Env:             envVars,
 	}
 

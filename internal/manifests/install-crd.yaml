@@ -125,6 +125,10 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
+    - jsonPath: .spec.dependsOn
+      name: Depends On
+      priority: 1
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -184,6 +188,12 @@ spec:
                 - secretRef
                 - type
                 type: object
+              dependsOn:
+                description: DependsOn lists Task names that must succeed before this
+                  Task starts.
+                items:
+                  type: string
+                type: array
               image:
                 description: |-
                   Image optionally overrides the default agent container image.
@@ -618,6 +628,12 @@ spec:
                     - secretRef
                     - type
                     type: object
+                  dependsOn:
+                    description: DependsOn lists Task names that spawned Tasks depend
+                      on.
+                    items:
+                      type: string
+                    type: array
                   image:
                     description: |-
                       Image optionally overrides the default agent container image.

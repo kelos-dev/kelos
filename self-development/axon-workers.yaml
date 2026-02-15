@@ -29,6 +29,7 @@ spec:
           cpu: "1"
           memory: "2Gi"
           ephemeral-storage: "4Gi"
+    branch: "axon-task-{{.Number}}"
     agentConfigRef:
       name: axon-dev-agent
     promptTemplate: |
@@ -42,9 +43,9 @@ spec:
         - gh pr edit <number> --add-label generated-by-axon --add-label ok-to-test
 
       Task:
-      - 0. Set up your working branch axon-task-{{.Number}}. Run this exactly:
+      - 0. Set up your working branch. Run this exactly:
         ```
-        git fetch --unshallow; git fetch origin axon-task-{{.Number}} && git checkout -B axon-task-{{.Number}} origin/axon-task-{{.Number}} && git rebase main || git checkout -b axon-task-{{.Number}} main
+        git fetch --unshallow || true; git rebase main
         ```
       - 1. Check if a PR already exists for branch axon-task-{{.Number}}.
 

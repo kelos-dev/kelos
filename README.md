@@ -14,7 +14,7 @@ Axon is built on four main primitives that enable sophisticated agent orchestrat
 
 1.  **Tasks**: Ephemeral units of work that wrap an AI agent run.
 2.  **Workspaces**: Persistent or ephemeral environments (git repos) where agents operate.
-3.  **AgentConfigs**: Reusable bundles of agent instructions (`AGENTS.md`, `CLAUDE.md`) and plugins (skills and agents).
+3.  **AgentConfigs**: Reusable bundles of agent instructions (`AGENTS.md`, `CLAUDE.md`), plugins (skills and agents), and MCP servers.
 4.  **TaskSpawners**: Orchestration engines that react to external triggers (GitHub, Cron) to automatically manage agent lifecycles.
 
 ## Demo
@@ -56,7 +56,7 @@ See [Examples](#examples) for a full autonomous self-development pipeline.
 - [Examples](#examples)
   - [Run against a git repo](#run-against-a-git-repo)
   - [Create PRs automatically](#create-prs-automatically)
-  - [Inject agent instructions and plugins](#inject-agent-instructions-and-plugins)
+  - [Inject agent instructions, plugins, and MCP servers](#inject-agent-instructions-plugins-and-mcp-servers)
   - [Auto-fix GitHub issues with TaskSpawner](#auto-fix-github-issues-with-taskspawner)
   - [Run tasks on a schedule (Cron)](#run-tasks-on-a-schedule-cron)
   - [Chain tasks with dependencies](#chain-tasks-with-dependencies)
@@ -75,11 +75,11 @@ See [Examples](#examples) for a full autonomous self-development pipeline.
 
 AI coding agents are evolving from interactive CLI tools into autonomous background workers. Axon provides the necessary infrastructure to manage this transition at scale.
 
-- **Orchestration, not just execution** — Don't just run an agent; manage its entire lifecycle. Chain tasks with `dependsOn` and pass results (branch names, PR URLs) between pipeline stages. Use `TaskSpawner` to build event-driven workers that react to GitHub issues, PRs, or schedules.
+- **Orchestration, not just execution** — Don't just run an agent; manage its entire lifecycle. Chain tasks with `dependsOn` and pass results (branch names, PR URLs, token usage) between pipeline stages. Use `TaskSpawner` to build event-driven workers that react to GitHub issues, PRs, or schedules.
 - **Host-isolated autonomy** — Each task runs in an isolated, ephemeral Pod with a freshly cloned git workspace. Agents have no access to your host machine — use [scoped tokens and branch protection](#security-considerations) to control repository access.
 - **Standardized Interface** — Plug in any agent (Claude, Codex, Gemini, OpenCode, or your own) using a simple [container interface](docs/agent-image-interface.md). Axon handles credential injection, workspace management, and Kubernetes plumbing.
 - **Scalable Parallelism** — Fan out agents across multiple repositories. Kubernetes handles scheduling, resource management, and queueing — scale is limited by your cluster capacity and API provider quotas.
-- **Observable & CI-Native** — Every agent run is a first-class Kubernetes resource with deterministic outputs (branch names, PR URLs) captured into status. Monitor via `kubectl`, manage via the `axon` CLI or declarative YAML (GitOps-ready), and integrate with ArgoCD or GitHub Actions.
+- **Observable & CI-Native** — Every agent run is a first-class Kubernetes resource with deterministic outputs (branch names, PR URLs, commit SHAs, token usage) captured into status. Monitor via `kubectl`, manage via the `axon` CLI or declarative YAML (GitOps-ready), and integrate with ArgoCD or GitHub Actions.
 
 ## How It Works
 
@@ -93,7 +93,7 @@ Axon orchestrates the flow from external events to autonomous execution:
   API (CI/CD, Webhooks) ────┘          └─(Lifecycle)──┴─(Execution)─┴─(Success/Fail)
 ```
 
-You define what needs to be done, and Axon handles the "how" — from cloning the right repo and injecting credentials to running the agent and capturing its outputs (like PR URLs and branch names).
+You define what needs to be done, and Axon handles the "how" — from cloning the right repo and injecting credentials to running the agent and capturing its outputs (branch names, commit SHAs, PR URLs, and token usage).
 
 <details>
 <summary>TaskSpawner — Automatic Task Creation from External Sources</summary>
@@ -289,9 +289,9 @@ axon run -p "Fix the bug described in issue #42 and open a PR with the fix"
 
 The `gh` CLI and `GITHUB_TOKEN` are available inside the agent container, so the agent can push branches and create PRs autonomously.
 
-### Inject agent instructions and plugins
+### Inject agent instructions, plugins, and MCP servers
 
-Use `AgentConfig` to bundle project-wide instructions (like `AGENTS.md` or `CLAUDE.md`) and Claude Code plugins (skills and agents). Tasks reference it via `agentConfigRef`:
+Use `AgentConfig` to bundle project-wide instructions (like `AGENTS.md` or `CLAUDE.md`), Claude Code plugins (skills and agents), and MCP servers. Tasks reference it via `agentConfigRef`:
 
 ```yaml
 apiVersion: axon.io/v1alpha1
@@ -320,6 +320,16 @@ spec:
             description: Code review specialist
             ---
             You are a code reviewer...
+  mcpServers:
+    - name: github
+      type: http
+      url: https://api.githubcopilot.com/mcp/
+      headers:
+        Authorization: "Bearer <token>"
+    - name: my-tools
+      type: stdio
+      command: npx
+      args: ["-y", "@my-org/mcp-tools"]
 ```
 
 Reference it from a Task:
@@ -349,7 +359,9 @@ Or via the CLI:
 axon create agentconfig my-config \
   --agents-md @AGENTS.md \
   --skill deploy=@skills/deploy.md \
-  --agent reviewer=@agents/reviewer.md
+  --agent reviewer=@agents/reviewer.md \
+  --mcp 'github={"type":"http","url":"https://api.githubcopilot.com/mcp/"}' \
+  --mcp 'my-tools=@mcp/my-tools.json'
 
 # Reference it when running a task
 axon run -p "Fix the bug" --agent-config my-config
@@ -357,6 +369,7 @@ axon run -p "Fix the bug" --agent-config my-config
 
 - `agentsMD` is written to `~/.claude/CLAUDE.md` (user-level, additive with the repo's own instructions like `AGENTS.md` or `CLAUDE.md`).
 - `plugins` are mounted as plugin directories and passed via `--plugin-dir`.
+- `mcpServers` are written to the agent's native MCP configuration (e.g., `~/.claude.json` for Claude Code, `~/.codex/config.toml` for Codex, `~/.gemini/settings.json` for Gemini). Supports `stdio`, `http`, and `sse` transport types.
 
 ### Auto-fix GitHub issues with TaskSpawner
 
@@ -559,6 +572,13 @@ The [`examples/`](examples/) directory contains self-contained, ready-to-apply Y
 | `spec.plugins[].skills[].content` | Skill content (markdown with frontmatter) | Yes (per skill) |
 | `spec.plugins[].agents[].name` | Agent name (becomes `agents/<name>.md`) | Yes (per agent) |
 | `spec.plugins[].agents[].content` | Agent content (markdown with frontmatter) | Yes (per agent) |
+| `spec.mcpServers[].name` | MCP server name (used as key in agent config) | Yes (per server) |
+| `spec.mcpServers[].type` | Transport type: `stdio`, `http`, or `sse` | Yes (per server) |
+| `spec.mcpServers[].command` | Executable to run (stdio only) | No |
+| `spec.mcpServers[].args` | Command-line arguments (stdio only) | No |
+| `spec.mcpServers[].url` | Server endpoint (http/sse only) | No |
+| `spec.mcpServers[].headers` | HTTP headers (http/sse only) | No |
+| `spec.mcpServers[].env` | Environment variables for server process (stdio only) | No |
 
 </details>
 
@@ -622,8 +642,8 @@ The `promptTemplate` field uses Go `text/template` syntax. Available variables d
 | `status.startTime` | When the Task started running |
 | `status.completionTime` | When the Task completed |
 | `status.message` | Additional information about the current status |
-| `status.outputs` | Lines captured between `AXON_OUTPUTS` markers (branch names, PR URLs) |
-| `status.results` | Parsed key-value map from outputs (e.g., `results.branch`, `results.pr`) |
+| `status.outputs` | Automatically captured outputs: `branch`, `commit`, `base-branch`, `pr`, `cost-usd`, `input-tokens`, `output-tokens` |
+| `status.results` | Parsed key-value map from outputs (e.g., `results.branch`, `results.commit`, `results.pr`, `results.input-tokens`) |
 
 </details>
 

@@ -14,6 +14,8 @@ spec:
     type: oauth
     secretRef:
       name: axon-credentials
+  agentConfigRef:
+    name: axon-dev-agent
   podOverrides:
     resources:
       requests:
@@ -25,11 +27,7 @@ spec:
         memory: 2Gi
         ephemeral-storage: 4Gi
   prompt: |
-    You are a coding agent that works within the ephemeral container environment.
-
-    Pre-checklist:
-    - git config user.name "Gunju Kim"
-    - git config user.email "gjkim042@gmail.com"
+    You are a coding agent.
 
     Task:
     Rebase and squash all commits on PR #${PR_NUMBER} (branch: ${BRANCH}) on top of origin/main.

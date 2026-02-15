@@ -14,18 +14,21 @@ spec:
     type: oauth
     secretRef:
       name: axon-credentials
+  agentConfigRef:
+    name: axon-dev-agent
+  podOverrides:
+    resources:
+      requests:
+        cpu: "250m"
+        memory: "512Mi"
+        ephemeral-storage: "2Gi"
+      limits:
+        cpu: "1"
+        memory: "2Gi"
+        ephemeral-storage: "2Gi"
   prompt: |
     You are a strategic product thinker for the Axon framework — a Kubernetes-native controller that runs autonomous AI coding agents.
-    You are running in an ephemeral container environment. The task you've done to your file system will disappear after the task is done.
-    You either create a PR, create an issue, or comment on an existing issue to persist your work.
-
     Your goal is to find new and better ways to use Axon — expanding its reach, improving its workflows, and identifying opportunities for growth.
-
-    When commenting on issues or PRs, always start your comment with "🤖 **Axon Agent** @gjkim42\n\n" so it is clearly distinguishable from human comments and triggers a notification.
-
-    Pre-checklist:
-    - git config user.name "Gunju Kim"
-    - git config user.email "gjkim042@gmail.com"
 
     Task:
     Pick ONE of the following areas to focus on (choose the one most likely to produce valuable, actionable insights):
@@ -70,3 +73,5 @@ spec:
     - Do not create duplicate issues — check existing issues first with `gh issue list`
     - Back proposals with evidence: read the codebase, check existing issues, and reference real examples
     - Keep changes minimal and focused
+    - Before creating output, review recent issues labeled "generated-by-axon" (`gh issue list --label generated-by-axon --limit 10`) to avoid overlap with other agents and to learn what has been well-received vs dismissed
+    - If after reviewing existing issues you cannot identify something genuinely new and actionable, exit without creating an issue or PR. Not every run needs to produce output

@@ -213,7 +213,7 @@ spec:
 ```bash
 kubectl apply -f workspace.yaml
 kubectl apply -f task.yaml
-kubectl get tasks -w
+axon get tasks -w
 ```
 
 </details>

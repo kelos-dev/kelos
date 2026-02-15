@@ -28,7 +28,7 @@ kubectl apply -f examples/01-simple-task/
 3. **Watch the Task:**
 
 ```bash
-kubectl get tasks -w
+axon get tasks -w
 ```
 
 4. **Stream the agent logs:**

@@ -31,7 +31,7 @@ kubectl apply -f examples/<example-directory>/
 5. Watch the Task progress:
 
 ```bash
-kubectl get tasks -w
+axon get tasks -w
 ```
 
 ## Tips

@@ -34,13 +34,13 @@ kubectl apply -f examples/04-taskspawner-cron/
 5. **Verify the spawner is running:**
 
 ```bash
-kubectl get taskspawners -w
+axon get taskspawners -w
 ```
 
 6. **Watch spawned Tasks after the schedule fires:**
 
 ```bash
-kubectl get tasks -w
+axon get tasks -w
 ```
 
 7. **Cleanup:**

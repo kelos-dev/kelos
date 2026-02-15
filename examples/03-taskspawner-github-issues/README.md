@@ -43,7 +43,7 @@ kubectl apply -f examples/03-taskspawner-github-issues/
 4. **Verify the spawner is running:**
 
 ```bash
-kubectl get taskspawners -w
+axon get taskspawners -w
 ```
 
 5. **Create a test issue** with the `bug` label in your repository. The
@@ -52,7 +52,7 @@ kubectl get taskspawners -w
 6. **Watch spawned Tasks:**
 
 ```bash
-kubectl get tasks -w
+axon get tasks -w
 ```
 
 7. **Cleanup:**

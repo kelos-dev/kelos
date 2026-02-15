@@ -121,7 +121,7 @@ kubectl apply -f self-development/axon-workers.yaml
 **Monitor:**
 ```bash
 # Watch for new tasks being created
-kubectl get tasks -w
+axon get tasks -w
 
 # Check TaskSpawner status
 kubectl get taskspawner axon-workers -o yaml

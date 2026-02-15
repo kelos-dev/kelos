@@ -34,6 +34,7 @@ func newGetCommand(cfg *ClientConfig) *cobra.Command {
 
 func newGetTaskSpawnerCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Command {
 	var output string
+	var watch bool
 
 	cmd := &cobra.Command{
 		Use:     "taskspawner [name]",
@@ -43,6 +44,14 @@ func newGetTaskSpawnerCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Com
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if output != "" && output != "yaml" && output != "json" {
 				return fmt.Errorf("unknown output format %q: must be one of yaml, json", output)
+			}
+
+			if watch && output != "" {
+				return fmt.Errorf("--watch is not supported with --output")
+			}
+
+			if watch && len(args) == 1 {
+				return fmt.Errorf("--watch is only supported when listing resources")
 			}
 
 			if *allNamespaces && len(args) == 1 {
@@ -74,11 +83,16 @@ func newGetTaskSpawnerCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Com
 				}
 			}
 
-			tsList := &axonv1alpha1.TaskSpawnerList{}
 			var listOpts []client.ListOption
 			if !*allNamespaces {
 				listOpts = append(listOpts, client.InNamespace(ns))
 			}
+
+			if watch {
+				return watchTaskSpawners(ctx, cl, listOpts, *allNamespaces)
+			}
+
+			tsList := &axonv1alpha1.TaskSpawnerList{}
 			if err := cl.List(ctx, tsList, listOpts...); err != nil {
 				return fmt.Errorf("listing task spawners: %w", err)
 			}
@@ -97,6 +111,7 @@ func newGetTaskSpawnerCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Com
 	}
 
 	cmd.Flags().StringVarP(&output, "output", "o", "", "Output format (yaml or json)")
+	cmd.Flags().BoolVarP(&watch, "watch", "w", false, "Watch for changes")
 
 	cmd.ValidArgsFunction = completeTaskSpawnerNames(cfg)
 	_ = cmd.RegisterFlagCompletionFunc("output", cobra.FixedCompletions([]string{"yaml", "json"}, cobra.ShellCompDirectiveNoFileComp))
@@ -106,6 +121,7 @@ func newGetTaskSpawnerCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Com
 
 func newGetTaskCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Command {
 	var output string
+	var watch bool
 
 	cmd := &cobra.Command{
 		Use:     "task [name]",
@@ -115,6 +131,14 @@ func newGetTaskCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if output != "" && output != "yaml" && output != "json" {
 				return fmt.Errorf("unknown output format %q: must be one of yaml, json", output)
+			}
+
+			if watch && output != "" {
+				return fmt.Errorf("--watch is not supported with --output")
+			}
+
+			if watch && len(args) == 1 {
+				return fmt.Errorf("--watch is only supported when listing resources")
 			}
 
 			if *allNamespaces && len(args) == 1 {
@@ -146,11 +170,16 @@ func newGetTaskCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Command {
 				}
 			}
 
-			taskList := &axonv1alpha1.TaskList{}
 			var listOpts []client.ListOption
 			if !*allNamespaces {
 				listOpts = append(listOpts, client.InNamespace(ns))
 			}
+
+			if watch {
+				return watchTasks(ctx, cl, listOpts, *allNamespaces)
+			}
+
+			taskList := &axonv1alpha1.TaskList{}
 			if err := cl.List(ctx, taskList, listOpts...); err != nil {
 				return fmt.Errorf("listing tasks: %w", err)
 			}
@@ -169,6 +198,7 @@ func newGetTaskCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&output, "output", "o", "", "Output format (yaml or json)")
+	cmd.Flags().BoolVarP(&watch, "watch", "w", false, "Watch for changes")
 
 	cmd.ValidArgsFunction = completeTaskNames(cfg)
 	_ = cmd.RegisterFlagCompletionFunc("output", cobra.FixedCompletions([]string{"yaml", "json"}, cobra.ShellCompDirectiveNoFileComp))
@@ -178,6 +208,7 @@ func newGetTaskCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Command {
 
 func newGetWorkspaceCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Command {
 	var output string
+	var watch bool
 
 	cmd := &cobra.Command{
 		Use:     "workspace [name]",
@@ -187,6 +218,14 @@ func newGetWorkspaceCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Comma
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if output != "" && output != "yaml" && output != "json" {
 				return fmt.Errorf("unknown output format %q: must be one of yaml, json", output)
+			}
+
+			if watch && output != "" {
+				return fmt.Errorf("--watch is not supported with --output")
+			}
+
+			if watch && len(args) == 1 {
+				return fmt.Errorf("--watch is only supported when listing resources")
 			}
 
 			if *allNamespaces && len(args) == 1 {
@@ -218,11 +257,16 @@ func newGetWorkspaceCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Comma
 				}
 			}
 
-			wsList := &axonv1alpha1.WorkspaceList{}
 			var listOpts []client.ListOption
 			if !*allNamespaces {
 				listOpts = append(listOpts, client.InNamespace(ns))
 			}
+
+			if watch {
+				return watchWorkspaces(ctx, cl, listOpts, *allNamespaces)
+			}
+
+			wsList := &axonv1alpha1.WorkspaceList{}
 			if err := cl.List(ctx, wsList, listOpts...); err != nil {
 				return fmt.Errorf("listing workspaces: %w", err)
 			}
@@ -241,6 +285,7 @@ func newGetWorkspaceCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Comma
 	}
 
 	cmd.Flags().StringVarP(&output, "output", "o", "", "Output format (yaml or json)")
+	cmd.Flags().BoolVarP(&watch, "watch", "w", false, "Watch for changes")
 
 	cmd.ValidArgsFunction = completeWorkspaceNames(cfg)
 	_ = cmd.RegisterFlagCompletionFunc("output", cobra.FixedCompletions([]string{"yaml", "json"}, cobra.ShellCompDirectiveNoFileComp))

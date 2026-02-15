@@ -490,6 +490,9 @@ spec:
             - prompt
             - type
             type: object
+            x-kubernetes-validations:
+            - message: Task spec is immutable after creation
+              rule: self == oldSelf
           status:
             description: TaskStatus defines the observed state of Task.
             properties:

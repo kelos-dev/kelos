@@ -47,9 +47,6 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 		yes            bool
 		timeout        string
 		envFlags       []string
-		agentsMD       string
-		skillFlags     []string
-		agentFlags     []string
 		agentConfigRef string
 		dependsOn      []string
 	)
@@ -73,6 +70,9 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 				}
 				if !cmd.Flags().Changed("workspace") && c.Workspace.Name != "" {
 					workspace = c.Workspace.Name
+				}
+				if !cmd.Flags().Changed("agent-config") && c.AgentConfig != "" {
+					agentConfigRef = c.AgentConfig
 				}
 			}
 
@@ -177,63 +177,6 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 						}
 					}
 					workspace = wsName
-				}
-			}
-
-			// Handle AgentConfig: create from flags or use existing reference.
-			if agentConfigRef == "" && (agentsMD != "" || len(skillFlags) > 0 || len(agentFlags) > 0) {
-				acSpec := axonv1alpha1.AgentConfigSpec{}
-
-				resolvedMD, err := resolveContent(agentsMD)
-				if err != nil {
-					return fmt.Errorf("resolving --agents-md: %w", err)
-				}
-				acSpec.AgentsMD = resolvedMD
-
-				if len(skillFlags) > 0 || len(agentFlags) > 0 {
-					plugin := axonv1alpha1.PluginSpec{Name: "axon"}
-
-					for _, s := range skillFlags {
-						sn, sc, err := parseNameContent(s, "skill")
-						if err != nil {
-							return err
-						}
-						plugin.Skills = append(plugin.Skills, axonv1alpha1.SkillDefinition{
-							Name: sn, Content: sc,
-						})
-					}
-
-					for _, a := range agentFlags {
-						an, ac, err := parseNameContent(a, "agent")
-						if err != nil {
-							return err
-						}
-						plugin.Agents = append(plugin.Agents, axonv1alpha1.AgentDefinition{
-							Name: an, Content: ac,
-						})
-					}
-
-					acSpec.Plugins = []axonv1alpha1.PluginSpec{plugin}
-				}
-
-				acName := "agentconfig-" + rand.String(5)
-				acObj := &axonv1alpha1.AgentConfig{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      acName,
-						Namespace: ns,
-					},
-					Spec: acSpec,
-				}
-
-				if dryRun {
-					agentConfigRef = acName
-				} else {
-					acObj.SetGroupVersionKind(axonv1alpha1.GroupVersion.WithKind("AgentConfig"))
-					acCtx := context.Background()
-					if err := cl.Create(acCtx, acObj); err != nil {
-						return fmt.Errorf("creating agent config: %w", err)
-					}
-					agentConfigRef = acName
 				}
 			}
 
@@ -342,9 +285,6 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation prompts")
 	cmd.Flags().StringVar(&timeout, "timeout", "", "maximum execution time for the agent (e.g. 30m, 1h)")
 	cmd.Flags().StringArrayVar(&envFlags, "env", nil, "additional environment variables for the agent (NAME=VALUE)")
-	cmd.Flags().StringVar(&agentsMD, "agents-md", "", "agent instructions (content or @file path)")
-	cmd.Flags().StringArrayVar(&skillFlags, "skill", nil, "skill definition as name=content or name=@file")
-	cmd.Flags().StringArrayVar(&agentFlags, "agent", nil, "agent definition as name=content or name=@file")
 	cmd.Flags().StringVar(&agentConfigRef, "agent-config", "", "name of AgentConfig resource to use")
 	cmd.Flags().StringArrayVar(&dependsOn, "depends-on", nil, "Task names this task depends on (repeatable)")
 
@@ -519,34 +459,4 @@ func ensureCredentialSecret(cfg *ClientConfig, name, key, value string, skipConf
 		return fmt.Errorf("updating credentials secret: %w", err)
 	}
 	return nil
-}
-
-// resolveContent returns the content string directly, or if it starts with "@",
-// reads the content from the referenced file path.
-func resolveContent(s string) (string, error) {
-	if s == "" {
-		return "", nil
-	}
-	if strings.HasPrefix(s, "@") {
-		data, err := os.ReadFile(s[1:])
-		if err != nil {
-			return "", fmt.Errorf("reading file %s: %w", s[1:], err)
-		}
-		return string(data), nil
-	}
-	return s, nil
-}
-
-// parseNameContent splits a "name=content" or "name=@file" string into name
-// and resolved content. The flagName parameter is used in error messages.
-func parseNameContent(s, flagName string) (string, string, error) {
-	parts := strings.SplitN(s, "=", 2)
-	if len(parts) != 2 || parts[0] == "" {
-		return "", "", fmt.Errorf("invalid --%s value %q: must be name=content or name=@file", flagName, s)
-	}
-	content, err := resolveContent(parts[1])
-	if err != nil {
-		return "", "", fmt.Errorf("resolving --%s %q: %w", flagName, parts[0], err)
-	}
-	return parts[0], content, nil
 }

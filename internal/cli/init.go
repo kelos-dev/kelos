@@ -36,6 +36,9 @@ oauthToken: ""
 #   ref: main
 #   token: ""  # GitHub token for git auth and gh CLI (optional)
 
+# Default AgentConfig resource (optional)
+# agentConfig: my-agent-config
+
 # Advanced: provide your own Kubernetes secret directly
 # secret: ""
 # credentialType: oauth

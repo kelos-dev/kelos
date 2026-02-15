@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"context"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -249,6 +250,25 @@ var _ = Describe("workspace CRUD", func() {
 
 		By("verifying workspace is deleted")
 		framework.AxonFail("get", "workspace", "test-ws", "-n", f.Namespace)
+	})
+})
+
+var _ = Describe("agentconfig CRUD", func() {
+	f := framework.NewFramework("ac-crud")
+
+	It("should create and verify an agentconfig", func() {
+		By("creating an agentconfig via CLI")
+		framework.Axon("create", "agentconfig", "test-ac",
+			"-n", f.Namespace,
+			"--agents-md", "Follow TDD",
+		)
+
+		By("verifying agentconfig exists via typed client")
+		ac, err := f.AxonClientset.ApiV1alpha1().AgentConfigs(f.Namespace).Get(
+			context.TODO(), "test-ac", metav1.GetOptions{},
+		)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ac.Spec.AgentsMD).To(Equal("Follow TDD"))
 	})
 })
 

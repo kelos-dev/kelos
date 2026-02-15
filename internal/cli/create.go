@@ -22,6 +22,7 @@ func newCreateCommand(cfg *ClientConfig) *cobra.Command {
 	}
 
 	cmd.AddCommand(newCreateWorkspaceCommand(cfg))
+	cmd.AddCommand(newCreateAgentConfigCommand(cfg))
 
 	return cmd
 }

@@ -18,6 +18,7 @@ type Config struct {
 	Model          string          `json:"model,omitempty"`
 	Namespace      string          `json:"namespace,omitempty"`
 	Workspace      WorkspaceConfig `json:"workspace,omitempty"`
+	AgentConfig    string          `json:"agentConfig,omitempty"`
 }
 
 // WorkspaceConfig holds workspace-related configuration.

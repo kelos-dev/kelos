@@ -22,11 +22,11 @@ spec:
         requests:
           cpu: "250m"
           memory: "512Mi"
-          ephemeral-storage: "1Gi"
+          ephemeral-storage: "2Gi"
         limits:
           cpu: "1"
           memory: "2Gi"
-          ephemeral-storage: "4Gi"
+          ephemeral-storage: "2Gi"
     agentConfigRef:
       name: axon-dev-agent
     promptTemplate: |
@@ -47,7 +47,7 @@ spec:
          - Look for rough edges in the CLI or API
 
       3. **Examples & Use Cases**
-         - Review existing examples in `self-development/`
+         - Review existing examples in `examples/` and `self-development/`
          - Check if example manifests are correct and well-documented
          - Identify missing examples that would help new users
 
@@ -69,4 +69,6 @@ spec:
       - Focus on ONE area per run, do it thoroughly
       - Do not create duplicate issues — check existing issues first with `gh issue list`
       - Keep changes minimal and focused
+      - Before creating output, review recent issues labeled "generated-by-axon" (`gh issue list --label generated-by-axon --limit 10`) to avoid overlap with other agents and to learn what has been well-received vs dismissed
+      - If after reviewing existing issues you cannot identify something genuinely new and actionable, exit without creating an issue or PR. Not every run needs to produce output
   pollInterval: 1m

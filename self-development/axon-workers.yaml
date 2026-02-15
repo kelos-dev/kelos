@@ -9,6 +9,7 @@ spec:
         - actor/axon
       excludeLabels:
         - axon/needs-input
+  maxConcurrency: 3
   taskTemplate:
     workspaceRef:
       name: axon-agent
@@ -45,7 +46,7 @@ spec:
       Task:
       - 0. Set up your working branch. Run this exactly:
         ```
-        git fetch --unshallow || true; git rebase main
+        git fetch --unshallow || true; git fetch origin main; git rebase origin/main
         ```
       - 1. Check if a PR already exists for branch axon-task-{{.Number}}.
 
@@ -72,5 +73,5 @@ spec:
         - Commented on the issue or the PR for more information.
         - You cannot make any progress on the issue, explain why.
       - If you find anything worth considering (e.g. bugs, improvements, follow-up work), create a new issue:
-        - gh issue create --title "<title>" --body "<description>" --label axon/needs-input
+        - gh issue create --title "<title>" --body "<description>" --label generated-by-axon --label axon/needs-input
   pollInterval: 1m

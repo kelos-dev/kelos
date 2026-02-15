@@ -319,11 +319,14 @@ spec:
 Or via the CLI:
 
 ```bash
-# Inject instructions and plugins from local files
-axon run -p "Fix the bug" \
+# Create an AgentConfig from local files
+axon create agentconfig my-config \
   --agents-md @AGENTS.md \
   --skill deploy=@skills/deploy.md \
   --agent reviewer=@agents/reviewer.md
+
+# Reference it when running a task
+axon run -p "Fix the bug" --agent-config my-config
 ```
 
 - `agentsMD` is written to `~/.claude/CLAUDE.md` (user-level, additive with the repo's own instructions like `AGENTS.md` or `CLAUDE.md`).
@@ -622,6 +625,7 @@ If both `name` and `repo` are set, `name` takes precedence. The `--workspace` CL
 | `type` | Default agent type (`claude-code`, `codex`, `gemini`, or `opencode`) |
 | `model` | Default model override |
 | `namespace` | Default Kubernetes namespace |
+| `agentConfig` | Default AgentConfig resource name |
 
 </details>
 
@@ -645,6 +649,7 @@ The `axon` CLI lets you manage the full lifecycle without writing YAML.
 |---------|-------------|
 | `axon run` | Create and run a new Task |
 | `axon create workspace` | Create a Workspace resource |
+| `axon create agentconfig` | Create an AgentConfig resource |
 | `axon get <resource>` | List resources (`tasks`, `taskspawners`, `workspaces`) |
 | `axon delete <resource> <name>` | Delete a resource |
 | `axon logs <task-name> [-f]` | View or stream logs from a task |

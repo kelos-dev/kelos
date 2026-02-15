@@ -215,6 +215,24 @@ func TestLoadConfig_TypeEmpty(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_AgentConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `agentConfig: my-agent-config
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.AgentConfig != "my-agent-config" {
+		t.Errorf("AgentConfig = %q, want %q", cfg.AgentConfig, "my-agent-config")
+	}
+}
+
 func TestLoadConfig_APIKey(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")

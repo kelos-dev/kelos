@@ -6,7 +6,7 @@
 [![Go Version](https://img.shields.io/github/go-mod/go-version/axon-core/axon)](https://github.com/axon-core/axon)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-Axon is an orchestration framework that turns AI coding agents into scalable, autonomous Kubernetes workloads. By providing a standardized interface for agents (Claude Code, OpenAI Codex, Google Gemini) and powerful orchestration primitives, Axon allows you to build complex, self-healing AI development pipelines that run with full autonomy in isolated, ephemeral Pods.
+Axon is an orchestration framework that turns AI coding agents into scalable, autonomous Kubernetes workloads. By providing a standardized interface for agents (Claude Code, OpenAI Codex, Google Gemini, OpenCode) and powerful orchestration primitives, Axon allows you to build complex, self-healing AI development pipelines that run with full autonomy in isolated, ephemeral Pods.
 
 ## Framework Core
 
@@ -77,7 +77,7 @@ AI coding agents are evolving from interactive CLI tools into autonomous backgro
 
 - **Orchestration, not just execution** — Don't just run an agent; manage its entire lifecycle. Chain tasks with `dependsOn` and pass results (branch names, PR URLs) between pipeline stages. Use `TaskSpawner` to build event-driven workers that react to GitHub issues, PRs, or schedules.
 - **Host-isolated autonomy** — Each task runs in an isolated, ephemeral Pod with a freshly cloned git workspace. Agents have no access to your host machine — use [scoped tokens and branch protection](#security-considerations) to control repository access.
-- **Standardized Interface** — Plug in any agent (Claude, Codex, Gemini, or your own) using a simple [container interface](docs/agent-image-interface.md). Axon handles credential injection, workspace management, and Kubernetes plumbing.
+- **Standardized Interface** — Plug in any agent (Claude, Codex, Gemini, OpenCode, or your own) using a simple [container interface](docs/agent-image-interface.md). Axon handles credential injection, workspace management, and Kubernetes plumbing.
 - **Scalable Parallelism** — Fan out agents across multiple repositories. Kubernetes handles scheduling, resource management, and queueing — scale is limited by your cluster capacity and API provider quotas.
 - **Observable & CI-Native** — Every agent run is a first-class Kubernetes resource with deterministic outputs (branch names, PR URLs) captured into status. Monitor via `kubectl`, manage via the `axon` CLI or declarative YAML (GitOps-ready), and integrate with ArgoCD or GitHub Actions.
 

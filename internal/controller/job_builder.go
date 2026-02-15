@@ -162,6 +162,11 @@ func (b *JobBuilder) buildAgentJob(task *axonv1alpha1.Task, workspace *axonv1alp
 		})
 	}
 
+	envVars = append(envVars, corev1.EnvVar{
+		Name:  "AXON_AGENT_TYPE",
+		Value: task.Spec.Type,
+	})
+
 	switch task.Spec.Credentials.Type {
 	case axonv1alpha1.CredentialTypeAPIKey:
 		keyName := apiKeyEnvVar(task.Spec.Type)
@@ -202,6 +207,13 @@ func (b *JobBuilder) buildAgentJob(task *axonv1alpha1.Task, workspace *axonv1alp
 			ghHostEnv := corev1.EnvVar{Name: "GH_HOST", Value: host}
 			envVars = append(envVars, ghHostEnv)
 			workspaceEnvVars = append(workspaceEnvVars, ghHostEnv)
+		}
+
+		if workspace.Ref != "" {
+			envVars = append(envVars, corev1.EnvVar{
+				Name:  "AXON_BASE_BRANCH",
+				Value: workspace.Ref,
+			})
 		}
 	}
 

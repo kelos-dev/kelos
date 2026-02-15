@@ -28,6 +28,13 @@ $ axon init
 #     repo: https://github.com/your-org/your-repo.git
 #     ref: main
 #     token: <github-token>
+
+# Run a task against your repo
+$ axon run -p "Fix the bug described in issue #42 and open a PR with the fix"
+task/task-a5b3c created
+
+# Stream the logs
+$ axon logs task-a5b3c -f
 ```
 
 https://github.com/user-attachments/assets/837cd8d5-4071-42dd-be32-114c649386ff
@@ -154,9 +161,13 @@ axon init
 ### 4. Run Your First Task
 
 ```bash
-axon run -p "Add a hello world program in Python"
-axon logs <task-name> -f
+$ axon run -p "Add a hello world program in Python"
+task/task-r8x2q created
+
+$ axon logs task-r8x2q -f
 ```
+
+The task name (e.g. `task-r8x2q`) is auto-generated. Use `--name` to set a custom name, or `-w` to automatically watch task logs.
 
 The agent clones your repo, makes changes, and can push a branch or open a PR.
 

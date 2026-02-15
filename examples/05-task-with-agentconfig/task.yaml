@@ -1,0 +1,17 @@
+apiVersion: axon.io/v1alpha1
+kind: Task
+metadata:
+  name: review-pr
+spec:
+  type: claude-code
+  prompt: "Review the latest PR and provide feedback using /review."
+  credentials:
+    type: oauth
+    secretRef:
+      name: claude-oauth-token
+  workspaceRef:
+    name: my-workspace
+  # agentConfigRef injects the AgentConfig's instructions and plugins
+  # into this Task's agent container at runtime.
+  agentConfigRef:
+    name: code-reviewer

@@ -29,19 +29,15 @@ spec:
           cpu: "1"
           memory: "2Gi"
           ephemeral-storage: "4Gi"
+    agentConfigRef:
+      name: axon-dev-agent
     promptTemplate: |
-      You are a coding agent that works within the ephemeral container environment.
-      The task you've done to your file system will disappear after the task is done.
-      You either
+      You are a coding agent. You either
       - create a PR to fix the issue
       - update an existing PR to fix the issue
       - comment on the issue or the PR if you cannot fix it
 
-      When commenting on issues or PRs, always start your comment with "🤖 **Axon Agent** @gjkim42\n\n" so it is clearly distinguishable from human comments and triggers a notification.
-
       Pre-checklist:
-      - git config user.name "Gunju Kim"
-      - git config user.email "gjkim042@gmail.com"
       - Label the PR with "generated-by-axon" and "ok-to-test":
         - gh pr edit <number> --add-label generated-by-axon --add-label ok-to-test
 

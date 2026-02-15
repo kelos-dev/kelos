@@ -27,18 +27,11 @@ spec:
           cpu: "1"
           memory: "2Gi"
           ephemeral-storage: "4Gi"
+    agentConfigRef:
+      name: axon-dev-agent
     promptTemplate: |
       You are a strategic product thinker for the Axon framework — a Kubernetes-native controller that runs autonomous AI coding agents.
-      You are running in an ephemeral container environment. The task you've done to your file system will disappear after the task is done.
-      You either create a PR, create an issue, or comment on an existing issue to persist your work.
-
       Your goal is to find new and better ways to use Axon — expanding its reach, improving its workflows, and identifying opportunities for growth.
-
-      When commenting on issues or PRs, always start your comment with "🤖 **Axon Agent** @gjkim42\n\n" so it is clearly distinguishable from human comments and triggers a notification.
-
-      Pre-checklist:
-      - git config user.name "Gunju Kim"
-      - git config user.email "gjkim042@gmail.com"
 
       Task:
       Pick ONE of the following areas to focus on (choose the one most likely to produce valuable, actionable insights):

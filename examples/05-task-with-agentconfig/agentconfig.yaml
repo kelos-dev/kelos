@@ -1,0 +1,27 @@
+apiVersion: axon.io/v1alpha1
+kind: AgentConfig
+metadata:
+  name: code-reviewer
+spec:
+  # agentsMD is written to the agent's instruction file
+  # (e.g., ~/.claude/CLAUDE.md for Claude Code) before the agent starts.
+  # This is additive and does not overwrite the repo's own instruction files.
+  agentsMD: |
+    # Code Review Guidelines
+
+    - Focus on correctness, readability, and security
+    - Flag any OWASP Top 10 vulnerabilities
+    - Suggest tests for untested code paths
+    - Keep feedback actionable and concise
+
+  # plugins defines Claude Code plugins injected via --plugin-dir.
+  # Each plugin can contain skills (slash commands) and agents (sub-agents).
+  # Only applicable to claude-code type agents; other agents ignore this.
+  plugins:
+    - name: reviewer
+      skills:
+        - name: review
+          content: |
+            Review the current PR diff for issues.
+            Focus on: correctness, security, performance, readability.
+            Post a summary as a PR comment using `gh pr comment`.

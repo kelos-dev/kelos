@@ -2519,3 +2519,160 @@ func TestBuildJob_BranchEnvDoesNotMutateWorkspaceEnvVars(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildJob_AxonAgentTypeAlwaysSet(t *testing.T) {
+	tests := []struct {
+		name      string
+		agentType string
+	}{
+		{"claude-code", AgentTypeClaudeCode},
+		{"codex", AgentTypeCodex},
+		{"gemini", AgentTypeGemini},
+		{"opencode", AgentTypeOpenCode},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			builder := NewJobBuilder()
+			task := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-agent-type",
+					Namespace: "default",
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   tt.agentType,
+					Prompt: "Hello",
+					Credentials: axonv1alpha1.Credentials{
+						Type:      axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+					},
+				},
+			}
+
+			job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+			if err != nil {
+				t.Fatalf("Build() returned error: %v", err)
+			}
+
+			container := job.Spec.Template.Spec.Containers[0]
+			found := false
+			for _, env := range container.Env {
+				if env.Name == "AXON_AGENT_TYPE" {
+					found = true
+					if env.Value != tt.agentType {
+						t.Errorf("AXON_AGENT_TYPE: expected %q, got %q", tt.agentType, env.Value)
+					}
+				}
+			}
+			if !found {
+				t.Error("Expected AXON_AGENT_TYPE env var to be set")
+			}
+		})
+	}
+}
+
+func TestBuildJob_AxonBaseBranchSetWhenWorkspaceRefPresent(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-base-branch",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix the code",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &axonv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/example/repo.git",
+		Ref:  "develop",
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+	found := false
+	for _, env := range container.Env {
+		if env.Name == "AXON_BASE_BRANCH" {
+			found = true
+			if env.Value != "develop" {
+				t.Errorf("AXON_BASE_BRANCH: expected %q, got %q", "develop", env.Value)
+			}
+		}
+	}
+	if !found {
+		t.Error("Expected AXON_BASE_BRANCH env var to be set when workspace.Ref is non-empty")
+	}
+}
+
+func TestBuildJob_AxonBaseBranchAbsentWhenRefEmpty(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-base-branch-empty",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix the code",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &axonv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/example/repo.git",
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+	for _, env := range container.Env {
+		if env.Name == "AXON_BASE_BRANCH" {
+			t.Error("AXON_BASE_BRANCH should not be set when workspace.Ref is empty")
+		}
+	}
+}
+
+func TestBuildJob_AxonBaseBranchAbsentWithoutWorkspace(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-base-branch-no-ws",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix the code",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+	for _, env := range container.Env {
+		if env.Name == "AXON_BASE_BRANCH" {
+			t.Error("AXON_BASE_BRANCH should not be set when workspace is nil")
+		}
+	}
+}

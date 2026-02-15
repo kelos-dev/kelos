@@ -50,9 +50,9 @@ if [ -n "${AXON_PLUGIN_DIR:-}" ] && [ -d "${AXON_PLUGIN_DIR}" ]; then
   ARGS+=("--enable" "skills")
 fi
 
-codex "${ARGS[@]}"
-AGENT_EXIT_CODE=$?
+codex "${ARGS[@]}" | tee /tmp/agent-output.jsonl
+AGENT_EXIT_CODE=${PIPESTATUS[0]}
 
-/axon/capture-outputs.sh
+/axon/axon-capture
 
 exit $AGENT_EXIT_CODE

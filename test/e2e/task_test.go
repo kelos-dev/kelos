@@ -148,7 +148,7 @@ var _ = Describe("Task with workspace", func() {
 var _ = Describe("Task output capture", func() {
 	f := framework.NewFramework("output")
 
-	It("should populate Outputs with branch name after task completes", func() {
+	It("should populate Outputs and Results after task completes", func() {
 		By("creating OAuth credentials secret")
 		f.CreateSecret("claude-credentials",
 			"CLAUDE_CODE_OAUTH_TOKEN="+oauthToken)
@@ -172,7 +172,7 @@ var _ = Describe("Task output capture", func() {
 			Spec: axonv1alpha1.TaskSpec{
 				Type:   "claude-code",
 				Model:  testModel,
-				Prompt: "Run 'git branch --show-current' and print the output, then say done",
+				Prompt: "Print 'hello' to stdout",
 				Credentials: axonv1alpha1.Credentials{
 					Type:      axonv1alpha1.CredentialTypeOAuth,
 					SecretRef: axonv1alpha1.SecretReference{Name: "claude-credentials"},
@@ -192,13 +192,28 @@ var _ = Describe("Task output capture", func() {
 
 		By("verifying output markers appear in Pod logs")
 		logs := f.GetJobLogs("outputs-task")
+		GinkgoWriter.Printf("Job logs:\n%s\n", logs)
 		Expect(logs).To(ContainSubstring("---AXON_OUTPUTS_START---"))
 		Expect(logs).To(ContainSubstring("---AXON_OUTPUTS_END---"))
-		Expect(logs).To(ContainSubstring("branch: main"))
 
-		By("verifying Outputs field is populated in Task status")
+		By("verifying Outputs field contains branch, commit, base-branch, and usage")
 		outputs := f.GetTaskOutputs("outputs-task")
 		Expect(outputs).To(ContainSubstring("branch: main"))
+		Expect(outputs).To(MatchRegexp(`commit: [0-9a-f]{40}`))
+		Expect(outputs).To(ContainSubstring("base-branch: main"))
+		Expect(outputs).To(MatchRegexp(`input-tokens: \d+`))
+		Expect(outputs).To(MatchRegexp(`output-tokens: \d+`))
+		Expect(outputs).To(MatchRegexp(`cost-usd: [\d.]+`))
+
+		By("verifying Results map has structured entries")
+		results := f.GetTaskResults("outputs-task")
+		Expect(results).To(HaveKeyWithValue("branch", "main"))
+		Expect(results).To(HaveKey("commit"))
+		Expect(results["commit"]).To(MatchRegexp(`^[0-9a-f]{40}$`))
+		Expect(results).To(HaveKeyWithValue("base-branch", "main"))
+		Expect(results).To(HaveKey("input-tokens"))
+		Expect(results).To(HaveKey("output-tokens"))
+		Expect(results).To(HaveKey("cost-usd"))
 	})
 })
 

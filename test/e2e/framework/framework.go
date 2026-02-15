@@ -300,6 +300,13 @@ func (f *Framework) GetTaskOutputs(name string) string {
 	return strings.Join(task.Status.Outputs, "\n")
 }
 
+// GetTaskResults returns the Results map of a Task.
+func (f *Framework) GetTaskResults(name string) map[string]string {
+	task, err := f.AxonClientset.ApiV1alpha1().Tasks(f.Namespace).Get(context.TODO(), name, metav1.GetOptions{})
+	Expect(err).NotTo(HaveOccurred(), "Failed to get task %s", name)
+	return task.Status.Results
+}
+
 // GetTaskSpawnerPhase returns the phase of a TaskSpawner.
 func (f *Framework) GetTaskSpawnerPhase(name string) string {
 	ts, err := f.AxonClientset.ApiV1alpha1().TaskSpawners(f.Namespace).Get(context.TODO(), name, metav1.GetOptions{})

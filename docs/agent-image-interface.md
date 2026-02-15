@@ -38,6 +38,8 @@ Axon sets the following reserved environment variables on agent containers:
 | `GH_TOKEN` | GitHub token for `gh` CLI (github.com) | When workspace has a `secretRef` and repo is on github.com |
 | `GH_ENTERPRISE_TOKEN` | GitHub token for `gh` CLI (GitHub Enterprise) | When workspace has a `secretRef` and repo is on a GitHub Enterprise host |
 | `GH_HOST` | Hostname for GitHub Enterprise | When repo is on a GitHub Enterprise host |
+| `AXON_AGENT_TYPE` | The agent type (`claude-code`, `codex`, `gemini`, `opencode`) | Always |
+| `AXON_BASE_BRANCH` | The base branch (workspace `ref`) for the task | When workspace has a non-empty `ref` |
 | `AXON_AGENTS_MD` | User-level instructions from AgentConfig | When `agentConfigRef` is set and `agentsMD` is non-empty |
 | `AXON_PLUGIN_DIR` | Path to plugin directory containing skills and agents | When `agentConfigRef` is set and `plugins` is non-empty |
 
@@ -62,7 +64,7 @@ entrypoint script does not need to handle directory changes.
 
 ## Output Capture
 
-After the agent exits, the entrypoint should run `/axon/capture-outputs.sh` to
+After the agent exits, the entrypoint should run `/axon/axon-capture` to
 emit deterministic outputs (branch name, PR URLs) to stdout. The controller
 reads Pod logs and extracts lines between the following markers:
 
@@ -70,6 +72,11 @@ reads Pod logs and extracts lines between the following markers:
 ---AXON_OUTPUTS_START---
 branch: <branch-name>
 pr: https://github.com/org/repo/pull/123
+commit: <sha>
+base-branch: <name>
+input-tokens: <number>
+output-tokens: <number>
+cost-usd: <number>
 ---AXON_OUTPUTS_END---
 ```
 
@@ -78,29 +85,40 @@ these lines in `TaskStatus.Outputs` and also parses them into a
 `TaskStatus.Results` map for structured access. Lines without `: ` are kept
 in Outputs but skipped when building Results.
 
+The `commit` and `base-branch` keys are captured by `axon-capture`.
+Token usage and cost keys (`input-tokens`, `output-tokens`, `cost-usd`) are
+also extracted by `axon-capture`, which reads the agent's JSON output from
+`/tmp/agent-output.jsonl` and uses `AXON_AGENT_TYPE` to parse agent-specific
+formats. All agents emit `input-tokens` and `output-tokens`; `claude-code`
+additionally emits `cost-usd`.
+
 Results can be referenced in dependency prompt templates:
 
 ```
 {{ index .Deps "task-a" "Results" "branch" }}
 ```
 
-The shared script `/axon/capture-outputs.sh` is included in all reference images
-and handles this automatically. Custom images should either:
+The `/axon/axon-capture` binary is included in all reference images and handles
+this automatically. Custom images should either:
 
-1. Include the script and call it after the agent exits, or
+1. Include the binary and call it after the agent exits, or
 2. Emit the markers directly from their entrypoint.
 
 The entrypoint must **not** use `exec` to run the agent, so that the capture
 step runs after the agent exits. Use the following pattern:
 
 ```bash
-<agent> "${ARGS[@]}"
-AGENT_EXIT_CODE=$?
+<agent> "${ARGS[@]}" | tee /tmp/agent-output.jsonl
+AGENT_EXIT_CODE=${PIPESTATUS[0]}
 
-/axon/capture-outputs.sh
+/axon/axon-capture
 
 exit $AGENT_EXIT_CODE
 ```
+
+The `tee` command copies the agent's stdout to `/tmp/agent-output.jsonl` so
+that `axon-capture` can extract token usage or cost information.
+`PIPESTATUS[0]` captures the agent's exit code correctly with `set -uo pipefail`.
 
 Also use `set -uo pipefail` (without `-e`) so the capture script runs even if
 the agent exits non-zero.

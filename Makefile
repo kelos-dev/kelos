@@ -84,6 +84,7 @@ image: ## Build docker images (use WHAT to build specific image).
 	@for dir in $(filter cmd/%,$(or $(WHAT),$(IMAGE_DIRS))); do \
 		GOOS=linux GOARCH=amd64 $(MAKE) build WHAT=$$dir; \
 	done
+	@GOOS=linux GOARCH=amd64 $(MAKE) build WHAT=cmd/axon-capture
 	@for dir in $(or $(WHAT),$(IMAGE_DIRS)); do \
 		docker build -t $(REGISTRY)/$$(basename $$dir):$(VERSION) -f $$dir/Dockerfile .; \
 	done

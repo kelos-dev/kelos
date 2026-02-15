@@ -63,6 +63,25 @@ func TestParseOutputs(t *testing.T) {
 			},
 		},
 		{
+			name: "all output keys including commit, base-branch, and usage",
+			logData: "---AXON_OUTPUTS_START---\nbranch: axon-task-42\n" +
+				"pr: https://github.com/org/repo/pull/42\n" +
+				"commit: abc123def456\n" +
+				"base-branch: main\n" +
+				"input-tokens: 1500\n" +
+				"output-tokens: 800\n" +
+				"cost-usd: 0.025\n---AXON_OUTPUTS_END---\n",
+			expected: []string{
+				"branch: axon-task-42",
+				"pr: https://github.com/org/repo/pull/42",
+				"commit: abc123def456",
+				"base-branch: main",
+				"input-tokens: 1500",
+				"output-tokens: 800",
+				"cost-usd: 0.025",
+			},
+		},
+		{
 			name:     "start marker without end marker",
 			logData:  "---AXON_OUTPUTS_START---\nbranch: broken\n",
 			expected: nil,
@@ -152,6 +171,25 @@ func TestResultsFromOutputs(t *testing.T) {
 			outputs: []string{"message: hello: world"},
 			expected: map[string]string{
 				"message": "hello: world",
+			},
+		},
+		{
+			name: "new output keys in results map",
+			outputs: []string{
+				"branch: axon-task-42",
+				"commit: abc123def456",
+				"base-branch: main",
+				"input-tokens: 1500",
+				"output-tokens: 800",
+				"cost-usd: 0.025",
+			},
+			expected: map[string]string{
+				"branch":        "axon-task-42",
+				"commit":        "abc123def456",
+				"base-branch":   "main",
+				"input-tokens":  "1500",
+				"output-tokens": "800",
+				"cost-usd":      "0.025",
 			},
 		},
 	}

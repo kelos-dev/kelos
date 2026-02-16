@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
 	"text/template"
 	"time"
 
@@ -504,6 +505,11 @@ func (r *TaskReconciler) updateStatus(ctx context.Context, task *axonv1alpha1.Ta
 		taskDurationSeconds.WithLabelValues(task.Namespace, task.Spec.Type, string(newPhase)).Observe(duration)
 	}
 
+	// Record cost and token metrics when results are available
+	if (setCompletionTime || retryOutputs) && results != nil {
+		RecordCostTokenMetrics(task, results)
+	}
+
 	if setCompletionTime && (outputs != nil || results != nil) {
 		r.recordEvent(task, corev1.EventTypeNormal, "OutputsCaptured", "Captured %d outputs and %d results from agent", len(outputs), len(results))
 	}
@@ -777,6 +783,30 @@ func (r *TaskReconciler) resolvePromptTemplate(ctx context.Context, task *axonv1
 		return task.Spec.Prompt
 	}
 	return buf.String()
+}
+
+// RecordCostTokenMetrics emits Prometheus counters for cost and token usage
+// extracted from Task results.
+func RecordCostTokenMetrics(task *axonv1alpha1.Task, results map[string]string) {
+	spawner := task.Labels["axon.io/taskspawner"]
+	model := task.Spec.Model
+	labels := []string{task.Namespace, task.Spec.Type, spawner, model}
+
+	if costStr, ok := results["cost-usd"]; ok {
+		if cost, err := strconv.ParseFloat(costStr, 64); err == nil && cost > 0 {
+			taskCostUSD.WithLabelValues(labels...).Add(cost)
+		}
+	}
+	if inputStr, ok := results["input-tokens"]; ok {
+		if tokens, err := strconv.ParseFloat(inputStr, 64); err == nil && tokens > 0 {
+			taskInputTokens.WithLabelValues(labels...).Add(tokens)
+		}
+	}
+	if outputStr, ok := results["output-tokens"]; ok {
+		if tokens, err := strconv.ParseFloat(outputStr, 64); err == nil && tokens > 0 {
+			taskOutputTokens.WithLabelValues(labels...).Add(tokens)
+		}
+	}
 }
 
 // SetupWithManager sets up the controller with the Manager.

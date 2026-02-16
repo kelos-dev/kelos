@@ -42,6 +42,33 @@ var (
 		},
 		[]string{"controller"},
 	)
+
+	// taskCostUSD records the cost in USD of completed Tasks.
+	taskCostUSD = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "axon_task_cost_usd_total",
+			Help: "Total cost in USD of completed Tasks",
+		},
+		[]string{"namespace", "type", "spawner", "model"},
+	)
+
+	// taskInputTokens records the total input tokens consumed by completed Tasks.
+	taskInputTokens = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "axon_task_input_tokens_total",
+			Help: "Total input tokens consumed by completed Tasks",
+		},
+		[]string{"namespace", "type", "spawner", "model"},
+	)
+
+	// taskOutputTokens records the total output tokens consumed by completed Tasks.
+	taskOutputTokens = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "axon_task_output_tokens_total",
+			Help: "Total output tokens consumed by completed Tasks",
+		},
+		[]string{"namespace", "type", "spawner", "model"},
+	)
 )
 
 func init() {
@@ -50,5 +77,8 @@ func init() {
 		taskCompletedTotal,
 		taskDurationSeconds,
 		reconcileErrorsTotal,
+		taskCostUSD,
+		taskInputTokens,
+		taskOutputTokens,
 	)
 }

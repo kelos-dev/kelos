@@ -1,0 +1,9 @@
+apiVersion: axon.io/v1alpha1
+kind: Workspace
+metadata:
+  name: openclaw
+spec:
+  repo: https://github.com/openclaw/openclaw.git
+  ref: main
+  secretRef:
+    name: openclaw-github-token

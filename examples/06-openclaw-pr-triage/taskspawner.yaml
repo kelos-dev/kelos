@@ -1,0 +1,84 @@
+apiVersion: axon.io/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: openclaw-pr-triage
+spec:
+  when:
+    githubIssues:
+      types:
+        - pulls
+        - issues
+      state: open
+  taskTemplate:
+    type: claude-code
+    workspaceRef:
+      name: openclaw
+    credentials:
+      type: oauth
+      secretRef:
+        name: openclaw-claude-oauth
+    promptTemplate: |
+      You are a triage agent for the OpenClaw project (github.com/openclaw/openclaw).
+      Your job is to analyze the following {{.Kind}} and post a single triage comment using `gh`.
+
+      ---
+      {{.Kind}} #{{.Number}}: {{.Title}}
+      {{.Body}}
+      {{if .Comments}}
+      Comments:
+      {{.Comments}}
+      {{end}}
+      ---
+
+      ## Your tasks
+
+      ### 1. Duplicate detection
+      Search for other open PRs and issues that address the same thing:
+        - `gh pr list --state open --limit 100 --json number,title,body,labels`
+        - `gh issue list --state open --limit 100 --json number,title,body,labels`
+      Look for semantic overlap, not just title similarity. Two PRs that fix the
+      same bug in different ways are duplicates. Flag every duplicate you find with
+      its number and a one-line explanation of why they overlap.
+
+      ### 2. Quality signals (PRs only)
+      If this is a pull request, evaluate:
+        - **Code quality**: Read the diff with `gh pr diff {{.Number}}`. Look for
+          correctness, test coverage, error handling, and style consistency.
+        - **Description quality**: Is the problem clearly stated? Is the approach explained?
+        - **Scope**: Is it a focused change or does it bundle unrelated modifications?
+        - **Test coverage**: Does it add or update tests for the changed behavior?
+        - **Breaking changes**: Does it modify public APIs or config formats?
+      Rate the PR: STRONG / ACCEPTABLE / NEEDS WORK / REJECT.
+
+      ### 3. Vision alignment
+      OpenClaw's vision: a personal AI assistant that is open-source, privacy-first,
+      and runs on user-owned hardware. Any PR that undermines these principles
+      (e.g., adding telemetry, requiring a hosted service, removing self-host
+      capability) should be flagged as MISALIGNED with a clear explanation.
+
+      ## Output
+      Post exactly one comment on this {{.Kind}} using:
+        `gh {{if eq .Kind "pull_request"}}pr{{else}}issue{{end}} comment {{.Number}} --body "..."`
+
+      Format the comment as:
+
+      ```
+      ## Axon Triage Report
+
+      **Duplicates found**: #X (reason), #Y (reason) — or "None found"
+
+      **Quality** (PRs only): STRONG / ACCEPTABLE / NEEDS WORK / REJECT
+      - Code: ...
+      - Tests: ...
+      - Scope: ...
+
+      **Vision alignment**: ALIGNED / MISALIGNED
+      - ...
+
+      **Recommendation**: MERGE / REVISE / CLOSE AS DUPLICATE / NEEDS MAINTAINER REVIEW
+      ```
+
+      Do NOT open PRs, push code, or modify any files. Read-only analysis only.
+    ttlSecondsAfterFinished: 3600
+  pollInterval: 3m
+  maxConcurrency: 5

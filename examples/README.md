@@ -16,6 +16,7 @@ Ready-to-use patterns and YAML manifests for orchestrating AI agents with Axon. 
 | [03-taskspawner-github-issues](03-taskspawner-github-issues/) | Automatically create Tasks from labeled GitHub issues |
 | [04-taskspawner-cron](04-taskspawner-cron/) | Run agent tasks on a cron schedule |
 | [05-task-with-agentconfig](05-task-with-agentconfig/) | Inject reusable instructions and plugins via AgentConfig |
+| [06-openclaw-pr-triage](06-openclaw-pr-triage/) | Triage PRs and issues at scale: de-dupe, review, vision-check |
 
 ## How to Use
 

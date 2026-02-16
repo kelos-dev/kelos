@@ -174,12 +174,19 @@ var _ = Describe("Install/Uninstall", Ordered, func() {
 				Namespace: "axon-system",
 			}, sa)).To(Succeed())
 
-			By("Verifying the ClusterRole was NOT created")
+			By("Verifying the ClusterRole axon-controller-role was NOT created")
 			cr := &rbacv1.ClusterRole{}
 			err := k8sClient.Get(ctx, types.NamespacedName{
 				Name: "axon-controller-role",
 			}, cr)
-			Expect(apierrors.IsNotFound(err)).To(BeTrue(), "expected ClusterRole to not exist")
+			Expect(apierrors.IsNotFound(err)).To(BeTrue(), "expected ClusterRole axon-controller-role to not exist")
+
+			By("Verifying the ClusterRole axon-spawner-role was NOT created")
+			spawnerRole := &rbacv1.ClusterRole{}
+			err = k8sClient.Get(ctx, types.NamespacedName{
+				Name: "axon-spawner-role",
+			}, spawnerRole)
+			Expect(apierrors.IsNotFound(err)).To(BeTrue(), "expected ClusterRole axon-spawner-role to not exist")
 
 			By("Verifying the ClusterRoleBinding was NOT created")
 			crb := &rbacv1.ClusterRoleBinding{}

@@ -46,13 +46,13 @@ func newInstallCommand(cfg *ClientConfig) *cobra.Command {
 				controllerManifest = withImagePullPolicy(controllerManifest, imagePullPolicy)
 			}
 
+			var filter func(*unstructured.Unstructured) bool
+			if skipRBAC {
+				filter = excludeClusterRBAC
+			}
+
 			if dryRun {
-				if _, err := os.Stdout.Write(manifests.InstallCRD); err != nil {
-					return err
-				}
-				fmt.Fprintln(os.Stdout, "---")
-				_, err := os.Stdout.Write(controllerManifest)
-				return err
+				return dryRunManifests(os.Stdout, manifests.InstallCRD, controllerManifest, filter)
 			}
 
 			restConfig, _, err := cfg.resolveConfig()
@@ -70,11 +70,6 @@ func newInstallCommand(cfg *ClientConfig) *cobra.Command {
 			}
 
 			ctx := cmd.Context()
-
-			var filter func(*unstructured.Unstructured) bool
-			if skipRBAC {
-				filter = excludeClusterRBAC
-			}
 
 			fmt.Fprintf(os.Stdout, "Installing axon CRDs\n")
 			if err := applyManifests(ctx, dc, dyn, manifests.InstallCRD, filter); err != nil {
@@ -178,6 +173,47 @@ func newUninstallCommand(cfg *ClientConfig) *cobra.Command {
 	}
 
 	return cmd
+}
+
+// dryRunManifests writes the combined manifests to w, optionally filtering
+// out objects matched by exclude. When exclude is nil the raw bytes are
+// written directly; otherwise each document is parsed, filtered, and
+// re-serialized.
+func dryRunManifests(w io.Writer, crdData, controllerData []byte, exclude func(*unstructured.Unstructured) bool) error {
+	if exclude == nil {
+		if _, err := w.Write(crdData); err != nil {
+			return err
+		}
+		fmt.Fprintln(w, "---")
+		_, err := w.Write(controllerData)
+		return err
+	}
+
+	allData := [][]byte{crdData, controllerData}
+	first := true
+	for _, data := range allData {
+		objs, err := parseManifests(data)
+		if err != nil {
+			return err
+		}
+		for _, obj := range objs {
+			if exclude(obj) {
+				continue
+			}
+			if !first {
+				fmt.Fprintln(w, "---")
+			}
+			out, err := yaml.Marshal(obj.Object)
+			if err != nil {
+				return fmt.Errorf("marshaling %s %s: %w", obj.GetKind(), obj.GetName(), err)
+			}
+			if _, err := w.Write(out); err != nil {
+				return err
+			}
+			first = false
+		}
+	}
+	return nil
 }
 
 // parseManifests splits a multi-document YAML byte slice into individual

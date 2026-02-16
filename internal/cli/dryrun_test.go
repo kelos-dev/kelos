@@ -598,6 +598,30 @@ func TestInstallCommand_DryRun(t *testing.T) {
 	}
 }
 
+func TestInstallCommand_DryRun_SkipRBAC(t *testing.T) {
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{"install", "--dry-run", "--skip-rbac"})
+
+	output := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "CustomResourceDefinition") {
+		t.Errorf("expected CRD manifest in dry-run output, got:\n%s", output[:min(len(output), 500)])
+	}
+	if !strings.Contains(output, "Deployment") {
+		t.Errorf("expected Deployment manifest in dry-run output, got:\n%s", output[:min(len(output), 500)])
+	}
+	if strings.Contains(output, "kind: ClusterRole") {
+		t.Errorf("expected ClusterRole to be excluded with --skip-rbac, got:\n%s", output[:min(len(output), 500)])
+	}
+	if strings.Contains(output, "kind: ClusterRoleBinding") {
+		t.Errorf("expected ClusterRoleBinding to be excluded with --skip-rbac, got:\n%s", output[:min(len(output), 500)])
+	}
+}
+
 func TestInstallCommand_DryRun_Version(t *testing.T) {
 	cmd := NewRootCommand()
 	cmd.SetArgs([]string{"install", "--dry-run", "--version", "v0.5.0"})

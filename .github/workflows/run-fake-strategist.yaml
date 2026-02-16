@@ -42,10 +42,6 @@ jobs:
           location: ${{ env.GKE_CLUSTER_LOCATION }}
           project_id: ${{ env.GCP_PROJECT_ID }}
 
-      - name: Debug
-        run: |
-          kubectl get pods -n default
-
       - name: Create strategist task if none active
         id: create_task
         run: |

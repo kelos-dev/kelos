@@ -362,15 +362,15 @@ See the [full AgentConfig spec](docs/reference.md#agentconfig) for plugins, skil
 This is a real-world TaskSpawner that picks up every open issue, investigates it, opens (or updates) a PR, self-reviews, and ensures CI passes — fully autonomously. When the agent can't make progress, it labels the issue `axon/needs-input` and stops. Remove the label to re-queue it.
 
 ```
- ┌──────────────────────────────────────────────────────────────────┐
- │                        Feedback Loop                             │
- │                                                                  │
- │  ┌─────────────┐  polls  ┌────────────────┐                     │
- │  │ TaskSpawner │───────▶ │ GitHub Issues  │                     │
- │  └──────┬──────┘         │ (open, no      │                     │
- │         │                │  needs-input)  │                     │
- │         │ creates        └────────────────┘                     │
- │         ▼                                                       │
+ ┌────────────────────────────────────────────────────────────────┐
+ │                        Feedback Loop                           │
+ │                                                                │
+ │  ┌─────────────┐  polls  ┌────────────────┐                    │
+ │  │ TaskSpawner │───────▶ │ GitHub Issues  │                    │
+ │  └──────┬──────┘         │ (open, no      │                    │
+ │         │                │  needs-input)  │                    │
+ │         │ creates        └────────────────┘                    │
+ │         ▼                                                      │
  │  ┌─────────────┐  runs   ┌─────────────┐  opens PR   ┌───────┐ │
  │  │    Task     │───────▶ │    Agent    │────────────▶│ Human │ │
  │  └─────────────┘  in Pod │   (Claude)  │  or labels  │Review │ │

@@ -50,7 +50,7 @@ func newLogsCommand(cfg *ClientConfig) *cobra.Command {
 
 			if task.Status.PodName == "" {
 				if !follow {
-					return fmt.Errorf("task %q has no pod yet", args[0])
+					return fmt.Errorf("task %q has no pod yet; use 'axon logs %s -f' to wait for it to start", args[0], args[0])
 				}
 
 				fmt.Fprintf(os.Stderr, "Waiting for task %q to start...\n", args[0])

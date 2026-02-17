@@ -83,18 +83,26 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 					return fmt.Errorf("config file must specify either oauthToken or apiKey, not both")
 				}
 				if token := cfg.Config.OAuthToken; token != "" {
+					resolved, err := resolveContent(token)
+					if err != nil {
+						return fmt.Errorf("resolving oauthToken: %w", err)
+					}
 					if !dryRun {
 						oauthKey := oauthSecretKey(agentType)
-						if err := ensureCredentialSecret(cfg, "axon-credentials", oauthKey, resolveCredentialValue(token), yes); err != nil {
+						if err := ensureCredentialSecret(cfg, "axon-credentials", oauthKey, resolveCredentialValue(resolved), yes); err != nil {
 							return err
 						}
 					}
 					secret = "axon-credentials"
 					credentialType = "oauth"
 				} else if key := cfg.Config.APIKey; key != "" {
+					resolved, err := resolveContent(key)
+					if err != nil {
+						return fmt.Errorf("resolving apiKey: %w", err)
+					}
 					if !dryRun {
 						apiKey := apiKeySecretKey(agentType)
-						if err := ensureCredentialSecret(cfg, "axon-credentials", apiKey, resolveCredentialValue(key), yes); err != nil {
+						if err := ensureCredentialSecret(cfg, "axon-credentials", apiKey, resolveCredentialValue(resolved), yes); err != nil {
 							return err
 						}
 					}
@@ -343,7 +351,7 @@ func apiKeySecretKey(agentType string) string {
 func oauthSecretKey(agentType string) string {
 	switch agentType {
 	case "codex":
-		return "CODEX_API_KEY"
+		return "CODEX_AUTH_JSON"
 	case "gemini":
 		return "GEMINI_API_KEY"
 	case "opencode":

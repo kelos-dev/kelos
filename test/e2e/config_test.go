@@ -16,6 +16,12 @@ import (
 var _ = Describe("Config", func() {
 	f := framework.NewFramework("config")
 
+	BeforeEach(func() {
+		if oauthToken == "" {
+			Skip("CLAUDE_CODE_OAUTH_TOKEN not set")
+		}
+	})
+
 	It("should run a Task using config file defaults", func() {
 		By("writing a temp config file with oauthToken and inline workspace")
 		dir := GinkgoT().TempDir()
@@ -103,6 +109,12 @@ var _ = Describe("Config", func() {
 
 var _ = Describe("Config with namespace", func() {
 	f := framework.NewFramework("config-ns")
+
+	BeforeEach(func() {
+		if oauthToken == "" {
+			Skip("CLAUDE_CODE_OAUTH_TOKEN not set")
+		}
+	})
 
 	It("should use namespace from config file", func() {
 		By("creating OAuth credentials secret")

@@ -20,7 +20,7 @@ func resolveContent(s string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("reading file %s: %w", s[1:], err)
 		}
-		return string(data), nil
+		return strings.TrimRight(string(data), "\n"), nil
 	}
 	return s, nil
 }

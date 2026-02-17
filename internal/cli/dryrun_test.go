@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -632,4 +633,156 @@ func TestInstallCommand_DryRun_ImagePullPolicy(t *testing.T) {
 	if !strings.Contains(output, "--spawner-image-pull-policy=Always") {
 		t.Errorf("expected --spawner-image-pull-policy=Always in dry-run output, got:\n%s", output[:min(len(output), 500)])
 	}
+}
+
+func TestRunCommand_DryRun_CodexOAuthToken(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	cfg := "oauthToken: '{\"token\":\"test\"}'\ntype: codex\n"
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{
+		"run",
+		"--config", cfgPath,
+		"--dry-run",
+		"--prompt", "hello",
+		"--name", "codex-oauth-task",
+		"--namespace", "test-ns",
+	})
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	if err := cmd.Execute(); err != nil {
+		w.Close()
+		os.Stdout = old
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	w.Close()
+	os.Stdout = old
+	var out bytes.Buffer
+	out.ReadFrom(r)
+	output := out.String()
+
+	if !strings.Contains(output, "type: codex") {
+		t.Errorf("expected 'type: codex' in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "type: oauth") {
+		t.Errorf("expected credential 'type: oauth' in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "axon-credentials") {
+		t.Errorf("expected 'axon-credentials' secret reference in output, got:\n%s", output)
+	}
+}
+
+func TestRunCommand_DryRun_CodexOAuthToken_FileRef(t *testing.T) {
+	dir := t.TempDir()
+
+	authFile := filepath.Join(dir, "auth.json")
+	if err := os.WriteFile(authFile, []byte(`{"token":"from-file"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfgPath := filepath.Join(dir, "config.yaml")
+	cfg := fmt.Sprintf("oauthToken: \"@%s\"\ntype: codex\n", authFile)
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{
+		"run",
+		"--config", cfgPath,
+		"--dry-run",
+		"--prompt", "hello",
+		"--name", "codex-file-task",
+		"--namespace", "test-ns",
+	})
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	if err := cmd.Execute(); err != nil {
+		w.Close()
+		os.Stdout = old
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	w.Close()
+	os.Stdout = old
+	var out bytes.Buffer
+	out.ReadFrom(r)
+	output := out.String()
+
+	if !strings.Contains(output, "type: oauth") {
+		t.Errorf("expected credential 'type: oauth' in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "axon-credentials") {
+		t.Errorf("expected 'axon-credentials' secret reference in output, got:\n%s", output)
+	}
+}
+
+func TestResolveContent(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
+		got, err := resolveContent("")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != "" {
+			t.Errorf("expected empty, got %q", got)
+		}
+	})
+
+	t.Run("plain string", func(t *testing.T) {
+		got, err := resolveContent("my-token")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != "my-token" {
+			t.Errorf("expected %q, got %q", "my-token", got)
+		}
+	})
+
+	t.Run("file reference", func(t *testing.T) {
+		dir := t.TempDir()
+		f := filepath.Join(dir, "token.txt")
+		if err := os.WriteFile(f, []byte("file-content"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, err := resolveContent("@" + f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != "file-content" {
+			t.Errorf("expected %q, got %q", "file-content", got)
+		}
+	})
+
+	t.Run("file reference trims trailing newline", func(t *testing.T) {
+		dir := t.TempDir()
+		f := filepath.Join(dir, "token.txt")
+		if err := os.WriteFile(f, []byte("file-content\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, err := resolveContent("@" + f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != "file-content" {
+			t.Errorf("expected %q, got %q", "file-content", got)
+		}
+	})
+
+	t.Run("file not found", func(t *testing.T) {
+		_, err := resolveContent("@/nonexistent/path")
+		if err == nil {
+			t.Fatal("expected error for missing file")
+		}
+	})
 }

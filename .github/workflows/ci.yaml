@@ -98,6 +98,7 @@ jobs:
       - name: E2E Test
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
           GITHUB_TOKEN: ${{ github.token }}
           AXON_BIN: ${{ github.workspace }}/bin/axon
         run: make test-e2e

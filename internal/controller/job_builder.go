@@ -129,7 +129,7 @@ func apiKeyEnvVar(agentType string) string {
 func oauthEnvVar(agentType string) string {
 	switch agentType {
 	case AgentTypeCodex:
-		return "CODEX_API_KEY"
+		return "CODEX_AUTH_JSON"
 	case AgentTypeGemini:
 		return "GEMINI_API_KEY"
 	case AgentTypeOpenCode:

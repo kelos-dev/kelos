@@ -143,11 +143,27 @@ func (f *Framework) collectDebugInfo() {
 		}
 	}
 
-	// List pods
+	// List pods and collect logs from failed ones
 	pods, err := f.Clientset.CoreV1().Pods(f.Namespace).List(ctx, metav1.ListOptions{})
 	if err == nil {
 		for _, p := range pods.Items {
 			fmt.Fprintf(GinkgoWriter, "Pod %s: phase=%s\n", p.Name, p.Status.Phase)
+			if p.Status.Phase == corev1.PodFailed || p.Status.Phase == corev1.PodSucceeded {
+				for _, c := range p.Spec.Containers {
+					tailLines := int64(30)
+					req := f.Clientset.CoreV1().Pods(f.Namespace).GetLogs(p.Name, &corev1.PodLogOptions{
+						Container: c.Name,
+						TailLines: &tailLines,
+					})
+					stream, sErr := req.Stream(ctx)
+					if sErr != nil {
+						continue
+					}
+					logBytes, _ := io.ReadAll(stream)
+					stream.Close()
+					fmt.Fprintf(GinkgoWriter, "Pod %s container %s logs (last 30 lines):\n%s\n", p.Name, c.Name, string(logBytes))
+				}
+			}
 		}
 	}
 

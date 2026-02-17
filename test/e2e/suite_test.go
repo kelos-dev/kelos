@@ -6,14 +6,48 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
 )
 
 const testModel = "haiku"
 
 var (
-	oauthToken  string
-	githubToken string
+	oauthToken    string
+	codexAuthJSON string
+	githubToken   string
 )
+
+type agentTestConfig struct {
+	AgentType      string
+	CredentialType axonv1alpha1.CredentialType
+	SecretName     string
+	SecretKey      string
+	SecretValue    *string
+	Model          string
+	SkipMessage    string
+}
+
+var agentConfigs = []agentTestConfig{
+	{
+		AgentType:      "claude-code",
+		CredentialType: axonv1alpha1.CredentialTypeOAuth,
+		SecretName:     "claude-credentials",
+		SecretKey:      "CLAUDE_CODE_OAUTH_TOKEN",
+		SecretValue:    &oauthToken,
+		Model:          testModel,
+		SkipMessage:    "CLAUDE_CODE_OAUTH_TOKEN not set",
+	},
+	{
+		AgentType:      "codex",
+		CredentialType: axonv1alpha1.CredentialTypeOAuth,
+		SecretName:     "codex-credentials",
+		SecretKey:      "CODEX_AUTH_JSON",
+		SecretValue:    &codexAuthJSON,
+		Model:          "gpt-5.1-codex-mini",
+		SkipMessage:    "CODEX_AUTH_JSON not set",
+	},
+}
 
 func TestE2E(t *testing.T) {
 	RegisterFailHandler(Fail)
@@ -22,8 +56,10 @@ func TestE2E(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	oauthToken = os.Getenv("CLAUDE_CODE_OAUTH_TOKEN")
-	if oauthToken == "" {
-		Skip("CLAUDE_CODE_OAUTH_TOKEN not set, skipping e2e tests")
-	}
+	codexAuthJSON = os.Getenv("CODEX_AUTH_JSON")
 	githubToken = os.Getenv("GITHUB_TOKEN")
+
+	if oauthToken == "" && codexAuthJSON == "" {
+		Skip("Neither CLAUDE_CODE_OAUTH_TOKEN nor CODEX_AUTH_JSON set, skipping e2e tests")
+	}
 })

@@ -107,8 +107,16 @@ workspace:
 **Claude OAuth token** (recommended for Claude Code):
 Run `claude auth login` locally, then copy the token from `~/.claude/credentials.json`.
 
-**Anthropic API key** (alternative):
+**Anthropic API key** (alternative for Claude Code):
 Create one at [console.anthropic.com](https://console.anthropic.com). Set `apiKey` instead of `oauthToken` in your config.
+
+**Codex OAuth credentials** (for OpenAI Codex):
+Run `codex auth login` locally, then reference the auth file in your config:
+```yaml
+oauthToken: "@~/.codex/auth.json"
+type: codex
+```
+Or set `apiKey` with an OpenAI API key instead.
 
 **GitHub token** (for pushing branches and creating PRs):
 Create a [Personal Access Token](https://github.com/settings/tokens) with `repo` scope (and `workflow` if your repo uses GitHub Actions).

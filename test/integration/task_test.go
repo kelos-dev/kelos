@@ -1237,6 +1237,71 @@ var _ = Describe("Task Controller", func() {
 		})
 	})
 
+	Context("When creating a Codex Task with OAuth credentials", func() {
+		It("Should create a Job with CODEX_AUTH_JSON env var", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-task-codex-oauth",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with CODEX_AUTH_JSON")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "codex-oauth-secret",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"CODEX_AUTH_JSON": `{"token":"test-token"}`,
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+			By("Creating a Codex Task with OAuth credentials")
+			task := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-codex-oauth",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   "codex",
+					Prompt: "Review the code",
+					Credentials: axonv1alpha1.Credentials{
+						Type: axonv1alpha1.CredentialTypeOAuth,
+						SecretRef: axonv1alpha1.SecretReference{
+							Name: "codex-oauth-secret",
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, task)).Should(Succeed())
+
+			By("Verifying a Job is created")
+			jobLookupKey := types.NamespacedName{Name: task.Name, Namespace: ns.Name}
+			createdJob := &batchv1.Job{}
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, jobLookupKey, createdJob)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Logging the Job spec")
+			logJobSpec(createdJob)
+
+			By("Verifying the Job has CODEX_AUTH_JSON env var")
+			container := createdJob.Spec.Template.Spec.Containers[0]
+			Expect(container.Name).To(Equal("codex"))
+			Expect(container.Env).To(HaveLen(2))
+			Expect(container.Env[0].Name).To(Equal("AXON_AGENT_TYPE"))
+			Expect(container.Env[0].Value).To(Equal("codex"))
+			Expect(container.Env[1].Name).To(Equal("CODEX_AUTH_JSON"))
+			Expect(container.Env[1].ValueFrom.SecretKeyRef.Name).To(Equal("codex-oauth-secret"))
+			Expect(container.Env[1].ValueFrom.SecretKeyRef.Key).To(Equal("CODEX_AUTH_JSON"))
+		})
+	})
+
 	Context("When creating an OpenCode Task with API key credentials", func() {
 		It("Should create a Job with OPENCODE_API_KEY env var", func() {
 			By("Creating a namespace")

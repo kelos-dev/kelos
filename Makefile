@@ -48,8 +48,8 @@ test-integration: envtest ## Run integration tests (envtest).
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./test/integration/... -v
 
 .PHONY: test-e2e
-test-e2e: ginkgo ## Run e2e tests (requires cluster and CLAUDE_CODE_OAUTH_TOKEN).
-	$(GINKGO) -v --timeout 10m ./test/e2e/...
+test-e2e: ginkgo ## Run e2e tests (requires cluster and agent credentials).
+	$(GINKGO) -v --timeout 20m ./test/e2e/...
 
 .PHONY: update
 update: controller-gen yamlfmt shfmt ## Run all generators and formatters.

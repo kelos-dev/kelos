@@ -12,6 +12,14 @@ set -uo pipefail
 
 PROMPT="${1:?Prompt argument is required}"
 
+# Write auth.json from env var for OAuth/ChatGPT credential flow.
+# Strip control characters so serde_json's strict parser accepts
+# the file (the env var value may contain raw newlines).
+if [ -n "${CODEX_AUTH_JSON:-}" ]; then
+  mkdir -p ~/.codex
+  printf '%s' "$CODEX_AUTH_JSON" | tr -d '\n\r' >~/.codex/auth.json
+fi
+
 ARGS=(
   "exec"
   "--dangerously-bypass-approvals-and-sandbox"

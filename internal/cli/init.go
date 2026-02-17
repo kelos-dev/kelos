@@ -18,6 +18,8 @@ oauthToken: ""
 # apiKey: ""
 
 # Agent type (optional, default: claude-code)
+# For codex with oauth: set oauthToken to auth.json content or @filepath
+#   oauthToken: "@~/.codex/auth.json"
 # type: claude-code
 
 # Model override (optional)

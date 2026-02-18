@@ -1,0 +1,104 @@
+apiVersion: axon.io/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: axon-triage
+spec:
+  when:
+    githubIssues:
+      types:
+        - issues
+      state: open
+      labels:
+        - needs-actor
+      excludeLabels:
+        - axon/needs-input
+  maxConcurrency: 8
+  taskTemplate:
+    workspaceRef:
+      name: axon-agent
+    model: opus
+    type: claude-code
+    credentials:
+      type: oauth
+      secretRef:
+        name: axon-credentials
+    agentConfigRef:
+      name: axon-dev-agent
+    promptTemplate: |
+      You are a triage agent for the Axon project (github.com/axon-core/axon).
+      Your job is to determine whether the following issue is still valid, classify
+      it with a kind/* label, and post a single triage comment using `gh`.
+
+      ---
+      Issue #{{.Number}}: {{.Title}}
+      {{.Body}}
+      {{if .Comments}}
+      Comments:
+      {{.Comments}}
+      {{end}}
+      ---
+
+      ## Your tasks
+
+      ### 1. Classify the issue
+      Read the issue carefully and apply exactly one `kind/*` label:
+        - `kind/bug` — something is broken or behaving incorrectly
+        - `kind/feature` — a request for new functionality
+        - `kind/api` — related to API changes or additions
+        - `kind/docs` — documentation improvement or fix
+
+      Apply the label:
+        `gh issue edit {{.Number}} --add-label <kind-label> --remove-label needs-kind`
+
+      ### 2. Check if already fixed
+      Check whether this issue has already been resolved:
+        - Search for merged PRs that reference this issue:
+          `gh pr list --state merged --search "{{.Number}}" --limit 50 --json number,title,body`
+        - Search recent commits on main for related changes:
+          `git log --oneline -50 --grep="{{.Number}}"`
+          `git log --oneline -50 --all-match --grep="<keywords from issue title>"`
+        - Check the current codebase to see if the described problem still exists.
+          Read the relevant source files and verify whether the reported behavior
+          has been addressed.
+
+      ### 3. Check if outdated or no longer relevant
+      Determine whether the issue is outdated:
+        - Does it reference APIs, flags, config fields, or features that no longer exist?
+        - Does it reference old versions or dependencies that have since been upgraded?
+        - Has the surrounding code been refactored or removed entirely?
+        - Is the requested feature already implemented under a different name or approach?
+
+      ### 4. Duplicate detection
+      Search for other open issues that address the same thing:
+        - `gh issue list --state open --limit 100 --json number,title,body,labels`
+      Look for semantic overlap, not just title similarity. Flag every duplicate
+      you find with its number and a one-line explanation of why they overlap.
+
+      ## Output
+      Post exactly one comment on this issue using:
+        `gh issue comment {{.Number}} --body "..."`
+
+      Format the comment as:
+
+      ```
+      ## Axon Triage Report
+
+      **Kind**: <kind label applied>
+
+      **Status**: STILL VALID / ALREADY FIXED / OUTDATED / DUPLICATE
+
+      **Evidence**:
+      - <concise explanation of what you found, with links to relevant PRs, commits, or code>
+
+      **Duplicates found**: #X (reason), #Y (reason) — or "None found"
+
+      **Recommendation**: KEEP OPEN / CLOSE (with reason)
+      ```
+
+      After posting the comment, add the `axon/needs-input` label so a maintainer
+      can review the triage and the issue is not re-processed:
+        `gh issue edit {{.Number}} --add-label axon/needs-input`
+
+      Do NOT open PRs, push code, or modify any files. Read-only analysis only
+      (except for the comment and labels above).
+  pollInterval: 1m

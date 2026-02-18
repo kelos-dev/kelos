@@ -1,0 +1,68 @@
+# Task dependency chain: implement -> test -> review
+#
+# - "implement" runs first and creates a branch with changes.
+# - "write-tests" waits for "implement" to succeed, then adds tests on
+#   the same branch using the branch name from implement's outputs.
+# - "review" waits for "write-tests" to succeed, then reviews the PR.
+#
+# All three tasks share the same branch, so they are also serialized by
+# the branch mutex — only one runs at a time.
+
+apiVersion: axon.io/v1alpha1
+kind: Task
+metadata:
+  name: implement
+spec:
+  type: claude-code
+  # TODO: Replace with your feature description
+  prompt: |
+    Add a /healthz HTTP endpoint that returns 200 OK with a JSON body
+    containing the server version. Push your changes to the branch.
+  credentials:
+    type: oauth
+    secretRef:
+      name: claude-oauth-token
+  workspaceRef:
+    name: my-workspace
+  branch: feature/healthz
+---
+apiVersion: axon.io/v1alpha1
+kind: Task
+metadata:
+  name: write-tests
+spec:
+  type: claude-code
+  # This prompt is a Go text/template. When "implement" succeeds, Axon
+  # resolves {{ index .Deps "implement" "Results" "branch" }} to the
+  # branch name captured from implement's outputs (e.g. "feature/healthz").
+  prompt: |
+    The implementation is on branch {{ index .Deps "implement" "Results" "branch" }}.
+    Write unit tests for the /healthz endpoint. Make sure all tests pass
+    before pushing.
+  credentials:
+    type: oauth
+    secretRef:
+      name: claude-oauth-token
+  workspaceRef:
+    name: my-workspace
+  branch: feature/healthz
+  dependsOn: [implement]
+---
+apiVersion: axon.io/v1alpha1
+kind: Task
+metadata:
+  name: review
+spec:
+  type: claude-code
+  prompt: |
+    Review the changes on branch {{ index .Deps "write-tests" "Results" "branch" }}.
+    Open a pull request if one does not exist yet, then review it for
+    correctness, test coverage, and style. Leave comments on the PR.
+  credentials:
+    type: oauth
+    secretRef:
+      name: claude-oauth-token
+  workspaceRef:
+    name: my-workspace
+  branch: feature/healthz
+  dependsOn: [write-tests]

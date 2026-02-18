@@ -14,7 +14,7 @@
 - tests:
   - `make test` — run all unit tests
   - `make test-integration` — run integration tests
-  - `make test-e2e` — run end-to-end tests (use the cheapest model for cost savings)
+  - e2e tests are hard to run locally. Push changes and use the PR's CI jobs to run them instead.
 - `make build` — build binary
 
 ## Directory Structure

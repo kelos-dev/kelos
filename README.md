@@ -24,12 +24,17 @@ Supports **Claude Code**, **OpenAI Codex**, **Google Gemini**, **OpenCode**, and
 ## Demo
 
 ```bash
-# Run a task against your repo
-$ axon run -p "Fix the bug described in issue #42 and open a PR with the fix"
-task/task-a5b3c created
+# Run multiple tasks in parallel across your repo
+$ axon run -p "Fix the bug described in issue #42 and open a PR" --name fix-42
+$ axon run -p "Add unit tests for the auth module" --name add-tests
+$ axon run -p "Update API docs for v2 endpoints" --name update-docs
 
-# Stream the logs
-$ axon logs task-a5b3c -f
+# Watch all tasks progress simultaneously
+$ axon get tasks
+NAME          STATUS    AGE
+fix-42        Running   2m
+add-tests     Running   1m
+update-docs   Running   45s
 ```
 
 https://github.com/user-attachments/assets/837cd8d5-4071-42dd-be32-114c649386ff

@@ -27,7 +27,7 @@ spec:
     promptTemplate: |
       You are a triage agent for the Axon project (github.com/axon-core/axon).
       Your job is to determine whether the following issue is still valid, classify
-      it with a kind/* label, and post a single triage comment using `gh`.
+      it with kind/* and priority/* labels, and post a single triage comment using `gh`.
 
       ---
       Issue #{{.Number}}: {{.Title}}
@@ -49,6 +49,22 @@ spec:
 
       Apply the label:
         `gh issue edit {{.Number}} --add-label <kind-label> --remove-label needs-kind`
+
+      ### 1b. Assess priority
+      Based on the issue content and its impact, apply exactly one `priority/*` label:
+        - `priority/critical-urgent` — production broken, data loss, security vulnerability, or blocking all development
+        - `priority/imporant-soon` — significant bug or feature needed for upcoming work; should be addressed soon
+        - `priority/import-longterm` — valuable improvement but not time-sensitive; can be planned for a future milestone
+        - `priority/backlog` — nice-to-have, minor cosmetic issues, or speculative ideas
+
+      Guidelines:
+        - Bugs that affect correctness → at least `imporant-soon`
+        - Documentation-only issues → usually `import-longterm` or `backlog`
+        - Feature requests for existing gaps → usually `imporant-soon` or `import-longterm`
+        - Broad proposals or speculative ideas → usually `backlog`
+
+      Apply the label:
+        `gh issue edit {{.Number}} --add-label <priority-label> --remove-label needs-priority`
 
       ### 2. Check if already fixed
       Check whether this issue has already been resolved:
@@ -84,6 +100,8 @@ spec:
       ## Axon Triage Report
 
       **Kind**: <kind label applied>
+
+      **Priority**: <priority label applied>
 
       **Status**: STILL VALID / ALREADY FIXED / OUTDATED / DUPLICATE
 

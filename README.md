@@ -31,10 +31,10 @@ $ axon run -p "Update API docs for v2 endpoints" --name update-docs
 
 # Watch all tasks progress simultaneously
 $ axon get tasks
-NAME          STATUS    AGE
-fix-42        Running   2m
-add-tests     Running   1m
-update-docs   Running   45s
+NAME          TYPE          PHASE     BRANCH                WORKSPACE   AGENT CONFIG   DURATION   AGE
+fix-42        claude-code   Running   axon-task-fix-42      my-repo     my-config      2m         2m
+add-tests     claude-code   Running   axon-task-add-tests   my-repo     my-config      1m         1m
+update-docs   claude-code   Running   axon-task-update-docs my-repo     my-config      45s        45s
 ```
 
 https://github.com/user-attachments/assets/0ea57071-15d8-4b3b-a546-d00429b76f8d
@@ -438,7 +438,7 @@ The key pattern is `excludeLabels: [axon/needs-input]` — this creates a feedba
 | `axon uninstall` | Uninstall Axon from the cluster |
 | `axon init` | Initialize `~/.axon/config.yaml` |
 | `axon run` | Create and run a new Task |
-| `axon get <resource>` | List resources (`tasks`, `taskspawners`, `workspaces`) |
+| `axon get <resource> [name]` | List resources or view a specific resource (`tasks`, `taskspawners`, `workspaces`) |
 | `axon delete <resource> <name>` | Delete a resource |
 | `axon logs <task-name> [-f]` | View or stream logs from a task |
 | `axon suspend taskspawner <name>` | Pause a TaskSpawner |

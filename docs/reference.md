@@ -198,7 +198,7 @@ The `axon` CLI lets you manage the full lifecycle without writing YAML.
 | `axon run` | Create and run a new Task |
 | `axon create workspace` | Create a Workspace resource |
 | `axon create agentconfig` | Create an AgentConfig resource |
-| `axon get <resource>` | List resources (`tasks`, `taskspawners`, `workspaces`) |
+| `axon get <resource> [name]` | List resources or view a specific resource (`tasks`, `taskspawners`, `workspaces`) |
 | `axon delete <resource> <name>` | Delete a resource |
 | `axon logs <task-name> [-f]` | View or stream logs from a task |
 | `axon suspend taskspawner <name>` | Pause a TaskSpawner (stops polling, running tasks continue) |
@@ -221,11 +221,16 @@ The `axon` CLI lets you manage the full lifecycle without writing YAML.
 - `--secret`: Pre-created secret name
 - `--credential-type`: Credential type when using `--secret` (default: `api-key`)
 
+### `axon get` Flags
+
+- `--output, -o`: Output format (`yaml` or `json`)
+- `--detail, -d`: Show detailed information for a specific resource
+- `--all-namespaces, -A`: List resources across all namespaces
+
 ### Common Flags
 
 - `--config`: Path to config file (default `~/.axon/config.yaml`)
 - `--namespace, -n`: Kubernetes namespace
 - `--kubeconfig`: Path to kubeconfig file
 - `--dry-run`: Print resources without creating them (supported by `run`, `create`, `install`)
-- `--output, -o`: Output format (`yaml` or `json`) (supported by `get`)
 - `--yes, -y`: Skip confirmation prompts

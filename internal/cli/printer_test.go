@@ -320,6 +320,159 @@ func TestPrintWorkspaceDetail(t *testing.T) {
 	}
 }
 
+func TestPrintTaskTableSingleItem(t *testing.T) {
+	task := axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "my-task",
+			CreationTimestamp: metav1.NewTime(time.Now().Add(-30 * time.Minute)),
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type: "claude-code",
+		},
+		Status: axonv1alpha1.TaskStatus{
+			Phase: axonv1alpha1.TaskPhaseSucceeded,
+		},
+	}
+
+	var buf bytes.Buffer
+	printTaskTable(&buf, []axonv1alpha1.Task{task}, false)
+	output := buf.String()
+
+	if !strings.Contains(output, "NAME") {
+		t.Errorf("expected header NAME in output, got %q", output)
+	}
+	if !strings.Contains(output, "my-task") {
+		t.Errorf("expected my-task in output, got %q", output)
+	}
+	if !strings.Contains(output, "claude-code") {
+		t.Errorf("expected type claude-code in output, got %q", output)
+	}
+	if !strings.Contains(output, string(axonv1alpha1.TaskPhaseSucceeded)) {
+		t.Errorf("expected phase Succeeded in output, got %q", output)
+	}
+	if strings.Contains(output, "Prompt:") {
+		t.Errorf("table view should not contain detail fields, got %q", output)
+	}
+}
+
+func TestPrintTaskSpawnerTableSingleItem(t *testing.T) {
+	spawner := axonv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "my-spawner",
+			CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
+		},
+		Spec: axonv1alpha1.TaskSpawnerSpec{
+			When: axonv1alpha1.When{
+				Cron: &axonv1alpha1.Cron{
+					Schedule: "0 * * * *",
+				},
+			},
+		},
+		Status: axonv1alpha1.TaskSpawnerStatus{
+			Phase:             axonv1alpha1.TaskSpawnerPhaseRunning,
+			TotalDiscovered:   5,
+			TotalTasksCreated: 3,
+		},
+	}
+
+	var buf bytes.Buffer
+	printTaskSpawnerTable(&buf, []axonv1alpha1.TaskSpawner{spawner}, false)
+	output := buf.String()
+
+	if !strings.Contains(output, "NAME") {
+		t.Errorf("expected header NAME in output, got %q", output)
+	}
+	if !strings.Contains(output, "my-spawner") {
+		t.Errorf("expected my-spawner in output, got %q", output)
+	}
+	if !strings.Contains(output, "cron: 0 * * * *") {
+		t.Errorf("expected cron source in output, got %q", output)
+	}
+	if strings.Contains(output, "Poll Interval:") {
+		t.Errorf("table view should not contain detail fields, got %q", output)
+	}
+}
+
+func TestPrintWorkspaceTableSingleItem(t *testing.T) {
+	ws := axonv1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "my-workspace",
+			CreationTimestamp: metav1.NewTime(time.Now().Add(-2 * time.Hour)),
+		},
+		Spec: axonv1alpha1.WorkspaceSpec{
+			Repo: "https://github.com/org/repo.git",
+			Ref:  "main",
+		},
+	}
+
+	var buf bytes.Buffer
+	printWorkspaceTable(&buf, []axonv1alpha1.Workspace{ws}, false)
+	output := buf.String()
+
+	if !strings.Contains(output, "NAME") {
+		t.Errorf("expected header NAME in output, got %q", output)
+	}
+	if !strings.Contains(output, "my-workspace") {
+		t.Errorf("expected my-workspace in output, got %q", output)
+	}
+	if !strings.Contains(output, "https://github.com/org/repo.git") {
+		t.Errorf("expected repo URL in output, got %q", output)
+	}
+	if strings.Contains(output, "Secret:") {
+		t.Errorf("table view should not contain detail fields, got %q", output)
+	}
+}
+
+func TestPrintTaskSpawnerDetail(t *testing.T) {
+	lastDiscovery := metav1.NewTime(time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC))
+	spawner := &axonv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-spawner",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpawnerSpec{
+			When: axonv1alpha1.When{
+				Cron: &axonv1alpha1.Cron{
+					Schedule: "0 * * * *",
+				},
+			},
+			TaskTemplate: axonv1alpha1.TaskTemplate{
+				Type:  "claude-code",
+				Model: "claude-sonnet-4-20250514",
+			},
+			PollInterval: "5m",
+		},
+		Status: axonv1alpha1.TaskSpawnerStatus{
+			Phase:             axonv1alpha1.TaskSpawnerPhaseRunning,
+			DeploymentName:    "my-spawner-deploy",
+			TotalDiscovered:   10,
+			TotalTasksCreated: 7,
+			LastDiscoveryTime: &lastDiscovery,
+		},
+	}
+
+	var buf bytes.Buffer
+	printTaskSpawnerDetail(&buf, spawner)
+	output := buf.String()
+
+	for _, expected := range []string{
+		"Name:", "my-spawner",
+		"Namespace:", "default",
+		"Source:", "Cron",
+		"Schedule:", "0 * * * *",
+		"Task Type:", "claude-code",
+		"Model:", "claude-sonnet-4-20250514",
+		"Poll Interval:", "5m",
+		"Deployment:", "my-spawner-deploy",
+		"Discovered:", "10",
+		"Tasks Created:", "7",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Errorf("expected %q in detail output, got %q", expected, output)
+		}
+	}
+}
+
 func TestPrintWorkspaceDetailWithoutOptionalFields(t *testing.T) {
 	ws := &axonv1alpha1.Workspace{
 		ObjectMeta: metav1.ObjectMeta{

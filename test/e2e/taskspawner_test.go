@@ -124,7 +124,7 @@ var _ = Describe("TaskSpawner", func() {
 		Expect(output).To(ContainSubstring("spawner"))
 
 		By("verifying axon get taskspawner shows detail")
-		output = framework.AxonOutput("get", "taskspawner", "spawner", "-n", f.Namespace)
+		output = framework.AxonOutput("get", "taskspawner", "spawner", "-n", f.Namespace, "--detail")
 		Expect(output).To(ContainSubstring("spawner"))
 		Expect(output).To(ContainSubstring("GitHub Issues"))
 
@@ -224,7 +224,7 @@ var _ = Describe("Cron TaskSpawner", func() {
 		Expect(output).To(ContainSubstring("cron-spawner"))
 
 		By("verifying axon get taskspawner shows cron detail")
-		output = framework.AxonOutput("get", "taskspawner", "cron-spawner", "-n", f.Namespace)
+		output = framework.AxonOutput("get", "taskspawner", "cron-spawner", "-n", f.Namespace, "--detail")
 		Expect(output).To(ContainSubstring("cron-spawner"))
 		Expect(output).To(ContainSubstring("Cron"))
 		Expect(output).To(ContainSubstring("0 9 * * 1"))

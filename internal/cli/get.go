@@ -34,11 +34,12 @@ func newGetCommand(cfg *ClientConfig) *cobra.Command {
 
 func newGetTaskSpawnerCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Command {
 	var output string
+	var detail bool
 
 	cmd := &cobra.Command{
 		Use:     "taskspawner [name]",
 		Aliases: []string{"taskspawners", "ts"},
-		Short:   "List task spawners or get details of a specific task spawner",
+		Short:   "List task spawners or get a specific task spawner",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if output != "" && output != "yaml" && output != "json" {
@@ -69,7 +70,11 @@ func newGetTaskSpawnerCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Com
 				case "json":
 					return printJSON(os.Stdout, ts)
 				default:
-					printTaskSpawnerDetail(os.Stdout, ts)
+					if detail {
+						printTaskSpawnerDetail(os.Stdout, ts)
+					} else {
+						printTaskSpawnerTable(os.Stdout, []axonv1alpha1.TaskSpawner{*ts}, false)
+					}
 					return nil
 				}
 			}
@@ -97,6 +102,7 @@ func newGetTaskSpawnerCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Com
 	}
 
 	cmd.Flags().StringVarP(&output, "output", "o", "", "Output format (yaml or json)")
+	cmd.Flags().BoolVarP(&detail, "detail", "d", false, "Show detailed information for a specific task spawner")
 
 	cmd.ValidArgsFunction = completeTaskSpawnerNames(cfg)
 	_ = cmd.RegisterFlagCompletionFunc("output", cobra.FixedCompletions([]string{"yaml", "json"}, cobra.ShellCompDirectiveNoFileComp))
@@ -106,11 +112,12 @@ func newGetTaskSpawnerCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Com
 
 func newGetTaskCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Command {
 	var output string
+	var detail bool
 
 	cmd := &cobra.Command{
 		Use:     "task [name]",
 		Aliases: []string{"tasks"},
-		Short:   "List tasks or get details of a specific task",
+		Short:   "List tasks or get a specific task",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if output != "" && output != "yaml" && output != "json" {
@@ -141,7 +148,11 @@ func newGetTaskCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Command {
 				case "json":
 					return printJSON(os.Stdout, task)
 				default:
-					printTaskDetail(os.Stdout, task)
+					if detail {
+						printTaskDetail(os.Stdout, task)
+					} else {
+						printTaskTable(os.Stdout, []axonv1alpha1.Task{*task}, false)
+					}
 					return nil
 				}
 			}
@@ -169,6 +180,7 @@ func newGetTaskCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&output, "output", "o", "", "Output format (yaml or json)")
+	cmd.Flags().BoolVarP(&detail, "detail", "d", false, "Show detailed information for a specific task")
 
 	cmd.ValidArgsFunction = completeTaskNames(cfg)
 	_ = cmd.RegisterFlagCompletionFunc("output", cobra.FixedCompletions([]string{"yaml", "json"}, cobra.ShellCompDirectiveNoFileComp))
@@ -178,11 +190,12 @@ func newGetTaskCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Command {
 
 func newGetWorkspaceCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Command {
 	var output string
+	var detail bool
 
 	cmd := &cobra.Command{
 		Use:     "workspace [name]",
 		Aliases: []string{"workspaces", "ws"},
-		Short:   "List workspaces or get details of a specific workspace",
+		Short:   "List workspaces or get a specific workspace",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if output != "" && output != "yaml" && output != "json" {
@@ -213,7 +226,11 @@ func newGetWorkspaceCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Comma
 				case "json":
 					return printJSON(os.Stdout, ws)
 				default:
-					printWorkspaceDetail(os.Stdout, ws)
+					if detail {
+						printWorkspaceDetail(os.Stdout, ws)
+					} else {
+						printWorkspaceTable(os.Stdout, []axonv1alpha1.Workspace{*ws}, false)
+					}
 					return nil
 				}
 			}
@@ -241,6 +258,7 @@ func newGetWorkspaceCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Comma
 	}
 
 	cmd.Flags().StringVarP(&output, "output", "o", "", "Output format (yaml or json)")
+	cmd.Flags().BoolVarP(&detail, "detail", "d", false, "Show detailed information for a specific workspace")
 
 	cmd.ValidArgsFunction = completeWorkspaceNames(cfg)
 	_ = cmd.RegisterFlagCompletionFunc("output", cobra.FixedCompletions([]string{"yaml", "json"}, cobra.ShellCompDirectiveNoFileComp))

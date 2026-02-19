@@ -115,7 +115,7 @@ var _ = Describe("CLI", func() {
 		f.WaitForJobCompletion("cli-ws-task")
 
 		By("verifying task status via CLI get (detail)")
-		output := framework.AxonOutput("get", "task", "cli-ws-task", "-n", f.Namespace)
+		output := framework.AxonOutput("get", "task", "cli-ws-task", "-n", f.Namespace, "--detail")
 		Expect(output).To(ContainSubstring("Succeeded"))
 		Expect(output).To(ContainSubstring("Workspace"))
 

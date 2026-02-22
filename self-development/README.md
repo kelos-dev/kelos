@@ -8,6 +8,7 @@ These TaskSpawners demonstrate how to orchestrate fully autonomous AI workers th
 - Monitor GitHub issues
 - Investigate and fix problems
 - Create or update pull requests
+- Automatically review pull requests
 - Self-review and iterate on feedback
 - Request human input when blocked
 
@@ -129,6 +130,32 @@ kubectl get taskspawner axon-workers -o yaml
 # View logs from a specific task
 kubectl logs -l job-name=<job-name> -f
 ```
+
+### axon-pr-reviewer.yaml
+
+This TaskSpawner watches for open pull requests labeled `ok-to-test` and automatically reviews them. It is the first self-development spawner to use `types: ["pulls"]`, demonstrating Axon's PR-driven automation capabilities.
+
+**Key features:**
+- Polls for open PRs with the `ok-to-test` label
+- Checks out the PR branch and reads the full diff
+- Evaluates correctness, testing, code quality, security, and API compatibility
+- Runs `make verify` and `make test` as part of the review
+- Posts a structured review via the GitHub API (APPROVE, REQUEST_CHANGES, or COMMENT)
+- Skips re-reviewing PRs that have no new commits since the last review
+- Uses Sonnet for cost efficiency (reviews are read-heavy, not code-generation)
+- TTL of 30 minutes allows re-review when PRs are updated
+
+**Deploy:**
+```bash
+kubectl apply -f self-development/axon-pr-reviewer.yaml
+```
+
+**How the review cycle works:**
+1. A PR is opened and labeled `ok-to-test`
+2. The spawner discovers the PR and creates a review Task
+3. The agent checks out the PR, reads the diff, runs checks, and posts a review
+4. The Task completes and is cleaned up after 30 minutes (TTL)
+5. If the PR is updated (new commits pushed), the spawner creates a new review Task on the next poll
 
 ### axon-fake-user.yaml
 

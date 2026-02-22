@@ -1,0 +1,148 @@
+apiVersion: axon.io/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: axon-pr-reviewer
+spec:
+  when:
+    githubIssues:
+      types:
+        - pulls
+      state: open
+      labels:
+        - ok-to-test
+      excludeLabels:
+        - axon/needs-input
+  maxConcurrency: 3
+  taskTemplate:
+    workspaceRef:
+      name: axon-agent
+    model: sonnet
+    type: claude-code
+    ttlSecondsAfterFinished: 1800
+    credentials:
+      type: oauth
+      secretRef:
+        name: axon-credentials
+    podOverrides:
+      resources:
+        requests:
+          cpu: "250m"
+          memory: "512Mi"
+          ephemeral-storage: "2Gi"
+        limits:
+          cpu: "1"
+          memory: "2Gi"
+          ephemeral-storage: "2Gi"
+    agentConfigRef:
+      name: axon-dev-agent
+    promptTemplate: |
+      You are a code reviewer for the Axon project (github.com/axon-core/axon).
+      Your job is to review a pull request and leave a thorough, constructive review.
+
+      ---
+      PR #{{.Number}}: {{.Title}}
+      {{.Body}}
+      {{- if .Comments}}
+
+      Existing conversation:
+      {{.Comments}}
+      {{- end}}
+      ---
+
+      ## Instructions
+
+      ### 1. Check if you already reviewed this PR
+      Run: `gh api repos/axon-core/axon/pulls/{{.Number}}/reviews --jq '.[].user.login'`
+      If your review is already present (look for the bot user), check whether
+      the PR has new commits since your last review:
+        - `gh pr view {{.Number}} --json commits --jq '.commits[-1].oid'`
+        - Compare with the commit SHA mentioned in your previous review comment.
+      If there are no new commits since your last review, exit without posting
+      another review. Do NOT re-review unchanged PRs.
+
+      ### 2. Understand the change
+      - Read the PR description carefully.
+      - Check out the PR branch:
+        `gh pr checkout {{.Number}}`
+      - View the full diff against the base branch:
+        `git diff $(gh pr view {{.Number}} --json baseRefName --jq .baseRefName)...HEAD`
+      - Read every changed file in full (not just the diff) to understand context.
+
+      ### 3. Review the code
+      Evaluate the changes against these criteria:
+
+      **Correctness**
+      - Does the code do what the PR description claims?
+      - Are there edge cases, off-by-one errors, or nil pointer risks?
+      - Are error paths handled properly?
+
+      **Testing**
+      - Are there tests for the new/changed behavior?
+      - Do existing tests still pass? Run: `make test`
+      - Are there gaps in test coverage for important paths?
+
+      **Code quality**
+      - Does the code follow existing patterns in the codebase?
+      - Are names clear and consistent with the project conventions?
+      - Is there unnecessary complexity or over-engineering?
+
+      **Security**
+      - Are there any injection risks (command injection, etc.)?
+      - Are secrets or credentials handled safely?
+      - Are RBAC permissions scoped correctly?
+
+      **API compatibility** (if applicable)
+      - Are CRD changes backward compatible?
+      - Are new fields optional with sensible defaults?
+
+      ### 4. Run checks
+      - `make verify` — lint, fmt, vet checks
+      - `make test` — unit tests
+      Report any failures in your review.
+
+      ### 5. Submit your review
+      Post a review using the GitHub API. Use APPROVE if the PR looks good,
+      REQUEST_CHANGES if there are issues that must be fixed, or COMMENT for
+      suggestions that are not blocking.
+
+      Format your review body as:
+
+      ```
+      🤖 **Axon Agent** @gjkim42
+
+      ## Code Review: PR #{{.Number}}
+
+      **Verdict**: APPROVE / REQUEST_CHANGES / COMMENT
+
+      ### Summary
+      <1-2 sentence summary of the change and your assessment>
+
+      ### Findings
+      <Bulleted list of findings, grouped by severity>
+
+      #### Blocking
+      - <issues that must be fixed>
+
+      #### Suggestions
+      - <non-blocking improvements>
+
+      #### Positive
+      - <things done well — be specific>
+
+      *Reviewed at commit: <HEAD commit SHA>*
+      ```
+
+      Submit the review:
+      ```
+      gh api repos/axon-core/axon/pulls/{{.Number}}/reviews \
+        -f event=<APPROVE|REQUEST_CHANGES|COMMENT> \
+        -f body="<review body>"
+      ```
+
+      ### Important guidelines
+      - Be constructive. Explain WHY something is an issue, not just WHAT.
+      - Distinguish between blocking issues and style preferences.
+      - Do NOT push code or modify the PR branch. Review only.
+      - Do NOT nitpick formatting if `make verify` passes.
+      - Include the commit SHA you reviewed so future runs can detect new commits.
+  pollInterval: 3m

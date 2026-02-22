@@ -160,6 +160,23 @@ This spawner uses a cron schedule (`0 */12 * * *`) and will create a task every 
 - **Integration Opportunities** — identify tools/platforms Axon could integrate with (CI systems, monitoring, chat ops, etc.)
 - **New CRDs & API Extensions** — propose new Custom Resource Definitions or extensions to existing CRDs that would expand Axon's capabilities
 
+### axon-pr-reviewer.yaml
+
+This TaskSpawner watches for open pull requests labeled `ok-to-test` and performs automated code reviews, replacing the need for external code review bots.
+
+**Deploy:**
+```bash
+kubectl apply -f self-development/axon-pr-reviewer.yaml
+```
+
+This spawner polls for new PRs and creates a task for each one to:
+- Read the full PR diff and understand the changes
+- Review for correctness, test coverage, style, security, and simplicity
+- Post a structured review comment on the PR
+- Add the `axon/needs-input` label to avoid re-reviewing
+
+The reviewer is read-only — it does not push code or modify files.
+
 ## Customizing for Your Repository
 
 To adapt these examples for your own repository:

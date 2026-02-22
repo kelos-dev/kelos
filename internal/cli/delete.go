@@ -25,6 +25,7 @@ func newDeleteCommand(cfg *ClientConfig) *cobra.Command {
 	cmd.AddCommand(newDeleteTaskCommand(cfg))
 	cmd.AddCommand(newDeleteWorkspaceCommand(cfg))
 	cmd.AddCommand(newDeleteTaskSpawnerCommand(cfg))
+	cmd.AddCommand(newDeleteAgentConfigCommand(cfg))
 
 	return cmd
 }

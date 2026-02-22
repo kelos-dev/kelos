@@ -14,6 +14,7 @@ func TestDetailFlagRegistered(t *testing.T) {
 		{"get task", []string{"get", "task"}},
 		{"get taskspawner", []string{"get", "taskspawner"}},
 		{"get workspace", []string{"get", "workspace"}},
+		{"get agentconfig", []string{"get", "agentconfig"}},
 	}
 
 	for _, tt := range tests {

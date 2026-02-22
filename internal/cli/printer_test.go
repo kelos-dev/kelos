@@ -618,6 +618,189 @@ func TestPrintTaskDetail(t *testing.T) {
 	}
 }
 
+func TestPrintAgentConfigTable(t *testing.T) {
+	configs := []axonv1alpha1.AgentConfig{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "config-one",
+				CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
+			},
+			Spec: axonv1alpha1.AgentConfigSpec{
+				AgentsMD: "some instructions",
+				Plugins: []axonv1alpha1.PluginSpec{
+					{Name: "axon"},
+				},
+				MCPServers: []axonv1alpha1.MCPServerSpec{
+					{Name: "github", Type: "http"},
+					{Name: "local", Type: "stdio"},
+				},
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "config-two",
+				CreationTimestamp: metav1.NewTime(time.Now().Add(-24 * time.Hour)),
+			},
+			Spec: axonv1alpha1.AgentConfigSpec{},
+		},
+	}
+
+	var buf bytes.Buffer
+	printAgentConfigTable(&buf, configs, false)
+	output := buf.String()
+
+	for _, header := range []string{"NAME", "PLUGINS", "MCP SERVERS", "AGE"} {
+		if !strings.Contains(output, header) {
+			t.Errorf("expected header %s in output, got %q", header, output)
+		}
+	}
+	if strings.Contains(output, "NAMESPACE") {
+		t.Errorf("expected no NAMESPACE header when allNamespaces is false, got %q", output)
+	}
+	if !strings.Contains(output, "config-one") {
+		t.Errorf("expected config-one in output, got %q", output)
+	}
+	if !strings.Contains(output, "config-two") {
+		t.Errorf("expected config-two in output, got %q", output)
+	}
+}
+
+func TestPrintAgentConfigTableAllNamespaces(t *testing.T) {
+	configs := []axonv1alpha1.AgentConfig{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "config-one",
+				Namespace:         "ns-a",
+				CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
+			},
+			Spec: axonv1alpha1.AgentConfigSpec{},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "config-two",
+				Namespace:         "ns-b",
+				CreationTimestamp: metav1.NewTime(time.Now().Add(-24 * time.Hour)),
+			},
+			Spec: axonv1alpha1.AgentConfigSpec{},
+		},
+	}
+
+	var buf bytes.Buffer
+	printAgentConfigTable(&buf, configs, true)
+	output := buf.String()
+
+	if !strings.Contains(output, "NAMESPACE") {
+		t.Errorf("expected NAMESPACE header when allNamespaces is true, got %q", output)
+	}
+	if !strings.Contains(output, "ns-a") {
+		t.Errorf("expected namespace ns-a in output, got %q", output)
+	}
+	if !strings.Contains(output, "ns-b") {
+		t.Errorf("expected namespace ns-b in output, got %q", output)
+	}
+}
+
+func TestPrintAgentConfigTableSingleItem(t *testing.T) {
+	ac := axonv1alpha1.AgentConfig{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "my-config",
+			CreationTimestamp: metav1.NewTime(time.Now().Add(-2 * time.Hour)),
+		},
+		Spec: axonv1alpha1.AgentConfigSpec{
+			Plugins: []axonv1alpha1.PluginSpec{
+				{Name: "axon"},
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	printAgentConfigTable(&buf, []axonv1alpha1.AgentConfig{ac}, false)
+	output := buf.String()
+
+	if !strings.Contains(output, "NAME") {
+		t.Errorf("expected header NAME in output, got %q", output)
+	}
+	if !strings.Contains(output, "my-config") {
+		t.Errorf("expected my-config in output, got %q", output)
+	}
+	if strings.Contains(output, "Agents MD:") {
+		t.Errorf("table view should not contain detail fields, got %q", output)
+	}
+}
+
+func TestPrintAgentConfigDetail(t *testing.T) {
+	ac := &axonv1alpha1.AgentConfig{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-config",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.AgentConfigSpec{
+			AgentsMD: "Build and test instructions",
+			Plugins: []axonv1alpha1.PluginSpec{
+				{
+					Name: "axon",
+					Skills: []axonv1alpha1.SkillDefinition{
+						{Name: "review", Content: "review content"},
+					},
+					Agents: []axonv1alpha1.AgentDefinition{
+						{Name: "triage", Content: "triage content"},
+					},
+				},
+			},
+			MCPServers: []axonv1alpha1.MCPServerSpec{
+				{Name: "github", Type: "http"},
+				{Name: "local-tool", Type: "stdio"},
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	printAgentConfigDetail(&buf, ac)
+	output := buf.String()
+
+	for _, expected := range []string{
+		"Name:", "my-config",
+		"Namespace:", "default",
+		"Agents MD:", "Build and test instructions",
+		"Plugins:", "axon",
+		"skills=[review]",
+		"agents=[triage]",
+		"MCP Servers:", "github (http)",
+		"local-tool (stdio)",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Errorf("expected %q in detail output, got %q", expected, output)
+		}
+	}
+}
+
+func TestPrintAgentConfigDetailMinimal(t *testing.T) {
+	ac := &axonv1alpha1.AgentConfig{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "minimal-config",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.AgentConfigSpec{},
+	}
+
+	var buf bytes.Buffer
+	printAgentConfigDetail(&buf, ac)
+	output := buf.String()
+
+	if !strings.Contains(output, "minimal-config") {
+		t.Errorf("expected config name in output, got %q", output)
+	}
+	for _, absent := range []string{
+		"Agents MD:",
+		"Plugins:",
+		"MCP Servers:",
+	} {
+		if strings.Contains(output, absent) {
+			t.Errorf("expected no %s field for minimal config, got %q", absent, output)
+		}
+	}
+}
+
 func TestPrintTaskDetailMinimal(t *testing.T) {
 	task := &axonv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{

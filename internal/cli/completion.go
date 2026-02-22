@@ -64,6 +64,33 @@ func completeTaskSpawnerNames(cfg *ClientConfig) cobra.CompletionFunc {
 	}
 }
 
+func completeAgentConfigNames(cfg *ClientConfig) cobra.CompletionFunc {
+	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) > 0 {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		cl, ns, err := cfg.NewClient()
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+
+		acList := &axonv1alpha1.AgentConfigList{}
+		if err := cl.List(ctx, acList, client.InNamespace(ns)); err != nil {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+
+		var names []string
+		for _, ac := range acList.Items {
+			names = append(names, ac.Name)
+		}
+		return names, cobra.ShellCompDirectiveNoFileComp
+	}
+}
+
 func completeWorkspaceNames(cfg *ClientConfig) cobra.CompletionFunc {
 	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if len(args) > 0 {

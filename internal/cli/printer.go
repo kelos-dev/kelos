@@ -235,6 +235,77 @@ func printWorkspaceDetail(w io.Writer, ws *axonv1alpha1.Workspace) {
 	}
 }
 
+func printAgentConfigTable(w io.Writer, configs []axonv1alpha1.AgentConfig, allNamespaces bool) {
+	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
+	if allNamespaces {
+		fmt.Fprintln(tw, "NAMESPACE\tNAME\tPLUGINS\tMCP SERVERS\tAGE")
+	} else {
+		fmt.Fprintln(tw, "NAME\tPLUGINS\tMCP SERVERS\tAGE")
+	}
+	for _, ac := range configs {
+		age := duration.HumanDuration(time.Since(ac.CreationTimestamp.Time))
+		plugins := fmt.Sprintf("%d", len(ac.Spec.Plugins))
+		mcpServers := fmt.Sprintf("%d", len(ac.Spec.MCPServers))
+		if allNamespaces {
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", ac.Namespace, ac.Name, plugins, mcpServers, age)
+		} else {
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", ac.Name, plugins, mcpServers, age)
+		}
+	}
+	tw.Flush()
+}
+
+func printAgentConfigDetail(w io.Writer, ac *axonv1alpha1.AgentConfig) {
+	printField(w, "Name", ac.Name)
+	printField(w, "Namespace", ac.Namespace)
+	if ac.Spec.AgentsMD != "" {
+		// Truncate long agents-md content for display
+		md := ac.Spec.AgentsMD
+		if len(md) > 80 {
+			md = md[:80] + "..."
+		}
+		printField(w, "Agents MD", md)
+	}
+	if len(ac.Spec.Plugins) > 0 {
+		for i, p := range ac.Spec.Plugins {
+			var parts []string
+			if len(p.Skills) > 0 {
+				skillNames := make([]string, len(p.Skills))
+				for j, s := range p.Skills {
+					skillNames[j] = s.Name
+				}
+				parts = append(parts, fmt.Sprintf("skills=[%s]", strings.Join(skillNames, ",")))
+			}
+			if len(p.Agents) > 0 {
+				agentNames := make([]string, len(p.Agents))
+				for j, a := range p.Agents {
+					agentNames[j] = a.Name
+				}
+				parts = append(parts, fmt.Sprintf("agents=[%s]", strings.Join(agentNames, ",")))
+			}
+			detail := p.Name
+			if len(parts) > 0 {
+				detail += " (" + strings.Join(parts, ", ") + ")"
+			}
+			if i == 0 {
+				printField(w, "Plugins", detail)
+			} else {
+				fmt.Fprintf(w, "%-20s%s\n", "", detail)
+			}
+		}
+	}
+	if len(ac.Spec.MCPServers) > 0 {
+		for i, m := range ac.Spec.MCPServers {
+			detail := fmt.Sprintf("%s (%s)", m.Name, m.Type)
+			if i == 0 {
+				printField(w, "MCP Servers", detail)
+			} else {
+				fmt.Fprintf(w, "%-20s%s\n", "", detail)
+			}
+		}
+	}
+}
+
 func printField(w io.Writer, label, value string) {
 	fmt.Fprintf(w, "%-20s%s\n", label+":", value)
 }

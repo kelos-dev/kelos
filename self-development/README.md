@@ -171,11 +171,13 @@ kubectl apply -f self-development/axon-pr-reviewer.yaml
 
 This spawner polls for PRs labeled `ok-to-test` and creates a task for each one to:
 - Check if the PR head has changed since the last axon review
-- Read the full PR diff and understand the changes
+- Read the full PR diff for context and the incremental diff since the last review
 - Review for correctness, test coverage, style, security, and simplicity
 - Post a structured comment on the PR
 
 The reviewer automatically re-reviews PRs when new commits are pushed.
+On follow-up reviews it focuses on the incremental diff (changes since the
+last reviewed commit) while using the full PR diff for overall context.
 The Task's TTL is set to zero so it is deleted as soon as the review
 finishes, letting the spawner rediscover the PR on the next poll cycle.
 The agent compares the PR head SHA against the reviewed commit SHA

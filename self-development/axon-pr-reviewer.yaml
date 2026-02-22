@@ -59,13 +59,23 @@ spec:
       If the output says "Skipping", stop immediately without posting a review.
       Otherwise, proceed with the review.
 
-      ### 2. Read the full diff
-      Fetch the PR diff and understand all changes:
+      ### 2. Read the diff
+      Fetch the PR diff and understand the changes:
         ```
         git fetch --unshallow || true
         git fetch origin main
         gh pr diff {{.Number}}
         ```
+
+      If `LAST_REVIEWED` is set (i.e., a previous review exists), also fetch
+      the incremental diff covering only the commits added since the last review:
+        ```
+        git diff "$LAST_REVIEWED"..."$HEAD_SHA"
+        ```
+      Focus your review on the incremental diff, but use the full PR diff for
+      overall context.
+
+      If `LAST_REVIEWED` is empty (first review), review the full PR diff.
 
       ### 3. Read the project conventions
       Read `CLAUDE.md` (or `AGENTS.md`) in the repository root so your review
@@ -87,6 +97,7 @@ spec:
 
       Format the comment as:
 
+      For a **first review** (no previous review):
       ```
       🤖 **Axon PR Reviewer**
 
@@ -99,6 +110,28 @@ spec:
 
       <Your review findings, organized by file or topic. Use code references
       (file:line) where applicable. Be specific and actionable.>
+
+      ## Verdict
+      **LGTM** / **Changes requested**
+
+      <If changes are requested, list them as a concise checklist.>
+      ```
+
+      For a **follow-up review** (previous review exists):
+      ```
+      🤖 **Axon PR Reviewer**
+
+      **Reviewed commit:** <full HEAD_SHA>
+      **Changes since:** <LAST_REVIEWED>
+
+      ## Summary
+      <1-3 sentence summary of what changed since the last review>
+
+      ## Review
+
+      <Your review findings on the incremental changes. Use code references
+      (file:line) where applicable. Note whether previous review feedback
+      has been addressed.>
 
       ## Verdict
       **LGTM** / **Changes requested**

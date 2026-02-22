@@ -1281,6 +1281,33 @@ spec:
                   Ref is the git reference to checkout (branch, tag, or commit SHA).
                   Defaults to the repository's default branch if not specified.
                 type: string
+              remotes:
+                description: |-
+                  Remotes are additional git remotes to configure after cloning.
+                  The credential from SecretRef applies to all remotes.
+                items:
+                  description: |-
+                    GitRemote defines an additional git remote to configure in the cloned
+                    repository after the initial clone.
+                  properties:
+                    name:
+                      description: Name is the git remote name (must not be "origin").
+                      minLength: 1
+                      type: string
+                    url:
+                      description: URL is the git remote URL.
+                      pattern: ^(https?://|git://|git@).*
+                      type: string
+                  required:
+                  - name
+                  - url
+                  type: object
+                type: array
+                x-kubernetes-validations:
+                - message: remote name 'origin' is reserved for the clone source
+                  rule: self.all(r, r.name != 'origin')
+                - message: remote names must be unique
+                  rule: self.map(r, r.name).size() == self.size()
               repo:
                 description: Repo is the git repository URL to clone.
                 pattern: ^(https?://|git://|git@).*

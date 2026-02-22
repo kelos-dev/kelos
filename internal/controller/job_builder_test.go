@@ -3120,3 +3120,243 @@ func TestBuildJob_AxonBaseBranchAbsentWithoutWorkspace(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildJob_WorkspaceWithOneRemote(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-one-remote",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Work on feature",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &axonv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/org/repo.git",
+		Ref:  "main",
+		Remotes: []axonv1alpha1.GitRemote{
+			{Name: "private", URL: "https://github.com/user/repo.git"},
+		},
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	var remoteSetup *corev1.Container
+	for i := range job.Spec.Template.Spec.InitContainers {
+		if job.Spec.Template.Spec.InitContainers[i].Name == "remote-setup" {
+			remoteSetup = &job.Spec.Template.Spec.InitContainers[i]
+			break
+		}
+	}
+	if remoteSetup == nil {
+		t.Fatal("Expected remote-setup init container")
+	}
+
+	script := remoteSetup.Command[2]
+	if !strings.Contains(script, "git remote add 'private' 'https://github.com/user/repo.git'") {
+		t.Errorf("Expected script to add quoted private remote, got %q", script)
+	}
+
+	if *remoteSetup.SecurityContext.RunAsUser != ClaudeCodeUID {
+		t.Errorf("Expected RunAsUser %d, got %d", ClaudeCodeUID, *remoteSetup.SecurityContext.RunAsUser)
+	}
+}
+
+func TestBuildJob_WorkspaceWithMultipleRemotes(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-multi-remote",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Work on feature",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &axonv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/org/repo.git",
+		Ref:  "main",
+		Remotes: []axonv1alpha1.GitRemote{
+			{Name: "private", URL: "https://github.com/user/repo.git"},
+			{Name: "downstream", URL: "https://github.com/vendor/repo.git"},
+		},
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	var remoteSetup *corev1.Container
+	for i := range job.Spec.Template.Spec.InitContainers {
+		if job.Spec.Template.Spec.InitContainers[i].Name == "remote-setup" {
+			remoteSetup = &job.Spec.Template.Spec.InitContainers[i]
+			break
+		}
+	}
+	if remoteSetup == nil {
+		t.Fatal("Expected remote-setup init container")
+	}
+
+	script := remoteSetup.Command[2]
+	if !strings.Contains(script, "git remote add 'private' 'https://github.com/user/repo.git'") {
+		t.Errorf("Expected script to add quoted private remote, got %q", script)
+	}
+	if !strings.Contains(script, "git remote add 'downstream' 'https://github.com/vendor/repo.git'") {
+		t.Errorf("Expected script to add quoted downstream remote, got %q", script)
+	}
+}
+
+func TestBuildJob_WorkspaceWithNoRemotesNoRemoteSetupContainer(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-no-remotes",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix the code",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &axonv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/org/repo.git",
+		Ref:  "main",
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	for _, c := range job.Spec.Template.Spec.InitContainers {
+		if c.Name == "remote-setup" {
+			t.Error("Expected no remote-setup init container when remotes is empty")
+		}
+	}
+}
+
+func TestBuildJob_RemoteSetupOrderingWithBranchSetup(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-remote-order",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Work on feature",
+			Branch: "feature-x",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &axonv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/org/repo.git",
+		Ref:  "main",
+		Remotes: []axonv1alpha1.GitRemote{
+			{Name: "private", URL: "https://github.com/user/repo.git"},
+		},
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	initContainers := job.Spec.Template.Spec.InitContainers
+	nameOrder := make([]string, len(initContainers))
+	for i, c := range initContainers {
+		nameOrder[i] = c.Name
+	}
+
+	cloneIdx, remoteIdx, branchIdx := -1, -1, -1
+	for i, name := range nameOrder {
+		switch name {
+		case "git-clone":
+			cloneIdx = i
+		case "remote-setup":
+			remoteIdx = i
+		case "branch-setup":
+			branchIdx = i
+		}
+	}
+
+	if cloneIdx < 0 || remoteIdx < 0 || branchIdx < 0 {
+		t.Fatalf("Expected git-clone, remote-setup, branch-setup; got %v", nameOrder)
+	}
+	if !(cloneIdx < remoteIdx && remoteIdx < branchIdx) {
+		t.Errorf("Expected ordering git-clone < remote-setup < branch-setup, got %v", nameOrder)
+	}
+}
+
+func TestBuildJob_RemoteSetupQuotesShellMetacharacters(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-remote-injection",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Do work",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &axonv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/org/repo.git",
+		Remotes: []axonv1alpha1.GitRemote{
+			{Name: "bad;rm -rf /", URL: "https://evil.com$(whoami)"},
+		},
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	var remoteSetup *corev1.Container
+	for i := range job.Spec.Template.Spec.InitContainers {
+		if job.Spec.Template.Spec.InitContainers[i].Name == "remote-setup" {
+			remoteSetup = &job.Spec.Template.Spec.InitContainers[i]
+			break
+		}
+	}
+	if remoteSetup == nil {
+		t.Fatal("Expected remote-setup init container")
+	}
+
+	script := remoteSetup.Command[2]
+	expected := "git remote add 'bad;rm -rf /' 'https://evil.com$(whoami)'"
+	if !strings.Contains(script, expected) {
+		t.Errorf("Expected shell metacharacters to be single-quoted:\nwant substring: %s\ngot script: %s", expected, script)
+	}
+}

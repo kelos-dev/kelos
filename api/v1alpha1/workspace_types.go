@@ -4,6 +4,18 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// GitRemote defines an additional git remote to configure in the cloned
+// repository after the initial clone.
+type GitRemote struct {
+	// Name is the git remote name (must not be "origin").
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// URL is the git remote URL.
+	// +kubebuilder:validation:Pattern="^(https?://|git://|git@).*"
+	URL string `json:"url"`
+}
+
 // WorkspaceFile defines a file to write into the cloned repository before the
 // agent container starts.
 type WorkspaceFile struct {
@@ -32,6 +44,13 @@ type WorkspaceSpec struct {
 	// authentication and GitHub CLI (gh) operations.
 	// +optional
 	SecretRef *SecretReference `json:"secretRef,omitempty"`
+
+	// Remotes are additional git remotes to configure after cloning.
+	// The credential from SecretRef applies to all remotes.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="self.all(r, r.name != 'origin')",message="remote name 'origin' is reserved for the clone source"
+	// +kubebuilder:validation:XValidation:rule="self.map(r, r.name).size() == self.size()",message="remote names must be unique"
+	Remotes []GitRemote `json:"remotes,omitempty"`
 
 	// Files are written into the cloned repository before the agent starts.
 	// This can be used to inject plugin-like assets such as skills

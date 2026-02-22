@@ -310,6 +310,24 @@ func (b *JobBuilder) buildAgentJob(task *axonv1alpha1.Task, workspace *axonv1alp
 
 		initContainers = append(initContainers, initContainer)
 
+		if len(workspace.Remotes) > 0 {
+			var parts []string
+			parts = append(parts, fmt.Sprintf("cd %s/repo", WorkspaceMountPath))
+			for _, r := range workspace.Remotes {
+				parts = append(parts, fmt.Sprintf("git remote add %s %s", shellQuote(r.Name), shellQuote(r.URL)))
+			}
+			remoteSetupContainer := corev1.Container{
+				Name:         "remote-setup",
+				Image:        GitCloneImage,
+				Command:      []string{"sh", "-c", strings.Join(parts, " && ")},
+				VolumeMounts: []corev1.VolumeMount{volumeMount},
+				SecurityContext: &corev1.SecurityContext{
+					RunAsUser: &agentUID,
+				},
+			}
+			initContainers = append(initContainers, remoteSetupContainer)
+		}
+
 		if task.Spec.Branch != "" {
 			fetchCmd := `git fetch origin "$AXON_BRANCH":"$AXON_BRANCH" 2>/dev/null`
 			if workspace.SecretRef != nil {

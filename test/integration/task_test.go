@@ -2991,4 +2991,110 @@ var _ = Describe("Task Controller", func() {
 			Expect(err.Error()).To(ContainSubstring("immutable"))
 		})
 	})
+
+	Context("When creating a Task with workspace remotes", func() {
+		It("Should create a Job with a remote-setup init container", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-task-workspace-remotes",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with API key")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+			By("Creating a Workspace with remotes")
+			ws := &axonv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace-remotes",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/org/repo.git",
+					Ref:  "main",
+					Remotes: []axonv1alpha1.GitRemote{
+						{Name: "private", URL: "https://github.com/user/repo.git"},
+						{Name: "downstream", URL: "https://github.com/vendor/repo.git"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
+
+			By("Creating a Task referencing the workspace")
+			task := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-task-remotes",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "Work on feature",
+					Credentials: axonv1alpha1.Credentials{
+						Type: axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{
+							Name: "anthropic-api-key",
+						},
+					},
+					WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						Name: "test-workspace-remotes",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, task)).Should(Succeed())
+
+			By("Verifying a Job is created")
+			jobLookupKey := types.NamespacedName{Name: task.Name, Namespace: ns.Name}
+			createdJob := &batchv1.Job{}
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, jobLookupKey, createdJob)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Logging the Job spec")
+			logJobSpec(createdJob)
+
+			By("Verifying the remote-setup init container exists")
+			initContainers := createdJob.Spec.Template.Spec.InitContainers
+			var remoteSetup *corev1.Container
+			for i := range initContainers {
+				if initContainers[i].Name == "remote-setup" {
+					remoteSetup = &initContainers[i]
+					break
+				}
+			}
+			Expect(remoteSetup).NotTo(BeNil(), "Expected remote-setup init container")
+
+			By("Verifying the remote-setup script adds both remotes")
+			Expect(remoteSetup.Command).To(HaveLen(3))
+			Expect(remoteSetup.Command[0]).To(Equal("sh"))
+			Expect(remoteSetup.Command[2]).To(ContainSubstring("git remote add 'private' 'https://github.com/user/repo.git'"))
+			Expect(remoteSetup.Command[2]).To(ContainSubstring("git remote add 'downstream' 'https://github.com/vendor/repo.git'"))
+
+			By("Verifying init container ordering: git-clone before remote-setup")
+			Expect(initContainers[0].Name).To(Equal("git-clone"))
+			cloneFound := false
+			for i, c := range initContainers {
+				if c.Name == "remote-setup" {
+					Expect(cloneFound).To(BeTrue(), "remote-setup should come after git-clone")
+					_ = i
+					break
+				}
+				if c.Name == "git-clone" {
+					cloneFound = true
+				}
+			}
+		})
+	})
 })

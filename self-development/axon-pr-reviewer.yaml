@@ -47,16 +47,18 @@ spec:
       Before doing anything, check whether the PR head has changed since the
       last axon review. Run:
         ```
-        HEAD_SHA=$(gh api repos/{owner}/{repo}/pulls/{{.Number}} --jq '.head.sha')
-        LAST_REVIEWED_SHA=$(gh api repos/{owner}/{repo}/pulls/{{.Number}}/reviews \
-          --jq '[.[] | select(.user.login == "axon-agent" or (.body | test("Axon Agent"))) | .commit_id] | last // empty')
-        if [ "$HEAD_SHA" = "$LAST_REVIEWED_SHA" ]; then
+        REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+        HEAD_SHA=$(gh pr view {{.Number}} --json headRefOid -q .headRefOid)
+        LAST_REVIEWED_SHA=$(gh api "repos/${REPO}/pulls/{{.Number}}/reviews" \
+          --jq '[.[] | select(.user.login == "axon-agent" or (.body | test("Axon PR Reviewer"))) | .commit_id] | last // empty')
+        if [ -n "$LAST_REVIEWED_SHA" ] && [ "$HEAD_SHA" = "$LAST_REVIEWED_SHA" ]; then
           echo "Already reviewed commit $HEAD_SHA. Skipping."
           exit 0
         fi
+        echo "Reviewing commit $HEAD_SHA (last reviewed: ${LAST_REVIEWED_SHA:-none})"
         ```
       If the PR head SHA matches the last reviewed commit, exit immediately
-      without posting a review.
+      without posting a review. Otherwise, proceed with the review.
 
       ### 2. Read the full diff
       Fetch the PR diff and understand all changes:
@@ -89,6 +91,8 @@ spec:
       ```
       🤖 **Axon PR Reviewer**
 
+      **Reviewed commit:** <HEAD_SHA>
+
       ## Summary
       <1-3 sentence summary of what the PR does>
 
@@ -109,4 +113,5 @@ spec:
         Use `--comment` only.
       - Be constructive and specific. Avoid vague feedback.
       - Focus on substantive issues, not style nitpicks that a linter would catch.
+      - Always include the reviewed commit SHA in the review comment header.
   pollInterval: 1m

@@ -49,7 +49,7 @@ spec:
         ```
         HEAD_SHA=$(gh pr view {{.Number}} --json headRefOid -q .headRefOid)
         LAST_REVIEWED=$(gh pr view {{.Number}} --json comments \
-          --jq '[.comments[] | select(.body | test("Axon PR Reviewer")) | .body | capture("Reviewed commit:.* (?<sha>[0-9a-f]{7,40})") | .sha] | last // empty')
+          --jq '[.comments[] | select(.body | test("Axon PR Reviewer")) | .body | capture("Reviewed commit:.* (?<sha>[0-9a-f]{7,40})")? | .sha] | last // empty')
         if [ -n "$LAST_REVIEWED" ] && [ "$HEAD_SHA" = "$LAST_REVIEWED" ]; then
           echo "Already reviewed commit $HEAD_SHA. Skipping."
           exit 0

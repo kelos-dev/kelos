@@ -44,21 +44,18 @@ spec:
       ## Your tasks
 
       ### 1. Check for new commits since last review
-      Before doing anything, check whether this PR has new commits since the
+      Before doing anything, check whether the PR head has changed since the
       last axon review. Run:
         ```
-        LAST_REVIEW_DATE=$(gh api repos/{owner}/{repo}/pulls/{{.Number}}/reviews \
-          --jq '[.[] | select(.user.login == "axon-agent" or (.body | test("Axon Agent"))) | .submitted_at] | sort | last // empty')
-        if [ -n "$LAST_REVIEW_DATE" ]; then
-          NEW_COMMITS=$(gh api repos/{owner}/{repo}/pulls/{{.Number}}/commits \
-            --jq "[.[] | select(.commit.committer.date > \"$LAST_REVIEW_DATE\")] | length")
-          if [ "$NEW_COMMITS" = "0" ]; then
-            echo "No new commits since last review. Skipping."
-            exit 0
-          fi
+        HEAD_SHA=$(gh api repos/{owner}/{repo}/pulls/{{.Number}} --jq '.head.sha')
+        LAST_REVIEWED_SHA=$(gh api repos/{owner}/{repo}/pulls/{{.Number}}/reviews \
+          --jq '[.[] | select(.user.login == "axon-agent" or (.body | test("Axon Agent"))) | .commit_id] | last // empty')
+        if [ "$HEAD_SHA" = "$LAST_REVIEWED_SHA" ]; then
+          echo "Already reviewed commit $HEAD_SHA. Skipping."
+          exit 0
         fi
         ```
-      If there are no new commits since the last axon review, exit immediately
+      If the PR head SHA matches the last reviewed commit, exit immediately
       without posting a review.
 
       ### 2. Read the full diff

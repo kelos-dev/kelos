@@ -169,11 +169,16 @@ This TaskSpawner watches for open pull requests labeled `ok-to-test` and perform
 kubectl apply -f self-development/axon-pr-reviewer.yaml
 ```
 
-This spawner polls for new PRs and creates a task for each one to:
+This spawner polls for PRs labeled `ok-to-test` and creates a task for each one to:
+- Check if there are new commits since the last axon review
 - Read the full PR diff and understand the changes
 - Review for correctness, test coverage, style, security, and simplicity
 - Post a structured review comment on the PR
-- Add the `axon/needs-input` label to avoid re-reviewing
+
+The reviewer automatically re-reviews PRs when new commits are pushed.
+After the review Task's TTL expires, the spawner rediscovers the PR and
+spawns a new review. The agent skips posting if there are no new commits
+since its last review, so only meaningful updates trigger new feedback.
 
 The reviewer is read-only — it does not push code or modify files.
 

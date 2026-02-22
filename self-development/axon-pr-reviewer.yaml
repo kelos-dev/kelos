@@ -9,8 +9,6 @@ spec:
         - pulls
       labels:
         - ok-to-test
-      excludeLabels:
-        - axon/needs-input
   maxConcurrency: 3
   taskTemplate:
     workspaceRef:
@@ -45,7 +43,25 @@ spec:
 
       ## Your tasks
 
-      ### 1. Read the full diff
+      ### 1. Check for new commits since last review
+      Before doing anything, check whether this PR has new commits since the
+      last axon review. Run:
+        ```
+        LAST_REVIEW_DATE=$(gh api repos/{owner}/{repo}/pulls/{{.Number}}/reviews \
+          --jq '[.[] | select(.user.login == "axon-agent" or (.body | test("Axon Agent"))) | .submitted_at] | sort | last // empty')
+        if [ -n "$LAST_REVIEW_DATE" ]; then
+          NEW_COMMITS=$(gh api repos/{owner}/{repo}/pulls/{{.Number}}/commits \
+            --jq "[.[] | select(.commit.committer.date > \"$LAST_REVIEW_DATE\")] | length")
+          if [ "$NEW_COMMITS" = "0" ]; then
+            echo "No new commits since last review. Skipping."
+            exit 0
+          fi
+        fi
+        ```
+      If there are no new commits since the last axon review, exit immediately
+      without posting a review.
+
+      ### 2. Read the full diff
       Fetch the PR diff and understand all changes:
         ```
         git fetch --unshallow || true
@@ -53,11 +69,11 @@ spec:
         gh pr diff {{.Number}}
         ```
 
-      ### 2. Read the project conventions
+      ### 3. Read the project conventions
       Read `CLAUDE.md` (or `AGENTS.md`) in the repository root so your review
       aligns with the project's coding standards.
 
-      ### 3. Review the changes
+      ### 4. Review the changes
       Evaluate the PR for:
         - **Correctness**: Does the code do what it claims? Are there logic errors or edge cases?
         - **Tests**: Are there adequate tests for the changes? Are existing tests updated if needed?
@@ -65,7 +81,7 @@ spec:
         - **Security**: Are there any security concerns (injection, hardcoded secrets, etc.)?
         - **Simplicity**: Is the change minimal and focused, or does it include unnecessary refactoring?
 
-      ### 4. Post your review
+      ### 5. Post your review
       Post a single review comment on the PR using `gh`:
         ```
         gh pr review {{.Number}} --comment --body "..."
@@ -74,6 +90,8 @@ spec:
       Format the comment as:
 
       ```
+      🤖 **Axon PR Reviewer**
+
       ## Summary
       <1-3 sentence summary of what the PR does>
 
@@ -87,12 +105,6 @@ spec:
 
       <If changes are requested, list them as a concise checklist.>
       ```
-
-      After posting the review, add the `axon/needs-input` label to the PR so
-      it is not re-reviewed:
-        ```
-        gh pr edit {{.Number}} --add-label axon/needs-input
-        ```
 
       ## Constraints
       - Do NOT push code, create commits, or modify any files. This is a read-only review.

@@ -495,7 +495,7 @@ Axon uses standard Kubernetes RBAC — use namespace isolation to separate teams
 
 Running AI agents costs real money. Here's how to stay in control:
 
-**Model costs vary significantly.** Opus is the most capable but most expensive model. Use `spec.model` (or `model` in config) to choose cheaper models like Sonnet for routine tasks and reserve Opus for complex work. As a rough guide, a typical 15-minute Sonnet task costs ~$1-3, while an Opus task of the same length can cost ~$5-15 depending on context size.
+**Model costs vary significantly.** Opus is the most capable but most expensive model. Use `spec.model` (or `model` in config) to choose cheaper models like Sonnet for routine tasks and reserve Opus for complex work. Check the [API pricing](https://docs.anthropic.com/en/docs/about-claude/pricing) page for current rates.
 
 **Use `maxConcurrency` to cap spend.** Without it, a TaskSpawner can create unlimited concurrent tasks. If 100 issues match your filter on first poll, that's 100 simultaneous agent runs. Always set a limit:
 
@@ -555,7 +555,7 @@ Agents run in isolated, ephemeral Pods with no host access. Their capabilities a
 <details>
 <summary><strong>How much does it cost to run?</strong></summary>
 
-Costs depend on the model and task complexity. As a rough guide: a 15-minute Sonnet task costs ~$1-3, while Opus costs ~$5-15 for the same duration. Use `maxConcurrency`, timeouts, and model selection to stay in budget. See [Cost and Limits](#cost-and-limits).
+Costs depend on the model and task complexity. Check the [API pricing](https://docs.anthropic.com/en/docs/about-claude/pricing) page for current rates. Use `maxConcurrency`, timeouts, and model selection to stay in budget. See [Cost and Limits](#cost-and-limits).
 
 </details>
 

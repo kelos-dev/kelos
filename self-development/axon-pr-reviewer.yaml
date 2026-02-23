@@ -15,7 +15,7 @@ spec:
       name: axon-agent
     model: opus
     type: claude-code
-    ttlSecondsAfterFinished: 0
+    ttlSecondsAfterFinished: 3600
     credentials:
       type: oauth
       secretRef:
@@ -43,21 +43,14 @@ spec:
 
       ## Your tasks
 
-      ### 1. Check for new commits since last review
-      Before doing anything, check whether the PR head has changed since the
-      last axon review. Run:
+      ### 1. Gather context
+      Fetch the current HEAD SHA and check whether a previous axon review exists:
         ```
         HEAD_SHA=$(gh pr view {{.Number}} --json headRefOid -q .headRefOid)
         LAST_REVIEWED=$(gh pr view {{.Number}} --json comments \
           --jq '[.comments[] | select(.body | test("Axon PR Reviewer")) | .body | capture("Reviewed commit:.* (?<sha>[0-9a-f]{7,40})")? | .sha] | last // empty')
-        if [ -n "$LAST_REVIEWED" ] && [ "$HEAD_SHA" = "$LAST_REVIEWED" ]; then
-          echo "Already reviewed commit $HEAD_SHA. Skipping."
-          exit 0
-        fi
-        echo "Reviewing commit $HEAD_SHA (last reviewed: ${LAST_REVIEWED:-none})"
+        echo "HEAD: $HEAD_SHA, last reviewed: ${LAST_REVIEWED:-none}"
         ```
-      If the output says "Skipping", stop immediately without posting a review.
-      Otherwise, proceed with the review.
 
       ### 2. Read the diff
       Fetch the PR diff and understand the changes:

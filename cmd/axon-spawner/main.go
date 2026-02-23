@@ -173,10 +173,10 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 		return fmt.Errorf("listing existing Tasks: %w", err)
 	}
 
-	existingTasks := make(map[string]bool)
+	existingTaskPhase := make(map[string]axonv1alpha1.TaskPhase)
 	activeTasks := 0
 	for _, t := range existingTaskList.Items {
-		existingTasks[t.Name] = true
+		existingTaskPhase[t.Name] = t.Status.Phase
 		if t.Status.Phase != axonv1alpha1.TaskPhaseSucceeded && t.Status.Phase != axonv1alpha1.TaskPhaseFailed {
 			activeTasks++
 		}
@@ -185,7 +185,25 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 	var newItems []source.WorkItem
 	for _, item := range items {
 		taskName := fmt.Sprintf("%s-%s", ts.Name, item.ID)
-		if !existingTasks[taskName] {
+		phase, exists := existingTaskPhase[taskName]
+		if !exists {
+			newItems = append(newItems, item)
+			continue
+		}
+		// If a completed/failed Task is re-discovered (e.g. label removed
+		// and re-added), delete it so the spawner can create a fresh Task.
+		// This closes the re-work loop without requiring /reset-worker.
+		if phase == axonv1alpha1.TaskPhaseSucceeded || phase == axonv1alpha1.TaskPhaseFailed {
+			existing := &axonv1alpha1.Task{}
+			existing.Name = taskName
+			existing.Namespace = ts.Namespace
+			if err := cl.Delete(ctx, existing); err != nil {
+				if !apierrors.IsNotFound(err) {
+					log.Error(err, "Deleting completed Task for re-work", "task", taskName)
+					continue
+				}
+			}
+			log.Info("Deleted completed Task for re-discovered item", "task", taskName, "previousPhase", phase)
 			newItems = append(newItems, item)
 		}
 	}

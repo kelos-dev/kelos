@@ -284,16 +284,15 @@ func TestRunCycleWithSource_MaxConcurrencyWithExistingActiveTasks(t *testing.T) 
 
 func TestRunCycleWithSource_CompletedTasksDontCountTowardsLimit(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", int32Ptr(2))
+	// Use completed tasks that are NOT re-discovered (different IDs)
 	existingTasks := []axonv1alpha1.Task{
-		newTask("spawner-done1", "default", "spawner", axonv1alpha1.TaskPhaseSucceeded),
-		newTask("spawner-done2", "default", "spawner", axonv1alpha1.TaskPhaseFailed),
+		newTask("spawner-old1", "default", "spawner", axonv1alpha1.TaskPhaseSucceeded),
+		newTask("spawner-old2", "default", "spawner", axonv1alpha1.TaskPhaseFailed),
 	}
 	cl, key := setupTest(t, ts, existingTasks...)
 
 	src := &fakeSource{
 		items: []source.WorkItem{
-			{ID: "done1", Title: "Done 1"},
-			{ID: "done2", Title: "Done 2"},
 			{ID: "3", Title: "Item 3"},
 			{ID: "4", Title: "Item 4"},
 			{ID: "5", Title: "Item 5"},
@@ -304,7 +303,7 @@ func TestRunCycleWithSource_CompletedTasksDontCountTowardsLimit(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	// 2 completed tasks don't count, so 2 new can be created (maxConcurrency=2)
+	// 2 completed tasks don't count towards concurrency, so 2 new can be created (maxConcurrency=2)
 	var taskList axonv1alpha1.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
@@ -394,9 +393,9 @@ func TestRunCycleWithSource_ActiveTasksStatusUpdated(t *testing.T) {
 	if err := cl.Get(context.Background(), key, &updatedTS); err != nil {
 		t.Fatalf("Getting TaskSpawner: %v", err)
 	}
-	// 1 existing running + 1 new = 2 active
-	if updatedTS.Status.ActiveTasks != 2 {
-		t.Errorf("Expected activeTasks=2, got %d", updatedTS.Status.ActiveTasks)
+	// 1 existing running + 2 new (done re-created + 3) = 3 active
+	if updatedTS.Status.ActiveTasks != 3 {
+		t.Errorf("Expected activeTasks=3, got %d", updatedTS.Status.ActiveTasks)
 	}
 }
 
@@ -625,17 +624,17 @@ func TestRunCycleWithSource_MaxTotalTasksLimitsCreation(t *testing.T) {
 
 func TestRunCycleWithSource_MaxTotalTasksWithExistingTasks(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
-	ts.Spec.MaxTotalTasks = int32Ptr(3)
+	ts.Spec.MaxTotalTasks = int32Ptr(4)
 	ts.Status.TotalTasksCreated = 2 // Already created 2 tasks before
 	existingTasks := []axonv1alpha1.Task{
-		newTask("spawner-existing1", "default", "spawner", axonv1alpha1.TaskPhaseSucceeded),
+		newTask("spawner-old1", "default", "spawner", axonv1alpha1.TaskPhaseSucceeded),
 		newTask("spawner-existing2", "default", "spawner", axonv1alpha1.TaskPhaseRunning),
 	}
 	cl, key := setupTest(t, ts, existingTasks...)
 
 	src := &fakeSource{
 		items: []source.WorkItem{
-			{ID: "existing1", Title: "Existing 1"},
+			// old1 is NOT re-discovered (different ID)
 			{ID: "existing2", Title: "Existing 2"},
 			{ID: "3", Title: "Item 3"},
 			{ID: "4", Title: "Item 4"},
@@ -647,13 +646,14 @@ func TestRunCycleWithSource_MaxTotalTasksWithExistingTasks(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	// Only 1 new task should be created (totalCreated=2, max=3, budget left=1)
+	// Budget left = 4-2 = 2. Items 3,4,5 are new (existing2 is active → skipped).
+	// Only 2 new tasks can be created.
 	var taskList axonv1alpha1.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
-	if len(taskList.Items) != 3 {
-		t.Errorf("Expected 3 tasks (2 existing + 1 new), got %d", len(taskList.Items))
+	if len(taskList.Items) != 4 {
+		t.Errorf("Expected 4 tasks (2 existing + 2 new), got %d", len(taskList.Items))
 	}
 }
 
@@ -830,6 +830,101 @@ func TestRunCycleWithSource_BranchStaticPassedThrough(t *testing.T) {
 	}
 	if taskList.Items[0].Spec.Branch != "feature/my-branch" {
 		t.Errorf("Expected branch %q, got %q", "feature/my-branch", taskList.Items[0].Spec.Branch)
+	}
+}
+
+func TestRunCycleWithSource_RediscoveredCompletedTaskIsReplaced(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	existingTasks := []axonv1alpha1.Task{
+		newTask("spawner-42", "default", "spawner", axonv1alpha1.TaskPhaseSucceeded),
+	}
+	cl, key := setupTest(t, ts, existingTasks...)
+
+	// Item 42 is re-discovered (e.g. label removed and re-added)
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{ID: "42", Number: 42, Title: "Re-queued issue"},
+		},
+	}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	// The old completed task should be replaced with a new one
+	var taskList axonv1alpha1.TaskList
+	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatalf("Listing tasks: %v", err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task (old deleted, new created), got %d", len(taskList.Items))
+	}
+	if taskList.Items[0].Name != "spawner-42" {
+		t.Errorf("Expected task name spawner-42, got %s", taskList.Items[0].Name)
+	}
+	// New task should not have a terminal phase
+	if taskList.Items[0].Status.Phase == axonv1alpha1.TaskPhaseSucceeded || taskList.Items[0].Status.Phase == axonv1alpha1.TaskPhaseFailed {
+		t.Errorf("Expected new task to not be in terminal phase, got %s", taskList.Items[0].Status.Phase)
+	}
+}
+
+func TestRunCycleWithSource_RediscoveredFailedTaskIsReplaced(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	existingTasks := []axonv1alpha1.Task{
+		newTask("spawner-99", "default", "spawner", axonv1alpha1.TaskPhaseFailed),
+	}
+	cl, key := setupTest(t, ts, existingTasks...)
+
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{ID: "99", Number: 99, Title: "Retry after failure"},
+		},
+	}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var taskList axonv1alpha1.TaskList
+	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatalf("Listing tasks: %v", err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task (old deleted, new created), got %d", len(taskList.Items))
+	}
+	if taskList.Items[0].Name != "spawner-99" {
+		t.Errorf("Expected task name spawner-99, got %s", taskList.Items[0].Name)
+	}
+}
+
+func TestRunCycleWithSource_ActiveTaskNotReplaced(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	existingTasks := []axonv1alpha1.Task{
+		newTask("spawner-10", "default", "spawner", axonv1alpha1.TaskPhaseRunning),
+	}
+	cl, key := setupTest(t, ts, existingTasks...)
+
+	// Item 10 is re-discovered but its task is still running
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{ID: "10", Number: 10, Title: "Still running"},
+		},
+	}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var taskList axonv1alpha1.TaskList
+	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatalf("Listing tasks: %v", err)
+	}
+	// Running task should NOT be replaced
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task (unchanged), got %d", len(taskList.Items))
+	}
+	if taskList.Items[0].Status.Phase != axonv1alpha1.TaskPhaseRunning {
+		t.Errorf("Expected task to still be Running, got %s", taskList.Items[0].Status.Phase)
 	}
 }
 

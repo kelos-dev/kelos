@@ -36,4 +36,5 @@ done
 go install github.com/axon-core/axon/cmd/axon
 
 axon install --version "${LOCAL_IMAGE_TAG}" --image-pull-policy IfNotPresent
+kubectl rollout restart deployment/axon-controller-manager -n axon-system
 kubectl rollout status deployment/axon-controller-manager -n axon-system

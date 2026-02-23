@@ -17,6 +17,7 @@ import (
 	clientfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
+	"github.com/axon-core/axon/internal/version"
 )
 
 func newScheme() *runtime.Scheme {
@@ -247,8 +248,9 @@ func TestSend(t *testing.T) {
 	if receivedContentType != "application/json" {
 		t.Errorf("Content-Type = %q, want %q", receivedContentType, "application/json")
 	}
-	if receivedUserAgent != userAgent {
-		t.Errorf("User-Agent = %q, want %q", receivedUserAgent, userAgent)
+	wantUA := "axon-telemetry/" + version.Version
+	if receivedUserAgent != wantUA {
+		t.Errorf("User-Agent = %q, want %q", receivedUserAgent, wantUA)
 	}
 
 	var decoded Report

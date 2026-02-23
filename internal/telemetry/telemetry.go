@@ -34,8 +34,6 @@ const (
 	defaultNamespace = "axon-system"
 	// sendTimeout is the HTTP timeout for sending telemetry reports.
 	sendTimeout = 10 * time.Second
-	// userAgent is the User-Agent header for telemetry requests.
-	userAgent = "axon-telemetry"
 )
 
 // Report contains anonymous aggregate telemetry data.
@@ -243,7 +241,7 @@ func send(ctx context.Context, endpoint string, report *Report) error {
 		return fmt.Errorf("creating request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", "axon-telemetry/"+version.Version)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -266,21 +264,17 @@ func getOrCreateInstallationID(ctx context.Context, c client.Client, namespace s
 	key := types.NamespacedName{Name: configMapName, Namespace: namespace}
 
 	err := c.Get(ctx, key, &cm)
-	if err == nil {
-		// ConfigMap exists; return the stored ID.
+	switch {
+	case err == nil:
+		// ConfigMap exists; return the stored ID if present.
 		if id, ok := cm.Data[installationIDKey]; ok && id != "" {
 			return id, nil
 		}
-	}
+		// ConfigMap exists but missing the key — update it below.
 
-	if err != nil && !errors.IsNotFound(err) {
-		return "", fmt.Errorf("getting configmap: %w", err)
-	}
-
-	// Create or update the ConfigMap with a new installation ID.
-	id := uuid.New().String()
-
-	if errors.IsNotFound(err) {
+	case errors.IsNotFound(err):
+		// ConfigMap does not exist — create it with a new ID.
+		id := uuid.New().String()
 		cm = corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      configMapName,
@@ -298,9 +292,13 @@ func getOrCreateInstallationID(ctx context.Context, c client.Client, namespace s
 			return "", fmt.Errorf("creating configmap: %w", err)
 		}
 		return id, nil
+
+	default:
+		return "", fmt.Errorf("getting configmap: %w", err)
 	}
 
-	// ConfigMap exists but missing the key.
+	// ConfigMap exists but the installation ID key is missing or empty.
+	id := uuid.New().String()
 	if cm.Data == nil {
 		cm.Data = make(map[string]string)
 	}

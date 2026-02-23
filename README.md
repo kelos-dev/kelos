@@ -351,6 +351,29 @@ spec:
 
 </details>
 
+Downstream tasks can reference upstream results in their prompt using `{{.Deps}}`:
+
+```yaml
+apiVersion: axon.io/v1alpha1
+kind: Task
+metadata:
+  name: open-pr
+spec:
+  type: claude-code
+  prompt: |
+    Open a PR for branch {{index .Deps "write-tests" "Results" "branch"}}.
+  credentials:
+    type: oauth
+    secretRef:
+      name: claude-oauth-token
+  workspaceRef:
+    name: my-workspace
+  branch: feature/user-service
+  dependsOn: [write-tests]
+```
+
+The `.Deps` map is keyed by dependency Task name. Each entry has `Results` (key-value map with branch, commit, pr, etc.) and `Outputs` (raw output lines). See [examples/07-task-pipeline](examples/07-task-pipeline/) for a full three-stage pipeline.
+
 ### Inject agent instructions and MCP servers
 
 Use `AgentConfig` to bundle project-wide instructions, plugins, and MCP servers:

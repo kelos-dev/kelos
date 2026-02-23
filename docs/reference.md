@@ -20,6 +20,27 @@
 | `spec.podOverrides.env` | Additional environment variables (built-in vars take precedence on conflict) | No |
 | `spec.podOverrides.nodeSelector` | Node selection labels to constrain which nodes run agent pods | No |
 
+### Dependency Result Passing
+
+When a Task has `dependsOn`, its `prompt` field supports Go `text/template` syntax for referencing upstream results. The template data has a single key `.Deps` containing a map keyed by dependency Task name:
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `{{index .Deps "<name>" "Results" "<key>"}}` | string | A specific key-value result from the dependency (e.g., `branch`, `commit`, `pr`) |
+| `{{index .Deps "<name>" "Outputs"}}` | []string | Raw output lines from the dependency |
+| `{{index .Deps "<name>" "Name"}}` | string | The dependency Task name |
+
+Example:
+
+```yaml
+prompt: |
+  The scaffold task created code on branch {{index .Deps "scaffold" "Results" "branch"}}.
+  Open a PR for these changes.
+dependsOn: [scaffold]
+```
+
+If template rendering fails (e.g., missing key), the raw prompt string is used as-is.
+
 ## Workspace
 
 | Field | Description | Required |

@@ -16,6 +16,8 @@ Ready-to-use patterns and YAML manifests for orchestrating AI agents with Axon. 
 | [03-taskspawner-github-issues](03-taskspawner-github-issues/) | Automatically create Tasks from labeled GitHub issues |
 | [04-taskspawner-cron](04-taskspawner-cron/) | Run agent tasks on a cron schedule |
 | [05-task-with-agentconfig](05-task-with-agentconfig/) | Inject reusable instructions and plugins via AgentConfig |
+| [06-fork-workflow](06-fork-workflow/) | Discover upstream issues and work in a fork |
+| [07-task-pipeline](07-task-pipeline/) | Chain Tasks with `dependsOn` and pass results between stages |
 
 ## How to Use
 

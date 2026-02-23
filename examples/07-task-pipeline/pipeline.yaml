@@ -1,0 +1,74 @@
+# Stage 1: Scaffold the feature
+apiVersion: axon.io/v1alpha1
+kind: Task
+metadata:
+  name: scaffold
+spec:
+  type: claude-code
+  credentials:
+    type: oauth
+    secretRef:
+      name: claude-credentials
+  workspaceRef:
+    name: my-workspace
+  branch: feature/auth
+  prompt: |
+    Scaffold a user authentication module with the following:
+    - A login endpoint (POST /auth/login)
+    - A registration endpoint (POST /auth/register)
+    - JWT token generation and validation
+    - Basic middleware for protected routes
+
+    Create the code, commit your changes, and push the branch.
+---
+# Stage 2: Write tests (waits for scaffold to succeed)
+apiVersion: axon.io/v1alpha1
+kind: Task
+metadata:
+  name: write-tests
+spec:
+  type: claude-code
+  credentials:
+    type: oauth
+    secretRef:
+      name: claude-credentials
+  workspaceRef:
+    name: my-workspace
+  branch: feature/auth
+  dependsOn:
+    - scaffold
+  prompt: |
+    The scaffold task created an auth module on branch {{index .Deps "scaffold" "Results" "branch"}}.
+
+    Write comprehensive tests for the authentication module:
+    - Unit tests for token generation and validation
+    - Integration tests for login and registration endpoints
+    - Edge cases: invalid credentials, expired tokens, duplicate registration
+
+    Run the tests to make sure they pass. Commit and push.
+---
+# Stage 3: Open a pull request (waits for write-tests to succeed)
+apiVersion: axon.io/v1alpha1
+kind: Task
+metadata:
+  name: open-pr
+spec:
+  type: claude-code
+  credentials:
+    type: oauth
+    secretRef:
+      name: claude-credentials
+  workspaceRef:
+    name: my-workspace
+  branch: feature/auth
+  dependsOn:
+    - write-tests
+  prompt: |
+    The auth module and its tests are ready on branch {{index .Deps "write-tests" "Results" "branch"}}.
+
+    Review the full diff (git diff main...HEAD) and open a pull request:
+    - Write a clear title and description summarizing the changes
+    - List the endpoints added and test coverage
+    - Reference any relevant issues
+
+    Use `gh pr create` to open the PR.

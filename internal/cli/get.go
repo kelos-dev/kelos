@@ -114,6 +114,7 @@ func newGetTaskSpawnerCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Com
 func newGetTaskCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Command {
 	var output string
 	var detail bool
+	var phases []string
 
 	cmd := &cobra.Command{
 		Use:     "task [name]",
@@ -127,6 +128,10 @@ func newGetTaskCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Command {
 
 			if *allNamespaces && len(args) == 1 {
 				return fmt.Errorf("a resource cannot be retrieved by name across all namespaces")
+			}
+
+			if err := validatePhases(phases); err != nil {
+				return err
 			}
 
 			cl, ns, err := cfg.NewClient()
@@ -168,6 +173,11 @@ func newGetTaskCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Command {
 			}
 
 			taskList.SetGroupVersionKind(axonv1alpha1.GroupVersion.WithKind("TaskList"))
+
+			if len(phases) > 0 {
+				taskList.Items = filterTasksByPhase(taskList.Items, phases)
+			}
+
 			switch output {
 			case "yaml":
 				return printYAML(os.Stdout, taskList)
@@ -182,9 +192,14 @@ func newGetTaskCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Command {
 
 	cmd.Flags().StringVarP(&output, "output", "o", "", "Output format (yaml or json)")
 	cmd.Flags().BoolVarP(&detail, "detail", "d", false, "Show detailed information for a specific task")
+	cmd.Flags().StringSliceVar(&phases, "phase", nil, "Filter tasks by phase (Pending, Running, Waiting, Succeeded, Failed)")
 
 	cmd.ValidArgsFunction = completeTaskNames(cfg)
 	_ = cmd.RegisterFlagCompletionFunc("output", cobra.FixedCompletions([]string{"yaml", "json"}, cobra.ShellCompDirectiveNoFileComp))
+	_ = cmd.RegisterFlagCompletionFunc("phase", cobra.FixedCompletions(
+		[]string{"Pending", "Running", "Waiting", "Succeeded", "Failed"},
+		cobra.ShellCompDirectiveNoFileComp,
+	))
 
 	return cmd
 }
@@ -265,4 +280,35 @@ func newGetWorkspaceCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Comma
 	_ = cmd.RegisterFlagCompletionFunc("output", cobra.FixedCompletions([]string{"yaml", "json"}, cobra.ShellCompDirectiveNoFileComp))
 
 	return cmd
+}
+
+var validTaskPhases = map[axonv1alpha1.TaskPhase]bool{
+	axonv1alpha1.TaskPhasePending:   true,
+	axonv1alpha1.TaskPhaseRunning:   true,
+	axonv1alpha1.TaskPhaseWaiting:   true,
+	axonv1alpha1.TaskPhaseSucceeded: true,
+	axonv1alpha1.TaskPhaseFailed:    true,
+}
+
+func validatePhases(phases []string) error {
+	for _, p := range phases {
+		if !validTaskPhases[axonv1alpha1.TaskPhase(p)] {
+			return fmt.Errorf("unknown phase %q: must be one of Pending, Running, Waiting, Succeeded, Failed", p)
+		}
+	}
+	return nil
+}
+
+func filterTasksByPhase(tasks []axonv1alpha1.Task, phases []string) []axonv1alpha1.Task {
+	phaseSet := make(map[axonv1alpha1.TaskPhase]bool, len(phases))
+	for _, p := range phases {
+		phaseSet[axonv1alpha1.TaskPhase(p)] = true
+	}
+	filtered := make([]axonv1alpha1.Task, 0, len(tasks))
+	for _, t := range tasks {
+		if phaseSet[t.Status.Phase] {
+			filtered = append(filtered, t)
+		}
+	}
+	return filtered
 }

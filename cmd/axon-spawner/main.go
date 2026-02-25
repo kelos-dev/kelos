@@ -174,9 +174,13 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 	}
 
 	existingTasks := make(map[string]bool)
+	failedTasks := make(map[string]bool)
 	activeTasks := 0
 	for _, t := range existingTaskList.Items {
 		existingTasks[t.Name] = true
+		if t.Status.Phase == axonv1alpha1.TaskPhaseFailed {
+			failedTasks[t.Name] = true
+		}
 		if t.Status.Phase != axonv1alpha1.TaskPhaseSucceeded && t.Status.Phase != axonv1alpha1.TaskPhaseFailed {
 			activeTasks++
 		}
@@ -185,7 +189,7 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 	var newItems []source.WorkItem
 	for _, item := range items {
 		taskName := fmt.Sprintf("%s-%s", ts.Name, item.ID)
-		if !existingTasks[taskName] {
+		if !existingTasks[taskName] || failedTasks[taskName] {
 			newItems = append(newItems, item)
 		}
 	}
@@ -215,6 +219,21 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 		}
 
 		taskName := fmt.Sprintf("%s-%s", ts.Name, item.ID)
+
+		// Delete failed Task so it can be recreated for retry
+		if failedTasks[taskName] {
+			old := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      taskName,
+					Namespace: ts.Namespace,
+				},
+			}
+			if err := cl.Delete(ctx, old); err != nil && !apierrors.IsNotFound(err) {
+				log.Error(err, "Deleting failed Task for retry", "task", taskName)
+				continue
+			}
+			log.Info("Deleted failed Task for retry", "task", taskName)
+		}
 
 		prompt, err := source.RenderPrompt(ts.Spec.TaskTemplate.PromptTemplate, item)
 		if err != nil {

@@ -257,6 +257,28 @@ func (r *TaskReconciler) createJob(ctx context.Context, task *axonv1alpha1.Task)
 			return ctrl.Result{}, err
 		}
 		agentConfig = &ac.Spec
+
+		// Resolve MCP server secret references (headersFrom / envFrom)
+		if len(agentConfig.MCPServers) > 0 {
+			resolved, err := r.resolveMCPServerSecrets(ctx, task.Namespace, agentConfig.MCPServers)
+			if err != nil {
+				logger.Error(err, "Unable to resolve MCP server secrets")
+				r.recordEvent(task, corev1.EventTypeWarning, "MCPSecretFailed", "Failed to resolve MCP server secret: %v", err)
+				updateErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+					if getErr := r.Get(ctx, client.ObjectKeyFromObject(task), task); getErr != nil {
+						return getErr
+					}
+					task.Status.Phase = axonv1alpha1.TaskPhaseFailed
+					task.Status.Message = fmt.Sprintf("Failed to resolve MCP server secret: %v", err)
+					return r.Status().Update(ctx, task)
+				})
+				if updateErr != nil {
+					logger.Error(updateErr, "Unable to update Task status")
+				}
+				return ctrl.Result{}, nil
+			}
+			agentConfig.MCPServers = resolved
+		}
 	}
 
 	resolvedPrompt := r.resolvePromptTemplate(ctx, task)
@@ -385,6 +407,57 @@ func (r *TaskReconciler) resolveGitHubAppToken(ctx context.Context, task *axonv1
 		Name: tokenSecretName,
 	}
 	return &resolved, nil
+}
+
+// resolveMCPServerSecrets resolves headersFrom and envFrom secret references
+// for MCP server specs. It fetches the referenced secrets and merges their data
+// into the inline Headers/Env maps (with secret values taking precedence for
+// overlapping keys). The returned slice contains copies with the merged values
+// and nil headersFrom/envFrom fields.
+func (r *TaskReconciler) resolveMCPServerSecrets(ctx context.Context, namespace string, servers []axonv1alpha1.MCPServerSpec) ([]axonv1alpha1.MCPServerSpec, error) {
+	resolved := make([]axonv1alpha1.MCPServerSpec, len(servers))
+	for i, s := range servers {
+		resolved[i] = s
+
+		if s.HeadersFrom != nil {
+			var secret corev1.Secret
+			if err := r.Get(ctx, client.ObjectKey{
+				Namespace: namespace,
+				Name:      s.HeadersFrom.Name,
+			}, &secret); err != nil {
+				return nil, fmt.Errorf("fetching headersFrom secret %q for MCP server %q: %w", s.HeadersFrom.Name, s.Name, err)
+			}
+			merged := make(map[string]string, len(s.Headers)+len(secret.Data))
+			for k, v := range s.Headers {
+				merged[k] = v
+			}
+			for k, v := range secret.Data {
+				merged[k] = string(v)
+			}
+			resolved[i].Headers = merged
+			resolved[i].HeadersFrom = nil
+		}
+
+		if s.EnvFrom != nil {
+			var secret corev1.Secret
+			if err := r.Get(ctx, client.ObjectKey{
+				Namespace: namespace,
+				Name:      s.EnvFrom.Name,
+			}, &secret); err != nil {
+				return nil, fmt.Errorf("fetching envFrom secret %q for MCP server %q: %w", s.EnvFrom.Name, s.Name, err)
+			}
+			merged := make(map[string]string, len(s.Env)+len(secret.Data))
+			for k, v := range s.Env {
+				merged[k] = v
+			}
+			for k, v := range secret.Data {
+				merged[k] = string(v)
+			}
+			resolved[i].Env = merged
+			resolved[i].EnvFrom = nil
+		}
+	}
+	return resolved, nil
 }
 
 // updateStatus updates Task status based on Job status.

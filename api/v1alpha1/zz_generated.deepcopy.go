@@ -250,12 +250,22 @@ func (in *MCPServerSpec) DeepCopyInto(out *MCPServerSpec) {
 			(*out)[key] = val
 		}
 	}
+	if in.HeadersFrom != nil {
+		in, out := &in.HeadersFrom, &out.HeadersFrom
+		*out = new(SecretReference)
+		**out = **in
+	}
 	if in.Env != nil {
 		in, out := &in.Env, &out.Env
 		*out = make(map[string]string, len(*in))
 		for key, val := range *in {
 			(*out)[key] = val
 		}
+	}
+	if in.EnvFrom != nil {
+		in, out := &in.EnvFrom, &out.EnvFrom
+		*out = new(SecretReference)
+		**out = **in
 	}
 }
 

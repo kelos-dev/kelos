@@ -3482,3 +3482,152 @@ func TestBuildJob_WorkspaceWithInvalidUpstreamRemoteNoEnv(t *testing.T) {
 		}
 	}
 }
+
+// TestBuildJob_AgentConfigMCPServersResolvedHeadersFrom verifies that headers
+// resolved from a secret (merged into the inline Headers map by the controller)
+// appear correctly in the AXON_MCP_SERVERS JSON output.
+func TestBuildJob_AgentConfigMCPServersResolvedHeadersFrom(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-mcp-resolved",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	// Simulate what the controller does: secret headers are already merged
+	// into the inline Headers map, and HeadersFrom is cleared.
+	agentConfig := &axonv1alpha1.AgentConfigSpec{
+		MCPServers: []axonv1alpha1.MCPServerSpec{
+			{
+				Name: "github",
+				Type: "http",
+				URL:  "https://api.githubcopilot.com/mcp/",
+				Headers: map[string]string{
+					"Authorization": "Bearer secret-token",
+					"X-Custom":      "custom-value",
+				},
+				// HeadersFrom is nil after controller resolution
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, agentConfig, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+
+	var mcpJSON string
+	for _, env := range container.Env {
+		if env.Name == "AXON_MCP_SERVERS" {
+			mcpJSON = env.Value
+		}
+	}
+	if mcpJSON == "" {
+		t.Fatal("Expected AXON_MCP_SERVERS env var to be set")
+	}
+
+	var parsed struct {
+		MCPServers map[string]struct {
+			Headers map[string]string `json:"headers"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal([]byte(mcpJSON), &parsed); err != nil {
+		t.Fatalf("Failed to parse AXON_MCP_SERVERS JSON: %v", err)
+	}
+
+	github, ok := parsed.MCPServers["github"]
+	if !ok {
+		t.Fatal("Expected 'github' MCP server entry")
+	}
+	if github.Headers["Authorization"] != "Bearer secret-token" {
+		t.Errorf("Expected Authorization header from resolved secret, got %q", github.Headers["Authorization"])
+	}
+	if github.Headers["X-Custom"] != "custom-value" {
+		t.Errorf("Expected X-Custom header from resolved secret, got %q", github.Headers["X-Custom"])
+	}
+}
+
+// TestBuildJob_AgentConfigMCPServersResolvedEnvFrom verifies that env vars
+// resolved from a secret appear correctly in the AXON_MCP_SERVERS JSON output.
+func TestBuildJob_AgentConfigMCPServersResolvedEnvFrom(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-mcp-env-resolved",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	// Simulate controller resolution: secret env values merged into Env map
+	agentConfig := &axonv1alpha1.AgentConfigSpec{
+		MCPServers: []axonv1alpha1.MCPServerSpec{
+			{
+				Name:    "local-db",
+				Type:    "stdio",
+				Command: "npx",
+				Args:    []string{"-y", "dbhub"},
+				Env: map[string]string{
+					"DSN":         "postgres://localhost/db",
+					"DB_PASSWORD": "secret-pass",
+				},
+				// EnvFrom is nil after controller resolution
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, agentConfig, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+
+	var mcpJSON string
+	for _, env := range container.Env {
+		if env.Name == "AXON_MCP_SERVERS" {
+			mcpJSON = env.Value
+		}
+	}
+	if mcpJSON == "" {
+		t.Fatal("Expected AXON_MCP_SERVERS env var to be set")
+	}
+
+	var parsed struct {
+		MCPServers map[string]struct {
+			Env map[string]string `json:"env"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal([]byte(mcpJSON), &parsed); err != nil {
+		t.Fatalf("Failed to parse AXON_MCP_SERVERS JSON: %v", err)
+	}
+
+	localDB, ok := parsed.MCPServers["local-db"]
+	if !ok {
+		t.Fatal("Expected 'local-db' MCP server entry")
+	}
+	if localDB.Env["DSN"] != "postgres://localhost/db" {
+		t.Errorf("Expected DSN env, got %q", localDB.Env["DSN"])
+	}
+	if localDB.Env["DB_PASSWORD"] != "secret-pass" {
+		t.Errorf("Expected DB_PASSWORD env from resolved secret, got %q", localDB.Env["DB_PASSWORD"])
+	}
+}

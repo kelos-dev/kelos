@@ -72,12 +72,38 @@ spec:
                         Env are environment variables for the server process.
                         Only used when type is "stdio".
                       type: object
+                    envFrom:
+                      description: |-
+                        EnvFrom references a Secret whose data keys are environment variable
+                        names and values are environment variable values. Only used when
+                        type is "stdio". Values from EnvFrom take precedence over inline Env
+                        for overlapping keys.
+                      properties:
+                        name:
+                          description: Name is the name of the secret.
+                          type: string
+                      required:
+                      - name
+                      type: object
                     headers:
                       additionalProperties:
                         type: string
                       description: |-
                         Headers are HTTP headers to include in requests.
                         Only used when type is "http" or "sse".
+                      type: object
+                    headersFrom:
+                      description: |-
+                        HeadersFrom references a Secret whose data keys are header names
+                        and values are header values. Only used when type is "http" or "sse".
+                        Values from HeadersFrom take precedence over inline Headers for
+                        overlapping keys.
+                      properties:
+                        name:
+                          description: Name is the name of the secret.
+                          type: string
+                      required:
+                      - name
                       type: object
                     name:
                       description: |-

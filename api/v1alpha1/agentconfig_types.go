@@ -88,10 +88,24 @@ type MCPServerSpec struct {
 	// +optional
 	Headers map[string]string `json:"headers,omitempty"`
 
+	// HeadersFrom references a Secret whose data keys are header names
+	// and values are header values. Only used when type is "http" or "sse".
+	// Values from HeadersFrom take precedence over inline Headers for
+	// overlapping keys.
+	// +optional
+	HeadersFrom *SecretReference `json:"headersFrom,omitempty"`
+
 	// Env are environment variables for the server process.
 	// Only used when type is "stdio".
 	// +optional
 	Env map[string]string `json:"env,omitempty"`
+
+	// EnvFrom references a Secret whose data keys are environment variable
+	// names and values are environment variable values. Only used when
+	// type is "stdio". Values from EnvFrom take precedence over inline Env
+	// for overlapping keys.
+	// +optional
+	EnvFrom *SecretReference `json:"envFrom,omitempty"`
 }
 
 // AgentConfigReference refers to an AgentConfig resource by name.

@@ -3097,4 +3097,419 @@ var _ = Describe("Task Controller", func() {
 			}
 		})
 	})
+
+	Context("When creating a Task with AgentConfig MCP servers using headersFrom", func() {
+		It("Should resolve secret headers and include them in AXON_MCP_SERVERS", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-mcp-headersfrom",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with API key")
+			apiSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, apiSecret)).Should(Succeed())
+
+			By("Creating a Secret with MCP headers")
+			mcpSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "mcp-github-headers",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"Authorization": "Bearer secret-token",
+					"X-From-Secret": "secret-value",
+				},
+			}
+			Expect(k8sClient.Create(ctx, mcpSecret)).Should(Succeed())
+
+			By("Creating an AgentConfig with MCP server using headersFrom")
+			agentConfig := &axonv1alpha1.AgentConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "mcp-headersfrom-config",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.AgentConfigSpec{
+					MCPServers: []axonv1alpha1.MCPServerSpec{
+						{
+							Name: "github",
+							Type: "http",
+							URL:  "https://api.example.com/mcp/",
+							Headers: map[string]string{
+								"X-Inline": "inline-value",
+							},
+							HeadersFrom: &axonv1alpha1.SecretValuesSource{
+								SecretRef: axonv1alpha1.SecretReference{Name: "mcp-github-headers"},
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentConfig)).Should(Succeed())
+
+			By("Creating a Task referencing the AgentConfig")
+			task := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "task-mcp-headersfrom",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "Test MCP headersFrom",
+					Credentials: axonv1alpha1.Credentials{
+						Type:      axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{Name: "anthropic-api-key"},
+					},
+					AgentConfigRef: &axonv1alpha1.AgentConfigReference{Name: "mcp-headersfrom-config"},
+				},
+			}
+			Expect(k8sClient.Create(ctx, task)).Should(Succeed())
+
+			By("Verifying a Job is created")
+			createdJob := &batchv1.Job{}
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: task.Name, Namespace: ns.Name}, createdJob)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Logging the Job spec")
+			logJobSpec(createdJob)
+
+			By("Verifying AXON_MCP_SERVERS contains resolved headers from secret")
+			container := createdJob.Spec.Template.Spec.Containers[0]
+			var mcpJSON string
+			for _, env := range container.Env {
+				if env.Name == "AXON_MCP_SERVERS" {
+					mcpJSON = env.Value
+				}
+			}
+			Expect(mcpJSON).NotTo(BeEmpty(), "Expected AXON_MCP_SERVERS env var")
+
+			var parsed struct {
+				MCPServers map[string]struct {
+					Headers map[string]string `json:"headers"`
+				} `json:"mcpServers"`
+			}
+			Expect(json.Unmarshal([]byte(mcpJSON), &parsed)).Should(Succeed())
+
+			github, ok := parsed.MCPServers["github"]
+			Expect(ok).To(BeTrue(), "Expected 'github' MCP server entry")
+			Expect(github.Headers["Authorization"]).To(Equal("Bearer secret-token"))
+			Expect(github.Headers["X-From-Secret"]).To(Equal("secret-value"))
+			Expect(github.Headers["X-Inline"]).To(Equal("inline-value"))
+		})
+	})
+
+	Context("When creating a Task with AgentConfig MCP servers using envFrom", func() {
+		It("Should resolve secret env vars and include them in AXON_MCP_SERVERS", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-mcp-envfrom",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with API key")
+			apiSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, apiSecret)).Should(Succeed())
+
+			By("Creating a Secret with MCP env vars")
+			mcpSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "mcp-db-env",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"DB_PASSWORD": "secret-pass",
+					"DB_HOST":     "db.internal",
+				},
+			}
+			Expect(k8sClient.Create(ctx, mcpSecret)).Should(Succeed())
+
+			By("Creating an AgentConfig with MCP server using envFrom")
+			agentConfig := &axonv1alpha1.AgentConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "mcp-envfrom-config",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.AgentConfigSpec{
+					MCPServers: []axonv1alpha1.MCPServerSpec{
+						{
+							Name:    "local-db",
+							Type:    "stdio",
+							Command: "npx",
+							Args:    []string{"-y", "dbhub"},
+							Env: map[string]string{
+								"DSN": "postgres://localhost/db",
+							},
+							EnvFrom: &axonv1alpha1.SecretValuesSource{
+								SecretRef: axonv1alpha1.SecretReference{Name: "mcp-db-env"},
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentConfig)).Should(Succeed())
+
+			By("Creating a Task referencing the AgentConfig")
+			task := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "task-mcp-envfrom",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "Test MCP envFrom",
+					Credentials: axonv1alpha1.Credentials{
+						Type:      axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{Name: "anthropic-api-key"},
+					},
+					AgentConfigRef: &axonv1alpha1.AgentConfigReference{Name: "mcp-envfrom-config"},
+				},
+			}
+			Expect(k8sClient.Create(ctx, task)).Should(Succeed())
+
+			By("Verifying a Job is created")
+			createdJob := &batchv1.Job{}
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: task.Name, Namespace: ns.Name}, createdJob)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Logging the Job spec")
+			logJobSpec(createdJob)
+
+			By("Verifying AXON_MCP_SERVERS contains resolved env vars from secret")
+			container := createdJob.Spec.Template.Spec.Containers[0]
+			var mcpJSON string
+			for _, env := range container.Env {
+				if env.Name == "AXON_MCP_SERVERS" {
+					mcpJSON = env.Value
+				}
+			}
+			Expect(mcpJSON).NotTo(BeEmpty(), "Expected AXON_MCP_SERVERS env var")
+
+			var parsed struct {
+				MCPServers map[string]struct {
+					Env map[string]string `json:"env"`
+				} `json:"mcpServers"`
+			}
+			Expect(json.Unmarshal([]byte(mcpJSON), &parsed)).Should(Succeed())
+
+			localDB, ok := parsed.MCPServers["local-db"]
+			Expect(ok).To(BeTrue(), "Expected 'local-db' MCP server entry")
+			Expect(localDB.Env["DB_PASSWORD"]).To(Equal("secret-pass"))
+			Expect(localDB.Env["DB_HOST"]).To(Equal("db.internal"))
+			Expect(localDB.Env["DSN"]).To(Equal("postgres://localhost/db"))
+		})
+	})
+
+	Context("When creating a Task with MCP server referencing a missing secret", func() {
+		It("Should fail the Task with an appropriate error", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-mcp-missing-secret",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with API key")
+			apiSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, apiSecret)).Should(Succeed())
+
+			By("Creating an AgentConfig referencing a nonexistent secret")
+			agentConfig := &axonv1alpha1.AgentConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "mcp-missing-secret-config",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.AgentConfigSpec{
+					MCPServers: []axonv1alpha1.MCPServerSpec{
+						{
+							Name: "api",
+							Type: "http",
+							URL:  "https://api.example.com/mcp/",
+							HeadersFrom: &axonv1alpha1.SecretValuesSource{
+								SecretRef: axonv1alpha1.SecretReference{Name: "nonexistent-secret"},
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentConfig)).Should(Succeed())
+
+			By("Creating a Task referencing the AgentConfig")
+			task := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "task-mcp-missing-secret",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "Test missing MCP secret",
+					Credentials: axonv1alpha1.Credentials{
+						Type:      axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{Name: "anthropic-api-key"},
+					},
+					AgentConfigRef: &axonv1alpha1.AgentConfigReference{Name: "mcp-missing-secret-config"},
+				},
+			}
+			Expect(k8sClient.Create(ctx, task)).Should(Succeed())
+
+			By("Verifying Task status transitions to Failed")
+			taskLookupKey := types.NamespacedName{Name: task.Name, Namespace: ns.Name}
+			createdTask := &axonv1alpha1.Task{}
+			Eventually(func() axonv1alpha1.TaskPhase {
+				err := k8sClient.Get(ctx, taskLookupKey, createdTask)
+				if err != nil {
+					return ""
+				}
+				return createdTask.Status.Phase
+			}, timeout, interval).Should(Equal(axonv1alpha1.TaskPhaseFailed))
+
+			By("Verifying error message mentions the missing secret")
+			Expect(createdTask.Status.Message).To(ContainSubstring("nonexistent-secret"))
+
+			By("Verifying MCPSecretFailed event is emitted")
+			Eventually(func() *corev1.Event {
+				return findEvent(ns.Name, task.Name, "MCPSecretFailed")
+			}, timeout, interval).ShouldNot(BeNil())
+		})
+	})
+
+	Context("When creating a Task with MCP servers using headersFrom precedence over inline", func() {
+		It("Should give secret values precedence over inline values for overlapping keys", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-mcp-precedence",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with API key")
+			apiSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, apiSecret)).Should(Succeed())
+
+			By("Creating a Secret with an overlapping header key")
+			mcpSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "mcp-override-headers",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"Authorization": "Bearer from-secret",
+				},
+			}
+			Expect(k8sClient.Create(ctx, mcpSecret)).Should(Succeed())
+
+			By("Creating an AgentConfig with both inline and secretRef for the same header")
+			agentConfig := &axonv1alpha1.AgentConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "mcp-precedence-config",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.AgentConfigSpec{
+					MCPServers: []axonv1alpha1.MCPServerSpec{
+						{
+							Name: "api",
+							Type: "http",
+							URL:  "https://api.example.com/mcp/",
+							Headers: map[string]string{
+								"Authorization": "Bearer inline-token",
+								"X-Only-Inline": "preserved",
+							},
+							HeadersFrom: &axonv1alpha1.SecretValuesSource{
+								SecretRef: axonv1alpha1.SecretReference{Name: "mcp-override-headers"},
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentConfig)).Should(Succeed())
+
+			By("Creating a Task referencing the AgentConfig")
+			task := &axonv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "task-mcp-precedence",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "Test MCP precedence",
+					Credentials: axonv1alpha1.Credentials{
+						Type:      axonv1alpha1.CredentialTypeAPIKey,
+						SecretRef: axonv1alpha1.SecretReference{Name: "anthropic-api-key"},
+					},
+					AgentConfigRef: &axonv1alpha1.AgentConfigReference{Name: "mcp-precedence-config"},
+				},
+			}
+			Expect(k8sClient.Create(ctx, task)).Should(Succeed())
+
+			By("Verifying a Job is created")
+			createdJob := &batchv1.Job{}
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: task.Name, Namespace: ns.Name}, createdJob)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Verifying secret value takes precedence over inline for overlapping key")
+			container := createdJob.Spec.Template.Spec.Containers[0]
+			var mcpJSON string
+			for _, env := range container.Env {
+				if env.Name == "AXON_MCP_SERVERS" {
+					mcpJSON = env.Value
+				}
+			}
+			Expect(mcpJSON).NotTo(BeEmpty(), "Expected AXON_MCP_SERVERS env var")
+
+			var parsed struct {
+				MCPServers map[string]struct {
+					Headers map[string]string `json:"headers"`
+				} `json:"mcpServers"`
+			}
+			Expect(json.Unmarshal([]byte(mcpJSON), &parsed)).Should(Succeed())
+
+			api, ok := parsed.MCPServers["api"]
+			Expect(ok).To(BeTrue(), "Expected 'api' MCP server entry")
+			Expect(api.Headers["Authorization"]).To(Equal("Bearer from-secret"), "Secret value should take precedence")
+			Expect(api.Headers["X-Only-Inline"]).To(Equal("preserved"), "Non-overlapping inline header should be preserved")
+		})
+	})
 })

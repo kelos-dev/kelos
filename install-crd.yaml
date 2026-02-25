@@ -1084,6 +1084,16 @@ spec:
                   githubIssues:
                     description: GitHubIssues discovers issues from a GitHub repository.
                     properties:
+                      excludeComments:
+                        description: |-
+                          ExcludeComments enables comment-based exclusion. When set, issues that
+                          have a comment matching any of these strings (e.g., "/axon needs-input")
+                          are excluded unless a subsequent TriggerComment overrides it. Comments
+                          are scanned in reverse chronological order — the most recent matching
+                          command wins.
+                        items:
+                          type: string
+                        type: array
                       excludeLabels:
                         description: ExcludeLabels filters out issues that have any
                           of these labels (client-side).
@@ -1111,6 +1121,16 @@ spec:
                         - open
                         - closed
                         - all
+                        type: string
+                      triggerComment:
+                        description: |-
+                          TriggerComment enables comment-based discovery. When set, only issues
+                          that have a comment matching this string (e.g., "/axon pick-up") are
+                          included. This is useful for repos where you lack label permissions.
+                          If ExcludeComments is also set, TriggerComment doubles as a resume
+                          command — the most recent match between TriggerComment and
+                          ExcludeComments wins. Comments are scanned in reverse chronological
+                          order.
                         type: string
                       types:
                         default:

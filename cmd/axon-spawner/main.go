@@ -342,14 +342,16 @@ func buildSource(ts *axonv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFil
 		}
 
 		return &source.GitHubSource{
-			Owner:         owner,
-			Repo:          repo,
-			Types:         gh.Types,
-			Labels:        gh.Labels,
-			ExcludeLabels: gh.ExcludeLabels,
-			State:         gh.State,
-			Token:         token,
-			BaseURL:       apiBaseURL,
+			Owner:           owner,
+			Repo:            repo,
+			Types:           gh.Types,
+			Labels:          gh.Labels,
+			ExcludeLabels:   gh.ExcludeLabels,
+			State:           gh.State,
+			Token:           token,
+			BaseURL:         apiBaseURL,
+			TriggerComment:  gh.TriggerComment,
+			ExcludeComments: gh.ExcludeComments,
 		}, nil
 	}
 

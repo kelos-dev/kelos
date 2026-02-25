@@ -516,3 +516,350 @@ func TestDiscoverTypesDefault(t *testing.T) {
 func containsParam(query, param string) bool {
 	return strings.Contains(query, param)
 }
+
+func TestDiscoverTriggerComment(t *testing.T) {
+	issues := []githubIssue{
+		{Number: 1, Title: "Triggered", Body: "Body 1", HTMLURL: "https://github.com/o/r/issues/1"},
+		{Number: 2, Title: "Not triggered", Body: "Body 2", HTMLURL: "https://github.com/o/r/issues/2"},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/repos/owner/repo/issues":
+			json.NewEncoder(w).Encode(issues)
+		case r.URL.Path == "/repos/owner/repo/issues/1/comments":
+			json.NewEncoder(w).Encode([]githubComment{{Body: "/axon pick-up"}})
+		case r.URL.Path == "/repos/owner/repo/issues/2/comments":
+			json.NewEncoder(w).Encode([]githubComment{{Body: "Just a regular comment"}})
+		}
+	}))
+	defer server.Close()
+
+	s := &GitHubSource{
+		Owner:          "owner",
+		Repo:           "repo",
+		BaseURL:        server.URL,
+		TriggerComment: "/axon pick-up",
+	}
+
+	items, err := s.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	if items[0].Number != 1 {
+		t.Errorf("expected issue #1, got #%d", items[0].Number)
+	}
+}
+
+func TestDiscoverExcludeComment(t *testing.T) {
+	issues := []githubIssue{
+		{Number: 1, Title: "Active", Body: "Body 1", HTMLURL: "https://github.com/o/r/issues/1"},
+		{Number: 2, Title: "Needs input", Body: "Body 2", HTMLURL: "https://github.com/o/r/issues/2"},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/repos/owner/repo/issues":
+			json.NewEncoder(w).Encode(issues)
+		case r.URL.Path == "/repos/owner/repo/issues/1/comments":
+			json.NewEncoder(w).Encode([]githubComment{{Body: "Normal comment"}})
+		case r.URL.Path == "/repos/owner/repo/issues/2/comments":
+			json.NewEncoder(w).Encode([]githubComment{{Body: "/axon needs-input"}})
+		}
+	}))
+	defer server.Close()
+
+	s := &GitHubSource{
+		Owner:           "owner",
+		Repo:            "repo",
+		BaseURL:         server.URL,
+		ExcludeComments: []string{"/axon needs-input"},
+	}
+
+	items, err := s.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	if items[0].Number != 1 {
+		t.Errorf("expected issue #1, got #%d", items[0].Number)
+	}
+}
+
+func TestDiscoverMultipleExcludeComments(t *testing.T) {
+	issues := []githubIssue{
+		{Number: 1, Title: "Active", Body: "Body 1", HTMLURL: "https://github.com/o/r/issues/1"},
+		{Number: 2, Title: "Needs input", Body: "Body 2", HTMLURL: "https://github.com/o/r/issues/2"},
+		{Number: 3, Title: "Paused", Body: "Body 3", HTMLURL: "https://github.com/o/r/issues/3"},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/repos/owner/repo/issues":
+			json.NewEncoder(w).Encode(issues)
+		case r.URL.Path == "/repos/owner/repo/issues/1/comments":
+			json.NewEncoder(w).Encode([]githubComment{{Body: "Normal comment"}})
+		case r.URL.Path == "/repos/owner/repo/issues/2/comments":
+			json.NewEncoder(w).Encode([]githubComment{{Body: "/axon needs-input"}})
+		case r.URL.Path == "/repos/owner/repo/issues/3/comments":
+			json.NewEncoder(w).Encode([]githubComment{{Body: "/axon pause"}})
+		}
+	}))
+	defer server.Close()
+
+	s := &GitHubSource{
+		Owner:           "owner",
+		Repo:            "repo",
+		BaseURL:         server.URL,
+		ExcludeComments: []string{"/axon needs-input", "/axon pause"},
+	}
+
+	items, err := s.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	if items[0].Number != 1 {
+		t.Errorf("expected issue #1, got #%d", items[0].Number)
+	}
+}
+
+func TestDiscoverTriggerAsResume(t *testing.T) {
+	issues := []githubIssue{
+		{Number: 1, Title: "Resumed", Body: "Body 1", HTMLURL: "https://github.com/o/r/issues/1"},
+		{Number: 2, Title: "Still excluded", Body: "Body 2", HTMLURL: "https://github.com/o/r/issues/2"},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/repos/owner/repo/issues":
+			json.NewEncoder(w).Encode(issues)
+		case r.URL.Path == "/repos/owner/repo/issues/1/comments":
+			// Trigger, then exclude, then trigger again — trigger is most recent, so issue should be included
+			json.NewEncoder(w).Encode([]githubComment{
+				{Body: "/axon pick-up"},
+				{Body: "/axon needs-input"},
+				{Body: "/axon pick-up"},
+			})
+		case r.URL.Path == "/repos/owner/repo/issues/2/comments":
+			// Trigger then exclude — exclude is most recent, so issue should be excluded
+			json.NewEncoder(w).Encode([]githubComment{
+				{Body: "/axon pick-up"},
+				{Body: "/axon needs-input"},
+			})
+		}
+	}))
+	defer server.Close()
+
+	s := &GitHubSource{
+		Owner:           "owner",
+		Repo:            "repo",
+		BaseURL:         server.URL,
+		TriggerComment:  "/axon pick-up",
+		ExcludeComments: []string{"/axon needs-input"},
+	}
+
+	items, err := s.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	if items[0].Number != 1 {
+		t.Errorf("expected issue #1, got #%d", items[0].Number)
+	}
+}
+
+func TestDiscoverTriggerAndExcludeComment(t *testing.T) {
+	issues := []githubIssue{
+		{Number: 1, Title: "Triggered and active", Body: "Body 1", HTMLURL: "https://github.com/o/r/issues/1"},
+		{Number: 2, Title: "Triggered but excluded", Body: "Body 2", HTMLURL: "https://github.com/o/r/issues/2"},
+		{Number: 3, Title: "Not triggered", Body: "Body 3", HTMLURL: "https://github.com/o/r/issues/3"},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/repos/owner/repo/issues":
+			json.NewEncoder(w).Encode(issues)
+		case r.URL.Path == "/repos/owner/repo/issues/1/comments":
+			json.NewEncoder(w).Encode([]githubComment{{Body: "/axon pick-up"}})
+		case r.URL.Path == "/repos/owner/repo/issues/2/comments":
+			json.NewEncoder(w).Encode([]githubComment{
+				{Body: "/axon pick-up"},
+				{Body: "/axon needs-input"},
+			})
+		case r.URL.Path == "/repos/owner/repo/issues/3/comments":
+			json.NewEncoder(w).Encode([]githubComment{{Body: "Just a comment"}})
+		}
+	}))
+	defer server.Close()
+
+	s := &GitHubSource{
+		Owner:           "owner",
+		Repo:            "repo",
+		BaseURL:         server.URL,
+		TriggerComment:  "/axon pick-up",
+		ExcludeComments: []string{"/axon needs-input"},
+	}
+
+	items, err := s.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	if items[0].Number != 1 {
+		t.Errorf("expected issue #1, got #%d", items[0].Number)
+	}
+}
+
+func TestPassesCommentFilter(t *testing.T) {
+	tests := []struct {
+		name            string
+		triggerComment  string
+		excludeComments []string
+		comments        string
+		want            bool
+	}{
+		{
+			name:     "no filters configured",
+			comments: "some comment",
+			want:     true,
+		},
+		{
+			name:           "trigger present",
+			triggerComment: "/axon pick-up",
+			comments:       "/axon pick-up",
+			want:           true,
+		},
+		{
+			name:           "trigger absent",
+			triggerComment: "/axon pick-up",
+			comments:       "no trigger here",
+			want:           false,
+		},
+		{
+			name:           "trigger empty comments",
+			triggerComment: "/axon pick-up",
+			comments:       "",
+			want:           false,
+		},
+		{
+			name:            "exclude present",
+			excludeComments: []string{"/axon needs-input"},
+			comments:        "/axon needs-input",
+			want:            false,
+		},
+		{
+			name:            "exclude absent",
+			excludeComments: []string{"/axon needs-input"},
+			comments:        "normal comment",
+			want:            true,
+		},
+		{
+			name:            "trigger as resume after exclude",
+			triggerComment:  "/axon pick-up",
+			excludeComments: []string{"/axon needs-input"},
+			comments:        "/axon pick-up\n---\n/axon needs-input\n---\n/axon pick-up",
+			want:            true,
+		},
+		{
+			name:            "exclude after trigger",
+			triggerComment:  "/axon pick-up",
+			excludeComments: []string{"/axon needs-input"},
+			comments:        "/axon pick-up\n---\n/axon needs-input",
+			want:            false,
+		},
+		{
+			name:            "both set but neither found",
+			triggerComment:  "/axon pick-up",
+			excludeComments: []string{"/axon needs-input"},
+			comments:        "normal comment",
+			want:            false,
+		},
+		{
+			name:            "command must be on its own line",
+			excludeComments: []string{"/axon needs-input"},
+			comments:        "please do /axon needs-input for me",
+			want:            true,
+		},
+		{
+			name:            "multiple exclude comments",
+			excludeComments: []string{"/axon needs-input", "/axon pause"},
+			comments:        "/axon pause",
+			want:            false,
+		},
+		{
+			name:            "multiple exclude comments none match",
+			excludeComments: []string{"/axon needs-input", "/axon pause"},
+			comments:        "normal comment",
+			want:            true,
+		},
+		{
+			name:            "multiple exclude with trigger resume",
+			triggerComment:  "/axon pick-up",
+			excludeComments: []string{"/axon needs-input", "/axon pause"},
+			comments:        "/axon pick-up\n---\n/axon pause\n---\n/axon pick-up",
+			want:            true,
+		},
+		{
+			name:            "multiple exclude second matches most recent",
+			triggerComment:  "/axon pick-up",
+			excludeComments: []string{"/axon needs-input", "/axon pause"},
+			comments:        "/axon pick-up\n---\n/axon pause",
+			want:            false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &GitHubSource{
+				TriggerComment:  tt.triggerComment,
+				ExcludeComments: tt.excludeComments,
+			}
+			got := s.passesCommentFilter(tt.comments)
+			if got != tt.want {
+				t.Errorf("passesCommentFilter() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestContainsCommand(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		cmd  string
+		want bool
+	}{
+		{"exact match", "/axon pick-up", "/axon pick-up", true},
+		{"with whitespace", "  /axon pick-up  ", "/axon pick-up", true},
+		{"multiline match", "some text\n/axon pick-up\nmore text", "/axon pick-up", true},
+		{"no match", "some text without command", "/axon pick-up", false},
+		{"partial match in word", "do /axon pick-up now", "/axon pick-up", false},
+		{"empty body", "", "/axon pick-up", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := containsCommand(tt.body, tt.cmd)
+			if got != tt.want {
+				t.Errorf("containsCommand(%q, %q) = %v, want %v", tt.body, tt.cmd, got, tt.want)
+			}
+		})
+	}
+}

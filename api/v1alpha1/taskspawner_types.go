@@ -75,6 +75,24 @@ type GitHubIssues struct {
 	// +kubebuilder:default=open
 	// +optional
 	State string `json:"state,omitempty"`
+
+	// TriggerComment enables comment-based discovery. When set, only issues
+	// that have a comment matching this string (e.g., "/axon pick-up") are
+	// included. This is useful for repos where you lack label permissions.
+	// If ExcludeComments is also set, TriggerComment doubles as a resume
+	// command — the most recent match between TriggerComment and
+	// ExcludeComments wins. Comments are scanned in reverse chronological
+	// order.
+	// +optional
+	TriggerComment string `json:"triggerComment,omitempty"`
+
+	// ExcludeComments enables comment-based exclusion. When set, issues that
+	// have a comment matching any of these strings (e.g., "/axon needs-input")
+	// are excluded unless a subsequent TriggerComment overrides it. Comments
+	// are scanned in reverse chronological order — the most recent matching
+	// command wins.
+	// +optional
+	ExcludeComments []string `json:"excludeComments,omitempty"`
 }
 
 // Jira discovers issues from a Jira project.

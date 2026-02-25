@@ -25,15 +25,17 @@ const (
 
 // GitHubSource discovers issues from a GitHub repository.
 type GitHubSource struct {
-	Owner         string
-	Repo          string
-	Types         []string
-	Labels        []string
-	ExcludeLabels []string
-	State         string
-	Token         string
-	BaseURL       string
-	Client        *http.Client
+	Owner           string
+	Repo            string
+	Types           []string
+	Labels          []string
+	ExcludeLabels   []string
+	State           string
+	Token           string
+	BaseURL         string
+	Client          *http.Client
+	TriggerComment  string
+	ExcludeComments []string
 }
 
 type githubIssue struct {
@@ -76,6 +78,8 @@ func (s *GitHubSource) Discover(ctx context.Context) ([]WorkItem, error) {
 
 	issues = s.filterItems(issues)
 
+	needsCommentFilter := s.TriggerComment != "" || len(s.ExcludeComments) > 0
+
 	var items []WorkItem
 	for _, issue := range issues {
 		var labels []string
@@ -86,6 +90,10 @@ func (s *GitHubSource) Discover(ctx context.Context) ([]WorkItem, error) {
 		comments, err := s.fetchComments(ctx, issue.Number)
 		if err != nil {
 			return nil, fmt.Errorf("fetching comments for issue #%d: %w", issue.Number, err)
+		}
+
+		if needsCommentFilter && !s.passesCommentFilter(comments) {
+			continue
 		}
 
 		kind := "Issue"
@@ -106,6 +114,81 @@ func (s *GitHubSource) Discover(ctx context.Context) ([]WorkItem, error) {
 	}
 
 	return items, nil
+}
+
+// passesCommentFilter checks whether an issue's comments satisfy the
+// comment-based trigger and exclude rules. Comments are expected in the
+// concatenated format produced by fetchComments (separated by "\n---\n").
+//
+// When both TriggerComment and ExcludeComments are set, the most recent
+// matching command wins (scanned in reverse chronological order).
+// TriggerComment doubles as a resume command — posting it after an
+// ExcludeComment re-enables the issue.
+func (s *GitHubSource) passesCommentFilter(comments string) bool {
+	// Split into individual comment bodies.
+	var parts []string
+	if comments != "" {
+		parts = strings.Split(comments, "\n---\n")
+	}
+
+	// When only TriggerComment is set, require at least one matching comment.
+	if s.TriggerComment != "" && len(s.ExcludeComments) == 0 {
+		for _, p := range parts {
+			if containsCommand(p, s.TriggerComment) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// When only ExcludeComments is set, exclude if any comment matches.
+	if len(s.ExcludeComments) > 0 && s.TriggerComment == "" {
+		for i := len(parts) - 1; i >= 0; i-- {
+			if containsAnyCommand(parts[i], s.ExcludeComments) {
+				return false
+			}
+		}
+		return true
+	}
+
+	// When both are set, scan in reverse; the most recent matching command wins.
+	// TriggerComment acts as both initial trigger and resume.
+	if s.TriggerComment != "" && len(s.ExcludeComments) > 0 {
+		for i := len(parts) - 1; i >= 0; i-- {
+			if containsAnyCommand(parts[i], s.ExcludeComments) {
+				return false
+			}
+			if containsCommand(parts[i], s.TriggerComment) {
+				return true
+			}
+		}
+		// Neither command found — trigger is required but absent.
+		return false
+	}
+
+	return true
+}
+
+// containsAnyCommand reports whether body contains any of the given commands.
+func containsAnyCommand(body string, cmds []string) bool {
+	for _, cmd := range cmds {
+		if containsCommand(body, cmd) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsCommand reports whether body contains the given command string.
+// The command must appear at the start of a line to avoid false matches
+// inside prose.
+func containsCommand(body, cmd string) bool {
+	for _, line := range strings.Split(body, "\n") {
+		if strings.TrimSpace(line) == cmd {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *GitHubSource) resolvedTypes() map[string]struct{} {

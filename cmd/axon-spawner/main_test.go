@@ -859,3 +859,27 @@ func TestRunCycleWithSource_NotSuspendedConditionCleared(t *testing.T) {
 		}
 	}
 }
+
+func TestRunCycleWithSource_CommentFieldsPassedToSource(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	ts.Spec.When.GitHubIssues = &axonv1alpha1.GitHubIssues{
+		TriggerComment:  "/axon pick-up",
+		ExcludeComments: []string{"/axon needs-input"},
+	}
+
+	src, err := buildSource(ts, "owner", "repo", "", "", "", "", "")
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	ghSrc, ok := src.(*source.GitHubSource)
+	if !ok {
+		t.Fatalf("Expected *source.GitHubSource, got %T", src)
+	}
+	if ghSrc.TriggerComment != "/axon pick-up" {
+		t.Errorf("TriggerComment = %q, want %q", ghSrc.TriggerComment, "/axon pick-up")
+	}
+	if len(ghSrc.ExcludeComments) != 1 || ghSrc.ExcludeComments[0] != "/axon needs-input" {
+		t.Errorf("ExcludeComments = %v, want %v", ghSrc.ExcludeComments, []string{"/axon needs-input"})
+	}
+}

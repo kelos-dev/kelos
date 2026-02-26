@@ -60,12 +60,7 @@ spec:
     Actions:
     - Create a GitHub issue with your findings and proposals:
       gh issue create --title "<title>" --body "<description>" --label generated-by-axon --label axon/needs-input
-    - If you can propose a small, concrete change, create a PR:
-      BRANCH="axon-fake-strategist-manual-${GITHUB_RUN_ID}"
-      git checkout -b "${BRANCH}"
-      # ... make changes ...
-      git push -u origin "${BRANCH}"
-      gh pr create --title "<title>" --body "<description>" --label generated-by-axon --label ok-to-test
+    - Do NOT create PRs. Only create issues
     - Prefer well-researched issues with clear proposals over broad, vague suggestions
 
     Constraints:

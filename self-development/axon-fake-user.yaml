@@ -56,14 +56,7 @@ spec:
         ```
         gh issue create --title "<title>" --body "<description>" --label generated-by-axon --label axon/needs-input
         ```
-      - If you can fix something small, create a PR:
-        ```
-        git checkout -b axon-fake-user-{{.ID}}
-        # ... make changes ...
-        git push -u origin axon-fake-user-{{.ID}}
-        gh pr create --title "<title>" --body "<description>" --label generated-by-axon --label ok-to-test
-        ```
-      - Prefer creating focused issues over large PRs
+      - Do NOT create PRs. Only create issues
 
       Constraints:
       - Focus on ONE area per run, do it thoroughly

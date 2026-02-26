@@ -65,13 +65,7 @@ spec:
         ```
         gh issue create --title "<title>" --body "<description>" --label generated-by-axon --label axon/needs-input
         ```
-      - If you can propose a small, concrete change, create a PR:
-        ```
-        git checkout -b axon-fake-strategist-{{.ID}}
-        # ... make changes ...
-        git push -u origin axon-fake-strategist-{{.ID}}
-        gh pr create --title "<title>" --body "<description>" --label generated-by-axon --label ok-to-test
-        ```
+      - Do NOT create PRs. Only create issues
       - Prefer well-researched issues with clear proposals over broad, vague suggestions
 
       Constraints:

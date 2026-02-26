@@ -168,6 +168,13 @@ func (b *JobBuilder) buildAgentJob(task *axonv1alpha1.Task, workspace *axonv1alp
 		Value: task.Spec.Type,
 	})
 
+	if spawner := task.Labels["axon.io/taskspawner"]; spawner != "" {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "AXON_TASKSPAWNER",
+			Value: spawner,
+		})
+	}
+
 	switch task.Spec.Credentials.Type {
 	case axonv1alpha1.CredentialTypeAPIKey:
 		keyName := apiKeyEnvVar(task.Spec.Type)

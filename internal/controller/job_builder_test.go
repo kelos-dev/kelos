@@ -3482,3 +3482,73 @@ func TestBuildJob_WorkspaceWithInvalidUpstreamRemoteNoEnv(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildJob_TaskSpawnerLabelInjectsEnv(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-spawner-env",
+			Namespace: "default",
+			Labels: map[string]string{
+				"axon.io/taskspawner": "axon-workers",
+			},
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Hello",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+	found := false
+	for _, env := range container.Env {
+		if env.Name == "AXON_TASKSPAWNER" {
+			found = true
+			if env.Value != "axon-workers" {
+				t.Errorf("AXON_TASKSPAWNER: expected %q, got %q", "axon-workers", env.Value)
+			}
+		}
+	}
+	if !found {
+		t.Error("Expected AXON_TASKSPAWNER env var to be set when label is present")
+	}
+}
+
+func TestBuildJob_NoTaskSpawnerLabelNoEnv(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &axonv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-no-spawner-env",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Hello",
+			Credentials: axonv1alpha1.Credentials{
+				Type:      axonv1alpha1.CredentialTypeAPIKey,
+				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+	for _, env := range container.Env {
+		if env.Name == "AXON_TASKSPAWNER" {
+			t.Errorf("Expected no AXON_TASKSPAWNER env var when label is absent, but found value %q", env.Value)
+		}
+	}
+}

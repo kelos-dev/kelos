@@ -105,36 +105,44 @@ func (b *DeploymentBuilder) Build(ts *axonv1alpha1.TaskSpawner, workspace *axonv
 					ReadOnly:  true,
 				})
 
+				refresherEnv := []corev1.EnvVar{
+					{
+						Name: "APP_ID",
+						ValueFrom: &corev1.EnvVarSource{
+							SecretKeyRef: &corev1.SecretKeySelector{
+								LocalObjectReference: corev1.LocalObjectReference{
+									Name: workspace.SecretRef.Name,
+								},
+								Key: "appID",
+							},
+						},
+					},
+					{
+						Name: "INSTALLATION_ID",
+						ValueFrom: &corev1.EnvVarSource{
+							SecretKeyRef: &corev1.SecretKeySelector{
+								LocalObjectReference: corev1.LocalObjectReference{
+									Name: workspace.SecretRef.Name,
+								},
+								Key: "installationID",
+							},
+						},
+					},
+				}
+				if apiBaseURL := gitHubAPIBaseURL(host); apiBaseURL != "" {
+					refresherEnv = append(refresherEnv, corev1.EnvVar{
+						Name:  "GITHUB_API_BASE_URL",
+						Value: apiBaseURL,
+					})
+				}
+
 				restartPolicyAlways := corev1.ContainerRestartPolicyAlways
 				initContainers = append(initContainers, corev1.Container{
 					Name:            "token-refresher",
 					Image:           b.TokenRefresherImage,
 					ImagePullPolicy: b.TokenRefresherImagePullPolicy,
 					RestartPolicy:   &restartPolicyAlways,
-					Env: []corev1.EnvVar{
-						{
-							Name: "APP_ID",
-							ValueFrom: &corev1.EnvVarSource{
-								SecretKeyRef: &corev1.SecretKeySelector{
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: workspace.SecretRef.Name,
-									},
-									Key: "appID",
-								},
-							},
-						},
-						{
-							Name: "INSTALLATION_ID",
-							ValueFrom: &corev1.EnvVarSource{
-								SecretKeyRef: &corev1.SecretKeySelector{
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: workspace.SecretRef.Name,
-									},
-									Key: "installationID",
-								},
-							},
-						},
-					},
+					Env:             refresherEnv,
 					VolumeMounts: []corev1.VolumeMount{
 						{
 							Name:      "github-token",

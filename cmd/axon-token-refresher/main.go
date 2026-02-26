@@ -66,6 +66,9 @@ func main() {
 	defer cancel()
 
 	tc := githubapp.NewTokenClient()
+	if apiURL := os.Getenv("GITHUB_API_BASE_URL"); apiURL != "" {
+		tc.BaseURL = apiURL
+	}
 
 	fmt.Println("Starting token refresher")
 

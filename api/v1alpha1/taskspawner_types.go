@@ -94,6 +94,18 @@ type GitHubIssues struct {
 	// +optional
 	ExcludeComments []string `json:"excludeComments,omitempty"`
 
+	// Assignee filters issues by assignee username. Use "*" for issues with
+	// any assignee, or "none" for issues with no assignee. When empty, no
+	// assignee filtering is applied (server-side via GitHub API).
+	// +optional
+	Assignee string `json:"assignee,omitempty"`
+
+	// Author filters issues by the username of the user who created them
+	// (server-side via GitHub API's "creator" parameter). When empty, no
+	// author filtering is applied.
+	// +optional
+	Author string `json:"author,omitempty"`
+
 	// PriorityLabels defines a label-based priority order for discovered items.
 	// When maxConcurrency limits how many tasks are created per cycle,
 	// items are sorted by the first matching label before task creation.

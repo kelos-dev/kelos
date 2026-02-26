@@ -1044,6 +1044,18 @@ spec:
                   githubIssues:
                     description: GitHubIssues discovers issues from a GitHub repository.
                     properties:
+                      assignee:
+                        description: |-
+                          Assignee filters issues by assignee username. Use "*" for issues with
+                          any assignee, or "none" for issues with no assignee. When empty, no
+                          assignee filtering is applied (server-side via GitHub API).
+                        type: string
+                      author:
+                        description: |-
+                          Author filters issues by the username of the user who created them
+                          (server-side via GitHub API's "creator" parameter). When empty, no
+                          author filtering is applied.
+                        type: string
                       excludeComments:
                         description: |-
                           ExcludeComments enables comment-based exclusion. When set, issues that

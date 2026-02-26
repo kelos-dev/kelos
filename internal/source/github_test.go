@@ -96,6 +96,118 @@ func TestDiscoverLabelFiltering(t *testing.T) {
 	}
 }
 
+func TestDiscoverAssigneeFiltering(t *testing.T) {
+	var receivedQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/owner/repo/issues" {
+			receivedQuery = r.URL.RawQuery
+			json.NewEncoder(w).Encode([]githubIssue{})
+		}
+	}))
+	defer server.Close()
+
+	s := &GitHubSource{
+		Owner:    "owner",
+		Repo:     "repo",
+		Assignee: "octocat",
+		BaseURL:  server.URL,
+	}
+
+	_, err := s.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !containsParam(receivedQuery, "assignee=octocat") {
+		t.Errorf("expected assignee=octocat in query: %s", receivedQuery)
+	}
+}
+
+func TestDiscoverAssigneeNone(t *testing.T) {
+	var receivedQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/owner/repo/issues" {
+			receivedQuery = r.URL.RawQuery
+			json.NewEncoder(w).Encode([]githubIssue{})
+		}
+	}))
+	defer server.Close()
+
+	s := &GitHubSource{
+		Owner:    "owner",
+		Repo:     "repo",
+		Assignee: "none",
+		BaseURL:  server.URL,
+	}
+
+	_, err := s.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !containsParam(receivedQuery, "assignee=none") {
+		t.Errorf("expected assignee=none in query: %s", receivedQuery)
+	}
+}
+
+func TestDiscoverAuthorFiltering(t *testing.T) {
+	var receivedQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/owner/repo/issues" {
+			receivedQuery = r.URL.RawQuery
+			json.NewEncoder(w).Encode([]githubIssue{})
+		}
+	}))
+	defer server.Close()
+
+	s := &GitHubSource{
+		Owner:   "owner",
+		Repo:    "repo",
+		Author:  "octocat",
+		BaseURL: server.URL,
+	}
+
+	_, err := s.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !containsParam(receivedQuery, "creator=octocat") {
+		t.Errorf("expected creator=octocat in query: %s", receivedQuery)
+	}
+}
+
+func TestDiscoverAssigneeAndAuthorTogether(t *testing.T) {
+	var receivedQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/owner/repo/issues" {
+			receivedQuery = r.URL.RawQuery
+			json.NewEncoder(w).Encode([]githubIssue{})
+		}
+	}))
+	defer server.Close()
+
+	s := &GitHubSource{
+		Owner:    "owner",
+		Repo:     "repo",
+		Assignee: "alice",
+		Author:   "bob",
+		BaseURL:  server.URL,
+	}
+
+	_, err := s.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !containsParam(receivedQuery, "assignee=alice") {
+		t.Errorf("expected assignee=alice in query: %s", receivedQuery)
+	}
+	if !containsParam(receivedQuery, "creator=bob") {
+		t.Errorf("expected creator=bob in query: %s", receivedQuery)
+	}
+}
+
 func TestDiscoverStateFiltering(t *testing.T) {
 	var receivedQuery string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

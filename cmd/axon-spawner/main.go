@@ -353,6 +353,8 @@ func buildSource(ts *axonv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFil
 			Labels:          gh.Labels,
 			ExcludeLabels:   gh.ExcludeLabels,
 			State:           gh.State,
+			Assignee:        gh.Assignee,
+			Author:          gh.Author,
 			Token:           token,
 			BaseURL:         apiBaseURL,
 			TriggerComment:  gh.TriggerComment,

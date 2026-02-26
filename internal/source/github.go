@@ -31,6 +31,8 @@ type GitHubSource struct {
 	Labels          []string
 	ExcludeLabels   []string
 	State           string
+	Assignee        string
+	Author          string
 	Token           string
 	BaseURL         string
 	Client          *http.Client
@@ -271,6 +273,14 @@ func (s *GitHubSource) buildIssuesURL() string {
 
 	if len(s.Labels) > 0 {
 		params.Set("labels", strings.Join(s.Labels, ","))
+	}
+
+	if s.Assignee != "" {
+		params.Set("assignee", s.Assignee)
+	}
+
+	if s.Author != "" {
+		params.Set("creator", s.Author)
 	}
 
 	return u + "?" + params.Encode()

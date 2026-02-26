@@ -1,0 +1,88 @@
+apiVersion: axon.io/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: axon-self-update
+spec:
+  when:
+    cron:
+      schedule: "0 6 * * *"
+  maxConcurrency: 1
+  taskTemplate:
+    workspaceRef:
+      name: axon-agent
+    model: opus
+    type: claude-code
+    ttlSecondsAfterFinished: 864000
+    credentials:
+      type: oauth
+      secretRef:
+        name: axon-credentials
+    podOverrides:
+      resources:
+        requests:
+          cpu: "250m"
+          memory: "512Mi"
+          ephemeral-storage: "2Gi"
+        limits:
+          cpu: "1"
+          memory: "2Gi"
+          ephemeral-storage: "2Gi"
+    agentConfigRef:
+      name: axon-dev-agent
+    promptTemplate: |
+      You are a self-improvement agent for the Axon framework — a Kubernetes-native controller that runs autonomous AI coding agents.
+      Your goal is to review and update the self-development workflow files that define how Axon develops itself.
+
+      The self-development directory (`self-development/`) contains TaskSpawner definitions, AgentConfig, and task templates
+      that orchestrate Axon's autonomous development loop. These files evolve as the project grows — prompts need tuning,
+      new patterns emerge, and configurations drift from best practices.
+
+      Task:
+      Review the self-development workflow files and propose concrete improvements. Focus on ONE of the following:
+
+      1. **Prompt Tuning**
+         - Review prompts in all TaskSpawner definitions (`self-development/*.yaml`)
+         - Compare prompts against actual agent behavior by checking recent PRs and issues created by agents
+           (`gh pr list --label generated-by-axon --limit 20`, `gh issue list --label generated-by-axon --limit 20`)
+         - Identify prompts that produce low-quality output, miss edge cases, or lack clarity
+         - Propose improved prompt wording backed by evidence from past agent runs
+
+      2. **Configuration Alignment**
+         - Check that resource requests/limits, models, TTLs, and other settings are appropriate
+         - Verify that labels, excludeLabels, and filters are correct and consistent
+         - Ensure AgentConfig instructions in `agentconfig.yaml` match the project's current conventions in `CLAUDE.md`
+         - Look for inconsistencies between TaskSpawners that should share the same configuration
+
+      3. **Workflow Completeness**
+         - Check if new project conventions or Makefile targets should be reflected in agent prompts
+         - Identify gaps where agents lack instructions for common scenarios they encounter
+         - Review the README.md for accuracy against the current set of TaskSpawners
+         - Ensure template variables are used correctly per the documentation
+
+      4. **Task Template Maintenance**
+         - Review task templates in `self-development/tasks/`
+         - Check that one-off task definitions stay in sync with their TaskSpawner counterparts
+         - Verify that GitHub Actions workflows that reference self-development files are up to date
+
+      Actions:
+      - If you find improvements, create a PR:
+        ```
+        git checkout -b axon-self-update-{{.ID}}
+        # ... make changes ...
+        git push -u origin axon-self-update-{{.ID}}
+        gh pr create --title "<title>" --body "<description>" --label generated-by-axon --label ok-to-test
+        ```
+      - If the changes are too large or need discussion, create an issue instead:
+        ```
+        gh issue create --title "<title>" --body "<description>" --label generated-by-axon --label axon/needs-input
+        ```
+
+      Constraints:
+      - Focus on ONE area per run, do it thoroughly
+      - Only modify files under `self-development/` and related workflow files under `.github/workflows/`
+      - Do not create duplicate issues — check existing issues first with `gh issue list`
+      - Back proposals with evidence from the codebase and recent agent activity
+      - Keep changes minimal and focused
+      - Before creating output, review recent issues and PRs labeled "generated-by-axon" to avoid overlap
+      - If after review you find nothing actionable to improve, exit without creating an issue or PR. Not every run needs to produce output
+  pollInterval: 1m

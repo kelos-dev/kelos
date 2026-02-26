@@ -160,6 +160,21 @@ This spawner uses a cron schedule (`0 */12 * * *`) and will create a task every 
 - **Integration Opportunities** — identify tools/platforms Axon could integrate with (CI systems, monitoring, chat ops, etc.)
 - **New CRDs & API Extensions** — propose new Custom Resource Definitions or extensions to existing CRDs that would expand Axon's capabilities
 
+### axon-self-update.yaml
+
+This TaskSpawner runs daily to review and update the self-development workflow files themselves.
+
+**Deploy:**
+```bash
+kubectl apply -f self-development/axon-self-update.yaml
+```
+
+This spawner uses a daily cron schedule (`0 6 * * *`, every day at 06:00 UTC) and will create a task to focus on one of:
+- **Prompt Tuning** — review and improve prompts based on actual agent output quality
+- **Configuration Alignment** — ensure resource settings, labels, and AgentConfig stay consistent
+- **Workflow Completeness** — check that agent prompts reflect current project conventions and Makefile targets
+- **Task Template Maintenance** — keep one-off task definitions in sync with their TaskSpawner counterparts
+
 ## Customizing for Your Repository
 
 To adapt these examples for your own repository:

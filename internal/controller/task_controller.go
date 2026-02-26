@@ -343,7 +343,20 @@ func (r *TaskReconciler) resolveGitHubAppToken(ctx context.Context, task *axonv1
 		return nil, fmt.Errorf("parsing GitHub App credentials: %w", err)
 	}
 
-	tokenResp, err := r.TokenClient.GenerateInstallationToken(ctx, creds)
+	// Use a per-call TokenClient so that concurrent reconciles with different
+	// hosts do not race on the shared r.TokenClient.BaseURL.
+	tc := &githubapp.TokenClient{
+		BaseURL: r.TokenClient.BaseURL,
+		Client:  r.TokenClient.Client,
+	}
+	if workspace.Repo != "" {
+		host, _, _ := parseGitHubRepo(workspace.Repo)
+		if apiBaseURL := gitHubAPIBaseURL(host); apiBaseURL != "" {
+			tc.BaseURL = apiBaseURL
+		}
+	}
+
+	tokenResp, err := tc.GenerateInstallationToken(ctx, creds)
 	if err != nil {
 		return nil, fmt.Errorf("generating installation token: %w", err)
 	}

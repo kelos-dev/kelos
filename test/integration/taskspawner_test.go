@@ -1485,6 +1485,391 @@ var _ = Describe("TaskSpawner Controller", func() {
 		})
 	})
 
+	Context("When switching workspace secret from PAT to GitHub App", func() {
+		It("Should update the Deployment to add token-refresher sidecar", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-taskspawner-pat-to-app",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a PAT secret")
+			patSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "switch-secret",
+					Namespace: ns.Name,
+				},
+				Data: map[string][]byte{
+					"GITHUB_TOKEN": []byte("ghp_test_token"),
+				},
+			}
+			Expect(k8sClient.Create(ctx, patSecret)).Should(Succeed())
+
+			By("Creating a Workspace with PAT secretRef")
+			ws := &axonv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace-switch",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/axon-core/axon.git",
+					Ref:  "main",
+					SecretRef: &axonv1alpha1.SecretReference{
+						Name: "switch-secret",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
+
+			By("Creating a TaskSpawner referencing the workspace")
+			ts := &axonv1alpha1.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-spawner-switch",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpawnerSpec{
+					When: axonv1alpha1.When{
+						GitHubIssues: &axonv1alpha1.GitHubIssues{},
+					},
+					TaskTemplate: axonv1alpha1.TaskTemplate{
+						Type: "claude-code",
+						Credentials: axonv1alpha1.Credentials{
+							Type: axonv1alpha1.CredentialTypeOAuth,
+							SecretRef: axonv1alpha1.SecretReference{
+								Name: "claude-credentials",
+							},
+						},
+						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+							Name: "test-workspace-switch",
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ts)).Should(Succeed())
+
+			By("Verifying a Deployment is created in PAT mode")
+			deployLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
+			createdDeploy := &appsv1.Deployment{}
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, deployLookupKey, createdDeploy)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Verifying initial state: PAT mode (GITHUB_TOKEN env, no init containers)")
+			Expect(createdDeploy.Spec.Template.Spec.InitContainers).To(BeEmpty())
+			Expect(createdDeploy.Spec.Template.Spec.Volumes).To(BeEmpty())
+			Expect(createdDeploy.Spec.Template.Spec.Containers[0].Env).To(HaveLen(1))
+			Expect(createdDeploy.Spec.Template.Spec.Containers[0].Env[0].Name).To(Equal("GITHUB_TOKEN"))
+
+			By("Switching the secret to GitHub App credentials")
+			privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+			Expect(err).NotTo(HaveOccurred())
+			keyPEM := pem.EncodeToMemory(&pem.Block{
+				Type:  "RSA PRIVATE KEY",
+				Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
+			})
+
+			Eventually(func() error {
+				secret := &corev1.Secret{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: "switch-secret", Namespace: ns.Name}, secret); err != nil {
+					return err
+				}
+				secret.Data = map[string][]byte{
+					"appID":          []byte("12345"),
+					"installationID": []byte("67890"),
+					"privateKey":     keyPEM,
+				}
+				return k8sClient.Update(ctx, secret)
+			}, timeout, interval).Should(Succeed())
+
+			By("Verifying the Deployment is updated to GitHub App mode with token-refresher sidecar")
+			Eventually(func() int {
+				err := k8sClient.Get(ctx, deployLookupKey, createdDeploy)
+				if err != nil {
+					return -1
+				}
+				return len(createdDeploy.Spec.Template.Spec.InitContainers)
+			}, timeout, interval).Should(Equal(1))
+
+			Expect(createdDeploy.Spec.Template.Spec.InitContainers[0].Name).To(Equal("token-refresher"))
+			Expect(createdDeploy.Spec.Template.Spec.InitContainers[0].Image).To(Equal(controller.DefaultTokenRefresherImage))
+
+			By("Verifying volumes are added")
+			Expect(createdDeploy.Spec.Template.Spec.Volumes).To(HaveLen(2))
+
+			By("Verifying spawner has volume mount and --github-token-file arg")
+			spawner := createdDeploy.Spec.Template.Spec.Containers[0]
+			Expect(spawner.VolumeMounts).To(HaveLen(1))
+			Expect(spawner.VolumeMounts[0].Name).To(Equal("github-token"))
+			Expect(spawner.Args).To(ContainElement("--github-token-file=/shared/token/GITHUB_TOKEN"))
+
+			By("Verifying GITHUB_TOKEN env var is removed")
+			for _, env := range spawner.Env {
+				Expect(env.Name).NotTo(Equal("GITHUB_TOKEN"))
+			}
+		})
+	})
+
+	Context("When switching workspace secret from GitHub App to PAT", func() {
+		It("Should update the Deployment to remove token-refresher sidecar", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-taskspawner-app-to-pat",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Generating a test RSA key for GitHub App")
+			privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+			Expect(err).NotTo(HaveOccurred())
+			keyPEM := pem.EncodeToMemory(&pem.Block{
+				Type:  "RSA PRIVATE KEY",
+				Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
+			})
+
+			By("Creating a GitHub App secret")
+			appSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "switch-secret-2",
+					Namespace: ns.Name,
+				},
+				Data: map[string][]byte{
+					"appID":          []byte("12345"),
+					"installationID": []byte("67890"),
+					"privateKey":     keyPEM,
+				},
+			}
+			Expect(k8sClient.Create(ctx, appSecret)).Should(Succeed())
+
+			By("Creating a Workspace with GitHub App secretRef")
+			ws := &axonv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace-switch-2",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/axon-core/axon.git",
+					Ref:  "main",
+					SecretRef: &axonv1alpha1.SecretReference{
+						Name: "switch-secret-2",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
+
+			By("Creating a TaskSpawner referencing the workspace")
+			ts := &axonv1alpha1.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-spawner-switch-2",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpawnerSpec{
+					When: axonv1alpha1.When{
+						GitHubIssues: &axonv1alpha1.GitHubIssues{},
+					},
+					TaskTemplate: axonv1alpha1.TaskTemplate{
+						Type: "claude-code",
+						Credentials: axonv1alpha1.Credentials{
+							Type: axonv1alpha1.CredentialTypeOAuth,
+							SecretRef: axonv1alpha1.SecretReference{
+								Name: "claude-credentials",
+							},
+						},
+						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+							Name: "test-workspace-switch-2",
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ts)).Should(Succeed())
+
+			By("Verifying a Deployment is created in GitHub App mode")
+			deployLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
+			createdDeploy := &appsv1.Deployment{}
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, deployLookupKey, createdDeploy)
+				if err != nil {
+					return false
+				}
+				return len(createdDeploy.Spec.Template.Spec.InitContainers) == 1
+			}, timeout, interval).Should(BeTrue())
+
+			By("Verifying initial state: GitHub App mode")
+			Expect(createdDeploy.Spec.Template.Spec.InitContainers[0].Name).To(Equal("token-refresher"))
+			Expect(createdDeploy.Spec.Template.Spec.Volumes).To(HaveLen(2))
+			Expect(createdDeploy.Spec.Template.Spec.Containers[0].VolumeMounts).To(HaveLen(1))
+
+			By("Switching the secret to PAT credentials")
+			Eventually(func() error {
+				secret := &corev1.Secret{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: "switch-secret-2", Namespace: ns.Name}, secret); err != nil {
+					return err
+				}
+				secret.Data = map[string][]byte{
+					"GITHUB_TOKEN": []byte("ghp_new_pat_token"),
+				}
+				return k8sClient.Update(ctx, secret)
+			}, timeout, interval).Should(Succeed())
+
+			By("Verifying the Deployment is updated to PAT mode (init containers removed)")
+			Eventually(func() int {
+				err := k8sClient.Get(ctx, deployLookupKey, createdDeploy)
+				if err != nil {
+					return -1
+				}
+				return len(createdDeploy.Spec.Template.Spec.InitContainers)
+			}, timeout, interval).Should(Equal(0))
+
+			By("Verifying volumes are removed")
+			Expect(createdDeploy.Spec.Template.Spec.Volumes).To(BeEmpty())
+
+			By("Verifying volume mounts are removed")
+			Expect(createdDeploy.Spec.Template.Spec.Containers[0].VolumeMounts).To(BeEmpty())
+
+			By("Verifying GITHUB_TOKEN env var is present")
+			spawner := createdDeploy.Spec.Template.Spec.Containers[0]
+			foundToken := false
+			for _, env := range spawner.Env {
+				if env.Name == "GITHUB_TOKEN" {
+					foundToken = true
+					break
+				}
+			}
+			Expect(foundToken).To(BeTrue(), "expected GITHUB_TOKEN env var after switch to PAT")
+
+			By("Verifying --github-token-file arg is removed")
+			Expect(spawner.Args).NotTo(ContainElement("--github-token-file=/shared/token/GITHUB_TOKEN"))
+		})
+	})
+
+	Context("When workspace secretRef changes to a different secret", func() {
+		It("Should update the Deployment when workspace spec changes", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-taskspawner-ws-change",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a PAT secret")
+			patSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pat-secret-ws",
+					Namespace: ns.Name,
+				},
+				Data: map[string][]byte{
+					"GITHUB_TOKEN": []byte("ghp_test_token"),
+				},
+			}
+			Expect(k8sClient.Create(ctx, patSecret)).Should(Succeed())
+
+			By("Generating a test RSA key for GitHub App")
+			privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+			Expect(err).NotTo(HaveOccurred())
+			keyPEM := pem.EncodeToMemory(&pem.Block{
+				Type:  "RSA PRIVATE KEY",
+				Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
+			})
+
+			By("Creating a GitHub App secret")
+			appSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "app-secret-ws",
+					Namespace: ns.Name,
+				},
+				Data: map[string][]byte{
+					"appID":          []byte("12345"),
+					"installationID": []byte("67890"),
+					"privateKey":     keyPEM,
+				},
+			}
+			Expect(k8sClient.Create(ctx, appSecret)).Should(Succeed())
+
+			By("Creating a Workspace with PAT secretRef")
+			ws := &axonv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace-ws-change",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/axon-core/axon.git",
+					Ref:  "main",
+					SecretRef: &axonv1alpha1.SecretReference{
+						Name: "pat-secret-ws",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
+
+			By("Creating a TaskSpawner referencing the workspace")
+			ts := &axonv1alpha1.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-spawner-ws-change",
+					Namespace: ns.Name,
+				},
+				Spec: axonv1alpha1.TaskSpawnerSpec{
+					When: axonv1alpha1.When{
+						GitHubIssues: &axonv1alpha1.GitHubIssues{},
+					},
+					TaskTemplate: axonv1alpha1.TaskTemplate{
+						Type: "claude-code",
+						Credentials: axonv1alpha1.Credentials{
+							Type: axonv1alpha1.CredentialTypeOAuth,
+							SecretRef: axonv1alpha1.SecretReference{
+								Name: "claude-credentials",
+							},
+						},
+						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+							Name: "test-workspace-ws-change",
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ts)).Should(Succeed())
+
+			By("Verifying a Deployment is created in PAT mode")
+			deployLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
+			createdDeploy := &appsv1.Deployment{}
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, deployLookupKey, createdDeploy)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			Expect(createdDeploy.Spec.Template.Spec.InitContainers).To(BeEmpty())
+
+			By("Updating workspace to point to GitHub App secret")
+			Eventually(func() error {
+				wsObj := &axonv1alpha1.Workspace{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: "test-workspace-ws-change", Namespace: ns.Name}, wsObj); err != nil {
+					return err
+				}
+				wsObj.Spec.SecretRef = &axonv1alpha1.SecretReference{
+					Name: "app-secret-ws",
+				}
+				return k8sClient.Update(ctx, wsObj)
+			}, timeout, interval).Should(Succeed())
+
+			By("Verifying the Deployment is updated to GitHub App mode")
+			Eventually(func() int {
+				err := k8sClient.Get(ctx, deployLookupKey, createdDeploy)
+				if err != nil {
+					return -1
+				}
+				return len(createdDeploy.Spec.Template.Spec.InitContainers)
+			}, timeout, interval).Should(Equal(1))
+
+			Expect(createdDeploy.Spec.Template.Spec.InitContainers[0].Name).To(Equal("token-refresher"))
+			Expect(createdDeploy.Spec.Template.Spec.Volumes).To(HaveLen(2))
+		})
+	})
+
 	Context("When creating a TaskSpawner with comment-based workflow control", func() {
 		It("Should store triggerComment and excludeComments in spec and create a Deployment", func() {
 			By("Creating a namespace")

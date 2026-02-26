@@ -835,3 +835,402 @@ func TestUpdateDeployment_NoUpdateWhenReplicasMatch(t *testing.T) {
 		t.Errorf("expected Replicas=1 (unchanged), got %v", updated.Spec.Replicas)
 	}
 }
+
+func TestUpdateDeployment_PATToGitHubApp(t *testing.T) {
+	builder := NewDeploymentBuilder()
+	ts := &axonv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-spawner",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpawnerSpec{
+			When: axonv1alpha1.When{
+				GitHubIssues: &axonv1alpha1.GitHubIssues{},
+			},
+			TaskTemplate: axonv1alpha1.TaskTemplate{
+				Type:         "claude-code",
+				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "ws"},
+			},
+		},
+	}
+	workspace := &axonv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/axon-core/axon.git",
+		SecretRef: &axonv1alpha1.SecretReference{
+			Name: "my-secret",
+		},
+	}
+
+	// Build the initial deployment in PAT mode
+	deploy := builder.Build(ts, workspace, false)
+
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(appsv1.AddToScheme(scheme))
+	utilruntime.Must(axonv1alpha1.AddToScheme(scheme))
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(ts, deploy).
+		WithStatusSubresource(ts).
+		Build()
+
+	r := &TaskSpawnerReconciler{
+		Client:            cl,
+		Scheme:            scheme,
+		DeploymentBuilder: builder,
+	}
+
+	// Verify initial state: PAT mode (no init containers, no volumes)
+	if len(deploy.Spec.Template.Spec.InitContainers) != 0 {
+		t.Fatalf("expected 0 init containers in PAT mode, got %d", len(deploy.Spec.Template.Spec.InitContainers))
+	}
+	if len(deploy.Spec.Template.Spec.Volumes) != 0 {
+		t.Fatalf("expected 0 volumes in PAT mode, got %d", len(deploy.Spec.Template.Spec.Volumes))
+	}
+
+	// Switch to GitHub App mode
+	ctx := context.Background()
+	if err := r.updateDeployment(ctx, ts, deploy, workspace, true, 1); err != nil {
+		t.Fatalf("updateDeployment error: %v", err)
+	}
+
+	var updated appsv1.Deployment
+	if err := cl.Get(ctx, client.ObjectKeyFromObject(deploy), &updated); err != nil {
+		t.Fatalf("getting deployment: %v", err)
+	}
+
+	// Verify GitHub App mode: init container, volumes, volume mounts added
+	if len(updated.Spec.Template.Spec.InitContainers) != 1 {
+		t.Fatalf("expected 1 init container after switch to GitHub App, got %d", len(updated.Spec.Template.Spec.InitContainers))
+	}
+	if updated.Spec.Template.Spec.InitContainers[0].Name != "token-refresher" {
+		t.Errorf("init container name = %q, want %q", updated.Spec.Template.Spec.InitContainers[0].Name, "token-refresher")
+	}
+	if len(updated.Spec.Template.Spec.Volumes) != 2 {
+		t.Fatalf("expected 2 volumes after switch to GitHub App, got %d", len(updated.Spec.Template.Spec.Volumes))
+	}
+	if len(updated.Spec.Template.Spec.Containers[0].VolumeMounts) != 1 {
+		t.Fatalf("expected 1 volume mount on spawner after switch to GitHub App, got %d", len(updated.Spec.Template.Spec.Containers[0].VolumeMounts))
+	}
+
+	// Verify no GITHUB_TOKEN env var (should use token file instead)
+	for _, env := range updated.Spec.Template.Spec.Containers[0].Env {
+		if env.Name == "GITHUB_TOKEN" {
+			t.Error("spawner should not have GITHUB_TOKEN env var in GitHub App mode")
+		}
+	}
+
+	// Verify --github-token-file arg is present
+	found := false
+	for _, arg := range updated.Spec.Template.Spec.Containers[0].Args {
+		if arg == "--github-token-file=/shared/token/GITHUB_TOKEN" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected --github-token-file arg after switch to GitHub App, got args: %v", updated.Spec.Template.Spec.Containers[0].Args)
+	}
+}
+
+func TestUpdateDeployment_GitHubAppToPAT(t *testing.T) {
+	builder := NewDeploymentBuilder()
+	ts := &axonv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-spawner",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpawnerSpec{
+			When: axonv1alpha1.When{
+				GitHubIssues: &axonv1alpha1.GitHubIssues{},
+			},
+			TaskTemplate: axonv1alpha1.TaskTemplate{
+				Type:         "claude-code",
+				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "ws"},
+			},
+		},
+	}
+	workspace := &axonv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/axon-core/axon.git",
+		SecretRef: &axonv1alpha1.SecretReference{
+			Name: "my-secret",
+		},
+	}
+
+	// Build the initial deployment in GitHub App mode
+	deploy := builder.Build(ts, workspace, true)
+
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(appsv1.AddToScheme(scheme))
+	utilruntime.Must(axonv1alpha1.AddToScheme(scheme))
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(ts, deploy).
+		WithStatusSubresource(ts).
+		Build()
+
+	r := &TaskSpawnerReconciler{
+		Client:            cl,
+		Scheme:            scheme,
+		DeploymentBuilder: builder,
+	}
+
+	// Verify initial state: GitHub App mode
+	if len(deploy.Spec.Template.Spec.InitContainers) != 1 {
+		t.Fatalf("expected 1 init container in GitHub App mode, got %d", len(deploy.Spec.Template.Spec.InitContainers))
+	}
+	if len(deploy.Spec.Template.Spec.Volumes) != 2 {
+		t.Fatalf("expected 2 volumes in GitHub App mode, got %d", len(deploy.Spec.Template.Spec.Volumes))
+	}
+
+	// Switch to PAT mode
+	ctx := context.Background()
+	if err := r.updateDeployment(ctx, ts, deploy, workspace, false, 1); err != nil {
+		t.Fatalf("updateDeployment error: %v", err)
+	}
+
+	var updated appsv1.Deployment
+	if err := cl.Get(ctx, client.ObjectKeyFromObject(deploy), &updated); err != nil {
+		t.Fatalf("getting deployment: %v", err)
+	}
+
+	// Verify PAT mode: init containers, volumes, and volume mounts removed
+	if len(updated.Spec.Template.Spec.InitContainers) != 0 {
+		t.Errorf("expected 0 init containers after switch to PAT, got %d", len(updated.Spec.Template.Spec.InitContainers))
+	}
+	if len(updated.Spec.Template.Spec.Volumes) != 0 {
+		t.Errorf("expected 0 volumes after switch to PAT, got %d", len(updated.Spec.Template.Spec.Volumes))
+	}
+	if len(updated.Spec.Template.Spec.Containers[0].VolumeMounts) != 0 {
+		t.Errorf("expected 0 volume mounts on spawner after switch to PAT, got %d", len(updated.Spec.Template.Spec.Containers[0].VolumeMounts))
+	}
+
+	// Verify GITHUB_TOKEN env var is present
+	foundToken := false
+	for _, env := range updated.Spec.Template.Spec.Containers[0].Env {
+		if env.Name == "GITHUB_TOKEN" {
+			foundToken = true
+			break
+		}
+	}
+	if !foundToken {
+		t.Error("expected GITHUB_TOKEN env var after switch to PAT")
+	}
+
+	// Verify --github-token-file arg is not present
+	for _, arg := range updated.Spec.Template.Spec.Containers[0].Args {
+		if arg == "--github-token-file=/shared/token/GITHUB_TOKEN" {
+			t.Error("should not have --github-token-file arg after switch to PAT")
+		}
+	}
+}
+
+func TestFindTaskSpawnersForSecret(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(appsv1.AddToScheme(scheme))
+	utilruntime.Must(axonv1alpha1.AddToScheme(scheme))
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-secret",
+			Namespace: "default",
+		},
+	}
+	// Workspace referencing the secret
+	ws := &axonv1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ws",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.WorkspaceSpec{
+			Repo: "https://github.com/axon-core/axon.git",
+			SecretRef: &axonv1alpha1.SecretReference{
+				Name: "my-secret",
+			},
+		},
+	}
+	// Workspace not referencing the secret
+	wsOther := &axonv1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ws-other",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.WorkspaceSpec{
+			Repo: "https://github.com/axon-core/other.git",
+			SecretRef: &axonv1alpha1.SecretReference{
+				Name: "other-secret",
+			},
+		},
+	}
+	// TaskSpawner referencing ws (should be returned)
+	ts1 := &axonv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "spawner-1",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpawnerSpec{
+			When: axonv1alpha1.When{
+				GitHubIssues: &axonv1alpha1.GitHubIssues{},
+			},
+			TaskTemplate: axonv1alpha1.TaskTemplate{
+				Type:         "claude-code",
+				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "ws"},
+			},
+		},
+	}
+	// TaskSpawner referencing ws-other (should not be returned)
+	ts2 := &axonv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "spawner-2",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpawnerSpec{
+			When: axonv1alpha1.When{
+				GitHubIssues: &axonv1alpha1.GitHubIssues{},
+			},
+			TaskTemplate: axonv1alpha1.TaskTemplate{
+				Type:         "claude-code",
+				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "ws-other"},
+			},
+		},
+	}
+	// TaskSpawner with no workspaceRef (should not be returned)
+	ts3 := &axonv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "spawner-3",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpawnerSpec{
+			When: axonv1alpha1.When{
+				Jira: &axonv1alpha1.Jira{
+					BaseURL:   "https://jira.example.com",
+					Project:   "TEST",
+					SecretRef: axonv1alpha1.SecretReference{Name: "jira-creds"},
+				},
+			},
+			TaskTemplate: axonv1alpha1.TaskTemplate{
+				Type: "claude-code",
+			},
+		},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(secret, ws, wsOther, ts1, ts2, ts3).
+		Build()
+
+	r := &TaskSpawnerReconciler{
+		Client: cl,
+		Scheme: scheme,
+	}
+
+	ctx := context.Background()
+	requests := r.findTaskSpawnersForSecret(ctx, secret)
+
+	if len(requests) != 1 {
+		t.Fatalf("expected 1 request, got %d: %v", len(requests), requests)
+	}
+	if requests[0].Name != "spawner-1" {
+		t.Errorf("expected request for spawner-1, got %q", requests[0].Name)
+	}
+}
+
+func TestFindTaskSpawnersForWorkspace(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(appsv1.AddToScheme(scheme))
+	utilruntime.Must(axonv1alpha1.AddToScheme(scheme))
+
+	ws := &axonv1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ws",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.WorkspaceSpec{
+			Repo: "https://github.com/axon-core/axon.git",
+		},
+	}
+
+	// TaskSpawner referencing ws (should be returned)
+	ts1 := &axonv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "spawner-1",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpawnerSpec{
+			When: axonv1alpha1.When{
+				GitHubIssues: &axonv1alpha1.GitHubIssues{},
+			},
+			TaskTemplate: axonv1alpha1.TaskTemplate{
+				Type:         "claude-code",
+				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "ws"},
+			},
+		},
+	}
+	// Another TaskSpawner referencing ws (should also be returned)
+	ts2 := &axonv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "spawner-2",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpawnerSpec{
+			When: axonv1alpha1.When{
+				GitHubIssues: &axonv1alpha1.GitHubIssues{},
+			},
+			TaskTemplate: axonv1alpha1.TaskTemplate{
+				Type:         "claude-code",
+				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "ws"},
+			},
+		},
+	}
+	// TaskSpawner referencing different workspace (should not be returned)
+	ts3 := &axonv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "spawner-3",
+			Namespace: "default",
+		},
+		Spec: axonv1alpha1.TaskSpawnerSpec{
+			When: axonv1alpha1.When{
+				GitHubIssues: &axonv1alpha1.GitHubIssues{},
+			},
+			TaskTemplate: axonv1alpha1.TaskTemplate{
+				Type:         "claude-code",
+				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "other-ws"},
+			},
+		},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(ws, ts1, ts2, ts3).
+		Build()
+
+	r := &TaskSpawnerReconciler{
+		Client: cl,
+		Scheme: scheme,
+	}
+
+	ctx := context.Background()
+	requests := r.findTaskSpawnersForWorkspace(ctx, ws)
+
+	if len(requests) != 2 {
+		t.Fatalf("expected 2 requests, got %d: %v", len(requests), requests)
+	}
+
+	names := map[string]bool{}
+	for _, req := range requests {
+		names[req.Name] = true
+	}
+	if !names["spawner-1"] {
+		t.Error("expected request for spawner-1")
+	}
+	if !names["spawner-2"] {
+		t.Error("expected request for spawner-2")
+	}
+	if names["spawner-3"] {
+		t.Error("should not have request for spawner-3")
+	}
+}

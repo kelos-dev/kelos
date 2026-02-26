@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"reflect"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -16,7 +17,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
 	"github.com/axon-core/axon/internal/githubapp"
@@ -37,6 +40,7 @@ type TaskSpawnerReconciler struct {
 // +kubebuilder:rbac:groups=axon.io,resources=taskspawners,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=axon.io,resources=taskspawners/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=axon.io,resources=taskspawners/finalizers,verbs=update
+// +kubebuilder:rbac:groups=axon.io,resources=workspaces,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create
@@ -251,20 +255,35 @@ func (r *TaskSpawnerReconciler) updateDeployment(ctx context.Context, ts *axonv1
 
 	desired := r.DeploymentBuilder.Build(ts, workspace, isGitHubApp)
 
-	// Compare container spec (image, args, env)
 	needsUpdate := false
+
+	// Compare main container spec (image, args, env, volumeMounts)
 	if len(deploy.Spec.Template.Spec.Containers) > 0 {
 		current := deploy.Spec.Template.Spec.Containers[0]
 		target := desired.Spec.Template.Spec.Containers[0]
 
 		if current.Image != target.Image ||
 			!equalStringSlices(current.Args, target.Args) ||
-			!equalEnvVars(current.Env, target.Env) {
+			!equalEnvVars(current.Env, target.Env) ||
+			!reflect.DeepEqual(current.VolumeMounts, target.VolumeMounts) {
 			deploy.Spec.Template.Spec.Containers[0].Image = target.Image
 			deploy.Spec.Template.Spec.Containers[0].Args = target.Args
 			deploy.Spec.Template.Spec.Containers[0].Env = target.Env
+			deploy.Spec.Template.Spec.Containers[0].VolumeMounts = target.VolumeMounts
 			needsUpdate = true
 		}
+	}
+
+	// Compare init containers (token-refresher sidecar)
+	if !reflect.DeepEqual(deploy.Spec.Template.Spec.InitContainers, desired.Spec.Template.Spec.InitContainers) {
+		deploy.Spec.Template.Spec.InitContainers = desired.Spec.Template.Spec.InitContainers
+		needsUpdate = true
+	}
+
+	// Compare volumes (shared token emptyDir, github-app-secret)
+	if !reflect.DeepEqual(deploy.Spec.Template.Spec.Volumes, desired.Spec.Template.Spec.Volumes) {
+		deploy.Spec.Template.Spec.Volumes = desired.Spec.Template.Spec.Volumes
+		needsUpdate = true
 	}
 
 	// Check replica count for suspend/resume
@@ -401,5 +420,83 @@ func (r *TaskSpawnerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&axonv1alpha1.TaskSpawner{}).
 		Owns(&appsv1.Deployment{}).
+		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.findTaskSpawnersForSecret)).
+		Watches(&axonv1alpha1.Workspace{}, handler.EnqueueRequestsFromMapFunc(r.findTaskSpawnersForWorkspace)).
 		Complete(r)
+}
+
+// findTaskSpawnersForSecret maps a Secret change to the TaskSpawners that
+// reference it via their Workspace's secretRef.
+func (r *TaskSpawnerReconciler) findTaskSpawnersForSecret(ctx context.Context, obj client.Object) []reconcile.Request {
+	secret, ok := obj.(*corev1.Secret)
+	if !ok {
+		return nil
+	}
+
+	// Find workspaces that reference this secret
+	var workspaceList axonv1alpha1.WorkspaceList
+	if err := r.List(ctx, &workspaceList, client.InNamespace(secret.Namespace)); err != nil {
+		return nil
+	}
+
+	var workspaceNames []string
+	for _, ws := range workspaceList.Items {
+		if ws.Spec.SecretRef != nil && ws.Spec.SecretRef.Name == secret.Name {
+			workspaceNames = append(workspaceNames, ws.Name)
+		}
+	}
+	if len(workspaceNames) == 0 {
+		return nil
+	}
+
+	// Find task spawners that reference those workspaces
+	var tsList axonv1alpha1.TaskSpawnerList
+	if err := r.List(ctx, &tsList, client.InNamespace(secret.Namespace)); err != nil {
+		return nil
+	}
+
+	wsNameSet := make(map[string]bool, len(workspaceNames))
+	for _, name := range workspaceNames {
+		wsNameSet[name] = true
+	}
+
+	var requests []reconcile.Request
+	for _, ts := range tsList.Items {
+		if ts.Spec.TaskTemplate.WorkspaceRef != nil && wsNameSet[ts.Spec.TaskTemplate.WorkspaceRef.Name] {
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Namespace: ts.Namespace,
+					Name:      ts.Name,
+				},
+			})
+		}
+	}
+	return requests
+}
+
+// findTaskSpawnersForWorkspace maps a Workspace change to the TaskSpawners
+// that reference it via taskTemplate.workspaceRef.
+func (r *TaskSpawnerReconciler) findTaskSpawnersForWorkspace(ctx context.Context, obj client.Object) []reconcile.Request {
+	ws, ok := obj.(*axonv1alpha1.Workspace)
+	if !ok {
+		return nil
+	}
+
+	var tsList axonv1alpha1.TaskSpawnerList
+	if err := r.List(ctx, &tsList, client.InNamespace(ws.Namespace)); err != nil {
+		return nil
+	}
+
+	var requests []reconcile.Request
+	for _, ts := range tsList.Items {
+		if ts.Spec.TaskTemplate.WorkspaceRef != nil && ts.Spec.TaskTemplate.WorkspaceRef.Name == ws.Name {
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Namespace: ts.Namespace,
+					Name:      ts.Name,
+				},
+			})
+		}
+	}
+	return requests
 }

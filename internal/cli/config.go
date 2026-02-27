@@ -8,7 +8,7 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// Config holds configuration loaded from the axon config file.
+// Config holds configuration loaded from the kelos config file.
 type Config struct {
 	OAuthToken     string          `json:"oauthToken,omitempty"`
 	APIKey         string          `json:"apiKey,omitempty"`
@@ -39,17 +39,17 @@ type GitHubAppConfig struct {
 	PrivateKeyPath string `json:"privateKeyPath"`
 }
 
-// DefaultConfigPath returns the default config file path (~/.axon/config.yaml).
+// DefaultConfigPath returns the default config file path (~/.kelos/config.yaml).
 func DefaultConfigPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("getting home directory: %w", err)
 	}
-	return filepath.Join(home, ".axon", "config.yaml"), nil
+	return filepath.Join(home, ".kelos", "config.yaml"), nil
 }
 
 // LoadConfig reads and parses the config file at the given path.
-// If path is empty, the default path (~/.axon/config.yaml) is used.
+// If path is empty, the default path (~/.kelos/config.yaml) is used.
 // If the file does not exist, an empty Config is returned without error.
 func LoadConfig(path string) (*Config, error) {
 	if path == "" {

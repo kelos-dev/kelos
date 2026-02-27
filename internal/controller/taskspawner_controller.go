@@ -21,12 +21,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
-	"github.com/axon-core/axon/internal/githubapp"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	"github.com/kelos-dev/kelos/internal/githubapp"
 )
 
 const (
-	taskSpawnerFinalizer = "axon.io/taskspawner-finalizer"
+	taskSpawnerFinalizer = "kelos.dev/taskspawner-finalizer"
 )
 
 // TaskSpawnerReconciler reconciles a TaskSpawner object.
@@ -37,10 +37,10 @@ type TaskSpawnerReconciler struct {
 	Recorder          record.EventRecorder
 }
 
-// +kubebuilder:rbac:groups=axon.io,resources=taskspawners,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=axon.io,resources=taskspawners/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=axon.io,resources=taskspawners/finalizers,verbs=update
-// +kubebuilder:rbac:groups=axon.io,resources=workspaces,verbs=get;list;watch
+// +kubebuilder:rbac:groups=kelos.dev,resources=taskspawners,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=kelos.dev,resources=taskspawners/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=kelos.dev,resources=taskspawners/finalizers,verbs=update
+// +kubebuilder:rbac:groups=kelos.dev,resources=workspaces,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create
@@ -51,7 +51,7 @@ type TaskSpawnerReconciler struct {
 func (r *TaskSpawnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	var ts axonv1alpha1.TaskSpawner
+	var ts kelosv1alpha1.TaskSpawner
 	if err := r.Get(ctx, req.NamespacedName, &ts); err != nil {
 		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, nil
@@ -95,11 +95,11 @@ func (r *TaskSpawnerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	// Resolve workspace if workspaceRef is set in taskTemplate
-	var workspace *axonv1alpha1.WorkspaceSpec
+	var workspace *kelosv1alpha1.WorkspaceSpec
 	var isGitHubApp bool
 	if ts.Spec.TaskTemplate.WorkspaceRef != nil {
 		workspaceRefName := ts.Spec.TaskTemplate.WorkspaceRef.Name
-		var ws axonv1alpha1.Workspace
+		var ws kelosv1alpha1.Workspace
 		if err := r.Get(ctx, client.ObjectKey{
 			Namespace: ts.Namespace,
 			Name:      workspaceRefName,
@@ -154,10 +154,10 @@ func (r *TaskSpawnerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	// Determine the desired phase based on current state
 	desiredPhase := ts.Status.Phase
-	if isSuspended && ts.Status.Phase != axonv1alpha1.TaskSpawnerPhaseSuspended {
-		desiredPhase = axonv1alpha1.TaskSpawnerPhaseSuspended
-	} else if !isSuspended && ts.Status.Phase == axonv1alpha1.TaskSpawnerPhaseSuspended {
-		desiredPhase = axonv1alpha1.TaskSpawnerPhaseRunning
+	if isSuspended && ts.Status.Phase != kelosv1alpha1.TaskSpawnerPhaseSuspended {
+		desiredPhase = kelosv1alpha1.TaskSpawnerPhaseSuspended
+	} else if !isSuspended && ts.Status.Phase == kelosv1alpha1.TaskSpawnerPhaseSuspended {
+		desiredPhase = kelosv1alpha1.TaskSpawnerPhaseRunning
 	}
 
 	// Update status with deployment name or phase if needed
@@ -169,13 +169,13 @@ func (r *TaskSpawnerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			}
 			ts.Status.DeploymentName = deploy.Name
 			if isSuspended {
-				ts.Status.Phase = axonv1alpha1.TaskSpawnerPhaseSuspended
+				ts.Status.Phase = kelosv1alpha1.TaskSpawnerPhaseSuspended
 				ts.Status.Message = "Suspended by user"
-			} else if ts.Status.Phase == axonv1alpha1.TaskSpawnerPhaseSuspended {
-				ts.Status.Phase = axonv1alpha1.TaskSpawnerPhaseRunning
+			} else if ts.Status.Phase == kelosv1alpha1.TaskSpawnerPhaseSuspended {
+				ts.Status.Phase = kelosv1alpha1.TaskSpawnerPhaseRunning
 				ts.Status.Message = "Resumed"
 			} else if ts.Status.Phase == "" {
-				ts.Status.Phase = axonv1alpha1.TaskSpawnerPhasePending
+				ts.Status.Phase = kelosv1alpha1.TaskSpawnerPhasePending
 			}
 			return r.Status().Update(ctx, &ts)
 		}); err != nil {
@@ -188,7 +188,7 @@ func (r *TaskSpawnerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 }
 
 // handleDeletion handles TaskSpawner deletion.
-func (r *TaskSpawnerReconciler) handleDeletion(ctx context.Context, ts *axonv1alpha1.TaskSpawner) (ctrl.Result, error) {
+func (r *TaskSpawnerReconciler) handleDeletion(ctx context.Context, ts *kelosv1alpha1.TaskSpawner) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	if controllerutil.ContainsFinalizer(ts, taskSpawnerFinalizer) {
@@ -205,7 +205,7 @@ func (r *TaskSpawnerReconciler) handleDeletion(ctx context.Context, ts *axonv1al
 }
 
 // createDeployment creates a Deployment for the TaskSpawner.
-func (r *TaskSpawnerReconciler) createDeployment(ctx context.Context, ts *axonv1alpha1.TaskSpawner, workspace *axonv1alpha1.WorkspaceSpec, isGitHubApp bool, replicas int32) (ctrl.Result, error) {
+func (r *TaskSpawnerReconciler) createDeployment(ctx context.Context, ts *kelosv1alpha1.TaskSpawner, workspace *kelosv1alpha1.WorkspaceSpec, isGitHubApp bool, replicas int32) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	deploy := r.DeploymentBuilder.Build(ts, workspace, isGitHubApp)
@@ -234,10 +234,10 @@ func (r *TaskSpawnerReconciler) createDeployment(ctx context.Context, ts *axonv1
 			return getErr
 		}
 		if replicas == 0 {
-			ts.Status.Phase = axonv1alpha1.TaskSpawnerPhaseSuspended
+			ts.Status.Phase = kelosv1alpha1.TaskSpawnerPhaseSuspended
 			ts.Status.Message = "Suspended by user"
 		} else {
-			ts.Status.Phase = axonv1alpha1.TaskSpawnerPhasePending
+			ts.Status.Phase = kelosv1alpha1.TaskSpawnerPhasePending
 		}
 		ts.Status.DeploymentName = deploy.Name
 		return r.Status().Update(ctx, ts)
@@ -250,7 +250,7 @@ func (r *TaskSpawnerReconciler) createDeployment(ctx context.Context, ts *axonv1
 }
 
 // updateDeployment updates the Deployment to match the desired spec if it has drifted.
-func (r *TaskSpawnerReconciler) updateDeployment(ctx context.Context, ts *axonv1alpha1.TaskSpawner, deploy *appsv1.Deployment, workspace *axonv1alpha1.WorkspaceSpec, isGitHubApp bool, desiredReplicas int32) error {
+func (r *TaskSpawnerReconciler) updateDeployment(ctx context.Context, ts *kelosv1alpha1.TaskSpawner, deploy *appsv1.Deployment, workspace *kelosv1alpha1.WorkspaceSpec, isGitHubApp bool, desiredReplicas int32) error {
 	logger := log.FromContext(ctx)
 
 	desired := r.DeploymentBuilder.Build(ts, workspace, isGitHubApp)
@@ -418,10 +418,10 @@ func (r *TaskSpawnerReconciler) recordEvent(obj runtime.Object, eventType, reaso
 // SetupWithManager sets up the controller with the Manager.
 func (r *TaskSpawnerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&axonv1alpha1.TaskSpawner{}).
+		For(&kelosv1alpha1.TaskSpawner{}).
 		Owns(&appsv1.Deployment{}).
 		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.findTaskSpawnersForSecret)).
-		Watches(&axonv1alpha1.Workspace{}, handler.EnqueueRequestsFromMapFunc(r.findTaskSpawnersForWorkspace)).
+		Watches(&kelosv1alpha1.Workspace{}, handler.EnqueueRequestsFromMapFunc(r.findTaskSpawnersForWorkspace)).
 		Complete(r)
 }
 
@@ -434,7 +434,7 @@ func (r *TaskSpawnerReconciler) findTaskSpawnersForSecret(ctx context.Context, o
 	}
 
 	// Find workspaces that reference this secret
-	var workspaceList axonv1alpha1.WorkspaceList
+	var workspaceList kelosv1alpha1.WorkspaceList
 	if err := r.List(ctx, &workspaceList, client.InNamespace(secret.Namespace)); err != nil {
 		return nil
 	}
@@ -450,7 +450,7 @@ func (r *TaskSpawnerReconciler) findTaskSpawnersForSecret(ctx context.Context, o
 	}
 
 	// Find task spawners that reference those workspaces
-	var tsList axonv1alpha1.TaskSpawnerList
+	var tsList kelosv1alpha1.TaskSpawnerList
 	if err := r.List(ctx, &tsList, client.InNamespace(secret.Namespace)); err != nil {
 		return nil
 	}
@@ -477,12 +477,12 @@ func (r *TaskSpawnerReconciler) findTaskSpawnersForSecret(ctx context.Context, o
 // findTaskSpawnersForWorkspace maps a Workspace change to the TaskSpawners
 // that reference it via taskTemplate.workspaceRef.
 func (r *TaskSpawnerReconciler) findTaskSpawnersForWorkspace(ctx context.Context, obj client.Object) []reconcile.Request {
-	ws, ok := obj.(*axonv1alpha1.Workspace)
+	ws, ok := obj.(*kelosv1alpha1.Workspace)
 	if !ok {
 		return nil
 	}
 
-	var tsList axonv1alpha1.TaskSpawnerList
+	var tsList kelosv1alpha1.TaskSpawnerList
 	if err := r.List(ctx, &tsList, client.InNamespace(ws.Namespace)); err != nil {
 		return nil
 	}

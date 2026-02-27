@@ -13,9 +13,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
-	"github.com/axon-core/axon/internal/controller"
-	"github.com/axon-core/axon/internal/githubapp"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	"github.com/kelos-dev/kelos/internal/controller"
+	"github.com/kelos-dev/kelos/internal/githubapp"
 )
 
 var (
@@ -25,7 +25,7 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(axonv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(kelosv1alpha1.AddToScheme(scheme))
 }
 
 func main() {
@@ -75,7 +75,7 @@ func main() {
 		Scheme:                 scheme,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "axon-controller-leader-election",
+		LeaderElectionID:       "kelos-controller-leader-election",
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
@@ -103,7 +103,7 @@ func main() {
 		JobBuilder:   jobBuilder,
 		Clientset:    clientset,
 		TokenClient:  githubapp.NewTokenClient(),
-		Recorder:     mgr.GetEventRecorderFor("axon-controller"),
+		Recorder:     mgr.GetEventRecorderFor("kelos-controller"),
 		BranchLocker: controller.NewBranchLocker(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Task")
@@ -119,7 +119,7 @@ func main() {
 		Client:            mgr.GetClient(),
 		Scheme:            mgr.GetScheme(),
 		DeploymentBuilder: deploymentBuilder,
-		Recorder:          mgr.GetEventRecorderFor("axon-controller"),
+		Recorder:          mgr.GetEventRecorderFor("kelos-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "TaskSpawner")
 		os.Exit(1)

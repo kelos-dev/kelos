@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 )
 
 func newGetAgentConfigCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Command {
@@ -37,12 +37,12 @@ func newGetAgentConfigCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Com
 			ctx := context.Background()
 
 			if len(args) == 1 {
-				ac := &axonv1alpha1.AgentConfig{}
+				ac := &kelosv1alpha1.AgentConfig{}
 				if err := cl.Get(ctx, client.ObjectKey{Name: args[0], Namespace: ns}, ac); err != nil {
 					return fmt.Errorf("getting agent config: %w", err)
 				}
 
-				ac.SetGroupVersionKind(axonv1alpha1.GroupVersion.WithKind("AgentConfig"))
+				ac.SetGroupVersionKind(kelosv1alpha1.GroupVersion.WithKind("AgentConfig"))
 				switch output {
 				case "yaml":
 					return printYAML(os.Stdout, ac)
@@ -52,13 +52,13 @@ func newGetAgentConfigCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Com
 					if detail {
 						printAgentConfigDetail(os.Stdout, ac)
 					} else {
-						printAgentConfigTable(os.Stdout, []axonv1alpha1.AgentConfig{*ac}, false)
+						printAgentConfigTable(os.Stdout, []kelosv1alpha1.AgentConfig{*ac}, false)
 					}
 					return nil
 				}
 			}
 
-			acList := &axonv1alpha1.AgentConfigList{}
+			acList := &kelosv1alpha1.AgentConfigList{}
 			var listOpts []client.ListOption
 			if !*allNamespaces {
 				listOpts = append(listOpts, client.InNamespace(ns))
@@ -67,7 +67,7 @@ func newGetAgentConfigCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Com
 				return fmt.Errorf("listing agent configs: %w", err)
 			}
 
-			acList.SetGroupVersionKind(axonv1alpha1.GroupVersion.WithKind("AgentConfigList"))
+			acList.SetGroupVersionKind(kelosv1alpha1.GroupVersion.WithKind("AgentConfigList"))
 			switch output {
 			case "yaml":
 				return printYAML(os.Stdout, acList)

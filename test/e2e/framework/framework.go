@@ -21,8 +21,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
-	axonclientset "github.com/axon-core/axon/pkg/generated/clientset/versioned"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	kelosclientset "github.com/kelos-dev/kelos/pkg/generated/clientset/versioned"
 )
 
 // Framework provides a per-test namespace environment for e2e tests,
@@ -39,8 +39,8 @@ type Framework struct {
 	// Clientset is a standard Kubernetes clientset for the test cluster.
 	Clientset kubernetes.Interface
 
-	// AxonClientset is a generated typed clientset for axon.io resources.
-	AxonClientset axonclientset.Interface
+	// KelosClientset is a generated typed clientset for kelos.dev resources.
+	KelosClientset kelosclientset.Interface
 }
 
 // NewFramework creates a new Framework and registers Ginkgo lifecycle
@@ -75,9 +75,9 @@ func (f *Framework) beforeEach() {
 	Expect(err).NotTo(HaveOccurred(), "Failed to create kubernetes clientset")
 	f.Clientset = cs
 
-	ac, err := axonclientset.NewForConfig(cfg)
-	Expect(err).NotTo(HaveOccurred(), "Failed to create axon clientset")
-	f.AxonClientset = ac
+	ac, err := kelosclientset.NewForConfig(cfg)
+	Expect(err).NotTo(HaveOccurred(), "Failed to create kelos clientset")
+	f.KelosClientset = ac
 
 	By(fmt.Sprintf("Creating test namespace %s", f.Namespace))
 	ns := &corev1.Namespace{
@@ -128,7 +128,7 @@ func (f *Framework) collectDebugInfo() {
 	ctx := context.TODO()
 
 	// List tasks
-	tasks, err := f.AxonClientset.ApiV1alpha1().Tasks(f.Namespace).List(ctx, metav1.ListOptions{})
+	tasks, err := f.KelosClientset.ApiV1alpha1().Tasks(f.Namespace).List(ctx, metav1.ListOptions{})
 	if err == nil {
 		for _, t := range tasks.Items {
 			fmt.Fprintf(GinkgoWriter, "Task %s: phase=%s\n", t.Name, t.Status.Phase)
@@ -136,7 +136,7 @@ func (f *Framework) collectDebugInfo() {
 	}
 
 	// List taskspawners
-	spawners, err := f.AxonClientset.ApiV1alpha1().TaskSpawners(f.Namespace).List(ctx, metav1.ListOptions{})
+	spawners, err := f.KelosClientset.ApiV1alpha1().TaskSpawners(f.Namespace).List(ctx, metav1.ListOptions{})
 	if err == nil {
 		for _, s := range spawners.Items {
 			fmt.Fprintf(GinkgoWriter, "TaskSpawner %s: phase=%s\n", s.Name, s.Status.Phase)
@@ -177,13 +177,13 @@ func (f *Framework) collectDebugInfo() {
 	}
 
 	// Controller manager logs (best-effort)
-	managerPods, err := f.Clientset.CoreV1().Pods("axon-system").List(ctx, metav1.ListOptions{
+	managerPods, err := f.Clientset.CoreV1().Pods("kelos-system").List(ctx, metav1.ListOptions{
 		LabelSelector: "control-plane=controller-manager",
 	})
 	if err == nil {
 		tailLines := int64(50)
 		for _, p := range managerPods.Items {
-			req := f.Clientset.CoreV1().Pods("axon-system").GetLogs(p.Name, &corev1.PodLogOptions{
+			req := f.Clientset.CoreV1().Pods("kelos-system").GetLogs(p.Name, &corev1.PodLogOptions{
 				TailLines: &tailLines,
 			})
 			stream, err := req.Stream(ctx)
@@ -217,48 +217,48 @@ func (f *Framework) CreateSecret(name string, literals ...string) {
 	Expect(err).NotTo(HaveOccurred(), "Failed to create secret %s", name)
 }
 
-// CreateTask creates a Task in the test namespace using the axon clientset.
-func (f *Framework) CreateTask(task *axonv1alpha1.Task) {
+// CreateTask creates a Task in the test namespace using the kelos clientset.
+func (f *Framework) CreateTask(task *kelosv1alpha1.Task) {
 	if task.Namespace == "" {
 		task.Namespace = f.Namespace
 	}
-	_, err := f.AxonClientset.ApiV1alpha1().Tasks(task.Namespace).Create(context.TODO(), task, metav1.CreateOptions{})
+	_, err := f.KelosClientset.ApiV1alpha1().Tasks(task.Namespace).Create(context.TODO(), task, metav1.CreateOptions{})
 	Expect(err).NotTo(HaveOccurred(), "Failed to create task %s", task.Name)
 }
 
-// CreateWorkspace creates a Workspace in the test namespace using the axon clientset.
-func (f *Framework) CreateWorkspace(ws *axonv1alpha1.Workspace) {
+// CreateWorkspace creates a Workspace in the test namespace using the kelos clientset.
+func (f *Framework) CreateWorkspace(ws *kelosv1alpha1.Workspace) {
 	if ws.Namespace == "" {
 		ws.Namespace = f.Namespace
 	}
-	_, err := f.AxonClientset.ApiV1alpha1().Workspaces(ws.Namespace).Create(context.TODO(), ws, metav1.CreateOptions{})
+	_, err := f.KelosClientset.ApiV1alpha1().Workspaces(ws.Namespace).Create(context.TODO(), ws, metav1.CreateOptions{})
 	Expect(err).NotTo(HaveOccurred(), "Failed to create workspace %s", ws.Name)
 }
 
-// CreateTaskSpawner creates a TaskSpawner in the test namespace using the axon clientset.
-func (f *Framework) CreateTaskSpawner(ts *axonv1alpha1.TaskSpawner) {
+// CreateTaskSpawner creates a TaskSpawner in the test namespace using the kelos clientset.
+func (f *Framework) CreateTaskSpawner(ts *kelosv1alpha1.TaskSpawner) {
 	if ts.Namespace == "" {
 		ts.Namespace = f.Namespace
 	}
-	_, err := f.AxonClientset.ApiV1alpha1().TaskSpawners(ts.Namespace).Create(context.TODO(), ts, metav1.CreateOptions{})
+	_, err := f.KelosClientset.ApiV1alpha1().TaskSpawners(ts.Namespace).Create(context.TODO(), ts, metav1.CreateOptions{})
 	Expect(err).NotTo(HaveOccurred(), "Failed to create taskspawner %s", ts.Name)
 }
 
-// DeleteTask deletes a Task by name from the test namespace using the axon clientset.
+// DeleteTask deletes a Task by name from the test namespace using the kelos clientset.
 func (f *Framework) DeleteTask(name string) {
-	err := f.AxonClientset.ApiV1alpha1().Tasks(f.Namespace).Delete(context.TODO(), name, metav1.DeleteOptions{})
+	err := f.KelosClientset.ApiV1alpha1().Tasks(f.Namespace).Delete(context.TODO(), name, metav1.DeleteOptions{})
 	Expect(err).NotTo(HaveOccurred(), "Failed to delete task %s", name)
 }
 
-// DeleteWorkspace deletes a Workspace by name from the test namespace using the axon clientset.
+// DeleteWorkspace deletes a Workspace by name from the test namespace using the kelos clientset.
 func (f *Framework) DeleteWorkspace(name string) {
-	err := f.AxonClientset.ApiV1alpha1().Workspaces(f.Namespace).Delete(context.TODO(), name, metav1.DeleteOptions{})
+	err := f.KelosClientset.ApiV1alpha1().Workspaces(f.Namespace).Delete(context.TODO(), name, metav1.DeleteOptions{})
 	Expect(err).NotTo(HaveOccurred(), "Failed to delete workspace %s", name)
 }
 
-// DeleteTaskSpawner deletes a TaskSpawner by name from the test namespace using the axon clientset.
+// DeleteTaskSpawner deletes a TaskSpawner by name from the test namespace using the kelos clientset.
 func (f *Framework) DeleteTaskSpawner(name string) {
-	err := f.AxonClientset.ApiV1alpha1().TaskSpawners(f.Namespace).Delete(context.TODO(), name, metav1.DeleteOptions{})
+	err := f.KelosClientset.ApiV1alpha1().TaskSpawners(f.Namespace).Delete(context.TODO(), name, metav1.DeleteOptions{})
 	Expect(err).NotTo(HaveOccurred(), "Failed to delete taskspawner %s", name)
 }
 
@@ -304,35 +304,35 @@ func (f *Framework) WaitForDeploymentAvailable(name string) {
 
 // GetTaskPhase returns the phase of a Task.
 func (f *Framework) GetTaskPhase(name string) string {
-	task, err := f.AxonClientset.ApiV1alpha1().Tasks(f.Namespace).Get(context.TODO(), name, metav1.GetOptions{})
+	task, err := f.KelosClientset.ApiV1alpha1().Tasks(f.Namespace).Get(context.TODO(), name, metav1.GetOptions{})
 	Expect(err).NotTo(HaveOccurred(), "Failed to get task %s", name)
 	return string(task.Status.Phase)
 }
 
 // GetTaskOutputs returns the outputs of a Task as a joined string.
 func (f *Framework) GetTaskOutputs(name string) string {
-	task, err := f.AxonClientset.ApiV1alpha1().Tasks(f.Namespace).Get(context.TODO(), name, metav1.GetOptions{})
+	task, err := f.KelosClientset.ApiV1alpha1().Tasks(f.Namespace).Get(context.TODO(), name, metav1.GetOptions{})
 	Expect(err).NotTo(HaveOccurred(), "Failed to get task %s", name)
 	return strings.Join(task.Status.Outputs, "\n")
 }
 
 // GetTaskResults returns the Results map of a Task.
 func (f *Framework) GetTaskResults(name string) map[string]string {
-	task, err := f.AxonClientset.ApiV1alpha1().Tasks(f.Namespace).Get(context.TODO(), name, metav1.GetOptions{})
+	task, err := f.KelosClientset.ApiV1alpha1().Tasks(f.Namespace).Get(context.TODO(), name, metav1.GetOptions{})
 	Expect(err).NotTo(HaveOccurred(), "Failed to get task %s", name)
 	return task.Status.Results
 }
 
 // GetTaskSpawnerPhase returns the phase of a TaskSpawner.
 func (f *Framework) GetTaskSpawnerPhase(name string) string {
-	ts, err := f.AxonClientset.ApiV1alpha1().TaskSpawners(f.Namespace).Get(context.TODO(), name, metav1.GetOptions{})
+	ts, err := f.KelosClientset.ApiV1alpha1().TaskSpawners(f.Namespace).Get(context.TODO(), name, metav1.GetOptions{})
 	Expect(err).NotTo(HaveOccurred(), "Failed to get taskspawner %s", name)
 	return string(ts.Status.Phase)
 }
 
 // ListTaskNames returns the names of all Tasks matching the given label selector.
 func (f *Framework) ListTaskNames(labelSelector string) []string {
-	tasks, err := f.AxonClientset.ApiV1alpha1().Tasks(f.Namespace).List(context.TODO(), metav1.ListOptions{
+	tasks, err := f.KelosClientset.ApiV1alpha1().Tasks(f.Namespace).List(context.TODO(), metav1.ListOptions{
 		LabelSelector: labelSelector,
 	})
 	Expect(err).NotTo(HaveOccurred(), "Failed to list tasks")
@@ -365,28 +365,28 @@ func (f *Framework) GetJobLogs(name string) string {
 	return buf.String()
 }
 
-// AxonBin returns the path to the axon binary.
-func AxonBin() string {
-	if bin := os.Getenv("AXON_BIN"); bin != "" {
+// KelosBin returns the path to the kelos binary.
+func KelosBin() string {
+	if bin := os.Getenv("KELOS_BIN"); bin != "" {
 		return bin
 	}
-	return "axon"
+	return "kelos"
 }
 
-// Axon executes an axon CLI command with output directed to GinkgoWriter.
+// Kelos executes an kelos CLI command with output directed to GinkgoWriter.
 // It fails the test on error.
-func Axon(args ...string) {
-	cmd := exec.Command(AxonBin(), args...)
+func Kelos(args ...string) {
+	cmd := exec.Command(KelosBin(), args...)
 	cmd.Stdout = GinkgoWriter
 	cmd.Stderr = GinkgoWriter
 	err := cmd.Run()
 	Expect(err).NotTo(HaveOccurred())
 }
 
-// AxonOutput executes an axon CLI command and returns its stdout.
+// KelosOutput executes an kelos CLI command and returns its stdout.
 // It fails the test on error.
-func AxonOutput(args ...string) string {
-	cmd := exec.Command(AxonBin(), args...)
+func KelosOutput(args ...string) string {
+	cmd := exec.Command(KelosBin(), args...)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = os.Stderr
@@ -395,10 +395,10 @@ func AxonOutput(args ...string) string {
 	return strings.TrimSpace(out.String())
 }
 
-// AxonOutputWithStderr executes an axon CLI command and returns both
+// KelosOutputWithStderr executes an kelos CLI command and returns both
 // stdout and stderr.
-func AxonOutputWithStderr(args ...string) (string, string) {
-	cmd := exec.Command(AxonBin(), args...)
+func KelosOutputWithStderr(args ...string) (string, string) {
+	cmd := exec.Command(KelosBin(), args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -407,18 +407,18 @@ func AxonOutputWithStderr(args ...string) (string, string) {
 	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String())
 }
 
-// AxonFail executes an axon CLI command and expects it to fail.
-func AxonFail(args ...string) {
-	cmd := exec.Command(AxonBin(), args...)
+// KelosFail executes an kelos CLI command and expects it to fail.
+func KelosFail(args ...string) {
+	cmd := exec.Command(KelosBin(), args...)
 	cmd.Stdout = GinkgoWriter
 	cmd.Stderr = GinkgoWriter
 	err := cmd.Run()
 	Expect(err).To(HaveOccurred())
 }
 
-// AxonCommand creates an exec.Cmd for the axon binary without running it.
-func AxonCommand(args ...string) *exec.Cmd {
-	cmd := exec.Command(AxonBin(), args...)
+// KelosCommand creates an exec.Cmd for the kelos binary without running it.
+func KelosCommand(args ...string) *exec.Cmd {
+	cmd := exec.Command(KelosBin(), args...)
 	cmd.Stdout = GinkgoWriter
 	cmd.Stderr = GinkgoWriter
 	return cmd

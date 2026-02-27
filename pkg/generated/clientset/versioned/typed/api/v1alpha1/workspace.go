@@ -21,8 +21,8 @@ package v1alpha1
 import (
 	context "context"
 
-	apiv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
-	scheme "github.com/axon-core/axon/pkg/generated/clientset/versioned/scheme"
+	apiv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	scheme "github.com/kelos-dev/kelos/pkg/generated/clientset/versioned/scheme"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"

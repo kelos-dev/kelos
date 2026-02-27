@@ -1,11 +1,11 @@
 # Image configuration
 REGISTRY ?= gjkim42
 VERSION ?= latest
-IMAGE_DIRS ?= cmd/axon-controller cmd/axon-spawner cmd/axon-token-refresher claude-code codex gemini opencode
+IMAGE_DIRS ?= cmd/kelos-controller cmd/kelos-spawner cmd/kelos-token-refresher claude-code codex gemini opencode
 
-# Version injection for the axon CLI – only set ldflags when an explicit
+# Version injection for the kelos CLI – only set ldflags when an explicit
 # version is given so that dev builds fall through to runtime/debug info.
-VERSION_PKG = github.com/axon-core/axon/internal/version
+VERSION_PKG = github.com/kelos-dev/kelos/internal/version
 ifneq ($(VERSION),latest)
 LDFLAGS ?= -X $(VERSION_PKG).Version=$(VERSION)
 endif
@@ -69,7 +69,7 @@ verify: controller-gen yamlfmt shfmt ## Verify everything is up-to-date and corr
 ##@ Build
 
 .PHONY: build
-build: ## Build binaries (use WHAT=cmd/axon to build specific binary).
+build: ## Build binaries (use WHAT=cmd/kelos to build specific binary).
 	@for dir in $$(go list ./$(or $(WHAT),cmd/...)); do \
 		bin_name=$$(basename $$dir); \
 		CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/$$bin_name $$dir; \
@@ -77,14 +77,14 @@ build: ## Build binaries (use WHAT=cmd/axon to build specific binary).
 
 .PHONY: run
 run: ## Run a controller from your host.
-	go run ./cmd/axon-controller
+	go run ./cmd/kelos-controller
 
 .PHONY: image
 image: ## Build docker images (use WHAT to build specific image).
 	@for dir in $(filter cmd/%,$(or $(WHAT),$(IMAGE_DIRS))); do \
 		GOOS=linux GOARCH=amd64 $(MAKE) build WHAT=$$dir; \
 	done
-	@GOOS=linux GOARCH=amd64 $(MAKE) build WHAT=cmd/axon-capture
+	@GOOS=linux GOARCH=amd64 $(MAKE) build WHAT=cmd/kelos-capture
 	@for dir in $(or $(WHAT),$(IMAGE_DIRS)); do \
 		docker build -t $(REGISTRY)/$$(basename $$dir):$(VERSION) -f $$dir/Dockerfile .; \
 	done
@@ -102,10 +102,10 @@ release-binaries: ## Cross-compile CLI binaries for release and generate checksu
 	@for platform in $(RELEASE_PLATFORMS); do \
 		os=$${platform%/*}; \
 		arch=$${platform#*/}; \
-		GOOS=$$os GOARCH=$$arch $(MAKE) build WHAT=cmd/axon; \
-		mv bin/axon "bin/axon-$${os}-$${arch}"; \
+		GOOS=$$os GOARCH=$$arch $(MAKE) build WHAT=cmd/kelos; \
+		mv bin/kelos "bin/kelos-$${os}-$${arch}"; \
 	done
-	@cd bin && sha256sum axon-* > checksums.txt
+	@cd bin && sha256sum kelos-* > checksums.txt
 
 .PHONY: clean
 clean: ## Clean build artifacts.

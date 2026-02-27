@@ -54,7 +54,7 @@ kubectl get tasks -w
 6. **Stream the agent logs:**
 
 ```bash
-axon logs review-pr -f
+kelos logs review-pr -f
 ```
 
 7. **Cleanup:**

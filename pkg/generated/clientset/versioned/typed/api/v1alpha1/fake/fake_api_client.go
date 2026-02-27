@@ -19,7 +19,7 @@ limitations under the License.
 package fake
 
 import (
-	v1alpha1 "github.com/axon-core/axon/pkg/generated/clientset/versioned/typed/api/v1alpha1"
+	v1alpha1 "github.com/kelos-dev/kelos/pkg/generated/clientset/versioned/typed/api/v1alpha1"
 	rest "k8s.io/client-go/rest"
 	testing "k8s.io/client-go/testing"
 )

@@ -37,8 +37,8 @@ func TestCaptureOutputsFullFlow(t *testing.T) {
 	}}
 
 	usageFile := writeTempFile(t, `{"type":"result","total_cost_usd":0.05,"usage":{"input_tokens":1000,"output_tokens":500}}`)
-	t.Setenv("AXON_AGENT_TYPE", "claude-code")
-	t.Setenv("AXON_BASE_BRANCH", "")
+	t.Setenv("KELOS_AGENT_TYPE", "claude-code")
+	t.Setenv("KELOS_BASE_BRANCH", "")
 
 	outputs := captureOutputs(r, usageFile)
 
@@ -64,8 +64,8 @@ func TestCaptureOutputsBaseBranchFromEnv(t *testing.T) {
 		"git rev-parse HEAD": {output: "deadbeef"},
 	}}
 
-	t.Setenv("AXON_BASE_BRANCH", "develop")
-	t.Setenv("AXON_AGENT_TYPE", "")
+	t.Setenv("KELOS_BASE_BRANCH", "develop")
+	t.Setenv("KELOS_AGENT_TYPE", "")
 
 	outputs := captureOutputs(r, "/nonexistent")
 
@@ -82,8 +82,8 @@ func TestCaptureOutputsNotGitRepo(t *testing.T) {
 		"git rev-parse --is-inside-work-tree": {err: fmt.Errorf("not a git repo")},
 	}}
 
-	t.Setenv("AXON_BASE_BRANCH", "")
-	t.Setenv("AXON_AGENT_TYPE", "")
+	t.Setenv("KELOS_BASE_BRANCH", "")
+	t.Setenv("KELOS_AGENT_TYPE", "")
 
 	outputs := captureOutputs(r, "/nonexistent")
 
@@ -103,8 +103,8 @@ func TestCaptureOutputsMultiplePRs(t *testing.T) {
 		"git symbolic-ref refs/remotes/origin/HEAD": {output: "refs/remotes/origin/main"},
 	}}
 
-	t.Setenv("AXON_BASE_BRANCH", "")
-	t.Setenv("AXON_AGENT_TYPE", "")
+	t.Setenv("KELOS_BASE_BRANCH", "")
+	t.Setenv("KELOS_AGENT_TYPE", "")
 
 	outputs := captureOutputs(r, "/nonexistent")
 
@@ -126,8 +126,8 @@ func TestCaptureOutputsDetachedHead(t *testing.T) {
 		"git symbolic-ref refs/remotes/origin/HEAD": {output: "refs/remotes/origin/main"},
 	}}
 
-	t.Setenv("AXON_BASE_BRANCH", "")
-	t.Setenv("AXON_AGENT_TYPE", "")
+	t.Setenv("KELOS_BASE_BRANCH", "")
+	t.Setenv("KELOS_AGENT_TYPE", "")
 
 	outputs := captureOutputs(r, "/nonexistent")
 
@@ -147,8 +147,8 @@ func TestCaptureOutputsGhFails(t *testing.T) {
 		"git symbolic-ref refs/remotes/origin/HEAD": {output: "refs/remotes/origin/main"},
 	}}
 
-	t.Setenv("AXON_BASE_BRANCH", "")
-	t.Setenv("AXON_AGENT_TYPE", "")
+	t.Setenv("KELOS_BASE_BRANCH", "")
+	t.Setenv("KELOS_AGENT_TYPE", "")
 
 	outputs := captureOutputs(r, "/nonexistent")
 
@@ -170,8 +170,8 @@ func TestCaptureOutputsMarkers(t *testing.T) {
 		"git symbolic-ref refs/remotes/origin/HEAD": {err: fmt.Errorf("no remote")},
 	}}
 
-	t.Setenv("AXON_BASE_BRANCH", "")
-	t.Setenv("AXON_AGENT_TYPE", "")
+	t.Setenv("KELOS_BASE_BRANCH", "")
+	t.Setenv("KELOS_AGENT_TYPE", "")
 
 	outputs := captureOutputs(r, "/nonexistent")
 
@@ -180,7 +180,7 @@ func TestCaptureOutputsMarkers(t *testing.T) {
 	}
 	// Markers should NOT be in the output slice; Run() adds them when printing.
 	for _, line := range outputs {
-		if strings.Contains(line, "AXON_OUTPUTS") {
+		if strings.Contains(line, "KELOS_OUTPUTS") {
 			t.Errorf("markers should not be in output slice: %s", line)
 		}
 	}
@@ -191,8 +191,8 @@ func TestCaptureOutputsNoMarkersWhenEmpty(t *testing.T) {
 		"git rev-parse --is-inside-work-tree": {err: fmt.Errorf("not a git repo")},
 	}}
 
-	t.Setenv("AXON_BASE_BRANCH", "")
-	t.Setenv("AXON_AGENT_TYPE", "")
+	t.Setenv("KELOS_BASE_BRANCH", "")
+	t.Setenv("KELOS_AGENT_TYPE", "")
 
 	outputs := captureOutputs(r, "/nonexistent")
 
@@ -240,9 +240,9 @@ func TestCaptureOutputsWithUpstreamRepo(t *testing.T) {
 		"git symbolic-ref refs/remotes/origin/HEAD": {output: "refs/remotes/origin/main"},
 	}}
 
-	t.Setenv("AXON_BASE_BRANCH", "")
-	t.Setenv("AXON_AGENT_TYPE", "")
-	t.Setenv("AXON_UPSTREAM_REPO", "upstream-org/repo")
+	t.Setenv("KELOS_BASE_BRANCH", "")
+	t.Setenv("KELOS_AGENT_TYPE", "")
+	t.Setenv("KELOS_UPSTREAM_REPO", "upstream-org/repo")
 
 	outputs := captureOutputs(r, "/nonexistent")
 
@@ -270,9 +270,9 @@ func TestCaptureOutputsUpstreamRepoNoPRs(t *testing.T) {
 		"git symbolic-ref refs/remotes/origin/HEAD": {output: "refs/remotes/origin/main"},
 	}}
 
-	t.Setenv("AXON_BASE_BRANCH", "")
-	t.Setenv("AXON_AGENT_TYPE", "")
-	t.Setenv("AXON_UPSTREAM_REPO", "upstream-org/repo")
+	t.Setenv("KELOS_BASE_BRANCH", "")
+	t.Setenv("KELOS_AGENT_TYPE", "")
+	t.Setenv("KELOS_UPSTREAM_REPO", "upstream-org/repo")
 
 	outputs := captureOutputs(r, "/nonexistent")
 
@@ -286,8 +286,8 @@ func TestCaptureOutputsUpstreamRepoNoPRs(t *testing.T) {
 
 func TestMain(m *testing.M) {
 	// Ensure env vars don't leak between tests by clearing them.
-	os.Unsetenv("AXON_BASE_BRANCH")
-	os.Unsetenv("AXON_AGENT_TYPE")
-	os.Unsetenv("AXON_UPSTREAM_REPO")
+	os.Unsetenv("KELOS_BASE_BRANCH")
+	os.Unsetenv("KELOS_AGENT_TYPE")
+	os.Unsetenv("KELOS_UPSTREAM_REPO")
 	os.Exit(m.Run())
 }

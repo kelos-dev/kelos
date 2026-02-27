@@ -85,7 +85,7 @@ If template rendering fails (e.g., missing key), the raw prompt string is used a
 | `spec.taskTemplate.agentConfigRef.name` | Name of an AgentConfig resource for spawned Tasks | No |
 | `spec.taskTemplate.promptTemplate` | Go text/template for prompt (see [template variables](#prompttemplate-variables) below) | No |
 | `spec.taskTemplate.dependsOn` | Task names that spawned Tasks depend on | No |
-| `spec.taskTemplate.branch` | Git branch template for spawned Tasks (supports Go template variables, e.g., `axon-task-{{.Number}}`) | No |
+| `spec.taskTemplate.branch` | Git branch template for spawned Tasks (supports Go template variables, e.g., `kelos-task-{{.Number}}`) | No |
 | `spec.taskTemplate.ttlSecondsAfterFinished` | Auto-delete spawned tasks after N seconds | No |
 | `spec.taskTemplate.podOverrides` | Pod customization for spawned Tasks (resources, timeout, env, nodeSelector) | No |
 | `spec.pollInterval` | How often to poll the source (default: `5m`) | No |
@@ -140,10 +140,10 @@ The `promptTemplate` field uses Go `text/template` syntax. Available variables d
 
 ## Configuration
 
-Axon reads defaults from `~/.axon/config.yaml` (override with `--config`). CLI flags always take precedence over config file values.
+Kelos reads defaults from `~/.kelos/config.yaml` (override with `--config`). CLI flags always take precedence over config file values.
 
 ```yaml
-# ~/.axon/config.yaml
+# ~/.kelos/config.yaml
 oauthToken: <your-oauth-token>
 # or: apiKey: <your-api-key>
 model: claude-sonnet-4-5-20250929
@@ -154,8 +154,8 @@ namespace: my-namespace
 
 | Field | Description |
 |-------|-------------|
-| `oauthToken` | OAuth token — Axon auto-creates the Kubernetes secret. Use `none` for an empty credential |
-| `apiKey` | API key — Axon auto-creates the Kubernetes secret. Use `none` for an empty credential (e.g., free-tier OpenCode models) |
+| `oauthToken` | OAuth token — Kelos auto-creates the Kubernetes secret. Use `none` for an empty credential |
+| `apiKey` | API key — Kelos auto-creates the Kubernetes secret. Use `none` for an empty credential (e.g., free-tier OpenCode models) |
 | `secret` | (Advanced) Use a pre-created Kubernetes secret |
 | `credentialType` | Credential type when using `secret` (`api-key` or `oauth`) |
 
@@ -172,7 +172,7 @@ workspace:
   name: my-workspace
 ```
 
-**Specify inline — Axon auto-creates the Workspace resource and secret:**
+**Specify inline — Kelos auto-creates the Workspace resource and secret:**
 
 ```yaml
 workspace:
@@ -184,9 +184,9 @@ workspace:
 | Field | Description |
 |-------|-------------|
 | `workspace.name` | Name of an existing Workspace resource |
-| `workspace.repo` | Git repository URL — Axon auto-creates a Workspace resource |
+| `workspace.repo` | Git repository URL — Kelos auto-creates a Workspace resource |
 | `workspace.ref` | Git reference (branch, tag, or commit SHA) |
-| `workspace.token` | GitHub token — Axon auto-creates the secret and injects `GITHUB_TOKEN` |
+| `workspace.token` | GitHub token — Kelos auto-creates the secret and injects `GITHUB_TOKEN` |
 
 If both `name` and `repo` are set, `name` takes precedence. The `--workspace` CLI flag overrides all config values.
 
@@ -201,31 +201,31 @@ If both `name` and `repo` are set, `name` takes precedence. The `--workspace` CL
 
 ## CLI Reference
 
-The `axon` CLI lets you manage the full lifecycle without writing YAML.
+The `kelos` CLI lets you manage the full lifecycle without writing YAML.
 
 ### Core Commands
 
 | Command | Description |
 |---------|-------------|
-| `axon install` | Install Axon CRDs and controller into the cluster |
-| `axon uninstall` | Uninstall Axon from the cluster |
-| `axon init` | Initialize `~/.axon/config.yaml` |
-| `axon version` | Print version information |
+| `kelos install` | Install Kelos CRDs and controller into the cluster |
+| `kelos uninstall` | Uninstall Kelos from the cluster |
+| `kelos init` | Initialize `~/.kelos/config.yaml` |
+| `kelos version` | Print version information |
 
 ### Resource Management
 
 | Command | Description |
 |---------|-------------|
-| `axon run` | Create and run a new Task |
-| `axon create workspace` | Create a Workspace resource |
-| `axon create agentconfig` | Create an AgentConfig resource |
-| `axon get <resource> [name]` | List resources or view a specific resource (`tasks`, `taskspawners`, `workspaces`) |
-| `axon delete <resource> <name>` | Delete a resource |
-| `axon logs <task-name> [-f]` | View or stream logs from a task |
-| `axon suspend taskspawner <name>` | Pause a TaskSpawner (stops polling, running tasks continue) |
-| `axon resume taskspawner <name>` | Resume a paused TaskSpawner |
+| `kelos run` | Create and run a new Task |
+| `kelos create workspace` | Create a Workspace resource |
+| `kelos create agentconfig` | Create an AgentConfig resource |
+| `kelos get <resource> [name]` | List resources or view a specific resource (`tasks`, `taskspawners`, `workspaces`) |
+| `kelos delete <resource> <name>` | Delete a resource |
+| `kelos logs <task-name> [-f]` | View or stream logs from a task |
+| `kelos suspend taskspawner <name>` | Pause a TaskSpawner (stops polling, running tasks continue) |
+| `kelos resume taskspawner <name>` | Resume a paused TaskSpawner |
 
-### `axon run` Flags
+### `kelos run` Flags
 
 - `--prompt, -p`: Task prompt (required)
 - `--type, -t`: Agent type (default: `claude-code`)
@@ -242,7 +242,7 @@ The `axon` CLI lets you manage the full lifecycle without writing YAML.
 - `--secret`: Pre-created secret name
 - `--credential-type`: Credential type when using `--secret` (default: `api-key`)
 
-### `axon get` Flags
+### `kelos get` Flags
 
 - `--output, -o`: Output format (`yaml` or `json`)
 - `--detail, -d`: Show detailed information for a specific resource
@@ -250,7 +250,7 @@ The `axon` CLI lets you manage the full lifecycle without writing YAML.
 
 ### Common Flags
 
-- `--config`: Path to config file (default `~/.axon/config.yaml`)
+- `--config`: Path to config file (default `~/.kelos/config.yaml`)
 - `--namespace, -n`: Kubernetes namespace
 - `--kubeconfig`: Path to kubeconfig file
 - `--dry-run`: Print resources without creating them (supported by `run`, `create`, `install`)

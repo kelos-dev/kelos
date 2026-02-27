@@ -11,15 +11,15 @@ RUN go mod download
 COPY . .
 
 # Build
-RUN make build WHAT=cmd/axon-token-refresher
+RUN make build WHAT=cmd/kelos-token-refresher
 
 # Runtime stage
 FROM gcr.io/distroless/static:nonroot
 
 WORKDIR /
 
-COPY --from=builder /workspace/bin/axon-token-refresher .
+COPY --from=builder /workspace/bin/kelos-token-refresher .
 
 USER 65532:65532
 
-ENTRYPOINT ["/axon-token-refresher"]
+ENTRYPOINT ["/kelos-token-refresher"]

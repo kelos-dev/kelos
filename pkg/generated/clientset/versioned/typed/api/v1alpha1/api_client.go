@@ -21,8 +21,8 @@ package v1alpha1
 import (
 	http "net/http"
 
-	apiv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
-	scheme "github.com/axon-core/axon/pkg/generated/clientset/versioned/scheme"
+	apiv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	scheme "github.com/kelos-dev/kelos/pkg/generated/clientset/versioned/scheme"
 	rest "k8s.io/client-go/rest"
 )
 

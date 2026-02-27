@@ -30,10 +30,10 @@ ENV PATH="/usr/local/go/bin:${PATH}"
 ARG OPENCODE_VERSION=1.2.6
 RUN npm install -g opencode-ai@${OPENCODE_VERSION}
 
-COPY opencode/axon_entrypoint.sh /axon_entrypoint.sh
-RUN chmod +x /axon_entrypoint.sh
+COPY opencode/kelos_entrypoint.sh /kelos_entrypoint.sh
+RUN chmod +x /kelos_entrypoint.sh
 
-COPY bin/axon-capture /axon/axon-capture
+COPY bin/kelos-capture /kelos/kelos-capture
 
 RUN useradd -u 61100 -m -s /bin/bash agent
 RUN mkdir -p /home/agent/.opencode && chown -R agent:agent /home/agent

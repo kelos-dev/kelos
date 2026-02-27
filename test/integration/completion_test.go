@@ -10,8 +10,8 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
-	"github.com/axon-core/axon/internal/cli"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	"github.com/kelos-dev/kelos/internal/cli"
 )
 
 func writeEnvtestKubeconfig() string {
@@ -58,17 +58,17 @@ var _ = Describe("Completion", func() {
 
 			By("Creating Tasks")
 			for _, name := range []string{"task-alpha", "task-beta"} {
-				task := &axonv1alpha1.Task{
+				task := &kelosv1alpha1.Task{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      name,
 						Namespace: ns.Name,
 					},
-					Spec: axonv1alpha1.TaskSpec{
+					Spec: kelosv1alpha1.TaskSpec{
 						Type:   "claude-code",
 						Prompt: "test",
-						Credentials: axonv1alpha1.Credentials{
-							Type: axonv1alpha1.CredentialTypeAPIKey,
-							SecretRef: axonv1alpha1.SecretReference{
+						Credentials: kelosv1alpha1.Credentials{
+							Type: kelosv1alpha1.CredentialTypeAPIKey,
+							SecretRef: kelosv1alpha1.SecretReference{
 								Name: "test-secret",
 							},
 						},
@@ -96,17 +96,17 @@ var _ = Describe("Completion", func() {
 			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
 
 			By("Creating a TaskSpawner")
-			ts := &axonv1alpha1.TaskSpawner{
+			ts := &kelosv1alpha1.TaskSpawner{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "spawner-one",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.TaskSpawnerSpec{
-					TaskTemplate: axonv1alpha1.TaskTemplate{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
-						Credentials: axonv1alpha1.Credentials{
-							Type: axonv1alpha1.CredentialTypeAPIKey,
-							SecretRef: axonv1alpha1.SecretReference{
+						Credentials: kelosv1alpha1.Credentials{
+							Type: kelosv1alpha1.CredentialTypeAPIKey,
+							SecretRef: kelosv1alpha1.SecretReference{
 								Name: "test-secret",
 							},
 						},
@@ -133,17 +133,17 @@ var _ = Describe("Completion", func() {
 			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
 
 			By("Creating a Task")
-			task := &axonv1alpha1.Task{
+			task := &kelosv1alpha1.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "task-gamma",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.TaskSpec{
+				Spec: kelosv1alpha1.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "test",
-					Credentials: axonv1alpha1.Credentials{
-						Type: axonv1alpha1.CredentialTypeAPIKey,
-						SecretRef: axonv1alpha1.SecretReference{
+					Credentials: kelosv1alpha1.Credentials{
+						Type: kelosv1alpha1.CredentialTypeAPIKey,
+						SecretRef: kelosv1alpha1.SecretReference{
 							Name: "test-secret",
 						},
 					},

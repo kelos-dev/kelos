@@ -9,7 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 )
 
 func newDeleteAgentConfigCommand(cfg *ClientConfig) *cobra.Command {
@@ -42,7 +42,7 @@ func newDeleteAgentConfigCommand(cfg *ClientConfig) *cobra.Command {
 			ctx := context.Background()
 
 			if all {
-				acList := &axonv1alpha1.AgentConfigList{}
+				acList := &kelosv1alpha1.AgentConfigList{}
 				if err := cl.List(ctx, acList, client.InNamespace(ns)); err != nil {
 					return fmt.Errorf("listing agent configs: %w", err)
 				}
@@ -59,7 +59,7 @@ func newDeleteAgentConfigCommand(cfg *ClientConfig) *cobra.Command {
 				return nil
 			}
 
-			ac := &axonv1alpha1.AgentConfig{
+			ac := &kelosv1alpha1.AgentConfig{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      args[0],
 					Namespace: ns,

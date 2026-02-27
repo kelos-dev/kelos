@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 )
 
 func completeTaskNames(cfg *ClientConfig) cobra.CompletionFunc {
@@ -24,7 +24,7 @@ func completeTaskNames(cfg *ClientConfig) cobra.CompletionFunc {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
 
-		taskList := &axonv1alpha1.TaskList{}
+		taskList := &kelosv1alpha1.TaskList{}
 		if err := cl.List(ctx, taskList, client.InNamespace(ns)); err != nil {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
@@ -51,7 +51,7 @@ func completeTaskSpawnerNames(cfg *ClientConfig) cobra.CompletionFunc {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
 
-		tsList := &axonv1alpha1.TaskSpawnerList{}
+		tsList := &kelosv1alpha1.TaskSpawnerList{}
 		if err := cl.List(ctx, tsList, client.InNamespace(ns)); err != nil {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
@@ -78,7 +78,7 @@ func completeAgentConfigNames(cfg *ClientConfig) cobra.CompletionFunc {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
 
-		acList := &axonv1alpha1.AgentConfigList{}
+		acList := &kelosv1alpha1.AgentConfigList{}
 		if err := cl.List(ctx, acList, client.InNamespace(ns)); err != nil {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
@@ -105,7 +105,7 @@ func completeWorkspaceNames(cfg *ClientConfig) cobra.CompletionFunc {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
 
-		wsList := &axonv1alpha1.WorkspaceList{}
+		wsList := &kelosv1alpha1.WorkspaceList{}
 		if err := cl.List(ctx, wsList, client.InNamespace(ns)); err != nil {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}

@@ -1,5 +1,5 @@
 FROM gcr.io/distroless/static:nonroot
 WORKDIR /
-COPY bin/axon-controller .
+COPY bin/kelos-spawner .
 USER 65532:65532
-ENTRYPOINT ["/axon-controller"]
+ENTRYPOINT ["/kelos-spawner"]

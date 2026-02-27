@@ -1,21 +1,21 @@
-apiVersion: axon.io/v1alpha1
+apiVersion: kelos.dev/v1alpha1
 kind: Task
 metadata:
-  name: axon-workers-${ISSUE_NUMBER}
+  name: kelos-workers-${ISSUE_NUMBER}
   labels:
-    axon.run/type: squash-commits
+    kelos.dev/type: squash-commits
 spec:
   workspaceRef:
-    name: axon-agent
+    name: kelos-agent
   model: sonnet
   type: claude-code
   ttlSecondsAfterFinished: 3600
   credentials:
     type: oauth
     secretRef:
-      name: axon-credentials
+      name: kelos-credentials
   agentConfigRef:
-    name: axon-dev-agent
+    name: kelos-dev-agent
   podOverrides:
     resources:
       requests:

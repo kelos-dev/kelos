@@ -1,4 +1,4 @@
-apiVersion: axon.io/v1alpha1
+apiVersion: kelos.dev/v1alpha1
 kind: TaskSpawner
 metadata:
   name: fork-issue-fixer
@@ -19,7 +19,7 @@ spec:
       type: oauth
       secretRef:
         name: claude-oauth-token
-    branch: "axon-task-{{.Number}}"
+    branch: "kelos-task-{{.Number}}"
     promptTemplate: |
       Fix the following GitHub issue from the upstream repository and open a
       PR from this fork back to upstream.

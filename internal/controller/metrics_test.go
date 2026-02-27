@@ -7,7 +7,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 )
 
 func TestMetricsRegistered(t *testing.T) {
@@ -125,7 +125,7 @@ func TestTaskOutputTokensCounter(t *testing.T) {
 func TestRecordCostTokenMetrics(t *testing.T) {
 	tests := []struct {
 		name       string
-		task       *axonv1alpha1.Task
+		task       *kelosv1alpha1.Task
 		results    map[string]string
 		wantCost   float64
 		wantInput  float64
@@ -133,12 +133,12 @@ func TestRecordCostTokenMetrics(t *testing.T) {
 	}{
 		{
 			name: "All metrics present",
-			task: &axonv1alpha1.Task{
+			task: &kelosv1alpha1.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Namespace: "record-ns-1",
-					Labels:    map[string]string{"axon.io/taskspawner": "spawner-1"},
+					Labels:    map[string]string{"kelos.dev/taskspawner": "spawner-1"},
 				},
-				Spec: axonv1alpha1.TaskSpec{
+				Spec: kelosv1alpha1.TaskSpec{
 					Type:  "claude-code",
 					Model: "opus",
 				},
@@ -154,12 +154,12 @@ func TestRecordCostTokenMetrics(t *testing.T) {
 		},
 		{
 			name: "Only cost present",
-			task: &axonv1alpha1.Task{
+			task: &kelosv1alpha1.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Namespace: "record-ns-2",
-					Labels:    map[string]string{"axon.io/taskspawner": "spawner-2"},
+					Labels:    map[string]string{"kelos.dev/taskspawner": "spawner-2"},
 				},
-				Spec: axonv1alpha1.TaskSpec{
+				Spec: kelosv1alpha1.TaskSpec{
 					Type:  "claude-code",
 					Model: "sonnet",
 				},
@@ -171,11 +171,11 @@ func TestRecordCostTokenMetrics(t *testing.T) {
 		},
 		{
 			name: "No spawner label or model",
-			task: &axonv1alpha1.Task{
+			task: &kelosv1alpha1.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Namespace: "record-ns-3",
 				},
-				Spec: axonv1alpha1.TaskSpec{
+				Spec: kelosv1alpha1.TaskSpec{
 					Type: "codex",
 				},
 			},
@@ -190,12 +190,12 @@ func TestRecordCostTokenMetrics(t *testing.T) {
 		},
 		{
 			name: "Invalid cost value is ignored",
-			task: &axonv1alpha1.Task{
+			task: &kelosv1alpha1.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Namespace: "record-ns-4",
-					Labels:    map[string]string{"axon.io/taskspawner": "spawner-4"},
+					Labels:    map[string]string{"kelos.dev/taskspawner": "spawner-4"},
 				},
-				Spec: axonv1alpha1.TaskSpec{
+				Spec: kelosv1alpha1.TaskSpec{
 					Type:  "claude-code",
 					Model: "opus",
 				},
@@ -208,12 +208,12 @@ func TestRecordCostTokenMetrics(t *testing.T) {
 		},
 		{
 			name: "Negative values are ignored",
-			task: &axonv1alpha1.Task{
+			task: &kelosv1alpha1.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Namespace: "record-ns-5",
-					Labels:    map[string]string{"axon.io/taskspawner": "spawner-5"},
+					Labels:    map[string]string{"kelos.dev/taskspawner": "spawner-5"},
 				},
-				Spec: axonv1alpha1.TaskSpec{
+				Spec: kelosv1alpha1.TaskSpec{
 					Type:  "claude-code",
 					Model: "opus",
 				},
@@ -228,7 +228,7 @@ func TestRecordCostTokenMetrics(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			spawner := tt.task.Labels["axon.io/taskspawner"]
+			spawner := tt.task.Labels["kelos.dev/taskspawner"]
 			model := tt.task.Spec.Model
 			labels := []string{tt.task.Namespace, tt.task.Spec.Type, spawner, model}
 

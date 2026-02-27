@@ -19,7 +19,7 @@ limitations under the License.
 package v1alpha1
 
 import (
-	internalinterfaces "github.com/axon-core/axon/pkg/generated/informers/externalversions/internalinterfaces"
+	internalinterfaces "github.com/kelos-dev/kelos/pkg/generated/informers/externalversions/internalinterfaces"
 )
 
 // Interface provides access to all the informers in this group version.

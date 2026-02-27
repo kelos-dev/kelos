@@ -11,7 +11,7 @@ func NewRootCommand() *cobra.Command {
 	var configPath string
 
 	cmd := &cobra.Command{
-		Use:           "axon",
+		Use:           "kelos",
 		Short:         "CLI for managing AI agent Tasks on Kubernetes",
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -34,7 +34,7 @@ func NewRootCommand() *cobra.Command {
 		},
 	}
 
-	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to config file (default ~/.axon/config.yaml)")
+	cmd.PersistentFlags().StringVar(&configPath, "config", "", "path to config file (default ~/.kelos/config.yaml)")
 	cmd.PersistentFlags().StringVar(&cfg.Kubeconfig, "kubeconfig", "", "path to kubeconfig file")
 	cmd.PersistentFlags().StringVarP(&cfg.Namespace, "namespace", "n", "", "Kubernetes namespace")
 

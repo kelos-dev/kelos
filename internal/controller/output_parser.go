@@ -3,12 +3,12 @@ package controller
 import "strings"
 
 const (
-	outputStartMarker = "---AXON_OUTPUTS_START---"
-	outputEndMarker   = "---AXON_OUTPUTS_END---"
+	outputStartMarker = "---KELOS_OUTPUTS_START---"
+	outputEndMarker   = "---KELOS_OUTPUTS_END---"
 )
 
 // ParseOutputs extracts output lines from log data between the
-// ---AXON_OUTPUTS_START--- and ---AXON_OUTPUTS_END--- markers.
+// ---KELOS_OUTPUTS_START--- and ---KELOS_OUTPUTS_END--- markers.
 func ParseOutputs(logData string) []string {
 	startIdx := strings.Index(logData, outputStartMarker)
 	if startIdx == -1 {

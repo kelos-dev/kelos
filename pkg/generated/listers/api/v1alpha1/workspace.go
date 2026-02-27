@@ -19,7 +19,7 @@ limitations under the License.
 package v1alpha1
 
 import (
-	apiv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
+	apiv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 	labels "k8s.io/apimachinery/pkg/labels"
 	listers "k8s.io/client-go/listers"
 	cache "k8s.io/client-go/tools/cache"

@@ -147,8 +147,8 @@ func TestRunCommand_DryRun_OpenCodeNoneAPIKey(t *testing.T) {
 	if !strings.Contains(output, "type: opencode") {
 		t.Errorf("expected 'type: opencode' in output, got:\n%s", output)
 	}
-	if !strings.Contains(output, "axon-credentials") {
-		t.Errorf("expected 'axon-credentials' secret reference in output, got:\n%s", output)
+	if !strings.Contains(output, "kelos-credentials") {
+		t.Errorf("expected 'kelos-credentials' secret reference in output, got:\n%s", output)
 	}
 }
 
@@ -233,8 +233,8 @@ workspace:
 	out.ReadFrom(r)
 	output := out.String()
 
-	if !strings.Contains(output, "axon-workspace") {
-		t.Errorf("expected workspace reference 'axon-workspace' in dry-run output, got:\n%s", output)
+	if !strings.Contains(output, "kelos-workspace") {
+		t.Errorf("expected workspace reference 'kelos-workspace' in dry-run output, got:\n%s", output)
 	}
 }
 
@@ -587,14 +587,14 @@ func TestInstallCommand_DryRun(t *testing.T) {
 	if !strings.Contains(output, "Deployment") {
 		t.Errorf("expected Deployment manifest in dry-run output, got:\n%s", output[:min(len(output), 500)])
 	}
-	if !strings.Contains(output, "name: axon-controller-role") {
+	if !strings.Contains(output, "name: kelos-controller-role") {
 		t.Errorf("expected controller ClusterRole in dry-run output, got:\n%s", output[:min(len(output), 500)])
 	}
 	if !strings.Contains(output, "- rolebindings") {
 		t.Errorf("expected rolebindings RBAC rule in dry-run output, got:\n%s", output[:min(len(output), 500)])
 	}
 	// Should not contain installation messages.
-	if strings.Contains(output, "Installing axon") {
+	if strings.Contains(output, "Installing kelos") {
 		t.Errorf("dry-run should not print installation messages, got:\n%s", output[:min(len(output), 500)])
 	}
 }
@@ -675,8 +675,8 @@ func TestRunCommand_DryRun_CodexOAuthToken(t *testing.T) {
 	if !strings.Contains(output, "type: oauth") {
 		t.Errorf("expected credential 'type: oauth' in output, got:\n%s", output)
 	}
-	if !strings.Contains(output, "axon-credentials") {
-		t.Errorf("expected 'axon-credentials' secret reference in output, got:\n%s", output)
+	if !strings.Contains(output, "kelos-credentials") {
+		t.Errorf("expected 'kelos-credentials' secret reference in output, got:\n%s", output)
 	}
 }
 
@@ -723,8 +723,8 @@ func TestRunCommand_DryRun_CodexOAuthToken_FileRef(t *testing.T) {
 	if !strings.Contains(output, "type: oauth") {
 		t.Errorf("expected credential 'type: oauth' in output, got:\n%s", output)
 	}
-	if !strings.Contains(output, "axon-credentials") {
-		t.Errorf("expected 'axon-credentials' secret reference in output, got:\n%s", output)
+	if !strings.Contains(output, "kelos-credentials") {
+		t.Errorf("expected 'kelos-credentials' secret reference in output, got:\n%s", output)
 	}
 }
 

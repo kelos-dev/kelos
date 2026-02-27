@@ -1,7 +1,7 @@
-apiVersion: axon.io/v1alpha1
+apiVersion: kelos.dev/v1alpha1
 kind: TaskSpawner
 metadata:
-  name: axon-fake-user
+  name: kelos-fake-user
 spec:
   when:
     cron:
@@ -9,14 +9,14 @@ spec:
   maxConcurrency: 1
   taskTemplate:
     workspaceRef:
-      name: axon-agent
+      name: kelos-agent
     model: sonnet
     type: claude-code
     ttlSecondsAfterFinished: 864000
     credentials:
       type: oauth
       secretRef:
-        name: axon-credentials
+        name: kelos-credentials
     podOverrides:
       resources:
         requests:
@@ -28,17 +28,17 @@ spec:
           memory: "2Gi"
           ephemeral-storage: "2Gi"
     agentConfigRef:
-      name: axon-dev-agent
+      name: kelos-dev-agent
     promptTemplate: |
-      You are a developer experience tester for the Axon framework — a Kubernetes-native controller that runs autonomous AI coding agents.
-      Your goal is to improve Axon so that more developers adopt it. Act as a new user trying out the project for the first time.
+      You are a developer experience tester for the Kelos framework — a Kubernetes-native controller that runs autonomous AI coding agents.
+      Your goal is to improve Kelos so that more developers adopt it. Act as a new user trying out the project for the first time.
 
       Task:
       Pick ONE of the following areas to focus on (choose the one most likely to have actionable improvements):
 
       1. **Documentation & Onboarding**
          - Read the README and try to follow the getting-started instructions
-         - Check if CLI help text (`axon --help`, `axon run --help`, etc.) is clear
+         - Check if CLI help text (`kelos --help`, `kelos run --help`, etc.) is clear
          - Look for missing or outdated documentation
 
       2. **Developer Experience**
@@ -54,7 +54,7 @@ spec:
       Actions:
       - If you find an issue, create a GitHub issue:
         ```
-        gh issue create --title "<title>" --body "<description>" --label generated-by-axon --label axon/needs-input
+        gh issue create --title "<title>" --body "<description>" --label generated-by-kelos --label kelos/needs-input
         ```
       - Do NOT create PRs. Only create issues
 
@@ -62,6 +62,6 @@ spec:
       - Focus on ONE area per run, do it thoroughly
       - Do not create duplicate issues — check existing issues first with `gh issue list`
       - Keep changes minimal and focused
-      - Before creating output, review recent issues labeled "generated-by-axon" (`gh issue list --label generated-by-axon --limit 10`) to avoid overlap with other agents and to learn what has been well-received vs dismissed
+      - Before creating output, review recent issues labeled "generated-by-kelos" (`gh issue list --label generated-by-kelos --limit 10`) to avoid overlap with other agents and to learn what has been well-received vs dismissed
       - If after reviewing existing issues you cannot identify something genuinely new and actionable, exit without creating an issue or PR. Not every run needs to produce output
   pollInterval: 1m

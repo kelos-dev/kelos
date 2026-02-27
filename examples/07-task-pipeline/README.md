@@ -91,15 +91,15 @@ to `Running`, and finally `open-pr`.
 5. **View results from a completed Task:**
 
 ```bash
-axon get task scaffold -o yaml | grep -A 10 results:
+kelos get task scaffold -o yaml | grep -A 10 results:
 ```
 
 6. **Stream logs from any stage:**
 
 ```bash
-axon logs scaffold -f
-axon logs write-tests -f
-axon logs open-pr -f
+kelos logs scaffold -f
+kelos logs write-tests -f
+kelos logs open-pr -f
 ```
 
 7. **Cleanup:**
@@ -113,13 +113,13 @@ kubectl delete -f examples/07-task-pipeline/
 You can create the same pipeline with the CLI:
 
 ```bash
-axon run -p "Scaffold a user authentication module" \
+kelos run -p "Scaffold a user authentication module" \
   --name scaffold --branch feature/auth --workspace my-workspace -w
 
-axon run -p 'Write tests for the auth module on branch {{index .Deps "scaffold" "Results" "branch"}}' \
+kelos run -p 'Write tests for the auth module on branch {{index .Deps "scaffold" "Results" "branch"}}' \
   --name write-tests --depends-on scaffold --branch feature/auth --workspace my-workspace -w
 
-axon run -p 'Open a PR for branch {{index .Deps "write-tests" "Results" "branch"}}' \
+kelos run -p 'Open a PR for branch {{index .Deps "write-tests" "Results" "branch"}}' \
   --name open-pr --depends-on write-tests --branch feature/auth --workspace my-workspace -w
 ```
 

@@ -19,9 +19,9 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
-	"github.com/axon-core/axon/internal/controller"
-	"github.com/axon-core/axon/internal/githubapp"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	"github.com/kelos-dev/kelos/internal/controller"
+	"github.com/kelos-dev/kelos/internal/githubapp"
 )
 
 var (
@@ -54,7 +54,7 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
 
-	err = axonv1alpha1.AddToScheme(scheme.Scheme)
+	err = kelosv1alpha1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
@@ -85,7 +85,7 @@ var _ = BeforeSuite(func() {
 		Scheme:       mgr.GetScheme(),
 		JobBuilder:   controller.NewJobBuilder(),
 		TokenClient:  tokenClient,
-		Recorder:     mgr.GetEventRecorderFor("axon-controller"),
+		Recorder:     mgr.GetEventRecorderFor("kelos-controller"),
 		BranchLocker: controller.NewBranchLocker(),
 	}).SetupWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
@@ -94,7 +94,7 @@ var _ = BeforeSuite(func() {
 		Client:            mgr.GetClient(),
 		Scheme:            mgr.GetScheme(),
 		DeploymentBuilder: controller.NewDeploymentBuilder(),
-		Recorder:          mgr.GetEventRecorderFor("axon-controller"),
+		Recorder:          mgr.GetEventRecorderFor("kelos-controller"),
 	}).SetupWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 
@@ -109,13 +109,13 @@ var _ = BeforeSuite(func() {
 
 	// Verify all CRDs are fully established by attempting to list each custom resource type
 	Eventually(func() error {
-		return k8sClient.List(ctx, &axonv1alpha1.TaskList{})
+		return k8sClient.List(ctx, &kelosv1alpha1.TaskList{})
 	}, 30*time.Second, 100*time.Millisecond).Should(Succeed())
 	Eventually(func() error {
-		return k8sClient.List(ctx, &axonv1alpha1.TaskSpawnerList{})
+		return k8sClient.List(ctx, &kelosv1alpha1.TaskSpawnerList{})
 	}, 30*time.Second, 100*time.Millisecond).Should(Succeed())
 	Eventually(func() error {
-		return k8sClient.List(ctx, &axonv1alpha1.WorkspaceList{})
+		return k8sClient.List(ctx, &kelosv1alpha1.WorkspaceList{})
 	}, 30*time.Second, 100*time.Millisecond).Should(Succeed())
 })
 

@@ -1,10 +1,10 @@
-# Axon Orchestration Examples
+# Kelos Orchestration Examples
 
-Ready-to-use patterns and YAML manifests for orchestrating AI agents with Axon. These examples demonstrate how to combine Tasks, Workspaces, and TaskSpawners into functional AI workflows.
+Ready-to-use patterns and YAML manifests for orchestrating AI agents with Kelos. These examples demonstrate how to combine Tasks, Workspaces, and TaskSpawners into functional AI workflows.
 
 ## Prerequisites
 
-- Kubernetes cluster (1.28+) with Axon installed (`axon install`)
+- Kubernetes cluster (1.28+) with Kelos installed (`kelos install`)
 - `kubectl` configured
 
 ## Examples

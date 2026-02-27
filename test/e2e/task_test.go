@@ -8,8 +8,8 @@ import (
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
-	"github.com/axon-core/axon/test/e2e/framework"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	"github.com/kelos-dev/kelos/test/e2e/framework"
 )
 
 func describeAgentTests(cfg agentTestConfig) {
@@ -27,17 +27,17 @@ func describeAgentTests(cfg agentTestConfig) {
 			f.CreateSecret(cfg.SecretName, cfg.SecretKey+"="+*cfg.SecretValue)
 
 			By("creating a Task")
-			f.CreateTask(&axonv1alpha1.Task{
+			f.CreateTask(&kelosv1alpha1.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "basic-task",
 				},
-				Spec: axonv1alpha1.TaskSpec{
+				Spec: kelosv1alpha1.TaskSpec{
 					Type:   cfg.AgentType,
 					Model:  cfg.Model,
-					Prompt: "Print 'Hello from Axon e2e test' to stdout",
-					Credentials: axonv1alpha1.Credentials{
+					Prompt: "Print 'Hello from Kelos e2e test' to stdout",
+					Credentials: kelosv1alpha1.Credentials{
 						Type:      cfg.CredentialType,
-						SecretRef: axonv1alpha1.SecretReference{Name: cfg.SecretName},
+						SecretRef: kelosv1alpha1.SecretReference{Name: cfg.SecretName},
 					},
 				},
 			})
@@ -71,30 +71,30 @@ func describeAgentTests(cfg agentTestConfig) {
 			f.CreateSecret(cfg.SecretName, cfg.SecretKey+"="+*cfg.SecretValue)
 
 			By("creating a Workspace resource")
-			f.CreateWorkspace(&axonv1alpha1.Workspace{
+			f.CreateWorkspace(&kelosv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "e2e-workspace",
 				},
-				Spec: axonv1alpha1.WorkspaceSpec{
-					Repo: "https://github.com/axon-core/axon.git",
+				Spec: kelosv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/kelos-dev/kelos.git",
 					Ref:  "main",
 				},
 			})
 
 			By("creating a Task with workspace ref")
-			f.CreateTask(&axonv1alpha1.Task{
+			f.CreateTask(&kelosv1alpha1.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "ws-task",
 				},
-				Spec: axonv1alpha1.TaskSpec{
+				Spec: kelosv1alpha1.TaskSpec{
 					Type:   cfg.AgentType,
 					Model:  cfg.Model,
 					Prompt: "Create a file called 'test.txt' with the content 'hello' in the current directory and print 'done'",
-					Credentials: axonv1alpha1.Credentials{
+					Credentials: kelosv1alpha1.Credentials{
 						Type:      cfg.CredentialType,
-						SecretRef: axonv1alpha1.SecretReference{Name: cfg.SecretName},
+						SecretRef: kelosv1alpha1.SecretReference{Name: cfg.SecretName},
 					},
-					WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "e2e-workspace"},
+					WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "e2e-workspace"},
 				},
 			})
 
@@ -132,30 +132,30 @@ func describeAgentTests(cfg agentTestConfig) {
 			f.CreateSecret(cfg.SecretName, cfg.SecretKey+"="+*cfg.SecretValue)
 
 			By("creating a Workspace resource")
-			f.CreateWorkspace(&axonv1alpha1.Workspace{
+			f.CreateWorkspace(&kelosv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "e2e-outputs-workspace",
 				},
-				Spec: axonv1alpha1.WorkspaceSpec{
-					Repo: "https://github.com/axon-core/axon.git",
+				Spec: kelosv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/kelos-dev/kelos.git",
 					Ref:  "main",
 				},
 			})
 
 			By("creating a Task with workspace ref")
-			f.CreateTask(&axonv1alpha1.Task{
+			f.CreateTask(&kelosv1alpha1.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "outputs-task",
 				},
-				Spec: axonv1alpha1.TaskSpec{
+				Spec: kelosv1alpha1.TaskSpec{
 					Type:   cfg.AgentType,
 					Model:  cfg.Model,
 					Prompt: "Print 'hello' to stdout",
-					Credentials: axonv1alpha1.Credentials{
+					Credentials: kelosv1alpha1.Credentials{
 						Type:      cfg.CredentialType,
-						SecretRef: axonv1alpha1.SecretReference{Name: cfg.SecretName},
+						SecretRef: kelosv1alpha1.SecretReference{Name: cfg.SecretName},
 					},
-					WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "e2e-outputs-workspace"},
+					WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "e2e-outputs-workspace"},
 				},
 			})
 
@@ -171,8 +171,8 @@ func describeAgentTests(cfg agentTestConfig) {
 			By("verifying output markers appear in Pod logs")
 			logs := f.GetJobLogs("outputs-task")
 			GinkgoWriter.Printf("Job logs:\n%s\n", logs)
-			Expect(logs).To(ContainSubstring("---AXON_OUTPUTS_START---"))
-			Expect(logs).To(ContainSubstring("---AXON_OUTPUTS_END---"))
+			Expect(logs).To(ContainSubstring("---KELOS_OUTPUTS_START---"))
+			Expect(logs).To(ContainSubstring("---KELOS_OUTPUTS_END---"))
 
 			By("verifying Outputs field contains branch, commit, base-branch, and usage")
 			outputs := f.GetTaskOutputs("outputs-task")
@@ -215,34 +215,34 @@ func describeAgentTests(cfg agentTestConfig) {
 			f.CreateSecret(cfg.SecretName, cfg.SecretKey+"="+*cfg.SecretValue)
 
 			By("creating Task A")
-			f.CreateTask(&axonv1alpha1.Task{
+			f.CreateTask(&kelosv1alpha1.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "dep-chain-a",
 				},
-				Spec: axonv1alpha1.TaskSpec{
+				Spec: kelosv1alpha1.TaskSpec{
 					Type:   cfg.AgentType,
 					Model:  cfg.Model,
 					Prompt: "Print 'Task A done' to stdout",
-					Credentials: axonv1alpha1.Credentials{
+					Credentials: kelosv1alpha1.Credentials{
 						Type:      cfg.CredentialType,
-						SecretRef: axonv1alpha1.SecretReference{Name: cfg.SecretName},
+						SecretRef: kelosv1alpha1.SecretReference{Name: cfg.SecretName},
 					},
 				},
 			})
 
 			By("creating Task B that depends on Task A")
-			f.CreateTask(&axonv1alpha1.Task{
+			f.CreateTask(&kelosv1alpha1.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "dep-chain-b",
 				},
-				Spec: axonv1alpha1.TaskSpec{
+				Spec: kelosv1alpha1.TaskSpec{
 					Type:      cfg.AgentType,
 					Model:     cfg.Model,
 					Prompt:    "Print 'Task B done' to stdout",
 					DependsOn: []string{"dep-chain-a"},
-					Credentials: axonv1alpha1.Credentials{
+					Credentials: kelosv1alpha1.Credentials{
 						Type:      cfg.CredentialType,
-						SecretRef: axonv1alpha1.SecretReference{Name: cfg.SecretName},
+						SecretRef: kelosv1alpha1.SecretReference{Name: cfg.SecretName},
 					},
 				},
 			})
@@ -278,17 +278,17 @@ func describeAgentTests(cfg agentTestConfig) {
 			f.CreateSecret(cfg.SecretName, cfg.SecretKey+"="+*cfg.SecretValue)
 
 			By("creating a Task")
-			f.CreateTask(&axonv1alpha1.Task{
+			f.CreateTask(&kelosv1alpha1.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "cleanup-task",
 				},
-				Spec: axonv1alpha1.TaskSpec{
+				Spec: kelosv1alpha1.TaskSpec{
 					Type:   cfg.AgentType,
 					Model:  cfg.Model,
 					Prompt: "Print 'Hello' to stdout",
-					Credentials: axonv1alpha1.Credentials{
+					Credentials: kelosv1alpha1.Credentials{
 						Type:      cfg.CredentialType,
-						SecretRef: axonv1alpha1.SecretReference{Name: cfg.SecretName},
+						SecretRef: kelosv1alpha1.SecretReference{Name: cfg.SecretName},
 					},
 				},
 			})
@@ -326,17 +326,17 @@ var _ = Describe("Task with make available", func() {
 			"CLAUDE_CODE_OAUTH_TOKEN="+oauthToken)
 
 		By("creating a Task that uses make")
-		f.CreateTask(&axonv1alpha1.Task{
+		f.CreateTask(&kelosv1alpha1.Task{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "make-task",
 			},
-			Spec: axonv1alpha1.TaskSpec{
+			Spec: kelosv1alpha1.TaskSpec{
 				Type:   "claude-code",
 				Model:  testModel,
 				Prompt: "Run 'make --version' and print the output",
-				Credentials: axonv1alpha1.Credentials{
-					Type:      axonv1alpha1.CredentialTypeOAuth,
-					SecretRef: axonv1alpha1.SecretReference{Name: "claude-credentials"},
+				Credentials: kelosv1alpha1.Credentials{
+					Type:      kelosv1alpha1.CredentialTypeOAuth,
+					SecretRef: kelosv1alpha1.SecretReference{Name: "claude-credentials"},
 				},
 			},
 		})
@@ -378,31 +378,31 @@ var _ = Describe("Task with workspace and secretRef", func() {
 			"GITHUB_TOKEN="+githubToken)
 
 		By("creating a Workspace resource with secretRef")
-		f.CreateWorkspace(&axonv1alpha1.Workspace{
+		f.CreateWorkspace(&kelosv1alpha1.Workspace{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "e2e-github-workspace",
 			},
-			Spec: axonv1alpha1.WorkspaceSpec{
-				Repo:      "https://github.com/axon-core/axon.git",
+			Spec: kelosv1alpha1.WorkspaceSpec{
+				Repo:      "https://github.com/kelos-dev/kelos.git",
 				Ref:       "main",
-				SecretRef: &axonv1alpha1.SecretReference{Name: "workspace-credentials"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "workspace-credentials"},
 			},
 		})
 
 		By("creating a Task with workspace ref")
-		f.CreateTask(&axonv1alpha1.Task{
+		f.CreateTask(&kelosv1alpha1.Task{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "github-task",
 			},
-			Spec: axonv1alpha1.TaskSpec{
+			Spec: kelosv1alpha1.TaskSpec{
 				Type:   "claude-code",
 				Model:  testModel,
 				Prompt: "Run 'gh auth status' and print the output",
-				Credentials: axonv1alpha1.Credentials{
-					Type:      axonv1alpha1.CredentialTypeOAuth,
-					SecretRef: axonv1alpha1.SecretReference{Name: "claude-credentials"},
+				Credentials: kelosv1alpha1.Credentials{
+					Type:      kelosv1alpha1.CredentialTypeOAuth,
+					SecretRef: kelosv1alpha1.SecretReference{Name: "claude-credentials"},
 				},
-				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "e2e-github-workspace"},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "e2e-github-workspace"},
 			},
 		})
 

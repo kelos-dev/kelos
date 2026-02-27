@@ -22,10 +22,10 @@ import (
 	context "context"
 	time "time"
 
-	axonapiv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
-	versioned "github.com/axon-core/axon/pkg/generated/clientset/versioned"
-	internalinterfaces "github.com/axon-core/axon/pkg/generated/informers/externalversions/internalinterfaces"
-	apiv1alpha1 "github.com/axon-core/axon/pkg/generated/listers/api/v1alpha1"
+	kelosapiv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	versioned "github.com/kelos-dev/kelos/pkg/generated/clientset/versioned"
+	internalinterfaces "github.com/kelos-dev/kelos/pkg/generated/informers/externalversions/internalinterfaces"
+	apiv1alpha1 "github.com/kelos-dev/kelos/pkg/generated/listers/api/v1alpha1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	watch "k8s.io/apimachinery/pkg/watch"
@@ -83,7 +83,7 @@ func NewFilteredTaskInformer(client versioned.Interface, namespace string, resyn
 				return client.ApiV1alpha1().Tasks(namespace).Watch(ctx, options)
 			},
 		}, client),
-		&axonapiv1alpha1.Task{},
+		&kelosapiv1alpha1.Task{},
 		resyncPeriod,
 		indexers,
 	)
@@ -94,7 +94,7 @@ func (f *taskInformer) defaultInformer(client versioned.Interface, resyncPeriod 
 }
 
 func (f *taskInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&axonapiv1alpha1.Task{}, f.defaultInformer)
+	return f.factory.InformerFor(&kelosapiv1alpha1.Task{}, f.defaultInformer)
 }
 
 func (f *taskInformer) Lister() apiv1alpha1.TaskLister {

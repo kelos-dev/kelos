@@ -15,8 +15,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
-	"github.com/axon-core/axon/internal/controller"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	"github.com/kelos-dev/kelos/internal/controller"
 )
 
 var _ = Describe("TaskSpawner Controller", func() {
@@ -36,39 +36,39 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
 
 			By("Creating a Workspace")
-			ws := &axonv1alpha1.Workspace{
+			ws := &kelosv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-workspace",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.WorkspaceSpec{
-					Repo: "https://github.com/axon-core/axon.git",
+				Spec: kelosv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/kelos-dev/kelos.git",
 					Ref:  "main",
 				},
 			}
 			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
 
 			By("Creating a TaskSpawner")
-			ts := &axonv1alpha1.TaskSpawner{
+			ts := &kelosv1alpha1.TaskSpawner{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-spawner",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.TaskSpawnerSpec{
-					When: axonv1alpha1.When{
-						GitHubIssues: &axonv1alpha1.GitHubIssues{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							State: "open",
 						},
 					},
-					TaskTemplate: axonv1alpha1.TaskTemplate{
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
-						Credentials: axonv1alpha1.Credentials{
-							Type: axonv1alpha1.CredentialTypeOAuth,
-							SecretRef: axonv1alpha1.SecretReference{
+						Credentials: kelosv1alpha1.Credentials{
+							Type: kelosv1alpha1.CredentialTypeOAuth,
+							SecretRef: kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
-						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 							Name: "test-workspace",
 						},
 					},
@@ -78,7 +78,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, ts)).Should(Succeed())
 
 			tsLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
-			createdTS := &axonv1alpha1.TaskSpawner{}
+			createdTS := &kelosv1alpha1.TaskSpawner{}
 
 			By("Verifying the TaskSpawner has a finalizer")
 			Eventually(func() bool {
@@ -87,7 +87,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					return false
 				}
 				for _, f := range createdTS.Finalizers {
-					if f == "axon.io/taskspawner-finalizer" {
+					if f == "kelos.dev/taskspawner-finalizer" {
 						return true
 					}
 				}
@@ -104,7 +104,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 			}, timeout, interval).Should(BeTrue())
 
 			By("Verifying the Deployment labels")
-			Expect(createdDeploy.Labels["axon.io/taskspawner"]).To(Equal(ts.Name))
+			Expect(createdDeploy.Labels["kelos.dev/taskspawner"]).To(Equal(ts.Name))
 
 			By("Verifying the Deployment spec")
 			Expect(createdDeploy.Spec.Template.Spec.Containers).To(HaveLen(1))
@@ -114,8 +114,8 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(container.Args).To(ConsistOf(
 				"--taskspawner-name="+ts.Name,
 				"--taskspawner-namespace="+ns.Name,
-				"--github-owner=axon-core",
-				"--github-repo=axon",
+				"--github-owner=kelos-dev",
+				"--github-repo=kelos",
 			))
 
 			By("Verifying the ServiceAccount")
@@ -141,7 +141,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 			}, timeout, interval).Should(Equal(ts.Name))
 
 			By("Verifying TaskSpawner phase is Pending")
-			Expect(createdTS.Status.Phase).To(Equal(axonv1alpha1.TaskSpawnerPhasePending))
+			Expect(createdTS.Status.Phase).To(Equal(kelosv1alpha1.TaskSpawnerPhasePending))
 		})
 	})
 
@@ -168,15 +168,15 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
 
 			By("Creating a Workspace with secretRef")
-			ws := &axonv1alpha1.Workspace{
+			ws := &kelosv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-workspace-token",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.WorkspaceSpec{
-					Repo: "https://github.com/axon-core/axon.git",
+				Spec: kelosv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/kelos-dev/kelos.git",
 					Ref:  "main",
-					SecretRef: &axonv1alpha1.SecretReference{
+					SecretRef: &kelosv1alpha1.SecretReference{
 						Name: "github-token",
 					},
 				},
@@ -184,24 +184,24 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
 
 			By("Creating a TaskSpawner with workspace secretRef")
-			ts := &axonv1alpha1.TaskSpawner{
+			ts := &kelosv1alpha1.TaskSpawner{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-spawner-token",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.TaskSpawnerSpec{
-					When: axonv1alpha1.When{
-						GitHubIssues: &axonv1alpha1.GitHubIssues{},
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 					},
-					TaskTemplate: axonv1alpha1.TaskTemplate{
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
-						Credentials: axonv1alpha1.Credentials{
-							Type: axonv1alpha1.CredentialTypeOAuth,
-							SecretRef: axonv1alpha1.SecretReference{
+						Credentials: kelosv1alpha1.Credentials{
+							Type: kelosv1alpha1.CredentialTypeOAuth,
+							SecretRef: kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
-						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 							Name: "test-workspace-token",
 						},
 					},
@@ -238,36 +238,36 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
 
 			By("Creating a Workspace")
-			ws := &axonv1alpha1.Workspace{
+			ws := &kelosv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-workspace-delete",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.WorkspaceSpec{
-					Repo: "https://github.com/axon-core/axon.git",
+				Spec: kelosv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/kelos-dev/kelos.git",
 				},
 			}
 			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
 
 			By("Creating a TaskSpawner")
-			ts := &axonv1alpha1.TaskSpawner{
+			ts := &kelosv1alpha1.TaskSpawner{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-spawner-delete",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.TaskSpawnerSpec{
-					When: axonv1alpha1.When{
-						GitHubIssues: &axonv1alpha1.GitHubIssues{},
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 					},
-					TaskTemplate: axonv1alpha1.TaskTemplate{
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
-						Credentials: axonv1alpha1.Credentials{
-							Type: axonv1alpha1.CredentialTypeOAuth,
-							SecretRef: axonv1alpha1.SecretReference{
+						Credentials: kelosv1alpha1.Credentials{
+							Type: kelosv1alpha1.CredentialTypeOAuth,
+							SecretRef: kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
-						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 							Name: "test-workspace-delete",
 						},
 					},
@@ -276,7 +276,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, ts)).Should(Succeed())
 
 			tsLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
-			createdTS := &axonv1alpha1.TaskSpawner{}
+			createdTS := &kelosv1alpha1.TaskSpawner{}
 
 			By("Waiting for the Deployment to be created")
 			deployLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
@@ -308,36 +308,36 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
 
 			By("Creating a Workspace")
-			ws := &axonv1alpha1.Workspace{
+			ws := &kelosv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-workspace-idempotent",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.WorkspaceSpec{
-					Repo: "https://github.com/axon-core/axon.git",
+				Spec: kelosv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/kelos-dev/kelos.git",
 				},
 			}
 			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
 
 			By("Creating a TaskSpawner")
-			ts := &axonv1alpha1.TaskSpawner{
+			ts := &kelosv1alpha1.TaskSpawner{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-spawner-idempotent",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.TaskSpawnerSpec{
-					When: axonv1alpha1.When{
-						GitHubIssues: &axonv1alpha1.GitHubIssues{},
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 					},
-					TaskTemplate: axonv1alpha1.TaskTemplate{
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
-						Credentials: axonv1alpha1.Credentials{
-							Type: axonv1alpha1.CredentialTypeOAuth,
-							SecretRef: axonv1alpha1.SecretReference{
+						Credentials: kelosv1alpha1.Credentials{
+							Type: kelosv1alpha1.CredentialTypeOAuth,
+							SecretRef: kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
-						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 							Name: "test-workspace-idempotent",
 						},
 					},
@@ -357,13 +357,13 @@ var _ = Describe("TaskSpawner Controller", func() {
 			deployList := &appsv1.DeploymentList{}
 			Expect(k8sClient.List(ctx, deployList,
 				client.InNamespace(ns.Name),
-				client.MatchingLabels{"axon.io/taskspawner": ts.Name},
+				client.MatchingLabels{"kelos.dev/taskspawner": ts.Name},
 			)).Should(Succeed())
 			Expect(deployList.Items).To(HaveLen(1))
 
 			By("Triggering re-reconcile by updating TaskSpawner")
 			tsLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
-			updatedTS := &axonv1alpha1.TaskSpawner{}
+			updatedTS := &kelosv1alpha1.TaskSpawner{}
 			Expect(k8sClient.Get(ctx, tsLookupKey, updatedTS)).Should(Succeed())
 			if updatedTS.Annotations == nil {
 				updatedTS.Annotations = map[string]string{}
@@ -376,7 +376,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 				dl := &appsv1.DeploymentList{}
 				err := k8sClient.List(ctx, dl,
 					client.InNamespace(ns.Name),
-					client.MatchingLabels{"axon.io/taskspawner": ts.Name},
+					client.MatchingLabels{"kelos.dev/taskspawner": ts.Name},
 				)
 				if err != nil {
 					return -1
@@ -397,40 +397,40 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
 
 			By("Creating a Workspace")
-			ws := &axonv1alpha1.Workspace{
+			ws := &kelosv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-workspace-types",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.WorkspaceSpec{
-					Repo: "https://github.com/axon-core/axon.git",
+				Spec: kelosv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/kelos-dev/kelos.git",
 					Ref:  "main",
 				},
 			}
 			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
 
 			By("Creating a TaskSpawner with types=[issues, pulls]")
-			ts := &axonv1alpha1.TaskSpawner{
+			ts := &kelosv1alpha1.TaskSpawner{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-spawner-types",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.TaskSpawnerSpec{
-					When: axonv1alpha1.When{
-						GitHubIssues: &axonv1alpha1.GitHubIssues{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							Types: []string{"issues", "pulls"},
 							State: "open",
 						},
 					},
-					TaskTemplate: axonv1alpha1.TaskTemplate{
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
-						Credentials: axonv1alpha1.Credentials{
-							Type: axonv1alpha1.CredentialTypeOAuth,
-							SecretRef: axonv1alpha1.SecretReference{
+						Credentials: kelosv1alpha1.Credentials{
+							Type: kelosv1alpha1.CredentialTypeOAuth,
+							SecretRef: kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
-						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 							Name: "test-workspace-types",
 						},
 					},
@@ -441,7 +441,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 
 			By("Verifying the TaskSpawner spec preserves types")
 			tsLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
-			createdTS := &axonv1alpha1.TaskSpawner{}
+			createdTS := &kelosv1alpha1.TaskSpawner{}
 			Eventually(func() bool {
 				err := k8sClient.Get(ctx, tsLookupKey, createdTS)
 				return err == nil
@@ -470,24 +470,24 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
 
 			By("Creating a TaskSpawner referencing a nonexistent Workspace")
-			ts := &axonv1alpha1.TaskSpawner{
+			ts := &kelosv1alpha1.TaskSpawner{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-spawner-no-workspace",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.TaskSpawnerSpec{
-					When: axonv1alpha1.When{
-						GitHubIssues: &axonv1alpha1.GitHubIssues{},
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 					},
-					TaskTemplate: axonv1alpha1.TaskTemplate{
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
-						Credentials: axonv1alpha1.Credentials{
-							Type: axonv1alpha1.CredentialTypeOAuth,
-							SecretRef: axonv1alpha1.SecretReference{
+						Credentials: kelosv1alpha1.Credentials{
+							Type: kelosv1alpha1.CredentialTypeOAuth,
+							SecretRef: kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
-						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 							Name: "nonexistent-workspace",
 						},
 					},
@@ -506,24 +506,24 @@ var _ = Describe("TaskSpawner Controller", func() {
 
 			By("Verifying the TaskSpawner is not marked as Failed")
 			tsLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
-			createdTS := &axonv1alpha1.TaskSpawner{}
+			createdTS := &kelosv1alpha1.TaskSpawner{}
 
 			Consistently(func() bool {
 				err := k8sClient.Get(ctx, tsLookupKey, createdTS)
 				if err != nil {
 					return true
 				}
-				return createdTS.Status.Phase != axonv1alpha1.TaskSpawnerPhaseFailed
+				return createdTS.Status.Phase != kelosv1alpha1.TaskSpawnerPhaseFailed
 			}, 3*time.Second, interval).Should(BeTrue())
 
 			By("Creating the Workspace and verifying the Deployment is eventually created")
-			ws := &axonv1alpha1.Workspace{
+			ws := &kelosv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "nonexistent-workspace",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.WorkspaceSpec{
-					Repo: "https://github.com/axon-core/axon.git",
+				Spec: kelosv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/kelos-dev/kelos.git",
 					Ref:  "main",
 				},
 			}
@@ -547,13 +547,13 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
 
 			By("Creating a Workspace")
-			ws := &axonv1alpha1.Workspace{
+			ws := &kelosv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-workspace-maxconc",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.WorkspaceSpec{
-					Repo: "https://github.com/axon-core/axon.git",
+				Spec: kelosv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/kelos-dev/kelos.git",
 					Ref:  "main",
 				},
 			}
@@ -561,26 +561,26 @@ var _ = Describe("TaskSpawner Controller", func() {
 
 			By("Creating a TaskSpawner with maxConcurrency=3")
 			maxConc := int32(3)
-			ts := &axonv1alpha1.TaskSpawner{
+			ts := &kelosv1alpha1.TaskSpawner{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-spawner-maxconc",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.TaskSpawnerSpec{
-					When: axonv1alpha1.When{
-						GitHubIssues: &axonv1alpha1.GitHubIssues{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							State: "open",
 						},
 					},
-					TaskTemplate: axonv1alpha1.TaskTemplate{
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
-						Credentials: axonv1alpha1.Credentials{
-							Type: axonv1alpha1.CredentialTypeOAuth,
-							SecretRef: axonv1alpha1.SecretReference{
+						Credentials: kelosv1alpha1.Credentials{
+							Type: kelosv1alpha1.CredentialTypeOAuth,
+							SecretRef: kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
-						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 							Name: "test-workspace-maxconc",
 						},
 					},
@@ -592,7 +592,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 
 			By("Verifying maxConcurrency is stored in spec")
 			tsLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
-			createdTS := &axonv1alpha1.TaskSpawner{}
+			createdTS := &kelosv1alpha1.TaskSpawner{}
 			Eventually(func() bool {
 				err := k8sClient.Get(ctx, tsLookupKey, createdTS)
 				return err == nil
@@ -619,7 +619,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 			}, timeout, interval).Should(Succeed())
 
 			By("Verifying activeTasks is stored in status")
-			updatedTS := &axonv1alpha1.TaskSpawner{}
+			updatedTS := &kelosv1alpha1.TaskSpawner{}
 			Eventually(func() int {
 				err := k8sClient.Get(ctx, tsLookupKey, updatedTS)
 				if err != nil {
@@ -641,22 +641,22 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
 
 			By("Creating a TaskSpawner with cron source")
-			ts := &axonv1alpha1.TaskSpawner{
+			ts := &kelosv1alpha1.TaskSpawner{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-spawner-cron",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.TaskSpawnerSpec{
-					When: axonv1alpha1.When{
-						Cron: &axonv1alpha1.Cron{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						Cron: &kelosv1alpha1.Cron{
 							Schedule: "0 9 * * 1",
 						},
 					},
-					TaskTemplate: axonv1alpha1.TaskTemplate{
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
-						Credentials: axonv1alpha1.Credentials{
-							Type: axonv1alpha1.CredentialTypeOAuth,
-							SecretRef: axonv1alpha1.SecretReference{
+						Credentials: kelosv1alpha1.Credentials{
+							Type: kelosv1alpha1.CredentialTypeOAuth,
+							SecretRef: kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
@@ -667,7 +667,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, ts)).Should(Succeed())
 
 			tsLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
-			createdTS := &axonv1alpha1.TaskSpawner{}
+			createdTS := &kelosv1alpha1.TaskSpawner{}
 
 			By("Verifying the TaskSpawner has a finalizer")
 			Eventually(func() bool {
@@ -676,7 +676,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					return false
 				}
 				for _, f := range createdTS.Finalizers {
-					if f == "axon.io/taskspawner-finalizer" {
+					if f == "kelos.dev/taskspawner-finalizer" {
 						return true
 					}
 				}
@@ -693,7 +693,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 			}, timeout, interval).Should(BeTrue())
 
 			By("Verifying the Deployment labels")
-			Expect(createdDeploy.Labels["axon.io/taskspawner"]).To(Equal(ts.Name))
+			Expect(createdDeploy.Labels["kelos.dev/taskspawner"]).To(Equal(ts.Name))
 
 			By("Verifying the Deployment spec")
 			Expect(createdDeploy.Spec.Template.Spec.Containers).To(HaveLen(1))
@@ -723,7 +723,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 			}, timeout, interval).Should(Equal(ts.Name))
 
 			By("Verifying TaskSpawner phase is Pending")
-			Expect(createdTS.Status.Phase).To(Equal(axonv1alpha1.TaskSpawnerPhasePending))
+			Expect(createdTS.Status.Phase).To(Equal(kelosv1alpha1.TaskSpawnerPhasePending))
 		})
 	})
 
@@ -760,15 +760,15 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, ghAppSecret)).Should(Succeed())
 
 			By("Creating a Workspace with GitHub App secretRef")
-			ws := &axonv1alpha1.Workspace{
+			ws := &kelosv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-workspace-app",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.WorkspaceSpec{
-					Repo: "https://github.com/axon-core/axon.git",
+				Spec: kelosv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/kelos-dev/kelos.git",
 					Ref:  "main",
-					SecretRef: &axonv1alpha1.SecretReference{
+					SecretRef: &kelosv1alpha1.SecretReference{
 						Name: "github-app-creds",
 					},
 				},
@@ -776,26 +776,26 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
 
 			By("Creating a TaskSpawner")
-			ts := &axonv1alpha1.TaskSpawner{
+			ts := &kelosv1alpha1.TaskSpawner{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-spawner-app",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.TaskSpawnerSpec{
-					When: axonv1alpha1.When{
-						GitHubIssues: &axonv1alpha1.GitHubIssues{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							State: "open",
 						},
 					},
-					TaskTemplate: axonv1alpha1.TaskTemplate{
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
-						Credentials: axonv1alpha1.Credentials{
-							Type: axonv1alpha1.CredentialTypeOAuth,
-							SecretRef: axonv1alpha1.SecretReference{
+						Credentials: kelosv1alpha1.Credentials{
+							Type: kelosv1alpha1.CredentialTypeOAuth,
+							SecretRef: kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
-						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 							Name: "test-workspace-app",
 						},
 					},
@@ -885,13 +885,13 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
 
 			By("Creating a Workspace")
-			ws := &axonv1alpha1.Workspace{
+			ws := &kelosv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-workspace-suspend",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.WorkspaceSpec{
-					Repo: "https://github.com/axon-core/axon.git",
+				Spec: kelosv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/kelos-dev/kelos.git",
 					Ref:  "main",
 				},
 			}
@@ -899,26 +899,26 @@ var _ = Describe("TaskSpawner Controller", func() {
 
 			By("Creating a TaskSpawner with suspend=true")
 			suspend := true
-			ts := &axonv1alpha1.TaskSpawner{
+			ts := &kelosv1alpha1.TaskSpawner{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-spawner-suspend",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.TaskSpawnerSpec{
-					When: axonv1alpha1.When{
-						GitHubIssues: &axonv1alpha1.GitHubIssues{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							State: "open",
 						},
 					},
-					TaskTemplate: axonv1alpha1.TaskTemplate{
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
-						Credentials: axonv1alpha1.Credentials{
-							Type: axonv1alpha1.CredentialTypeOAuth,
-							SecretRef: axonv1alpha1.SecretReference{
+						Credentials: kelosv1alpha1.Credentials{
+							Type: kelosv1alpha1.CredentialTypeOAuth,
+							SecretRef: kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
-						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 							Name: "test-workspace-suspend",
 						},
 					},
@@ -942,14 +942,14 @@ var _ = Describe("TaskSpawner Controller", func() {
 
 			By("Verifying TaskSpawner phase is Suspended")
 			tsLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
-			createdTS := &axonv1alpha1.TaskSpawner{}
-			Eventually(func() axonv1alpha1.TaskSpawnerPhase {
+			createdTS := &kelosv1alpha1.TaskSpawner{}
+			Eventually(func() kelosv1alpha1.TaskSpawnerPhase {
 				err := k8sClient.Get(ctx, tsLookupKey, createdTS)
 				if err != nil {
 					return ""
 				}
 				return createdTS.Status.Phase
-			}, timeout, interval).Should(Equal(axonv1alpha1.TaskSpawnerPhaseSuspended))
+			}, timeout, interval).Should(Equal(kelosv1alpha1.TaskSpawnerPhaseSuspended))
 
 			Expect(createdTS.Status.Message).To(Equal("Suspended by user"))
 		})
@@ -966,13 +966,13 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
 
 			By("Creating a Workspace")
-			ws := &axonv1alpha1.Workspace{
+			ws := &kelosv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-workspace-resume",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.WorkspaceSpec{
-					Repo: "https://github.com/axon-core/axon.git",
+				Spec: kelosv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/kelos-dev/kelos.git",
 					Ref:  "main",
 				},
 			}
@@ -980,26 +980,26 @@ var _ = Describe("TaskSpawner Controller", func() {
 
 			By("Creating a TaskSpawner with suspend=true")
 			suspend := true
-			ts := &axonv1alpha1.TaskSpawner{
+			ts := &kelosv1alpha1.TaskSpawner{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-spawner-resume",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.TaskSpawnerSpec{
-					When: axonv1alpha1.When{
-						GitHubIssues: &axonv1alpha1.GitHubIssues{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							State: "open",
 						},
 					},
-					TaskTemplate: axonv1alpha1.TaskTemplate{
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
-						Credentials: axonv1alpha1.Credentials{
-							Type: axonv1alpha1.CredentialTypeOAuth,
-							SecretRef: axonv1alpha1.SecretReference{
+						Credentials: kelosv1alpha1.Credentials{
+							Type: kelosv1alpha1.CredentialTypeOAuth,
+							SecretRef: kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
-						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 							Name: "test-workspace-resume",
 						},
 					},
@@ -1023,14 +1023,14 @@ var _ = Describe("TaskSpawner Controller", func() {
 			}, timeout, interval).Should(BeTrue())
 
 			By("Waiting for phase to be Suspended")
-			createdTS := &axonv1alpha1.TaskSpawner{}
-			Eventually(func() axonv1alpha1.TaskSpawnerPhase {
+			createdTS := &kelosv1alpha1.TaskSpawner{}
+			Eventually(func() kelosv1alpha1.TaskSpawnerPhase {
 				err := k8sClient.Get(ctx, tsLookupKey, createdTS)
 				if err != nil {
 					return ""
 				}
 				return createdTS.Status.Phase
-			}, timeout, interval).Should(Equal(axonv1alpha1.TaskSpawnerPhaseSuspended))
+			}, timeout, interval).Should(Equal(kelosv1alpha1.TaskSpawnerPhaseSuspended))
 
 			By("Resuming the TaskSpawner by setting suspend=false")
 			Eventually(func() error {
@@ -1053,13 +1053,13 @@ var _ = Describe("TaskSpawner Controller", func() {
 			}, timeout, interval).Should(Equal(int32(1)))
 
 			By("Verifying TaskSpawner phase is Running")
-			Eventually(func() axonv1alpha1.TaskSpawnerPhase {
+			Eventually(func() kelosv1alpha1.TaskSpawnerPhase {
 				err := k8sClient.Get(ctx, tsLookupKey, createdTS)
 				if err != nil {
 					return ""
 				}
 				return createdTS.Status.Phase
-			}, timeout, interval).Should(Equal(axonv1alpha1.TaskSpawnerPhaseRunning))
+			}, timeout, interval).Should(Equal(kelosv1alpha1.TaskSpawnerPhaseRunning))
 
 			Expect(createdTS.Status.Message).To(Equal("Resumed"))
 		})
@@ -1076,13 +1076,13 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
 
 			By("Creating a Workspace")
-			ws := &axonv1alpha1.Workspace{
+			ws := &kelosv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-workspace-maxtotal",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.WorkspaceSpec{
-					Repo: "https://github.com/axon-core/axon.git",
+				Spec: kelosv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/kelos-dev/kelos.git",
 					Ref:  "main",
 				},
 			}
@@ -1090,26 +1090,26 @@ var _ = Describe("TaskSpawner Controller", func() {
 
 			By("Creating a TaskSpawner with maxTotalTasks=10")
 			maxTotal := int32(10)
-			ts := &axonv1alpha1.TaskSpawner{
+			ts := &kelosv1alpha1.TaskSpawner{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-spawner-maxtotal",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.TaskSpawnerSpec{
-					When: axonv1alpha1.When{
-						GitHubIssues: &axonv1alpha1.GitHubIssues{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							State: "open",
 						},
 					},
-					TaskTemplate: axonv1alpha1.TaskTemplate{
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
-						Credentials: axonv1alpha1.Credentials{
-							Type: axonv1alpha1.CredentialTypeOAuth,
-							SecretRef: axonv1alpha1.SecretReference{
+						Credentials: kelosv1alpha1.Credentials{
+							Type: kelosv1alpha1.CredentialTypeOAuth,
+							SecretRef: kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
-						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 							Name: "test-workspace-maxtotal",
 						},
 					},
@@ -1121,7 +1121,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 
 			By("Verifying maxTotalTasks is stored in spec")
 			tsLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
-			createdTS := &axonv1alpha1.TaskSpawner{}
+			createdTS := &kelosv1alpha1.TaskSpawner{}
 			Eventually(func() bool {
 				err := k8sClient.Get(ctx, tsLookupKey, createdTS)
 				return err == nil
@@ -1150,39 +1150,39 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
 
 			By("Creating a Workspace")
-			ws := &axonv1alpha1.Workspace{
+			ws := &kelosv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-workspace-suspend-running",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.WorkspaceSpec{
-					Repo: "https://github.com/axon-core/axon.git",
+				Spec: kelosv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/kelos-dev/kelos.git",
 					Ref:  "main",
 				},
 			}
 			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
 
 			By("Creating a TaskSpawner (not suspended)")
-			ts := &axonv1alpha1.TaskSpawner{
+			ts := &kelosv1alpha1.TaskSpawner{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-spawner-suspend-running",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.TaskSpawnerSpec{
-					When: axonv1alpha1.When{
-						GitHubIssues: &axonv1alpha1.GitHubIssues{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							State: "open",
 						},
 					},
-					TaskTemplate: axonv1alpha1.TaskTemplate{
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
-						Credentials: axonv1alpha1.Credentials{
-							Type: axonv1alpha1.CredentialTypeOAuth,
-							SecretRef: axonv1alpha1.SecretReference{
+						Credentials: kelosv1alpha1.Credentials{
+							Type: kelosv1alpha1.CredentialTypeOAuth,
+							SecretRef: kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
-						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 							Name: "test-workspace-suspend-running",
 						},
 					},
@@ -1205,14 +1205,14 @@ var _ = Describe("TaskSpawner Controller", func() {
 			}, timeout, interval).Should(BeTrue())
 
 			By("Waiting for phase to be Pending")
-			createdTS := &axonv1alpha1.TaskSpawner{}
-			Eventually(func() axonv1alpha1.TaskSpawnerPhase {
+			createdTS := &kelosv1alpha1.TaskSpawner{}
+			Eventually(func() kelosv1alpha1.TaskSpawnerPhase {
 				err := k8sClient.Get(ctx, tsLookupKey, createdTS)
 				if err != nil {
 					return ""
 				}
 				return createdTS.Status.Phase
-			}, timeout, interval).Should(Equal(axonv1alpha1.TaskSpawnerPhasePending))
+			}, timeout, interval).Should(Equal(kelosv1alpha1.TaskSpawnerPhasePending))
 
 			By("Suspending the TaskSpawner")
 			Eventually(func() error {
@@ -1235,13 +1235,13 @@ var _ = Describe("TaskSpawner Controller", func() {
 			}, timeout, interval).Should(Equal(int32(0)))
 
 			By("Verifying TaskSpawner phase is Suspended")
-			Eventually(func() axonv1alpha1.TaskSpawnerPhase {
+			Eventually(func() kelosv1alpha1.TaskSpawnerPhase {
 				err := k8sClient.Get(ctx, tsLookupKey, createdTS)
 				if err != nil {
 					return ""
 				}
 				return createdTS.Status.Phase
-			}, timeout, interval).Should(Equal(axonv1alpha1.TaskSpawnerPhaseSuspended))
+			}, timeout, interval).Should(Equal(kelosv1alpha1.TaskSpawnerPhaseSuspended))
 
 			By("Verifying DeploymentUpdated event is emitted")
 			Eventually(func() bool {
@@ -1271,39 +1271,39 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
 
 			By("Creating a Workspace")
-			ws := &axonv1alpha1.Workspace{
+			ws := &kelosv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-workspace-events",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.WorkspaceSpec{
-					Repo: "https://github.com/axon-core/axon.git",
+				Spec: kelosv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/kelos-dev/kelos.git",
 					Ref:  "main",
 				},
 			}
 			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
 
 			By("Creating a TaskSpawner")
-			ts := &axonv1alpha1.TaskSpawner{
+			ts := &kelosv1alpha1.TaskSpawner{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-spawner-events",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.TaskSpawnerSpec{
-					When: axonv1alpha1.When{
-						GitHubIssues: &axonv1alpha1.GitHubIssues{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							State: "open",
 						},
 					},
-					TaskTemplate: axonv1alpha1.TaskTemplate{
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
-						Credentials: axonv1alpha1.Credentials{
-							Type: axonv1alpha1.CredentialTypeOAuth,
-							SecretRef: axonv1alpha1.SecretReference{
+						Credentials: kelosv1alpha1.Credentials{
+							Type: kelosv1alpha1.CredentialTypeOAuth,
+							SecretRef: kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
-						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 							Name: "test-workspace-events",
 						},
 					},
@@ -1350,42 +1350,42 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
 
 			By("Creating a Workspace")
-			ws := &axonv1alpha1.Workspace{
+			ws := &kelosv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-workspace",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.WorkspaceSpec{
-					Repo: "https://github.com/axon-core/axon.git",
+				Spec: kelosv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/kelos-dev/kelos.git",
 					Ref:  "main",
 				},
 			}
 			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
 
 			By("Creating a TaskSpawner with branch template")
-			ts := &axonv1alpha1.TaskSpawner{
+			ts := &kelosv1alpha1.TaskSpawner{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "spawner-branch-tmpl",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.TaskSpawnerSpec{
-					When: axonv1alpha1.When{
-						GitHubIssues: &axonv1alpha1.GitHubIssues{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							State: "open",
 						},
 					},
-					TaskTemplate: axonv1alpha1.TaskTemplate{
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
-						Credentials: axonv1alpha1.Credentials{
-							Type: axonv1alpha1.CredentialTypeOAuth,
-							SecretRef: axonv1alpha1.SecretReference{
+						Credentials: kelosv1alpha1.Credentials{
+							Type: kelosv1alpha1.CredentialTypeOAuth,
+							SecretRef: kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
-						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 							Name: "test-workspace",
 						},
-						Branch: "axon-task-{{.Number}}",
+						Branch: "kelos-task-{{.Number}}",
 					},
 					PollInterval: "5m",
 				},
@@ -1394,12 +1394,12 @@ var _ = Describe("TaskSpawner Controller", func() {
 
 			By("Verifying the branch template is stored in the spec")
 			tsLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
-			createdTS := &axonv1alpha1.TaskSpawner{}
+			createdTS := &kelosv1alpha1.TaskSpawner{}
 			Eventually(func() bool {
 				err := k8sClient.Get(ctx, tsLookupKey, createdTS)
 				return err == nil
 			}, timeout, interval).Should(BeTrue())
-			Expect(createdTS.Spec.TaskTemplate.Branch).To(Equal("axon-task-{{.Number}}"))
+			Expect(createdTS.Spec.TaskTemplate.Branch).To(Equal("kelos-task-{{.Number}}"))
 
 			By("Verifying a Deployment is created")
 			deployLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
@@ -1426,12 +1426,12 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
 
 			By("Creating a Workspace pointing to the fork")
-			ws := &axonv1alpha1.Workspace{
+			ws := &kelosv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-workspace-fork",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.WorkspaceSpec{
+				Spec: kelosv1alpha1.WorkspaceSpec{
 					Repo: "https://github.com/my-fork/my-repo.git",
 					Ref:  "main",
 				},
@@ -1439,27 +1439,27 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
 
 			By("Creating a TaskSpawner with githubIssues.repo pointing to upstream")
-			ts := &axonv1alpha1.TaskSpawner{
+			ts := &kelosv1alpha1.TaskSpawner{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-spawner-fork",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.TaskSpawnerSpec{
-					When: axonv1alpha1.When{
-						GitHubIssues: &axonv1alpha1.GitHubIssues{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							Repo:  "https://github.com/upstream-org/my-repo.git",
 							State: "open",
 						},
 					},
-					TaskTemplate: axonv1alpha1.TaskTemplate{
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
-						Credentials: axonv1alpha1.Credentials{
-							Type: axonv1alpha1.CredentialTypeOAuth,
-							SecretRef: axonv1alpha1.SecretReference{
+						Credentials: kelosv1alpha1.Credentials{
+							Type: kelosv1alpha1.CredentialTypeOAuth,
+							SecretRef: kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
-						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 							Name: "test-workspace-fork",
 						},
 					},
@@ -1508,15 +1508,15 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, patSecret)).Should(Succeed())
 
 			By("Creating a Workspace with PAT secretRef")
-			ws := &axonv1alpha1.Workspace{
+			ws := &kelosv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-workspace-switch",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.WorkspaceSpec{
-					Repo: "https://github.com/axon-core/axon.git",
+				Spec: kelosv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/kelos-dev/kelos.git",
 					Ref:  "main",
-					SecretRef: &axonv1alpha1.SecretReference{
+					SecretRef: &kelosv1alpha1.SecretReference{
 						Name: "switch-secret",
 					},
 				},
@@ -1524,24 +1524,24 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
 
 			By("Creating a TaskSpawner referencing the workspace")
-			ts := &axonv1alpha1.TaskSpawner{
+			ts := &kelosv1alpha1.TaskSpawner{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-spawner-switch",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.TaskSpawnerSpec{
-					When: axonv1alpha1.When{
-						GitHubIssues: &axonv1alpha1.GitHubIssues{},
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 					},
-					TaskTemplate: axonv1alpha1.TaskTemplate{
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
-						Credentials: axonv1alpha1.Credentials{
-							Type: axonv1alpha1.CredentialTypeOAuth,
-							SecretRef: axonv1alpha1.SecretReference{
+						Credentials: kelosv1alpha1.Credentials{
+							Type: kelosv1alpha1.CredentialTypeOAuth,
+							SecretRef: kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
-						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 							Name: "test-workspace-switch",
 						},
 					},
@@ -1646,15 +1646,15 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, appSecret)).Should(Succeed())
 
 			By("Creating a Workspace with GitHub App secretRef")
-			ws := &axonv1alpha1.Workspace{
+			ws := &kelosv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-workspace-switch-2",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.WorkspaceSpec{
-					Repo: "https://github.com/axon-core/axon.git",
+				Spec: kelosv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/kelos-dev/kelos.git",
 					Ref:  "main",
-					SecretRef: &axonv1alpha1.SecretReference{
+					SecretRef: &kelosv1alpha1.SecretReference{
 						Name: "switch-secret-2",
 					},
 				},
@@ -1662,24 +1662,24 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
 
 			By("Creating a TaskSpawner referencing the workspace")
-			ts := &axonv1alpha1.TaskSpawner{
+			ts := &kelosv1alpha1.TaskSpawner{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-spawner-switch-2",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.TaskSpawnerSpec{
-					When: axonv1alpha1.When{
-						GitHubIssues: &axonv1alpha1.GitHubIssues{},
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 					},
-					TaskTemplate: axonv1alpha1.TaskTemplate{
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
-						Credentials: axonv1alpha1.Credentials{
-							Type: axonv1alpha1.CredentialTypeOAuth,
-							SecretRef: axonv1alpha1.SecretReference{
+						Credentials: kelosv1alpha1.Credentials{
+							Type: kelosv1alpha1.CredentialTypeOAuth,
+							SecretRef: kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
-						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 							Name: "test-workspace-switch-2",
 						},
 					},
@@ -1792,15 +1792,15 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, appSecret)).Should(Succeed())
 
 			By("Creating a Workspace with PAT secretRef")
-			ws := &axonv1alpha1.Workspace{
+			ws := &kelosv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-workspace-ws-change",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.WorkspaceSpec{
-					Repo: "https://github.com/axon-core/axon.git",
+				Spec: kelosv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/kelos-dev/kelos.git",
 					Ref:  "main",
-					SecretRef: &axonv1alpha1.SecretReference{
+					SecretRef: &kelosv1alpha1.SecretReference{
 						Name: "pat-secret-ws",
 					},
 				},
@@ -1808,24 +1808,24 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
 
 			By("Creating a TaskSpawner referencing the workspace")
-			ts := &axonv1alpha1.TaskSpawner{
+			ts := &kelosv1alpha1.TaskSpawner{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-spawner-ws-change",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.TaskSpawnerSpec{
-					When: axonv1alpha1.When{
-						GitHubIssues: &axonv1alpha1.GitHubIssues{},
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 					},
-					TaskTemplate: axonv1alpha1.TaskTemplate{
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
-						Credentials: axonv1alpha1.Credentials{
-							Type: axonv1alpha1.CredentialTypeOAuth,
-							SecretRef: axonv1alpha1.SecretReference{
+						Credentials: kelosv1alpha1.Credentials{
+							Type: kelosv1alpha1.CredentialTypeOAuth,
+							SecretRef: kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
-						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 							Name: "test-workspace-ws-change",
 						},
 					},
@@ -1846,11 +1846,11 @@ var _ = Describe("TaskSpawner Controller", func() {
 
 			By("Updating workspace to point to GitHub App secret")
 			Eventually(func() error {
-				wsObj := &axonv1alpha1.Workspace{}
+				wsObj := &kelosv1alpha1.Workspace{}
 				if err := k8sClient.Get(ctx, types.NamespacedName{Name: "test-workspace-ws-change", Namespace: ns.Name}, wsObj); err != nil {
 					return err
 				}
-				wsObj.Spec.SecretRef = &axonv1alpha1.SecretReference{
+				wsObj.Spec.SecretRef = &kelosv1alpha1.SecretReference{
 					Name: "app-secret-ws",
 				}
 				return k8sClient.Update(ctx, wsObj)
@@ -1881,41 +1881,41 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
 
 			By("Creating a Workspace")
-			ws := &axonv1alpha1.Workspace{
+			ws := &kelosv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-workspace-comments",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.WorkspaceSpec{
-					Repo: "https://github.com/axon-core/axon.git",
+				Spec: kelosv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/kelos-dev/kelos.git",
 					Ref:  "main",
 				},
 			}
 			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
 
 			By("Creating a TaskSpawner with triggerComment and excludeComments")
-			ts := &axonv1alpha1.TaskSpawner{
+			ts := &kelosv1alpha1.TaskSpawner{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-spawner-comments",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.TaskSpawnerSpec{
-					When: axonv1alpha1.When{
-						GitHubIssues: &axonv1alpha1.GitHubIssues{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							State:           "open",
-							TriggerComment:  "/axon pick-up",
-							ExcludeComments: []string{"/axon needs-input", "/axon pause"},
+							TriggerComment:  "/kelos pick-up",
+							ExcludeComments: []string{"/kelos needs-input", "/kelos pause"},
 						},
 					},
-					TaskTemplate: axonv1alpha1.TaskTemplate{
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
-						Credentials: axonv1alpha1.Credentials{
-							Type: axonv1alpha1.CredentialTypeOAuth,
-							SecretRef: axonv1alpha1.SecretReference{
+						Credentials: kelosv1alpha1.Credentials{
+							Type: kelosv1alpha1.CredentialTypeOAuth,
+							SecretRef: kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
-						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 							Name: "test-workspace-comments",
 						},
 					},
@@ -1926,13 +1926,13 @@ var _ = Describe("TaskSpawner Controller", func() {
 
 			By("Verifying the comment fields are stored in spec")
 			tsLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
-			createdTS := &axonv1alpha1.TaskSpawner{}
+			createdTS := &kelosv1alpha1.TaskSpawner{}
 			Eventually(func() bool {
 				err := k8sClient.Get(ctx, tsLookupKey, createdTS)
 				return err == nil
 			}, timeout, interval).Should(BeTrue())
-			Expect(createdTS.Spec.When.GitHubIssues.TriggerComment).To(Equal("/axon pick-up"))
-			Expect(createdTS.Spec.When.GitHubIssues.ExcludeComments).To(ConsistOf("/axon needs-input", "/axon pause"))
+			Expect(createdTS.Spec.When.GitHubIssues.TriggerComment).To(Equal("/kelos pick-up"))
+			Expect(createdTS.Spec.When.GitHubIssues.ExcludeComments).To(ConsistOf("/kelos needs-input", "/kelos pause"))
 
 			By("Verifying a Deployment is created")
 			deployLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
@@ -1957,40 +1957,40 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
 
 			By("Creating a Workspace")
-			ws := &axonv1alpha1.Workspace{
+			ws := &kelosv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-workspace-trigger-only",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.WorkspaceSpec{
-					Repo: "https://github.com/axon-core/axon.git",
+				Spec: kelosv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/kelos-dev/kelos.git",
 					Ref:  "main",
 				},
 			}
 			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
 
 			By("Creating a TaskSpawner with only triggerComment")
-			ts := &axonv1alpha1.TaskSpawner{
+			ts := &kelosv1alpha1.TaskSpawner{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-spawner-trigger-only",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.TaskSpawnerSpec{
-					When: axonv1alpha1.When{
-						GitHubIssues: &axonv1alpha1.GitHubIssues{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							State:          "open",
-							TriggerComment: "/axon pick-up",
+							TriggerComment: "/kelos pick-up",
 						},
 					},
-					TaskTemplate: axonv1alpha1.TaskTemplate{
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
-						Credentials: axonv1alpha1.Credentials{
-							Type: axonv1alpha1.CredentialTypeOAuth,
-							SecretRef: axonv1alpha1.SecretReference{
+						Credentials: kelosv1alpha1.Credentials{
+							Type: kelosv1alpha1.CredentialTypeOAuth,
+							SecretRef: kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
-						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 							Name: "test-workspace-trigger-only",
 						},
 					},
@@ -2001,12 +2001,12 @@ var _ = Describe("TaskSpawner Controller", func() {
 
 			By("Verifying triggerComment is stored and excludeComments is empty")
 			tsLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
-			createdTS := &axonv1alpha1.TaskSpawner{}
+			createdTS := &kelosv1alpha1.TaskSpawner{}
 			Eventually(func() bool {
 				err := k8sClient.Get(ctx, tsLookupKey, createdTS)
 				return err == nil
 			}, timeout, interval).Should(BeTrue())
-			Expect(createdTS.Spec.When.GitHubIssues.TriggerComment).To(Equal("/axon pick-up"))
+			Expect(createdTS.Spec.When.GitHubIssues.TriggerComment).To(Equal("/kelos pick-up"))
 			Expect(createdTS.Spec.When.GitHubIssues.ExcludeComments).To(BeEmpty())
 
 			By("Verifying a Deployment is created")
@@ -2028,40 +2028,40 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
 
 			By("Creating a Workspace")
-			ws := &axonv1alpha1.Workspace{
+			ws := &kelosv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-workspace-exclude-only",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.WorkspaceSpec{
-					Repo: "https://github.com/axon-core/axon.git",
+				Spec: kelosv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/kelos-dev/kelos.git",
 					Ref:  "main",
 				},
 			}
 			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
 
 			By("Creating a TaskSpawner with only excludeComments")
-			ts := &axonv1alpha1.TaskSpawner{
+			ts := &kelosv1alpha1.TaskSpawner{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-spawner-exclude-only",
 					Namespace: ns.Name,
 				},
-				Spec: axonv1alpha1.TaskSpawnerSpec{
-					When: axonv1alpha1.When{
-						GitHubIssues: &axonv1alpha1.GitHubIssues{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							State:           "open",
-							ExcludeComments: []string{"/axon needs-input"},
+							ExcludeComments: []string{"/kelos needs-input"},
 						},
 					},
-					TaskTemplate: axonv1alpha1.TaskTemplate{
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
-						Credentials: axonv1alpha1.Credentials{
-							Type: axonv1alpha1.CredentialTypeOAuth,
-							SecretRef: axonv1alpha1.SecretReference{
+						Credentials: kelosv1alpha1.Credentials{
+							Type: kelosv1alpha1.CredentialTypeOAuth,
+							SecretRef: kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
-						WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+						WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 							Name: "test-workspace-exclude-only",
 						},
 					},
@@ -2072,13 +2072,13 @@ var _ = Describe("TaskSpawner Controller", func() {
 
 			By("Verifying excludeComments is stored and triggerComment is empty")
 			tsLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
-			createdTS := &axonv1alpha1.TaskSpawner{}
+			createdTS := &kelosv1alpha1.TaskSpawner{}
 			Eventually(func() bool {
 				err := k8sClient.Get(ctx, tsLookupKey, createdTS)
 				return err == nil
 			}, timeout, interval).Should(BeTrue())
 			Expect(createdTS.Spec.When.GitHubIssues.TriggerComment).To(BeEmpty())
-			Expect(createdTS.Spec.When.GitHubIssues.ExcludeComments).To(ConsistOf("/axon needs-input"))
+			Expect(createdTS.Spec.When.GitHubIssues.ExcludeComments).To(ConsistOf("/kelos needs-input"))
 
 			By("Verifying a Deployment is created")
 			deployLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}

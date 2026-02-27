@@ -8,10 +8,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const configTemplate = `# Axon configuration file
-# See: https://github.com/axon-core/axon
+const configTemplate = `# Kelos configuration file
+# See: https://github.com/kelos-dev/kelos
 
-# OAuth token (axon auto-creates the Kubernetes secret for you)
+# OAuth token (kelos auto-creates the Kubernetes secret for you)
 oauthToken: ""
 
 # Or use an API key instead:
@@ -57,12 +57,12 @@ func printNextSteps(configPath string) {
 	fmt.Fprintln(os.Stdout, "2. Edit the config file and add your token:")
 	fmt.Fprintf(os.Stdout, "   %s\n", configPath)
 	fmt.Fprintln(os.Stdout, "")
-	fmt.Fprintln(os.Stdout, "3. Install Axon (if not already installed):")
-	fmt.Fprintln(os.Stdout, "   axon install")
+	fmt.Fprintln(os.Stdout, "3. Install Kelos (if not already installed):")
+	fmt.Fprintln(os.Stdout, "   kelos install")
 	fmt.Fprintln(os.Stdout, "")
 	fmt.Fprintln(os.Stdout, "4. Run your first task:")
-	fmt.Fprintln(os.Stdout, "   axon run -p \"Create a hello world program in Python\"")
-	fmt.Fprintln(os.Stdout, "   axon logs <task-name> -f")
+	fmt.Fprintln(os.Stdout, "   kelos run -p \"Create a hello world program in Python\"")
+	fmt.Fprintln(os.Stdout, "   kelos logs <task-name> -f")
 	fmt.Fprintln(os.Stdout, "")
 }
 

@@ -1,4 +1,4 @@
-name: Reset Axon Worker
+name: Squash Kelos Worker Commits
 
 on:
   issue_comment:
@@ -18,15 +18,15 @@ permissions:
   id-token: write
 
 concurrency:
-  group: reset-axon-worker-${{ github.event.issue.number || github.event.pull_request.number }}
+  group: squash-kelos-worker-commits-${{ github.event.issue.number || github.event.pull_request.number }}
   cancel-in-progress: false
 
 jobs:
-  reset-axon-worker:
-    if: contains(github.event.comment.body || github.event.review.body || '', '/reset-worker')
+  squash-kelos-worker-commits:
+    if: contains(github.event.comment.body || github.event.review.body || '', '/squash-commits')
     runs-on: ubuntu-latest
     env:
-      AXON_NAMESPACE: ${{ vars.AXON_NAMESPACE || 'default' }}
+      KELOS_NAMESPACE: ${{ vars.KELOS_NAMESPACE || 'default' }}
       GCP_PROJECT_ID: gjkim-400213
       GKE_CLUSTER_NAME: gjkim
       GKE_CLUSTER_LOCATION: asia-northeast3
@@ -56,11 +56,9 @@ jobs:
               return [...new Set(numbers)].filter((n) => Number.isInteger(n) && n > 0)
             }
 
-            // For pull_request_review events, the commenter is in review.user
-            // For issue_comment and pull_request_review_comment events, it is in comment.user
             const commenter = context.payload.comment?.user?.login || context.payload.review?.user?.login || ""
             if (!commenter) {
-              core.info("Ignoring /reset-worker with unknown commenter")
+              core.info("Ignoring /squash-commits with unknown commenter")
               core.setOutput("should_reset", "false")
               return
             }
@@ -80,22 +78,18 @@ jobs:
             }
 
             if (permission !== "admin") {
-              core.info(`Ignoring /reset-worker from non-admin user ${commenter} (permission=${permission || "unknown"})`)
+              core.info(`Ignoring /squash-commits from non-admin user ${commenter} (permission=${permission || "unknown"})`)
               core.setOutput("should_reset", "false")
               return
             }
 
-            // For issue_comment events, context.payload.issue is available.
-            // For pull_request_review_comment and pull_request_review events,
-            // only context.payload.pull_request is available.
             const issue = context.payload.issue
             const pullRequest = context.payload.pull_request
 
+            // This command only makes sense on a PR (it squashes commits on a branch)
             if (issue && !issue.pull_request) {
-              core.info(`Reset requested on issue #${issue.number}`)
-              core.setOutput("should_reset", "true")
-              core.setOutput("target_issue_number", String(issue.number))
-              core.setOutput("target_pr_number", "")
+              core.info("This command must be used on a pull request, not an issue")
+              core.setOutput("should_reset", "false")
               return
             }
 
@@ -118,10 +112,30 @@ jobs:
               return
             }
 
-            core.info(`Reset requested on PR #${prNumber} for issue #${referencedIssues[0]}`)
+            core.info(`Squash requested on PR #${prNumber} (branch: ${pr.head.ref}) for issue #${referencedIssues[0]}`)
             core.setOutput("should_reset", "true")
             core.setOutput("target_issue_number", String(referencedIssues[0]))
             core.setOutput("target_pr_number", String(prNumber))
+            core.setOutput("target_branch", pr.head.ref)
+
+      - name: Checkout repository
+        if: steps.gate.outputs.should_reset == 'true'
+        uses: actions/checkout@v4
+
+      - name: Generate task manifest from template
+        id: manifest
+        if: steps.gate.outputs.should_reset == 'true'
+        env:
+          BRANCH: ${{ steps.gate.outputs.target_branch }}
+          PR_NUMBER: ${{ steps.gate.outputs.target_pr_number }}
+          ISSUE_NUMBER: ${{ steps.gate.outputs.target_issue_number }}
+        run: |
+          set -euo pipefail
+          MANIFEST_PATH="${RUNNER_TEMP}/squash-task.yaml"
+          export BRANCH PR_NUMBER ISSUE_NUMBER
+          envsubst '${BRANCH} ${PR_NUMBER} ${ISSUE_NUMBER}' \
+            < self-development/tasks/squash-commits-task.yaml > "${MANIFEST_PATH}"
+          echo "manifest_path=${MANIFEST_PATH}" >> "${GITHUB_OUTPUT}"
 
       - name: Authenticate to Google Cloud
         if: steps.gate.outputs.should_reset == 'true'
@@ -140,47 +154,46 @@ jobs:
 
       - name: Remove existing worker task
         if: steps.gate.outputs.should_reset == 'true'
+        env:
+          TARGET_ISSUE_NUMBER: ${{ steps.gate.outputs.target_issue_number }}
         run: |
           set -euo pipefail
-          task_name="axon-workers-${{ steps.gate.outputs.target_issue_number }}"
-          kubectl delete task.axon.io "${task_name}" -n "${AXON_NAMESPACE}" --ignore-not-found=true
-          echo "Removed task ${task_name} in namespace ${AXON_NAMESPACE} for target issue #${{ steps.gate.outputs.target_issue_number }}"
+          task_name="kelos-workers-${TARGET_ISSUE_NUMBER}"
+          kubectl delete task.kelos.dev "${task_name}" -n "${KELOS_NAMESPACE}" --ignore-not-found=true
+          echo "Removed task ${task_name} in namespace ${KELOS_NAMESPACE} for target issue #${TARGET_ISSUE_NUMBER}"
 
-      - name: Remove axon/needs-input label from issue and PR
+      - name: Add kelos/needs-input label to issue
         if: steps.gate.outputs.should_reset == 'true'
         uses: actions/github-script@v7
         env:
           TARGET_ISSUE_NUMBER: ${{ steps.gate.outputs.target_issue_number }}
-          TARGET_PR_NUMBER: ${{ steps.gate.outputs.target_pr_number }}
         with:
           script: |
-            const label = "axon/needs-input"
-            const targets = new Set()
-
+            const label = "kelos/needs-input"
             const targetIssueNumber = Number(process.env.TARGET_ISSUE_NUMBER || "0")
-            const targetPrNumber = Number(process.env.TARGET_PR_NUMBER || "0")
 
-            if (Number.isInteger(targetIssueNumber) && targetIssueNumber > 0) {
-              targets.add(targetIssueNumber)
-            }
-            if (Number.isInteger(targetPrNumber) && targetPrNumber > 0) {
-              targets.add(targetPrNumber)
+            if (!Number.isInteger(targetIssueNumber) || targetIssueNumber <= 0) {
+              core.info("No valid target issue number, skipping label addition")
+              return
             }
 
-            for (const issue_number of targets) {
-              try {
-                await github.rest.issues.removeLabel({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number,
-                  name: label,
-                })
-                core.info(`Removed label ${label} from #${issue_number}`)
-              } catch (error) {
-                if (error.status === 404) {
-                  core.info(`Label ${label} not present on #${issue_number}`)
-                  continue
-                }
-                throw error
-              }
+            try {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: targetIssueNumber,
+                labels: [label],
+              })
+              core.info(`Added label ${label} to issue #${targetIssueNumber}`)
+            } catch (error) {
+              core.warning(`Failed to add label ${label} to issue #${targetIssueNumber}: ${error.message}`)
             }
+
+      - name: Create squash task
+        if: steps.gate.outputs.should_reset == 'true'
+        env:
+          MANIFEST_PATH: ${{ steps.manifest.outputs.manifest_path }}
+        run: |
+          set -euo pipefail
+          task_name="$(kubectl create -n "${KELOS_NAMESPACE}" -f "${MANIFEST_PATH}" -o jsonpath='{.metadata.name}')"
+          echo "Created squash task: ${task_name} in namespace ${KELOS_NAMESPACE}"

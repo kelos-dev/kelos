@@ -12,8 +12,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
-	"github.com/axon-core/axon/internal/controller"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	"github.com/kelos-dev/kelos/internal/controller"
 )
 
 // getMetricValue retrieves the current value of a counter metric from the
@@ -74,24 +74,24 @@ func createNamespaceWithSecret(nsName string) {
 // createAndCompleteTask creates a Task, waits for its Job to be created,
 // simulates Job completion, and waits for the Task to reach Succeeded phase.
 // Returns the completed Task object.
-func createAndCompleteTask(nsName, taskName, spawner, model string) *axonv1alpha1.Task {
+func createAndCompleteTask(nsName, taskName, spawner, model string) *kelosv1alpha1.Task {
 	labels := map[string]string{}
 	if spawner != "" {
-		labels["axon.io/taskspawner"] = spawner
+		labels["kelos.dev/taskspawner"] = spawner
 	}
 
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      taskName,
 			Namespace: nsName,
 			Labels:    labels,
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   "claude-code",
 			Prompt: fmt.Sprintf("Test task %s", taskName),
-			Credentials: axonv1alpha1.Credentials{
-				Type: axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{
+			Credentials: kelosv1alpha1.Credentials{
+				Type: kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{
 					Name: "anthropic-api-key",
 				},
 			},
@@ -115,15 +115,15 @@ func createAndCompleteTask(nsName, taskName, spawner, model string) *axonv1alpha
 	}, metricsTimeout, metricsInterval).Should(Succeed())
 
 	taskKey := types.NamespacedName{Name: taskName, Namespace: nsName}
-	Eventually(func() axonv1alpha1.TaskPhase {
-		var t axonv1alpha1.Task
+	Eventually(func() kelosv1alpha1.TaskPhase {
+		var t kelosv1alpha1.Task
 		if err := k8sClient.Get(ctx, taskKey, &t); err != nil {
 			return ""
 		}
 		return t.Status.Phase
-	}, metricsTimeout, metricsInterval).Should(Equal(axonv1alpha1.TaskPhaseSucceeded))
+	}, metricsTimeout, metricsInterval).Should(Equal(kelosv1alpha1.TaskPhaseSucceeded))
 
-	completedTask := &axonv1alpha1.Task{}
+	completedTask := &kelosv1alpha1.Task{}
 	Expect(k8sClient.Get(ctx, taskKey, completedTask)).Should(Succeed())
 	return completedTask
 }
@@ -140,9 +140,9 @@ var _ = Describe("Cost and Token Metrics", func() {
 				"spawner":   "test-spawner",
 				"model":     "opus",
 			}
-			costBefore := getMetricValue("axon_task_cost_usd_total", metricLabels)
-			inputBefore := getMetricValue("axon_task_input_tokens_total", metricLabels)
-			outputBefore := getMetricValue("axon_task_output_tokens_total", metricLabels)
+			costBefore := getMetricValue("kelos_task_cost_usd_total", metricLabels)
+			inputBefore := getMetricValue("kelos_task_input_tokens_total", metricLabels)
+			outputBefore := getMetricValue("kelos_task_output_tokens_total", metricLabels)
 
 			completedTask := createAndCompleteTask(nsName, "metrics-task", "test-spawner", "opus")
 
@@ -154,9 +154,9 @@ var _ = Describe("Cost and Token Metrics", func() {
 			})
 
 			By("Verifying all three metrics were incremented")
-			Expect(getMetricValue("axon_task_cost_usd_total", metricLabels) - costBefore).To(BeNumerically("~", 2.50, 0.001))
-			Expect(getMetricValue("axon_task_input_tokens_total", metricLabels) - inputBefore).To(BeNumerically("~", 12000, 0.001))
-			Expect(getMetricValue("axon_task_output_tokens_total", metricLabels) - outputBefore).To(BeNumerically("~", 3500, 0.001))
+			Expect(getMetricValue("kelos_task_cost_usd_total", metricLabels) - costBefore).To(BeNumerically("~", 2.50, 0.001))
+			Expect(getMetricValue("kelos_task_input_tokens_total", metricLabels) - inputBefore).To(BeNumerically("~", 12000, 0.001))
+			Expect(getMetricValue("kelos_task_output_tokens_total", metricLabels) - outputBefore).To(BeNumerically("~", 3500, 0.001))
 		})
 	})
 
@@ -171,9 +171,9 @@ var _ = Describe("Cost and Token Metrics", func() {
 				"spawner":   "",
 				"model":     "sonnet",
 			}
-			costBefore := getMetricValue("axon_task_cost_usd_total", metricLabels)
-			inputBefore := getMetricValue("axon_task_input_tokens_total", metricLabels)
-			outputBefore := getMetricValue("axon_task_output_tokens_total", metricLabels)
+			costBefore := getMetricValue("kelos_task_cost_usd_total", metricLabels)
+			inputBefore := getMetricValue("kelos_task_input_tokens_total", metricLabels)
+			outputBefore := getMetricValue("kelos_task_output_tokens_total", metricLabels)
 
 			completedTask := createAndCompleteTask(nsName, "metrics-partial-task", "", "sonnet")
 
@@ -183,9 +183,9 @@ var _ = Describe("Cost and Token Metrics", func() {
 			})
 
 			By("Verifying only cost metric was incremented")
-			Expect(getMetricValue("axon_task_cost_usd_total", metricLabels) - costBefore).To(BeNumerically("~", 0.75, 0.001))
-			Expect(getMetricValue("axon_task_input_tokens_total", metricLabels) - inputBefore).To(BeNumerically("~", 0, 0.001))
-			Expect(getMetricValue("axon_task_output_tokens_total", metricLabels) - outputBefore).To(BeNumerically("~", 0, 0.001))
+			Expect(getMetricValue("kelos_task_cost_usd_total", metricLabels) - costBefore).To(BeNumerically("~", 0.75, 0.001))
+			Expect(getMetricValue("kelos_task_input_tokens_total", metricLabels) - inputBefore).To(BeNumerically("~", 0, 0.001))
+			Expect(getMetricValue("kelos_task_output_tokens_total", metricLabels) - outputBefore).To(BeNumerically("~", 0, 0.001))
 		})
 	})
 
@@ -200,7 +200,7 @@ var _ = Describe("Cost and Token Metrics", func() {
 				"spawner":   "multi-spawner",
 				"model":     "opus",
 			}
-			costBefore := getMetricValue("axon_task_cost_usd_total", metricLabels)
+			costBefore := getMetricValue("kelos_task_cost_usd_total", metricLabels)
 
 			By("Creating and completing two tasks with different costs")
 			for i, name := range []string{"accumulate-task-1", "accumulate-task-2"} {
@@ -212,7 +212,7 @@ var _ = Describe("Cost and Token Metrics", func() {
 			}
 
 			By("Verifying metrics accumulated from both tasks")
-			Expect(getMetricValue("axon_task_cost_usd_total", metricLabels) - costBefore).To(BeNumerically("~", 3.00, 0.001))
+			Expect(getMetricValue("kelos_task_cost_usd_total", metricLabels) - costBefore).To(BeNumerically("~", 3.00, 0.001))
 		})
 	})
 })

@@ -5,8 +5,8 @@ import (
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
-	"github.com/axon-core/axon/test/e2e/framework"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	"github.com/kelos-dev/kelos/test/e2e/framework"
 )
 
 // openCodeTestModel uses a free OpenCode model so e2e tests require no authentication.
@@ -21,17 +21,17 @@ var _ = Describe("OpenCode Task", func() {
 			"OPENCODE_API_KEY=")
 
 		By("creating an OpenCode Task")
-		f.CreateTask(&axonv1alpha1.Task{
+		f.CreateTask(&kelosv1alpha1.Task{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "opencode-task",
 			},
-			Spec: axonv1alpha1.TaskSpec{
+			Spec: kelosv1alpha1.TaskSpec{
 				Type:   "opencode",
 				Model:  openCodeTestModel,
 				Prompt: "Print 'Hello from OpenCode e2e test' to stdout",
-				Credentials: axonv1alpha1.Credentials{
-					Type:      axonv1alpha1.CredentialTypeAPIKey,
-					SecretRef: axonv1alpha1.SecretReference{Name: "opencode-credentials"},
+				Credentials: kelosv1alpha1.Credentials{
+					Type:      kelosv1alpha1.CredentialTypeAPIKey,
+					SecretRef: kelosv1alpha1.SecretReference{Name: "opencode-credentials"},
 				},
 			},
 		})

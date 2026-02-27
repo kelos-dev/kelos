@@ -30,10 +30,10 @@ ENV PATH="/usr/local/go/bin:${PATH}"
 ARG CLAUDE_CODE_VERSION=2.1.45
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
-COPY claude-code/axon_entrypoint.sh /axon_entrypoint.sh
-RUN chmod +x /axon_entrypoint.sh
+COPY claude-code/kelos_entrypoint.sh /kelos_entrypoint.sh
+RUN chmod +x /kelos_entrypoint.sh
 
-COPY bin/axon-capture /axon/axon-capture
+COPY bin/kelos-capture /kelos/kelos-capture
 
 RUN useradd -u 61100 -m -s /bin/bash claude
 RUN mkdir -p /home/claude/.claude && chown -R claude:claude /home/claude

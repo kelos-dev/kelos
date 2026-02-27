@@ -21,11 +21,11 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/yaml"
 
-	"github.com/axon-core/axon/internal/manifests"
-	"github.com/axon-core/axon/internal/version"
+	"github.com/kelos-dev/kelos/internal/manifests"
+	"github.com/kelos-dev/kelos/internal/version"
 )
 
-const fieldManager = "axon"
+const fieldManager = "kelos"
 
 func newInstallCommand(cfg *ClientConfig) *cobra.Command {
 	var dryRun bool
@@ -34,7 +34,7 @@ func newInstallCommand(cfg *ClientConfig) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "install",
-		Short: "Install axon CRDs and controller into the cluster",
+		Short: "Install kelos CRDs and controller into the cluster",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if flagVersion != "" {
@@ -70,17 +70,17 @@ func newInstallCommand(cfg *ClientConfig) *cobra.Command {
 
 			ctx := cmd.Context()
 
-			fmt.Fprintf(os.Stdout, "Installing axon CRDs\n")
+			fmt.Fprintf(os.Stdout, "Installing kelos CRDs\n")
 			if err := applyManifests(ctx, dc, dyn, manifests.InstallCRD); err != nil {
 				return fmt.Errorf("installing CRDs: %w", err)
 			}
 
-			fmt.Fprintf(os.Stdout, "Installing axon controller (version: %s)\n", version.Version)
+			fmt.Fprintf(os.Stdout, "Installing kelos controller (version: %s)\n", version.Version)
 			if err := applyManifests(ctx, dc, dyn, controllerManifest); err != nil {
 				return fmt.Errorf("installing controller: %w", err)
 			}
 
-			fmt.Fprintf(os.Stdout, "Axon installed successfully\n")
+			fmt.Fprintf(os.Stdout, "Kelos installed successfully\n")
 			return nil
 		},
 	}
@@ -136,7 +136,7 @@ func withImagePullPolicy(data []byte, policy string) []byte {
 func newUninstallCommand(cfg *ClientConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "uninstall",
-		Short: "Uninstall axon controller and CRDs from the cluster",
+		Short: "Uninstall kelos controller and CRDs from the cluster",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			restConfig, _, err := cfg.resolveConfig()
@@ -155,17 +155,17 @@ func newUninstallCommand(cfg *ClientConfig) *cobra.Command {
 
 			ctx := cmd.Context()
 
-			fmt.Fprintf(os.Stdout, "Removing axon controller\n")
+			fmt.Fprintf(os.Stdout, "Removing kelos controller\n")
 			if err := deleteManifests(ctx, dc, dyn, manifests.InstallController); err != nil {
 				return fmt.Errorf("removing controller: %w", err)
 			}
 
-			fmt.Fprintf(os.Stdout, "Removing axon CRDs\n")
+			fmt.Fprintf(os.Stdout, "Removing kelos CRDs\n")
 			if err := deleteManifests(ctx, dc, dyn, manifests.InstallCRD); err != nil {
 				return fmt.Errorf("removing CRDs: %w", err)
 			}
 
-			fmt.Fprintf(os.Stdout, "Axon uninstalled successfully\n")
+			fmt.Fprintf(os.Stdout, "Kelos uninstalled successfully\n")
 			return nil
 		},
 	}

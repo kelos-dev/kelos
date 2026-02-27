@@ -10,21 +10,21 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 )
 
 const (
 	// DefaultSpawnerImage is the default image for the spawner binary.
-	DefaultSpawnerImage = "gjkim42/axon-spawner:latest"
+	DefaultSpawnerImage = "gjkim42/kelos-spawner:latest"
 
 	// DefaultTokenRefresherImage is the default image for the token refresher sidecar.
-	DefaultTokenRefresherImage = "gjkim42/axon-token-refresher:latest"
+	DefaultTokenRefresherImage = "gjkim42/kelos-token-refresher:latest"
 
 	// SpawnerServiceAccount is the service account used by spawner Deployments.
-	SpawnerServiceAccount = "axon-spawner"
+	SpawnerServiceAccount = "kelos-spawner"
 
 	// SpawnerClusterRole is the ClusterRole referenced by spawner RoleBindings.
-	SpawnerClusterRole = "axon-spawner-role"
+	SpawnerClusterRole = "kelos-spawner-role"
 )
 
 // DeploymentBuilder constructs Kubernetes Deployments for TaskSpawners.
@@ -48,7 +48,7 @@ func NewDeploymentBuilder() *DeploymentBuilder {
 // for GitHub API authentication. The isGitHubApp parameter indicates whether
 // the workspace secret contains GitHub App credentials, which requires a
 // token refresher sidecar.
-func (b *DeploymentBuilder) Build(ts *axonv1alpha1.TaskSpawner, workspace *axonv1alpha1.WorkspaceSpec, isGitHubApp bool) *appsv1.Deployment {
+func (b *DeploymentBuilder) Build(ts *kelosv1alpha1.TaskSpawner, workspace *kelosv1alpha1.WorkspaceSpec, isGitHubApp bool) *appsv1.Deployment {
 	replicas := int32(1)
 
 	args := []string{
@@ -214,10 +214,10 @@ func (b *DeploymentBuilder) Build(ts *axonv1alpha1.TaskSpawner, workspace *axonv
 	}
 
 	labels := map[string]string{
-		"app.kubernetes.io/name":       "axon",
+		"app.kubernetes.io/name":       "kelos",
 		"app.kubernetes.io/component":  "spawner",
-		"app.kubernetes.io/managed-by": "axon-controller",
-		"axon.io/taskspawner":          ts.Name,
+		"app.kubernetes.io/managed-by": "kelos-controller",
+		"kelos.dev/taskspawner":        ts.Name,
 	}
 
 	spawnerContainer := corev1.Container{

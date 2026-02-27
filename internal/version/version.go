@@ -6,7 +6,7 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-// Version is the current version of the axon binary. It is set at build time
+// Version is the current version of the kelos binary. It is set at build time
 // via ldflags. When unset (e.g. during development or go install) it falls
 // back to the module version from Go build info, and finally to "latest".
 var Version = "latest"

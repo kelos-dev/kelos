@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -25,33 +25,33 @@ func TestParseGitHubOwnerRepo(t *testing.T) {
 	}{
 		{
 			name:      "HTTPS URL",
-			repoURL:   "https://github.com/axon-core/axon.git",
-			wantOwner: "axon-core",
-			wantRepo:  "axon",
+			repoURL:   "https://github.com/kelos-dev/kelos.git",
+			wantOwner: "kelos-dev",
+			wantRepo:  "kelos",
 		},
 		{
 			name:      "HTTPS URL without .git",
-			repoURL:   "https://github.com/axon-core/axon",
-			wantOwner: "axon-core",
-			wantRepo:  "axon",
+			repoURL:   "https://github.com/kelos-dev/kelos",
+			wantOwner: "kelos-dev",
+			wantRepo:  "kelos",
 		},
 		{
 			name:      "HTTPS URL with trailing slash",
-			repoURL:   "https://github.com/axon-core/axon/",
-			wantOwner: "axon-core",
-			wantRepo:  "axon",
+			repoURL:   "https://github.com/kelos-dev/kelos/",
+			wantOwner: "kelos-dev",
+			wantRepo:  "kelos",
 		},
 		{
 			name:      "SSH URL",
-			repoURL:   "git@github.com:axon-core/axon.git",
-			wantOwner: "axon-core",
-			wantRepo:  "axon",
+			repoURL:   "git@github.com:kelos-dev/kelos.git",
+			wantOwner: "kelos-dev",
+			wantRepo:  "kelos",
 		},
 		{
 			name:      "SSH URL without .git",
-			repoURL:   "git@github.com:axon-core/axon",
-			wantOwner: "axon-core",
-			wantRepo:  "axon",
+			repoURL:   "git@github.com:kelos-dev/kelos",
+			wantOwner: "kelos-dev",
+			wantRepo:  "kelos",
 		},
 		{
 			name:      "HTTPS URL with org",
@@ -96,17 +96,17 @@ func TestParseGitHubRepo(t *testing.T) {
 	}{
 		{
 			name:      "github.com HTTPS",
-			repoURL:   "https://github.com/axon-core/axon.git",
+			repoURL:   "https://github.com/kelos-dev/kelos.git",
 			wantHost:  "github.com",
-			wantOwner: "axon-core",
-			wantRepo:  "axon",
+			wantOwner: "kelos-dev",
+			wantRepo:  "kelos",
 		},
 		{
 			name:      "github.com SSH",
-			repoURL:   "git@github.com:axon-core/axon.git",
+			repoURL:   "git@github.com:kelos-dev/kelos.git",
 			wantHost:  "github.com",
-			wantOwner: "axon-core",
-			wantRepo:  "axon",
+			wantOwner: "kelos-dev",
+			wantRepo:  "kelos",
 		},
 		{
 			name:      "GitHub Enterprise HTTPS",
@@ -195,14 +195,14 @@ func TestGitHubAPIBaseURL(t *testing.T) {
 func TestBuildDeploymentWithEnterpriseURL(t *testing.T) {
 	builder := NewDeploymentBuilder()
 
-	ts := &axonv1alpha1.TaskSpawner{
+	ts := &kelosv1alpha1.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-spawner",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpawnerSpec{
-			When: axonv1alpha1.When{
-				GitHubIssues: &axonv1alpha1.GitHubIssues{},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
 		},
 	}
@@ -214,7 +214,7 @@ func TestBuildDeploymentWithEnterpriseURL(t *testing.T) {
 	}{
 		{
 			name:              "github.com repo does not include api-base-url arg",
-			repoURL:           "https://github.com/axon-core/axon.git",
+			repoURL:           "https://github.com/kelos-dev/kelos.git",
 			wantAPIBaseURLArg: "",
 		},
 		{
@@ -226,7 +226,7 @@ func TestBuildDeploymentWithEnterpriseURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			workspace := &axonv1alpha1.WorkspaceSpec{
+			workspace := &kelosv1alpha1.WorkspaceSpec{
 				Repo: tt.repoURL,
 			}
 			dep := builder.Build(ts, workspace, false)
@@ -254,24 +254,24 @@ func TestBuildDeploymentWithEnterpriseURL(t *testing.T) {
 
 func TestDeploymentBuilder_GitHubApp(t *testing.T) {
 	builder := NewDeploymentBuilder()
-	ts := &axonv1alpha1.TaskSpawner{
+	ts := &kelosv1alpha1.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-spawner",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpawnerSpec{
-			When: axonv1alpha1.When{
-				GitHubIssues: &axonv1alpha1.GitHubIssues{},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: axonv1alpha1.TaskTemplate{
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
 				Type:         "claude-code",
-				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "ws"},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
 			},
 		},
 	}
-	workspace := &axonv1alpha1.WorkspaceSpec{
-		Repo: "https://github.com/axon-core/axon.git",
-		SecretRef: &axonv1alpha1.SecretReference{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/kelos-dev/kelos.git",
+		SecretRef: &kelosv1alpha1.SecretReference{
 			Name: "github-app-creds",
 		},
 	}
@@ -334,24 +334,24 @@ func TestDeploymentBuilder_GitHubApp(t *testing.T) {
 
 func TestDeploymentBuilder_GitHubAppEnterprise(t *testing.T) {
 	builder := NewDeploymentBuilder()
-	ts := &axonv1alpha1.TaskSpawner{
+	ts := &kelosv1alpha1.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-spawner",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpawnerSpec{
-			When: axonv1alpha1.When{
-				GitHubIssues: &axonv1alpha1.GitHubIssues{},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: axonv1alpha1.TaskTemplate{
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
 				Type:         "claude-code",
-				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "ws"},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
 			},
 		},
 	}
-	workspace := &axonv1alpha1.WorkspaceSpec{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.example.com/my-org/my-repo.git",
-		SecretRef: &axonv1alpha1.SecretReference{
+		SecretRef: &kelosv1alpha1.SecretReference{
 			Name: "github-app-creds",
 		},
 	}
@@ -376,24 +376,24 @@ func TestDeploymentBuilder_GitHubAppEnterprise(t *testing.T) {
 
 func TestDeploymentBuilder_GitHubAppGitHubCom(t *testing.T) {
 	builder := NewDeploymentBuilder()
-	ts := &axonv1alpha1.TaskSpawner{
+	ts := &kelosv1alpha1.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-spawner",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpawnerSpec{
-			When: axonv1alpha1.When{
-				GitHubIssues: &axonv1alpha1.GitHubIssues{},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: axonv1alpha1.TaskTemplate{
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
 				Type:         "claude-code",
-				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "ws"},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
 			},
 		},
 	}
-	workspace := &axonv1alpha1.WorkspaceSpec{
-		Repo: "https://github.com/axon-core/axon.git",
-		SecretRef: &axonv1alpha1.SecretReference{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/kelos-dev/kelos.git",
+		SecretRef: &kelosv1alpha1.SecretReference{
 			Name: "github-app-creds",
 		},
 	}
@@ -415,24 +415,24 @@ func TestDeploymentBuilder_GitHubAppGitHubCom(t *testing.T) {
 
 func TestDeploymentBuilder_PAT(t *testing.T) {
 	builder := NewDeploymentBuilder()
-	ts := &axonv1alpha1.TaskSpawner{
+	ts := &kelosv1alpha1.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-spawner",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpawnerSpec{
-			When: axonv1alpha1.When{
-				GitHubIssues: &axonv1alpha1.GitHubIssues{},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: axonv1alpha1.TaskTemplate{
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
 				Type:         "claude-code",
-				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "ws"},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
 			},
 		},
 	}
-	workspace := &axonv1alpha1.WorkspaceSpec{
-		Repo: "https://github.com/axon-core/axon.git",
-		SecretRef: &axonv1alpha1.SecretReference{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/kelos-dev/kelos.git",
+		SecretRef: &kelosv1alpha1.SecretReference{
 			Name: "github-token",
 		},
 	}
@@ -463,21 +463,21 @@ func TestDeploymentBuilder_PAT(t *testing.T) {
 
 func TestDeploymentBuilder_Jira(t *testing.T) {
 	builder := NewDeploymentBuilder()
-	ts := &axonv1alpha1.TaskSpawner{
+	ts := &kelosv1alpha1.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-spawner",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpawnerSpec{
-			When: axonv1alpha1.When{
-				Jira: &axonv1alpha1.Jira{
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				Jira: &kelosv1alpha1.Jira{
 					BaseURL:   "https://mycompany.atlassian.net",
 					Project:   "PROJ",
 					JQL:       "status = Open",
-					SecretRef: axonv1alpha1.SecretReference{Name: "jira-creds"},
+					SecretRef: kelosv1alpha1.SecretReference{Name: "jira-creds"},
 				},
 			},
-			TaskTemplate: axonv1alpha1.TaskTemplate{
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
 				Type: "claude-code",
 			},
 		},
@@ -553,20 +553,20 @@ func TestDeploymentBuilder_Jira(t *testing.T) {
 
 func TestBuildDeploymentWithGitHubIssuesRepoOverride(t *testing.T) {
 	builder := NewDeploymentBuilder()
-	ts := &axonv1alpha1.TaskSpawner{
+	ts := &kelosv1alpha1.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-spawner",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpawnerSpec{
-			When: axonv1alpha1.When{
-				GitHubIssues: &axonv1alpha1.GitHubIssues{
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubIssues: &kelosv1alpha1.GitHubIssues{
 					Repo: "https://github.com/upstream-org/upstream-repo.git",
 				},
 			},
 		},
 	}
-	workspace := &axonv1alpha1.WorkspaceSpec{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/my-fork/upstream-repo.git",
 	}
 
@@ -600,20 +600,20 @@ func TestBuildDeploymentWithGitHubIssuesRepoOverride(t *testing.T) {
 
 func TestBuildDeploymentWithGitHubIssuesRepoOverrideEnterprise(t *testing.T) {
 	builder := NewDeploymentBuilder()
-	ts := &axonv1alpha1.TaskSpawner{
+	ts := &kelosv1alpha1.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-spawner",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpawnerSpec{
-			When: axonv1alpha1.When{
-				GitHubIssues: &axonv1alpha1.GitHubIssues{
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubIssues: &kelosv1alpha1.GitHubIssues{
 					Repo: "https://github.example.com/upstream-org/upstream-repo.git",
 				},
 			},
 		},
 	}
-	workspace := &axonv1alpha1.WorkspaceSpec{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/my-fork/upstream-repo.git",
 	}
 
@@ -634,20 +634,20 @@ func TestBuildDeploymentWithGitHubIssuesRepoOverrideEnterprise(t *testing.T) {
 
 func TestDeploymentBuilder_JiraNoJQL(t *testing.T) {
 	builder := NewDeploymentBuilder()
-	ts := &axonv1alpha1.TaskSpawner{
+	ts := &kelosv1alpha1.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-spawner",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpawnerSpec{
-			When: axonv1alpha1.When{
-				Jira: &axonv1alpha1.Jira{
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				Jira: &kelosv1alpha1.Jira{
 					BaseURL:   "https://jira.example.com",
 					Project:   "TEST",
-					SecretRef: axonv1alpha1.SecretReference{Name: "jira-creds"},
+					SecretRef: kelosv1alpha1.SecretReference{Name: "jira-creds"},
 				},
 			},
-			TaskTemplate: axonv1alpha1.TaskTemplate{
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
 				Type: "claude-code",
 			},
 		},
@@ -667,18 +667,18 @@ func boolPtr(v bool) *bool { return &v }
 
 func TestUpdateDeployment_SuspendScalesDown(t *testing.T) {
 	builder := NewDeploymentBuilder()
-	ts := &axonv1alpha1.TaskSpawner{
+	ts := &kelosv1alpha1.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-spawner",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpawnerSpec{
-			When: axonv1alpha1.When{
-				GitHubIssues: &axonv1alpha1.GitHubIssues{},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: axonv1alpha1.TaskTemplate{
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
 				Type:         "claude-code",
-				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "ws"},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
 			},
 			Suspend: boolPtr(true),
 		},
@@ -694,7 +694,7 @@ func TestUpdateDeployment_SuspendScalesDown(t *testing.T) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(appsv1.AddToScheme(scheme))
-	utilruntime.Must(axonv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(kelosv1alpha1.AddToScheme(scheme))
 
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
@@ -726,18 +726,18 @@ func TestUpdateDeployment_SuspendScalesDown(t *testing.T) {
 
 func TestUpdateDeployment_ResumeScalesUp(t *testing.T) {
 	builder := NewDeploymentBuilder()
-	ts := &axonv1alpha1.TaskSpawner{
+	ts := &kelosv1alpha1.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-spawner",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpawnerSpec{
-			When: axonv1alpha1.When{
-				GitHubIssues: &axonv1alpha1.GitHubIssues{},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: axonv1alpha1.TaskTemplate{
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
 				Type:         "claude-code",
-				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "ws"},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
 			},
 			Suspend: boolPtr(false),
 		},
@@ -752,7 +752,7 @@ func TestUpdateDeployment_ResumeScalesUp(t *testing.T) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(appsv1.AddToScheme(scheme))
-	utilruntime.Must(axonv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(kelosv1alpha1.AddToScheme(scheme))
 
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
@@ -784,18 +784,18 @@ func TestUpdateDeployment_ResumeScalesUp(t *testing.T) {
 
 func TestUpdateDeployment_NoUpdateWhenReplicasMatch(t *testing.T) {
 	builder := NewDeploymentBuilder()
-	ts := &axonv1alpha1.TaskSpawner{
+	ts := &kelosv1alpha1.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-spawner",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpawnerSpec{
-			When: axonv1alpha1.When{
-				GitHubIssues: &axonv1alpha1.GitHubIssues{},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: axonv1alpha1.TaskTemplate{
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
 				Type:         "claude-code",
-				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "ws"},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
 			},
 		},
 	}
@@ -806,7 +806,7 @@ func TestUpdateDeployment_NoUpdateWhenReplicasMatch(t *testing.T) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(appsv1.AddToScheme(scheme))
-	utilruntime.Must(axonv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(kelosv1alpha1.AddToScheme(scheme))
 
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
@@ -838,24 +838,24 @@ func TestUpdateDeployment_NoUpdateWhenReplicasMatch(t *testing.T) {
 
 func TestUpdateDeployment_PATToGitHubApp(t *testing.T) {
 	builder := NewDeploymentBuilder()
-	ts := &axonv1alpha1.TaskSpawner{
+	ts := &kelosv1alpha1.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-spawner",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpawnerSpec{
-			When: axonv1alpha1.When{
-				GitHubIssues: &axonv1alpha1.GitHubIssues{},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: axonv1alpha1.TaskTemplate{
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
 				Type:         "claude-code",
-				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "ws"},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
 			},
 		},
 	}
-	workspace := &axonv1alpha1.WorkspaceSpec{
-		Repo: "https://github.com/axon-core/axon.git",
-		SecretRef: &axonv1alpha1.SecretReference{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/kelos-dev/kelos.git",
+		SecretRef: &kelosv1alpha1.SecretReference{
 			Name: "my-secret",
 		},
 	}
@@ -866,7 +866,7 @@ func TestUpdateDeployment_PATToGitHubApp(t *testing.T) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(appsv1.AddToScheme(scheme))
-	utilruntime.Must(axonv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(kelosv1alpha1.AddToScheme(scheme))
 
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
@@ -935,24 +935,24 @@ func TestUpdateDeployment_PATToGitHubApp(t *testing.T) {
 
 func TestUpdateDeployment_GitHubAppToPAT(t *testing.T) {
 	builder := NewDeploymentBuilder()
-	ts := &axonv1alpha1.TaskSpawner{
+	ts := &kelosv1alpha1.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-spawner",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpawnerSpec{
-			When: axonv1alpha1.When{
-				GitHubIssues: &axonv1alpha1.GitHubIssues{},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: axonv1alpha1.TaskTemplate{
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
 				Type:         "claude-code",
-				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "ws"},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
 			},
 		},
 	}
-	workspace := &axonv1alpha1.WorkspaceSpec{
-		Repo: "https://github.com/axon-core/axon.git",
-		SecretRef: &axonv1alpha1.SecretReference{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/kelos-dev/kelos.git",
+		SecretRef: &kelosv1alpha1.SecretReference{
 			Name: "my-secret",
 		},
 	}
@@ -963,7 +963,7 @@ func TestUpdateDeployment_GitHubAppToPAT(t *testing.T) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(appsv1.AddToScheme(scheme))
-	utilruntime.Must(axonv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(kelosv1alpha1.AddToScheme(scheme))
 
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
@@ -1031,7 +1031,7 @@ func TestFindTaskSpawnersForSecret(t *testing.T) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(appsv1.AddToScheme(scheme))
-	utilruntime.Must(axonv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(kelosv1alpha1.AddToScheme(scheme))
 
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1040,78 +1040,78 @@ func TestFindTaskSpawnersForSecret(t *testing.T) {
 		},
 	}
 	// Workspace referencing the secret
-	ws := &axonv1alpha1.Workspace{
+	ws := &kelosv1alpha1.Workspace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ws",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.WorkspaceSpec{
-			Repo: "https://github.com/axon-core/axon.git",
-			SecretRef: &axonv1alpha1.SecretReference{
+		Spec: kelosv1alpha1.WorkspaceSpec{
+			Repo: "https://github.com/kelos-dev/kelos.git",
+			SecretRef: &kelosv1alpha1.SecretReference{
 				Name: "my-secret",
 			},
 		},
 	}
 	// Workspace not referencing the secret
-	wsOther := &axonv1alpha1.Workspace{
+	wsOther := &kelosv1alpha1.Workspace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ws-other",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.WorkspaceSpec{
-			Repo: "https://github.com/axon-core/other.git",
-			SecretRef: &axonv1alpha1.SecretReference{
+		Spec: kelosv1alpha1.WorkspaceSpec{
+			Repo: "https://github.com/kelos-dev/other.git",
+			SecretRef: &kelosv1alpha1.SecretReference{
 				Name: "other-secret",
 			},
 		},
 	}
 	// TaskSpawner referencing ws (should be returned)
-	ts1 := &axonv1alpha1.TaskSpawner{
+	ts1 := &kelosv1alpha1.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "spawner-1",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpawnerSpec{
-			When: axonv1alpha1.When{
-				GitHubIssues: &axonv1alpha1.GitHubIssues{},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: axonv1alpha1.TaskTemplate{
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
 				Type:         "claude-code",
-				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "ws"},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
 			},
 		},
 	}
 	// TaskSpawner referencing ws-other (should not be returned)
-	ts2 := &axonv1alpha1.TaskSpawner{
+	ts2 := &kelosv1alpha1.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "spawner-2",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpawnerSpec{
-			When: axonv1alpha1.When{
-				GitHubIssues: &axonv1alpha1.GitHubIssues{},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: axonv1alpha1.TaskTemplate{
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
 				Type:         "claude-code",
-				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "ws-other"},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws-other"},
 			},
 		},
 	}
 	// TaskSpawner with no workspaceRef (should not be returned)
-	ts3 := &axonv1alpha1.TaskSpawner{
+	ts3 := &kelosv1alpha1.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "spawner-3",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpawnerSpec{
-			When: axonv1alpha1.When{
-				Jira: &axonv1alpha1.Jira{
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				Jira: &kelosv1alpha1.Jira{
 					BaseURL:   "https://jira.example.com",
 					Project:   "TEST",
-					SecretRef: axonv1alpha1.SecretReference{Name: "jira-creds"},
+					SecretRef: kelosv1alpha1.SecretReference{Name: "jira-creds"},
 				},
 			},
-			TaskTemplate: axonv1alpha1.TaskTemplate{
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
 				Type: "claude-code",
 			},
 		},
@@ -1142,63 +1142,63 @@ func TestFindTaskSpawnersForWorkspace(t *testing.T) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(appsv1.AddToScheme(scheme))
-	utilruntime.Must(axonv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(kelosv1alpha1.AddToScheme(scheme))
 
-	ws := &axonv1alpha1.Workspace{
+	ws := &kelosv1alpha1.Workspace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ws",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.WorkspaceSpec{
-			Repo: "https://github.com/axon-core/axon.git",
+		Spec: kelosv1alpha1.WorkspaceSpec{
+			Repo: "https://github.com/kelos-dev/kelos.git",
 		},
 	}
 
 	// TaskSpawner referencing ws (should be returned)
-	ts1 := &axonv1alpha1.TaskSpawner{
+	ts1 := &kelosv1alpha1.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "spawner-1",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpawnerSpec{
-			When: axonv1alpha1.When{
-				GitHubIssues: &axonv1alpha1.GitHubIssues{},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: axonv1alpha1.TaskTemplate{
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
 				Type:         "claude-code",
-				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "ws"},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
 			},
 		},
 	}
 	// Another TaskSpawner referencing ws (should also be returned)
-	ts2 := &axonv1alpha1.TaskSpawner{
+	ts2 := &kelosv1alpha1.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "spawner-2",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpawnerSpec{
-			When: axonv1alpha1.When{
-				GitHubIssues: &axonv1alpha1.GitHubIssues{},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: axonv1alpha1.TaskTemplate{
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
 				Type:         "claude-code",
-				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "ws"},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
 			},
 		},
 	}
 	// TaskSpawner referencing different workspace (should not be returned)
-	ts3 := &axonv1alpha1.TaskSpawner{
+	ts3 := &kelosv1alpha1.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "spawner-3",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpawnerSpec{
-			When: axonv1alpha1.When{
-				GitHubIssues: &axonv1alpha1.GitHubIssues{},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: axonv1alpha1.TaskTemplate{
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
 				Type:         "claude-code",
-				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "other-ws"},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "other-ws"},
 			},
 		},
 	}

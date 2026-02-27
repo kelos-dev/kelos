@@ -34,7 +34,7 @@ kubectl get tasks -w
 4. **Stream the agent logs:**
 
 ```bash
-axon logs simple-task -f
+kelos logs simple-task -f
 ```
 
 > **Tip:** You can also use `kubectl logs -l job-name=simple-task -f` for direct

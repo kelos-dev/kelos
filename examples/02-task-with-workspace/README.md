@@ -39,7 +39,7 @@ kubectl get tasks -w
 5. **Stream the agent logs:**
 
 ```bash
-axon logs add-tests -f
+kelos logs add-tests -f
 ```
 
 > **Tip:** You can also use `kubectl logs -l job-name=add-tests -f` for direct

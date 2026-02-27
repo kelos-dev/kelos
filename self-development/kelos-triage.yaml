@@ -18,10 +18,21 @@ spec:
       name: kelos-agent
     model: opus
     type: claude-code
+    ttlSecondsAfterFinished: 3600
     credentials:
       type: oauth
       secretRef:
         name: kelos-credentials
+    podOverrides:
+      resources:
+        requests:
+          cpu: "250m"
+          memory: "512Mi"
+          ephemeral-storage: "2Gi"
+        limits:
+          cpu: "1"
+          memory: "2Gi"
+          ephemeral-storage: "2Gi"
     agentConfigRef:
       name: kelos-dev-agent
     promptTemplate: |

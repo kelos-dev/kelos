@@ -11,8 +11,8 @@ spec:
         - kelos/needs-input
       priorityLabels:
         - priority/critical-urgent
-        - priority/imporant-soon
-        - priority/import-longterm
+        - priority/important-soon
+        - priority/important-longterm
         - priority/backlog
   maxConcurrency: 3
   taskTemplate:

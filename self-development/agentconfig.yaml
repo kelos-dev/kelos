@@ -19,3 +19,14 @@ spec:
     ## Standards
     - Do not create duplicate issues — check existing issues first with `gh issue list`
     - Keep changes minimal and focused
+
+    ## Project Conventions
+    - Use Makefile targets instead of discovering build/test commands yourself:
+      - `make verify` — run all verification checks (lint, fmt, vet, etc.)
+      - `make update` — update all generated files
+      - `make test` — run all unit tests
+      - `make test-integration` — run integration tests
+      - `make build` — build binary
+    - Always try to add or improve tests when modifying code
+    - Logging conventions: start log messages with capital letters and do not end with punctuation
+    - Commit messages: do not include PR links in commit messages

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDiscover(t *testing.T) {
@@ -973,5 +974,206 @@ func TestContainsCommand(t *testing.T) {
 				t.Errorf("containsCommand(%q, %q) = %v, want %v", tt.body, tt.cmd, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestLatestTriggerTime(t *testing.T) {
+	t1 := "2026-01-01T12:00:00Z"
+	t2 := "2026-01-02T12:00:00Z"
+	t3 := "2026-01-03T12:00:00Z"
+
+	tests := []struct {
+		name     string
+		comments []githubComment
+		trigger  string
+		want     string // expected RFC3339 time or "" for zero
+	}{
+		{
+			name:     "no comments",
+			comments: nil,
+			trigger:  "/kelos pick-up",
+			want:     "",
+		},
+		{
+			name: "single matching comment",
+			comments: []githubComment{
+				{Body: "/kelos pick-up", CreatedAt: t1},
+			},
+			trigger: "/kelos pick-up",
+			want:    t1,
+		},
+		{
+			name: "multiple matching comments returns latest",
+			comments: []githubComment{
+				{Body: "/kelos pick-up", CreatedAt: t1},
+				{Body: "regular comment", CreatedAt: t2},
+				{Body: "/kelos pick-up", CreatedAt: t3},
+			},
+			trigger: "/kelos pick-up",
+			want:    t3,
+		},
+		{
+			name: "no matching comments",
+			comments: []githubComment{
+				{Body: "regular comment", CreatedAt: t1},
+				{Body: "another comment", CreatedAt: t2},
+			},
+			trigger: "/kelos pick-up",
+			want:    "",
+		},
+		{
+			name: "invalid timestamp skipped",
+			comments: []githubComment{
+				{Body: "/kelos pick-up", CreatedAt: "not-a-timestamp"},
+				{Body: "/kelos pick-up", CreatedAt: t2},
+			},
+			trigger: "/kelos pick-up",
+			want:    t2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := latestTriggerTime(tt.comments, tt.trigger)
+			if tt.want == "" {
+				if !got.IsZero() {
+					t.Errorf("latestTriggerTime() = %v, want zero time", got)
+				}
+				return
+			}
+			expected, _ := time.Parse(time.RFC3339, tt.want)
+			if !got.Equal(expected) {
+				t.Errorf("latestTriggerTime() = %v, want %v", got, expected)
+			}
+		})
+	}
+}
+
+func TestDiscoverSetsTriggerTime(t *testing.T) {
+	triggerTS := "2026-01-15T10:30:00Z"
+
+	issues := []githubIssue{
+		{Number: 1, Title: "Triggered", Body: "Body 1", HTMLURL: "https://github.com/o/r/issues/1"},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/repos/owner/repo/issues":
+			json.NewEncoder(w).Encode(issues)
+		case r.URL.Path == "/repos/owner/repo/issues/1/comments":
+			json.NewEncoder(w).Encode([]githubComment{
+				{Body: "some comment", CreatedAt: "2026-01-10T10:00:00Z"},
+				{Body: "/kelos pick-up", CreatedAt: triggerTS},
+			})
+		}
+	}))
+	defer server.Close()
+
+	s := &GitHubSource{
+		Owner:          "owner",
+		Repo:           "repo",
+		BaseURL:        server.URL,
+		TriggerComment: "/kelos pick-up",
+	}
+
+	items, err := s.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+
+	expected, _ := time.Parse(time.RFC3339, triggerTS)
+	if !items[0].TriggerTime.Equal(expected) {
+		t.Errorf("TriggerTime = %v, want %v", items[0].TriggerTime, expected)
+	}
+}
+
+func TestDiscoverTriggerTimeSurvivesByteLimit(t *testing.T) {
+	// An early trigger comment passes the comment filter, then a large
+	// comment pushes us past maxCommentBytes. A second (newer) trigger
+	// comment posted after the big comment must still be found by
+	// latestTriggerTime even though concatCommentBodies truncates it.
+	earlyTS := "2026-01-10T10:00:00Z"
+	latestTS := "2026-01-20T10:00:00Z"
+
+	issues := []githubIssue{
+		{Number: 1, Title: "Big comments", Body: "Body", HTMLURL: "https://github.com/o/r/issues/1"},
+	}
+
+	bigBody := strings.Repeat("x", 70*1024)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/repos/owner/repo/issues":
+			json.NewEncoder(w).Encode(issues)
+		case r.URL.Path == "/repos/owner/repo/issues/1/comments":
+			json.NewEncoder(w).Encode([]githubComment{
+				{Body: "/kelos pick-up", CreatedAt: earlyTS},
+				{Body: bigBody, CreatedAt: "2026-01-15T10:00:00Z"},
+				{Body: "/kelos pick-up", CreatedAt: latestTS},
+			})
+		}
+	}))
+	defer server.Close()
+
+	s := &GitHubSource{
+		Owner:          "owner",
+		Repo:           "repo",
+		BaseURL:        server.URL,
+		TriggerComment: "/kelos pick-up",
+	}
+
+	items, err := s.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+
+	expected, _ := time.Parse(time.RFC3339, latestTS)
+	if !items[0].TriggerTime.Equal(expected) {
+		t.Errorf("TriggerTime = %v, want %v (trigger after byte-limit should still be found)", items[0].TriggerTime, expected)
+	}
+}
+
+func TestDiscoverTriggerTimeZeroWithoutTriggerComment(t *testing.T) {
+	issues := []githubIssue{
+		{Number: 1, Title: "No trigger", Body: "Body", HTMLURL: "https://github.com/o/r/issues/1"},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/repos/owner/repo/issues":
+			json.NewEncoder(w).Encode(issues)
+		case r.URL.Path == "/repos/owner/repo/issues/1/comments":
+			json.NewEncoder(w).Encode([]githubComment{
+				{Body: "some comment", CreatedAt: "2026-01-10T10:00:00Z"},
+			})
+		}
+	}))
+	defer server.Close()
+
+	// No TriggerComment configured
+	s := &GitHubSource{
+		Owner:   "owner",
+		Repo:    "repo",
+		BaseURL: server.URL,
+	}
+
+	items, err := s.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+
+	if !items[0].TriggerTime.IsZero() {
+		t.Errorf("TriggerTime = %v, want zero time when TriggerComment not configured", items[0].TriggerTime)
 	}
 }

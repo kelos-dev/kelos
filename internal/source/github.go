@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -55,7 +56,8 @@ type githubLabel struct {
 }
 
 type githubComment struct {
-	Body string `json:"body"`
+	Body      string `json:"body"`
+	CreatedAt string `json:"created_at"`
 }
 
 func (s *GitHubSource) baseURL() string {
@@ -90,10 +92,12 @@ func (s *GitHubSource) Discover(ctx context.Context) ([]WorkItem, error) {
 			labels = append(labels, l.Name)
 		}
 
-		comments, err := s.fetchComments(ctx, issue.Number)
+		rawComments, err := s.fetchComments(ctx, issue.Number)
 		if err != nil {
 			return nil, fmt.Errorf("fetching comments for issue #%d: %w", issue.Number, err)
 		}
+
+		comments := concatCommentBodies(rawComments)
 
 		if needsCommentFilter && !s.passesCommentFilter(comments) {
 			continue
@@ -104,7 +108,7 @@ func (s *GitHubSource) Discover(ctx context.Context) ([]WorkItem, error) {
 			kind = "PR"
 		}
 
-		items = append(items, WorkItem{
+		item := WorkItem{
 			ID:       strconv.Itoa(issue.Number),
 			Number:   issue.Number,
 			Title:    issue.Title,
@@ -113,10 +117,37 @@ func (s *GitHubSource) Discover(ctx context.Context) ([]WorkItem, error) {
 			Labels:   labels,
 			Comments: comments,
 			Kind:     kind,
-		})
+		}
+
+		// Record the timestamp of the most recent trigger comment so the
+		// spawner can retrigger completed tasks when a new trigger arrives.
+		if s.TriggerComment != "" {
+			item.TriggerTime = latestTriggerTime(rawComments, s.TriggerComment)
+		}
+
+		items = append(items, item)
 	}
 
 	return items, nil
+}
+
+// latestTriggerTime returns the CreatedAt timestamp of the most recent
+// comment whose body contains the trigger command, or the zero time if
+// none match.
+func latestTriggerTime(comments []githubComment, trigger string) time.Time {
+	var latest time.Time
+	for _, c := range comments {
+		if containsCommand(c.Body, trigger) {
+			t, err := time.Parse(time.RFC3339, c.CreatedAt)
+			if err != nil {
+				continue
+			}
+			if t.After(latest) {
+				latest = t
+			}
+		}
+	}
+	return latest
 }
 
 // passesCommentFilter checks whether an issue's comments satisfy the
@@ -318,12 +349,12 @@ func (s *GitHubSource) fetchIssuesPage(ctx context.Context, pageURL string) ([]g
 	return issues, nextURL, nil
 }
 
-func (s *GitHubSource) fetchComments(ctx context.Context, issueNumber int) (string, error) {
+func (s *GitHubSource) fetchComments(ctx context.Context, issueNumber int) ([]githubComment, error) {
 	u := fmt.Sprintf("%s/repos/%s/%s/issues/%d/comments?per_page=100", s.baseURL(), s.Owner, s.Repo, issueNumber)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return "", fmt.Errorf("creating request: %w", err)
+		return nil, fmt.Errorf("creating request: %w", err)
 	}
 
 	if s.Token != "" {
@@ -333,20 +364,27 @@ func (s *GitHubSource) fetchComments(ctx context.Context, issueNumber int) (stri
 
 	resp, err := s.httpClient().Do(req)
 	if err != nil {
-		return "", fmt.Errorf("fetching comments: %w", err)
+		return nil, fmt.Errorf("fetching comments: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return "", fmt.Errorf("GitHub API returned status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("GitHub API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	var comments []githubComment
 	if err := json.NewDecoder(resp.Body).Decode(&comments); err != nil {
-		return "", fmt.Errorf("decoding comments: %w", err)
+		return nil, fmt.Errorf("decoding comments: %w", err)
 	}
 
+	return comments, nil
+}
+
+// concatCommentBodies joins comment bodies into a single string separated by
+// "\n---\n", matching the format expected by passesCommentFilter. Bodies are
+// truncated at maxCommentBytes to bound memory usage.
+func concatCommentBodies(comments []githubComment) string {
 	var parts []string
 	totalBytes := 0
 	for _, c := range comments {
@@ -356,8 +394,7 @@ func (s *GitHubSource) fetchComments(ctx context.Context, issueNumber int) (stri
 		}
 		parts = append(parts, c.Body)
 	}
-
-	return strings.Join(parts, "\n---\n"), nil
+	return strings.Join(parts, "\n---\n")
 }
 
 var linkNextRe = regexp.MustCompile(`<([^>]+)>;\s*rel="next"`)

@@ -3,6 +3,7 @@ package source
 import (
 	"context"
 	"sort"
+	"time"
 )
 
 // WorkItem represents a discovered work item from an external source.
@@ -17,6 +18,13 @@ type WorkItem struct {
 	Kind     string // "Issue" or "PR"
 	Time     string // Cron trigger time (RFC3339)
 	Schedule string // Cron schedule expression
+
+	// TriggerTime is the creation time of the most recent trigger comment
+	// for this work item. It is only set when a TriggerComment filter is
+	// configured and a matching comment was found. The spawner uses this
+	// to retrigger completed tasks when the trigger comment is newer than
+	// the task's completion time.
+	TriggerTime time.Time
 }
 
 // Source discovers work items from an external system.

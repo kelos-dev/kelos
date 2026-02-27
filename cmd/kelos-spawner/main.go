@@ -173,19 +173,44 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 		return fmt.Errorf("listing existing Tasks: %w", err)
 	}
 
-	existingTasks := make(map[string]bool)
+	existingTaskMap := make(map[string]*kelosv1alpha1.Task)
 	activeTasks := 0
-	for _, t := range existingTaskList.Items {
-		existingTasks[t.Name] = true
+	for i := range existingTaskList.Items {
+		t := &existingTaskList.Items[i]
+		existingTaskMap[t.Name] = t
 		if t.Status.Phase != kelosv1alpha1.TaskPhaseSucceeded && t.Status.Phase != kelosv1alpha1.TaskPhaseFailed {
 			activeTasks++
 		}
 	}
 
+	// Determine whether the source supports retrigger via TriggerComment.
+	hasTriggerComment := ts.Spec.When.GitHubIssues != nil && ts.Spec.When.GitHubIssues.TriggerComment != ""
+
 	var newItems []source.WorkItem
 	for _, item := range items {
 		taskName := fmt.Sprintf("%s-%s", ts.Name, item.ID)
-		if !existingTasks[taskName] {
+		existing, found := existingTaskMap[taskName]
+		if !found {
+			newItems = append(newItems, item)
+			continue
+		}
+
+		// Retrigger: when TriggerComment is configured and the existing task
+		// is completed, check whether a trigger comment was posted after the
+		// task finished. If so, delete the completed task so a new one can be
+		// created. Note: if creation is later blocked by maxConcurrency or
+		// maxTotalTasks, the item will be picked up as new on the next cycle
+		// since the old task no longer exists.
+		if hasTriggerComment && !item.TriggerTime.IsZero() &&
+			(existing.Status.Phase == kelosv1alpha1.TaskPhaseSucceeded || existing.Status.Phase == kelosv1alpha1.TaskPhaseFailed) &&
+			existing.Status.CompletionTime != nil &&
+			item.TriggerTime.After(existing.Status.CompletionTime.Time) {
+
+			if err := cl.Delete(ctx, existing); err != nil && !apierrors.IsNotFound(err) {
+				log.Error(err, "Deleting completed task for retrigger", "task", taskName)
+				continue
+			}
+			log.Info("Deleted completed task for retrigger", "task", taskName)
 			newItems = append(newItems, item)
 		}
 	}

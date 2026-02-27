@@ -10,6 +10,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -631,7 +632,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 	})
 
 	Context("When creating a TaskSpawner with Cron source", func() {
-		It("Should create a Deployment and update status", func() {
+		It("Should create a CronJob and update status", func() {
 			By("Creating a namespace")
 			ns := &corev1.Namespace{
 				ObjectMeta: metav1.ObjectMeta{
@@ -683,47 +684,55 @@ var _ = Describe("TaskSpawner Controller", func() {
 				return false
 			}, timeout, interval).Should(BeTrue())
 
-			By("Verifying a Deployment is created")
-			deployLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
-			createdDeploy := &appsv1.Deployment{}
+			By("Verifying a CronJob is created")
+			cronJobLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
+			createdCronJob := &batchv1.CronJob{}
 
 			Eventually(func() bool {
-				err := k8sClient.Get(ctx, deployLookupKey, createdDeploy)
+				err := k8sClient.Get(ctx, cronJobLookupKey, createdCronJob)
 				return err == nil
 			}, timeout, interval).Should(BeTrue())
 
-			By("Verifying the Deployment labels")
-			Expect(createdDeploy.Labels["kelos.dev/taskspawner"]).To(Equal(ts.Name))
+			By("Verifying the CronJob labels")
+			Expect(createdCronJob.Labels["kelos.dev/taskspawner"]).To(Equal(ts.Name))
 
-			By("Verifying the Deployment spec")
-			Expect(createdDeploy.Spec.Template.Spec.Containers).To(HaveLen(1))
-			container := createdDeploy.Spec.Template.Spec.Containers[0]
+			By("Verifying the CronJob schedule")
+			Expect(createdCronJob.Spec.Schedule).To(Equal("0 9 * * 1"))
+
+			By("Verifying the CronJob concurrency policy")
+			Expect(createdCronJob.Spec.ConcurrencyPolicy).To(Equal(batchv1.ForbidConcurrent))
+
+			By("Verifying the CronJob pod spec")
+			podSpec := createdCronJob.Spec.JobTemplate.Spec.Template.Spec
+			Expect(podSpec.Containers).To(HaveLen(1))
+			container := podSpec.Containers[0]
 			Expect(container.Name).To(Equal("spawner"))
 			Expect(container.Image).To(Equal(controller.DefaultSpawnerImage))
 			Expect(container.Args).To(ConsistOf(
 				"--taskspawner-name="+ts.Name,
 				"--taskspawner-namespace="+ns.Name,
+				"--one-shot",
 			))
 
-			By("Verifying the Deployment has no env vars (cron needs no secrets)")
+			By("Verifying the CronJob has no env vars (cron needs no secrets)")
 			Expect(container.Env).To(BeEmpty())
 
-			By("Verifying the Deployment has owner reference")
-			Expect(createdDeploy.OwnerReferences).To(HaveLen(1))
-			Expect(createdDeploy.OwnerReferences[0].Name).To(Equal(ts.Name))
-			Expect(createdDeploy.OwnerReferences[0].Kind).To(Equal("TaskSpawner"))
+			By("Verifying the CronJob has owner reference")
+			Expect(createdCronJob.OwnerReferences).To(HaveLen(1))
+			Expect(createdCronJob.OwnerReferences[0].Name).To(Equal(ts.Name))
+			Expect(createdCronJob.OwnerReferences[0].Kind).To(Equal("TaskSpawner"))
 
-			By("Verifying TaskSpawner status has deploymentName")
+			By("Verifying TaskSpawner status has cronJobName")
 			Eventually(func() string {
 				err := k8sClient.Get(ctx, tsLookupKey, createdTS)
 				if err != nil {
 					return ""
 				}
-				return createdTS.Status.DeploymentName
+				return createdTS.Status.CronJobName
 			}, timeout, interval).Should(Equal(ts.Name))
 
-			By("Verifying TaskSpawner phase is Pending")
-			Expect(createdTS.Status.Phase).To(Equal(kelosv1alpha1.TaskSpawnerPhasePending))
+			By("Verifying TaskSpawner phase is Running")
+			Expect(createdTS.Status.Phase).To(Equal(kelosv1alpha1.TaskSpawnerPhaseRunning))
 		})
 	})
 

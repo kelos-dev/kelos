@@ -6,6 +6,7 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -42,10 +43,16 @@ type TaskSpawnerReconciler struct {
 // +kubebuilder:rbac:groups=kelos.dev,resources=taskspawners/finalizers,verbs=update
 // +kubebuilder:rbac:groups=kelos.dev,resources=workspaces,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=batch,resources=cronjobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+
+// isCronBased returns true if the TaskSpawner uses a cron schedule.
+func isCronBased(ts *kelosv1alpha1.TaskSpawner) bool {
+	return ts.Spec.When.Cron != nil
+}
 
 // Reconcile handles TaskSpawner reconciliation.
 func (r *TaskSpawnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -76,6 +83,31 @@ func (r *TaskSpawnerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	// Ensure ServiceAccount and RoleBinding exist in the namespace
+	if err := r.ensureSpawnerRBAC(ctx, ts.Namespace); err != nil {
+		logger.Error(err, "unable to ensure spawner RBAC")
+		return ctrl.Result{}, err
+	}
+
+	isSuspended := ts.Spec.Suspend != nil && *ts.Spec.Suspend
+
+	// Cron-based TaskSpawners use a CronJob instead of a Deployment.
+	if isCronBased(&ts) {
+		return r.reconcileCronJob(ctx, req, &ts, isSuspended)
+	}
+
+	return r.reconcileDeployment(ctx, req, &ts, isSuspended)
+}
+
+// reconcileDeployment handles the Deployment lifecycle for polling-based TaskSpawners.
+func (r *TaskSpawnerReconciler) reconcileDeployment(ctx context.Context, req ctrl.Request, ts *kelosv1alpha1.TaskSpawner, isSuspended bool) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	// Clean up any existing CronJob from a previous cron-based configuration.
+	if err := r.deleteStaleResource(ctx, req.NamespacedName, &batchv1.CronJob{}, "CronJob"); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	// Check if Deployment already exists
 	var deploy appsv1.Deployment
 	deployExists := true
@@ -86,12 +118,6 @@ func (r *TaskSpawnerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			logger.Error(err, "unable to fetch Deployment")
 			return ctrl.Result{}, err
 		}
-	}
-
-	// Ensure ServiceAccount and RoleBinding exist in the namespace
-	if err := r.ensureSpawnerRBAC(ctx, ts.Namespace); err != nil {
-		logger.Error(err, "unable to ensure spawner RBAC")
-		return ctrl.Result{}, err
 	}
 
 	// Resolve workspace if workspaceRef is set in taskTemplate
@@ -106,7 +132,7 @@ func (r *TaskSpawnerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}, &ws); err != nil {
 			if apierrors.IsNotFound(err) {
 				logger.Info("Workspace not found yet, requeuing", "workspace", workspaceRefName)
-				r.recordEvent(&ts, corev1.EventTypeNormal, "WorkspaceNotFound", "Workspace %s not found, requeuing", workspaceRefName)
+				r.recordEvent(ts, corev1.EventTypeNormal, "WorkspaceNotFound", "Workspace %s not found, requeuing", workspaceRefName)
 				return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 			}
 			logger.Error(err, "Unable to fetch Workspace for TaskSpawner", "workspace", workspaceRefName)
@@ -135,7 +161,6 @@ func (r *TaskSpawnerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	// Determine desired replica count based on suspend state
-	isSuspended := ts.Spec.Suspend != nil && *ts.Spec.Suspend
 	desiredReplicas := int32(1)
 	if isSuspended {
 		desiredReplicas = 0
@@ -143,11 +168,11 @@ func (r *TaskSpawnerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	// Create Deployment if it doesn't exist
 	if !deployExists {
-		return r.createDeployment(ctx, &ts, workspace, isGitHubApp, desiredReplicas)
+		return r.createDeployment(ctx, ts, workspace, isGitHubApp, desiredReplicas)
 	}
 
 	// Update Deployment if spec changed
-	if err := r.updateDeployment(ctx, &ts, &deploy, workspace, isGitHubApp, desiredReplicas); err != nil {
+	if err := r.updateDeployment(ctx, ts, &deploy, workspace, isGitHubApp, desiredReplicas); err != nil {
 		logger.Error(err, "unable to update Deployment")
 		return ctrl.Result{}, err
 	}
@@ -161,13 +186,14 @@ func (r *TaskSpawnerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	// Update status with deployment name or phase if needed
-	needsStatusUpdate := ts.Status.DeploymentName != deploy.Name || ts.Status.Phase != desiredPhase
+	needsStatusUpdate := ts.Status.DeploymentName != deploy.Name || ts.Status.CronJobName != "" || ts.Status.Phase != desiredPhase
 	if needsStatusUpdate {
 		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-			if getErr := r.Get(ctx, req.NamespacedName, &ts); getErr != nil {
+			if getErr := r.Get(ctx, req.NamespacedName, ts); getErr != nil {
 				return getErr
 			}
 			ts.Status.DeploymentName = deploy.Name
+			ts.Status.CronJobName = ""
 			if isSuspended {
 				ts.Status.Phase = kelosv1alpha1.TaskSpawnerPhaseSuspended
 				ts.Status.Message = "Suspended by user"
@@ -177,7 +203,110 @@ func (r *TaskSpawnerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			} else if ts.Status.Phase == "" {
 				ts.Status.Phase = kelosv1alpha1.TaskSpawnerPhasePending
 			}
-			return r.Status().Update(ctx, &ts)
+			return r.Status().Update(ctx, ts)
+		}); err != nil {
+			logger.Error(err, "Unable to update TaskSpawner status")
+			return ctrl.Result{}, err
+		}
+	}
+
+	return ctrl.Result{}, nil
+}
+
+// reconcileCronJob handles the CronJob lifecycle for cron-based TaskSpawners.
+func (r *TaskSpawnerReconciler) reconcileCronJob(ctx context.Context, req ctrl.Request, ts *kelosv1alpha1.TaskSpawner, isSuspended bool) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	// Clean up any existing Deployment from a previous polling-based configuration.
+	if err := r.deleteStaleResource(ctx, req.NamespacedName, &appsv1.Deployment{}, "Deployment"); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	var cronJob batchv1.CronJob
+	cronJobExists := true
+	if err := r.Get(ctx, req.NamespacedName, &cronJob); err != nil {
+		if apierrors.IsNotFound(err) {
+			cronJobExists = false
+		} else {
+			logger.Error(err, "Unable to fetch CronJob")
+			return ctrl.Result{}, err
+		}
+	}
+
+	// Resolve workspace if workspaceRef is set in taskTemplate
+	var workspace *kelosv1alpha1.WorkspaceSpec
+	var isGitHubApp bool
+	if ts.Spec.TaskTemplate.WorkspaceRef != nil {
+		workspaceRefName := ts.Spec.TaskTemplate.WorkspaceRef.Name
+		var ws kelosv1alpha1.Workspace
+		if err := r.Get(ctx, client.ObjectKey{
+			Namespace: ts.Namespace,
+			Name:      workspaceRefName,
+		}, &ws); err != nil {
+			if apierrors.IsNotFound(err) {
+				logger.Info("Workspace not found yet, requeuing", "workspace", workspaceRefName)
+				r.recordEvent(ts, corev1.EventTypeNormal, "WorkspaceNotFound", "Workspace %s not found, requeuing", workspaceRefName)
+				return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+			}
+			logger.Error(err, "Unable to fetch Workspace for TaskSpawner", "workspace", workspaceRefName)
+			return ctrl.Result{}, err
+		}
+		workspace = &ws.Spec
+
+		// Detect GitHub App auth
+		if workspace.SecretRef != nil {
+			var secret corev1.Secret
+			if err := r.Get(ctx, client.ObjectKey{
+				Namespace: ts.Namespace,
+				Name:      workspace.SecretRef.Name,
+			}, &secret); err != nil {
+				if !apierrors.IsNotFound(err) {
+					logger.Error(err, "Unable to fetch workspace secret", "secret", workspace.SecretRef.Name)
+					return ctrl.Result{}, err
+				}
+			} else {
+				isGitHubApp = githubapp.IsGitHubApp(secret.Data)
+				if isGitHubApp {
+					logger.Info("Detected GitHub App secret for TaskSpawner", "secret", workspace.SecretRef.Name)
+				}
+			}
+		}
+	}
+
+	if !cronJobExists {
+		return r.createCronJob(ctx, ts, workspace, isGitHubApp, isSuspended)
+	}
+
+	if err := r.updateCronJob(ctx, ts, &cronJob, workspace, isGitHubApp, isSuspended); err != nil {
+		logger.Error(err, "Unable to update CronJob")
+		return ctrl.Result{}, err
+	}
+
+	// Determine the desired phase based on current state.
+	// CronJobs are considered Running once they exist and are not suspended.
+	desiredPhase := ts.Status.Phase
+	if isSuspended {
+		desiredPhase = kelosv1alpha1.TaskSpawnerPhaseSuspended
+	} else if ts.Status.Phase != kelosv1alpha1.TaskSpawnerPhaseRunning {
+		desiredPhase = kelosv1alpha1.TaskSpawnerPhaseRunning
+	}
+
+	needsStatusUpdate := ts.Status.CronJobName != cronJob.Name || ts.Status.DeploymentName != "" || ts.Status.Phase != desiredPhase
+	if needsStatusUpdate {
+		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			if getErr := r.Get(ctx, req.NamespacedName, ts); getErr != nil {
+				return getErr
+			}
+			ts.Status.CronJobName = cronJob.Name
+			ts.Status.DeploymentName = ""
+			if isSuspended {
+				ts.Status.Phase = kelosv1alpha1.TaskSpawnerPhaseSuspended
+				ts.Status.Message = "Suspended by user"
+			} else {
+				ts.Status.Phase = kelosv1alpha1.TaskSpawnerPhaseRunning
+				ts.Status.Message = ""
+			}
+			return r.Status().Update(ctx, ts)
 		}); err != nil {
 			logger.Error(err, "Unable to update TaskSpawner status")
 			return ctrl.Result{}, err
@@ -192,7 +321,7 @@ func (r *TaskSpawnerReconciler) handleDeletion(ctx context.Context, ts *kelosv1a
 	logger := log.FromContext(ctx)
 
 	if controllerutil.ContainsFinalizer(ts, taskSpawnerFinalizer) {
-		// The Deployment will be garbage collected via owner reference,
+		// The Deployment or CronJob will be garbage collected via owner reference,
 		// but we remove the finalizer to allow the TaskSpawner to be deleted.
 		controllerutil.RemoveFinalizer(ts, taskSpawnerFinalizer)
 		if err := r.Update(ctx, ts); err != nil {
@@ -240,6 +369,7 @@ func (r *TaskSpawnerReconciler) createDeployment(ctx context.Context, ts *kelosv
 			ts.Status.Phase = kelosv1alpha1.TaskSpawnerPhasePending
 		}
 		ts.Status.DeploymentName = deploy.Name
+		ts.Status.CronJobName = ""
 		return r.Status().Update(ctx, ts)
 	}); err != nil {
 		logger.Error(err, "Unable to update TaskSpawner status")
@@ -302,6 +432,139 @@ func (r *TaskSpawnerReconciler) updateDeployment(ctx context.Context, ts *kelosv
 
 	logger.Info("Updated Deployment", "deployment", deploy.Name, "replicas", desiredReplicas)
 	r.recordEvent(ts, corev1.EventTypeNormal, "DeploymentUpdated", "Updated spawner Deployment %s", deploy.Name)
+	return nil
+}
+
+// createCronJob creates a CronJob for a cron-based TaskSpawner.
+func (r *TaskSpawnerReconciler) createCronJob(ctx context.Context, ts *kelosv1alpha1.TaskSpawner, workspace *kelosv1alpha1.WorkspaceSpec, isGitHubApp bool, isSuspended bool) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	cronJob := r.DeploymentBuilder.BuildCronJob(ts, workspace, isGitHubApp)
+	cronJob.Spec.Suspend = &isSuspended
+
+	// Set owner reference
+	if err := controllerutil.SetControllerReference(ts, cronJob, r.Scheme); err != nil {
+		logger.Error(err, "Unable to set owner reference on CronJob")
+		return ctrl.Result{}, err
+	}
+
+	if err := r.Create(ctx, cronJob); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return ctrl.Result{Requeue: true}, nil
+		}
+		logger.Error(err, "Unable to create CronJob")
+		return ctrl.Result{}, err
+	}
+
+	logger.Info("Created CronJob", "cronJob", cronJob.Name, "schedule", ts.Spec.When.Cron.Schedule)
+	r.recordEvent(ts, corev1.EventTypeNormal, "CronJobCreated", "Created spawner CronJob %s with schedule %s", cronJob.Name, ts.Spec.When.Cron.Schedule)
+
+	// Update status
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		if getErr := r.Get(ctx, client.ObjectKeyFromObject(ts), ts); getErr != nil {
+			return getErr
+		}
+		if isSuspended {
+			ts.Status.Phase = kelosv1alpha1.TaskSpawnerPhaseSuspended
+			ts.Status.Message = "Suspended by user"
+		} else {
+			ts.Status.Phase = kelosv1alpha1.TaskSpawnerPhaseRunning
+		}
+		ts.Status.CronJobName = cronJob.Name
+		ts.Status.DeploymentName = ""
+		return r.Status().Update(ctx, ts)
+	}); err != nil {
+		logger.Error(err, "Unable to update TaskSpawner status")
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{Requeue: true}, nil
+}
+
+// updateCronJob updates the CronJob if the schedule or suspend state changed.
+func (r *TaskSpawnerReconciler) updateCronJob(ctx context.Context, ts *kelosv1alpha1.TaskSpawner, cronJob *batchv1.CronJob, workspace *kelosv1alpha1.WorkspaceSpec, isGitHubApp bool, isSuspended bool) error {
+	logger := log.FromContext(ctx)
+
+	desired := r.DeploymentBuilder.BuildCronJob(ts, workspace, isGitHubApp)
+	needsUpdate := false
+
+	if cronJob.Spec.Schedule != desired.Spec.Schedule {
+		cronJob.Spec.Schedule = desired.Spec.Schedule
+		needsUpdate = true
+	}
+
+	if cronJob.Spec.Suspend == nil || *cronJob.Spec.Suspend != isSuspended {
+		cronJob.Spec.Suspend = &isSuspended
+		needsUpdate = true
+	}
+
+	currentPodSpec := &cronJob.Spec.JobTemplate.Spec.Template.Spec
+	desiredPodSpec := &desired.Spec.JobTemplate.Spec.Template.Spec
+
+	// Update container spec if changed (image, args, env, volumeMounts)
+	if len(currentPodSpec.Containers) > 0 {
+		current := currentPodSpec.Containers[0]
+		target := desiredPodSpec.Containers[0]
+
+		if current.Image != target.Image ||
+			!equalStringSlices(current.Args, target.Args) ||
+			!equalEnvVars(current.Env, target.Env) ||
+			!reflect.DeepEqual(current.VolumeMounts, target.VolumeMounts) {
+			currentPodSpec.Containers[0].Image = target.Image
+			currentPodSpec.Containers[0].Args = target.Args
+			currentPodSpec.Containers[0].Env = target.Env
+			currentPodSpec.Containers[0].VolumeMounts = target.VolumeMounts
+			needsUpdate = true
+		}
+	}
+
+	// Update init containers if changed
+	if !reflect.DeepEqual(currentPodSpec.InitContainers, desiredPodSpec.InitContainers) {
+		currentPodSpec.InitContainers = desiredPodSpec.InitContainers
+		needsUpdate = true
+	}
+
+	// Update volumes if changed
+	if !reflect.DeepEqual(currentPodSpec.Volumes, desiredPodSpec.Volumes) {
+		currentPodSpec.Volumes = desiredPodSpec.Volumes
+		needsUpdate = true
+	}
+
+	if !needsUpdate {
+		return nil
+	}
+
+	if err := r.Update(ctx, cronJob); err != nil {
+		return err
+	}
+
+	logger.Info("Updated CronJob", "cronJob", cronJob.Name, "schedule", cronJob.Spec.Schedule, "suspended", isSuspended)
+	r.recordEvent(ts, corev1.EventTypeNormal, "CronJobUpdated", "Updated spawner CronJob %s", cronJob.Name)
+	return nil
+}
+
+// deleteStaleResource deletes a resource by NamespacedName if it exists.
+// This is used to clean up the old resource type when switching between
+// Deployment-based and CronJob-based TaskSpawners.
+func (r *TaskSpawnerReconciler) deleteStaleResource(ctx context.Context, key types.NamespacedName, obj client.Object, kind string) error {
+	logger := log.FromContext(ctx)
+
+	if err := r.Get(ctx, key, obj); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+
+	if err := r.Delete(ctx, obj); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		logger.Error(err, "Unable to delete stale "+kind, "name", key.Name)
+		return err
+	}
+
+	logger.Info("Deleted stale "+kind+" after switching TaskSpawner type", "name", key.Name)
 	return nil
 }
 
@@ -420,6 +683,7 @@ func (r *TaskSpawnerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&kelosv1alpha1.TaskSpawner{}).
 		Owns(&appsv1.Deployment{}).
+		Owns(&batchv1.CronJob{}).
 		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.findTaskSpawnersForSecret)).
 		Watches(&kelosv1alpha1.Workspace{}, handler.EnqueueRequestsFromMapFunc(r.findTaskSpawnersForWorkspace)).
 		Complete(r)

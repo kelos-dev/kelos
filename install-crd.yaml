@@ -1233,9 +1233,15 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              cronJobName:
+                description: |-
+                  CronJobName is the name of the CronJob running the spawner.
+                  Set for cron-based sources.
+                type: string
               deploymentName:
-                description: DeploymentName is the name of the Deployment running
-                  the spawner.
+                description: |-
+                  DeploymentName is the name of the Deployment running the spawner.
+                  Set for polling-based sources (GitHub Issues, Jira).
                 type: string
               lastDiscoveryTime:
                 description: LastDiscoveryTime is the last time the source was polled.

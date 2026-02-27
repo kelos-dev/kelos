@@ -130,7 +130,8 @@ The `promptTemplate` field uses Go `text/template` syntax. Available variables d
 | Field | Description |
 |-------|-------------|
 | `status.phase` | Current phase: `Pending`, `Running`, `Suspended`, or `Failed` |
-| `status.deploymentName` | Name of the Deployment running the spawner |
+| `status.deploymentName` | Name of the Deployment running the spawner (polling-based sources) |
+| `status.cronJobName` | Name of the CronJob running the spawner (cron-based sources) |
 | `status.totalDiscovered` | Total number of items discovered from the source |
 | `status.totalTasksCreated` | Total number of Tasks created by this spawner |
 | `status.activeTasks` | Number of currently active (non-terminal) Tasks |

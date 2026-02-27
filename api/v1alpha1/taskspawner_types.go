@@ -256,8 +256,14 @@ type TaskSpawnerStatus struct {
 	Phase TaskSpawnerPhase `json:"phase,omitempty"`
 
 	// DeploymentName is the name of the Deployment running the spawner.
+	// Set for polling-based sources (GitHub Issues, Jira).
 	// +optional
 	DeploymentName string `json:"deploymentName,omitempty"`
+
+	// CronJobName is the name of the CronJob running the spawner.
+	// Set for cron-based sources.
+	// +optional
+	CronJobName string `json:"cronJobName,omitempty"`
 
 	// TotalDiscovered is the total number of work items discovered.
 	// +optional

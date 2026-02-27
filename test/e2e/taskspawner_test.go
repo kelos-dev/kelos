@@ -153,7 +153,7 @@ var _ = Describe("TaskSpawner", func() {
 var _ = Describe("Cron TaskSpawner", func() {
 	f := framework.NewFramework("cron")
 
-	It("should create a spawner Deployment and discover cron ticks", func() {
+	It("should create a CronJob and discover cron ticks", func() {
 		By("creating OAuth credentials secret")
 		f.CreateSecret("claude-credentials",
 			"CLAUDE_CODE_OAUTH_TOKEN="+oauthToken)
@@ -182,8 +182,8 @@ var _ = Describe("Cron TaskSpawner", func() {
 			},
 		})
 
-		By("waiting for Deployment to become available")
-		f.WaitForDeploymentAvailable("cron-spawner")
+		By("waiting for CronJob to be created")
+		f.WaitForCronJobCreated("cron-spawner")
 
 		By("waiting for TaskSpawner phase to become Running")
 		Eventually(func() string {

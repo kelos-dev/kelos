@@ -302,6 +302,14 @@ func (f *Framework) WaitForDeploymentAvailable(name string) {
 	}, 2*time.Minute, 10*time.Second).Should(BeTrue())
 }
 
+// WaitForCronJobCreated waits for a CronJob with the given name to appear.
+func (f *Framework) WaitForCronJobCreated(name string) {
+	Eventually(func() error {
+		_, err := f.Clientset.BatchV1().CronJobs(f.Namespace).Get(context.TODO(), name, metav1.GetOptions{})
+		return err
+	}, 2*time.Minute, 10*time.Second).Should(Succeed())
+}
+
 // GetTaskPhase returns the phase of a Task.
 func (f *Framework) GetTaskPhase(name string) string {
 	task, err := f.KelosClientset.ApiV1alpha1().Tasks(f.Namespace).Get(context.TODO(), name, metav1.GetOptions{})

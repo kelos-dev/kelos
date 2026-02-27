@@ -41,6 +41,7 @@ func main() {
 	var jiraBaseURL string
 	var jiraProject string
 	var jiraJQL string
+	var oneShot bool
 
 	flag.StringVar(&name, "taskspawner-name", "", "Name of the TaskSpawner to manage")
 	flag.StringVar(&namespace, "taskspawner-namespace", "", "Namespace of the TaskSpawner")
@@ -51,6 +52,7 @@ func main() {
 	flag.StringVar(&jiraBaseURL, "jira-base-url", "", "Jira instance base URL (e.g. https://mycompany.atlassian.net)")
 	flag.StringVar(&jiraProject, "jira-project", "", "Jira project key")
 	flag.StringVar(&jiraJQL, "jira-jql", "", "Optional JQL filter for Jira issues")
+	flag.BoolVar(&oneShot, "one-shot", false, "Run a single discovery cycle and exit (used by CronJob)")
 
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
@@ -80,23 +82,31 @@ func main() {
 	ctx := ctrl.SetupSignalHandler()
 	key := types.NamespacedName{Name: name, Namespace: namespace}
 
-	log.Info("starting spawner", "taskspawner", key)
+	log.Info("Starting spawner", "taskspawner", key, "oneShot", oneShot)
+
+	if oneShot {
+		if err := runCycle(ctx, cl, key, githubOwner, githubRepo, githubAPIBaseURL, githubTokenFile, jiraBaseURL, jiraProject, jiraJQL); err != nil {
+			log.Error(err, "Discovery cycle failed")
+			os.Exit(1)
+		}
+		return
+	}
 
 	for {
 		if err := runCycle(ctx, cl, key, githubOwner, githubRepo, githubAPIBaseURL, githubTokenFile, jiraBaseURL, jiraProject, jiraJQL); err != nil {
-			log.Error(err, "discovery cycle failed")
+			log.Error(err, "Discovery cycle failed")
 		}
 
 		// Re-read the TaskSpawner to get the current poll interval
 		var ts kelosv1alpha1.TaskSpawner
 		if err := cl.Get(ctx, key, &ts); err != nil {
-			log.Error(err, "unable to fetch TaskSpawner for poll interval")
+			log.Error(err, "Unable to fetch TaskSpawner for poll interval")
 			sleepOrDone(ctx, 5*time.Minute)
 			continue
 		}
 
 		interval := parsePollInterval(ts.Spec.PollInterval)
-		log.Info("sleeping until next cycle", "interval", interval)
+		log.Info("Sleeping until next cycle", "interval", interval)
 		if done := sleepOrDone(ctx, interval); done {
 			return
 		}

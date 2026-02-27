@@ -1,0 +1,47 @@
+name: Retest
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  retest:
+    if: >-
+      github.event.issue.pull_request && contains(github.event.comment.body, '/retest')
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      pull-requests: read
+    steps:
+      - name: Check permission
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PERMISSION=$(gh api "repos/${{ github.repository }}/collaborators/${{ github.event.comment.user.login }}/permission" -q .permission)
+          if [[ "$PERMISSION" != "admin" && "$PERMISSION" != "write" ]]; then
+            echo "User ${{ github.event.comment.user.login }} does not have write permission (permission=$PERMISSION)"
+            exit 1
+          fi
+
+      - name: Trigger CI
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER=${{ github.event.issue.number }}
+          HEAD_SHA=$(gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid)
+          RUN_ID=$(gh run list --workflow=ci.yaml --commit="$HEAD_SHA" --limit=1 --json databaseId -q '.[0].databaseId')
+
+          if [ -n "$RUN_ID" ]; then
+            CONCLUSION=$(gh run view "$RUN_ID" --json conclusion -q .conclusion)
+            if [ "$CONCLUSION" = "failure" ]; then
+              gh run rerun "$RUN_ID" --failed
+              exit 0
+            elif [ -z "$CONCLUSION" ]; then
+              echo "CI is already in progress (run $RUN_ID)"
+              exit 0
+            fi
+          fi
+
+          HEAD_REF=$(gh pr view "$PR_NUMBER" --json headRefName -q .headRefName)
+          OK_TO_TEST=$(gh pr view "$PR_NUMBER" --json labels -q '[.labels[].name] | any(. == "ok-to-test")')
+          gh workflow run ci.yaml --ref "$HEAD_REF" -f "ok-to-test=$OK_TO_TEST"

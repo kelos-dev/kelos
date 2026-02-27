@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/axon-core/axon/internal/capture"
+	"github.com/kelos-dev/kelos/internal/capture"
 )
 
 func main() {

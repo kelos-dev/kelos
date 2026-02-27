@@ -15,15 +15,15 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
-	"github.com/axon-core/axon/internal/cli"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	"github.com/kelos-dev/kelos/internal/cli"
 )
 
-// clearNamespaceFinalizers removes finalizers from the axon-system namespace
+// clearNamespaceFinalizers removes finalizers from the kelos-system namespace
 // so it can be deleted in envtest (which has no namespace controller).
 func clearNamespaceFinalizers() {
 	ns := &corev1.Namespace{}
-	err := k8sClient.Get(ctx, types.NamespacedName{Name: "axon-system"}, ns)
+	err := k8sClient.Get(ctx, types.NamespacedName{Name: "kelos-system"}, ns)
 	if apierrors.IsNotFound(err) {
 		return
 	}
@@ -38,21 +38,21 @@ func clearNamespaceFinalizers() {
 // without touching the CRDs, keeping the envtest environment intact.
 func deleteControllerResources() {
 	for _, obj := range []client.Object{
-		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "axon-controller-rolebinding"}},
-		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "axon-controller-role"}},
-		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "axon-spawner-role"}},
+		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "kelos-controller-rolebinding"}},
+		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "kelos-controller-role"}},
+		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "kelos-spawner-role"}},
 	} {
 		_ = client.IgnoreNotFound(k8sClient.Delete(ctx, obj))
 	}
 
-	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "axon-system"}}
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "kelos-system"}}
 	_ = client.IgnoreNotFound(k8sClient.Delete(ctx, ns))
 
 	// Clear finalizers so the namespace can be deleted in envtest.
 	clearNamespaceFinalizers()
 
 	Eventually(func() bool {
-		err := k8sClient.Get(ctx, types.NamespacedName{Name: "axon-system"}, &corev1.Namespace{})
+		err := k8sClient.Get(ctx, types.NamespacedName{Name: "kelos-system"}, &corev1.Namespace{})
 		return apierrors.IsNotFound(err)
 	}, 30*time.Second, 100*time.Millisecond).Should(BeTrue())
 }
@@ -64,7 +64,7 @@ func restoreCRDs(kubeconfigPath string) {
 	// Wait for namespace termination to complete before re-installing.
 	clearNamespaceFinalizers()
 	Eventually(func() bool {
-		err := k8sClient.Get(ctx, types.NamespacedName{Name: "axon-system"}, &corev1.Namespace{})
+		err := k8sClient.Get(ctx, types.NamespacedName{Name: "kelos-system"}, &corev1.Namespace{})
 		return apierrors.IsNotFound(err)
 	}, 30*time.Second, 100*time.Millisecond).Should(BeTrue())
 
@@ -72,7 +72,7 @@ func restoreCRDs(kubeconfigPath string) {
 	// server-side apply patches a CRD that still has a deletionTimestamp, the
 	// patch succeeds but the CRD is still deleted, leaving the API unavailable.
 	crdGVK := schema.GroupVersionKind{Group: "apiextensions.k8s.io", Version: "v1", Kind: "CustomResourceDefinition"}
-	for _, name := range []string{"tasks.axon.io", "taskspawners.axon.io", "workspaces.axon.io"} {
+	for _, name := range []string{"tasks.kelos.dev", "taskspawners.kelos.dev", "workspaces.kelos.dev"} {
 		Eventually(func() bool {
 			crd := &unstructured.Unstructured{}
 			crd.SetGroupVersionKind(crdGVK)
@@ -88,13 +88,13 @@ func restoreCRDs(kubeconfigPath string) {
 	// Wait for all CRDs to be fully established before subsequent tests
 	// can create custom resources. We verify by attempting to list each type.
 	Eventually(func() error {
-		return k8sClient.List(ctx, &axonv1alpha1.TaskList{})
+		return k8sClient.List(ctx, &kelosv1alpha1.TaskList{})
 	}, 30*time.Second, 100*time.Millisecond).Should(Succeed())
 	Eventually(func() error {
-		return k8sClient.List(ctx, &axonv1alpha1.TaskSpawnerList{})
+		return k8sClient.List(ctx, &kelosv1alpha1.TaskSpawnerList{})
 	}, 30*time.Second, 100*time.Millisecond).Should(Succeed())
 	Eventually(func() error {
-		return k8sClient.List(ctx, &axonv1alpha1.WorkspaceList{})
+		return k8sClient.List(ctx, &kelosv1alpha1.WorkspaceList{})
 	}, 30*time.Second, 100*time.Millisecond).Should(Succeed())
 
 	deleteControllerResources()
@@ -107,44 +107,44 @@ var _ = Describe("Install/Uninstall", Ordered, func() {
 		kubeconfigPath = writeEnvtestKubeconfig()
 	})
 
-	Context("axon install", func() {
+	Context("kelos install", func() {
 		AfterEach(func() {
 			deleteControllerResources()
 		})
 
-		It("Should create axon-system namespace and controller resources", func() {
+		It("Should create kelos-system namespace and controller resources", func() {
 			root := cli.NewRootCommand()
 			root.SetArgs([]string{"install", "--kubeconfig", kubeconfigPath})
 			Expect(root.Execute()).To(Succeed())
 
-			By("Verifying the axon-system namespace exists")
+			By("Verifying the kelos-system namespace exists")
 			ns := &corev1.Namespace{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "axon-system"}, ns)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "kelos-system"}, ns)).To(Succeed())
 
 			By("Verifying the controller ServiceAccount exists")
 			sa := &corev1.ServiceAccount{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "axon-controller",
-				Namespace: "axon-system",
+				Name:      "kelos-controller",
+				Namespace: "kelos-system",
 			}, sa)).To(Succeed())
 
 			By("Verifying the ClusterRole exists")
 			cr := &rbacv1.ClusterRole{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name: "axon-controller-role",
+				Name: "kelos-controller-role",
 			}, cr)).To(Succeed())
 
 			By("Verifying the ClusterRoleBinding exists")
 			crb := &rbacv1.ClusterRoleBinding{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name: "axon-controller-rolebinding",
+				Name: "kelos-controller-rolebinding",
 			}, crb)).To(Succeed())
 
 			By("Verifying the Deployment exists")
 			dep := &appsv1.Deployment{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "axon-controller-manager",
-				Namespace: "axon-system",
+				Name:      "kelos-controller-manager",
+				Namespace: "kelos-system",
 			}, dep)).To(Succeed())
 		})
 
@@ -159,7 +159,7 @@ var _ = Describe("Install/Uninstall", Ordered, func() {
 		})
 	})
 
-	Context("axon uninstall", func() {
+	Context("kelos uninstall", func() {
 		AfterEach(func() {
 			restoreCRDs(kubeconfigPath)
 		})
@@ -178,8 +178,8 @@ var _ = Describe("Install/Uninstall", Ordered, func() {
 			By("Verifying the Deployment is gone")
 			dep := &appsv1.Deployment{}
 			err := k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "axon-controller-manager",
-				Namespace: "axon-system",
+				Name:      "kelos-controller-manager",
+				Namespace: "kelos-system",
 			}, dep)
 			Expect(client.IgnoreNotFound(err)).To(Succeed())
 			if err == nil {
@@ -189,7 +189,7 @@ var _ = Describe("Install/Uninstall", Ordered, func() {
 			By("Verifying the ClusterRole is gone")
 			cr := &rbacv1.ClusterRole{}
 			err = k8sClient.Get(ctx, types.NamespacedName{
-				Name: "axon-controller-role",
+				Name: "kelos-controller-role",
 			}, cr)
 			Expect(client.IgnoreNotFound(err)).To(Succeed())
 			if err == nil {

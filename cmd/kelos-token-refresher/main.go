@@ -25,7 +25,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/axon-core/axon/internal/githubapp"
+	"github.com/kelos-dev/kelos/internal/githubapp"
 )
 
 const (

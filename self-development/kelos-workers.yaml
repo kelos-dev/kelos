@@ -1,14 +1,14 @@
-apiVersion: axon.io/v1alpha1
+apiVersion: kelos.dev/v1alpha1
 kind: TaskSpawner
 metadata:
-  name: axon-workers
+  name: kelos-workers
 spec:
   when:
     githubIssues:
       labels:
-        - actor/axon
+        - actor/kelos
       excludeLabels:
-        - axon/needs-input
+        - kelos/needs-input
       priorityLabels:
         - priority/critical-urgent
         - priority/imporant-soon
@@ -17,14 +17,14 @@ spec:
   maxConcurrency: 3
   taskTemplate:
     workspaceRef:
-      name: axon-agent
+      name: kelos-agent
     model: opus
     type: claude-code
     ttlSecondsAfterFinished: 3600
     credentials:
       type: oauth
       secretRef:
-        name: axon-credentials
+        name: kelos-credentials
     podOverrides:
       resources:
         requests:
@@ -35,9 +35,9 @@ spec:
           cpu: "1"
           memory: "2Gi"
           ephemeral-storage: "4Gi"
-    branch: "axon-task-{{.Number}}"
+    branch: "kelos-task-{{.Number}}"
     agentConfigRef:
-      name: axon-dev-agent
+      name: kelos-dev-agent
     promptTemplate: |
       You are a coding agent. You either
       - create a PR to fix the issue
@@ -45,21 +45,21 @@ spec:
       - comment on the issue or the PR if you cannot fix it
 
       Pre-checklist:
-      - Label the PR with "generated-by-axon" and "ok-to-test":
-        - gh pr edit <number> --add-label generated-by-axon --add-label ok-to-test
+      - Label the PR with "generated-by-kelos" and "ok-to-test":
+        - gh pr edit <number> --add-label generated-by-kelos --add-label ok-to-test
 
       Task:
       - 0. Set up your working branch. Run this exactly:
         ```
         git fetch --unshallow || true; git fetch origin main; git rebase origin/main
         ```
-      - 1. Check if a PR already exists for branch axon-task-{{.Number}}.
+      - 1. Check if a PR already exists for branch kelos-task-{{.Number}}.
 
       If a PR already exists:
       - 2a. Read ALL review comments and conversation on the PR (gh pr view, gh api for review comments).
       - 3a. Read the existing diff (git diff main...HEAD) to understand what has already been done. Do NOT start over or rewrite from scratch.
       - 4a. Make only the incremental changes needed to address review feedback or remaining issues. Preserve existing work.
-      - 5a. Commit and push your changes to origin axon-task-{{.Number}}.
+      - 5a. Commit and push your changes to origin kelos-task-{{.Number}}.
       - 6a. /review the PR to verify your changes address the feedback. If changes are needed, make them, commit and push, then /review again. Repeat until the review passes.
       - 7a. Update the PR title and description to reflect the final diff.
       - 8a. Make sure the PR passes all CI tests.
@@ -67,16 +67,16 @@ spec:
       If no PR exists:
       - 2b. Investigate the issue #{{.Number}}.
       - 3b. Create a commit that fixes the issue.
-      - 4b. Push your branch to origin axon-task-{{.Number}}.
+      - 4b. Push your branch to origin kelos-task-{{.Number}}.
       - 5b. Create a PR, then /review it. If changes are needed, make them, commit and push, then /review again. Repeat until the review passes.
       - 6b. Update the PR title and description to reflect the final diff.
       - 7b. Make sure the PR passes all CI tests.
 
       Post-checklist:
-      - Add axon/needs-input label to the issue (gh issue edit {{.Number}} --add-label axon/needs-input) and leave a comment for the reason if any of the following applies:
+      - Add kelos/needs-input label to the issue (gh issue edit {{.Number}} --add-label kelos/needs-input) and leave a comment for the reason if any of the following applies:
         - The PR is ready for review, please take a look.
         - Commented on the issue or the PR for more information.
         - You cannot make any progress on the issue, explain why.
       - If you find anything worth considering (e.g. bugs, improvements, follow-up work), create a new issue:
-        - gh issue create --title "<title>" --body "<description>" --label generated-by-axon --label axon/needs-input
+        - gh issue create --title "<title>" --body "<description>" --label generated-by-kelos --label kelos/needs-input
   pollInterval: 1m

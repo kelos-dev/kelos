@@ -15,7 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/rand"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 )
 
 // credentialNone is a reserved value for apiKey or oauthToken in the config
@@ -89,11 +89,11 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 					}
 					if !dryRun {
 						oauthKey := oauthSecretKey(agentType)
-						if err := ensureCredentialSecret(cfg, "axon-credentials", oauthKey, resolveCredentialValue(resolved), yes); err != nil {
+						if err := ensureCredentialSecret(cfg, "kelos-credentials", oauthKey, resolveCredentialValue(resolved), yes); err != nil {
 							return err
 						}
 					}
-					secret = "axon-credentials"
+					secret = "kelos-credentials"
 					credentialType = "oauth"
 				} else if key := cfg.Config.APIKey; key != "" {
 					resolved, err := resolveContent(key)
@@ -102,11 +102,11 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 					}
 					if !dryRun {
 						apiKey := apiKeySecretKey(agentType)
-						if err := ensureCredentialSecret(cfg, "axon-credentials", apiKey, resolveCredentialValue(resolved), yes); err != nil {
+						if err := ensureCredentialSecret(cfg, "kelos-credentials", apiKey, resolveCredentialValue(resolved), yes); err != nil {
 							return err
 						}
 					}
-					secret = "axon-credentials"
+					secret = "kelos-credentials"
 					credentialType = "api-key"
 				}
 			}
@@ -123,7 +123,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 			if dryRun {
 				// Resolve workspace from inline config for dry-run.
 				if workspace == "" && cfg.Config != nil && cfg.Config.Workspace.Repo != "" {
-					workspace = "axon-workspace"
+					workspace = "kelos-workspace"
 				}
 			} else {
 				// Auto-create Workspace CR from inline config if no --workspace flag.
@@ -134,30 +134,30 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 						return fmt.Errorf("workspace config must specify either token or githubApp, not both")
 					}
 
-					wsName := "axon-workspace"
-					ws := &axonv1alpha1.Workspace{
+					wsName := "kelos-workspace"
+					ws := &kelosv1alpha1.Workspace{
 						ObjectMeta: metav1.ObjectMeta{
 							Name:      wsName,
 							Namespace: ns,
 						},
-						Spec: axonv1alpha1.WorkspaceSpec{
+						Spec: kelosv1alpha1.WorkspaceSpec{
 							Repo: wsCfg.Repo,
 							Ref:  wsCfg.Ref,
 						},
 					}
 					if wsCfg.Token != "" {
-						if err := ensureCredentialSecret(cfg, "axon-workspace-credentials", "GITHUB_TOKEN", wsCfg.Token, yes); err != nil {
+						if err := ensureCredentialSecret(cfg, "kelos-workspace-credentials", "GITHUB_TOKEN", wsCfg.Token, yes); err != nil {
 							return err
 						}
-						ws.Spec.SecretRef = &axonv1alpha1.SecretReference{
-							Name: "axon-workspace-credentials",
+						ws.Spec.SecretRef = &kelosv1alpha1.SecretReference{
+							Name: "kelos-workspace-credentials",
 						}
 					} else if wsCfg.GitHubApp != nil {
-						if err := ensureGitHubAppSecret(cfg, "axon-workspace-credentials", wsCfg.GitHubApp, yes); err != nil {
+						if err := ensureGitHubAppSecret(cfg, "kelos-workspace-credentials", wsCfg.GitHubApp, yes); err != nil {
 							return err
 						}
-						ws.Spec.SecretRef = &axonv1alpha1.SecretReference{
-							Name: "axon-workspace-credentials",
+						ws.Spec.SecretRef = &kelosv1alpha1.SecretReference{
+							Name: "kelos-workspace-credentials",
 						}
 					}
 					ctx := context.Background()
@@ -165,7 +165,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 						if !apierrors.IsAlreadyExists(err) {
 							return fmt.Errorf("creating workspace: %w", err)
 						}
-						existing := &axonv1alpha1.Workspace{}
+						existing := &kelosv1alpha1.Workspace{}
 						if err := cl.Get(ctx, client.ObjectKey{Name: wsName, Namespace: ns}, existing); err != nil {
 							return fmt.Errorf("fetching existing workspace: %w", err)
 						}
@@ -193,17 +193,17 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 				name = "task-" + rand.String(5)
 			}
 
-			task := &axonv1alpha1.Task{
+			task := &kelosv1alpha1.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      name,
 					Namespace: ns,
 				},
-				Spec: axonv1alpha1.TaskSpec{
+				Spec: kelosv1alpha1.TaskSpec{
 					Type:   agentType,
 					Prompt: prompt,
-					Credentials: axonv1alpha1.Credentials{
-						Type: axonv1alpha1.CredentialType(credentialType),
-						SecretRef: axonv1alpha1.SecretReference{
+					Credentials: kelosv1alpha1.Credentials{
+						Type: kelosv1alpha1.CredentialType(credentialType),
+						SecretRef: kelosv1alpha1.SecretReference{
 							Name: secret,
 						},
 					},
@@ -220,19 +220,19 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 			}
 
 			if workspace != "" {
-				task.Spec.WorkspaceRef = &axonv1alpha1.WorkspaceReference{
+				task.Spec.WorkspaceRef = &kelosv1alpha1.WorkspaceReference{
 					Name: workspace,
 				}
 			}
 
 			if agentConfigRef != "" {
-				task.Spec.AgentConfigRef = &axonv1alpha1.AgentConfigReference{
+				task.Spec.AgentConfigRef = &kelosv1alpha1.AgentConfigReference{
 					Name: agentConfigRef,
 				}
 			}
 
 			// Build PodOverrides from --timeout and --env flags.
-			var po *axonv1alpha1.PodOverrides
+			var po *kelosv1alpha1.PodOverrides
 			if timeout != "" {
 				d, err := time.ParseDuration(timeout)
 				if err != nil {
@@ -243,13 +243,13 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 					return fmt.Errorf("--timeout must be at least 1s")
 				}
 				if po == nil {
-					po = &axonv1alpha1.PodOverrides{}
+					po = &kelosv1alpha1.PodOverrides{}
 				}
 				po.ActiveDeadlineSeconds = &secs
 			}
 			if len(envFlags) > 0 {
 				if po == nil {
-					po = &axonv1alpha1.PodOverrides{}
+					po = &kelosv1alpha1.PodOverrides{}
 				}
 				for _, e := range envFlags {
 					parts := strings.SplitN(e, "=", 2)
@@ -266,7 +266,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 				task.Spec.PodOverrides = po
 			}
 
-			task.SetGroupVersionKind(axonv1alpha1.GroupVersion.WithKind("Task"))
+			task.SetGroupVersionKind(kelosv1alpha1.GroupVersion.WithKind("Task"))
 
 			if dryRun {
 				return printYAML(os.Stdout, task)
@@ -311,9 +311,9 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 }
 
 func watchTask(ctx context.Context, cl client.Client, name, namespace string) error {
-	var lastPhase axonv1alpha1.TaskPhase
+	var lastPhase kelosv1alpha1.TaskPhase
 	for {
-		task := &axonv1alpha1.Task{}
+		task := &kelosv1alpha1.Task{}
 		if err := cl.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, task); err != nil {
 			return fmt.Errorf("getting task: %w", err)
 		}
@@ -323,7 +323,7 @@ func watchTask(ctx context.Context, cl client.Client, name, namespace string) er
 			lastPhase = task.Status.Phase
 		}
 
-		if task.Status.Phase == axonv1alpha1.TaskPhaseSucceeded || task.Status.Phase == axonv1alpha1.TaskPhaseFailed {
+		if task.Status.Phase == kelosv1alpha1.TaskPhaseSucceeded || task.Status.Phase == kelosv1alpha1.TaskPhaseFailed {
 			return nil
 		}
 

@@ -1,10 +1,10 @@
 #!/bin/bash
-# axon_entrypoint.sh — reference implementation of the Axon agent image
+# kelos_entrypoint.sh — reference implementation of the Kelos agent image
 # interface for Claude Code.
 #
 # Interface contract:
 #   - First argument ($1): the task prompt
-#   - AXON_MODEL env var: model name (optional)
+#   - KELOS_MODEL env var: model name (optional)
 #   - UID 61100: shared between git-clone init container and agent
 #   - Working directory: /workspace/repo when a workspace is configured
 
@@ -19,19 +19,19 @@ ARGS=(
   "-p" "$PROMPT"
 )
 
-if [ -n "${AXON_MODEL:-}" ]; then
-  ARGS+=("--model" "$AXON_MODEL")
+if [ -n "${KELOS_MODEL:-}" ]; then
+  ARGS+=("--model" "$KELOS_MODEL")
 fi
 
 # Write user-level instructions (additive, no conflict with repo)
-if [ -n "${AXON_AGENTS_MD:-}" ]; then
+if [ -n "${KELOS_AGENTS_MD:-}" ]; then
   mkdir -p ~/.claude
-  printf '%s' "$AXON_AGENTS_MD" >~/.claude/CLAUDE.md
+  printf '%s' "$KELOS_AGENTS_MD" >~/.claude/CLAUDE.md
 fi
 
 # Pass each plugin directory via --plugin-dir
-if [ -n "${AXON_PLUGIN_DIR:-}" ] && [ -d "${AXON_PLUGIN_DIR}" ]; then
-  for dir in "${AXON_PLUGIN_DIR}"/*/; do
+if [ -n "${KELOS_PLUGIN_DIR:-}" ] && [ -d "${KELOS_PLUGIN_DIR}" ]; then
+  for dir in "${KELOS_PLUGIN_DIR}"/*/; do
     [ -d "$dir" ] && ARGS+=("--plugin-dir" "$dir")
   done
 fi
@@ -39,13 +39,13 @@ fi
 # Write MCP server configuration to user-scoped ~/.claude.json.
 # This avoids overwriting the repository's own .mcp.json while
 # still making the servers available to Claude Code.
-if [ -n "${AXON_MCP_SERVERS:-}" ]; then
+if [ -n "${KELOS_MCP_SERVERS:-}" ]; then
   node -e '
 const fs = require("fs");
 const cfgPath = require("os").homedir() + "/.claude.json";
 let existing = {};
 try { existing = JSON.parse(fs.readFileSync(cfgPath, "utf8")); } catch {}
-const mcp = JSON.parse(process.env.AXON_MCP_SERVERS);
+const mcp = JSON.parse(process.env.KELOS_MCP_SERVERS);
 existing.mcpServers = Object.assign(existing.mcpServers || {}, mcp.mcpServers || {});
 fs.writeFileSync(cfgPath, JSON.stringify(existing, null, 2));
 '
@@ -54,6 +54,6 @@ fi
 claude "${ARGS[@]}" | tee /tmp/agent-output.jsonl
 AGENT_EXIT_CODE=${PIPESTATUS[0]}
 
-/axon/axon-capture
+/kelos/kelos-capture
 
 exit $AGENT_EXIT_CODE

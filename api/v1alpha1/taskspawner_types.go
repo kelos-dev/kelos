@@ -77,7 +77,7 @@ type GitHubIssues struct {
 	State string `json:"state,omitempty"`
 
 	// TriggerComment enables comment-based discovery. When set, only issues
-	// that have a comment matching this string (e.g., "/axon pick-up") are
+	// that have a comment matching this string (e.g., "/kelos pick-up") are
 	// included. This is useful for repos where you lack label permissions.
 	// If ExcludeComments is also set, TriggerComment doubles as a resume
 	// command — the most recent match between TriggerComment and
@@ -87,7 +87,7 @@ type GitHubIssues struct {
 	TriggerComment string `json:"triggerComment,omitempty"`
 
 	// ExcludeComments enables comment-based exclusion. When set, issues that
-	// have a comment matching any of these strings (e.g., "/axon needs-input")
+	// have a comment matching any of these strings (e.g., "/kelos needs-input")
 	// are excluded unless a subsequent TriggerComment overrides it. Comments
 	// are scanned in reverse chronological order — the most recent matching
 	// command wins.
@@ -182,7 +182,7 @@ type TaskTemplate struct {
 	DependsOn []string `json:"dependsOn,omitempty"`
 
 	// Branch is the git branch spawned Tasks should work on.
-	// Supports Go text/template variables from the work item, e.g. "axon-task-{{.Number}}".
+	// Supports Go text/template variables from the work item, e.g. "kelos-task-{{.Number}}".
 	// Available variables: {{.ID}}, {{.Number}}, {{.Title}}, {{.Body}}, {{.URL}}, {{.Comments}}, {{.Labels}}, {{.Kind}}, {{.Time}}, {{.Schedule}}.
 	// +optional
 	Branch string `json:"branch,omitempty"`

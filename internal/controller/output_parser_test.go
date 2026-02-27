@@ -18,33 +18,33 @@ func TestParseOutputs(t *testing.T) {
 		},
 		{
 			name:     "empty between markers",
-			logData:  "---AXON_OUTPUTS_START---\n---AXON_OUTPUTS_END---\n",
+			logData:  "---KELOS_OUTPUTS_START---\n---KELOS_OUTPUTS_END---\n",
 			expected: nil,
 		},
 		{
 			name:     "whitespace only between markers",
-			logData:  "---AXON_OUTPUTS_START---\n  \n  \n---AXON_OUTPUTS_END---\n",
+			logData:  "---KELOS_OUTPUTS_START---\n  \n  \n---KELOS_OUTPUTS_END---\n",
 			expected: nil,
 		},
 		{
 			name:     "branch only",
-			logData:  "---AXON_OUTPUTS_START---\nbranch: axon-task-123\n---AXON_OUTPUTS_END---\n",
-			expected: []string{"branch: axon-task-123"},
+			logData:  "---KELOS_OUTPUTS_START---\nbranch: kelos-task-123\n---KELOS_OUTPUTS_END---\n",
+			expected: []string{"branch: kelos-task-123"},
 		},
 		{
 			name: "branch and PR URL",
-			logData: "---AXON_OUTPUTS_START---\nbranch: axon-task-123\n" +
-				"pr: https://github.com/org/repo/pull/456\n---AXON_OUTPUTS_END---\n",
+			logData: "---KELOS_OUTPUTS_START---\nbranch: kelos-task-123\n" +
+				"pr: https://github.com/org/repo/pull/456\n---KELOS_OUTPUTS_END---\n",
 			expected: []string{
-				"branch: axon-task-123",
+				"branch: kelos-task-123",
 				"pr: https://github.com/org/repo/pull/456",
 			},
 		},
 		{
 			name: "branch and multiple PR URLs",
-			logData: "---AXON_OUTPUTS_START---\nbranch: feature-branch\n" +
+			logData: "---KELOS_OUTPUTS_START---\nbranch: feature-branch\n" +
 				"pr: https://github.com/org/repo/pull/1\n" +
-				"pr: https://github.com/org/repo/pull/2\n---AXON_OUTPUTS_END---\n",
+				"pr: https://github.com/org/repo/pull/2\n---KELOS_OUTPUTS_END---\n",
 			expected: []string{
 				"branch: feature-branch",
 				"pr: https://github.com/org/repo/pull/1",
@@ -54,8 +54,8 @@ func TestParseOutputs(t *testing.T) {
 		{
 			name: "markers in noisy log data",
 			logData: "Starting agent...\nProcessing task...\nDone.\n" +
-				"---AXON_OUTPUTS_START---\nbranch: my-branch\n" +
-				"pr: https://github.com/org/repo/pull/99\n---AXON_OUTPUTS_END---\n" +
+				"---KELOS_OUTPUTS_START---\nbranch: my-branch\n" +
+				"pr: https://github.com/org/repo/pull/99\n---KELOS_OUTPUTS_END---\n" +
 				"Exiting with code 0\n",
 			expected: []string{
 				"branch: my-branch",
@@ -64,15 +64,15 @@ func TestParseOutputs(t *testing.T) {
 		},
 		{
 			name: "all output keys including commit, base-branch, and usage",
-			logData: "---AXON_OUTPUTS_START---\nbranch: axon-task-42\n" +
+			logData: "---KELOS_OUTPUTS_START---\nbranch: kelos-task-42\n" +
 				"pr: https://github.com/org/repo/pull/42\n" +
 				"commit: abc123def456\n" +
 				"base-branch: main\n" +
 				"input-tokens: 1500\n" +
 				"output-tokens: 800\n" +
-				"cost-usd: 0.025\n---AXON_OUTPUTS_END---\n",
+				"cost-usd: 0.025\n---KELOS_OUTPUTS_END---\n",
 			expected: []string{
-				"branch: axon-task-42",
+				"branch: kelos-task-42",
 				"pr: https://github.com/org/repo/pull/42",
 				"commit: abc123def456",
 				"base-branch: main",
@@ -83,12 +83,12 @@ func TestParseOutputs(t *testing.T) {
 		},
 		{
 			name:     "start marker without end marker",
-			logData:  "---AXON_OUTPUTS_START---\nbranch: broken\n",
+			logData:  "---KELOS_OUTPUTS_START---\nbranch: broken\n",
 			expected: nil,
 		},
 		{
 			name:     "end marker before start marker",
-			logData:  "---AXON_OUTPUTS_END---\n---AXON_OUTPUTS_START---\nbranch: wrong-order\n",
+			logData:  "---KELOS_OUTPUTS_END---\n---KELOS_OUTPUTS_START---\nbranch: wrong-order\n",
 			expected: nil,
 		},
 	}
@@ -176,7 +176,7 @@ func TestResultsFromOutputs(t *testing.T) {
 		{
 			name: "new output keys in results map",
 			outputs: []string{
-				"branch: axon-task-42",
+				"branch: kelos-task-42",
 				"commit: abc123def456",
 				"base-branch: main",
 				"input-tokens: 1500",
@@ -184,7 +184,7 @@ func TestResultsFromOutputs(t *testing.T) {
 				"cost-usd: 0.025",
 			},
 			expected: map[string]string{
-				"branch":        "axon-task-42",
+				"branch":        "kelos-task-42",
 				"commit":        "abc123def456",
 				"base-branch":   "main",
 				"input-tokens":  "1500",

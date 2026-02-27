@@ -11,7 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 )
 
 const (
@@ -49,10 +49,10 @@ const (
 	WorkspaceMountPath = "/workspace"
 
 	// PluginVolumeName is the name of the plugin volume.
-	PluginVolumeName = "axon-plugin"
+	PluginVolumeName = "kelos-plugin"
 
 	// PluginMountPath is the mount path for the plugin volume.
-	PluginMountPath = "/axon/plugin"
+	PluginMountPath = "/kelos/plugin"
 
 	// AgentUID is the UID shared between the git-clone init
 	// container and the agent container. Custom agent images must run
@@ -88,7 +88,7 @@ func NewJobBuilder() *JobBuilder {
 
 // Build creates a Job for the given Task. The prompt parameter is the
 // resolved prompt text (which may have been expanded from a template).
-func (b *JobBuilder) Build(task *axonv1alpha1.Task, workspace *axonv1alpha1.WorkspaceSpec, agentConfig *axonv1alpha1.AgentConfigSpec, prompt string) (*batchv1.Job, error) {
+func (b *JobBuilder) Build(task *kelosv1alpha1.Task, workspace *kelosv1alpha1.WorkspaceSpec, agentConfig *kelosv1alpha1.AgentConfigSpec, prompt string) (*batchv1.Job, error) {
 	switch task.Spec.Type {
 	case AgentTypeClaudeCode:
 		return b.buildAgentJob(task, workspace, agentConfig, b.ClaudeCodeImage, b.ClaudeCodeImagePullPolicy, prompt)
@@ -140,7 +140,7 @@ func oauthEnvVar(agentType string) string {
 }
 
 // buildAgentJob creates a Job for the given agent type.
-func (b *JobBuilder) buildAgentJob(task *axonv1alpha1.Task, workspace *axonv1alpha1.WorkspaceSpec, agentConfig *axonv1alpha1.AgentConfigSpec, defaultImage string, pullPolicy corev1.PullPolicy, prompt string) (*batchv1.Job, error) {
+func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1alpha1.WorkspaceSpec, agentConfig *kelosv1alpha1.AgentConfigSpec, defaultImage string, pullPolicy corev1.PullPolicy, prompt string) (*batchv1.Job, error) {
 	image := defaultImage
 	if task.Spec.Image != "" {
 		image = task.Spec.Image
@@ -148,35 +148,35 @@ func (b *JobBuilder) buildAgentJob(task *axonv1alpha1.Task, workspace *axonv1alp
 
 	var envVars []corev1.EnvVar
 
-	// Set AXON_MODEL for all agent containers.
+	// Set KELOS_MODEL for all agent containers.
 	if task.Spec.Model != "" {
 		envVars = append(envVars, corev1.EnvVar{
-			Name:  "AXON_MODEL",
+			Name:  "KELOS_MODEL",
 			Value: task.Spec.Model,
 		})
 	}
 
 	if task.Spec.Branch != "" {
 		envVars = append(envVars, corev1.EnvVar{
-			Name:  "AXON_BRANCH",
+			Name:  "KELOS_BRANCH",
 			Value: task.Spec.Branch,
 		})
 	}
 
 	envVars = append(envVars, corev1.EnvVar{
-		Name:  "AXON_AGENT_TYPE",
+		Name:  "KELOS_AGENT_TYPE",
 		Value: task.Spec.Type,
 	})
 
-	if spawner := task.Labels["axon.io/taskspawner"]; spawner != "" {
+	if spawner := task.Labels["kelos.dev/taskspawner"]; spawner != "" {
 		envVars = append(envVars, corev1.EnvVar{
-			Name:  "AXON_TASKSPAWNER",
+			Name:  "KELOS_TASKSPAWNER",
 			Value: spawner,
 		})
 	}
 
 	switch task.Spec.Credentials.Type {
-	case axonv1alpha1.CredentialTypeAPIKey:
+	case kelosv1alpha1.CredentialTypeAPIKey:
 		keyName := apiKeyEnvVar(task.Spec.Type)
 		envVars = append(envVars, corev1.EnvVar{
 			Name: keyName,
@@ -189,7 +189,7 @@ func (b *JobBuilder) buildAgentJob(task *axonv1alpha1.Task, workspace *axonv1alp
 				},
 			},
 		})
-	case axonv1alpha1.CredentialTypeOAuth:
+	case kelosv1alpha1.CredentialTypeOAuth:
 		tokenName := oauthEnvVar(task.Spec.Type)
 		envVars = append(envVars, corev1.EnvVar{
 			Name: tokenName,
@@ -219,18 +219,18 @@ func (b *JobBuilder) buildAgentJob(task *axonv1alpha1.Task, workspace *axonv1alp
 
 		if workspace.Ref != "" {
 			envVars = append(envVars, corev1.EnvVar{
-				Name:  "AXON_BASE_BRANCH",
+				Name:  "KELOS_BASE_BRANCH",
 				Value: workspace.Ref,
 			})
 		}
 
-		// Inject AXON_UPSTREAM_REPO if an "upstream" remote is configured
+		// Inject KELOS_UPSTREAM_REPO if an "upstream" remote is configured
 		for _, remote := range workspace.Remotes {
 			if remote.Name == "upstream" {
 				_, upstreamOwner, upstreamRepo := parseGitHubRepo(remote.URL)
 				if upstreamOwner != "" && upstreamRepo != "" {
 					envVars = append(envVars, corev1.EnvVar{
-						Name:  "AXON_UPSTREAM_REPO",
+						Name:  "KELOS_UPSTREAM_REPO",
 						Value: fmt.Sprintf("%s/%s", upstreamOwner, upstreamRepo),
 					})
 				}
@@ -274,7 +274,7 @@ func (b *JobBuilder) buildAgentJob(task *axonv1alpha1.Task, workspace *axonv1alp
 		Name:            task.Spec.Type,
 		Image:           image,
 		ImagePullPolicy: pullPolicy,
-		Command:         []string{"/axon_entrypoint.sh"},
+		Command:         []string{"/kelos_entrypoint.sh"},
 		Args:            []string{prompt},
 		Env:             envVars,
 	}
@@ -350,22 +350,22 @@ func (b *JobBuilder) buildAgentJob(task *axonv1alpha1.Task, workspace *axonv1alp
 		}
 
 		if task.Spec.Branch != "" {
-			fetchCmd := `git fetch origin "$AXON_BRANCH":"$AXON_BRANCH" 2>/dev/null`
+			fetchCmd := `git fetch origin "$KELOS_BRANCH":"$KELOS_BRANCH" 2>/dev/null`
 			if workspace.SecretRef != nil {
 				credHelper := `!f() { echo "username=x-access-token"; echo "password=$GITHUB_TOKEN"; }; f`
-				fetchCmd = fmt.Sprintf(`git -c credential.helper='%s' fetch origin "$AXON_BRANCH":"$AXON_BRANCH" 2>/dev/null`, credHelper)
+				fetchCmd = fmt.Sprintf(`git -c credential.helper='%s' fetch origin "$KELOS_BRANCH":"$KELOS_BRANCH" 2>/dev/null`, credHelper)
 			}
 			branchSetupScript := fmt.Sprintf(
 				`cd %s/repo && %s; `+
-					`if git rev-parse --verify refs/heads/"$AXON_BRANCH" >/dev/null 2>&1; then `+
-					`git checkout "$AXON_BRANCH"; `+
-					`else git checkout -b "$AXON_BRANCH"; fi`,
+					`if git rev-parse --verify refs/heads/"$KELOS_BRANCH" >/dev/null 2>&1; then `+
+					`git checkout "$KELOS_BRANCH"; `+
+					`else git checkout -b "$KELOS_BRANCH"; fi`,
 				WorkspaceMountPath, fetchCmd,
 			)
 			branchEnv := make([]corev1.EnvVar, len(workspaceEnvVars), len(workspaceEnvVars)+1)
 			copy(branchEnv, workspaceEnvVars)
 			branchEnv = append(branchEnv, corev1.EnvVar{
-				Name:  "AXON_BRANCH",
+				Name:  "KELOS_BRANCH",
 				Value: task.Spec.Branch,
 			})
 			branchSetupContainer := corev1.Container{
@@ -407,7 +407,7 @@ func (b *JobBuilder) buildAgentJob(task *axonv1alpha1.Task, workspace *axonv1alp
 	if agentConfig != nil {
 		if agentConfig.AgentsMD != "" {
 			mainContainer.Env = append(mainContainer.Env, corev1.EnvVar{
-				Name:  "AXON_AGENTS_MD",
+				Name:  "KELOS_AGENTS_MD",
 				Value: agentConfig.AgentsMD,
 			})
 		}
@@ -435,7 +435,7 @@ func (b *JobBuilder) buildAgentJob(task *axonv1alpha1.Task, workspace *axonv1alp
 			mainContainer.VolumeMounts = append(mainContainer.VolumeMounts,
 				corev1.VolumeMount{Name: PluginVolumeName, MountPath: PluginMountPath})
 			mainContainer.Env = append(mainContainer.Env, corev1.EnvVar{
-				Name:  "AXON_PLUGIN_DIR",
+				Name:  "KELOS_PLUGIN_DIR",
 				Value: PluginMountPath,
 			})
 		}
@@ -446,7 +446,7 @@ func (b *JobBuilder) buildAgentJob(task *axonv1alpha1.Task, workspace *axonv1alp
 				return nil, fmt.Errorf("invalid MCP server configuration: %w", err)
 			}
 			mainContainer.Env = append(mainContainer.Env, corev1.EnvVar{
-				Name:  "AXON_MCP_SERVERS",
+				Name:  "KELOS_MCP_SERVERS",
 				Value: mcpJSON,
 			})
 		}
@@ -490,10 +490,10 @@ func (b *JobBuilder) buildAgentJob(task *axonv1alpha1.Task, workspace *axonv1alp
 			Name:      task.Name,
 			Namespace: task.Namespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/name":       "axon",
+				"app.kubernetes.io/name":       "kelos",
 				"app.kubernetes.io/component":  "task",
-				"app.kubernetes.io/managed-by": "axon-controller",
-				"axon.io/task":                 task.Name,
+				"app.kubernetes.io/managed-by": "kelos-controller",
+				"kelos.dev/task":               task.Name,
 			},
 		},
 		Spec: batchv1.JobSpec{
@@ -502,10 +502,10 @@ func (b *JobBuilder) buildAgentJob(task *axonv1alpha1.Task, workspace *axonv1alp
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						"app.kubernetes.io/name":       "axon",
+						"app.kubernetes.io/name":       "kelos",
 						"app.kubernetes.io/component":  "task",
-						"app.kubernetes.io/managed-by": "axon-controller",
-						"axon.io/task":                 task.Name,
+						"app.kubernetes.io/managed-by": "kelos-controller",
+						"kelos.dev/task":               task.Name,
 					},
 				},
 				Spec: corev1.PodSpec{
@@ -523,7 +523,7 @@ func (b *JobBuilder) buildAgentJob(task *axonv1alpha1.Task, workspace *axonv1alp
 	return job, nil
 }
 
-func buildWorkspaceFileInjectionScript(files []axonv1alpha1.WorkspaceFile) (string, error) {
+func buildWorkspaceFileInjectionScript(files []kelosv1alpha1.WorkspaceFile) (string, error) {
 	lines := []string{"set -eu"}
 
 	for _, file := range files {
@@ -587,7 +587,7 @@ func sanitizeComponentName(name, kind string) error {
 	return nil
 }
 
-func buildPluginSetupScript(plugins []axonv1alpha1.PluginSpec) (string, error) {
+func buildPluginSetupScript(plugins []kelosv1alpha1.PluginSpec) (string, error) {
 	lines := []string{"set -eu"}
 
 	for _, plugin := range plugins {
@@ -639,7 +639,7 @@ type mcpServerJSON struct {
 
 // buildMCPServersJSON converts MCPServerSpec entries into a JSON string
 // that matches the .mcp.json format: {"mcpServers":{"name":{...},...}}.
-func buildMCPServersJSON(servers []axonv1alpha1.MCPServerSpec) (string, error) {
+func buildMCPServersJSON(servers []kelosv1alpha1.MCPServerSpec) (string, error) {
 	mcpMap := make(map[string]mcpServerJSON, len(servers))
 	for _, s := range servers {
 		if s.Name == "" {

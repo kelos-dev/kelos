@@ -24,12 +24,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
-	"github.com/axon-core/axon/internal/githubapp"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	"github.com/kelos-dev/kelos/internal/githubapp"
 )
 
 const (
-	taskFinalizer = "axon.io/finalizer"
+	taskFinalizer = "kelos.dev/finalizer"
 
 	// outputRetryWindow is the maximum duration after CompletionTime
 	// during which the controller retries reading Pod logs for outputs.
@@ -50,11 +50,11 @@ type TaskReconciler struct {
 	BranchLocker *BranchLocker
 }
 
-// +kubebuilder:rbac:groups=axon.io,resources=tasks,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=axon.io,resources=tasks/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=axon.io,resources=tasks/finalizers,verbs=update
-// +kubebuilder:rbac:groups=axon.io,resources=workspaces,verbs=get;list;watch
-// +kubebuilder:rbac:groups=axon.io,resources=agentconfigs,verbs=get;list;watch
+// +kubebuilder:rbac:groups=kelos.dev,resources=tasks,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=kelos.dev,resources=tasks/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=kelos.dev,resources=tasks/finalizers,verbs=update
+// +kubebuilder:rbac:groups=kelos.dev,resources=workspaces,verbs=get;list;watch
+// +kubebuilder:rbac:groups=kelos.dev,resources=agentconfigs,verbs=get;list;watch
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods/log,verbs=get
@@ -65,7 +65,7 @@ type TaskReconciler struct {
 func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	var task axonv1alpha1.Task
+	var task kelosv1alpha1.Task
 	if err := r.Get(ctx, req.NamespacedName, &task); err != nil {
 		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, nil
@@ -167,7 +167,7 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 }
 
 // handleDeletion handles Task deletion.
-func (r *TaskReconciler) handleDeletion(ctx context.Context, task *axonv1alpha1.Task) (ctrl.Result, error) {
+func (r *TaskReconciler) handleDeletion(ctx context.Context, task *kelosv1alpha1.Task) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	if controllerutil.ContainsFinalizer(task, taskFinalizer) {
@@ -200,12 +200,12 @@ func (r *TaskReconciler) handleDeletion(ctx context.Context, task *axonv1alpha1.
 }
 
 // createJob creates a Job for the Task.
-func (r *TaskReconciler) createJob(ctx context.Context, task *axonv1alpha1.Task) (ctrl.Result, error) {
+func (r *TaskReconciler) createJob(ctx context.Context, task *kelosv1alpha1.Task) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	var workspace *axonv1alpha1.WorkspaceSpec
+	var workspace *kelosv1alpha1.WorkspaceSpec
 	if task.Spec.WorkspaceRef != nil {
-		var ws axonv1alpha1.Workspace
+		var ws kelosv1alpha1.Workspace
 		if err := r.Get(ctx, client.ObjectKey{
 			Namespace: task.Namespace,
 			Name:      task.Spec.WorkspaceRef.Name,
@@ -229,7 +229,7 @@ func (r *TaskReconciler) createJob(ctx context.Context, task *axonv1alpha1.Task)
 					if getErr := r.Get(ctx, client.ObjectKeyFromObject(task), task); getErr != nil {
 						return getErr
 					}
-					task.Status.Phase = axonv1alpha1.TaskPhaseFailed
+					task.Status.Phase = kelosv1alpha1.TaskPhaseFailed
 					task.Status.Message = fmt.Sprintf("Failed to resolve GitHub token: %v", err)
 					return r.Status().Update(ctx, task)
 				})
@@ -242,9 +242,9 @@ func (r *TaskReconciler) createJob(ctx context.Context, task *axonv1alpha1.Task)
 		}
 	}
 
-	var agentConfig *axonv1alpha1.AgentConfigSpec
+	var agentConfig *kelosv1alpha1.AgentConfigSpec
 	if task.Spec.AgentConfigRef != nil {
-		var ac axonv1alpha1.AgentConfig
+		var ac kelosv1alpha1.AgentConfig
 		if err := r.Get(ctx, client.ObjectKey{
 			Namespace: task.Namespace,
 			Name:      task.Spec.AgentConfigRef.Name,
@@ -269,7 +269,7 @@ func (r *TaskReconciler) createJob(ctx context.Context, task *axonv1alpha1.Task)
 			if getErr := r.Get(ctx, client.ObjectKeyFromObject(task), task); getErr != nil {
 				return getErr
 			}
-			task.Status.Phase = axonv1alpha1.TaskPhaseFailed
+			task.Status.Phase = kelosv1alpha1.TaskPhaseFailed
 			task.Status.Message = fmt.Sprintf("Failed to build Job: %v", err)
 			return r.Status().Update(ctx, task)
 		})
@@ -302,7 +302,7 @@ func (r *TaskReconciler) createJob(ctx context.Context, task *axonv1alpha1.Task)
 		if getErr := r.Get(ctx, client.ObjectKeyFromObject(task), task); getErr != nil {
 			return getErr
 		}
-		task.Status.Phase = axonv1alpha1.TaskPhasePending
+		task.Status.Phase = kelosv1alpha1.TaskPhasePending
 		task.Status.JobName = job.Name
 		return r.Status().Update(ctx, task)
 	}); err != nil {
@@ -317,7 +317,7 @@ func (r *TaskReconciler) createJob(ctx context.Context, task *axonv1alpha1.Task)
 // and if so, generates an installation token and creates a new secret with
 // the GITHUB_TOKEN key. Returns a modified workspace spec pointing to the
 // generated secret.
-func (r *TaskReconciler) resolveGitHubAppToken(ctx context.Context, task *axonv1alpha1.Task, workspace *axonv1alpha1.WorkspaceSpec) (*axonv1alpha1.WorkspaceSpec, error) {
+func (r *TaskReconciler) resolveGitHubAppToken(ctx context.Context, task *kelosv1alpha1.Task, workspace *kelosv1alpha1.WorkspaceSpec) (*kelosv1alpha1.WorkspaceSpec, error) {
 	logger := log.FromContext(ctx)
 
 	var secret corev1.Secret
@@ -394,14 +394,14 @@ func (r *TaskReconciler) resolveGitHubAppToken(ctx context.Context, task *axonv1
 
 	// Return a modified workspace spec that points to the generated token secret
 	resolved := *workspace
-	resolved.SecretRef = &axonv1alpha1.SecretReference{
+	resolved.SecretRef = &kelosv1alpha1.SecretReference{
 		Name: tokenSecretName,
 	}
 	return &resolved, nil
 }
 
 // updateStatus updates Task status based on Job status.
-func (r *TaskReconciler) updateStatus(ctx context.Context, task *axonv1alpha1.Task, job *batchv1.Job) (ctrl.Result, error) {
+func (r *TaskReconciler) updateStatus(ctx context.Context, task *kelosv1alpha1.Task, job *batchv1.Job) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	// Discover pod name for the task
@@ -409,38 +409,38 @@ func (r *TaskReconciler) updateStatus(ctx context.Context, task *axonv1alpha1.Ta
 	if task.Status.PodName == "" {
 		var pods corev1.PodList
 		if err := r.List(ctx, &pods, client.InNamespace(task.Namespace), client.MatchingLabels{
-			"axon.io/task": task.Name,
+			"kelos.dev/task": task.Name,
 		}); err == nil && len(pods.Items) > 0 {
 			podName = pods.Items[0].Name
 		}
 	}
 
 	// Determine the new phase based on Job status
-	var newPhase axonv1alpha1.TaskPhase
+	var newPhase kelosv1alpha1.TaskPhase
 	var newMessage string
 	var setStartTime, setCompletionTime bool
 
 	if job.Status.Active > 0 {
-		if task.Status.Phase != axonv1alpha1.TaskPhaseRunning {
-			newPhase = axonv1alpha1.TaskPhaseRunning
+		if task.Status.Phase != kelosv1alpha1.TaskPhaseRunning {
+			newPhase = kelosv1alpha1.TaskPhaseRunning
 			setStartTime = true
 			r.recordEvent(task, corev1.EventTypeNormal, "TaskRunning", "Task started running")
 		}
 	} else if job.Status.Succeeded > 0 {
-		if task.Status.Phase != axonv1alpha1.TaskPhaseSucceeded {
-			newPhase = axonv1alpha1.TaskPhaseSucceeded
+		if task.Status.Phase != kelosv1alpha1.TaskPhaseSucceeded {
+			newPhase = kelosv1alpha1.TaskPhaseSucceeded
 			newMessage = "Task completed successfully"
 			setCompletionTime = true
 			r.recordEvent(task, corev1.EventTypeNormal, "TaskSucceeded", "Task completed successfully")
-			taskCompletedTotal.WithLabelValues(task.Namespace, task.Spec.Type, string(axonv1alpha1.TaskPhaseSucceeded)).Inc()
+			taskCompletedTotal.WithLabelValues(task.Namespace, task.Spec.Type, string(kelosv1alpha1.TaskPhaseSucceeded)).Inc()
 		}
 	} else if job.Status.Failed > 0 {
-		if task.Status.Phase != axonv1alpha1.TaskPhaseFailed {
-			newPhase = axonv1alpha1.TaskPhaseFailed
+		if task.Status.Phase != kelosv1alpha1.TaskPhaseFailed {
+			newPhase = kelosv1alpha1.TaskPhaseFailed
 			newMessage = "Task failed"
 			setCompletionTime = true
 			r.recordEvent(task, corev1.EventTypeWarning, "TaskFailed", "Task failed")
-			taskCompletedTotal.WithLabelValues(task.Namespace, task.Spec.Type, string(axonv1alpha1.TaskPhaseFailed)).Inc()
+			taskCompletedTotal.WithLabelValues(task.Namespace, task.Spec.Type, string(kelosv1alpha1.TaskPhaseFailed)).Inc()
 		}
 	}
 
@@ -538,11 +538,11 @@ func (r *TaskReconciler) updateStatus(ctx context.Context, task *axonv1alpha1.Ta
 // ttlExpired checks whether a finished Task has exceeded its TTL.
 // It returns (true, 0) if the Task should be deleted now, or (false, duration)
 // if the Task should be requeued after the given duration.
-func (r *TaskReconciler) ttlExpired(task *axonv1alpha1.Task) (bool, time.Duration) {
+func (r *TaskReconciler) ttlExpired(task *kelosv1alpha1.Task) (bool, time.Duration) {
 	if task.Spec.TTLSecondsAfterFinished == nil {
 		return false, 0
 	}
-	if task.Status.Phase != axonv1alpha1.TaskPhaseSucceeded && task.Status.Phase != axonv1alpha1.TaskPhaseFailed {
+	if task.Status.Phase != kelosv1alpha1.TaskPhaseSucceeded && task.Status.Phase != kelosv1alpha1.TaskPhaseFailed {
 		return false, 0
 	}
 	if task.Status.CompletionTime == nil {
@@ -596,18 +596,18 @@ func (r *TaskReconciler) recordEvent(obj runtime.Object, eventType, reason, mess
 
 // checkDependencies verifies that all tasks listed in DependsOn have succeeded.
 // Returns (ready, result, error). ready=true means all dependencies succeeded.
-func (r *TaskReconciler) checkDependencies(ctx context.Context, task *axonv1alpha1.Task) (bool, ctrl.Result, error) {
+func (r *TaskReconciler) checkDependencies(ctx context.Context, task *kelosv1alpha1.Task) (bool, ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	// Cycle detection only on first check (skip if already Waiting)
-	if task.Status.Phase != axonv1alpha1.TaskPhaseWaiting {
+	if task.Status.Phase != kelosv1alpha1.TaskPhaseWaiting {
 		if err := r.detectCycle(ctx, task); err != nil {
 			logger.Info("Circular dependency detected", "task", task.Name, "error", err)
 			updateErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 				if getErr := r.Get(ctx, client.ObjectKeyFromObject(task), task); getErr != nil {
 					return getErr
 				}
-				task.Status.Phase = axonv1alpha1.TaskPhaseFailed
+				task.Status.Phase = kelosv1alpha1.TaskPhaseFailed
 				task.Status.Message = fmt.Sprintf("Circular dependency detected: %v", err)
 				now := metav1.Now()
 				task.Status.CompletionTime = &now
@@ -622,7 +622,7 @@ func (r *TaskReconciler) checkDependencies(ctx context.Context, task *axonv1alph
 	}
 
 	for _, depName := range task.Spec.DependsOn {
-		var depTask axonv1alpha1.Task
+		var depTask kelosv1alpha1.Task
 		if err := r.Get(ctx, client.ObjectKey{
 			Namespace: task.Namespace, Name: depName,
 		}, &depTask); err != nil {
@@ -634,13 +634,13 @@ func (r *TaskReconciler) checkDependencies(ctx context.Context, task *axonv1alph
 			return false, ctrl.Result{}, err
 		}
 
-		if depTask.Status.Phase == axonv1alpha1.TaskPhaseFailed {
+		if depTask.Status.Phase == kelosv1alpha1.TaskPhaseFailed {
 			logger.Info("Dependency failed", "dependency", depName)
 			updateErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 				if getErr := r.Get(ctx, client.ObjectKeyFromObject(task), task); getErr != nil {
 					return getErr
 				}
-				task.Status.Phase = axonv1alpha1.TaskPhaseFailed
+				task.Status.Phase = kelosv1alpha1.TaskPhaseFailed
 				task.Status.Message = fmt.Sprintf("Dependency %q failed", depName)
 				now := metav1.Now()
 				task.Status.CompletionTime = &now
@@ -650,11 +650,11 @@ func (r *TaskReconciler) checkDependencies(ctx context.Context, task *axonv1alph
 				logger.Error(updateErr, "Unable to update Task status")
 			}
 			r.recordEvent(task, corev1.EventTypeWarning, "DependencyFailed", "Dependency %q failed", depName)
-			taskCompletedTotal.WithLabelValues(task.Namespace, task.Spec.Type, string(axonv1alpha1.TaskPhaseFailed)).Inc()
+			taskCompletedTotal.WithLabelValues(task.Namespace, task.Spec.Type, string(kelosv1alpha1.TaskPhaseFailed)).Inc()
 			return false, ctrl.Result{}, nil
 		}
 
-		if depTask.Status.Phase != axonv1alpha1.TaskPhaseSucceeded {
+		if depTask.Status.Phase != kelosv1alpha1.TaskPhaseSucceeded {
 			logger.Info("Dependency not ready", "dependency", depName, "phase", depTask.Status.Phase)
 			r.setWaitingPhase(ctx, task, fmt.Sprintf("Waiting for dependency %q", depName))
 			return false, ctrl.Result{RequeueAfter: 10 * time.Second}, nil
@@ -666,7 +666,7 @@ func (r *TaskReconciler) checkDependencies(ctx context.Context, task *axonv1alph
 
 // detectCycle walks the dependency graph from the given task and returns an
 // error if a cycle is detected.
-func (r *TaskReconciler) detectCycle(ctx context.Context, task *axonv1alpha1.Task) error {
+func (r *TaskReconciler) detectCycle(ctx context.Context, task *kelosv1alpha1.Task) error {
 	visited := make(map[string]bool)
 	return r.walkDeps(ctx, task.Namespace, task.Name, visited)
 }
@@ -677,7 +677,7 @@ func (r *TaskReconciler) walkDeps(ctx context.Context, namespace, name string, v
 	}
 	visited[name] = true
 
-	var t axonv1alpha1.Task
+	var t kelosv1alpha1.Task
 	if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &t); err != nil {
 		return nil // Cannot detect cycle if task doesn't exist yet
 	}
@@ -695,7 +695,7 @@ func (r *TaskReconciler) walkDeps(ctx context.Context, namespace, name string, v
 // branchLockKey returns the key used for branch locking. The lock is scoped
 // to (workspace, branch) so that tasks on different workspaces with the same
 // branch name do not block each other.
-func branchLockKey(task *axonv1alpha1.Task) string {
+func branchLockKey(task *kelosv1alpha1.Task) string {
 	ws := ""
 	if task.Spec.WorkspaceRef != nil {
 		ws = task.Spec.WorkspaceRef.Name
@@ -707,11 +707,11 @@ func branchLockKey(task *axonv1alpha1.Task) string {
 // active. Returns (locked, result, error). locked=true means another task holds
 // the branch. A task is considered to hold the lock if it is Running, Pending,
 // or is an earlier-created Waiting task (FIFO ordering for the branch queue).
-func (r *TaskReconciler) checkBranchLock(ctx context.Context, task *axonv1alpha1.Task) (bool, ctrl.Result, error) {
+func (r *TaskReconciler) checkBranchLock(ctx context.Context, task *kelosv1alpha1.Task) (bool, ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	key := branchLockKey(task)
 
-	var taskList axonv1alpha1.TaskList
+	var taskList kelosv1alpha1.TaskList
 	if err := r.List(ctx, &taskList, client.InNamespace(task.Namespace)); err != nil {
 		return false, ctrl.Result{}, err
 	}
@@ -724,11 +724,11 @@ func (r *TaskReconciler) checkBranchLock(ctx context.Context, task *axonv1alpha1
 			continue
 		}
 		switch t.Status.Phase {
-		case axonv1alpha1.TaskPhaseRunning, axonv1alpha1.TaskPhasePending:
+		case kelosv1alpha1.TaskPhaseRunning, kelosv1alpha1.TaskPhasePending:
 			logger.Info("Branch locked by another task", "branch", task.Spec.Branch, "lockedBy", t.Name)
 			r.setWaitingPhase(ctx, task, fmt.Sprintf("Waiting for branch %q (locked by %s)", task.Spec.Branch, t.Name))
 			return true, ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-		case axonv1alpha1.TaskPhaseWaiting:
+		case kelosv1alpha1.TaskPhaseWaiting:
 			if t.CreationTimestamp.Before(&task.CreationTimestamp) {
 				logger.Info("Branch queued behind earlier task", "branch", task.Spec.Branch, "queuedBehind", t.Name)
 				r.setWaitingPhase(ctx, task, fmt.Sprintf("Waiting for branch %q (queued behind %s)", task.Spec.Branch, t.Name))
@@ -741,16 +741,16 @@ func (r *TaskReconciler) checkBranchLock(ctx context.Context, task *axonv1alpha1
 }
 
 // setWaitingPhase updates the task phase to Waiting with the given message.
-func (r *TaskReconciler) setWaitingPhase(ctx context.Context, task *axonv1alpha1.Task, message string) {
+func (r *TaskReconciler) setWaitingPhase(ctx context.Context, task *kelosv1alpha1.Task, message string) {
 	logger := log.FromContext(ctx)
 	updateErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		if getErr := r.Get(ctx, client.ObjectKeyFromObject(task), task); getErr != nil {
 			return getErr
 		}
-		if task.Status.Phase == axonv1alpha1.TaskPhaseWaiting && task.Status.Message == message {
+		if task.Status.Phase == kelosv1alpha1.TaskPhaseWaiting && task.Status.Message == message {
 			return nil
 		}
-		task.Status.Phase = axonv1alpha1.TaskPhaseWaiting
+		task.Status.Phase = kelosv1alpha1.TaskPhaseWaiting
 		task.Status.Message = message
 		return r.Status().Update(ctx, task)
 	})
@@ -761,7 +761,7 @@ func (r *TaskReconciler) setWaitingPhase(ctx context.Context, task *axonv1alpha1
 
 // resolvePromptTemplate resolves Go template references in the prompt using
 // dependency outputs. Falls back to the raw prompt on any error.
-func (r *TaskReconciler) resolvePromptTemplate(ctx context.Context, task *axonv1alpha1.Task) string {
+func (r *TaskReconciler) resolvePromptTemplate(ctx context.Context, task *kelosv1alpha1.Task) string {
 	logger := log.FromContext(ctx)
 
 	if len(task.Spec.DependsOn) == 0 {
@@ -770,7 +770,7 @@ func (r *TaskReconciler) resolvePromptTemplate(ctx context.Context, task *axonv1
 
 	deps := make(map[string]interface{})
 	for _, depName := range task.Spec.DependsOn {
-		var depTask axonv1alpha1.Task
+		var depTask kelosv1alpha1.Task
 		if err := r.Get(ctx, client.ObjectKey{
 			Namespace: task.Namespace, Name: depName,
 		}, &depTask); err != nil {
@@ -800,8 +800,8 @@ func (r *TaskReconciler) resolvePromptTemplate(ctx context.Context, task *axonv1
 
 // RecordCostTokenMetrics emits Prometheus counters for cost and token usage
 // extracted from Task results.
-func RecordCostTokenMetrics(task *axonv1alpha1.Task, results map[string]string) {
-	spawner := task.Labels["axon.io/taskspawner"]
+func RecordCostTokenMetrics(task *kelosv1alpha1.Task, results map[string]string) {
+	spawner := task.Labels["kelos.dev/taskspawner"]
 	model := task.Spec.Model
 	labels := []string{task.Namespace, task.Spec.Type, spawner, model}
 
@@ -825,9 +825,9 @@ func RecordCostTokenMetrics(task *axonv1alpha1.Task, results map[string]string) 
 // SetupWithManager sets up the controller with the Manager.
 func (r *TaskReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&axonv1alpha1.Task{}).
+		For(&kelosv1alpha1.Task{}).
 		Owns(&batchv1.Job{}).
-		Watches(&axonv1alpha1.Task{}, handler.EnqueueRequestsFromMapFunc(r.enqueueDependentTasks)).
+		Watches(&kelosv1alpha1.Task{}, handler.EnqueueRequestsFromMapFunc(r.enqueueDependentTasks)).
 		Complete(r)
 }
 
@@ -836,17 +836,17 @@ func (r *TaskReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // branch-queued tasks are reconciled immediately when a task reaches a terminal
 // phase, instead of waiting for a requeue timer.
 func (r *TaskReconciler) enqueueDependentTasks(ctx context.Context, obj client.Object) []reconcile.Request {
-	task, ok := obj.(*axonv1alpha1.Task)
+	task, ok := obj.(*kelosv1alpha1.Task)
 	if !ok {
 		return nil
 	}
 
 	// Only trigger when a task reaches a terminal phase
-	if task.Status.Phase != axonv1alpha1.TaskPhaseSucceeded && task.Status.Phase != axonv1alpha1.TaskPhaseFailed {
+	if task.Status.Phase != kelosv1alpha1.TaskPhaseSucceeded && task.Status.Phase != kelosv1alpha1.TaskPhaseFailed {
 		return nil
 	}
 
-	var taskList axonv1alpha1.TaskList
+	var taskList kelosv1alpha1.TaskList
 	if err := r.List(ctx, &taskList, client.InNamespace(task.Namespace)); err != nil {
 		return nil
 	}
@@ -870,7 +870,7 @@ func (r *TaskReconciler) enqueueDependentTasks(ctx context.Context, obj client.O
 		// Re-enqueue tasks waiting for the same workspace+branch
 		if !seen[t.Name] && task.Spec.Branch != "" && t.Spec.Branch != "" &&
 			branchLockKey(&t) == branchLockKey(task) &&
-			t.Status.Phase == axonv1alpha1.TaskPhaseWaiting {
+			t.Status.Phase == kelosv1alpha1.TaskPhaseWaiting {
 			seen[t.Name] = true
 			requests = append(requests, reconcile.Request{
 				NamespacedName: client.ObjectKeyFromObject(&t),

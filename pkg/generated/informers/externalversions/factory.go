@@ -23,9 +23,9 @@ import (
 	sync "sync"
 	time "time"
 
-	versioned "github.com/axon-core/axon/pkg/generated/clientset/versioned"
-	api "github.com/axon-core/axon/pkg/generated/informers/externalversions/api"
-	internalinterfaces "github.com/axon-core/axon/pkg/generated/informers/externalversions/internalinterfaces"
+	versioned "github.com/kelos-dev/kelos/pkg/generated/clientset/versioned"
+	api "github.com/kelos-dev/kelos/pkg/generated/informers/externalversions/api"
+	internalinterfaces "github.com/kelos-dev/kelos/pkg/generated/informers/externalversions/internalinterfaces"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"

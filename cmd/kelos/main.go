@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/axon-core/axon/internal/cli"
+	"github.com/kelos-dev/kelos/internal/cli"
 )
 
 func main() {

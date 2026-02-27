@@ -2,22 +2,22 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: axon-system
+  name: kelos-system
   labels:
-    app.kubernetes.io/name: axon
+    app.kubernetes.io/name: kelos
     app.kubernetes.io/component: manager
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: axon-controller
-  namespace: axon-system
+  name: kelos-controller
+  namespace: kelos-system
 # BEGIN GENERATED: controller-rbac
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: axon-controller-role
+  name: kelos-controller-role
 rules:
 - apiGroups:
   - ""
@@ -72,7 +72,19 @@ rules:
   - update
   - watch
 - apiGroups:
-  - axon.io
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - kelos.dev
   resources:
   - agentconfigs
   - workspaces
@@ -81,7 +93,7 @@ rules:
   - list
   - watch
 - apiGroups:
-  - axon.io
+  - kelos.dev
   resources:
   - tasks
   - taskspawners
@@ -94,14 +106,14 @@ rules:
   - update
   - watch
 - apiGroups:
-  - axon.io
+  - kelos.dev
   resources:
   - tasks/finalizers
   - taskspawners/finalizers
   verbs:
   - update
 - apiGroups:
-  - axon.io
+  - kelos.dev
   resources:
   - tasks/status
   - taskspawners/status
@@ -109,18 +121,6 @@ rules:
   - get
   - patch
   - update
-- apiGroups:
-  - batch
-  resources:
-  - jobs
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
 - apiGroups:
   - rbac.authorization.k8s.io
   resources:
@@ -135,10 +135,10 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: axon-spawner-role
+  name: kelos-spawner-role
 rules:
   - apiGroups:
-      - axon.io
+      - kelos.dev
     resources:
       - taskspawners
     verbs:
@@ -146,7 +146,7 @@ rules:
       - list
       - watch
   - apiGroups:
-      - axon.io
+      - kelos.dev
     resources:
       - taskspawners/status
     verbs:
@@ -154,7 +154,7 @@ rules:
       - update
       - patch
   - apiGroups:
-      - axon.io
+      - kelos.dev
     resources:
       - tasks
     verbs:
@@ -165,21 +165,21 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: axon-controller-rolebinding
+  name: kelos-controller-rolebinding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: axon-controller-role
+  name: kelos-controller-role
 subjects:
   - kind: ServiceAccount
-    name: axon-controller
-    namespace: axon-system
+    name: kelos-controller
+    namespace: kelos-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: axon-leader-election-role
-  namespace: axon-system
+  name: kelos-leader-election-role
+  namespace: kelos-system
 rules:
   - apiGroups:
       - ""
@@ -216,51 +216,51 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: axon-leader-election-rolebinding
-  namespace: axon-system
+  name: kelos-leader-election-rolebinding
+  namespace: kelos-system
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: axon-leader-election-role
+  name: kelos-leader-election-role
 subjects:
   - kind: ServiceAccount
-    name: axon-controller
-    namespace: axon-system
+    name: kelos-controller
+    namespace: kelos-system
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: axon-controller-manager
-  namespace: axon-system
+  name: kelos-controller-manager
+  namespace: kelos-system
   labels:
-    app.kubernetes.io/name: axon
+    app.kubernetes.io/name: kelos
     app.kubernetes.io/component: manager
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: axon
+      app.kubernetes.io/name: kelos
       app.kubernetes.io/component: manager
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: axon
+        app.kubernetes.io/name: kelos
         app.kubernetes.io/component: manager
     spec:
-      serviceAccountName: axon-controller
+      serviceAccountName: kelos-controller
       securityContext:
         runAsNonRoot: true
       containers:
         - name: manager
-          image: gjkim42/axon-controller:latest
+          image: gjkim42/kelos-controller:latest
           args:
             - --leader-elect
             - --claude-code-image=gjkim42/claude-code:latest
             - --codex-image=gjkim42/codex:latest
             - --gemini-image=gjkim42/gemini:latest
             - --opencode-image=gjkim42/opencode:latest
-            - --spawner-image=gjkim42/axon-spawner:latest
-            - --token-refresher-image=gjkim42/axon-token-refresher:latest
+            - --spawner-image=gjkim42/kelos-spawner:latest
+            - --token-refresher-image=gjkim42/kelos-token-refresher:latest
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

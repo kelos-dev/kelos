@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -14,17 +14,17 @@ import (
 
 func TestBuildClaudeCodeJob_DefaultImage(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-task",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Hello world",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 			Model: "claude-sonnet-4-20250514",
 		},
@@ -42,9 +42,9 @@ func TestBuildClaudeCodeJob_DefaultImage(t *testing.T) {
 		t.Errorf("Expected image %q, got %q", ClaudeCodeImage, container.Image)
 	}
 
-	// Command should be /axon_entrypoint.sh (uniform interface).
-	if len(container.Command) != 1 || container.Command[0] != "/axon_entrypoint.sh" {
-		t.Errorf("Expected command [/axon_entrypoint.sh], got %v", container.Command)
+	// Command should be /kelos_entrypoint.sh (uniform interface).
+	if len(container.Command) != 1 || container.Command[0] != "/kelos_entrypoint.sh" {
+		t.Errorf("Expected command [/kelos_entrypoint.sh], got %v", container.Command)
 	}
 
 	// Args should be just the prompt.
@@ -52,34 +52,34 @@ func TestBuildClaudeCodeJob_DefaultImage(t *testing.T) {
 		t.Errorf("Expected args [Hello world], got %v", container.Args)
 	}
 
-	// AXON_MODEL should be set with the correct value.
-	foundAxonModel := false
+	// KELOS_MODEL should be set with the correct value.
+	foundKelosModel := false
 	for _, env := range container.Env {
-		if env.Name == "AXON_MODEL" {
-			foundAxonModel = true
+		if env.Name == "KELOS_MODEL" {
+			foundKelosModel = true
 			if env.Value != "claude-sonnet-4-20250514" {
-				t.Errorf("AXON_MODEL value: expected %q, got %q", "claude-sonnet-4-20250514", env.Value)
+				t.Errorf("KELOS_MODEL value: expected %q, got %q", "claude-sonnet-4-20250514", env.Value)
 			}
 		}
 	}
-	if !foundAxonModel {
-		t.Error("Expected AXON_MODEL env var to be set")
+	if !foundKelosModel {
+		t.Error("Expected KELOS_MODEL env var to be set")
 	}
 }
 
 func TestBuildClaudeCodeJob_CustomImage(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-custom",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the bug",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 			Model: "my-model",
 			Image: "my-custom-agent:latest",
@@ -98,9 +98,9 @@ func TestBuildClaudeCodeJob_CustomImage(t *testing.T) {
 		t.Errorf("Expected image %q, got %q", "my-custom-agent:latest", container.Image)
 	}
 
-	// Command should be /axon_entrypoint.sh (same interface as default).
-	if len(container.Command) != 1 || container.Command[0] != "/axon_entrypoint.sh" {
-		t.Errorf("Expected command [/axon_entrypoint.sh], got %v", container.Command)
+	// Command should be /kelos_entrypoint.sh (same interface as default).
+	if len(container.Command) != 1 || container.Command[0] != "/kelos_entrypoint.sh" {
+		t.Errorf("Expected command [/kelos_entrypoint.sh], got %v", container.Command)
 	}
 
 	// Args should be just the prompt.
@@ -108,34 +108,34 @@ func TestBuildClaudeCodeJob_CustomImage(t *testing.T) {
 		t.Errorf("Expected args [Fix the bug], got %v", container.Args)
 	}
 
-	// AXON_MODEL should be set with the correct value.
-	foundAxonModel := false
+	// KELOS_MODEL should be set with the correct value.
+	foundKelosModel := false
 	for _, env := range container.Env {
-		if env.Name == "AXON_MODEL" {
-			foundAxonModel = true
+		if env.Name == "KELOS_MODEL" {
+			foundKelosModel = true
 			if env.Value != "my-model" {
-				t.Errorf("AXON_MODEL value: expected %q, got %q", "my-model", env.Value)
+				t.Errorf("KELOS_MODEL value: expected %q, got %q", "my-model", env.Value)
 			}
 		}
 	}
-	if !foundAxonModel {
-		t.Error("Expected AXON_MODEL env var to be set")
+	if !foundKelosModel {
+		t.Error("Expected KELOS_MODEL env var to be set")
 	}
 }
 
 func TestBuildClaudeCodeJob_NoModel(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-no-model",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Hello",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -147,32 +147,32 @@ func TestBuildClaudeCodeJob_NoModel(t *testing.T) {
 
 	container := job.Spec.Template.Spec.Containers[0]
 
-	// AXON_MODEL should NOT be set when model is empty.
+	// KELOS_MODEL should NOT be set when model is empty.
 	for _, env := range container.Env {
-		if env.Name == "AXON_MODEL" {
-			t.Error("AXON_MODEL should not be set when model is empty")
+		if env.Name == "KELOS_MODEL" {
+			t.Error("KELOS_MODEL should not be set when model is empty")
 		}
 	}
 }
 
 func TestBuildClaudeCodeJob_WorkspaceWithRef(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-workspace",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the code",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	workspace := &axonv1alpha1.WorkspaceSpec{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/example/repo.git",
 		Ref:  "main",
 	}
@@ -224,27 +224,27 @@ func TestBuildClaudeCodeJob_WorkspaceWithRef(t *testing.T) {
 
 func TestBuildClaudeCodeJob_WorkspaceWithInjectedFiles(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-workspace-files",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Inject plugin files",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
 	skillContent := "---\nname: reviewer\n---\nUse this skill for reviews\n"
 	agentsContent := "Follow these team guidelines\n"
-	workspace := &axonv1alpha1.WorkspaceSpec{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/example/repo.git",
 		Ref:  "main",
-		Files: []axonv1alpha1.WorkspaceFile{
+		Files: []kelosv1alpha1.WorkspaceFile{
 			{
 				Path:    ".claude/skills/reviewer/SKILL.md",
 				Content: skillContent,
@@ -296,24 +296,24 @@ func TestBuildClaudeCodeJob_WorkspaceWithInjectedFiles(t *testing.T) {
 
 func TestBuildClaudeCodeJob_WorkspaceWithInjectedFilesInvalidPath(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-workspace-files-invalid",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Inject plugin files",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	workspace := &axonv1alpha1.WorkspaceSpec{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/example/repo.git",
-		Files: []axonv1alpha1.WorkspaceFile{
+		Files: []kelosv1alpha1.WorkspaceFile{
 			{
 				Path:    "../AGENTS.md",
 				Content: "invalid",
@@ -332,26 +332,26 @@ func TestBuildClaudeCodeJob_WorkspaceWithInjectedFilesInvalidPath(t *testing.T) 
 
 func TestBuildClaudeCodeJob_CustomImageWithWorkspace(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-custom-ws",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the bug",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 			Image: "my-agent:v1",
 			Model: "gpt-4",
 		},
 	}
 
-	workspace := &axonv1alpha1.WorkspaceSpec{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/example/repo.git",
-		SecretRef: &axonv1alpha1.SecretReference{
+		SecretRef: &kelosv1alpha1.SecretReference{
 			Name: "github-token",
 		},
 	}
@@ -363,12 +363,12 @@ func TestBuildClaudeCodeJob_CustomImageWithWorkspace(t *testing.T) {
 
 	container := job.Spec.Template.Spec.Containers[0]
 
-	// Custom image with workspace should still use /axon_entrypoint.sh.
+	// Custom image with workspace should still use /kelos_entrypoint.sh.
 	if container.Image != "my-agent:v1" {
 		t.Errorf("Expected image %q, got %q", "my-agent:v1", container.Image)
 	}
-	if len(container.Command) != 1 || container.Command[0] != "/axon_entrypoint.sh" {
-		t.Errorf("Expected command [/axon_entrypoint.sh], got %v", container.Command)
+	if len(container.Command) != 1 || container.Command[0] != "/kelos_entrypoint.sh" {
+		t.Errorf("Expected command [/kelos_entrypoint.sh], got %v", container.Command)
 	}
 	if len(container.Args) != 1 || container.Args[0] != "Fix the bug" {
 		t.Errorf("Expected args [Fix the bug], got %v", container.Args)
@@ -390,7 +390,7 @@ func TestBuildClaudeCodeJob_CustomImageWithWorkspace(t *testing.T) {
 		t.Errorf("Expected FSGroup %d, got %d", ClaudeCodeUID, *job.Spec.Template.Spec.SecurityContext.FSGroup)
 	}
 
-	// Should have AXON_MODEL with correct value, ANTHROPIC_API_KEY, GITHUB_TOKEN, GH_TOKEN.
+	// Should have KELOS_MODEL with correct value, ANTHROPIC_API_KEY, GITHUB_TOKEN, GH_TOKEN.
 	envMap := map[string]string{}
 	for _, env := range container.Env {
 		if env.Value != "" {
@@ -399,37 +399,37 @@ func TestBuildClaudeCodeJob_CustomImageWithWorkspace(t *testing.T) {
 			envMap[env.Name] = "(from-secret)"
 		}
 	}
-	for _, name := range []string{"AXON_MODEL", "ANTHROPIC_API_KEY", "GITHUB_TOKEN", "GH_TOKEN"} {
+	for _, name := range []string{"KELOS_MODEL", "ANTHROPIC_API_KEY", "GITHUB_TOKEN", "GH_TOKEN"} {
 		if _, ok := envMap[name]; !ok {
 			t.Errorf("Expected env var %q to be set", name)
 		}
 	}
-	if envMap["AXON_MODEL"] != "gpt-4" {
-		t.Errorf("AXON_MODEL value: expected %q, got %q", "gpt-4", envMap["AXON_MODEL"])
+	if envMap["KELOS_MODEL"] != "gpt-4" {
+		t.Errorf("KELOS_MODEL value: expected %q, got %q", "gpt-4", envMap["KELOS_MODEL"])
 	}
 }
 
 func TestBuildClaudeCodeJob_WorkspaceWithSecretRefPersistsCredentialHelper(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-persist-cred",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the code",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	workspace := &axonv1alpha1.WorkspaceSpec{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/example/repo.git",
 		Ref:  "main",
-		SecretRef: &axonv1alpha1.SecretReference{
+		SecretRef: &kelosv1alpha1.SecretReference{
 			Name: "github-token",
 		},
 	}
@@ -460,24 +460,24 @@ func TestBuildClaudeCodeJob_WorkspaceWithSecretRefPersistsCredentialHelper(t *te
 
 func TestBuildClaudeCodeJob_EnterpriseWorkspaceSetsGHHostAndEnterpriseToken(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-ghe",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the bug",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	workspace := &axonv1alpha1.WorkspaceSpec{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.example.com/my-org/my-repo.git",
-		SecretRef: &axonv1alpha1.SecretReference{
+		SecretRef: &kelosv1alpha1.SecretReference{
 			Name: "github-token",
 		},
 	}
@@ -535,24 +535,24 @@ func TestBuildClaudeCodeJob_EnterpriseWorkspaceSetsGHHostAndEnterpriseToken(t *t
 
 func TestBuildClaudeCodeJob_GithubComWorkspaceUsesGHToken(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-no-ghe",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the bug",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	workspace := &axonv1alpha1.WorkspaceSpec{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/my-org/my-repo.git",
-		SecretRef: &axonv1alpha1.SecretReference{
+		SecretRef: &kelosv1alpha1.SecretReference{
 			Name: "github-token",
 		},
 	}
@@ -588,17 +588,17 @@ func TestBuildClaudeCodeJob_GithubComWorkspaceUsesGHToken(t *testing.T) {
 
 func TestBuildCodexJob_DefaultImage(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-codex",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeCodex,
 			Prompt: "Fix the bug",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "openai-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "openai-secret"},
 			},
 			Model: "gpt-4.1",
 		},
@@ -621,9 +621,9 @@ func TestBuildCodexJob_DefaultImage(t *testing.T) {
 		t.Errorf("Expected container name %q, got %q", AgentTypeCodex, container.Name)
 	}
 
-	// Command should be /axon_entrypoint.sh (uniform interface).
-	if len(container.Command) != 1 || container.Command[0] != "/axon_entrypoint.sh" {
-		t.Errorf("Expected command [/axon_entrypoint.sh], got %v", container.Command)
+	// Command should be /kelos_entrypoint.sh (uniform interface).
+	if len(container.Command) != 1 || container.Command[0] != "/kelos_entrypoint.sh" {
+		t.Errorf("Expected command [/kelos_entrypoint.sh], got %v", container.Command)
 	}
 
 	// Args should be just the prompt.
@@ -631,18 +631,18 @@ func TestBuildCodexJob_DefaultImage(t *testing.T) {
 		t.Errorf("Expected args [Fix the bug], got %v", container.Args)
 	}
 
-	// AXON_MODEL should be set.
-	foundAxonModel := false
+	// KELOS_MODEL should be set.
+	foundKelosModel := false
 	for _, env := range container.Env {
-		if env.Name == "AXON_MODEL" {
-			foundAxonModel = true
+		if env.Name == "KELOS_MODEL" {
+			foundKelosModel = true
 			if env.Value != "gpt-4.1" {
-				t.Errorf("AXON_MODEL value: expected %q, got %q", "gpt-4.1", env.Value)
+				t.Errorf("KELOS_MODEL value: expected %q, got %q", "gpt-4.1", env.Value)
 			}
 		}
 	}
-	if !foundAxonModel {
-		t.Error("Expected AXON_MODEL env var to be set")
+	if !foundKelosModel {
+		t.Error("Expected KELOS_MODEL env var to be set")
 	}
 
 	// CODEX_API_KEY should be set (not ANTHROPIC_API_KEY).
@@ -672,17 +672,17 @@ func TestBuildCodexJob_DefaultImage(t *testing.T) {
 
 func TestBuildCodexJob_CustomImage(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-codex-custom",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeCodex,
 			Prompt: "Refactor the module",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "openai-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "openai-secret"},
 			},
 			Image: "my-codex:v2",
 		},
@@ -700,34 +700,34 @@ func TestBuildCodexJob_CustomImage(t *testing.T) {
 		t.Errorf("Expected image %q, got %q", "my-codex:v2", container.Image)
 	}
 
-	// Command should be /axon_entrypoint.sh.
-	if len(container.Command) != 1 || container.Command[0] != "/axon_entrypoint.sh" {
-		t.Errorf("Expected command [/axon_entrypoint.sh], got %v", container.Command)
+	// Command should be /kelos_entrypoint.sh.
+	if len(container.Command) != 1 || container.Command[0] != "/kelos_entrypoint.sh" {
+		t.Errorf("Expected command [/kelos_entrypoint.sh], got %v", container.Command)
 	}
 }
 
 func TestBuildCodexJob_WithWorkspace(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-codex-ws",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeCodex,
 			Prompt: "Fix the code",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "openai-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "openai-secret"},
 			},
 			Model: "gpt-4.1",
 		},
 	}
 
-	workspace := &axonv1alpha1.WorkspaceSpec{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/example/repo.git",
 		Ref:  "main",
-		SecretRef: &axonv1alpha1.SecretReference{
+		SecretRef: &kelosv1alpha1.SecretReference{
 			Name: "github-token",
 		},
 	}
@@ -747,7 +747,7 @@ func TestBuildCodexJob_WithWorkspace(t *testing.T) {
 		t.Fatalf("Expected 1 volume mount, got %d", len(container.VolumeMounts))
 	}
 
-	// Should have CODEX_API_KEY (not ANTHROPIC_API_KEY), AXON_MODEL, GITHUB_TOKEN, GH_TOKEN.
+	// Should have CODEX_API_KEY (not ANTHROPIC_API_KEY), KELOS_MODEL, GITHUB_TOKEN, GH_TOKEN.
 	envMap := map[string]string{}
 	for _, env := range container.Env {
 		if env.Value != "" {
@@ -756,7 +756,7 @@ func TestBuildCodexJob_WithWorkspace(t *testing.T) {
 			envMap[env.Name] = "(from-secret)"
 		}
 	}
-	for _, name := range []string{"AXON_MODEL", "CODEX_API_KEY", "GITHUB_TOKEN", "GH_TOKEN"} {
+	for _, name := range []string{"KELOS_MODEL", "CODEX_API_KEY", "GITHUB_TOKEN", "GH_TOKEN"} {
 		if _, ok := envMap[name]; !ok {
 			t.Errorf("Expected env var %q to be set", name)
 		}
@@ -780,17 +780,17 @@ func TestBuildCodexJob_WithWorkspace(t *testing.T) {
 
 func TestBuildCodexJob_OAuthCredentials(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-codex-oauth",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeCodex,
 			Prompt: "Review the code",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeOAuth,
-				SecretRef: axonv1alpha1.SecretReference{Name: "codex-oauth"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeOAuth,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "codex-oauth"},
 			},
 		},
 	}
@@ -832,17 +832,17 @@ func TestBuildCodexJob_OAuthCredentials(t *testing.T) {
 
 func TestBuildGeminiJob_DefaultImage(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-gemini",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeGemini,
 			Prompt: "Fix the bug",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "gemini-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "gemini-secret"},
 			},
 			Model: "gemini-2.5-pro",
 		},
@@ -865,9 +865,9 @@ func TestBuildGeminiJob_DefaultImage(t *testing.T) {
 		t.Errorf("Expected container name %q, got %q", AgentTypeGemini, container.Name)
 	}
 
-	// Command should be /axon_entrypoint.sh (uniform interface).
-	if len(container.Command) != 1 || container.Command[0] != "/axon_entrypoint.sh" {
-		t.Errorf("Expected command [/axon_entrypoint.sh], got %v", container.Command)
+	// Command should be /kelos_entrypoint.sh (uniform interface).
+	if len(container.Command) != 1 || container.Command[0] != "/kelos_entrypoint.sh" {
+		t.Errorf("Expected command [/kelos_entrypoint.sh], got %v", container.Command)
 	}
 
 	// Args should be just the prompt.
@@ -875,18 +875,18 @@ func TestBuildGeminiJob_DefaultImage(t *testing.T) {
 		t.Errorf("Expected args [Fix the bug], got %v", container.Args)
 	}
 
-	// AXON_MODEL should be set.
-	foundAxonModel := false
+	// KELOS_MODEL should be set.
+	foundKelosModel := false
 	for _, env := range container.Env {
-		if env.Name == "AXON_MODEL" {
-			foundAxonModel = true
+		if env.Name == "KELOS_MODEL" {
+			foundKelosModel = true
 			if env.Value != "gemini-2.5-pro" {
-				t.Errorf("AXON_MODEL value: expected %q, got %q", "gemini-2.5-pro", env.Value)
+				t.Errorf("KELOS_MODEL value: expected %q, got %q", "gemini-2.5-pro", env.Value)
 			}
 		}
 	}
-	if !foundAxonModel {
-		t.Error("Expected AXON_MODEL env var to be set")
+	if !foundKelosModel {
+		t.Error("Expected KELOS_MODEL env var to be set")
 	}
 
 	// GEMINI_API_KEY should be set (not ANTHROPIC_API_KEY or CODEX_API_KEY).
@@ -919,17 +919,17 @@ func TestBuildGeminiJob_DefaultImage(t *testing.T) {
 
 func TestBuildGeminiJob_CustomImage(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-gemini-custom",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeGemini,
 			Prompt: "Refactor the module",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "gemini-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "gemini-secret"},
 			},
 			Image: "my-gemini:v2",
 		},
@@ -947,34 +947,34 @@ func TestBuildGeminiJob_CustomImage(t *testing.T) {
 		t.Errorf("Expected image %q, got %q", "my-gemini:v2", container.Image)
 	}
 
-	// Command should be /axon_entrypoint.sh.
-	if len(container.Command) != 1 || container.Command[0] != "/axon_entrypoint.sh" {
-		t.Errorf("Expected command [/axon_entrypoint.sh], got %v", container.Command)
+	// Command should be /kelos_entrypoint.sh.
+	if len(container.Command) != 1 || container.Command[0] != "/kelos_entrypoint.sh" {
+		t.Errorf("Expected command [/kelos_entrypoint.sh], got %v", container.Command)
 	}
 }
 
 func TestBuildGeminiJob_WithWorkspace(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-gemini-ws",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeGemini,
 			Prompt: "Fix the code",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "gemini-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "gemini-secret"},
 			},
 			Model: "gemini-2.5-pro",
 		},
 	}
 
-	workspace := &axonv1alpha1.WorkspaceSpec{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/example/repo.git",
 		Ref:  "main",
-		SecretRef: &axonv1alpha1.SecretReference{
+		SecretRef: &kelosv1alpha1.SecretReference{
 			Name: "github-token",
 		},
 	}
@@ -994,7 +994,7 @@ func TestBuildGeminiJob_WithWorkspace(t *testing.T) {
 		t.Fatalf("Expected 1 volume mount, got %d", len(container.VolumeMounts))
 	}
 
-	// Should have GEMINI_API_KEY (not ANTHROPIC_API_KEY), AXON_MODEL, GITHUB_TOKEN, GH_TOKEN.
+	// Should have GEMINI_API_KEY (not ANTHROPIC_API_KEY), KELOS_MODEL, GITHUB_TOKEN, GH_TOKEN.
 	envMap := map[string]string{}
 	for _, env := range container.Env {
 		if env.Value != "" {
@@ -1003,7 +1003,7 @@ func TestBuildGeminiJob_WithWorkspace(t *testing.T) {
 			envMap[env.Name] = "(from-secret)"
 		}
 	}
-	for _, name := range []string{"AXON_MODEL", "GEMINI_API_KEY", "GITHUB_TOKEN", "GH_TOKEN"} {
+	for _, name := range []string{"KELOS_MODEL", "GEMINI_API_KEY", "GITHUB_TOKEN", "GH_TOKEN"} {
 		if _, ok := envMap[name]; !ok {
 			t.Errorf("Expected env var %q to be set", name)
 		}
@@ -1030,17 +1030,17 @@ func TestBuildGeminiJob_WithWorkspace(t *testing.T) {
 
 func TestBuildGeminiJob_OAuthCredentials(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-gemini-oauth",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeGemini,
 			Prompt: "Review the code",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeOAuth,
-				SecretRef: axonv1alpha1.SecretReference{Name: "gemini-oauth"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeOAuth,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "gemini-oauth"},
 			},
 		},
 	}
@@ -1082,17 +1082,17 @@ func TestBuildGeminiJob_OAuthCredentials(t *testing.T) {
 
 func TestBuildOpenCodeJob_DefaultImage(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-opencode",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeOpenCode,
 			Prompt: "Fix the bug",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "opencode-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "opencode-secret"},
 			},
 			Model: "anthropic/claude-sonnet-4-20250514",
 		},
@@ -1115,9 +1115,9 @@ func TestBuildOpenCodeJob_DefaultImage(t *testing.T) {
 		t.Errorf("Expected container name %q, got %q", AgentTypeOpenCode, container.Name)
 	}
 
-	// Command should be /axon_entrypoint.sh (uniform interface).
-	if len(container.Command) != 1 || container.Command[0] != "/axon_entrypoint.sh" {
-		t.Errorf("Expected command [/axon_entrypoint.sh], got %v", container.Command)
+	// Command should be /kelos_entrypoint.sh (uniform interface).
+	if len(container.Command) != 1 || container.Command[0] != "/kelos_entrypoint.sh" {
+		t.Errorf("Expected command [/kelos_entrypoint.sh], got %v", container.Command)
 	}
 
 	// Args should be just the prompt.
@@ -1125,18 +1125,18 @@ func TestBuildOpenCodeJob_DefaultImage(t *testing.T) {
 		t.Errorf("Expected args [Fix the bug], got %v", container.Args)
 	}
 
-	// AXON_MODEL should be set.
-	foundAxonModel := false
+	// KELOS_MODEL should be set.
+	foundKelosModel := false
 	for _, env := range container.Env {
-		if env.Name == "AXON_MODEL" {
-			foundAxonModel = true
+		if env.Name == "KELOS_MODEL" {
+			foundKelosModel = true
 			if env.Value != "anthropic/claude-sonnet-4-20250514" {
-				t.Errorf("AXON_MODEL value: expected %q, got %q", "anthropic/claude-sonnet-4-20250514", env.Value)
+				t.Errorf("KELOS_MODEL value: expected %q, got %q", "anthropic/claude-sonnet-4-20250514", env.Value)
 			}
 		}
 	}
-	if !foundAxonModel {
-		t.Error("Expected AXON_MODEL env var to be set")
+	if !foundKelosModel {
+		t.Error("Expected KELOS_MODEL env var to be set")
 	}
 
 	// OPENCODE_API_KEY should be set (not ANTHROPIC_API_KEY, CODEX_API_KEY, or GEMINI_API_KEY).
@@ -1172,17 +1172,17 @@ func TestBuildOpenCodeJob_DefaultImage(t *testing.T) {
 
 func TestBuildOpenCodeJob_CustomImage(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-opencode-custom",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeOpenCode,
 			Prompt: "Refactor the module",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "opencode-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "opencode-secret"},
 			},
 			Image: "my-opencode:v2",
 		},
@@ -1200,34 +1200,34 @@ func TestBuildOpenCodeJob_CustomImage(t *testing.T) {
 		t.Errorf("Expected image %q, got %q", "my-opencode:v2", container.Image)
 	}
 
-	// Command should be /axon_entrypoint.sh.
-	if len(container.Command) != 1 || container.Command[0] != "/axon_entrypoint.sh" {
-		t.Errorf("Expected command [/axon_entrypoint.sh], got %v", container.Command)
+	// Command should be /kelos_entrypoint.sh.
+	if len(container.Command) != 1 || container.Command[0] != "/kelos_entrypoint.sh" {
+		t.Errorf("Expected command [/kelos_entrypoint.sh], got %v", container.Command)
 	}
 }
 
 func TestBuildOpenCodeJob_WithWorkspace(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-opencode-ws",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeOpenCode,
 			Prompt: "Fix the code",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "opencode-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "opencode-secret"},
 			},
 			Model: "anthropic/claude-sonnet-4-20250514",
 		},
 	}
 
-	workspace := &axonv1alpha1.WorkspaceSpec{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/example/repo.git",
 		Ref:  "main",
-		SecretRef: &axonv1alpha1.SecretReference{
+		SecretRef: &kelosv1alpha1.SecretReference{
 			Name: "github-token",
 		},
 	}
@@ -1247,7 +1247,7 @@ func TestBuildOpenCodeJob_WithWorkspace(t *testing.T) {
 		t.Fatalf("Expected 1 volume mount, got %d", len(container.VolumeMounts))
 	}
 
-	// Should have OPENCODE_API_KEY (not ANTHROPIC_API_KEY), AXON_MODEL, GITHUB_TOKEN, GH_TOKEN.
+	// Should have OPENCODE_API_KEY (not ANTHROPIC_API_KEY), KELOS_MODEL, GITHUB_TOKEN, GH_TOKEN.
 	envMap := map[string]string{}
 	for _, env := range container.Env {
 		if env.Value != "" {
@@ -1256,7 +1256,7 @@ func TestBuildOpenCodeJob_WithWorkspace(t *testing.T) {
 			envMap[env.Name] = "(from-secret)"
 		}
 	}
-	for _, name := range []string{"AXON_MODEL", "OPENCODE_API_KEY", "GITHUB_TOKEN", "GH_TOKEN"} {
+	for _, name := range []string{"KELOS_MODEL", "OPENCODE_API_KEY", "GITHUB_TOKEN", "GH_TOKEN"} {
 		if _, ok := envMap[name]; !ok {
 			t.Errorf("Expected env var %q to be set", name)
 		}
@@ -1286,17 +1286,17 @@ func TestBuildOpenCodeJob_WithWorkspace(t *testing.T) {
 
 func TestBuildOpenCodeJob_OAuthCredentials(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-opencode-oauth",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeOpenCode,
 			Prompt: "Review the code",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeOAuth,
-				SecretRef: axonv1alpha1.SecretReference{Name: "opencode-oauth"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeOAuth,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "opencode-oauth"},
 			},
 		},
 	}
@@ -1341,17 +1341,17 @@ func TestBuildOpenCodeJob_OAuthCredentials(t *testing.T) {
 
 func TestBuildClaudeCodeJob_UnsupportedType(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-unsupported",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   "unsupported-agent",
 			Prompt: "Hello",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -1366,19 +1366,19 @@ func int64Ptr(v int64) *int64 { return &v }
 
 func TestBuildJob_PodOverridesResources(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-resources",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
-			PodOverrides: &axonv1alpha1.PodOverrides{
+			PodOverrides: &kelosv1alpha1.PodOverrides{
 				Resources: &corev1.ResourceRequirements{
 					Requests: corev1.ResourceList{
 						corev1.ResourceMemory: resource.MustParse("512Mi"),
@@ -1420,19 +1420,19 @@ func TestBuildJob_PodOverridesResources(t *testing.T) {
 
 func TestBuildJob_PodOverridesActiveDeadlineSeconds(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-deadline",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
-			PodOverrides: &axonv1alpha1.PodOverrides{
+			PodOverrides: &kelosv1alpha1.PodOverrides{
 				ActiveDeadlineSeconds: int64Ptr(1800),
 			},
 		},
@@ -1453,20 +1453,20 @@ func TestBuildJob_PodOverridesActiveDeadlineSeconds(t *testing.T) {
 
 func TestBuildJob_PodOverridesEnv(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-env",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 			Model: "claude-sonnet-4-20250514",
-			PodOverrides: &axonv1alpha1.PodOverrides{
+			PodOverrides: &kelosv1alpha1.PodOverrides{
 				Env: []corev1.EnvVar{
 					{Name: "HTTP_PROXY", Value: "http://proxy:8080"},
 					{Name: "NO_PROXY", Value: "localhost"},
@@ -1497,30 +1497,30 @@ func TestBuildJob_PodOverridesEnv(t *testing.T) {
 	}
 
 	// Built-in env vars should still be present.
-	if envMap["AXON_MODEL"] != "claude-sonnet-4-20250514" {
-		t.Errorf("Expected AXON_MODEL to still be set, got %q", envMap["AXON_MODEL"])
+	if envMap["KELOS_MODEL"] != "claude-sonnet-4-20250514" {
+		t.Errorf("Expected KELOS_MODEL to still be set, got %q", envMap["KELOS_MODEL"])
 	}
 }
 
 func TestBuildJob_PodOverridesEnvBuiltinPrecedence(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-env-precedence",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 			Model: "claude-sonnet-4-20250514",
-			PodOverrides: &axonv1alpha1.PodOverrides{
+			PodOverrides: &kelosv1alpha1.PodOverrides{
 				Env: []corev1.EnvVar{
 					// Attempt to override a built-in env var.
-					{Name: "AXON_MODEL", Value: "should-not-take-effect"},
+					{Name: "KELOS_MODEL", Value: "should-not-take-effect"},
 				},
 			},
 		},
@@ -1535,35 +1535,35 @@ func TestBuildJob_PodOverridesEnvBuiltinPrecedence(t *testing.T) {
 
 	// User env vars that collide with built-in names should be filtered out
 	// so that built-in vars always take precedence.
-	var axonModelCount int
+	var kelosModelCount int
 	for _, e := range container.Env {
-		if e.Name == "AXON_MODEL" {
-			axonModelCount++
+		if e.Name == "KELOS_MODEL" {
+			kelosModelCount++
 			if e.Value != "claude-sonnet-4-20250514" {
-				t.Errorf("Expected AXON_MODEL value %q, got %q", "claude-sonnet-4-20250514", e.Value)
+				t.Errorf("Expected KELOS_MODEL value %q, got %q", "claude-sonnet-4-20250514", e.Value)
 			}
 		}
 	}
-	if axonModelCount != 1 {
-		t.Errorf("Expected exactly 1 AXON_MODEL env var, got %d", axonModelCount)
+	if kelosModelCount != 1 {
+		t.Errorf("Expected exactly 1 KELOS_MODEL env var, got %d", kelosModelCount)
 	}
 }
 
 func TestBuildJob_PodOverridesNodeSelector(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-node-selector",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
-			PodOverrides: &axonv1alpha1.PodOverrides{
+			PodOverrides: &kelosv1alpha1.PodOverrides{
 				NodeSelector: map[string]string{
 					"workload-type": "ai-agent",
 					"gpu":           "true",
@@ -1591,19 +1591,19 @@ func TestBuildJob_PodOverridesNodeSelector(t *testing.T) {
 
 func TestBuildJob_PodOverridesAllFields(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-all-overrides",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeCodex,
 			Prompt: "Fix issue",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "openai-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "openai-secret"},
 			},
-			PodOverrides: &axonv1alpha1.PodOverrides{
+			PodOverrides: &kelosv1alpha1.PodOverrides{
 				Resources: &corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
 						corev1.ResourceMemory: resource.MustParse("4Gi"),
@@ -1657,17 +1657,17 @@ func TestBuildJob_PodOverridesAllFields(t *testing.T) {
 
 func TestBuildJob_NoPodOverrides(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-no-overrides",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -1697,22 +1697,22 @@ func TestBuildJob_NoPodOverrides(t *testing.T) {
 
 func TestBuildJob_AgentConfigAgentsMD(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-agentsmd",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	agentConfig := &axonv1alpha1.AgentConfigSpec{
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
 		AgentsMD: "Follow TDD. Always write tests first.",
 	}
 
@@ -1723,18 +1723,18 @@ func TestBuildJob_AgentConfigAgentsMD(t *testing.T) {
 
 	container := job.Spec.Template.Spec.Containers[0]
 
-	// AXON_AGENTS_MD should be set.
+	// KELOS_AGENTS_MD should be set.
 	foundAgentsMD := false
 	for _, env := range container.Env {
-		if env.Name == "AXON_AGENTS_MD" {
+		if env.Name == "KELOS_AGENTS_MD" {
 			foundAgentsMD = true
 			if env.Value != "Follow TDD. Always write tests first." {
-				t.Errorf("AXON_AGENTS_MD value: expected %q, got %q", "Follow TDD. Always write tests first.", env.Value)
+				t.Errorf("KELOS_AGENTS_MD value: expected %q, got %q", "Follow TDD. Always write tests first.", env.Value)
 			}
 		}
 	}
 	if !foundAgentsMD {
-		t.Error("Expected AXON_AGENTS_MD env var to be set")
+		t.Error("Expected KELOS_AGENTS_MD env var to be set")
 	}
 
 	// No plugin volume or init containers should be created.
@@ -1748,29 +1748,29 @@ func TestBuildJob_AgentConfigAgentsMD(t *testing.T) {
 
 func TestBuildJob_AgentConfigPlugins(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-plugins",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	agentConfig := &axonv1alpha1.AgentConfigSpec{
-		Plugins: []axonv1alpha1.PluginSpec{
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
+		Plugins: []kelosv1alpha1.PluginSpec{
 			{
 				Name: "team-tools",
-				Skills: []axonv1alpha1.SkillDefinition{
+				Skills: []kelosv1alpha1.SkillDefinition{
 					{Name: "deploy", Content: "Deploy instructions here"},
 				},
-				Agents: []axonv1alpha1.AgentDefinition{
+				Agents: []kelosv1alpha1.AgentDefinition{
 					{Name: "reviewer", Content: "You are a code reviewer"},
 				},
 			},
@@ -1839,41 +1839,41 @@ func TestBuildJob_AgentConfigPlugins(t *testing.T) {
 		t.Error("Expected plugin volume mount on main container")
 	}
 
-	// AXON_PLUGIN_DIR should be set.
+	// KELOS_PLUGIN_DIR should be set.
 	envMap := map[string]string{}
 	for _, env := range container.Env {
 		if env.Value != "" {
 			envMap[env.Name] = env.Value
 		}
 	}
-	if envMap["AXON_PLUGIN_DIR"] != PluginMountPath {
-		t.Errorf("Expected AXON_PLUGIN_DIR=%q, got %q", PluginMountPath, envMap["AXON_PLUGIN_DIR"])
+	if envMap["KELOS_PLUGIN_DIR"] != PluginMountPath {
+		t.Errorf("Expected KELOS_PLUGIN_DIR=%q, got %q", PluginMountPath, envMap["KELOS_PLUGIN_DIR"])
 	}
 }
 
 func TestBuildJob_AgentConfigFull(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-full-config",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	agentConfig := &axonv1alpha1.AgentConfigSpec{
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
 		AgentsMD: "Follow TDD",
-		Plugins: []axonv1alpha1.PluginSpec{
+		Plugins: []kelosv1alpha1.PluginSpec{
 			{
 				Name: "tools",
-				Skills: []axonv1alpha1.SkillDefinition{
+				Skills: []kelosv1alpha1.SkillDefinition{
 					{Name: "deploy", Content: "Deploy content"},
 				},
 			},
@@ -1894,11 +1894,11 @@ func TestBuildJob_AgentConfigFull(t *testing.T) {
 	}
 
 	// Both env vars should be set.
-	if envMap["AXON_AGENTS_MD"] != "Follow TDD" {
-		t.Errorf("Expected AXON_AGENTS_MD=%q, got %q", "Follow TDD", envMap["AXON_AGENTS_MD"])
+	if envMap["KELOS_AGENTS_MD"] != "Follow TDD" {
+		t.Errorf("Expected KELOS_AGENTS_MD=%q, got %q", "Follow TDD", envMap["KELOS_AGENTS_MD"])
 	}
-	if envMap["AXON_PLUGIN_DIR"] != PluginMountPath {
-		t.Errorf("Expected AXON_PLUGIN_DIR=%q, got %q", PluginMountPath, envMap["AXON_PLUGIN_DIR"])
+	if envMap["KELOS_PLUGIN_DIR"] != PluginMountPath {
+		t.Errorf("Expected KELOS_PLUGIN_DIR=%q, got %q", PluginMountPath, envMap["KELOS_PLUGIN_DIR"])
 	}
 
 	// Should have plugin volume and init container.
@@ -1912,32 +1912,32 @@ func TestBuildJob_AgentConfigFull(t *testing.T) {
 
 func TestBuildJob_AgentConfigWithWorkspace(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-config-ws",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	workspace := &axonv1alpha1.WorkspaceSpec{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/example/repo.git",
 		Ref:  "main",
 	}
 
-	agentConfig := &axonv1alpha1.AgentConfigSpec{
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
 		AgentsMD: "Follow TDD",
-		Plugins: []axonv1alpha1.PluginSpec{
+		Plugins: []kelosv1alpha1.PluginSpec{
 			{
 				Name: "tools",
-				Skills: []axonv1alpha1.SkillDefinition{
+				Skills: []kelosv1alpha1.SkillDefinition{
 					{Name: "deploy", Content: "Deploy content"},
 				},
 			},
@@ -1973,22 +1973,22 @@ func TestBuildJob_AgentConfigWithWorkspace(t *testing.T) {
 
 func TestBuildJob_AgentConfigWithoutWorkspace(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-config-no-ws",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	agentConfig := &axonv1alpha1.AgentConfigSpec{
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
 		AgentsMD: "Follow TDD",
 	}
 
@@ -2006,8 +2006,8 @@ func TestBuildJob_AgentConfigWithoutWorkspace(t *testing.T) {
 			envMap[env.Name] = env.Value
 		}
 	}
-	if envMap["AXON_AGENTS_MD"] != "Follow TDD" {
-		t.Errorf("Expected AXON_AGENTS_MD=%q, got %q", "Follow TDD", envMap["AXON_AGENTS_MD"])
+	if envMap["KELOS_AGENTS_MD"] != "Follow TDD" {
+		t.Errorf("Expected KELOS_AGENTS_MD=%q, got %q", "Follow TDD", envMap["KELOS_AGENTS_MD"])
 	}
 
 	// No workspace volume.
@@ -2023,30 +2023,30 @@ func TestBuildJob_AgentConfigWithoutWorkspace(t *testing.T) {
 
 func TestBuildJob_AgentConfigCodex(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-codex-agentconfig",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeCodex,
 			Prompt: "Fix issue",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	agentConfig := &axonv1alpha1.AgentConfigSpec{
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
 		AgentsMD: "Follow TDD. Always write tests first.",
-		Plugins: []axonv1alpha1.PluginSpec{
+		Plugins: []kelosv1alpha1.PluginSpec{
 			{
 				Name: "team-tools",
-				Skills: []axonv1alpha1.SkillDefinition{
+				Skills: []kelosv1alpha1.SkillDefinition{
 					{Name: "deploy", Content: "Deploy instructions here"},
 				},
-				Agents: []axonv1alpha1.AgentDefinition{
+				Agents: []kelosv1alpha1.AgentDefinition{
 					{Name: "reviewer", Content: "You are a code reviewer"},
 				},
 			},
@@ -2066,14 +2066,14 @@ func TestBuildJob_AgentConfigCodex(t *testing.T) {
 		}
 	}
 
-	// AXON_AGENTS_MD should be set for codex tasks.
-	if envMap["AXON_AGENTS_MD"] != "Follow TDD. Always write tests first." {
-		t.Errorf("Expected AXON_AGENTS_MD=%q, got %q", "Follow TDD. Always write tests first.", envMap["AXON_AGENTS_MD"])
+	// KELOS_AGENTS_MD should be set for codex tasks.
+	if envMap["KELOS_AGENTS_MD"] != "Follow TDD. Always write tests first." {
+		t.Errorf("Expected KELOS_AGENTS_MD=%q, got %q", "Follow TDD. Always write tests first.", envMap["KELOS_AGENTS_MD"])
 	}
 
-	// AXON_PLUGIN_DIR should be set for codex tasks.
-	if envMap["AXON_PLUGIN_DIR"] != PluginMountPath {
-		t.Errorf("Expected AXON_PLUGIN_DIR=%q, got %q", PluginMountPath, envMap["AXON_PLUGIN_DIR"])
+	// KELOS_PLUGIN_DIR should be set for codex tasks.
+	if envMap["KELOS_PLUGIN_DIR"] != PluginMountPath {
+		t.Errorf("Expected KELOS_PLUGIN_DIR=%q, got %q", PluginMountPath, envMap["KELOS_PLUGIN_DIR"])
 	}
 
 	// Should have plugin volume and init container.
@@ -2092,27 +2092,27 @@ func TestBuildJob_AgentConfigCodex(t *testing.T) {
 
 func TestBuildJob_AgentConfigGemini(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-gemini-agentconfig",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeGemini,
 			Prompt: "Fix issue",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	agentConfig := &axonv1alpha1.AgentConfigSpec{
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
 		AgentsMD: "Use conventional commits.",
-		Plugins: []axonv1alpha1.PluginSpec{
+		Plugins: []kelosv1alpha1.PluginSpec{
 			{
 				Name: "ci-tools",
-				Skills: []axonv1alpha1.SkillDefinition{
+				Skills: []kelosv1alpha1.SkillDefinition{
 					{Name: "lint", Content: "Run linter before committing"},
 				},
 			},
@@ -2132,14 +2132,14 @@ func TestBuildJob_AgentConfigGemini(t *testing.T) {
 		}
 	}
 
-	// AXON_AGENTS_MD should be set for gemini tasks.
-	if envMap["AXON_AGENTS_MD"] != "Use conventional commits." {
-		t.Errorf("Expected AXON_AGENTS_MD=%q, got %q", "Use conventional commits.", envMap["AXON_AGENTS_MD"])
+	// KELOS_AGENTS_MD should be set for gemini tasks.
+	if envMap["KELOS_AGENTS_MD"] != "Use conventional commits." {
+		t.Errorf("Expected KELOS_AGENTS_MD=%q, got %q", "Use conventional commits.", envMap["KELOS_AGENTS_MD"])
 	}
 
-	// AXON_PLUGIN_DIR should be set for gemini tasks.
-	if envMap["AXON_PLUGIN_DIR"] != PluginMountPath {
-		t.Errorf("Expected AXON_PLUGIN_DIR=%q, got %q", PluginMountPath, envMap["AXON_PLUGIN_DIR"])
+	// KELOS_PLUGIN_DIR should be set for gemini tasks.
+	if envMap["KELOS_PLUGIN_DIR"] != PluginMountPath {
+		t.Errorf("Expected KELOS_PLUGIN_DIR=%q, got %q", PluginMountPath, envMap["KELOS_PLUGIN_DIR"])
 	}
 
 	// Should have plugin volume and init container.
@@ -2158,30 +2158,30 @@ func TestBuildJob_AgentConfigGemini(t *testing.T) {
 
 func TestBuildJob_AgentConfigOpenCode(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-opencode-agentconfig",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeOpenCode,
 			Prompt: "Fix issue",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	agentConfig := &axonv1alpha1.AgentConfigSpec{
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
 		AgentsMD: "Always run tests before committing.",
-		Plugins: []axonv1alpha1.PluginSpec{
+		Plugins: []kelosv1alpha1.PluginSpec{
 			{
 				Name: "dev-tools",
-				Skills: []axonv1alpha1.SkillDefinition{
+				Skills: []kelosv1alpha1.SkillDefinition{
 					{Name: "test", Content: "Run unit tests first"},
 				},
-				Agents: []axonv1alpha1.AgentDefinition{
+				Agents: []kelosv1alpha1.AgentDefinition{
 					{Name: "linter", Content: "You are a code linter"},
 				},
 			},
@@ -2201,14 +2201,14 @@ func TestBuildJob_AgentConfigOpenCode(t *testing.T) {
 		}
 	}
 
-	// AXON_AGENTS_MD should be set for opencode tasks.
-	if envMap["AXON_AGENTS_MD"] != "Always run tests before committing." {
-		t.Errorf("Expected AXON_AGENTS_MD=%q, got %q", "Always run tests before committing.", envMap["AXON_AGENTS_MD"])
+	// KELOS_AGENTS_MD should be set for opencode tasks.
+	if envMap["KELOS_AGENTS_MD"] != "Always run tests before committing." {
+		t.Errorf("Expected KELOS_AGENTS_MD=%q, got %q", "Always run tests before committing.", envMap["KELOS_AGENTS_MD"])
 	}
 
-	// AXON_PLUGIN_DIR should be set for opencode tasks.
-	if envMap["AXON_PLUGIN_DIR"] != PluginMountPath {
-		t.Errorf("Expected AXON_PLUGIN_DIR=%q, got %q", PluginMountPath, envMap["AXON_PLUGIN_DIR"])
+	// KELOS_PLUGIN_DIR should be set for opencode tasks.
+	if envMap["KELOS_PLUGIN_DIR"] != PluginMountPath {
+		t.Errorf("Expected KELOS_PLUGIN_DIR=%q, got %q", PluginMountPath, envMap["KELOS_PLUGIN_DIR"])
 	}
 
 	// Should have plugin volume and init container.
@@ -2227,58 +2227,58 @@ func TestBuildJob_AgentConfigOpenCode(t *testing.T) {
 
 func TestBuildJob_AgentConfigPluginNamePathTraversal(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-traversal",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
 	tests := []struct {
 		name       string
-		config     *axonv1alpha1.AgentConfigSpec
+		config     *kelosv1alpha1.AgentConfigSpec
 		wantErrStr string
 	}{
 		{
 			name: "plugin name with slash",
-			config: &axonv1alpha1.AgentConfigSpec{
-				Plugins: []axonv1alpha1.PluginSpec{
-					{Name: "../../etc", Skills: []axonv1alpha1.SkillDefinition{{Name: "s", Content: "c"}}},
+			config: &kelosv1alpha1.AgentConfigSpec{
+				Plugins: []kelosv1alpha1.PluginSpec{
+					{Name: "../../etc", Skills: []kelosv1alpha1.SkillDefinition{{Name: "s", Content: "c"}}},
 				},
 			},
 			wantErrStr: "path separators",
 		},
 		{
 			name: "skill name with slash",
-			config: &axonv1alpha1.AgentConfigSpec{
-				Plugins: []axonv1alpha1.PluginSpec{
-					{Name: "ok", Skills: []axonv1alpha1.SkillDefinition{{Name: "../evil", Content: "c"}}},
+			config: &kelosv1alpha1.AgentConfigSpec{
+				Plugins: []kelosv1alpha1.PluginSpec{
+					{Name: "ok", Skills: []kelosv1alpha1.SkillDefinition{{Name: "../evil", Content: "c"}}},
 				},
 			},
 			wantErrStr: "path separators",
 		},
 		{
 			name: "agent name dot-dot",
-			config: &axonv1alpha1.AgentConfigSpec{
-				Plugins: []axonv1alpha1.PluginSpec{
-					{Name: "ok", Agents: []axonv1alpha1.AgentDefinition{{Name: "..", Content: "c"}}},
+			config: &kelosv1alpha1.AgentConfigSpec{
+				Plugins: []kelosv1alpha1.PluginSpec{
+					{Name: "ok", Agents: []kelosv1alpha1.AgentDefinition{{Name: "..", Content: "c"}}},
 				},
 			},
 			wantErrStr: "path traversal",
 		},
 		{
 			name: "plugin name is dot",
-			config: &axonv1alpha1.AgentConfigSpec{
-				Plugins: []axonv1alpha1.PluginSpec{
-					{Name: ".", Skills: []axonv1alpha1.SkillDefinition{{Name: "s", Content: "c"}}},
+			config: &kelosv1alpha1.AgentConfigSpec{
+				Plugins: []kelosv1alpha1.PluginSpec{
+					{Name: ".", Skills: []kelosv1alpha1.SkillDefinition{{Name: "s", Content: "c"}}},
 				},
 			},
 			wantErrStr: "path traversal",
@@ -2300,23 +2300,23 @@ func TestBuildJob_AgentConfigPluginNamePathTraversal(t *testing.T) {
 
 func TestBuildJob_BranchSetupInitContainer(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-branch",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Work on feature",
 			Branch: "feature-x",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	workspace := &axonv1alpha1.WorkspaceSpec{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/example/repo.git",
 		Ref:  "main",
 	}
@@ -2343,8 +2343,8 @@ func TestBuildJob_BranchSetupInitContainer(t *testing.T) {
 		t.Fatalf("Expected command [sh -c ...], got %v", branchSetup.Command)
 	}
 	script := branchSetup.Command[2]
-	if !strings.Contains(script, "$AXON_BRANCH") {
-		t.Error("Expected branch-setup script to reference $AXON_BRANCH")
+	if !strings.Contains(script, "$KELOS_BRANCH") {
+		t.Error("Expected branch-setup script to reference $KELOS_BRANCH")
 	}
 	if !strings.Contains(script, "git checkout") {
 		t.Error("Expected branch-setup script to include git checkout")
@@ -2357,52 +2357,52 @@ func TestBuildJob_BranchSetupInitContainer(t *testing.T) {
 		t.Error("Expected no credential helper without secretRef")
 	}
 
-	// Verify AXON_BRANCH env var on init container.
+	// Verify KELOS_BRANCH env var on init container.
 	var foundBranch bool
 	for _, env := range branchSetup.Env {
-		if env.Name == "AXON_BRANCH" && env.Value == "feature-x" {
+		if env.Name == "KELOS_BRANCH" && env.Value == "feature-x" {
 			foundBranch = true
 		}
 	}
 	if !foundBranch {
-		t.Error("Expected AXON_BRANCH=feature-x env var on branch-setup")
+		t.Error("Expected KELOS_BRANCH=feature-x env var on branch-setup")
 	}
 
-	// Verify AXON_BRANCH env var on main container.
+	// Verify KELOS_BRANCH env var on main container.
 	mainContainer := job.Spec.Template.Spec.Containers[0]
 	var foundMainBranch bool
 	for _, env := range mainContainer.Env {
-		if env.Name == "AXON_BRANCH" && env.Value == "feature-x" {
+		if env.Name == "KELOS_BRANCH" && env.Value == "feature-x" {
 			foundMainBranch = true
 		}
 	}
 	if !foundMainBranch {
-		t.Error("Expected AXON_BRANCH=feature-x env var on main container")
+		t.Error("Expected KELOS_BRANCH=feature-x env var on main container")
 	}
 }
 
 func TestBuildJob_BranchSetupWithSecretRefUsesCredentialHelper(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-branch-cred",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Work on feature",
 			Branch: "feature-y",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	workspace := &axonv1alpha1.WorkspaceSpec{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/example/repo.git",
 		Ref:  "main",
-		SecretRef: &axonv1alpha1.SecretReference{
+		SecretRef: &kelosv1alpha1.SecretReference{
 			Name: "github-token",
 		},
 	}
@@ -2442,18 +2442,18 @@ func TestBuildJob_BranchSetupWithSecretRefUsesCredentialHelper(t *testing.T) {
 
 func TestBuildJob_BranchWithoutWorkspaceNoInitContainer(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-branch-no-ws",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Work on feature",
 			Branch: "feature-z",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -2468,41 +2468,41 @@ func TestBuildJob_BranchWithoutWorkspaceNoInitContainer(t *testing.T) {
 		t.Errorf("Expected 0 init containers without workspace, got %d", len(job.Spec.Template.Spec.InitContainers))
 	}
 
-	// AXON_BRANCH should still be set on the main container.
+	// KELOS_BRANCH should still be set on the main container.
 	mainContainer := job.Spec.Template.Spec.Containers[0]
 	var foundBranch bool
 	for _, env := range mainContainer.Env {
-		if env.Name == "AXON_BRANCH" && env.Value == "feature-z" {
+		if env.Name == "KELOS_BRANCH" && env.Value == "feature-z" {
 			foundBranch = true
 		}
 	}
 	if !foundBranch {
-		t.Error("Expected AXON_BRANCH=feature-z env var even without workspace")
+		t.Error("Expected KELOS_BRANCH=feature-z env var even without workspace")
 	}
 }
 
 func TestBuildJob_BranchEnvDoesNotMutateWorkspaceEnvVars(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-branch-env-safety",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Work on feature",
 			Branch: "feature-w",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	workspace := &axonv1alpha1.WorkspaceSpec{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/example/repo.git",
 		Ref:  "main",
-		SecretRef: &axonv1alpha1.SecretReference{
+		SecretRef: &kelosv1alpha1.SecretReference{
 			Name: "github-token",
 		},
 	}
@@ -2512,19 +2512,19 @@ func TestBuildJob_BranchEnvDoesNotMutateWorkspaceEnvVars(t *testing.T) {
 		t.Fatalf("Build() returned error: %v", err)
 	}
 
-	// The git-clone init container should NOT have AXON_BRANCH in its env.
+	// The git-clone init container should NOT have KELOS_BRANCH in its env.
 	gitClone := job.Spec.Template.Spec.InitContainers[0]
 	if gitClone.Name != "git-clone" {
 		t.Fatalf("Expected first init container to be git-clone, got %s", gitClone.Name)
 	}
 	for _, env := range gitClone.Env {
-		if env.Name == "AXON_BRANCH" {
-			t.Error("git-clone init container should not have AXON_BRANCH env var (slice mutation bug)")
+		if env.Name == "KELOS_BRANCH" {
+			t.Error("git-clone init container should not have KELOS_BRANCH env var (slice mutation bug)")
 		}
 	}
 }
 
-func TestBuildJob_AxonAgentTypeAlwaysSet(t *testing.T) {
+func TestBuildJob_KelosAgentTypeAlwaysSet(t *testing.T) {
 	tests := []struct {
 		name      string
 		agentType string
@@ -2538,17 +2538,17 @@ func TestBuildJob_AxonAgentTypeAlwaysSet(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			builder := NewJobBuilder()
-			task := &axonv1alpha1.Task{
+			task := &kelosv1alpha1.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-agent-type",
 					Namespace: "default",
 				},
-				Spec: axonv1alpha1.TaskSpec{
+				Spec: kelosv1alpha1.TaskSpec{
 					Type:   tt.agentType,
 					Prompt: "Hello",
-					Credentials: axonv1alpha1.Credentials{
-						Type:      axonv1alpha1.CredentialTypeAPIKey,
-						SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+					Credentials: kelosv1alpha1.Credentials{
+						Type:      kelosv1alpha1.CredentialTypeAPIKey,
+						SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 					},
 				},
 			}
@@ -2561,15 +2561,15 @@ func TestBuildJob_AxonAgentTypeAlwaysSet(t *testing.T) {
 			container := job.Spec.Template.Spec.Containers[0]
 			found := false
 			for _, env := range container.Env {
-				if env.Name == "AXON_AGENT_TYPE" {
+				if env.Name == "KELOS_AGENT_TYPE" {
 					found = true
 					if env.Value != tt.agentType {
-						t.Errorf("AXON_AGENT_TYPE: expected %q, got %q", tt.agentType, env.Value)
+						t.Errorf("KELOS_AGENT_TYPE: expected %q, got %q", tt.agentType, env.Value)
 					}
 				}
 			}
 			if !found {
-				t.Error("Expected AXON_AGENT_TYPE env var to be set")
+				t.Error("Expected KELOS_AGENT_TYPE env var to be set")
 			}
 		})
 	}
@@ -2577,23 +2577,23 @@ func TestBuildJob_AxonAgentTypeAlwaysSet(t *testing.T) {
 
 func TestBuildJob_AgentConfigMCPServers(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-mcp",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	agentConfig := &axonv1alpha1.AgentConfigSpec{
-		MCPServers: []axonv1alpha1.MCPServerSpec{
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
+		MCPServers: []kelosv1alpha1.MCPServerSpec{
 			{
 				Name: "github",
 				Type: "http",
@@ -2616,15 +2616,15 @@ func TestBuildJob_AgentConfigMCPServers(t *testing.T) {
 
 	container := job.Spec.Template.Spec.Containers[0]
 
-	// AXON_MCP_SERVERS should be set.
+	// KELOS_MCP_SERVERS should be set.
 	var mcpJSON string
 	for _, env := range container.Env {
-		if env.Name == "AXON_MCP_SERVERS" {
+		if env.Name == "KELOS_MCP_SERVERS" {
 			mcpJSON = env.Value
 		}
 	}
 	if mcpJSON == "" {
-		t.Fatal("Expected AXON_MCP_SERVERS env var to be set")
+		t.Fatal("Expected KELOS_MCP_SERVERS env var to be set")
 	}
 
 	// Verify the JSON structure matches .mcp.json format.
@@ -2638,7 +2638,7 @@ func TestBuildJob_AgentConfigMCPServers(t *testing.T) {
 		} `json:"mcpServers"`
 	}
 	if err := json.Unmarshal([]byte(mcpJSON), &parsed); err != nil {
-		t.Fatalf("Failed to parse AXON_MCP_SERVERS JSON: %v", err)
+		t.Fatalf("Failed to parse KELOS_MCP_SERVERS JSON: %v", err)
 	}
 
 	if len(parsed.MCPServers) != 2 {
@@ -2684,23 +2684,23 @@ func TestBuildJob_AgentConfigMCPServers(t *testing.T) {
 
 func TestBuildJob_AgentConfigMCPServersWithHTTPHeaders(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-mcp-headers",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	agentConfig := &axonv1alpha1.AgentConfigSpec{
-		MCPServers: []axonv1alpha1.MCPServerSpec{
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
+		MCPServers: []kelosv1alpha1.MCPServerSpec{
 			{
 				Name:    "secure-api",
 				Type:    "http",
@@ -2719,12 +2719,12 @@ func TestBuildJob_AgentConfigMCPServersWithHTTPHeaders(t *testing.T) {
 
 	var mcpJSON string
 	for _, env := range container.Env {
-		if env.Name == "AXON_MCP_SERVERS" {
+		if env.Name == "KELOS_MCP_SERVERS" {
 			mcpJSON = env.Value
 		}
 	}
 	if mcpJSON == "" {
-		t.Fatal("Expected AXON_MCP_SERVERS env var to be set")
+		t.Fatal("Expected KELOS_MCP_SERVERS env var to be set")
 	}
 
 	var parsed struct {
@@ -2733,7 +2733,7 @@ func TestBuildJob_AgentConfigMCPServersWithHTTPHeaders(t *testing.T) {
 		} `json:"mcpServers"`
 	}
 	if err := json.Unmarshal([]byte(mcpJSON), &parsed); err != nil {
-		t.Fatalf("Failed to parse AXON_MCP_SERVERS JSON: %v", err)
+		t.Fatalf("Failed to parse KELOS_MCP_SERVERS JSON: %v", err)
 	}
 
 	secureAPI, ok := parsed.MCPServers["secure-api"]
@@ -2747,32 +2747,32 @@ func TestBuildJob_AgentConfigMCPServersWithHTTPHeaders(t *testing.T) {
 
 func TestBuildJob_AgentConfigMCPServersWithPluginsAndAgentsMD(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-mcp-full",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	agentConfig := &axonv1alpha1.AgentConfigSpec{
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
 		AgentsMD: "Follow TDD",
-		Plugins: []axonv1alpha1.PluginSpec{
+		Plugins: []kelosv1alpha1.PluginSpec{
 			{
 				Name: "tools",
-				Skills: []axonv1alpha1.SkillDefinition{
+				Skills: []kelosv1alpha1.SkillDefinition{
 					{Name: "deploy", Content: "Deploy content"},
 				},
 			},
 		},
-		MCPServers: []axonv1alpha1.MCPServerSpec{
+		MCPServers: []kelosv1alpha1.MCPServerSpec{
 			{
 				Name: "github",
 				Type: "http",
@@ -2794,15 +2794,15 @@ func TestBuildJob_AgentConfigMCPServersWithPluginsAndAgentsMD(t *testing.T) {
 		}
 	}
 
-	// All three should be set: AXON_AGENTS_MD, AXON_PLUGIN_DIR, AXON_MCP_SERVERS.
-	if envMap["AXON_AGENTS_MD"] != "Follow TDD" {
-		t.Errorf("Expected AXON_AGENTS_MD=%q, got %q", "Follow TDD", envMap["AXON_AGENTS_MD"])
+	// All three should be set: KELOS_AGENTS_MD, KELOS_PLUGIN_DIR, KELOS_MCP_SERVERS.
+	if envMap["KELOS_AGENTS_MD"] != "Follow TDD" {
+		t.Errorf("Expected KELOS_AGENTS_MD=%q, got %q", "Follow TDD", envMap["KELOS_AGENTS_MD"])
 	}
-	if envMap["AXON_PLUGIN_DIR"] != PluginMountPath {
-		t.Errorf("Expected AXON_PLUGIN_DIR=%q, got %q", PluginMountPath, envMap["AXON_PLUGIN_DIR"])
+	if envMap["KELOS_PLUGIN_DIR"] != PluginMountPath {
+		t.Errorf("Expected KELOS_PLUGIN_DIR=%q, got %q", PluginMountPath, envMap["KELOS_PLUGIN_DIR"])
 	}
-	if envMap["AXON_MCP_SERVERS"] == "" {
-		t.Error("Expected AXON_MCP_SERVERS to be set")
+	if envMap["KELOS_MCP_SERVERS"] == "" {
+		t.Error("Expected KELOS_MCP_SERVERS to be set")
 	}
 
 	// Should have plugin volume and init container.
@@ -2816,23 +2816,23 @@ func TestBuildJob_AgentConfigMCPServersWithPluginsAndAgentsMD(t *testing.T) {
 
 func TestBuildJob_AgentConfigMCPServersCodex(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-mcp-codex",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeCodex,
 			Prompt: "Fix issue",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "openai-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "openai-secret"},
 			},
 		},
 	}
 
-	agentConfig := &axonv1alpha1.AgentConfigSpec{
-		MCPServers: []axonv1alpha1.MCPServerSpec{
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
+		MCPServers: []kelosv1alpha1.MCPServerSpec{
 			{
 				Name: "github",
 				Type: "http",
@@ -2849,34 +2849,34 @@ func TestBuildJob_AgentConfigMCPServersCodex(t *testing.T) {
 	container := job.Spec.Template.Spec.Containers[0]
 	foundMCP := false
 	for _, env := range container.Env {
-		if env.Name == "AXON_MCP_SERVERS" {
+		if env.Name == "KELOS_MCP_SERVERS" {
 			foundMCP = true
 		}
 	}
 	if !foundMCP {
-		t.Error("Expected AXON_MCP_SERVERS env var to be set for codex")
+		t.Error("Expected KELOS_MCP_SERVERS env var to be set for codex")
 	}
 }
 
 func TestBuildJob_AgentConfigMCPServersGemini(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-mcp-gemini",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeGemini,
 			Prompt: "Fix issue",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "gemini-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "gemini-secret"},
 			},
 		},
 	}
 
-	agentConfig := &axonv1alpha1.AgentConfigSpec{
-		MCPServers: []axonv1alpha1.MCPServerSpec{
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
+		MCPServers: []kelosv1alpha1.MCPServerSpec{
 			{
 				Name: "github",
 				Type: "http",
@@ -2893,34 +2893,34 @@ func TestBuildJob_AgentConfigMCPServersGemini(t *testing.T) {
 	container := job.Spec.Template.Spec.Containers[0]
 	foundMCP := false
 	for _, env := range container.Env {
-		if env.Name == "AXON_MCP_SERVERS" {
+		if env.Name == "KELOS_MCP_SERVERS" {
 			foundMCP = true
 		}
 	}
 	if !foundMCP {
-		t.Error("Expected AXON_MCP_SERVERS env var to be set for gemini")
+		t.Error("Expected KELOS_MCP_SERVERS env var to be set for gemini")
 	}
 }
 
 func TestBuildJob_AgentConfigMCPServersEmptyName(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-mcp-empty-name",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	agentConfig := &axonv1alpha1.AgentConfigSpec{
-		MCPServers: []axonv1alpha1.MCPServerSpec{
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
+		MCPServers: []kelosv1alpha1.MCPServerSpec{
 			{
 				Name: "",
 				Type: "http",
@@ -2940,23 +2940,23 @@ func TestBuildJob_AgentConfigMCPServersEmptyName(t *testing.T) {
 
 func TestBuildJob_AgentConfigMCPServersDuplicateName(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-mcp-dup",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	agentConfig := &axonv1alpha1.AgentConfigSpec{
-		MCPServers: []axonv1alpha1.MCPServerSpec{
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
+		MCPServers: []kelosv1alpha1.MCPServerSpec{
 			{Name: "github", Type: "http", URL: "https://api.githubcopilot.com/mcp/"},
 			{Name: "github", Type: "sse", URL: "https://other.example.com/sse"},
 		},
@@ -2985,22 +2985,22 @@ func TestBuildJob_AgentConfigMCPServerNamePathTraversal(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			builder := NewJobBuilder()
-			task := &axonv1alpha1.Task{
+			task := &kelosv1alpha1.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-mcp-traversal",
 					Namespace: "default",
 				},
-				Spec: axonv1alpha1.TaskSpec{
+				Spec: kelosv1alpha1.TaskSpec{
 					Type:   AgentTypeClaudeCode,
 					Prompt: "Fix issue",
-					Credentials: axonv1alpha1.Credentials{
-						Type:      axonv1alpha1.CredentialTypeAPIKey,
-						SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+					Credentials: kelosv1alpha1.Credentials{
+						Type:      kelosv1alpha1.CredentialTypeAPIKey,
+						SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 					},
 				},
 			}
-			agentConfig := &axonv1alpha1.AgentConfigSpec{
-				MCPServers: []axonv1alpha1.MCPServerSpec{
+			agentConfig := &kelosv1alpha1.AgentConfigSpec{
+				MCPServers: []kelosv1alpha1.MCPServerSpec{
 					{Name: tt.mcpName, Type: "http", URL: "https://example.com/mcp"},
 				},
 			}
@@ -3015,24 +3015,24 @@ func TestBuildJob_AgentConfigMCPServerNamePathTraversal(t *testing.T) {
 	}
 }
 
-func TestBuildJob_AxonBaseBranchSetWhenWorkspaceRefPresent(t *testing.T) {
+func TestBuildJob_KelosBaseBranchSetWhenWorkspaceRefPresent(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-base-branch",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the code",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	workspace := &axonv1alpha1.WorkspaceSpec{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/example/repo.git",
 		Ref:  "develop",
 	}
@@ -3045,36 +3045,36 @@ func TestBuildJob_AxonBaseBranchSetWhenWorkspaceRefPresent(t *testing.T) {
 	container := job.Spec.Template.Spec.Containers[0]
 	found := false
 	for _, env := range container.Env {
-		if env.Name == "AXON_BASE_BRANCH" {
+		if env.Name == "KELOS_BASE_BRANCH" {
 			found = true
 			if env.Value != "develop" {
-				t.Errorf("AXON_BASE_BRANCH: expected %q, got %q", "develop", env.Value)
+				t.Errorf("KELOS_BASE_BRANCH: expected %q, got %q", "develop", env.Value)
 			}
 		}
 	}
 	if !found {
-		t.Error("Expected AXON_BASE_BRANCH env var to be set when workspace.Ref is non-empty")
+		t.Error("Expected KELOS_BASE_BRANCH env var to be set when workspace.Ref is non-empty")
 	}
 }
 
-func TestBuildJob_AxonBaseBranchAbsentWhenRefEmpty(t *testing.T) {
+func TestBuildJob_KelosBaseBranchAbsentWhenRefEmpty(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-base-branch-empty",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the code",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	workspace := &axonv1alpha1.WorkspaceSpec{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/example/repo.git",
 	}
 
@@ -3085,25 +3085,25 @@ func TestBuildJob_AxonBaseBranchAbsentWhenRefEmpty(t *testing.T) {
 
 	container := job.Spec.Template.Spec.Containers[0]
 	for _, env := range container.Env {
-		if env.Name == "AXON_BASE_BRANCH" {
-			t.Error("AXON_BASE_BRANCH should not be set when workspace.Ref is empty")
+		if env.Name == "KELOS_BASE_BRANCH" {
+			t.Error("KELOS_BASE_BRANCH should not be set when workspace.Ref is empty")
 		}
 	}
 }
 
-func TestBuildJob_AxonBaseBranchAbsentWithoutWorkspace(t *testing.T) {
+func TestBuildJob_KelosBaseBranchAbsentWithoutWorkspace(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-base-branch-no-ws",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the code",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -3115,33 +3115,33 @@ func TestBuildJob_AxonBaseBranchAbsentWithoutWorkspace(t *testing.T) {
 
 	container := job.Spec.Template.Spec.Containers[0]
 	for _, env := range container.Env {
-		if env.Name == "AXON_BASE_BRANCH" {
-			t.Error("AXON_BASE_BRANCH should not be set when workspace is nil")
+		if env.Name == "KELOS_BASE_BRANCH" {
+			t.Error("KELOS_BASE_BRANCH should not be set when workspace is nil")
 		}
 	}
 }
 
 func TestBuildJob_WorkspaceWithOneRemote(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-one-remote",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Work on feature",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	workspace := &axonv1alpha1.WorkspaceSpec{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/org/repo.git",
 		Ref:  "main",
-		Remotes: []axonv1alpha1.GitRemote{
+		Remotes: []kelosv1alpha1.GitRemote{
 			{Name: "private", URL: "https://github.com/user/repo.git"},
 		},
 	}
@@ -3174,25 +3174,25 @@ func TestBuildJob_WorkspaceWithOneRemote(t *testing.T) {
 
 func TestBuildJob_WorkspaceWithMultipleRemotes(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-multi-remote",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Work on feature",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	workspace := &axonv1alpha1.WorkspaceSpec{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/org/repo.git",
 		Ref:  "main",
-		Remotes: []axonv1alpha1.GitRemote{
+		Remotes: []kelosv1alpha1.GitRemote{
 			{Name: "private", URL: "https://github.com/user/repo.git"},
 			{Name: "downstream", URL: "https://github.com/vendor/repo.git"},
 		},
@@ -3225,22 +3225,22 @@ func TestBuildJob_WorkspaceWithMultipleRemotes(t *testing.T) {
 
 func TestBuildJob_WorkspaceWithNoRemotesNoRemoteSetupContainer(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-no-remotes",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the code",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	workspace := &axonv1alpha1.WorkspaceSpec{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/org/repo.git",
 		Ref:  "main",
 	}
@@ -3259,26 +3259,26 @@ func TestBuildJob_WorkspaceWithNoRemotesNoRemoteSetupContainer(t *testing.T) {
 
 func TestBuildJob_RemoteSetupOrderingWithBranchSetup(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-remote-order",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Work on feature",
 			Branch: "feature-x",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	workspace := &axonv1alpha1.WorkspaceSpec{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/org/repo.git",
 		Ref:  "main",
-		Remotes: []axonv1alpha1.GitRemote{
+		Remotes: []kelosv1alpha1.GitRemote{
 			{Name: "private", URL: "https://github.com/user/repo.git"},
 		},
 	}
@@ -3316,24 +3316,24 @@ func TestBuildJob_RemoteSetupOrderingWithBranchSetup(t *testing.T) {
 
 func TestBuildJob_RemoteSetupQuotesShellMetacharacters(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-remote-injection",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Do work",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	workspace := &axonv1alpha1.WorkspaceSpec{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/org/repo.git",
-		Remotes: []axonv1alpha1.GitRemote{
+		Remotes: []kelosv1alpha1.GitRemote{
 			{Name: "bad;rm -rf /", URL: "https://evil.com$(whoami)"},
 		},
 	}
@@ -3363,25 +3363,25 @@ func TestBuildJob_RemoteSetupQuotesShellMetacharacters(t *testing.T) {
 
 func TestBuildJob_WorkspaceWithUpstreamRemoteInjectsEnv(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-upstream-env",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the code",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	workspace := &axonv1alpha1.WorkspaceSpec{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/my-fork/repo.git",
 		Ref:  "main",
-		Remotes: []axonv1alpha1.GitRemote{
+		Remotes: []kelosv1alpha1.GitRemote{
 			{Name: "upstream", URL: "https://github.com/upstream-org/repo.git"},
 		},
 	}
@@ -3394,40 +3394,40 @@ func TestBuildJob_WorkspaceWithUpstreamRemoteInjectsEnv(t *testing.T) {
 	mainContainer := job.Spec.Template.Spec.Containers[0]
 	found := false
 	for _, env := range mainContainer.Env {
-		if env.Name == "AXON_UPSTREAM_REPO" {
+		if env.Name == "KELOS_UPSTREAM_REPO" {
 			found = true
 			if env.Value != "upstream-org/repo" {
-				t.Errorf("AXON_UPSTREAM_REPO = %q, want %q", env.Value, "upstream-org/repo")
+				t.Errorf("KELOS_UPSTREAM_REPO = %q, want %q", env.Value, "upstream-org/repo")
 			}
 			break
 		}
 	}
 	if !found {
-		t.Error("Expected AXON_UPSTREAM_REPO env var on main container")
+		t.Error("Expected KELOS_UPSTREAM_REPO env var on main container")
 	}
 }
 
 func TestBuildJob_WorkspaceWithNonUpstreamRemoteNoEnv(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-no-upstream-env",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the code",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	workspace := &axonv1alpha1.WorkspaceSpec{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/my-fork/repo.git",
 		Ref:  "main",
-		Remotes: []axonv1alpha1.GitRemote{
+		Remotes: []kelosv1alpha1.GitRemote{
 			{Name: "other", URL: "https://github.com/other-org/repo.git"},
 		},
 	}
@@ -3439,33 +3439,33 @@ func TestBuildJob_WorkspaceWithNonUpstreamRemoteNoEnv(t *testing.T) {
 
 	mainContainer := job.Spec.Template.Spec.Containers[0]
 	for _, env := range mainContainer.Env {
-		if env.Name == "AXON_UPSTREAM_REPO" {
-			t.Errorf("Expected no AXON_UPSTREAM_REPO env var, but found value %q", env.Value)
+		if env.Name == "KELOS_UPSTREAM_REPO" {
+			t.Errorf("Expected no KELOS_UPSTREAM_REPO env var, but found value %q", env.Value)
 		}
 	}
 }
 
 func TestBuildJob_WorkspaceWithInvalidUpstreamRemoteNoEnv(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-invalid-upstream",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the code",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
 
-	workspace := &axonv1alpha1.WorkspaceSpec{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/my-fork/repo.git",
 		Ref:  "main",
-		Remotes: []axonv1alpha1.GitRemote{
+		Remotes: []kelosv1alpha1.GitRemote{
 			{Name: "upstream", URL: "not-a-valid-url"},
 		},
 	}
@@ -3477,28 +3477,28 @@ func TestBuildJob_WorkspaceWithInvalidUpstreamRemoteNoEnv(t *testing.T) {
 
 	mainContainer := job.Spec.Template.Spec.Containers[0]
 	for _, env := range mainContainer.Env {
-		if env.Name == "AXON_UPSTREAM_REPO" {
-			t.Errorf("Expected no AXON_UPSTREAM_REPO for invalid URL, but found value %q", env.Value)
+		if env.Name == "KELOS_UPSTREAM_REPO" {
+			t.Errorf("Expected no KELOS_UPSTREAM_REPO for invalid URL, but found value %q", env.Value)
 		}
 	}
 }
 
 func TestBuildJob_TaskSpawnerLabelInjectsEnv(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-spawner-env",
 			Namespace: "default",
 			Labels: map[string]string{
-				"axon.io/taskspawner": "axon-workers",
+				"kelos.dev/taskspawner": "kelos-workers",
 			},
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Hello",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -3511,31 +3511,31 @@ func TestBuildJob_TaskSpawnerLabelInjectsEnv(t *testing.T) {
 	container := job.Spec.Template.Spec.Containers[0]
 	found := false
 	for _, env := range container.Env {
-		if env.Name == "AXON_TASKSPAWNER" {
+		if env.Name == "KELOS_TASKSPAWNER" {
 			found = true
-			if env.Value != "axon-workers" {
-				t.Errorf("AXON_TASKSPAWNER: expected %q, got %q", "axon-workers", env.Value)
+			if env.Value != "kelos-workers" {
+				t.Errorf("KELOS_TASKSPAWNER: expected %q, got %q", "kelos-workers", env.Value)
 			}
 		}
 	}
 	if !found {
-		t.Error("Expected AXON_TASKSPAWNER env var to be set when label is present")
+		t.Error("Expected KELOS_TASKSPAWNER env var to be set when label is present")
 	}
 }
 
 func TestBuildJob_NoTaskSpawnerLabelNoEnv(t *testing.T) {
 	builder := NewJobBuilder()
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-no-spawner-env",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Hello",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -3547,8 +3547,8 @@ func TestBuildJob_NoTaskSpawnerLabelNoEnv(t *testing.T) {
 
 	container := job.Spec.Template.Spec.Containers[0]
 	for _, env := range container.Env {
-		if env.Name == "AXON_TASKSPAWNER" {
-			t.Errorf("Expected no AXON_TASKSPAWNER env var when label is absent, but found value %q", env.Value)
+		if env.Name == "KELOS_TASKSPAWNER" {
+			t.Errorf("Expected no KELOS_TASKSPAWNER env var when label is absent, but found value %q", env.Value)
 		}
 	}
 }

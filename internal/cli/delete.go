@@ -9,7 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 )
 
 func newDeleteCommand(cfg *ClientConfig) *cobra.Command {
@@ -60,7 +60,7 @@ func newDeleteTaskCommand(cfg *ClientConfig) *cobra.Command {
 			ctx := context.Background()
 
 			if all {
-				taskList := &axonv1alpha1.TaskList{}
+				taskList := &kelosv1alpha1.TaskList{}
 				if err := cl.List(ctx, taskList, client.InNamespace(ns)); err != nil {
 					return fmt.Errorf("listing tasks: %w", err)
 				}
@@ -77,7 +77,7 @@ func newDeleteTaskCommand(cfg *ClientConfig) *cobra.Command {
 				return nil
 			}
 
-			task := &axonv1alpha1.Task{
+			task := &kelosv1alpha1.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      args[0],
 					Namespace: ns,
@@ -128,7 +128,7 @@ func newDeleteWorkspaceCommand(cfg *ClientConfig) *cobra.Command {
 			ctx := context.Background()
 
 			if all {
-				wsList := &axonv1alpha1.WorkspaceList{}
+				wsList := &kelosv1alpha1.WorkspaceList{}
 				if err := cl.List(ctx, wsList, client.InNamespace(ns)); err != nil {
 					return fmt.Errorf("listing workspaces: %w", err)
 				}
@@ -145,7 +145,7 @@ func newDeleteWorkspaceCommand(cfg *ClientConfig) *cobra.Command {
 				return nil
 			}
 
-			ws := &axonv1alpha1.Workspace{
+			ws := &kelosv1alpha1.Workspace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      args[0],
 					Namespace: ns,
@@ -196,7 +196,7 @@ func newDeleteTaskSpawnerCommand(cfg *ClientConfig) *cobra.Command {
 			ctx := context.Background()
 
 			if all {
-				tsList := &axonv1alpha1.TaskSpawnerList{}
+				tsList := &kelosv1alpha1.TaskSpawnerList{}
 				if err := cl.List(ctx, tsList, client.InNamespace(ns)); err != nil {
 					return fmt.Errorf("listing task spawners: %w", err)
 				}
@@ -213,7 +213,7 @@ func newDeleteTaskSpawnerCommand(cfg *ClientConfig) *cobra.Command {
 				return nil
 			}
 
-			ts := &axonv1alpha1.TaskSpawner{
+			ts := &kelosv1alpha1.TaskSpawner{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      args[0],
 					Namespace: ns,

@@ -26,19 +26,19 @@ var _ = Describe("Install Script", Ordered, func() {
 		repoRoot, err = filepath.Abs(filepath.Join("..", ".."))
 		Expect(err).NotTo(HaveOccurred())
 
-		buildCmd := exec.Command("make", "build", "WHAT=cmd/axon")
+		buildCmd := exec.Command("make", "build", "WHAT=cmd/kelos")
 		buildCmd.Dir = repoRoot
 		buildCmd.Stdout = GinkgoWriter
 		buildCmd.Stderr = GinkgoWriter
 		Expect(buildCmd.Run()).To(Succeed())
 
-		builtBinary := filepath.Join(repoRoot, "bin", "axon")
+		builtBinary := filepath.Join(repoRoot, "bin", "kelos")
 		Expect(builtBinary).To(BeAnExistingFile())
 
 		binaryData, err = os.ReadFile(builtBinary)
 		Expect(err).NotTo(HaveOccurred())
 
-		binaryName = fmt.Sprintf("axon-%s-%s", runtime.GOOS, runtime.GOARCH)
+		binaryName = fmt.Sprintf("kelos-%s-%s", runtime.GOOS, runtime.GOARCH)
 	})
 
 	BeforeEach(func() {
@@ -56,14 +56,14 @@ var _ = Describe("Install Script", Ordered, func() {
 		server.Close()
 	})
 
-	It("Should install the axon CLI binary", func() {
+	It("Should install the kelos CLI binary", func() {
 		By("Running hack/install.sh with a temporary install directory")
 		installDir := GinkgoT().TempDir()
 		installScript := filepath.Join(repoRoot, "hack", "install.sh")
 
 		cmd := exec.Command("bash", installScript)
 		cmd.Env = append(os.Environ(),
-			"AXON_RELEASE_URL="+server.URL,
+			"KELOS_RELEASE_URL="+server.URL,
 			"INSTALL_DIR="+installDir,
 		)
 		cmd.Stdout = GinkgoWriter
@@ -71,7 +71,7 @@ var _ = Describe("Install Script", Ordered, func() {
 		Expect(cmd.Run()).To(Succeed())
 
 		By("Verifying the binary was installed")
-		installedBinary := filepath.Join(installDir, "axon")
+		installedBinary := filepath.Join(installDir, "kelos")
 		Expect(installedBinary).To(BeAnExistingFile())
 
 		By("Verifying the installed binary is executable")
@@ -94,7 +94,7 @@ var _ = Describe("Install Script", Ordered, func() {
 
 		cmd := exec.Command("bash", installScript)
 		cmd.Env = append(os.Environ(),
-			"AXON_RELEASE_URL="+server.URL,
+			"KELOS_RELEASE_URL="+server.URL,
 			"INSTALL_DIR="+installDir,
 		)
 		cmd.Stdout = GinkgoWriter
@@ -102,7 +102,7 @@ var _ = Describe("Install Script", Ordered, func() {
 		Expect(cmd.Run()).To(Succeed())
 
 		By("Verifying the directory was created and binary was installed")
-		installedBinary := filepath.Join(installDir, "axon")
+		installedBinary := filepath.Join(installDir, "kelos")
 		Expect(installedBinary).To(BeAnExistingFile())
 	})
 
@@ -115,7 +115,7 @@ var _ = Describe("Install Script", Ordered, func() {
 
 		cmd := exec.Command("bash", installScript)
 		cmd.Env = append(os.Environ(),
-			"AXON_RELEASE_URL="+server.URL,
+			"KELOS_RELEASE_URL="+server.URL,
 			"INSTALL_DIR="+installDir,
 		)
 		output, err := cmd.CombinedOutput()

@@ -1,10 +1,10 @@
 #!/bin/bash
-# axon_entrypoint.sh — Axon agent image interface implementation for
+# kelos_entrypoint.sh — Kelos agent image interface implementation for
 # OpenAI Codex CLI.
 #
 # Interface contract:
 #   - First argument ($1): the task prompt
-#   - AXON_MODEL env var: model name (optional)
+#   - KELOS_MODEL env var: model name (optional)
 #   - UID 61100: shared between git-clone init container and agent
 #   - Working directory: /workspace/repo when a workspace is configured
 
@@ -27,19 +27,19 @@ ARGS=(
   "$PROMPT"
 )
 
-if [ -n "${AXON_MODEL:-}" ]; then
-  ARGS+=("--model" "$AXON_MODEL")
+if [ -n "${KELOS_MODEL:-}" ]; then
+  ARGS+=("--model" "$KELOS_MODEL")
 fi
 
 # Write user-level instructions (global scope read by Codex CLI)
-if [ -n "${AXON_AGENTS_MD:-}" ]; then
+if [ -n "${KELOS_AGENTS_MD:-}" ]; then
   mkdir -p ~/.codex
-  printf '%s' "$AXON_AGENTS_MD" >~/.codex/AGENTS.md
+  printf '%s' "$KELOS_AGENTS_MD" >~/.codex/AGENTS.md
 fi
 
 # Install each plugin as a Codex skill directory under ~/.codex/skills
-if [ -n "${AXON_PLUGIN_DIR:-}" ] && [ -d "${AXON_PLUGIN_DIR}" ]; then
-  for plugindir in "${AXON_PLUGIN_DIR}"/*/; do
+if [ -n "${KELOS_PLUGIN_DIR:-}" ] && [ -d "${KELOS_PLUGIN_DIR}" ]; then
+  for plugindir in "${KELOS_PLUGIN_DIR}"/*/; do
     [ -d "$plugindir" ] || continue
     # Copy skills into ~/.codex/skills/<plugin>/<skill>/SKILL.md
     if [ -d "${plugindir}skills" ]; then
@@ -59,12 +59,12 @@ if [ -n "${AXON_PLUGIN_DIR:-}" ] && [ -d "${AXON_PLUGIN_DIR}" ]; then
 fi
 
 # Write MCP server configuration to project-scoped config.
-# AXON_MCP_SERVERS contains JSON in .mcp.json format; convert to
+# KELOS_MCP_SERVERS contains JSON in .mcp.json format; convert to
 # Codex TOML via a small Node.js helper that is available in the image.
-if [ -n "${AXON_MCP_SERVERS:-}" ]; then
+if [ -n "${KELOS_MCP_SERVERS:-}" ]; then
   mkdir -p ~/.codex
   node -e '
-const cfg = JSON.parse(process.env.AXON_MCP_SERVERS);
+const cfg = JSON.parse(process.env.KELOS_MCP_SERVERS);
 const servers = cfg.mcpServers || {};
 let toml = "";
 for (const [name, s] of Object.entries(servers)) {
@@ -89,6 +89,6 @@ fi
 codex "${ARGS[@]}" | tee /tmp/agent-output.jsonl
 AGENT_EXIT_CODE=${PIPESTATUS[0]}
 
-/axon/axon-capture
+/kelos/kelos-capture
 
 exit $AGENT_EXIT_CODE

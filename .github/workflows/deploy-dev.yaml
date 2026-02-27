@@ -20,7 +20,7 @@ jobs:
     if: (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     env:
-      AXON_NAMESPACE: ${{ vars.AXON_NAMESPACE || 'default' }}
+      KELOS_NAMESPACE: ${{ vars.KELOS_NAMESPACE || 'default' }}
       GCP_PROJECT_ID: gjkim-400213
       GKE_CLUSTER_NAME: gjkim
       GKE_CLUSTER_LOCATION: asia-northeast3
@@ -34,7 +34,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Build CLI
-        run: make build WHAT=cmd/axon
+        run: make build WHAT=cmd/kelos
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -49,13 +49,13 @@ jobs:
           location: ${{ env.GKE_CLUSTER_LOCATION }}
           project_id: ${{ env.GCP_PROJECT_ID }}
 
-      - name: Install axon
+      - name: Install kelos
         run: |
-          bin/axon install --version main --image-pull-policy Always
-          kubectl rollout restart deployment/axon-controller-manager -n axon-system
-          kubectl rollout status deployment/axon-controller-manager -n axon-system --timeout=120s
-          kubectl rollout restart deployment -l app.kubernetes.io/component=spawner -n "${AXON_NAMESPACE}"
-          kubectl rollout status deployment -l app.kubernetes.io/component=spawner -n "${AXON_NAMESPACE}" --timeout=120s
+          bin/kelos install --version main --image-pull-policy Always
+          kubectl rollout restart deployment/kelos-controller-manager -n kelos-system
+          kubectl rollout status deployment/kelos-controller-manager -n kelos-system --timeout=120s
+          kubectl rollout restart deployment -l app.kubernetes.io/component=spawner -n "${KELOS_NAMESPACE}"
+          kubectl rollout status deployment -l app.kubernetes.io/component=spawner -n "${KELOS_NAMESPACE}" --timeout=120s
 
       - name: Apply self-development resources
-        run: kubectl apply -f self-development/ -n "${AXON_NAMESPACE}"
+        run: kubectl apply -f self-development/ -n "${KELOS_NAMESPACE}"

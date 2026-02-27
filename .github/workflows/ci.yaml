@@ -84,25 +84,25 @@ jobs:
 
       - name: Load images into kind
         run: |
-          kind load docker-image gjkim42/axon-controller:e2e
-          kind load docker-image gjkim42/axon-spawner:e2e
+          kind load docker-image gjkim42/kelos-controller:e2e
+          kind load docker-image gjkim42/kelos-spawner:e2e
           kind load docker-image gjkim42/claude-code:e2e
           kind load docker-image gjkim42/codex:e2e
           kind load docker-image gjkim42/gemini:e2e
           kind load docker-image gjkim42/opencode:e2e
 
       - name: Build CLI
-        run: make build WHAT=cmd/axon
+        run: make build WHAT=cmd/kelos
 
       - name: Deploy controller
         run: |
-          bin/axon install --version e2e --image-pull-policy Never
-          kubectl wait --for=condition=available deployment/axon-controller-manager -n axon-system --timeout=120s
+          bin/kelos install --version e2e --image-pull-policy Never
+          kubectl wait --for=condition=available deployment/kelos-controller-manager -n kelos-system --timeout=120s
 
       - name: E2E Test
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
           GITHUB_TOKEN: ${{ github.token }}
-          AXON_BIN: ${{ github.workspace }}/bin/axon
+          KELOS_BIN: ${{ github.workspace }}/bin/kelos
         run: make test-e2e

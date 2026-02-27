@@ -1,6 +1,6 @@
 # Self-Development Orchestration Patterns
 
-This directory contains real-world orchestration patterns used by the Axon project itself for autonomous development.
+This directory contains real-world orchestration patterns used by the Kelos project itself for autonomous development.
 
 ## Overview
 
@@ -20,10 +20,10 @@ Before deploying these examples, you need to create the following resources:
 Create a Workspace that points to your repository:
 
 ```yaml
-apiVersion: axon.io/v1alpha1
+apiVersion: kelos.dev/v1alpha1
 kind: Workspace
 metadata:
-  name: axon-agent
+  name: kelos-agent
 spec:
   repo: https://github.com/your-org/your-repo.git
   ref: main
@@ -51,13 +51,13 @@ Create a secret with your AI agent credentials:
 
 **For OAuth (Claude Code):**
 ```bash
-kubectl create secret generic axon-credentials \
+kubectl create secret generic kelos-credentials \
   --from-literal=CLAUDE_CODE_OAUTH_TOKEN=<your-claude-oauth-token>
 ```
 
 **For API Key:**
 ```bash
-kubectl create secret generic axon-credentials \
+kubectl create secret generic kelos-credentials \
   --from-literal=ANTHROPIC_API_KEY=<your-api-key>
 ```
 
@@ -80,32 +80,32 @@ GitHub Actions:
 
 The target cluster must already have:
 
-- Axon installed
-- `Workspace` named `axon-agent`
-- Secret `axon-credentials`
+- Kelos installed
+- `Workspace` named `kelos-agent`
+- Secret `kelos-credentials`
 
-### axon-workers.yaml
+### kelos-workers.yaml
 
-This TaskSpawner picks up open GitHub issues labeled with `actor/axon` and creates autonomous agent tasks to fix them.
+This TaskSpawner picks up open GitHub issues labeled with `actor/kelos` and creates autonomous agent tasks to fix them.
 
 **Key features:**
 - Automatically checks for existing PRs and updates them incrementally
 - Self-reviews PRs before requesting human review
 - Ensures CI passes before completion
-- Labels issues with `axon/needs-input` when human input is needed
+- Labels issues with `kelos/needs-input` when human input is needed
 - Creates a feedback loop: remove the label to re-queue the issue
 - Supports manual reset via `/reset-worker` comment from a repository admin:
-  - Deletes `Task/axon-workers-<ISSUE-NUMBER>` so it can be recreated with the same name
-  - Removes `axon/needs-input` from the relevant issue and PR
+  - Deletes `Task/kelos-workers-<ISSUE-NUMBER>` so it can be recreated with the same name
+  - Removes `kelos/needs-input` from the relevant issue and PR
 
 **Deploy:**
 ```bash
 # First, ensure all prerequisites are created
 kubectl apply -f - <<EOF
-apiVersion: axon.io/v1alpha1
+apiVersion: kelos.dev/v1alpha1
 kind: Workspace
 metadata:
-  name: axon-agent
+  name: kelos-agent
 spec:
   repo: https://github.com/your-org/your-repo.git
   ref: main
@@ -115,7 +115,7 @@ spec:
 EOF
 
 # Then deploy the TaskSpawner
-kubectl apply -f self-development/axon-workers.yaml
+kubectl apply -f self-development/kelos-workers.yaml
 ```
 
 **Monitor:**
@@ -124,19 +124,19 @@ kubectl apply -f self-development/axon-workers.yaml
 kubectl get tasks -w
 
 # Check TaskSpawner status
-kubectl get taskspawner axon-workers -o yaml
+kubectl get taskspawner kelos-workers -o yaml
 
 # View logs from a specific task
 kubectl logs -l job-name=<job-name> -f
 ```
 
-### axon-fake-user.yaml
+### kelos-fake-user.yaml
 
 This TaskSpawner runs daily to test the developer experience as if you were a new user.
 
 **Deploy:**
 ```bash
-kubectl apply -f self-development/axon-fake-user.yaml
+kubectl apply -f self-development/kelos-fake-user.yaml
 ```
 
 This spawner uses a daily cron schedule (`0 9 * * *`) and will create a task each day to:
@@ -145,28 +145,28 @@ This spawner uses a daily cron schedule (`0 9 * * *`) and will create a task eac
 - Review examples and identify gaps
 - Create GitHub issues for any problems found
 
-### axon-fake-strategist.yaml
+### kelos-fake-strategist.yaml
 
-This TaskSpawner runs every 12 hours to strategically explore new ways to use and improve Axon.
+This TaskSpawner runs every 12 hours to strategically explore new ways to use and improve Kelos.
 
 **Deploy:**
 ```bash
-kubectl apply -f self-development/axon-fake-strategist.yaml
+kubectl apply -f self-development/kelos-fake-strategist.yaml
 ```
 
 This spawner uses a cron schedule (`0 */12 * * *`) and will create a task every 12 hours to focus on one of:
-- **New Use Cases** — explore what types of projects/teams could benefit from Axon, propose example TaskSpawner configs
+- **New Use Cases** — explore what types of projects/teams could benefit from Kelos, propose example TaskSpawner configs
 - **Workflow Improvements** — analyze existing self-development configs and suggest better patterns, prompts, or automation flows
-- **Integration Opportunities** — identify tools/platforms Axon could integrate with (CI systems, monitoring, chat ops, etc.)
-- **New CRDs & API Extensions** — propose new Custom Resource Definitions or extensions to existing CRDs that would expand Axon's capabilities
+- **Integration Opportunities** — identify tools/platforms Kelos could integrate with (CI systems, monitoring, chat ops, etc.)
+- **New CRDs & API Extensions** — propose new Custom Resource Definitions or extensions to existing CRDs that would expand Kelos's capabilities
 
-### axon-self-update.yaml
+### kelos-self-update.yaml
 
 This TaskSpawner runs daily to review and update the self-development workflow files themselves.
 
 **Deploy:**
 ```bash
-kubectl apply -f self-development/axon-self-update.yaml
+kubectl apply -f self-development/kelos-self-update.yaml
 ```
 
 This spawner uses a daily cron schedule (`0 6 * * *`, every day at 06:00 UTC) and will create a task to focus on one of:
@@ -225,11 +225,11 @@ To adapt these examples for your own repository:
 
 ## Feedback Loop Pattern
 
-The key pattern in these examples is the `excludeLabels: [axon/needs-input]` configuration. This creates an autonomous feedback loop:
+The key pattern in these examples is the `excludeLabels: [kelos/needs-input]` configuration. This creates an autonomous feedback loop:
 
-1. Agent picks up an open issue without the `axon/needs-input` label
+1. Agent picks up an open issue without the `kelos/needs-input` label
 2. Agent investigates, creates/updates a PR, and self-reviews
-3. If the agent needs human input, it adds the `axon/needs-input` label
+3. If the agent needs human input, it adds the `kelos/needs-input` label
 4. The issue is excluded from future polls until a human removes the label
 5. Removing the label re-queues the issue on the next poll
 
@@ -240,8 +240,8 @@ This allows agents to work fully autonomously while gracefully handing off to hu
 **TaskSpawner not creating tasks:**
 - Check the TaskSpawner status: `kubectl get taskspawner <name> -o yaml`
 - Verify the Workspace exists: `kubectl get workspace`
-- Ensure credentials are correctly configured: `kubectl get secret axon-credentials`
-- Check TaskSpawner logs: `kubectl logs deployment/axon-controller-manager -n axon-system`
+- Ensure credentials are correctly configured: `kubectl get secret kelos-credentials`
+- Check TaskSpawner logs: `kubectl logs deployment/kelos-controller-manager -n kelos-system`
 
 **Tasks failing immediately:**
 - Verify the agent credentials are valid
@@ -251,11 +251,11 @@ This allows agents to work fully autonomously while gracefully handing off to hu
 **Agent not creating PRs:**
 - Ensure the `github-token` secret exists and is referenced in the Workspace
 - Verify the token has `repo` permissions
-- Check if git user is configured in the agent prompt (see `axon-workers.yaml` for example)
+- Check if git user is configured in the agent prompt (see `kelos-workers.yaml` for example)
 
 ## Next Steps
 
 - Read the [main README](../README.md) for more details on Tasks and Workspaces
 - Review the [agent image interface](../docs/agent-image-interface.md) to create custom agents
 - Check existing TaskSpawners: `kubectl get taskspawners`
-- Monitor task execution: `axon get tasks` or `kubectl get tasks`
+- Monitor task execution: `kelos get tasks` or `kubectl get tasks`

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/axon-core/axon/internal/manifests"
+	"github.com/kelos-dev/kelos/internal/manifests"
 )
 
 func TestParseManifests_SingleDocument(t *testing.T) {
@@ -213,7 +213,7 @@ func TestUninstallCommand_RejectsExtraArgs(t *testing.T) {
 }
 
 func TestVersionedManifest_Latest(t *testing.T) {
-	data := []byte("image: gjkim42/axon-controller:latest")
+	data := []byte("image: gjkim42/kelos-controller:latest")
 	result := versionedManifest(data, "latest")
 	if !bytes.Equal(result, data) {
 		t.Errorf("expected manifest unchanged for latest version, got %s", string(result))
@@ -221,18 +221,18 @@ func TestVersionedManifest_Latest(t *testing.T) {
 }
 
 func TestVersionedManifest_Tagged(t *testing.T) {
-	data := []byte("image: gjkim42/axon-controller:latest")
+	data := []byte("image: gjkim42/kelos-controller:latest")
 	result := versionedManifest(data, "v0.1.0")
-	expected := []byte("image: gjkim42/axon-controller:v0.1.0")
+	expected := []byte("image: gjkim42/kelos-controller:v0.1.0")
 	if !bytes.Equal(result, expected) {
 		t.Errorf("expected %s, got %s", string(expected), string(result))
 	}
 }
 
 func TestVersionedManifest_MultipleImages(t *testing.T) {
-	data := []byte(`image: gjkim42/axon-controller:latest
+	data := []byte(`image: gjkim42/kelos-controller:latest
 args:
-  - --spawner-image=gjkim42/axon-spawner:latest
+  - --spawner-image=gjkim42/kelos-spawner:latest
   - --claude-code-image=gjkim42/claude-code:latest`)
 	result := versionedManifest(data, "v0.2.0")
 	if bytes.Contains(result, []byte(":latest")) {
@@ -260,8 +260,8 @@ func TestVersionedManifest_EmbeddedControllerImageArgs(t *testing.T) {
 		"--codex-image=gjkim42/codex:",
 		"--gemini-image=gjkim42/gemini:",
 		"--opencode-image=gjkim42/opencode:",
-		"--spawner-image=gjkim42/axon-spawner:",
-		"--token-refresher-image=gjkim42/axon-token-refresher:",
+		"--spawner-image=gjkim42/kelos-spawner:",
+		"--token-refresher-image=gjkim42/kelos-token-refresher:",
 	}
 	for _, arg := range expectedArgs {
 		if !bytes.Contains(manifests.InstallController, []byte(arg)) {
@@ -276,8 +276,8 @@ func TestVersionedManifest_EmbeddedControllerImageArgs(t *testing.T) {
 		"--codex-image=gjkim42/codex:v0.3.0",
 		"--gemini-image=gjkim42/gemini:v0.3.0",
 		"--opencode-image=gjkim42/opencode:v0.3.0",
-		"--spawner-image=gjkim42/axon-spawner:v0.3.0",
-		"--token-refresher-image=gjkim42/axon-token-refresher:v0.3.0",
+		"--spawner-image=gjkim42/kelos-spawner:v0.3.0",
+		"--token-refresher-image=gjkim42/kelos-token-refresher:v0.3.0",
 	}
 	for _, arg := range versionedArgs {
 		if !bytes.Contains(result, []byte(arg)) {
@@ -289,14 +289,14 @@ func TestVersionedManifest_EmbeddedControllerImageArgs(t *testing.T) {
 func TestWithImagePullPolicy(t *testing.T) {
 	data := []byte(`      containers:
         - name: manager
-          image: gjkim42/axon-controller:v0.1.0
+          image: gjkim42/kelos-controller:v0.1.0
           args:
             - --leader-elect
             - --claude-code-image=gjkim42/claude-code:v0.1.0
-            - --spawner-image=gjkim42/axon-spawner:v0.1.0`)
+            - --spawner-image=gjkim42/kelos-spawner:v0.1.0`)
 	result := withImagePullPolicy(data, "Always")
 	// Verify container imagePullPolicy appears right after the image line.
-	expected := []byte("          image: gjkim42/axon-controller:v0.1.0\n          imagePullPolicy: Always\n")
+	expected := []byte("          image: gjkim42/kelos-controller:v0.1.0\n          imagePullPolicy: Always\n")
 	if !bytes.Contains(result, expected) {
 		t.Errorf("expected imagePullPolicy right after image line, got:\n%s", string(result))
 	}

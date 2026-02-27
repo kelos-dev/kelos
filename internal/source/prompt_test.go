@@ -159,12 +159,12 @@ func TestRenderTemplate(t *testing.T) {
 		Kind:   "Issue",
 	}
 
-	result, err := RenderTemplate("axon-task-{{.Number}}", item)
+	result, err := RenderTemplate("kelos-task-{{.Number}}", item)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result != "axon-task-42" {
-		t.Errorf("expected %q, got %q", "axon-task-42", result)
+	if result != "kelos-task-42" {
+		t.Errorf("expected %q, got %q", "kelos-task-42", result)
 	}
 }
 

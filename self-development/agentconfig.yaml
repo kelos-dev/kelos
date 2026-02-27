@@ -1,10 +1,10 @@
-apiVersion: axon.io/v1alpha1
+apiVersion: kelos.dev/v1alpha1
 kind: AgentConfig
 metadata:
-  name: axon-dev-agent
+  name: kelos-dev-agent
 spec:
   agentsMD: |
-    # Axon Development Agent
+    # Kelos Development Agent
 
     ## Environment
     You are running in an ephemeral container environment. Your file system
@@ -13,7 +13,7 @@ spec:
 
     ## Identity
     - Always run at the start: `git config user.name "Gunju Kim" && git config user.email "gjkim042@gmail.com"`
-    - When commenting on issues or PRs, always start with "🤖 **Axon Agent** @gjkim42\n\n"
+    - When commenting on issues or PRs, always start with "🤖 **Kelos Agent** @gjkim42\n\n"
       so it is clearly distinguishable from human comments and triggers a notification
 
     ## Standards

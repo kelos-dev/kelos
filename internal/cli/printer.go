@@ -12,10 +12,10 @@ import (
 	"k8s.io/apimachinery/pkg/util/duration"
 	"sigs.k8s.io/yaml"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 )
 
-func taskDuration(status *axonv1alpha1.TaskStatus) string {
+func taskDuration(status *kelosv1alpha1.TaskStatus) string {
 	if status.StartTime == nil {
 		return "-"
 	}
@@ -25,7 +25,7 @@ func taskDuration(status *axonv1alpha1.TaskStatus) string {
 	return duration.HumanDuration(time.Since(status.StartTime.Time))
 }
 
-func printTaskTable(w io.Writer, tasks []axonv1alpha1.Task, allNamespaces bool) {
+func printTaskTable(w io.Writer, tasks []kelosv1alpha1.Task, allNamespaces bool) {
 	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
 	if allNamespaces {
 		fmt.Fprintln(tw, "NAMESPACE\tNAME\tTYPE\tPHASE\tBRANCH\tWORKSPACE\tAGENT CONFIG\tDURATION\tAGE")
@@ -58,7 +58,7 @@ func printTaskTable(w io.Writer, tasks []axonv1alpha1.Task, allNamespaces bool) 
 	tw.Flush()
 }
 
-func printTaskDetail(w io.Writer, t *axonv1alpha1.Task) {
+func printTaskDetail(w io.Writer, t *kelosv1alpha1.Task) {
 	printField(w, "Name", t.Name)
 	printField(w, "Namespace", t.Namespace)
 	printField(w, "Type", t.Spec.Type)
@@ -132,7 +132,7 @@ func printTaskDetail(w io.Writer, t *axonv1alpha1.Task) {
 	}
 }
 
-func printTaskSpawnerTable(w io.Writer, spawners []axonv1alpha1.TaskSpawner, allNamespaces bool) {
+func printTaskSpawnerTable(w io.Writer, spawners []kelosv1alpha1.TaskSpawner, allNamespaces bool) {
 	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
 	if allNamespaces {
 		fmt.Fprintln(tw, "NAMESPACE\tNAME\tSOURCE\tPHASE\tDISCOVERED\tTASKS\tAGE")
@@ -164,7 +164,7 @@ func printTaskSpawnerTable(w io.Writer, spawners []axonv1alpha1.TaskSpawner, all
 	tw.Flush()
 }
 
-func printTaskSpawnerDetail(w io.Writer, ts *axonv1alpha1.TaskSpawner) {
+func printTaskSpawnerDetail(w io.Writer, ts *kelosv1alpha1.TaskSpawner) {
 	printField(w, "Name", ts.Name)
 	printField(w, "Namespace", ts.Namespace)
 	printField(w, "Phase", string(ts.Status.Phase))
@@ -205,7 +205,7 @@ func printTaskSpawnerDetail(w io.Writer, ts *axonv1alpha1.TaskSpawner) {
 	}
 }
 
-func printWorkspaceTable(w io.Writer, workspaces []axonv1alpha1.Workspace, allNamespaces bool) {
+func printWorkspaceTable(w io.Writer, workspaces []kelosv1alpha1.Workspace, allNamespaces bool) {
 	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
 	if allNamespaces {
 		fmt.Fprintln(tw, "NAMESPACE\tNAME\tREPO\tREF\tAGE")
@@ -223,7 +223,7 @@ func printWorkspaceTable(w io.Writer, workspaces []axonv1alpha1.Workspace, allNa
 	tw.Flush()
 }
 
-func printWorkspaceDetail(w io.Writer, ws *axonv1alpha1.Workspace) {
+func printWorkspaceDetail(w io.Writer, ws *kelosv1alpha1.Workspace) {
 	printField(w, "Name", ws.Name)
 	printField(w, "Namespace", ws.Namespace)
 	printField(w, "Repo", ws.Spec.Repo)
@@ -235,7 +235,7 @@ func printWorkspaceDetail(w io.Writer, ws *axonv1alpha1.Workspace) {
 	}
 }
 
-func printAgentConfigTable(w io.Writer, configs []axonv1alpha1.AgentConfig, allNamespaces bool) {
+func printAgentConfigTable(w io.Writer, configs []kelosv1alpha1.AgentConfig, allNamespaces bool) {
 	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
 	if allNamespaces {
 		fmt.Fprintln(tw, "NAMESPACE\tNAME\tPLUGINS\tMCP SERVERS\tAGE")
@@ -255,7 +255,7 @@ func printAgentConfigTable(w io.Writer, configs []axonv1alpha1.AgentConfig, allN
 	tw.Flush()
 }
 
-func printAgentConfigDetail(w io.Writer, ac *axonv1alpha1.AgentConfig) {
+func printAgentConfigDetail(w io.Writer, ac *kelosv1alpha1.AgentConfig) {
 	printField(w, "Name", ac.Name)
 	printField(w, "Namespace", ac.Namespace)
 	if ac.Spec.AgentsMD != "" {

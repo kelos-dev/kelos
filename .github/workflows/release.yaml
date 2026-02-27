@@ -21,7 +21,7 @@ jobs:
         uses: docker/login-action@v3
         with:
           username: gjkim42
-          password: ${{ secrets.DOCKERHUB_AXON_TOKEN }}
+          password: ${{ secrets.DOCKERHUB_KELOS_TOKEN }}
 
       - name: Determine version
         id: version
@@ -62,5 +62,5 @@ jobs:
         run: |
           gh release create "$VERSION" --verify-tag --generate-notes || true
           gh release upload "$VERSION" --clobber \
-            bin/axon-* \
+            bin/kelos-* \
             bin/checksums.txt

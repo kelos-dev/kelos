@@ -9,7 +9,7 @@ import (
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 )
 
 func newSuspendCommand(cfg *ClientConfig) *cobra.Command {
@@ -52,7 +52,7 @@ func newSuspendTaskSpawnerCommand(cfg *ClientConfig) *cobra.Command {
 
 			alreadySuspended := false
 			if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-				ts := &axonv1alpha1.TaskSpawner{}
+				ts := &kelosv1alpha1.TaskSpawner{}
 				if err := cl.Get(ctx, key, ts); err != nil {
 					return fmt.Errorf("getting task spawner: %w", err)
 				}
@@ -123,7 +123,7 @@ func newResumeTaskSpawnerCommand(cfg *ClientConfig) *cobra.Command {
 
 			notSuspended := false
 			if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-				ts := &axonv1alpha1.TaskSpawner{}
+				ts := &kelosv1alpha1.TaskSpawner{}
 				if err := cl.Get(ctx, key, ts); err != nil {
 					return fmt.Errorf("getting task spawner: %w", err)
 				}

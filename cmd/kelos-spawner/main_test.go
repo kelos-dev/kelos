@@ -16,8 +16,8 @@ import (
 
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
-	"github.com/axon-core/axon/internal/source"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	"github.com/kelos-dev/kelos/internal/source"
 )
 
 type fakeSource struct {
@@ -31,14 +31,14 @@ func (f *fakeSource) Discover(_ context.Context) ([]source.WorkItem, error) {
 func newTestScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(s))
-	utilruntime.Must(axonv1alpha1.AddToScheme(s))
+	utilruntime.Must(kelosv1alpha1.AddToScheme(s))
 	return s
 }
 
 func int32Ptr(v int32) *int32 { return &v }
 func boolPtr(v bool) *bool    { return &v }
 
-func setupTest(t *testing.T, ts *axonv1alpha1.TaskSpawner, existingTasks ...axonv1alpha1.Task) (client.Client, types.NamespacedName) {
+func setupTest(t *testing.T, ts *kelosv1alpha1.TaskSpawner, existingTasks ...kelosv1alpha1.Task) (client.Client, types.NamespacedName) {
 	t.Helper()
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 
@@ -57,47 +57,47 @@ func setupTest(t *testing.T, ts *axonv1alpha1.TaskSpawner, existingTasks ...axon
 	return cl, key
 }
 
-func newTaskSpawner(name, namespace string, maxConcurrency *int32) *axonv1alpha1.TaskSpawner {
-	return &axonv1alpha1.TaskSpawner{
+func newTaskSpawner(name, namespace string, maxConcurrency *int32) *kelosv1alpha1.TaskSpawner {
+	return &kelosv1alpha1.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
 		},
-		Spec: axonv1alpha1.TaskSpawnerSpec{
-			When: axonv1alpha1.When{
-				GitHubIssues: &axonv1alpha1.GitHubIssues{},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: axonv1alpha1.TaskTemplate{
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
 				Type: "claude-code",
-				Credentials: axonv1alpha1.Credentials{
-					Type:      axonv1alpha1.CredentialTypeOAuth,
-					SecretRef: axonv1alpha1.SecretReference{Name: "creds"},
+				Credentials: kelosv1alpha1.Credentials{
+					Type:      kelosv1alpha1.CredentialTypeOAuth,
+					SecretRef: kelosv1alpha1.SecretReference{Name: "creds"},
 				},
-				WorkspaceRef: &axonv1alpha1.WorkspaceReference{Name: "test-ws"},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "test-ws"},
 			},
 			MaxConcurrency: maxConcurrency,
 		},
 	}
 }
 
-func newTask(name, namespace, spawnerName string, phase axonv1alpha1.TaskPhase) axonv1alpha1.Task {
-	return axonv1alpha1.Task{
+func newTask(name, namespace, spawnerName string, phase kelosv1alpha1.TaskPhase) kelosv1alpha1.Task {
+	return kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
 			Labels: map[string]string{
-				"axon.io/taskspawner": spawnerName,
+				"kelos.dev/taskspawner": spawnerName,
 			},
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeOAuth,
-				SecretRef: axonv1alpha1.SecretReference{Name: "creds"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeOAuth,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "creds"},
 			},
 		},
-		Status: axonv1alpha1.TaskStatus{
+		Status: kelosv1alpha1.TaskStatus{
 			Phase: phase,
 		},
 	}
@@ -129,7 +129,7 @@ func TestBuildSource_GitHubIssuesWithBaseURL(t *testing.T) {
 func TestBuildSource_GitHubIssuesDefaultBaseURL(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 
-	src, err := buildSource(ts, "axon-core", "axon", "", "", "", "", "")
+	src, err := buildSource(ts, "kelos-dev", "kelos", "", "", "", "", "")
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -144,25 +144,25 @@ func TestBuildSource_GitHubIssuesDefaultBaseURL(t *testing.T) {
 }
 
 func TestBuildSource_Jira(t *testing.T) {
-	ts := &axonv1alpha1.TaskSpawner{
+	ts := &kelosv1alpha1.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "spawner",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpawnerSpec{
-			When: axonv1alpha1.When{
-				Jira: &axonv1alpha1.Jira{
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				Jira: &kelosv1alpha1.Jira{
 					BaseURL:   "https://mycompany.atlassian.net",
 					Project:   "PROJ",
 					JQL:       "status = Open",
-					SecretRef: axonv1alpha1.SecretReference{Name: "jira-creds"},
+					SecretRef: kelosv1alpha1.SecretReference{Name: "jira-creds"},
 				},
 			},
-			TaskTemplate: axonv1alpha1.TaskTemplate{
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
 				Type: "claude-code",
-				Credentials: axonv1alpha1.Credentials{
-					Type:      axonv1alpha1.CredentialTypeOAuth,
-					SecretRef: axonv1alpha1.SecretReference{Name: "creds"},
+				Credentials: kelosv1alpha1.Credentials{
+					Type:      kelosv1alpha1.CredentialTypeOAuth,
+					SecretRef: kelosv1alpha1.SecretReference{Name: "creds"},
 				},
 			},
 		},
@@ -214,7 +214,7 @@ func TestRunCycleWithSource_NoMaxConcurrency(t *testing.T) {
 	}
 
 	// All 3 tasks should be created
-	var taskList axonv1alpha1.TaskList
+	var taskList kelosv1alpha1.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestRunCycleWithSource_MaxConcurrencyLimitsCreation(t *testing.T) {
 	}
 
 	// Only 2 tasks should be created (maxConcurrency=2)
-	var taskList axonv1alpha1.TaskList
+	var taskList kelosv1alpha1.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -252,9 +252,9 @@ func TestRunCycleWithSource_MaxConcurrencyLimitsCreation(t *testing.T) {
 
 func TestRunCycleWithSource_MaxConcurrencyWithExistingActiveTasks(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", int32Ptr(3))
-	existingTasks := []axonv1alpha1.Task{
-		newTask("spawner-existing1", "default", "spawner", axonv1alpha1.TaskPhaseRunning),
-		newTask("spawner-existing2", "default", "spawner", axonv1alpha1.TaskPhasePending),
+	existingTasks := []kelosv1alpha1.Task{
+		newTask("spawner-existing1", "default", "spawner", kelosv1alpha1.TaskPhaseRunning),
+		newTask("spawner-existing2", "default", "spawner", kelosv1alpha1.TaskPhasePending),
 	}
 	cl, key := setupTest(t, ts, existingTasks...)
 
@@ -273,7 +273,7 @@ func TestRunCycleWithSource_MaxConcurrencyWithExistingActiveTasks(t *testing.T) 
 	}
 
 	// 2 active + 1 new = 3 (maxConcurrency), so only 1 new task should be created
-	var taskList axonv1alpha1.TaskList
+	var taskList kelosv1alpha1.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -284,9 +284,9 @@ func TestRunCycleWithSource_MaxConcurrencyWithExistingActiveTasks(t *testing.T) 
 
 func TestRunCycleWithSource_CompletedTasksDontCountTowardsLimit(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", int32Ptr(2))
-	existingTasks := []axonv1alpha1.Task{
-		newTask("spawner-done1", "default", "spawner", axonv1alpha1.TaskPhaseSucceeded),
-		newTask("spawner-done2", "default", "spawner", axonv1alpha1.TaskPhaseFailed),
+	existingTasks := []kelosv1alpha1.Task{
+		newTask("spawner-done1", "default", "spawner", kelosv1alpha1.TaskPhaseSucceeded),
+		newTask("spawner-done2", "default", "spawner", kelosv1alpha1.TaskPhaseFailed),
 	}
 	cl, key := setupTest(t, ts, existingTasks...)
 
@@ -305,7 +305,7 @@ func TestRunCycleWithSource_CompletedTasksDontCountTowardsLimit(t *testing.T) {
 	}
 
 	// 2 completed tasks don't count, so 2 new can be created (maxConcurrency=2)
-	var taskList axonv1alpha1.TaskList
+	var taskList kelosv1alpha1.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -330,7 +330,7 @@ func TestRunCycleWithSource_MaxConcurrencyZeroMeansNoLimit(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	var taskList axonv1alpha1.TaskList
+	var taskList kelosv1alpha1.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -341,9 +341,9 @@ func TestRunCycleWithSource_MaxConcurrencyZeroMeansNoLimit(t *testing.T) {
 
 func TestRunCycleWithSource_MaxConcurrencyAlreadyAtLimit(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", int32Ptr(2))
-	existingTasks := []axonv1alpha1.Task{
-		newTask("spawner-active1", "default", "spawner", axonv1alpha1.TaskPhaseRunning),
-		newTask("spawner-active2", "default", "spawner", axonv1alpha1.TaskPhasePending),
+	existingTasks := []kelosv1alpha1.Task{
+		newTask("spawner-active1", "default", "spawner", kelosv1alpha1.TaskPhaseRunning),
+		newTask("spawner-active2", "default", "spawner", kelosv1alpha1.TaskPhasePending),
 	}
 	cl, key := setupTest(t, ts, existingTasks...)
 
@@ -360,7 +360,7 @@ func TestRunCycleWithSource_MaxConcurrencyAlreadyAtLimit(t *testing.T) {
 	}
 
 	// Already at limit (2 active), so no new tasks should be created
-	var taskList axonv1alpha1.TaskList
+	var taskList kelosv1alpha1.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -371,9 +371,9 @@ func TestRunCycleWithSource_MaxConcurrencyAlreadyAtLimit(t *testing.T) {
 
 func TestRunCycleWithSource_ActiveTasksStatusUpdated(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", int32Ptr(5))
-	existingTasks := []axonv1alpha1.Task{
-		newTask("spawner-running", "default", "spawner", axonv1alpha1.TaskPhaseRunning),
-		newTask("spawner-done", "default", "spawner", axonv1alpha1.TaskPhaseSucceeded),
+	existingTasks := []kelosv1alpha1.Task{
+		newTask("spawner-running", "default", "spawner", kelosv1alpha1.TaskPhaseRunning),
+		newTask("spawner-done", "default", "spawner", kelosv1alpha1.TaskPhaseSucceeded),
 	}
 	cl, key := setupTest(t, ts, existingTasks...)
 
@@ -390,7 +390,7 @@ func TestRunCycleWithSource_ActiveTasksStatusUpdated(t *testing.T) {
 	}
 
 	// Check status was updated with activeTasks
-	var updatedTS axonv1alpha1.TaskSpawner
+	var updatedTS kelosv1alpha1.TaskSpawner
 	if err := cl.Get(context.Background(), key, &updatedTS); err != nil {
 		t.Fatalf("Getting TaskSpawner: %v", err)
 	}
@@ -404,7 +404,7 @@ func int64Ptr(v int64) *int64 { return &v }
 
 func TestRunCycleWithSource_AgentConfigRefForwarded(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
-	ts.Spec.TaskTemplate.AgentConfigRef = &axonv1alpha1.AgentConfigReference{
+	ts.Spec.TaskTemplate.AgentConfigRef = &kelosv1alpha1.AgentConfigReference{
 		Name: "my-config",
 	}
 	cl, key := setupTest(t, ts)
@@ -419,7 +419,7 @@ func TestRunCycleWithSource_AgentConfigRefForwarded(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	var taskList axonv1alpha1.TaskList
+	var taskList kelosv1alpha1.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -438,7 +438,7 @@ func TestRunCycleWithSource_AgentConfigRefForwarded(t *testing.T) {
 
 func TestRunCycleWithSource_PodOverridesForwarded(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
-	ts.Spec.TaskTemplate.PodOverrides = &axonv1alpha1.PodOverrides{
+	ts.Spec.TaskTemplate.PodOverrides = &kelosv1alpha1.PodOverrides{
 		ActiveDeadlineSeconds: int64Ptr(1800),
 		Env: []corev1.EnvVar{
 			{Name: "HTTP_PROXY", Value: "http://proxy:8080"},
@@ -460,7 +460,7 @@ func TestRunCycleWithSource_PodOverridesForwarded(t *testing.T) {
 	}
 
 	// Verify the created Task has PodOverrides forwarded from the TaskTemplate.
-	var taskList axonv1alpha1.TaskList
+	var taskList kelosv1alpha1.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -500,7 +500,7 @@ func TestRunCycleWithSource_Suspended(t *testing.T) {
 	}
 
 	// No tasks should be created when suspended
-	var taskList axonv1alpha1.TaskList
+	var taskList kelosv1alpha1.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -509,12 +509,12 @@ func TestRunCycleWithSource_Suspended(t *testing.T) {
 	}
 
 	// Status should be Suspended
-	var updatedTS axonv1alpha1.TaskSpawner
+	var updatedTS kelosv1alpha1.TaskSpawner
 	if err := cl.Get(context.Background(), key, &updatedTS); err != nil {
 		t.Fatalf("Getting TaskSpawner: %v", err)
 	}
-	if updatedTS.Status.Phase != axonv1alpha1.TaskSpawnerPhaseSuspended {
-		t.Errorf("Expected phase %q, got %q", axonv1alpha1.TaskSpawnerPhaseSuspended, updatedTS.Status.Phase)
+	if updatedTS.Status.Phase != kelosv1alpha1.TaskSpawnerPhaseSuspended {
+		t.Errorf("Expected phase %q, got %q", kelosv1alpha1.TaskSpawnerPhaseSuspended, updatedTS.Status.Phase)
 	}
 	if updatedTS.Status.Message != "Suspended by user" {
 		t.Errorf("Expected message %q, got %q", "Suspended by user", updatedTS.Status.Message)
@@ -538,7 +538,7 @@ func TestRunCycleWithSource_SuspendFalseRunsNormally(t *testing.T) {
 	}
 
 	// Tasks should be created normally when suspend=false
-	var taskList axonv1alpha1.TaskList
+	var taskList kelosv1alpha1.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -551,7 +551,7 @@ func TestRunCycleWithSource_SuspendedIdempotent(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 	ts.Spec.Suspend = boolPtr(true)
 	// Pre-set the status to Suspended to test idempotency
-	ts.Status.Phase = axonv1alpha1.TaskSpawnerPhaseSuspended
+	ts.Status.Phase = kelosv1alpha1.TaskSpawnerPhaseSuspended
 	ts.Status.Message = "Suspended by user"
 	cl, key := setupTest(t, ts)
 
@@ -570,7 +570,7 @@ func TestRunCycleWithSource_SuspendedIdempotent(t *testing.T) {
 	}
 
 	// Still no tasks created
-	var taskList axonv1alpha1.TaskList
+	var taskList kelosv1alpha1.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -598,7 +598,7 @@ func TestRunCycleWithSource_MaxTotalTasksLimitsCreation(t *testing.T) {
 	}
 
 	// Only 2 tasks should be created (maxTotalTasks=2)
-	var taskList axonv1alpha1.TaskList
+	var taskList kelosv1alpha1.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -607,7 +607,7 @@ func TestRunCycleWithSource_MaxTotalTasksLimitsCreation(t *testing.T) {
 	}
 
 	// Check TaskBudgetExhausted condition
-	var updatedTS axonv1alpha1.TaskSpawner
+	var updatedTS kelosv1alpha1.TaskSpawner
 	if err := cl.Get(context.Background(), key, &updatedTS); err != nil {
 		t.Fatalf("Getting TaskSpawner: %v", err)
 	}
@@ -627,9 +627,9 @@ func TestRunCycleWithSource_MaxTotalTasksWithExistingTasks(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 	ts.Spec.MaxTotalTasks = int32Ptr(3)
 	ts.Status.TotalTasksCreated = 2 // Already created 2 tasks before
-	existingTasks := []axonv1alpha1.Task{
-		newTask("spawner-existing1", "default", "spawner", axonv1alpha1.TaskPhaseSucceeded),
-		newTask("spawner-existing2", "default", "spawner", axonv1alpha1.TaskPhaseRunning),
+	existingTasks := []kelosv1alpha1.Task{
+		newTask("spawner-existing1", "default", "spawner", kelosv1alpha1.TaskPhaseSucceeded),
+		newTask("spawner-existing2", "default", "spawner", kelosv1alpha1.TaskPhaseRunning),
 	}
 	cl, key := setupTest(t, ts, existingTasks...)
 
@@ -648,7 +648,7 @@ func TestRunCycleWithSource_MaxTotalTasksWithExistingTasks(t *testing.T) {
 	}
 
 	// Only 1 new task should be created (totalCreated=2, max=3, budget left=1)
-	var taskList axonv1alpha1.TaskList
+	var taskList kelosv1alpha1.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -675,7 +675,7 @@ func TestRunCycleWithSource_MaxTotalTasksBudgetAlreadyExhausted(t *testing.T) {
 	}
 
 	// No new tasks should be created
-	var taskList axonv1alpha1.TaskList
+	var taskList kelosv1alpha1.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -701,7 +701,7 @@ func TestRunCycleWithSource_MaxTotalTasksZeroMeansNoLimit(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	var taskList axonv1alpha1.TaskList
+	var taskList kelosv1alpha1.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -729,7 +729,7 @@ func TestRunCycleWithSource_MaxTotalTasksAndMaxConcurrencyCombined(t *testing.T)
 	}
 
 	// maxTotalTasks=2 is more restrictive than maxConcurrency=10
-	var taskList axonv1alpha1.TaskList
+	var taskList kelosv1alpha1.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -753,7 +753,7 @@ func TestRunCycleWithSource_SuspendedConditionSet(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	var updatedTS axonv1alpha1.TaskSpawner
+	var updatedTS kelosv1alpha1.TaskSpawner
 	if err := cl.Get(context.Background(), key, &updatedTS); err != nil {
 		t.Fatalf("Getting TaskSpawner: %v", err)
 	}
@@ -772,7 +772,7 @@ func TestRunCycleWithSource_SuspendedConditionSet(t *testing.T) {
 
 func TestRunCycleWithSource_BranchTemplateRendered(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
-	ts.Spec.TaskTemplate.Branch = "axon-task-{{.Number}}"
+	ts.Spec.TaskTemplate.Branch = "kelos-task-{{.Number}}"
 	cl, key := setupTest(t, ts)
 
 	src := &fakeSource{
@@ -786,7 +786,7 @@ func TestRunCycleWithSource_BranchTemplateRendered(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	var taskList axonv1alpha1.TaskList
+	var taskList kelosv1alpha1.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -798,11 +798,11 @@ func TestRunCycleWithSource_BranchTemplateRendered(t *testing.T) {
 	for _, task := range taskList.Items {
 		branches[task.Name] = task.Spec.Branch
 	}
-	if branches["spawner-42"] != "axon-task-42" {
-		t.Errorf("Expected branch %q for spawner-42, got %q", "axon-task-42", branches["spawner-42"])
+	if branches["spawner-42"] != "kelos-task-42" {
+		t.Errorf("Expected branch %q for spawner-42, got %q", "kelos-task-42", branches["spawner-42"])
 	}
-	if branches["spawner-99"] != "axon-task-99" {
-		t.Errorf("Expected branch %q for spawner-99, got %q", "axon-task-99", branches["spawner-99"])
+	if branches["spawner-99"] != "kelos-task-99" {
+		t.Errorf("Expected branch %q for spawner-99, got %q", "kelos-task-99", branches["spawner-99"])
 	}
 }
 
@@ -821,7 +821,7 @@ func TestRunCycleWithSource_BranchStaticPassedThrough(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	var taskList axonv1alpha1.TaskList
+	var taskList kelosv1alpha1.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -848,7 +848,7 @@ func TestRunCycleWithSource_NotSuspendedConditionCleared(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	var updatedTS axonv1alpha1.TaskSpawner
+	var updatedTS kelosv1alpha1.TaskSpawner
 	if err := cl.Get(context.Background(), key, &updatedTS); err != nil {
 		t.Fatalf("Getting TaskSpawner: %v", err)
 	}
@@ -883,7 +883,7 @@ func TestRunCycleWithSource_PriorityLabelsOrderCreation(t *testing.T) {
 	}
 
 	// With maxConcurrency=2, only 2 tasks should be created
-	var taskList axonv1alpha1.TaskList
+	var taskList kelosv1alpha1.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -924,7 +924,7 @@ func TestRunCycleWithSource_PriorityLabelsNotConfigured(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	var taskList axonv1alpha1.TaskList
+	var taskList kelosv1alpha1.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -974,9 +974,9 @@ func TestBuildSource_PriorityLabelsPassedToSource(t *testing.T) {
 
 func TestRunCycleWithSource_CommentFieldsPassedToSource(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
-	ts.Spec.When.GitHubIssues = &axonv1alpha1.GitHubIssues{
-		TriggerComment:  "/axon pick-up",
-		ExcludeComments: []string{"/axon needs-input"},
+	ts.Spec.When.GitHubIssues = &kelosv1alpha1.GitHubIssues{
+		TriggerComment:  "/kelos pick-up",
+		ExcludeComments: []string{"/kelos needs-input"},
 	}
 
 	src, err := buildSource(ts, "owner", "repo", "", "", "", "", "")
@@ -988,10 +988,10 @@ func TestRunCycleWithSource_CommentFieldsPassedToSource(t *testing.T) {
 	if !ok {
 		t.Fatalf("Expected *source.GitHubSource, got %T", src)
 	}
-	if ghSrc.TriggerComment != "/axon pick-up" {
-		t.Errorf("TriggerComment = %q, want %q", ghSrc.TriggerComment, "/axon pick-up")
+	if ghSrc.TriggerComment != "/kelos pick-up" {
+		t.Errorf("TriggerComment = %q, want %q", ghSrc.TriggerComment, "/kelos pick-up")
 	}
-	if len(ghSrc.ExcludeComments) != 1 || ghSrc.ExcludeComments[0] != "/axon needs-input" {
-		t.Errorf("ExcludeComments = %v, want %v", ghSrc.ExcludeComments, []string{"/axon needs-input"})
+	if len(ghSrc.ExcludeComments) != 1 || ghSrc.ExcludeComments[0] != "/kelos needs-input" {
+		t.Errorf("ExcludeComments = %v, want %v", ghSrc.ExcludeComments, []string{"/kelos needs-input"})
 	}
 }

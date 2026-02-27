@@ -1,4 +1,4 @@
-module github.com/axon-core/axon
+module github.com/kelos-dev/kelos
 
 go 1.25.0
 

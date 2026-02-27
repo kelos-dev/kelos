@@ -1,4 +1,4 @@
-apiVersion: axon.io/v1alpha1
+apiVersion: kelos.dev/v1alpha1
 kind: Task
 metadata:
   name: simple-task

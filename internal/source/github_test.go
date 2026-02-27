@@ -396,7 +396,7 @@ func TestDiscoverComments(t *testing.T) {
 func TestDiscoverExcludeLabels(t *testing.T) {
 	issues := []githubIssue{
 		{Number: 1, Title: "Bug 1", Body: "Body 1", HTMLURL: "https://github.com/o/r/issues/1", Labels: []githubLabel{{Name: "bug"}}},
-		{Number: 2, Title: "Needs input", Body: "Body 2", HTMLURL: "https://github.com/o/r/issues/2", Labels: []githubLabel{{Name: "bug"}, {Name: "axon/needs-input"}}},
+		{Number: 2, Title: "Needs input", Body: "Body 2", HTMLURL: "https://github.com/o/r/issues/2", Labels: []githubLabel{{Name: "bug"}, {Name: "kelos/needs-input"}}},
 		{Number: 3, Title: "Feature", Body: "Body 3", HTMLURL: "https://github.com/o/r/issues/3", Labels: []githubLabel{{Name: "enhancement"}}},
 	}
 
@@ -413,7 +413,7 @@ func TestDiscoverExcludeLabels(t *testing.T) {
 	s := &GitHubSource{
 		Owner:         "owner",
 		Repo:          "repo",
-		ExcludeLabels: []string{"axon/needs-input"},
+		ExcludeLabels: []string{"kelos/needs-input"},
 		BaseURL:       server.URL,
 	}
 
@@ -452,7 +452,7 @@ func TestDiscoverExcludeLabelsNoMatch(t *testing.T) {
 	s := &GitHubSource{
 		Owner:         "owner",
 		Repo:          "repo",
-		ExcludeLabels: []string{"axon/needs-input"},
+		ExcludeLabels: []string{"kelos/needs-input"},
 		BaseURL:       server.URL,
 	}
 
@@ -640,7 +640,7 @@ func TestDiscoverTriggerComment(t *testing.T) {
 		case r.URL.Path == "/repos/owner/repo/issues":
 			json.NewEncoder(w).Encode(issues)
 		case r.URL.Path == "/repos/owner/repo/issues/1/comments":
-			json.NewEncoder(w).Encode([]githubComment{{Body: "/axon pick-up"}})
+			json.NewEncoder(w).Encode([]githubComment{{Body: "/kelos pick-up"}})
 		case r.URL.Path == "/repos/owner/repo/issues/2/comments":
 			json.NewEncoder(w).Encode([]githubComment{{Body: "Just a regular comment"}})
 		}
@@ -651,7 +651,7 @@ func TestDiscoverTriggerComment(t *testing.T) {
 		Owner:          "owner",
 		Repo:           "repo",
 		BaseURL:        server.URL,
-		TriggerComment: "/axon pick-up",
+		TriggerComment: "/kelos pick-up",
 	}
 
 	items, err := s.Discover(context.Background())
@@ -680,7 +680,7 @@ func TestDiscoverExcludeComment(t *testing.T) {
 		case r.URL.Path == "/repos/owner/repo/issues/1/comments":
 			json.NewEncoder(w).Encode([]githubComment{{Body: "Normal comment"}})
 		case r.URL.Path == "/repos/owner/repo/issues/2/comments":
-			json.NewEncoder(w).Encode([]githubComment{{Body: "/axon needs-input"}})
+			json.NewEncoder(w).Encode([]githubComment{{Body: "/kelos needs-input"}})
 		}
 	}))
 	defer server.Close()
@@ -689,7 +689,7 @@ func TestDiscoverExcludeComment(t *testing.T) {
 		Owner:           "owner",
 		Repo:            "repo",
 		BaseURL:         server.URL,
-		ExcludeComments: []string{"/axon needs-input"},
+		ExcludeComments: []string{"/kelos needs-input"},
 	}
 
 	items, err := s.Discover(context.Background())
@@ -719,9 +719,9 @@ func TestDiscoverMultipleExcludeComments(t *testing.T) {
 		case r.URL.Path == "/repos/owner/repo/issues/1/comments":
 			json.NewEncoder(w).Encode([]githubComment{{Body: "Normal comment"}})
 		case r.URL.Path == "/repos/owner/repo/issues/2/comments":
-			json.NewEncoder(w).Encode([]githubComment{{Body: "/axon needs-input"}})
+			json.NewEncoder(w).Encode([]githubComment{{Body: "/kelos needs-input"}})
 		case r.URL.Path == "/repos/owner/repo/issues/3/comments":
-			json.NewEncoder(w).Encode([]githubComment{{Body: "/axon pause"}})
+			json.NewEncoder(w).Encode([]githubComment{{Body: "/kelos pause"}})
 		}
 	}))
 	defer server.Close()
@@ -730,7 +730,7 @@ func TestDiscoverMultipleExcludeComments(t *testing.T) {
 		Owner:           "owner",
 		Repo:            "repo",
 		BaseURL:         server.URL,
-		ExcludeComments: []string{"/axon needs-input", "/axon pause"},
+		ExcludeComments: []string{"/kelos needs-input", "/kelos pause"},
 	}
 
 	items, err := s.Discover(context.Background())
@@ -759,15 +759,15 @@ func TestDiscoverTriggerAsResume(t *testing.T) {
 		case r.URL.Path == "/repos/owner/repo/issues/1/comments":
 			// Trigger, then exclude, then trigger again — trigger is most recent, so issue should be included
 			json.NewEncoder(w).Encode([]githubComment{
-				{Body: "/axon pick-up"},
-				{Body: "/axon needs-input"},
-				{Body: "/axon pick-up"},
+				{Body: "/kelos pick-up"},
+				{Body: "/kelos needs-input"},
+				{Body: "/kelos pick-up"},
 			})
 		case r.URL.Path == "/repos/owner/repo/issues/2/comments":
 			// Trigger then exclude — exclude is most recent, so issue should be excluded
 			json.NewEncoder(w).Encode([]githubComment{
-				{Body: "/axon pick-up"},
-				{Body: "/axon needs-input"},
+				{Body: "/kelos pick-up"},
+				{Body: "/kelos needs-input"},
 			})
 		}
 	}))
@@ -777,8 +777,8 @@ func TestDiscoverTriggerAsResume(t *testing.T) {
 		Owner:           "owner",
 		Repo:            "repo",
 		BaseURL:         server.URL,
-		TriggerComment:  "/axon pick-up",
-		ExcludeComments: []string{"/axon needs-input"},
+		TriggerComment:  "/kelos pick-up",
+		ExcludeComments: []string{"/kelos needs-input"},
 	}
 
 	items, err := s.Discover(context.Background())
@@ -806,11 +806,11 @@ func TestDiscoverTriggerAndExcludeComment(t *testing.T) {
 		case r.URL.Path == "/repos/owner/repo/issues":
 			json.NewEncoder(w).Encode(issues)
 		case r.URL.Path == "/repos/owner/repo/issues/1/comments":
-			json.NewEncoder(w).Encode([]githubComment{{Body: "/axon pick-up"}})
+			json.NewEncoder(w).Encode([]githubComment{{Body: "/kelos pick-up"}})
 		case r.URL.Path == "/repos/owner/repo/issues/2/comments":
 			json.NewEncoder(w).Encode([]githubComment{
-				{Body: "/axon pick-up"},
-				{Body: "/axon needs-input"},
+				{Body: "/kelos pick-up"},
+				{Body: "/kelos needs-input"},
 			})
 		case r.URL.Path == "/repos/owner/repo/issues/3/comments":
 			json.NewEncoder(w).Encode([]githubComment{{Body: "Just a comment"}})
@@ -822,8 +822,8 @@ func TestDiscoverTriggerAndExcludeComment(t *testing.T) {
 		Owner:           "owner",
 		Repo:            "repo",
 		BaseURL:         server.URL,
-		TriggerComment:  "/axon pick-up",
-		ExcludeComments: []string{"/axon needs-input"},
+		TriggerComment:  "/kelos pick-up",
+		ExcludeComments: []string{"/kelos needs-input"},
 	}
 
 	items, err := s.Discover(context.Background())
@@ -854,85 +854,85 @@ func TestPassesCommentFilter(t *testing.T) {
 		},
 		{
 			name:           "trigger present",
-			triggerComment: "/axon pick-up",
-			comments:       "/axon pick-up",
+			triggerComment: "/kelos pick-up",
+			comments:       "/kelos pick-up",
 			want:           true,
 		},
 		{
 			name:           "trigger absent",
-			triggerComment: "/axon pick-up",
+			triggerComment: "/kelos pick-up",
 			comments:       "no trigger here",
 			want:           false,
 		},
 		{
 			name:           "trigger empty comments",
-			triggerComment: "/axon pick-up",
+			triggerComment: "/kelos pick-up",
 			comments:       "",
 			want:           false,
 		},
 		{
 			name:            "exclude present",
-			excludeComments: []string{"/axon needs-input"},
-			comments:        "/axon needs-input",
+			excludeComments: []string{"/kelos needs-input"},
+			comments:        "/kelos needs-input",
 			want:            false,
 		},
 		{
 			name:            "exclude absent",
-			excludeComments: []string{"/axon needs-input"},
+			excludeComments: []string{"/kelos needs-input"},
 			comments:        "normal comment",
 			want:            true,
 		},
 		{
 			name:            "trigger as resume after exclude",
-			triggerComment:  "/axon pick-up",
-			excludeComments: []string{"/axon needs-input"},
-			comments:        "/axon pick-up\n---\n/axon needs-input\n---\n/axon pick-up",
+			triggerComment:  "/kelos pick-up",
+			excludeComments: []string{"/kelos needs-input"},
+			comments:        "/kelos pick-up\n---\n/kelos needs-input\n---\n/kelos pick-up",
 			want:            true,
 		},
 		{
 			name:            "exclude after trigger",
-			triggerComment:  "/axon pick-up",
-			excludeComments: []string{"/axon needs-input"},
-			comments:        "/axon pick-up\n---\n/axon needs-input",
+			triggerComment:  "/kelos pick-up",
+			excludeComments: []string{"/kelos needs-input"},
+			comments:        "/kelos pick-up\n---\n/kelos needs-input",
 			want:            false,
 		},
 		{
 			name:            "both set but neither found",
-			triggerComment:  "/axon pick-up",
-			excludeComments: []string{"/axon needs-input"},
+			triggerComment:  "/kelos pick-up",
+			excludeComments: []string{"/kelos needs-input"},
 			comments:        "normal comment",
 			want:            false,
 		},
 		{
 			name:            "command must be on its own line",
-			excludeComments: []string{"/axon needs-input"},
-			comments:        "please do /axon needs-input for me",
+			excludeComments: []string{"/kelos needs-input"},
+			comments:        "please do /kelos needs-input for me",
 			want:            true,
 		},
 		{
 			name:            "multiple exclude comments",
-			excludeComments: []string{"/axon needs-input", "/axon pause"},
-			comments:        "/axon pause",
+			excludeComments: []string{"/kelos needs-input", "/kelos pause"},
+			comments:        "/kelos pause",
 			want:            false,
 		},
 		{
 			name:            "multiple exclude comments none match",
-			excludeComments: []string{"/axon needs-input", "/axon pause"},
+			excludeComments: []string{"/kelos needs-input", "/kelos pause"},
 			comments:        "normal comment",
 			want:            true,
 		},
 		{
 			name:            "multiple exclude with trigger resume",
-			triggerComment:  "/axon pick-up",
-			excludeComments: []string{"/axon needs-input", "/axon pause"},
-			comments:        "/axon pick-up\n---\n/axon pause\n---\n/axon pick-up",
+			triggerComment:  "/kelos pick-up",
+			excludeComments: []string{"/kelos needs-input", "/kelos pause"},
+			comments:        "/kelos pick-up\n---\n/kelos pause\n---\n/kelos pick-up",
 			want:            true,
 		},
 		{
 			name:            "multiple exclude second matches most recent",
-			triggerComment:  "/axon pick-up",
-			excludeComments: []string{"/axon needs-input", "/axon pause"},
-			comments:        "/axon pick-up\n---\n/axon pause",
+			triggerComment:  "/kelos pick-up",
+			excludeComments: []string{"/kelos needs-input", "/kelos pause"},
+			comments:        "/kelos pick-up\n---\n/kelos pause",
 			want:            false,
 		},
 	}
@@ -958,12 +958,12 @@ func TestContainsCommand(t *testing.T) {
 		cmd  string
 		want bool
 	}{
-		{"exact match", "/axon pick-up", "/axon pick-up", true},
-		{"with whitespace", "  /axon pick-up  ", "/axon pick-up", true},
-		{"multiline match", "some text\n/axon pick-up\nmore text", "/axon pick-up", true},
-		{"no match", "some text without command", "/axon pick-up", false},
-		{"partial match in word", "do /axon pick-up now", "/axon pick-up", false},
-		{"empty body", "", "/axon pick-up", false},
+		{"exact match", "/kelos pick-up", "/kelos pick-up", true},
+		{"with whitespace", "  /kelos pick-up  ", "/kelos pick-up", true},
+		{"multiline match", "some text\n/kelos pick-up\nmore text", "/kelos pick-up", true},
+		{"no match", "some text without command", "/kelos pick-up", false},
+		{"partial match in word", "do /kelos pick-up now", "/kelos pick-up", false},
+		{"empty body", "", "/kelos pick-up", false},
 	}
 
 	for _, tt := range tests {

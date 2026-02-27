@@ -30,10 +30,10 @@ ENV PATH="/usr/local/go/bin:${PATH}"
 ARG CODEX_VERSION=0.103.0
 RUN npm install -g @openai/codex@${CODEX_VERSION}
 
-COPY codex/axon_entrypoint.sh /axon_entrypoint.sh
-RUN chmod +x /axon_entrypoint.sh
+COPY codex/kelos_entrypoint.sh /kelos_entrypoint.sh
+RUN chmod +x /kelos_entrypoint.sh
 
-COPY bin/axon-capture /axon/axon-capture
+COPY bin/kelos-capture /kelos/kelos-capture
 
 RUN useradd -u 61100 -m -s /bin/bash agent
 RUN mkdir -p /home/agent/.codex && chown -R agent:agent /home/agent

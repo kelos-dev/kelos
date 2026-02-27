@@ -1,7 +1,7 @@
-apiVersion: axon.io/v1alpha1
+apiVersion: kelos.dev/v1alpha1
 kind: TaskSpawner
 metadata:
-  name: axon-triage
+  name: kelos-triage
 spec:
   when:
     githubIssues:
@@ -11,21 +11,21 @@ spec:
       labels:
         - needs-actor
       excludeLabels:
-        - axon/needs-input
+        - kelos/needs-input
   maxConcurrency: 8
   taskTemplate:
     workspaceRef:
-      name: axon-agent
+      name: kelos-agent
     model: opus
     type: claude-code
     credentials:
       type: oauth
       secretRef:
-        name: axon-credentials
+        name: kelos-credentials
     agentConfigRef:
-      name: axon-dev-agent
+      name: kelos-dev-agent
     promptTemplate: |
-      You are a triage agent for the Axon project (github.com/axon-core/axon).
+      You are a triage agent for the Kelos project (github.com/kelos-dev/kelos).
       Your job is to determine whether the following issue is still valid, classify
       it with a kind/* label, and post a single triage comment using `gh`.
 
@@ -81,7 +81,7 @@ spec:
       Format the comment as:
 
       ```
-      ## Axon Triage Report
+      ## Kelos Triage Report
 
       **Kind**: <kind label applied>
 
@@ -95,9 +95,9 @@ spec:
       **Recommendation**: KEEP OPEN / CLOSE (with reason)
       ```
 
-      After posting the comment, add the `axon/needs-input` label so a maintainer
+      After posting the comment, add the `kelos/needs-input` label so a maintainer
       can review the triage and the issue is not re-processed:
-        `gh issue edit {{.Number}} --add-label axon/needs-input`
+        `gh issue edit {{.Number}} --add-label kelos/needs-input`
 
       Do NOT open PRs, push code, or modify any files. Read-only analysis only
       (except for the comment and labels above).

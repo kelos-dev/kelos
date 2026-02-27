@@ -64,7 +64,7 @@ func TestConfirmOverride_IncludesResourceName(t *testing.T) {
 	defer func() { stdinReader = old }()
 
 	// This just verifies the function runs without error with a resource name.
-	_, err := confirmOverride("secret/axon-credentials")
+	_, err := confirmOverride("secret/kelos-credentials")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

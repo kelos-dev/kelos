@@ -20,15 +20,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
-	"github.com/axon-core/axon/internal/source"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	"github.com/kelos-dev/kelos/internal/source"
 )
 
 var scheme = runtime.NewScheme()
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(axonv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(kelosv1alpha1.AddToScheme(scheme))
 }
 
 func main() {
@@ -88,7 +88,7 @@ func main() {
 		}
 
 		// Re-read the TaskSpawner to get the current poll interval
-		var ts axonv1alpha1.TaskSpawner
+		var ts kelosv1alpha1.TaskSpawner
 		if err := cl.Get(ctx, key, &ts); err != nil {
 			log.Error(err, "unable to fetch TaskSpawner for poll interval")
 			sleepOrDone(ctx, 5*time.Minute)
@@ -104,7 +104,7 @@ func main() {
 }
 
 func runCycle(ctx context.Context, cl client.Client, key types.NamespacedName, githubOwner, githubRepo, githubAPIBaseURL, githubTokenFile, jiraBaseURL, jiraProject, jiraJQL string) error {
-	var ts axonv1alpha1.TaskSpawner
+	var ts kelosv1alpha1.TaskSpawner
 	if err := cl.Get(ctx, key, &ts); err != nil {
 		return fmt.Errorf("fetching TaskSpawner: %w", err)
 	}
@@ -120,7 +120,7 @@ func runCycle(ctx context.Context, cl client.Client, key types.NamespacedName, g
 func runCycleWithSource(ctx context.Context, cl client.Client, key types.NamespacedName, src source.Source) error {
 	log := ctrl.Log.WithName("spawner")
 
-	var ts axonv1alpha1.TaskSpawner
+	var ts kelosv1alpha1.TaskSpawner
 	if err := cl.Get(ctx, key, &ts); err != nil {
 		return fmt.Errorf("fetching TaskSpawner: %w", err)
 	}
@@ -128,7 +128,7 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 	// Check if suspended
 	if ts.Spec.Suspend != nil && *ts.Spec.Suspend {
 		log.Info("TaskSpawner is suspended, skipping cycle")
-		if ts.Status.Phase != axonv1alpha1.TaskSpawnerPhaseSuspended {
+		if ts.Status.Phase != kelosv1alpha1.TaskSpawnerPhaseSuspended {
 			// Re-fetch to get the latest resource version before status update
 			if err := cl.Get(ctx, key, &ts); err != nil {
 				return fmt.Errorf("re-fetching TaskSpawner for suspend status: %w", err)
@@ -137,10 +137,10 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 			if ts.Spec.Suspend == nil || !*ts.Spec.Suspend {
 				return nil
 			}
-			if ts.Status.Phase == axonv1alpha1.TaskSpawnerPhaseSuspended {
+			if ts.Status.Phase == kelosv1alpha1.TaskSpawnerPhaseSuspended {
 				return nil
 			}
-			ts.Status.Phase = axonv1alpha1.TaskSpawnerPhaseSuspended
+			ts.Status.Phase = kelosv1alpha1.TaskSpawnerPhaseSuspended
 			ts.Status.Message = "Suspended by user"
 			meta.SetStatusCondition(&ts.Status.Conditions, metav1.Condition{
 				Type:               "Suspended",
@@ -165,10 +165,10 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 
 	// Build set of already-created Tasks by listing them from the API.
 	// This is resilient to spawner restarts (status may lag behind actual Tasks).
-	var existingTaskList axonv1alpha1.TaskList
+	var existingTaskList kelosv1alpha1.TaskList
 	if err := cl.List(ctx, &existingTaskList,
 		client.InNamespace(ts.Namespace),
-		client.MatchingLabels{"axon.io/taskspawner": ts.Name},
+		client.MatchingLabels{"kelos.dev/taskspawner": ts.Name},
 	); err != nil {
 		return fmt.Errorf("listing existing Tasks: %w", err)
 	}
@@ -177,7 +177,7 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 	activeTasks := 0
 	for _, t := range existingTaskList.Items {
 		existingTasks[t.Name] = true
-		if t.Status.Phase != axonv1alpha1.TaskPhaseSucceeded && t.Status.Phase != axonv1alpha1.TaskPhaseFailed {
+		if t.Status.Phase != kelosv1alpha1.TaskPhaseSucceeded && t.Status.Phase != kelosv1alpha1.TaskPhaseFailed {
 			activeTasks++
 		}
 	}
@@ -227,15 +227,15 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 			continue
 		}
 
-		task := &axonv1alpha1.Task{
+		task := &kelosv1alpha1.Task{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      taskName,
 				Namespace: ts.Namespace,
 				Labels: map[string]string{
-					"axon.io/taskspawner": ts.Name,
+					"kelos.dev/taskspawner": ts.Name,
 				},
 			},
-			Spec: axonv1alpha1.TaskSpec{
+			Spec: kelosv1alpha1.TaskSpec{
 				Type:                    ts.Spec.TaskTemplate.Type,
 				Prompt:                  prompt,
 				Credentials:             ts.Spec.TaskTemplate.Credentials,
@@ -286,7 +286,7 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 	}
 
 	now := metav1.Now()
-	ts.Status.Phase = axonv1alpha1.TaskSpawnerPhaseRunning
+	ts.Status.Phase = kelosv1alpha1.TaskSpawnerPhaseRunning
 	ts.Status.LastDiscoveryTime = &now
 	ts.Status.TotalDiscovered = len(items)
 	ts.Status.TotalTasksCreated += newTasksCreated
@@ -328,7 +328,7 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 	return nil
 }
 
-func buildSource(ts *axonv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFile, jiraBaseURL, jiraProject, jiraJQL string) (source.Source, error) {
+func buildSource(ts *kelosv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFile, jiraBaseURL, jiraProject, jiraJQL string) (source.Source, error) {
 	if ts.Spec.When.GitHubIssues != nil {
 		gh := ts.Spec.When.GitHubIssues
 

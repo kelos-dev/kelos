@@ -1,12 +1,12 @@
-<h1 align="center">Axon</h1>
+<h1 align="center">Kelos</h1>
 
 <p align="center"><strong>The Kubernetes-native framework for orchestrating autonomous AI coding agents.</strong></p>
 
 <p align="center">
-  <a href="https://github.com/axon-core/axon/actions/workflows/ci.yaml"><img src="https://github.com/axon-core/axon/actions/workflows/ci.yaml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/axon-core/axon/releases/latest"><img src="https://img.shields.io/github/v/release/axon-core/axon" alt="Release"></a>
-  <a href="https://github.com/axon-core/axon"><img src="https://img.shields.io/github/stars/axon-core/axon?style=flat" alt="GitHub Stars"></a>
-  <a href="https://github.com/axon-core/axon"><img src="https://img.shields.io/github/go-mod/go-version/axon-core/axon" alt="Go Version"></a>
+  <a href="https://github.com/kelos-dev/kelos/actions/workflows/ci.yaml"><img src="https://github.com/kelos-dev/kelos/actions/workflows/ci.yaml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/kelos-dev/kelos/releases/latest"><img src="https://img.shields.io/github/v/release/kelos-dev/kelos" alt="Release"></a>
+  <a href="https://github.com/kelos-dev/kelos"><img src="https://img.shields.io/github/stars/kelos-dev/kelos?style=flat" alt="GitHub Stars"></a>
+  <a href="https://github.com/kelos-dev/kelos"><img src="https://img.shields.io/github/go-mod/go-version/kelos-dev/kelos" alt="Go Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License"></a>
 </p>
 
@@ -17,7 +17,7 @@
   <a href="examples/">YAML Manifests</a>
 </p>
 
-Point Axon at a GitHub issue and get a PR back — fully autonomous, running in Kubernetes. Each agent runs in an isolated, ephemeral Pod with a freshly cloned git workspace. Fan out across repositories, chain tasks into pipelines, and react to events automatically.
+Point Kelos at a GitHub issue and get a PR back — fully autonomous, running in Kubernetes. Each agent runs in an isolated, ephemeral Pod with a freshly cloned git workspace. Fan out across repositories, chain tasks into pipelines, and react to events automatically.
 
 Supports **Claude Code**, **OpenAI Codex**, **Google Gemini**, **OpenCode**, and [custom agent images](docs/agent-image-interface.md).
 
@@ -25,31 +25,31 @@ Supports **Claude Code**, **OpenAI Codex**, **Google Gemini**, **OpenCode**, and
 
 ```bash
 # Run multiple tasks in parallel across your repo
-$ axon run -p "Fix the bug described in issue #42 and open a PR" --name fix-42
-$ axon run -p "Add unit tests for the auth module" --name add-tests
-$ axon run -p "Update API docs for v2 endpoints" --name update-docs
+$ kelos run -p "Fix the bug described in issue #42 and open a PR" --name fix-42
+$ kelos run -p "Add unit tests for the auth module" --name add-tests
+$ kelos run -p "Update API docs for v2 endpoints" --name update-docs
 
 # Watch all tasks progress simultaneously
-$ axon get tasks
+$ kelos get tasks
 NAME          TYPE          PHASE     BRANCH                WORKSPACE   AGENT CONFIG   DURATION   AGE
-fix-42        claude-code   Running   axon-task-fix-42      my-repo     my-config      2m         2m
-add-tests     claude-code   Running   axon-task-add-tests   my-repo     my-config      1m         1m
-update-docs   claude-code   Running   axon-task-update-docs my-repo     my-config      45s        45s
+fix-42        claude-code   Running   kelos-task-fix-42      my-repo     my-config      2m         2m
+add-tests     claude-code   Running   kelos-task-add-tests   my-repo     my-config      1m         1m
+update-docs   claude-code   Running   kelos-task-update-docs my-repo     my-config      45s        45s
 ```
 
 https://github.com/user-attachments/assets/0ea57071-15d8-4b3b-a546-d00429b76f8d
 
 See [Autonomous self-development pipeline](#autonomous-self-development-pipeline) for a full end-to-end example.
 
-## Why Axon?
+## Why Kelos?
 
-AI coding agents are evolving from interactive CLI tools into autonomous background workers. Axon provides the infrastructure to manage this transition at scale.
+AI coding agents are evolving from interactive CLI tools into autonomous background workers. Kelos provides the infrastructure to manage this transition at scale.
 
 - **Orchestration, not just execution** — Don't just run an agent; manage its entire lifecycle. Chain tasks with `dependsOn` and pass results (branch names, PR URLs, token usage) between pipeline stages. Use `TaskSpawner` to build event-driven workers that react to GitHub issues, PRs, or schedules.
 - **Host-isolated autonomy** — Each task runs in an isolated, ephemeral Pod with a freshly cloned git workspace. Agents have no access to your host machine — use [scoped tokens and branch protection](#security-considerations) to control repository access.
-- **Standardized interface** — Plug in any agent (Claude, Codex, Gemini, OpenCode, or your own) using a simple [container interface](docs/agent-image-interface.md). Axon handles credential injection, workspace management, and Kubernetes plumbing.
+- **Standardized interface** — Plug in any agent (Claude, Codex, Gemini, OpenCode, or your own) using a simple [container interface](docs/agent-image-interface.md). Kelos handles credential injection, workspace management, and Kubernetes plumbing.
 - **Scalable parallelism** — Fan out agents across multiple repositories. Kubernetes handles scheduling, resource management, and queueing — scale is limited by your cluster capacity and API provider quotas.
-- **Observable & CI-native** — Every agent run is a first-class Kubernetes resource with deterministic outputs (branch names, PR URLs, commit SHAs, token usage) captured into status. Monitor via `kubectl`, manage via the `axon` CLI or declarative YAML (GitOps-ready), and integrate with ArgoCD or GitHub Actions.
+- **Observable & CI-native** — Every agent run is a first-class Kubernetes resource with deterministic outputs (branch names, PR URLs, commit SHAs, token usage) captured into status. Monitor via `kubectl`, manage via the `kelos` CLI or declarative YAML (GitOps-ready), and integrate with ArgoCD or GitHub Actions.
 
 ## Quick Start
 
@@ -75,40 +75,40 @@ This creates a single-node cluster and configures your kubeconfig automatically.
 ### 1. Install the CLI
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/axon-core/axon/main/hack/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/kelos-dev/kelos/main/hack/install.sh | bash
 ```
 
 <details>
 <summary>Alternative: install from source</summary>
 
 ```bash
-go install github.com/axon-core/axon/cmd/axon@latest
+go install github.com/kelos-dev/kelos/cmd/kelos@latest
 ```
 
 </details>
 
-### 2. Install Axon
+### 2. Install Kelos
 
 ```bash
-axon install
+kelos install
 ```
 
-This installs the Axon controller and CRDs into the `axon-system` namespace.
+This installs the Kelos controller and CRDs into the `kelos-system` namespace.
 
 Verify the installation:
 
 ```bash
-kubectl get pods -n axon-system
-kubectl get crds | grep axon.io
+kubectl get pods -n kelos-system
+kubectl get crds | grep kelos.dev
 ```
 
 ### 3. Initialize Your Config
 
 ```bash
-axon init
+kelos init
 ```
 
-Edit `~/.axon/config.yaml`:
+Edit `~/.kelos/config.yaml`:
 
 ```yaml
 oauthToken: <your-oauth-token>
@@ -145,10 +145,10 @@ Create a [Personal Access Token](https://github.com/settings/tokens) with `repo`
 ### 4. Run Your First Task
 
 ```bash
-$ axon run -p "Add a hello world program in Python"
+$ kelos run -p "Add a hello world program in Python"
 task/task-r8x2q created
 
-$ axon logs task-r8x2q -f
+$ kelos logs task-r8x2q -f
 ```
 
 The task name (e.g. `task-r8x2q`) is auto-generated. Use `--name` to set a custom name, or `-w` to automatically watch task logs.
@@ -156,7 +156,7 @@ The task name (e.g. `task-r8x2q`) is auto-generated. Use `--name` to set a custo
 The agent clones your repo, makes changes, and can push a branch or open a PR.
 
 > **Tip:** If something goes wrong, check the controller logs with
-> `kubectl logs deployment/axon-controller-manager -n axon-system`.
+> `kubectl logs deployment/kelos-controller-manager -n kelos-system`.
 
 <details>
 <summary>Using kubectl and YAML instead of the CLI</summary>
@@ -164,7 +164,7 @@ The agent clones your repo, makes changes, and can push a branch or open a PR.
 Create a `Workspace` resource to define a git repository:
 
 ```yaml
-apiVersion: axon.io/v1alpha1
+apiVersion: kelos.dev/v1alpha1
 kind: Workspace
 metadata:
   name: my-workspace
@@ -176,7 +176,7 @@ spec:
 Then reference it from a `Task`:
 
 ```yaml
-apiVersion: axon.io/v1alpha1
+apiVersion: kelos.dev/v1alpha1
 kind: Task
 metadata:
   name: hello-world
@@ -202,19 +202,19 @@ kubectl get tasks -w
 <details>
 <summary>Using an API key instead of OAuth</summary>
 
-Set `apiKey` instead of `oauthToken` in `~/.axon/config.yaml`:
+Set `apiKey` instead of `oauthToken` in `~/.kelos/config.yaml`:
 
 ```yaml
 apiKey: <your-api-key>
 ```
 
-Or pass `--secret` to `axon run` with a pre-created secret (api-key is the default credential type), or set `spec.credentials.type: api-key` in YAML.
+Or pass `--secret` to `kelos run` with a pre-created secret (api-key is the default credential type), or set `spec.credentials.type: api-key` in YAML.
 
 </details>
 
 ## How It Works
 
-Axon orchestrates the flow from external events to autonomous execution:
+Kelos orchestrates the flow from external events to autonomous execution:
 
 ```
   Triggers (GitHub, Cron) ──┐
@@ -224,11 +224,11 @@ Axon orchestrates the flow from external events to autonomous execution:
   API (CI/CD, Webhooks) ────┘          └─(Lifecycle)──┴─(Execution)─┴─(Success/Fail)
 ```
 
-You define what needs to be done, and Axon handles the "how" — from cloning the right repo and injecting credentials to running the agent and capturing its outputs (branch names, commit SHAs, PR URLs, and token usage).
+You define what needs to be done, and Kelos handles the "how" — from cloning the right repo and injecting credentials to running the agent and capturing its outputs (branch names, commit SHAs, PR URLs, and token usage).
 
 ### Core Primitives
 
-Axon is built on four resources:
+Kelos is built on four resources:
 
 1. **Tasks** — Ephemeral units of work that wrap an AI agent run.
 2. **Workspaces** — Persistent or ephemeral environments (git repos) where agents operate.
@@ -265,7 +265,7 @@ workspace:
 ```
 
 ```bash
-axon run -p "Fix the bug described in issue #42 and open a PR with the fix"
+kelos run -p "Fix the bug described in issue #42 and open a PR with the fix"
 ```
 
 The `gh` CLI and `GITHUB_TOKEN` are available inside the agent container, so the agent can push branches and create PRs autonomously.
@@ -275,7 +275,7 @@ The `gh` CLI and `GITHUB_TOKEN` are available inside the agent container, so the
 Create a TaskSpawner to automatically turn GitHub issues into agent tasks:
 
 ```yaml
-apiVersion: axon.io/v1alpha1
+apiVersion: kelos.dev/v1alpha1
 kind: TaskSpawner
 metadata:
   name: fix-bugs
@@ -307,8 +307,8 @@ TaskSpawner polls for new issues matching your filters and creates a Task for ea
 Use `dependsOn` to chain tasks into pipelines. A task in `Waiting` phase stays paused until all its dependencies succeed:
 
 ```bash
-axon run -p "Scaffold a new user service" --name scaffold --branch feature/user-service
-axon run -p "Write tests for the user service" --depends-on scaffold --branch feature/user-service
+kelos run -p "Scaffold a new user service" --name scaffold --branch feature/user-service
+kelos run -p "Write tests for the user service" --depends-on scaffold --branch feature/user-service
 ```
 
 Tasks sharing the same `branch` are serialized automatically — only one runs at a time.
@@ -317,7 +317,7 @@ Tasks sharing the same `branch` are serialized automatically — only one runs a
 <summary>YAML equivalent</summary>
 
 ```yaml
-apiVersion: axon.io/v1alpha1
+apiVersion: kelos.dev/v1alpha1
 kind: Task
 metadata:
   name: scaffold
@@ -332,7 +332,7 @@ spec:
     name: my-workspace
   branch: feature/user-service
 ---
-apiVersion: axon.io/v1alpha1
+apiVersion: kelos.dev/v1alpha1
 kind: Task
 metadata:
   name: write-tests
@@ -354,7 +354,7 @@ spec:
 Downstream tasks can reference upstream results in their prompt using `{{.Deps}}`:
 
 ```yaml
-apiVersion: axon.io/v1alpha1
+apiVersion: kelos.dev/v1alpha1
 kind: Task
 metadata:
   name: open-pr
@@ -379,7 +379,7 @@ The `.Deps` map is keyed by dependency Task name. Each entry has `Results` (key-
 Use `AgentConfig` to bundle project-wide instructions, plugins, and MCP servers:
 
 ```yaml
-apiVersion: axon.io/v1alpha1
+apiVersion: kelos.dev/v1alpha1
 kind: AgentConfig
 metadata:
   name: my-config
@@ -396,7 +396,7 @@ spec:
 ```
 
 ```bash
-axon run -p "Fix the bug" --agent-config my-config
+kelos run -p "Fix the bug" --agent-config my-config
 ```
 
 - `agentsMD` is written to `~/.claude/CLAUDE.md` (user-level, additive with the repo's own instructions).
@@ -407,7 +407,7 @@ See the [full AgentConfig spec](docs/reference.md#agentconfig) for plugins, skil
 
 ### Autonomous self-development pipeline
 
-This is a real-world TaskSpawner that picks up every open issue, investigates it, opens (or updates) a PR, self-reviews, and ensures CI passes — fully autonomously. When the agent can't make progress, it labels the issue `axon/needs-input` and stops. Remove the label to re-queue it.
+This is a real-world TaskSpawner that picks up every open issue, investigates it, opens (or updates) a PR, self-reviews, and ensures CI passes — fully autonomously. When the agent can't make progress, it labels the issue `kelos/needs-input` and stops. Remove the label to re-queue it.
 
 ```
  ┌────────────────────────────────────────────────────────────────┐
@@ -429,9 +429,9 @@ This is a real-world TaskSpawner that picks up every open issue, investigates it
  └────────────────────────────────────────────────────────────────┘
 ```
 
-See [`self-development/axon-workers.yaml`](self-development/axon-workers.yaml) for the full manifest and the [`self-development/` README](self-development/README.md) for setup instructions.
+See [`self-development/kelos-workers.yaml`](self-development/kelos-workers.yaml) for the full manifest and the [`self-development/` README](self-development/README.md) for setup instructions.
 
-The key pattern is `excludeLabels: [axon/needs-input]` — this creates a feedback loop where the agent works autonomously until it needs human input, then pauses. Removing the label re-queues the issue on the next poll.
+The key pattern is `excludeLabels: [kelos/needs-input]` — this creates a feedback loop where the agent works autonomously until it needs human input, then pauses. Removing the label re-queues the issue on the next poll.
 
 > Browse all ready-to-apply YAML manifests in the [`examples/`](examples/) directory.
 
@@ -457,15 +457,15 @@ The key pattern is `excludeLabels: [axon/needs-input]` — this creates a feedba
 
 | Command | Description |
 |---------|-------------|
-| `axon install` | Install Axon CRDs and controller into the cluster |
-| `axon uninstall` | Uninstall Axon from the cluster |
-| `axon init` | Initialize `~/.axon/config.yaml` |
-| `axon run` | Create and run a new Task |
-| `axon get <resource> [name]` | List resources or view a specific resource (`tasks`, `taskspawners`, `workspaces`) |
-| `axon delete <resource> <name>` | Delete a resource |
-| `axon logs <task-name> [-f]` | View or stream logs from a task |
-| `axon suspend taskspawner <name>` | Pause a TaskSpawner |
-| `axon resume taskspawner <name>` | Resume a paused TaskSpawner |
+| `kelos install` | Install Kelos CRDs and controller into the cluster |
+| `kelos uninstall` | Uninstall Kelos from the cluster |
+| `kelos init` | Initialize `~/.kelos/config.yaml` |
+| `kelos run` | Create and run a new Task |
+| `kelos get <resource> [name]` | List resources or view a specific resource (`tasks`, `taskspawners`, `workspaces`) |
+| `kelos delete <resource> <name>` | Delete a resource |
+| `kelos logs <task-name> [-f]` | View or stream logs from a task |
+| `kelos suspend taskspawner <name>` | Pause a TaskSpawner |
+| `kelos resume taskspawner <name>` | Resume a paused TaskSpawner |
 
 See [full CLI reference](docs/reference.md#cli-reference) for all flags and options.
 
@@ -473,7 +473,7 @@ See [full CLI reference](docs/reference.md#cli-reference) for all flags and opti
 
 ## Security Considerations
 
-Axon runs agents in isolated, ephemeral Pods with no access to your host machine, SSH keys, or other processes. The risk surface is limited to what the injected credentials allow.
+Kelos runs agents in isolated, ephemeral Pods with no access to your host machine, SSH keys, or other processes. The risk surface is limited to what the injected credentials allow.
 
 **What agents CAN do:** Push branches, create PRs, and call the GitHub API using the injected `GITHUB_TOKEN`.
 
@@ -489,7 +489,7 @@ Best practices:
 
 > **About `--dangerously-skip-permissions`:** Claude Code uses this flag for non-interactive operation. Despite the name, the actual risk is minimal — agents run inside ephemeral containers with no host access. The flag simply disables interactive approval prompts, which is necessary for autonomous execution.
 
-Axon uses standard Kubernetes RBAC — use namespace isolation to separate teams. Each TaskSpawner automatically creates a scoped ServiceAccount and RoleBinding.
+Kelos uses standard Kubernetes RBAC — use namespace isolation to separate teams. Each TaskSpawner automatically creates a scoped ServiceAccount and RoleBinding.
 
 ## Cost and Limits
 
@@ -516,15 +516,15 @@ spec:
 Or via the CLI:
 
 ```bash
-axon run -p "Fix the bug" --timeout 30m
+kelos run -p "Fix the bug" --timeout 30m
 ```
 
 **Use `suspend` for emergencies.** If costs are spiraling, pause a spawner immediately:
 
 ```bash
-axon suspend taskspawner my-spawner
+kelos suspend taskspawner my-spawner
 # ... investigate ...
-axon resume taskspawner my-spawner
+kelos resume taskspawner my-spawner
 ```
 
 **Rate limits.** API providers enforce concurrency and token limits. If a task hits a rate limit mid-execution, it will likely fail. Use `maxConcurrency` to stay within your provider's limits.
@@ -532,16 +532,16 @@ axon resume taskspawner my-spawner
 ## FAQ
 
 <details>
-<summary><strong>What agents does Axon support?</strong></summary>
+<summary><strong>What agents does Kelos support?</strong></summary>
 
-Axon supports **Claude Code**, **OpenAI Codex**, **Google Gemini**, and **OpenCode** out of the box. You can also bring your own agent image using the [container interface](docs/agent-image-interface.md).
+Kelos supports **Claude Code**, **OpenAI Codex**, **Google Gemini**, and **OpenCode** out of the box. You can also bring your own agent image using the [container interface](docs/agent-image-interface.md).
 
 </details>
 
 <details>
-<summary><strong>Can I use Axon without Kubernetes?</strong></summary>
+<summary><strong>Can I use Kelos without Kubernetes?</strong></summary>
 
-No. Axon is built on Kubernetes Custom Resources and requires a Kubernetes cluster. For local development, use [kind](https://kind.sigs.k8s.io/) (`kind create cluster`) to create a single-node cluster on your machine.
+No. Kelos is built on Kubernetes Custom Resources and requires a Kubernetes cluster. For local development, use [kind](https://kind.sigs.k8s.io/) (`kind create cluster`) to create a single-node cluster on your machine.
 
 </details>
 
@@ -562,7 +562,7 @@ Costs depend on the model and task complexity. Check the [API pricing](https://d
 ## Uninstall
 
 ```bash
-axon uninstall
+kelos uninstall
 ```
 
 ## Development
@@ -587,7 +587,7 @@ make image              # build docker image
 
 For significant changes, please open an issue first to discuss the approach.
 
-We welcome contributions of all kinds — see [good first issues](https://github.com/axon-core/axon/labels/good%20first%20issue) for places to start.
+We welcome contributions of all kinds — see [good first issues](https://github.com/kelos-dev/kelos/labels/good%20first%20issue) for places to start.
 
 ## License
 

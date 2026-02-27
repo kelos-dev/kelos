@@ -8,17 +8,17 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 )
 
 func TestPrintWorkspaceTable(t *testing.T) {
-	workspaces := []axonv1alpha1.Workspace{
+	workspaces := []kelosv1alpha1.Workspace{
 		{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:              "ws-one",
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
 			},
-			Spec: axonv1alpha1.WorkspaceSpec{
+			Spec: kelosv1alpha1.WorkspaceSpec{
 				Repo: "https://github.com/org/repo.git",
 				Ref:  "main",
 			},
@@ -28,7 +28,7 @@ func TestPrintWorkspaceTable(t *testing.T) {
 				Name:              "ws-two",
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-24 * time.Hour)),
 			},
-			Spec: axonv1alpha1.WorkspaceSpec{
+			Spec: kelosv1alpha1.WorkspaceSpec{
 				Repo: "https://github.com/org/other.git",
 			},
 		},
@@ -59,14 +59,14 @@ func TestPrintWorkspaceTable(t *testing.T) {
 }
 
 func TestPrintWorkspaceTableAllNamespaces(t *testing.T) {
-	workspaces := []axonv1alpha1.Workspace{
+	workspaces := []kelosv1alpha1.Workspace{
 		{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:              "ws-one",
 				Namespace:         "ns-a",
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
 			},
-			Spec: axonv1alpha1.WorkspaceSpec{
+			Spec: kelosv1alpha1.WorkspaceSpec{
 				Repo: "https://github.com/org/repo.git",
 				Ref:  "main",
 			},
@@ -77,7 +77,7 @@ func TestPrintWorkspaceTableAllNamespaces(t *testing.T) {
 				Namespace:         "ns-b",
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-24 * time.Hour)),
 			},
-			Spec: axonv1alpha1.WorkspaceSpec{
+			Spec: kelosv1alpha1.WorkspaceSpec{
 				Repo: "https://github.com/org/other.git",
 			},
 		},
@@ -101,25 +101,25 @@ func TestPrintWorkspaceTableAllNamespaces(t *testing.T) {
 func TestPrintTaskTable(t *testing.T) {
 	now := time.Now()
 	startTime := metav1.NewTime(now.Add(-30 * time.Minute))
-	tasks := []axonv1alpha1.Task{
+	tasks := []kelosv1alpha1.Task{
 		{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:              "task-one",
 				CreationTimestamp: metav1.NewTime(now.Add(-1 * time.Hour)),
 			},
-			Spec: axonv1alpha1.TaskSpec{
+			Spec: kelosv1alpha1.TaskSpec{
 				Type:   "claude-code",
 				Model:  "claude-sonnet-4-20250514",
 				Branch: "feature/test",
-				WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 					Name: "my-ws",
 				},
-				AgentConfigRef: &axonv1alpha1.AgentConfigReference{
+				AgentConfigRef: &kelosv1alpha1.AgentConfigReference{
 					Name: "my-config",
 				},
 			},
-			Status: axonv1alpha1.TaskStatus{
-				Phase:     axonv1alpha1.TaskPhaseRunning,
+			Status: kelosv1alpha1.TaskStatus{
+				Phase:     kelosv1alpha1.TaskPhaseRunning,
 				StartTime: &startTime,
 			},
 		},
@@ -148,19 +148,19 @@ func TestPrintTaskTableAllNamespaces(t *testing.T) {
 	now := time.Now()
 	startTime := metav1.NewTime(now.Add(-90 * time.Minute))
 	completionTime := metav1.NewTime(now.Add(-60 * time.Minute))
-	tasks := []axonv1alpha1.Task{
+	tasks := []kelosv1alpha1.Task{
 		{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:              "task-one",
 				Namespace:         "ns-a",
 				CreationTimestamp: metav1.NewTime(now.Add(-1 * time.Hour)),
 			},
-			Spec: axonv1alpha1.TaskSpec{
+			Spec: kelosv1alpha1.TaskSpec{
 				Type:   "claude-code",
 				Branch: "feat/one",
 			},
-			Status: axonv1alpha1.TaskStatus{
-				Phase: axonv1alpha1.TaskPhaseRunning,
+			Status: kelosv1alpha1.TaskStatus{
+				Phase: kelosv1alpha1.TaskPhaseRunning,
 			},
 		},
 		{
@@ -169,11 +169,11 @@ func TestPrintTaskTableAllNamespaces(t *testing.T) {
 				Namespace:         "ns-b",
 				CreationTimestamp: metav1.NewTime(now.Add(-2 * time.Hour)),
 			},
-			Spec: axonv1alpha1.TaskSpec{
+			Spec: kelosv1alpha1.TaskSpec{
 				Type: "codex",
 			},
-			Status: axonv1alpha1.TaskStatus{
-				Phase:          axonv1alpha1.TaskPhaseSucceeded,
+			Status: kelosv1alpha1.TaskStatus{
+				Phase:          kelosv1alpha1.TaskPhaseSucceeded,
 				StartTime:      &startTime,
 				CompletionTime: &completionTime,
 			},
@@ -197,21 +197,21 @@ func TestPrintTaskTableAllNamespaces(t *testing.T) {
 }
 
 func TestPrintTaskSpawnerTable(t *testing.T) {
-	spawners := []axonv1alpha1.TaskSpawner{
+	spawners := []kelosv1alpha1.TaskSpawner{
 		{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:              "spawner-one",
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
 			},
-			Spec: axonv1alpha1.TaskSpawnerSpec{
-				When: axonv1alpha1.When{
-					Cron: &axonv1alpha1.Cron{
+			Spec: kelosv1alpha1.TaskSpawnerSpec{
+				When: kelosv1alpha1.When{
+					Cron: &kelosv1alpha1.Cron{
 						Schedule: "*/5 * * * *",
 					},
 				},
 			},
-			Status: axonv1alpha1.TaskSpawnerStatus{
-				Phase: axonv1alpha1.TaskSpawnerPhaseRunning,
+			Status: kelosv1alpha1.TaskSpawnerStatus{
+				Phase: kelosv1alpha1.TaskSpawnerPhaseRunning,
 			},
 		},
 	}
@@ -232,22 +232,22 @@ func TestPrintTaskSpawnerTable(t *testing.T) {
 }
 
 func TestPrintTaskSpawnerTableAllNamespaces(t *testing.T) {
-	spawners := []axonv1alpha1.TaskSpawner{
+	spawners := []kelosv1alpha1.TaskSpawner{
 		{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:              "spawner-one",
 				Namespace:         "ns-a",
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
 			},
-			Spec: axonv1alpha1.TaskSpawnerSpec{
-				When: axonv1alpha1.When{
-					Cron: &axonv1alpha1.Cron{
+			Spec: kelosv1alpha1.TaskSpawnerSpec{
+				When: kelosv1alpha1.When{
+					Cron: &kelosv1alpha1.Cron{
 						Schedule: "*/5 * * * *",
 					},
 				},
 			},
-			Status: axonv1alpha1.TaskSpawnerStatus{
-				Phase: axonv1alpha1.TaskSpawnerPhaseRunning,
+			Status: kelosv1alpha1.TaskSpawnerStatus{
+				Phase: kelosv1alpha1.TaskSpawnerPhaseRunning,
 			},
 		},
 		{
@@ -256,18 +256,18 @@ func TestPrintTaskSpawnerTableAllNamespaces(t *testing.T) {
 				Namespace:         "ns-b",
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-2 * time.Hour)),
 			},
-			Spec: axonv1alpha1.TaskSpawnerSpec{
-				When: axonv1alpha1.When{
-					GitHubIssues: &axonv1alpha1.GitHubIssues{},
+			Spec: kelosv1alpha1.TaskSpawnerSpec{
+				When: kelosv1alpha1.When{
+					GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 				},
-				TaskTemplate: axonv1alpha1.TaskTemplate{
-					WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+				TaskTemplate: kelosv1alpha1.TaskTemplate{
+					WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 						Name: "my-ws",
 					},
 				},
 			},
-			Status: axonv1alpha1.TaskSpawnerStatus{
-				Phase: axonv1alpha1.TaskSpawnerPhaseRunning,
+			Status: kelosv1alpha1.TaskSpawnerStatus{
+				Phase: kelosv1alpha1.TaskSpawnerPhaseRunning,
 			},
 		},
 	}
@@ -288,15 +288,15 @@ func TestPrintTaskSpawnerTableAllNamespaces(t *testing.T) {
 }
 
 func TestPrintWorkspaceDetail(t *testing.T) {
-	ws := &axonv1alpha1.Workspace{
+	ws := &kelosv1alpha1.Workspace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "my-workspace",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.WorkspaceSpec{
+		Spec: kelosv1alpha1.WorkspaceSpec{
 			Repo: "https://github.com/org/repo.git",
 			Ref:  "main",
-			SecretRef: &axonv1alpha1.SecretReference{
+			SecretRef: &kelosv1alpha1.SecretReference{
 				Name: "gh-token",
 			},
 		},
@@ -321,21 +321,21 @@ func TestPrintWorkspaceDetail(t *testing.T) {
 }
 
 func TestPrintTaskTableSingleItem(t *testing.T) {
-	task := axonv1alpha1.Task{
+	task := kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "my-task",
 			CreationTimestamp: metav1.NewTime(time.Now().Add(-30 * time.Minute)),
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type: "claude-code",
 		},
-		Status: axonv1alpha1.TaskStatus{
-			Phase: axonv1alpha1.TaskPhaseSucceeded,
+		Status: kelosv1alpha1.TaskStatus{
+			Phase: kelosv1alpha1.TaskPhaseSucceeded,
 		},
 	}
 
 	var buf bytes.Buffer
-	printTaskTable(&buf, []axonv1alpha1.Task{task}, false)
+	printTaskTable(&buf, []kelosv1alpha1.Task{task}, false)
 	output := buf.String()
 
 	if !strings.Contains(output, "NAME") {
@@ -347,7 +347,7 @@ func TestPrintTaskTableSingleItem(t *testing.T) {
 	if !strings.Contains(output, "claude-code") {
 		t.Errorf("expected type claude-code in output, got %q", output)
 	}
-	if !strings.Contains(output, string(axonv1alpha1.TaskPhaseSucceeded)) {
+	if !strings.Contains(output, string(kelosv1alpha1.TaskPhaseSucceeded)) {
 		t.Errorf("expected phase Succeeded in output, got %q", output)
 	}
 	if strings.Contains(output, "Prompt:") {
@@ -356,27 +356,27 @@ func TestPrintTaskTableSingleItem(t *testing.T) {
 }
 
 func TestPrintTaskSpawnerTableSingleItem(t *testing.T) {
-	spawner := axonv1alpha1.TaskSpawner{
+	spawner := kelosv1alpha1.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "my-spawner",
 			CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
 		},
-		Spec: axonv1alpha1.TaskSpawnerSpec{
-			When: axonv1alpha1.When{
-				Cron: &axonv1alpha1.Cron{
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				Cron: &kelosv1alpha1.Cron{
 					Schedule: "0 * * * *",
 				},
 			},
 		},
-		Status: axonv1alpha1.TaskSpawnerStatus{
-			Phase:             axonv1alpha1.TaskSpawnerPhaseRunning,
+		Status: kelosv1alpha1.TaskSpawnerStatus{
+			Phase:             kelosv1alpha1.TaskSpawnerPhaseRunning,
 			TotalDiscovered:   5,
 			TotalTasksCreated: 3,
 		},
 	}
 
 	var buf bytes.Buffer
-	printTaskSpawnerTable(&buf, []axonv1alpha1.TaskSpawner{spawner}, false)
+	printTaskSpawnerTable(&buf, []kelosv1alpha1.TaskSpawner{spawner}, false)
 	output := buf.String()
 
 	if !strings.Contains(output, "NAME") {
@@ -394,19 +394,19 @@ func TestPrintTaskSpawnerTableSingleItem(t *testing.T) {
 }
 
 func TestPrintWorkspaceTableSingleItem(t *testing.T) {
-	ws := axonv1alpha1.Workspace{
+	ws := kelosv1alpha1.Workspace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "my-workspace",
 			CreationTimestamp: metav1.NewTime(time.Now().Add(-2 * time.Hour)),
 		},
-		Spec: axonv1alpha1.WorkspaceSpec{
+		Spec: kelosv1alpha1.WorkspaceSpec{
 			Repo: "https://github.com/org/repo.git",
 			Ref:  "main",
 		},
 	}
 
 	var buf bytes.Buffer
-	printWorkspaceTable(&buf, []axonv1alpha1.Workspace{ws}, false)
+	printWorkspaceTable(&buf, []kelosv1alpha1.Workspace{ws}, false)
 	output := buf.String()
 
 	if !strings.Contains(output, "NAME") {
@@ -425,25 +425,25 @@ func TestPrintWorkspaceTableSingleItem(t *testing.T) {
 
 func TestPrintTaskSpawnerDetail(t *testing.T) {
 	lastDiscovery := metav1.NewTime(time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC))
-	spawner := &axonv1alpha1.TaskSpawner{
+	spawner := &kelosv1alpha1.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "my-spawner",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpawnerSpec{
-			When: axonv1alpha1.When{
-				Cron: &axonv1alpha1.Cron{
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				Cron: &kelosv1alpha1.Cron{
 					Schedule: "0 * * * *",
 				},
 			},
-			TaskTemplate: axonv1alpha1.TaskTemplate{
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
 				Type:  "claude-code",
 				Model: "claude-sonnet-4-20250514",
 			},
 			PollInterval: "5m",
 		},
-		Status: axonv1alpha1.TaskSpawnerStatus{
-			Phase:             axonv1alpha1.TaskSpawnerPhaseRunning,
+		Status: kelosv1alpha1.TaskSpawnerStatus{
+			Phase:             kelosv1alpha1.TaskSpawnerPhaseRunning,
 			DeploymentName:    "my-spawner-deploy",
 			TotalDiscovered:   10,
 			TotalTasksCreated: 7,
@@ -474,12 +474,12 @@ func TestPrintTaskSpawnerDetail(t *testing.T) {
 }
 
 func TestPrintWorkspaceDetailWithoutOptionalFields(t *testing.T) {
-	ws := &axonv1alpha1.Workspace{
+	ws := &kelosv1alpha1.Workspace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "minimal-ws",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.WorkspaceSpec{
+		Spec: kelosv1alpha1.WorkspaceSpec{
 			Repo: "https://github.com/org/repo.git",
 		},
 	}
@@ -506,17 +506,17 @@ func TestTaskDuration(t *testing.T) {
 
 	tests := []struct {
 		name   string
-		status axonv1alpha1.TaskStatus
+		status kelosv1alpha1.TaskStatus
 		want   string
 	}{
 		{
 			name:   "no start time",
-			status: axonv1alpha1.TaskStatus{},
+			status: kelosv1alpha1.TaskStatus{},
 			want:   "-",
 		},
 		{
 			name: "completed task",
-			status: axonv1alpha1.TaskStatus{
+			status: kelosv1alpha1.TaskStatus{
 				StartTime:      &startTime,
 				CompletionTime: &completionTime,
 			},
@@ -524,7 +524,7 @@ func TestTaskDuration(t *testing.T) {
 		},
 		{
 			name: "running task",
-			status: axonv1alpha1.TaskStatus{
+			status: kelosv1alpha1.TaskStatus{
 				StartTime: &startTime,
 			},
 			want: "30m",
@@ -548,35 +548,35 @@ func TestPrintTaskDetail(t *testing.T) {
 	ttl := int32(3600)
 	timeout := int64(7200)
 
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "full-task",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "Fix the bug",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "my-secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 			Model:     "claude-sonnet-4-20250514",
 			Image:     "custom-image:latest",
 			Branch:    "feature/fix",
 			DependsOn: []string{"task-a", "task-b"},
-			WorkspaceRef: &axonv1alpha1.WorkspaceReference{
+			WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 				Name: "my-ws",
 			},
-			AgentConfigRef: &axonv1alpha1.AgentConfigReference{
+			AgentConfigRef: &kelosv1alpha1.AgentConfigReference{
 				Name: "my-config",
 			},
 			TTLSecondsAfterFinished: &ttl,
-			PodOverrides: &axonv1alpha1.PodOverrides{
+			PodOverrides: &kelosv1alpha1.PodOverrides{
 				ActiveDeadlineSeconds: &timeout,
 			},
 		},
-		Status: axonv1alpha1.TaskStatus{
-			Phase:          axonv1alpha1.TaskPhaseSucceeded,
+		Status: kelosv1alpha1.TaskStatus{
+			Phase:          kelosv1alpha1.TaskPhaseSucceeded,
 			JobName:        "full-task-job",
 			PodName:        "full-task-pod",
 			StartTime:      &startTime,
@@ -619,18 +619,18 @@ func TestPrintTaskDetail(t *testing.T) {
 }
 
 func TestPrintAgentConfigTable(t *testing.T) {
-	configs := []axonv1alpha1.AgentConfig{
+	configs := []kelosv1alpha1.AgentConfig{
 		{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:              "config-one",
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
 			},
-			Spec: axonv1alpha1.AgentConfigSpec{
+			Spec: kelosv1alpha1.AgentConfigSpec{
 				AgentsMD: "some instructions",
-				Plugins: []axonv1alpha1.PluginSpec{
-					{Name: "axon"},
+				Plugins: []kelosv1alpha1.PluginSpec{
+					{Name: "kelos"},
 				},
-				MCPServers: []axonv1alpha1.MCPServerSpec{
+				MCPServers: []kelosv1alpha1.MCPServerSpec{
 					{Name: "github", Type: "http"},
 					{Name: "local", Type: "stdio"},
 				},
@@ -641,7 +641,7 @@ func TestPrintAgentConfigTable(t *testing.T) {
 				Name:              "config-two",
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-24 * time.Hour)),
 			},
-			Spec: axonv1alpha1.AgentConfigSpec{},
+			Spec: kelosv1alpha1.AgentConfigSpec{},
 		},
 	}
 
@@ -666,14 +666,14 @@ func TestPrintAgentConfigTable(t *testing.T) {
 }
 
 func TestPrintAgentConfigTableAllNamespaces(t *testing.T) {
-	configs := []axonv1alpha1.AgentConfig{
+	configs := []kelosv1alpha1.AgentConfig{
 		{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:              "config-one",
 				Namespace:         "ns-a",
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
 			},
-			Spec: axonv1alpha1.AgentConfigSpec{},
+			Spec: kelosv1alpha1.AgentConfigSpec{},
 		},
 		{
 			ObjectMeta: metav1.ObjectMeta{
@@ -681,7 +681,7 @@ func TestPrintAgentConfigTableAllNamespaces(t *testing.T) {
 				Namespace:         "ns-b",
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-24 * time.Hour)),
 			},
-			Spec: axonv1alpha1.AgentConfigSpec{},
+			Spec: kelosv1alpha1.AgentConfigSpec{},
 		},
 	}
 
@@ -701,20 +701,20 @@ func TestPrintAgentConfigTableAllNamespaces(t *testing.T) {
 }
 
 func TestPrintAgentConfigTableSingleItem(t *testing.T) {
-	ac := axonv1alpha1.AgentConfig{
+	ac := kelosv1alpha1.AgentConfig{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "my-config",
 			CreationTimestamp: metav1.NewTime(time.Now().Add(-2 * time.Hour)),
 		},
-		Spec: axonv1alpha1.AgentConfigSpec{
-			Plugins: []axonv1alpha1.PluginSpec{
-				{Name: "axon"},
+		Spec: kelosv1alpha1.AgentConfigSpec{
+			Plugins: []kelosv1alpha1.PluginSpec{
+				{Name: "kelos"},
 			},
 		},
 	}
 
 	var buf bytes.Buffer
-	printAgentConfigTable(&buf, []axonv1alpha1.AgentConfig{ac}, false)
+	printAgentConfigTable(&buf, []kelosv1alpha1.AgentConfig{ac}, false)
 	output := buf.String()
 
 	if !strings.Contains(output, "NAME") {
@@ -729,25 +729,25 @@ func TestPrintAgentConfigTableSingleItem(t *testing.T) {
 }
 
 func TestPrintAgentConfigDetail(t *testing.T) {
-	ac := &axonv1alpha1.AgentConfig{
+	ac := &kelosv1alpha1.AgentConfig{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "my-config",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.AgentConfigSpec{
+		Spec: kelosv1alpha1.AgentConfigSpec{
 			AgentsMD: "Build and test instructions",
-			Plugins: []axonv1alpha1.PluginSpec{
+			Plugins: []kelosv1alpha1.PluginSpec{
 				{
-					Name: "axon",
-					Skills: []axonv1alpha1.SkillDefinition{
+					Name: "kelos",
+					Skills: []kelosv1alpha1.SkillDefinition{
 						{Name: "review", Content: "review content"},
 					},
-					Agents: []axonv1alpha1.AgentDefinition{
+					Agents: []kelosv1alpha1.AgentDefinition{
 						{Name: "triage", Content: "triage content"},
 					},
 				},
 			},
-			MCPServers: []axonv1alpha1.MCPServerSpec{
+			MCPServers: []kelosv1alpha1.MCPServerSpec{
 				{Name: "github", Type: "http"},
 				{Name: "local-tool", Type: "stdio"},
 			},
@@ -762,7 +762,7 @@ func TestPrintAgentConfigDetail(t *testing.T) {
 		"Name:", "my-config",
 		"Namespace:", "default",
 		"Agents MD:", "Build and test instructions",
-		"Plugins:", "axon",
+		"Plugins:", "kelos",
 		"skills=[review]",
 		"agents=[triage]",
 		"MCP Servers:", "github (http)",
@@ -775,12 +775,12 @@ func TestPrintAgentConfigDetail(t *testing.T) {
 }
 
 func TestPrintAgentConfigDetailMinimal(t *testing.T) {
-	ac := &axonv1alpha1.AgentConfig{
+	ac := &kelosv1alpha1.AgentConfig{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "minimal-config",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.AgentConfigSpec{},
+		Spec: kelosv1alpha1.AgentConfigSpec{},
 	}
 
 	var buf bytes.Buffer
@@ -802,21 +802,21 @@ func TestPrintAgentConfigDetailMinimal(t *testing.T) {
 }
 
 func TestPrintTaskDetailMinimal(t *testing.T) {
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "minimal-task",
 			Namespace: "default",
 		},
-		Spec: axonv1alpha1.TaskSpec{
+		Spec: kelosv1alpha1.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "Do something",
-			Credentials: axonv1alpha1.Credentials{
-				Type:      axonv1alpha1.CredentialTypeAPIKey,
-				SecretRef: axonv1alpha1.SecretReference{Name: "secret"},
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "secret"},
 			},
 		},
-		Status: axonv1alpha1.TaskStatus{
-			Phase: axonv1alpha1.TaskPhasePending,
+		Status: kelosv1alpha1.TaskStatus{
+			Phase: kelosv1alpha1.TaskPhasePending,
 		},
 	}
 

@@ -19,8 +19,8 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
-	"github.com/axon-core/axon/internal/githubapp"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	"github.com/kelos-dev/kelos/internal/githubapp"
 )
 
 func TestTTLExpired(t *testing.T) {
@@ -34,7 +34,7 @@ func TestTTLExpired(t *testing.T) {
 
 	tests := []struct {
 		name            string
-		task            *axonv1alpha1.Task
+		task            *kelosv1alpha1.Task
 		wantExpired     bool
 		wantRequeueMin  time.Duration
 		wantRequeueMax  time.Duration
@@ -42,12 +42,12 @@ func TestTTLExpired(t *testing.T) {
 	}{
 		{
 			name: "No TTL set",
-			task: &axonv1alpha1.Task{
-				Spec: axonv1alpha1.TaskSpec{
+			task: &kelosv1alpha1.Task{
+				Spec: kelosv1alpha1.TaskSpec{
 					TTLSecondsAfterFinished: nil,
 				},
-				Status: axonv1alpha1.TaskStatus{
-					Phase:          axonv1alpha1.TaskPhaseSucceeded,
+				Status: kelosv1alpha1.TaskStatus{
+					Phase:          kelosv1alpha1.TaskPhaseSucceeded,
 					CompletionTime: timePtr(time.Now().Add(-10 * time.Second)),
 				},
 			},
@@ -56,12 +56,12 @@ func TestTTLExpired(t *testing.T) {
 		},
 		{
 			name: "Not in terminal phase",
-			task: &axonv1alpha1.Task{
-				Spec: axonv1alpha1.TaskSpec{
+			task: &kelosv1alpha1.Task{
+				Spec: kelosv1alpha1.TaskSpec{
 					TTLSecondsAfterFinished: int32Ptr(60),
 				},
-				Status: axonv1alpha1.TaskStatus{
-					Phase: axonv1alpha1.TaskPhaseRunning,
+				Status: kelosv1alpha1.TaskStatus{
+					Phase: kelosv1alpha1.TaskPhaseRunning,
 				},
 			},
 			wantExpired:     false,
@@ -69,12 +69,12 @@ func TestTTLExpired(t *testing.T) {
 		},
 		{
 			name: "CompletionTime not set",
-			task: &axonv1alpha1.Task{
-				Spec: axonv1alpha1.TaskSpec{
+			task: &kelosv1alpha1.Task{
+				Spec: kelosv1alpha1.TaskSpec{
 					TTLSecondsAfterFinished: int32Ptr(60),
 				},
-				Status: axonv1alpha1.TaskStatus{
-					Phase:          axonv1alpha1.TaskPhaseSucceeded,
+				Status: kelosv1alpha1.TaskStatus{
+					Phase:          kelosv1alpha1.TaskPhaseSucceeded,
 					CompletionTime: nil,
 				},
 			},
@@ -83,12 +83,12 @@ func TestTTLExpired(t *testing.T) {
 		},
 		{
 			name: "TTL=0 and completed",
-			task: &axonv1alpha1.Task{
-				Spec: axonv1alpha1.TaskSpec{
+			task: &kelosv1alpha1.Task{
+				Spec: kelosv1alpha1.TaskSpec{
 					TTLSecondsAfterFinished: int32Ptr(0),
 				},
-				Status: axonv1alpha1.TaskStatus{
-					Phase:          axonv1alpha1.TaskPhaseSucceeded,
+				Status: kelosv1alpha1.TaskStatus{
+					Phase:          kelosv1alpha1.TaskPhaseSucceeded,
 					CompletionTime: timePtr(time.Now().Add(-1 * time.Second)),
 				},
 			},
@@ -97,12 +97,12 @@ func TestTTLExpired(t *testing.T) {
 		},
 		{
 			name: "TTL expired for succeeded task",
-			task: &axonv1alpha1.Task{
-				Spec: axonv1alpha1.TaskSpec{
+			task: &kelosv1alpha1.Task{
+				Spec: kelosv1alpha1.TaskSpec{
 					TTLSecondsAfterFinished: int32Ptr(10),
 				},
-				Status: axonv1alpha1.TaskStatus{
-					Phase:          axonv1alpha1.TaskPhaseSucceeded,
+				Status: kelosv1alpha1.TaskStatus{
+					Phase:          kelosv1alpha1.TaskPhaseSucceeded,
 					CompletionTime: timePtr(time.Now().Add(-20 * time.Second)),
 				},
 			},
@@ -111,12 +111,12 @@ func TestTTLExpired(t *testing.T) {
 		},
 		{
 			name: "TTL expired for failed task",
-			task: &axonv1alpha1.Task{
-				Spec: axonv1alpha1.TaskSpec{
+			task: &kelosv1alpha1.Task{
+				Spec: kelosv1alpha1.TaskSpec{
 					TTLSecondsAfterFinished: int32Ptr(5),
 				},
-				Status: axonv1alpha1.TaskStatus{
-					Phase:          axonv1alpha1.TaskPhaseFailed,
+				Status: kelosv1alpha1.TaskStatus{
+					Phase:          kelosv1alpha1.TaskPhaseFailed,
 					CompletionTime: timePtr(time.Now().Add(-10 * time.Second)),
 				},
 			},
@@ -125,12 +125,12 @@ func TestTTLExpired(t *testing.T) {
 		},
 		{
 			name: "TTL not yet expired",
-			task: &axonv1alpha1.Task{
-				Spec: axonv1alpha1.TaskSpec{
+			task: &kelosv1alpha1.Task{
+				Spec: kelosv1alpha1.TaskSpec{
 					TTLSecondsAfterFinished: int32Ptr(60),
 				},
-				Status: axonv1alpha1.TaskStatus{
-					Phase:          axonv1alpha1.TaskPhaseSucceeded,
+				Status: kelosv1alpha1.TaskStatus{
+					Phase:          kelosv1alpha1.TaskPhaseSucceeded,
 					CompletionTime: timePtr(time.Now()),
 				},
 			},
@@ -140,12 +140,12 @@ func TestTTLExpired(t *testing.T) {
 		},
 		{
 			name: "Pending phase with TTL",
-			task: &axonv1alpha1.Task{
-				Spec: axonv1alpha1.TaskSpec{
+			task: &kelosv1alpha1.Task{
+				Spec: kelosv1alpha1.TaskSpec{
 					TTLSecondsAfterFinished: int32Ptr(10),
 				},
-				Status: axonv1alpha1.TaskStatus{
-					Phase: axonv1alpha1.TaskPhasePending,
+				Status: kelosv1alpha1.TaskStatus{
+					Phase: kelosv1alpha1.TaskPhasePending,
 				},
 			},
 			wantExpired:     false,
@@ -192,7 +192,7 @@ func TestResolveGitHubAppToken_EnterpriseURL(t *testing.T) {
 	}{
 		{
 			name:        "github.com uses default API URL",
-			repoURL:     "https://github.com/axon-core/axon.git",
+			repoURL:     "https://github.com/kelos-dev/kelos.git",
 			wantAPIPath: "/app/installations/67890/access_tokens",
 		},
 		{
@@ -217,7 +217,7 @@ func TestResolveGitHubAppToken_EnterpriseURL(t *testing.T) {
 
 			scheme := runtime.NewScheme()
 			utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-			utilruntime.Must(axonv1alpha1.AddToScheme(scheme))
+			utilruntime.Must(kelosv1alpha1.AddToScheme(scheme))
 
 			secretData := map[string][]byte{
 				"appID":          []byte("12345"),
@@ -248,7 +248,7 @@ func TestResolveGitHubAppToken_EnterpriseURL(t *testing.T) {
 				TokenClient: tc,
 			}
 
-			task := &axonv1alpha1.Task{
+			task := &kelosv1alpha1.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-task",
 					Namespace: "default",
@@ -265,9 +265,9 @@ func TestResolveGitHubAppToken_EnterpriseURL(t *testing.T) {
 				repoURL = server.URL + "/my-org/my-repo.git"
 			}
 
-			workspace := &axonv1alpha1.WorkspaceSpec{
+			workspace := &kelosv1alpha1.WorkspaceSpec{
 				Repo: repoURL,
-				SecretRef: &axonv1alpha1.SecretReference{
+				SecretRef: &kelosv1alpha1.SecretReference{
 					Name: "github-app-creds",
 				},
 			}
@@ -291,7 +291,7 @@ func TestResolveGitHubAppToken_EnterpriseURL(t *testing.T) {
 func TestResolveGitHubAppToken_PATSecret(t *testing.T) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(axonv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(kelosv1alpha1.AddToScheme(scheme))
 
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -313,15 +313,15 @@ func TestResolveGitHubAppToken_PATSecret(t *testing.T) {
 		Scheme: scheme,
 	}
 
-	task := &axonv1alpha1.Task{
+	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-task",
 			Namespace: "default",
 		},
 	}
-	workspace := &axonv1alpha1.WorkspaceSpec{
-		Repo: "https://github.com/axon-core/axon.git",
-		SecretRef: &axonv1alpha1.SecretReference{
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/kelos-dev/kelos.git",
+		SecretRef: &kelosv1alpha1.SecretReference{
 			Name: "pat-secret",
 		},
 	}

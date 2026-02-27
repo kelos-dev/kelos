@@ -63,14 +63,14 @@ END {
 validate_manifest_resources() {
   local file="$1"
   local -a required=(
-    "Namespace axon-system"
-    "ServiceAccount axon-controller"
-    "ClusterRole axon-controller-role"
-    "ClusterRole axon-spawner-role"
-    "ClusterRoleBinding axon-controller-rolebinding"
-    "Role axon-leader-election-role"
-    "RoleBinding axon-leader-election-rolebinding"
-    "Deployment axon-controller-manager"
+    "Namespace kelos-system"
+    "ServiceAccount kelos-controller"
+    "ClusterRole kelos-controller-role"
+    "ClusterRole kelos-spawner-role"
+    "ClusterRoleBinding kelos-controller-rolebinding"
+    "Role kelos-leader-election-role"
+    "RoleBinding kelos-leader-election-rolebinding"
+    "Deployment kelos-controller-manager"
   )
 
   local entry
@@ -102,7 +102,7 @@ trap 'rm -rf "${TMPDIR}"' EXIT
 
 RBAC_FILE="${TMPDIR}/rbac.yaml"
 GOCACHE="${TMPDIR}/go-build-cache" "${CONTROLLER_GEN}" \
-  rbac:roleName=axon-controller-role \
+  rbac:roleName=kelos-controller-role \
   paths="./..." \
   output:rbac:stdout >"${RBAC_FILE}"
 

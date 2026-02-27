@@ -13,7 +13,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 )
 
 func newLogsCommand(cfg *ClientConfig) *cobra.Command {
@@ -43,7 +43,7 @@ func newLogsCommand(cfg *ClientConfig) *cobra.Command {
 			}
 
 			ctx := context.Background()
-			task := &axonv1alpha1.Task{}
+			task := &kelosv1alpha1.Task{}
 			if err := cl.Get(ctx, client.ObjectKey{Name: args[0], Namespace: ns}, task); err != nil {
 				return fmt.Errorf("getting task: %w", err)
 			}
@@ -83,10 +83,10 @@ func newLogsCommand(cfg *ClientConfig) *cobra.Command {
 	return cmd
 }
 
-func waitForPod(ctx context.Context, cl client.Client, name, namespace string) (*axonv1alpha1.Task, error) {
-	var lastPhase axonv1alpha1.TaskPhase
+func waitForPod(ctx context.Context, cl client.Client, name, namespace string) (*kelosv1alpha1.Task, error) {
+	var lastPhase kelosv1alpha1.TaskPhase
 	for {
-		task := &axonv1alpha1.Task{}
+		task := &kelosv1alpha1.Task{}
 		if err := cl.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, task); err != nil {
 			return nil, fmt.Errorf("getting task: %w", err)
 		}
@@ -96,7 +96,7 @@ func waitForPod(ctx context.Context, cl client.Client, name, namespace string) (
 			lastPhase = task.Status.Phase
 		}
 
-		if task.Status.Phase == axonv1alpha1.TaskPhaseFailed {
+		if task.Status.Phase == kelosv1alpha1.TaskPhaseFailed {
 			msg := "unknown error"
 			if task.Status.Message != "" {
 				msg = task.Status.Message

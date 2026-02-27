@@ -1,10 +1,10 @@
 #!/bin/bash
-# axon_entrypoint.sh — Axon agent image interface implementation for
+# kelos_entrypoint.sh — Kelos agent image interface implementation for
 # Google Gemini CLI.
 #
 # Interface contract:
 #   - First argument ($1): the task prompt
-#   - AXON_MODEL env var: model name (optional)
+#   - KELOS_MODEL env var: model name (optional)
 #   - UID 61100: shared between git-clone init container and agent
 #   - Working directory: /workspace/repo when a workspace is configured
 
@@ -18,19 +18,19 @@ ARGS=(
   "-p" "$PROMPT"
 )
 
-if [ -n "${AXON_MODEL:-}" ]; then
-  ARGS+=("--model" "$AXON_MODEL")
+if [ -n "${KELOS_MODEL:-}" ]; then
+  ARGS+=("--model" "$KELOS_MODEL")
 fi
 
 # Write user-level instructions (global scope read by Gemini CLI)
-if [ -n "${AXON_AGENTS_MD:-}" ]; then
+if [ -n "${KELOS_AGENTS_MD:-}" ]; then
   mkdir -p ~/.gemini
-  printf '%s' "$AXON_AGENTS_MD" >~/.gemini/GEMINI.md
+  printf '%s' "$KELOS_AGENTS_MD" >~/.gemini/GEMINI.md
 fi
 
 # Install each plugin as a Gemini extension with skills and agents
-if [ -n "${AXON_PLUGIN_DIR:-}" ] && [ -d "${AXON_PLUGIN_DIR}" ]; then
-  for plugindir in "${AXON_PLUGIN_DIR}"/*/; do
+if [ -n "${KELOS_PLUGIN_DIR:-}" ] && [ -d "${KELOS_PLUGIN_DIR}" ]; then
+  for plugindir in "${KELOS_PLUGIN_DIR}"/*/; do
     [ -d "$plugindir" ] || continue
     pluginname=$(basename "$plugindir")
     # Sanitize plugin name for safe JSON interpolation
@@ -50,30 +50,30 @@ if [ -n "${AXON_PLUGIN_DIR:-}" ] && [ -d "${AXON_PLUGIN_DIR}" ]; then
 fi
 
 # Write MCP server configuration to Gemini settings.
-# AXON_MCP_SERVERS contains JSON with an "mcpServers" key that Gemini
+# KELOS_MCP_SERVERS contains JSON with an "mcpServers" key that Gemini
 # settings.json accepts directly. Merge with existing settings if present.
-if [ -n "${AXON_MCP_SERVERS:-}" ]; then
+if [ -n "${KELOS_MCP_SERVERS:-}" ]; then
   settings_file="$HOME/.gemini/settings.json"
   if [ -f "$settings_file" ]; then
     # Merge mcpServers into existing settings using a small Node.js helper.
-    # Read AXON_MCP_SERVERS from the environment to avoid exposing
+    # Read KELOS_MCP_SERVERS from the environment to avoid exposing
     # potentially sensitive headers in process argument lists.
     node -e '
 const fs = require("fs");
 const existing = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-const mcp = JSON.parse(process.env.AXON_MCP_SERVERS);
+const mcp = JSON.parse(process.env.KELOS_MCP_SERVERS);
 existing.mcpServers = Object.assign(existing.mcpServers || {}, mcp.mcpServers || {});
 fs.writeFileSync(process.argv[1], JSON.stringify(existing, null, 2));
 ' "$settings_file"
   else
     mkdir -p ~/.gemini
-    printf '%s' "$AXON_MCP_SERVERS" >"$settings_file"
+    printf '%s' "$KELOS_MCP_SERVERS" >"$settings_file"
   fi
 fi
 
 gemini "${ARGS[@]}" | tee /tmp/agent-output.jsonl
 AGENT_EXIT_CODE=${PIPESTATUS[0]}
 
-/axon/axon-capture
+/kelos/kelos-capture
 
 exit $AGENT_EXIT_CODE

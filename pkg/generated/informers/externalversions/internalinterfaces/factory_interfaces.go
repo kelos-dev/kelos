@@ -21,7 +21,7 @@ package internalinterfaces
 import (
 	time "time"
 
-	versioned "github.com/axon-core/axon/pkg/generated/clientset/versioned"
+	versioned "github.com/kelos-dev/kelos/pkg/generated/clientset/versioned"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	cache "k8s.io/client-go/tools/cache"

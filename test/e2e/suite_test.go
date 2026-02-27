@@ -7,7 +7,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 )
 
 const testModel = "haiku"
@@ -20,7 +20,7 @@ var (
 
 type agentTestConfig struct {
 	AgentType      string
-	CredentialType axonv1alpha1.CredentialType
+	CredentialType kelosv1alpha1.CredentialType
 	SecretName     string
 	SecretKey      string
 	SecretValue    *string
@@ -31,7 +31,7 @@ type agentTestConfig struct {
 var agentConfigs = []agentTestConfig{
 	{
 		AgentType:      "claude-code",
-		CredentialType: axonv1alpha1.CredentialTypeOAuth,
+		CredentialType: kelosv1alpha1.CredentialTypeOAuth,
 		SecretName:     "claude-credentials",
 		SecretKey:      "CLAUDE_CODE_OAUTH_TOKEN",
 		SecretValue:    &oauthToken,
@@ -40,7 +40,7 @@ var agentConfigs = []agentTestConfig{
 	},
 	{
 		AgentType:      "codex",
-		CredentialType: axonv1alpha1.CredentialTypeOAuth,
+		CredentialType: kelosv1alpha1.CredentialTypeOAuth,
 		SecretName:     "codex-credentials",
 		SecretKey:      "CODEX_AUTH_JSON",
 		SecretValue:    &codexAuthJSON,

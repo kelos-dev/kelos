@@ -19,9 +19,9 @@ limitations under the License.
 package fake
 
 import (
-	clientset "github.com/axon-core/axon/pkg/generated/clientset/versioned"
-	apiv1alpha1 "github.com/axon-core/axon/pkg/generated/clientset/versioned/typed/api/v1alpha1"
-	fakeapiv1alpha1 "github.com/axon-core/axon/pkg/generated/clientset/versioned/typed/api/v1alpha1/fake"
+	clientset "github.com/kelos-dev/kelos/pkg/generated/clientset/versioned"
+	apiv1alpha1 "github.com/kelos-dev/kelos/pkg/generated/clientset/versioned/typed/api/v1alpha1"
+	fakeapiv1alpha1 "github.com/kelos-dev/kelos/pkg/generated/clientset/versioned/typed/api/v1alpha1/fake"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"

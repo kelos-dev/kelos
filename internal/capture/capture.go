@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	markerStart     = "---AXON_OUTPUTS_START---"
-	markerEnd       = "---AXON_OUTPUTS_END---"
+	markerStart     = "---KELOS_OUTPUTS_START---"
+	markerEnd       = "---KELOS_OUTPUTS_END---"
 	agentOutputFile = "/tmp/agent-output.jsonl"
 	commandTimeout  = 30 * time.Second
 )
@@ -70,7 +70,7 @@ func captureOutputs(r runner, usageFile string) []string {
 		}
 	}
 
-	if base := os.Getenv("AXON_BASE_BRANCH"); base != "" {
+	if base := os.Getenv("KELOS_BASE_BRANCH"); base != "" {
 		outputs = append(outputs, "base-branch: "+base)
 	} else if inGitRepo {
 		ref, err := r.run("git", "symbolic-ref", "refs/remotes/origin/HEAD")
@@ -82,7 +82,7 @@ func captureOutputs(r runner, usageFile string) []string {
 		}
 	}
 
-	agentType := os.Getenv("AXON_AGENT_TYPE")
+	agentType := os.Getenv("KELOS_AGENT_TYPE")
 	usage := ParseUsage(agentType, usageFile)
 	for _, key := range []string{"cost-usd", "input-tokens", "output-tokens"} {
 		if v, ok := usage[key]; ok {
@@ -103,7 +103,7 @@ func capturePRs(r runner, branch string) []string {
 	lines := queryPRs(r, branch, "")
 
 	// Also check upstream repo if set (fork workflow)
-	if upstreamRepo := os.Getenv("AXON_UPSTREAM_REPO"); upstreamRepo != "" {
+	if upstreamRepo := os.Getenv("KELOS_UPSTREAM_REPO"); upstreamRepo != "" {
 		lines = append(lines, queryPRs(r, branch, upstreamRepo)...)
 	}
 

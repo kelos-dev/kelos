@@ -1,5 +1,5 @@
 # Stage 1: Scaffold the feature
-apiVersion: axon.io/v1alpha1
+apiVersion: kelos.dev/v1alpha1
 kind: Task
 metadata:
   name: scaffold
@@ -22,7 +22,7 @@ spec:
     Create the code, commit your changes, and push the branch.
 ---
 # Stage 2: Write tests (waits for scaffold to succeed)
-apiVersion: axon.io/v1alpha1
+apiVersion: kelos.dev/v1alpha1
 kind: Task
 metadata:
   name: write-tests
@@ -48,7 +48,7 @@ spec:
     Run the tests to make sure they pass. Commit and push.
 ---
 # Stage 3: Open a pull request (waits for write-tests to succeed)
-apiVersion: axon.io/v1alpha1
+apiVersion: kelos.dev/v1alpha1
 kind: Task
 metadata:
   name: open-pr

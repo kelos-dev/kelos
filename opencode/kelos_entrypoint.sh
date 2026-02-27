@@ -1,13 +1,13 @@
 #!/bin/bash
-# axon_entrypoint.sh — Axon agent image interface implementation for
+# kelos_entrypoint.sh — Kelos agent image interface implementation for
 # OpenCode CLI.
 #
 # Interface contract:
 #   - First argument ($1): the task prompt
-#   - AXON_MODEL env var: model name (optional, provider/model format)
+#   - KELOS_MODEL env var: model name (optional, provider/model format)
 #   - OPENCODE_API_KEY env var: API key forwarded to the provider
-#   - AXON_AGENTS_MD env var: user-level instructions (optional)
-#   - AXON_PLUGIN_DIR env var: plugin directory with skills/agents (optional)
+#   - KELOS_AGENTS_MD env var: user-level instructions (optional)
+#   - KELOS_PLUGIN_DIR env var: plugin directory with skills/agents (optional)
 #   - UID 61100: shared between git-clone init container and agent
 #   - Working directory: /workspace/repo when a workspace is configured
 
@@ -16,9 +16,9 @@ set -uo pipefail
 PROMPT="${1:?Prompt argument is required}"
 
 # Map OPENCODE_API_KEY to the correct provider environment variable
-# based on the provider prefix in AXON_MODEL.
-if [ -n "${OPENCODE_API_KEY:-}" ] && [ -n "${AXON_MODEL:-}" ]; then
-  PROVIDER="${AXON_MODEL%%/*}"
+# based on the provider prefix in KELOS_MODEL.
+if [ -n "${OPENCODE_API_KEY:-}" ] && [ -n "${KELOS_MODEL:-}" ]; then
+  PROVIDER="${KELOS_MODEL%%/*}"
   case "$PROVIDER" in
     anthropic) export ANTHROPIC_API_KEY="$OPENCODE_API_KEY" ;;
     openai) export OPENAI_API_KEY="$OPENCODE_API_KEY" ;;
@@ -29,7 +29,7 @@ if [ -n "${OPENCODE_API_KEY:-}" ] && [ -n "${AXON_MODEL:-}" ]; then
       # Zen/OpenCode models: no provider-specific key mapping needed.
       ;;
     *)
-      echo "Warning: Unrecognized provider prefix '$PROVIDER' in AXON_MODEL, defaulting to Anthropic" >&2
+      echo "Warning: Unrecognized provider prefix '$PROVIDER' in KELOS_MODEL, defaulting to Anthropic" >&2
       export ANTHROPIC_API_KEY="$OPENCODE_API_KEY"
       ;;
   esac
@@ -44,19 +44,19 @@ ARGS=(
   "$PROMPT"
 )
 
-if [ -n "${AXON_MODEL:-}" ]; then
-  ARGS+=("--model" "$AXON_MODEL")
+if [ -n "${KELOS_MODEL:-}" ]; then
+  ARGS+=("--model" "$KELOS_MODEL")
 fi
 
 # Write user-level instructions (global scope read by OpenCode CLI)
-if [ -n "${AXON_AGENTS_MD:-}" ]; then
+if [ -n "${KELOS_AGENTS_MD:-}" ]; then
   mkdir -p ~/.config/opencode
-  printf '%s' "$AXON_AGENTS_MD" >~/.config/opencode/AGENTS.md
+  printf '%s' "$KELOS_AGENTS_MD" >~/.config/opencode/AGENTS.md
 fi
 
 # Install each plugin's skills and agents into OpenCode's global config
-if [ -n "${AXON_PLUGIN_DIR:-}" ] && [ -d "${AXON_PLUGIN_DIR}" ]; then
-  for plugindir in "${AXON_PLUGIN_DIR}"/*/; do
+if [ -n "${KELOS_PLUGIN_DIR:-}" ] && [ -d "${KELOS_PLUGIN_DIR}" ]; then
+  for plugindir in "${KELOS_PLUGIN_DIR}"/*/; do
     [ -d "$plugindir" ] || continue
     pluginname=$(basename "$plugindir")
     # Copy skills into ~/.config/opencode/skills/<plugin>-<skill>/SKILL.md
@@ -85,6 +85,6 @@ fi
 opencode "${ARGS[@]}" | tee /tmp/agent-output.jsonl
 AGENT_EXIT_CODE=${PIPESTATUS[0]}
 
-/axon/axon-capture
+/kelos/kelos-capture
 
 exit $AGENT_EXIT_CODE

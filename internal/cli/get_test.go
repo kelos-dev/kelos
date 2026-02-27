@@ -3,7 +3,7 @@ package cli
 import (
 	"testing"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 )
 
 func TestDetailFlagRegistered(t *testing.T) {
@@ -74,43 +74,43 @@ func TestValidatePhases(t *testing.T) {
 }
 
 func TestFilterTasksByPhase(t *testing.T) {
-	tasks := []axonv1alpha1.Task{
-		{Status: axonv1alpha1.TaskStatus{Phase: axonv1alpha1.TaskPhasePending}},
-		{Status: axonv1alpha1.TaskStatus{Phase: axonv1alpha1.TaskPhaseRunning}},
-		{Status: axonv1alpha1.TaskStatus{Phase: axonv1alpha1.TaskPhaseSucceeded}},
-		{Status: axonv1alpha1.TaskStatus{Phase: axonv1alpha1.TaskPhaseFailed}},
-		{Status: axonv1alpha1.TaskStatus{Phase: axonv1alpha1.TaskPhaseWaiting}},
+	tasks := []kelosv1alpha1.Task{
+		{Status: kelosv1alpha1.TaskStatus{Phase: kelosv1alpha1.TaskPhasePending}},
+		{Status: kelosv1alpha1.TaskStatus{Phase: kelosv1alpha1.TaskPhaseRunning}},
+		{Status: kelosv1alpha1.TaskStatus{Phase: kelosv1alpha1.TaskPhaseSucceeded}},
+		{Status: kelosv1alpha1.TaskStatus{Phase: kelosv1alpha1.TaskPhaseFailed}},
+		{Status: kelosv1alpha1.TaskStatus{Phase: kelosv1alpha1.TaskPhaseWaiting}},
 	}
 
 	tests := []struct {
 		name       string
 		phases     []string
 		wantCount  int
-		wantPhases []axonv1alpha1.TaskPhase
+		wantPhases []kelosv1alpha1.TaskPhase
 	}{
 		{
 			name:       "filter Running only",
 			phases:     []string{"Running"},
 			wantCount:  1,
-			wantPhases: []axonv1alpha1.TaskPhase{axonv1alpha1.TaskPhaseRunning},
+			wantPhases: []kelosv1alpha1.TaskPhase{kelosv1alpha1.TaskPhaseRunning},
 		},
 		{
 			name:      "filter non-completed",
 			phases:    []string{"Pending", "Running", "Waiting"},
 			wantCount: 3,
-			wantPhases: []axonv1alpha1.TaskPhase{
-				axonv1alpha1.TaskPhasePending,
-				axonv1alpha1.TaskPhaseRunning,
-				axonv1alpha1.TaskPhaseWaiting,
+			wantPhases: []kelosv1alpha1.TaskPhase{
+				kelosv1alpha1.TaskPhasePending,
+				kelosv1alpha1.TaskPhaseRunning,
+				kelosv1alpha1.TaskPhaseWaiting,
 			},
 		},
 		{
 			name:      "filter completed",
 			phases:    []string{"Succeeded", "Failed"},
 			wantCount: 2,
-			wantPhases: []axonv1alpha1.TaskPhase{
-				axonv1alpha1.TaskPhaseSucceeded,
-				axonv1alpha1.TaskPhaseFailed,
+			wantPhases: []kelosv1alpha1.TaskPhase{
+				kelosv1alpha1.TaskPhaseSucceeded,
+				kelosv1alpha1.TaskPhaseFailed,
 			},
 		},
 		{

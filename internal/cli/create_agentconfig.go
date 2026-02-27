@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	axonv1alpha1 "github.com/axon-core/axon/api/v1alpha1"
+	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 )
 
 func newCreateAgentConfigCommand(cfg *ClientConfig) *cobra.Command {
@@ -41,7 +41,7 @@ func newCreateAgentConfigCommand(cfg *ClientConfig) *cobra.Command {
 				return err
 			}
 
-			acSpec := axonv1alpha1.AgentConfigSpec{}
+			acSpec := kelosv1alpha1.AgentConfigSpec{}
 
 			resolvedMD, err := resolveContent(agentsMD)
 			if err != nil {
@@ -50,14 +50,14 @@ func newCreateAgentConfigCommand(cfg *ClientConfig) *cobra.Command {
 			acSpec.AgentsMD = resolvedMD
 
 			if len(skillFlags) > 0 || len(agentFlags) > 0 {
-				plugin := axonv1alpha1.PluginSpec{Name: "axon"}
+				plugin := kelosv1alpha1.PluginSpec{Name: "kelos"}
 
 				for _, s := range skillFlags {
 					sn, sc, err := parseNameContent(s, "skill")
 					if err != nil {
 						return err
 					}
-					plugin.Skills = append(plugin.Skills, axonv1alpha1.SkillDefinition{
+					plugin.Skills = append(plugin.Skills, kelosv1alpha1.SkillDefinition{
 						Name: sn, Content: sc,
 					})
 				}
@@ -67,12 +67,12 @@ func newCreateAgentConfigCommand(cfg *ClientConfig) *cobra.Command {
 					if err != nil {
 						return err
 					}
-					plugin.Agents = append(plugin.Agents, axonv1alpha1.AgentDefinition{
+					plugin.Agents = append(plugin.Agents, kelosv1alpha1.AgentDefinition{
 						Name: an, Content: ac,
 					})
 				}
 
-				acSpec.Plugins = []axonv1alpha1.PluginSpec{plugin}
+				acSpec.Plugins = []kelosv1alpha1.PluginSpec{plugin}
 			}
 
 			mcpSeen := make(map[string]bool, len(mcpFlags))
@@ -88,7 +88,7 @@ func newCreateAgentConfigCommand(cfg *ClientConfig) *cobra.Command {
 				acSpec.MCPServers = append(acSpec.MCPServers, mcpSpec)
 			}
 
-			acObj := &axonv1alpha1.AgentConfig{
+			acObj := &kelosv1alpha1.AgentConfig{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      name,
 					Namespace: ns,
@@ -96,7 +96,7 @@ func newCreateAgentConfigCommand(cfg *ClientConfig) *cobra.Command {
 				Spec: acSpec,
 			}
 
-			acObj.SetGroupVersionKind(axonv1alpha1.GroupVersion.WithKind("AgentConfig"))
+			acObj.SetGroupVersionKind(kelosv1alpha1.GroupVersion.WithKind("AgentConfig"))
 
 			if dryRun {
 				return printYAML(os.Stdout, acObj)

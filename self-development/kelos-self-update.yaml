@@ -65,17 +65,11 @@ spec:
          - Verify that GitHub Actions workflows that reference self-development files are up to date
 
       Actions:
-      - If you find improvements, create a PR:
-        ```
-        git checkout -b kelos-self-update-{{.ID}}
-        # ... make changes ...
-        git push -u origin kelos-self-update-{{.ID}}
-        gh pr create --title "<title>" --body "<description>" --label generated-by-kelos --label ok-to-test
-        ```
-      - If the changes are too large or need discussion, create an issue instead:
+      - If you find improvements, create a GitHub issue with your findings and proposals:
         ```
         gh issue create --title "<title>" --body "<description>" --label generated-by-kelos --label kelos/needs-input
         ```
+      - Do NOT create PRs. Only create issues
 
       Constraints:
       - Focus on ONE area per run, do it thoroughly

@@ -37,7 +37,7 @@ add-tests     claude-code   Running   kelos-task-add-tests   my-repo     my-conf
 update-docs   claude-code   Running   kelos-task-update-docs my-repo     my-config      45s        45s
 ```
 
-https://github.com/user-attachments/assets/0ea57071-15d8-4b3b-a546-d00429b76f8d
+https://github.com/user-attachments/assets/515c0a27-8099-47e3-8121-0b433e6bc274
 
 See [Autonomous self-development pipeline](#autonomous-self-development-pipeline) for a full end-to-end example.
 

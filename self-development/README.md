@@ -2,14 +2,48 @@
 
 This directory contains real-world orchestration patterns used by the Kelos project itself for autonomous development.
 
-## Overview
+## How It Works
 
-These TaskSpawners demonstrate how to orchestrate fully autonomous AI workers that:
-- Monitor GitHub issues
-- Investigate and fix problems
-- Create or update pull requests
-- Self-review and iterate on feedback
-- Request human input when blocked
+```
+┌───────────────────────────────────────────────────────────┐
+│                      GitHub Issues                        │
+└────────────┬─────────────────────────────┬────────────────┘
+             │ labeled needs-actor         │ labeled actor/kelos
+             ▼                             │
+┌────────────────────────┐                 │
+│ kelos-triage           │                 │
+│ Classify, prioritize   │── assigns ─────►│
+│ & recommend actor      │   actor/kelos   │
+└────────────────────────┘   if automatable│
+                                           ▼
+                            ┌────────────────────────┐
+                            │ kelos-workers           │
+                            │ Investigate, fix,       │
+                            │ create/update PR        │
+                            └───────────┬────────────┘
+                                        ▼
+                            ┌────────────────────────┐
+                            │ Pull Request           │
+                            │ + CI check             │
+                            │ + self-review          │
+                            └────────────────────────┘
+
+┌───────────────────────────────────────────────────────────┐
+│                   Cron-scheduled agents                    │
+├───────────────────┬───────────────────┬───────────────────┤
+│ kelos-self-update │ kelos-fake-user   │ kelos-fake-       │
+│ Daily 06:00 UTC   │ Daily 09:00 UTC   │ strategist        │
+│ Improve workflow  │ Test DX as a      │ Every 12h         │
+│ files             │ new user          │ Explore new ideas │
+│ → PR or Issue     │ → Issues          │ → Issues          │
+└───────────────────┴───────────────────┴───────────────────┘
+
+Feedback loop (kelos/needs-input label):
+  Agent adds label when blocked ──► Issue excluded from polls
+  Human removes label           ──► Issue re-queued on next poll
+```
+
+All agents share an `AgentConfig` (`agentconfig.yaml`) that defines git identity, comment signatures, and standard constraints.
 
 ## Prerequisites
 
@@ -61,32 +95,17 @@ kubectl create secret generic kelos-credentials \
   --from-literal=ANTHROPIC_API_KEY=<your-api-key>
 ```
 
-## Deploying the Examples
-
-## Run one-off fake strategist task
-
-Run it either manually or from GitHub Actions.
-
-Manual:
-
-```bash
-kubectl apply -f self-development/tasks/fake-strategist-task.yaml
-```
-
-GitHub Actions:
-
-1. Open `Actions` -> `Run Fake Strategist`
-2. Click `Run workflow` (optionally set `namespace`)
-
-The target cluster must already have:
-
-- Kelos installed
-- `Workspace` named `kelos-agent`
-- Secret `kelos-credentials`
+## TaskSpawners
 
 ### kelos-workers.yaml
 
-This TaskSpawner picks up open GitHub issues labeled with `actor/kelos` and creates autonomous agent tasks to fix them.
+Picks up open GitHub issues labeled `actor/kelos` and creates autonomous agent tasks to fix them.
+
+| | |
+|---|---|
+| **Trigger** | GitHub Issues with `actor/kelos` label |
+| **Model** | Opus |
+| **Concurrency** | 3 |
 
 **Key features:**
 - Automatically checks for existing PRs and updates them incrementally
@@ -100,80 +119,101 @@ This TaskSpawner picks up open GitHub issues labeled with `actor/kelos` and crea
 
 **Deploy:**
 ```bash
-# First, ensure all prerequisites are created
-kubectl apply -f - <<EOF
-apiVersion: kelos.dev/v1alpha1
-kind: Workspace
-metadata:
-  name: kelos-agent
-spec:
-  repo: https://github.com/your-org/your-repo.git
-  ref: main
-  secretRef:
-    name: github-token
-  # or authenticate with githubApp
-EOF
-
-# Then deploy the TaskSpawner
 kubectl apply -f self-development/kelos-workers.yaml
 ```
 
-**Monitor:**
+### kelos-triage.yaml
+
+Picks up open GitHub issues labeled `needs-actor` and performs automated triage.
+
+| | |
+|---|---|
+| **Trigger** | GitHub Issues with `needs-actor` label |
+| **Model** | Opus |
+| **Concurrency** | 8 |
+
+**For each issue, the agent:**
+1. Classifies with exactly one `kind/*` label (`kind/bug`, `kind/feature`, `kind/api`, `kind/docs`)
+2. Checks if the issue has already been fixed by a merged PR or recent commit
+3. Checks if the issue references outdated APIs, flags, or features
+4. Detects duplicate issues
+5. Assesses priority (`priority/important-soon`, `priority/important-longterm`, `priority/backlog`)
+6. Recommends an actor — assigns `actor/kelos` if the issue has clear scope and verifiable criteria, otherwise leaves `needs-actor` for human decision
+
+Posts a single triage comment with its findings and adds `kelos/needs-input` for maintainer review before any worker agent picks up the issue.
+
+**Deploy:**
 ```bash
-# Watch for new tasks being created
-kubectl get tasks -w
-
-# Check TaskSpawner status
-kubectl get taskspawner kelos-workers -o yaml
-
-# View logs from a specific task
-kubectl logs -l job-name=<job-name> -f
+kubectl apply -f self-development/kelos-triage.yaml
 ```
 
 ### kelos-fake-user.yaml
 
-This TaskSpawner runs daily to test the developer experience as if you were a new user.
+Runs daily to test the developer experience as if you were a new user.
+
+| | |
+|---|---|
+| **Trigger** | Cron `0 9 * * *` (daily at 09:00 UTC) |
+| **Model** | Sonnet |
+| **Concurrency** | 1 |
+
+Each run picks one focus area:
+- **Documentation & Onboarding** — follow getting-started instructions, test CLI help text
+- **Developer Experience** — review error messages, test common workflows
+- **Examples & Use Cases** — verify manifests, identify missing examples
+
+Creates GitHub issues for any problems found.
 
 **Deploy:**
 ```bash
 kubectl apply -f self-development/kelos-fake-user.yaml
 ```
 
-This spawner uses a daily cron schedule (`0 9 * * *`) and will create a task each day to:
-- Test documentation and onboarding flows
-- Check CLI help text and error messages
-- Review examples and identify gaps
-- Create GitHub issues for any problems found
-
 ### kelos-fake-strategist.yaml
 
-This TaskSpawner runs every 12 hours to strategically explore new ways to use and improve Kelos.
+Runs every 12 hours to strategically explore new ways to use and improve Kelos.
+
+| | |
+|---|---|
+| **Trigger** | Cron `0 */12 * * *` (every 12 hours) |
+| **Model** | Opus |
+| **Concurrency** | 1 |
+
+Each run picks one focus area:
+- **New Use Cases** — explore what types of projects/teams could benefit from Kelos
+- **Workflow Improvements** — analyze existing configs and suggest better patterns
+- **Integration Opportunities** — identify tools/platforms Kelos could integrate with
+- **New CRDs & API Extensions** — propose new CRDs or extensions to existing ones
+
+Creates GitHub issues for actionable insights.
 
 **Deploy:**
 ```bash
 kubectl apply -f self-development/kelos-fake-strategist.yaml
 ```
 
-This spawner uses a cron schedule (`0 */12 * * *`) and will create a task every 12 hours to focus on one of:
-- **New Use Cases** — explore what types of projects/teams could benefit from Kelos, propose example TaskSpawner configs
-- **Workflow Improvements** — analyze existing self-development configs and suggest better patterns, prompts, or automation flows
-- **Integration Opportunities** — identify tools/platforms Kelos could integrate with (CI systems, monitoring, chat ops, etc.)
-- **New CRDs & API Extensions** — propose new Custom Resource Definitions or extensions to existing CRDs that would expand Kelos's capabilities
-
 ### kelos-self-update.yaml
 
-This TaskSpawner runs daily to review and update the self-development workflow files themselves.
+Runs daily to review and update the self-development workflow files themselves.
+
+| | |
+|---|---|
+| **Trigger** | Cron `0 6 * * *` (daily at 06:00 UTC) |
+| **Model** | Opus |
+| **Concurrency** | 1 |
+
+Each run picks one focus area:
+- **Prompt Tuning** — review and improve prompts based on actual agent output quality
+- **Configuration Alignment** — ensure resource settings, labels, and AgentConfig stay consistent
+- **Workflow Completeness** — check that agent prompts reflect current project conventions and Makefile targets
+- **Task Template Maintenance** — keep one-off task definitions in sync with their TaskSpawner counterparts
+
+Creates a PR for code changes or an issue if discussion is needed.
 
 **Deploy:**
 ```bash
 kubectl apply -f self-development/kelos-self-update.yaml
 ```
-
-This spawner uses a daily cron schedule (`0 6 * * *`, every day at 06:00 UTC) and will create a task to focus on one of:
-- **Prompt Tuning** — review and improve prompts based on actual agent output quality
-- **Configuration Alignment** — ensure resource settings, labels, and AgentConfig stay consistent
-- **Workflow Completeness** — check that agent prompts reflect current project conventions and Makefile targets
-- **Task Template Maintenance** — keep one-off task definitions in sync with their TaskSpawner counterparts
 
 ## Customizing for Your Repository
 

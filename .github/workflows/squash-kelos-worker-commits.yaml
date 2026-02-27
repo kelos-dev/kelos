@@ -30,8 +30,8 @@ jobs:
       GCP_PROJECT_ID: gjkim-400213
       GKE_CLUSTER_NAME: gjkim
       GKE_CLUSTER_LOCATION: asia-northeast3
-      GCP_SERVICE_ACCOUNT_EMAIL: axon-core-axon-gh-action@gjkim-400213.iam.gserviceaccount.com
-      GCP_WORKLOAD_IDENTITY_PROVIDER: projects/317215297044/locations/global/workloadIdentityPools/github/providers/axon
+      GCP_SERVICE_ACCOUNT_EMAIL: kelos-gh-action@gjkim-400213.iam.gserviceaccount.com
+      GCP_WORKLOAD_IDENTITY_PROVIDER: projects/317215297044/locations/global/workloadIdentityPools/github/providers/kelos
     steps:
       - name: Determine if reset is requested
         id: gate

@@ -177,21 +177,23 @@ kelos init
 Edit `~/.kelos/config.yaml`:
 
 ```yaml
-oauthToken: <your-oauth-token>
+apiKey: <your-anthropic-api-key>
 workspace:
   repo: https://github.com/your-org/your-repo.git
   ref: main
   token: <github-token>  # optional, for private repos and pushing changes
 ```
 
+The CLI defaults to the `api-key` credential type. If you set `oauthToken` instead, the CLI auto-detects and uses OAuth.
+
 <details>
 <summary>How to get your credentials</summary>
 
-**Claude OAuth token** (recommended for Claude Code):
-Run `claude auth login` locally, then copy the token from `~/.claude/credentials.json`.
+**Anthropic API key** (default for Claude Code):
+Create one at [console.anthropic.com](https://console.anthropic.com). Set `apiKey` in your config.
 
-**Anthropic API key** (alternative for Claude Code):
-Create one at [console.anthropic.com](https://console.anthropic.com). Set `apiKey` instead of `oauthToken` in your config.
+**Claude OAuth token** (alternative for Claude Code desktop users):
+Run `claude auth login` locally, then copy the token from `~/.claude/credentials.json`. Set `oauthToken` instead of `apiKey` in your config.
 
 **Codex OAuth credentials** (for OpenAI Codex):
 Run `codex auth login` locally, then reference the auth file in your config:
@@ -279,15 +281,15 @@ kubectl get tasks -w
 </details>
 
 <details>
-<summary>Using an API key instead of OAuth</summary>
+<summary>Using an OAuth token instead of an API key</summary>
 
-Set `apiKey` instead of `oauthToken` in `~/.kelos/config.yaml`:
+Set `oauthToken` instead of `apiKey` in `~/.kelos/config.yaml`:
 
 ```yaml
-apiKey: <your-api-key>
+oauthToken: <your-oauth-token>
 ```
 
-Or pass `--secret` to `kelos run` with a pre-created secret (api-key is the default credential type), or set `spec.credentials.type: api-key` in YAML.
+The CLI auto-detects the credential type based on which key is set. You can also pass `--credential-type oauth` explicitly, or set `spec.credentials.type: oauth` in YAML.
 
 </details>
 

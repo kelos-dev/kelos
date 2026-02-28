@@ -728,6 +728,116 @@ func TestRunCommand_DryRun_CodexOAuthToken_FileRef(t *testing.T) {
 	}
 }
 
+func TestRunCommand_InvalidAgentType(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("secret: my-secret\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewRootCommand()
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{
+		"run",
+		"--config", cfgPath,
+		"--dry-run",
+		"--prompt", "hello",
+		"--type", "invalid-agent",
+	})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid agent type")
+	}
+	if !strings.Contains(err.Error(), `invalid agent type "invalid-agent"`) {
+		t.Errorf("expected error about invalid agent type, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "claude-code") {
+		t.Errorf("expected error to list valid types, got: %v", err)
+	}
+}
+
+func TestRunCommand_InvalidCredentialType(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("secret: my-secret\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewRootCommand()
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{
+		"run",
+		"--config", cfgPath,
+		"--dry-run",
+		"--prompt", "hello",
+		"--credential-type", "invalid",
+	})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid credential type")
+	}
+	if !strings.Contains(err.Error(), `invalid credential type "invalid"`) {
+		t.Errorf("expected error about invalid credential type, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "api-key") {
+		t.Errorf("expected error to list valid credential types, got: %v", err)
+	}
+}
+
+func TestRunCommand_InvalidAgentTypeFromConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	cfg := "secret: my-secret\ntype: bad-type\n"
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewRootCommand()
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{
+		"run",
+		"--config", cfgPath,
+		"--dry-run",
+		"--prompt", "hello",
+	})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid agent type from config")
+	}
+	if !strings.Contains(err.Error(), `invalid agent type "bad-type"`) {
+		t.Errorf("expected error about invalid agent type, got: %v", err)
+	}
+}
+
+func TestRunCommand_InvalidCredentialTypeFromConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	cfg := "secret: my-secret\ncredentialType: bad-cred\n"
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewRootCommand()
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{
+		"run",
+		"--config", cfgPath,
+		"--dry-run",
+		"--prompt", "hello",
+	})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid credential type from config")
+	}
+	if !strings.Contains(err.Error(), `invalid credential type "bad-cred"`) {
+		t.Errorf("expected error about invalid credential type, got: %v", err)
+	}
+}
+
 func TestResolveContent(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		got, err := resolveContent("")

@@ -77,6 +77,12 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 				}
 			}
 
+			// Validate agent type.
+			validAgentTypes := []string{"claude-code", "codex", "gemini", "opencode"}
+			if !contains(validAgentTypes, agentType) {
+				return fmt.Errorf("invalid agent type %q: must be one of: %s", agentType, strings.Join(validAgentTypes, ", "))
+			}
+
 			// Auto-create secret from token if no explicit secret is set.
 			if secret == "" && cfg.Config != nil {
 				if cfg.Config.OAuthToken != "" && cfg.Config.APIKey != "" {
@@ -113,6 +119,12 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 
 			if secret == "" {
 				return fmt.Errorf("no credentials configured (set oauthToken/apiKey in config file, or use --secret flag)")
+			}
+
+			// Validate credential type (after auto-create may have set it).
+			validCredentialTypes := []string{"api-key", "oauth"}
+			if !contains(validCredentialTypes, credentialType) {
+				return fmt.Errorf("invalid credential type %q: must be one of: %s", credentialType, strings.Join(validCredentialTypes, ", "))
 			}
 
 			cl, ns, err := newClientOrDryRun(cfg, dryRun)
@@ -286,7 +298,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&prompt, "prompt", "p", "", "task prompt (required)")
-	cmd.Flags().StringVarP(&agentType, "type", "t", "claude-code", "agent type (claude-code, codex, gemini)")
+	cmd.Flags().StringVarP(&agentType, "type", "t", "claude-code", "agent type (claude-code, codex, gemini, opencode)")
 	cmd.Flags().StringVar(&secret, "secret", "", "secret name with credentials (overrides oauthToken/apiKey in config)")
 	cmd.Flags().StringVar(&credentialType, "credential-type", "api-key", "credential type (api-key, oauth)")
 	cmd.Flags().StringVar(&model, "model", "", "model override")
@@ -329,6 +341,16 @@ func watchTask(ctx context.Context, cl client.Client, name, namespace string) er
 
 		time.Sleep(2 * time.Second)
 	}
+}
+
+// contains reports whether s is in the given slice.
+func contains(vals []string, s string) bool {
+	for _, v := range vals {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 // apiKeySecretKey returns the secret key name for API key credentials

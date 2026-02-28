@@ -160,17 +160,13 @@ var _ = Describe("Install/Uninstall", Ordered, func() {
 	})
 
 	Context("kelos uninstall", func() {
-		AfterEach(func() {
-			restoreCRDs(kubeconfigPath)
-		})
-
-		It("Should remove controller resources", func() {
+		It("Should remove controller resources but preserve CRDs by default", func() {
 			By("Installing first")
 			root := cli.NewRootCommand()
 			root.SetArgs([]string{"install", "--kubeconfig", kubeconfigPath})
 			Expect(root.Execute()).To(Succeed())
 
-			By("Uninstalling")
+			By("Uninstalling without --crd")
 			root2 := cli.NewRootCommand()
 			root2.SetArgs([]string{"uninstall", "--kubeconfig", kubeconfigPath})
 			Expect(root2.Execute()).To(Succeed())
@@ -195,6 +191,40 @@ var _ = Describe("Install/Uninstall", Ordered, func() {
 			if err == nil {
 				Fail("expected ClusterRole to be deleted")
 			}
+
+			By("Verifying CRDs are preserved")
+			crdGVK := schema.GroupVersionKind{Group: "apiextensions.k8s.io", Version: "v1", Kind: "CustomResourceDefinition"}
+			for _, name := range []string{"tasks.kelos.dev", "taskspawners.kelos.dev", "workspaces.kelos.dev", "agentconfigs.kelos.dev"} {
+				crd := &unstructured.Unstructured{}
+				crd.SetGroupVersionKind(crdGVK)
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name}, crd)).To(Succeed(), "CRD %s should still exist", name)
+			}
+		})
+
+		It("Should remove CRDs when --crd is set", func() {
+			By("Installing first")
+			root := cli.NewRootCommand()
+			root.SetArgs([]string{"install", "--kubeconfig", kubeconfigPath})
+			Expect(root.Execute()).To(Succeed())
+
+			By("Uninstalling with --crd")
+			root2 := cli.NewRootCommand()
+			root2.SetArgs([]string{"uninstall", "--crd", "--kubeconfig", kubeconfigPath})
+			Expect(root2.Execute()).To(Succeed())
+
+			By("Verifying the Deployment is gone")
+			dep := &appsv1.Deployment{}
+			err := k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "kelos-controller-manager",
+				Namespace: "kelos-system",
+			}, dep)
+			Expect(client.IgnoreNotFound(err)).To(Succeed())
+			if err == nil {
+				Fail("expected Deployment to be deleted")
+			}
+
+			By("Restoring CRDs for subsequent tests")
+			restoreCRDs(kubeconfigPath)
 		})
 
 		It("Should be idempotent", func() {

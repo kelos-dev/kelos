@@ -367,6 +367,74 @@ func TestInstallCommand_VersionFlag(t *testing.T) {
 	}
 }
 
+func TestInstallCommand_DryRun_CRDFlagDefaultTrue(t *testing.T) {
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{"install", "--dry-run"})
+
+	output := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "CustomResourceDefinition") {
+		t.Errorf("expected CRD manifest in default dry-run output, got:\n%s", output[:min(len(output), 500)])
+	}
+	if !strings.Contains(output, "Deployment") {
+		t.Errorf("expected Deployment manifest in default dry-run output, got:\n%s", output[:min(len(output), 500)])
+	}
+}
+
+func TestInstallCommand_DryRun_CRDFlagFalse(t *testing.T) {
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{"install", "--dry-run", "--crd=false"})
+
+	output := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if strings.Contains(output, "CustomResourceDefinition") {
+		t.Errorf("expected no CRD manifest when --crd=false, got:\n%s", output[:min(len(output), 500)])
+	}
+	if !strings.Contains(output, "Deployment") {
+		t.Errorf("expected Deployment manifest when --crd=false, got:\n%s", output[:min(len(output), 500)])
+	}
+}
+
+func TestInstallCommand_DryRun_CRDFlagTrue(t *testing.T) {
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{"install", "--dry-run", "--crd=true"})
+
+	output := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "CustomResourceDefinition") {
+		t.Errorf("expected CRD manifest when --crd=true, got:\n%s", output[:min(len(output), 500)])
+	}
+	if !strings.Contains(output, "Deployment") {
+		t.Errorf("expected Deployment manifest when --crd=true, got:\n%s", output[:min(len(output), 500)])
+	}
+}
+
+func TestUninstallCommand_CRDFlagAccepted(t *testing.T) {
+	// Verify the --crd flag is accepted by the uninstall command (even though
+	// it cannot connect to a cluster, it should parse the flag without error).
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{"uninstall", "--crd", "--kubeconfig", "/nonexistent/path/kubeconfig"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected uninstall to fail with invalid kubeconfig")
+	}
+	if !strings.Contains(err.Error(), "loading kubeconfig:") {
+		t.Fatalf("expected kubeconfig loading error, got %v", err)
+	}
+}
+
 func TestVersionCommand(t *testing.T) {
 	cmd := NewRootCommand()
 	cmd.SetArgs([]string{"version"})

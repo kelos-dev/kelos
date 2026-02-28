@@ -31,6 +31,7 @@ func newInstallCommand(cfg *ClientConfig) *cobra.Command {
 	var dryRun bool
 	var flagVersion string
 	var imagePullPolicy string
+	var crd bool
 
 	cmd := &cobra.Command{
 		Use:   "install",
@@ -46,10 +47,12 @@ func newInstallCommand(cfg *ClientConfig) *cobra.Command {
 			}
 
 			if dryRun {
-				if _, err := os.Stdout.Write(manifests.InstallCRD); err != nil {
-					return err
+				if crd {
+					if _, err := os.Stdout.Write(manifests.InstallCRD); err != nil {
+						return err
+					}
+					fmt.Fprintln(os.Stdout, "---")
 				}
-				fmt.Fprintln(os.Stdout, "---")
 				_, err := os.Stdout.Write(controllerManifest)
 				return err
 			}
@@ -70,9 +73,11 @@ func newInstallCommand(cfg *ClientConfig) *cobra.Command {
 
 			ctx := cmd.Context()
 
-			fmt.Fprintf(os.Stdout, "Installing kelos CRDs\n")
-			if err := applyManifests(ctx, dc, dyn, manifests.InstallCRD); err != nil {
-				return fmt.Errorf("installing CRDs: %w", err)
+			if crd {
+				fmt.Fprintf(os.Stdout, "Installing kelos CRDs\n")
+				if err := applyManifests(ctx, dc, dyn, manifests.InstallCRD); err != nil {
+					return fmt.Errorf("installing CRDs: %w", err)
+				}
 			}
 
 			fmt.Fprintf(os.Stdout, "Installing kelos controller (version: %s)\n", version.Version)
@@ -88,6 +93,7 @@ func newInstallCommand(cfg *ClientConfig) *cobra.Command {
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print the manifests that would be applied without installing")
 	cmd.Flags().StringVar(&flagVersion, "version", "", "override the version used for image tags (defaults to the binary version)")
 	cmd.Flags().StringVar(&imagePullPolicy, "image-pull-policy", "", "set imagePullPolicy on controller containers (e.g. Always, IfNotPresent, Never)")
+	cmd.Flags().BoolVar(&crd, "crd", true, "install CRDs (set to false to skip CRD installation)")
 
 	return cmd
 }
@@ -134,6 +140,8 @@ func withImagePullPolicy(data []byte, policy string) []byte {
 }
 
 func newUninstallCommand(cfg *ClientConfig) *cobra.Command {
+	var crd bool
+
 	cmd := &cobra.Command{
 		Use:   "uninstall",
 		Short: "Uninstall kelos controller and CRDs from the cluster",
@@ -160,15 +168,19 @@ func newUninstallCommand(cfg *ClientConfig) *cobra.Command {
 				return fmt.Errorf("removing controller: %w", err)
 			}
 
-			fmt.Fprintf(os.Stdout, "Removing kelos CRDs\n")
-			if err := deleteManifests(ctx, dc, dyn, manifests.InstallCRD); err != nil {
-				return fmt.Errorf("removing CRDs: %w", err)
+			if crd {
+				fmt.Fprintf(os.Stdout, "Removing kelos CRDs\n")
+				if err := deleteManifests(ctx, dc, dyn, manifests.InstallCRD); err != nil {
+					return fmt.Errorf("removing CRDs: %w", err)
+				}
 			}
 
 			fmt.Fprintf(os.Stdout, "Kelos uninstalled successfully\n")
 			return nil
 		},
 	}
+
+	cmd.Flags().BoolVar(&crd, "crd", false, "also remove CRDs (deleting CRDs cascades to all custom resources)")
 
 	return cmd
 }

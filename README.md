@@ -63,7 +63,7 @@ TaskSpawner watches external sources (e.g., GitHub Issues) and automatically cre
 
 Kelos develops itself. Five TaskSpawners run 24/7, each handling a different part of the development lifecycle — fully autonomous.
 
-<img width="2694" height="1966" alt="kelos-self-development" src="https://github.com/user-attachments/assets/969e6832-c480-4df2-bcc0-bf9314ece2d4" />
+<img width="2694" height="1966" alt="kelos-self-development" src="https://github.com/user-attachments/assets/87c9bf09-b316-473e-9784-1ad8c4601fae" />
 
 | TaskSpawner | Trigger | Model | Description |
 |---|---|---|---|

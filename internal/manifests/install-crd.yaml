@@ -532,6 +532,7 @@ spec:
                 - codex
                 - gemini
                 - opencode
+                - custom
                 type: string
               workspaceRef:
                 description: WorkspaceRef optionally references a Workspace resource
@@ -1011,6 +1012,7 @@ spec:
                     - codex
                     - gemini
                     - opencode
+                    - custom
                     type: string
                   workspaceRef:
                     description: |-

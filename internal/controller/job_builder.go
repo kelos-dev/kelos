@@ -39,6 +39,9 @@ const (
 	// AgentTypeOpenCode is the agent type for OpenCode.
 	AgentTypeOpenCode = "opencode"
 
+	// AgentTypeCustom is the agent type for custom agent images.
+	AgentTypeCustom = "custom"
+
 	// GitCloneImage is the image used for cloning git repositories.
 	GitCloneImage = "alpine/git:v2.47.2"
 
@@ -98,6 +101,11 @@ func (b *JobBuilder) Build(task *kelosv1alpha1.Task, workspace *kelosv1alpha1.Wo
 		return b.buildAgentJob(task, workspace, agentConfig, b.GeminiImage, b.GeminiImagePullPolicy, prompt)
 	case AgentTypeOpenCode:
 		return b.buildAgentJob(task, workspace, agentConfig, b.OpenCodeImage, b.OpenCodeImagePullPolicy, prompt)
+	case AgentTypeCustom:
+		if task.Spec.Image == "" {
+			return nil, fmt.Errorf("custom agent type requires spec.image to be set")
+		}
+		return b.buildAgentJob(task, workspace, agentConfig, "", corev1.PullPolicy(""), prompt)
 	default:
 		return nil, fmt.Errorf("unsupported agent type: %s", task.Spec.Type)
 	}
@@ -119,6 +127,10 @@ func apiKeyEnvVar(agentType string) string {
 		// OPENCODE_API_KEY is the environment variable that the opencode
 		// entrypoint reads for API key authentication.
 		return "OPENCODE_API_KEY"
+	case AgentTypeCustom:
+		// KELOS_API_KEY is a generic environment variable for custom agent
+		// images to read API key credentials.
+		return "KELOS_API_KEY"
 	default:
 		return "ANTHROPIC_API_KEY"
 	}
@@ -134,6 +146,8 @@ func oauthEnvVar(agentType string) string {
 		return "GEMINI_API_KEY"
 	case AgentTypeOpenCode:
 		return "OPENCODE_API_KEY"
+	case AgentTypeCustom:
+		return "KELOS_OAUTH_TOKEN"
 	default:
 		return "CLAUDE_CODE_OAUTH_TOKEN"
 	}

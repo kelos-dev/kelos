@@ -153,7 +153,7 @@ func TestRunCommand_DryRun_OpenCodeNoneAPIKey(t *testing.T) {
 }
 
 func TestRunCommand_DryRun_AgentType(t *testing.T) {
-	for _, agentType := range []string{"claude-code", "codex", "gemini", "opencode"} {
+	for _, agentType := range []string{"claude-code", "codex", "gemini", "opencode", "custom"} {
 		t.Run(agentType, func(t *testing.T) {
 			dir := t.TempDir()
 			cfgPath := filepath.Join(dir, "config.yaml")

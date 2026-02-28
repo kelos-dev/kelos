@@ -25,7 +25,7 @@ import (
 const credentialNone = "none"
 
 // validAgentTypes lists the accepted values for the --type flag.
-var validAgentTypes = []string{"claude-code", "codex", "gemini", "opencode"}
+var validAgentTypes = []string{"claude-code", "codex", "gemini", "opencode", "custom"}
 
 // validCredentialTypes lists the accepted values for the --credential-type flag.
 var validCredentialTypes = []string{"api-key", "oauth"}
@@ -358,6 +358,8 @@ func apiKeySecretKey(agentType string) string {
 		return "GEMINI_API_KEY"
 	case "opencode":
 		return "OPENCODE_API_KEY"
+	case "custom":
+		return "KELOS_API_KEY"
 	default:
 		return "ANTHROPIC_API_KEY"
 	}
@@ -373,6 +375,8 @@ func oauthSecretKey(agentType string) string {
 		return "GEMINI_API_KEY"
 	case "opencode":
 		return "OPENCODE_API_KEY"
+	case "custom":
+		return "KELOS_OAUTH_TOKEN"
 	default:
 		return "CLAUDE_CODE_OAUTH_TOKEN"
 	}

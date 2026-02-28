@@ -149,7 +149,7 @@ type Jira struct {
 type TaskTemplate struct {
 	// Type specifies the agent type (e.g., claude-code).
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=claude-code;codex;gemini;opencode
+	// +kubebuilder:validation:Enum=claude-code;codex;gemini;opencode;custom
 	Type string `json:"type"`
 
 	// Credentials specifies how to authenticate with the agent.

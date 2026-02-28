@@ -1362,6 +1362,73 @@ func TestBuildClaudeCodeJob_UnsupportedType(t *testing.T) {
 	}
 }
 
+func TestBuildJob_CustomType(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-custom-type",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeCustom,
+			Prompt: "Hello",
+			Image:  "my-custom-agent:v1",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+	if container.Image != "my-custom-agent:v1" {
+		t.Errorf("Expected image %q, got %q", "my-custom-agent:v1", container.Image)
+	}
+
+	// Verify KELOS_API_KEY is used for custom agent type.
+	var found bool
+	for _, env := range container.Env {
+		if env.Name == "KELOS_API_KEY" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Expected KELOS_API_KEY env var for custom agent type")
+	}
+}
+
+func TestBuildJob_CustomType_MissingImage(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-custom-no-image",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeCustom,
+			Prompt: "Hello",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	_, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err == nil {
+		t.Fatal("Expected error for custom type without image")
+	}
+	if !strings.Contains(err.Error(), "custom agent type requires spec.image") {
+		t.Errorf("Expected error about missing image, got: %v", err)
+	}
+}
+
 func int64Ptr(v int64) *int64 { return &v }
 
 func TestBuildJob_PodOverridesResources(t *testing.T) {

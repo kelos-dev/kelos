@@ -4,44 +4,7 @@ This directory contains real-world orchestration patterns used by the Kelos proj
 
 ## How It Works
 
-```
-┌───────────────────────────────────────────────────────────┐
-│                      GitHub Issues                        │
-└────────────┬─────────────────────────────┬────────────────┘
-             │ labeled needs-actor         │ labeled actor/kelos
-             ▼                             │
-┌────────────────────────┐                 │
-│ kelos-triage           │                 │
-│ Classify, prioritize   │── assigns ─────►│
-│ & recommend actor      │   actor/kelos   │
-└────────────────────────┘   if automatable│
-                                           ▼
-                            ┌────────────────────────┐
-                            │ kelos-workers           │
-                            │ Investigate, fix,       │
-                            │ create/update PR        │
-                            └───────────┬────────────┘
-                                        ▼
-                            ┌────────────────────────┐
-                            │ Pull Request           │
-                            │ + CI check             │
-                            │ + self-review          │
-                            └────────────────────────┘
-
-┌───────────────────────────────────────────────────────────┐
-│                   Cron-scheduled agents                    │
-├───────────────────┬───────────────────┬───────────────────┤
-│ kelos-self-update │ kelos-fake-user   │ kelos-fake-       │
-│ Daily 06:00 UTC   │ Daily 09:00 UTC   │ strategist        │
-│ Improve workflow  │ Test DX as a      │ Every 12h         │
-│ files             │ new user          │ Explore new ideas │
-│ → PR or Issue     │ → Issues          │ → Issues          │
-└───────────────────┴───────────────────┴───────────────────┘
-
-Feedback loop (kelos/needs-input label):
-  Agent adds label when blocked ──► Issue excluded from polls
-  Human removes label           ──► Issue re-queued on next poll
-```
+<img width="2694" height="1966" alt="kelos-self-development" src="https://github.com/user-attachments/assets/604bf531-bc69-41be-a716-b9d17b477460" />
 
 All agents share an `AgentConfig` (`agentconfig.yaml`) that defines git identity, comment signatures, and standard constraints.
 

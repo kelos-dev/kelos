@@ -1,6 +1,6 @@
 <h1 align="center">Kelos</h1>
 
-<p align="center"><strong>The Kubernetes-native framework for orchestrating autonomous AI coding agents.</strong></p>
+<p align="center"><strong>Turn your development workflow into YAML. Orchestrate autonomous AI coding agents on Kubernetes.</strong></p>
 
 <p align="center">
   <a href="https://github.com/kelos-dev/kelos/actions/workflows/ci.yaml"><img src="https://github.com/kelos-dev/kelos/actions/workflows/ci.yaml/badge.svg" alt="CI"></a>
@@ -12,39 +12,105 @@
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> &middot;
+  <a href="#kelos-developing-kelos">Kelos Developing Kelos</a> &middot;
   <a href="#examples">Examples</a> &middot;
   <a href="docs/reference.md">Reference</a> &middot;
   <a href="examples/">YAML Manifests</a>
 </p>
 
-Point Kelos at a GitHub issue and get a PR back — fully autonomous, running in Kubernetes. Each agent runs in an isolated, ephemeral Pod with a freshly cloned git workspace. Fan out across repositories, chain tasks into pipelines, and react to events automatically.
+Kelos started as a way to sandbox AI coding agents in Kubernetes. The biggest unlock turned out to be something else: **defining your entire development workflow as YAML.**
+
+Instead of invoking an agent when you need it, you declare what your team's workflow looks like — watch for bugs and draft PRs, test the developer experience periodically, scan for improvements on a schedule — and Kelos runs it continuously. Agents become managed workers, not tools you invoke.
+
+We use Kelos to develop Kelos. Five TaskSpawners run 24/7: triaging issues, fixing bugs, testing DX as a fake new user, brainstorming improvements, and tuning their own prompts. [See the full pipeline below.](#kelos-developing-kelos)
 
 Supports **Claude Code**, **OpenAI Codex**, **Google Gemini**, **OpenCode**, and [custom agent images](docs/agent-image-interface.md).
 
-## Demo
+## How It Works
 
-```bash
-# Run multiple tasks in parallel across your repo
-$ kelos run -p "Fix the bug described in issue #42 and open a PR" --name fix-42
-$ kelos run -p "Add unit tests for the auth module" --name add-tests
-$ kelos run -p "Update API docs for v2 endpoints" --name update-docs
+Kelos orchestrates the flow from external events to autonomous execution:
 
-# Watch all tasks progress simultaneously
-$ kelos get tasks
-NAME          TYPE          PHASE     BRANCH                WORKSPACE   AGENT CONFIG   DURATION   AGE
-fix-42        claude-code   Running   kelos-task-fix-42      my-repo     my-config      2m         2m
-add-tests     claude-code   Running   kelos-task-add-tests   my-repo     my-config      1m         1m
-update-docs   claude-code   Running   kelos-task-update-docs my-repo     my-config      45s        45s
+<img width="2521" height="1582" alt="kelos-resources" src="https://github.com/user-attachments/assets/456c0534-22c0-4d90-b461-e34e33b07dd1" />
+
+You define what needs to be done, and Kelos handles the "how" — from cloning the right repo and injecting credentials to running the agent and capturing its outputs (branch names, commit SHAs, PR URLs, and token usage).
+
+### Core Primitives
+
+Kelos is built on four resources:
+
+1. **Tasks** — Ephemeral units of work that wrap an AI agent run.
+2. **Workspaces** — Persistent or ephemeral environments (git repos) where agents operate.
+3. **AgentConfigs** — Reusable bundles of agent instructions (`AGENTS.md`, `CLAUDE.md`), plugins (skills and agents), and MCP servers.
+4. **TaskSpawners** — Orchestration engines that react to external triggers (GitHub, Cron) to automatically manage agent lifecycles.
+
+<details>
+<summary>TaskSpawner — Automatic Task Creation from External Sources</summary>
+
+TaskSpawner watches external sources (e.g., GitHub Issues) and automatically creates Tasks for each discovered item.
+
+```
+                    polls         new issues
+ TaskSpawner ─────────────▶ GitHub Issues
+      │        ◀─────────────
+      │
+      ├──creates──▶ Task: fix-bugs-1
+      └──creates──▶ Task: fix-bugs-2
 ```
 
-https://github.com/user-attachments/assets/bb10e8ba-ecdf-4dc5-9a74-070d9335a00b
+</details>
 
-See [Autonomous self-development pipeline](#autonomous-self-development-pipeline) for a full end-to-end example.
+## Kelos Developing Kelos
+
+Kelos develops itself. Five TaskSpawners run 24/7, each handling a different part of the development lifecycle — fully autonomous.
+
+<img width="2694" height="1966" alt="kelos-self-development" src="https://github.com/user-attachments/assets/969e6832-c480-4df2-bcc0-bf9314ece2d4" />
+
+| TaskSpawner | Trigger | Model | Description |
+|---|---|---|---|
+| **kelos-workers** | GitHub Issues (`actor/kelos`) | Opus | Picks up issues, creates or updates PRs, self-reviews, and ensures CI passes |
+| **kelos-triage** | GitHub Issues (`needs-actor`) | Opus | Classifies issues by kind/priority, detects duplicates, and recommends an actor |
+| **kelos-fake-user** | Cron (daily 09:00 UTC) | Sonnet | Tests DX as a new user — follows docs, tries CLI workflows, files issues for problems found |
+| **kelos-fake-strategist** | Cron (every 12 hours) | Opus | Explores new use cases, workflow improvements, and integration opportunities |
+| **kelos-self-update** | Cron (daily 06:00 UTC) | Opus | Reviews and tunes prompts, configs, and workflow files — the pipeline improves itself |
+
+Here's a trimmed snippet of `kelos-workers.yaml` — enough to show the pattern:
+
+```yaml
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: kelos-workers
+spec:
+  when:
+    githubIssues:
+      labels: [actor/kelos]
+      excludeLabels: [kelos/needs-input]
+      priorityLabels:
+        - priority/critical-urgent
+        - priority/important-soon
+  maxConcurrency: 3
+  taskTemplate:
+    model: opus
+    type: claude-code
+    branch: "kelos-task-{{.Number}}"
+    promptTemplate: |
+      You are a coding agent. You either
+      - create a PR to fix the issue
+      - update an existing PR to fix the issue
+      - comment on the issue or the PR if you cannot fix it
+      ...
+  pollInterval: 1m
+```
+
+The key pattern is `excludeLabels: [kelos/needs-input]` — this creates a feedback loop where the agent works autonomously until it needs human input, then pauses. Removing the label re-queues the issue on the next poll.
+
+See the full manifest at [`self-development/kelos-workers.yaml`](self-development/kelos-workers.yaml) and the [`self-development/` README](self-development/README.md) for setup instructions.
 
 ## Why Kelos?
 
-AI coding agents are evolving from interactive CLI tools into autonomous background workers. Kelos provides the infrastructure to manage this transition at scale.
+AI coding agents are evolving from interactive CLI tools into autonomous background workers — managed like infrastructure, not invoked like commands. Kelos provides the framework to manage this transition at scale.
 
+- **Workflow as YAML** — Define your development workflow declaratively: what triggers agents, what they do, and how they hand off. Version-control it, review it in PRs, and GitOps it like any other infrastructure.
 - **Orchestration, not just execution** — Don't just run an agent; manage its entire lifecycle. Chain tasks with `dependsOn` and pass results (branch names, PR URLs, token usage) between pipeline stages. Use `TaskSpawner` to build event-driven workers that react to GitHub issues, PRs, or schedules.
 - **Host-isolated autonomy** — Each task runs in an isolated, ephemeral Pod with a freshly cloned git workspace. Agents have no access to your host machine — use [scoped tokens and branch protection](#security-considerations) to control repository access.
 - **Standardized interface** — Plug in any agent (Claude, Codex, Gemini, OpenCode, or your own) using a simple [container interface](docs/agent-image-interface.md). Kelos handles credential injection, workspace management, and Kubernetes plumbing.
@@ -225,57 +291,7 @@ Or pass `--secret` to `kelos run` with a pre-created secret (api-key is the defa
 
 </details>
 
-## How It Works
-
-Kelos orchestrates the flow from external events to autonomous execution:
-
-<img width="2521" height="1582" alt="kelos-resources" src="https://github.com/user-attachments/assets/456c0534-22c0-4d90-b461-e34e33b07dd1" />
-
-You define what needs to be done, and Kelos handles the "how" — from cloning the right repo and injecting credentials to running the agent and capturing its outputs (branch names, commit SHAs, PR URLs, and token usage).
-
-### Core Primitives
-
-Kelos is built on four resources:
-
-1. **Tasks** — Ephemeral units of work that wrap an AI agent run.
-2. **Workspaces** — Persistent or ephemeral environments (git repos) where agents operate.
-3. **AgentConfigs** — Reusable bundles of agent instructions (`AGENTS.md`, `CLAUDE.md`), plugins (skills and agents), and MCP servers.
-4. **TaskSpawners** — Orchestration engines that react to external triggers (GitHub, Cron) to automatically manage agent lifecycles.
-
-<details>
-<summary>TaskSpawner — Automatic Task Creation from External Sources</summary>
-
-TaskSpawner watches external sources (e.g., GitHub Issues) and automatically creates Tasks for each discovered item.
-
-```
-                    polls         new issues
- TaskSpawner ─────────────▶ GitHub Issues
-      │        ◀─────────────
-      │
-      ├──creates──▶ Task: fix-bugs-1
-      └──creates──▶ Task: fix-bugs-2
-```
-
-</details>
-
 ## Examples
-
-### Create PRs automatically
-
-Add a `token` to your workspace config:
-
-```yaml
-workspace:
-  repo: https://github.com/your-org/repo.git
-  ref: main
-  token: <your-github-token>
-```
-
-```bash
-kelos run -p "Fix the bug described in issue #42 and open a PR with the fix"
-```
-
-The `gh` CLI and `GITHUB_TOKEN` are available inside the agent container, so the agent can push branches and create PRs autonomously.
 
 ### Auto-fix GitHub issues with TaskSpawner
 
@@ -309,7 +325,7 @@ kubectl apply -f taskspawner.yaml
 
 TaskSpawner polls for new issues matching your filters and creates a Task for each one.
 
-### Chain tasks with dependencies
+### Chain tasks into pipelines
 
 Use `dependsOn` to chain tasks into pipelines. A task in `Waiting` phase stays paused until all its dependencies succeed:
 
@@ -381,6 +397,23 @@ spec:
 
 The `.Deps` map is keyed by dependency Task name. Each entry has `Results` (key-value map with branch, commit, pr, etc.) and `Outputs` (raw output lines). See [examples/07-task-pipeline](examples/07-task-pipeline/) for a full three-stage pipeline.
 
+### Create PRs automatically
+
+Add a `token` to your workspace config:
+
+```yaml
+workspace:
+  repo: https://github.com/your-org/repo.git
+  ref: main
+  token: <your-github-token>
+```
+
+```bash
+kelos run -p "Fix the bug described in issue #42 and open a PR with the fix"
+```
+
+The `gh` CLI and `GITHUB_TOKEN` are available inside the agent container, so the agent can push branches and create PRs autonomously.
+
 ### Inject agent instructions and MCP servers
 
 Use `AgentConfig` to bundle project-wide instructions, plugins, and MCP servers:
@@ -412,21 +445,11 @@ kelos run -p "Fix the bug" --agent-config my-config
 
 See the [full AgentConfig spec](docs/reference.md#agentconfig) for plugins, skills, and agents configuration.
 
-### Autonomous self-development pipeline
-
-This is a real-world TaskSpawner that picks up every open issue, investigates it, opens (or updates) a PR, self-reviews, and ensures CI passes — fully autonomously. When the agent can't make progress, it labels the issue `kelos/needs-input` and stops. Remove the label to re-queue it.
-
-<img width="2694" height="1966" alt="kelos-self-development" src="https://github.com/user-attachments/assets/969e6832-c480-4df2-bcc0-bf9314ece2d4" />
-
-See [`self-development/kelos-workers.yaml`](self-development/kelos-workers.yaml) for the full manifest and the [`self-development/` README](self-development/README.md) for setup instructions.
-
-The key pattern is `excludeLabels: [kelos/needs-input]` — this creates a feedback loop where the agent works autonomously until it needs human input, then pauses. Removing the label re-queues the issue on the next poll.
-
 > Browse all ready-to-apply YAML manifests in the [`examples/`](examples/) directory.
 
 ## Orchestration Patterns
 
-- **Autonomous Self-Development** — Build a feedback loop where agents pick up issues, write code, self-review, and fix CI flakes until the task is complete. See the [self-development pipeline](#autonomous-self-development-pipeline).
+- **Autonomous Self-Development** — Build a feedback loop where agents pick up issues, write code, self-review, and fix CI flakes until the task is complete. See the [self-development pipeline](#kelos-developing-kelos).
 - **Event-Driven Bug Fixing** — Automatically spawn agents to investigate and fix bugs as soon as they are labeled in GitHub. See [Auto-fix GitHub issues](#auto-fix-github-issues-with-taskspawner).
 - **Fleet-Wide Refactoring** — Orchestrate a "fan-out" where dozens of agents apply the same refactoring pattern across a fleet of microservices in parallel.
 - **Hands-Free CI/CD** — Embed agents as first-class steps in your deployment pipelines to generate documentation or perform automated migrations.

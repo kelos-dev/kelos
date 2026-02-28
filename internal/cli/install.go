@@ -144,7 +144,7 @@ func newUninstallCommand(cfg *ClientConfig) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "uninstall",
-		Short: "Uninstall kelos controller and CRDs from the cluster",
+		Short: "Uninstall kelos controller from the cluster",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			restConfig, _, err := cfg.resolveConfig()

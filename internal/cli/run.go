@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -22,6 +23,12 @@ import (
 // file that indicates an empty credential. This is useful for agents like
 // OpenCode that support free-tier models requiring no authentication.
 const credentialNone = "none"
+
+// validAgentTypes lists the accepted values for the --type flag.
+var validAgentTypes = []string{"claude-code", "codex", "gemini", "opencode"}
+
+// validCredentialTypes lists the accepted values for the --credential-type flag.
+var validCredentialTypes = []string{"api-key", "oauth"}
 
 // resolveCredentialValue returns the actual credential value to store in the
 // secret. The reserved value "none" maps to an empty string.
@@ -78,8 +85,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 			}
 
 			// Validate agent type.
-			validAgentTypes := []string{"claude-code", "codex", "gemini", "opencode"}
-			if !contains(validAgentTypes, agentType) {
+			if !slices.Contains(validAgentTypes, agentType) {
 				return fmt.Errorf("invalid agent type %q: must be one of: %s", agentType, strings.Join(validAgentTypes, ", "))
 			}
 
@@ -122,8 +128,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 			}
 
 			// Validate credential type (after auto-create may have set it).
-			validCredentialTypes := []string{"api-key", "oauth"}
-			if !contains(validCredentialTypes, credentialType) {
+			if !slices.Contains(validCredentialTypes, credentialType) {
 				return fmt.Errorf("invalid credential type %q: must be one of: %s", credentialType, strings.Join(validCredentialTypes, ", "))
 			}
 
@@ -298,9 +303,9 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&prompt, "prompt", "p", "", "task prompt (required)")
-	cmd.Flags().StringVarP(&agentType, "type", "t", "claude-code", "agent type (claude-code, codex, gemini, opencode)")
+	cmd.Flags().StringVarP(&agentType, "type", "t", "claude-code", fmt.Sprintf("agent type (%s)", strings.Join(validAgentTypes, ", ")))
 	cmd.Flags().StringVar(&secret, "secret", "", "secret name with credentials (overrides oauthToken/apiKey in config)")
-	cmd.Flags().StringVar(&credentialType, "credential-type", "api-key", "credential type (api-key, oauth)")
+	cmd.Flags().StringVar(&credentialType, "credential-type", "api-key", fmt.Sprintf("credential type (%s)", strings.Join(validCredentialTypes, ", ")))
 	cmd.Flags().StringVar(&model, "model", "", "model override")
 	cmd.Flags().StringVar(&image, "image", "", "custom agent image (must implement agent image interface)")
 	cmd.Flags().StringVar(&name, "name", "", "task name (auto-generated if omitted)")
@@ -316,8 +321,8 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 
 	cmd.MarkFlagRequired("prompt")
 
-	_ = cmd.RegisterFlagCompletionFunc("credential-type", cobra.FixedCompletions([]string{"api-key", "oauth"}, cobra.ShellCompDirectiveNoFileComp))
-	_ = cmd.RegisterFlagCompletionFunc("type", cobra.FixedCompletions([]string{"claude-code", "codex", "gemini", "opencode"}, cobra.ShellCompDirectiveNoFileComp))
+	_ = cmd.RegisterFlagCompletionFunc("credential-type", cobra.FixedCompletions(validCredentialTypes, cobra.ShellCompDirectiveNoFileComp))
+	_ = cmd.RegisterFlagCompletionFunc("type", cobra.FixedCompletions(validAgentTypes, cobra.ShellCompDirectiveNoFileComp))
 
 	return cmd
 }
@@ -341,16 +346,6 @@ func watchTask(ctx context.Context, cl client.Client, name, namespace string) er
 
 		time.Sleep(2 * time.Second)
 	}
-}
-
-// contains reports whether s is in the given slice.
-func contains(vals []string, s string) bool {
-	for _, v := range vals {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }
 
 // apiKeySecretKey returns the secret key name for API key credentials

@@ -4,7 +4,7 @@ This directory contains real-world orchestration patterns used by the Kelos proj
 
 ## How It Works
 
-<img width="2694" height="1966" alt="kelos-self-development" src="https://github.com/user-attachments/assets/08153d3f-71d0-42b5-9fb0-2e2bdccb2a5d" />
+<img width="2694" height="1966" alt="kelos-self-development" src="https://github.com/user-attachments/assets/7e8978ab-8b2f-496d-b3e3-d25ea9f01fbf" />
 
 All agents share an `AgentConfig` (`agentconfig.yaml`) that defines git identity, comment signatures, and standard constraints.
 

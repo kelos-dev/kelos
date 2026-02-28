@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -86,7 +87,8 @@ func Run(ctx context.Context, log logr.Logger, c client.Client, clientset kubern
 	log.Info("Telemetry report collected", "payload", string(data))
 
 	if err := send(ctx, endpoint, report); err != nil {
-		return fmt.Errorf("sending telemetry: %w", err)
+		log.Error(err, "Failed to send telemetry report (non-fatal)")
+		return nil
 	}
 
 	log.Info("Telemetry report sent successfully")
@@ -177,6 +179,7 @@ func collect(ctx context.Context, c client.Client, clientset kubernetes.Interfac
 	for st := range sourceTypes {
 		report.Features.SourceTypes = append(report.Features.SourceTypes, st)
 	}
+	sort.Strings(report.Features.SourceTypes)
 
 	// Collect AgentConfig data.
 	var agentConfigs kelosv1alpha1.AgentConfigList

@@ -78,5 +78,5 @@ spec:
         - Commented on the issue or the PR for more information.
         - You cannot make any progress on the issue, explain why.
       - If you find anything worth considering (e.g. bugs, improvements, follow-up work), create a new issue:
-        - gh issue create --title "<title>" --body "<description>" --label generated-by-kelos --label kelos/needs-input
+        - gh issue create --title "<title>" --body "<description>" --label generated-by-kelos
   pollInterval: 1m

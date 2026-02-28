@@ -67,7 +67,7 @@ spec:
       Actions:
       - If you find improvements, create a GitHub issue with your findings and proposals:
         ```
-        gh issue create --title "<title>" --body "<description>" --label generated-by-kelos --label kelos/needs-input
+        gh issue create --title "<title>" --body "<description>" --label generated-by-kelos
         ```
       - Do NOT create PRs. Only create issues
 

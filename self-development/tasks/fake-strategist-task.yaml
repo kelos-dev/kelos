@@ -59,7 +59,7 @@ spec:
 
     Actions:
     - Create a GitHub issue with your findings and proposals:
-      gh issue create --title "<title>" --body "<description>" --label generated-by-kelos --label kelos/needs-input
+      gh issue create --title "<title>" --body "<description>" --label generated-by-kelos
     - Do NOT create PRs. Only create issues
     - Prefer well-researched issues with clear proposals over broad, vague suggestions
 

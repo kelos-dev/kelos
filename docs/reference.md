@@ -48,7 +48,10 @@ If template rendering fails (e.g., missing key), the raw prompt string is used a
 | `spec.repo` | Git repository URL to clone (HTTPS, git://, or SSH) | Yes |
 | `spec.ref` | Branch, tag, or commit SHA to checkout (defaults to repo's default branch) | No |
 | `spec.secretRef.name` | Secret containing credentials for git auth and `gh` CLI (see [authentication methods](#workspace-authentication) below) | No |
-| `spec.files[]` | Files to inject into the cloned repository before the agent starts | No |
+| `spec.remotes[].name` | Git remote name to add after cloning (must not be `"origin"`) | Yes (per remote) |
+| `spec.remotes[].url` | Git remote URL | Yes (per remote) |
+| `spec.files[].path` | Relative file path inside the repository (e.g., `CLAUDE.md`) | Yes (per file) |
+| `spec.files[].content` | File content to write | Yes (per file) |
 
 ### Workspace Authentication
 

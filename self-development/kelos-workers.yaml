@@ -53,19 +53,24 @@ spec:
 
       If a PR already exists:
       - 2a. Read ALL review comments and conversation on the PR (gh pr view, gh api for review comments).
+      - 2a-extra. Also read ALL comments on the linked issue (gh issue view <number> --comments), not just the PR.
       - 3a. Read the existing diff (git diff main...HEAD) to understand what has already been done. Do NOT start over or rewrite from scratch.
       - 4a. Make only the incremental changes needed to address review feedback or remaining issues. Preserve existing work.
       - 5a. Commit and push your changes to origin kelos-task-{{.Number}}.
       - 6a. /review the PR to verify your changes address the feedback. If changes are needed, make them, commit and push, then /review again. Repeat until the review passes.
-      - 7a. Update the PR title and description to reflect the final diff. Ensure the PR has labels "generated-by-kelos" and "ok-to-test" (use `gh pr edit <number> --add-label generated-by-kelos --add-label ok-to-test` if missing).
+      - 7a. Update the PR title and description to reflect the final diff. The PR body MUST contain a standard closing keyword reference on its own line (e.g., `Fixes #<number>` or `Closes #<number>`). Do not embed the issue number in natural language. Ensure the PR has labels "generated-by-kelos" and "ok-to-test" (use `gh pr edit <number> --add-label generated-by-kelos --add-label ok-to-test` if missing).
       - 8a. Make sure the PR passes all CI tests.
 
       If no PR exists:
       - 2b. Investigate the issue #{{.Number}}.
+        - Read ALL comments on the issue, including maintainer feedback and linked issues/PRs.
+        - If previous PRs for this issue were closed, read their reviews to understand why before choosing your approach.
+        - Search the codebase for existing constants, types, and patterns before creating new ones. Do not duplicate definitions.
+        - Only implement what the issue explicitly asks for. If you discover related improvements, create separate issues for them.
       - 3b. Create a commit that fixes the issue.
       - 4b. Push your branch to origin kelos-task-{{.Number}}.
       - 5b. Create a PR with labels "generated-by-kelos" and "ok-to-test" (use `gh pr create --label generated-by-kelos --label ok-to-test`), then /review it. If changes are needed, make them, commit and push, then /review again. Repeat until the review passes.
-      - 6b. Update the PR title and description to reflect the final diff.
+      - 6b. Update the PR title and description to reflect the final diff. The PR body MUST contain a standard closing keyword reference on its own line (e.g., `Fixes #<number>` or `Closes #<number>`). Do not embed the issue number in natural language.
       - 7b. Make sure the PR passes all CI tests.
 
       Post-checklist:

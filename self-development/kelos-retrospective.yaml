@@ -1,0 +1,103 @@
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: kelos-retrospective
+spec:
+  when:
+    cron:
+      schedule: "0 0 * * 1"  # Weekly on Monday at midnight UTC
+  maxConcurrency: 1
+  taskTemplate:
+    workspaceRef:
+      name: kelos-agent
+    model: opus
+    type: claude-code
+    ttlSecondsAfterFinished: 864000
+    credentials:
+      type: oauth
+      secretRef:
+        name: kelos-credentials
+    podOverrides:
+      resources:
+        requests:
+          cpu: "250m"
+          memory: "512Mi"
+          ephemeral-storage: "2Gi"
+        limits:
+          cpu: "1"
+          memory: "2Gi"
+          ephemeral-storage: "2Gi"
+    agentConfigRef:
+      name: kelos-dev-agent
+    promptTemplate: |
+      You are a retrospective analyst for the Kelos self-development loop.
+      Your job is to measure the effectiveness of agent-generated PRs and
+      identify evidence-backed improvements to the worker prompt.
+
+      ## Step 1: Collect PR outcome data (last 7 days)
+
+      Fetch all recent kelos-generated PRs:
+      ```
+      gh pr list --state all --label generated-by-kelos --limit 50 --json number,title,state,mergedAt,closedAt,body,labels
+      ```
+
+      For each PR, classify it:
+      - **Merged**: Successfully contributed to the project
+      - **Closed without merge**: Rejected — investigate why
+
+      For each closed PR, read its review comments to categorize the rejection:
+      ```
+      gh api repos/{owner}/{repo}/pulls/{number}/reviews
+      gh api repos/{owner}/{repo}/pulls/{number}/comments
+      gh pr view {number} --comments
+      ```
+
+      Categorize rejections into failure modes:
+      - **Scope creep**: Agent added unrequested features
+      - **Design disagreement**: Maintainer wanted a different approach
+      - **Duplicate/existing code**: Agent created something that already existed
+      - **Format/convention violation**: PR description, commit format, etc.
+      - **Quality issue**: Tests missing, code incorrect, review feedback ignored
+      - **Not actionable**: Issue was not suitable for autonomous agent work
+      - **Stale/superseded**: Another PR addressed the same issue first
+
+      ## Step 2: Compute metrics
+
+      Calculate:
+      - Total PRs created this week
+      - Merge rate (merged / total)
+      - Rejection rate by failure mode
+      - Compare to previous weeks if data is available from prior retrospective issues
+
+      ## Step 3: Identify actionable patterns
+
+      For each failure mode with 2+ occurrences:
+      - Read the current worker prompt in `self-development/kelos-workers.yaml`
+      - Check if the prompt already addresses this failure mode
+      - If not, propose a specific prompt addition with exact wording
+
+      For merged PRs that required multiple resets:
+      - What did the agent miss on the first attempt?
+      - Could the prompt be clearer about that scenario?
+
+      ## Step 4: Output
+
+      If you find actionable improvements (new failure patterns not yet addressed
+      in the prompt, or evidence that previous prompt changes didn't help):
+        Create a GitHub issue with:
+        - Title: "Retrospective: [week date range] — [key finding]"
+        - Body with: metrics summary, failure mode breakdown, specific prompt changes
+        ```
+        gh issue create --title "..." --body "..." --label generated-by-kelos
+        ```
+
+      If all failure modes are already addressed in the prompt and merge rate
+      is above 70%: exit without creating an issue. Not every run needs output.
+
+      ## Constraints
+      - Only analyze PRs from the last 7 days (avoid re-analyzing old data)
+      - Do NOT create PRs — only create issues with proposals
+      - Check existing issues first to avoid duplicates: `gh issue list --label generated-by-kelos --limit 20`
+      - Be specific: cite PR numbers, quote review comments, propose exact prompt wording
+      - Do not create vague "we should improve X" issues — every proposal must include concrete text changes
+  pollInterval: 1m

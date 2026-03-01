@@ -185,6 +185,29 @@ Creates GitHub issues for actionable improvements found.
 kubectl apply -f self-development/kelos-self-update.yaml
 ```
 
+### kelos-retrospective.yaml
+
+Runs weekly to analyze PR outcomes and identify evidence-backed prompt improvements.
+
+| | |
+|---|---|
+| **Trigger** | Cron `0 0 * * 1` (weekly on Monday at midnight UTC) |
+| **Model** | Opus |
+| **Concurrency** | 1 |
+
+Each run performs a structured analysis:
+1. **Collect PR data** — fetches all kelos-generated PRs from the last 7 days
+2. **Classify outcomes** — categorizes each PR as merged or closed, with rejection reasons
+3. **Compute metrics** — calculates merge rate, rejection rate by failure mode, and week-over-week trends
+4. **Identify patterns** — proposes specific prompt changes backed by statistical evidence
+
+Creates GitHub issues only when actionable improvements are found (new failure patterns or evidence that previous changes didn't help). Skips output when merge rate is above 70% and all failure modes are already addressed.
+
+**Deploy:**
+```bash
+kubectl apply -f self-development/kelos-retrospective.yaml
+```
+
 ## Customizing for Your Repository
 
 To adapt these examples for your own repository:

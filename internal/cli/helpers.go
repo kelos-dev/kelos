@@ -9,6 +9,79 @@ import (
 	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 )
 
+// parseGitHubPluginFlag parses a --github-plugin flag value in the format
+// "name=owner/repo[@ref][,host=HOST][,secret=SECRET]" into a PluginSpec
+// with a GitHubPluginSource.
+func parseGitHubPluginFlag(s string) (kelosv1alpha1.PluginSpec, error) {
+	parts := strings.SplitN(s, "=", 2)
+	if len(parts) != 2 || parts[0] == "" {
+		return kelosv1alpha1.PluginSpec{}, fmt.Errorf("invalid --github-plugin value %q: must be name=owner/repo[@ref][,host=HOST][,secret=SECRET]", s)
+	}
+
+	name := parts[0]
+	remainder := parts[1]
+
+	// Split remainder by comma to extract optional key=value pairs.
+	segments := strings.Split(remainder, ",")
+	if segments[0] == "" {
+		return kelosv1alpha1.PluginSpec{}, fmt.Errorf("invalid --github-plugin value %q: repo is required", s)
+	}
+
+	repoAndRef := segments[0]
+	var host, secret string
+
+	for _, seg := range segments[1:] {
+		kv := strings.SplitN(seg, "=", 2)
+		if len(kv) != 2 || kv[0] == "" {
+			return kelosv1alpha1.PluginSpec{}, fmt.Errorf("invalid --github-plugin option %q in %q", seg, s)
+		}
+		switch kv[0] {
+		case "host":
+			host = kv[1]
+		case "secret":
+			secret = kv[1]
+		default:
+			return kelosv1alpha1.PluginSpec{}, fmt.Errorf("unknown --github-plugin option %q in %q", kv[0], s)
+		}
+	}
+
+	// Split repo@ref.
+	var repo, ref string
+	if idx := strings.LastIndex(repoAndRef, "@"); idx > 0 {
+		repo = repoAndRef[:idx]
+		ref = repoAndRef[idx+1:]
+		if ref == "" {
+			return kelosv1alpha1.PluginSpec{}, fmt.Errorf("invalid --github-plugin repo %q: ref must not be empty when '@' is present", repoAndRef)
+		}
+	} else {
+		repo = repoAndRef
+	}
+
+	// Validate owner/repo format.
+	repoParts := strings.Split(repo, "/")
+	if len(repoParts) != 2 || repoParts[0] == "" || repoParts[1] == "" {
+		return kelosv1alpha1.PluginSpec{}, fmt.Errorf("invalid --github-plugin repo %q: must be in owner/repo format", repo)
+	}
+
+	ghSource := &kelosv1alpha1.GitHubPluginSource{
+		Repo: repo,
+	}
+	if ref != "" {
+		ghSource.Ref = &ref
+	}
+	if host != "" {
+		ghSource.Host = &host
+	}
+	if secret != "" {
+		ghSource.SecretRef = &kelosv1alpha1.SecretReference{Name: secret}
+	}
+
+	return kelosv1alpha1.PluginSpec{
+		Name:   name,
+		GitHub: ghSource,
+	}, nil
+}
+
 // resolveContent returns the content string directly, or if it starts with "@",
 // reads the content from the referenced file path.
 func resolveContent(s string) (string, error) {

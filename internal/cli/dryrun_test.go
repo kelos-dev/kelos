@@ -509,6 +509,143 @@ func TestCreateAgentConfigCommand_DryRun_FileReference(t *testing.T) {
 	}
 }
 
+func TestCreateAgentConfigCommand_DryRun_WithGitHubPlugin(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{
+		"create", "agentconfig", "gh-ac",
+		"--config", cfgPath,
+		"--dry-run",
+		"--github-plugin", "tools=acme/tools@v1.0",
+		"--namespace", "test-ns",
+	})
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	if err := cmd.Execute(); err != nil {
+		w.Close()
+		os.Stdout = old
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	w.Close()
+	os.Stdout = old
+	var out bytes.Buffer
+	out.ReadFrom(r)
+	output := out.String()
+
+	if !strings.Contains(output, "kind: AgentConfig") {
+		t.Errorf("expected 'kind: AgentConfig' in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "name: tools") {
+		t.Errorf("expected plugin name 'tools' in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "repo: acme/tools") {
+		t.Errorf("expected repo 'acme/tools' in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "ref: v1.0") {
+		t.Errorf("expected ref 'v1.0' in output, got:\n%s", output)
+	}
+}
+
+func TestCreateAgentConfigCommand_DryRun_GitHubPluginWithSecret(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{
+		"create", "agentconfig", "private-ac",
+		"--config", cfgPath,
+		"--dry-run",
+		"--github-plugin", "priv=corp/private-tools,host=ghe.corp.com,secret=my-token",
+		"--namespace", "test-ns",
+	})
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	if err := cmd.Execute(); err != nil {
+		w.Close()
+		os.Stdout = old
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	w.Close()
+	os.Stdout = old
+	var out bytes.Buffer
+	out.ReadFrom(r)
+	output := out.String()
+
+	if !strings.Contains(output, "repo: corp/private-tools") {
+		t.Errorf("expected repo in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "host: ghe.corp.com") {
+		t.Errorf("expected host in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "name: my-token") {
+		t.Errorf("expected secret name in output, got:\n%s", output)
+	}
+}
+
+func TestCreateAgentConfigCommand_DryRun_GitHubPluginCombinedWithInline(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{
+		"create", "agentconfig", "combined-ac",
+		"--config", cfgPath,
+		"--dry-run",
+		"--skill", "review=Review the code",
+		"--github-plugin", "tools=acme/tools",
+		"--namespace", "test-ns",
+	})
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	if err := cmd.Execute(); err != nil {
+		w.Close()
+		os.Stdout = old
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	w.Close()
+	os.Stdout = old
+	var out bytes.Buffer
+	out.ReadFrom(r)
+	output := out.String()
+
+	// Should have both inline "kelos" plugin and GitHub "tools" plugin.
+	if !strings.Contains(output, "name: kelos") {
+		t.Errorf("expected inline plugin name 'kelos' in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "name: tools") {
+		t.Errorf("expected github plugin name 'tools' in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "repo: acme/tools") {
+		t.Errorf("expected repo in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Review the code") {
+		t.Errorf("expected skill content in output, got:\n%s", output)
+	}
+}
+
 func TestCreateAgentConfigCommand_MissingName(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")

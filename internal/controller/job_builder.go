@@ -418,14 +418,33 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 				VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 			})
 
-			script, err := buildPluginSetupScript(agentConfig.Plugins)
+			wsHasToken := workspace != nil && workspace.SecretRef != nil
+			script, pluginEnvVars, err := buildPluginSetupScript(agentConfig.Plugins, wsHasToken)
 			if err != nil {
 				return nil, fmt.Errorf("invalid plugin configuration: %w", err)
 			}
+
+			pluginSetupEnv := append([]corev1.EnvVar{}, pluginEnvVars...)
+			// Only pass workspace token when a GitHub plugin needs it as fallback
+			// (i.e., it has no secretRef of its own).
+			if wsHasToken {
+				needsWorkspaceToken := false
+				for _, p := range agentConfig.Plugins {
+					if p.GitHub != nil && p.GitHub.SecretRef == nil {
+						needsWorkspaceToken = true
+						break
+					}
+				}
+				if needsWorkspaceToken {
+					pluginSetupEnv = append(pluginSetupEnv, workspaceEnvVars...)
+				}
+			}
+
 			initContainers = append(initContainers, corev1.Container{
 				Name:    "plugin-setup",
 				Image:   GitCloneImage,
 				Command: []string{"sh", "-c", script},
+				Env:     pluginSetupEnv,
 				VolumeMounts: []corev1.VolumeMount{
 					{Name: PluginVolumeName, MountPath: PluginMountPath},
 				},
@@ -587,17 +606,94 @@ func sanitizeComponentName(name, kind string) error {
 	return nil
 }
 
-func buildPluginSetupScript(plugins []kelosv1alpha1.PluginSpec) (string, error) {
+// validateGitHubRepo checks that a GitHub plugin repo string is in "owner/repo" format.
+func validateGitHubRepo(repo string) error {
+	parts := strings.Split(repo, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return fmt.Errorf("GitHub plugin repo %q must be in owner/repo format", repo)
+	}
+	return nil
+}
+
+// gitHubCloneURL returns the HTTPS clone URL for a GitHub repository.
+func gitHubCloneURL(host *string, repo string) string {
+	h := "github.com"
+	if host != nil && *host != "" {
+		h = *host
+	}
+	return fmt.Sprintf("https://%s/%s.git", h, repo)
+}
+
+func buildPluginSetupScript(plugins []kelosv1alpha1.PluginSpec, workspaceHasToken bool) (string, []corev1.EnvVar, error) {
 	lines := []string{"set -eu"}
+	var envVars []corev1.EnvVar
+
+	seen := make(map[string]bool, len(plugins))
+	tokenIdx := 0
 
 	for _, plugin := range plugins {
 		if err := sanitizeComponentName(plugin.Name, "plugin"); err != nil {
-			return "", err
+			return "", nil, err
+		}
+		if seen[plugin.Name] {
+			return "", nil, fmt.Errorf("duplicate plugin name %q", plugin.Name)
+		}
+		seen[plugin.Name] = true
+
+		if plugin.GitHub != nil && (len(plugin.Skills) > 0 || len(plugin.Agents) > 0) {
+			return "", nil, fmt.Errorf("plugin %q: github and inline skills/agents are mutually exclusive", plugin.Name)
+		}
+
+		if plugin.GitHub != nil {
+			gh := plugin.GitHub
+			if err := validateGitHubRepo(gh.Repo); err != nil {
+				return "", nil, err
+			}
+
+			cloneURL := gitHubCloneURL(gh.Host, gh.Repo)
+			dest := path.Join(PluginMountPath, plugin.Name)
+
+			// Build credential helper based on auth source.
+			var credPrefix string
+			if gh.SecretRef != nil {
+				envName := fmt.Sprintf("KELOS_PLUGIN_TOKEN_%d", tokenIdx)
+				tokenIdx++
+				envVars = append(envVars, corev1.EnvVar{
+					Name: envName,
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: gh.SecretRef.Name,
+							},
+							Key: "GITHUB_TOKEN",
+						},
+					},
+				})
+				credHelper := fmt.Sprintf(`!f() { echo "username=x-access-token"; echo "password=$%s"; }; f`, envName)
+				credPrefix = fmt.Sprintf("git -c credential.helper=%s", shellQuote(credHelper))
+			} else if workspaceHasToken {
+				credHelper := `!f() { echo "username=x-access-token"; echo "password=$GITHUB_TOKEN"; }; f`
+				credPrefix = fmt.Sprintf("git -c credential.helper=%s", shellQuote(credHelper))
+			}
+
+			var cloneCmd string
+			cloneArgs := "clone --depth 1"
+			if gh.Ref != nil && *gh.Ref != "" {
+				cloneArgs += " --branch " + shellQuote(*gh.Ref)
+			}
+			cloneArgs += " -- " + shellQuote(cloneURL) + " " + shellQuote(dest)
+			if credPrefix != "" {
+				cloneCmd = credPrefix + " " + cloneArgs
+			} else {
+				cloneCmd = "git " + cloneArgs
+			}
+			lines = append(lines, cloneCmd)
+			continue
 		}
 
 		for _, skill := range plugin.Skills {
 			if err := sanitizeComponentName(skill.Name, "skill"); err != nil {
-				return "", err
+				return "", nil, err
 			}
 			dir := path.Join(PluginMountPath, plugin.Name, "skills", skill.Name)
 			target := path.Join(dir, "SKILL.md")
@@ -610,7 +706,7 @@ func buildPluginSetupScript(plugins []kelosv1alpha1.PluginSpec) (string, error) 
 
 		for _, agent := range plugin.Agents {
 			if err := sanitizeComponentName(agent.Name, "agent"); err != nil {
-				return "", err
+				return "", nil, err
 			}
 			dir := path.Join(PluginMountPath, plugin.Name, "agents")
 			target := path.Join(dir, agent.Name+".md")
@@ -622,7 +718,7 @@ func buildPluginSetupScript(plugins []kelosv1alpha1.PluginSpec) (string, error) 
 		}
 	}
 
-	return strings.Join(lines, "\n"), nil
+	return strings.Join(lines, "\n"), envVars, nil
 }
 
 // mcpServerJSON represents a single MCP server entry in the .mcp.json

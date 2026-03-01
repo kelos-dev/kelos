@@ -1362,7 +1362,8 @@ func TestBuildClaudeCodeJob_UnsupportedType(t *testing.T) {
 	}
 }
 
-func int64Ptr(v int64) *int64 { return &v }
+func int64Ptr(v int64) *int64    { return &v }
+func stringPtr(v string) *string { return &v }
 
 func TestBuildJob_PodOverridesResources(t *testing.T) {
 	builder := NewJobBuilder()
@@ -3549,6 +3550,570 @@ func TestBuildJob_NoTaskSpawnerLabelNoEnv(t *testing.T) {
 	for _, env := range container.Env {
 		if env.Name == "KELOS_TASKSPAWNER" {
 			t.Errorf("Expected no KELOS_TASKSPAWNER env var when label is absent, but found value %q", env.Value)
+		}
+	}
+}
+
+func TestBuildJob_GitHubPluginPublic(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-gh-plugin", Namespace: "default"},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
+		Plugins: []kelosv1alpha1.PluginSpec{
+			{
+				Name:   "my-plugin",
+				GitHub: &kelosv1alpha1.GitHubPluginSource{Repo: "acme/tools"},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, agentConfig, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	if len(job.Spec.Template.Spec.InitContainers) != 1 {
+		t.Fatalf("Expected 1 init container, got %d", len(job.Spec.Template.Spec.InitContainers))
+	}
+	ic := job.Spec.Template.Spec.InitContainers[0]
+	script := ic.Command[2]
+
+	if !strings.Contains(script, "git clone --depth 1") {
+		t.Errorf("Expected git clone in script, got: %s", script)
+	}
+	if !strings.Contains(script, "https://github.com/acme/tools.git") {
+		t.Errorf("Expected github.com clone URL, got: %s", script)
+	}
+	if !strings.Contains(script, PluginMountPath+"/my-plugin") {
+		t.Errorf("Expected clone destination, got: %s", script)
+	}
+	// No credential helper for public repos without workspace token.
+	if strings.Contains(script, "credential.helper") {
+		t.Errorf("Expected no credential helper for public plugin, got: %s", script)
+	}
+	if len(ic.Env) != 0 {
+		t.Errorf("Expected no env vars on init container, got %d", len(ic.Env))
+	}
+}
+
+func TestBuildJob_GitHubPluginWithRef(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-gh-ref", Namespace: "default"},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
+		Plugins: []kelosv1alpha1.PluginSpec{
+			{
+				Name:   "versioned",
+				GitHub: &kelosv1alpha1.GitHubPluginSource{Repo: "acme/tools", Ref: stringPtr("v1.2.0")},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, agentConfig, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	script := job.Spec.Template.Spec.InitContainers[0].Command[2]
+	if !strings.Contains(script, "--branch") {
+		t.Errorf("Expected --branch in clone command, got: %s", script)
+	}
+	if !strings.Contains(script, "v1.2.0") {
+		t.Errorf("Expected ref v1.2.0 in clone command, got: %s", script)
+	}
+}
+
+func TestBuildJob_GitHubPluginPrivateSecretRef(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-gh-private", Namespace: "default"},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
+		Plugins: []kelosv1alpha1.PluginSpec{
+			{
+				Name: "private-plugin",
+				GitHub: &kelosv1alpha1.GitHubPluginSource{
+					Repo:      "acme/private-tools",
+					SecretRef: &kelosv1alpha1.SecretReference{Name: "plugin-token"},
+				},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, agentConfig, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	ic := job.Spec.Template.Spec.InitContainers[0]
+	script := ic.Command[2]
+
+	if !strings.Contains(script, "credential.helper") {
+		t.Errorf("Expected credential helper for private plugin, got: %s", script)
+	}
+	if !strings.Contains(script, "KELOS_PLUGIN_TOKEN_0") {
+		t.Errorf("Expected KELOS_PLUGIN_TOKEN_0 in credential helper, got: %s", script)
+	}
+
+	// Verify env var referencing the secret.
+	found := false
+	for _, env := range ic.Env {
+		if env.Name == "KELOS_PLUGIN_TOKEN_0" {
+			found = true
+			if env.ValueFrom == nil || env.ValueFrom.SecretKeyRef == nil {
+				t.Fatal("Expected secret key ref for plugin token env")
+			}
+			if env.ValueFrom.SecretKeyRef.Name != "plugin-token" {
+				t.Errorf("Expected secret name %q, got %q", "plugin-token", env.ValueFrom.SecretKeyRef.Name)
+			}
+			if env.ValueFrom.SecretKeyRef.Key != "GITHUB_TOKEN" {
+				t.Errorf("Expected secret key %q, got %q", "GITHUB_TOKEN", env.ValueFrom.SecretKeyRef.Key)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("Expected KELOS_PLUGIN_TOKEN_0 env var on init container")
+	}
+}
+
+func TestBuildJob_GitHubPluginGHE(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-gh-ghe", Namespace: "default"},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
+		Plugins: []kelosv1alpha1.PluginSpec{
+			{
+				Name: "ghe-plugin",
+				GitHub: &kelosv1alpha1.GitHubPluginSource{
+					Repo: "internal/tools",
+					Host: stringPtr("github.corp.example.com"),
+				},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, agentConfig, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	script := job.Spec.Template.Spec.InitContainers[0].Command[2]
+	if !strings.Contains(script, "https://github.corp.example.com/internal/tools.git") {
+		t.Errorf("Expected GHE clone URL, got: %s", script)
+	}
+}
+
+func TestBuildJob_GitHubPluginWorkspaceTokenFallback(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-gh-ws-token", Namespace: "default"},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo:      "https://github.com/example/repo.git",
+		Ref:       "main",
+		SecretRef: &kelosv1alpha1.SecretReference{Name: "ws-token"},
+	}
+
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
+		Plugins: []kelosv1alpha1.PluginSpec{
+			{
+				Name:   "fallback-plugin",
+				GitHub: &kelosv1alpha1.GitHubPluginSource{Repo: "acme/tools"},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, workspace, agentConfig, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	// Find plugin-setup init container.
+	var ic *corev1.Container
+	for i := range job.Spec.Template.Spec.InitContainers {
+		if job.Spec.Template.Spec.InitContainers[i].Name == "plugin-setup" {
+			ic = &job.Spec.Template.Spec.InitContainers[i]
+			break
+		}
+	}
+	if ic == nil {
+		t.Fatal("Expected plugin-setup init container")
+	}
+
+	script := ic.Command[2]
+	if !strings.Contains(script, "credential.helper") {
+		t.Errorf("Expected credential helper with workspace token fallback, got: %s", script)
+	}
+	if !strings.Contains(script, "GITHUB_TOKEN") {
+		t.Errorf("Expected GITHUB_TOKEN in credential helper, got: %s", script)
+	}
+
+	// Verify workspace env vars passed to init container.
+	foundGHToken := false
+	for _, env := range ic.Env {
+		if env.Name == "GITHUB_TOKEN" {
+			foundGHToken = true
+		}
+	}
+	if !foundGHToken {
+		t.Error("Expected GITHUB_TOKEN env var on plugin-setup init container for workspace fallback")
+	}
+}
+
+func TestBuildJob_GitHubPluginMutualExclusivity(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-mutual-ex", Namespace: "default"},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
+		Plugins: []kelosv1alpha1.PluginSpec{
+			{
+				Name:   "bad-plugin",
+				GitHub: &kelosv1alpha1.GitHubPluginSource{Repo: "acme/tools"},
+				Skills: []kelosv1alpha1.SkillDefinition{{Name: "s", Content: "c"}},
+			},
+		},
+	}
+
+	_, err := builder.Build(task, nil, agentConfig, task.Spec.Prompt)
+	if err == nil {
+		t.Fatal("Expected error for mutually exclusive github and skills")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("Expected mutually exclusive error, got: %v", err)
+	}
+}
+
+func TestBuildJob_GitHubPluginInvalidRepoFormat(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-bad-repo", Namespace: "default"},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	tests := []struct {
+		name string
+		repo string
+	}{
+		{"no slash", "acme-tools"},
+		{"too many slashes", "acme/tools/extra"},
+		{"empty owner", "/tools"},
+		{"empty repo", "acme/"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agentConfig := &kelosv1alpha1.AgentConfigSpec{
+				Plugins: []kelosv1alpha1.PluginSpec{
+					{
+						Name:   "bad",
+						GitHub: &kelosv1alpha1.GitHubPluginSource{Repo: tt.repo},
+					},
+				},
+			}
+			_, err := builder.Build(task, nil, agentConfig, task.Spec.Prompt)
+			if err == nil {
+				t.Fatal("Expected error for invalid repo format")
+			}
+			if !strings.Contains(err.Error(), "owner/repo") {
+				t.Errorf("Expected owner/repo format error, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestBuildJob_GitHubPluginDuplicateName(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-dup-name", Namespace: "default"},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
+		Plugins: []kelosv1alpha1.PluginSpec{
+			{Name: "dup", GitHub: &kelosv1alpha1.GitHubPluginSource{Repo: "acme/a"}},
+			{Name: "dup", GitHub: &kelosv1alpha1.GitHubPluginSource{Repo: "acme/b"}},
+		},
+	}
+
+	_, err := builder.Build(task, nil, agentConfig, task.Spec.Prompt)
+	if err == nil {
+		t.Fatal("Expected error for duplicate plugin name")
+	}
+	if !strings.Contains(err.Error(), "duplicate") {
+		t.Errorf("Expected duplicate error, got: %v", err)
+	}
+}
+
+func TestBuildJob_GitHubPluginCombinedWithInline(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-combined", Namespace: "default"},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
+		Plugins: []kelosv1alpha1.PluginSpec{
+			{
+				Name:   "gh-plugin",
+				GitHub: &kelosv1alpha1.GitHubPluginSource{Repo: "acme/tools"},
+			},
+			{
+				Name:   "inline-plugin",
+				Skills: []kelosv1alpha1.SkillDefinition{{Name: "deploy", Content: "Deploy stuff"}},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, agentConfig, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	ic := job.Spec.Template.Spec.InitContainers[0]
+	script := ic.Command[2]
+
+	// Should contain both git clone and mkdir.
+	if !strings.Contains(script, "git clone") {
+		t.Errorf("Expected git clone for GitHub plugin, got: %s", script)
+	}
+	if !strings.Contains(script, "mkdir -p") {
+		t.Errorf("Expected mkdir for inline plugin, got: %s", script)
+	}
+	if !strings.Contains(script, PluginMountPath+"/gh-plugin") {
+		t.Errorf("Expected GitHub plugin dest path, got: %s", script)
+	}
+	if !strings.Contains(script, PluginMountPath+"/inline-plugin/skills/deploy/SKILL.md") {
+		t.Errorf("Expected inline plugin skill path, got: %s", script)
+	}
+}
+
+func TestBuildJob_GitHubPluginMultipleSecrets(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-multi-secrets", Namespace: "default"},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
+		Plugins: []kelosv1alpha1.PluginSpec{
+			{
+				Name: "plugin-a",
+				GitHub: &kelosv1alpha1.GitHubPluginSource{
+					Repo:      "acme/a",
+					SecretRef: &kelosv1alpha1.SecretReference{Name: "secret-a"},
+				},
+			},
+			{
+				Name: "plugin-b",
+				GitHub: &kelosv1alpha1.GitHubPluginSource{
+					Repo:      "acme/b",
+					SecretRef: &kelosv1alpha1.SecretReference{Name: "secret-b"},
+				},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, agentConfig, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	ic := job.Spec.Template.Spec.InitContainers[0]
+	script := ic.Command[2]
+
+	if !strings.Contains(script, "KELOS_PLUGIN_TOKEN_0") {
+		t.Errorf("Expected KELOS_PLUGIN_TOKEN_0 in script, got: %s", script)
+	}
+	if !strings.Contains(script, "KELOS_PLUGIN_TOKEN_1") {
+		t.Errorf("Expected KELOS_PLUGIN_TOKEN_1 in script, got: %s", script)
+	}
+
+	// Verify both env vars reference different secrets.
+	envMap := map[string]string{}
+	for _, env := range ic.Env {
+		if env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil {
+			envMap[env.Name] = env.ValueFrom.SecretKeyRef.Name
+		}
+	}
+	if envMap["KELOS_PLUGIN_TOKEN_0"] != "secret-a" {
+		t.Errorf("Expected KELOS_PLUGIN_TOKEN_0 from secret-a, got %q", envMap["KELOS_PLUGIN_TOKEN_0"])
+	}
+	if envMap["KELOS_PLUGIN_TOKEN_1"] != "secret-b" {
+		t.Errorf("Expected KELOS_PLUGIN_TOKEN_1 from secret-b, got %q", envMap["KELOS_PLUGIN_TOKEN_1"])
+	}
+}
+
+func TestBuildJob_GitHubPluginMutualExclusivityWithAgents(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-mutual-ex-agents", Namespace: "default"},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
+		Plugins: []kelosv1alpha1.PluginSpec{
+			{
+				Name:   "bad-plugin",
+				GitHub: &kelosv1alpha1.GitHubPluginSource{Repo: "acme/tools"},
+				Agents: []kelosv1alpha1.AgentDefinition{{Name: "a", Content: "c"}},
+			},
+		},
+	}
+
+	_, err := builder.Build(task, nil, agentConfig, task.Spec.Prompt)
+	if err == nil {
+		t.Fatal("Expected error for mutually exclusive github and agents")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("Expected mutually exclusive error, got: %v", err)
+	}
+}
+
+func TestBuildJob_GitHubPluginAllWithSecretRef_NoWorkspaceTokenLeak(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-no-leak", Namespace: "default"},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo:      "https://github.com/example/repo.git",
+		Ref:       "main",
+		SecretRef: &kelosv1alpha1.SecretReference{Name: "ws-token"},
+	}
+
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
+		Plugins: []kelosv1alpha1.PluginSpec{
+			{
+				Name: "plugin-a",
+				GitHub: &kelosv1alpha1.GitHubPluginSource{
+					Repo:      "acme/a",
+					SecretRef: &kelosv1alpha1.SecretReference{Name: "secret-a"},
+				},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, workspace, agentConfig, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	var ic *corev1.Container
+	for i := range job.Spec.Template.Spec.InitContainers {
+		if job.Spec.Template.Spec.InitContainers[i].Name == "plugin-setup" {
+			ic = &job.Spec.Template.Spec.InitContainers[i]
+			break
+		}
+	}
+	if ic == nil {
+		t.Fatal("Expected plugin-setup init container")
+	}
+
+	// Workspace GITHUB_TOKEN should NOT be injected when all plugins have their own secretRef.
+	for _, env := range ic.Env {
+		if env.Name == "GITHUB_TOKEN" {
+			t.Error("Workspace GITHUB_TOKEN should not be injected when all GitHub plugins have their own secretRef")
 		}
 	}
 }

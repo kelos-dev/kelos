@@ -26,11 +26,18 @@ type AgentConfigSpec struct {
 }
 
 // PluginSpec defines a Claude Code plugin bundle.
+// A plugin can be defined inline (Skills/Agents) or sourced from a GitHub
+// repository (GitHub). These two modes are mutually exclusive.
 type PluginSpec struct {
 	// Name is the plugin name. Used as the plugin directory name
 	// and for namespacing in Claude Code (e.g., <name>:skill-name).
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
+
+	// GitHub sources the plugin from a GitHub repository.
+	// When set, Skills and Agents must not be specified.
+	// +optional
+	GitHub *GitHubPluginSource `json:"github,omitempty"`
 
 	// Skills defines skills for this plugin.
 	// Each becomes skills/<name>/SKILL.md in the plugin directory.
@@ -41,6 +48,31 @@ type PluginSpec struct {
 	// Each becomes agents/<name>.md in the plugin directory.
 	// +optional
 	Agents []AgentDefinition `json:"agents,omitempty"`
+}
+
+// GitHubPluginSource defines a plugin sourced from a GitHub repository.
+type GitHubPluginSource struct {
+	// Repo is the GitHub repository in "owner/repo" format.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern=`^[^/]+/[^/]+$`
+	Repo string `json:"repo"`
+
+	// Ref is an optional branch or tag to check out.
+	// If empty, the repository's default branch is used.
+	// +optional
+	Ref *string `json:"ref,omitempty"`
+
+	// Host is the GitHub hostname. Defaults to "github.com".
+	// Set this for GitHub Enterprise Server instances.
+	// +optional
+	Host *string `json:"host,omitempty"`
+
+	// SecretRef references a Secret containing a GITHUB_TOKEN key
+	// for authenticating to private repositories.
+	// If not set and the workspace has a token, the workspace token
+	// is used as a fallback.
+	// +optional
+	SecretRef *SecretReference `json:"secretRef,omitempty"`
 }
 
 // SkillDefinition defines a Claude Code skill (slash command).

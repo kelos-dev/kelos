@@ -109,7 +109,10 @@ spec:
                   Each plugin is mounted as a separate plugin directory.
                   Only applicable to claude-code type agents; other agents ignore this.
                 items:
-                  description: PluginSpec defines a Claude Code plugin bundle.
+                  description: |-
+                    PluginSpec defines a Claude Code plugin bundle.
+                    A plugin can be defined inline (Skills/Agents) or sourced from a GitHub
+                    repository (GitHub). These two modes are mutually exclusive.
                   properties:
                     agents:
                       description: |-
@@ -128,6 +131,43 @@ spec:
                         - name
                         type: object
                       type: array
+                    github:
+                      description: |-
+                        GitHub sources the plugin from a GitHub repository.
+                        When set, Skills and Agents must not be specified.
+                      properties:
+                        host:
+                          description: |-
+                            Host is the GitHub hostname. Defaults to "github.com".
+                            Set this for GitHub Enterprise Server instances.
+                          type: string
+                        ref:
+                          description: |-
+                            Ref is an optional branch or tag to check out.
+                            If empty, the repository's default branch is used.
+                          type: string
+                        repo:
+                          description: Repo is the GitHub repository in "owner/repo"
+                            format.
+                          minLength: 1
+                          pattern: ^[^/]+/[^/]+$
+                          type: string
+                        secretRef:
+                          description: |-
+                            SecretRef references a Secret containing a GITHUB_TOKEN key
+                            for authenticating to private repositories.
+                            If not set and the workspace has a token, the workspace token
+                            is used as a fallback.
+                          properties:
+                            name:
+                              description: Name is the name of the secret.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                      required:
+                      - repo
+                      type: object
                     name:
                       description: |-
                         Name is the plugin name. Used as the plugin directory name

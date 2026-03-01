@@ -93,10 +93,15 @@ func newCreateAgentConfigCommand(cfg *ClientConfig) *cobra.Command {
 				acSpec.Plugins = append(acSpec.Plugins, gpSpec)
 			}
 
+			mpSeen := make(map[string]bool, len(marketplacePluginFlags))
 			for _, mp := range marketplacePluginFlags {
 				if err := validateMarketplacePluginFlag(mp); err != nil {
 					return err
 				}
+				if mpSeen[mp] {
+					return fmt.Errorf("duplicate --marketplace-plugin %q", mp)
+				}
+				mpSeen[mp] = true
 			}
 			acSpec.MarketplacePlugins = marketplacePluginFlags
 

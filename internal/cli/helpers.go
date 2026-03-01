@@ -23,7 +23,7 @@ func parseGitHubPluginFlag(s string) (kelosv1alpha1.PluginSpec, error) {
 
 	// Split remainder by comma to extract optional key=value pairs.
 	segments := strings.Split(remainder, ",")
-	if len(segments) == 0 || segments[0] == "" {
+	if segments[0] == "" {
 		return kelosv1alpha1.PluginSpec{}, fmt.Errorf("invalid --github-plugin value %q: repo is required", s)
 	}
 

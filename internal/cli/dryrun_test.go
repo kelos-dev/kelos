@@ -727,6 +727,32 @@ func TestCreateAgentConfigCommand_DryRun_MarketplacePluginCombinedWithGitHub(t *
 	}
 }
 
+func TestCreateAgentConfigCommand_DryRun_DuplicateMarketplacePlugin(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{
+		"create", "agentconfig", "dup-mp-ac",
+		"--config", cfgPath,
+		"--dry-run",
+		"--marketplace-plugin", "github@anthropics-claude-code",
+		"--marketplace-plugin", "github@anthropics-claude-code",
+		"--namespace", "test-ns",
+	})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for duplicate marketplace plugin")
+	}
+	if !strings.Contains(err.Error(), "duplicate --marketplace-plugin") {
+		t.Errorf("expected duplicate error, got: %v", err)
+	}
+}
+
 func TestCreateAgentConfigCommand_MissingName(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")

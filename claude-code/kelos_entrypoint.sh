@@ -41,7 +41,7 @@ if [ -n "${KELOS_MARKETPLACE_PLUGINS:-}" ]; then
   IFS=',' read -ra MPLUGINS <<<"$KELOS_MARKETPLACE_PLUGINS"
   for mp in "${MPLUGINS[@]}"; do
     echo "Installing marketplace plugin: $mp"
-    claude plugin install "$mp" || echo "Warning: failed to install marketplace plugin $mp"
+    claude plugin install "$mp"
   done
 fi
 

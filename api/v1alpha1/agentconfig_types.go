@@ -60,12 +60,12 @@ type GitHubPluginSource struct {
 	// Ref is an optional branch or tag to check out.
 	// If empty, the repository's default branch is used.
 	// +optional
-	Ref string `json:"ref,omitempty"`
+	Ref *string `json:"ref,omitempty"`
 
 	// Host is the GitHub hostname. Defaults to "github.com".
 	// Set this for GitHub Enterprise Server instances.
 	// +optional
-	Host string `json:"host,omitempty"`
+	Host *string `json:"host,omitempty"`
 
 	// SecretRef references a Secret containing a GITHUB_TOKEN key
 	// for authenticating to private repositories.

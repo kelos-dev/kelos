@@ -1362,7 +1362,8 @@ func TestBuildClaudeCodeJob_UnsupportedType(t *testing.T) {
 	}
 }
 
-func int64Ptr(v int64) *int64 { return &v }
+func int64Ptr(v int64) *int64    { return &v }
+func stringPtr(v string) *string { return &v }
 
 func TestBuildJob_PodOverridesResources(t *testing.T) {
 	builder := NewJobBuilder()
@@ -3623,7 +3624,7 @@ func TestBuildJob_GitHubPluginWithRef(t *testing.T) {
 		Plugins: []kelosv1alpha1.PluginSpec{
 			{
 				Name:   "versioned",
-				GitHub: &kelosv1alpha1.GitHubPluginSource{Repo: "acme/tools", Ref: "v1.2.0"},
+				GitHub: &kelosv1alpha1.GitHubPluginSource{Repo: "acme/tools", Ref: stringPtr("v1.2.0")},
 			},
 		},
 	}
@@ -3724,7 +3725,7 @@ func TestBuildJob_GitHubPluginGHE(t *testing.T) {
 				Name: "ghe-plugin",
 				GitHub: &kelosv1alpha1.GitHubPluginSource{
 					Repo: "internal/tools",
-					Host: "github.corp.example.com",
+					Host: stringPtr("github.corp.example.com"),
 				},
 			},
 		},

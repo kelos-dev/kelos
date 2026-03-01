@@ -133,11 +133,19 @@ func TestParseGitHubPluginFlag(t *testing.T) {
 			if spec.GitHub.Repo != tt.wantRepo {
 				t.Errorf("Repo = %q, want %q", spec.GitHub.Repo, tt.wantRepo)
 			}
-			if spec.GitHub.Ref != tt.wantRef {
-				t.Errorf("Ref = %q, want %q", spec.GitHub.Ref, tt.wantRef)
+			gotRef := ""
+			if spec.GitHub.Ref != nil {
+				gotRef = *spec.GitHub.Ref
 			}
-			if spec.GitHub.Host != tt.wantHost {
-				t.Errorf("Host = %q, want %q", spec.GitHub.Host, tt.wantHost)
+			if gotRef != tt.wantRef {
+				t.Errorf("Ref = %q, want %q", gotRef, tt.wantRef)
+			}
+			gotHost := ""
+			if spec.GitHub.Host != nil {
+				gotHost = *spec.GitHub.Host
+			}
+			if gotHost != tt.wantHost {
+				t.Errorf("Host = %q, want %q", gotHost, tt.wantHost)
 			}
 			secretName := ""
 			if spec.GitHub.SecretRef != nil {

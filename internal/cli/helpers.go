@@ -65,8 +65,12 @@ func parseGitHubPluginFlag(s string) (kelosv1alpha1.PluginSpec, error) {
 
 	ghSource := &kelosv1alpha1.GitHubPluginSource{
 		Repo: repo,
-		Ref:  ref,
-		Host: host,
+	}
+	if ref != "" {
+		ghSource.Ref = &ref
+	}
+	if host != "" {
+		ghSource.Host = &host
 	}
 	if secret != "" {
 		ghSource.SecretRef = &kelosv1alpha1.SecretReference{Name: secret}

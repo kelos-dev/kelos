@@ -616,11 +616,12 @@ func validateGitHubRepo(repo string) error {
 }
 
 // gitHubCloneURL returns the HTTPS clone URL for a GitHub repository.
-func gitHubCloneURL(host, repo string) string {
-	if host == "" {
-		host = "github.com"
+func gitHubCloneURL(host *string, repo string) string {
+	h := "github.com"
+	if host != nil && *host != "" {
+		h = *host
 	}
-	return fmt.Sprintf("https://%s/%s.git", host, repo)
+	return fmt.Sprintf("https://%s/%s.git", h, repo)
 }
 
 func buildPluginSetupScript(plugins []kelosv1alpha1.PluginSpec, workspaceHasToken bool) (string, []corev1.EnvVar, error) {
@@ -677,8 +678,8 @@ func buildPluginSetupScript(plugins []kelosv1alpha1.PluginSpec, workspaceHasToke
 
 			var cloneCmd string
 			cloneArgs := "clone --depth 1"
-			if gh.Ref != "" {
-				cloneArgs += " --branch " + shellQuote(gh.Ref)
+			if gh.Ref != nil && *gh.Ref != "" {
+				cloneArgs += " --branch " + shellQuote(*gh.Ref)
 			}
 			cloneArgs += " -- " + shellQuote(cloneURL) + " " + shellQuote(dest)
 			if credPrefix != "" {

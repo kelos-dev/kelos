@@ -13,13 +13,12 @@ import (
 
 func newCreateAgentConfigCommand(cfg *ClientConfig) *cobra.Command {
 	var (
-		agentsMD               string
-		skillFlags             []string
-		agentFlags             []string
-		githubPluginFlags      []string
-		marketplacePluginFlags []string
-		mcpFlags               []string
-		dryRun                 bool
+		agentsMD          string
+		skillFlags        []string
+		agentFlags        []string
+		githubPluginFlags []string
+		mcpFlags          []string
+		dryRun            bool
 	)
 
 	cmd := &cobra.Command{
@@ -93,18 +92,6 @@ func newCreateAgentConfigCommand(cfg *ClientConfig) *cobra.Command {
 				acSpec.Plugins = append(acSpec.Plugins, gpSpec)
 			}
 
-			mpSeen := make(map[string]bool, len(marketplacePluginFlags))
-			for _, mp := range marketplacePluginFlags {
-				if err := validateMarketplacePluginFlag(mp); err != nil {
-					return err
-				}
-				if mpSeen[mp] {
-					return fmt.Errorf("duplicate --marketplace-plugin %q", mp)
-				}
-				mpSeen[mp] = true
-			}
-			acSpec.MarketplacePlugins = marketplacePluginFlags
-
 			mcpSeen := make(map[string]bool, len(mcpFlags))
 			for _, m := range mcpFlags {
 				mcpSpec, err := parseMCPFlag(m)
@@ -144,7 +131,6 @@ func newCreateAgentConfigCommand(cfg *ClientConfig) *cobra.Command {
 	cmd.Flags().StringArrayVar(&skillFlags, "skill", nil, "skill definition as name=content or name=@file")
 	cmd.Flags().StringArrayVar(&agentFlags, "agent", nil, "agent definition as name=content or name=@file")
 	cmd.Flags().StringArrayVar(&githubPluginFlags, "github-plugin", nil, "GitHub plugin as name=owner/repo[@ref][,host=HOST][,secret=SECRET]")
-	cmd.Flags().StringArrayVar(&marketplacePluginFlags, "marketplace-plugin", nil, "marketplace plugin as plugin-name@marketplace-name")
 	cmd.Flags().StringArrayVar(&mcpFlags, "mcp", nil, "MCP server as name=JSON or name=@file (e.g. github='{\"type\":\"http\",\"url\":\"https://api.githubcopilot.com/mcp/\"}')")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print the resource that would be created without submitting it")
 

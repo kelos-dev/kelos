@@ -25,7 +25,7 @@ jobs:
   reset-kelos-worker:
     if: >-
       contains(github.event.comment.body || github.event.review.body || '', '/reset-worker')
-      && (github.event.sender.type || 'User') == 'User'
+      && github.event.sender.type == 'User'
     runs-on: ubuntu-latest
     env:
       KELOS_NAMESPACE: ${{ vars.KELOS_NAMESPACE || 'default' }}

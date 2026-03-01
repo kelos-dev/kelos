@@ -50,6 +50,9 @@ func parseGitHubPluginFlag(s string) (kelosv1alpha1.PluginSpec, error) {
 	if idx := strings.LastIndex(repoAndRef, "@"); idx > 0 {
 		repo = repoAndRef[:idx]
 		ref = repoAndRef[idx+1:]
+		if ref == "" {
+			return kelosv1alpha1.PluginSpec{}, fmt.Errorf("invalid --github-plugin repo %q: ref must not be empty when '@' is present", repoAndRef)
+		}
 	} else {
 		repo = repoAndRef
 	}

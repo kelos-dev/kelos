@@ -96,6 +96,12 @@ func TestParseGitHubPluginFlag(t *testing.T) {
 			wantErrStr: "unknown --github-plugin option",
 		},
 		{
+			name:       "trailing @ with empty ref",
+			input:      "my-plugin=acme/tools@",
+			wantErr:    true,
+			wantErrStr: "ref must not be empty",
+		},
+		{
 			name:       "empty repo",
 			input:      "my-plugin=",
 			wantErr:    true,

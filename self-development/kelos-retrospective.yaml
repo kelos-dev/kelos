@@ -36,9 +36,9 @@ spec:
 
       ## Step 1: Collect PR outcome data (last 7 days)
 
-      Fetch all recent kelos-generated PRs:
+      Fetch all recent kelos-generated PRs (filter to the last 7 days):
       ```
-      gh pr list --state all --label generated-by-kelos --limit 50 --json number,title,state,mergedAt,closedAt,body,labels
+      gh pr list --state all --label generated-by-kelos --limit 50 --search "created:>=$(date -d '7 days ago' +%Y-%m-%d)" --json number,title,state,mergedAt,closedAt,body,labels
       ```
 
       For each PR, classify it:
@@ -47,9 +47,8 @@ spec:
 
       For each closed PR, read its review comments to categorize the rejection:
       ```
-      gh api repos/{owner}/{repo}/pulls/{number}/reviews
-      gh api repos/{owner}/{repo}/pulls/{number}/comments
       gh pr view {number} --comments
+      gh pr view {number} --json reviews
       ```
 
       Categorize rejections into failure modes:

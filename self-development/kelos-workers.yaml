@@ -44,10 +44,6 @@ spec:
       - update an existing PR to fix the issue
       - comment on the issue or the PR if you cannot fix it
 
-      Pre-checklist:
-      - Label the PR with "generated-by-kelos" and "ok-to-test":
-        - gh pr edit <number> --add-label generated-by-kelos --add-label ok-to-test
-
       Task:
       - 0. Set up your working branch. Run this exactly:
         ```
@@ -61,14 +57,14 @@ spec:
       - 4a. Make only the incremental changes needed to address review feedback or remaining issues. Preserve existing work.
       - 5a. Commit and push your changes to origin kelos-task-{{.Number}}.
       - 6a. /review the PR to verify your changes address the feedback. If changes are needed, make them, commit and push, then /review again. Repeat until the review passes.
-      - 7a. Update the PR title and description to reflect the final diff.
+      - 7a. Update the PR title and description to reflect the final diff. Ensure the PR has labels "generated-by-kelos" and "ok-to-test" (use `gh pr edit <number> --add-label generated-by-kelos --add-label ok-to-test` if missing).
       - 8a. Make sure the PR passes all CI tests.
 
       If no PR exists:
       - 2b. Investigate the issue #{{.Number}}.
       - 3b. Create a commit that fixes the issue.
       - 4b. Push your branch to origin kelos-task-{{.Number}}.
-      - 5b. Create a PR, then /review it. If changes are needed, make them, commit and push, then /review again. Repeat until the review passes.
+      - 5b. Create a PR with labels "generated-by-kelos" and "ok-to-test" (use `gh pr create --label generated-by-kelos --label ok-to-test`), then /review it. If changes are needed, make them, commit and push, then /review again. Repeat until the review passes.
       - 6b. Update the PR title and description to reflect the final diff.
       - 7b. Make sure the PR passes all CI tests.
 

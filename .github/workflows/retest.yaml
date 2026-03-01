@@ -3,8 +3,6 @@ name: Retest
 on:
   issue_comment:
     types: [created]
-  pull_request_target:
-    types: [labeled]
 
 jobs:
   retest:
@@ -36,11 +34,14 @@ jobs:
 
           if [ -n "$RUN_ID" ]; then
             CONCLUSION=$(gh run view "$RUN_ID" --json conclusion -q .conclusion)
-            if [ "$CONCLUSION" = "failure" ]; then
+            if [ -z "$CONCLUSION" ]; then
+              echo "CI is already in progress (run $RUN_ID)"
+              exit 0
+            elif [ "$CONCLUSION" = "failure" ]; then
               gh run rerun "$RUN_ID" --failed
               exit 0
-            elif [ -z "$CONCLUSION" ]; then
-              echo "CI is already in progress (run $RUN_ID)"
+            else
+              gh run rerun "$RUN_ID"
               exit 0
             fi
           fi
@@ -48,18 +49,3 @@ jobs:
           HEAD_REF=$(gh pr view "$PR_NUMBER" --json headRefName -q .headRefName)
           OK_TO_TEST=$(gh pr view "$PR_NUMBER" --json labels -q '[.labels[].name] | any(. == "ok-to-test")')
           gh workflow run ci.yaml --ref "$HEAD_REF" -f "ok-to-test=$OK_TO_TEST"
-
-  trigger-on-ok-to-test:
-    if: >-
-      github.event_name == 'pull_request_target' && github.event.label.name == 'ok-to-test'
-    runs-on: ubuntu-latest
-    permissions:
-      actions: write
-    steps:
-      - name: Trigger CI
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
-        run: |
-          gh workflow run ci.yaml --ref "$HEAD_REF" -f "ok-to-test=true"

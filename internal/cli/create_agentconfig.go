@@ -77,6 +77,9 @@ func newCreateAgentConfigCommand(cfg *ClientConfig) *cobra.Command {
 			}
 
 			pluginNameSeen := make(map[string]bool)
+			if len(skillFlags) > 0 || len(agentFlags) > 0 {
+				pluginNameSeen["kelos"] = true
+			}
 			for _, gp := range githubPluginFlags {
 				gpSpec, err := parseGitHubPluginFlag(gp)
 				if err != nil {

@@ -425,16 +425,17 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 			}
 
 			pluginSetupEnv := append([]corev1.EnvVar{}, pluginEnvVars...)
-			// If any GitHub plugin falls back to workspace token, pass it through.
+			// Only pass workspace token when a GitHub plugin needs it as fallback
+			// (i.e., it has no secretRef of its own).
 			if wsHasToken {
-				hasGitHubPlugin := false
+				needsWorkspaceToken := false
 				for _, p := range agentConfig.Plugins {
-					if p.GitHub != nil {
-						hasGitHubPlugin = true
+					if p.GitHub != nil && p.GitHub.SecretRef == nil {
+						needsWorkspaceToken = true
 						break
 					}
 				}
-				if hasGitHubPlugin {
+				if needsWorkspaceToken {
 					pluginSetupEnv = append(pluginSetupEnv, workspaceEnvVars...)
 				}
 			}

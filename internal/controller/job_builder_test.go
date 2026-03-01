@@ -4027,3 +4027,92 @@ func TestBuildJob_GitHubPluginMultipleSecrets(t *testing.T) {
 		t.Errorf("Expected KELOS_PLUGIN_TOKEN_1 from secret-b, got %q", envMap["KELOS_PLUGIN_TOKEN_1"])
 	}
 }
+
+func TestBuildJob_GitHubPluginMutualExclusivityWithAgents(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-mutual-ex-agents", Namespace: "default"},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
+		Plugins: []kelosv1alpha1.PluginSpec{
+			{
+				Name:   "bad-plugin",
+				GitHub: &kelosv1alpha1.GitHubPluginSource{Repo: "acme/tools"},
+				Agents: []kelosv1alpha1.AgentDefinition{{Name: "a", Content: "c"}},
+			},
+		},
+	}
+
+	_, err := builder.Build(task, nil, agentConfig, task.Spec.Prompt)
+	if err == nil {
+		t.Fatal("Expected error for mutually exclusive github and agents")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("Expected mutually exclusive error, got: %v", err)
+	}
+}
+
+func TestBuildJob_GitHubPluginAllWithSecretRef_NoWorkspaceTokenLeak(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-no-leak", Namespace: "default"},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo:      "https://github.com/example/repo.git",
+		Ref:       "main",
+		SecretRef: &kelosv1alpha1.SecretReference{Name: "ws-token"},
+	}
+
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
+		Plugins: []kelosv1alpha1.PluginSpec{
+			{
+				Name: "plugin-a",
+				GitHub: &kelosv1alpha1.GitHubPluginSource{
+					Repo:      "acme/a",
+					SecretRef: &kelosv1alpha1.SecretReference{Name: "secret-a"},
+				},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, workspace, agentConfig, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	var ic *corev1.Container
+	for i := range job.Spec.Template.Spec.InitContainers {
+		if job.Spec.Template.Spec.InitContainers[i].Name == "plugin-setup" {
+			ic = &job.Spec.Template.Spec.InitContainers[i]
+			break
+		}
+	}
+	if ic == nil {
+		t.Fatal("Expected plugin-setup init container")
+	}
+
+	// Workspace GITHUB_TOKEN should NOT be injected when all plugins have their own secretRef.
+	for _, env := range ic.Env {
+		if env.Name == "GITHUB_TOKEN" {
+			t.Error("Workspace GITHUB_TOKEN should not be injected when all GitHub plugins have their own secretRef")
+		}
+	}
+}

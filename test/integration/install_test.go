@@ -202,5 +202,58 @@ var _ = Describe("Install/Uninstall", Ordered, func() {
 			root.SetArgs([]string{"uninstall", "--kubeconfig", kubeconfigPath})
 			Expect(root.Execute()).To(Succeed())
 		})
+
+		It("Should clean up custom resources with finalizers before removing controller", func() {
+			By("Installing first")
+			root := cli.NewRootCommand()
+			root.SetArgs([]string{"install", "--kubeconfig", kubeconfigPath})
+			Expect(root.Execute()).To(Succeed())
+
+			By("Creating a Task with required fields")
+			task := &kelosv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-uninstall-task",
+					Namespace: "default",
+				},
+				Spec: kelosv1alpha1.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "test prompt",
+					Credentials: kelosv1alpha1.Credentials{
+						Type:      kelosv1alpha1.CredentialTypeAPIKey,
+						SecretRef: kelosv1alpha1.SecretReference{Name: "fake-secret"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, task)).To(Succeed())
+
+			By("Waiting for the controller to add the finalizer")
+			Eventually(func() bool {
+				var t kelosv1alpha1.Task
+				if err := k8sClient.Get(ctx, types.NamespacedName{
+					Name: "test-uninstall-task", Namespace: "default",
+				}, &t); err != nil {
+					return false
+				}
+				for _, f := range t.Finalizers {
+					if f == "kelos.dev/finalizer" {
+						return true
+					}
+				}
+				return false
+			}, 10*time.Second, 100*time.Millisecond).Should(BeTrue())
+
+			By("Uninstalling")
+			root2 := cli.NewRootCommand()
+			root2.SetArgs([]string{"uninstall", "--kubeconfig", kubeconfigPath})
+			Expect(root2.Execute()).To(Succeed())
+
+			By("Verifying custom resources are gone")
+			Eventually(func() bool {
+				var taskList kelosv1alpha1.TaskList
+				err := k8sClient.List(ctx, &taskList)
+				// After CRDs are deleted, listing will fail
+				return err != nil || len(taskList.Items) == 0
+			}, 30*time.Second, 100*time.Millisecond).Should(BeTrue())
+		})
 	})
 })

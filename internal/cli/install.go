@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/discovery"
@@ -133,6 +135,21 @@ func withImagePullPolicy(data []byte, policy string) []byte {
 	return buf.Bytes()
 }
 
+// kelosGVRs lists the kelos custom resource GVRs that need to be cleaned up
+// before the controller and CRDs can be safely removed. Resources with
+// finalizers (tasks, taskspawners) must be deleted while the controller is
+// still running so it can process the finalizer removal.
+var kelosGVRs = []schema.GroupVersionResource{
+	{Group: "kelos.dev", Version: "v1alpha1", Resource: "tasks"},
+	{Group: "kelos.dev", Version: "v1alpha1", Resource: "taskspawners"},
+	{Group: "kelos.dev", Version: "v1alpha1", Resource: "workspaces"},
+	{Group: "kelos.dev", Version: "v1alpha1", Resource: "agentconfigs"},
+}
+
+// crDeletionTimeout is the maximum time to wait for all custom resources
+// to be fully deleted (finalizers processed) before proceeding.
+const crDeletionTimeout = 5 * time.Minute
+
 func newUninstallCommand(cfg *ClientConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "uninstall",
@@ -155,6 +172,23 @@ func newUninstallCommand(cfg *ClientConfig) *cobra.Command {
 
 			ctx := cmd.Context()
 
+			// Delete all custom resources first while the controller is
+			// still running. The controller handles finalizer removal on
+			// Tasks and TaskSpawners; deleting the controller first would
+			// leave those resources stuck with unresolvable finalizers.
+			fmt.Fprintf(os.Stdout, "Removing kelos custom resources\n")
+			if err := deleteAllCustomResources(ctx, dyn); err != nil {
+				return fmt.Errorf("removing custom resources: %w", err)
+			}
+
+			// Wait for all custom resources to be fully deleted. The
+			// controller must process finalizers before the resources
+			// disappear, so we poll until nothing remains.
+			fmt.Fprintf(os.Stdout, "Waiting for custom resources to be deleted\n")
+			if err := waitForCustomResourceDeletion(ctx, dyn); err != nil {
+				return fmt.Errorf("waiting for custom resource deletion: %w", err)
+			}
+
 			fmt.Fprintf(os.Stdout, "Removing kelos controller\n")
 			if err := deleteManifests(ctx, dc, dyn, manifests.InstallController); err != nil {
 				return fmt.Errorf("removing controller: %w", err)
@@ -171,6 +205,67 @@ func newUninstallCommand(cfg *ClientConfig) *cobra.Command {
 	}
 
 	return cmd
+}
+
+// deleteAllCustomResources deletes all instances of kelos custom resources
+// across all namespaces. It skips resources whose CRD does not exist
+// (e.g. if CRDs were already removed).
+func deleteAllCustomResources(ctx context.Context, dyn dynamic.Interface) error {
+	for _, gvr := range kelosGVRs {
+		list, err := dyn.Resource(gvr).Namespace("").List(ctx, metav1.ListOptions{})
+		if err != nil {
+			if errors.IsNotFound(err) || meta.IsNoMatchError(err) {
+				continue
+			}
+			return fmt.Errorf("listing %s: %w", gvr.Resource, err)
+		}
+		for i := range list.Items {
+			obj := &list.Items[i]
+			if obj.GetDeletionTimestamp() != nil {
+				continue
+			}
+			if err := dyn.Resource(gvr).Namespace(obj.GetNamespace()).Delete(ctx, obj.GetName(), metav1.DeleteOptions{}); err != nil {
+				if errors.IsNotFound(err) {
+					continue
+				}
+				return fmt.Errorf("deleting %s %s/%s: %w", gvr.Resource, obj.GetNamespace(), obj.GetName(), err)
+			}
+		}
+	}
+	return nil
+}
+
+// waitForCustomResourceDeletion polls until no kelos custom resources remain.
+// This gives the controller time to process finalizers on Tasks and TaskSpawners.
+func waitForCustomResourceDeletion(ctx context.Context, dyn dynamic.Interface) error {
+	deadline := time.Now().Add(crDeletionTimeout)
+	for {
+		allGone := true
+		for _, gvr := range kelosGVRs {
+			list, err := dyn.Resource(gvr).Namespace("").List(ctx, metav1.ListOptions{Limit: 1})
+			if err != nil {
+				if errors.IsNotFound(err) || meta.IsNoMatchError(err) {
+					continue
+				}
+				return fmt.Errorf("listing %s: %w", gvr.Resource, err)
+			}
+			if len(list.Items) > 0 {
+				allGone = false
+				break
+			}
+		}
+		if allGone {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out waiting for custom resources to be deleted (finalizers may not be processed -- is the controller running?)")
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
 }
 
 // parseManifests splits a multi-document YAML byte slice into individual

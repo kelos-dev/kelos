@@ -2,8 +2,15 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 
 	"github.com/kelos-dev/kelos/internal/manifests"
 )
@@ -372,5 +379,124 @@ func TestVersionCommand(t *testing.T) {
 	cmd.SetArgs([]string{"version"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("version command failed: %v", err)
+	}
+}
+
+// kelosListKinds maps kelos GVRs to their list kinds for the fake dynamic client.
+var kelosListKinds = map[schema.GroupVersionResource]string{
+	{Group: "kelos.dev", Version: "v1alpha1", Resource: "tasks"}:        "TaskList",
+	{Group: "kelos.dev", Version: "v1alpha1", Resource: "taskspawners"}: "TaskSpawnerList",
+	{Group: "kelos.dev", Version: "v1alpha1", Resource: "workspaces"}:   "WorkspaceList",
+	{Group: "kelos.dev", Version: "v1alpha1", Resource: "agentconfigs"}: "AgentConfigList",
+}
+
+func TestDeleteAllCustomResources_NoResources(t *testing.T) {
+	scheme := runtime.NewScheme()
+	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, kelosListKinds)
+	if err := deleteAllCustomResources(context.Background(), client); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDeleteAllCustomResources_DeletesExistingResources(t *testing.T) {
+	scheme := runtime.NewScheme()
+
+	task := &unstructured.Unstructured{}
+	task.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "kelos.dev", Version: "v1alpha1", Kind: "Task",
+	})
+	task.SetName("my-task")
+	task.SetNamespace("default")
+
+	workspace := &unstructured.Unstructured{}
+	workspace.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "kelos.dev", Version: "v1alpha1", Kind: "Workspace",
+	})
+	workspace.SetName("my-workspace")
+	workspace.SetNamespace("default")
+
+	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, kelosListKinds, task, workspace)
+	if err := deleteAllCustomResources(context.Background(), client); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify resources were deleted
+	taskGVR := schema.GroupVersionResource{Group: "kelos.dev", Version: "v1alpha1", Resource: "tasks"}
+	list, err := client.Resource(taskGVR).Namespace("default").List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error listing tasks: %v", err)
+	}
+	if len(list.Items) != 0 {
+		t.Errorf("expected 0 tasks, got %d", len(list.Items))
+	}
+
+	wsGVR := schema.GroupVersionResource{Group: "kelos.dev", Version: "v1alpha1", Resource: "workspaces"}
+	list, err = client.Resource(wsGVR).Namespace("default").List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error listing workspaces: %v", err)
+	}
+	if len(list.Items) != 0 {
+		t.Errorf("expected 0 workspaces, got %d", len(list.Items))
+	}
+}
+
+func TestDeleteAllCustomResources_SkipsAlreadyDeletingResources(t *testing.T) {
+	scheme := runtime.NewScheme()
+
+	now := metav1.Now()
+	task := &unstructured.Unstructured{}
+	task.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "kelos.dev", Version: "v1alpha1", Kind: "Task",
+	})
+	task.SetName("deleting-task")
+	task.SetNamespace("default")
+	task.SetDeletionTimestamp(&now)
+	task.SetFinalizers([]string{"kelos.dev/finalizer"})
+
+	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, kelosListKinds, task)
+
+	if err := deleteAllCustomResources(context.Background(), client); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Resource should still exist because it was already deleting (has deletionTimestamp)
+	// and we skip those
+	taskGVR := schema.GroupVersionResource{Group: "kelos.dev", Version: "v1alpha1", Resource: "tasks"}
+	list, err := client.Resource(taskGVR).Namespace("default").List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("unexpected error listing tasks: %v", err)
+	}
+	if len(list.Items) != 1 {
+		t.Errorf("expected 1 task (still deleting), got %d", len(list.Items))
+	}
+}
+
+func TestWaitForCustomResourceDeletion_AlreadyEmpty(t *testing.T) {
+	scheme := runtime.NewScheme()
+	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, kelosListKinds)
+
+	if err := waitForCustomResourceDeletion(context.Background(), client); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestWaitForCustomResourceDeletion_RespectsContextCancellation(t *testing.T) {
+	scheme := runtime.NewScheme()
+
+	task := &unstructured.Unstructured{}
+	task.SetGroupVersionKind(schema.GroupVersionKind{
+		Group: "kelos.dev", Version: "v1alpha1", Kind: "Task",
+	})
+	task.SetName("stuck-task")
+	task.SetNamespace("default")
+
+	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, kelosListKinds, task)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	err := waitForCustomResourceDeletion(ctx, client)
+	if err == nil {
+		t.Fatal("expected error from cancelled context")
 	}
 }

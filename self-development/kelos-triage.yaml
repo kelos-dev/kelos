@@ -113,8 +113,8 @@ spec:
         - It depends on external systems Kelos cannot access
         - It requires human judgment about product direction
 
-      If recommending `actor/kelos`:
-        `gh issue edit {{.Number}} --add-label actor/kelos --remove-label needs-actor`
+      Do NOT apply the actor label yet — it will be applied together with the
+      lifecycle labels in a single command below to avoid race conditions.
 
       ## Output
       Post exactly one comment on this issue using:
@@ -139,7 +139,14 @@ spec:
       **Recommendation**: KEEP OPEN / CLOSE (with reason)
       ```
 
-      After posting the comment, update labels to complete the triage lifecycle:
+      After posting the comment, update labels to complete the triage lifecycle.
+      Apply the actor label in the same command to avoid a race condition where
+      workers pick up the issue before `kelos/needs-input` is set.
+
+      If recommending `actor/kelos`:
+        `gh issue edit {{.Number}} --add-label triage-accepted --add-label kelos/needs-input --add-label actor/kelos --remove-label needs-triage --remove-label needs-actor`
+
+      If leaving `needs-actor`:
         `gh issue edit {{.Number}} --add-label triage-accepted --add-label kelos/needs-input --remove-label needs-triage`
 
       The `kelos/needs-input` label ensures a maintainer reviews before any worker

@@ -18,11 +18,9 @@
   <a href="examples/">YAML Manifests</a>
 </p>
 
-Kelos started as a way to sandbox AI coding agents in Kubernetes. The biggest unlock turned out to be something else: **defining your entire development workflow as YAML.**
+Kelos lets you **define your development workflow as YAML** and run it continuously on Kubernetes. Declare what triggers agents, what they do, and how they hand off — Kelos handles the rest.
 
-Instead of invoking an agent when you need it, you declare what your team's workflow looks like — watch for bugs and draft PRs, test the developer experience periodically, scan for improvements on a schedule — and Kelos runs it continuously. Agents become managed workers, not tools you invoke.
-
-We use Kelos to develop Kelos. Five TaskSpawners run 24/7: triaging issues, fixing bugs, testing DX as a fake new user, brainstorming improvements, and tuning their own prompts. [See the full pipeline below.](#kelos-developing-kelos)
+We use Kelos to develop Kelos. Five TaskSpawners run 24/7: triaging issues, fixing bugs, testing DX, brainstorming improvements, and tuning their own prompts. [See the full pipeline below.](#kelos-developing-kelos)
 
 Supports **Claude Code**, **OpenAI Codex**, **Google Gemini**, **OpenCode**, and [custom agent images](docs/agent-image-interface.md).
 

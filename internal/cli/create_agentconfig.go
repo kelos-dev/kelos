@@ -13,11 +13,12 @@ import (
 
 func newCreateAgentConfigCommand(cfg *ClientConfig) *cobra.Command {
 	var (
-		agentsMD   string
-		skillFlags []string
-		agentFlags []string
-		mcpFlags   []string
-		dryRun     bool
+		agentsMD          string
+		skillFlags        []string
+		agentFlags        []string
+		githubPluginFlags []string
+		mcpFlags          []string
+		dryRun            bool
 	)
 
 	cmd := &cobra.Command{
@@ -72,7 +73,20 @@ func newCreateAgentConfigCommand(cfg *ClientConfig) *cobra.Command {
 					})
 				}
 
-				acSpec.Plugins = []kelosv1alpha1.PluginSpec{plugin}
+				acSpec.Plugins = append(acSpec.Plugins, plugin)
+			}
+
+			pluginNameSeen := make(map[string]bool)
+			for _, gp := range githubPluginFlags {
+				gpSpec, err := parseGitHubPluginFlag(gp)
+				if err != nil {
+					return err
+				}
+				if pluginNameSeen[gpSpec.Name] {
+					return fmt.Errorf("duplicate --github-plugin name %q", gpSpec.Name)
+				}
+				pluginNameSeen[gpSpec.Name] = true
+				acSpec.Plugins = append(acSpec.Plugins, gpSpec)
 			}
 
 			mcpSeen := make(map[string]bool, len(mcpFlags))
@@ -113,6 +127,7 @@ func newCreateAgentConfigCommand(cfg *ClientConfig) *cobra.Command {
 	cmd.Flags().StringVar(&agentsMD, "agents-md", "", "agent instructions (content or @file path)")
 	cmd.Flags().StringArrayVar(&skillFlags, "skill", nil, "skill definition as name=content or name=@file")
 	cmd.Flags().StringArrayVar(&agentFlags, "agent", nil, "agent definition as name=content or name=@file")
+	cmd.Flags().StringArrayVar(&githubPluginFlags, "github-plugin", nil, "GitHub plugin as name=owner/repo[@ref][,host=HOST][,secret=SECRET]")
 	cmd.Flags().StringArrayVar(&mcpFlags, "mcp", nil, "MCP server as name=JSON or name=@file (e.g. github='{\"type\":\"http\",\"url\":\"https://api.githubcopilot.com/mcp/\"}')")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print the resource that would be created without submitting it")
 

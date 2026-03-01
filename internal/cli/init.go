@@ -22,6 +22,18 @@ oauthToken: ""
 #   oauthToken: "@~/.codex/auth.json"
 # type: claude-code
 
+# Where to get credentials for each agent type:
+#   claude-code:
+#     OAuth token: https://claude.ai/settings/developer
+#     API key:     https://console.anthropic.com/settings/keys
+#   codex:
+#     API key:     https://platform.openai.com/api-keys
+#     OAuth:       run "codex auth login", then set oauthToken: "@~/.codex/auth.json"
+#   gemini:
+#     API key:     https://aistudio.google.com/app/apikey
+#   opencode:
+#     API key:     depends on the model provider (Anthropic, OpenAI, Google, etc.)
+
 # Model override (optional)
 # model: ""
 
@@ -59,8 +71,10 @@ func printNextSteps(configPath string) {
 	fmt.Fprintln(os.Stdout, "Next steps:")
 	fmt.Fprintln(os.Stdout, "")
 	fmt.Fprintln(os.Stdout, "1. Get your credentials:")
-	fmt.Fprintln(os.Stdout, "   • For Claude Code (OAuth): https://claude.ai/settings/developer")
-	fmt.Fprintln(os.Stdout, "   • For API access (API key): https://console.anthropic.com/settings/keys")
+	fmt.Fprintln(os.Stdout, "   • Claude Code (OAuth): https://claude.ai/settings/developer")
+	fmt.Fprintln(os.Stdout, "   • Claude Code (API key): https://console.anthropic.com/settings/keys")
+	fmt.Fprintln(os.Stdout, "   • Codex (API key): https://platform.openai.com/api-keys")
+	fmt.Fprintln(os.Stdout, "   • Gemini (API key): https://aistudio.google.com/app/apikey")
 	fmt.Fprintln(os.Stdout, "")
 	fmt.Fprintln(os.Stdout, "2. Edit the config file and add your token:")
 	fmt.Fprintf(os.Stdout, "   %s\n", configPath)

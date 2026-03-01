@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -73,5 +74,34 @@ func TestInitCommand_ForceOverwrites(t *testing.T) {
 	}
 	if string(data) == "existing" {
 		t.Fatal("expected file to be overwritten")
+	}
+}
+
+func TestInitCommand_ConfigContainsCredentialURLs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{"init", "--config", path})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading created file: %v", err)
+	}
+
+	content := string(data)
+	expectedURLs := []string{
+		"https://claude.ai/settings/developer",
+		"https://console.anthropic.com/settings/keys",
+		"https://platform.openai.com/api-keys",
+		"https://aistudio.google.com/app/apikey",
+	}
+	for _, url := range expectedURLs {
+		if !strings.Contains(content, url) {
+			t.Errorf("config file missing credential URL: %s", url)
+		}
 	}
 }

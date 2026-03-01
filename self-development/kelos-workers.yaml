@@ -53,7 +53,7 @@ spec:
 
       If a PR already exists:
       - 2a. Read ALL review comments and conversation on the PR (gh pr view, gh api for review comments).
-      - 2a-extra. Also read ALL comments on the linked issue (gh issue view <number> --comments), not just the PR.
+        - Also read ALL comments on the linked issue (gh issue view <number> --comments), not just the PR.
       - 3a. Read the existing diff (git diff main...HEAD) to understand what has already been done. Do NOT start over or rewrite from scratch.
       - 4a. Make only the incremental changes needed to address review feedback or remaining issues. Preserve existing work.
       - 5a. Commit and push your changes to origin kelos-task-{{.Number}}.
@@ -63,7 +63,7 @@ spec:
 
       If no PR exists:
       - 2b. Investigate the issue #{{.Number}}.
-        - Read ALL comments on the issue, including maintainer feedback and linked issues/PRs.
+        - Read ALL comments on the issue (gh issue view {{.Number}} --comments), including maintainer feedback and linked issues/PRs.
         - If previous PRs for this issue were closed, read their reviews to understand why before choosing your approach.
         - Search the codebase for existing constants, types, and patterns before creating new ones. Do not duplicate definitions.
         - Only implement what the issue explicitly asks for. If you discover related improvements, create separate issues for them.

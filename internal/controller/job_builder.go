@@ -459,6 +459,13 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 			})
 		}
 
+		if len(agentConfig.MarketplacePlugins) > 0 {
+			mainContainer.Env = append(mainContainer.Env, corev1.EnvVar{
+				Name:  "KELOS_MARKETPLACE_PLUGINS",
+				Value: strings.Join(agentConfig.MarketplacePlugins, ","),
+			})
+		}
+
 		if len(agentConfig.MCPServers) > 0 {
 			mcpJSON, err := buildMCPServersJSON(agentConfig.MCPServers)
 			if err != nil {

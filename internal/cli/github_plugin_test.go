@@ -149,3 +149,63 @@ func TestParseGitHubPluginFlag(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateMarketplacePluginFlag(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+		errStr  string
+	}{
+		{
+			name:  "valid plugin",
+			input: "github@anthropics-claude-code",
+		},
+		{
+			name:  "valid plugin with dashes",
+			input: "commit-commands@claude-plugins-official",
+		},
+		{
+			name:    "empty string",
+			input:   "",
+			wantErr: true,
+			errStr:  "must not be empty",
+		},
+		{
+			name:    "no @ sign",
+			input:   "just-a-name",
+			wantErr: true,
+			errStr:  "plugin-name@marketplace-name",
+		},
+		{
+			name:    "leading @ sign",
+			input:   "@marketplace",
+			wantErr: true,
+			errStr:  "plugin-name@marketplace-name",
+		},
+		{
+			name:    "trailing @ sign",
+			input:   "plugin@",
+			wantErr: true,
+			errStr:  "marketplace name must not be empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateMarketplacePluginFlag(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("Expected error containing %q, got nil", tt.errStr)
+				}
+				if tt.errStr != "" && !strings.Contains(err.Error(), tt.errStr) {
+					t.Errorf("Expected error containing %q, got: %v", tt.errStr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+		})
+	}
+}

@@ -36,6 +36,15 @@ if [ -n "${KELOS_PLUGIN_DIR:-}" ] && [ -d "${KELOS_PLUGIN_DIR}" ]; then
   done
 fi
 
+# Install marketplace plugins via "claude plugin install"
+if [ -n "${KELOS_MARKETPLACE_PLUGINS:-}" ]; then
+  IFS=',' read -ra MPLUGINS <<<"$KELOS_MARKETPLACE_PLUGINS"
+  for mp in "${MPLUGINS[@]}"; do
+    echo "Installing marketplace plugin: $mp"
+    claude plugin install "$mp" || echo "Warning: failed to install marketplace plugin $mp"
+  done
+fi
+
 # Write MCP server configuration to user-scoped ~/.claude.json.
 # This avoids overwriting the repository's own .mcp.json while
 # still making the servers available to Claude Code.

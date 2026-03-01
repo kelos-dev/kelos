@@ -78,6 +78,22 @@ func parseGitHubPluginFlag(s string) (kelosv1alpha1.PluginSpec, error) {
 	}, nil
 }
 
+// validateMarketplacePluginFlag validates a --marketplace-plugin flag value.
+// The expected format is "plugin-name@marketplace-name".
+func validateMarketplacePluginFlag(s string) error {
+	if s == "" {
+		return fmt.Errorf("invalid --marketplace-plugin value: must not be empty")
+	}
+	idx := strings.LastIndex(s, "@")
+	if idx <= 0 {
+		return fmt.Errorf("invalid --marketplace-plugin value %q: must be in plugin-name@marketplace-name format", s)
+	}
+	if idx == len(s)-1 {
+		return fmt.Errorf("invalid --marketplace-plugin value %q: marketplace name must not be empty", s)
+	}
+	return nil
+}
+
 // resolveContent returns the content string directly, or if it starts with "@",
 // reads the content from the referenced file path.
 func resolveContent(s string) (string, error) {

@@ -18,6 +18,13 @@ type AgentConfigSpec struct {
 	// +optional
 	Plugins []PluginSpec `json:"plugins,omitempty"`
 
+	// MarketplacePlugins lists plugins to install from Claude Code
+	// marketplace catalogs via "claude plugin install".
+	// Each entry is in the format "plugin-name@marketplace-name".
+	// Only applicable to claude-code type agents; other agents ignore this.
+	// +optional
+	MarketplacePlugins []string `json:"marketplacePlugins,omitempty"`
+
 	// MCPServers defines MCP (Model Context Protocol) servers to make
 	// available to the agent. Each entry is written to the agent's native
 	// MCP configuration (e.g., ~/.claude.json for Claude Code).

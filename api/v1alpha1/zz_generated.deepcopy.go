@@ -109,6 +109,11 @@ func (in *AgentConfigSpec) DeepCopyInto(out *AgentConfigSpec) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
+	if in.MarketplacePlugins != nil {
+		in, out := &in.MarketplacePlugins, &out.MarketplacePlugins
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.MCPServers != nil {
 		in, out := &in.MCPServers, &out.MCPServers
 		*out = make([]MCPServerSpec, len(*in))

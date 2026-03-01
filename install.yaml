@@ -293,3 +293,43 @@ spec:
             requests:
               cpu: 10m
               memory: 64Mi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: kelos-telemetry
+  namespace: kelos-system
+  labels:
+    app.kubernetes.io/name: kelos
+    app.kubernetes.io/component: telemetry
+spec:
+  schedule: "0 6 * * *"
+  concurrencyPolicy: Replace
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      template:
+        spec:
+          serviceAccountName: kelos-controller
+          securityContext:
+            runAsNonRoot: true
+          restartPolicy: OnFailure
+          containers:
+            - name: telemetry
+              image: ghcr.io/kelos-dev/kelos-controller:latest
+              args:
+                - --telemetry-report
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+              resources:
+                limits:
+                  cpu: 100m
+                  memory: 64Mi
+                requests:
+                  cpu: 10m
+                  memory: 32Mi

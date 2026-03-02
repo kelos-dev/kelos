@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -334,5 +335,76 @@ func TestResolveGitHubAppToken_PATSecret(t *testing.T) {
 	// PAT secrets should pass through unchanged
 	if result.SecretRef.Name != "pat-secret" {
 		t.Errorf("secret name = %q, want %q (should be unchanged for PAT)", result.SecretRef.Name, "pat-secret")
+	}
+}
+
+func TestIsJobFailed(t *testing.T) {
+	tests := []struct {
+		name       string
+		conditions []batchv1.JobCondition
+		want       bool
+	}{
+		{
+			name:       "No conditions",
+			conditions: nil,
+			want:       false,
+		},
+		{
+			name: "Job failed condition true",
+			conditions: []batchv1.JobCondition{
+				{
+					Type:   batchv1.JobFailed,
+					Status: corev1.ConditionTrue,
+				},
+			},
+			want: true,
+		},
+		{
+			name: "Job failed condition false",
+			conditions: []batchv1.JobCondition{
+				{
+					Type:   batchv1.JobFailed,
+					Status: corev1.ConditionFalse,
+				},
+			},
+			want: false,
+		},
+		{
+			name: "Job complete condition only",
+			conditions: []batchv1.JobCondition{
+				{
+					Type:   batchv1.JobComplete,
+					Status: corev1.ConditionTrue,
+				},
+			},
+			want: false,
+		},
+		{
+			name: "Multiple conditions with failed",
+			conditions: []batchv1.JobCondition{
+				{
+					Type:   batchv1.JobComplete,
+					Status: corev1.ConditionFalse,
+				},
+				{
+					Type:   batchv1.JobFailed,
+					Status: corev1.ConditionTrue,
+				},
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			job := &batchv1.Job{
+				Status: batchv1.JobStatus{
+					Conditions: tt.conditions,
+				},
+			}
+			if got := isJobFailed(job); got != tt.want {
+				t.Errorf("isJobFailed() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

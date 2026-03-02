@@ -267,7 +267,7 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 		workspaceEnvVars = append(workspaceEnvVars, ghTokenEnv)
 	}
 
-	backoffLimit := int32(0)
+	backoffLimit := int32(1)
 	agentUID := AgentUID
 
 	mainContainer := corev1.Container{
@@ -485,6 +485,30 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 		}
 	}
 
+	// PodFailurePolicy ensures only pod disruptions (e.g. node scale-down,
+	// preemption) consume the backoff budget while application crashes fail the
+	// Job immediately.
+	podFailurePolicy := &batchv1.PodFailurePolicy{
+		Rules: []batchv1.PodFailurePolicyRule{
+			{
+				Action: batchv1.PodFailurePolicyActionCount,
+				OnPodConditions: []batchv1.PodFailurePolicyOnPodConditionsPattern{
+					{
+						Type:   corev1.DisruptionTarget,
+						Status: corev1.ConditionTrue,
+					},
+				},
+			},
+			{
+				Action: batchv1.PodFailurePolicyActionFailJob,
+				OnExitCodes: &batchv1.PodFailurePolicyOnExitCodesRequirement{
+					Operator: batchv1.PodFailurePolicyOnExitCodesOpNotIn,
+					Values:   []int32{0},
+				},
+			},
+		},
+	}
+
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      task.Name,
@@ -498,6 +522,7 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 		},
 		Spec: batchv1.JobSpec{
 			BackoffLimit:          &backoffLimit,
+			PodFailurePolicy:      podFailurePolicy,
 			ActiveDeadlineSeconds: activeDeadlineSeconds,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{

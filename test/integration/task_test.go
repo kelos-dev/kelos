@@ -1783,6 +1783,10 @@ var _ = Describe("Task Controller", func() {
 					return err
 				}
 				createdJob.Status.Failed = 1
+				createdJob.Status.Conditions = append(createdJob.Status.Conditions, batchv1.JobCondition{
+					Type:   batchv1.JobFailed,
+					Status: corev1.ConditionTrue,
+				})
 				return k8sClient.Status().Update(ctx, createdJob)
 			}, timeout, interval).Should(Succeed())
 
@@ -1992,6 +1996,10 @@ var _ = Describe("Task Controller", func() {
 					return err
 				}
 				jobA.Status.Failed = 1
+				jobA.Status.Conditions = append(jobA.Status.Conditions, batchv1.JobCondition{
+					Type:   batchv1.JobFailed,
+					Status: corev1.ConditionTrue,
+				})
 				return k8sClient.Status().Update(ctx, &jobA)
 			}, timeout, interval).Should(Succeed())
 

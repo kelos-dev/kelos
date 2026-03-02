@@ -434,7 +434,7 @@ func (r *TaskReconciler) updateStatus(ctx context.Context, task *kelosv1alpha1.T
 			r.recordEvent(task, corev1.EventTypeNormal, "TaskSucceeded", "Task completed successfully")
 			taskCompletedTotal.WithLabelValues(task.Namespace, task.Spec.Type, string(kelosv1alpha1.TaskPhaseSucceeded)).Inc()
 		}
-	} else if job.Status.Failed > 0 {
+	} else if isJobFailed(job) {
 		if task.Status.Phase != kelosv1alpha1.TaskPhaseFailed {
 			newPhase = kelosv1alpha1.TaskPhaseFailed
 			newMessage = "Task failed"
@@ -820,6 +820,19 @@ func RecordCostTokenMetrics(task *kelosv1alpha1.Task, results map[string]string)
 			taskOutputTokens.WithLabelValues(labels...).Add(tokens)
 		}
 	}
+}
+
+// isJobFailed checks whether the Job has permanently failed by looking for a
+// JobFailed condition with status True. Unlike checking job.Status.Failed > 0,
+// this correctly handles Jobs with backoffLimit > 0 where intermediate pod
+// failures are retries rather than terminal failures.
+func isJobFailed(job *batchv1.Job) bool {
+	for _, c := range job.Status.Conditions {
+		if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
 }
 
 // SetupWithManager sets up the controller with the Manager.

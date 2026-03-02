@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -3550,5 +3551,69 @@ func TestBuildJob_NoTaskSpawnerLabelNoEnv(t *testing.T) {
 		if env.Name == "KELOS_TASKSPAWNER" {
 			t.Errorf("Expected no KELOS_TASKSPAWNER env var when label is absent, but found value %q", env.Value)
 		}
+	}
+}
+
+func TestBuildJob_PodFailurePolicy(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod-failure-policy",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Hello",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	if *job.Spec.BackoffLimit != 1 {
+		t.Errorf("Expected BackoffLimit 1, got %d", *job.Spec.BackoffLimit)
+	}
+
+	if job.Spec.PodFailurePolicy == nil {
+		t.Fatal("Expected PodFailurePolicy to be set")
+	}
+
+	rules := job.Spec.PodFailurePolicy.Rules
+	if len(rules) != 2 {
+		t.Fatalf("Expected 2 PodFailurePolicy rules, got %d", len(rules))
+	}
+
+	// Rule 1: DisruptionTarget → Count (retry on node scale-down)
+	if rules[0].Action != batchv1.PodFailurePolicyActionCount {
+		t.Errorf("Expected first rule action Count, got %s", rules[0].Action)
+	}
+	if len(rules[0].OnPodConditions) != 1 {
+		t.Fatalf("Expected 1 pod condition pattern in first rule, got %d", len(rules[0].OnPodConditions))
+	}
+	if rules[0].OnPodConditions[0].Type != corev1.DisruptionTarget {
+		t.Errorf("Expected first rule condition type DisruptionTarget, got %s", rules[0].OnPodConditions[0].Type)
+	}
+	if rules[0].OnPodConditions[0].Status != corev1.ConditionTrue {
+		t.Errorf("Expected first rule condition status True, got %s", rules[0].OnPodConditions[0].Status)
+	}
+
+	// Rule 2: non-zero exit codes → FailJob (no retry on app crash)
+	if rules[1].Action != batchv1.PodFailurePolicyActionFailJob {
+		t.Errorf("Expected second rule action FailJob, got %s", rules[1].Action)
+	}
+	if rules[1].OnExitCodes == nil {
+		t.Fatal("Expected second rule to have OnExitCodes")
+	}
+	if rules[1].OnExitCodes.Operator != batchv1.PodFailurePolicyOnExitCodesOpNotIn {
+		t.Errorf("Expected exit codes operator NotIn, got %s", rules[1].OnExitCodes.Operator)
+	}
+	if len(rules[1].OnExitCodes.Values) != 1 || rules[1].OnExitCodes.Values[0] != 0 {
+		t.Errorf("Expected exit codes values [0], got %v", rules[1].OnExitCodes.Values)
 	}
 }

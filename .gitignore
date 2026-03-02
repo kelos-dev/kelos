@@ -37,3 +37,4 @@ bin/
 # Claude Code
 .claude/
 CLAUDE.local.md
+.claude

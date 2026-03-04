@@ -1,0 +1,31 @@
+name: Check PR Labels
+
+on:
+  pull_request_target:
+    types: [opened, labeled, unlabeled, synchronize]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check-pr-labels:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for needs-kind and needs-release-note labels
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const labels = pr.labels.map(l => l.name);
+
+            const blocking = ['needs-kind', 'needs-release-note'];
+            const found = blocking.filter(l => labels.includes(l));
+
+            if (found.length > 0) {
+              core.setFailed(`PR is missing required labels. Blocking labels found: ${found.join(', ')}`);
+            } else {
+              core.info('All required labels are present');
+            }

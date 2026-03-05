@@ -37,8 +37,14 @@ RUN mkdir -p /home/agent/.cursor && chown -R agent:agent /home/agent
 
 USER agent
 
-# Cursor CLI installs to ~/.local/bin
-RUN curl -fsSL https://cursor.com/install | bash
+ARG CURSOR_CLI_VERSION=2026.02.27-e7d2ef6
+RUN ARCH=$(uname -m) \
+    && case "$ARCH" in x86_64) ARCH="x64" ;; aarch64) ARCH="arm64" ;; esac \
+    && INSTALL_DIR="$HOME/.local/share/cursor-agent/versions/${CURSOR_CLI_VERSION}" \
+    && mkdir -p "$INSTALL_DIR" "$HOME/.local/bin" \
+    && curl -fsSL "https://downloads.cursor.com/lab/${CURSOR_CLI_VERSION}/linux/${ARCH}/agent-cli-package.tar.gz" \
+       | tar -xz -C "$INSTALL_DIR" \
+    && ln -sf "$INSTALL_DIR/agent" "$HOME/.local/bin/agent"
 
 ENV GOPATH="/home/agent/go"
 ENV PATH="/home/agent/.local/bin:${GOPATH}/bin:${PATH}"

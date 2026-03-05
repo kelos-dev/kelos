@@ -1409,6 +1409,12 @@ func TestBuildCursorJob_DefaultImage(t *testing.T) {
 		if env.Name == "CODEX_API_KEY" {
 			t.Error("CODEX_API_KEY should not be set for cursor agent type")
 		}
+		if env.Name == "GEMINI_API_KEY" {
+			t.Error("GEMINI_API_KEY should not be set for cursor agent type")
+		}
+		if env.Name == "OPENCODE_API_KEY" {
+			t.Error("OPENCODE_API_KEY should not be set for cursor agent type")
+		}
 	}
 	if !foundKelosModel {
 		t.Error("Expected KELOS_MODEL env var to be set")
@@ -1493,6 +1499,18 @@ func TestBuildCursorJob_OAuthCredentials(t *testing.T) {
 		}
 		if env.Name == "CLAUDE_CODE_OAUTH_TOKEN" {
 			t.Error("CLAUDE_CODE_OAUTH_TOKEN should not be set for cursor agent type")
+		}
+		if env.Name == "ANTHROPIC_API_KEY" {
+			t.Error("ANTHROPIC_API_KEY should not be set for cursor agent type")
+		}
+		if env.Name == "CODEX_API_KEY" {
+			t.Error("CODEX_API_KEY should not be set for cursor agent type")
+		}
+		if env.Name == "GEMINI_API_KEY" {
+			t.Error("GEMINI_API_KEY should not be set for cursor agent type")
+		}
+		if env.Name == "OPENCODE_API_KEY" {
+			t.Error("OPENCODE_API_KEY should not be set for cursor agent type")
 		}
 	}
 	if !foundCursorKey {

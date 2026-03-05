@@ -6,6 +6,8 @@
 #   - First argument ($1): the task prompt
 #   - CURSOR_API_KEY env var: API key for authentication
 #   - KELOS_MODEL env var: model name (optional)
+#   - KELOS_AGENTS_MD env var: user-level instructions (optional)
+#   - KELOS_PLUGIN_DIR env var: plugin directory with skills/agents (optional)
 #   - UID 61100: shared between git-clone init container and agent
 #   - Working directory: /workspace/repo when a workspace is configured
 
@@ -26,29 +28,39 @@ if [ -n "${KELOS_MODEL:-}" ]; then
   ARGS=("--model" "$KELOS_MODEL" "${ARGS[@]}")
 fi
 
-# Write user-level instructions to both user config and workspace root.
-# Cursor CLI may read AGENTS.md from the working directory.
+# Write user-level instructions (global scope read by Cursor CLI)
 if [ -n "${KELOS_AGENTS_MD:-}" ]; then
   mkdir -p ~/.cursor
   printf '%s' "$KELOS_AGENTS_MD" >~/.cursor/AGENTS.md
-  printf '%s' "$KELOS_AGENTS_MD" >/workspace/AGENTS.md
 fi
 
-# Install each plugin's skills into Cursor's .cursor/skills/ directory
-# in the workspace so the CLI discovers them at runtime.
+# Install each plugin's skills and agents into Cursor's config directories.
+# Skills are placed into .cursor/skills/ relative to the working directory
+# so the CLI discovers them at runtime. Agents are installed as Cursor
+# rules under .cursor/rules/ in the working directory.
 if [ -n "${KELOS_PLUGIN_DIR:-}" ] && [ -d "${KELOS_PLUGIN_DIR}" ]; then
   for plugindir in "${KELOS_PLUGIN_DIR}"/*/; do
     [ -d "$plugindir" ] || continue
+    pluginname=$(basename "$plugindir")
+    # Copy skills into .cursor/skills/<plugin>-<skill>/SKILL.md
     if [ -d "${plugindir}skills" ]; then
       for skilldir in "${plugindir}skills"/*/; do
         [ -d "$skilldir" ] || continue
         skillname=$(basename "$skilldir")
-        pluginname=$(basename "$plugindir")
-        targetdir="/workspace/.cursor/skills/${pluginname}-${skillname}"
+        targetdir=".cursor/skills/${pluginname}-${skillname}"
         mkdir -p "$targetdir"
         if [ -f "${skilldir}SKILL.md" ]; then
           cp "${skilldir}SKILL.md" "$targetdir/SKILL.md"
         fi
+      done
+    fi
+    # Copy agents into .cursor/rules/ as .mdc rule files
+    if [ -d "${plugindir}agents" ]; then
+      mkdir -p .cursor/rules
+      for agentfile in "${plugindir}agents"/*.md; do
+        [ -f "$agentfile" ] || continue
+        agentname=$(basename "$agentfile" .md)
+        cp "$agentfile" ".cursor/rules/${pluginname}-${agentname}.mdc"
       done
     fi
   done

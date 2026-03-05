@@ -54,7 +54,7 @@ spec:
       Actions:
       - If you find an issue, create a GitHub issue:
         ```
-        gh issue create --title "<title>" --body "<description>" --label generated-by-kelos
+        gh issue create --title "<title>" --body "<description>" --label generated-by-kelos --label spawned-by/kelos-fake-user
         ```
       - Do NOT create PRs. Only create issues
 

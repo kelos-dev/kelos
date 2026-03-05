@@ -4,7 +4,7 @@ on:
   issues:
     types: [opened, labeled, unlabeled]
   pull_request_target:
-    types: [opened, edited, labeled, unlabeled]
+    types: [opened, edited, labeled, unlabeled, synchronize]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.issue.number || github.event.pull_request.number || github.run_id }}
@@ -110,4 +110,30 @@ jobs:
 
             if (errors.length > 0) {
               throw new Error(`Failed to sync labels: ${errors.map(e => e.rule).join(', ')}`);
+            }
+
+  check-pr-labels:
+    runs-on: ubuntu-latest
+    needs: sync-labels
+    if: always() && github.event.pull_request
+    permissions:
+      issues: read
+    steps:
+      - name: Check for blocking labels
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: labels } = await github.rest.issues.listLabelsOnIssue({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+            });
+
+            const blocking = ['needs-kind', 'needs-release-note'];
+            const found = blocking.filter(b => labels.some(l => l.name === b));
+
+            if (found.length > 0) {
+              core.setFailed(`PR is missing required labels. Blocking labels found: ${found.join(', ')}`);
+            } else {
+              core.info('All required labels are present');
             }

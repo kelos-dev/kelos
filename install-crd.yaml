@@ -556,6 +556,7 @@ spec:
                 - codex
                 - gemini
                 - opencode
+                - cursor
                 type: string
               workspaceRef:
                 description: WorkspaceRef optionally references a Workspace resource
@@ -1039,6 +1040,7 @@ spec:
                     - codex
                     - gemini
                     - opencode
+                    - cursor
                     type: string
                   workspaceRef:
                     description: |-

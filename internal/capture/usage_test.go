@@ -81,6 +81,18 @@ func TestParseUsage(t *testing.T) {
 			},
 		},
 		{
+			name:      "cursor reuses claude-code parser",
+			agentType: "cursor",
+			content: `{"type":"assistant","message":"thinking..."}
+{"type":"result","total_cost_usd":0.0532,"usage":{"input_tokens":15230,"output_tokens":4821}}
+`,
+			want: map[string]string{
+				"cost-usd":      "0.0532",
+				"input-tokens":  "15230",
+				"output-tokens": "4821",
+			},
+		},
+		{
 			name:      "unknown agent type returns nil",
 			agentType: "unknown-agent",
 			content:   `{"type":"result"}` + "\n",

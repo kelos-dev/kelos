@@ -260,6 +260,7 @@ spec:
             - --codex-image=ghcr.io/kelos-dev/codex:latest
             - --gemini-image=ghcr.io/kelos-dev/gemini:latest
             - --opencode-image=ghcr.io/kelos-dev/opencode:latest
+            - --cursor-image=ghcr.io/kelos-dev/cursor:latest
             - --spawner-image=ghcr.io/kelos-dev/kelos-spawner:latest
             - --token-refresher-image=ghcr.io/kelos-dev/kelos-token-refresher:latest
           securityContext:

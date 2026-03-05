@@ -71,7 +71,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          gh release create "$VERSION" --verify-tag --notes-file /tmp/release-notes.md || true
+          gh release create "$VERSION" --verify-tag --draft --title "$VERSION" --notes-file /tmp/release-notes.md || true
           gh release upload "$VERSION" --clobber \
             bin/kelos-* \
             bin/checksums.txt

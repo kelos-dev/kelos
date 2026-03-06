@@ -205,6 +205,20 @@ Creates GitHub issues for actionable improvements found.
 kubectl apply -f self-development/kelos-self-update.yaml
 ```
 
+## One-Off Task Templates
+
+The `tasks/` directory contains standalone Task definitions used by GitHub Actions workflows for manual or utility operations. Unlike TaskSpawner-created tasks, these are applied directly via `kubectl apply` from workflow YAML.
+
+### tasks/fake-strategist-task.yaml
+
+Used by the `run-fake-strategist.yaml` workflow (`workflow_dispatch`). Creates a one-off strategist task identical to what the `kelos-fake-strategist` TaskSpawner would create, allowing manual triggering outside the cron schedule.
+
+### tasks/squash-commits-task.yaml
+
+Used by the `squash-kelos-worker-commits.yaml` workflow. Triggered by the `/squash-commits` command on a PR. Rebases and squashes all commits on the PR branch into a single commit.
+
+**Important:** This task deliberately uses the name `kelos-workers-<ISSUE_NUMBER>` to occupy the same slot as the worker task, preventing the TaskSpawner from re-spawning a conflicting worker during the squash operation.
+
 ## Customizing for Your Repository
 
 To adapt these examples for your own repository:

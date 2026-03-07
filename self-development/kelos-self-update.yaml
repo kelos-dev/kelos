@@ -82,5 +82,6 @@ spec:
         - Strategic proposals, new use cases, integrations, CRD extensions → kelos-fake-strategist
         - Documentation, CLI UX, error messages → kelos-fake-user
         - Agent configuration based on PR reviews → kelos-config-update
+      - When editing or proposing changes to YAML files with `promptTemplate: |` (literal block scalars), ensure all content lines maintain the correct indentation level (typically 6 spaces for content inside a 4-space-indented key). Lines with insufficient indentation will exit the block scalar and break YAML parsing
       - If after review you find nothing actionable to improve, exit without creating an issue or PR. Not every run needs to produce output
   pollInterval: 1m

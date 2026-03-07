@@ -85,4 +85,5 @@ spec:
       - Do not create a PR if no actionable changes are found — exit cleanly instead
       - Do not create duplicate issues — check existing issues first with `gh issue list`
       - Back every change with a specific reference to the PR review that motivated it
+      - When editing YAML files with `promptTemplate: |` (literal block scalars), ensure all content lines maintain the correct indentation level (typically 6 spaces for content inside a 4-space-indented key). Lines with insufficient indentation will exit the block scalar and break YAML parsing
   pollInterval: 1m

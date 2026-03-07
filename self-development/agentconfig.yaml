@@ -19,6 +19,7 @@ spec:
     ## Standards
     - Do not create duplicate issues — check existing issues first with `gh issue list`
     - Keep changes minimal and focused
+    - Stay within the stated scope of the task — do not modify files or components outside what was explicitly requested
 
     ## Project Conventions
     - Use Makefile targets instead of discovering build/test commands yourself:
@@ -28,5 +29,7 @@ spec:
       - `make test-integration` — run integration tests
       - `make build` — build binary
     - Always try to add or improve tests when modifying code
+    - In Go tests, use typed constants (e.g., `batchv1.PodFailurePolicyActionCount`) instead of string literals
+    - When modifying configuration or features, update related documentation (e.g., README) in the same PR
     - Logging conventions: start log messages with capital letters and do not end with punctuation
     - Commit messages: do not include PR links in commit messages

@@ -18,7 +18,7 @@ func describeAgentTests(cfg agentTestConfig) {
 
 		BeforeEach(func() {
 			if *cfg.SecretValue == "" {
-				Skip(cfg.SkipMessage)
+				Skip(cfg.EnvVar + " not set")
 			}
 		})
 
@@ -62,7 +62,7 @@ func describeAgentTests(cfg agentTestConfig) {
 
 		BeforeEach(func() {
 			if *cfg.SecretValue == "" {
-				Skip(cfg.SkipMessage)
+				Skip(cfg.EnvVar + " not set")
 			}
 		})
 
@@ -123,7 +123,7 @@ func describeAgentTests(cfg agentTestConfig) {
 
 		BeforeEach(func() {
 			if *cfg.SecretValue == "" {
-				Skip(cfg.SkipMessage)
+				Skip(cfg.EnvVar + " not set")
 			}
 		})
 
@@ -206,7 +206,7 @@ func describeAgentTests(cfg agentTestConfig) {
 
 		BeforeEach(func() {
 			if *cfg.SecretValue == "" {
-				Skip(cfg.SkipMessage)
+				Skip(cfg.EnvVar + " not set")
 			}
 		})
 
@@ -269,7 +269,7 @@ func describeAgentTests(cfg agentTestConfig) {
 
 		BeforeEach(func() {
 			if *cfg.SecretValue == "" {
-				Skip(cfg.SkipMessage)
+				Skip(cfg.EnvVar + " not set")
 			}
 		})
 

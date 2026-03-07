@@ -25,6 +25,10 @@ type When struct {
 	// +optional
 	GitHubIssues *GitHubIssues `json:"githubIssues,omitempty"`
 
+	// GitHubPullRequests discovers pull requests from a GitHub repository.
+	// +optional
+	GitHubPullRequests *GitHubPullRequests `json:"githubPullRequests,omitempty"`
+
 	// Cron triggers task spawning on a cron schedule.
 	// +optional
 	Cron *Cron `json:"cron,omitempty"`
@@ -115,6 +119,69 @@ type GitHubIssues struct {
 	PriorityLabels []string `json:"priorityLabels,omitempty"`
 }
 
+// GitHubPullRequests discovers pull requests from a GitHub repository.
+// By default the repository owner and name are derived from the workspace's
+// repo URL specified in taskTemplate.workspaceRef. Set the Repo field to
+// override this — useful for fork workflows where the workspace points to a
+// fork but pull requests should be discovered from the upstream repository.
+// If the workspace has a secretRef, it is used for GitHub API authentication.
+type GitHubPullRequests struct {
+	// Repo optionally overrides the repository to poll for pull requests, in
+	// "owner/repo" format or as a full URL. When empty, the repository
+	// is derived from the workspace repo URL in taskTemplate.workspaceRef.
+	// Use this for fork workflows where the workspace points to a fork
+	// but pull requests should be discovered from the upstream repository.
+	// +optional
+	Repo string `json:"repo,omitempty"`
+
+	// Labels filters pull requests by labels.
+	// +optional
+	Labels []string `json:"labels,omitempty"`
+
+	// ExcludeLabels filters out pull requests that have any of these labels (client-side).
+	// +optional
+	ExcludeLabels []string `json:"excludeLabels,omitempty"`
+
+	// State filters pull requests by state (open, closed, all). Defaults to open.
+	// +kubebuilder:validation:Enum=open;closed;all
+	// +kubebuilder:default=open
+	// +optional
+	State string `json:"state,omitempty"`
+
+	// ReviewState filters pull requests by aggregated review state. The most
+	// recent APPROVED or CHANGES_REQUESTED review from each reviewer on the
+	// current head SHA is considered. When set to "any", review state does not
+	// gate discovery.
+	// +kubebuilder:validation:Enum=approved;changes_requested;any
+	// +kubebuilder:default=any
+	// +optional
+	ReviewState string `json:"reviewState,omitempty"`
+
+	// ExcludeComments enables comment-based exclusion on PR conversation
+	// comments. When set together with ReviewState, a newer qualifying review
+	// re-enables the pull request after a matching exclude comment.
+	// +optional
+	ExcludeComments []string `json:"excludeComments,omitempty"`
+
+	// Author filters pull requests by the username of the user who opened them.
+	// When empty, no author filtering is applied.
+	// +optional
+	Author string `json:"author,omitempty"`
+
+	// Draft filters pull requests by draft state. When unset, both draft and
+	// ready-for-review pull requests are included.
+	// +optional
+	Draft *bool `json:"draft,omitempty"`
+
+	// PriorityLabels defines a label-based priority order for discovered items.
+	// When maxConcurrency limits how many tasks are created per cycle,
+	// items are sorted by the first matching label before task creation.
+	// Index 0 is the highest priority. Items without a matching label
+	// are scheduled last. When empty, items are processed in discovery order.
+	// +optional
+	PriorityLabels []string `json:"priorityLabels,omitempty"`
+}
+
 // Jira discovers issues from a Jira project.
 // Authentication is provided via a Secret referenced in the TaskSpawner's
 // namespace. The secret must contain a "JIRA_TOKEN" key. For Jira Cloud,
@@ -167,7 +234,8 @@ type TaskTemplate struct {
 	Image string `json:"image,omitempty"`
 
 	// WorkspaceRef references the Workspace that defines the repository.
-	// Required when using githubIssues source; optional for other sources.
+	// Required when using githubIssues or githubPullRequests source; optional
+	// for other sources.
 	// When set, spawned Tasks inherit this workspace reference.
 	// +optional
 	WorkspaceRef *WorkspaceReference `json:"workspaceRef,omitempty"`
@@ -184,14 +252,16 @@ type TaskTemplate struct {
 	// Branch is the git branch spawned Tasks should work on.
 	// Supports Go text/template variables from the work item, e.g. "kelos-task-{{.Number}}".
 	// Available variables (all sources): {{.ID}}, {{.Title}}, {{.Kind}}
-	// GitHub/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
+	// GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
+	// GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}
 	// Cron sources: {{.Time}}, {{.Schedule}}
 	// +optional
 	Branch string `json:"branch,omitempty"`
 
 	// PromptTemplate is a Go text/template for rendering the task prompt.
 	// Available variables (all sources): {{.ID}}, {{.Title}}, {{.Kind}}
-	// GitHub/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
+	// GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
+	// GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}
 	// Cron sources: {{.Time}}, {{.Schedule}}
 	// +optional
 	PromptTemplate string `json:"promptTemplate,omitempty"`
@@ -213,7 +283,7 @@ type TaskTemplate struct {
 }
 
 // TaskSpawnerSpec defines the desired state of TaskSpawner.
-// +kubebuilder:validation:XValidation:rule="!has(self.when.githubIssues) || has(self.taskTemplate.workspaceRef)",message="taskTemplate.workspaceRef is required when using githubIssues source"
+// +kubebuilder:validation:XValidation:rule="!(has(self.when.githubIssues) || has(self.when.githubPullRequests)) || has(self.taskTemplate.workspaceRef)",message="taskTemplate.workspaceRef is required when using githubIssues or githubPullRequests source"
 type TaskSpawnerSpec struct {
 	// When defines the conditions that trigger task spawning.
 	// +kubebuilder:validation:Required

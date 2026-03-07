@@ -70,9 +70,9 @@ func (b *DeploymentBuilder) buildPodParts(ts *kelosv1alpha1.TaskSpawner, workspa
 	if workspace != nil {
 		host, owner, repo := parseGitHubRepo(workspace.Repo)
 
-		// Override with explicit GitHubIssues.Repo if set (fork workflow)
-		if ts.Spec.When.GitHubIssues != nil && ts.Spec.When.GitHubIssues.Repo != "" {
-			host, owner, repo = parseGitHubRepo(ts.Spec.When.GitHubIssues.Repo)
+		// Override with an explicit GitHub source repo if set (fork workflow).
+		if repoOverride := githubSourceRepoOverride(ts); repoOverride != "" {
+			host, owner, repo = parseGitHubRepo(repoOverride)
 		}
 
 		args = append(args,
@@ -377,6 +377,16 @@ func parseGitHubRepo(repoURL string) (host, owner, repo string) {
 func parseGitHubOwnerRepo(repoURL string) (owner, repo string) {
 	_, owner, repo = parseGitHubRepo(repoURL)
 	return owner, repo
+}
+
+func githubSourceRepoOverride(ts *kelosv1alpha1.TaskSpawner) string {
+	if ts.Spec.When.GitHubIssues != nil && ts.Spec.When.GitHubIssues.Repo != "" {
+		return ts.Spec.When.GitHubIssues.Repo
+	}
+	if ts.Spec.When.GitHubPullRequests != nil && ts.Spec.When.GitHubPullRequests.Repo != "" {
+		return ts.Spec.When.GitHubPullRequests.Repo
+	}
+	return ""
 }
 
 // gitHubAPIBaseURL returns the GitHub API base URL for the given host.

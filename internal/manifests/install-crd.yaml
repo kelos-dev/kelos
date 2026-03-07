@@ -731,7 +731,8 @@ spec:
                       Branch is the git branch spawned Tasks should work on.
                       Supports Go text/template variables from the work item, e.g. "kelos-task-{{.Number}}".
                       Available variables (all sources): {{.ID}}, {{.Title}}, {{.Kind}}
-                      GitHub/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
+                      GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
+                      GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}
                       Cron sources: {{.Time}}, {{.Schedule}}
                     type: string
                   credentials:
@@ -1017,7 +1018,8 @@ spec:
                     description: |-
                       PromptTemplate is a Go text/template for rendering the task prompt.
                       Available variables (all sources): {{.ID}}, {{.Title}}, {{.Kind}}
-                      GitHub/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
+                      GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
+                      GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}
                       Cron sources: {{.Time}}, {{.Schedule}}
                     type: string
                   ttlSecondsAfterFinished:
@@ -1043,7 +1045,8 @@ spec:
                   workspaceRef:
                     description: |-
                       WorkspaceRef references the Workspace that defines the repository.
-                      Required when using githubIssues source; optional for other sources.
+                      Required when using githubIssues or githubPullRequests source; optional
+                      for other sources.
                       When set, spawned Tasks inherit this workspace reference.
                     properties:
                       name:
@@ -1151,6 +1154,79 @@ spec:
                           type: string
                         type: array
                     type: object
+                  githubPullRequests:
+                    description: GitHubPullRequests discovers pull requests from a
+                      GitHub repository.
+                    properties:
+                      author:
+                        description: |-
+                          Author filters pull requests by the username of the user who opened them.
+                          When empty, no author filtering is applied.
+                        type: string
+                      draft:
+                        description: |-
+                          Draft filters pull requests by draft state. When unset, both draft and
+                          ready-for-review pull requests are included.
+                        type: boolean
+                      excludeComments:
+                        description: |-
+                          ExcludeComments enables comment-based exclusion on PR conversation
+                          comments. When set together with ReviewState, a newer qualifying review
+                          re-enables the pull request after a matching exclude comment.
+                        items:
+                          type: string
+                        type: array
+                      excludeLabels:
+                        description: ExcludeLabels filters out pull requests that
+                          have any of these labels (client-side).
+                        items:
+                          type: string
+                        type: array
+                      labels:
+                        description: Labels filters pull requests by labels.
+                        items:
+                          type: string
+                        type: array
+                      priorityLabels:
+                        description: |-
+                          PriorityLabels defines a label-based priority order for discovered items.
+                          When maxConcurrency limits how many tasks are created per cycle,
+                          items are sorted by the first matching label before task creation.
+                          Index 0 is the highest priority. Items without a matching label
+                          are scheduled last. When empty, items are processed in discovery order.
+                        items:
+                          type: string
+                        type: array
+                      repo:
+                        description: |-
+                          Repo optionally overrides the repository to poll for pull requests, in
+                          "owner/repo" format or as a full URL. When empty, the repository
+                          is derived from the workspace repo URL in taskTemplate.workspaceRef.
+                          Use this for fork workflows where the workspace points to a fork
+                          but pull requests should be discovered from the upstream repository.
+                        type: string
+                      reviewState:
+                        default: any
+                        description: |-
+                          ReviewState filters pull requests by aggregated review state. The most
+                          recent APPROVED or CHANGES_REQUESTED review from each reviewer on the
+                          current head SHA is considered. When set to "any", review state does not
+                          gate discovery.
+                        enum:
+                        - approved
+                        - changes_requested
+                        - any
+                        type: string
+                      state:
+                        default: open
+                        description: State filters pull requests by state (open, closed,
+                          all). Defaults to open.
+                        enum:
+                        - open
+                        - closed
+                        - all
+                        type: string
+                    type: object
                   jira:
                     description: Jira discovers issues from a Jira project.
                     properties:
@@ -1192,8 +1268,9 @@ spec:
             type: object
             x-kubernetes-validations:
             - message: taskTemplate.workspaceRef is required when using githubIssues
-                source
-              rule: '!has(self.when.githubIssues) || has(self.taskTemplate.workspaceRef)'
+                or githubPullRequests source
+              rule: '!(has(self.when.githubIssues) || has(self.when.githubPullRequests))
+                || has(self.taskTemplate.workspaceRef)'
           status:
             description: TaskSpawnerStatus defines the observed state of TaskSpawner.
             properties:

@@ -193,9 +193,6 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 		}
 	}
 
-	// Determine whether the source supports retrigger via TriggerComment.
-	hasTriggerComment := ts.Spec.When.GitHubIssues != nil && ts.Spec.When.GitHubIssues.TriggerComment != ""
-
 	var newItems []source.WorkItem
 	for _, item := range items {
 		taskName := fmt.Sprintf("%s-%s", ts.Name, item.ID)
@@ -205,13 +202,13 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 			continue
 		}
 
-		// Retrigger: when TriggerComment is configured and the existing task
-		// is completed, check whether a trigger comment was posted after the
-		// task finished. If so, delete the completed task so a new one can be
-		// created. Note: if creation is later blocked by maxConcurrency or
-		// maxTotalTasks, the item will be picked up as new on the next cycle
-		// since the old task no longer exists.
-		if hasTriggerComment && !item.TriggerTime.IsZero() &&
+		// Retrigger: when the source provides a trigger time and the existing
+		// task is completed, check whether a new trigger arrived after the task
+		// finished. If so, delete the completed task so a new one can be created.
+		// Note: if creation is later blocked by maxConcurrency or maxTotalTasks,
+		// the item will be picked up as new on the next cycle since the old task
+		// no longer exists.
+		if !item.TriggerTime.IsZero() &&
 			(existing.Status.Phase == kelosv1alpha1.TaskPhaseSucceeded || existing.Status.Phase == kelosv1alpha1.TaskPhaseFailed) &&
 			existing.Status.CompletionTime != nil &&
 			item.TriggerTime.After(existing.Status.CompletionTime.Time) {
@@ -226,8 +223,8 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 	}
 
 	// Sort new items by priority labels when configured
-	if ts.Spec.When.GitHubIssues != nil && len(ts.Spec.When.GitHubIssues.PriorityLabels) > 0 {
-		source.SortByLabelPriority(newItems, ts.Spec.When.GitHubIssues.PriorityLabels)
+	if priorityLabels := priorityLabelsForTaskSpawner(&ts); len(priorityLabels) > 0 {
+		source.SortByLabelPriority(newItems, priorityLabels)
 	}
 
 	maxConcurrency := int32(0)
@@ -366,21 +363,10 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 func buildSource(ts *kelosv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFile, jiraBaseURL, jiraProject, jiraJQL string) (source.Source, error) {
 	if ts.Spec.When.GitHubIssues != nil {
 		gh := ts.Spec.When.GitHubIssues
-
-		token := os.Getenv("GITHUB_TOKEN")
-		if tokenFile != "" {
-			data, err := os.ReadFile(tokenFile)
-			if err != nil {
-				if os.IsNotExist(err) {
-					ctrl.Log.WithName("spawner").Info("Token file not yet available, proceeding without token", "path", tokenFile)
-				} else {
-					return nil, fmt.Errorf("reading token file %s: %w", tokenFile, err)
-				}
-			} else {
-				token = strings.TrimSpace(string(data))
-			}
+		token, err := readGitHubToken(tokenFile)
+		if err != nil {
+			return nil, err
 		}
-
 		return &source.GitHubSource{
 			Owner:           owner,
 			Repo:            repo,
@@ -394,6 +380,29 @@ func buildSource(ts *kelosv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFi
 			BaseURL:         apiBaseURL,
 			TriggerComment:  gh.TriggerComment,
 			ExcludeComments: gh.ExcludeComments,
+			PriorityLabels:  gh.PriorityLabels,
+		}, nil
+	}
+
+	if ts.Spec.When.GitHubPullRequests != nil {
+		gh := ts.Spec.When.GitHubPullRequests
+		token, err := readGitHubToken(tokenFile)
+		if err != nil {
+			return nil, err
+		}
+
+		return &source.GitHubPullRequestSource{
+			Owner:           owner,
+			Repo:            repo,
+			Labels:          gh.Labels,
+			ExcludeLabels:   gh.ExcludeLabels,
+			State:           gh.State,
+			Author:          gh.Author,
+			Token:           token,
+			BaseURL:         apiBaseURL,
+			ReviewState:     gh.ReviewState,
+			ExcludeComments: gh.ExcludeComments,
+			Draft:           gh.Draft,
 			PriorityLabels:  gh.PriorityLabels,
 		}, nil
 	}
@@ -425,6 +434,34 @@ func buildSource(ts *kelosv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFi
 	}
 
 	return nil, fmt.Errorf("no source configured in TaskSpawner %s/%s", ts.Namespace, ts.Name)
+}
+
+func readGitHubToken(tokenFile string) (string, error) {
+	token := os.Getenv("GITHUB_TOKEN")
+	if tokenFile == "" {
+		return token, nil
+	}
+
+	data, err := os.ReadFile(tokenFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			ctrl.Log.WithName("spawner").Info("Token file not yet available, proceeding without token", "path", tokenFile)
+			return token, nil
+		}
+		return "", fmt.Errorf("reading token file %s: %w", tokenFile, err)
+	}
+
+	return strings.TrimSpace(string(data)), nil
+}
+
+func priorityLabelsForTaskSpawner(ts *kelosv1alpha1.TaskSpawner) []string {
+	if ts.Spec.When.GitHubIssues != nil {
+		return ts.Spec.When.GitHubIssues.PriorityLabels
+	}
+	if ts.Spec.When.GitHubPullRequests != nil {
+		return ts.Spec.When.GitHubPullRequests.PriorityLabels
+	}
+	return nil
 }
 
 func parsePollInterval(s string) time.Duration {

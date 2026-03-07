@@ -83,6 +83,7 @@ Picks up open GitHub issues labeled `actor/kelos` and creates autonomous agent t
 - Ensures CI passes before completion
 - Labels issues with `kelos/needs-input` when human input is needed
 - Creates a feedback loop: remove the label to re-queue the issue
+- Hands off PR review feedback to `kelos-pr-responder`
 - Supports manual reset via `/reset-worker` comment from a repository admin:
   - Deletes `Task/kelos-workers-<ISSUE-NUMBER>` so it can be recreated with the same name
   - Removes `kelos/needs-input` from the relevant issue and PR
@@ -90,6 +91,28 @@ Picks up open GitHub issues labeled `actor/kelos` and creates autonomous agent t
 **Deploy:**
 ```bash
 kubectl apply -f self-development/kelos-workers.yaml
+```
+
+### kelos-pr-responder.yaml
+
+Picks up open GitHub pull requests labeled `generated-by-kelos` when a reviewer requests changes.
+
+| | |
+|---|---|
+| **Trigger** | GitHub Pull Requests with `generated-by-kelos` label and `changes requested` review state |
+| **Model** | Opus |
+| **Concurrency** | 2 |
+
+**Key features:**
+- Reuses the existing PR branch instead of starting over
+- Reads review comments and PR conversation before making incremental changes
+- Lets the maintainer stay on the PR page for the common review-feedback loop
+- Uses `/kelos needs-input` PR comments to pause when human input is required
+- Keeps `/reset-worker` available as a fallback during rollout
+
+**Deploy:**
+```bash
+kubectl apply -f self-development/kelos-pr-responder.yaml
 ```
 
 ### kelos-triage.yaml

@@ -16,14 +16,19 @@ type WorkItem struct {
 	Labels   []string
 	Comments string
 	Kind     string // "Issue" or "PR"
-	Time     string // Cron trigger time (RFC3339)
-	Schedule string // Cron schedule expression
+	Branch   string
+	// ReviewState is the aggregated pull request review state for GitHub PR sources.
+	ReviewState string
+	// ReviewComments contains formatted inline review comments for GitHub PR sources.
+	ReviewComments string
+	Time           string // Cron trigger time (RFC3339)
+	Schedule       string // Cron schedule expression
 
-	// TriggerTime is the creation time of the most recent trigger comment
-	// for this work item. It is only set when a TriggerComment filter is
-	// configured and a matching comment was found. The spawner uses this
-	// to retrigger completed tasks when the trigger comment is newer than
-	// the task's completion time.
+	// TriggerTime is the source-provided re-engagement time for this work item.
+	// For GitHub issues it is the most recent matching trigger comment time.
+	// For GitHub pull requests it is the most recent qualifying review time.
+	// The spawner uses this to retrigger completed tasks when the trigger time
+	// is newer than the task's completion time.
 	TriggerTime time.Time
 }
 

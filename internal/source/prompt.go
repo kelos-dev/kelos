@@ -28,7 +28,8 @@ func RenderPrompt(promptTemplate string, item WorkItem) (string, error) {
 
 // RenderTemplate renders a Go text/template string with the given work item's fields.
 // Available variables (all sources): {{.ID}}, {{.Title}}, {{.Kind}}
-// GitHub/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
+// GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
+// GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}
 // Cron sources: {{.Time}}, {{.Schedule}}
 func RenderTemplate(tmplStr string, item WorkItem) (string, error) {
 	tmpl, err := template.New("tmpl").Parse(tmplStr)
@@ -42,27 +43,33 @@ func RenderTemplate(tmplStr string, item WorkItem) (string, error) {
 	}
 
 	data := struct {
-		ID       string
-		Number   int
-		Title    string
-		Body     string
-		URL      string
-		Labels   string
-		Comments string
-		Kind     string
-		Time     string
-		Schedule string
+		ID             string
+		Number         int
+		Title          string
+		Body           string
+		URL            string
+		Labels         string
+		Comments       string
+		Kind           string
+		Branch         string
+		ReviewState    string
+		ReviewComments string
+		Time           string
+		Schedule       string
 	}{
-		ID:       item.ID,
-		Number:   item.Number,
-		Title:    item.Title,
-		Body:     item.Body,
-		URL:      item.URL,
-		Labels:   strings.Join(item.Labels, ", "),
-		Comments: item.Comments,
-		Kind:     kind,
-		Time:     item.Time,
-		Schedule: item.Schedule,
+		ID:             item.ID,
+		Number:         item.Number,
+		Title:          item.Title,
+		Body:           item.Body,
+		URL:            item.URL,
+		Labels:         strings.Join(item.Labels, ", "),
+		Comments:       item.Comments,
+		Kind:           kind,
+		Branch:         item.Branch,
+		ReviewState:    item.ReviewState,
+		ReviewComments: item.ReviewComments,
+		Time:           item.Time,
+		Schedule:       item.Schedule,
 	}
 
 	var buf bytes.Buffer

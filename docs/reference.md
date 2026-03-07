@@ -113,11 +113,17 @@ GitHub Apps are preferred over PATs for production use because they offer fine-g
 
 | Field | Description | Required |
 |-------|-------------|----------|
-| `spec.taskTemplate.workspaceRef.name` | Workspace resource (repo URL, auth, and clone target for spawned Tasks) | Yes (when using githubIssues) |
+| `spec.taskTemplate.workspaceRef.name` | Workspace resource (repo URL, auth, and clone target for spawned Tasks) | Yes (when using `githubIssues` or `githubPullRequests`) |
 | `spec.when.githubIssues.labels` | Filter issues by labels | No |
 | `spec.when.githubIssues.excludeLabels` | Exclude issues with these labels | No |
 | `spec.when.githubIssues.state` | Filter by state: `open`, `closed`, `all` (default: `open`) | No |
 | `spec.when.githubIssues.types` | Filter by type: `issues`, `pulls` (default: `issues`) | No |
+| `spec.when.githubPullRequests.labels` | Filter pull requests by labels | No |
+| `spec.when.githubPullRequests.excludeLabels` | Exclude pull requests with these labels | No |
+| `spec.when.githubPullRequests.state` | Filter by state: `open`, `closed`, `all` (default: `open`) | No |
+| `spec.when.githubPullRequests.reviewState` | Filter by aggregated review state: `approved`, `changes_requested`, `any` (default: `any`) | No |
+| `spec.when.githubPullRequests.excludeComments` | Exclude pull requests when PR conversation comments contain these commands | No |
+| `spec.when.githubPullRequests.draft` | Filter by draft state | No |
 | `spec.when.cron.schedule` | Cron schedule expression (e.g., `"0 * * * *"`) | Yes (when using cron) |
 | `spec.taskTemplate.type` | Agent type (`claude-code`, `codex`, `gemini`, or `opencode`) | Yes |
 | `spec.taskTemplate.credentials` | Credentials for the agent (same as Task) | Yes |
@@ -140,18 +146,21 @@ GitHub Apps are preferred over PATs for production use because they offer fine-g
 
 The `promptTemplate` field uses Go `text/template` syntax. Available variables depend on the source type:
 
-| Variable | Description | GitHub Issues | Cron |
-|----------|-------------|---------------|------|
-| `{{.ID}}` | Unique identifier | Issue/PR number as string (e.g., `"42"`) | Date-time string (e.g., `"20260207-0900"`) |
-| `{{.Number}}` | Issue or PR number | Issue/PR number (e.g., `42`) | `0` |
-| `{{.Title}}` | Title of the work item | Issue/PR title | Trigger time (RFC3339) |
-| `{{.Body}}` | Body text | Issue/PR body | Empty |
-| `{{.URL}}` | URL to the source item | GitHub HTML URL | Empty |
-| `{{.Labels}}` | Comma-separated labels | Issue/PR labels | Empty |
-| `{{.Comments}}` | Concatenated comments | Issue/PR comments | Empty |
-| `{{.Kind}}` | Type of work item | `"Issue"` or `"PR"` | `"Issue"` |
-| `{{.Time}}` | Trigger time (RFC3339) | Empty | Cron tick time (e.g., `"2026-02-07T09:00:00Z"`) |
-| `{{.Schedule}}` | Cron schedule expression | Empty | Schedule string (e.g., `"0 * * * *"`) |
+| Variable | Description | GitHub Issues | GitHub Pull Requests | Cron |
+|----------|-------------|---------------|----------------------|------|
+| `{{.ID}}` | Unique identifier | Issue/PR number as string (e.g., `"42"`) | Pull request number as string | Date-time string (e.g., `"20260207-0900"`) |
+| `{{.Number}}` | Issue or PR number | Issue/PR number (e.g., `42`) | Pull request number | `0` |
+| `{{.Title}}` | Title of the work item | Issue/PR title | Pull request title | Trigger time (RFC3339) |
+| `{{.Body}}` | Body text | Issue/PR body | Pull request body | Empty |
+| `{{.URL}}` | URL to the source item | GitHub HTML URL | GitHub PR URL | Empty |
+| `{{.Labels}}` | Comma-separated labels | Issue/PR labels | Pull request labels | Empty |
+| `{{.Comments}}` | Concatenated comments | Issue/PR comments | PR conversation comments | Empty |
+| `{{.Kind}}` | Type of work item | `"Issue"` or `"PR"` | `"PR"` | `"Issue"` |
+| `{{.Branch}}` | Git branch to update | Empty | PR head branch (e.g., `"kelos-task-42"`) | Empty |
+| `{{.ReviewState}}` | Aggregated review state | Empty | `approved`, `changes_requested`, or empty | Empty |
+| `{{.ReviewComments}}` | Formatted inline review comments | Empty | Inline PR review comments | Empty |
+| `{{.Time}}` | Trigger time (RFC3339) | Empty | Empty | Cron tick time (e.g., `"2026-02-07T09:00:00Z"`) |
+| `{{.Schedule}}` | Cron schedule expression | Empty | Empty | Schedule string (e.g., `"0 * * * *"`) |
 
 ## Task Status
 

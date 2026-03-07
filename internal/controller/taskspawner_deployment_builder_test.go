@@ -636,6 +636,52 @@ func TestBuildDeploymentWithGitHubIssuesRepoOverrideEnterprise(t *testing.T) {
 	}
 }
 
+func TestBuildDeploymentWithGitHubPullRequestsRepoOverride(t *testing.T) {
+	builder := NewDeploymentBuilder()
+	ts := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-spawner",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
+					Repo: "https://github.com/upstream-org/upstream-repo.git",
+				},
+			},
+		},
+	}
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/my-fork/upstream-repo.git",
+	}
+
+	deploy := builder.Build(ts, workspace, false)
+	args := deploy.Spec.Template.Spec.Containers[0].Args
+
+	foundOwner := false
+	foundRepo := false
+	for _, arg := range args {
+		if arg == "--github-owner=upstream-org" {
+			foundOwner = true
+		}
+		if arg == "--github-repo=upstream-repo" {
+			foundRepo = true
+		}
+	}
+	if !foundOwner {
+		t.Errorf("expected --github-owner=upstream-org, got args: %v", args)
+	}
+	if !foundRepo {
+		t.Errorf("expected --github-repo=upstream-repo, got args: %v", args)
+	}
+
+	for _, arg := range args {
+		if arg == "--github-owner=my-fork" {
+			t.Errorf("should not use fork owner, got args: %v", args)
+		}
+	}
+}
+
 func TestDeploymentBuilder_JiraNoJQL(t *testing.T) {
 	builder := NewDeploymentBuilder()
 	ts := &kelosv1alpha1.TaskSpawner{

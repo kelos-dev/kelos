@@ -144,6 +144,46 @@ func TestBuildSource_GitHubIssuesDefaultBaseURL(t *testing.T) {
 	}
 }
 
+func TestBuildSource_GitHubPullRequests(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	ts.Spec.When = kelosv1alpha1.When{
+		GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
+			State:           "open",
+			ReviewState:     "changes_requested",
+			ExcludeComments: []string{"/kelos needs-input"},
+			Draft:           boolPtr(false),
+		},
+	}
+
+	src, err := buildSource(ts, "kelos-dev", "kelos", "https://github.example.com/api/v3", "", "", "", "")
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	ghSrc, ok := src.(*source.GitHubPullRequestSource)
+	if !ok {
+		t.Fatalf("Expected *source.GitHubPullRequestSource, got %T", src)
+	}
+	if ghSrc.BaseURL != "https://github.example.com/api/v3" {
+		t.Errorf("BaseURL = %q, want %q", ghSrc.BaseURL, "https://github.example.com/api/v3")
+	}
+	if ghSrc.Owner != "kelos-dev" {
+		t.Errorf("Owner = %q, want %q", ghSrc.Owner, "kelos-dev")
+	}
+	if ghSrc.Repo != "kelos" {
+		t.Errorf("Repo = %q, want %q", ghSrc.Repo, "kelos")
+	}
+	if ghSrc.ReviewState != "changes_requested" {
+		t.Errorf("ReviewState = %q, want %q", ghSrc.ReviewState, "changes_requested")
+	}
+	if len(ghSrc.ExcludeComments) != 1 || ghSrc.ExcludeComments[0] != "/kelos needs-input" {
+		t.Errorf("ExcludeComments = %v, want %v", ghSrc.ExcludeComments, []string{"/kelos needs-input"})
+	}
+	if ghSrc.Draft == nil || *ghSrc.Draft {
+		t.Errorf("Draft = %v, want false", ghSrc.Draft)
+	}
+}
+
 func TestBuildSource_Jira(t *testing.T) {
 	ts := &kelosv1alpha1.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1128,8 +1168,7 @@ func TestRunCycleWithSource_RetriggerFailedTask(t *testing.T) {
 	}
 }
 
-func TestRunCycleWithSource_RetriggerSkippedWithoutTriggerComment(t *testing.T) {
-	// When TriggerComment is not configured, retrigger should not happen
+func TestRunCycleWithSource_RetriggerFromSourceTriggerTime(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 
 	completionTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
@@ -1150,16 +1189,16 @@ func TestRunCycleWithSource_RetriggerSkippedWithoutTriggerComment(t *testing.T) 
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	// Completed task should remain — no retrigger without TriggerComment config
+	// The old completed task should be deleted and a new one created.
 	var taskList kelosv1alpha1.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
 	if len(taskList.Items) != 1 {
-		t.Fatalf("Expected 1 task (no retrigger), got %d", len(taskList.Items))
+		t.Fatalf("Expected 1 task (old deleted, new created), got %d", len(taskList.Items))
 	}
-	if taskList.Items[0].Status.CompletionTime == nil {
-		t.Error("Expected the original completed task to remain")
+	if taskList.Items[0].Status.CompletionTime != nil {
+		t.Error("Expected a fresh task without CompletionTime")
 	}
 }
 

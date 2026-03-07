@@ -2098,4 +2098,84 @@ var _ = Describe("TaskSpawner Controller", func() {
 			}, timeout, interval).Should(BeTrue())
 		})
 	})
+
+	Context("When creating a TaskSpawner with githubPullRequests", func() {
+		It("Should store githubPullRequests fields in spec and create a Deployment", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-taskspawner-github-prs",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Workspace")
+			ws := &kelosv1alpha1.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace-github-prs",
+					Namespace: ns.Name,
+				},
+				Spec: kelosv1alpha1.WorkspaceSpec{
+					Repo: "https://github.com/kelos-dev/kelos.git",
+					Ref:  "main",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
+
+			By("Creating a TaskSpawner with githubPullRequests")
+			draft := false
+			ts := &kelosv1alpha1.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-spawner-github-prs",
+					Namespace: ns.Name,
+				},
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
+							State:           "open",
+							ReviewState:     "changes_requested",
+							Labels:          []string{"generated-by-kelos"},
+							ExcludeComments: []string{"/kelos needs-input"},
+							Draft:           &draft,
+						},
+					},
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
+						Type: "claude-code",
+						Credentials: kelosv1alpha1.Credentials{
+							Type: kelosv1alpha1.CredentialTypeOAuth,
+							SecretRef: kelosv1alpha1.SecretReference{
+								Name: "claude-credentials",
+							},
+						},
+						WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
+							Name: "test-workspace-github-prs",
+						},
+					},
+					PollInterval: "5m",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ts)).Should(Succeed())
+
+			By("Verifying the githubPullRequests fields are stored in spec")
+			tsLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
+			createdTS := &kelosv1alpha1.TaskSpawner{}
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, tsLookupKey, createdTS)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+			Expect(createdTS.Spec.When.GitHubPullRequests.ReviewState).To(Equal("changes_requested"))
+			Expect(createdTS.Spec.When.GitHubPullRequests.ExcludeComments).To(ConsistOf("/kelos needs-input"))
+			Expect(createdTS.Spec.When.GitHubPullRequests.Labels).To(ConsistOf("generated-by-kelos"))
+			Expect(createdTS.Spec.When.GitHubPullRequests.Draft).ToNot(BeNil())
+			Expect(*createdTS.Spec.When.GitHubPullRequests.Draft).To(BeFalse())
+
+			By("Verifying a Deployment is created")
+			deployLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
+			createdDeploy := &appsv1.Deployment{}
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, deployLookupKey, createdDeploy)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+		})
+	})
 })

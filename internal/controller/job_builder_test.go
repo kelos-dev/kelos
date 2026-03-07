@@ -346,7 +346,7 @@ func TestBuildClaudeCodeJob_CustomImageWithWorkspace(t *testing.T) {
 				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 			Image: "my-agent:v1",
-			Model: "gpt-4",
+			Model: "gpt-5.4",
 		},
 	}
 
@@ -405,8 +405,8 @@ func TestBuildClaudeCodeJob_CustomImageWithWorkspace(t *testing.T) {
 			t.Errorf("Expected env var %q to be set", name)
 		}
 	}
-	if envMap["KELOS_MODEL"] != "gpt-4" {
-		t.Errorf("KELOS_MODEL value: expected %q, got %q", "gpt-4", envMap["KELOS_MODEL"])
+	if envMap["KELOS_MODEL"] != "gpt-5.4" {
+		t.Errorf("KELOS_MODEL value: expected %q, got %q", "gpt-5.4", envMap["KELOS_MODEL"])
 	}
 }
 
@@ -601,7 +601,7 @@ func TestBuildCodexJob_DefaultImage(t *testing.T) {
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
 				SecretRef: kelosv1alpha1.SecretReference{Name: "openai-secret"},
 			},
-			Model: "gpt-4.1",
+			Model: "gpt-5.4",
 		},
 	}
 
@@ -637,8 +637,8 @@ func TestBuildCodexJob_DefaultImage(t *testing.T) {
 	for _, env := range container.Env {
 		if env.Name == "KELOS_MODEL" {
 			foundKelosModel = true
-			if env.Value != "gpt-4.1" {
-				t.Errorf("KELOS_MODEL value: expected %q, got %q", "gpt-4.1", env.Value)
+			if env.Value != "gpt-5.4" {
+				t.Errorf("KELOS_MODEL value: expected %q, got %q", "gpt-5.4", env.Value)
 			}
 		}
 	}
@@ -721,7 +721,7 @@ func TestBuildCodexJob_WithWorkspace(t *testing.T) {
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
 				SecretRef: kelosv1alpha1.SecretReference{Name: "openai-secret"},
 			},
-			Model: "gpt-4.1",
+			Model: "gpt-5.4",
 		},
 	}
 

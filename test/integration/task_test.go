@@ -874,7 +874,7 @@ var _ = Describe("Task Controller", func() {
 							Name: "anthropic-api-key",
 						},
 					},
-					Model: "gpt-4",
+					Model: "gpt-5.4",
 					Image: "my-custom-agent:v1",
 					WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 						Name: "test-workspace",
@@ -904,7 +904,7 @@ var _ = Describe("Task Controller", func() {
 			By("Verifying KELOS_MODEL and KELOS_AGENT_TYPE are set")
 			Expect(container.Env).To(HaveLen(4))
 			Expect(container.Env[0].Name).To(Equal("KELOS_MODEL"))
-			Expect(container.Env[0].Value).To(Equal("gpt-4"))
+			Expect(container.Env[0].Value).To(Equal("gpt-5.4"))
 			Expect(container.Env[1].Name).To(Equal("KELOS_AGENT_TYPE"))
 			Expect(container.Env[1].Value).To(Equal("claude-code"))
 
@@ -1081,7 +1081,7 @@ var _ = Describe("Task Controller", func() {
 							Name: "codex-api-key",
 						},
 					},
-					Model: "gpt-4.1",
+					Model: "gpt-5.4",
 				},
 			}
 			Expect(k8sClient.Create(ctx, task)).Should(Succeed())
@@ -1126,7 +1126,7 @@ var _ = Describe("Task Controller", func() {
 			By("Verifying the Job has KELOS_MODEL, KELOS_AGENT_TYPE, and CODEX_API_KEY env vars")
 			Expect(container.Env).To(HaveLen(3))
 			Expect(container.Env[0].Name).To(Equal("KELOS_MODEL"))
-			Expect(container.Env[0].Value).To(Equal("gpt-4.1"))
+			Expect(container.Env[0].Value).To(Equal("gpt-5.4"))
 			Expect(container.Env[1].Name).To(Equal("KELOS_AGENT_TYPE"))
 			Expect(container.Env[1].Value).To(Equal("codex"))
 			Expect(container.Env[2].Name).To(Equal("CODEX_API_KEY"))

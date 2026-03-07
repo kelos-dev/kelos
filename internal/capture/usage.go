@@ -39,6 +39,8 @@ func ParseUsage(agentType, filePath string) map[string]string {
 		return parseGemini(lines)
 	case "opencode":
 		return parseOpencode(lines)
+	case "cursor":
+		return parseClaudeCode(lines)
 	default:
 		return nil
 	}

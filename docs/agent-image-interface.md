@@ -34,12 +34,13 @@ Kelos sets the following reserved environment variables on agent containers:
 | `CODEX_AUTH_JSON` | Contents of `~/.codex/auth.json` (`codex` agent, `oauth` credential type) | When credential type is `oauth` and agent type is `codex` |
 | `GEMINI_API_KEY` | API key for Google Gemini (`gemini` agent, api-key or oauth credential type) | When agent type is `gemini` |
 | `OPENCODE_API_KEY` | API key for OpenCode (`opencode` agent, api-key or oauth credential type) | When agent type is `opencode` |
+| `CURSOR_API_KEY` | API key for Cursor CLI (`cursor` agent, api-key or oauth credential type) | When agent type is `cursor` |
 | `CLAUDE_CODE_OAUTH_TOKEN` | OAuth token (`claude-code` agent, oauth credential type) | When credential type is `oauth` and agent type is `claude-code` |
 | `GITHUB_TOKEN` | GitHub token for workspace access | When workspace has a `secretRef` |
 | `GH_TOKEN` | GitHub token for `gh` CLI (github.com) | When workspace has a `secretRef` and repo is on github.com |
 | `GH_ENTERPRISE_TOKEN` | GitHub token for `gh` CLI (GitHub Enterprise) | When workspace has a `secretRef` and repo is on a GitHub Enterprise host |
 | `GH_HOST` | Hostname for GitHub Enterprise | When repo is on a GitHub Enterprise host |
-| `KELOS_AGENT_TYPE` | The agent type (`claude-code`, `codex`, `gemini`, `opencode`) | Always |
+| `KELOS_AGENT_TYPE` | The agent type (`claude-code`, `codex`, `gemini`, `opencode`, `cursor`) | Always |
 | `KELOS_BASE_BRANCH` | The base branch (workspace `ref`) for the task | When workspace has a non-empty `ref` |
 | `KELOS_AGENTS_MD` | User-level instructions from AgentConfig | When `agentConfigRef` is set and `agentsMD` is non-empty |
 | `KELOS_PLUGIN_DIR` | Path to plugin directory containing skills and agents | When `agentConfigRef` is set and `plugins` is non-empty |
@@ -130,3 +131,4 @@ the agent exits non-zero.
 - `codex/kelos_entrypoint.sh` — wraps the `codex` CLI (OpenAI Codex).
 - `gemini/kelos_entrypoint.sh` — wraps the `gemini` CLI (Google Gemini).
 - `opencode/kelos_entrypoint.sh` — wraps the `opencode` CLI (OpenCode).
+- `cursor/kelos_entrypoint.sh` — wraps the `agent` CLI (Cursor).

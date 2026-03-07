@@ -1340,6 +1340,184 @@ func TestBuildOpenCodeJob_OAuthCredentials(t *testing.T) {
 	}
 }
 
+func TestBuildCursorJob_DefaultImage(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-cursor",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeCursor,
+			Prompt: "Fix the bug",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "cursor-secret"},
+			},
+			Model: "claude-sonnet-4-20250514",
+		},
+	}
+
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+
+	if container.Image != CursorImage {
+		t.Errorf("Expected image %q, got %q", CursorImage, container.Image)
+	}
+
+	if container.Name != AgentTypeCursor {
+		t.Errorf("Expected container name %q, got %q", AgentTypeCursor, container.Name)
+	}
+
+	if len(container.Command) != 1 || container.Command[0] != "/kelos_entrypoint.sh" {
+		t.Errorf("Expected command [/kelos_entrypoint.sh], got %v", container.Command)
+	}
+
+	if len(container.Args) != 1 || container.Args[0] != "Fix the bug" {
+		t.Errorf("Expected args [Fix the bug], got %v", container.Args)
+	}
+
+	foundKelosModel := false
+	foundCursorKey := false
+	for _, env := range container.Env {
+		if env.Name == "KELOS_MODEL" {
+			foundKelosModel = true
+			if env.Value != "claude-sonnet-4-20250514" {
+				t.Errorf("KELOS_MODEL value: expected %q, got %q", "claude-sonnet-4-20250514", env.Value)
+			}
+		}
+		if env.Name == "CURSOR_API_KEY" {
+			foundCursorKey = true
+			if env.ValueFrom == nil || env.ValueFrom.SecretKeyRef == nil {
+				t.Error("Expected CURSOR_API_KEY to reference a secret")
+			} else {
+				if env.ValueFrom.SecretKeyRef.Name != "cursor-secret" {
+					t.Errorf("Expected secret name %q, got %q", "cursor-secret", env.ValueFrom.SecretKeyRef.Name)
+				}
+				if env.ValueFrom.SecretKeyRef.Key != "CURSOR_API_KEY" {
+					t.Errorf("Expected secret key %q, got %q", "CURSOR_API_KEY", env.ValueFrom.SecretKeyRef.Key)
+				}
+			}
+		}
+		if env.Name == "ANTHROPIC_API_KEY" {
+			t.Error("ANTHROPIC_API_KEY should not be set for cursor agent type")
+		}
+		if env.Name == "CODEX_API_KEY" {
+			t.Error("CODEX_API_KEY should not be set for cursor agent type")
+		}
+		if env.Name == "GEMINI_API_KEY" {
+			t.Error("GEMINI_API_KEY should not be set for cursor agent type")
+		}
+		if env.Name == "OPENCODE_API_KEY" {
+			t.Error("OPENCODE_API_KEY should not be set for cursor agent type")
+		}
+	}
+	if !foundKelosModel {
+		t.Error("Expected KELOS_MODEL env var to be set")
+	}
+	if !foundCursorKey {
+		t.Error("Expected CURSOR_API_KEY env var to be set")
+	}
+}
+
+func TestBuildCursorJob_CustomImage(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-cursor-custom",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeCursor,
+			Prompt: "Refactor the module",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "cursor-secret"},
+			},
+			Image: "my-cursor:v2",
+		},
+	}
+
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+
+	if container.Image != "my-cursor:v2" {
+		t.Errorf("Expected image %q, got %q", "my-cursor:v2", container.Image)
+	}
+
+	if len(container.Command) != 1 || container.Command[0] != "/kelos_entrypoint.sh" {
+		t.Errorf("Expected command [/kelos_entrypoint.sh], got %v", container.Command)
+	}
+}
+
+func TestBuildCursorJob_OAuthCredentials(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-cursor-oauth",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeCursor,
+			Prompt: "Review the code",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeOAuth,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "cursor-oauth"},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+
+	foundCursorKey := false
+	for _, env := range container.Env {
+		if env.Name == "CURSOR_API_KEY" {
+			foundCursorKey = true
+			if env.ValueFrom == nil || env.ValueFrom.SecretKeyRef == nil {
+				t.Error("Expected CURSOR_API_KEY to reference a secret")
+			} else {
+				if env.ValueFrom.SecretKeyRef.Name != "cursor-oauth" {
+					t.Errorf("Expected secret name %q, got %q", "cursor-oauth", env.ValueFrom.SecretKeyRef.Name)
+				}
+				if env.ValueFrom.SecretKeyRef.Key != "CURSOR_API_KEY" {
+					t.Errorf("Expected secret key %q, got %q", "CURSOR_API_KEY", env.ValueFrom.SecretKeyRef.Key)
+				}
+			}
+		}
+		if env.Name == "CLAUDE_CODE_OAUTH_TOKEN" {
+			t.Error("CLAUDE_CODE_OAUTH_TOKEN should not be set for cursor agent type")
+		}
+		if env.Name == "ANTHROPIC_API_KEY" {
+			t.Error("ANTHROPIC_API_KEY should not be set for cursor agent type")
+		}
+		if env.Name == "CODEX_API_KEY" {
+			t.Error("CODEX_API_KEY should not be set for cursor agent type")
+		}
+		if env.Name == "GEMINI_API_KEY" {
+			t.Error("GEMINI_API_KEY should not be set for cursor agent type")
+		}
+		if env.Name == "OPENCODE_API_KEY" {
+			t.Error("OPENCODE_API_KEY should not be set for cursor agent type")
+		}
+	}
+	if !foundCursorKey {
+		t.Error("Expected CURSOR_API_KEY env var to be set")
+	}
+}
+
 func TestBuildClaudeCodeJob_UnsupportedType(t *testing.T) {
 	builder := NewJobBuilder()
 	task := &kelosv1alpha1.Task{

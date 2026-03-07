@@ -18,7 +18,7 @@ func describeAgentTests(cfg agentTestConfig) {
 
 		BeforeEach(func() {
 			if *cfg.SecretValue == "" {
-				Skip(cfg.SkipMessage)
+				Skip(cfg.EnvVar + " not set")
 			}
 		})
 
@@ -62,7 +62,7 @@ func describeAgentTests(cfg agentTestConfig) {
 
 		BeforeEach(func() {
 			if *cfg.SecretValue == "" {
-				Skip(cfg.SkipMessage)
+				Skip(cfg.EnvVar + " not set")
 			}
 		})
 
@@ -123,7 +123,7 @@ func describeAgentTests(cfg agentTestConfig) {
 
 		BeforeEach(func() {
 			if *cfg.SecretValue == "" {
-				Skip(cfg.SkipMessage)
+				Skip(cfg.EnvVar + " not set")
 			}
 		})
 
@@ -182,7 +182,7 @@ func describeAgentTests(cfg agentTestConfig) {
 			Expect(outputs).To(MatchRegexp(`input-tokens: \d+`))
 			Expect(outputs).To(MatchRegexp(`output-tokens: \d+`))
 
-			if cfg.AgentType == "claude-code" {
+			if cfg.AgentType == "claude-code" || cfg.AgentType == "cursor" {
 				Expect(outputs).To(MatchRegexp(`cost-usd: [\d.]+`))
 			}
 
@@ -195,7 +195,7 @@ func describeAgentTests(cfg agentTestConfig) {
 			Expect(results).To(HaveKey("input-tokens"))
 			Expect(results).To(HaveKey("output-tokens"))
 
-			if cfg.AgentType == "claude-code" {
+			if cfg.AgentType == "claude-code" || cfg.AgentType == "cursor" {
 				Expect(results).To(HaveKey("cost-usd"))
 			}
 		})
@@ -206,7 +206,7 @@ func describeAgentTests(cfg agentTestConfig) {
 
 		BeforeEach(func() {
 			if *cfg.SecretValue == "" {
-				Skip(cfg.SkipMessage)
+				Skip(cfg.EnvVar + " not set")
 			}
 		})
 
@@ -269,7 +269,7 @@ func describeAgentTests(cfg agentTestConfig) {
 
 		BeforeEach(func() {
 			if *cfg.SecretValue == "" {
-				Skip(cfg.SkipMessage)
+				Skip(cfg.EnvVar + " not set")
 			}
 		})
 

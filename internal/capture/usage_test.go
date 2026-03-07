@@ -81,6 +81,17 @@ func TestParseUsage(t *testing.T) {
 			},
 		},
 		{
+			name:      "cursor result with camelCase usage",
+			agentType: "cursor",
+			content: `{"type":"thinking","subtype":"delta","text":"working..."}
+{"type":"result","subtype":"success","duration_ms":11799,"is_error":false,"result":"done","usage":{"inputTokens":36067,"outputTokens":227,"cacheReadTokens":34560,"cacheWriteTokens":0}}
+`,
+			want: map[string]string{
+				"input-tokens":  "36067",
+				"output-tokens": "227",
+			},
+		},
+		{
 			name:      "unknown agent type returns nil",
 			agentType: "unknown-agent",
 			content:   `{"type":"result"}` + "\n",

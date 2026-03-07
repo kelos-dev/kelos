@@ -39,6 +39,8 @@ func ParseUsage(agentType, filePath string) map[string]string {
 		return parseGemini(lines)
 	case "opencode":
 		return parseOpencode(lines)
+	case "cursor":
+		return parseCursor(lines)
 	default:
 		return nil
 	}
@@ -61,6 +63,29 @@ func parseClaudeCode(lines [][]byte) map[string]string {
 			result["input-tokens"] = formatNumber(v)
 		}
 		if v, ok := usage["output_tokens"]; ok {
+			result["output-tokens"] = formatNumber(v)
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// parseCursor extracts token counts from the last
+// {"type":"result","usage":{"inputTokens":N,"outputTokens":N}} line.
+// Cursor uses camelCase field names instead of claude-code's snake_case.
+func parseCursor(lines [][]byte) map[string]string {
+	last := findLastByType(lines, "result")
+	if last == nil {
+		return nil
+	}
+	result := make(map[string]string)
+	if usage, ok := last["usage"].(map[string]any); ok {
+		if v, ok := usage["inputTokens"]; ok {
+			result["input-tokens"] = formatNumber(v)
+		}
+		if v, ok := usage["outputTokens"]; ok {
 			result["output-tokens"] = formatNumber(v)
 		}
 	}

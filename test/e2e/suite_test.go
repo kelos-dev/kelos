@@ -15,6 +15,7 @@ const testModel = "haiku"
 var (
 	oauthToken    string
 	codexAuthJSON string
+	cursorAPIKey  string
 	githubToken   string
 )
 
@@ -25,7 +26,7 @@ type agentTestConfig struct {
 	SecretKey      string
 	SecretValue    *string
 	Model          string
-	SkipMessage    string
+	EnvVar         string
 }
 
 var agentConfigs = []agentTestConfig{
@@ -36,7 +37,7 @@ var agentConfigs = []agentTestConfig{
 		SecretKey:      "CLAUDE_CODE_OAUTH_TOKEN",
 		SecretValue:    &oauthToken,
 		Model:          testModel,
-		SkipMessage:    "CLAUDE_CODE_OAUTH_TOKEN not set",
+		EnvVar:         "CLAUDE_CODE_OAUTH_TOKEN",
 	},
 	{
 		AgentType:      "codex",
@@ -45,7 +46,16 @@ var agentConfigs = []agentTestConfig{
 		SecretKey:      "CODEX_AUTH_JSON",
 		SecretValue:    &codexAuthJSON,
 		Model:          "gpt-5.1-codex-mini",
-		SkipMessage:    "CODEX_AUTH_JSON not set",
+		EnvVar:         "CODEX_AUTH_JSON",
+	},
+	{
+		AgentType:      "cursor",
+		CredentialType: kelosv1alpha1.CredentialTypeAPIKey,
+		SecretName:     "cursor-credentials",
+		SecretKey:      "CURSOR_API_KEY",
+		SecretValue:    &cursorAPIKey,
+		Model:          "auto",
+		EnvVar:         "CURSOR_API_KEY",
 	},
 }
 
@@ -57,9 +67,18 @@ func TestE2E(t *testing.T) {
 var _ = BeforeSuite(func() {
 	oauthToken = os.Getenv("CLAUDE_CODE_OAUTH_TOKEN")
 	codexAuthJSON = os.Getenv("CODEX_AUTH_JSON")
+	cursorAPIKey = os.Getenv("CURSOR_API_KEY")
 	githubToken = os.Getenv("GITHUB_TOKEN")
 
-	if oauthToken == "" && codexAuthJSON == "" {
-		Skip("Neither CLAUDE_CODE_OAUTH_TOKEN nor CODEX_AUTH_JSON set, skipping e2e tests")
+	// Each credential env var is checked individually so that a
+	// misconfigured CI secret surfaces as a clear test failure
+	// instead of silently skipping the related agent tests.
+	for _, cfg := range agentConfigs {
+		if _, ok := os.LookupEnv(cfg.EnvVar); ok && *cfg.SecretValue == "" {
+			Fail(cfg.EnvVar + " is set but empty")
+		}
+	}
+	if oauthToken == "" && codexAuthJSON == "" && cursorAPIKey == "" {
+		Fail("No agent credentials set (CLAUDE_CODE_OAUTH_TOKEN, CODEX_AUTH_JSON, CURSOR_API_KEY)")
 	}
 })

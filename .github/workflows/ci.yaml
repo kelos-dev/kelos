@@ -100,6 +100,7 @@ jobs:
           kind load docker-image ghcr.io/kelos-dev/codex:e2e
           kind load docker-image ghcr.io/kelos-dev/gemini:e2e
           kind load docker-image ghcr.io/kelos-dev/opencode:e2e
+          kind load docker-image ghcr.io/kelos-dev/cursor:e2e
 
       - name: Build CLI
         run: make build WHAT=cmd/kelos
@@ -113,6 +114,7 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
           GITHUB_TOKEN: ${{ github.token }}
           KELOS_BIN: ${{ github.workspace }}/bin/kelos
         run: make test-e2e

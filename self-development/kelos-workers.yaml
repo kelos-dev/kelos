@@ -37,7 +37,7 @@ spec:
           ephemeral-storage: "4Gi"
     branch: "kelos-task-{{.Number}}"
     agentConfigRef:
-      name: kelos-dev-agent
+      name: kelos-workers-agent
     promptTemplate: |
       You are a coding agent. You either
       - create a PR to fix the issue

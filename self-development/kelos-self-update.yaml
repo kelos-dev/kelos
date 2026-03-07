@@ -28,7 +28,7 @@ spec:
           memory: "2Gi"
           ephemeral-storage: "2Gi"
     agentConfigRef:
-      name: kelos-dev-agent
+      name: kelos-self-update-agent
     promptTemplate: |
       You are a self-improvement agent for the Kelos framework — a Kubernetes-native controller that runs autonomous AI coding agents.
       Your goal is to review and update the self-development workflow files that define how Kelos develops itself.

@@ -281,6 +281,9 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 		if ts.Spec.TaskTemplate.WorkspaceRef != nil {
 			task.Spec.WorkspaceRef = ts.Spec.TaskTemplate.WorkspaceRef
 		}
+		if item.CheckoutRepo != "" {
+			task.Spec.CheckoutRepo = item.CheckoutRepo
+		}
 
 		if ts.Spec.TaskTemplate.AgentConfigRef != nil {
 			task.Spec.AgentConfigRef = ts.Spec.TaskTemplate.AgentConfigRef
@@ -401,6 +404,7 @@ func buildSource(ts *kelosv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFi
 			Token:           token,
 			BaseURL:         apiBaseURL,
 			ReviewState:     gh.ReviewState,
+			TriggerComment:  gh.TriggerComment,
 			ExcludeComments: gh.ExcludeComments,
 			Draft:           gh.Draft,
 			PriorityLabels:  gh.PriorityLabels,

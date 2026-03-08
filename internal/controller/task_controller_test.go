@@ -176,6 +176,27 @@ func TestTTLExpired(t *testing.T) {
 	}
 }
 
+func TestBranchLockKeyIncludesCheckoutRepo(t *testing.T) {
+	taskA := &kelosv1alpha1.Task{
+		Spec: kelosv1alpha1.TaskSpec{
+			WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
+			CheckoutRepo: "https://github.com/contributor-a/repo.git",
+			Branch:       "feature-x",
+		},
+	}
+	taskB := &kelosv1alpha1.Task{
+		Spec: kelosv1alpha1.TaskSpec{
+			WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
+			CheckoutRepo: "https://github.com/contributor-b/repo.git",
+			Branch:       "feature-x",
+		},
+	}
+
+	if branchLockKey(taskA) == branchLockKey(taskB) {
+		t.Fatalf("Expected distinct branch lock keys, got %q", branchLockKey(taskA))
+	}
+}
+
 func TestResolveGitHubAppToken_EnterpriseURL(t *testing.T) {
 	// Generate a test RSA key for GitHub App credentials
 	key, err := rsa.GenerateKey(rand.Reader, 2048)

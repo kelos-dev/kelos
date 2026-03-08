@@ -100,6 +100,12 @@ type TaskSpec struct {
 	// +optional
 	WorkspaceRef *WorkspaceReference `json:"workspaceRef,omitempty"`
 
+	// CheckoutRepo optionally overrides workspace.spec.repo for the clone
+	// source used as the Task's origin remote. When empty, workspace.spec.repo
+	// is used.
+	// +optional
+	CheckoutRepo string `json:"checkoutRepo,omitempty"`
+
 	// AgentConfigRef references an AgentConfig resource.
 	// +optional
 	AgentConfigRef *AgentConfigReference `json:"agentConfigRef,omitempty"`
@@ -110,7 +116,7 @@ type TaskSpec struct {
 
 	// Branch is the git branch this Task works on.
 	// The controller ensures only one Task with the same Branch value
-	// runs at a time. Overrides workspace ref for checkout.
+	// runs at a time for the same workspace and checkout repository.
 	// +optional
 	Branch string `json:"branch,omitempty"`
 

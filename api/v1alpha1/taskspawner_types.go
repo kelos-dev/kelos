@@ -157,9 +157,18 @@ type GitHubPullRequests struct {
 	// +optional
 	ReviewState string `json:"reviewState,omitempty"`
 
+	// TriggerComment re-enables a pull request after a matching ExcludeComment.
+	// When set together with ExcludeComments, the most recent match between
+	// TriggerComment and ExcludeComments wins based on comment timestamps after
+	// all other PR filters (including ReviewState) match.
+	// +optional
+	TriggerComment string `json:"triggerComment,omitempty"`
+
 	// ExcludeComments enables comment-based exclusion on PR conversation
-	// comments. When set together with ReviewState, a newer qualifying review
-	// re-enables the pull request after a matching exclude comment.
+	// comments. When set together with TriggerComment, the most recent match
+	// between TriggerComment and ExcludeComments wins based on comment
+	// timestamps. ExcludeComments does not bypass other PR filters such as
+	// ReviewState.
 	// +optional
 	ExcludeComments []string `json:"excludeComments,omitempty"`
 

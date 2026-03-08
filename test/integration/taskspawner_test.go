@@ -2134,6 +2134,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 						GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
 							State:           "open",
 							ReviewState:     "changes_requested",
+							TriggerComment:  "/kelos pick-up",
 							Labels:          []string{"generated-by-kelos"},
 							ExcludeComments: []string{"/kelos needs-input"},
 							Draft:           &draft,
@@ -2164,6 +2165,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 				return err == nil
 			}, timeout, interval).Should(BeTrue())
 			Expect(createdTS.Spec.When.GitHubPullRequests.ReviewState).To(Equal("changes_requested"))
+			Expect(createdTS.Spec.When.GitHubPullRequests.TriggerComment).To(Equal("/kelos pick-up"))
 			Expect(createdTS.Spec.When.GitHubPullRequests.ExcludeComments).To(ConsistOf("/kelos needs-input"))
 			Expect(createdTS.Spec.When.GitHubPullRequests.Labels).To(ConsistOf("generated-by-kelos"))
 			Expect(createdTS.Spec.When.GitHubPullRequests.Draft).ToNot(BeNil())

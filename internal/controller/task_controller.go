@@ -780,14 +780,14 @@ func (r *TaskReconciler) walkDeps(ctx context.Context, namespace, name string, v
 }
 
 // branchLockKey returns the key used for branch locking. The lock is scoped
-// to (workspace, branch) so that tasks on different workspaces with the same
-// branch name do not block each other.
+// to (workspace, checkoutRepo, branch) so that tasks on different workspaces
+// or checkout repositories with the same branch name do not block each other.
 func branchLockKey(task *kelosv1alpha1.Task) string {
 	ws := ""
 	if task.Spec.WorkspaceRef != nil {
 		ws = task.Spec.WorkspaceRef.Name
 	}
-	return ws + ":" + task.Spec.Branch
+	return ws + ":" + task.Spec.CheckoutRepo + ":" + task.Spec.Branch
 }
 
 // checkBranchLock checks if another task with the same workspace and branch is

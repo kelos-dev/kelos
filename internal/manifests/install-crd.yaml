@@ -296,7 +296,13 @@ spec:
                 description: |-
                   Branch is the git branch this Task works on.
                   The controller ensures only one Task with the same Branch value
-                  runs at a time. Overrides workspace ref for checkout.
+                  runs at a time for the same workspace and checkout repository.
+                type: string
+              checkoutRepo:
+                description: |-
+                  CheckoutRepo optionally overrides workspace.spec.repo for the clone
+                  source used as the Task's origin remote. When empty, workspace.spec.repo
+                  is used.
                 type: string
               credentials:
                 description: Credentials specifies how to authenticate with the agent.
@@ -1213,8 +1219,10 @@ spec:
                       excludeComments:
                         description: |-
                           ExcludeComments enables comment-based exclusion on PR conversation
-                          comments. When set together with ReviewState, a newer qualifying review
-                          re-enables the pull request after a matching exclude comment.
+                          comments. When set together with TriggerComment, the most recent match
+                          between TriggerComment and ExcludeComments wins based on comment
+                          timestamps. ExcludeComments does not bypass other PR filters such as
+                          ReviewState.
                         items:
                           type: string
                         type: array
@@ -1267,6 +1275,13 @@ spec:
                         - open
                         - closed
                         - all
+                        type: string
+                      triggerComment:
+                        description: |-
+                          TriggerComment re-enables a pull request after a matching ExcludeComment.
+                          When set together with ExcludeComments, the most recent match between
+                          TriggerComment and ExcludeComments wins based on comment timestamps after
+                          all other PR filters (including ReviewState) match.
                         type: string
                     type: object
                   jira:

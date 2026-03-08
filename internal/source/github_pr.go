@@ -30,6 +30,7 @@ type GitHubPullRequestSource struct {
 	BaseURL         string
 	Client          *http.Client
 	ReviewState     string
+	TriggerComment  string
 	ExcludeComments []string
 	Draft           *bool
 	PriorityLabels  []string
@@ -40,8 +41,13 @@ type githubUser struct {
 }
 
 type githubPullRequestHead struct {
-	Ref string `json:"ref"`
-	SHA string `json:"sha"`
+	Ref  string            `json:"ref"`
+	SHA  string            `json:"sha"`
+	Repo *githubRepository `json:"repo"`
+}
+
+type githubRepository struct {
+	CloneURL string `json:"clone_url"`
 }
 
 type githubPullRequest struct {
@@ -103,7 +109,8 @@ func (s *GitHubPullRequestSource) Discover(ctx context.Context) ([]WorkItem, err
 			return nil, fmt.Errorf("fetching comments for pull request #%d: %w", pr.Number, err)
 		}
 
-		if !s.passesExcludeCommentFilter(conversationComments, triggerTime) {
+		commentAllowed, commentTriggerTime := s.passesCommentFilter(conversationComments)
+		if !commentAllowed {
 			continue
 		}
 
@@ -111,6 +118,7 @@ func (s *GitHubPullRequestSource) Discover(ctx context.Context) ([]WorkItem, err
 		if err != nil {
 			return nil, fmt.Errorf("fetching review comments for pull request #%d: %w", pr.Number, err)
 		}
+		reviewComments = filterPullRequestCommentsForCommit(reviewComments, pr.Head.SHA)
 
 		labels := make([]string, 0, len(pr.Labels))
 		for _, l := range pr.Labels {
@@ -127,13 +135,12 @@ func (s *GitHubPullRequestSource) Discover(ctx context.Context) ([]WorkItem, err
 			Comments:       concatCommentBodies(conversationComments),
 			Kind:           "PR",
 			Branch:         pr.Head.Ref,
+			CheckoutRepo:   pullRequestCheckoutRepo(pr),
 			ReviewState:    reviewState,
 			ReviewComments: concatPullRequestReviewComments(reviewComments),
 		}
 
-		if s.resolvedReviewState() != reviewStateAny {
-			item.TriggerTime = triggerTime
-		}
+		item.TriggerTime = s.resolveTriggerTime(triggerTime, commentTriggerTime)
 
 		items = append(items, item)
 	}
@@ -232,6 +239,8 @@ func (s *GitHubPullRequestSource) buildPullRequestsURL() string {
 		state = "open"
 	}
 	params.Set("state", state)
+	params.Set("sort", "updated")
+	params.Set("direction", "desc")
 
 	return u + "?" + params.Encode()
 }
@@ -326,21 +335,27 @@ func (s *GitHubPullRequestSource) httpClient() *http.Client {
 	return http.DefaultClient
 }
 
-func (s *GitHubPullRequestSource) passesExcludeCommentFilter(comments []githubComment, triggerTime time.Time) bool {
+func (s *GitHubPullRequestSource) passesCommentFilter(comments []githubComment) (bool, time.Time) {
 	if len(s.ExcludeComments) == 0 {
-		return true
+		return true, time.Time{}
 	}
 
 	excludeTime := latestMatchingCommentTime(comments, s.ExcludeComments)
 	if excludeTime.IsZero() {
-		return true
+		return true, time.Time{}
 	}
 
-	if triggerTime.IsZero() {
-		return false
+	if s.TriggerComment == "" {
+		return false, time.Time{}
 	}
 
-	return triggerTime.After(excludeTime)
+	triggerTime := latestMatchingCommentTime(comments, []string{s.TriggerComment})
+
+	if triggerTime.After(excludeTime) {
+		return true, triggerTime
+	}
+
+	return false, time.Time{}
 }
 
 func aggregatePullRequestReviewState(reviews []githubPullRequestReview, headSHA string) (string, time.Time) {
@@ -426,6 +441,32 @@ func latestMatchingCommentTime(comments []githubComment, cmds []string) time.Tim
 		}
 	}
 	return latest
+}
+
+func (s *GitHubPullRequestSource) resolveTriggerTime(reviewTriggerTime, commentTriggerTime time.Time) time.Time {
+	triggerTime := commentTriggerTime
+	if s.resolvedReviewState() != reviewStateAny && reviewTriggerTime.After(triggerTime) {
+		triggerTime = reviewTriggerTime
+	}
+	return triggerTime
+}
+
+func filterPullRequestCommentsForCommit(comments []githubPullRequestComment, commitID string) []githubPullRequestComment {
+	filtered := make([]githubPullRequestComment, 0, len(comments))
+	for _, comment := range comments {
+		if comment.CommitID != commitID {
+			continue
+		}
+		filtered = append(filtered, comment)
+	}
+	return filtered
+}
+
+func pullRequestCheckoutRepo(pr githubPullRequest) string {
+	if pr.Head.Repo == nil {
+		return ""
+	}
+	return strings.TrimSpace(pr.Head.Repo.CloneURL)
 }
 
 func concatPullRequestReviewComments(comments []githubPullRequestComment) string {

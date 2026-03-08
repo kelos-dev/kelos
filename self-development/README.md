@@ -108,6 +108,7 @@ Picks up open GitHub pull requests labeled `generated-by-kelos` when a reviewer 
 - Reads review comments and PR conversation before making incremental changes
 - Lets the maintainer stay on the PR page for the common review-feedback loop
 - Uses `/kelos needs-input` PR comments to pause when human input is required
+- Uses `/kelos pick-up` PR comments to resume after the needed input arrives
 - Keeps `/reset-worker` available as a fallback during rollout
 
 **Deploy:**

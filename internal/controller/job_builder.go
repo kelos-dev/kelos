@@ -168,6 +168,54 @@ func oauthEnvVar(agentType string) string {
 	}
 }
 
+func resolveCheckoutRepo(task *kelosv1alpha1.Task, workspace *kelosv1alpha1.WorkspaceSpec) string {
+	if task.Spec.CheckoutRepo != "" {
+		return task.Spec.CheckoutRepo
+	}
+	if workspace == nil {
+		return ""
+	}
+	return workspace.Repo
+}
+
+func effectiveWorkspaceRemotes(task *kelosv1alpha1.Task, workspace *kelosv1alpha1.WorkspaceSpec) []kelosv1alpha1.GitRemote {
+	if workspace == nil {
+		return nil
+	}
+
+	remotes := append([]kelosv1alpha1.GitRemote(nil), workspace.Remotes...)
+	checkoutRepo := strings.TrimSpace(task.Spec.CheckoutRepo)
+	if checkoutRepo == "" || checkoutRepo == workspace.Repo {
+		return remotes
+	}
+
+	autoUpstream := kelosv1alpha1.GitRemote{
+		Name: "upstream",
+		URL:  workspace.Repo,
+	}
+	for i := range remotes {
+		if remotes[i].Name == autoUpstream.Name {
+			remotes[i].URL = autoUpstream.URL
+			return remotes
+		}
+	}
+
+	return append(remotes, autoUpstream)
+}
+
+func upstreamRepoEnvValue(remotes []kelosv1alpha1.GitRemote) string {
+	for _, remote := range remotes {
+		if remote.Name != "upstream" {
+			continue
+		}
+		_, upstreamOwner, upstreamRepo := parseGitHubRepo(remote.URL)
+		if upstreamOwner != "" && upstreamRepo != "" {
+			return fmt.Sprintf("%s/%s", upstreamOwner, upstreamRepo)
+		}
+	}
+	return ""
+}
+
 // buildAgentJob creates a Job for the given agent type.
 func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1alpha1.WorkspaceSpec, agentConfig *kelosv1alpha1.AgentConfigSpec, defaultImage string, pullPolicy corev1.PullPolicy, prompt string) (*batchv1.Job, error) {
 	image := defaultImage
@@ -235,8 +283,10 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 
 	var workspaceEnvVars []corev1.EnvVar
 	var isEnterprise bool
+	checkoutRepo := resolveCheckoutRepo(task, workspace)
+	effectiveRemotes := effectiveWorkspaceRemotes(task, workspace)
 	if workspace != nil {
-		host, _, _ := parseGitHubRepo(workspace.Repo)
+		host, _, _ := parseGitHubRepo(checkoutRepo)
 		isEnterprise = host != "" && host != "github.com"
 
 		if isEnterprise {
@@ -253,18 +303,11 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 			})
 		}
 
-		// Inject KELOS_UPSTREAM_REPO if an "upstream" remote is configured
-		for _, remote := range workspace.Remotes {
-			if remote.Name == "upstream" {
-				_, upstreamOwner, upstreamRepo := parseGitHubRepo(remote.URL)
-				if upstreamOwner != "" && upstreamRepo != "" {
-					envVars = append(envVars, corev1.EnvVar{
-						Name:  "KELOS_UPSTREAM_REPO",
-						Value: fmt.Sprintf("%s/%s", upstreamOwner, upstreamRepo),
-					})
-				}
-				break
-			}
+		if upstreamRepo := upstreamRepoEnvValue(effectiveRemotes); upstreamRepo != "" {
+			envVars = append(envVars, corev1.EnvVar{
+				Name:  "KELOS_UPSTREAM_REPO",
+				Value: upstreamRepo,
+			})
 		}
 	}
 
@@ -341,7 +384,7 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 		if workspace.Ref != "" {
 			cloneArgs = append(cloneArgs, "--branch", workspace.Ref)
 		}
-		cloneArgs = append(cloneArgs, "--no-single-branch", "--depth", "1", "--", workspace.Repo, WorkspaceMountPath+"/repo")
+		cloneArgs = append(cloneArgs, "--no-single-branch", "--depth", "1", "--", checkoutRepo, WorkspaceMountPath+"/repo")
 
 		initContainer := corev1.Container{
 			Name:         "git-clone",
@@ -373,11 +416,20 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 
 		initContainers = append(initContainers, initContainer)
 
-		if len(workspace.Remotes) > 0 {
+		if len(effectiveRemotes) > 0 {
 			var parts []string
 			parts = append(parts, fmt.Sprintf("cd %s/repo", WorkspaceMountPath))
-			for _, r := range workspace.Remotes {
-				parts = append(parts, fmt.Sprintf("git remote add %s %s", shellQuote(r.Name), shellQuote(r.URL)))
+			for _, r := range effectiveRemotes {
+				parts = append(parts,
+					fmt.Sprintf(
+						"if git remote get-url %s >/dev/null 2>&1; then git remote set-url %s %s; else git remote add %s %s; fi",
+						shellQuote(r.Name),
+						shellQuote(r.Name),
+						shellQuote(r.URL),
+						shellQuote(r.Name),
+						shellQuote(r.URL),
+					),
+				)
 			}
 			remoteSetupContainer := corev1.Container{
 				Name:         "remote-setup",

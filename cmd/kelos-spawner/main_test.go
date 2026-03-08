@@ -150,6 +150,7 @@ func TestBuildSource_GitHubPullRequests(t *testing.T) {
 		GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
 			State:           "open",
 			ReviewState:     "changes_requested",
+			TriggerComment:  "/kelos pick-up",
 			ExcludeComments: []string{"/kelos needs-input"},
 			Draft:           boolPtr(false),
 		},
@@ -175,6 +176,9 @@ func TestBuildSource_GitHubPullRequests(t *testing.T) {
 	}
 	if ghSrc.ReviewState != "changes_requested" {
 		t.Errorf("ReviewState = %q, want %q", ghSrc.ReviewState, "changes_requested")
+	}
+	if ghSrc.TriggerComment != "/kelos pick-up" {
+		t.Errorf("TriggerComment = %q, want %q", ghSrc.TriggerComment, "/kelos pick-up")
 	}
 	if len(ghSrc.ExcludeComments) != 1 || ghSrc.ExcludeComments[0] != "/kelos needs-input" {
 		t.Errorf("ExcludeComments = %v, want %v", ghSrc.ExcludeComments, []string{"/kelos needs-input"})
@@ -871,6 +875,37 @@ func TestRunCycleWithSource_BranchStaticPassedThrough(t *testing.T) {
 	}
 	if taskList.Items[0].Spec.Branch != "feature/my-branch" {
 		t.Errorf("Expected branch %q, got %q", "feature/my-branch", taskList.Items[0].Spec.Branch)
+	}
+}
+
+func TestRunCycleWithSource_CheckoutRepoPassedThrough(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	cl, key := setupTest(t, ts)
+
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{
+				ID:           "1",
+				Number:       1,
+				Title:        "Fork PR",
+				CheckoutRepo: "https://github.com/contributor/repo.git",
+			},
+		},
+	}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatalf("Listing tasks: %v", err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task, got %d", len(taskList.Items))
+	}
+	if taskList.Items[0].Spec.CheckoutRepo != "https://github.com/contributor/repo.git" {
+		t.Errorf("CheckoutRepo = %q, want %q", taskList.Items[0].Spec.CheckoutRepo, "https://github.com/contributor/repo.git")
 	}
 }
 

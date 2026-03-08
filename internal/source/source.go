@@ -17,6 +17,8 @@ type WorkItem struct {
 	Comments string
 	Kind     string // "Issue" or "PR"
 	Branch   string
+	// CheckoutRepo optionally overrides the workspace clone source for the task.
+	CheckoutRepo string
 	// ReviewState is the aggregated pull request review state for GitHub PR sources.
 	ReviewState string
 	// ReviewComments contains formatted inline review comments for GitHub PR sources.
@@ -26,7 +28,8 @@ type WorkItem struct {
 
 	// TriggerTime is the source-provided re-engagement time for this work item.
 	// For GitHub issues it is the most recent matching trigger comment time.
-	// For GitHub pull requests it is the most recent qualifying review time.
+	// For GitHub pull requests it is the most recent qualifying review time or
+	// matching trigger comment time that re-enabled the PR.
 	// The spawner uses this to retrigger completed tasks when the trigger time
 	// is newer than the task's completion time.
 	TriggerTime time.Time

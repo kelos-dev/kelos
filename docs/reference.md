@@ -122,6 +122,7 @@ GitHub Apps are preferred over PATs for production use because they offer fine-g
 | `spec.when.githubPullRequests.excludeLabels` | Exclude pull requests with these labels | No |
 | `spec.when.githubPullRequests.state` | Filter by state: `open`, `closed`, `all` (default: `open`) | No |
 | `spec.when.githubPullRequests.reviewState` | Filter by aggregated review state: `approved`, `changes_requested`, `any` (default: `any`) | No |
+| `spec.when.githubPullRequests.triggerComment` | Resume a PR after `excludeComments`; with `excludeComments`, the latest matching command wins | No |
 | `spec.when.githubPullRequests.excludeComments` | Exclude pull requests when PR conversation comments contain these commands | No |
 | `spec.when.githubPullRequests.draft` | Filter by draft state | No |
 | `spec.when.cron.schedule` | Cron schedule expression (e.g., `"0 * * * *"`) | Yes (when using cron) |

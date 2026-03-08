@@ -3811,6 +3811,71 @@ func TestBuildJob_WorkspaceWithUpstreamRemoteInjectsEnv(t *testing.T) {
 	}
 }
 
+func TestBuildJob_CheckoutRepoOverridesCloneSourceAndAddsUpstream(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-checkout-repo",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:         AgentTypeClaudeCode,
+			Prompt:       "Fix the PR",
+			CheckoutRepo: "https://github.com/contributor/repo.git",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/upstream-org/repo.git",
+		Ref:  "main",
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	initContainer := job.Spec.Template.Spec.InitContainers[0]
+	if got := initContainer.Args[len(initContainer.Args)-2]; got != "https://github.com/contributor/repo.git" {
+		t.Fatalf("Clone source = %q, want %q", got, "https://github.com/contributor/repo.git")
+	}
+
+	var remoteSetup *corev1.Container
+	for i := range job.Spec.Template.Spec.InitContainers {
+		if job.Spec.Template.Spec.InitContainers[i].Name == "remote-setup" {
+			remoteSetup = &job.Spec.Template.Spec.InitContainers[i]
+			break
+		}
+	}
+	if remoteSetup == nil {
+		t.Fatal("Expected remote-setup init container")
+	}
+
+	script := remoteSetup.Command[2]
+	if !strings.Contains(script, "git remote add 'upstream' 'https://github.com/upstream-org/repo.git'") {
+		t.Errorf("Expected remote-setup script to add upstream remote, got %q", script)
+	}
+
+	mainContainer := job.Spec.Template.Spec.Containers[0]
+	found := false
+	for _, env := range mainContainer.Env {
+		if env.Name == "KELOS_UPSTREAM_REPO" {
+			found = true
+			if env.Value != "upstream-org/repo" {
+				t.Errorf("KELOS_UPSTREAM_REPO = %q, want %q", env.Value, "upstream-org/repo")
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("Expected KELOS_UPSTREAM_REPO env var on main container")
+	}
+}
+
 func TestBuildJob_WorkspaceWithNonUpstreamRemoteNoEnv(t *testing.T) {
 	builder := NewJobBuilder()
 	task := &kelosv1alpha1.Task{

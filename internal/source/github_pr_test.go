@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 )
@@ -26,6 +27,9 @@ func TestDiscoverPullRequests(t *testing.T) {
 					Head: githubPullRequestHead{
 						Ref: "kelos-task-123",
 						SHA: "head-sha-1",
+						Repo: &githubRepository{
+							CloneURL: "https://github.com/contributor/repo.git",
+						},
 					},
 				},
 			})
@@ -47,6 +51,13 @@ func TestDiscoverPullRequests(t *testing.T) {
 			})
 		case "/repos/owner/repo/pulls/1/comments":
 			json.NewEncoder(w).Encode([]githubPullRequestComment{
+				{
+					Body:      "Old comment should be ignored",
+					Path:      "internal/source/github.go",
+					Line:      41,
+					CreatedAt: "2026-01-01T12:01:00Z",
+					CommitID:  "old-sha",
+				},
 				{
 					Body:      "Handle the error path",
 					Path:      "internal/source/github.go",
@@ -85,6 +96,9 @@ func TestDiscoverPullRequests(t *testing.T) {
 	}
 	if item.Branch != "kelos-task-123" {
 		t.Errorf("Branch = %q, want %q", item.Branch, "kelos-task-123")
+	}
+	if item.CheckoutRepo != "https://github.com/contributor/repo.git" {
+		t.Errorf("CheckoutRepo = %q, want %q", item.CheckoutRepo, "https://github.com/contributor/repo.git")
 	}
 	if item.ReviewState != "changes_requested" {
 		t.Errorf("ReviewState = %q, want %q", item.ReviewState, "changes_requested")
@@ -159,7 +173,7 @@ func TestDiscoverPullRequestsBlockedByPauseComment(t *testing.T) {
 	}
 }
 
-func TestDiscoverPullRequestsResumeAfterNewReview(t *testing.T) {
+func TestDiscoverPullRequestsTriggerCommentDoesNotBlockInitialDiscovery(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/repos/owner/repo/pulls":
@@ -180,13 +194,59 @@ func TestDiscoverPullRequestsResumeAfterNewReview(t *testing.T) {
 					State:       "CHANGES_REQUESTED",
 					SubmittedAt: "2026-01-02T12:00:00Z",
 					CommitID:    "head-sha-1",
-					User:        githubUser{Login: "reviewer-a"},
+					User:        githubUser{Login: "reviewer"},
 				},
+			})
+		case "/repos/owner/repo/issues/1/comments":
+			json.NewEncoder(w).Encode([]githubComment{})
+		case "/repos/owner/repo/pulls/1/comments":
+			json.NewEncoder(w).Encode([]githubPullRequestComment{})
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	s := &GitHubPullRequestSource{
+		Owner:          "owner",
+		Repo:           "repo",
+		BaseURL:        server.URL,
+		ReviewState:    "changes_requested",
+		TriggerComment: "/kelos pick-up",
+	}
+
+	items, err := s.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+}
+
+func TestDiscoverPullRequestsResumeAfterTriggerComment(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/owner/repo/pulls":
+			json.NewEncoder(w).Encode([]githubPullRequest{
+				{
+					Number:  1,
+					Title:   "Fix flaky test",
+					HTMLURL: "https://github.com/owner/repo/pull/1",
+					Head: githubPullRequestHead{
+						Ref: "kelos-task-123",
+						SHA: "head-sha-1",
+					},
+				},
+			})
+		case "/repos/owner/repo/pulls/1/reviews":
+			json.NewEncoder(w).Encode([]githubPullRequestReview{
 				{
 					State:       "CHANGES_REQUESTED",
-					SubmittedAt: "2026-01-04T12:00:00Z",
+					SubmittedAt: "2026-01-02T12:00:00Z",
 					CommitID:    "head-sha-1",
-					User:        githubUser{Login: "reviewer-b"},
+					User:        githubUser{Login: "reviewer"},
 				},
 			})
 		case "/repos/owner/repo/issues/1/comments":
@@ -194,6 +254,10 @@ func TestDiscoverPullRequestsResumeAfterNewReview(t *testing.T) {
 				{
 					Body:      "/kelos needs-input",
 					CreatedAt: "2026-01-03T12:00:00Z",
+				},
+				{
+					Body:      "/kelos pick-up",
+					CreatedAt: "2026-01-04T12:00:00Z",
 				},
 			})
 		case "/repos/owner/repo/pulls/1/comments":
@@ -209,6 +273,7 @@ func TestDiscoverPullRequestsResumeAfterNewReview(t *testing.T) {
 		Repo:            "repo",
 		BaseURL:         server.URL,
 		ReviewState:     "changes_requested",
+		TriggerComment:  "/kelos pick-up",
 		ExcludeComments: []string{"/kelos needs-input"},
 	}
 
@@ -219,6 +284,69 @@ func TestDiscoverPullRequestsResumeAfterNewReview(t *testing.T) {
 
 	if len(items) != 1 {
 		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+
+	wantTriggerTime := time.Date(2026, 1, 4, 12, 0, 0, 0, time.UTC)
+	if !items[0].TriggerTime.Equal(wantTriggerTime) {
+		t.Errorf("TriggerTime = %v, want %v", items[0].TriggerTime, wantTriggerTime)
+	}
+}
+
+func TestDiscoverPullRequestsExcludeCommentNotClearedByNewReview(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/owner/repo/pulls":
+			json.NewEncoder(w).Encode([]githubPullRequest{
+				{
+					Number:  1,
+					Title:   "Fix flaky test",
+					HTMLURL: "https://github.com/owner/repo/pull/1",
+					Head: githubPullRequestHead{
+						Ref: "kelos-task-123",
+						SHA: "head-sha-1",
+					},
+				},
+			})
+		case "/repos/owner/repo/pulls/1/reviews":
+			json.NewEncoder(w).Encode([]githubPullRequestReview{
+				{
+					State:       "CHANGES_REQUESTED",
+					SubmittedAt: "2026-01-05T12:00:00Z",
+					CommitID:    "head-sha-1",
+					User:        githubUser{Login: "reviewer"},
+				},
+			})
+		case "/repos/owner/repo/issues/1/comments":
+			json.NewEncoder(w).Encode([]githubComment{
+				{
+					Body:      "/kelos needs-input",
+					CreatedAt: "2026-01-04T12:00:00Z",
+				},
+			})
+		case "/repos/owner/repo/pulls/1/comments":
+			json.NewEncoder(w).Encode([]githubPullRequestComment{})
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	s := &GitHubPullRequestSource{
+		Owner:           "owner",
+		Repo:            "repo",
+		BaseURL:         server.URL,
+		ReviewState:     "changes_requested",
+		TriggerComment:  "/kelos pick-up",
+		ExcludeComments: []string{"/kelos needs-input"},
+	}
+
+	items, err := s.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(items) != 0 {
+		t.Fatalf("expected 0 items, got %d", len(items))
 	}
 }
 
@@ -389,5 +517,124 @@ func TestAggregatePullRequestReviewState(t *testing.T) {
 				t.Errorf("time = %v, want %v", gotTime, tt.wantTime)
 			}
 		})
+	}
+}
+
+func TestPullRequestCommentFilter(t *testing.T) {
+	tests := []struct {
+		name            string
+		triggerComment  string
+		excludeComments []string
+		comments        []githubComment
+		wantAllowed     bool
+		wantTriggerTime time.Time
+	}{
+		{
+			name:        "no filters configured",
+			wantAllowed: true,
+		},
+		{
+			name:           "trigger alone is inert",
+			triggerComment: "/kelos pick-up",
+			wantAllowed:    true,
+		},
+		{
+			name:           "trigger alone does not set trigger time",
+			triggerComment: "/kelos pick-up",
+			comments: []githubComment{
+				{Body: "/kelos pick-up", CreatedAt: "2026-01-02T12:00:00Z"},
+			},
+			wantAllowed: true,
+		},
+		{
+			name:            "exclude only blocks",
+			excludeComments: []string{"/kelos needs-input"},
+			comments: []githubComment{
+				{Body: "/kelos needs-input", CreatedAt: "2026-01-02T12:00:00Z"},
+			},
+			wantAllowed: false,
+		},
+		{
+			name:            "no matching comments leaves PR eligible",
+			triggerComment:  "/kelos pick-up",
+			excludeComments: []string{"/kelos needs-input"},
+			wantAllowed:     true,
+		},
+		{
+			name:            "latest trigger wins",
+			triggerComment:  "/kelos pick-up",
+			excludeComments: []string{"/kelos needs-input"},
+			comments: []githubComment{
+				{Body: "/kelos needs-input", CreatedAt: "2026-01-02T12:00:00Z"},
+				{Body: "/kelos pick-up", CreatedAt: "2026-01-03T12:00:00Z"},
+			},
+			wantAllowed:     true,
+			wantTriggerTime: time.Date(2026, 1, 3, 12, 0, 0, 0, time.UTC),
+		},
+		{
+			name:            "latest exclude wins",
+			triggerComment:  "/kelos pick-up",
+			excludeComments: []string{"/kelos needs-input"},
+			comments: []githubComment{
+				{Body: "/kelos pick-up", CreatedAt: "2026-01-02T12:00:00Z"},
+				{Body: "/kelos needs-input", CreatedAt: "2026-01-03T12:00:00Z"},
+			},
+			wantAllowed: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &GitHubPullRequestSource{
+				TriggerComment:  tt.triggerComment,
+				ExcludeComments: tt.excludeComments,
+			}
+			gotAllowed, gotTriggerTime := s.passesCommentFilter(tt.comments)
+			if gotAllowed != tt.wantAllowed {
+				t.Errorf("allowed = %v, want %v", gotAllowed, tt.wantAllowed)
+			}
+			if !gotTriggerTime.Equal(tt.wantTriggerTime) {
+				t.Errorf("trigger time = %v, want %v", gotTriggerTime, tt.wantTriggerTime)
+			}
+		})
+	}
+}
+
+func TestBuildPullRequestsURLSortedByUpdated(t *testing.T) {
+	s := &GitHubPullRequestSource{
+		Owner: "owner",
+		Repo:  "repo",
+		State: "all",
+	}
+
+	u, err := url.Parse(s.buildPullRequestsURL())
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	q := u.Query()
+	if q.Get("state") != "all" {
+		t.Errorf("state = %q, want %q", q.Get("state"), "all")
+	}
+	if q.Get("sort") != "updated" {
+		t.Errorf("sort = %q, want %q", q.Get("sort"), "updated")
+	}
+	if q.Get("direction") != "desc" {
+		t.Errorf("direction = %q, want %q", q.Get("direction"), "desc")
+	}
+}
+
+func TestResolvePullRequestTriggerTime(t *testing.T) {
+	reviewTime := time.Date(2026, 1, 5, 12, 0, 0, 0, time.UTC)
+	commentTime := time.Date(2026, 1, 4, 12, 0, 0, 0, time.UTC)
+
+	s := &GitHubPullRequestSource{ReviewState: "changes_requested"}
+	if got := s.resolveTriggerTime(reviewTime, commentTime); !got.Equal(reviewTime) {
+		t.Errorf("resolveTriggerTime() = %v, want %v", got, reviewTime)
+	}
+
+	s = &GitHubPullRequestSource{ReviewState: "any"}
+	if got := s.resolveTriggerTime(reviewTime, commentTime); !got.Equal(commentTime) {
+		t.Errorf("resolveTriggerTime() with reviewState=any = %v, want %v", got, commentTime)
 	}
 }

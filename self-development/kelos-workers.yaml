@@ -1,4 +1,36 @@
 apiVersion: kelos.dev/v1alpha1
+kind: AgentConfig
+metadata:
+  name: kelos-workers-agent
+spec:
+  agentsMD: |
+    # Kelos Worker Agent
+
+    ## Environment
+    You are running in an ephemeral container environment. Your file system
+    changes disappear after the task completes. Persist work by creating PRs,
+    issues, or comments.
+
+    ## Identity
+    - When commenting on issues or PRs, always start with "🤖 **Kelos Worker Agent** @gjkim42\n\n"
+      so it is clearly distinguishable from human comments and triggers a notification
+
+    ## Standards
+    - Do not create duplicate issues — check existing issues first with `gh issue list`
+    - Keep changes minimal and focused
+
+    ## Project Conventions
+    - Use Makefile targets instead of discovering build/test commands yourself:
+      - `make verify` — run all verification checks (lint, fmt, vet, etc.)
+      - `make update` — update all generated files
+      - `make test` — run all unit tests
+      - `make test-integration` — run integration tests
+      - `make build` — build binary
+    - Always try to add or improve tests when modifying code
+    - Logging conventions: start log messages with capital letters and do not end with punctuation
+    - Commit messages: do not include PR links in commit messages
+---
+apiVersion: kelos.dev/v1alpha1
 kind: TaskSpawner
 metadata:
   name: kelos-workers
@@ -46,7 +78,7 @@ spec:
           value: "gjkim042@gmail.com"
     branch: "kelos-task-{{.Number}}"
     agentConfigRef:
-      name: kelos-dev-agent
+      name: kelos-workers-agent
     promptTemplate: |
       You are a coding agent. You either
       - create a PR to fix the issue

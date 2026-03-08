@@ -1,6 +1,8 @@
 apiVersion: kelos.dev/v1alpha1
 kind: Task
 metadata:
+  # Uses the same name as the worker task to prevent the TaskSpawner
+  # from re-spawning a conflicting worker while squash is in progress.
   name: kelos-workers-${ISSUE_NUMBER}
   labels:
     kelos.dev/type: squash-commits
@@ -19,13 +21,13 @@ spec:
   podOverrides:
     resources:
       requests:
-        cpu: 250m
-        memory: 512Mi
-        ephemeral-storage: 4Gi
+        cpu: "250m"
+        memory: "512Mi"
+        ephemeral-storage: "4Gi"
       limits:
         cpu: "1"
-        memory: 2Gi
-        ephemeral-storage: 4Gi
+        memory: "2Gi"
+        ephemeral-storage: "4Gi"
   prompt: |
     You are a coding agent.
 

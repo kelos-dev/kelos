@@ -48,7 +48,17 @@ jobs:
               context.payload.issue?.body ||
               context.payload.pull_request?.body ||
               ''
-            const actor = context.payload.sender?.login || ''
+            // Resolve the actor from the author of the text containing the
+            // label command, not from the event sender.  When a bot edits
+            // a PR description the sender is the bot, but the PR author
+            // (who wrote /kind, /priority, etc.) is the relevant actor for
+            // permission checks.
+            const actor =
+              context.payload.comment?.user?.login ||
+              context.payload.review?.user?.login ||
+              context.payload.issue?.user?.login ||
+              context.payload.pull_request?.user?.login ||
+              ''
             const issueNumber = context.payload.issue?.number || context.payload.pull_request?.number || 0
 
             core.setOutput('body', body)

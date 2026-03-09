@@ -15,7 +15,6 @@ const testModel = "haiku"
 var (
 	oauthToken    string
 	codexAuthJSON string
-	cursorAPIKey  string
 	githubToken   string
 )
 
@@ -48,15 +47,6 @@ var agentConfigs = []agentTestConfig{
 		Model:          "gpt-5.1-codex-mini",
 		EnvVar:         "CODEX_AUTH_JSON",
 	},
-	{
-		AgentType:      "cursor",
-		CredentialType: kelosv1alpha1.CredentialTypeAPIKey,
-		SecretName:     "cursor-credentials",
-		SecretKey:      "CURSOR_API_KEY",
-		SecretValue:    &cursorAPIKey,
-		Model:          "auto",
-		EnvVar:         "CURSOR_API_KEY",
-	},
 }
 
 func TestE2E(t *testing.T) {
@@ -67,7 +57,6 @@ func TestE2E(t *testing.T) {
 var _ = BeforeSuite(func() {
 	oauthToken = os.Getenv("CLAUDE_CODE_OAUTH_TOKEN")
 	codexAuthJSON = os.Getenv("CODEX_AUTH_JSON")
-	cursorAPIKey = os.Getenv("CURSOR_API_KEY")
 	githubToken = os.Getenv("GITHUB_TOKEN")
 
 	// Each credential env var is checked individually so that a
@@ -78,7 +67,7 @@ var _ = BeforeSuite(func() {
 			Fail(cfg.EnvVar + " is set but empty")
 		}
 	}
-	if oauthToken == "" && codexAuthJSON == "" && cursorAPIKey == "" {
-		Fail("No agent credentials set (CLAUDE_CODE_OAUTH_TOKEN, CODEX_AUTH_JSON, CURSOR_API_KEY)")
+	if oauthToken == "" && codexAuthJSON == "" {
+		Fail("No agent credentials set (CLAUDE_CODE_OAUTH_TOKEN, CODEX_AUTH_JSON)")
 	}
 })

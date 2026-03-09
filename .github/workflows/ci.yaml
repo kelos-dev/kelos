@@ -114,7 +114,6 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
-          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
           GITHUB_TOKEN: ${{ github.token }}
           KELOS_BIN: ${{ github.workspace }}/bin/kelos
         run: make test-e2e

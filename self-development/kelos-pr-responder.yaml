@@ -8,7 +8,6 @@ spec:
       labels:
         - generated-by-kelos
       state: open
-      reviewState: changes_requested
       triggerComment: /kelos pick-up
       draft: false
       excludeComments:
@@ -34,6 +33,15 @@ spec:
           cpu: "1"
           memory: "2Gi"
           ephemeral-storage: "4Gi"
+      env:
+        - name: GIT_AUTHOR_NAME
+          value: "Gunju Kim"
+        - name: GIT_AUTHOR_EMAIL
+          value: "gjkim042@gmail.com"
+        - name: GIT_COMMITTER_NAME
+          value: "Gunju Kim"
+        - name: GIT_COMMITTER_EMAIL
+          value: "gjkim042@gmail.com"
     branch: "{{.Branch}}"
     agentConfigRef:
       name: kelos-dev-agent

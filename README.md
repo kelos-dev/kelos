@@ -1,6 +1,6 @@
 <h1 align="center">Kelos</h1>
 
-<p align="center"><strong>Turn your development workflow into YAML. Orchestrate autonomous AI coding agents on Kubernetes.</strong></p>
+<p align="center"><strong>Declaratively orchestrate autonomous AI coding agents on Kubernetes.</strong></p>
 
 <p align="center">
   <a href="https://github.com/kelos-dev/kelos/actions/workflows/ci.yaml"><img src="https://github.com/kelos-dev/kelos/actions/workflows/ci.yaml/badge.svg" alt="CI"></a>
@@ -18,7 +18,7 @@
   <a href="examples/">YAML Manifests</a>
 </p>
 
-Kelos lets you **define your development workflow as YAML** and run it continuously on Kubernetes. Declare what triggers agents, what they do, and how they hand off — Kelos handles the rest.
+Kelos lets you **define your development workflow as Kubernetes resources** and run it continuously. Declare what triggers agents, what they do, and how they hand off — Kelos handles the rest.
 
 Kelos develops Kelos through six TaskSpawners run 24/7: triaging issues, fixing bugs, responding to PR feedback, testing DX, brainstorming improvements, and tuning their own prompts. [See the full pipeline below.](#kelos-developing-kelos)
 

@@ -1,6 +1,6 @@
 <h1 align="center">Kelos</h1>
 
-<p align="center"><strong>Declaratively orchestrate autonomous AI coding agents on Kubernetes.</strong></p>
+<p align="center"><strong>Orchestrate autonomous AI coding agents on Kubernetes.</strong></p>
 
 <p align="center">
   <a href="https://github.com/kelos-dev/kelos/actions/workflows/ci.yaml"><img src="https://github.com/kelos-dev/kelos/actions/workflows/ci.yaml/badge.svg" alt="CI"></a>

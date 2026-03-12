@@ -57,6 +57,7 @@ type githubPullRequest struct {
 }
 
 type githubPullRequestReview struct {
+	Body        string     `json:"body"`
 	State       string     `json:"state"`
 	SubmittedAt string     `json:"submitted_at"`
 	CommitID    string     `json:"commit_id"`
@@ -110,6 +111,7 @@ func (s *GitHubPullRequestSource) Discover(ctx context.Context) ([]WorkItem, err
 		}
 
 		allComments := mergeComments(conversationComments, reviewComments)
+		allComments = appendReviewBodies(allComments, reviews)
 		commentAllowed, commentTriggerTime := s.passesCommentFilter(pr.Body, allComments)
 		if !commentAllowed {
 			continue
@@ -474,6 +476,23 @@ func (s *GitHubPullRequestSource) resolveTriggerTime(reviewTriggerTime, commentT
 		triggerTime = reviewTriggerTime
 	}
 	return triggerTime
+}
+
+// appendReviewBodies appends review body text from pull request reviews to the
+// comment list so that commands in review bodies are evaluated by the comment
+// filter.
+func appendReviewBodies(comments []githubComment, reviews []githubPullRequestReview) []githubComment {
+	for _, r := range reviews {
+		body := strings.TrimSpace(r.Body)
+		if body == "" {
+			continue
+		}
+		comments = append(comments, githubComment{
+			Body:      body,
+			CreatedAt: r.SubmittedAt,
+		})
+	}
+	return comments
 }
 
 // mergeComments combines conversation comments and review comments into a

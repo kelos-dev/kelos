@@ -1,16 +1,16 @@
 # 09 — Open-Source Maintainer Kit
 
 A drop-in toolkit of comment-triggered TaskSpawners that automate common
-open-source maintenance tasks: issue triage, auto-fix, PR feedback loops,
-stale issue cleanup, and contributor onboarding.
+open-source maintenance tasks: issue triage, auto-fix, code review, PR
+feedback loops, stale issue cleanup, and contributor onboarding.
 
 ## Use Case
 
-Maintainers type `/bot triage`, `/bot fix`, `/bot update`, or `/bot guide` on
-any issue or PR. Kelos picks up the comment and spawns an agent Task
-automatically. No label taxonomy required — just comments.
+Maintainers type `/bot triage`, `/bot fix`, `/bot review`, `/bot update`, or
+`/bot guide` on any issue or PR. Kelos picks up the comment and spawns an
+agent Task automatically. No label taxonomy required — just comments.
 
-This is a **multi-agent orchestration** example: five TaskSpawners coordinate
+This is a **multi-agent orchestration** example: six TaskSpawners coordinate
 the full issue-to-PR-to-review lifecycle.
 
 ## Resources
@@ -23,6 +23,7 @@ the full issue-to-PR-to-review lifecycle.
 | `agentconfig.yaml` | AgentConfig | Shared instructions for all agents |
 | `triage-spawner.yaml` | TaskSpawner | `/bot triage` — classify and prioritize issues |
 | `worker-spawner.yaml` | TaskSpawner | `/bot fix` — pick up issues and create PRs |
+| `code-review-spawner.yaml` | TaskSpawner | `/bot review` — automated code review on PRs |
 | `pr-responder-spawner.yaml` | TaskSpawner | `/bot update` — address PR review feedback |
 | `stale-issue-spawner.yaml` | TaskSpawner | Cron — weekly stale issue cleanup |
 | `contributor-guide-spawner.yaml` | TaskSpawner | `/bot guide` — onboarding help for contributors |
@@ -35,6 +36,9 @@ Maintainer comments "/bot triage" on issue
 
 Maintainer comments "/bot fix" on issue
     └── worker-spawner → agent creates branch, implements fix, opens PR
+
+Maintainer comments "/bot review" on PR
+    └── code-review-spawner → agent reviews the diff and posts review comments
 
 Reviewer comments "/bot update" on PR
     └── pr-responder-spawner → agent addresses review feedback, pushes to branch

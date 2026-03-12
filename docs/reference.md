@@ -120,13 +120,18 @@ GitHub Apps are preferred over PATs for production use because they offer fine-g
 | `spec.when.githubIssues.types` | Filter by type: `issues`, `pulls` (default: `issues`) | No |
 | `spec.when.githubIssues.triggerComment` | Requires a matching command in the issue body or comments to include the issue. When combined with `excludeComments`, the latest matching command wins | No |
 | `spec.when.githubIssues.excludeComments` | Exclude issues whose most recent matching command is an exclude comment. When combined with `triggerComment`, the latest matching command wins | No |
+| `spec.when.githubIssues.assignee` | Filter by assignee username; use `"*"` for any assignee or `"none"` for unassigned | No |
+| `spec.when.githubIssues.author` | Filter by issue author username | No |
+| `spec.when.githubIssues.priorityLabels` | Priority-order labels for task selection when `maxConcurrency` is set; index 0 is highest priority | No |
 | `spec.when.githubPullRequests.labels` | Filter pull requests by labels | No |
 | `spec.when.githubPullRequests.excludeLabels` | Exclude pull requests with these labels | No |
 | `spec.when.githubPullRequests.state` | Filter by state: `open`, `closed`, `all` (default: `open`) | No |
 | `spec.when.githubPullRequests.reviewState` | Filter by aggregated review state: `approved`, `changes_requested`, `any` (default: `any`) | No |
 | `spec.when.githubPullRequests.triggerComment` | Requires a matching command in the PR body or comments to include the PR. When combined with `excludeComments`, the latest matching command wins | No |
 | `spec.when.githubPullRequests.excludeComments` | Exclude PRs whose most recent matching command is an exclude comment. When combined with `triggerComment`, the latest matching command wins | No |
+| `spec.when.githubPullRequests.author` | Filter by PR author username | No |
 | `spec.when.githubPullRequests.draft` | Filter by draft state | No |
+| `spec.when.githubPullRequests.priorityLabels` | Priority-order labels for task selection when `maxConcurrency` is set; index 0 is highest priority | No |
 | `spec.when.cron.schedule` | Cron schedule expression (e.g., `"0 * * * *"`) | Yes (when using cron) |
 | `spec.taskTemplate.type` | Agent type (`claude-code`, `codex`, `gemini`, or `opencode`) | Yes |
 | `spec.taskTemplate.credentials` | Credentials for the agent (same as Task) | Yes |

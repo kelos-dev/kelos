@@ -1,0 +1,36 @@
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: oss-stale-cleanup
+spec:
+  when:
+    cron:
+      schedule: "0 9 * * 1" # Every Monday at 9am
+  maxConcurrency: 1
+  taskTemplate:
+    type: claude-code
+    model: sonnet
+    workspaceRef:
+      name: my-project
+    credentials:
+      type: api-key
+      secretRef:
+        name: agent-credentials
+    agentConfigRef:
+      name: oss-maintainer-agent
+    promptTemplate: |
+      Review open issues with no activity in 90+ days.
+
+      Steps:
+      1. List issues with no recent activity using gh CLI
+      2. For each stale issue:
+         - Check if the issue is still relevant
+         - Check if a PR already addresses it
+         - If clearly outdated, comment explaining why and suggest closing
+         - If unclear, ask the reporter for an update
+      3. Process at most 5 issues per run to avoid noise
+
+      Rules:
+      - Never close issues directly — only comment
+      - Be respectful — someone may still care about the issue
+      - Skip issues with "pinned" or "keep-open" labels

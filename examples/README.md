@@ -19,6 +19,7 @@ Ready-to-use patterns and YAML manifests for orchestrating AI agents with Kelos.
 | [06-fork-workflow](06-fork-workflow/) | Discover upstream issues and work in a fork |
 | [07-task-pipeline](07-task-pipeline/) | Chain Tasks with `dependsOn` and pass results between stages |
 | [08-task-with-kelos-skill](08-task-with-kelos-skill/) | Give an agent the Kelos skill for authoring and debugging resources |
+| [09-oss-maintainer-kit](09-oss-maintainer-kit/) | Drop-in toolkit for AI-assisted open-source maintenance with comment-triggered agents |
 
 ## How to Use
 

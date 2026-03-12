@@ -1,0 +1,47 @@
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: oss-triage
+spec:
+  when:
+    githubIssues:
+      state: open
+      triggerComment: /bot triage
+      excludeComments:
+        - /bot done
+  maxConcurrency: 4
+  taskTemplate:
+    type: claude-code
+    model: sonnet
+    workspaceRef:
+      name: my-project
+    credentials:
+      type: api-key
+      secretRef:
+        name: agent-credentials
+    agentConfigRef:
+      name: oss-maintainer-agent
+    promptTemplate: |
+      You are an issue triage agent for an open-source project.
+
+      Analyze issue #{{.Number}}: {{.Title}}
+
+      {{.Body}}
+      {{if .Comments}}
+      Comments:
+      {{.Comments}}
+      {{end}}
+
+      Tasks:
+      1. Classify the issue (bug, feature request, question, documentation)
+      2. Check if this is a duplicate of any open issue
+      3. Assess severity and priority
+      4. If it's a question, provide a helpful answer directly
+      5. Post a triage comment with your analysis
+      6. Apply appropriate labels if the project uses them
+
+      Rules:
+      - Be welcoming — this may be someone's first open-source interaction
+      - For duplicates, link to the original issue and suggest closing
+      - For questions answered in docs, link to the relevant documentation
+      - Do NOT close issues — only comment and label

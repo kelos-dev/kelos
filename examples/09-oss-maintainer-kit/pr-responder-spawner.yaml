@@ -1,0 +1,51 @@
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: oss-pr-responder
+spec:
+  when:
+    githubPullRequests:
+      state: open
+      draft: false
+      triggerComment: /bot update
+      excludeComments:
+        - /bot needs-input
+  maxConcurrency: 2
+  taskTemplate:
+    type: claude-code
+    model: opus
+    workspaceRef:
+      name: my-project
+    credentials:
+      type: api-key
+      secretRef:
+        name: agent-credentials
+    agentConfigRef:
+      name: oss-maintainer-agent
+    branch: "{{.Branch}}"
+    promptTemplate: |
+      You are updating an existing PR in response to review feedback.
+
+      PR #{{.Number}}: {{.Title}}
+      Branch: {{.Branch}}
+      Review state: {{.ReviewState}}
+
+      {{if .ReviewComments}}
+      Inline review comments:
+      {{.ReviewComments}}
+      {{end}}
+      {{if .Comments}}
+      PR conversation:
+      {{.Comments}}
+      {{end}}
+
+      Steps:
+      1. Check out the existing branch and read the current diff
+      2. Address each review comment with minimal, focused changes
+      3. Run tests to verify your changes
+      4. Commit and push to the same branch
+      5. Post a comment summarizing what you changed
+
+      Rules:
+      - Make incremental changes — do NOT rewrite from scratch
+      - If you need maintainer input, post "/bot needs-input" and explain why

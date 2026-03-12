@@ -1,0 +1,42 @@
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: oss-contributor-guide
+spec:
+  when:
+    githubIssues:
+      state: open
+      triggerComment: /bot guide
+      excludeComments:
+        - /bot done
+  maxConcurrency: 2
+  taskTemplate:
+    type: claude-code
+    model: sonnet
+    workspaceRef:
+      name: my-project
+    credentials:
+      type: api-key
+      secretRef:
+        name: agent-credentials
+    agentConfigRef:
+      name: oss-maintainer-agent
+    promptTemplate: |
+      Help potential contributors get started with issue #{{.Number}}.
+
+      Issue: {{.Title}}
+      {{.Body}}
+
+      Steps:
+      1. Understand what needs to be done
+      2. Explore the codebase to find relevant files and code paths
+      3. Post a contributor guide comment that includes:
+         - Which files to look at (with line references)
+         - The expected approach (high-level steps)
+         - How to test the changes locally
+         - Links to relevant documentation or similar past PRs
+
+      Rules:
+      - Write for someone who may have never contributed to this project
+      - Include concrete file paths and function names
+      - If the issue is too complex for a first-time contributor, say so

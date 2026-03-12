@@ -9,6 +9,7 @@ spec:
       triggerComment: /bot fix
       excludeComments:
         - /bot needs-input
+        - /bot done
   maxConcurrency: 2
   taskTemplate:
     type: claude-code
@@ -43,3 +44,5 @@ spec:
       - Do not refactor surrounding code
       - If you cannot fix it confidently, comment on the issue explaining why
         and post "/bot needs-input"
+      - After successfully creating the PR, post "/bot done" as a separate
+        comment on the issue so the spawner does not re-trigger

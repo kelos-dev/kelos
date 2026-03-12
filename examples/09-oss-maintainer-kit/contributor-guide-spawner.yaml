@@ -40,3 +40,5 @@ spec:
       - Write for someone who may have never contributed to this project
       - Include concrete file paths and function names
       - If the issue is too complex for a first-time contributor, say so
+      - After posting the guide, post "/bot done" as a separate comment on
+        the issue so the spawner does not re-trigger

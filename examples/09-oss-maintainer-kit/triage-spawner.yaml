@@ -45,3 +45,5 @@ spec:
       - For duplicates, link to the original issue and suggest closing
       - For questions answered in docs, link to the relevant documentation
       - Do NOT close issues — only comment and label
+      - After completing triage, post "/bot done" as a separate comment on
+        the issue so the spawner does not re-trigger

@@ -113,6 +113,12 @@ type GitHubIssues struct {
 	// are scheduled last. When empty, items are processed in discovery order.
 	// +optional
 	PriorityLabels []string `json:"priorityLabels,omitempty"`
+
+	// Feedback enables posting status comments on GitHub issues when Tasks
+	// are created and completed. Requires the GitHub token to have write
+	// access to issues. Defaults to false.
+	// +optional
+	Feedback *bool `json:"feedback,omitempty"`
 }
 
 // GitHubPullRequests discovers pull requests from a GitHub repository.
@@ -184,6 +190,12 @@ type GitHubPullRequests struct {
 	// are scheduled last. When empty, items are processed in discovery order.
 	// +optional
 	PriorityLabels []string `json:"priorityLabels,omitempty"`
+
+	// Feedback enables posting status comments on GitHub pull requests when
+	// Tasks are created and completed. Requires the GitHub token to have
+	// write access to issues/PRs. Defaults to false.
+	// +optional
+	Feedback *bool `json:"feedback,omitempty"`
 }
 
 // Jira discovers issues from a Jira project.

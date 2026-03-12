@@ -113,6 +113,14 @@ func main() {
 	}
 }
 
+// sourceContext carries metadata about the external source alongside the
+// Source interface. It is used to set annotations on spawned Tasks and
+// to build a GitHubFeedback instance when feedback is enabled.
+type sourceContext struct {
+	source   source.Source
+	feedback *source.GitHubFeedback
+}
+
 func runCycle(ctx context.Context, cl client.Client, key types.NamespacedName, githubOwner, githubRepo, githubAPIBaseURL, githubTokenFile, jiraBaseURL, jiraProject, jiraJQL string) error {
 	var ts kelosv1alpha1.TaskSpawner
 	if err := cl.Get(ctx, key, &ts); err != nil {
@@ -124,10 +132,43 @@ func runCycle(ctx context.Context, cl client.Client, key types.NamespacedName, g
 		return fmt.Errorf("building source: %w", err)
 	}
 
-	return runCycleWithSource(ctx, cl, key, src)
+	sc := sourceContext{source: src}
+
+	// Build feedback client when feedback is enabled for GitHub sources
+	if feedbackEnabled(&ts) {
+		token, err := readGitHubToken(githubTokenFile)
+		if err == nil && token != "" {
+			sc.feedback = &source.GitHubFeedback{
+				Owner:   githubOwner,
+				Repo:    githubRepo,
+				Token:   token,
+				BaseURL: githubAPIBaseURL,
+			}
+		}
+	}
+
+	return runCycleWithSource(ctx, cl, key, sc)
 }
 
-func runCycleWithSource(ctx context.Context, cl client.Client, key types.NamespacedName, src source.Source) error {
+// feedbackEnabled returns true if the TaskSpawner has feedback enabled on
+// its GitHub source.
+func feedbackEnabled(ts *kelosv1alpha1.TaskSpawner) bool {
+	if ts.Spec.When.GitHubIssues != nil && ts.Spec.When.GitHubIssues.Feedback != nil {
+		return *ts.Spec.When.GitHubIssues.Feedback
+	}
+	if ts.Spec.When.GitHubPullRequests != nil && ts.Spec.When.GitHubPullRequests.Feedback != nil {
+		return *ts.Spec.When.GitHubPullRequests.Feedback
+	}
+	return false
+}
+
+// Annotation keys used for feedback tracking on Tasks.
+const (
+	annotationSourceNumber   = "kelos.dev/source-number"
+	annotationFeedbackPosted = "kelos.dev/feedback-posted"
+)
+
+func runCycleWithSource(ctx context.Context, cl client.Client, key types.NamespacedName, sc sourceContext) error {
 	log := ctrl.Log.WithName("spawner")
 
 	var ts kelosv1alpha1.TaskSpawner
@@ -166,7 +207,7 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 		return nil
 	}
 
-	items, err := src.Discover(ctx)
+	items, err := sc.source.Discover(ctx)
 	if err != nil {
 		return fmt.Errorf("discovering items: %w", err)
 	}
@@ -191,6 +232,11 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 		if t.Status.Phase != kelosv1alpha1.TaskPhaseSucceeded && t.Status.Phase != kelosv1alpha1.TaskPhaseFailed {
 			activeTasks++
 		}
+	}
+
+	// Post completion feedback for terminal tasks that haven't been reported yet
+	if sc.feedback != nil {
+		postCompletionFeedback(ctx, cl, sc.feedback, existingTaskMap)
 	}
 
 	var newItems []source.WorkItem
@@ -278,6 +324,14 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 			},
 		}
 
+		// When feedback is enabled, store the issue/PR number as an annotation
+		// so completion feedback can be posted on subsequent cycles.
+		if sc.feedback != nil && item.Number > 0 {
+			task.Annotations = map[string]string{
+				annotationSourceNumber: strconv.Itoa(item.Number),
+			}
+		}
+
 		if ts.Spec.TaskTemplate.WorkspaceRef != nil {
 			task.Spec.WorkspaceRef = ts.Spec.TaskTemplate.WorkspaceRef
 		}
@@ -309,6 +363,14 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 		log.Info("Created Task", "task", taskName, "item", item.ID)
 		newTasksCreated++
 		activeTasks++
+
+		// Post "task started" feedback comment (best-effort)
+		if sc.feedback != nil && item.Number > 0 {
+			comment := source.TaskStartedComment(taskName)
+			if err := sc.feedback.PostComment(ctx, item.Number, comment); err != nil {
+				log.Error(err, "Posting task started comment", "task", taskName, "issue", item.Number)
+			}
+		}
 	}
 
 	// Update status in a single batch
@@ -357,6 +419,61 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 	}
 
 	return nil
+}
+
+// postCompletionFeedback iterates over existing tasks and posts a completion
+// comment on the associated GitHub issue/PR for any task in a terminal phase
+// that hasn't had feedback posted yet. After posting, it annotates the task
+// with annotationFeedbackPosted to prevent duplicate comments.
+func postCompletionFeedback(ctx context.Context, cl client.Client, fb *source.GitHubFeedback, tasks map[string]*kelosv1alpha1.Task) {
+	log := ctrl.Log.WithName("spawner")
+
+	for _, t := range tasks {
+		// Only process terminal tasks
+		if t.Status.Phase != kelosv1alpha1.TaskPhaseSucceeded && t.Status.Phase != kelosv1alpha1.TaskPhaseFailed {
+			continue
+		}
+
+		// Skip if feedback already posted
+		if t.Annotations[annotationFeedbackPosted] == "true" {
+			continue
+		}
+
+		// Skip if no source number annotation
+		numberStr, ok := t.Annotations[annotationSourceNumber]
+		if !ok {
+			continue
+		}
+		number, err := strconv.Atoi(numberStr)
+		if err != nil {
+			continue
+		}
+
+		// Compute duration
+		var duration string
+		if t.Status.StartTime != nil && t.Status.CompletionTime != nil {
+			d := t.Status.CompletionTime.Time.Sub(t.Status.StartTime.Time)
+			duration = d.Round(time.Second).String()
+		}
+
+		succeeded := t.Status.Phase == kelosv1alpha1.TaskPhaseSucceeded
+		comment := source.TaskCompletedComment(t.Name, succeeded, duration, t.Status.Results)
+
+		if err := fb.PostComment(ctx, number, comment); err != nil {
+			log.Error(err, "Posting task completion comment", "task", t.Name, "issue", number)
+			continue
+		}
+
+		// Mark feedback as posted to prevent duplicates
+		patch := client.MergeFrom(t.DeepCopy())
+		if t.Annotations == nil {
+			t.Annotations = make(map[string]string)
+		}
+		t.Annotations[annotationFeedbackPosted] = "true"
+		if err := cl.Patch(ctx, t, patch); err != nil {
+			log.Error(err, "Patching task with feedback-posted annotation", "task", t.Name)
+		}
+	}
 }
 
 func buildSource(ts *kelosv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFile, jiraBaseURL, jiraProject, jiraJQL string) (source.Source, error) {

@@ -57,7 +57,7 @@ spec:
       Read the issue carefully and apply exactly one `kind/*` label:
         - `kind/bug` — something is broken or behaving incorrectly
         - `kind/feature` — a request for new functionality
-        - `kind/api` — related to API changes or additions
+        - `kind/cleanup` — refactoring, technical debt, or configuration alignment
         - `kind/docs` — documentation improvement or fix
 
       Apply the label:

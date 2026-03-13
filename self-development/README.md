@@ -122,7 +122,7 @@ Picks up open GitHub issues labeled `needs-actor` and performs automated triage.
 | **Concurrency** | 8 |
 
 **For each issue, the agent:**
-1. Classifies with exactly one `kind/*` label (`kind/bug`, `kind/feature`, `kind/api`, `kind/docs`)
+1. Classifies with exactly one `kind/*` label (`kind/bug`, `kind/feature`, `kind/cleanup`, `kind/docs`)
 2. Checks if the issue has already been fixed by a merged PR or recent commit
 3. Checks if the issue references outdated APIs, flags, or features
 4. Detects duplicate issues

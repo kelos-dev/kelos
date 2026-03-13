@@ -111,7 +111,7 @@ spec:
         - If previous PRs for this issue were closed, read their reviews to understand why before choosing your approach.
         - Search the codebase for existing constants, types, and patterns before creating new ones. Do not duplicate definitions.
         - Only implement what the issue explicitly asks for. If you discover related improvements, create separate issues for them.
-      - 3b. Create a commit that fixes the issue.
+      - 3b. Create commits that fix the issue. Use separate commits for logically independent changes (e.g., adding a new API field vs. wiring it through the system).
       - 4b. Push your branch to origin kelos-task-{{.Number}}.
       - 5b. Create a PR with labels "generated-by-kelos" and "ok-to-test" (use `gh pr create --label generated-by-kelos --label ok-to-test`), then /review it. If changes are needed, make them, commit and push, then /review again. Repeat until the review passes.
       - 6b. Update the PR title and description to reflect the final diff. The PR body MUST contain a standard closing keyword reference on its own line (e.g., `Fixes #{{.Number}}` or `Closes #{{.Number}}`). Do not embed the issue number in natural language.

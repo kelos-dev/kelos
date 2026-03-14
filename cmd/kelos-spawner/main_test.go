@@ -112,7 +112,7 @@ func newTask(name, namespace, spawnerName string, phase kelosv1alpha1.TaskPhase)
 func TestBuildSource_GitHubIssuesWithBaseURL(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 
-	src, err := buildSource(ts, "my-org", "my-repo", "https://github.example.com/api/v3", "", "", "", "")
+	src, err := buildSource(ts, "my-org", "my-repo", "https://github.example.com/api/v3", "", "", "", "", nil)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestBuildSource_GitHubIssuesWithBaseURL(t *testing.T) {
 func TestBuildSource_GitHubIssuesDefaultBaseURL(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 
-	src, err := buildSource(ts, "kelos-dev", "kelos", "", "", "", "", "")
+	src, err := buildSource(ts, "kelos-dev", "kelos", "", "", "", "", "", nil)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestBuildSource_GitHubPullRequests(t *testing.T) {
 		},
 	}
 
-	src, err := buildSource(ts, "kelos-dev", "kelos", "https://github.example.com/api/v3", "", "", "", "")
+	src, err := buildSource(ts, "kelos-dev", "kelos", "https://github.example.com/api/v3", "", "", "", "", nil)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestBuildSource_Jira(t *testing.T) {
 	t.Setenv("JIRA_USER", "user@example.com")
 	t.Setenv("JIRA_TOKEN", "jira-api-token")
 
-	src, err := buildSource(ts, "", "", "", "", "https://mycompany.atlassian.net", "PROJ", "status = Open")
+	src, err := buildSource(ts, "", "", "", "", "https://mycompany.atlassian.net", "PROJ", "status = Open", nil)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -1002,7 +1002,7 @@ func TestBuildSource_PriorityLabelsPassedToSource(t *testing.T) {
 		"priority/imporant-soon",
 	}
 
-	src, err := buildSource(ts, "owner", "repo", "", "", "", "", "")
+	src, err := buildSource(ts, "owner", "repo", "", "", "", "", "", nil)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -1029,7 +1029,7 @@ func TestRunCycleWithSource_CommentFieldsPassedToSource(t *testing.T) {
 		ExcludeComments: []string{"/kelos needs-input"},
 	}
 
-	src, err := buildSource(ts, "owner", "repo", "", "", "", "", "")
+	src, err := buildSource(ts, "owner", "repo", "", "", "", "", "", nil)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}

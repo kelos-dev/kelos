@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -28,6 +29,7 @@ type spawnerRuntimeConfig struct {
 	JiraBaseURL      string
 	JiraProject      string
 	JiraJQL          string
+	HTTPClient       *http.Client
 }
 
 type spawnerReconciler struct {
@@ -66,7 +68,7 @@ func (r *spawnerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 func runOnce(ctx context.Context, cl client.Client, key types.NamespacedName, cfg spawnerRuntimeConfig) (time.Duration, error) {
-	if err := runCycle(ctx, cl, key, cfg.GitHubOwner, cfg.GitHubRepo, cfg.GitHubAPIBaseURL, cfg.GitHubTokenFile, cfg.JiraBaseURL, cfg.JiraProject, cfg.JiraJQL); err != nil {
+	if err := runCycle(ctx, cl, key, cfg.GitHubOwner, cfg.GitHubRepo, cfg.GitHubAPIBaseURL, cfg.GitHubTokenFile, cfg.JiraBaseURL, cfg.JiraProject, cfg.JiraJQL, cfg.HTTPClient); err != nil {
 		return 0, err
 	}
 

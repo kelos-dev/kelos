@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -87,6 +88,10 @@ func main() {
 
 	log.Info("Starting spawner", "taskspawner", key, "oneShot", oneShot)
 
+	httpClient := &http.Client{
+		Transport: source.NewETagTransport(http.DefaultTransport, log),
+	}
+
 	cfgArgs := spawnerRuntimeConfig{
 		GitHubOwner:      githubOwner,
 		GitHubRepo:       githubRepo,
@@ -95,6 +100,7 @@ func main() {
 		JiraBaseURL:      jiraBaseURL,
 		JiraProject:      jiraProject,
 		JiraJQL:          jiraJQL,
+		HTTPClient:       httpClient,
 	}
 
 	if oneShot {
@@ -157,13 +163,13 @@ func runReportingCycle(ctx context.Context, cl client.Client, key types.Namespac
 	return nil
 }
 
-func runCycle(ctx context.Context, cl client.Client, key types.NamespacedName, githubOwner, githubRepo, githubAPIBaseURL, githubTokenFile, jiraBaseURL, jiraProject, jiraJQL string) error {
+func runCycle(ctx context.Context, cl client.Client, key types.NamespacedName, githubOwner, githubRepo, githubAPIBaseURL, githubTokenFile, jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) error {
 	var ts kelosv1alpha1.TaskSpawner
 	if err := cl.Get(ctx, key, &ts); err != nil {
 		return fmt.Errorf("fetching TaskSpawner: %w", err)
 	}
 
-	src, err := buildSource(&ts, githubOwner, githubRepo, githubAPIBaseURL, githubTokenFile, jiraBaseURL, jiraProject, jiraJQL)
+	src, err := buildSource(&ts, githubOwner, githubRepo, githubAPIBaseURL, githubTokenFile, jiraBaseURL, jiraProject, jiraJQL, httpClient)
 	if err != nil {
 		return fmt.Errorf("building source: %w", err)
 	}
@@ -452,7 +458,7 @@ func reportingEnabled(ts *kelosv1alpha1.TaskSpawner) bool {
 	return false
 }
 
-func buildSource(ts *kelosv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFile, jiraBaseURL, jiraProject, jiraJQL string) (source.Source, error) {
+func buildSource(ts *kelosv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFile, jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) (source.Source, error) {
 	if ts.Spec.When.GitHubIssues != nil {
 		gh := ts.Spec.When.GitHubIssues
 		token, err := readGitHubToken(tokenFile)
@@ -470,6 +476,7 @@ func buildSource(ts *kelosv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFi
 			Author:          gh.Author,
 			Token:           token,
 			BaseURL:         apiBaseURL,
+			Client:          httpClient,
 			TriggerComment:  gh.TriggerComment,
 			ExcludeComments: gh.ExcludeComments,
 			PriorityLabels:  gh.PriorityLabels,
@@ -492,6 +499,7 @@ func buildSource(ts *kelosv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFi
 			Author:          gh.Author,
 			Token:           token,
 			BaseURL:         apiBaseURL,
+			Client:          httpClient,
 			ReviewState:     gh.ReviewState,
 			TriggerComment:  gh.TriggerComment,
 			ExcludeComments: gh.ExcludeComments,

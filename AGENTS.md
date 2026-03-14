@@ -23,6 +23,7 @@
 - Choose exactly one `/kind` label from: `bug`, `cleanup`, `docs`, `feature`.
 - If there is no associated issue, write "N/A" under the issue section.
 - If the PR does not introduce a user-facing change, write "NONE" in the `release-note` block.
+- If the PR introduces a new API field, CRD change, or user-facing feature, write a meaningful release note describing the change — do not write "NONE".
 
 ## Directory Structure
 - `cmd/` — CLI entrypoints

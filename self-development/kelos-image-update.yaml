@@ -16,7 +16,7 @@ spec:
       so it is clearly distinguishable from human comments and triggers a notification
 
     ## Standards
-    - Do not create duplicate issues — check existing issues first with `gh issue list`
+    - Do not create duplicate PRs — check existing PRs first with `gh pr list`
     - Keep changes minimal and focused
 ---
 apiVersion: kelos.dev/v1alpha1
@@ -48,11 +48,20 @@ spec:
           cpu: "1"
           memory: "2Gi"
           ephemeral-storage: "2Gi"
+      env:
+        - name: GIT_AUTHOR_NAME
+          value: "Gunju Kim"
+        - name: GIT_AUTHOR_EMAIL
+          value: "gjkim042@gmail.com"
+        - name: GIT_COMMITTER_NAME
+          value: "Gunju Kim"
+        - name: GIT_COMMITTER_EMAIL
+          value: "gjkim042@gmail.com"
     agentConfigRef:
       name: kelos-image-update-agent
     promptTemplate: |
       You are an image update agent for the Kelos framework — a Kubernetes-native controller that runs autonomous AI coding agents.
-      Your goal is to check whether any coding agent images have newer versions available and create GitHub issues to update them.
+      Your goal is to check whether any coding agent images have newer versions available and create PRs to update them.
 
       Coding agents and their Dockerfiles:
       - **claude-code** — `claude-code/Dockerfile` — npm package `@anthropic-ai/claude-code` (ARG `CLAUDE_CODE_VERSION`)
@@ -74,24 +83,44 @@ spec:
       - Skip version checking since it uses a binary download URL with an opaque version format
 
       Then for each agent that has a newer version available:
-      1. First check if an open issue already exists for updating that agent:
+      1. First check if an open PR already exists for updating that agent:
          ```
-         gh issue list --state open --label generated-by-kelos --search "update <agent-name> image" --json number,title
+         gh pr list --state open --label generated-by-kelos --search "update <agent-name> image" --json number,title
          ```
-      2. If an open issue already exists, skip it — do NOT create a duplicate
-      3. If no open issue exists, create one:
-         ```
-         gh issue create \
-           --title "Update <agent-name> image from <current-version> to <latest-version>" \
-           --body "<description with Dockerfile path, current version, latest version, and changelog link if available>" \
-           --label generated-by-kelos --label actor/kelos --label kind/cleanup --label priority/important-soon
-         ```
+      2. If an open PR already exists, skip it — do NOT create a duplicate
+      3. If no open PR exists, create one:
+         a. Create a new branch:
+            ```
+            git checkout -b update-<agent-name>-image-<latest-version> origin/main
+            ```
+         b. Update the version ARG in the Dockerfile (e.g., change `ARG CLAUDE_CODE_VERSION=<current>` to `ARG CLAUDE_CODE_VERSION=<latest>`)
+         c. Commit the change:
+            ```
+            git commit -am "Update <agent-name> image to <latest-version>"
+            ```
+         d. Push and create a PR:
+            ```
+            git push origin update-<agent-name>-image-<latest-version>
+            ```
+            Then create the PR. Because the PR body contains backtick-fenced blocks, write
+            the body to a temp file first and use `--body-file` to avoid shell quoting issues:
+            ```
+            gh pr create \
+              --title "Update <agent-name> image to <latest-version>" \
+              --body-file /tmp/pr-body.md \
+              --label generated-by-kelos --label ok-to-test --label kind/feature
+            ```
+            The PR body (`/tmp/pr-body.md`) MUST follow `.github/PULL_REQUEST_TEMPLATE.md`:
+            - Start with `/kind feature` on its own line
+            - Fill in all template sections (What type, What this PR does, Which issues, Special notes, Does this PR introduce a user-facing change)
+            - Set "Which issue(s)" to "N/A"
+            - Include a release-note fenced block: Update <agent-name> image from <current-version> to <latest-version>
 
       Constraints:
-      - Create at most ONE issue per coding agent per run
-      - Do NOT create issues if the version is already up to date
-      - Do NOT create duplicate issues — always check for existing open issues first
-      - Do NOT create PRs — only create issues
-      - If no agents need updating, exit cleanly without creating any issues
-      - Include the npm package changelog or release notes link in the issue body when available
+      - Create at most ONE PR per coding agent per run
+      - Do NOT create PRs if the version is already up to date
+      - Do NOT create duplicate PRs — always check for existing open PRs first
+      - Do NOT create issues — only create PRs
+      - If no agents need updating, exit cleanly without creating any PRs
+      - Include the npm package changelog or release notes link in the PR body when available
   pollInterval: 1m

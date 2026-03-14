@@ -253,7 +253,7 @@ kubectl apply -f self-development/kelos-self-update.yaml
 
 ### kelos-image-update.yaml
 
-Runs daily to check for newer versions of coding agent images and creates issues to update them.
+Runs daily to check for newer versions of coding agent images and creates PRs to update them.
 
 | | |
 |---|---|
@@ -267,7 +267,7 @@ Checks the following coding agents for updates:
 - **gemini** — `@google/gemini-cli` npm package
 - **opencode** — `opencode-ai` npm package
 
-Creates at most one issue per agent. Skips agents that are already up to date or already have an open update issue.
+Creates at most one PR per agent. Skips agents that are already up to date or already have an open update PR.
 
 **Deploy:**
 ```bash

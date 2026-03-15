@@ -88,7 +88,7 @@ spec:
       3. Compare the current version with the latest version
       4. Before creating a PR, validate that the download binary actually exists:
          ```
-         curl -so /dev/null -w '%{http_code}' "https://downloads.cursor.com/lab/<latest-version>/linux/x64/agent-cli-package.tar.gz"
+         curl -sI -o /dev/null -w '%{http_code}' "https://downloads.cursor.com/lab/<latest-version>/linux/x64/agent-cli-package.tar.gz"
          ```
          Only proceed if the returned HTTP status code is exactly `200`. If the URL returns any other status (including redirects like 302), skip cursor for this run.
 

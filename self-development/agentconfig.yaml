@@ -29,3 +29,4 @@ spec:
     - Always try to add or improve tests when modifying code
     - Logging conventions: start log messages with capital letters and do not end with punctuation
     - Commit messages: do not include PR links in commit messages
+    - When making structural changes (adding new files, configs, or components), update related documentation (especially README files) to stay in sync

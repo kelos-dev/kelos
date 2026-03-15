@@ -24,6 +24,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	"github.com/kelos-dev/kelos/internal/logging"
 	"github.com/kelos-dev/kelos/internal/reporting"
 	"github.com/kelos-dev/kelos/internal/source"
 )
@@ -58,11 +59,15 @@ func main() {
 	flag.StringVar(&jiraJQL, "jira-jql", "", "Optional JQL filter for Jira issues")
 	flag.BoolVar(&oneShot, "one-shot", false, "Run a single discovery cycle and exit (used by CronJob)")
 
-	opts := zap.Options{Development: true}
-	opts.BindFlags(flag.CommandLine)
+	opts, applyVerbosity := logging.SetupZapOptions(flag.CommandLine)
 	flag.Parse()
 
-	logger := zap.New(zap.UseFlagOptions(&opts))
+	if err := applyVerbosity(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	logger := zap.New(zap.UseFlagOptions(opts))
 	ctrl.SetLogger(logger)
 	log := ctrl.Log.WithName("spawner")
 

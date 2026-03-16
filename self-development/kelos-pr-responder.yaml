@@ -91,7 +91,7 @@ spec:
       - 8. Make sure the PR passes all CI tests.
 
       Post-checklist:
-      - If the PR is ready for human review, you need more information, or you cannot make progress, post a PR comment whose first line is `/kelos needs-input` and explain why below it. Maintainers can resume the PR later with `/kelos pick-up`.
+      - If the PR is ready for human review, you need more information, or you cannot make progress, post a PR comment whose first line is `/kelos needs-input` and explain why below it. Maintainers can resume the PR later with `/kelos pick-up`. When all review feedback was already addressed in previous commits and no new comments require action, keep the explanation brief (e.g. "All review feedback was addressed in previous commits. Ready for re-review.") instead of repeating a full status breakdown. Never post duplicate or near-identical status messages.
       - If you find anything worth considering (e.g. bugs, improvements, follow-up work), create a new issue:
         - gh issue create --title "<title>" --body "<description>" --label generated-by-kelos
   pollInterval: 1m

@@ -254,3 +254,80 @@ spec:
       - Post exactly one comment per run
       - The comment MUST end with a standalone `/kelos needs-input` line
   pollInterval: 1m
+
+---
+
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: paiops-rebase
+spec:
+  when:
+    githubPullRequests:
+      state: open
+      triggerComment: /kelos approve
+      excludeComments:
+        - /kelos needs-input
+      reporting:
+        enabled: true
+  maxConcurrency: 5
+  taskTemplate:
+    workspaceRef:
+      name: paiops-workspace
+    model: sonnet
+    type: claude-code
+    ttlSecondsAfterFinished: 600
+    credentials:
+      type: oauth
+      secretRef:
+        name: kelos-credentials
+    branch: "{{.Branch}}"
+    agentConfigRef:
+      name: kelos-dev-agent
+    promptTemplate: |
+      You are a rebase agent. Your only task is to keep a PR branch rebased on its base branch.
+
+      Pull request:
+      - PR #{{.Number}}: {{.Title}}
+      - Branch: {{.Branch}}
+
+      Steps:
+      1. Determine the base branch of this PR:
+         ```
+         BASE=$(gh pr view {{.Number}} --json baseRefName --jq .baseRefName)
+         ```
+
+      2. Fetch full history and check out the branch:
+         ```
+         git fetch --unshallow || true
+         git fetch origin "$BASE"
+         git checkout {{.Branch}}
+         ```
+
+      3. Check if a rebase is needed:
+         ```
+         MERGE_BASE=$(git merge-base "origin/$BASE" HEAD)
+         ORIGIN_BASE=$(git rev-parse "origin/$BASE")
+         ```
+         If MERGE_BASE equals ORIGIN_BASE, the branch is already up to date. Exit without making any changes.
+
+      4. Rebase the branch onto origin/$BASE:
+         ```
+         git rebase "origin/$BASE"
+         ```
+
+      5. If the rebase has conflicts:
+         - Abort the rebase: `git rebase --abort`
+         - Post a comment on the PR whose first line is `/kelos needs-input` followed by a description of which files have conflicts
+         - Exit
+
+      6. Force push the rebased branch:
+         ```
+         git push --force-with-lease origin {{.Branch}}
+         ```
+
+      Important:
+      - Do NOT modify any source code
+      - Do NOT start any development work
+      - Only rebase and push
+  pollInterval: 5m

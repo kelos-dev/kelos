@@ -9,8 +9,8 @@ spec:
       draft: false
       triggerComment: /bot review
       excludeComments:
-        - /bot done
         - /bot needs-input
+        - /bot done
   maxConcurrency: 2
   taskTemplate:
     type: claude-code

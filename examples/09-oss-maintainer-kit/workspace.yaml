@@ -4,5 +4,6 @@ metadata:
   name: my-project
 spec:
   repo: https://github.com/owner/repo.git # TODO: replace with your repository URL
+  ref: main
   secretRef:
     name: github-token

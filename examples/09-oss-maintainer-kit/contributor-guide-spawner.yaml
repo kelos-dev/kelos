@@ -8,6 +8,7 @@ spec:
       state: open
       triggerComment: /bot guide
       excludeComments:
+        - /bot needs-input
         - /bot done
   maxConcurrency: 2
   taskTemplate:

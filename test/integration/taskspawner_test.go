@@ -2414,7 +2414,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 							PollInterval: "30s",
 						},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,

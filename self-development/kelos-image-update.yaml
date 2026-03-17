@@ -134,4 +134,3 @@ spec:
       - If no agents need updating, exit cleanly without creating any PRs
       - Include the npm package changelog or release notes link in the PR body when available
       - For cursor, include a link to https://cursor.com/changelog in the PR body instead
-  pollInterval: 1m

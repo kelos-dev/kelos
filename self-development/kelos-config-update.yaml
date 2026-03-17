@@ -94,4 +94,3 @@ spec:
       - Do not create a PR if no actionable changes are found — exit cleanly instead
       - Do not create duplicate issues — check existing issues first with `gh issue list`
       - Back every change with a specific reference to the PR review that motivated it
-  pollInterval: 1m

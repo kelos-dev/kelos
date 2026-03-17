@@ -106,4 +106,3 @@ spec:
         - Agent configuration based on PR reviews → kelos-config-update
         - Coding agent image version updates → kelos-image-update
       - If after reviewing existing issues you cannot identify something genuinely new and actionable, exit without creating an issue or PR. Not every run needs to produce output
-  pollInterval: 1m

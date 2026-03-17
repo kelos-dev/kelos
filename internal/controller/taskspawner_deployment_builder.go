@@ -186,9 +186,8 @@ func (b *DeploymentBuilder) buildPodParts(ts *kelosv1alpha1.TaskSpawner, workspa
 		}
 	}
 
-	on := ts.Spec.EffectiveOn()
-	if on.Jira != nil {
-		jira := on.Jira
+	if ts.Spec.When.Jira != nil {
+		jira := ts.Spec.When.Jira
 		args = append(args,
 			"--jira-base-url="+jira.BaseURL,
 			"--jira-project="+jira.Project,
@@ -297,7 +296,6 @@ func (b *DeploymentBuilder) Build(ts *kelosv1alpha1.TaskSpawner, workspace *kelo
 // so that CronJob pods get the same GitHub auth and repo args as Deployments.
 func (b *DeploymentBuilder) BuildCronJob(ts *kelosv1alpha1.TaskSpawner, workspace *kelosv1alpha1.WorkspaceSpec, isGitHubApp bool) *batchv1.CronJob {
 	p := b.buildPodParts(ts, workspace, isGitHubApp)
-	on := ts.Spec.EffectiveOn()
 
 	// Add --one-shot flag so the spawner runs a single cycle and exits.
 	// Copy to avoid mutating the shared slice from buildPodParts.
@@ -326,7 +324,7 @@ func (b *DeploymentBuilder) BuildCronJob(ts *kelosv1alpha1.TaskSpawner, workspac
 			Labels:    p.labels,
 		},
 		Spec: batchv1.CronJobSpec{
-			Schedule:                   on.Cron.Schedule,
+			Schedule:                   ts.Spec.When.Cron.Schedule,
 			ConcurrencyPolicy:          batchv1.ForbidConcurrent,
 			SuccessfulJobsHistoryLimit: &successfulJobsHistoryLimit,
 			FailedJobsHistoryLimit:     &failedJobsHistoryLimit,
@@ -390,12 +388,11 @@ func parseGitHubOwnerRepo(repoURL string) (owner, repo string) {
 }
 
 func githubSourceRepoOverride(ts *kelosv1alpha1.TaskSpawner) string {
-	on := ts.Spec.EffectiveOn()
-	if on.GitHubIssues != nil && on.GitHubIssues.Repo != "" {
-		return on.GitHubIssues.Repo
+	if ts.Spec.When.GitHubIssues != nil && ts.Spec.When.GitHubIssues.Repo != "" {
+		return ts.Spec.When.GitHubIssues.Repo
 	}
-	if on.GitHubPullRequests != nil && on.GitHubPullRequests.Repo != "" {
-		return on.GitHubPullRequests.Repo
+	if ts.Spec.When.GitHubPullRequests != nil && ts.Spec.When.GitHubPullRequests.Repo != "" {
+		return ts.Spec.When.GitHubPullRequests.Repo
 	}
 	return ""
 }

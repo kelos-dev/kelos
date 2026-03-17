@@ -102,9 +102,6 @@ var _ = Describe("Completion", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
-						Cron: &kelosv1alpha1.Cron{Schedule: "0 9 * * 1"},
-					},
 					TaskTemplate: kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{

@@ -51,8 +51,7 @@ type TaskSpawnerReconciler struct {
 
 // isCronBased returns true if the TaskSpawner uses a cron schedule.
 func isCronBased(ts *kelosv1alpha1.TaskSpawner) bool {
-	on := ts.Spec.EffectiveOn()
-	return on != nil && on.Cron != nil
+	return ts.Spec.When.Cron != nil
 }
 
 // Reconcile handles TaskSpawner reconciliation.
@@ -457,9 +456,8 @@ func (r *TaskSpawnerReconciler) createCronJob(ctx context.Context, ts *kelosv1al
 		return ctrl.Result{}, err
 	}
 
-	schedule := ts.Spec.EffectiveOn().Cron.Schedule
-	logger.Info("Created CronJob", "cronJob", cronJob.Name, "schedule", schedule)
-	r.recordEvent(ts, corev1.EventTypeNormal, "CronJobCreated", "Created spawner CronJob %s with schedule %s", cronJob.Name, schedule)
+	logger.Info("Created CronJob", "cronJob", cronJob.Name, "schedule", ts.Spec.When.Cron.Schedule)
+	r.recordEvent(ts, corev1.EventTypeNormal, "CronJobCreated", "Created spawner CronJob %s with schedule %s", cronJob.Name, ts.Spec.When.Cron.Schedule)
 
 	// Update status
 	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {

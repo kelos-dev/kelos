@@ -3,7 +3,7 @@ kind: TaskSpawner
 metadata:
   name: weekly-dependency-update
 spec:
-  on:
+  when:
     cron:
       schedule: "0 9 * * 1" # Every Monday at 9:00 AM UTC
   taskTemplate:

@@ -3,7 +3,7 @@ kind: TaskSpawner
 metadata:
   name: fix-bugs
 spec:
-  on:
+  when:
     githubIssues:
       labels:
         - bug

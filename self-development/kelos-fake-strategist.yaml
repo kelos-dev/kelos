@@ -35,7 +35,7 @@ kind: TaskSpawner
 metadata:
   name: kelos-fake-strategist
 spec:
-  on:
+  when:
     cron:
       schedule: "0 */12 * * *"
   maxConcurrency: 1

@@ -92,13 +92,13 @@ func TestCollect(t *testing.T) {
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "spawner-1", Namespace: "ns-a"},
 			Spec: kelosv1alpha1.TaskSpawnerSpec{
-				When: &kelosv1alpha1.On{GitHubIssues: &kelosv1alpha1.GitHubIssues{}},
+				When: kelosv1alpha1.When{GitHubIssues: &kelosv1alpha1.GitHubIssues{}},
 			},
 		},
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "spawner-2", Namespace: "ns-b"},
 			Spec: kelosv1alpha1.TaskSpawnerSpec{
-				When: &kelosv1alpha1.On{Cron: &kelosv1alpha1.Cron{Schedule: "0 * * * *"}},
+				When: kelosv1alpha1.When{Cron: &kelosv1alpha1.Cron{Schedule: "0 * * * *"}},
 			},
 		},
 	}
@@ -374,19 +374,19 @@ func TestSourceTypeExtraction(t *testing.T) {
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "s1", Namespace: "ns"},
 			Spec: kelosv1alpha1.TaskSpawnerSpec{
-				When: &kelosv1alpha1.On{GitHubIssues: &kelosv1alpha1.GitHubIssues{}},
+				When: kelosv1alpha1.When{GitHubIssues: &kelosv1alpha1.GitHubIssues{}},
 			},
 		},
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "s2", Namespace: "ns"},
 			Spec: kelosv1alpha1.TaskSpawnerSpec{
-				When: &kelosv1alpha1.On{Cron: &kelosv1alpha1.Cron{Schedule: "0 * * * *"}},
+				When: kelosv1alpha1.When{Cron: &kelosv1alpha1.Cron{Schedule: "0 * * * *"}},
 			},
 		},
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "s3", Namespace: "ns"},
 			Spec: kelosv1alpha1.TaskSpawnerSpec{
-				When: &kelosv1alpha1.On{Jira: &kelosv1alpha1.Jira{
+				When: kelosv1alpha1.When{Jira: &kelosv1alpha1.Jira{
 					BaseURL:   "https://jira.example.com",
 					Project:   "PROJ",
 					SecretRef: kelosv1alpha1.SecretReference{Name: "jira-secret"},
@@ -397,7 +397,7 @@ func TestSourceTypeExtraction(t *testing.T) {
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "s4", Namespace: "ns"},
 			Spec: kelosv1alpha1.TaskSpawnerSpec{
-				When: &kelosv1alpha1.On{GitHubIssues: &kelosv1alpha1.GitHubIssues{}},
+				When: kelosv1alpha1.When{GitHubIssues: &kelosv1alpha1.GitHubIssues{}},
 			},
 		},
 	}

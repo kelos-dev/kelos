@@ -49,7 +49,7 @@ var _ = Describe("TaskSpawner", func() {
 				Name: "spawner",
 			},
 			Spec: kelosv1alpha1.TaskSpawnerSpec{
-				When: &kelosv1alpha1.On{
+				When: kelosv1alpha1.When{
 					GitHubIssues: &kelosv1alpha1.GitHubIssues{
 						Labels:        []string{"do-not-remove/e2e-anchor"},
 						ExcludeLabels: []string{"e2e-exclude-placeholder"},
@@ -102,7 +102,7 @@ var _ = Describe("TaskSpawner", func() {
 				Name: "spawner",
 			},
 			Spec: kelosv1alpha1.TaskSpawnerSpec{
-				When: &kelosv1alpha1.On{
+				When: kelosv1alpha1.When{
 					GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 				},
 				TaskTemplate: kelosv1alpha1.TaskTemplate{
@@ -164,7 +164,7 @@ var _ = Describe("Cron TaskSpawner", func() {
 				Name: "cron-spawner",
 			},
 			Spec: kelosv1alpha1.TaskSpawnerSpec{
-				When: &kelosv1alpha1.On{
+				When: kelosv1alpha1.When{
 					Cron: &kelosv1alpha1.Cron{
 						Schedule: "* * * * *",
 					},
@@ -203,7 +203,7 @@ var _ = Describe("Cron TaskSpawner", func() {
 				Name: "cron-spawner",
 			},
 			Spec: kelosv1alpha1.TaskSpawnerSpec{
-				When: &kelosv1alpha1.On{
+				When: kelosv1alpha1.When{
 					Cron: &kelosv1alpha1.Cron{
 						Schedule: "0 9 * * 1",
 					},

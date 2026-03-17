@@ -70,7 +70,7 @@ func newTaskSpawner(name, namespace string, maxConcurrency *int32) *kelosv1alpha
 			Namespace: namespace,
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
 			TaskTemplate: kelosv1alpha1.TaskTemplate{
@@ -151,7 +151,7 @@ func TestBuildSource_GitHubIssuesDefaultBaseURL(t *testing.T) {
 
 func TestBuildSource_GitHubPullRequests(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
-	ts.Spec.When = &kelosv1alpha1.On{
+	ts.Spec.When = kelosv1alpha1.When{
 		GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
 			State:           "open",
 			ReviewState:     "changes_requested",
@@ -200,7 +200,7 @@ func TestBuildSource_Jira(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				Jira: &kelosv1alpha1.Jira{
 					BaseURL:   "https://mycompany.atlassian.net",
 					Project:   "PROJ",
@@ -1086,7 +1086,7 @@ func TestBuildSource_CommentPolicyPassedToIssueSource(t *testing.T) {
 
 func TestBuildSource_CommentPolicyPassedToPullRequestSource(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
-	ts.Spec.When = &kelosv1alpha1.On{
+	ts.Spec.When = kelosv1alpha1.When{
 		GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
 			CommentPolicy: &kelosv1alpha1.GitHubCommentPolicy{
 				TriggerComment:    "/kelos pick-up",
@@ -1133,7 +1133,7 @@ func TestBuildSource_CommentPolicyRejectsMixedConfig(t *testing.T) {
 			name: "issues",
 			ts: &kelosv1alpha1.TaskSpawner{
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							TriggerComment: "/kelos pick-up",
 							CommentPolicy: &kelosv1alpha1.GitHubCommentPolicy{
@@ -1148,7 +1148,7 @@ func TestBuildSource_CommentPolicyRejectsMixedConfig(t *testing.T) {
 			name: "pull requests",
 			ts: &kelosv1alpha1.TaskSpawner{
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
 							ExcludeComments: []string{"/kelos needs-input"},
 							CommentPolicy: &kelosv1alpha1.GitHubCommentPolicy{
@@ -1420,7 +1420,7 @@ func TestDeriveUpstreamRepo(t *testing.T) {
 			name: "GitHubIssues with shorthand",
 			ts: &kelosv1alpha1.TaskSpawner{
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							Repo: "upstream-org/upstream-repo",
 						},
@@ -1433,7 +1433,7 @@ func TestDeriveUpstreamRepo(t *testing.T) {
 			name: "GitHubIssues with full URL",
 			ts: &kelosv1alpha1.TaskSpawner{
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							Repo: "https://github.com/upstream-org/upstream-repo.git",
 						},
@@ -1446,7 +1446,7 @@ func TestDeriveUpstreamRepo(t *testing.T) {
 			name: "GitHubPullRequests with shorthand",
 			ts: &kelosv1alpha1.TaskSpawner{
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
 							Repo: "upstream-org/upstream-repo",
 						},
@@ -1459,7 +1459,7 @@ func TestDeriveUpstreamRepo(t *testing.T) {
 			name: "GitHubPullRequests with GHES URL",
 			ts: &kelosv1alpha1.TaskSpawner{
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
 							Repo: "https://github.example.com/upstream-org/upstream-repo.git",
 						},
@@ -1472,7 +1472,7 @@ func TestDeriveUpstreamRepo(t *testing.T) {
 			name: "GitHubIssues with SSH URL",
 			ts: &kelosv1alpha1.TaskSpawner{
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							Repo: "git@github.com:upstream-org/upstream-repo.git",
 						},
@@ -1485,7 +1485,7 @@ func TestDeriveUpstreamRepo(t *testing.T) {
 			name: "No repo override",
 			ts: &kelosv1alpha1.TaskSpawner{
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 					},
 				},
@@ -1511,7 +1511,7 @@ func TestRunCycleWithSource_PropagatesUpstreamRepo(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{
 					Repo: "https://github.com/upstream-org/upstream-repo.git",
 				},
@@ -1554,7 +1554,7 @@ func TestRunCycleWithSource_ExplicitUpstreamRepoTakesPrecedence(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{
 					Repo: "https://github.com/upstream-org/upstream-repo.git",
 				},
@@ -1594,7 +1594,7 @@ func TestRunCycleWithSource_ExplicitUpstreamRepoTakesPrecedence(t *testing.T) {
 func TestSourceAnnotations_GitHubIssues(t *testing.T) {
 	ts := &kelosv1alpha1.TaskSpawner{
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
 		},
@@ -1624,7 +1624,7 @@ func TestSourceAnnotations_GitHubIssues(t *testing.T) {
 func TestSourceAnnotations_GitHubPR(t *testing.T) {
 	ts := &kelosv1alpha1.TaskSpawner{
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{},
 			},
 		},
@@ -1651,7 +1651,7 @@ func TestSourceAnnotations_GitHubPR(t *testing.T) {
 func TestSourceAnnotations_ReportingEnabled(t *testing.T) {
 	ts := &kelosv1alpha1.TaskSpawner{
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{
 					Reporting: &kelosv1alpha1.GitHubReporting{
 						Enabled: true,
@@ -1676,7 +1676,7 @@ func TestSourceAnnotations_ReportingEnabled(t *testing.T) {
 func TestSourceAnnotations_ReportingEnabledPR(t *testing.T) {
 	ts := &kelosv1alpha1.TaskSpawner{
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
 					Reporting: &kelosv1alpha1.GitHubReporting{
 						Enabled: true,
@@ -1701,7 +1701,7 @@ func TestSourceAnnotations_ReportingEnabledPR(t *testing.T) {
 func TestSourceAnnotations_NonGitHub(t *testing.T) {
 	ts := &kelosv1alpha1.TaskSpawner{
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				Jira: &kelosv1alpha1.Jira{},
 			},
 		},
@@ -1752,7 +1752,7 @@ func TestRunCycleWithSource_AnnotationsStamped(t *testing.T) {
 func TestReportingEnabled_IssuesEnabled(t *testing.T) {
 	ts := &kelosv1alpha1.TaskSpawner{
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{
 					Reporting: &kelosv1alpha1.GitHubReporting{Enabled: true},
 				},
@@ -1767,7 +1767,7 @@ func TestReportingEnabled_IssuesEnabled(t *testing.T) {
 func TestReportingEnabled_IssuesDisabled(t *testing.T) {
 	ts := &kelosv1alpha1.TaskSpawner{
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{
 					Reporting: &kelosv1alpha1.GitHubReporting{Enabled: false},
 				},
@@ -1782,7 +1782,7 @@ func TestReportingEnabled_IssuesDisabled(t *testing.T) {
 func TestReportingEnabled_NoReportingField(t *testing.T) {
 	ts := &kelosv1alpha1.TaskSpawner{
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
 		},
@@ -1795,7 +1795,7 @@ func TestReportingEnabled_NoReportingField(t *testing.T) {
 func TestReportingEnabled_PREnabled(t *testing.T) {
 	ts := &kelosv1alpha1.TaskSpawner{
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
 					Reporting: &kelosv1alpha1.GitHubReporting{Enabled: true},
 				},
@@ -1810,7 +1810,7 @@ func TestReportingEnabled_PREnabled(t *testing.T) {
 func TestReportingEnabled_Jira(t *testing.T) {
 	ts := &kelosv1alpha1.TaskSpawner{
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				Jira: &kelosv1alpha1.Jira{},
 			},
 		},
@@ -2089,7 +2089,7 @@ func TestSpawnerReconcilerRequestsForTask(t *testing.T) {
 func TestResolvedPollInterval_SourceOverridesRoot(t *testing.T) {
 	ts := &kelosv1alpha1.TaskSpawner{
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{
 					PollInterval: "10s",
 				},
@@ -2106,7 +2106,7 @@ func TestResolvedPollInterval_SourceOverridesRoot(t *testing.T) {
 func TestResolvedPollInterval_FallsBackToRoot(t *testing.T) {
 	ts := &kelosv1alpha1.TaskSpawner{
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
 			PollInterval: "2m",
@@ -2121,7 +2121,7 @@ func TestResolvedPollInterval_FallsBackToRoot(t *testing.T) {
 func TestResolvedPollInterval_BothEmptyDefaultsFiveMinutes(t *testing.T) {
 	ts := &kelosv1alpha1.TaskSpawner{
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
 		},
@@ -2135,7 +2135,7 @@ func TestResolvedPollInterval_BothEmptyDefaultsFiveMinutes(t *testing.T) {
 func TestResolvedPollInterval_PullRequestsSourceOverride(t *testing.T) {
 	ts := &kelosv1alpha1.TaskSpawner{
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
 					PollInterval: "45s",
 				},
@@ -2152,7 +2152,7 @@ func TestResolvedPollInterval_PullRequestsSourceOverride(t *testing.T) {
 func TestResolvedPollInterval_JiraSourceOverride(t *testing.T) {
 	ts := &kelosv1alpha1.TaskSpawner{
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				Jira: &kelosv1alpha1.Jira{
 					BaseURL:      "https://example.atlassian.net",
 					Project:      "TEST",
@@ -2172,7 +2172,7 @@ func TestResolvedPollInterval_JiraSourceOverride(t *testing.T) {
 func TestResolvedPollInterval_CronUsesRootLevel(t *testing.T) {
 	ts := &kelosv1alpha1.TaskSpawner{
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				Cron: &kelosv1alpha1.Cron{
 					Schedule: "0 * * * *",
 				},

@@ -3,7 +3,7 @@ kind: TaskSpawner
 metadata:
   name: fork-issue-fixer
 spec:
-  on:
+  when:
     githubIssues:
       # Poll the upstream repo for issues instead of the fork
       # TODO: Replace with the upstream repository ("owner/repo" or full URL)

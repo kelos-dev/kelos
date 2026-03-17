@@ -3,7 +3,7 @@ kind: TaskSpawner
 metadata:
   name: kelos-squash-commits
 spec:
-  on:
+  when:
     githubPullRequests:
       state: open
       commentPolicy:

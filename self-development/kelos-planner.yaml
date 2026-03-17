@@ -25,7 +25,7 @@ kind: TaskSpawner
 metadata:
   name: kelos-planner
 spec:
-  on:
+  when:
     githubIssues:
       state: open
       commentPolicy:

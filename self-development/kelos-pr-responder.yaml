@@ -84,12 +84,13 @@ spec:
         ```
       - 1. Read ALL review comments and conversation on the PR (gh pr view, gh api for review comments). If `KELOS_UPSTREAM_REPO` is set, use it with `gh pr ... --repo "$KELOS_UPSTREAM_REPO"` and target that repo in `gh api`.
       - 2. Read ALL comments on the linked issue referenced by the PR body. First determine the linked issue number from the PR body, then run `gh issue view <linked-issue-number> --comments`. If `KELOS_UPSTREAM_REPO` is set, use `--repo "$KELOS_UPSTREAM_REPO"`.
-      - 3. Read the existing diff (git diff main...HEAD) to understand what has already been done. Do NOT start over or rewrite from scratch.
-      - 4. Make only the incremental changes needed to address review feedback or remaining issues. Preserve existing work.
-      - 5. Commit and push your changes to origin {{.Branch}}.
-      - 6. /review the PR to verify your changes address the feedback. If changes are needed, make them, commit and push, then /review again. Repeat until the review passes.
-      - 7. Update the PR title and description to reflect the final diff. The PR body MUST contain a standard closing keyword reference on its own line (e.g., `Fixes #123` or `Closes #123`). Do not embed the issue number in natural language. Ensure the PR has labels "generated-by-kelos" and "ok-to-test" (use `gh pr edit {{.Number}} --add-label generated-by-kelos --add-label ok-to-test` if missing). If `KELOS_UPSTREAM_REPO` is set, include `--repo "$KELOS_UPSTREAM_REPO"`.
-      - 8. Make sure the PR passes all CI tests.
+      - 3. Determine whether there is NEW unaddressed feedback since the last agent response. If all review comments have already been addressed and no new comments exist, skip to the post-checklist and post `/kelos needs-input` — do NOT post another "re-verified" or "no changes needed" comment.
+      - 4. Read the existing diff (git diff main...HEAD) to understand what has already been done. Do NOT start over or rewrite from scratch.
+      - 5. Make only the incremental changes needed to address review feedback or remaining issues. Preserve existing work.
+      - 6. Commit and push your changes to origin {{.Branch}}.
+      - 7. /review the PR to verify your changes address the feedback. If changes are needed, make them, commit and push, then /review again. Repeat until the review passes.
+      - 8. Update the PR title and description to reflect the final diff. The PR body MUST contain a standard closing keyword reference on its own line (e.g., `Fixes #123` or `Closes #123`). Do not embed the issue number in natural language. Ensure the PR has labels "generated-by-kelos" and "ok-to-test" (use `gh pr edit {{.Number}} --add-label generated-by-kelos --add-label ok-to-test` if missing). If `KELOS_UPSTREAM_REPO` is set, include `--repo "$KELOS_UPSTREAM_REPO"`.
+      - 9. Make sure the PR passes all CI tests.
 
       Post-checklist:
       - If the PR is ready for human review, you need more information, or you cannot make progress, post a PR comment whose first line is `/kelos needs-input` and explain why below it. Maintainers can resume the PR later with `/kelos pick-up`. When all review feedback was already addressed in previous commits and no new comments require action, keep the explanation brief (e.g. "All review feedback was addressed in previous commits. Ready for re-review.") instead of repeating a full status breakdown. Never post duplicate or near-identical status messages.

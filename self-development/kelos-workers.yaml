@@ -104,10 +104,13 @@ spec:
         - Also read ALL comments on the linked issue (gh issue view {{.Number}} --comments), not just the PR.
       - 3a. Read the existing diff (git diff main...HEAD) to understand what has already been done. Do NOT start over or rewrite from scratch.
       - 4a. Make only the incremental changes needed to address review feedback or remaining issues. Preserve existing work.
-      - 5a. Commit and push your changes to origin kelos-task-{{.Number}}.
-      - 6a. /review the PR to verify your changes address the feedback. If changes are needed, make them, commit and push, then /review again. Repeat until the review passes.
-      - 7a. Update the PR title and description to reflect the final diff. The PR body MUST contain a standard closing keyword reference on its own line (e.g., `Fixes #{{.Number}}` or `Closes #{{.Number}}`). Do not embed the issue number in natural language. Ensure the PR has labels "generated-by-kelos" and "ok-to-test" (use `gh pr edit {{.Number}} --add-label generated-by-kelos --add-label ok-to-test` if missing).
-      - 8a. Make sure the PR passes all CI tests.
+      - 5a. Before pushing, verify your changes are clean:
+        - Run `make verify` to catch lint, fmt, and vet issues locally.
+        - Run `git diff origin/main --stat` to confirm only files relevant to the task are modified. Revert any unrelated changes.
+      - 6a. Squash your commits into a single clean commit, then push to origin kelos-task-{{.Number}}.
+      - 7a. /review the PR to verify your changes address the feedback. If changes are needed, make them, commit and push, then /review again. Repeat until the review passes.
+      - 8a. Update the PR title and description to reflect the final diff. The PR body MUST contain a standard closing keyword reference on its own line (e.g., `Fixes #{{.Number}}` or `Closes #{{.Number}}`). Do not embed the issue number in natural language. Ensure the PR has labels "generated-by-kelos" and "ok-to-test" (use `gh pr edit {{.Number}} --add-label generated-by-kelos --add-label ok-to-test` if missing).
+      - 9a. Make sure the PR passes all CI tests.
 
       If no PR exists:
       - 2b. Investigate the issue #{{.Number}}.
@@ -116,10 +119,13 @@ spec:
         - Search the codebase for existing constants, types, and patterns before creating new ones. Do not duplicate definitions.
         - Only implement what the issue explicitly asks for. If you discover related improvements, create separate issues for them.
       - 3b. Create a commit that fixes the issue.
-      - 4b. Push your branch to origin kelos-task-{{.Number}}.
-      - 5b. Create a PR with labels "generated-by-kelos" and "ok-to-test" (use `gh pr create --label generated-by-kelos --label ok-to-test`), then /review it. If changes are needed, make them, commit and push, then /review again. Repeat until the review passes.
-      - 6b. Update the PR title and description to reflect the final diff. The PR body MUST contain a standard closing keyword reference on its own line (e.g., `Fixes #{{.Number}}` or `Closes #{{.Number}}`). Do not embed the issue number in natural language.
-      - 7b. Make sure the PR passes all CI tests.
+      - 4b. Before pushing, verify your changes are clean:
+        - Run `make verify` to catch lint, fmt, and vet issues locally.
+        - Run `git diff origin/main --stat` to confirm only files relevant to the task are modified. Revert any unrelated changes.
+      - 5b. Squash your commits into a single clean commit, then push your branch to origin kelos-task-{{.Number}}.
+      - 6b. Create a PR with labels "generated-by-kelos" and "ok-to-test" (use `gh pr create --label generated-by-kelos --label ok-to-test`), then /review it. If changes are needed, make them, commit and push, then /review again. Repeat until the review passes.
+      - 7b. Update the PR title and description to reflect the final diff. The PR body MUST contain a standard closing keyword reference on its own line (e.g., `Fixes #{{.Number}}` or `Closes #{{.Number}}`). Do not embed the issue number in natural language.
+      - 8b. Make sure the PR passes all CI tests.
 
       Post-checklist:
       - Post a `/kelos needs-input` comment on the issue (gh issue comment {{.Number}} --body "/kelos needs-input") and leave a comment for the reason if any of the following applies:

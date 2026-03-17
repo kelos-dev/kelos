@@ -5,6 +5,9 @@
 - **Keep changes minimal.** Do not refactor, reorganize, or 'improve' code beyond what was explicitly requested.
 - **For CI/release workflows**, always use existing Makefile targets rather than reimplementing build logic in YAML.
 - **Better tests.** Always try to add or improve tests(including integration, e2e) when modifying code.
+- **Run `make verify` before pushing.** Always run `make verify` locally to catch lint, fmt, and vet issues before pushing changes.
+- **Verify your diff.** Before pushing, run `git diff origin/main --stat` to confirm only files relevant to your task are modified. Revert any unrelated changes.
+- **Squash commits.** Squash your commits into a single clean commit before the final push.
 - **Logging conventions.** Start log messages with capital letters and do not end with punctuation.
 - **Commit messages.** Do not include PR links in commit messages.
 

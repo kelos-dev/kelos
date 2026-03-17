@@ -27,6 +27,9 @@ spec:
       - `make test-integration` — run integration tests
       - `make build` — build binary
     - Always try to add or improve tests when modifying code
+    - Run `make verify` before pushing to catch lint, fmt, and vet issues locally
+    - Before pushing, run `git diff origin/main --stat` to confirm only relevant files are modified — revert any unrelated changes
+    - Squash commits into a single clean commit before the final push
     - Logging conventions: start log messages with capital letters and do not end with punctuation
     - Commit messages: do not include PR links in commit messages
     - When making structural changes (adding new files, configs, or components), update related documentation (especially README files) to stay in sync

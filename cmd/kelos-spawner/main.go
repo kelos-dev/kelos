@@ -322,12 +322,10 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 		maxTotalTasks = int(*ts.Spec.MaxTotalTasks)
 	}
 
-	isPipelineMode := len(ts.Spec.TaskTemplates) > 0
-
 	newTasksCreated := 0
 	newPipelinesCreated := 0
 	for _, item := range newItems {
-		if isPipelineMode {
+		if pipelineMode {
 			// In pipeline mode, maxConcurrency counts pipeline instances
 			// (distinct items with at least one non-terminal task).
 			if maxConcurrency > 0 && int32(activeTasks) >= maxConcurrency {

@@ -29,6 +29,8 @@ spec:
     - Always try to add or improve tests when modifying code
     - Logging conventions: start log messages with capital letters and do not end with punctuation
     - Commit messages: do not include PR links in commit messages
+    - When adding new API fields or features, always update `self-development/` configs and `examples/` to use the newly added fields
+    - Do not hard-code future API version names in deprecation notices — the next version is not yet determined
 ---
 apiVersion: kelos.dev/v1alpha1
 kind: TaskSpawner

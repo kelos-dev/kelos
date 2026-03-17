@@ -30,3 +30,5 @@ spec:
     - Logging conventions: start log messages with capital letters and do not end with punctuation
     - Commit messages: do not include PR links in commit messages
     - When making structural changes (adding new files, configs, or components), update related documentation (especially README files) to stay in sync
+    - When adding new API fields or features, always update `self-development/` configs and `examples/` to use the newly added fields
+    - Do not hard-code future API version names in deprecation notices — the next version is not yet determined

@@ -7,6 +7,8 @@
 - **Better tests.** Always try to add or improve tests(including integration, e2e) when modifying code.
 - **Logging conventions.** Start log messages with capital letters and do not end with punctuation.
 - **Commit messages.** Do not include PR links in commit messages.
+- **API deprecation notices.** Do not hard-code future API version names (e.g., "will be removed in v1alpha2") — the next version is not yet determined.
+- **New API fields/features.** When adding new API fields or features, always update `self-development/` configs and `examples/` to use the newly added fields.
 
 ## Key Makefile Targets
 - `make verify` — run all verification checks (lint, fmt, vet, etc.).
@@ -20,7 +22,7 @@
 ## Pull Requests
 - **Always follow `.github/PULL_REQUEST_TEMPLATE.md`** when creating PRs.
 - Fill in every section of the template. Do not remove or skip sections — use "N/A" or "NONE" where appropriate.
-- Choose exactly one `/kind` label from: `bug`, `cleanup`, `docs`, `feature`.
+- Choose exactly one `/kind` label from: `bug`, `cleanup`, `docs`, `feature`. The `/kind <label>` line in the PR body automatically applies the label — do not pass redundant `--label kind/...` flags to `gh pr create`.
 - If there is no associated issue, write "N/A" under the issue section.
 - If the PR does not introduce a user-facing change, write "NONE" in the `release-note` block.
 - If the PR introduces a new API field, CRD change, or user-facing feature, write a meaningful release note describing the change — do not write "NONE".

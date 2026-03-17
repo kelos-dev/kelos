@@ -116,7 +116,7 @@ spec:
             gh pr create \
               --title "Update <agent-name> image to <latest-version>" \
               --body-file /tmp/pr-body.md \
-              --label generated-by-kelos --label ok-to-test --label kind/feature
+              --label generated-by-kelos --label ok-to-test
             ```
             The PR body (`/tmp/pr-body.md`) MUST follow `.github/PULL_REQUEST_TEMPLATE.md`:
             - Start with `/kind feature` on its own line

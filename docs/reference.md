@@ -114,31 +114,30 @@ GitHub Apps are preferred over PATs for production use because they offer fine-g
 | Field | Description | Required |
 |-------|-------------|----------|
 | `spec.taskTemplate.workspaceRef.name` | Workspace resource (repo URL, auth, and clone target for spawned Tasks) | Yes (when using `githubIssues` or `githubPullRequests`) |
-| `spec.on.githubIssues.repo` | Override repository to poll for issues (in `owner/repo` format or full URL); defaults to workspace repo URL | No |
-| `spec.on.githubIssues.labels` | Filter issues by labels | No |
-| `spec.on.githubIssues.excludeLabels` | Exclude issues with these labels | No |
-| `spec.on.githubIssues.state` | Filter by state: `open`, `closed`, `all` (default: `open`) | No |
-| `spec.on.githubIssues.types` | Filter by type: `issues`, `pulls` (default: `issues`) | No |
-| `spec.on.githubIssues.triggerComment` | Requires a matching command in the issue body or comments to include the issue. When combined with `excludeComments`, the latest matching command wins | No |
-| `spec.on.githubIssues.excludeComments` | Exclude issues whose most recent matching command is an exclude comment. When combined with `triggerComment`, the latest matching command wins | No |
-| `spec.on.githubIssues.assignee` | Filter by assignee username; use `"*"` for any assignee or `"none"` for unassigned | No |
-| `spec.on.githubIssues.author` | Filter by issue author username | No |
-| `spec.on.githubIssues.priorityLabels` | Priority-order labels for task selection when `maxConcurrency` is set; index 0 is highest priority | No |
-| `spec.on.githubIssues.pollInterval` | Per-source poll interval override (e.g., `"30s"`, `"5m"`); takes precedence over `spec.pollInterval` | No |
-| `spec.on.githubPullRequests.repo` | Override repository to poll for PRs (in `owner/repo` format or full URL); defaults to workspace repo URL | No |
-| `spec.on.githubPullRequests.labels` | Filter pull requests by labels | No |
-| `spec.on.githubPullRequests.excludeLabels` | Exclude pull requests with these labels | No |
-| `spec.on.githubPullRequests.state` | Filter by state: `open`, `closed`, `all` (default: `open`) | No |
-| `spec.on.githubPullRequests.reviewState` | Filter by aggregated review state: `approved`, `changes_requested`, `any` (default: `any`) | No |
-| `spec.on.githubPullRequests.triggerComment` | Requires a matching command in the PR body or comments to include the PR. When combined with `excludeComments`, the latest matching command wins | No |
-| `spec.on.githubPullRequests.excludeComments` | Exclude PRs whose most recent matching command is an exclude comment. When combined with `triggerComment`, the latest matching command wins | No |
-| `spec.on.githubPullRequests.author` | Filter by PR author username | No |
-| `spec.on.githubPullRequests.draft` | Filter by draft state | No |
-| `spec.on.githubPullRequests.priorityLabels` | Priority-order labels for task selection when `maxConcurrency` is set; index 0 is highest priority | No |
-| `spec.on.githubPullRequests.pollInterval` | Per-source poll interval override (e.g., `"30s"`, `"5m"`); takes precedence over `spec.pollInterval` | No |
-| `spec.on.jira.pollInterval` | Per-source poll interval override (e.g., `"30s"`, `"5m"`); takes precedence over `spec.pollInterval` | No |
-| `spec.on.cron.schedule` | Cron schedule expression (e.g., `"0 * * * *"`) | Yes (when using cron) |
-| `spec.when.*` | Deprecated: alias for `spec.on`. Exactly one of `spec.on` or `spec.when` must be set. Will be removed in the next API version | No |
+| `spec.when.githubIssues.repo` | Override repository to poll for issues (in `owner/repo` format or full URL); defaults to workspace repo URL | No |
+| `spec.when.githubIssues.labels` | Filter issues by labels | No |
+| `spec.when.githubIssues.excludeLabels` | Exclude issues with these labels | No |
+| `spec.when.githubIssues.state` | Filter by state: `open`, `closed`, `all` (default: `open`) | No |
+| `spec.when.githubIssues.types` | Filter by type: `issues`, `pulls` (default: `issues`) | No |
+| `spec.when.githubIssues.triggerComment` | Requires a matching command in the issue body or comments to include the issue. When combined with `excludeComments`, the latest matching command wins | No |
+| `spec.when.githubIssues.excludeComments` | Exclude issues whose most recent matching command is an exclude comment. When combined with `triggerComment`, the latest matching command wins | No |
+| `spec.when.githubIssues.assignee` | Filter by assignee username; use `"*"` for any assignee or `"none"` for unassigned | No |
+| `spec.when.githubIssues.author` | Filter by issue author username | No |
+| `spec.when.githubIssues.priorityLabels` | Priority-order labels for task selection when `maxConcurrency` is set; index 0 is highest priority | No |
+| `spec.when.githubIssues.pollInterval` | Per-source poll interval override (e.g., `"30s"`, `"5m"`); takes precedence over `spec.pollInterval` | No |
+| `spec.when.githubPullRequests.repo` | Override repository to poll for PRs (in `owner/repo` format or full URL); defaults to workspace repo URL | No |
+| `spec.when.githubPullRequests.labels` | Filter pull requests by labels | No |
+| `spec.when.githubPullRequests.excludeLabels` | Exclude pull requests with these labels | No |
+| `spec.when.githubPullRequests.state` | Filter by state: `open`, `closed`, `all` (default: `open`) | No |
+| `spec.when.githubPullRequests.reviewState` | Filter by aggregated review state: `approved`, `changes_requested`, `any` (default: `any`) | No |
+| `spec.when.githubPullRequests.triggerComment` | Requires a matching command in the PR body or comments to include the PR. When combined with `excludeComments`, the latest matching command wins | No |
+| `spec.when.githubPullRequests.excludeComments` | Exclude PRs whose most recent matching command is an exclude comment. When combined with `triggerComment`, the latest matching command wins | No |
+| `spec.when.githubPullRequests.author` | Filter by PR author username | No |
+| `spec.when.githubPullRequests.draft` | Filter by draft state | No |
+| `spec.when.githubPullRequests.priorityLabels` | Priority-order labels for task selection when `maxConcurrency` is set; index 0 is highest priority | No |
+| `spec.when.githubPullRequests.pollInterval` | Per-source poll interval override (e.g., `"30s"`, `"5m"`); takes precedence over `spec.pollInterval` | No |
+| `spec.when.jira.pollInterval` | Per-source poll interval override (e.g., `"30s"`, `"5m"`); takes precedence over `spec.pollInterval` | No |
+| `spec.when.cron.schedule` | Cron schedule expression (e.g., `"0 * * * *"`) | Yes (when using cron) |
 | `spec.taskTemplate.type` | Agent type (`claude-code`, `codex`, `gemini`, `opencode`, or `cursor`) | Yes |
 | `spec.taskTemplate.credentials` | Credentials for the agent (same as Task) | Yes |
 | `spec.taskTemplate.model` | Model override | No |

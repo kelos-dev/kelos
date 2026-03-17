@@ -105,15 +105,14 @@ func runOnce(ctx context.Context, cl client.Client, key types.NamespacedName, cf
 // It checks the active source's PollInterval first, falling back to
 // spec.pollInterval.
 func resolvedPollInterval(ts *kelosv1alpha1.TaskSpawner) time.Duration {
-	on := ts.Spec.EffectiveOn()
 	var sourceInterval string
 	switch {
-	case on.GitHubIssues != nil:
-		sourceInterval = on.GitHubIssues.PollInterval
-	case on.GitHubPullRequests != nil:
-		sourceInterval = on.GitHubPullRequests.PollInterval
-	case on.Jira != nil:
-		sourceInterval = on.Jira.PollInterval
+	case ts.Spec.When.GitHubIssues != nil:
+		sourceInterval = ts.Spec.When.GitHubIssues.PollInterval
+	case ts.Spec.When.GitHubPullRequests != nil:
+		sourceInterval = ts.Spec.When.GitHubPullRequests.PollInterval
+	case ts.Spec.When.Jira != nil:
+		sourceInterval = ts.Spec.When.Jira.PollInterval
 	}
 	if sourceInterval != "" {
 		return parsePollInterval(sourceInterval)

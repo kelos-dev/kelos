@@ -204,7 +204,7 @@ func TestPrintTaskSpawnerTable(t *testing.T) {
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
 			},
 			Spec: kelosv1alpha1.TaskSpawnerSpec{
-				When: &kelosv1alpha1.On{
+				When: kelosv1alpha1.When{
 					Cron: &kelosv1alpha1.Cron{
 						Schedule: "*/5 * * * *",
 					},
@@ -240,7 +240,7 @@ func TestPrintTaskSpawnerTableAllNamespaces(t *testing.T) {
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
 			},
 			Spec: kelosv1alpha1.TaskSpawnerSpec{
-				When: &kelosv1alpha1.On{
+				When: kelosv1alpha1.When{
 					Cron: &kelosv1alpha1.Cron{
 						Schedule: "*/5 * * * *",
 					},
@@ -257,7 +257,7 @@ func TestPrintTaskSpawnerTableAllNamespaces(t *testing.T) {
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-2 * time.Hour)),
 			},
 			Spec: kelosv1alpha1.TaskSpawnerSpec{
-				When: &kelosv1alpha1.On{
+				When: kelosv1alpha1.When{
 					GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 				},
 				TaskTemplate: kelosv1alpha1.TaskTemplate{
@@ -295,7 +295,7 @@ func TestPrintTaskSpawnerTableGitHubPullRequests(t *testing.T) {
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
 			},
 			Spec: kelosv1alpha1.TaskSpawnerSpec{
-				When: &kelosv1alpha1.On{
+				When: kelosv1alpha1.When{
 					GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{},
 				},
 				TaskTemplate: kelosv1alpha1.TaskTemplate{
@@ -327,7 +327,7 @@ func TestPrintTaskSpawnerTableGitHubPullRequestsNoWorkspace(t *testing.T) {
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
 			},
 			Spec: kelosv1alpha1.TaskSpawnerSpec{
-				When: &kelosv1alpha1.On{
+				When: kelosv1alpha1.When{
 					GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{},
 				},
 			},
@@ -354,7 +354,7 @@ func TestPrintTaskSpawnerTableJira(t *testing.T) {
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
 			},
 			Spec: kelosv1alpha1.TaskSpawnerSpec{
-				When: &kelosv1alpha1.On{
+				When: kelosv1alpha1.When{
 					Jira: &kelosv1alpha1.Jira{
 						BaseURL: "https://mycompany.atlassian.net",
 						Project: "PROJ",
@@ -386,7 +386,7 @@ func TestPrintTaskSpawnerDetailGitHubPullRequests(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
 					State:       "open",
 					Labels:      []string{"bug", "help-wanted"},
@@ -431,7 +431,7 @@ func TestPrintTaskSpawnerDetailJira(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				Jira: &kelosv1alpha1.Jira{
 					BaseURL: "https://mycompany.atlassian.net",
 					Project: "PROJ",
@@ -543,7 +543,7 @@ func TestPrintTaskSpawnerTableSingleItem(t *testing.T) {
 			CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				Cron: &kelosv1alpha1.Cron{
 					Schedule: "0 * * * *",
 				},
@@ -612,7 +612,7 @@ func TestPrintTaskSpawnerDetail(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				Cron: &kelosv1alpha1.Cron{
 					Schedule: "0 * * * *",
 				},

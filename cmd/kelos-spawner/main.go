@@ -430,8 +430,7 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 // onto a spawned Task. These annotations enable downstream consumers (such
 // as the reporting watcher) to identify the originating issue or PR.
 func sourceAnnotations(ts *kelosv1alpha1.TaskSpawner, item source.WorkItem) map[string]string {
-	on := ts.Spec.EffectiveOn()
-	if on.GitHubIssues == nil && on.GitHubPullRequests == nil {
+	if ts.Spec.When.GitHubIssues == nil && ts.Spec.When.GitHubPullRequests == nil {
 		return nil
 	}
 
@@ -455,12 +454,11 @@ func sourceAnnotations(ts *kelosv1alpha1.TaskSpawner, item source.WorkItem) map[
 // reportingEnabled returns true when GitHub reporting is configured and enabled
 // on the TaskSpawner.
 func reportingEnabled(ts *kelosv1alpha1.TaskSpawner) bool {
-	on := ts.Spec.EffectiveOn()
-	if on.GitHubIssues != nil && on.GitHubIssues.Reporting != nil {
-		return on.GitHubIssues.Reporting.Enabled
+	if ts.Spec.When.GitHubIssues != nil && ts.Spec.When.GitHubIssues.Reporting != nil {
+		return ts.Spec.When.GitHubIssues.Reporting.Enabled
 	}
-	if on.GitHubPullRequests != nil && on.GitHubPullRequests.Reporting != nil {
-		return on.GitHubPullRequests.Reporting.Enabled
+	if ts.Spec.When.GitHubPullRequests != nil && ts.Spec.When.GitHubPullRequests.Reporting != nil {
+		return ts.Spec.When.GitHubPullRequests.Reporting.Enabled
 	}
 	return false
 }
@@ -508,9 +506,8 @@ func resolveGitHubCommentPolicy(policy *kelosv1alpha1.GitHubCommentPolicy, legac
 }
 
 func buildSource(ts *kelosv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFile, jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) (source.Source, error) {
-	on := ts.Spec.EffectiveOn()
-	if on.GitHubIssues != nil {
-		gh := on.GitHubIssues
+	if ts.Spec.When.GitHubIssues != nil {
+		gh := ts.Spec.When.GitHubIssues
 		token, err := readGitHubToken(tokenFile)
 		if err != nil {
 			return nil, err
@@ -540,8 +537,8 @@ func buildSource(ts *kelosv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFi
 		}, nil
 	}
 
-	if on.GitHubPullRequests != nil {
-		gh := on.GitHubPullRequests
+	if ts.Spec.When.GitHubPullRequests != nil {
+		gh := ts.Spec.When.GitHubPullRequests
 		token, err := readGitHubToken(tokenFile)
 		if err != nil {
 			return nil, err
@@ -572,7 +569,7 @@ func buildSource(ts *kelosv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFi
 		}, nil
 	}
 
-	if on.Jira != nil {
+	if ts.Spec.When.Jira != nil {
 		user := os.Getenv("JIRA_USER")
 		token := os.Getenv("JIRA_TOKEN")
 
@@ -585,7 +582,7 @@ func buildSource(ts *kelosv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFi
 		}, nil
 	}
 
-	if on.Cron != nil {
+	if ts.Spec.When.Cron != nil {
 		var lastDiscovery time.Time
 		if ts.Status.LastDiscoveryTime != nil {
 			lastDiscovery = ts.Status.LastDiscoveryTime.Time
@@ -593,7 +590,7 @@ func buildSource(ts *kelosv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFi
 			lastDiscovery = ts.CreationTimestamp.Time
 		}
 		return &source.CronSource{
-			Schedule:          on.Cron.Schedule,
+			Schedule:          ts.Spec.When.Cron.Schedule,
 			LastDiscoveryTime: lastDiscovery,
 		}, nil
 	}
@@ -620,12 +617,11 @@ func readGitHubToken(tokenFile string) (string, error) {
 }
 
 func priorityLabelsForTaskSpawner(ts *kelosv1alpha1.TaskSpawner) []string {
-	on := ts.Spec.EffectiveOn()
-	if on.GitHubIssues != nil {
-		return on.GitHubIssues.PriorityLabels
+	if ts.Spec.When.GitHubIssues != nil {
+		return ts.Spec.When.GitHubIssues.PriorityLabels
 	}
-	if on.GitHubPullRequests != nil {
-		return on.GitHubPullRequests.PriorityLabels
+	if ts.Spec.When.GitHubPullRequests != nil {
+		return ts.Spec.When.GitHubPullRequests.PriorityLabels
 	}
 	return nil
 }
@@ -634,12 +630,11 @@ func priorityLabelsForTaskSpawner(ts *kelosv1alpha1.TaskSpawner) []string {
 // githubPullRequests.repo override, returning it in "owner/repo" format.
 // Returns an empty string when no override is configured.
 func deriveUpstreamRepo(ts *kelosv1alpha1.TaskSpawner) string {
-	on := ts.Spec.EffectiveOn()
 	var repoOverride string
-	if on.GitHubIssues != nil && on.GitHubIssues.Repo != "" {
-		repoOverride = on.GitHubIssues.Repo
-	} else if on.GitHubPullRequests != nil && on.GitHubPullRequests.Repo != "" {
-		repoOverride = on.GitHubPullRequests.Repo
+	if ts.Spec.When.GitHubIssues != nil && ts.Spec.When.GitHubIssues.Repo != "" {
+		repoOverride = ts.Spec.When.GitHubIssues.Repo
+	} else if ts.Spec.When.GitHubPullRequests != nil && ts.Spec.When.GitHubPullRequests.Repo != "" {
+		repoOverride = ts.Spec.When.GitHubPullRequests.Repo
 	}
 	if repoOverride == "" {
 		return ""

@@ -205,7 +205,7 @@ func TestBuildDeploymentWithEnterpriseURL(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
 		},
@@ -264,7 +264,7 @@ func TestDeploymentBuilder_GitHubApp(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
 			TaskTemplate: kelosv1alpha1.TaskTemplate{
@@ -344,7 +344,7 @@ func TestDeploymentBuilder_GitHubAppEnterprise(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
 			TaskTemplate: kelosv1alpha1.TaskTemplate{
@@ -386,7 +386,7 @@ func TestDeploymentBuilder_GitHubAppGitHubCom(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
 			TaskTemplate: kelosv1alpha1.TaskTemplate{
@@ -425,7 +425,7 @@ func TestDeploymentBuilder_PAT(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
 			TaskTemplate: kelosv1alpha1.TaskTemplate{
@@ -473,7 +473,7 @@ func TestDeploymentBuilder_Jira(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				Jira: &kelosv1alpha1.Jira{
 					BaseURL:   "https://mycompany.atlassian.net",
 					Project:   "PROJ",
@@ -563,7 +563,7 @@ func TestBuildDeploymentWithGitHubIssuesRepoOverride(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{
 					Repo: "https://github.com/upstream-org/upstream-repo.git",
 				},
@@ -610,7 +610,7 @@ func TestBuildDeploymentWithGitHubIssuesRepoOverrideEnterprise(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{
 					Repo: "https://github.example.com/upstream-org/upstream-repo.git",
 				},
@@ -644,7 +644,7 @@ func TestBuildDeploymentWithGitHubPullRequestsRepoOverride(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
 					Repo: "https://github.com/upstream-org/upstream-repo.git",
 				},
@@ -690,7 +690,7 @@ func TestBuildDeploymentWithGitHubIssuesShorthandRepoOverridePreservesGHESHost(t
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{
 					Repo: "upstream-org/upstream-repo",
 				},
@@ -738,7 +738,7 @@ func TestBuildDeploymentWithGitHubPullRequestsShorthandRepoOverridePreservesGHES
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
 					Repo: "upstream-org/upstream-repo",
 				},
@@ -786,7 +786,7 @@ func TestBuildDeploymentWithFullURLOverrideReplacesGHESHost(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{
 					Repo: "https://other-ghes.example.com/upstream-org/upstream-repo.git",
 				},
@@ -820,7 +820,7 @@ func TestDeploymentBuilder_JiraNoJQL(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				Jira: &kelosv1alpha1.Jira{
 					BaseURL:   "https://jira.example.com",
 					Project:   "TEST",
@@ -853,7 +853,7 @@ func TestUpdateDeployment_SuspendScalesDown(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
 			TaskTemplate: kelosv1alpha1.TaskTemplate{
@@ -912,7 +912,7 @@ func TestUpdateDeployment_ResumeScalesUp(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
 			TaskTemplate: kelosv1alpha1.TaskTemplate{
@@ -970,7 +970,7 @@ func TestUpdateDeployment_NoUpdateWhenReplicasMatch(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
 			TaskTemplate: kelosv1alpha1.TaskTemplate{
@@ -1024,7 +1024,7 @@ func TestUpdateDeployment_PATToGitHubApp(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
 			TaskTemplate: kelosv1alpha1.TaskTemplate{
@@ -1121,7 +1121,7 @@ func TestUpdateDeployment_GitHubAppToPAT(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
 			TaskTemplate: kelosv1alpha1.TaskTemplate{
@@ -1252,7 +1252,7 @@ func TestFindTaskSpawnersForSecret(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
 			TaskTemplate: kelosv1alpha1.TaskTemplate{
@@ -1268,7 +1268,7 @@ func TestFindTaskSpawnersForSecret(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
 			TaskTemplate: kelosv1alpha1.TaskTemplate{
@@ -1284,7 +1284,7 @@ func TestFindTaskSpawnersForSecret(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				Jira: &kelosv1alpha1.Jira{
 					BaseURL:   "https://jira.example.com",
 					Project:   "TEST",
@@ -1341,7 +1341,7 @@ func TestFindTaskSpawnersForWorkspace(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
 			TaskTemplate: kelosv1alpha1.TaskTemplate{
@@ -1357,7 +1357,7 @@ func TestFindTaskSpawnersForWorkspace(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
 			TaskTemplate: kelosv1alpha1.TaskTemplate{
@@ -1373,7 +1373,7 @@ func TestFindTaskSpawnersForWorkspace(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
 			TaskTemplate: kelosv1alpha1.TaskTemplate{
@@ -1423,7 +1423,7 @@ func TestBuildCronJob_BasicSchedule(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				Cron: &kelosv1alpha1.Cron{
 					Schedule: "0 9 * * 1",
 				},
@@ -1524,7 +1524,7 @@ func TestBuildCronJob_BackoffLimit(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				Cron: &kelosv1alpha1.Cron{
 					Schedule: "*/5 * * * *",
 				},
@@ -1551,7 +1551,7 @@ func TestIsCronBased(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				Cron: &kelosv1alpha1.Cron{
 					Schedule: "0 9 * * 1",
 				},
@@ -1574,7 +1574,7 @@ func TestIsCronBased(t *testing.T) {
 	// Verify non-cron TaskSpawner returns false
 	nonCronTS := &kelosv1alpha1.TaskSpawner{
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
 		},
@@ -1594,7 +1594,7 @@ func TestUpdateCronJob_ScheduleChange(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				Cron: &kelosv1alpha1.Cron{
 					Schedule: "0 10 * * 1", // Changed from 9 to 10
 				},
@@ -1646,7 +1646,7 @@ func TestUpdateCronJob_SuspendToggle(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				Cron: &kelosv1alpha1.Cron{
 					Schedule: "0 9 * * 1",
 				},
@@ -1698,7 +1698,7 @@ func TestUpdateCronJob_PodSpecChanges(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				Cron: &kelosv1alpha1.Cron{
 					Schedule: "0 9 * * 1",
 				},
@@ -1778,7 +1778,7 @@ func TestReconcileCronJob_DeletesStaleDeployment(t *testing.T) {
 			Finalizers: []string{taskSpawnerFinalizer},
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				Cron: &kelosv1alpha1.Cron{
 					Schedule: "0 9 * * 1",
 				},
@@ -1851,7 +1851,7 @@ func TestReconcileDeployment_DeletesStaleCronJob(t *testing.T) {
 			Finalizers: []string{taskSpawnerFinalizer},
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
 			TaskTemplate: kelosv1alpha1.TaskTemplate{
@@ -1922,7 +1922,7 @@ func TestBuildCronJob_WithWorkspacePAT(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				Cron: &kelosv1alpha1.Cron{
 					Schedule: "0 9 * * 1",
 				},
@@ -1993,7 +1993,7 @@ func TestBuildCronJob_WithWorkspaceGitHubApp(t *testing.T) {
 			Namespace: "default",
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				Cron: &kelosv1alpha1.Cron{
 					Schedule: "0 9 * * 1",
 				},
@@ -2077,7 +2077,7 @@ func TestReconcileCronJob_ClearsStaleDeploymentName(t *testing.T) {
 			Finalizers: []string{taskSpawnerFinalizer},
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				Cron: &kelosv1alpha1.Cron{
 					Schedule: "0 9 * * 1",
 				},
@@ -2136,7 +2136,7 @@ func TestReconcileDeployment_ClearsStaleCronJobName(t *testing.T) {
 			Finalizers: []string{taskSpawnerFinalizer},
 		},
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: &kelosv1alpha1.On{
+			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
 			TaskTemplate: kelosv1alpha1.TaskTemplate{

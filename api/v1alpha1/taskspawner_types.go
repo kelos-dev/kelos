@@ -18,9 +18,9 @@ const (
 	TaskSpawnerPhaseSuspended TaskSpawnerPhase = "Suspended"
 )
 
-// On defines the conditions that trigger task spawning.
+// When defines the conditions that trigger task spawning.
 // Exactly one field must be set.
-type On struct {
+type When struct {
 	// GitHubIssues discovers issues from a GitHub repository.
 	// +optional
 	GitHubIssues *GitHubIssues `json:"githubIssues,omitempty"`
@@ -374,18 +374,11 @@ type TaskTemplate struct {
 }
 
 // TaskSpawnerSpec defines the desired state of TaskSpawner.
-// +kubebuilder:validation:XValidation:rule="has(self.on) != has(self.when)",message="exactly one of on or when must be set"
-// +kubebuilder:validation:XValidation:rule="!((has(self.on) && (has(self.on.githubIssues) || has(self.on.githubPullRequests))) || (has(self.when) && (has(self.when.githubIssues) || has(self.when.githubPullRequests)))) || has(self.taskTemplate.workspaceRef)",message="taskTemplate.workspaceRef is required when using githubIssues or githubPullRequests source"
+// +kubebuilder:validation:XValidation:rule="!(has(self.when.githubIssues) || has(self.when.githubPullRequests)) || has(self.taskTemplate.workspaceRef)",message="taskTemplate.workspaceRef is required when using githubIssues or githubPullRequests source"
 type TaskSpawnerSpec struct {
-	// On defines the conditions that trigger task spawning.
-	// Exactly one of on or when must be set.
-	// +optional
-	On *On `json:"on,omitempty"`
-
 	// When defines the conditions that trigger task spawning.
-	// Deprecated: Use on instead. This field will be removed in the next API version.
-	// +optional
-	When *On `json:"when,omitempty"`
+	// +kubebuilder:validation:Required
+	When When `json:"when"`
 
 	// TaskTemplate defines the template for spawned Tasks.
 	// +kubebuilder:validation:Required
@@ -420,15 +413,6 @@ type TaskSpawnerSpec struct {
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	MaxTotalTasks *int32 `json:"maxTotalTasks,omitempty"`
-}
-
-// EffectiveOn returns the effective trigger configuration.
-// It returns On if set, otherwise falls back to When.
-func (s *TaskSpawnerSpec) EffectiveOn() *On {
-	if s.On != nil {
-		return s.On
-	}
-	return s.When
 }
 
 // TaskSpawnerStatus defines the observed state of TaskSpawner.

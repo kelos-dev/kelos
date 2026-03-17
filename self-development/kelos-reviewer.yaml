@@ -34,7 +34,7 @@ kind: TaskSpawner
 metadata:
   name: kelos-reviewer
 spec:
-  on:
+  when:
     githubPullRequests:
       state: open
       commentPolicy:

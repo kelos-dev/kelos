@@ -314,7 +314,7 @@ To adapt these examples for your own repository:
 2. **Adjust the issue filters:**
    ```yaml
    spec:
-     on:
+     when:
        githubIssues:
          labels: [your-label]        # Issues to pick up
          excludeLabels: [wontfix]    # Issues to skip

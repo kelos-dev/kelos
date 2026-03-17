@@ -57,7 +57,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							State: "open",
 						},
@@ -192,7 +192,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 					},
 					TaskTemplate: kelosv1alpha1.TaskTemplate{
@@ -258,7 +258,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 					},
 					TaskTemplate: kelosv1alpha1.TaskTemplate{
@@ -328,7 +328,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 					},
 					TaskTemplate: kelosv1alpha1.TaskTemplate{
@@ -418,7 +418,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							Types: []string{"issues", "pulls"},
 							State: "open",
@@ -478,7 +478,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 					},
 					TaskTemplate: kelosv1alpha1.TaskTemplate{
@@ -569,7 +569,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							State: "open",
 						},
@@ -649,7 +649,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						Cron: &kelosv1alpha1.Cron{
 							Schedule: "0 9 * * 1",
 						},
@@ -792,7 +792,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							State: "open",
 						},
@@ -915,7 +915,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							State: "open",
 						},
@@ -996,7 +996,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							State: "open",
 						},
@@ -1106,7 +1106,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							State: "open",
 						},
@@ -1179,7 +1179,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							State: "open",
 						},
@@ -1300,7 +1300,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							State: "open",
 						},
@@ -1379,7 +1379,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							State: "open",
 						},
@@ -1455,7 +1455,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							Repo:  "https://github.com/upstream-org/my-repo.git",
 							State: "open",
@@ -1540,7 +1540,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 					},
 					TaskTemplate: kelosv1alpha1.TaskTemplate{
@@ -1678,7 +1678,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 					},
 					TaskTemplate: kelosv1alpha1.TaskTemplate{
@@ -1824,7 +1824,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 					},
 					TaskTemplate: kelosv1alpha1.TaskTemplate{
@@ -1910,7 +1910,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							State:           "open",
 							TriggerComment:  "/kelos pick-up",
@@ -1986,7 +1986,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							State:          "open",
 							TriggerComment: "/kelos pick-up",
@@ -2057,7 +2057,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							State:           "open",
 							ExcludeComments: []string{"/kelos needs-input"},
@@ -2128,7 +2128,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							State: "open",
 							CommentPolicy: &kelosv1alpha1.GitHubCommentPolicy{
@@ -2209,7 +2209,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							State:          "open",
 							TriggerComment: "/kelos pick-up",
@@ -2267,7 +2267,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							State: "open",
 							CommentPolicy: &kelosv1alpha1.GitHubCommentPolicy{
@@ -2327,7 +2327,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
 							State:           "open",
 							ReviewState:     "changes_requested",
@@ -2408,7 +2408,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: &kelosv1alpha1.On{
+					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{
 							Labels:       []string{"bug"},
 							PollInterval: "30s",
@@ -2440,84 +2440,6 @@ var _ = Describe("TaskSpawner Controller", func() {
 			}, timeout, interval).Should(BeTrue())
 			Expect(createdTS.Spec.When.GitHubIssues.PollInterval).To(Equal("30s"))
 			Expect(createdTS.Spec.PollInterval).To(Equal("5m"))
-		})
-	})
-
-	Context("When creating a TaskSpawner with spec.on (alias for spec.when)", func() {
-		It("Should create a Deployment using the on field", func() {
-			By("Creating a namespace")
-			ns := &corev1.Namespace{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-taskspawner-on-alias",
-				},
-			}
-			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
-
-			By("Creating a Workspace")
-			ws := &kelosv1alpha1.Workspace{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-workspace-on-alias",
-					Namespace: ns.Name,
-				},
-				Spec: kelosv1alpha1.WorkspaceSpec{
-					Repo: "https://github.com/kelos-dev/kelos.git",
-					Ref:  "main",
-				},
-			}
-			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
-
-			By("Creating a TaskSpawner using spec.on")
-			ts := &kelosv1alpha1.TaskSpawner{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-spawner-on",
-					Namespace: ns.Name,
-				},
-				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					On: &kelosv1alpha1.On{
-						GitHubIssues: &kelosv1alpha1.GitHubIssues{
-							State: "open",
-						},
-					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
-						Type: "claude-code",
-						Credentials: kelosv1alpha1.Credentials{
-							Type: kelosv1alpha1.CredentialTypeOAuth,
-							SecretRef: kelosv1alpha1.SecretReference{
-								Name: "claude-credentials",
-							},
-						},
-						WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
-							Name: "test-workspace-on-alias",
-						},
-					},
-					PollInterval: "5m",
-				},
-			}
-			Expect(k8sClient.Create(ctx, ts)).Should(Succeed())
-
-			By("Verifying the on field is stored in spec")
-			tsLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
-			createdTS := &kelosv1alpha1.TaskSpawner{}
-			Eventually(func() bool {
-				err := k8sClient.Get(ctx, tsLookupKey, createdTS)
-				return err == nil
-			}, timeout, interval).Should(BeTrue())
-			Expect(createdTS.Spec.On).ToNot(BeNil())
-			Expect(createdTS.Spec.On.GitHubIssues).ToNot(BeNil())
-			Expect(createdTS.Spec.On.GitHubIssues.State).To(Equal("open"))
-
-			By("Verifying EffectiveOn returns the on field")
-			effectiveOn := createdTS.Spec.EffectiveOn()
-			Expect(effectiveOn).ToNot(BeNil())
-			Expect(effectiveOn.GitHubIssues).ToNot(BeNil())
-
-			By("Verifying a Deployment is created")
-			deployLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
-			createdDeploy := &appsv1.Deployment{}
-			Eventually(func() bool {
-				err := k8sClient.Get(ctx, deployLookupKey, createdDeploy)
-				return err == nil
-			}, timeout, interval).Should(BeTrue())
 		})
 	})
 })

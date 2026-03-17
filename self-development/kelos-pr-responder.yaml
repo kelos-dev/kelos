@@ -3,7 +3,7 @@ kind: TaskSpawner
 metadata:
   name: kelos-pr-responder
 spec:
-  on:
+  when:
     githubPullRequests:
       labels:
         - generated-by-kelos

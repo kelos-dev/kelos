@@ -1,8 +1,0 @@
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: kelos-system
-  labels:
-    app.kubernetes.io/name: kelos
-    app.kubernetes.io/component: manager

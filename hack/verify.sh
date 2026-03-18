@@ -16,9 +16,7 @@ cd "${REPO_ROOT}"
 
 # Files explicitly written by the update / verify pipeline.
 GENERATED_FILES=(
-  install-crd.yaml
   internal/manifests/install-crd.yaml
-  charts/kelos/templates/rbac.yaml
   internal/manifests/charts/kelos/templates/rbac.yaml
   api/v1alpha1/zz_generated.deepcopy.go
 )
@@ -35,15 +33,6 @@ for f in "${GENERATED_FILES[@]}"; do
     cp "${f}" "${TMPDIR}/${f}"
   fi
 done
-
-# Snapshot the embedded chart directory so we can detect drift after generators
-# re-copy it.  The generators (update-install-manifest.sh) delete and re-copy
-# internal/manifests/charts/kelos from charts/kelos, so comparing *after* the
-# generators would always succeed.  By snapshotting *before*, we compare the
-# committed copy against the freshly generated source chart.
-if [[ -d "internal/manifests/charts/kelos" ]]; then
-  cp -a internal/manifests/charts/kelos "${TMPDIR}/embedded_chart"
-fi
 
 # Snapshot the generated client directory.
 if [[ -d "pkg/generated" ]]; then
@@ -79,28 +68,7 @@ for f in "${GENERATED_FILES[@]}"; do
 done
 
 # ---------------------------------------------------------------------------
-# 3b. Compare embedded chart copy against source chart.
-# ---------------------------------------------------------------------------
-# We compare the *snapshot* of the embedded chart (taken before generators ran)
-# against the now-up-to-date source chart.  If they differ, the committed
-# embedded copy was stale.
-if [[ -d "${TMPDIR}/embedded_chart" ]]; then
-  if ! diff -rq charts/kelos "${TMPDIR}/embedded_chart" >/dev/null 2>&1; then
-    echo "ERROR: internal/manifests/charts/kelos is out of sync with charts/kelos"
-    diff -r charts/kelos "${TMPDIR}/embedded_chart" || true
-    ret=1
-  fi
-  # Restore the original embedded chart so we don't modify the working tree.
-  rm -rf internal/manifests/charts/kelos
-  cp -a "${TMPDIR}/embedded_chart" internal/manifests/charts/kelos
-elif [[ -d "internal/manifests/charts/kelos" ]]; then
-  echo "ERROR: internal/manifests/charts/kelos needs to be generated (directory did not exist before)"
-  rm -rf internal/manifests/charts/kelos
-  ret=1
-fi
-
-# ---------------------------------------------------------------------------
-# 3c. Compare generated client code and restore originals.
+# 3b. Compare generated client code and restore originals.
 # ---------------------------------------------------------------------------
 if [[ -d "${TMPDIR}/pkg_generated" ]]; then
   if ! diff -rq "${TMPDIR}/pkg_generated" pkg/generated >/dev/null 2>&1; then

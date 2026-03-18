@@ -9,7 +9,7 @@ cd "${REPO_ROOT}"
 START_MARKER="# BEGIN GENERATED: controller-rbac"
 END_MARKER="# END GENERATED: controller-rbac"
 
-CHART_RBAC="charts/kelos/templates/rbac.yaml"
+CHART_RBAC="internal/manifests/charts/kelos/templates/rbac.yaml"
 
 has_resource() {
   local file="$1"
@@ -107,7 +107,7 @@ TMPDIR="$(mktemp -d)"
 trap 'rm -rf "${TMPDIR}"' EXIT
 
 # Regenerate CRDs before syncing manifests.
-"${CONTROLLER_GEN}" crd paths="./..." output:crd:stdout >install-crd.yaml
+"${CONTROLLER_GEN}" crd paths="./..." output:crd:stdout >internal/manifests/install-crd.yaml
 
 RBAC_FILE="${TMPDIR}/rbac.yaml"
 GOCACHE="${TMPDIR}/go-build-cache" "${CONTROLLER_GEN}" \
@@ -138,9 +138,4 @@ $0 == end {
 
 mv "${TMPDIR}/rbac.yaml.new" "${CHART_RBAC}"
 
-validate_chart_resources "charts/kelos"
-
-# Copy CRDs and chart into internal/manifests for embedding.
-cp install-crd.yaml internal/manifests/install-crd.yaml
-rm -rf internal/manifests/charts/kelos
-cp -r charts/kelos internal/manifests/charts/kelos
+validate_chart_resources "internal/manifests/charts/kelos"

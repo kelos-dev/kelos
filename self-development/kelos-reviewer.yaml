@@ -67,6 +67,7 @@ spec:
           ephemeral-storage: "4Gi"
         limits:
           ephemeral-storage: "4Gi"
+    branch: "{{.Branch}}"
     agentConfigRef:
       name: kelos-reviewer-agent
     promptTemplate: |
@@ -87,6 +88,13 @@ spec:
       ---
 
       ## Your tasks
+
+      ### 0. Set up full history
+      Run this before reviewing:
+        ```
+        git fetch --unshallow || true
+        git fetch origin main
+        ```
 
       ### 1. Understand the context
       - Read the PR description and all comments: `gh pr view {{.Number}} --comments`

@@ -62,7 +62,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 							State: "open",
 						},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
@@ -195,7 +195,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
@@ -261,7 +261,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
@@ -331,7 +331,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
@@ -424,7 +424,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 							State: "open",
 						},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
@@ -481,7 +481,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
@@ -574,7 +574,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 							State: "open",
 						},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
@@ -654,7 +654,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 							Schedule: "0 9 * * 1",
 						},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
@@ -797,7 +797,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 							State: "open",
 						},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
@@ -920,7 +920,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 							State: "open",
 						},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
@@ -1001,7 +1001,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 							State: "open",
 						},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
@@ -1111,7 +1111,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 							State: "open",
 						},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
@@ -1184,7 +1184,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 							State: "open",
 						},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
@@ -1305,7 +1305,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 							State: "open",
 						},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
@@ -1384,7 +1384,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 							State: "open",
 						},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
@@ -1461,7 +1461,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 							State: "open",
 						},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
@@ -1543,7 +1543,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
@@ -1681,7 +1681,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
@@ -1827,7 +1827,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
@@ -1917,7 +1917,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 							ExcludeComments: []string{"/kelos needs-input", "/kelos pause"},
 						},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
@@ -1992,7 +1992,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 							TriggerComment: "/kelos pick-up",
 						},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
@@ -2063,7 +2063,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 							ExcludeComments: []string{"/kelos needs-input"},
 						},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
@@ -2140,7 +2140,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 							},
 						},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
@@ -2218,7 +2218,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 							},
 						},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
@@ -2275,7 +2275,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 							},
 						},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
@@ -2337,7 +2337,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 							Draft:           &draft,
 						},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
@@ -2414,7 +2414,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 							PollInterval: "30s",
 						},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,

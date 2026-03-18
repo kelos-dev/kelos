@@ -764,7 +764,9 @@ spec:
                   Defaults to false.
                 type: boolean
               taskTemplate:
-                description: TaskTemplate defines the template for spawned Tasks.
+                description: |-
+                  TaskTemplate defines the template for spawned Tasks.
+                  Exactly one of taskTemplate or taskTemplates must be set.
                 properties:
                   agentConfigRef:
                     description: |-
@@ -815,6 +817,7 @@ spec:
                       on.
                     items:
                       type: string
+                    maxItems: 10
                     type: array
                   image:
                     description: |-
@@ -1119,6 +1122,387 @@ spec:
                 - credentials
                 - type
                 type: object
+              taskTemplates:
+                description: |-
+                  TaskTemplates defines a pipeline of named task templates.
+                  When set, each discovered work item spawns one Task per step,
+                  with DependsOn references translated to fully-qualified task names.
+                  Exactly one of taskTemplate or taskTemplates must be set.
+                items:
+                  description: |-
+                    NamedTaskTemplate extends TaskTemplate with a pipeline step name.
+                    When used in taskTemplates, the DependsOn field references sibling step
+                    names within the same pipeline (the spawner translates them to
+                    fully-qualified task names at creation time).
+                  properties:
+                    agentConfigRef:
+                      description: |-
+                        AgentConfigRef references an AgentConfig resource.
+                        When set, spawned Tasks inherit this agent config reference.
+                      properties:
+                        name:
+                          description: Name is the name of the AgentConfig resource.
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    branch:
+                      description: |-
+                        Branch is the git branch spawned Tasks should work on.
+                        Supports Go text/template variables from the work item, e.g. "kelos-task-{{.Number}}".
+                        Available variables (all sources): {{.ID}}, {{.Title}}, {{.Kind}}
+                        GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
+                        GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}
+                        Cron sources: {{.Time}}, {{.Schedule}}
+                      type: string
+                    credentials:
+                      description: Credentials specifies how to authenticate with
+                        the agent.
+                      properties:
+                        secretRef:
+                          description: SecretRef references the Secret containing
+                            credentials.
+                          properties:
+                            name:
+                              description: Name is the name of the secret.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type:
+                          description: Type specifies the credential type (api-key
+                            or oauth).
+                          enum:
+                          - api-key
+                          - oauth
+                          type: string
+                      required:
+                      - secretRef
+                      - type
+                      type: object
+                    dependsOn:
+                      description: DependsOn lists Task names that spawned Tasks depend
+                        on.
+                      items:
+                        type: string
+                      maxItems: 10
+                      type: array
+                    image:
+                      description: |-
+                        Image optionally overrides the default agent container image.
+                        Custom images must implement the agent image interface
+                        (see docs/agent-image-interface.md).
+                      type: string
+                    model:
+                      description: Model optionally overrides the default model.
+                      type: string
+                    name:
+                      description: |-
+                        Name is the step name within the pipeline, used for task name suffix
+                        and as a reference target for other steps' dependsOn.
+                      maxLength: 63
+                      minLength: 1
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                    podOverrides:
+                      description: PodOverrides allows customizing the agent pod configuration
+                        for spawned Tasks.
+                      properties:
+                        activeDeadlineSeconds:
+                          description: |-
+                            ActiveDeadlineSeconds specifies the maximum duration in seconds
+                            that the agent pod can run before being terminated.
+                            This is set on the Job's activeDeadlineSeconds field.
+                          format: int64
+                          minimum: 1
+                          type: integer
+                        env:
+                          description: |-
+                            Env specifies additional environment variables for the agent container.
+                            These are appended after the built-in env vars (credentials, model, GitHub token).
+                            If a user-specified env var conflicts with a built-in one, the built-in takes precedence.
+                          items:
+                            description: EnvVar represents an environment variable
+                              present in a Container.
+                            properties:
+                              name:
+                                description: |-
+                                  Name of the environment variable.
+                                  May consist of any printable ASCII characters except '='.
+                                type: string
+                              value:
+                                description: |-
+                                  Variable references $(VAR_NAME) are expanded
+                                  using the previously defined environment variables in the container and
+                                  any service environment variables. If a variable cannot be resolved,
+                                  the reference in the input string will be unchanged. Double $$ are reduced
+                                  to a single $, which allows for escaping the $(VAR_NAME) syntax: i.e.
+                                  "$$(VAR_NAME)" will produce the string literal "$(VAR_NAME)".
+                                  Escaped references will never be expanded, regardless of whether the variable
+                                  exists or not.
+                                  Defaults to "".
+                                type: string
+                              valueFrom:
+                                description: Source for the environment variable's
+                                  value. Cannot be used if value is not empty.
+                                properties:
+                                  configMapKeyRef:
+                                    description: Selects a key of a ConfigMap.
+                                    properties:
+                                      key:
+                                        description: The key to select.
+                                        type: string
+                                      name:
+                                        default: ""
+                                        description: |-
+                                          Name of the referent.
+                                          This field is effectively required, but due to backwards compatibility is
+                                          allowed to be empty. Instances of this type with an empty value here are
+                                          almost certainly wrong.
+                                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                        type: string
+                                      optional:
+                                        description: Specify whether the ConfigMap
+                                          or its key must be defined
+                                        type: boolean
+                                    required:
+                                    - key
+                                    type: object
+                                    x-kubernetes-map-type: atomic
+                                  fieldRef:
+                                    description: |-
+                                      Selects a field of the pod: supports metadata.name, metadata.namespace, `metadata.labels['<KEY>']`, `metadata.annotations['<KEY>']`,
+                                      spec.nodeName, spec.serviceAccountName, status.hostIP, status.podIP, status.podIPs.
+                                    properties:
+                                      apiVersion:
+                                        description: Version of the schema the FieldPath
+                                          is written in terms of, defaults to "v1".
+                                        type: string
+                                      fieldPath:
+                                        description: Path of the field to select in
+                                          the specified API version.
+                                        type: string
+                                    required:
+                                    - fieldPath
+                                    type: object
+                                    x-kubernetes-map-type: atomic
+                                  fileKeyRef:
+                                    description: |-
+                                      FileKeyRef selects a key of the env file.
+                                      Requires the EnvFiles feature gate to be enabled.
+                                    properties:
+                                      key:
+                                        description: |-
+                                          The key within the env file. An invalid key will prevent the pod from starting.
+                                          The keys defined within a source may consist of any printable ASCII characters except '='.
+                                          During Alpha stage of the EnvFiles feature gate, the key size is limited to 128 characters.
+                                        type: string
+                                      optional:
+                                        default: false
+                                        description: |-
+                                          Specify whether the file or its key must be defined. If the file or key
+                                          does not exist, then the env var is not published.
+                                          If optional is set to true and the specified key does not exist,
+                                          the environment variable will not be set in the Pod's containers.
+
+                                          If optional is set to false and the specified key does not exist,
+                                          an error will be returned during Pod creation.
+                                        type: boolean
+                                      path:
+                                        description: |-
+                                          The path within the volume from which to select the file.
+                                          Must be relative and may not contain the '..' path or start with '..'.
+                                        type: string
+                                      volumeName:
+                                        description: The name of the volume mount
+                                          containing the env file.
+                                        type: string
+                                    required:
+                                    - key
+                                    - path
+                                    - volumeName
+                                    type: object
+                                    x-kubernetes-map-type: atomic
+                                  resourceFieldRef:
+                                    description: |-
+                                      Selects a resource of the container: only resources limits and requests
+                                      (limits.cpu, limits.memory, limits.ephemeral-storage, requests.cpu, requests.memory and requests.ephemeral-storage) are currently supported.
+                                    properties:
+                                      containerName:
+                                        description: 'Container name: required for
+                                          volumes, optional for env vars'
+                                        type: string
+                                      divisor:
+                                        anyOf:
+                                        - type: integer
+                                        - type: string
+                                        description: Specifies the output format of
+                                          the exposed resources, defaults to "1"
+                                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                        x-kubernetes-int-or-string: true
+                                      resource:
+                                        description: 'Required: resource to select'
+                                        type: string
+                                    required:
+                                    - resource
+                                    type: object
+                                    x-kubernetes-map-type: atomic
+                                  secretKeyRef:
+                                    description: Selects a key of a secret in the
+                                      pod's namespace
+                                    properties:
+                                      key:
+                                        description: The key of the secret to select
+                                          from.  Must be a valid secret key.
+                                        type: string
+                                      name:
+                                        default: ""
+                                        description: |-
+                                          Name of the referent.
+                                          This field is effectively required, but due to backwards compatibility is
+                                          allowed to be empty. Instances of this type with an empty value here are
+                                          almost certainly wrong.
+                                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                        type: string
+                                      optional:
+                                        description: Specify whether the Secret or
+                                          its key must be defined
+                                        type: boolean
+                                    required:
+                                    - key
+                                    type: object
+                                    x-kubernetes-map-type: atomic
+                                type: object
+                            required:
+                            - name
+                            type: object
+                          type: array
+                        nodeSelector:
+                          additionalProperties:
+                            type: string
+                          description: NodeSelector constrains agent pods to nodes
+                            matching the given labels.
+                          type: object
+                        resources:
+                          description: Resources defines resource limits and requests
+                            for the agent container.
+                          properties:
+                            claims:
+                              description: |-
+                                Claims lists the names of resources, defined in spec.resourceClaims,
+                                that are used by this container.
+
+                                This field depends on the
+                                DynamicResourceAllocation feature gate.
+
+                                This field is immutable. It can only be set for containers.
+                              items:
+                                description: ResourceClaim references one entry in
+                                  PodSpec.ResourceClaims.
+                                properties:
+                                  name:
+                                    description: |-
+                                      Name must match the name of one entry in pod.spec.resourceClaims of
+                                      the Pod where this field is used. It makes that resource available
+                                      inside a container.
+                                    type: string
+                                  request:
+                                    description: |-
+                                      Request is the name chosen for a request in the referenced claim.
+                                      If empty, everything from the claim is made available, otherwise
+                                      only the result of this request.
+                                    type: string
+                                required:
+                                - name
+                                type: object
+                              type: array
+                              x-kubernetes-list-map-keys:
+                              - name
+                              x-kubernetes-list-type: map
+                            limits:
+                              additionalProperties:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                              description: |-
+                                Limits describes the maximum amount of compute resources allowed.
+                                More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                              type: object
+                            requests:
+                              additionalProperties:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                              description: |-
+                                Requests describes the minimum amount of compute resources required.
+                                If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                                otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                                More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                              type: object
+                          type: object
+                      type: object
+                    promptTemplate:
+                      description: |-
+                        PromptTemplate is a Go text/template for rendering the task prompt.
+                        Available variables (all sources): {{.ID}}, {{.Title}}, {{.Kind}}
+                        GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
+                        GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}
+                        Cron sources: {{.Time}}, {{.Schedule}}
+                      type: string
+                    ttlSecondsAfterFinished:
+                      description: |-
+                        TTLSecondsAfterFinished limits the lifetime of a Task that has finished
+                        execution (either Succeeded or Failed). If set, spawned Tasks will be
+                        automatically deleted after the given number of seconds once they reach
+                        a terminal phase, allowing TaskSpawner to create a new Task.
+                        If this field is unset, spawned Tasks will not be automatically deleted.
+                        If this field is set to zero, spawned Tasks will be eligible to be deleted
+                        immediately after they finish.
+                      format: int32
+                      minimum: 0
+                      type: integer
+                    type:
+                      description: Type specifies the agent type (e.g., claude-code).
+                      enum:
+                      - claude-code
+                      - codex
+                      - gemini
+                      - opencode
+                      - cursor
+                      type: string
+                    upstreamRepo:
+                      description: |-
+                        UpstreamRepo is the upstream repository in "owner/repo" format.
+                        When set, spawned Tasks inherit this value and inject
+                        KELOS_UPSTREAM_REPO into the agent container. This is typically
+                        derived automatically from githubIssues.repo or
+                        githubPullRequests.repo by the spawner, but can be set explicitly.
+                      type: string
+                    workspaceRef:
+                      description: |-
+                        WorkspaceRef references the Workspace that defines the repository.
+                        Required when using githubIssues or githubPullRequests source; optional
+                        for other sources.
+                        When set, spawned Tasks inherit this workspace reference.
+                      properties:
+                        name:
+                          description: Name is the name of the Workspace resource.
+                          type: string
+                      required:
+                      - name
+                      type: object
+                  required:
+                  - credentials
+                  - name
+                  - type
+                  type: object
+                maxItems: 10
+                minItems: 1
+                type: array
               when:
                 description: When defines the conditions that trigger task spawning.
                 properties:
@@ -1466,14 +1850,25 @@ spec:
                     type: object
                 type: object
             required:
-            - taskTemplate
             - when
             type: object
             x-kubernetes-validations:
-            - message: taskTemplate.workspaceRef is required when using githubIssues
-                or githubPullRequests source
+            - message: exactly one of taskTemplate or taskTemplates must be set
+              rule: has(self.taskTemplate) != has(self.taskTemplates)
+            - message: workspaceRef is required when using githubIssues or githubPullRequests
+                source
               rule: '!(has(self.when.githubIssues) || has(self.when.githubPullRequests))
-                || has(self.taskTemplate.workspaceRef)'
+                || (has(self.taskTemplate) && has(self.taskTemplate.workspaceRef))
+                || (has(self.taskTemplates) && self.taskTemplates.exists(t, has(t.workspaceRef)))'
+            - message: taskTemplates step names must be unique
+              rule: '!has(self.taskTemplates) || self.taskTemplates.all(t, self.taskTemplates.exists_one(s,
+                s.name == t.name))'
+            - message: taskTemplates dependsOn must reference existing step names
+              rule: '!has(self.taskTemplates) || self.taskTemplates.all(t, !has(t.dependsOn)
+                || t.dependsOn.all(d, self.taskTemplates.exists(s, s.name == d)))'
+            - message: taskTemplates steps must not depend on themselves
+              rule: '!has(self.taskTemplates) || self.taskTemplates.all(t, !has(t.dependsOn)
+                || !t.dependsOn.exists(d, d == t.name))'
           status:
             description: TaskSpawnerStatus defines the observed state of TaskSpawner.
             properties:
@@ -1564,6 +1959,12 @@ spec:
                 type: string
               totalDiscovered:
                 description: TotalDiscovered is the total number of work items discovered.
+                type: integer
+              totalPipelinesCreated:
+                description: |-
+                  TotalPipelinesCreated is the total number of pipeline instances created
+                  (one per work item when using taskTemplates). Only incremented in
+                  pipeline mode.
                 type: integer
               totalTasksCreated:
                 description: TotalTasksCreated is the total number of Tasks created.

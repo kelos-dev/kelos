@@ -1,0 +1,77 @@
+# TaskSpawner Pipeline Example
+#
+# This example demonstrates using taskTemplates (plural) to create a
+# multi-step pipeline for each discovered work item. Each GitHub issue
+# matching the configured labels triggers a 3-step pipeline:
+#   plan -> implement -> open-pr
+#
+# The spawner translates dependsOn step names to fully-qualified task names:
+#   dependsOn: [plan]  ->  dependsOn: [issue-pipeline-42-plan]
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: issue-pipeline
+spec:
+  when:
+    githubIssues:
+      labels:
+        - agent-pipeline
+  maxConcurrency: 2
+  taskTemplates:
+    - name: plan
+      type: claude-code
+      model: claude-sonnet-4-6
+      credentials:
+        type: oauth
+        secretRef:
+          name: claude-credentials
+      workspaceRef:
+        name: my-workspace
+      promptTemplate: |
+        You are a technical planner. Analyze this issue and create
+        a detailed implementation plan.
+
+        Issue #{{.Number}}: {{.Title}}
+        {{.Body}}
+
+        Output a structured plan with clear steps. Do NOT write code.
+
+    - name: implement
+      type: claude-code
+      model: claude-sonnet-4-6
+      dependsOn:
+        - plan
+      credentials:
+        type: oauth
+        secretRef:
+          name: claude-credentials
+      workspaceRef:
+        name: my-workspace
+      branch: "kelos-{{.Number}}"
+      promptTemplate: |
+        Implement the plan from the planning step.
+
+        Plan output:
+        {{index .Deps "plan" "Outputs"}}
+
+        Issue #{{.Number}}: {{.Title}}
+
+        Create a branch, write code, run tests, commit, and push.
+
+    - name: open-pr
+      type: claude-code
+      dependsOn:
+        - implement
+      credentials:
+        type: oauth
+        secretRef:
+          name: claude-credentials
+      workspaceRef:
+        name: my-workspace
+      branch: "kelos-{{.Number}}"
+      promptTemplate: |
+        Open a pull request for the implementation on branch
+        {{index .Deps "implement" "Results" "branch"}}.
+
+        Reference issue #{{.Number}} in the PR description.
+        Use `gh pr create` to open the PR.

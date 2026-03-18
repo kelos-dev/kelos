@@ -260,7 +260,7 @@ func TestPrintTaskSpawnerTableAllNamespaces(t *testing.T) {
 				When: kelosv1alpha1.When{
 					GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 				},
-				TaskTemplate: kelosv1alpha1.TaskTemplate{
+				TaskTemplate: &kelosv1alpha1.TaskTemplate{
 					WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 						Name: "my-ws",
 					},
@@ -298,7 +298,7 @@ func TestPrintTaskSpawnerTableGitHubPullRequests(t *testing.T) {
 				When: kelosv1alpha1.When{
 					GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{},
 				},
-				TaskTemplate: kelosv1alpha1.TaskTemplate{
+				TaskTemplate: &kelosv1alpha1.TaskTemplate{
 					WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 						Name: "my-ws",
 					},
@@ -393,7 +393,7 @@ func TestPrintTaskSpawnerDetailGitHubPullRequests(t *testing.T) {
 					ReviewState: "changes_requested",
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type: "claude-code",
 				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 					Name: "my-ws",
@@ -441,7 +441,7 @@ func TestPrintTaskSpawnerDetailJira(t *testing.T) {
 					},
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type: "claude-code",
 			},
 			PollInterval: "10m",
@@ -617,7 +617,7 @@ func TestPrintTaskSpawnerDetail(t *testing.T) {
 					Schedule: "0 * * * *",
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type:  "claude-code",
 				Model: "claude-sonnet-4-20250514",
 			},

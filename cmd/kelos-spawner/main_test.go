@@ -73,7 +73,7 @@ func newTaskSpawner(name, namespace string, maxConcurrency *int32) *kelosv1alpha
 			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type: "claude-code",
 				Credentials: kelosv1alpha1.Credentials{
 					Type:      kelosv1alpha1.CredentialTypeOAuth,
@@ -208,7 +208,7 @@ func TestBuildSource_Jira(t *testing.T) {
 					SecretRef: kelosv1alpha1.SecretReference{Name: "jira-creds"},
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type: "claude-code",
 				Credentials: kelosv1alpha1.Credentials{
 					Type:      kelosv1alpha1.CredentialTypeOAuth,
@@ -1516,7 +1516,7 @@ func TestRunCycleWithSource_PropagatesUpstreamRepo(t *testing.T) {
 					Repo: "https://github.com/upstream-org/upstream-repo.git",
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type: "claude-code",
 				Credentials: kelosv1alpha1.Credentials{
 					Type:      kelosv1alpha1.CredentialTypeAPIKey,
@@ -1559,7 +1559,7 @@ func TestRunCycleWithSource_ExplicitUpstreamRepoTakesPrecedence(t *testing.T) {
 					Repo: "https://github.com/upstream-org/upstream-repo.git",
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type: "claude-code",
 				Credentials: kelosv1alpha1.Credentials{
 					Type:      kelosv1alpha1.CredentialTypeAPIKey,
@@ -2200,5 +2200,390 @@ func TestRunOnce_ReturnsSourcePollInterval(t *testing.T) {
 	}
 	if interval != 15*time.Second {
 		t.Fatalf("Interval = %v, want %v", interval, 15*time.Second)
+	}
+}
+
+// newPipelineTaskSpawner creates a TaskSpawner with taskTemplates (pipeline mode).
+func newPipelineTaskSpawner(name, namespace string, maxConcurrency *int32) *kelosv1alpha1.TaskSpawner {
+	return &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
+			},
+			TaskTemplates: []kelosv1alpha1.NamedTaskTemplate{
+				{
+					Name: "plan",
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
+						Type: "claude-code",
+						Credentials: kelosv1alpha1.Credentials{
+							Type:      kelosv1alpha1.CredentialTypeOAuth,
+							SecretRef: kelosv1alpha1.SecretReference{Name: "creds"},
+						},
+						WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "test-ws"},
+						Model:        "opus",
+					},
+				},
+				{
+					Name: "implement",
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
+						Type: "claude-code",
+						Credentials: kelosv1alpha1.Credentials{
+							Type:      kelosv1alpha1.CredentialTypeOAuth,
+							SecretRef: kelosv1alpha1.SecretReference{Name: "creds"},
+						},
+						WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "test-ws"},
+						DependsOn:    []string{"plan"},
+						Model:        "sonnet",
+						Branch:       "kelos-{{.Number}}",
+					},
+				},
+				{
+					Name: "open-pr",
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
+						Type: "claude-code",
+						Credentials: kelosv1alpha1.Credentials{
+							Type:      kelosv1alpha1.CredentialTypeOAuth,
+							SecretRef: kelosv1alpha1.SecretReference{Name: "creds"},
+						},
+						WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "test-ws"},
+						DependsOn:    []string{"implement"},
+						Branch:       "kelos-{{.Number}}",
+					},
+				},
+			},
+			MaxConcurrency: maxConcurrency,
+		},
+	}
+}
+
+func newPipelineTask(name, namespace, spawnerName, itemID string, phase kelosv1alpha1.TaskPhase) kelosv1alpha1.Task {
+	return kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels: map[string]string{
+				"kelos.dev/taskspawner":   spawnerName,
+				"kelos.dev/pipeline-item": itemID,
+			},
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   "claude-code",
+			Prompt: "test",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeOAuth,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "creds"},
+			},
+		},
+		Status: kelosv1alpha1.TaskStatus{
+			Phase: phase,
+		},
+	}
+}
+
+func TestRunCycleWithSource_TaskTemplates_CreatesMultipleTasksPerItem(t *testing.T) {
+	ts := newPipelineTaskSpawner("spawner", "default", nil)
+	cl, key := setupTest(t, ts)
+
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{ID: "42", Number: 42, Title: "Fix bug"},
+		},
+	}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatalf("Listing tasks: %v", err)
+	}
+	if len(taskList.Items) != 3 {
+		t.Fatalf("Expected 3 tasks (one per pipeline step), got %d", len(taskList.Items))
+	}
+
+	taskNames := make(map[string]bool)
+	for _, task := range taskList.Items {
+		taskNames[task.Name] = true
+	}
+	for _, expected := range []string{"spawner-42-plan", "spawner-42-implement", "spawner-42-open-pr"} {
+		if !taskNames[expected] {
+			t.Errorf("Expected task %q to be created", expected)
+		}
+	}
+}
+
+func TestRunCycleWithSource_TaskTemplates_DependsOnTranslation(t *testing.T) {
+	ts := newPipelineTaskSpawner("spawner", "default", nil)
+	cl, key := setupTest(t, ts)
+
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{ID: "42", Number: 42, Title: "Fix bug"},
+		},
+	}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatalf("Listing tasks: %v", err)
+	}
+
+	taskByName := make(map[string]*kelosv1alpha1.Task)
+	for i := range taskList.Items {
+		taskByName[taskList.Items[i].Name] = &taskList.Items[i]
+	}
+
+	// plan step should have no dependencies
+	planTask := taskByName["spawner-42-plan"]
+	if planTask == nil {
+		t.Fatal("Expected plan task to exist")
+	}
+	if len(planTask.Spec.DependsOn) != 0 {
+		t.Errorf("Plan task should have no dependencies, got %v", planTask.Spec.DependsOn)
+	}
+
+	// implement step should depend on the fully-qualified plan task name
+	implTask := taskByName["spawner-42-implement"]
+	if implTask == nil {
+		t.Fatal("Expected implement task to exist")
+	}
+	if len(implTask.Spec.DependsOn) != 1 || implTask.Spec.DependsOn[0] != "spawner-42-plan" {
+		t.Errorf("Implement task dependsOn = %v, want [spawner-42-plan]", implTask.Spec.DependsOn)
+	}
+
+	// open-pr step should depend on the fully-qualified implement task name
+	prTask := taskByName["spawner-42-open-pr"]
+	if prTask == nil {
+		t.Fatal("Expected open-pr task to exist")
+	}
+	if len(prTask.Spec.DependsOn) != 1 || prTask.Spec.DependsOn[0] != "spawner-42-implement" {
+		t.Errorf("Open-pr task dependsOn = %v, want [spawner-42-implement]", prTask.Spec.DependsOn)
+	}
+}
+
+func TestRunCycleWithSource_TaskTemplates_IndependentStepFields(t *testing.T) {
+	ts := newPipelineTaskSpawner("spawner", "default", nil)
+	cl, key := setupTest(t, ts)
+
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{ID: "42", Number: 42, Title: "Fix bug"},
+		},
+	}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatalf("Listing tasks: %v", err)
+	}
+
+	taskByName := make(map[string]*kelosv1alpha1.Task)
+	for i := range taskList.Items {
+		taskByName[taskList.Items[i].Name] = &taskList.Items[i]
+	}
+
+	// plan step should use opus model
+	planTask := taskByName["spawner-42-plan"]
+	if planTask.Spec.Model != "opus" {
+		t.Errorf("Plan task model = %q, want %q", planTask.Spec.Model, "opus")
+	}
+
+	// implement step should use sonnet model and rendered branch
+	implTask := taskByName["spawner-42-implement"]
+	if implTask.Spec.Model != "sonnet" {
+		t.Errorf("Implement task model = %q, want %q", implTask.Spec.Model, "sonnet")
+	}
+	if implTask.Spec.Branch != "kelos-42" {
+		t.Errorf("Implement task branch = %q, want %q", implTask.Spec.Branch, "kelos-42")
+	}
+}
+
+func TestRunCycleWithSource_TaskTemplates_PipelineLabels(t *testing.T) {
+	ts := newPipelineTaskSpawner("spawner", "default", nil)
+	cl, key := setupTest(t, ts)
+
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{ID: "42", Number: 42, Title: "Fix bug"},
+		},
+	}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatalf("Listing tasks: %v", err)
+	}
+
+	for _, task := range taskList.Items {
+		if task.Labels["kelos.dev/taskspawner"] != "spawner" {
+			t.Errorf("Task %s missing spawner label", task.Name)
+		}
+		if task.Labels["kelos.dev/pipeline-item"] != "42" {
+			t.Errorf("Task %s pipeline-item label = %q, want %q", task.Name, task.Labels["kelos.dev/pipeline-item"], "42")
+		}
+	}
+}
+
+func TestRunCycleWithSource_TaskTemplates_MaxConcurrencyCountsPipelines(t *testing.T) {
+	ts := newPipelineTaskSpawner("spawner", "default", int32Ptr(1))
+
+	// One existing active pipeline (item 1)
+	existingTasks := []kelosv1alpha1.Task{
+		newPipelineTask("spawner-1-plan", "default", "spawner", "1", kelosv1alpha1.TaskPhaseSucceeded),
+		newPipelineTask("spawner-1-implement", "default", "spawner", "1", kelosv1alpha1.TaskPhaseRunning),
+		newPipelineTask("spawner-1-open-pr", "default", "spawner", "1", kelosv1alpha1.TaskPhasePending),
+	}
+	cl, key := setupTest(t, ts, existingTasks...)
+
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{ID: "1", Number: 1, Title: "Existing"},
+			{ID: "2", Number: 2, Title: "New item"},
+		},
+	}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatalf("Listing tasks: %v", err)
+	}
+
+	// Should still have only the original 3 tasks (pipeline for item 1).
+	// New item 2 should be blocked by maxConcurrency=1 (item 1 has active tasks).
+	if len(taskList.Items) != 3 {
+		t.Errorf("Expected 3 tasks (maxConcurrency=1 blocks new pipeline), got %d", len(taskList.Items))
+	}
+}
+
+func TestRunCycleWithSource_TaskTemplates_MaxTotalTasksBudget(t *testing.T) {
+	ts := newPipelineTaskSpawner("spawner", "default", nil)
+	ts.Spec.MaxTotalTasks = int32Ptr(4) // budget for 4 tasks, but each pipeline is 3 steps
+	cl, key := setupTest(t, ts)
+
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{ID: "1", Number: 1, Title: "Item 1"},
+			{ID: "2", Number: 2, Title: "Item 2"},
+		},
+	}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatalf("Listing tasks: %v", err)
+	}
+
+	// First pipeline (3 tasks) fits within budget. Second pipeline (3 tasks)
+	// would exceed budget (3+3=6 > 4), so it's skipped entirely.
+	if len(taskList.Items) != 3 {
+		t.Errorf("Expected 3 tasks (one pipeline, second blocked by budget), got %d", len(taskList.Items))
+	}
+}
+
+func TestRunCycleWithSource_TaskTemplates_MultipleItems(t *testing.T) {
+	ts := newPipelineTaskSpawner("spawner", "default", nil)
+	cl, key := setupTest(t, ts)
+
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{ID: "1", Number: 1, Title: "Item 1"},
+			{ID: "2", Number: 2, Title: "Item 2"},
+		},
+	}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatalf("Listing tasks: %v", err)
+	}
+
+	// 2 items * 3 steps = 6 tasks
+	if len(taskList.Items) != 6 {
+		t.Fatalf("Expected 6 tasks (2 items * 3 steps), got %d", len(taskList.Items))
+	}
+
+	// Verify status
+	var updatedTS kelosv1alpha1.TaskSpawner
+	if err := cl.Get(context.Background(), key, &updatedTS); err != nil {
+		t.Fatalf("Getting TaskSpawner: %v", err)
+	}
+	if updatedTS.Status.TotalTasksCreated != 6 {
+		t.Errorf("TotalTasksCreated = %d, want 6", updatedTS.Status.TotalTasksCreated)
+	}
+	if updatedTS.Status.TotalPipelinesCreated != 2 {
+		t.Errorf("TotalPipelinesCreated = %d, want 2", updatedTS.Status.TotalPipelinesCreated)
+	}
+}
+
+func TestRunCycleWithSource_TaskTemplates_PartialPipelineRecovery(t *testing.T) {
+	ts := newPipelineTaskSpawner("spawner", "default", nil)
+
+	// Only the first step exists (simulating partial creation)
+	existingTasks := []kelosv1alpha1.Task{
+		newPipelineTask("spawner-42-plan", "default", "spawner", "42", kelosv1alpha1.TaskPhasePending),
+	}
+	cl, key := setupTest(t, ts, existingTasks...)
+
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{ID: "42", Number: 42, Title: "Partial pipeline"},
+			{ID: "99", Number: 99, Title: "New item"},
+		},
+	}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatalf("Listing tasks: %v", err)
+	}
+
+	// Item 42: plan exists, implement+open-pr should be created (partial recovery).
+	// Item 99: all 3 steps should be created (new item).
+	// Total: 1 (existing plan) + 2 (recovered steps) + 3 (new item 99) = 6 tasks.
+	expected := map[string]bool{
+		"spawner-42-plan":      true,
+		"spawner-42-implement": true,
+		"spawner-42-open-pr":   true,
+		"spawner-99-plan":      true,
+		"spawner-99-implement": true,
+		"spawner-99-open-pr":   true,
+	}
+	if len(taskList.Items) != len(expected) {
+		t.Fatalf("Expected %d tasks, got %d", len(expected), len(taskList.Items))
+	}
+	for _, task := range taskList.Items {
+		if !expected[task.Name] {
+			t.Errorf("Unexpected task created: %s", task.Name)
+		}
+		delete(expected, task.Name)
+	}
+	for name := range expected {
+		t.Errorf("Expected task %q to be present", name)
 	}
 }

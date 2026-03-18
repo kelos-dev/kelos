@@ -330,6 +330,7 @@ type TaskTemplate struct {
 
 	// DependsOn lists Task names that spawned Tasks depend on.
 	// +optional
+	// +kubebuilder:validation:MaxItems=10
 	DependsOn []string `json:"dependsOn,omitempty"`
 
 	// Branch is the git branch spawned Tasks should work on.
@@ -373,16 +374,46 @@ type TaskTemplate struct {
 	UpstreamRepo string `json:"upstreamRepo,omitempty"`
 }
 
+// NamedTaskTemplate extends TaskTemplate with a pipeline step name.
+// When used in taskTemplates, the DependsOn field references sibling step
+// names within the same pipeline (the spawner translates them to
+// fully-qualified task names at creation time).
+type NamedTaskTemplate struct {
+	// Name is the step name within the pipeline, used for task name suffix
+	// and as a reference target for other steps' dependsOn.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	Name string `json:"name"`
+
+	TaskTemplate `json:",inline"`
+}
+
 // TaskSpawnerSpec defines the desired state of TaskSpawner.
-// +kubebuilder:validation:XValidation:rule="!(has(self.when.githubIssues) || has(self.when.githubPullRequests)) || has(self.taskTemplate.workspaceRef)",message="taskTemplate.workspaceRef is required when using githubIssues or githubPullRequests source"
+// +kubebuilder:validation:XValidation:rule="has(self.taskTemplate) != has(self.taskTemplates)",message="exactly one of taskTemplate or taskTemplates must be set"
+// +kubebuilder:validation:XValidation:rule="!(has(self.when.githubIssues) || has(self.when.githubPullRequests)) || (has(self.taskTemplate) && has(self.taskTemplate.workspaceRef)) || (has(self.taskTemplates) && self.taskTemplates.exists(t, has(t.workspaceRef)))",message="workspaceRef is required when using githubIssues or githubPullRequests source"
+// +kubebuilder:validation:XValidation:rule="!has(self.taskTemplates) || self.taskTemplates.all(t, self.taskTemplates.exists_one(s, s.name == t.name))",message="taskTemplates step names must be unique"
+// +kubebuilder:validation:XValidation:rule="!has(self.taskTemplates) || self.taskTemplates.all(t, !has(t.dependsOn) || t.dependsOn.all(d, self.taskTemplates.exists(s, s.name == d)))",message="taskTemplates dependsOn must reference existing step names"
+// +kubebuilder:validation:XValidation:rule="!has(self.taskTemplates) || self.taskTemplates.all(t, !has(t.dependsOn) || !t.dependsOn.exists(d, d == t.name))",message="taskTemplates steps must not depend on themselves"
 type TaskSpawnerSpec struct {
 	// When defines the conditions that trigger task spawning.
 	// +kubebuilder:validation:Required
 	When When `json:"when"`
 
 	// TaskTemplate defines the template for spawned Tasks.
-	// +kubebuilder:validation:Required
-	TaskTemplate TaskTemplate `json:"taskTemplate"`
+	// Exactly one of taskTemplate or taskTemplates must be set.
+	// +optional
+	TaskTemplate *TaskTemplate `json:"taskTemplate,omitempty"`
+
+	// TaskTemplates defines a pipeline of named task templates.
+	// When set, each discovered work item spawns one Task per step,
+	// with DependsOn references translated to fully-qualified task names.
+	// Exactly one of taskTemplate or taskTemplates must be set.
+	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=10
+	TaskTemplates []NamedTaskTemplate `json:"taskTemplates,omitempty"`
 
 	// PollInterval is how often to poll the source for new items (e.g., "5m"). Defaults to "5m".
 	// Deprecated: use per-source pollInterval (e.g., spec.when.githubIssues.pollInterval) instead.
@@ -442,6 +473,12 @@ type TaskSpawnerStatus struct {
 	// ActiveTasks is the number of currently active (non-terminal) Tasks.
 	// +optional
 	ActiveTasks int `json:"activeTasks,omitempty"`
+
+	// TotalPipelinesCreated is the total number of pipeline instances created
+	// (one per work item when using taskTemplates). Only incremented in
+	// pipeline mode.
+	// +optional
+	TotalPipelinesCreated int `json:"totalPipelinesCreated,omitempty"`
 
 	// LastDiscoveryTime is the last time the source was polled.
 	// +optional

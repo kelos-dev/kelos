@@ -102,7 +102,7 @@ var _ = Describe("Completion", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeAPIKey,

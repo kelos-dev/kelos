@@ -123,8 +123,8 @@ func (r *TaskSpawnerReconciler) reconcileDeployment(ctx context.Context, req ctr
 	// Resolve workspace if workspaceRef is set in taskTemplate
 	var workspace *kelosv1alpha1.WorkspaceSpec
 	var isGitHubApp bool
-	if ts.Spec.TaskTemplate.WorkspaceRef != nil {
-		workspaceRefName := ts.Spec.TaskTemplate.WorkspaceRef.Name
+	if wsRef := taskSpawnerWorkspaceRef(ts); wsRef != nil {
+		workspaceRefName := wsRef.Name
 		var ws kelosv1alpha1.Workspace
 		if err := r.Get(ctx, client.ObjectKey{
 			Namespace: ts.Namespace,
@@ -236,8 +236,8 @@ func (r *TaskSpawnerReconciler) reconcileCronJob(ctx context.Context, req ctrl.R
 	// Resolve workspace if workspaceRef is set in taskTemplate
 	var workspace *kelosv1alpha1.WorkspaceSpec
 	var isGitHubApp bool
-	if ts.Spec.TaskTemplate.WorkspaceRef != nil {
-		workspaceRefName := ts.Spec.TaskTemplate.WorkspaceRef.Name
+	if wsRef := taskSpawnerWorkspaceRef(ts); wsRef != nil {
+		workspaceRefName := wsRef.Name
 		var ws kelosv1alpha1.Workspace
 		if err := r.Get(ctx, client.ObjectKey{
 			Namespace: ts.Namespace,
@@ -726,7 +726,7 @@ func (r *TaskSpawnerReconciler) findTaskSpawnersForSecret(ctx context.Context, o
 
 	var requests []reconcile.Request
 	for _, ts := range tsList.Items {
-		if ts.Spec.TaskTemplate.WorkspaceRef != nil && wsNameSet[ts.Spec.TaskTemplate.WorkspaceRef.Name] {
+		if wsRef := taskSpawnerWorkspaceRef(&ts); wsRef != nil && wsNameSet[wsRef.Name] {
 			requests = append(requests, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Namespace: ts.Namespace,
@@ -753,7 +753,7 @@ func (r *TaskSpawnerReconciler) findTaskSpawnersForWorkspace(ctx context.Context
 
 	var requests []reconcile.Request
 	for _, ts := range tsList.Items {
-		if ts.Spec.TaskTemplate.WorkspaceRef != nil && ts.Spec.TaskTemplate.WorkspaceRef.Name == ws.Name {
+		if wsRef := taskSpawnerWorkspaceRef(&ts); wsRef != nil && wsRef.Name == ws.Name {
 			requests = append(requests, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Namespace: ts.Namespace,
@@ -763,4 +763,19 @@ func (r *TaskSpawnerReconciler) findTaskSpawnersForWorkspace(ctx context.Context
 		}
 	}
 	return requests
+}
+
+// taskSpawnerWorkspaceRef returns the first WorkspaceReference found in the
+// TaskSpawner spec — either from taskTemplate or the first taskTemplates
+// entry that has one.
+func taskSpawnerWorkspaceRef(ts *kelosv1alpha1.TaskSpawner) *kelosv1alpha1.WorkspaceReference {
+	if ts.Spec.TaskTemplate != nil && ts.Spec.TaskTemplate.WorkspaceRef != nil {
+		return ts.Spec.TaskTemplate.WorkspaceRef
+	}
+	for i := range ts.Spec.TaskTemplates {
+		if ts.Spec.TaskTemplates[i].WorkspaceRef != nil {
+			return ts.Spec.TaskTemplates[i].WorkspaceRef
+		}
+	}
+	return nil
 }

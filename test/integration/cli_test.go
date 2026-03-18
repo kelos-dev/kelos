@@ -285,7 +285,7 @@ var _ = Describe("CLI Delete All Commands", func() {
 						Namespace: ns.Name,
 					},
 					Spec: kelosv1alpha1.TaskSpawnerSpec{
-						TaskTemplate: kelosv1alpha1.TaskTemplate{
+						TaskTemplate: &kelosv1alpha1.TaskTemplate{
 							Type: "claude-code",
 							Credentials: kelosv1alpha1.Credentials{
 								Type: kelosv1alpha1.CredentialTypeAPIKey,
@@ -375,7 +375,7 @@ var _ = Describe("CLI Delete TaskSpawner Command", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeAPIKey,
@@ -423,7 +423,7 @@ var _ = Describe("CLI Delete TaskSpawner Command", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeAPIKey,
@@ -471,7 +471,7 @@ var _ = Describe("CLI Delete TaskSpawner Command", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeAPIKey,
@@ -539,7 +539,7 @@ var _ = Describe("CLI Suspend/Resume Commands", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeAPIKey,
@@ -585,7 +585,7 @@ var _ = Describe("CLI Suspend/Resume Commands", func() {
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
 					Suspend: &suspend,
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeAPIKey,
@@ -631,7 +631,7 @@ var _ = Describe("CLI Suspend/Resume Commands", func() {
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
 					Suspend: &suspend,
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeAPIKey,
@@ -675,7 +675,7 @@ var _ = Describe("CLI Suspend/Resume Commands", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeAPIKey,
@@ -713,7 +713,7 @@ var _ = Describe("CLI Suspend/Resume Commands", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeAPIKey,
@@ -766,7 +766,7 @@ var _ = Describe("CLI Suspend/Resume Commands", func() {
 					Namespace: ns.Name,
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: &kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeAPIKey,

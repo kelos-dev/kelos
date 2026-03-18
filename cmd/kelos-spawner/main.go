@@ -239,41 +239,86 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 	}
 
 	existingTaskMap := make(map[string]*kelosv1alpha1.Task)
-	activeTasks := 0
 	for i := range existingTaskList.Items {
 		t := &existingTaskList.Items[i]
 		existingTaskMap[t.Name] = t
-		if t.Status.Phase != kelosv1alpha1.TaskPhaseSucceeded && t.Status.Phase != kelosv1alpha1.TaskPhaseFailed {
-			activeTasks++
+	}
+
+	pipelineMode := len(ts.Spec.TaskTemplates) > 0
+
+	// Count active tasks/pipelines depending on mode.
+	activeTasks := 0
+	if pipelineMode {
+		// In pipeline mode, count distinct active pipeline instances.
+		activeItems := make(map[string]bool)
+		for i := range existingTaskList.Items {
+			t := &existingTaskList.Items[i]
+			if t.Status.Phase != kelosv1alpha1.TaskPhaseSucceeded && t.Status.Phase != kelosv1alpha1.TaskPhaseFailed {
+				if itemID := t.Labels["kelos.dev/pipeline-item"]; itemID != "" {
+					activeItems[itemID] = true
+				}
+			}
+		}
+		activeTasks = len(activeItems)
+	} else {
+		for i := range existingTaskList.Items {
+			t := &existingTaskList.Items[i]
+			if t.Status.Phase != kelosv1alpha1.TaskPhaseSucceeded && t.Status.Phase != kelosv1alpha1.TaskPhaseFailed {
+				activeTasks++
+			}
 		}
 	}
 
 	var newItems []source.WorkItem
+	// In pipeline mode, track how many steps are missing per item for budget calculation.
+	var missingStepsPerItem map[string]int
+	if pipelineMode {
+		missingStepsPerItem = make(map[string]int)
+	}
 	for _, item := range items {
-		taskName := fmt.Sprintf("%s-%s", ts.Name, item.ID)
-		existing, found := existingTaskMap[taskName]
-		if !found {
-			newItems = append(newItems, item)
-			continue
-		}
-
-		// Retrigger: when the source provides a trigger time and the existing
-		// task is completed, check whether a new trigger arrived after the task
-		// finished. If so, delete the completed task so a new one can be created.
-		// Note: if creation is later blocked by maxConcurrency or maxTotalTasks,
-		// the item will be picked up as new on the next cycle since the old task
-		// no longer exists.
-		if !item.TriggerTime.IsZero() &&
-			(existing.Status.Phase == kelosv1alpha1.TaskPhaseSucceeded || existing.Status.Phase == kelosv1alpha1.TaskPhaseFailed) &&
-			existing.Status.CompletionTime != nil &&
-			item.TriggerTime.After(existing.Status.CompletionTime.Time) {
-
-			if err := cl.Delete(ctx, existing); err != nil && !apierrors.IsNotFound(err) {
-				log.Error(err, "Deleting completed task for retrigger", "task", taskName)
+		if pipelineMode {
+			// In pipeline mode, check if any step is missing for this item.
+			// This supports partial pipeline recovery: if the spawner crashed
+			// after creating some steps, the remaining steps are created on
+			// the next cycle.
+			missing := 0
+			for _, step := range ts.Spec.TaskTemplates {
+				taskName := fmt.Sprintf("%s-%s-%s", ts.Name, item.ID, step.Name)
+				if _, found := existingTaskMap[taskName]; !found {
+					missing++
+				}
+			}
+			if missing > 0 {
+				newItems = append(newItems, item)
+				missingStepsPerItem[item.ID] = missing
+			}
+			// TODO: retrigger support for pipelines can be added later
+		} else {
+			taskName := fmt.Sprintf("%s-%s", ts.Name, item.ID)
+			existing, found := existingTaskMap[taskName]
+			if !found {
+				newItems = append(newItems, item)
 				continue
 			}
-			log.Info("Deleted completed task for retrigger", "task", taskName)
-			newItems = append(newItems, item)
+
+			// Retrigger: when the source provides a trigger time and the existing
+			// task is completed, check whether a new trigger arrived after the task
+			// finished. If so, delete the completed task so a new one can be created.
+			// Note: if creation is later blocked by maxConcurrency or maxTotalTasks,
+			// the item will be picked up as new on the next cycle since the old task
+			// no longer exists.
+			if !item.TriggerTime.IsZero() &&
+				(existing.Status.Phase == kelosv1alpha1.TaskPhaseSucceeded || existing.Status.Phase == kelosv1alpha1.TaskPhaseFailed) &&
+				existing.Status.CompletionTime != nil &&
+				item.TriggerTime.After(existing.Status.CompletionTime.Time) {
+
+				if err := cl.Delete(ctx, existing); err != nil && !apierrors.IsNotFound(err) {
+					log.Error(err, "Deleting completed task for retrigger", "task", taskName)
+					continue
+				}
+				log.Info("Deleted completed task for retrigger", "task", taskName)
+				newItems = append(newItems, item)
+			}
 		}
 	}
 
@@ -293,89 +338,198 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 	}
 
 	newTasksCreated := 0
+	newPipelinesCreated := 0
 	for _, item := range newItems {
-		// Enforce max concurrency limit
-		if maxConcurrency > 0 && int32(activeTasks) >= maxConcurrency {
-			log.Info("Max concurrency reached, skipping remaining items", "activeTasks", activeTasks, "maxConcurrency", maxConcurrency)
-			break
-		}
+		if pipelineMode {
+			// In pipeline mode, maxConcurrency counts pipeline instances
+			// (distinct items with at least one non-terminal task).
+			if maxConcurrency > 0 && int32(activeTasks) >= maxConcurrency {
+				log.Info("Max concurrency reached, skipping remaining items", "activePipelines", activeTasks, "maxConcurrency", maxConcurrency)
+				break
+			}
 
-		// Enforce max total tasks limit
-		if maxTotalTasks > 0 && ts.Status.TotalTasksCreated+newTasksCreated >= maxTotalTasks {
-			log.Info("Task budget exhausted, skipping remaining items", "totalCreated", ts.Status.TotalTasksCreated+newTasksCreated, "maxTotalTasks", maxTotalTasks)
-			break
-		}
+			stepsToCreate := missingStepsPerItem[item.ID]
 
-		taskName := fmt.Sprintf("%s-%s", ts.Name, item.ID)
+			// Enforce max total tasks limit (counts individual tasks)
+			if maxTotalTasks > 0 && ts.Status.TotalTasksCreated+newTasksCreated+stepsToCreate > maxTotalTasks {
+				log.Info("Task budget exhausted, skipping remaining items", "totalCreated", ts.Status.TotalTasksCreated+newTasksCreated, "stepsNeeded", stepsToCreate, "maxTotalTasks", maxTotalTasks)
+				break
+			}
 
-		prompt, err := source.RenderPrompt(ts.Spec.TaskTemplate.PromptTemplate, item)
-		if err != nil {
-			log.Error(err, "rendering prompt", "item", item.ID)
-			continue
-		}
+			annotations := sourceAnnotations(&ts, item)
+			pipelineCreated := false
 
-		annotations := sourceAnnotations(&ts, item)
+			for _, step := range ts.Spec.TaskTemplates {
+				taskName := fmt.Sprintf("%s-%s-%s", ts.Name, item.ID, step.Name)
 
-		task := &kelosv1alpha1.Task{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      taskName,
-				Namespace: ts.Namespace,
-				Labels: map[string]string{
-					"kelos.dev/taskspawner": ts.Name,
-				},
-				Annotations: annotations,
-			},
-			Spec: kelosv1alpha1.TaskSpec{
-				Type:                    ts.Spec.TaskTemplate.Type,
-				Prompt:                  prompt,
-				Credentials:             ts.Spec.TaskTemplate.Credentials,
-				Model:                   ts.Spec.TaskTemplate.Model,
-				Image:                   ts.Spec.TaskTemplate.Image,
-				TTLSecondsAfterFinished: ts.Spec.TaskTemplate.TTLSecondsAfterFinished,
-				PodOverrides:            ts.Spec.TaskTemplate.PodOverrides,
-			},
-		}
+				// Check if this step already exists (partial pipeline recovery)
+				if _, exists := existingTaskMap[taskName]; exists {
+					continue
+				}
 
-		if ts.Spec.TaskTemplate.WorkspaceRef != nil {
-			task.Spec.WorkspaceRef = ts.Spec.TaskTemplate.WorkspaceRef
-		}
-		if ts.Spec.TaskTemplate.AgentConfigRef != nil {
-			task.Spec.AgentConfigRef = ts.Spec.TaskTemplate.AgentConfigRef
-		}
+				prompt, err := source.RenderPrompt(step.PromptTemplate, item)
+				if err != nil {
+					log.Error(err, "Rendering prompt for pipeline step", "item", item.ID, "step", step.Name)
+					continue
+				}
 
-		if len(ts.Spec.TaskTemplate.DependsOn) > 0 {
-			task.Spec.DependsOn = ts.Spec.TaskTemplate.DependsOn
-		}
-		if ts.Spec.TaskTemplate.Branch != "" {
-			branch, err := source.RenderTemplate(ts.Spec.TaskTemplate.Branch, item)
+				task := &kelosv1alpha1.Task{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      taskName,
+						Namespace: ts.Namespace,
+						Labels: map[string]string{
+							"kelos.dev/taskspawner":   ts.Name,
+							"kelos.dev/pipeline-item": item.ID,
+						},
+						Annotations: annotations,
+					},
+					Spec: kelosv1alpha1.TaskSpec{
+						Type:                    step.Type,
+						Prompt:                  prompt,
+						Credentials:             step.Credentials,
+						Model:                   step.Model,
+						Image:                   step.Image,
+						TTLSecondsAfterFinished: step.TTLSecondsAfterFinished,
+						PodOverrides:            step.PodOverrides,
+					},
+				}
+
+				if step.WorkspaceRef != nil {
+					task.Spec.WorkspaceRef = step.WorkspaceRef
+				}
+				if step.AgentConfigRef != nil {
+					task.Spec.AgentConfigRef = step.AgentConfigRef
+				}
+
+				// Translate sibling step names to fully-qualified task names
+				if len(step.DependsOn) > 0 {
+					translated := make([]string, len(step.DependsOn))
+					for i, dep := range step.DependsOn {
+						translated[i] = fmt.Sprintf("%s-%s-%s", ts.Name, item.ID, dep)
+					}
+					task.Spec.DependsOn = translated
+				}
+
+				if step.Branch != "" {
+					branch, err := source.RenderTemplate(step.Branch, item)
+					if err != nil {
+						log.Error(err, "Rendering branch template for pipeline step", "item", item.ID, "step", step.Name)
+						continue
+					}
+					task.Spec.Branch = branch
+				}
+
+				if step.UpstreamRepo != "" {
+					task.Spec.UpstreamRepo = step.UpstreamRepo
+				} else if upstreamRepo := deriveUpstreamRepo(&ts); upstreamRepo != "" {
+					task.Spec.UpstreamRepo = upstreamRepo
+				}
+
+				if err := cl.Create(ctx, task); err != nil {
+					if apierrors.IsAlreadyExists(err) {
+						log.Info("Pipeline task already exists, skipping", "task", taskName)
+					} else {
+						log.Error(err, "Creating pipeline task", "task", taskName)
+					}
+					continue
+				}
+
+				log.Info("Created pipeline task", "task", taskName, "item", item.ID, "step", step.Name)
+				newTasksCreated++
+				pipelineCreated = true
+			}
+
+			if pipelineCreated {
+				newPipelinesCreated++
+				activeTasks++
+			}
+		} else {
+			// Single-task mode (original behavior)
+			tmpl := ts.Spec.TaskTemplate
+
+			// Enforce max concurrency limit
+			if maxConcurrency > 0 && int32(activeTasks) >= maxConcurrency {
+				log.Info("Max concurrency reached, skipping remaining items", "activeTasks", activeTasks, "maxConcurrency", maxConcurrency)
+				break
+			}
+
+			// Enforce max total tasks limit
+			if maxTotalTasks > 0 && ts.Status.TotalTasksCreated+newTasksCreated >= maxTotalTasks {
+				log.Info("Task budget exhausted, skipping remaining items", "totalCreated", ts.Status.TotalTasksCreated+newTasksCreated, "maxTotalTasks", maxTotalTasks)
+				break
+			}
+
+			taskName := fmt.Sprintf("%s-%s", ts.Name, item.ID)
+
+			prompt, err := source.RenderPrompt(tmpl.PromptTemplate, item)
 			if err != nil {
-				log.Error(err, "rendering branch template", "item", item.ID)
+				log.Error(err, "rendering prompt", "item", item.ID)
 				continue
 			}
-			task.Spec.Branch = branch
-		}
 
-		// Propagate upstream repo for fork workflows. Explicit template
-		// value takes precedence; otherwise derive from the source repo
-		// override (githubIssues.repo or githubPullRequests.repo).
-		if ts.Spec.TaskTemplate.UpstreamRepo != "" {
-			task.Spec.UpstreamRepo = ts.Spec.TaskTemplate.UpstreamRepo
-		} else if upstreamRepo := deriveUpstreamRepo(&ts); upstreamRepo != "" {
-			task.Spec.UpstreamRepo = upstreamRepo
-		}
+			annotations := sourceAnnotations(&ts, item)
 
-		if err := cl.Create(ctx, task); err != nil {
-			if apierrors.IsAlreadyExists(err) {
-				log.Info("Task already exists, skipping", "task", taskName)
-			} else {
-				log.Error(err, "creating Task", "task", taskName)
+			task := &kelosv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      taskName,
+					Namespace: ts.Namespace,
+					Labels: map[string]string{
+						"kelos.dev/taskspawner": ts.Name,
+					},
+					Annotations: annotations,
+				},
+				Spec: kelosv1alpha1.TaskSpec{
+					Type:                    tmpl.Type,
+					Prompt:                  prompt,
+					Credentials:             tmpl.Credentials,
+					Model:                   tmpl.Model,
+					Image:                   tmpl.Image,
+					TTLSecondsAfterFinished: tmpl.TTLSecondsAfterFinished,
+					PodOverrides:            tmpl.PodOverrides,
+				},
 			}
-			continue
-		}
 
-		log.Info("Created Task", "task", taskName, "item", item.ID)
-		newTasksCreated++
-		activeTasks++
+			if tmpl.WorkspaceRef != nil {
+				task.Spec.WorkspaceRef = tmpl.WorkspaceRef
+			}
+			if tmpl.AgentConfigRef != nil {
+				task.Spec.AgentConfigRef = tmpl.AgentConfigRef
+			}
+
+			if len(tmpl.DependsOn) > 0 {
+				task.Spec.DependsOn = tmpl.DependsOn
+			}
+			if tmpl.Branch != "" {
+				branch, err := source.RenderTemplate(tmpl.Branch, item)
+				if err != nil {
+					log.Error(err, "rendering branch template", "item", item.ID)
+					continue
+				}
+				task.Spec.Branch = branch
+			}
+
+			// Propagate upstream repo for fork workflows. Explicit template
+			// value takes precedence; otherwise derive from the source repo
+			// override (githubIssues.repo or githubPullRequests.repo).
+			if tmpl.UpstreamRepo != "" {
+				task.Spec.UpstreamRepo = tmpl.UpstreamRepo
+			} else if upstreamRepo := deriveUpstreamRepo(&ts); upstreamRepo != "" {
+				task.Spec.UpstreamRepo = upstreamRepo
+			}
+
+			if err := cl.Create(ctx, task); err != nil {
+				if apierrors.IsAlreadyExists(err) {
+					log.Info("Task already exists, skipping", "task", taskName)
+				} else {
+					log.Error(err, "creating Task", "task", taskName)
+				}
+				continue
+			}
+
+			log.Info("Created Task", "task", taskName, "item", item.ID)
+			newTasksCreated++
+			activeTasks++
+		}
 	}
 
 	// Update status in a single batch
@@ -388,6 +542,7 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 	ts.Status.LastDiscoveryTime = &now
 	ts.Status.TotalDiscovered = len(items)
 	ts.Status.TotalTasksCreated += newTasksCreated
+	ts.Status.TotalPipelinesCreated += newPipelinesCreated
 	ts.Status.ActiveTasks = activeTasks
 	ts.Status.Message = fmt.Sprintf("Discovered %d items, created %d tasks total", ts.Status.TotalDiscovered, ts.Status.TotalTasksCreated)
 

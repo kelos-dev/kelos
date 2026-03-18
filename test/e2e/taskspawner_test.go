@@ -56,7 +56,7 @@ var _ = Describe("TaskSpawner", func() {
 						State:         "open",
 					},
 				},
-				TaskTemplate: kelosv1alpha1.TaskTemplate{
+				TaskTemplate: &kelosv1alpha1.TaskTemplate{
 					Type: "claude-code",
 					WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 						Name: "e2e-spawner-workspace",
@@ -105,7 +105,7 @@ var _ = Describe("TaskSpawner", func() {
 				When: kelosv1alpha1.When{
 					GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 				},
-				TaskTemplate: kelosv1alpha1.TaskTemplate{
+				TaskTemplate: &kelosv1alpha1.TaskTemplate{
 					Type: "claude-code",
 					WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 						Name: "e2e-spawner-workspace",
@@ -169,7 +169,7 @@ var _ = Describe("Cron TaskSpawner", func() {
 						Schedule: "* * * * *",
 					},
 				},
-				TaskTemplate: kelosv1alpha1.TaskTemplate{
+				TaskTemplate: &kelosv1alpha1.TaskTemplate{
 					Type:  "claude-code",
 					Model: testModel,
 					Credentials: kelosv1alpha1.Credentials{
@@ -208,7 +208,7 @@ var _ = Describe("Cron TaskSpawner", func() {
 						Schedule: "0 9 * * 1",
 					},
 				},
-				TaskTemplate: kelosv1alpha1.TaskTemplate{
+				TaskTemplate: &kelosv1alpha1.TaskTemplate{
 					Type: "claude-code",
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeOAuth,

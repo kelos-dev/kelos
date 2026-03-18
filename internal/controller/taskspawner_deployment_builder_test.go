@@ -267,7 +267,7 @@ func TestDeploymentBuilder_GitHubApp(t *testing.T) {
 			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type:         "claude-code",
 				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
 			},
@@ -347,7 +347,7 @@ func TestDeploymentBuilder_GitHubAppEnterprise(t *testing.T) {
 			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type:         "claude-code",
 				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
 			},
@@ -389,7 +389,7 @@ func TestDeploymentBuilder_GitHubAppGitHubCom(t *testing.T) {
 			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type:         "claude-code",
 				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
 			},
@@ -428,7 +428,7 @@ func TestDeploymentBuilder_PAT(t *testing.T) {
 			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type:         "claude-code",
 				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
 			},
@@ -481,7 +481,7 @@ func TestDeploymentBuilder_Jira(t *testing.T) {
 					SecretRef: kelosv1alpha1.SecretReference{Name: "jira-creds"},
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type: "claude-code",
 			},
 		},
@@ -827,7 +827,7 @@ func TestDeploymentBuilder_JiraNoJQL(t *testing.T) {
 					SecretRef: kelosv1alpha1.SecretReference{Name: "jira-creds"},
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type: "claude-code",
 			},
 		},
@@ -856,7 +856,7 @@ func TestUpdateDeployment_SuspendScalesDown(t *testing.T) {
 			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type:         "claude-code",
 				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
 			},
@@ -915,7 +915,7 @@ func TestUpdateDeployment_ResumeScalesUp(t *testing.T) {
 			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type:         "claude-code",
 				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
 			},
@@ -973,7 +973,7 @@ func TestUpdateDeployment_NoUpdateWhenReplicasMatch(t *testing.T) {
 			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type:         "claude-code",
 				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
 			},
@@ -1027,7 +1027,7 @@ func TestUpdateDeployment_PATToGitHubApp(t *testing.T) {
 			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type:         "claude-code",
 				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
 			},
@@ -1124,7 +1124,7 @@ func TestUpdateDeployment_GitHubAppToPAT(t *testing.T) {
 			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type:         "claude-code",
 				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
 			},
@@ -1255,7 +1255,7 @@ func TestFindTaskSpawnersForSecret(t *testing.T) {
 			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type:         "claude-code",
 				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
 			},
@@ -1271,7 +1271,7 @@ func TestFindTaskSpawnersForSecret(t *testing.T) {
 			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type:         "claude-code",
 				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws-other"},
 			},
@@ -1291,7 +1291,7 @@ func TestFindTaskSpawnersForSecret(t *testing.T) {
 					SecretRef: kelosv1alpha1.SecretReference{Name: "jira-creds"},
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type: "claude-code",
 			},
 		},
@@ -1344,7 +1344,7 @@ func TestFindTaskSpawnersForWorkspace(t *testing.T) {
 			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type:         "claude-code",
 				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
 			},
@@ -1360,7 +1360,7 @@ func TestFindTaskSpawnersForWorkspace(t *testing.T) {
 			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type:         "claude-code",
 				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
 			},
@@ -1376,7 +1376,7 @@ func TestFindTaskSpawnersForWorkspace(t *testing.T) {
 			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type:         "claude-code",
 				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "other-ws"},
 			},
@@ -1428,7 +1428,7 @@ func TestBuildCronJob_BasicSchedule(t *testing.T) {
 					Schedule: "0 9 * * 1",
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type: "claude-code",
 				Credentials: kelosv1alpha1.Credentials{
 					Type:      kelosv1alpha1.CredentialTypeAPIKey,
@@ -1529,7 +1529,7 @@ func TestBuildCronJob_BackoffLimit(t *testing.T) {
 					Schedule: "*/5 * * * *",
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type: "claude-code",
 			},
 		},
@@ -1556,7 +1556,7 @@ func TestIsCronBased(t *testing.T) {
 					Schedule: "0 9 * * 1",
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type: "claude-code",
 				Credentials: kelosv1alpha1.Credentials{
 					Type:      kelosv1alpha1.CredentialTypeAPIKey,
@@ -1599,7 +1599,7 @@ func TestUpdateCronJob_ScheduleChange(t *testing.T) {
 					Schedule: "0 10 * * 1", // Changed from 9 to 10
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type: "claude-code",
 			},
 		},
@@ -1651,7 +1651,7 @@ func TestUpdateCronJob_SuspendToggle(t *testing.T) {
 					Schedule: "0 9 * * 1",
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type: "claude-code",
 			},
 			Suspend: boolPtr(true),
@@ -1703,7 +1703,7 @@ func TestUpdateCronJob_PodSpecChanges(t *testing.T) {
 					Schedule: "0 9 * * 1",
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type: "claude-code",
 			},
 		},
@@ -1783,7 +1783,7 @@ func TestReconcileCronJob_DeletesStaleDeployment(t *testing.T) {
 					Schedule: "0 9 * * 1",
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type: "claude-code",
 			},
 		},
@@ -1854,7 +1854,7 @@ func TestReconcileDeployment_DeletesStaleCronJob(t *testing.T) {
 			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type: "claude-code",
 			},
 		},
@@ -1927,7 +1927,7 @@ func TestBuildCronJob_WithWorkspacePAT(t *testing.T) {
 					Schedule: "0 9 * * 1",
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type: "claude-code",
 				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 					Name: "my-workspace",
@@ -1998,7 +1998,7 @@ func TestBuildCronJob_WithWorkspaceGitHubApp(t *testing.T) {
 					Schedule: "0 9 * * 1",
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type: "claude-code",
 				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 					Name: "my-workspace",
@@ -2082,7 +2082,7 @@ func TestReconcileCronJob_ClearsStaleDeploymentName(t *testing.T) {
 					Schedule: "0 9 * * 1",
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type: "claude-code",
 			},
 		},
@@ -2139,7 +2139,7 @@ func TestReconcileDeployment_ClearsStaleCronJobName(t *testing.T) {
 			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: &kelosv1alpha1.TaskTemplate{
 				Type: "claude-code",
 			},
 		},

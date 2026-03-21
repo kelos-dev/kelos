@@ -93,9 +93,38 @@ spec:
       Then for each agent that has a newer version available:
       1. First check if an open PR already exists for updating that agent:
          ```
-         gh pr list --state open --label generated-by-kelos --search "update <agent-name> image" --json number,title
+         gh pr list --state open --label generated-by-kelos --search "update <agent-name> image" --json number,title,headRefName
          ```
-      2. If an open PR already exists, skip it — do NOT create a duplicate
+      2. If an open PR already exists:
+         a. Extract the version from the existing PR title (the version after "to ")
+         b. Compare it with the latest available version
+         c. If the existing PR already targets the latest version, skip it — no update needed
+         d. If the existing PR targets an older version, update it:
+            i. Check out the existing PR branch, resetting it to origin/main:
+               ```
+               git checkout -B <existing-branch> origin/main
+               ```
+            ii. Update the version ARG in the Dockerfile to the latest version
+            iii. Commit the change:
+                ```
+                git commit -am "Update <agent-name> image to <latest-version>"
+                ```
+            iv. Force-push the updated branch:
+                ```
+                git push --force origin <existing-branch>
+                ```
+            v. Update the existing PR title and body:
+               Write the updated body to a temp file first, then:
+               ```
+               gh pr edit <pr-number> \
+                 --title "Update <agent-name> image to <latest-version>" \
+                 --body-file /tmp/pr-body.md
+               ```
+               The PR body (`/tmp/pr-body.md`) MUST follow `.github/PULL_REQUEST_TEMPLATE.md`:
+               - Start with `/kind feature` on its own line
+               - Fill in all template sections (What type, What this PR does, Which issues, Special notes, Does this PR introduce a user-facing change)
+               - Set "Which issue(s)" to "N/A"
+               - Include a release-note fenced block: Update <agent-name> image from <current-version> to <latest-version>
       3. If no open PR exists, create one:
          a. Create a new branch:
             ```
@@ -127,7 +156,7 @@ spec:
       Constraints:
       - Create at most ONE PR per coding agent per run
       - Do NOT create PRs if the version is already up to date
-      - Do NOT create duplicate PRs — always check for existing open PRs first
+      - Do NOT create duplicate PRs — always check for existing open PRs first and update them if outdated
       - Do NOT create issues — only create PRs
       - If no agents need updating, exit cleanly without creating any PRs
       - Include the npm package changelog or release notes link in the PR body when available

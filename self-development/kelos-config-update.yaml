@@ -17,7 +17,7 @@ spec:
       type: oauth
       secretRef:
         name: kelos-credentials
-    branch: "kelos-config-update-{{.ID}}"
+    branch: "kelos-config-update-latest"
     podOverrides:
       resources:
         requests:
@@ -87,8 +87,10 @@ spec:
       - If review feedback is uncertain, contradictory, or appears to be a one-off, ignore it
       - Keep changes minimal and focused — one PR per run, touching only what the evidence supports
       - Do not create duplicate changes — check the current content of config files before modifying
-      - Before creating a PR, check for existing open PRs from this agent: `gh pr list --head kelos-config-update --state open`
-        If one exists, update it instead of creating a new one
+      - Before creating a PR, check for existing open PRs from this agent:
+        `gh pr list --state open --search "head:kelos-config-update" --json number,title,headRefName`
+        If one exists, check out its branch (`git fetch origin <branch> && git checkout <branch>`),
+        push your changes to that branch, and update the existing PR instead of creating a new one
       - Do not create a PR if no actionable changes are found — exit cleanly instead
       - Do not create duplicate issues — check existing issues first with `gh issue list`
       - Back every change with a specific reference to the PR review that motivated it

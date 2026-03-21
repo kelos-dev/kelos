@@ -15,3 +15,5 @@ spawnerImage: ghcr.io/kelos-dev/kelos-spawner
 spawnerResourceRequests: ""
 spawnerResourceLimits: ""
 tokenRefresherImage: ghcr.io/kelos-dev/kelos-token-refresher
+tokenRefresherResourceRequests: ""
+tokenRefresherResourceLimits: ""

@@ -36,6 +36,7 @@ type DeploymentBuilder struct {
 	SpawnerResources              *corev1.ResourceRequirements
 	TokenRefresherImage           string
 	TokenRefresherImagePullPolicy corev1.PullPolicy
+	TokenRefresherResources       *corev1.ResourceRequirements
 }
 
 // NewDeploymentBuilder creates a new DeploymentBuilder.
@@ -153,7 +154,7 @@ func (b *DeploymentBuilder) buildPodParts(ts *kelosv1alpha1.TaskSpawner, workspa
 				}
 
 				restartPolicyAlways := corev1.ContainerRestartPolicyAlways
-				initContainers = append(initContainers, corev1.Container{
+				refresherContainer := corev1.Container{
 					Name:            "token-refresher",
 					Image:           b.TokenRefresherImage,
 					ImagePullPolicy: b.TokenRefresherImagePullPolicy,
@@ -170,7 +171,11 @@ func (b *DeploymentBuilder) buildPodParts(ts *kelosv1alpha1.TaskSpawner, workspa
 							ReadOnly:  true,
 						},
 					},
-				})
+				}
+				if b.TokenRefresherResources != nil {
+					refresherContainer.Resources = *b.TokenRefresherResources
+				}
+				initContainers = append(initContainers, refresherContainer)
 			} else {
 				// PAT: inject GITHUB_TOKEN from secret
 				envVars = append(envVars, corev1.EnvVar{

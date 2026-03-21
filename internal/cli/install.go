@@ -37,6 +37,8 @@ func newInstallCommand(cfg *ClientConfig) *cobra.Command {
 	var disableHeartbeat bool
 	var spawnerResourceRequests string
 	var spawnerResourceLimits string
+	var tokenRefresherResourceRequests string
+	var tokenRefresherResourceLimits string
 
 	cmd := &cobra.Command{
 		Use:   "install",
@@ -47,7 +49,15 @@ func newInstallCommand(cfg *ClientConfig) *cobra.Command {
 				version.Version = flagVersion
 			}
 
-			vals := buildHelmValues(version.Version, imagePullPolicy, disableHeartbeat, spawnerResourceRequests, spawnerResourceLimits)
+			vals := buildHelmValues(
+				version.Version,
+				imagePullPolicy,
+				disableHeartbeat,
+				spawnerResourceRequests,
+				spawnerResourceLimits,
+				tokenRefresherResourceRequests,
+				tokenRefresherResourceLimits,
+			)
 			controllerManifest, err := helmchart.Render(manifests.ChartFS, vals)
 			if err != nil {
 				return fmt.Errorf("rendering chart: %w", err)
@@ -99,12 +109,14 @@ func newInstallCommand(cfg *ClientConfig) *cobra.Command {
 	cmd.Flags().BoolVar(&disableHeartbeat, "disable-heartbeat", false, "do not install the telemetry heartbeat CronJob")
 	cmd.Flags().StringVar(&spawnerResourceRequests, "spawner-resource-requests", "", "resource requests for spawner containers (e.g., cpu=250m,memory=512Mi)")
 	cmd.Flags().StringVar(&spawnerResourceLimits, "spawner-resource-limits", "", "resource limits for spawner containers (e.g., cpu=1,memory=1Gi)")
+	cmd.Flags().StringVar(&tokenRefresherResourceRequests, "token-refresher-resource-requests", "", "resource requests for token refresher sidecars (e.g., cpu=100m,memory=128Mi)")
+	cmd.Flags().StringVar(&tokenRefresherResourceLimits, "token-refresher-resource-limits", "", "resource limits for token refresher sidecars (e.g., cpu=200m,memory=256Mi)")
 
 	return cmd
 }
 
 // buildHelmValues constructs the values map for Helm chart rendering from CLI flags.
-func buildHelmValues(ver string, pullPolicy string, disableHeartbeat bool, spawnerResourceRequests string, spawnerResourceLimits string) map[string]interface{} {
+func buildHelmValues(ver string, pullPolicy string, disableHeartbeat bool, spawnerResourceRequests string, spawnerResourceLimits string, tokenRefresherResourceRequests string, tokenRefresherResourceLimits string) map[string]interface{} {
 	imageVals := map[string]interface{}{
 		"tag": ver,
 	}
@@ -124,6 +136,12 @@ func buildHelmValues(ver string, pullPolicy string, disableHeartbeat bool, spawn
 	}
 	if spawnerResourceLimits != "" {
 		vals["spawnerResourceLimits"] = spawnerResourceLimits
+	}
+	if tokenRefresherResourceRequests != "" {
+		vals["tokenRefresherResourceRequests"] = tokenRefresherResourceRequests
+	}
+	if tokenRefresherResourceLimits != "" {
+		vals["tokenRefresherResourceLimits"] = tokenRefresherResourceLimits
 	}
 	return vals
 }

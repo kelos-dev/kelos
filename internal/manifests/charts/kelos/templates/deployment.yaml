@@ -64,6 +64,12 @@ spec:
             {{- if .Values.image.pullPolicy }}
             - --token-refresher-image-pull-policy={{ .Values.image.pullPolicy }}
             {{- end }}
+            {{- if .Values.tokenRefresherResourceRequests }}
+            - --token-refresher-resource-requests={{ .Values.tokenRefresherResourceRequests }}
+            {{- end }}
+            {{- if .Values.tokenRefresherResourceLimits }}
+            - --token-refresher-resource-limits={{ .Values.tokenRefresherResourceLimits }}
+            {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

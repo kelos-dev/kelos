@@ -157,6 +157,27 @@ var _ = Describe("Install/Uninstall", Ordered, func() {
 			root2.SetArgs([]string{"install", "--kubeconfig", kubeconfigPath})
 			Expect(root2.Execute()).To(Succeed())
 		})
+
+		It("Should forward token refresher resource flags to the controller deployment", func() {
+			root := cli.NewRootCommand()
+			root.SetArgs([]string{
+				"install",
+				"--kubeconfig", kubeconfigPath,
+				"--token-refresher-resource-requests", "cpu=100m,memory=128Mi",
+				"--token-refresher-resource-limits", "cpu=200m,memory=256Mi",
+			})
+			Expect(root.Execute()).To(Succeed())
+
+			dep := &appsv1.Deployment{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "kelos-controller-manager",
+				Namespace: "kelos-system",
+			}, dep)).To(Succeed())
+
+			args := dep.Spec.Template.Spec.Containers[0].Args
+			Expect(args).To(ContainElement("--token-refresher-resource-requests=cpu=100m,memory=128Mi"))
+			Expect(args).To(ContainElement("--token-refresher-resource-limits=cpu=200m,memory=256Mi"))
+		})
 	})
 
 	Context("kelos uninstall", func() {

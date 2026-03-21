@@ -418,6 +418,56 @@ func TestDeploymentBuilder_GitHubAppGitHubCom(t *testing.T) {
 	}
 }
 
+func TestDeploymentBuilder_TokenRefresherResources(t *testing.T) {
+	builder := NewDeploymentBuilder()
+	builder.TokenRefresherResources = &corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("100m"),
+			corev1.ResourceMemory: resource.MustParse("128Mi"),
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("200m"),
+			corev1.ResourceMemory: resource.MustParse("256Mi"),
+		},
+	}
+
+	ts := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-spawner",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type:         "claude-code",
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
+			},
+		},
+	}
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/kelos-dev/kelos.git",
+		SecretRef: &kelosv1alpha1.SecretReference{
+			Name: "github-app-creds",
+		},
+	}
+
+	deploy := builder.Build(ts, workspace, true)
+	refresher := deploy.Spec.Template.Spec.InitContainers[0]
+	spawner := deploy.Spec.Template.Spec.Containers[0]
+
+	if refresher.Resources.Requests.Cpu().String() != "100m" {
+		t.Errorf("expected token-refresher cpu request 100m, got %s", refresher.Resources.Requests.Cpu().String())
+	}
+	if refresher.Resources.Limits.Memory().String() != "256Mi" {
+		t.Errorf("expected token-refresher memory limit 256Mi, got %s", refresher.Resources.Limits.Memory().String())
+	}
+	if len(spawner.Resources.Requests) != 0 || len(spawner.Resources.Limits) != 0 {
+		t.Errorf("expected spawner resources to remain empty, got requests=%v limits=%v", spawner.Resources.Requests, spawner.Resources.Limits)
+	}
+}
+
 func TestDeploymentBuilder_PAT(t *testing.T) {
 	builder := NewDeploymentBuilder()
 	ts := &kelosv1alpha1.TaskSpawner{
@@ -2386,6 +2436,56 @@ func TestDeploymentBuilder_CronJob_SpawnerResources(t *testing.T) {
 	}
 }
 
+func TestDeploymentBuilder_CronJob_TokenRefresherResources(t *testing.T) {
+	builder := NewDeploymentBuilder()
+	builder.TokenRefresherResources = &corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU: resource.MustParse("100m"),
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceMemory: resource.MustParse("256Mi"),
+		},
+	}
+
+	ts := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-spawner",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				Cron: &kelosv1alpha1.Cron{
+					Schedule: "*/5 * * * *",
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type:         "claude-code",
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
+			},
+		},
+	}
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/kelos-dev/kelos.git",
+		SecretRef: &kelosv1alpha1.SecretReference{
+			Name: "github-app-creds",
+		},
+	}
+
+	cronJob := builder.BuildCronJob(ts, workspace, true)
+	refresher := cronJob.Spec.JobTemplate.Spec.Template.Spec.InitContainers[0]
+	spawner := cronJob.Spec.JobTemplate.Spec.Template.Spec.Containers[0]
+
+	if refresher.Resources.Requests.Cpu().String() != "100m" {
+		t.Errorf("expected token-refresher cpu request 100m on CronJob, got %s", refresher.Resources.Requests.Cpu().String())
+	}
+	if refresher.Resources.Limits.Memory().String() != "256Mi" {
+		t.Errorf("expected token-refresher memory limit 256Mi on CronJob, got %s", refresher.Resources.Limits.Memory().String())
+	}
+	if len(spawner.Resources.Requests) != 0 || len(spawner.Resources.Limits) != 0 {
+		t.Errorf("expected spawner resources to remain empty on CronJob, got requests=%v limits=%v", spawner.Resources.Requests, spawner.Resources.Limits)
+	}
+}
+
 func TestDeploymentBuilder_SpawnerResources_TokenRefresherUnaffected(t *testing.T) {
 	builder := NewDeploymentBuilder()
 	builder.SpawnerResources = &corev1.ResourceRequirements{
@@ -2536,5 +2636,149 @@ func TestUpdateCronJob_ResourcesDrift(t *testing.T) {
 	spawner := updated.Spec.JobTemplate.Spec.Template.Spec.Containers[0]
 	if spawner.Resources.Requests.Cpu().String() != "100m" {
 		t.Errorf("expected cpu request 100m after drift update, got %s", spawner.Resources.Requests.Cpu().String())
+	}
+}
+
+func TestUpdateDeployment_TokenRefresherResourcesDrift(t *testing.T) {
+	builder := NewDeploymentBuilder()
+	ts := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-spawner",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type:         "claude-code",
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
+			},
+		},
+	}
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/kelos-dev/kelos.git",
+		SecretRef: &kelosv1alpha1.SecretReference{
+			Name: "github-app-creds",
+		},
+	}
+
+	deploy := builder.Build(ts, workspace, true)
+
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(appsv1.AddToScheme(scheme))
+	utilruntime.Must(kelosv1alpha1.AddToScheme(scheme))
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(ts, deploy).
+		WithStatusSubresource(ts).
+		Build()
+
+	builder.TokenRefresherResources = &corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU: resource.MustParse("100m"),
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceMemory: resource.MustParse("256Mi"),
+		},
+	}
+
+	r := &TaskSpawnerReconciler{
+		Client:            cl,
+		Scheme:            scheme,
+		DeploymentBuilder: builder,
+	}
+
+	ctx := context.Background()
+	if err := r.updateDeployment(ctx, ts, deploy, workspace, true, 1); err != nil {
+		t.Fatalf("updateDeployment error: %v", err)
+	}
+
+	var updated appsv1.Deployment
+	if err := cl.Get(ctx, client.ObjectKeyFromObject(deploy), &updated); err != nil {
+		t.Fatalf("getting deployment: %v", err)
+	}
+
+	refresher := updated.Spec.Template.Spec.InitContainers[0]
+	if refresher.Resources.Requests.Cpu().String() != "100m" {
+		t.Errorf("expected token-refresher cpu request 100m after drift update, got %s", refresher.Resources.Requests.Cpu().String())
+	}
+	if refresher.Resources.Limits.Memory().String() != "256Mi" {
+		t.Errorf("expected token-refresher memory limit 256Mi after drift update, got %s", refresher.Resources.Limits.Memory().String())
+	}
+}
+
+func TestUpdateCronJob_TokenRefresherResourcesDrift(t *testing.T) {
+	builder := NewDeploymentBuilder()
+	ts := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-spawner",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				Cron: &kelosv1alpha1.Cron{
+					Schedule: "*/5 * * * *",
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type:         "claude-code",
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
+			},
+		},
+	}
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/kelos-dev/kelos.git",
+		SecretRef: &kelosv1alpha1.SecretReference{
+			Name: "github-app-creds",
+		},
+	}
+
+	cronJob := builder.BuildCronJob(ts, workspace, true)
+
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(batchv1.AddToScheme(scheme))
+	utilruntime.Must(kelosv1alpha1.AddToScheme(scheme))
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(ts, cronJob).
+		WithStatusSubresource(ts).
+		Build()
+
+	builder.TokenRefresherResources = &corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU: resource.MustParse("100m"),
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceMemory: resource.MustParse("256Mi"),
+		},
+	}
+
+	r := &TaskSpawnerReconciler{
+		Client:            cl,
+		Scheme:            scheme,
+		DeploymentBuilder: builder,
+	}
+
+	ctx := context.Background()
+	if err := r.updateCronJob(ctx, ts, cronJob, workspace, true, false); err != nil {
+		t.Fatalf("updateCronJob error: %v", err)
+	}
+
+	var updated batchv1.CronJob
+	if err := cl.Get(ctx, client.ObjectKeyFromObject(cronJob), &updated); err != nil {
+		t.Fatalf("getting CronJob: %v", err)
+	}
+
+	refresher := updated.Spec.JobTemplate.Spec.Template.Spec.InitContainers[0]
+	if refresher.Resources.Requests.Cpu().String() != "100m" {
+		t.Errorf("expected token-refresher cpu request 100m after drift update, got %s", refresher.Resources.Requests.Cpu().String())
+	}
+	if refresher.Resources.Limits.Memory().String() != "256Mi" {
+		t.Errorf("expected token-refresher memory limit 256Mi after drift update, got %s", refresher.Resources.Limits.Memory().String())
 	}
 }

@@ -304,6 +304,16 @@ The `kelos` CLI lets you manage the full lifecycle without writing YAML.
 | `kelos suspend taskspawner <name>` | Pause a TaskSpawner (stops polling, running tasks continue) |
 | `kelos resume taskspawner <name>` | Resume a paused TaskSpawner |
 
+### `kelos install` Flags
+
+- `--version`: Override the image tag used for controller and bundled agent images
+- `--image-pull-policy`: Set `imagePullPolicy` on controller-managed images
+- `--disable-heartbeat`: Do not install the telemetry heartbeat CronJob
+- `--spawner-resource-requests`: Resource requests for spawner containers as comma-separated `name=value` pairs
+- `--spawner-resource-limits`: Resource limits for spawner containers as comma-separated `name=value` pairs
+- `--token-refresher-resource-requests`: Resource requests for token refresher sidecars as comma-separated `name=value` pairs, for example `cpu=100m,memory=128Mi`
+- `--token-refresher-resource-limits`: Resource limits for token refresher sidecars as comma-separated `name=value` pairs, for example `cpu=200m,memory=256Mi`
+
 ### `kelos run` Flags
 
 - `--prompt, -p`: Task prompt (required)

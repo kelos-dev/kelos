@@ -54,6 +54,8 @@ func main() {
 	var spawnerResourceLimits string
 	var tokenRefresherImage string
 	var tokenRefresherImagePullPolicy string
+	var tokenRefresherResourceRequests string
+	var tokenRefresherResourceLimits string
 	var telemetryReport bool
 	var telemetryEndpoint string
 	var telemetryEnvironment string
@@ -79,6 +81,8 @@ func main() {
 	flag.StringVar(&spawnerResourceLimits, "spawner-resource-limits", "", "Resource limits for spawner containers as comma-separated name=value pairs (e.g., cpu=1,memory=1Gi).")
 	flag.StringVar(&tokenRefresherImage, "token-refresher-image", controller.DefaultTokenRefresherImage, "The image to use for the token refresher sidecar.")
 	flag.StringVar(&tokenRefresherImagePullPolicy, "token-refresher-image-pull-policy", "", "The image pull policy for the token refresher sidecar (e.g., Always, Never, IfNotPresent).")
+	flag.StringVar(&tokenRefresherResourceRequests, "token-refresher-resource-requests", "", "Resource requests for token refresher sidecars as comma-separated name=value pairs (e.g., cpu=100m,memory=128Mi).")
+	flag.StringVar(&tokenRefresherResourceLimits, "token-refresher-resource-limits", "", "Resource limits for token refresher sidecars as comma-separated name=value pairs (e.g., cpu=200m,memory=256Mi).")
 	flag.BoolVar(&telemetryReport, "telemetry-report", false, "Run a one-shot telemetry report and exit.")
 	flag.StringVar(&telemetryEndpoint, "telemetry-endpoint", telemetry.DefaultPostHogEndpoint, "The PostHog endpoint for sending telemetry reports.")
 	flag.StringVar(&telemetryEnvironment, "telemetry-environment", "production", "The environment label for telemetry reports (e.g., production, development).")
@@ -93,7 +97,7 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(opts)))
 
-	// Parse spawner resource flags
+	// Parse resource flags.
 	var spawnerResources *corev1.ResourceRequirements
 	requests, err := controller.ParseResourceList(spawnerResourceRequests)
 	if err != nil {
@@ -109,6 +113,23 @@ func main() {
 		spawnerResources = &corev1.ResourceRequirements{
 			Requests: requests,
 			Limits:   limits,
+		}
+	}
+	var tokenRefresherResources *corev1.ResourceRequirements
+	tokenRefresherRequests, err := controller.ParseResourceList(tokenRefresherResourceRequests)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing --token-refresher-resource-requests: %v\n", err)
+		os.Exit(1)
+	}
+	tokenRefresherLimits, err := controller.ParseResourceList(tokenRefresherResourceLimits)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing --token-refresher-resource-limits: %v\n", err)
+		os.Exit(1)
+	}
+	if tokenRefresherRequests != nil || tokenRefresherLimits != nil {
+		tokenRefresherResources = &corev1.ResourceRequirements{
+			Requests: tokenRefresherRequests,
+			Limits:   tokenRefresherLimits,
 		}
 	}
 
@@ -190,6 +211,7 @@ func main() {
 	deploymentBuilder.SpawnerResources = spawnerResources
 	deploymentBuilder.TokenRefresherImage = tokenRefresherImage
 	deploymentBuilder.TokenRefresherImagePullPolicy = corev1.PullPolicy(tokenRefresherImagePullPolicy)
+	deploymentBuilder.TokenRefresherResources = tokenRefresherResources
 	if err = (&controller.TaskSpawnerReconciler{
 		Client:            mgr.GetClient(),
 		Scheme:            mgr.GetScheme(),

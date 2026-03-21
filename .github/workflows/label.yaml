@@ -12,10 +12,6 @@ on:
   pull_request_review:
     types: [submitted]
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.issue.number || github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: true
-
 permissions:
   issues: write
   pull-requests: write
@@ -24,16 +20,39 @@ jobs:
   comment-label:
     if: >-
       (
-        github.event_name == 'issue_comment' ||
-        github.event_name == 'pull_request_review_comment' ||
-        github.event_name == 'pull_request_review' ||
-        (github.event_name == 'issues' && (github.event.action == 'opened' || github.event.action == 'edited')) ||
-        (github.event_name == 'pull_request_target' && (github.event.action == 'opened' || github.event.action == 'edited'))
-      ) && (
-        contains(github.event.comment.body || github.event.review.body || github.event.issue.body || github.event.pull_request.body || '', '/kind') ||
-        contains(github.event.comment.body || github.event.review.body || github.event.issue.body || github.event.pull_request.body || '', '/priority') ||
-        contains(github.event.comment.body || github.event.review.body || github.event.issue.body || github.event.pull_request.body || '', '/actor') ||
-        contains(github.event.comment.body || github.event.review.body || github.event.issue.body || github.event.pull_request.body || '', '/triage')
+        (github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') &&
+        (
+          contains(github.event.comment.body || '', '/kind') ||
+          contains(github.event.comment.body || '', '/priority') ||
+          contains(github.event.comment.body || '', '/actor') ||
+          contains(github.event.comment.body || '', '/triage')
+        )
+      ) || (
+        github.event_name == 'pull_request_review' &&
+        (
+          contains(github.event.review.body || '', '/kind') ||
+          contains(github.event.review.body || '', '/priority') ||
+          contains(github.event.review.body || '', '/actor') ||
+          contains(github.event.review.body || '', '/triage')
+        )
+      ) || (
+        github.event_name == 'issues' &&
+        (github.event.action == 'opened' || github.event.action == 'edited') &&
+        (
+          contains(github.event.issue.body || '', '/kind') ||
+          contains(github.event.issue.body || '', '/priority') ||
+          contains(github.event.issue.body || '', '/actor') ||
+          contains(github.event.issue.body || '', '/triage')
+        )
+      ) || (
+        github.event_name == 'pull_request_target' &&
+        (github.event.action == 'opened' || github.event.action == 'edited') &&
+        (
+          contains(github.event.pull_request.body || '', '/kind') ||
+          contains(github.event.pull_request.body || '', '/priority') ||
+          contains(github.event.pull_request.body || '', '/actor') ||
+          contains(github.event.pull_request.body || '', '/triage')
+        )
       )
     runs-on: ubuntu-latest
     steps:
@@ -42,36 +61,60 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const body =
-              context.payload.comment?.body ||
-              context.payload.review?.body ||
-              context.payload.issue?.body ||
-              context.payload.pull_request?.body ||
-              ''
-            // Resolve the actor from the author of the text containing the
-            // label command, not from the event sender.  When a bot edits
-            // a PR description the sender is the bot, but the PR author
-            // (who wrote /kind, /priority, etc.) is the relevant actor for
-            // permission checks.
-            const actor =
-              context.payload.comment?.user?.login ||
-              context.payload.review?.user?.login ||
-              context.payload.issue?.user?.login ||
-              context.payload.pull_request?.user?.login ||
-              ''
-            const issueNumber = context.payload.issue?.number || context.payload.pull_request?.number || 0
+            const eventName = context.eventName
+            let body = ''
+            let actor = ''
+            let issueNumber = 0
+
+            if (eventName === 'issue_comment' || eventName === 'pull_request_review_comment') {
+              body = context.payload.comment?.body || ''
+              actor = context.payload.comment?.user?.login || ''
+              issueNumber = context.payload.issue?.number || context.payload.pull_request?.number || 0
+            } else if (eventName === 'pull_request_review') {
+              body = context.payload.review?.body || ''
+              actor = context.payload.review?.user?.login || ''
+              issueNumber = context.payload.pull_request?.number || context.payload.issue?.number || 0
+            } else if (eventName === 'issues') {
+              body = context.payload.issue?.body || ''
+              actor = context.payload.issue?.user?.login || ''
+              issueNumber = context.payload.issue?.number || 0
+            } else if (eventName === 'pull_request_target') {
+              body = context.payload.pull_request?.body || ''
+              actor = context.payload.pull_request?.user?.login || ''
+              issueNumber = context.payload.pull_request?.number || 0
+            } else {
+              core.setFailed(`Unsupported event for label workflow: ${eventName}`)
+              return
+            }
+
+            // Keep body and actor tied to the same event source so a review,
+            // comment, issue, or PR body cannot inherit another object's
+            // commands or author.
+            const strippedBody = body.replace(/<!--[\s\S]*?-->/g, '')
+            const hasCommand =
+              /^\s*\/(?:remove-)?(?:kind|priority|actor)\s+.+$/m.test(strippedBody) ||
+              /^\s*\/(?:remove-)?triage-accepted\s*$/m.test(strippedBody)
 
             core.setOutput('body', body)
             core.setOutput('actor', actor)
             core.setOutput('issue_number', String(issueNumber))
+            core.setOutput('has_command', hasCommand ? 'true' : 'false')
+
+            if (!hasCommand) {
+              core.info('No label commands found in selected source body')
+              return
+            }
 
             if (!actor) {
               core.setFailed('Could not determine actor for label command')
+              return
             }
             if (!issueNumber) {
               core.setFailed('Could not determine issue number for label command')
+              return
             }
       - name: Check permission
+        if: steps.context.outputs.has_command == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -82,6 +125,7 @@ jobs:
           fi
 
       - name: Apply labels
+        if: steps.context.outputs.has_command == 'true'
         uses: actions/github-script@v7
         env:
           COMMAND_BODY: ${{ steps.context.outputs.body }}

@@ -31,3 +31,4 @@ spec:
     - Commit messages: do not include PR links in commit messages
     - When making structural changes (adding new files, configs, or components), update related documentation (especially README files) to stay in sync
     - Kubernetes resource comparison: use semantic `.Equal()` or `.Cmp()` methods for `resource.Quantity` comparisons, not `reflect.DeepEqual`
+    - File removal/rename: when removing or renaming files, search for path references in tests (especially `test/integration/` and `test/e2e/` setup) and run `make test-integration` to catch breakages

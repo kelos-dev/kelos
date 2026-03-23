@@ -382,17 +382,19 @@ spec:
 
       1. Clone the paiops repository for reference:
          ```
-         git clone --depth 1 "https://$(gh auth token)@oss.navercorp.com/pai/paiops.git" /tmp/paiops
+         git clone --depth 1 "https://$(gh auth token)@oss.navercorp.com/pai/paiops.git" ./paiops
          ```
 
-      2. Read the PR diff:
+      2. Read the review prompt file at `.github/prompts/ai-code-review.prompt.md` and follow its guidelines for the entire review process.
+
+      3. Read the PR diff:
          ```
          gh pr diff {{.Number}}
          ```
 
-      3. Read the relevant source files to understand context around the changed code.
+      4. Read the relevant source files to understand context around the changed code.
 
-      4. Review the changes following the guidelines below, then post inline
+      5. Review the changes following the guidelines from step 2, then post inline
          review comments using `gh api` for each issue found:
          ```
          gh api repos/{owner}/{repo}/pulls/{{.Number}}/comments \
@@ -403,33 +405,8 @@ spec:
            -f side="RIGHT"
          ```
 
-      5. Post a PR comment whose first line is `/kelos needs-input` with a
-         brief summary of findings (or "No issues found").
-
-      ## 리뷰 지침
-
-      **핵심 원칙: 간결하고 실용적인 피드백만 제공**
-
-      - 실제 문제가 있는 코드에만 인라인 코멘트 작성
-      - 버그, 보안 취약점, 성능 이슈 등 수정이 필요한 부분 위주로 지적
-      - 사소한 스타일 이슈나 주관적 선호는 생략
-      - 칭찬이나 장황한 설명 불필요
-      - 한 이슈당 1-2문장으로 핵심만 전달
-
-      ## 리뷰 우선순위 (문제 있을 때만)
-      1. 버그/로직 오류
-      2. 보안 취약점
-      3. 성능 문제
-      4. 테스트 누락 (중요 로직에 한해)
-
-      ## paiops 참고
-      - paiops(pai/paiops)는 서비스 구현을 위한 공용 코드 패키지 라이브러리이며, 소스코드가 /tmp/paiops 디렉토리에 클론되어 있음
-      - PR 변경사항에서 paiops-core, paiops-pipeline을 사용하는 코드가 있으면 /tmp/paiops 소스를 참고하여 올바른 API 사용법, 패턴, 버전 호환성을 확인할 것
-      - PR의 변경사항 중 반복되는 패턴, 공통 유틸리티, 또는 여러 서비스에서 재사용 가능한 로직이 보이면 paiops에 추가/업데이트하는 것을 제안할 것
-      - paiops에 이미 존재하는 기능을 직접 구현하고 있다면 paiops 활용을 권장할 것
-      - paiops의 기존 API가 현재 요구사항을 충족하지 못해 우회하거나 확장하는 코드가 보이면, paiops 자체의 개선이 필요한지 의견을 남길 것
-
-      문제가 없으면 인라인 리뷰를 달지 않아도 됨.
+      6. Post a PR comment with the review summary as described in the prompt file.
+         The comment MUST start with `/kelos needs-input`.
 
       ## Rules
 

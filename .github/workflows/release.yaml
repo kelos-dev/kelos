@@ -50,7 +50,7 @@ jobs:
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           else
-            echo "version=main" >> "$GITHUB_OUTPUT"
+            echo "version=${GITHUB_REF#refs/heads/}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build images

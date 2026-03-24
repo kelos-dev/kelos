@@ -1,0 +1,11 @@
+apiVersion: kelos.dev/v1alpha1
+kind: Task
+metadata:
+  name: bedrock-irsa-task
+spec:
+  type: claude-code
+  prompt: "Write a Python script that prints the first 20 Fibonacci numbers."
+  credentials:
+    type: bedrock
+    region: us-east-1
+    serviceAccountName: bedrock-agent-sa

@@ -63,7 +63,7 @@ var _ = Describe("TaskSpawner", func() {
 					},
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeOAuth,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "claude-credentials"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "claude-credentials"},
 					},
 					PromptTemplate: "Fix: {{.Title}}\n{{.Body}}",
 				},
@@ -112,7 +112,7 @@ var _ = Describe("TaskSpawner", func() {
 					},
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeOAuth,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "claude-credentials"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "claude-credentials"},
 					},
 				},
 				PollInterval: "5m",
@@ -174,7 +174,7 @@ var _ = Describe("Cron TaskSpawner", func() {
 					Model: testModel,
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeOAuth,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "claude-credentials"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "claude-credentials"},
 					},
 					PromptTemplate: "Cron triggered at {{.Time}} (schedule: {{.Schedule}}). Print 'Hello from cron'",
 				},
@@ -212,7 +212,7 @@ var _ = Describe("Cron TaskSpawner", func() {
 					Type: "claude-code",
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeOAuth,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "claude-credentials"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "claude-credentials"},
 					},
 				},
 				PollInterval: "5m",

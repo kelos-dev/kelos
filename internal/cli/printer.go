@@ -64,7 +64,9 @@ func printTaskDetail(w io.Writer, t *kelosv1alpha1.Task) {
 	printField(w, "Type", t.Spec.Type)
 	printField(w, "Phase", string(t.Status.Phase))
 	printField(w, "Prompt", t.Spec.Prompt)
-	printField(w, "Secret", t.Spec.Credentials.SecretRef.Name)
+	if t.Spec.Credentials.SecretRef != nil {
+		printField(w, "Secret", t.Spec.Credentials.SecretRef.Name)
+	}
 	printField(w, "Credential Type", string(t.Spec.Credentials.Type))
 	if t.Spec.Model != "" {
 		printField(w, "Model", t.Spec.Model)

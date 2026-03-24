@@ -91,7 +91,7 @@ func createAndCompleteTask(nsName, taskName, spawner, model string) *kelosv1alph
 			Prompt: fmt.Sprintf("Test task %s", taskName),
 			Credentials: kelosv1alpha1.Credentials{
 				Type: kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{
+				SecretRef: &kelosv1alpha1.SecretReference{
 					Name: "anthropic-api-key",
 				},
 			},

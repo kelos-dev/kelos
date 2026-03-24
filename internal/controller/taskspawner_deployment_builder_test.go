@@ -1483,7 +1483,7 @@ func TestBuildCronJob_BasicSchedule(t *testing.T) {
 				Type: "claude-code",
 				Credentials: kelosv1alpha1.Credentials{
 					Type:      kelosv1alpha1.CredentialTypeAPIKey,
-					SecretRef: kelosv1alpha1.SecretReference{Name: "creds"},
+					SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
 				},
 			},
 		},
@@ -1611,7 +1611,7 @@ func TestIsCronBased(t *testing.T) {
 				Type: "claude-code",
 				Credentials: kelosv1alpha1.Credentials{
 					Type:      kelosv1alpha1.CredentialTypeAPIKey,
-					SecretRef: kelosv1alpha1.SecretReference{Name: "creds"},
+					SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
 				},
 			},
 		},

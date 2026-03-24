@@ -68,7 +68,7 @@ var _ = Describe("Completion", func() {
 						Prompt: "test",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeAPIKey,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "test-secret",
 							},
 						},
@@ -106,7 +106,7 @@ var _ = Describe("Completion", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeAPIKey,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "test-secret",
 							},
 						},
@@ -143,7 +143,7 @@ var _ = Describe("Completion", func() {
 					Prompt: "test",
 					Credentials: kelosv1alpha1.Credentials{
 						Type: kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{
+						SecretRef: &kelosv1alpha1.SecretReference{
 							Name: "test-secret",
 						},
 					},

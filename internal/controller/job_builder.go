@@ -169,11 +169,15 @@ func oauthEnvVar(agentType string) string {
 }
 
 // credentialEnvVars returns the environment variables to inject for the given
-// credential type, agent type, and secret name. This centralises all
-// credential-type-specific logic so that new providers (e.g. Vertex) only
-// need to add a case here.
-func credentialEnvVars(credType kelosv1alpha1.CredentialType, agentType, secretName string) []corev1.EnvVar {
-	secretRef := func(key string, optional bool) corev1.EnvVar {
+// credentials and agent type. This centralises all credential-type-specific
+// logic so that new providers (e.g. Vertex) only need to add a case here.
+func credentialEnvVars(creds kelosv1alpha1.Credentials, agentType string) []corev1.EnvVar {
+	secretName := ""
+	if creds.SecretRef != nil {
+		secretName = creds.SecretRef.Name
+	}
+
+	secretEnvRef := func(key string, optional bool) corev1.EnvVar {
 		sel := &corev1.SecretKeySelector{
 			LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
 			Key:                  key,
@@ -187,24 +191,37 @@ func credentialEnvVars(credType kelosv1alpha1.CredentialType, agentType, secretN
 		}
 	}
 
-	switch credType {
+	switch creds.Type {
 	case kelosv1alpha1.CredentialTypeAPIKey:
 		keyName := apiKeyEnvVar(agentType)
-		return []corev1.EnvVar{secretRef(keyName, false)}
+		return []corev1.EnvVar{secretEnvRef(keyName, false)}
 
 	case kelosv1alpha1.CredentialTypeOAuth:
 		tokenName := oauthEnvVar(agentType)
-		return []corev1.EnvVar{secretRef(tokenName, false)}
+		return []corev1.EnvVar{secretEnvRef(tokenName, false)}
 
 	case kelosv1alpha1.CredentialTypeBedrock:
-		return []corev1.EnvVar{
+		envs := []corev1.EnvVar{
 			{Name: "CLAUDE_CODE_USE_BEDROCK", Value: "1"},
-			secretRef("AWS_ACCESS_KEY_ID", false),
-			secretRef("AWS_SECRET_ACCESS_KEY", false),
-			secretRef("AWS_REGION", false),
-			secretRef("AWS_SESSION_TOKEN", true),
-			secretRef("ANTHROPIC_BEDROCK_BASE_URL", true),
 		}
+		if secretName != "" {
+			// Static credentials from a Secret.
+			envs = append(envs,
+				secretEnvRef("AWS_ACCESS_KEY_ID", false),
+				secretEnvRef("AWS_SECRET_ACCESS_KEY", false),
+				secretEnvRef("AWS_REGION", false),
+				secretEnvRef("AWS_SESSION_TOKEN", true),
+				secretEnvRef("ANTHROPIC_BEDROCK_BASE_URL", true),
+			)
+		} else if creds.Region != "" {
+			// IRSA mode — SDK picks up credentials from the projected
+			// service account token; only the region is needed.
+			envs = append(envs, corev1.EnvVar{
+				Name:  "AWS_REGION",
+				Value: creds.Region,
+			})
+		}
+		return envs
 
 	default:
 		return nil
@@ -272,7 +289,7 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 		})
 	}
 
-	credEnvVars := credentialEnvVars(task.Spec.Credentials.Type, task.Spec.Type, task.Spec.Credentials.SecretRef.Name)
+	credEnvVars := credentialEnvVars(task.Spec.Credentials, task.Spec.Type)
 	envVars = append(envVars, credEnvVars...)
 
 	var workspaceEnvVars []corev1.EnvVar
@@ -566,6 +583,12 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 		}
 	}
 
+	// ServiceAccountName from credentials (e.g. IRSA for Bedrock).
+	var serviceAccountName string
+	if task.Spec.Credentials.ServiceAccountName != "" {
+		serviceAccountName = task.Spec.Credentials.ServiceAccountName
+	}
+
 	// Apply PodOverrides before constructing the Job so all overrides
 	// are reflected in the final spec.
 	var activeDeadlineSeconds *int64
@@ -648,12 +671,13 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 					},
 				},
 				Spec: corev1.PodSpec{
-					RestartPolicy:   corev1.RestartPolicyNever,
-					SecurityContext: podSecurityContext,
-					InitContainers:  initContainers,
-					Volumes:         volumes,
-					Containers:      []corev1.Container{mainContainer},
-					NodeSelector:    nodeSelector,
+					RestartPolicy:      corev1.RestartPolicyNever,
+					SecurityContext:    podSecurityContext,
+					ServiceAccountName: serviceAccountName,
+					InitContainers:     initContainers,
+					Volumes:            volumes,
+					Containers:         []corev1.Container{mainContainer},
+					NodeSelector:       nodeSelector,
 				},
 			},
 		},

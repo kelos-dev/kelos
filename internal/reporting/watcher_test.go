@@ -107,7 +107,7 @@ func newTaskWithAnnotations(name, namespace string, phase kelosv1alpha1.TaskPhas
 			Prompt: "test",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeOAuth,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "creds"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
 			},
 		},
 		Status: kelosv1alpha1.TaskStatus{
@@ -555,7 +555,7 @@ func TestReportTaskStatus_NilAnnotations(t *testing.T) {
 			Prompt: "test",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeOAuth,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "creds"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
 			},
 		},
 		Status: kelosv1alpha1.TaskStatus{

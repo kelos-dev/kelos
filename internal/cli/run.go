@@ -50,6 +50,8 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 		agentConfigRef string
 		dependsOn      []string
 		branch         string
+		region         string
+		serviceAccount string
 	)
 
 	cmd := &cobra.Command{
@@ -119,20 +121,32 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 					secret = "kelos-credentials"
 					credentialType = "api-key"
 				} else if br := cfg.Config.Bedrock; br != nil {
-					if br.AccessKeyID == "" || br.SecretAccessKey == "" || br.Region == "" {
-						return fmt.Errorf("bedrock config requires accessKeyID, secretAccessKey, and region")
-					}
-					if !dryRun {
-						if err := ensureBedrockSecret(cfg, "kelos-credentials", br, yes); err != nil {
-							return err
+					hasStaticCreds := br.AccessKeyID != "" || br.SecretAccessKey != ""
+					if hasStaticCreds {
+						if br.AccessKeyID == "" || br.SecretAccessKey == "" || br.Region == "" {
+							return fmt.Errorf("bedrock config requires accessKeyID, secretAccessKey, and region when using static credentials")
+						}
+						if !dryRun {
+							if err := ensureBedrockSecret(cfg, "kelos-credentials", br, yes); err != nil {
+								return err
+							}
+						}
+						secret = "kelos-credentials"
+					} else {
+						// IRSA mode — no secret needed, region is set on credentials directly.
+						if br.Region == "" {
+							return fmt.Errorf("bedrock config requires region")
+						}
+						region = br.Region
+						if br.ServiceAccountName != "" && serviceAccount == "" {
+							serviceAccount = br.ServiceAccountName
 						}
 					}
-					secret = "kelos-credentials"
 					credentialType = "bedrock"
 				}
 			}
 
-			if secret == "" {
+			if secret == "" && credentialType != "bedrock" {
 				return fmt.Errorf("no credentials configured (set oauthToken/apiKey in config file, or use --secret flag)")
 			}
 
@@ -214,22 +228,28 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 				name = "task-" + rand.String(5)
 			}
 
+			creds := kelosv1alpha1.Credentials{
+				Type:   kelosv1alpha1.CredentialType(credentialType),
+				Region: region,
+			}
+			if secret != "" {
+				creds.SecretRef = &kelosv1alpha1.SecretReference{Name: secret}
+			}
+			if serviceAccount != "" {
+				creds.ServiceAccountName = serviceAccount
+			}
+
 			task := &kelosv1alpha1.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      name,
 					Namespace: ns,
 				},
 				Spec: kelosv1alpha1.TaskSpec{
-					Type:   agentType,
-					Prompt: prompt,
-					Credentials: kelosv1alpha1.Credentials{
-						Type: kelosv1alpha1.CredentialType(credentialType),
-						SecretRef: kelosv1alpha1.SecretReference{
-							Name: secret,
-						},
-					},
-					Model: model,
-					Image: image,
+					Type:        agentType,
+					Prompt:      prompt,
+					Credentials: creds,
+					Model:       model,
+					Image:       image,
 				},
 			}
 
@@ -309,7 +329,9 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 	cmd.Flags().StringVarP(&prompt, "prompt", "p", "", "task prompt (required)")
 	cmd.Flags().StringVarP(&agentType, "type", "t", "claude-code", "agent type (claude-code, codex, gemini, opencode, cursor)")
 	cmd.Flags().StringVar(&secret, "secret", "", "secret name with credentials (overrides oauthToken/apiKey in config)")
-	cmd.Flags().StringVar(&credentialType, "credential-type", "api-key", "credential type (api-key, oauth)")
+	cmd.Flags().StringVar(&credentialType, "credential-type", "api-key", "credential type (api-key, oauth, bedrock)")
+	cmd.Flags().StringVar(&region, "region", "", "cloud provider region (e.g. us-east-1 for Bedrock IRSA)")
+	cmd.Flags().StringVar(&serviceAccount, "service-account", "", "pod service account name (e.g. for IRSA on EKS)")
 	cmd.Flags().StringVar(&model, "model", "", "model override")
 	cmd.Flags().StringVar(&image, "image", "", "custom agent image (must implement agent image interface)")
 	cmd.Flags().StringVar(&name, "name", "", "task name (auto-generated if omitted)")

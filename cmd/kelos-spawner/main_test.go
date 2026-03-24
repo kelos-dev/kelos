@@ -77,7 +77,7 @@ func newTaskSpawner(name, namespace string, maxConcurrency *int32) *kelosv1alpha
 				Type: "claude-code",
 				Credentials: kelosv1alpha1.Credentials{
 					Type:      kelosv1alpha1.CredentialTypeOAuth,
-					SecretRef: kelosv1alpha1.SecretReference{Name: "creds"},
+					SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
 				},
 				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "test-ws"},
 			},
@@ -100,7 +100,7 @@ func newTask(name, namespace, spawnerName string, phase kelosv1alpha1.TaskPhase)
 			Prompt: "test",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeOAuth,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "creds"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
 			},
 		},
 		Status: kelosv1alpha1.TaskStatus{
@@ -212,7 +212,7 @@ func TestBuildSource_Jira(t *testing.T) {
 				Type: "claude-code",
 				Credentials: kelosv1alpha1.Credentials{
 					Type:      kelosv1alpha1.CredentialTypeOAuth,
-					SecretRef: kelosv1alpha1.SecretReference{Name: "creds"},
+					SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
 				},
 			},
 		},
@@ -1186,7 +1186,7 @@ func newCompletedTask(name, namespace, spawnerName string, phase kelosv1alpha1.T
 			Prompt: "test",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeOAuth,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "creds"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
 			},
 		},
 		Status: kelosv1alpha1.TaskStatus{
@@ -1520,7 +1520,7 @@ func TestRunCycleWithSource_PropagatesUpstreamRepo(t *testing.T) {
 				Type: "claude-code",
 				Credentials: kelosv1alpha1.Credentials{
 					Type:      kelosv1alpha1.CredentialTypeAPIKey,
-					SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+					SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 				},
 			},
 		},
@@ -1563,7 +1563,7 @@ func TestRunCycleWithSource_ExplicitUpstreamRepoTakesPrecedence(t *testing.T) {
 				Type: "claude-code",
 				Credentials: kelosv1alpha1.Credentials{
 					Type:      kelosv1alpha1.CredentialTypeAPIKey,
-					SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+					SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 				},
 				UpstreamRepo: "explicit-org/explicit-repo",
 			},
@@ -1843,7 +1843,7 @@ func TestRunReportingCycle_ReportsForAnnotatedTasks(t *testing.T) {
 			Prompt: "test",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeOAuth,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "creds"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
 			},
 		},
 		Status: kelosv1alpha1.TaskStatus{
@@ -1904,7 +1904,7 @@ func TestRunReportingCycle_SkipsTasksWithoutReporting(t *testing.T) {
 			Prompt: "test",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeOAuth,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "creds"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
 			},
 		},
 		Status: kelosv1alpha1.TaskStatus{

@@ -7,7 +7,7 @@ This example demonstrates running a Claude Code task using AWS Bedrock instead o
 - AWS account with Bedrock access enabled for Claude models
 - AWS IAM credentials with `bedrock:InvokeModel` permissions
 
-## Setup
+## Option 1: Static Credentials (Secret)
 
 1. Create the Secret with your AWS credentials:
 
@@ -24,9 +24,12 @@ This example demonstrates running a Claude Code task using AWS Bedrock instead o
    kubectl apply -f task.yaml
    ```
 
-## Using the CLI
+### Optional Secret Keys
 
-You can also use `kelos run` with a config file:
+- `AWS_SESSION_TOKEN`: Required when using temporary credentials (e.g. from STS AssumeRole)
+- `ANTHROPIC_BEDROCK_BASE_URL`: Custom Bedrock endpoint URL
+
+### CLI with Static Credentials
 
 ```yaml
 # ~/.kelos/config.yaml
@@ -46,27 +49,42 @@ Or with a pre-created secret:
 kelos run -p "Fix the bug" --credential-type bedrock --secret bedrock-credentials
 ```
 
-## Optional Fields
+## Option 2: IAM Roles for Service Accounts (IRSA)
 
-- `AWS_SESSION_TOKEN`: Required when using temporary credentials (e.g. from STS AssumeRole)
-- `ANTHROPIC_BEDROCK_BASE_URL`: Custom Bedrock endpoint URL
+On EKS, you can use IRSA instead of static credentials. The AWS SDK automatically picks up credentials from the projected service account token — no Secret needed.
 
-## IAM Roles for Service Accounts (IRSA)
+### Prerequisites
 
-On EKS, you can use IRSA instead of static credentials. In that case, use `podOverrides.env` to set only the required environment variables:
+1. Create an IAM role with `bedrock:InvokeModel` permissions
+2. Create a Kubernetes ServiceAccount annotated with the IAM role:
+
+   ```bash
+   kubectl create serviceaccount bedrock-agent-sa
+   kubectl annotate serviceaccount bedrock-agent-sa \
+     eks.amazonaws.com/role-arn=arn:aws:iam::123456789012:role/bedrock-agent-role
+   ```
+
+3. Create the Task with `region` and `serviceAccountName` (no `secretRef`):
+
+   ```bash
+   kubectl apply -f task-irsa.yaml
+   ```
+
+### CLI with IRSA
 
 ```yaml
-spec:
-  credentials:
-    type: api-key
-    secretRef:
-      name: dummy-secret  # Required by schema; not used by Bedrock
-  podOverrides:
-    env:
-      - name: CLAUDE_CODE_USE_BEDROCK
-        value: "1"
-      - name: AWS_REGION
-        value: us-east-1
+# ~/.kelos/config.yaml
+bedrock:
+  region: us-east-1
+  serviceAccountName: bedrock-agent-sa
 ```
 
-Note: First-class IRSA support (making `secretRef` optional for bedrock) is planned for a future release.
+```bash
+kelos run -p "Fix the bug"
+```
+
+Or with flags:
+
+```bash
+kelos run -p "Fix the bug" --credential-type bedrock --region us-east-1 --service-account bedrock-agent-sa
+```

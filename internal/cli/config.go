@@ -23,12 +23,15 @@ type Config struct {
 }
 
 // BedrockConfig holds AWS credentials for Bedrock authentication.
+// For IRSA mode, omit accessKeyID and secretAccessKey and set only region
+// and serviceAccountName.
 type BedrockConfig struct {
-	AccessKeyID     string `json:"accessKeyID"`
-	SecretAccessKey string `json:"secretAccessKey"`
-	Region          string `json:"region"`
-	SessionToken    string `json:"sessionToken,omitempty"`
-	BaseURL         string `json:"baseURL,omitempty"`
+	AccessKeyID        string `json:"accessKeyID,omitempty"`
+	SecretAccessKey    string `json:"secretAccessKey,omitempty"`
+	Region             string `json:"region"`
+	SessionToken       string `json:"sessionToken,omitempty"`
+	BaseURL            string `json:"baseURL,omitempty"`
+	ServiceAccountName string `json:"serviceAccountName,omitempty"`
 }
 
 // WorkspaceConfig holds workspace-related configuration.

@@ -41,12 +41,26 @@ type SecretReference struct {
 
 // Credentials defines how to authenticate with the AI agent.
 type Credentials struct {
-	// Type specifies the credential type (api-key or oauth).
+	// Type specifies the credential type.
 	// +kubebuilder:validation:Enum=api-key;oauth;bedrock
 	Type CredentialType `json:"type"`
 
 	// SecretRef references the Secret containing credentials.
-	SecretRef SecretReference `json:"secretRef"`
+	// Required for api-key and oauth types. Optional for bedrock
+	// when using IAM Roles for Service Accounts (IRSA).
+	// +optional
+	SecretRef *SecretReference `json:"secretRef,omitempty"`
+
+	// Region specifies the cloud provider region (e.g. AWS region for Bedrock).
+	// Used with bedrock credentials when secretRef is omitted (IRSA mode).
+	// +optional
+	Region string `json:"region,omitempty"`
+
+	// ServiceAccountName overrides the pod's service account.
+	// Use with IAM Roles for Service Accounts (IRSA) on EKS to let
+	// the pod assume an IAM role without static credentials.
+	// +optional
+	ServiceAccountName string `json:"serviceAccountName,omitempty"`
 }
 
 // PodOverrides defines optional overrides for the agent pod.
@@ -86,6 +100,7 @@ type TaskSpec struct {
 
 	// Credentials specifies how to authenticate with the agent.
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:XValidation:rule="self.type == 'bedrock' || has(self.secretRef)",message="secretRef is required for api-key and oauth credential types"
 	Credentials Credentials `json:"credentials"`
 
 	// Model optionally overrides the default model.

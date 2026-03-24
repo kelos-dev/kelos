@@ -304,6 +304,7 @@ type TaskTemplate struct {
 
 	// Credentials specifies how to authenticate with the agent.
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:XValidation:rule="self.type == 'bedrock' || has(self.secretRef)",message="secretRef is required for api-key and oauth credential types"
 	Credentials Credentials `json:"credentials"`
 
 	// Model optionally overrides the default model.

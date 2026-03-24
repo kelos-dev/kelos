@@ -739,7 +739,7 @@ func TestPrintTaskDetail(t *testing.T) {
 			Prompt: "Fix the bug",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 			Model:     "claude-sonnet-4-20250514",
 			Image:     "custom-image:latest",
@@ -993,7 +993,7 @@ func TestPrintTaskDetailMinimal(t *testing.T) {
 			Prompt: "Do something",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "secret"},
 			},
 		},
 		Status: kelosv1alpha1.TaskStatus{

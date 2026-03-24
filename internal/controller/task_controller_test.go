@@ -607,7 +607,7 @@ func TestUpdateStatusRefreshesPodName(t *testing.T) {
 			Prompt: "test",
 			Credentials: kelosv1alpha1.Credentials{
 				Type: kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{
+				SecretRef: &kelosv1alpha1.SecretReference{
 					Name: "creds",
 				},
 			},
@@ -663,7 +663,7 @@ func TestUpdateStatusClearsStalePodNameWhenNoLivePodsRemain(t *testing.T) {
 			Prompt: "test",
 			Credentials: kelosv1alpha1.Credentials{
 				Type: kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{
+				SecretRef: &kelosv1alpha1.SecretReference{
 					Name: "creds",
 				},
 			},

@@ -198,12 +198,12 @@ func TestRenderChart_ImageArgs(t *testing.T) {
 		t.Fatalf("rendering chart: %v", err)
 	}
 	versionedArgs := []string{
-		"--claude-code-image=ghcr.io/kelos-dev/claude-code:v0.3.0",
-		"--codex-image=ghcr.io/kelos-dev/codex:v0.3.0",
-		"--gemini-image=ghcr.io/kelos-dev/gemini:v0.3.0",
-		"--opencode-image=ghcr.io/kelos-dev/opencode:v0.3.0",
-		"--spawner-image=ghcr.io/kelos-dev/kelos-spawner:v0.3.0",
-		"--token-refresher-image=ghcr.io/kelos-dev/kelos-token-refresher:v0.3.0",
+		"--claude-code-image=public.ecr.aws/anomalo/kelos/claude-code:v0.3.0",
+		"--codex-image=public.ecr.aws/anomalo/kelos/codex:v0.3.0",
+		"--gemini-image=public.ecr.aws/anomalo/kelos/gemini:v0.3.0",
+		"--opencode-image=public.ecr.aws/anomalo/kelos/opencode:v0.3.0",
+		"--spawner-image=public.ecr.aws/anomalo/kelos/kelos-spawner:v0.3.0",
+		"--token-refresher-image=public.ecr.aws/anomalo/kelos/kelos-token-refresher:v0.3.0",
 	}
 	for _, arg := range versionedArgs {
 		if !bytes.Contains(data, []byte(arg)) {

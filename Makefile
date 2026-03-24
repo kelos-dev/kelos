@@ -1,5 +1,5 @@
 # Image configuration
-REGISTRY ?= ghcr.io/kelos-dev
+REGISTRY ?= public.ecr.aws/anomalo/kelos
 VERSION ?= latest
 IMAGE_DIRS ?= cmd/kelos-controller cmd/kelos-spawner cmd/kelos-token-refresher claude-code codex gemini opencode cursor
 

@@ -16,19 +16,19 @@ import (
 
 const (
 	// ClaudeCodeImage is the default image for Claude Code agent.
-	ClaudeCodeImage = "ghcr.io/kelos-dev/claude-code:latest"
+	ClaudeCodeImage = "public.ecr.aws/anomalo/kelos/claude-code:latest"
 
 	// CodexImage is the default image for OpenAI Codex agent.
-	CodexImage = "ghcr.io/kelos-dev/codex:latest"
+	CodexImage = "public.ecr.aws/anomalo/kelos/codex:latest"
 
 	// GeminiImage is the default image for Google Gemini CLI agent.
-	GeminiImage = "ghcr.io/kelos-dev/gemini:latest"
+	GeminiImage = "public.ecr.aws/anomalo/kelos/gemini:latest"
 
 	// OpenCodeImage is the default image for OpenCode agent.
-	OpenCodeImage = "ghcr.io/kelos-dev/opencode:latest"
+	OpenCodeImage = "public.ecr.aws/anomalo/kelos/opencode:latest"
 
 	// CursorImage is the default image for Cursor CLI agent.
-	CursorImage = "ghcr.io/kelos-dev/cursor:latest"
+	CursorImage = "public.ecr.aws/anomalo/kelos/cursor:latest"
 
 	// AgentTypeClaudeCode is the agent type for Claude Code.
 	AgentTypeClaudeCode = "claude-code"

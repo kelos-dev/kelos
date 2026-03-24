@@ -90,17 +90,17 @@ jobs:
           cluster_name: kind
 
       - name: Build images
-        run: make image VERSION=e2e
+        run: make image VERSION=e2e REGISTRY=public.ecr.aws/anomalo/kelos
 
       - name: Load images into kind
         run: |
-          kind load docker-image ghcr.io/kelos-dev/kelos-controller:e2e
-          kind load docker-image ghcr.io/kelos-dev/kelos-spawner:e2e
-          kind load docker-image ghcr.io/kelos-dev/claude-code:e2e
-          kind load docker-image ghcr.io/kelos-dev/codex:e2e
-          kind load docker-image ghcr.io/kelos-dev/gemini:e2e
-          kind load docker-image ghcr.io/kelos-dev/opencode:e2e
-          kind load docker-image ghcr.io/kelos-dev/cursor:e2e
+          kind load docker-image public.ecr.aws/anomalo/kelos/kelos-controller:e2e
+          kind load docker-image public.ecr.aws/anomalo/kelos/kelos-spawner:e2e
+          kind load docker-image public.ecr.aws/anomalo/kelos/claude-code:e2e
+          kind load docker-image public.ecr.aws/anomalo/kelos/codex:e2e
+          kind load docker-image public.ecr.aws/anomalo/kelos/gemini:e2e
+          kind load docker-image public.ecr.aws/anomalo/kelos/opencode:e2e
+          kind load docker-image public.ecr.aws/anomalo/kelos/cursor:e2e
 
       - name: Build CLI
         run: make build WHAT=cmd/kelos

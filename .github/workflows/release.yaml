@@ -9,12 +9,17 @@ concurrency:
   group: release
   cancel-in-progress: false
 
+env:
+  REGISTRY: public.ecr.aws
+  IMAGE_NAME: anomalo/kelos
+
 jobs:
   release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
       packages: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -24,12 +29,20 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Login to GHCR
-        uses: docker/login-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          role-to-assume: arn:aws:iam::580663733917:role/github-actions
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registry-type: public
 
       - name: Determine version
         id: version
@@ -43,18 +56,18 @@ jobs:
       - name: Build images
         env:
           VERSION: ${{ steps.version.outputs.version }}
-        run: make image VERSION="$VERSION"
+        run: make image VERSION="$VERSION" REGISTRY="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
 
       - name: Push images
         env:
           VERSION: ${{ steps.version.outputs.version }}
-        run: make push VERSION="$VERSION"
+        run: make push VERSION="$VERSION" REGISTRY="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
 
       - name: Push latest tags for releases
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          make image VERSION=latest
-          make push VERSION=latest
+          make image VERSION=latest REGISTRY="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          make push VERSION=latest REGISTRY="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
 
       - name: Build CLI binaries
         if: startsWith(github.ref, 'refs/tags/v')

@@ -5,7 +5,7 @@ set -o nounset
 set -o pipefail
 
 KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-kind}"
-REGISTRY="${REGISTRY:-ghcr.io/kelos-dev}"
+REGISTRY="${REGISTRY:-public.ecr.aws/anomalo/kelos}"
 LOCAL_IMAGE_TAG="${LOCAL_IMAGE_TAG:-local-dev}"
 if ! command -v kind >/dev/null 2>&1; then
   echo "Kind CLI not found in PATH" >&2

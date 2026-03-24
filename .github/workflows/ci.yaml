@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main,prod]
   pull_request:
-    branches: [main]
+    branches: [main,prod]
     types: [opened, synchronize, reopened, labeled]
   merge_group:
   workflow_dispatch:

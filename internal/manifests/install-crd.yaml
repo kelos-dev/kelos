@@ -317,6 +317,7 @@ spec:
                     enum:
                     - api-key
                     - oauth
+                    - bedrock
                     type: string
                 required:
                 - secretRef
@@ -805,6 +806,7 @@ spec:
                         enum:
                         - api-key
                         - oauth
+                        - bedrock
                         type: string
                     required:
                     - secretRef

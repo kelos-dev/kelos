@@ -4246,3 +4246,89 @@ func TestBuildJob_UpstreamRepoSpecWithoutRemote(t *testing.T) {
 		t.Error("Expected KELOS_UPSTREAM_REPO env var on main container")
 	}
 }
+
+func TestBuildClaudeCodeJob_BedrockCredentials(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-bedrock",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix the bug",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeBedrock,
+				SecretRef: kelosv1alpha1.SecretReference{Name: "bedrock-creds"},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+
+	// Collect env vars by name for easier assertions.
+	envMap := make(map[string]corev1.EnvVar)
+	for _, env := range container.Env {
+		envMap[env.Name] = env
+	}
+
+	// CLAUDE_CODE_USE_BEDROCK should be set as a literal value.
+	if env, ok := envMap["CLAUDE_CODE_USE_BEDROCK"]; !ok {
+		t.Error("Expected CLAUDE_CODE_USE_BEDROCK env var")
+	} else if env.Value != "1" {
+		t.Errorf("CLAUDE_CODE_USE_BEDROCK = %q, want %q", env.Value, "1")
+	}
+
+	// Required AWS credentials should reference the secret.
+	for _, key := range []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION"} {
+		env, ok := envMap[key]
+		if !ok {
+			t.Errorf("Expected %s env var", key)
+			continue
+		}
+		if env.ValueFrom == nil || env.ValueFrom.SecretKeyRef == nil {
+			t.Errorf("Expected %s to reference a secret", key)
+			continue
+		}
+		if env.ValueFrom.SecretKeyRef.Name != "bedrock-creds" {
+			t.Errorf("%s secret name = %q, want %q", key, env.ValueFrom.SecretKeyRef.Name, "bedrock-creds")
+		}
+		if env.ValueFrom.SecretKeyRef.Key != key {
+			t.Errorf("%s secret key = %q, want %q", key, env.ValueFrom.SecretKeyRef.Key, key)
+		}
+		if env.ValueFrom.SecretKeyRef.Optional != nil && *env.ValueFrom.SecretKeyRef.Optional {
+			t.Errorf("%s should not be optional", key)
+		}
+	}
+
+	// Optional AWS credentials should be marked optional.
+	for _, key := range []string{"AWS_SESSION_TOKEN", "ANTHROPIC_BEDROCK_BASE_URL"} {
+		env, ok := envMap[key]
+		if !ok {
+			t.Errorf("Expected %s env var", key)
+			continue
+		}
+		if env.ValueFrom == nil || env.ValueFrom.SecretKeyRef == nil {
+			t.Errorf("Expected %s to reference a secret", key)
+			continue
+		}
+		if env.ValueFrom.SecretKeyRef.Optional == nil || !*env.ValueFrom.SecretKeyRef.Optional {
+			t.Errorf("%s should be optional", key)
+		}
+	}
+
+	// ANTHROPIC_API_KEY should NOT be set for bedrock credential type.
+	if _, ok := envMap["ANTHROPIC_API_KEY"]; ok {
+		t.Error("ANTHROPIC_API_KEY should not be set for bedrock credential type")
+	}
+
+	// CLAUDE_CODE_OAUTH_TOKEN should NOT be set.
+	if _, ok := envMap["CLAUDE_CODE_OAUTH_TOKEN"]; ok {
+		t.Error("CLAUDE_CODE_OAUTH_TOKEN should not be set for bedrock credential type")
+	}
+}

@@ -168,6 +168,54 @@ func oauthEnvVar(agentType string) string {
 	}
 }
 
+// credentialEnvVars returns the environment variables to inject for the given
+// credential type, agent type, and secret name. This centralises all
+// credential-type-specific logic so that new providers (e.g. Vertex) only
+// need to add a case here.
+func credentialEnvVars(credType kelosv1alpha1.CredentialType, agentType, secretName string) []corev1.EnvVar {
+	secretRef := func(key string, optional bool) corev1.EnvVar {
+		sel := &corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
+			Key:                  key,
+		}
+		if optional {
+			sel.Optional = ptr(true)
+		}
+		return corev1.EnvVar{
+			Name:      key,
+			ValueFrom: &corev1.EnvVarSource{SecretKeyRef: sel},
+		}
+	}
+
+	switch credType {
+	case kelosv1alpha1.CredentialTypeAPIKey:
+		keyName := apiKeyEnvVar(agentType)
+		return []corev1.EnvVar{secretRef(keyName, false)}
+
+	case kelosv1alpha1.CredentialTypeOAuth:
+		tokenName := oauthEnvVar(agentType)
+		return []corev1.EnvVar{secretRef(tokenName, false)}
+
+	case kelosv1alpha1.CredentialTypeBedrock:
+		return []corev1.EnvVar{
+			{Name: "CLAUDE_CODE_USE_BEDROCK", Value: "1"},
+			secretRef("AWS_ACCESS_KEY_ID", false),
+			secretRef("AWS_SECRET_ACCESS_KEY", false),
+			secretRef("AWS_REGION", false),
+			secretRef("AWS_SESSION_TOKEN", true),
+			secretRef("ANTHROPIC_BEDROCK_BASE_URL", true),
+		}
+
+	default:
+		return nil
+	}
+}
+
+// ptr returns a pointer to the given value.
+func ptr[T any](v T) *T {
+	return &v
+}
+
 func effectiveWorkspaceRemotes(workspace *kelosv1alpha1.WorkspaceSpec) []kelosv1alpha1.GitRemote {
 	if workspace == nil {
 		return nil
@@ -224,34 +272,8 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 		})
 	}
 
-	switch task.Spec.Credentials.Type {
-	case kelosv1alpha1.CredentialTypeAPIKey:
-		keyName := apiKeyEnvVar(task.Spec.Type)
-		envVars = append(envVars, corev1.EnvVar{
-			Name: keyName,
-			ValueFrom: &corev1.EnvVarSource{
-				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{
-						Name: task.Spec.Credentials.SecretRef.Name,
-					},
-					Key: keyName,
-				},
-			},
-		})
-	case kelosv1alpha1.CredentialTypeOAuth:
-		tokenName := oauthEnvVar(task.Spec.Type)
-		envVars = append(envVars, corev1.EnvVar{
-			Name: tokenName,
-			ValueFrom: &corev1.EnvVarSource{
-				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{
-						Name: task.Spec.Credentials.SecretRef.Name,
-					},
-					Key: tokenName,
-				},
-			},
-		})
-	}
+	credEnvVars := credentialEnvVars(task.Spec.Credentials.Type, task.Spec.Type, task.Spec.Credentials.SecretRef.Name)
+	envVars = append(envVars, credEnvVars...)
 
 	var workspaceEnvVars []corev1.EnvVar
 	var isEnterprise bool

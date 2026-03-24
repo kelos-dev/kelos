@@ -19,6 +19,16 @@ type Config struct {
 	Namespace      string          `json:"namespace,omitempty"`
 	Workspace      WorkspaceConfig `json:"workspace,omitempty"`
 	AgentConfig    string          `json:"agentConfig,omitempty"`
+	Bedrock        *BedrockConfig  `json:"bedrock,omitempty"`
+}
+
+// BedrockConfig holds AWS credentials for Bedrock authentication.
+type BedrockConfig struct {
+	AccessKeyID     string `json:"accessKeyID"`
+	SecretAccessKey string `json:"secretAccessKey"`
+	Region          string `json:"region"`
+	SessionToken    string `json:"sessionToken,omitempty"`
+	BaseURL         string `json:"baseURL,omitempty"`
 }
 
 // WorkspaceConfig holds workspace-related configuration.

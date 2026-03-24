@@ -13,6 +13,8 @@ const (
 	CredentialTypeAPIKey CredentialType = "api-key"
 	// CredentialTypeOAuth uses OAuth for authentication.
 	CredentialTypeOAuth CredentialType = "oauth"
+	// CredentialTypeBedrock uses AWS credentials for Bedrock authentication.
+	CredentialTypeBedrock CredentialType = "bedrock"
 )
 
 // TaskPhase represents the current phase of a Task.
@@ -40,7 +42,7 @@ type SecretReference struct {
 // Credentials defines how to authenticate with the AI agent.
 type Credentials struct {
 	// Type specifies the credential type (api-key or oauth).
-	// +kubebuilder:validation:Enum=api-key;oauth
+	// +kubebuilder:validation:Enum=api-key;oauth;bedrock
 	Type CredentialType `json:"type"`
 
 	// SecretRef references the Secret containing credentials.

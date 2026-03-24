@@ -15,6 +15,7 @@
   <a href="#kelos-skill">Kelos Skill</a> &middot;
   <a href="#kelos-developing-kelos">Kelos Developing Kelos</a> &middot;
   <a href="#examples">Examples</a> &middot;
+  <a href="docs/integration.md">Integration</a> &middot;
   <a href="docs/reference.md">Reference</a> &middot;
   <a href="examples/">YAML Manifests</a>
 </p>
@@ -464,6 +465,28 @@ kelos run -p "Fix the bug" --agent-config my-config
 See the [full AgentConfig spec](docs/reference.md#agentconfig) for plugins, skills, and agents configuration.
 
 > Browse all ready-to-apply YAML manifests in the [`examples/`](examples/) directory.
+
+## Integration
+
+Kelos integrates with external systems in two ways:
+
+**TaskSpawner** — Kelos natively watches external sources and automatically creates Tasks. Supports GitHub Issues, GitHub Pull Requests, Jira, and Cron schedules. No glue code needed.
+
+```yaml
+spec:
+  when:
+    githubIssues:
+      labels: [bug]
+      state: open
+```
+
+**Direct Task creation** — Create Task resources from your own workflows for full control. Any system that can run `kubectl apply` or call the Kubernetes API can trigger agent runs — GitHub Actions, CI/CD pipelines, scripts, Slack bots, or custom automation.
+
+```bash
+kelos run -p "Fix the flaky test in ci_test.go" --workspace my-workspace
+```
+
+See the [Integration guide](docs/integration.md) for examples of both approaches, including GitHub Actions workflows, Jira setup, and programmatic Task creation.
 
 ## Orchestration Patterns
 

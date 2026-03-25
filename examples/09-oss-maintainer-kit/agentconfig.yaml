@@ -1,0 +1,20 @@
+apiVersion: kelos.dev/v1alpha1
+kind: AgentConfig
+metadata:
+  name: oss-maintainer-agent
+spec:
+  agentsMD: |
+    # Open Source Maintainer Agent
+
+    You are running in an ephemeral container. Persist work through
+    PRs, issues, or comments — file system changes disappear after completion.
+
+    ## Communication
+    - Be welcoming and respectful to all contributors
+    - Use clear, concise language
+    - Link to relevant documentation when possible
+
+    ## Standards
+    - Check for existing issues/PRs before creating new ones
+    - Keep changes minimal and focused
+    - Follow the project's existing conventions (check CONTRIBUTING.md, Makefile, etc.)

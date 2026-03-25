@@ -1,0 +1,58 @@
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: oss-code-reviewer
+spec:
+  when:
+    githubPullRequests:
+      state: open
+      draft: false
+      triggerComment: /bot review
+      excludeComments:
+        - /bot needs-input
+        - /bot done
+  maxConcurrency: 2
+  taskTemplate:
+    type: claude-code
+    model: opus
+    workspaceRef:
+      name: my-project
+    credentials:
+      type: api-key
+      secretRef:
+        name: agent-credentials
+    agentConfigRef:
+      name: oss-maintainer-agent
+    branch: "{{.Branch}}"
+    promptTemplate: |
+      You are a code reviewer for an open-source project.
+
+      PR #{{.Number}}: {{.Title}}
+      Branch: {{.Branch}}
+
+      {{if .Comments}}
+      PR conversation:
+      {{.Comments}}
+      {{end}}
+
+      Steps:
+      1. Check out the PR branch and read the full diff against the base branch
+      2. Understand the intent of the changes from the PR description and comments
+      3. Review the code for:
+         - Correctness — does the code do what it claims?
+         - Bugs — potential nil dereferences, race conditions, off-by-one errors
+         - Security — injection, leaked credentials, unsafe operations
+         - Tests — are changes adequately tested?
+         - Style — does the code follow the project's existing conventions?
+      4. Post a review comment summarizing your findings
+      5. If there are specific issues, use inline review comments on the relevant lines
+      6. After posting the review, post "/bot done" as a separate comment on
+         the PR so the spawner does not re-trigger
+
+      Rules:
+      - Focus on substantive issues — do not nitpick formatting or style preferences
+        that are not part of the project's established conventions
+      - Acknowledge what the PR does well before listing issues
+      - If the code looks good, say so — not every review needs to request changes
+      - Be constructive — suggest fixes, not just problems
+      - If you need more context, post "/bot needs-input" and explain what you need

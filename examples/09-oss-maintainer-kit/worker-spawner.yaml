@@ -1,0 +1,48 @@
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: oss-worker
+spec:
+  when:
+    githubIssues:
+      state: open
+      triggerComment: /bot fix
+      excludeComments:
+        - /bot needs-input
+        - /bot done
+  maxConcurrency: 2
+  taskTemplate:
+    type: claude-code
+    model: opus
+    workspaceRef:
+      name: my-project
+    credentials:
+      type: api-key
+      secretRef:
+        name: agent-credentials
+    agentConfigRef:
+      name: oss-maintainer-agent
+    branch: "bot/fix-{{.Number}}"
+    promptTemplate: |
+      Fix issue #{{.Number}}: {{.Title}}
+
+      {{.Body}}
+      {{if .Comments}}
+      Comments:
+      {{.Comments}}
+      {{end}}
+
+      Steps:
+      1. Understand the issue from the description and comments
+      2. Explore the codebase to find the relevant code
+      3. Implement a minimal, focused fix
+      4. Run tests if a test command is documented
+      5. Create a PR referencing the issue
+
+      Rules:
+      - Keep changes minimal — fix only what the issue asks for
+      - Do not refactor surrounding code
+      - If you cannot fix it confidently, comment on the issue explaining why
+        and post "/bot needs-input"
+      - After successfully creating the PR, post "/bot done" as a separate
+        comment on the issue so the spawner does not re-trigger

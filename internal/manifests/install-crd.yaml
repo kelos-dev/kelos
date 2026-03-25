@@ -303,16 +303,10 @@ spec:
               credentials:
                 description: Credentials specifies how to authenticate with the agent.
                 properties:
-                  region:
-                    description: |-
-                      Region specifies the cloud provider region (e.g. AWS region for Bedrock).
-                      Used with bedrock credentials when secretRef is omitted (IRSA mode).
-                    type: string
                   secretRef:
                     description: |-
                       SecretRef references the Secret containing credentials.
-                      Required for api-key and oauth types. Optional for bedrock
-                      when using IAM Roles for Service Accounts (IRSA).
+                      Required for api-key and oauth types. Not used with none.
                     properties:
                       name:
                         description: Name is the name of the secret.
@@ -320,18 +314,12 @@ spec:
                     required:
                     - name
                     type: object
-                  serviceAccountName:
-                    description: |-
-                      ServiceAccountName overrides the pod's service account.
-                      Use with IAM Roles for Service Accounts (IRSA) on EKS to let
-                      the pod assume an IAM role without static credentials.
-                    type: string
                   type:
                     description: Type specifies the credential type.
                     enum:
                     - api-key
                     - oauth
-                    - bedrock
+                    - none
                     type: string
                 required:
                 - type
@@ -339,7 +327,7 @@ spec:
                 x-kubernetes-validations:
                 - message: secretRef is required for api-key and oauth credential
                     types
-                  rule: self.type == 'bedrock' || has(self.secretRef)
+                  rule: self.type == 'none' || has(self.secretRef)
               dependsOn:
                 description: DependsOn lists Task names that must succeed before this
                   Task starts.
@@ -593,6 +581,12 @@ spec:
                           More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                         type: object
                     type: object
+                  serviceAccountName:
+                    description: |-
+                      ServiceAccountName sets the pod's service account.
+                      Use with workload identity systems such as IRSA on EKS, GKE
+                      Workload Identity, or Azure Workload Identity.
+                    type: string
                 type: object
               prompt:
                 description: Prompt is the task prompt to send to the agent.
@@ -808,16 +802,10 @@ spec:
                     description: Credentials specifies how to authenticate with the
                       agent.
                     properties:
-                      region:
-                        description: |-
-                          Region specifies the cloud provider region (e.g. AWS region for Bedrock).
-                          Used with bedrock credentials when secretRef is omitted (IRSA mode).
-                        type: string
                       secretRef:
                         description: |-
                           SecretRef references the Secret containing credentials.
-                          Required for api-key and oauth types. Optional for bedrock
-                          when using IAM Roles for Service Accounts (IRSA).
+                          Required for api-key and oauth types. Not used with none.
                         properties:
                           name:
                             description: Name is the name of the secret.
@@ -825,18 +813,12 @@ spec:
                         required:
                         - name
                         type: object
-                      serviceAccountName:
-                        description: |-
-                          ServiceAccountName overrides the pod's service account.
-                          Use with IAM Roles for Service Accounts (IRSA) on EKS to let
-                          the pod assume an IAM role without static credentials.
-                        type: string
                       type:
                         description: Type specifies the credential type.
                         enum:
                         - api-key
                         - oauth
-                        - bedrock
+                        - none
                         type: string
                     required:
                     - type
@@ -844,7 +826,7 @@ spec:
                     x-kubernetes-validations:
                     - message: secretRef is required for api-key and oauth credential
                         types
-                      rule: self.type == 'bedrock' || has(self.secretRef)
+                      rule: self.type == 'none' || has(self.secretRef)
                   dependsOn:
                     description: DependsOn lists Task names that spawned Tasks depend
                       on.
@@ -1099,6 +1081,12 @@ spec:
                               More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                             type: object
                         type: object
+                      serviceAccountName:
+                        description: |-
+                          ServiceAccountName sets the pod's service account.
+                          Use with workload identity systems such as IRSA on EKS, GKE
+                          Workload Identity, or Azure Workload Identity.
+                        type: string
                     type: object
                   promptTemplate:
                     description: |-

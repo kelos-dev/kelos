@@ -6,6 +6,23 @@ spec:
   type: claude-code
   prompt: "Write a Python script that prints the first 20 Fibonacci numbers."
   credentials:
-    type: bedrock
-    secretRef:
-      name: bedrock-credentials
+    type: none
+  podOverrides:
+    env:
+      - name: CLAUDE_CODE_USE_BEDROCK
+        value: "1"
+      - name: AWS_ACCESS_KEY_ID
+        valueFrom:
+          secretKeyRef:
+            name: bedrock-credentials
+            key: AWS_ACCESS_KEY_ID
+      - name: AWS_SECRET_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: bedrock-credentials
+            key: AWS_SECRET_ACCESS_KEY
+      - name: AWS_REGION
+        valueFrom:
+          secretKeyRef:
+            name: bedrock-credentials
+            key: AWS_REGION

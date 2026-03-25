@@ -50,8 +50,6 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 		agentConfigRef string
 		dependsOn      []string
 		branch         string
-		region         string
-		serviceAccount string
 	)
 
 	cmd := &cobra.Command{
@@ -88,11 +86,8 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 				if cfg.Config.APIKey != "" {
 					sources++
 				}
-				if cfg.Config.Bedrock != nil {
-					sources++
-				}
 				if sources > 1 {
-					return fmt.Errorf("config file must specify only one of oauthToken, apiKey, or bedrock")
+					return fmt.Errorf("config file must specify only one of oauthToken or apiKey")
 				}
 				if token := cfg.Config.OAuthToken; token != "" {
 					resolved, err := resolveContent(token)
@@ -120,33 +115,10 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 					}
 					secret = "kelos-credentials"
 					credentialType = "api-key"
-				} else if br := cfg.Config.Bedrock; br != nil {
-					hasStaticCreds := br.AccessKeyID != "" || br.SecretAccessKey != ""
-					if hasStaticCreds {
-						if br.AccessKeyID == "" || br.SecretAccessKey == "" || br.Region == "" {
-							return fmt.Errorf("bedrock config requires accessKeyID, secretAccessKey, and region when using static credentials")
-						}
-						if !dryRun {
-							if err := ensureBedrockSecret(cfg, "kelos-credentials", br, yes); err != nil {
-								return err
-							}
-						}
-						secret = "kelos-credentials"
-					} else {
-						// IRSA mode — no secret needed, region is set on credentials directly.
-						if br.Region == "" {
-							return fmt.Errorf("bedrock config requires region")
-						}
-						region = br.Region
-						if br.ServiceAccountName != "" && serviceAccount == "" {
-							serviceAccount = br.ServiceAccountName
-						}
-					}
-					credentialType = "bedrock"
 				}
 			}
 
-			if secret == "" && credentialType != "bedrock" {
+			if secret == "" && credentialType != "none" {
 				return fmt.Errorf("no credentials configured (set oauthToken/apiKey in config file, or use --secret flag)")
 			}
 
@@ -229,14 +201,10 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 			}
 
 			creds := kelosv1alpha1.Credentials{
-				Type:   kelosv1alpha1.CredentialType(credentialType),
-				Region: region,
+				Type: kelosv1alpha1.CredentialType(credentialType),
 			}
 			if secret != "" {
 				creds.SecretRef = &kelosv1alpha1.SecretReference{Name: secret}
-			}
-			if serviceAccount != "" {
-				creds.ServiceAccountName = serviceAccount
 			}
 
 			task := &kelosv1alpha1.Task{
@@ -329,9 +297,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 	cmd.Flags().StringVarP(&prompt, "prompt", "p", "", "task prompt (required)")
 	cmd.Flags().StringVarP(&agentType, "type", "t", "claude-code", "agent type (claude-code, codex, gemini, opencode, cursor)")
 	cmd.Flags().StringVar(&secret, "secret", "", "secret name with credentials (overrides oauthToken/apiKey in config)")
-	cmd.Flags().StringVar(&credentialType, "credential-type", "api-key", "credential type (api-key, oauth, bedrock)")
-	cmd.Flags().StringVar(&region, "region", "", "cloud provider region (e.g. us-east-1 for Bedrock IRSA)")
-	cmd.Flags().StringVar(&serviceAccount, "service-account", "", "pod service account name (e.g. for IRSA on EKS)")
+	cmd.Flags().StringVar(&credentialType, "credential-type", "api-key", "credential type (api-key, oauth, none)")
 	cmd.Flags().StringVar(&model, "model", "", "model override")
 	cmd.Flags().StringVar(&image, "image", "", "custom agent image (must implement agent image interface)")
 	cmd.Flags().StringVar(&name, "name", "", "task name (auto-generated if omitted)")
@@ -347,7 +313,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 
 	cmd.MarkFlagRequired("prompt")
 
-	_ = cmd.RegisterFlagCompletionFunc("credential-type", cobra.FixedCompletions([]string{"api-key", "oauth", "bedrock"}, cobra.ShellCompDirectiveNoFileComp))
+	_ = cmd.RegisterFlagCompletionFunc("credential-type", cobra.FixedCompletions([]string{"api-key", "oauth", "none"}, cobra.ShellCompDirectiveNoFileComp))
 	_ = cmd.RegisterFlagCompletionFunc("type", cobra.FixedCompletions([]string{"claude-code", "codex", "gemini", "opencode", "cursor"}, cobra.ShellCompDirectiveNoFileComp))
 
 	return cmd
@@ -518,63 +484,6 @@ func ensureCredentialSecret(cfg *ClientConfig, name, key, value string, skipConf
 	existing.StringData = secret.StringData
 	if _, err := cs.CoreV1().Secrets(ns).Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
 		return fmt.Errorf("updating credentials secret: %w", err)
-	}
-	return nil
-}
-
-// ensureBedrockSecret creates or updates a Secret with AWS Bedrock credentials.
-func ensureBedrockSecret(cfg *ClientConfig, name string, br *BedrockConfig, skipConfirm bool) error {
-	cs, ns, err := cfg.NewClientset()
-	if err != nil {
-		return err
-	}
-
-	data := map[string]string{
-		"AWS_ACCESS_KEY_ID":     br.AccessKeyID,
-		"AWS_SECRET_ACCESS_KEY": br.SecretAccessKey,
-		"AWS_REGION":            br.Region,
-	}
-	if br.SessionToken != "" {
-		data["AWS_SESSION_TOKEN"] = br.SessionToken
-	}
-	if br.BaseURL != "" {
-		data["ANTHROPIC_BEDROCK_BASE_URL"] = br.BaseURL
-	}
-
-	ctx := context.Background()
-	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: ns,
-		},
-		StringData: data,
-	}
-
-	existing, err := cs.CoreV1().Secrets(ns).Get(ctx, name, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		if _, err := cs.CoreV1().Secrets(ns).Create(ctx, secret, metav1.CreateOptions{}); err != nil {
-			return fmt.Errorf("creating Bedrock credentials secret: %w", err)
-		}
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("checking Bedrock credentials secret: %w", err)
-	}
-
-	if !skipConfirm {
-		ok, err := confirmOverride(fmt.Sprintf("secret/%s", name))
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return fmt.Errorf("aborted")
-		}
-	}
-
-	existing.Data = nil
-	existing.StringData = secret.StringData
-	if _, err := cs.CoreV1().Secrets(ns).Update(ctx, existing, metav1.UpdateOptions{}); err != nil {
-		return fmt.Errorf("updating Bedrock credentials secret: %w", err)
 	}
 	return nil
 }

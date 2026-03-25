@@ -6,6 +6,11 @@ spec:
   type: claude-code
   prompt: "Write a Python script that prints the first 20 Fibonacci numbers."
   credentials:
-    type: bedrock
-    region: us-east-1
+    type: none
+  podOverrides:
     serviceAccountName: bedrock-agent-sa
+    env:
+      - name: CLAUDE_CODE_USE_BEDROCK
+        value: "1"
+      - name: AWS_REGION
+        value: us-east-1

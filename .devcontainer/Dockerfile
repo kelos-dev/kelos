@@ -91,7 +91,4 @@ alias gimme-sandbox-creds="tsh svid issue --output /opt/roles-anywhere-sandbox -
 SHELL_RC
 EOF
 
-# Oh My Zsh
-RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
-
 USER vscode

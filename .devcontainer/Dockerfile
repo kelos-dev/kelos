@@ -90,5 +90,3 @@ alias gimme-admin-creds="tsh svid issue --output /opt/roles-anywhere-admin --svi
 alias gimme-sandbox-creds="tsh svid issue --output /opt/roles-anywhere-sandbox --svid-ttl 12h /cloud/aws-sandbox"
 SHELL_RC
 EOF
-
-USER vscode

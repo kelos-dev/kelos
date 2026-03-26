@@ -93,14 +93,19 @@ push: ## Push docker images (use WHAT to push specific image).
 
 DOCKER_PLATFORMS ?= linux/amd64,linux/arm64
 
-BUILDX_CACHE ?=
+BUILDX_CACHE_TYPE ?=
 
 .PHONY: push-multiarch
 push-multiarch: ## Build and push multi-arch docker images.
 	@for dir in $(or $(WHAT),$(IMAGE_DIRS)); do \
+		name=$$(basename $$dir); \
+		cache_flags=""; \
+		if [ -n "$(BUILDX_CACHE_TYPE)" ]; then \
+			cache_flags="--cache-from type=$(BUILDX_CACHE_TYPE),scope=$$name --cache-to type=$(BUILDX_CACHE_TYPE),scope=$$name,mode=max"; \
+		fi; \
 		docker buildx build --platform $(DOCKER_PLATFORMS) \
-			$(BUILDX_CACHE) \
-			-t $(REGISTRY)/$$(basename $$dir):$(VERSION) \
+			$$cache_flags \
+			-t $(REGISTRY)/$$name:$(VERSION) \
 			-f $$dir/Dockerfile --push .; \
 	done
 

@@ -93,10 +93,13 @@ push: ## Push docker images (use WHAT to push specific image).
 
 DOCKER_PLATFORMS ?= linux/amd64,linux/arm64
 
+BUILDX_CACHE ?=
+
 .PHONY: push-multiarch
 push-multiarch: ## Build and push multi-arch docker images.
 	@for dir in $(or $(WHAT),$(IMAGE_DIRS)); do \
 		docker buildx build --platform $(DOCKER_PLATFORMS) \
+			$(BUILDX_CACHE) \
 			-t $(REGISTRY)/$$(basename $$dir):$(VERSION) \
 			-f $$dir/Dockerfile --push .; \
 	done

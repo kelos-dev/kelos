@@ -3,7 +3,8 @@ WORKDIR /workspace
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -o bin/kelos-spawner ./cmd/kelos-spawner
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -o bin/kelos-spawner ./cmd/kelos-spawner
 
 FROM gcr.io/distroless/static:nonroot
 WORKDIR /

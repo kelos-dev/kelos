@@ -5,15 +5,45 @@ image:
 telemetry:
   enabled: true
 
-controllerImage: ghcr.io/kelos-dev/kelos-controller
-claudeCodeImage: ghcr.io/kelos-dev/claude-code
-codexImage: ghcr.io/kelos-dev/codex
-geminiImage: ghcr.io/kelos-dev/gemini
-opencodeImage: ghcr.io/kelos-dev/opencode
-cursorImage: ghcr.io/kelos-dev/cursor
-spawnerImage: ghcr.io/kelos-dev/kelos-spawner
+controllerImage: public.ecr.aws/anomalo/kelos/kelos-controller
+claudeCodeImage: public.ecr.aws/anomalo/kelos/claude-code
+codexImage: public.ecr.aws/anomalo/kelos/codex
+geminiImage: public.ecr.aws/anomalo/kelos/gemini
+opencodeImage: public.ecr.aws/anomalo/kelos/opencode
+cursorImage: public.ecr.aws/anomalo/kelos/cursor
+spawnerImage: public.ecr.aws/anomalo/kelos/kelos-spawner
 spawnerResourceRequests: ""
 spawnerResourceLimits: ""
-tokenRefresherImage: ghcr.io/kelos-dev/kelos-token-refresher
+tokenRefresherImage: public.ecr.aws/anomalo/kelos/kelos-token-refresher
 tokenRefresherResourceRequests: ""
 tokenRefresherResourceLimits: ""
+controller:
+  resources:
+    requests: {}
+    limits: {}
+
+webhook:
+  enabled: false
+  labels: {}
+  image: public.ecr.aws/anomalo/kelos/kelos-webhook-receiver
+  replicas: 1
+  port: 8080
+  service:
+    type: ClusterIP
+    port: 80
+  ingress:
+    enabled: false
+    ingressClassName: ""
+    host: ""
+    path: /
+    labels: {}
+    annotations: {}
+    tls: []
+  eventsNamespace: kelos-system
+  extraEnv: []
+  # Name of an existing Secret containing the GitHub webhook secret
+  # The secret must have a key named "secret"
+  githubWebhookSecretName: ""
+  resources:
+    requests: {}
+    limits: {}

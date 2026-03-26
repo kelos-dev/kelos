@@ -17,10 +17,10 @@ import (
 
 const (
 	// DefaultSpawnerImage is the default image for the spawner binary.
-	DefaultSpawnerImage = "ghcr.io/kelos-dev/kelos-spawner:latest"
+	DefaultSpawnerImage = "public.ecr.aws/anomalo/kelos/kelos-spawner:latest"
 
 	// DefaultTokenRefresherImage is the default image for the token refresher sidecar.
-	DefaultTokenRefresherImage = "ghcr.io/kelos-dev/kelos-token-refresher:latest"
+	DefaultTokenRefresherImage = "public.ecr.aws/anomalo/kelos/kelos-token-refresher:latest"
 
 	// SpawnerServiceAccount is the service account used by spawner Deployments.
 	SpawnerServiceAccount = "kelos-spawner"

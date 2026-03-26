@@ -79,7 +79,7 @@ var _ = Describe("Task Controller", func() {
 					Prompt: "Create a hello world program",
 					Credentials: kelosv1alpha1.Credentials{
 						Type: kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{
+						SecretRef: &kelosv1alpha1.SecretReference{
 							Name: "anthropic-api-key",
 						},
 					},
@@ -234,7 +234,7 @@ var _ = Describe("Task Controller", func() {
 					Prompt: "Create a hello world program",
 					Credentials: kelosv1alpha1.Credentials{
 						Type: kelosv1alpha1.CredentialTypeOAuth,
-						SecretRef: kelosv1alpha1.SecretReference{
+						SecretRef: &kelosv1alpha1.SecretReference{
 							Name: "claude-oauth",
 						},
 					},
@@ -339,7 +339,7 @@ var _ = Describe("Task Controller", func() {
 					Prompt: "Resolve MCP headersFrom",
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
 					},
 					AgentConfigRef: &kelosv1alpha1.AgentConfigReference{Name: "mcp-headers-from-config"},
 				},
@@ -445,7 +445,7 @@ var _ = Describe("Task Controller", func() {
 					Prompt: "Resolve MCP envFrom",
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
 					},
 					AgentConfigRef: &kelosv1alpha1.AgentConfigReference{Name: "mcp-env-from-config"},
 				},
@@ -534,7 +534,7 @@ var _ = Describe("Task Controller", func() {
 					Prompt: "Fail on missing MCP secret",
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
 					},
 					AgentConfigRef: &kelosv1alpha1.AgentConfigReference{Name: "mcp-missing-secret-config"},
 				},
@@ -629,7 +629,7 @@ var _ = Describe("Task Controller", func() {
 					Prompt: "Prefer MCP secret values",
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
 					},
 					AgentConfigRef: &kelosv1alpha1.AgentConfigReference{Name: "mcp-precedence-config"},
 				},
@@ -711,7 +711,7 @@ var _ = Describe("Task Controller", func() {
 					Prompt: "Fix the bug",
 					Credentials: kelosv1alpha1.Credentials{
 						Type: kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{
+						SecretRef: &kelosv1alpha1.SecretReference{
 							Name: "anthropic-api-key",
 						},
 					},
@@ -834,7 +834,7 @@ var _ = Describe("Task Controller", func() {
 					Prompt: "Create a PR",
 					Credentials: kelosv1alpha1.Credentials{
 						Type: kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{
+						SecretRef: &kelosv1alpha1.SecretReference{
 							Name: "anthropic-api-key",
 						},
 					},
@@ -953,7 +953,7 @@ var _ = Describe("Task Controller", func() {
 					Prompt: "Review the code",
 					Credentials: kelosv1alpha1.Credentials{
 						Type: kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{
+						SecretRef: &kelosv1alpha1.SecretReference{
 							Name: "anthropic-api-key",
 						},
 					},
@@ -1030,7 +1030,7 @@ var _ = Describe("Task Controller", func() {
 					Prompt: "Create a hello world program",
 					Credentials: kelosv1alpha1.Credentials{
 						Type: kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{
+						SecretRef: &kelosv1alpha1.SecretReference{
 							Name: "anthropic-api-key",
 						},
 					},
@@ -1112,7 +1112,7 @@ var _ = Describe("Task Controller", func() {
 					Prompt: "Create a hello world program",
 					Credentials: kelosv1alpha1.Credentials{
 						Type: kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{
+						SecretRef: &kelosv1alpha1.SecretReference{
 							Name: "anthropic-api-key",
 						},
 					},
@@ -1183,7 +1183,7 @@ var _ = Describe("Task Controller", func() {
 					Prompt: "Create a hello world program",
 					Credentials: kelosv1alpha1.Credentials{
 						Type: kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{
+						SecretRef: &kelosv1alpha1.SecretReference{
 							Name: "anthropic-api-key",
 						},
 					},
@@ -1274,7 +1274,7 @@ var _ = Describe("Task Controller", func() {
 					Prompt: "Fix the bug",
 					Credentials: kelosv1alpha1.Credentials{
 						Type: kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{
+						SecretRef: &kelosv1alpha1.SecretReference{
 							Name: "anthropic-api-key",
 						},
 					},
@@ -1386,7 +1386,7 @@ var _ = Describe("Task Controller", func() {
 					Prompt: "Fix the bug",
 					Credentials: kelosv1alpha1.Credentials{
 						Type: kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{
+						SecretRef: &kelosv1alpha1.SecretReference{
 							Name: "anthropic-api-key",
 						},
 					},
@@ -1481,7 +1481,7 @@ var _ = Describe("Task Controller", func() {
 					Prompt: "Fix the bug",
 					Credentials: kelosv1alpha1.Credentials{
 						Type: kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{
+						SecretRef: &kelosv1alpha1.SecretReference{
 							Name: "codex-api-key",
 						},
 					},
@@ -1590,7 +1590,7 @@ var _ = Describe("Task Controller", func() {
 					Prompt: "Refactor the module",
 					Credentials: kelosv1alpha1.Credentials{
 						Type: kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{
+						SecretRef: &kelosv1alpha1.SecretReference{
 							Name: "codex-api-key",
 						},
 					},
@@ -1674,7 +1674,7 @@ var _ = Describe("Task Controller", func() {
 					Prompt: "Review the code",
 					Credentials: kelosv1alpha1.Credentials{
 						Type: kelosv1alpha1.CredentialTypeOAuth,
-						SecretRef: kelosv1alpha1.SecretReference{
+						SecretRef: &kelosv1alpha1.SecretReference{
 							Name: "codex-oauth-secret",
 						},
 					},
@@ -1739,7 +1739,7 @@ var _ = Describe("Task Controller", func() {
 					Prompt: "Fix the bug",
 					Credentials: kelosv1alpha1.Credentials{
 						Type: kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{
+						SecretRef: &kelosv1alpha1.SecretReference{
 							Name: "opencode-api-key",
 						},
 					},
@@ -1835,7 +1835,7 @@ var _ = Describe("Task Controller", func() {
 					Prompt: "Fix the bug",
 					Credentials: kelosv1alpha1.Credentials{
 						Type: kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{
+						SecretRef: &kelosv1alpha1.SecretReference{
 							Name: "anthropic-api-key",
 						},
 					},
@@ -1958,7 +1958,7 @@ var _ = Describe("Task Controller", func() {
 					Prompt: "Fix the bug",
 					Credentials: kelosv1alpha1.Credentials{
 						Type: kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{
+						SecretRef: &kelosv1alpha1.SecretReference{
 							Name: "anthropic-api-key",
 						},
 					},
@@ -2048,7 +2048,7 @@ var _ = Describe("Task Controller", func() {
 					Prompt: "Test events",
 					Credentials: kelosv1alpha1.Credentials{
 						Type: kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{
+						SecretRef: &kelosv1alpha1.SecretReference{
 							Name: "anthropic-api-key",
 						},
 					},
@@ -2164,7 +2164,7 @@ var _ = Describe("Task Controller", func() {
 					Prompt: "Test failure event",
 					Credentials: kelosv1alpha1.Credentials{
 						Type: kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{
+						SecretRef: &kelosv1alpha1.SecretReference{
 							Name: "anthropic-api-key",
 						},
 					},
@@ -2248,7 +2248,7 @@ var _ = Describe("Task Controller", func() {
 					Prompt: "Do something",
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
 					},
 				},
 			}
@@ -2266,7 +2266,7 @@ var _ = Describe("Task Controller", func() {
 					DependsOn: []string{"task-a"},
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
 					},
 				},
 			}
@@ -2364,7 +2364,7 @@ var _ = Describe("Task Controller", func() {
 					Prompt: "Do something",
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
 					},
 				},
 			}
@@ -2382,7 +2382,7 @@ var _ = Describe("Task Controller", func() {
 					DependsOn: []string{"dep-task-a"},
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
 					},
 				},
 			}
@@ -2467,7 +2467,7 @@ var _ = Describe("Task Controller", func() {
 					Branch: "feature-1",
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
 					},
 				},
 			}
@@ -2510,7 +2510,7 @@ var _ = Describe("Task Controller", func() {
 					Branch: "feature-1",
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
 					},
 				},
 			}
@@ -2597,7 +2597,7 @@ var _ = Describe("Task Controller", func() {
 					Branch: "feature-x",
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
 					},
 					WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
 						Name: "test-workspace",
@@ -2714,7 +2714,7 @@ var _ = Describe("Task Controller", func() {
 					Branch: "feature-1",
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
 					},
 					WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "workspace-a"},
 				},
@@ -2758,7 +2758,7 @@ var _ = Describe("Task Controller", func() {
 					Branch: "feature-1",
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
 					},
 					WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "workspace-b"},
 				},
@@ -2808,7 +2808,7 @@ var _ = Describe("Task Controller", func() {
 					DependsOn: []string{"cycle-task-b"},
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
 					},
 				},
 			}
@@ -2826,7 +2826,7 @@ var _ = Describe("Task Controller", func() {
 					DependsOn: []string{"cycle-task-a"},
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
 					},
 				},
 			}
@@ -2878,7 +2878,7 @@ var _ = Describe("Task Controller", func() {
 					Prompt: "Generate outputs",
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
 					},
 				},
 			}
@@ -2929,7 +2929,7 @@ var _ = Describe("Task Controller", func() {
 					DependsOn: []string{"tmpl-task-a"},
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
 					},
 				},
 			}
@@ -2980,7 +2980,7 @@ var _ = Describe("Task Controller", func() {
 					Prompt: "Generate results",
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
 					},
 				},
 			}
@@ -3035,7 +3035,7 @@ var _ = Describe("Task Controller", func() {
 					DependsOn: []string{"results-task-a"},
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
 					},
 				},
 			}
@@ -3103,7 +3103,7 @@ var _ = Describe("Task Controller", func() {
 					Branch: "kelos-task-42",
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
 					},
 					WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "test-workspace"},
 				},
@@ -3125,7 +3125,7 @@ var _ = Describe("Task Controller", func() {
 					Branch: "kelos-task-99",
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
 					},
 					WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "test-workspace"},
 				},
@@ -3252,7 +3252,7 @@ var _ = Describe("Task Controller", func() {
 					Branch: "kelos-task-42",
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
 					},
 					WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "lock-workspace"},
 				},
@@ -3298,7 +3298,7 @@ var _ = Describe("Task Controller", func() {
 					Branch: "kelos-task-42",
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
 					},
 					WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "lock-workspace"},
 				},
@@ -3372,7 +3372,7 @@ var _ = Describe("Task Controller", func() {
 					Prompt: "Original prompt",
 					Credentials: kelosv1alpha1.Credentials{
 						Type: kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{
+						SecretRef: &kelosv1alpha1.SecretReference{
 							Name: "anthropic-api-key",
 						},
 					},
@@ -3454,7 +3454,7 @@ var _ = Describe("Task Controller", func() {
 					Prompt: "Work on feature",
 					Credentials: kelosv1alpha1.Credentials{
 						Type: kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{
+						SecretRef: &kelosv1alpha1.SecretReference{
 							Name: "anthropic-api-key",
 						},
 					},

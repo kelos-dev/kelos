@@ -94,10 +94,18 @@ spec:
               port: 8081
             initialDelaySeconds: 5
             periodSeconds: 10
+          {{- if or .Values.controller.resources.requests .Values.controller.resources.limits }}
           resources:
+            {{- if .Values.controller.resources.limits }}
             limits:
-              cpu: 500m
-              memory: 128Mi
+              {{- range $k, $v := .Values.controller.resources.limits }}
+              {{ $k }}: {{ $v }}
+              {{- end }}
+            {{- end }}
+            {{- if .Values.controller.resources.requests }}
             requests:
-              cpu: 10m
-              memory: 64Mi
+              {{- range $k, $v := .Values.controller.resources.requests }}
+              {{ $k }}: {{ $v }}
+              {{- end }}
+            {{- end }}
+          {{- end }}

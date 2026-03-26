@@ -198,7 +198,7 @@ var _ = Describe("CLI Delete All Commands", func() {
 						Prompt: "test",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeAPIKey,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "test-secret",
 							},
 						},
@@ -289,7 +289,7 @@ var _ = Describe("CLI Delete All Commands", func() {
 							Type: "claude-code",
 							Credentials: kelosv1alpha1.Credentials{
 								Type: kelosv1alpha1.CredentialTypeAPIKey,
-								SecretRef: kelosv1alpha1.SecretReference{
+								SecretRef: &kelosv1alpha1.SecretReference{
 									Name: "test-secret",
 								},
 							},
@@ -379,7 +379,7 @@ var _ = Describe("CLI Delete TaskSpawner Command", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeAPIKey,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "test-secret",
 							},
 						},
@@ -427,7 +427,7 @@ var _ = Describe("CLI Delete TaskSpawner Command", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeAPIKey,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "test-secret",
 							},
 						},
@@ -475,7 +475,7 @@ var _ = Describe("CLI Delete TaskSpawner Command", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeAPIKey,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "test-secret",
 							},
 						},
@@ -543,7 +543,7 @@ var _ = Describe("CLI Suspend/Resume Commands", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeAPIKey,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "test-secret",
 							},
 						},
@@ -589,7 +589,7 @@ var _ = Describe("CLI Suspend/Resume Commands", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeAPIKey,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "test-secret",
 							},
 						},
@@ -635,7 +635,7 @@ var _ = Describe("CLI Suspend/Resume Commands", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeAPIKey,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "test-secret",
 							},
 						},
@@ -679,7 +679,7 @@ var _ = Describe("CLI Suspend/Resume Commands", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeAPIKey,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "test-secret",
 							},
 						},
@@ -717,7 +717,7 @@ var _ = Describe("CLI Suspend/Resume Commands", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeAPIKey,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "test-secret",
 							},
 						},
@@ -770,7 +770,7 @@ var _ = Describe("CLI Suspend/Resume Commands", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeAPIKey,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "test-secret",
 							},
 						},

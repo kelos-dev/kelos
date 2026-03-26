@@ -304,7 +304,9 @@ spec:
                 description: Credentials specifies how to authenticate with the agent.
                 properties:
                   secretRef:
-                    description: SecretRef references the Secret containing credentials.
+                    description: |-
+                      SecretRef references the Secret containing credentials.
+                      Required for api-key and oauth types. Not used with none.
                     properties:
                       name:
                         description: Name is the name of the secret.
@@ -313,15 +315,19 @@ spec:
                     - name
                     type: object
                   type:
-                    description: Type specifies the credential type (api-key or oauth).
+                    description: Type specifies the credential type.
                     enum:
                     - api-key
                     - oauth
+                    - none
                     type: string
                 required:
-                - secretRef
                 - type
                 type: object
+                x-kubernetes-validations:
+                - message: secretRef is required for api-key and oauth credential
+                    types
+                  rule: self.type == 'none' || has(self.secretRef)
               dependsOn:
                 description: DependsOn lists Task names that must succeed before this
                   Task starts.
@@ -575,6 +581,12 @@ spec:
                           More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                         type: object
                     type: object
+                  serviceAccountName:
+                    description: |-
+                      ServiceAccountName sets the pod's service account.
+                      Use with workload identity systems such as IRSA on EKS, GKE
+                      Workload Identity, or Azure Workload Identity.
+                    type: string
                 type: object
               prompt:
                 description: Prompt is the task prompt to send to the agent.
@@ -791,7 +803,9 @@ spec:
                       agent.
                     properties:
                       secretRef:
-                        description: SecretRef references the Secret containing credentials.
+                        description: |-
+                          SecretRef references the Secret containing credentials.
+                          Required for api-key and oauth types. Not used with none.
                         properties:
                           name:
                             description: Name is the name of the secret.
@@ -800,16 +814,19 @@ spec:
                         - name
                         type: object
                       type:
-                        description: Type specifies the credential type (api-key or
-                          oauth).
+                        description: Type specifies the credential type.
                         enum:
                         - api-key
                         - oauth
+                        - none
                         type: string
                     required:
-                    - secretRef
                     - type
                     type: object
+                    x-kubernetes-validations:
+                    - message: secretRef is required for api-key and oauth credential
+                        types
+                      rule: self.type == 'none' || has(self.secretRef)
                   dependsOn:
                     description: DependsOn lists Task names that spawned Tasks depend
                       on.
@@ -1064,6 +1081,12 @@ spec:
                               More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                             type: object
                         type: object
+                      serviceAccountName:
+                        description: |-
+                          ServiceAccountName sets the pod's service account.
+                          Use with workload identity systems such as IRSA on EKS, GKE
+                          Workload Identity, or Azure Workload Identity.
+                        type: string
                     type: object
                   promptTemplate:
                     description: |-
@@ -1425,6 +1448,39 @@ spec:
                       rule: '!(has(self.commentPolicy) && ((has(self.triggerComment)
                         && size(self.triggerComment) > 0) || (has(self.excludeComments)
                         && size(self.excludeComments) > 0)))'
+                  githubWebhook:
+                    description: GitHubWebhook discovers issues and pull requests
+                      from GitHub webhooks.
+                    properties:
+                      excludeLabels:
+                        description: ExcludeLabels filters out issues/PRs that have
+                          any of these labels (client-side).
+                        items:
+                          type: string
+                        type: array
+                      labels:
+                        description: Labels filters issues/PRs by labels (applied
+                          client-side to webhook payloads).
+                        items:
+                          type: string
+                        type: array
+                      namespace:
+                        description: |-
+                          Namespace is the Kubernetes namespace where WebhookEvent resources are created.
+                          The spawner will watch for GitHub webhook events in this namespace.
+                        type: string
+                      reporting:
+                        description: Reporting configures status reporting back to
+                          GitHub.
+                        properties:
+                          enabled:
+                            description: Enabled posts standard status comments back
+                              to the originating GitHub issue or PR.
+                            type: boolean
+                        type: object
+                    required:
+                    - namespace
+                    type: object
                   jira:
                     description: Jira discovers issues from a Jira project.
                     properties:
@@ -1463,6 +1519,36 @@ spec:
                     - baseUrl
                     - project
                     - secretRef
+                    type: object
+                  linearWebhook:
+                    description: LinearWebhook discovers issues from Linear webhooks.
+                    properties:
+                      excludeLabels:
+                        description: ExcludeLabels filters out issues that have any
+                          of these labels (client-side).
+                        items:
+                          type: string
+                        type: array
+                      labels:
+                        description: Labels filters issues by labels (applied client-side
+                          to webhook payloads).
+                        items:
+                          type: string
+                        type: array
+                      namespace:
+                        description: |-
+                          Namespace is the Kubernetes namespace where WebhookEvent resources are created.
+                          The spawner will watch for Linear webhook events in this namespace.
+                        type: string
+                      states:
+                        description: |-
+                          States filters issues by workflow state names (e.g., ["Todo", "In Progress"]).
+                          When empty, all non-terminal states are processed (excludes "Done", "Canceled").
+                        items:
+                          type: string
+                        type: array
+                    required:
+                    - namespace
                     type: object
                 type: object
             required:
@@ -1568,6 +1654,98 @@ spec:
               totalTasksCreated:
                 description: TotalTasksCreated is the total number of Tasks created.
                 type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.0
+  name: webhookevents.kelos.dev
+spec:
+  group: kelos.dev
+  names:
+    kind: WebhookEvent
+    listKind: WebhookEventList
+    plural: webhookevents
+    singular: webhookevent
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.source
+      name: Source
+      type: string
+    - jsonPath: .status.processed
+      name: Processed
+      type: boolean
+    - jsonPath: .spec.receivedAt
+      name: ReceivedAt
+      type: date
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: WebhookEvent is the Schema for the webhookevents API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: WebhookEventSpec defines the desired state of WebhookEvent.
+            properties:
+              payload:
+                description: Payload is the raw webhook payload as JSON bytes.
+                format: byte
+                type: string
+              receivedAt:
+                description: ReceivedAt is the timestamp when the webhook was received.
+                format: date-time
+                type: string
+              source:
+                description: Source is the webhook source type (e.g., "github", "slack",
+                  "linear").
+                minLength: 1
+                type: string
+            required:
+            - payload
+            - receivedAt
+            - source
+            type: object
+          status:
+            description: WebhookEventStatus defines the observed state of WebhookEvent.
+            properties:
+              message:
+                description: Message provides additional information about processing.
+                type: string
+              processed:
+                description: Processed indicates whether this event has been processed
+                  by a source.
+                type: boolean
+              processedAt:
+                description: ProcessedAt is the timestamp when the event was processed.
+                format: date-time
+                type: string
             type: object
         type: object
     served: true

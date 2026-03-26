@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -39,6 +40,8 @@ func newInstallCommand(cfg *ClientConfig) *cobra.Command {
 	var spawnerResourceLimits string
 	var tokenRefresherResourceRequests string
 	var tokenRefresherResourceLimits string
+	var controllerResourceRequests string
+	var controllerResourceLimits string
 
 	cmd := &cobra.Command{
 		Use:   "install",
@@ -57,6 +60,8 @@ func newInstallCommand(cfg *ClientConfig) *cobra.Command {
 				spawnerResourceLimits,
 				tokenRefresherResourceRequests,
 				tokenRefresherResourceLimits,
+				controllerResourceRequests,
+				controllerResourceLimits,
 			)
 			controllerManifest, err := helmchart.Render(manifests.ChartFS, vals)
 			if err != nil {
@@ -111,12 +116,14 @@ func newInstallCommand(cfg *ClientConfig) *cobra.Command {
 	cmd.Flags().StringVar(&spawnerResourceLimits, "spawner-resource-limits", "", "resource limits for spawner containers (e.g., cpu=1,memory=1Gi)")
 	cmd.Flags().StringVar(&tokenRefresherResourceRequests, "token-refresher-resource-requests", "", "resource requests for token refresher sidecars (e.g., cpu=100m,memory=128Mi)")
 	cmd.Flags().StringVar(&tokenRefresherResourceLimits, "token-refresher-resource-limits", "", "resource limits for token refresher sidecars (e.g., cpu=200m,memory=256Mi)")
+	cmd.Flags().StringVar(&controllerResourceRequests, "controller-resource-requests", "", "resource requests for the controller container (e.g., cpu=10m,memory=64Mi)")
+	cmd.Flags().StringVar(&controllerResourceLimits, "controller-resource-limits", "", "resource limits for the controller container (e.g., cpu=500m,memory=128Mi)")
 
 	return cmd
 }
 
 // buildHelmValues constructs the values map for Helm chart rendering from CLI flags.
-func buildHelmValues(ver string, pullPolicy string, disableHeartbeat bool, spawnerResourceRequests string, spawnerResourceLimits string, tokenRefresherResourceRequests string, tokenRefresherResourceLimits string) map[string]interface{} {
+func buildHelmValues(ver string, pullPolicy string, disableHeartbeat bool, spawnerResourceRequests string, spawnerResourceLimits string, tokenRefresherResourceRequests string, tokenRefresherResourceLimits string, controllerResourceRequests string, controllerResourceLimits string) map[string]interface{} {
 	imageVals := map[string]interface{}{
 		"tag": ver,
 	}
@@ -143,7 +150,36 @@ func buildHelmValues(ver string, pullPolicy string, disableHeartbeat bool, spawn
 	if tokenRefresherResourceLimits != "" {
 		vals["tokenRefresherResourceLimits"] = tokenRefresherResourceLimits
 	}
+	controllerResources := map[string]interface{}{}
+	if controllerResourceRequests != "" {
+		controllerResources["requests"] = parseResourceString(controllerResourceRequests)
+	}
+	if controllerResourceLimits != "" {
+		controllerResources["limits"] = parseResourceString(controllerResourceLimits)
+	}
+	if len(controllerResources) > 0 {
+		vals["controller"] = map[string]interface{}{
+			"resources": controllerResources,
+		}
+	}
 	return vals
+}
+
+// parseResourceString converts a comma-separated key=value string (e.g.
+// "cpu=100m,memory=256Mi") into a map suitable for Helm values.
+func parseResourceString(s string) map[string]interface{} {
+	result := map[string]interface{}{}
+	for _, pair := range strings.Split(s, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		parts := strings.SplitN(pair, "=", 2)
+		if len(parts) == 2 {
+			result[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+		}
+	}
+	return result
 }
 
 // kelosGVRs lists the kelos custom resource GVRs that need to be cleaned up

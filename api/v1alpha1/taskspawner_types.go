@@ -29,6 +29,14 @@ type When struct {
 	// +optional
 	GitHubPullRequests *GitHubPullRequests `json:"githubPullRequests,omitempty"`
 
+	// GitHubWebhook discovers issues and pull requests from GitHub webhooks.
+	// +optional
+	GitHubWebhook *GitHubWebhook `json:"githubWebhook,omitempty"`
+
+	// LinearWebhook discovers issues from Linear webhooks.
+	// +optional
+	LinearWebhook *LinearWebhook `json:"linearWebhook,omitempty"`
+
 	// Cron triggers task spawning on a cron schedule.
 	// +optional
 	Cron *Cron `json:"cron,omitempty"`
@@ -260,6 +268,53 @@ type GitHubPullRequests struct {
 	PollInterval string `json:"pollInterval,omitempty"`
 }
 
+// GitHubWebhook discovers issues and pull requests from GitHub webhook events.
+// Instead of polling the GitHub API, work items are discovered from webhook
+// payloads received by the kelos-webhook-receiver and stored as WebhookEvent
+// custom resources.
+type GitHubWebhook struct {
+	// Namespace is the Kubernetes namespace where WebhookEvent resources are created.
+	// The spawner will watch for GitHub webhook events in this namespace.
+	// +kubebuilder:validation:Required
+	Namespace string `json:"namespace"`
+
+	// Labels filters issues/PRs by labels (applied client-side to webhook payloads).
+	// +optional
+	Labels []string `json:"labels,omitempty"`
+
+	// ExcludeLabels filters out issues/PRs that have any of these labels (client-side).
+	// +optional
+	ExcludeLabels []string `json:"excludeLabels,omitempty"`
+
+	// Reporting configures status reporting back to GitHub.
+	// +optional
+	Reporting *GitHubReporting `json:"reporting,omitempty"`
+}
+
+// LinearWebhook discovers issues from Linear webhooks.
+// Linear webhooks must be configured to POST to the kelos-webhook-receiver
+// endpoint at /webhook/linear. The webhook receiver creates WebhookEvent
+// CRDs that the spawner processes.
+type LinearWebhook struct {
+	// Namespace is the Kubernetes namespace where WebhookEvent resources are created.
+	// The spawner will watch for Linear webhook events in this namespace.
+	// +kubebuilder:validation:Required
+	Namespace string `json:"namespace"`
+
+	// States filters issues by workflow state names (e.g., ["Todo", "In Progress"]).
+	// When empty, all non-terminal states are processed (excludes "Done", "Canceled").
+	// +optional
+	States []string `json:"states,omitempty"`
+
+	// Labels filters issues by labels (applied client-side to webhook payloads).
+	// +optional
+	Labels []string `json:"labels,omitempty"`
+
+	// ExcludeLabels filters out issues that have any of these labels (client-side).
+	// +optional
+	ExcludeLabels []string `json:"excludeLabels,omitempty"`
+}
+
 // Jira discovers issues from a Jira project.
 // Authentication is provided via a Secret referenced in the TaskSpawner's
 // namespace. The secret must contain a "JIRA_TOKEN" key. For Jira Cloud,
@@ -304,6 +359,7 @@ type TaskTemplate struct {
 
 	// Credentials specifies how to authenticate with the agent.
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:XValidation:rule="self.type == 'none' || has(self.secretRef)",message="secretRef is required for api-key and oauth credential types"
 	Credentials Credentials `json:"credentials"`
 
 	// Model optionally overrides the default model.

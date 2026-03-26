@@ -37,7 +37,7 @@ func describeAgentTests(cfg agentTestConfig) {
 					Prompt: "Print 'Hello from Kelos e2e test' to stdout",
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      cfg.CredentialType,
-						SecretRef: kelosv1alpha1.SecretReference{Name: cfg.SecretName},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: cfg.SecretName},
 					},
 				},
 			})
@@ -92,7 +92,7 @@ func describeAgentTests(cfg agentTestConfig) {
 					Prompt: "Create a file called 'test.txt' with the content 'hello' in the current directory and print 'done'",
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      cfg.CredentialType,
-						SecretRef: kelosv1alpha1.SecretReference{Name: cfg.SecretName},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: cfg.SecretName},
 					},
 					WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "e2e-workspace"},
 				},
@@ -153,7 +153,7 @@ func describeAgentTests(cfg agentTestConfig) {
 					Prompt: "Print 'hello' to stdout",
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      cfg.CredentialType,
-						SecretRef: kelosv1alpha1.SecretReference{Name: cfg.SecretName},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: cfg.SecretName},
 					},
 					WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "e2e-outputs-workspace"},
 				},
@@ -225,7 +225,7 @@ func describeAgentTests(cfg agentTestConfig) {
 					Prompt: "Print 'Task A done' to stdout",
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      cfg.CredentialType,
-						SecretRef: kelosv1alpha1.SecretReference{Name: cfg.SecretName},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: cfg.SecretName},
 					},
 				},
 			})
@@ -242,7 +242,7 @@ func describeAgentTests(cfg agentTestConfig) {
 					DependsOn: []string{"dep-chain-a"},
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      cfg.CredentialType,
-						SecretRef: kelosv1alpha1.SecretReference{Name: cfg.SecretName},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: cfg.SecretName},
 					},
 				},
 			})
@@ -288,7 +288,7 @@ func describeAgentTests(cfg agentTestConfig) {
 					Prompt: "Print 'Hello' to stdout",
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      cfg.CredentialType,
-						SecretRef: kelosv1alpha1.SecretReference{Name: cfg.SecretName},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: cfg.SecretName},
 					},
 				},
 			})
@@ -336,7 +336,7 @@ var _ = Describe("Task with make available", func() {
 				Prompt: "Run 'make --version' and print the output",
 				Credentials: kelosv1alpha1.Credentials{
 					Type:      kelosv1alpha1.CredentialTypeOAuth,
-					SecretRef: kelosv1alpha1.SecretReference{Name: "claude-credentials"},
+					SecretRef: &kelosv1alpha1.SecretReference{Name: "claude-credentials"},
 				},
 			},
 		})
@@ -400,7 +400,7 @@ var _ = Describe("Task with workspace and secretRef", func() {
 				Prompt: "Run 'gh auth status' and print the output",
 				Credentials: kelosv1alpha1.Credentials{
 					Type:      kelosv1alpha1.CredentialTypeOAuth,
-					SecretRef: kelosv1alpha1.SecretReference{Name: "claude-credentials"},
+					SecretRef: &kelosv1alpha1.SecretReference{Name: "claude-credentials"},
 				},
 				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "e2e-github-workspace"},
 			},

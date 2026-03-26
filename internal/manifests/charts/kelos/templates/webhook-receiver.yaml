@@ -1,0 +1,166 @@
+{{- if .Values.webhook.enabled }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kelos-webhook-receiver
+  namespace: kelos-system
+  labels:
+    app.kubernetes.io/name: kelos
+    app.kubernetes.io/component: webhook-receiver
+    {{- range $k, $v := .Values.webhook.labels }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kelos-webhook-receiver
+  namespace: kelos-system
+  labels:
+    app.kubernetes.io/name: kelos
+    app.kubernetes.io/component: webhook-receiver
+    {{- range $k, $v := .Values.webhook.labels }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+spec:
+  replicas: {{ .Values.webhook.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kelos
+      app.kubernetes.io/component: webhook-receiver
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kelos
+        app.kubernetes.io/component: webhook-receiver
+        {{- range $k, $v := .Values.webhook.labels }}
+        {{ $k }}: {{ $v | quote }}
+        {{- end }}
+    spec:
+      serviceAccountName: kelos-webhook-receiver
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: receiver
+          image: {{ .Values.webhook.image }}{{- if .Values.image.tag }}:{{ .Values.image.tag }}{{- end }}
+          {{- if .Values.image.pullPolicy }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- end }}
+          args:
+            - --namespace={{ .Values.webhook.eventsNamespace }}
+            - --port={{ .Values.webhook.port }}
+          ports:
+            - containerPort: {{ .Values.webhook.port }}
+              name: http
+          {{- if or .Values.webhook.githubWebhookSecretName .Values.webhook.extraEnv }}
+          env:
+            {{- if .Values.webhook.githubWebhookSecretName }}
+            - name: GITHUB_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.webhook.githubWebhookSecretName }}
+                  key: secret
+            {{- end }}
+            {{- range .Values.webhook.extraEnv }}
+            - {{ . | toYaml | nindent 14 | trim }}
+            {{- end }}
+          {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.webhook.port }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.webhook.port }}
+          {{- if or .Values.webhook.resources.requests .Values.webhook.resources.limits }}
+          resources:
+            {{- if .Values.webhook.resources.limits }}
+            limits:
+              {{- range $k, $v := .Values.webhook.resources.limits }}
+              {{ $k }}: {{ $v }}
+              {{- end }}
+            {{- end }}
+            {{- if .Values.webhook.resources.requests }}
+            requests:
+              {{- range $k, $v := .Values.webhook.resources.requests }}
+              {{ $k }}: {{ $v }}
+              {{- end }}
+            {{- end }}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kelos-webhook-receiver
+  namespace: kelos-system
+  labels:
+    app.kubernetes.io/name: kelos
+    app.kubernetes.io/component: webhook-receiver
+    {{- range $k, $v := .Values.webhook.labels }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+spec:
+  selector:
+    app.kubernetes.io/name: kelos
+    app.kubernetes.io/component: webhook-receiver
+  ports:
+    - port: {{ .Values.webhook.service.port }}
+      targetPort: {{ .Values.webhook.port }}
+      protocol: TCP
+  type: {{ .Values.webhook.service.type }}
+{{- if .Values.webhook.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kelos-webhook-receiver
+  namespace: kelos-system
+  labels:
+    app.kubernetes.io/name: kelos
+    app.kubernetes.io/component: webhook-receiver
+    {{- range $k, $v := .Values.webhook.labels }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+    {{- range $k, $v := .Values.webhook.ingress.labels }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+  {{- if .Values.webhook.ingress.annotations }}
+  annotations:
+    {{- range $k, $v := .Values.webhook.ingress.annotations }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+  {{- end }}
+spec:
+  {{- if .Values.webhook.ingress.ingressClassName }}
+  ingressClassName: {{ .Values.webhook.ingress.ingressClassName }}
+  {{- end }}
+  {{- if .Values.webhook.ingress.tls }}
+  tls:
+    {{- range .Values.webhook.ingress.tls }}
+    - hosts:
+        {{- range .hosts }}
+        - {{ . | quote }}
+        {{- end }}
+      secretName: {{ .secretName }}
+    {{- end }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.webhook.ingress.host | quote }}
+      http:
+        paths:
+          - path: {{ .Values.webhook.ingress.path }}
+            pathType: Prefix
+            backend:
+              service:
+                name: kelos-webhook-receiver
+                port:
+                  number: {{ .Values.webhook.service.port }}
+{{- end }}
+{{- end }}

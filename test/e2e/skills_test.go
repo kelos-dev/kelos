@@ -81,7 +81,7 @@ var _ = Describe("Task with skills.sh AgentConfig", func() {
 				Prompt: "Print 'Hello from skills.sh e2e test' to stdout",
 				Credentials: kelosv1alpha1.Credentials{
 					Type:      kelosv1alpha1.CredentialTypeOAuth,
-					SecretRef: kelosv1alpha1.SecretReference{Name: "claude-credentials"},
+					SecretRef: &kelosv1alpha1.SecretReference{Name: "claude-credentials"},
 				},
 				AgentConfigRef: &kelosv1alpha1.AgentConfigReference{
 					Name: "skills-ac",

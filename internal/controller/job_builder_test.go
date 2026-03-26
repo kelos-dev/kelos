@@ -25,7 +25,7 @@ func TestBuildClaudeCodeJob_DefaultImage(t *testing.T) {
 			Prompt: "Hello world",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 			Model: "claude-sonnet-4-20250514",
 		},
@@ -80,7 +80,7 @@ func TestBuildClaudeCodeJob_CustomImage(t *testing.T) {
 			Prompt: "Fix the bug",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 			Model: "my-model",
 			Image: "my-custom-agent:latest",
@@ -136,7 +136,7 @@ func TestBuildClaudeCodeJob_NoModel(t *testing.T) {
 			Prompt: "Hello",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -168,7 +168,7 @@ func TestBuildClaudeCodeJob_WorkspaceWithRef(t *testing.T) {
 			Prompt: "Fix the code",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -235,7 +235,7 @@ func TestBuildClaudeCodeJob_WorkspaceWithInjectedFiles(t *testing.T) {
 			Prompt: "Inject plugin files",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -307,7 +307,7 @@ func TestBuildClaudeCodeJob_WorkspaceWithInjectedFilesInvalidPath(t *testing.T) 
 			Prompt: "Inject plugin files",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -343,7 +343,7 @@ func TestBuildClaudeCodeJob_CustomImageWithWorkspace(t *testing.T) {
 			Prompt: "Fix the bug",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 			Image: "my-agent:v1",
 			Model: "gpt-4",
@@ -425,7 +425,7 @@ func TestBuildClaudeCodeJob_WorkspaceWithSecretRefPersistsCredentialHelper(t *te
 			Prompt: "Fix the code",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -483,7 +483,7 @@ func TestBuildClaudeCodeJob_EnterpriseWorkspaceSetsGHHostAndEnterpriseToken(t *t
 			Prompt: "Fix the bug",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -562,7 +562,7 @@ func TestBuildClaudeCodeJob_GithubComWorkspaceUsesGHToken(t *testing.T) {
 			Prompt: "Fix the bug",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -615,7 +615,7 @@ func TestBuildCodexJob_DefaultImage(t *testing.T) {
 			Prompt: "Fix the bug",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "openai-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "openai-secret"},
 			},
 			Model: "gpt-4.1",
 		},
@@ -699,7 +699,7 @@ func TestBuildCodexJob_CustomImage(t *testing.T) {
 			Prompt: "Refactor the module",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "openai-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "openai-secret"},
 			},
 			Image: "my-codex:v2",
 		},
@@ -735,7 +735,7 @@ func TestBuildCodexJob_WithWorkspace(t *testing.T) {
 			Prompt: "Fix the code",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "openai-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "openai-secret"},
 			},
 			Model: "gpt-4.1",
 		},
@@ -810,7 +810,7 @@ func TestBuildCodexJob_OAuthCredentials(t *testing.T) {
 			Prompt: "Review the code",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeOAuth,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "codex-oauth"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "codex-oauth"},
 			},
 		},
 	}
@@ -862,7 +862,7 @@ func TestBuildGeminiJob_DefaultImage(t *testing.T) {
 			Prompt: "Fix the bug",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "gemini-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "gemini-secret"},
 			},
 			Model: "gemini-2.5-pro",
 		},
@@ -949,7 +949,7 @@ func TestBuildGeminiJob_CustomImage(t *testing.T) {
 			Prompt: "Refactor the module",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "gemini-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "gemini-secret"},
 			},
 			Image: "my-gemini:v2",
 		},
@@ -985,7 +985,7 @@ func TestBuildGeminiJob_WithWorkspace(t *testing.T) {
 			Prompt: "Fix the code",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "gemini-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "gemini-secret"},
 			},
 			Model: "gemini-2.5-pro",
 		},
@@ -1063,7 +1063,7 @@ func TestBuildGeminiJob_OAuthCredentials(t *testing.T) {
 			Prompt: "Review the code",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeOAuth,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "gemini-oauth"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "gemini-oauth"},
 			},
 		},
 	}
@@ -1115,7 +1115,7 @@ func TestBuildOpenCodeJob_DefaultImage(t *testing.T) {
 			Prompt: "Fix the bug",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "opencode-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "opencode-secret"},
 			},
 			Model: "anthropic/claude-sonnet-4-20250514",
 		},
@@ -1205,7 +1205,7 @@ func TestBuildOpenCodeJob_CustomImage(t *testing.T) {
 			Prompt: "Refactor the module",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "opencode-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "opencode-secret"},
 			},
 			Image: "my-opencode:v2",
 		},
@@ -1241,7 +1241,7 @@ func TestBuildOpenCodeJob_WithWorkspace(t *testing.T) {
 			Prompt: "Fix the code",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "opencode-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "opencode-secret"},
 			},
 			Model: "anthropic/claude-sonnet-4-20250514",
 		},
@@ -1322,7 +1322,7 @@ func TestBuildOpenCodeJob_OAuthCredentials(t *testing.T) {
 			Prompt: "Review the code",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeOAuth,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "opencode-oauth"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "opencode-oauth"},
 			},
 		},
 	}
@@ -1377,7 +1377,7 @@ func TestBuildCursorJob_DefaultImage(t *testing.T) {
 			Prompt: "Fix the bug",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "cursor-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "cursor-secret"},
 			},
 			Model: "claude-sonnet-4-20250514",
 		},
@@ -1461,7 +1461,7 @@ func TestBuildCursorJob_CustomImage(t *testing.T) {
 			Prompt: "Refactor the module",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "cursor-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "cursor-secret"},
 			},
 			Image: "my-cursor:v2",
 		},
@@ -1495,7 +1495,7 @@ func TestBuildCursorJob_OAuthCredentials(t *testing.T) {
 			Prompt: "Review the code",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeOAuth,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "cursor-oauth"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "cursor-oauth"},
 			},
 		},
 	}
@@ -1555,7 +1555,7 @@ func TestBuildClaudeCodeJob_UnsupportedType(t *testing.T) {
 			Prompt: "Hello",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -1580,7 +1580,7 @@ func TestBuildJob_PodOverridesResources(t *testing.T) {
 			Prompt: "Fix issue",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 			PodOverrides: &kelosv1alpha1.PodOverrides{
 				Resources: &corev1.ResourceRequirements{
@@ -1634,7 +1634,7 @@ func TestBuildJob_PodOverridesActiveDeadlineSeconds(t *testing.T) {
 			Prompt: "Fix issue",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 			PodOverrides: &kelosv1alpha1.PodOverrides{
 				ActiveDeadlineSeconds: int64Ptr(1800),
@@ -1667,7 +1667,7 @@ func TestBuildJob_PodOverridesEnv(t *testing.T) {
 			Prompt: "Fix issue",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 			Model: "claude-sonnet-4-20250514",
 			PodOverrides: &kelosv1alpha1.PodOverrides{
@@ -1718,7 +1718,7 @@ func TestBuildJob_PodOverridesEnvBuiltinPrecedence(t *testing.T) {
 			Prompt: "Fix issue",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 			Model: "claude-sonnet-4-20250514",
 			PodOverrides: &kelosv1alpha1.PodOverrides{
@@ -1765,7 +1765,7 @@ func TestBuildJob_PodOverridesNodeSelector(t *testing.T) {
 			Prompt: "Fix issue",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 			PodOverrides: &kelosv1alpha1.PodOverrides{
 				NodeSelector: map[string]string{
@@ -1805,7 +1805,7 @@ func TestBuildJob_PodOverridesAllFields(t *testing.T) {
 			Prompt: "Fix issue",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "openai-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "openai-secret"},
 			},
 			PodOverrides: &kelosv1alpha1.PodOverrides{
 				Resources: &corev1.ResourceRequirements{
@@ -1871,7 +1871,7 @@ func TestBuildJob_NoPodOverrides(t *testing.T) {
 			Prompt: "Fix issue",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -1911,7 +1911,7 @@ func TestBuildJob_AgentConfigAgentsMD(t *testing.T) {
 			Prompt: "Fix issue",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -1962,7 +1962,7 @@ func TestBuildJob_AgentConfigPlugins(t *testing.T) {
 			Prompt: "Fix issue",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -2067,7 +2067,7 @@ func TestBuildJob_AgentConfigFull(t *testing.T) {
 			Prompt: "Fix issue",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -2126,7 +2126,7 @@ func TestBuildJob_AgentConfigSkills(t *testing.T) {
 			Prompt: "Fix issue",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -2235,7 +2235,7 @@ func TestBuildJob_AgentConfigSkillsWithPlugins(t *testing.T) {
 			Prompt: "Fix issue",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -2294,7 +2294,7 @@ func TestBuildJob_AgentConfigSkillsEmptySource(t *testing.T) {
 			Prompt: "Fix issue",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -2326,7 +2326,7 @@ func TestBuildJob_AgentConfigWithWorkspace(t *testing.T) {
 			Prompt: "Fix issue",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -2387,7 +2387,7 @@ func TestBuildJob_AgentConfigWithoutWorkspace(t *testing.T) {
 			Prompt: "Fix issue",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -2437,7 +2437,7 @@ func TestBuildJob_AgentConfigCodex(t *testing.T) {
 			Prompt: "Fix issue",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -2506,7 +2506,7 @@ func TestBuildJob_AgentConfigGemini(t *testing.T) {
 			Prompt: "Fix issue",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -2572,7 +2572,7 @@ func TestBuildJob_AgentConfigOpenCode(t *testing.T) {
 			Prompt: "Fix issue",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -2641,7 +2641,7 @@ func TestBuildJob_AgentConfigPluginNamePathTraversal(t *testing.T) {
 			Prompt: "Fix issue",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -2715,7 +2715,7 @@ func TestBuildJob_BranchSetupInitContainer(t *testing.T) {
 			Branch: "feature-x",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -2798,7 +2798,7 @@ func TestBuildJob_BranchSetupWithSecretRefUsesCredentialHelper(t *testing.T) {
 			Branch: "feature-y",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -2857,7 +2857,7 @@ func TestBuildJob_BranchWithoutWorkspaceNoInitContainer(t *testing.T) {
 			Branch: "feature-z",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -2898,7 +2898,7 @@ func TestBuildJob_BranchEnvDoesNotMutateWorkspaceEnvVars(t *testing.T) {
 			Branch: "feature-w",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -2952,7 +2952,7 @@ func TestBuildJob_KelosAgentTypeAlwaysSet(t *testing.T) {
 					Prompt: "Hello",
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 					},
 				},
 			}
@@ -2991,7 +2991,7 @@ func TestBuildJob_AgentConfigMCPServers(t *testing.T) {
 			Prompt: "Fix issue",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -3098,7 +3098,7 @@ func TestBuildJob_AgentConfigMCPServersWithHTTPHeaders(t *testing.T) {
 			Prompt: "Fix issue",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -3161,7 +3161,7 @@ func TestBuildJob_AgentConfigMCPServersWithPluginsAndAgentsMD(t *testing.T) {
 			Prompt: "Fix issue",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -3230,7 +3230,7 @@ func TestBuildJob_AgentConfigMCPServersCodex(t *testing.T) {
 			Prompt: "Fix issue",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "openai-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "openai-secret"},
 			},
 		},
 	}
@@ -3274,7 +3274,7 @@ func TestBuildJob_AgentConfigMCPServersGemini(t *testing.T) {
 			Prompt: "Fix issue",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "gemini-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "gemini-secret"},
 			},
 		},
 	}
@@ -3318,7 +3318,7 @@ func TestBuildJob_AgentConfigMCPServersEmptyName(t *testing.T) {
 			Prompt: "Fix issue",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -3354,7 +3354,7 @@ func TestBuildJob_AgentConfigMCPServersDuplicateName(t *testing.T) {
 			Prompt: "Fix issue",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -3399,7 +3399,7 @@ func TestBuildJob_AgentConfigMCPServerNamePathTraversal(t *testing.T) {
 					Prompt: "Fix issue",
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 					},
 				},
 			}
@@ -3431,7 +3431,7 @@ func TestBuildJob_KelosBaseBranchSetWhenWorkspaceRefPresent(t *testing.T) {
 			Prompt: "Fix the code",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -3473,7 +3473,7 @@ func TestBuildJob_KelosBaseBranchAbsentWhenRefEmpty(t *testing.T) {
 			Prompt: "Fix the code",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -3507,7 +3507,7 @@ func TestBuildJob_KelosBaseBranchAbsentWithoutWorkspace(t *testing.T) {
 			Prompt: "Fix the code",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -3537,7 +3537,7 @@ func TestBuildJob_WorkspaceWithOneRemote(t *testing.T) {
 			Prompt: "Work on feature",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -3588,7 +3588,7 @@ func TestBuildJob_WorkspaceWithMultipleRemotes(t *testing.T) {
 			Prompt: "Work on feature",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -3639,7 +3639,7 @@ func TestBuildJob_WorkspaceWithNoRemotesNoRemoteSetupContainer(t *testing.T) {
 			Prompt: "Fix the code",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -3674,7 +3674,7 @@ func TestBuildJob_RemoteSetupOrderingWithBranchSetup(t *testing.T) {
 			Branch: "feature-x",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -3730,7 +3730,7 @@ func TestBuildJob_RemoteSetupQuotesShellMetacharacters(t *testing.T) {
 			Prompt: "Do work",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -3777,7 +3777,7 @@ func TestBuildJob_WorkspaceWithUpstreamRemoteInjectsEnv(t *testing.T) {
 			Prompt: "Fix the code",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -3823,7 +3823,7 @@ func TestBuildJob_WorkspaceWithNonUpstreamRemoteNoEnv(t *testing.T) {
 			Prompt: "Fix the code",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -3861,7 +3861,7 @@ func TestBuildJob_WorkspaceWithInvalidUpstreamRemoteNoEnv(t *testing.T) {
 			Prompt: "Fix the code",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -3902,7 +3902,7 @@ func TestBuildJob_TaskSpawnerLabelInjectsEnv(t *testing.T) {
 			Prompt: "Hello",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -3939,7 +3939,7 @@ func TestBuildJob_NoTaskSpawnerLabelNoEnv(t *testing.T) {
 			Prompt: "Hello",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -3969,7 +3969,7 @@ func TestBuildJob_PodFailurePolicy(t *testing.T) {
 			Prompt: "Hello",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -4033,7 +4033,7 @@ func TestBuildJob_GHConfigDirNotSetWithoutSecretRef(t *testing.T) {
 			Prompt: "Fix the bug",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -4067,7 +4067,7 @@ func TestBuildJob_CustomImageGetsGHConfigDir(t *testing.T) {
 			Prompt: "Fix the bug",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 			Image: "my-custom-agent:latest",
 		},
@@ -4116,7 +4116,7 @@ func TestBuildJob_CredentialHelperClearsInheritedHelpers(t *testing.T) {
 			Prompt: "Fix the bug",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 		},
 	}
@@ -4168,7 +4168,7 @@ func TestBuildJob_UpstreamRepoSpecOverridesRemote(t *testing.T) {
 			Prompt: "Fix the code",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 			UpstreamRepo: "override-org/override-repo",
 		},
@@ -4215,7 +4215,7 @@ func TestBuildJob_UpstreamRepoSpecWithoutRemote(t *testing.T) {
 			Prompt: "Fix the code",
 			Credentials: kelosv1alpha1.Credentials{
 				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: kelosv1alpha1.SecretReference{Name: "my-secret"},
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
 			},
 			UpstreamRepo: "upstream-org/upstream-repo",
 		},
@@ -4244,5 +4244,115 @@ func TestBuildJob_UpstreamRepoSpecWithoutRemote(t *testing.T) {
 	}
 	if !found {
 		t.Error("Expected KELOS_UPSTREAM_REPO env var on main container")
+	}
+}
+
+func TestBuildJob_NoneCredentials(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-none-creds",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix the bug",
+			Credentials: kelosv1alpha1.Credentials{
+				Type: kelosv1alpha1.CredentialTypeNone,
+			},
+			PodOverrides: &kelosv1alpha1.PodOverrides{
+				Env: []corev1.EnvVar{
+					{Name: "CLAUDE_CODE_USE_BEDROCK", Value: "1"},
+					{Name: "AWS_REGION", Value: "us-east-1"},
+				},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+
+	// Collect env vars by name for easier assertions.
+	envMap := make(map[string]corev1.EnvVar)
+	for _, env := range container.Env {
+		envMap[env.Name] = env
+	}
+
+	// User-supplied env vars from PodOverrides should be present.
+	if env, ok := envMap["CLAUDE_CODE_USE_BEDROCK"]; !ok {
+		t.Error("Expected CLAUDE_CODE_USE_BEDROCK env var from PodOverrides")
+	} else if env.Value != "1" {
+		t.Errorf("CLAUDE_CODE_USE_BEDROCK = %q, want %q", env.Value, "1")
+	}
+
+	if env, ok := envMap["AWS_REGION"]; !ok {
+		t.Error("Expected AWS_REGION env var from PodOverrides")
+	} else if env.Value != "us-east-1" {
+		t.Errorf("AWS_REGION = %q, want %q", env.Value, "us-east-1")
+	}
+
+	// No built-in credential env vars should be set.
+	if _, ok := envMap["ANTHROPIC_API_KEY"]; ok {
+		t.Error("ANTHROPIC_API_KEY should not be set for none credential type")
+	}
+	if _, ok := envMap["CLAUDE_CODE_OAUTH_TOKEN"]; ok {
+		t.Error("CLAUDE_CODE_OAUTH_TOKEN should not be set for none credential type")
+	}
+}
+
+func TestBuildJob_NoneCredentials_ServiceAccountName(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-none-sa",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix the bug",
+			Credentials: kelosv1alpha1.Credentials{
+				Type: kelosv1alpha1.CredentialTypeNone,
+			},
+			PodOverrides: &kelosv1alpha1.PodOverrides{
+				ServiceAccountName: "bedrock-agent-sa",
+				Env: []corev1.EnvVar{
+					{Name: "CLAUDE_CODE_USE_BEDROCK", Value: "1"},
+					{Name: "AWS_REGION", Value: "us-west-2"},
+				},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	// ServiceAccountName should be set on the pod spec from PodOverrides.
+	if job.Spec.Template.Spec.ServiceAccountName != "bedrock-agent-sa" {
+		t.Errorf("ServiceAccountName = %q, want %q", job.Spec.Template.Spec.ServiceAccountName, "bedrock-agent-sa")
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+	envMap := make(map[string]corev1.EnvVar)
+	for _, env := range container.Env {
+		envMap[env.Name] = env
+	}
+
+	// User-supplied env vars should be present.
+	if env, ok := envMap["CLAUDE_CODE_USE_BEDROCK"]; !ok {
+		t.Error("Expected CLAUDE_CODE_USE_BEDROCK env var")
+	} else if env.Value != "1" {
+		t.Errorf("CLAUDE_CODE_USE_BEDROCK = %q, want %q", env.Value, "1")
+	}
+
+	if env, ok := envMap["AWS_REGION"]; !ok {
+		t.Error("Expected AWS_REGION env var")
+	} else if env.Value != "us-west-2" {
+		t.Errorf("AWS_REGION = %q, want %q", env.Value, "us-west-2")
 	}
 }

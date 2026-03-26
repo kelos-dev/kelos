@@ -31,7 +31,7 @@ var _ = Describe("OpenCode Task", func() {
 				Prompt: "Print 'Hello from OpenCode e2e test' to stdout",
 				Credentials: kelosv1alpha1.Credentials{
 					Type:      kelosv1alpha1.CredentialTypeAPIKey,
-					SecretRef: kelosv1alpha1.SecretReference{Name: "opencode-credentials"},
+					SecretRef: &kelosv1alpha1.SecretReference{Name: "opencode-credentials"},
 				},
 			},
 		})

@@ -174,7 +174,7 @@ func runCycle(ctx context.Context, cl client.Client, key types.NamespacedName, g
 		return fmt.Errorf("fetching TaskSpawner: %w", err)
 	}
 
-	src, err := buildSource(&ts, githubOwner, githubRepo, githubAPIBaseURL, githubTokenFile, jiraBaseURL, jiraProject, jiraJQL, httpClient)
+	src, err := buildSource(&ts, githubOwner, githubRepo, githubAPIBaseURL, githubTokenFile, jiraBaseURL, jiraProject, jiraJQL, httpClient, cl)
 	if err != nil {
 		return fmt.Errorf("building source: %w", err)
 	}
@@ -505,7 +505,7 @@ func resolveGitHubCommentPolicy(policy *kelosv1alpha1.GitHubCommentPolicy, legac
 	}, nil
 }
 
-func buildSource(ts *kelosv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFile, jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) (source.Source, error) {
+func buildSource(ts *kelosv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFile, jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client, k8sClient client.Client) (source.Source, error) {
 	if ts.Spec.When.GitHubIssues != nil {
 		gh := ts.Spec.When.GitHubIssues
 		token, err := readGitHubToken(tokenFile)
@@ -566,6 +566,27 @@ func buildSource(ts *kelosv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFi
 			MinimumPermission: commentPolicy.MinimumPermission,
 			Draft:             gh.Draft,
 			PriorityLabels:    gh.PriorityLabels,
+		}, nil
+	}
+
+	if ts.Spec.When.GitHubWebhook != nil {
+		webhook := ts.Spec.When.GitHubWebhook
+		return &source.GitHubWebhookSource{
+			Client:        k8sClient,
+			Namespace:     webhook.Namespace,
+			Labels:        webhook.Labels,
+			ExcludeLabels: webhook.ExcludeLabels,
+		}, nil
+	}
+
+	if ts.Spec.When.LinearWebhook != nil {
+		webhook := ts.Spec.When.LinearWebhook
+		return &source.LinearWebhookSource{
+			Client:        k8sClient,
+			Namespace:     webhook.Namespace,
+			States:        webhook.States,
+			Labels:        webhook.Labels,
+			ExcludeLabels: webhook.ExcludeLabels,
 		}, nil
 	}
 

@@ -241,7 +241,7 @@ var _ = Describe("Install/Uninstall", Ordered, func() {
 					Prompt: "test prompt",
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeAPIKey,
-						SecretRef: kelosv1alpha1.SecretReference{Name: "fake-secret"},
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "fake-secret"},
 					},
 				},
 			}

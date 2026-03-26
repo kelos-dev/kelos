@@ -313,6 +313,8 @@ The `kelos` CLI lets you manage the full lifecycle without writing YAML.
 - `--spawner-resource-limits`: Resource limits for spawner containers as comma-separated `name=value` pairs
 - `--token-refresher-resource-requests`: Resource requests for token refresher sidecars as comma-separated `name=value` pairs, for example `cpu=100m,memory=128Mi`
 - `--token-refresher-resource-limits`: Resource limits for token refresher sidecars as comma-separated `name=value` pairs, for example `cpu=200m,memory=256Mi`
+- `--controller-resource-requests`: Resource requests for the controller container as comma-separated `name=value` pairs, for example `cpu=10m,memory=64Mi`
+- `--controller-resource-limits`: Resource limits for the controller container as comma-separated `name=value` pairs, for example `cpu=500m,memory=128Mi`
 
 ### `kelos run` Flags
 

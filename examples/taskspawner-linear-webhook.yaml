@@ -1,0 +1,145 @@
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: example-linear-webhook
+  namespace: default
+spec:
+  when:
+    linearWebhook:
+      # Namespace where kelos-webhook-receiver creates WebhookEvent resources
+      namespace: default
+      # Optional: filter by Linear issue states
+      # If not specified, all non-terminal states are accepted (excludes 'completed' and 'canceled')
+      states:
+        - "Todo"
+        - "In Progress"
+      # Optional: filter by labels (applied client-side to webhook payloads)
+      labels:
+        - "kelos-task"
+      # Optional: exclude items with these labels
+      excludeLabels:
+        - "skip-kelos"
+
+  taskTemplate:
+    type: claude-code
+    credentials:
+      type: api-key
+      secretRef:
+        name: anthropic-api-key
+    workspaceRef:
+      name: my-workspace
+    promptTemplate: |
+      {{ .Title }}
+
+      {{ .Body }}
+
+      Please investigate and resolve this {{ .Kind }}.
+
+---
+# Webhook receiver deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kelos-webhook-receiver
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kelos-webhook-receiver
+  template:
+    metadata:
+      labels:
+        app: kelos-webhook-receiver
+    spec:
+      serviceAccountName: kelos-webhook-receiver
+      containers:
+        - name: receiver
+          image: ghcr.io/kelos-dev/kelos-webhook-receiver:latest
+          args:
+            - --namespace=default
+            - --port=8080
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            # Optional: Linear webhook secret for signature validation
+            # If not set, signature validation is skipped (development mode only)
+            - name: LINEAR_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: linear-webhook-secret
+                  key: secret
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kelos-webhook-receiver
+  namespace: default
+spec:
+  selector:
+    app: kelos-webhook-receiver
+  ports:
+    - port: 80
+      targetPort: 8080
+      protocol: TCP
+  type: LoadBalancer
+
+---
+# ServiceAccount and RBAC for webhook receiver
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kelos-webhook-receiver
+  namespace: default
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kelos-webhook-receiver
+  namespace: default
+rules:
+  - apiGroups: ["kelos.dev"]
+    resources: ["webhookevents"]
+    verbs: ["create", "get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kelos-webhook-receiver
+  namespace: default
+subjects:
+  - kind: ServiceAccount
+    name: kelos-webhook-receiver
+    namespace: default
+roleRef:
+  kind: Role
+  name: kelos-webhook-receiver
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Example Secret for Linear webhook signature validation
+# Create this with your actual Linear webhook secret:
+#
+# kubectl create secret generic linear-webhook-secret \
+#   --from-literal=secret=your-linear-webhook-secret-here
+#
+apiVersion: v1
+kind: Secret
+metadata:
+  name: linear-webhook-secret
+  namespace: default
+type: Opaque
+stringData:
+  secret: "your-linear-webhook-secret-here"

@@ -149,7 +149,7 @@ func TestParseManifests_EmbeddedCRDs(t *testing.T) {
 
 func renderDefaultChart(t *testing.T) []byte {
 	t.Helper()
-	vals := buildHelmValues("v0.0.0-test", "", false, "", "", "", "")
+	vals := buildHelmValues("v0.0.0-test", "", false, "", "", "", "", "", "")
 	data, err := helmchart.Render(manifests.ChartFS, vals)
 	if err != nil {
 		t.Fatalf("rendering chart: %v", err)
@@ -178,7 +178,7 @@ func TestRenderChart_DefaultValues(t *testing.T) {
 }
 
 func TestRenderChart_VersionSubstitution(t *testing.T) {
-	vals := buildHelmValues("v0.5.0", "", false, "", "", "", "")
+	vals := buildHelmValues("v0.5.0", "", false, "", "", "", "", "", "")
 	data, err := helmchart.Render(manifests.ChartFS, vals)
 	if err != nil {
 		t.Fatalf("rendering chart: %v", err)
@@ -192,18 +192,18 @@ func TestRenderChart_VersionSubstitution(t *testing.T) {
 }
 
 func TestRenderChart_ImageArgs(t *testing.T) {
-	vals := buildHelmValues("v0.3.0", "", false, "", "", "", "")
+	vals := buildHelmValues("v0.3.0", "", false, "", "", "", "", "", "")
 	data, err := helmchart.Render(manifests.ChartFS, vals)
 	if err != nil {
 		t.Fatalf("rendering chart: %v", err)
 	}
 	versionedArgs := []string{
-		"--claude-code-image=ghcr.io/kelos-dev/claude-code:v0.3.0",
-		"--codex-image=ghcr.io/kelos-dev/codex:v0.3.0",
-		"--gemini-image=ghcr.io/kelos-dev/gemini:v0.3.0",
-		"--opencode-image=ghcr.io/kelos-dev/opencode:v0.3.0",
-		"--spawner-image=ghcr.io/kelos-dev/kelos-spawner:v0.3.0",
-		"--token-refresher-image=ghcr.io/kelos-dev/kelos-token-refresher:v0.3.0",
+		"--claude-code-image=public.ecr.aws/anomalo/kelos/claude-code:v0.3.0",
+		"--codex-image=public.ecr.aws/anomalo/kelos/codex:v0.3.0",
+		"--gemini-image=public.ecr.aws/anomalo/kelos/gemini:v0.3.0",
+		"--opencode-image=public.ecr.aws/anomalo/kelos/opencode:v0.3.0",
+		"--spawner-image=public.ecr.aws/anomalo/kelos/kelos-spawner:v0.3.0",
+		"--token-refresher-image=public.ecr.aws/anomalo/kelos/kelos-token-refresher:v0.3.0",
 	}
 	for _, arg := range versionedArgs {
 		if !bytes.Contains(data, []byte(arg)) {
@@ -213,7 +213,7 @@ func TestRenderChart_ImageArgs(t *testing.T) {
 }
 
 func TestRenderChart_ImagePullPolicy(t *testing.T) {
-	vals := buildHelmValues("v0.1.0", "Always", false, "", "", "", "")
+	vals := buildHelmValues("v0.1.0", "Always", false, "", "", "", "", "", "")
 	data, err := helmchart.Render(manifests.ChartFS, vals)
 	if err != nil {
 		t.Fatalf("rendering chart: %v", err)
@@ -236,7 +236,7 @@ func TestRenderChart_ImagePullPolicy(t *testing.T) {
 }
 
 func TestRenderChart_NoPullPolicyByDefault(t *testing.T) {
-	vals := buildHelmValues("latest", "", false, "", "", "", "")
+	vals := buildHelmValues("latest", "", false, "", "", "", "", "", "")
 	data, err := helmchart.Render(manifests.ChartFS, vals)
 	if err != nil {
 		t.Fatalf("rendering chart: %v", err)
@@ -250,7 +250,7 @@ func TestRenderChart_NoPullPolicyByDefault(t *testing.T) {
 }
 
 func TestRenderChart_DisableHeartbeat(t *testing.T) {
-	vals := buildHelmValues("latest", "", true, "", "", "", "")
+	vals := buildHelmValues("latest", "", true, "", "", "", "", "", "")
 	data, err := helmchart.Render(manifests.ChartFS, vals)
 	if err != nil {
 		t.Fatalf("rendering chart: %v", err)
@@ -277,7 +277,7 @@ func TestRenderChart_DisableHeartbeat(t *testing.T) {
 }
 
 func TestRenderChart_EnableHeartbeat(t *testing.T) {
-	vals := buildHelmValues("latest", "", false, "", "", "", "")
+	vals := buildHelmValues("latest", "", false, "", "", "", "", "", "")
 	data, err := helmchart.Render(manifests.ChartFS, vals)
 	if err != nil {
 		t.Fatalf("rendering chart: %v", err)
@@ -537,8 +537,104 @@ func TestInstallCommand_NoTokenRefresherResourcesByDefault(t *testing.T) {
 	}
 }
 
+func TestInstallCommand_ControllerResourceRequestsFlag(t *testing.T) {
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{"install", "--dry-run", "--controller-resource-requests", "cpu=10m,memory=64Mi"})
+
+	output := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "cpu: 10m") {
+		t.Errorf("expected cpu: 10m in output")
+	}
+	if !strings.Contains(output, "memory: 64Mi") {
+		t.Errorf("expected memory: 64Mi in output")
+	}
+}
+
+func TestInstallCommand_ControllerResourceLimitsFlag(t *testing.T) {
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{"install", "--dry-run", "--controller-resource-limits", "cpu=500m,memory=128Mi"})
+
+	output := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "cpu: 500m") {
+		t.Errorf("expected cpu: 500m in output")
+	}
+	if !strings.Contains(output, "memory: 128Mi") {
+		t.Errorf("expected memory: 128Mi in output")
+	}
+}
+
+func TestInstallCommand_NoControllerResourcesByDefault(t *testing.T) {
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{"install", "--dry-run"})
+
+	output := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	// Extract only the Deployment document so we don't match resources from
+	// the telemetry CronJob (which legitimately contains cpu: 10m / memory: 64Mi).
+	deployment := extractYAMLDocument(t, []byte(output), "kind: Deployment")
+
+	// Verify neither old limit defaults nor old request defaults are rendered.
+	for _, needle := range []string{"cpu: 500m", "memory: 128Mi", "cpu: 10m", "memory: 64Mi"} {
+		if strings.Contains(deployment, needle) {
+			t.Errorf("expected no hardcoded %s in controller Deployment when resources not set", needle)
+		}
+	}
+}
+
+func TestRenderChart_ControllerResources(t *testing.T) {
+	vals := buildHelmValues("latest", "", false, "", "", "", "", "cpu=100m,memory=256Mi", "cpu=1,memory=512Mi")
+	data, err := helmchart.Render(manifests.ChartFS, vals)
+	if err != nil {
+		t.Fatalf("rendering chart: %v", err)
+	}
+	if !bytes.Contains(data, []byte("cpu: 100m")) {
+		t.Error("expected cpu: 100m in rendered output for controller requests")
+	}
+	if !bytes.Contains(data, []byte("memory: 256Mi")) {
+		t.Error("expected memory: 256Mi in rendered output for controller requests")
+	}
+	if !bytes.Contains(data, []byte("cpu: 1\n")) {
+		t.Error("expected cpu: 1 in rendered output for controller limits")
+	}
+	if !bytes.Contains(data, []byte("memory: 512Mi")) {
+		t.Error("expected memory: 512Mi in rendered output for controller limits")
+	}
+}
+
+func TestRenderChart_NoControllerResourcesByDefault(t *testing.T) {
+	vals := buildHelmValues("latest", "", false, "", "", "", "", "", "")
+	data, err := helmchart.Render(manifests.ChartFS, vals)
+	if err != nil {
+		t.Fatalf("rendering chart: %v", err)
+	}
+	// Extract only the Deployment document so we don't match resources from
+	// the telemetry CronJob (which legitimately contains cpu: 10m / memory: 64Mi).
+	deployment := extractYAMLDocument(t, data, "kind: Deployment")
+
+	// Verify neither old limit defaults nor old request defaults are rendered.
+	for _, needle := range []string{"cpu: 500m", "memory: 128Mi", "cpu: 10m", "memory: 64Mi"} {
+		if strings.Contains(deployment, needle) {
+			t.Errorf("expected no hardcoded %s in controller Deployment when resources not set", needle)
+		}
+	}
+}
+
 func TestRenderChart_SpawnerResources(t *testing.T) {
-	vals := buildHelmValues("latest", "", false, "cpu=250m,memory=512Mi", "cpu=1,memory=1Gi", "", "")
+	vals := buildHelmValues("latest", "", false, "cpu=250m,memory=512Mi", "cpu=1,memory=1Gi", "", "", "", "")
 	data, err := helmchart.Render(manifests.ChartFS, vals)
 	if err != nil {
 		t.Fatalf("rendering chart: %v", err)
@@ -552,7 +648,7 @@ func TestRenderChart_SpawnerResources(t *testing.T) {
 }
 
 func TestRenderChart_TokenRefresherResources(t *testing.T) {
-	vals := buildHelmValues("latest", "", false, "", "", "cpu=100m,memory=128Mi", "cpu=200m,memory=256Mi")
+	vals := buildHelmValues("latest", "", false, "", "", "cpu=100m,memory=128Mi", "cpu=200m,memory=256Mi", "", "")
 	data, err := helmchart.Render(manifests.ChartFS, vals)
 	if err != nil {
 		t.Fatalf("rendering chart: %v", err)
@@ -566,7 +662,7 @@ func TestRenderChart_TokenRefresherResources(t *testing.T) {
 }
 
 func TestRenderChart_NoSpawnerResourcesByDefault(t *testing.T) {
-	vals := buildHelmValues("latest", "", false, "", "", "", "")
+	vals := buildHelmValues("latest", "", false, "", "", "", "", "", "")
 	data, err := helmchart.Render(manifests.ChartFS, vals)
 	if err != nil {
 		t.Fatalf("rendering chart: %v", err)
@@ -580,7 +676,7 @@ func TestRenderChart_NoSpawnerResourcesByDefault(t *testing.T) {
 }
 
 func TestRenderChart_NoTokenRefresherResourcesByDefault(t *testing.T) {
-	vals := buildHelmValues("latest", "", false, "", "", "", "")
+	vals := buildHelmValues("latest", "", false, "", "", "", "", "", "")
 	data, err := helmchart.Render(manifests.ChartFS, vals)
 	if err != nil {
 		t.Fatalf("rendering chart: %v", err)
@@ -730,6 +826,8 @@ func TestBuildHelmValues(t *testing.T) {
 		spawnerResourceLimits          string
 		tokenRefresherResourceRequests string
 		tokenRefresherResourceLimits   string
+		controllerResourceRequests     string
+		controllerResourceLimits       string
 		checkFn                        func(t *testing.T, vals map[string]interface{})
 	}{
 		{
@@ -757,6 +855,9 @@ func TestBuildHelmValues(t *testing.T) {
 				}
 				if _, ok := vals["tokenRefresherResourceLimits"]; ok {
 					t.Error("expected no tokenRefresherResourceLimits when empty")
+				}
+				if _, ok := vals["controller"]; ok {
+					t.Error("expected no controller key when empty")
 				}
 			},
 		},
@@ -822,6 +923,32 @@ func TestBuildHelmValues(t *testing.T) {
 				}
 			},
 		},
+		{
+			name:                       "with controller resource requests",
+			version:                    "latest",
+			controllerResourceRequests: "cpu=10m,memory=64Mi",
+			checkFn: func(t *testing.T, vals map[string]interface{}) {
+				ctrl := vals["controller"].(map[string]interface{})
+				res := ctrl["resources"].(map[string]interface{})
+				req := res["requests"].(map[string]interface{})
+				if req["cpu"] != "10m" || req["memory"] != "64Mi" {
+					t.Errorf("expected controller.resources.requests={cpu:10m,memory:64Mi}, got %v", req)
+				}
+			},
+		},
+		{
+			name:                     "with controller resource limits",
+			version:                  "latest",
+			controllerResourceLimits: "cpu=500m,memory=128Mi",
+			checkFn: func(t *testing.T, vals map[string]interface{}) {
+				ctrl := vals["controller"].(map[string]interface{})
+				res := ctrl["resources"].(map[string]interface{})
+				lim := res["limits"].(map[string]interface{})
+				if lim["cpu"] != "500m" || lim["memory"] != "128Mi" {
+					t.Errorf("expected controller.resources.limits={cpu:500m,memory:128Mi}, got %v", lim)
+				}
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -833,8 +960,24 @@ func TestBuildHelmValues(t *testing.T) {
 				tt.spawnerResourceLimits,
 				tt.tokenRefresherResourceRequests,
 				tt.tokenRefresherResourceLimits,
+				tt.controllerResourceRequests,
+				tt.controllerResourceLimits,
 			)
 			tt.checkFn(t, vals)
 		})
 	}
+}
+
+// extractYAMLDocument returns the first YAML document from data whose content
+// contains the given marker string. Documents are separated by "---".
+func extractYAMLDocument(t *testing.T, data []byte, marker string) string {
+	t.Helper()
+	docs := strings.Split(string(data), "---")
+	for _, doc := range docs {
+		if strings.Contains(doc, marker) {
+			return doc
+		}
+	}
+	t.Fatalf("no YAML document containing %q found in rendered output", marker)
+	return ""
 }

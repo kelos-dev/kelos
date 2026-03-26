@@ -13,6 +13,9 @@ const (
 	CredentialTypeAPIKey CredentialType = "api-key"
 	// CredentialTypeOAuth uses OAuth for authentication.
 	CredentialTypeOAuth CredentialType = "oauth"
+	// CredentialTypeNone disables built-in credential injection.
+	// Users supply their own credentials via PodOverrides.Env.
+	CredentialTypeNone CredentialType = "none"
 )
 
 // TaskPhase represents the current phase of a Task.
@@ -39,12 +42,14 @@ type SecretReference struct {
 
 // Credentials defines how to authenticate with the AI agent.
 type Credentials struct {
-	// Type specifies the credential type (api-key or oauth).
-	// +kubebuilder:validation:Enum=api-key;oauth
+	// Type specifies the credential type.
+	// +kubebuilder:validation:Enum=api-key;oauth;none
 	Type CredentialType `json:"type"`
 
 	// SecretRef references the Secret containing credentials.
-	SecretRef SecretReference `json:"secretRef"`
+	// Required for api-key and oauth types. Not used with none.
+	// +optional
+	SecretRef *SecretReference `json:"secretRef,omitempty"`
 }
 
 // PodOverrides defines optional overrides for the agent pod.
@@ -69,6 +74,12 @@ type PodOverrides struct {
 	// NodeSelector constrains agent pods to nodes matching the given labels.
 	// +optional
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+
+	// ServiceAccountName sets the pod's service account.
+	// Use with workload identity systems such as IRSA on EKS, GKE
+	// Workload Identity, or Azure Workload Identity.
+	// +optional
+	ServiceAccountName string `json:"serviceAccountName,omitempty"`
 }
 
 // TaskSpec defines the desired state of Task.
@@ -84,6 +95,7 @@ type TaskSpec struct {
 
 	// Credentials specifies how to authenticate with the agent.
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:XValidation:rule="self.type == 'none' || has(self.secretRef)",message="secretRef is required for api-key and oauth credential types"
 	Credentials Credentials `json:"credentials"`
 
 	// Model optionally overrides the default model.

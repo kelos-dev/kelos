@@ -828,6 +828,141 @@ func TestRunCommand_DryRun_CodexOAuthToken_FileRef(t *testing.T) {
 	}
 }
 
+func TestRunCommand_DryRun_NoneCredentialType(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{
+		"run",
+		"--config", cfgPath,
+		"--dry-run",
+		"--prompt", "hello",
+		"--name", "none-cred-task",
+		"--namespace", "test-ns",
+		"--credential-type", "none",
+	})
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	if err := cmd.Execute(); err != nil {
+		w.Close()
+		os.Stdout = old
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	w.Close()
+	os.Stdout = old
+	var out bytes.Buffer
+	out.ReadFrom(r)
+	output := out.String()
+
+	if !strings.Contains(output, "kind: Task") {
+		t.Errorf("expected 'kind: Task' in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "type: none") {
+		t.Errorf("expected credential 'type: none' in output, got:\n%s", output)
+	}
+	// none credential type should not produce a secretRef.
+	if strings.Contains(output, "secretRef") {
+		t.Errorf("none credential type should not include secretRef, got:\n%s", output)
+	}
+}
+
+func TestRunCommand_DryRun_NoneCredentialType_WithEnv(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{
+		"run",
+		"--config", cfgPath,
+		"--dry-run",
+		"--prompt", "hello",
+		"--name", "none-env-task",
+		"--namespace", "test-ns",
+		"--credential-type", "none",
+		"--env", "CLAUDE_CODE_USE_BEDROCK=1",
+		"--env", "AWS_REGION=us-east-1",
+	})
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	if err := cmd.Execute(); err != nil {
+		w.Close()
+		os.Stdout = old
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	w.Close()
+	os.Stdout = old
+	var out bytes.Buffer
+	out.ReadFrom(r)
+	output := out.String()
+
+	if !strings.Contains(output, "type: none") {
+		t.Errorf("expected credential 'type: none' in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "CLAUDE_CODE_USE_BEDROCK") {
+		t.Errorf("expected CLAUDE_CODE_USE_BEDROCK env var in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "AWS_REGION") {
+		t.Errorf("expected AWS_REGION env var in output, got:\n%s", output)
+	}
+}
+
+func TestRunCommand_DryRun_NoneCredentialType_ConfigFile(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	cfg := "credentialType: none\n"
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{
+		"run",
+		"--config", cfgPath,
+		"--dry-run",
+		"--prompt", "hello",
+		"--name", "none-cfg-task",
+		"--namespace", "test-ns",
+	})
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	if err := cmd.Execute(); err != nil {
+		w.Close()
+		os.Stdout = old
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	w.Close()
+	os.Stdout = old
+	var out bytes.Buffer
+	out.ReadFrom(r)
+	output := out.String()
+
+	if !strings.Contains(output, "type: none") {
+		t.Errorf("expected credential 'type: none' in output, got:\n%s", output)
+	}
+	if strings.Contains(output, "secretRef") {
+		t.Errorf("none credential type should not include secretRef, got:\n%s", output)
+	}
+}
+
 func TestResolveContent(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		got, err := resolveContent("")

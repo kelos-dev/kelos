@@ -66,7 +66,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
@@ -199,7 +199,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
@@ -265,7 +265,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
@@ -335,7 +335,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
@@ -428,7 +428,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
@@ -485,7 +485,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
@@ -578,7 +578,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
@@ -658,7 +658,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
@@ -801,7 +801,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
@@ -924,7 +924,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
@@ -1005,7 +1005,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
@@ -1115,7 +1115,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
@@ -1188,7 +1188,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
@@ -1309,7 +1309,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
@@ -1388,7 +1388,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
@@ -1465,7 +1465,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
@@ -1547,7 +1547,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
@@ -1685,7 +1685,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
@@ -1831,7 +1831,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
@@ -1921,7 +1921,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
@@ -1996,7 +1996,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
@@ -2067,7 +2067,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
@@ -2144,7 +2144,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
@@ -2222,7 +2222,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
@@ -2279,7 +2279,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
@@ -2341,7 +2341,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},
@@ -2418,7 +2418,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 						Type: "claude-code",
 						Credentials: kelosv1alpha1.Credentials{
 							Type: kelosv1alpha1.CredentialTypeOAuth,
-							SecretRef: kelosv1alpha1.SecretReference{
+							SecretRef: &kelosv1alpha1.SecretReference{
 								Name: "claude-credentials",
 							},
 						},

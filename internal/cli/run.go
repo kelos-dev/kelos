@@ -79,8 +79,15 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 
 			// Auto-create secret from token if no explicit secret is set.
 			if secret == "" && cfg.Config != nil {
-				if cfg.Config.OAuthToken != "" && cfg.Config.APIKey != "" {
-					return fmt.Errorf("config file must specify either oauthToken or apiKey, not both")
+				sources := 0
+				if cfg.Config.OAuthToken != "" {
+					sources++
+				}
+				if cfg.Config.APIKey != "" {
+					sources++
+				}
+				if sources > 1 {
+					return fmt.Errorf("config file must specify only one of oauthToken or apiKey")
 				}
 				if token := cfg.Config.OAuthToken; token != "" {
 					resolved, err := resolveContent(token)
@@ -111,7 +118,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 				}
 			}
 
-			if secret == "" {
+			if secret == "" && credentialType != "none" {
 				return fmt.Errorf("no credentials configured (set oauthToken/apiKey in config file, or use --secret flag)")
 			}
 
@@ -193,22 +200,24 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 				name = "task-" + rand.String(5)
 			}
 
+			creds := kelosv1alpha1.Credentials{
+				Type: kelosv1alpha1.CredentialType(credentialType),
+			}
+			if secret != "" {
+				creds.SecretRef = &kelosv1alpha1.SecretReference{Name: secret}
+			}
+
 			task := &kelosv1alpha1.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      name,
 					Namespace: ns,
 				},
 				Spec: kelosv1alpha1.TaskSpec{
-					Type:   agentType,
-					Prompt: prompt,
-					Credentials: kelosv1alpha1.Credentials{
-						Type: kelosv1alpha1.CredentialType(credentialType),
-						SecretRef: kelosv1alpha1.SecretReference{
-							Name: secret,
-						},
-					},
-					Model: model,
-					Image: image,
+					Type:        agentType,
+					Prompt:      prompt,
+					Credentials: creds,
+					Model:       model,
+					Image:       image,
 				},
 			}
 
@@ -288,7 +297,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 	cmd.Flags().StringVarP(&prompt, "prompt", "p", "", "task prompt (required)")
 	cmd.Flags().StringVarP(&agentType, "type", "t", "claude-code", "agent type (claude-code, codex, gemini, opencode, cursor)")
 	cmd.Flags().StringVar(&secret, "secret", "", "secret name with credentials (overrides oauthToken/apiKey in config)")
-	cmd.Flags().StringVar(&credentialType, "credential-type", "api-key", "credential type (api-key, oauth)")
+	cmd.Flags().StringVar(&credentialType, "credential-type", "api-key", "credential type (api-key, oauth, none)")
 	cmd.Flags().StringVar(&model, "model", "", "model override")
 	cmd.Flags().StringVar(&image, "image", "", "custom agent image (must implement agent image interface)")
 	cmd.Flags().StringVar(&name, "name", "", "task name (auto-generated if omitted)")
@@ -304,7 +313,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 
 	cmd.MarkFlagRequired("prompt")
 
-	_ = cmd.RegisterFlagCompletionFunc("credential-type", cobra.FixedCompletions([]string{"api-key", "oauth"}, cobra.ShellCompDirectiveNoFileComp))
+	_ = cmd.RegisterFlagCompletionFunc("credential-type", cobra.FixedCompletions([]string{"api-key", "oauth", "none"}, cobra.ShellCompDirectiveNoFileComp))
 	_ = cmd.RegisterFlagCompletionFunc("type", cobra.FixedCompletions([]string{"claude-code", "codex", "gemini", "opencode", "cursor"}, cobra.ShellCompDirectiveNoFileComp))
 
 	return cmd

@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, labeled]
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled]
   merge_group:
   workflow_dispatch:
     inputs:
@@ -23,7 +26,7 @@ concurrency:
 
 jobs:
   build:
-    if: github.event.action != 'labeled' || github.event.label.name == 'ok-to-test'
+    if: github.event_name != 'pull_request_target' && (github.event.action != 'labeled' || github.event.label.name == 'ok-to-test')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,7 +39,7 @@ jobs:
         run: make build
 
   verify:
-    if: github.event.action != 'labeled' || github.event.label.name == 'ok-to-test'
+    if: github.event_name != 'pull_request_target' && (github.event.action != 'labeled' || github.event.label.name == 'ok-to-test')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,7 +52,7 @@ jobs:
         run: make verify
 
   test:
-    if: github.event.action != 'labeled' || github.event.label.name == 'ok-to-test'
+    if: github.event_name != 'pull_request_target' && (github.event.action != 'labeled' || github.event.label.name == 'ok-to-test')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -62,7 +65,7 @@ jobs:
         run: make test
 
   test-integration:
-    if: github.event.action != 'labeled' || github.event.label.name == 'ok-to-test'
+    if: github.event_name != 'pull_request_target' && (github.event.action != 'labeled' || github.event.label.name == 'ok-to-test')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -76,10 +79,12 @@ jobs:
 
   test-e2e:
     if: >-
-      github.event_name == 'push' || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.ok-to-test) || contains(github.event.pull_request.labels.*.name, 'ok-to-test')
+      github.event_name == 'push' || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.ok-to-test) || (github.event_name == 'pull_request_target' && contains(github.event.pull_request.labels.*.name, 'ok-to-test'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - uses: actions/setup-go@v5
         with:

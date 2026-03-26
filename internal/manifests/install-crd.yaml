@@ -1520,6 +1520,36 @@ spec:
                     - project
                     - secretRef
                     type: object
+                  linearWebhook:
+                    description: LinearWebhook discovers issues from Linear webhooks.
+                    properties:
+                      excludeLabels:
+                        description: ExcludeLabels filters out issues that have any
+                          of these labels (client-side).
+                        items:
+                          type: string
+                        type: array
+                      labels:
+                        description: Labels filters issues by labels (applied client-side
+                          to webhook payloads).
+                        items:
+                          type: string
+                        type: array
+                      namespace:
+                        description: |-
+                          Namespace is the Kubernetes namespace where WebhookEvent resources are created.
+                          The spawner will watch for Linear webhook events in this namespace.
+                        type: string
+                      states:
+                        description: |-
+                          States filters issues by workflow state names (e.g., ["Todo", "In Progress"]).
+                          When empty, all non-terminal states are processed (excludes "Done", "Canceled").
+                        items:
+                          type: string
+                        type: array
+                    required:
+                    - namespace
+                    type: object
                 type: object
             required:
             - taskTemplate

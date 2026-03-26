@@ -123,6 +123,15 @@ func (h *webhookHandler) handle(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Validate signature for Linear webhooks
+	if source == "linear" {
+		if err := validateLinearSignature(r.Header, body); err != nil {
+			h.log.Error(err, "Linear signature validation failed")
+			http.Error(w, "Signature validation failed", http.StatusUnauthorized)
+			return
+		}
+	}
+
 	// Create WebhookEvent CRD
 	event := &kelosv1alpha1.WebhookEvent{
 		ObjectMeta: metav1.ObjectMeta{
@@ -168,6 +177,33 @@ func validateGitHubSignature(headers http.Header, payload []byte) error {
 	mac.Write(payload)
 	expectedMAC := mac.Sum(nil)
 	expectedSignature := "sha256=" + hex.EncodeToString(expectedMAC)
+
+	if !hmac.Equal([]byte(signature), []byte(expectedSignature)) {
+		return fmt.Errorf("signature mismatch")
+	}
+
+	return nil
+}
+
+// validateLinearSignature validates the X-Linear-Signature header against the payload.
+// The secret is read from the LINEAR_WEBHOOK_SECRET environment variable.
+func validateLinearSignature(headers http.Header, payload []byte) error {
+	signature := headers.Get("X-Linear-Signature")
+	if signature == "" {
+		return fmt.Errorf("missing X-Linear-Signature header")
+	}
+
+	secret := os.Getenv("LINEAR_WEBHOOK_SECRET")
+	if secret == "" {
+		// If no secret is configured, skip validation (development mode)
+		return nil
+	}
+
+	// Compute expected signature
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(payload)
+	expectedMAC := mac.Sum(nil)
+	expectedSignature := hex.EncodeToString(expectedMAC)
 
 	if !hmac.Equal([]byte(signature), []byte(expectedSignature)) {
 		return fmt.Errorf("signature mismatch")

@@ -579,6 +579,17 @@ func buildSource(ts *kelosv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFi
 		}, nil
 	}
 
+	if ts.Spec.When.LinearWebhook != nil {
+		webhook := ts.Spec.When.LinearWebhook
+		return &source.LinearWebhookSource{
+			Client:        k8sClient,
+			Namespace:     webhook.Namespace,
+			States:        webhook.States,
+			Labels:        webhook.Labels,
+			ExcludeLabels: webhook.ExcludeLabels,
+		}, nil
+	}
+
 	if ts.Spec.When.Jira != nil {
 		user := os.Getenv("JIRA_USER")
 		token := os.Getenv("JIRA_TOKEN")

@@ -1,3 +1,10 @@
+FROM golang:1.25 AS builder
+WORKDIR /workspace
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o bin/kelos-capture ./cmd/kelos-capture
+
 FROM ubuntu:24.04
 
 ARG GO_VERSION=1.25.0
@@ -33,7 +40,7 @@ RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 COPY claude-code/kelos_entrypoint.sh /kelos_entrypoint.sh
 RUN chmod +x /kelos_entrypoint.sh
 
-COPY bin/kelos-capture /kelos/kelos-capture
+COPY --from=builder /workspace/bin/kelos-capture /kelos/kelos-capture
 
 RUN useradd -u 61100 -m -s /bin/bash claude
 RUN mkdir -p /home/claude/.claude && chown -R claude:claude /home/claude

@@ -81,10 +81,6 @@ run: ## Run a controller from your host.
 
 .PHONY: image
 image: ## Build docker images (use WHAT to build specific image).
-	@for dir in $(filter cmd/%,$(or $(WHAT),$(IMAGE_DIRS))); do \
-		GOOS=linux GOARCH=amd64 $(MAKE) build WHAT=$$dir; \
-	done
-	@GOOS=linux GOARCH=amd64 $(MAKE) build WHAT=cmd/kelos-capture
 	@for dir in $(or $(WHAT),$(IMAGE_DIRS)); do \
 		docker build -t $(REGISTRY)/$$(basename $$dir):$(VERSION) -f $$dir/Dockerfile .; \
 	done
@@ -93,6 +89,16 @@ image: ## Build docker images (use WHAT to build specific image).
 push: ## Push docker images (use WHAT to push specific image).
 	@for dir in $(or $(WHAT),$(IMAGE_DIRS)); do \
 		docker push $(REGISTRY)/$$(basename $$dir):$(VERSION); \
+	done
+
+DOCKER_PLATFORMS ?= linux/amd64,linux/arm64
+
+.PHONY: push-multiarch
+push-multiarch: ## Build and push multi-arch docker images.
+	@for dir in $(or $(WHAT),$(IMAGE_DIRS)); do \
+		docker buildx build --platform $(DOCKER_PLATFORMS) \
+			-t $(REGISTRY)/$$(basename $$dir):$(VERSION) \
+			-f $$dir/Dockerfile --push .; \
 	done
 
 RELEASE_PLATFORMS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64

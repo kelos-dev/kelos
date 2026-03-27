@@ -295,6 +295,23 @@ type Jira struct {
 	PollInterval string `json:"pollInterval,omitempty"`
 }
 
+// TaskTemplateMetadata holds optional labels and annotations for spawned Tasks.
+type TaskTemplateMetadata struct {
+	// Labels are merged into the spawned Task's labels. Values support Go
+	// text/template with the same variables as branch and promptTemplate.
+	// The kelos.dev/taskspawner label is always set to the TaskSpawner name
+	// and overrides any user value for that key.
+	// +optional
+	Labels map[string]string `json:"labels,omitempty"`
+
+	// Annotations are merged into the spawned Task's annotations. Values
+	// support Go text/template with the same variables as branch and
+	// promptTemplate. Values from the GitHub source (e.g. kelos.dev/source-kind)
+	// are applied after rendering and override reserved keys on conflict.
+	// +optional
+	Annotations map[string]string `json:"annotations,omitempty"`
+}
+
 // TaskTemplate defines the template for spawned Tasks.
 type TaskTemplate struct {
 	// Type specifies the agent type (e.g., claude-code).
@@ -364,6 +381,10 @@ type TaskTemplate struct {
 	// PodOverrides allows customizing the agent pod configuration for spawned Tasks.
 	// +optional
 	PodOverrides *PodOverrides `json:"podOverrides,omitempty"`
+
+	// Metadata holds optional labels and annotations for spawned Tasks.
+	// +optional
+	Metadata *TaskTemplateMetadata `json:"metadata,omitempty"`
 
 	// UpstreamRepo is the upstream repository in "owner/repo" format.
 	// When set, spawned Tasks inherit this value and inject

@@ -1749,6 +1749,118 @@ func TestRunCycleWithSource_AnnotationsStamped(t *testing.T) {
 	}
 }
 
+func TestRunCycleWithSource_TaskTemplateMetadataLabelsAndAnnotations(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	ts.Spec.TaskTemplate.Metadata = &kelosv1alpha1.TaskTemplateMetadata{
+		Labels: map[string]string{
+			"app": "issue-{{.Number}}",
+		},
+		Annotations: map[string]string{
+			"kelos.dev/custom": "title-{{.Title}}",
+		},
+	}
+	cl, key := setupTest(t, ts)
+
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{ID: "42", Number: 42, Title: "Hello", Kind: "Issue"},
+		},
+	}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var task kelosv1alpha1.Task
+	if err := cl.Get(context.Background(), types.NamespacedName{Name: "spawner-42", Namespace: "default"}, &task); err != nil {
+		t.Fatalf("Failed to get created task: %v", err)
+	}
+
+	if task.Labels["app"] != "issue-42" {
+		t.Errorf(`Labels["app"] = %q, want "issue-42"`, task.Labels["app"])
+	}
+	if task.Labels["kelos.dev/taskspawner"] != "spawner" {
+		t.Errorf(`Labels["kelos.dev/taskspawner"] = %q, want "spawner"`, task.Labels["kelos.dev/taskspawner"])
+	}
+	if task.Annotations["kelos.dev/custom"] != "title-Hello" {
+		t.Errorf(`Annotations["kelos.dev/custom"] = %q, want "title-Hello"`, task.Annotations["kelos.dev/custom"])
+	}
+	if task.Annotations[reporting.AnnotationSourceKind] != "issue" {
+		t.Errorf("Expected source-kind from GitHub source, got %q", task.Annotations[reporting.AnnotationSourceKind])
+	}
+}
+
+func TestRunCycleWithSource_TaskTemplateMetadataReservedAnnotationsPrecedence(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	ts.Spec.TaskTemplate.Metadata = &kelosv1alpha1.TaskTemplateMetadata{
+		Annotations: map[string]string{
+			reporting.AnnotationSourceKind:      "wrong",
+			reporting.AnnotationSourceNumber:    "999",
+			reporting.AnnotationGitHubReporting: "disabled",
+			"kelos.dev/preserved-custom":        "from-template",
+		},
+	}
+	ts.Spec.When.GitHubIssues.Reporting = &kelosv1alpha1.GitHubReporting{Enabled: true}
+	cl, key := setupTest(t, ts)
+
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{ID: "42", Number: 42, Title: "Test", Kind: "Issue"},
+		},
+	}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var task kelosv1alpha1.Task
+	if err := cl.Get(context.Background(), types.NamespacedName{Name: "spawner-42", Namespace: "default"}, &task); err != nil {
+		t.Fatalf("Failed to get created task: %v", err)
+	}
+
+	if task.Annotations[reporting.AnnotationSourceKind] != "issue" {
+		t.Errorf("Source should win for %s, got %q", reporting.AnnotationSourceKind, task.Annotations[reporting.AnnotationSourceKind])
+	}
+	if task.Annotations[reporting.AnnotationSourceNumber] != "42" {
+		t.Errorf("Source should win for %s, got %q", reporting.AnnotationSourceNumber, task.Annotations[reporting.AnnotationSourceNumber])
+	}
+	if task.Annotations[reporting.AnnotationGitHubReporting] != "enabled" {
+		t.Errorf("Source should win for %s, got %q", reporting.AnnotationGitHubReporting, task.Annotations[reporting.AnnotationGitHubReporting])
+	}
+	if task.Annotations["kelos.dev/preserved-custom"] != "from-template" {
+		t.Errorf(`Non-conflicting template annotation should be kept, got %q`, task.Annotations["kelos.dev/preserved-custom"])
+	}
+}
+
+func TestRunCycleWithSource_TaskTemplateMetadataTaskSpawnerLabelWins(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	ts.Spec.TaskTemplate.Metadata = &kelosv1alpha1.TaskTemplateMetadata{
+		Labels: map[string]string{
+			"kelos.dev/taskspawner": "wrong",
+		},
+	}
+	cl, key := setupTest(t, ts)
+
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{ID: "1", Title: "Test", Kind: "Issue"},
+		},
+	}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var task kelosv1alpha1.Task
+	if err := cl.Get(context.Background(), types.NamespacedName{Name: "spawner-1", Namespace: "default"}, &task); err != nil {
+		t.Fatalf("Failed to get created task: %v", err)
+	}
+
+	if task.Labels["kelos.dev/taskspawner"] != "spawner" {
+		t.Errorf(`Labels["kelos.dev/taskspawner"] = %q, want "spawner"`, task.Labels["kelos.dev/taskspawner"])
+	}
+}
+
 func TestReportingEnabled_IssuesEnabled(t *testing.T) {
 	ts := &kelosv1alpha1.TaskSpawner{
 		Spec: kelosv1alpha1.TaskSpawnerSpec{

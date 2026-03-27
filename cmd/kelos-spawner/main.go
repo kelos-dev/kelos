@@ -314,15 +314,25 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 			continue
 		}
 
-		annotations := sourceAnnotations(&ts, item)
+		renderedLabels, renderedAnnotations, err := renderTaskTemplateMetadata(&ts, item)
+		if err != nil {
+			log.Error(err, "Rendering task template metadata", "item", item.ID)
+			continue
+		}
+
+		labels := make(map[string]string)
+		for k, v := range renderedLabels {
+			labels[k] = v
+		}
+		labels["kelos.dev/taskspawner"] = ts.Name
+
+		annotations := mergeStringMaps(renderedAnnotations, sourceAnnotations(&ts, item))
 
 		task := &kelosv1alpha1.Task{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      taskName,
-				Namespace: ts.Namespace,
-				Labels: map[string]string{
-					"kelos.dev/taskspawner": ts.Name,
-				},
+				Name:        taskName,
+				Namespace:   ts.Namespace,
+				Labels:      labels,
 				Annotations: annotations,
 			},
 			Spec: kelosv1alpha1.TaskSpec{
@@ -424,6 +434,52 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 	}
 
 	return nil
+}
+
+// mergeStringMaps returns a new map with keys from base, then keys from overlay
+// overwriting on duplicate keys.
+func mergeStringMaps(base, overlay map[string]string) map[string]string {
+	if len(base) == 0 && len(overlay) == 0 {
+		return nil
+	}
+	out := make(map[string]string)
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range overlay {
+		out[k] = v
+	}
+	return out
+}
+
+// renderTaskTemplateMetadata renders taskTemplate.metadata label and annotation
+// values using source.RenderTemplate.
+func renderTaskTemplateMetadata(ts *kelosv1alpha1.TaskSpawner, item source.WorkItem) (labels map[string]string, annotations map[string]string, err error) {
+	meta := ts.Spec.TaskTemplate.Metadata
+	if meta == nil {
+		return nil, nil, nil
+	}
+	if len(meta.Labels) > 0 {
+		labels = make(map[string]string)
+		for k, v := range meta.Labels {
+			rendered, err := source.RenderTemplate(v, item)
+			if err != nil {
+				return nil, nil, fmt.Errorf("label %q: %w", k, err)
+			}
+			labels[k] = rendered
+		}
+	}
+	if len(meta.Annotations) > 0 {
+		annotations = make(map[string]string)
+		for k, v := range meta.Annotations {
+			rendered, err := source.RenderTemplate(v, item)
+			if err != nil {
+				return nil, nil, fmt.Errorf("annotation %q: %w", k, err)
+			}
+			annotations[k] = rendered
+		}
+	}
+	return labels, annotations, nil
 }
 
 // sourceAnnotations returns annotations that stamp GitHub source metadata

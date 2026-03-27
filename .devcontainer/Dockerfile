@@ -16,6 +16,14 @@ RUN curl -fsSL https://github.com/ahmetb/kubectx/releases/latest/download/kubect
 # Claude Code
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
+# Install AWS CLI
+RUN cd $(mktemp -d) && \
+    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
+    unzip awscliv2.zip && \
+    ./aws/install && \
+    cd / && \
+    rm -rf "$OLDPWD"
+
 # asdf (for teleport-ent)
 # renovate: datasource=github-releases depName=asdf-vm/asdf
 ENV V_ASDF="0.18.1"
@@ -40,29 +48,23 @@ RUN <<EOB
     mkdir -p /root/.aws
     cat <<EOF > /root/.aws/config
 [default]
-credential_process = /usr/local/bin/aws_signing_helper credential-process --certificate /opt/roles-anywhere/svid.pem --private-key /opt/roles-anywhere/svid_key.pem --profile-arn arn:aws:rolesanywhere:us-west-1:580663733917:profile/1c5babda-a4a9-4c75-9a16-88e143ab0233 --trust-anchor-arn
-arn:aws:rolesanywhere:us-west-1:580663733917:trust-anchor/b15762fd-2a5f-4bcd-a09f-17f63f4f2f98 --role-arn arn:aws:iam::580663733917:role/TeleportDeveloperAccess
+credential_process = /usr/local/bin/aws_signing_helper credential-process --certificate /opt/roles-anywhere/svid.pem --private-key /opt/roles-anywhere/svid_key.pem --profile-arn arn:aws:rolesanywhere:us-west-1:580663733917:profile/1c5babda-a4a9-4c75-9a16-88e143ab0233 --trust-anchor-arn arn:aws:rolesanywhere:us-west-1:580663733917:trust-anchor/b15762fd-2a5f-4bcd-a09f-17f63f4f2f98 --role-arn arn:aws:iam::580663733917:role/TeleportDeveloperAccess
 output = json
 [profile teleport-admin]
-credential_process = /usr/local/bin/aws_signing_helper credential-process --certificate /opt/roles-anywhere-admin/svid.pem --private-key /opt/roles-anywhere-admin/svid_key.pem --profile-arn arn:aws:rolesanywhere:us-west-1:580663733917:profile/32163bf3-dd34-4b50-8ff2-bea86d8daf3b --trust-anchor-arn
-arn:aws:rolesanywhere:us-west-1:580663733917:trust-anchor/b15762fd-2a5f-4bcd-a09f-17f63f4f2f98 --role-arn arn:aws:iam::580663733917:role/TeleportAdministratorAccess
+credential_process = /usr/local/bin/aws_signing_helper credential-process --certificate /opt/roles-anywhere-admin/svid.pem --private-key /opt/roles-anywhere-admin/svid_key.pem --profile-arn arn:aws:rolesanywhere:us-west-1:580663733917:profile/32163bf3-dd34-4b50-8ff2-bea86d8daf3b --trust-anchor-arn arn:aws:rolesanywhere:us-west-1:580663733917:trust-anchor/b15762fd-2a5f-4bcd-a09f-17f63f4f2f98 --role-arn arn:aws:iam::580663733917:role/TeleportAdministratorAccess
 output = json
 [profile sandbox]
-credential_process = /usr/local/bin/aws_signing_helper credential-process --certificate /opt/roles-anywhere-sandbox/svid.pem --private-key /opt/roles-anywhere-sandbox/svid_key.pem --profile-arn arn:aws:rolesanywhere:us-east-1:774922483191:profile/bf98f431-d465-48d8-84b1-6d3090bb17aa --trust-anchor-arn
-arn:aws:rolesanywhere:us-east-1:774922483191:trust-anchor/9f687ddc-5ae6-4459-bd1f-ed9c7d296f25 --role-arn arn:aws:iam::774922483191:role/TeleportRolesAnywhere
+credential_process = /usr/local/bin/aws_signing_helper credential-process --certificate /opt/roles-anywhere-sandbox/svid.pem --private-key /opt/roles-anywhere-sandbox/svid_key.pem --profile-arn arn:aws:rolesanywhere:us-east-1:774922483191:profile/bf98f431-d465-48d8-84b1-6d3090bb17aa --trust-anchor-arn arn:aws:rolesanywhere:us-east-1:774922483191:trust-anchor/9f687ddc-5ae6-4459-bd1f-ed9c7d296f25 --role-arn arn:aws:iam::774922483191:role/TeleportRolesAnywhere
 region = us-west-1
 output = json
 [profile bd]
-credential_process = /usr/local/bin/aws_signing_helper credential-process --certificate /opt/roles-anywhere-bd/svid.pem --private-key /opt/roles-anywhere-bd/svid_key.pem --profile-arn arn:aws:rolesanywhere:us-west-1:580663733917:profile/e61115ef-b5d7-415f-b249-6fd1f3814aa1 --trust-anchor-arn
-arn:aws:rolesanywhere:us-west-1:580663733917:trust-anchor/b15762fd-2a5f-4bcd-a09f-17f63f4f2f98 --role-arn arn:aws:iam::580663733917:role/TeleportBusinessDevelopmentAccess
+credential_process = /usr/local/bin/aws_signing_helper credential-process --certificate /opt/roles-anywhere-bd/svid.pem --private-key /opt/roles-anywhere-bd/svid_key.pem --profile-arn arn:aws:rolesanywhere:us-west-1:580663733917:profile/e61115ef-b5d7-415f-b249-6fd1f3814aa1 --trust-anchor-arn arn:aws:rolesanywhere:us-west-1:580663733917:trust-anchor/b15762fd-2a5f-4bcd-a09f-17f63f4f2f98 --role-arn arn:aws:iam::580663733917:role/TeleportBusinessDevelopmentAccess
 output = json
 [profile cs]
-credential_process = /usr/local/bin/aws_signing_helper credential-process --certificate /opt/roles-anywhere-cs/svid.pem --private-key /opt/roles-anywhere-cs/svid_key.pem --profile-arn arn:aws:rolesanywhere:us-west-1:580663733917:profile/8bbcfc3e-f5e2-4d17-a7c4-fb10f648b10e --trust-anchor-arn
-arn:aws:rolesanywhere:us-west-1:580663733917:trust-anchor/b15762fd-2a5f-4bcd-a09f-17f63f4f2f98 --role-arn arn:aws:iam::580663733917:role/TeleportCustomerSolutionsAccess
+credential_process = /usr/local/bin/aws_signing_helper credential-process --certificate /opt/roles-anywhere-cs/svid.pem --private-key /opt/roles-anywhere-cs/svid_key.pem --profile-arn arn:aws:rolesanywhere:us-west-1:580663733917:profile/8bbcfc3e-f5e2-4d17-a7c4-fb10f648b10e --trust-anchor-arn arn:aws:rolesanywhere:us-west-1:580663733917:trust-anchor/b15762fd-2a5f-4bcd-a09f-17f63f4f2f98 --role-arn arn:aws:iam::580663733917:role/TeleportCustomerSolutionsAccess
 output = json
 [profile gtm]
-credential_process = /usr/local/bin/aws_signing_helper credential-process --certificate /opt/roles-anywhere-gtm/svid.pem --private-key /opt/roles-anywhere-gtm/svid_key.pem --profile-arn arn:aws:rolesanywhere:us-east-1:649126925216:profile/de329f63-770f-462c-9152-ea822877c9f3 --trust-anchor-arn
-arn:aws:rolesanywhere:us-east-1:649126925216:trust-anchor/a784c1f4-8247-4b9d-b565-d430fec69f15 --role-arn arn:aws:iam::649126925216:role/TeleportAdminAccess
+credential_process = /usr/local/bin/aws_signing_helper credential-process --certificate /opt/roles-anywhere-gtm/svid.pem --private-key /opt/roles-anywhere-gtm/svid_key.pem --profile-arn arn:aws:rolesanywhere:us-east-1:649126925216:profile/de329f63-770f-462c-9152-ea822877c9f3 --trust-anchor-arn arn:aws:rolesanywhere:us-east-1:649126925216:trust-anchor/a784c1f4-8247-4b9d-b565-d430fec69f15 --role-arn arn:aws:iam::649126925216:role/TeleportAdminAccess
 region = us-west-1
 output = json
 EOF

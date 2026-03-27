@@ -91,6 +91,7 @@ func runOnce(ctx context.Context, cl client.Client, key types.NamespacedName, cf
 				Token:     token,
 				TokenFile: cfg.GitHubTokenFile,
 				BaseURL:   cfg.GitHubAPIBaseURL,
+				Client:    cfg.HTTPClient,
 			},
 		}
 		if err := runReportingCycle(ctx, cl, key, reporter); err != nil {

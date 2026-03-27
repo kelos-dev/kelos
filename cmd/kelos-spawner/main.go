@@ -94,7 +94,7 @@ func main() {
 	log.Info("Starting spawner", "taskspawner", key, "oneShot", oneShot)
 
 	httpClient := &http.Client{
-		Transport: source.NewETagTransport(http.DefaultTransport, log),
+		Transport: source.NewETagTransport(source.NewMetricsTransport(http.DefaultTransport), log),
 	}
 
 	cfgArgs := spawnerRuntimeConfig{

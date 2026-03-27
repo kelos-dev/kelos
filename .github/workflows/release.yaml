@@ -11,6 +11,8 @@ concurrency:
 
 jobs:
   release:
+    # Skip if this is a bot commit updating the formula (prevents double builds)
+    if: github.actor != 'kelos-dev[bot]'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -79,6 +81,35 @@ jobs:
           gh release upload "$VERSION" --clobber \
             bin/kelos-* \
             bin/checksums.txt
+
+      - name: Checkout Homebrew tap
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/checkout@v4
+        with:
+          repository: kelos-dev/homebrew-tap
+          token: ${{ secrets.TAP_GITHUB_TOKEN }}
+          path: homebrew-tap
+
+      - name: Copy formula template to tap repo
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: cp Formula/kelos.rb homebrew-tap/Formula/kelos.rb
+
+      - name: Update Homebrew formula
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: bash hack/update-homebrew-formula.sh "$VERSION" homebrew-tap
+
+      - name: Commit and push Homebrew formula update
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: homebrew-tap
+        run: |
+          git config user.name "kelos-dev[bot]"
+          git config user.email "kelos-dev@users.noreply.github.com"
+          git add Formula/kelos.rb
+          git commit -m "chore: update Homebrew formula for ${{ steps.version.outputs.version }}" || true
+          git push
 
   publish-helm-chart:
     if: startsWith(github.ref, 'refs/tags/v')

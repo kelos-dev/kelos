@@ -24,6 +24,8 @@ on:
 jobs:
   e2e:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         if: inputs.checkout-ref == ''

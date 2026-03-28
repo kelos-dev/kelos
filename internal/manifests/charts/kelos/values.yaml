@@ -1,3 +1,7 @@
+crds:
+  install: true
+  keep: true
+
 image:
   tag: "latest"
   pullPolicy: ""

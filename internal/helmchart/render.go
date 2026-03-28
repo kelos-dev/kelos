@@ -96,19 +96,20 @@ func Render(chartFS fs.FS, values map[string]interface{}) ([]byte, error) {
 // be applied to avoid dependency issues (e.g., Namespace before namespaced
 // resources).  This follows the same ordering conventions as Helm.
 var installOrderMap = map[string]int{
-	"Namespace":          0,
-	"ServiceAccount":     1,
-	"Secret":             2,
-	"ConfigMap":          3,
-	"ClusterRole":        4,
-	"ClusterRoleBinding": 5,
-	"Role":               6,
-	"RoleBinding":        7,
-	"Service":            8,
-	"Deployment":         9,
-	"StatefulSet":        10,
-	"Job":                11,
-	"CronJob":            12,
+	"CustomResourceDefinition": -1,
+	"Namespace":                0,
+	"ServiceAccount":           1,
+	"Secret":                   2,
+	"ConfigMap":                3,
+	"ClusterRole":              4,
+	"ClusterRoleBinding":       5,
+	"Role":                     6,
+	"RoleBinding":              7,
+	"Service":                  8,
+	"Deployment":               9,
+	"StatefulSet":              10,
+	"Job":                      11,
+	"CronJob":                  12,
 }
 
 func kindOrder(kind string) int {

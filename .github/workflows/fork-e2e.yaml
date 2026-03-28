@@ -16,9 +16,9 @@ jobs:
   fork-e2e:
     uses: ./.github/workflows/reusable-e2e.yaml
     with:
-      checkout-ref: refs/pull/${{ inputs.pr_number }}/head
+      checkout-ref: refs/pull/${{ inputs.pr_number }}/merge
       persist-credentials: false
-      expected-sha: ${{ inputs.head_sha }}
+      expected-head-sha: ${{ inputs.head_sha }}
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}

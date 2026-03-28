@@ -15,6 +15,10 @@ on:
         description: If set, validate HEAD matches this SHA after checkout
         type: string
         default: ''
+      expected-head-sha:
+        description: If set, validate the checked-out merge commit includes this PR head SHA
+        type: string
+        default: ''
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
         required: true
@@ -26,6 +30,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # TaskSpawner E2E injects github.token into make test-e2e and calls the
+      # GitHub Issues API to discover issues and comments.
       issues: read
     steps:
       - uses: actions/checkout@v4
@@ -48,6 +54,26 @@ jobs:
           if [ "$actual_sha" != "$EXPECTED_SHA" ]; then
             echo "::error::HEAD SHA mismatch: expected $EXPECTED_SHA, got $actual_sha"
             echo "The ref has new commits since approval. Re-review and re-run with the updated SHA."
+            exit 1
+          fi
+
+      - name: Validate checked-out merge commit matches approved PR head SHA
+        if: inputs.expected-head-sha != ''
+        env:
+          EXPECTED_HEAD_SHA: ${{ inputs.expected-head-sha }}
+        run: |
+          parents=$(git show --no-patch --format=%P HEAD)
+          merge_head_sha=$(echo "$parents" | awk '{print $2}')
+
+          if [ -z "$merge_head_sha" ]; then
+            echo "::error::Checked-out ref is not a merge commit"
+            echo "The pull request may no longer have a merge ref. Re-review and re-run with an up-to-date PR."
+            exit 1
+          fi
+
+          if [ "$merge_head_sha" != "$EXPECTED_HEAD_SHA" ]; then
+            echo "::error::Merge ref PR head SHA mismatch: expected $EXPECTED_HEAD_SHA, got $merge_head_sha"
+            echo "The pull request has new commits since approval. Re-review and re-run with the updated SHA."
             exit 1
           fi
 

@@ -1,0 +1,115 @@
+name: Reusable E2E Test
+
+on:
+  workflow_call:
+    inputs:
+      checkout-ref:
+        description: Git ref to check out (leave empty for default)
+        type: string
+        default: ''
+      persist-credentials:
+        description: Whether to persist git credentials after checkout
+        type: boolean
+        default: true
+      expected-sha:
+        description: If set, validate HEAD matches this SHA after checkout
+        type: string
+        default: ''
+      expected-head-sha:
+        description: If set, validate the checked-out merge commit includes this PR head SHA
+        type: string
+        default: ''
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: true
+      CODEX_AUTH_JSON:
+        required: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # TaskSpawner E2E injects github.token into make test-e2e and calls the
+      # GitHub Issues API to discover issues and comments.
+      issues: read
+    steps:
+      - uses: actions/checkout@v4
+        if: inputs.checkout-ref == ''
+        with:
+          persist-credentials: ${{ inputs.persist-credentials }}
+
+      - uses: actions/checkout@v4
+        if: inputs.checkout-ref != ''
+        with:
+          ref: ${{ inputs.checkout-ref }}
+          persist-credentials: ${{ inputs.persist-credentials }}
+
+      - name: Validate checked-out commit matches approved SHA
+        if: inputs.expected-sha != ''
+        env:
+          EXPECTED_SHA: ${{ inputs.expected-sha }}
+        run: |
+          actual_sha=$(git rev-parse HEAD)
+          if [ "$actual_sha" != "$EXPECTED_SHA" ]; then
+            echo "::error::HEAD SHA mismatch: expected $EXPECTED_SHA, got $actual_sha"
+            echo "The ref has new commits since approval. Re-review and re-run with the updated SHA."
+            exit 1
+          fi
+
+      - name: Validate checked-out merge commit matches approved PR head SHA
+        if: inputs.expected-head-sha != ''
+        env:
+          EXPECTED_HEAD_SHA: ${{ inputs.expected-head-sha }}
+        run: |
+          parents=$(git show --no-patch --format=%P HEAD)
+          merge_head_sha=$(echo "$parents" | awk '{print $2}')
+
+          if [ -z "$merge_head_sha" ]; then
+            echo "::error::Checked-out ref is not a merge commit"
+            echo "The pull request may no longer have a merge ref. Re-review and re-run with an up-to-date PR."
+            exit 1
+          fi
+
+          if [ "$merge_head_sha" != "$EXPECTED_HEAD_SHA" ]; then
+            echo "::error::Merge ref PR head SHA mismatch: expected $EXPECTED_HEAD_SHA, got $merge_head_sha"
+            echo "The pull request has new commits since approval. Re-review and re-run with the updated SHA."
+            exit 1
+          fi
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: kind
+
+      - name: Build images
+        run: make image VERSION=e2e
+
+      - name: Load images into kind
+        run: |
+          kind load docker-image ghcr.io/kelos-dev/kelos-controller:e2e
+          kind load docker-image ghcr.io/kelos-dev/kelos-spawner:e2e
+          kind load docker-image ghcr.io/kelos-dev/claude-code:e2e
+          kind load docker-image ghcr.io/kelos-dev/codex:e2e
+          kind load docker-image ghcr.io/kelos-dev/gemini:e2e
+          kind load docker-image ghcr.io/kelos-dev/opencode:e2e
+          kind load docker-image ghcr.io/kelos-dev/cursor:e2e
+
+      - name: Build CLI
+        run: make build WHAT=cmd/kelos
+
+      - name: Deploy controller
+        run: |
+          bin/kelos install --version e2e --image-pull-policy Never --disable-heartbeat
+          kubectl wait --for=condition=available deployment/kelos-controller-manager -n kelos-system --timeout=120s
+
+      - name: E2E Test
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+          GITHUB_TOKEN: ${{ github.token }}
+          KELOS_BIN: ${{ github.workspace }}/bin/kelos
+        run: make test-e2e

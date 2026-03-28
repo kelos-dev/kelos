@@ -143,6 +143,11 @@ This creates a single-node cluster and configures your kubeconfig automatically.
 ### 1. Install the CLI
 
 ```bash
+# Homebrew
+brew tap kelos-dev/kelos
+brew install kelos
+
+# Or install from source
 curl -fsSL https://raw.githubusercontent.com/kelos-dev/kelos/main/hack/install.sh | bash
 ```
 

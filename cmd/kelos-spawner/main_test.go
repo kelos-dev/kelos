@@ -2033,118 +2033,32 @@ func TestReportingEnabled_Jira(t *testing.T) {
 	}
 }
 
-func TestRunReportingCycle_ReportsForAnnotatedTasks(t *testing.T) {
+func TestRunOnce_DoesNotCallReporting(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
+	ts.Spec.Suspend = boolPtr(true)
 	ts.Spec.When.GitHubIssues.Reporting = &kelosv1alpha1.GitHubReporting{Enabled: true}
 
-	// Create a task with reporting annotations and a Pending phase
-	task := kelosv1alpha1.Task{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "spawner-1",
-			Namespace: "default",
-			Labels: map[string]string{
-				"kelos.dev/taskspawner": "spawner",
-			},
-			Annotations: map[string]string{
-				reporting.AnnotationGitHubReporting: "enabled",
-				reporting.AnnotationSourceNumber:    "42",
-				reporting.AnnotationSourceKind:      "issue",
-			},
-		},
-		Spec: kelosv1alpha1.TaskSpec{
-			Type:   "claude-code",
-			Prompt: "test",
-			Credentials: kelosv1alpha1.Credentials{
-				Type:      kelosv1alpha1.CredentialTypeOAuth,
-				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
-			},
-		},
-		Status: kelosv1alpha1.TaskStatus{
-			Phase: kelosv1alpha1.TaskPhasePending,
-		},
+	task := newTask("spawner-1", "default", "spawner", kelosv1alpha1.TaskPhasePending)
+	task.Annotations = map[string]string{
+		reporting.AnnotationGitHubReporting: "enabled",
+		reporting.AnnotationSourceNumber:    "42",
+		reporting.AnnotationSourceKind:      "issue",
 	}
 
 	cl, key := setupTest(t, ts, task)
 
-	// Set up a fake GitHub server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]int64{"id": 999})
-	}))
-	defer server.Close()
-
-	reporter := &reporting.TaskReporter{
-		Client: cl,
-		Reporter: &reporting.GitHubReporter{
-			Owner:   "owner",
-			Repo:    "repo",
-			Token:   "token",
-			BaseURL: server.URL,
-		},
-	}
-
-	if err := runReportingCycle(context.Background(), cl, key, reporter); err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
-
-	// Verify annotations were updated
-	var updated kelosv1alpha1.Task
-	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(&task), &updated); err != nil {
-		t.Fatalf("Getting updated task: %v", err)
-	}
-	if updated.Annotations[reporting.AnnotationGitHubReportPhase] != "accepted" {
-		t.Errorf("Expected report phase 'accepted', got %q", updated.Annotations[reporting.AnnotationGitHubReportPhase])
-	}
-	if updated.Annotations[reporting.AnnotationGitHubCommentID] == "" {
-		t.Error("Expected comment ID to be set")
-	}
-}
-
-func TestRunReportingCycle_SkipsTasksWithoutReporting(t *testing.T) {
-	ts := newTaskSpawner("spawner", "default", nil)
-
-	// Task without reporting annotations
-	task := kelosv1alpha1.Task{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "spawner-1",
-			Namespace: "default",
-			Labels: map[string]string{
-				"kelos.dev/taskspawner": "spawner",
-			},
-		},
-		Spec: kelosv1alpha1.TaskSpec{
-			Type:   "claude-code",
-			Prompt: "test",
-			Credentials: kelosv1alpha1.Credentials{
-				Type:      kelosv1alpha1.CredentialTypeOAuth,
-				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
-			},
-		},
-		Status: kelosv1alpha1.TaskStatus{
-			Phase: kelosv1alpha1.TaskPhasePending,
-		},
-	}
-
-	cl, key := setupTest(t, ts, task)
-
-	// Server should never be called
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Error("GitHub API should not be called for tasks without reporting")
+		t.Error("Poll cycle should not call GitHub reporting API; reporting is handled by task-activity controller")
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
 
-	reporter := &reporting.TaskReporter{
-		Client: cl,
-		Reporter: &reporting.GitHubReporter{
-			Owner:   "owner",
-			Repo:    "repo",
-			Token:   "token",
-			BaseURL: server.URL,
-		},
-	}
-
-	if err := runReportingCycle(context.Background(), cl, key, reporter); err != nil {
+	_, err := runOnce(context.Background(), cl, key, spawnerRuntimeConfig{
+		GitHubOwner:      "owner",
+		GitHubRepo:       "repo",
+		GitHubAPIBaseURL: server.URL,
+	})
+	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 }
@@ -2173,11 +2087,10 @@ func TestRunOnce_ReturnsPollIntervalForSuspendedTaskSpawner(t *testing.T) {
 	}
 }
 
-func TestRunOnce_UsesEnvTokenForReporting(t *testing.T) {
+func TestHandleTaskActivity_UsesEnvToken(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "pat-token")
 
 	ts := newTaskSpawner("spawner", "default", nil)
-	ts.Spec.Suspend = boolPtr(true)
 	ts.Spec.When.GitHubIssues.Reporting = &kelosv1alpha1.GitHubReporting{Enabled: true}
 
 	task := newTask("spawner-1", "default", "spawner", kelosv1alpha1.TaskPhasePending)
@@ -2197,7 +2110,7 @@ func TestRunOnce_UsesEnvTokenForReporting(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := runOnce(context.Background(), cl, key, spawnerRuntimeConfig{
+	err := handleTaskActivity(context.Background(), cl, key, spawnerRuntimeConfig{
 		GitHubOwner:      "owner",
 		GitHubRepo:       "repo",
 		GitHubAPIBaseURL: server.URL,
@@ -2246,9 +2159,9 @@ func TestSpawnerReconcilerTaskSpawnerPredicate(t *testing.T) {
 	}
 }
 
-func TestSpawnerReconcilerTaskPredicate(t *testing.T) {
+func TestTaskActivityReconcilerTaskPredicate(t *testing.T) {
 	key := types.NamespacedName{Name: "spawner", Namespace: "default"}
-	r := &spawnerReconciler{Key: key}
+	r := &taskActivityReconciler{Key: key}
 	p := r.taskPredicate()
 
 	base := newTask("spawner-1", "default", "spawner", kelosv1alpha1.TaskPhasePending)
@@ -2279,9 +2192,9 @@ func TestSpawnerReconcilerTaskPredicate(t *testing.T) {
 	}
 }
 
-func TestSpawnerReconcilerRequestsForTask(t *testing.T) {
+func TestTaskActivityReconcilerRequestsForTask(t *testing.T) {
 	key := types.NamespacedName{Name: "spawner", Namespace: "default"}
-	r := &spawnerReconciler{Key: key}
+	r := &taskActivityReconciler{Key: key}
 
 	task := newTask("spawner-1", "default", "spawner", kelosv1alpha1.TaskPhasePending)
 	requests := r.requestsForTask(context.Background(), task.DeepCopy())
@@ -2293,9 +2206,9 @@ func TestSpawnerReconcilerRequestsForTask(t *testing.T) {
 	}
 
 	other := newTask("other-1", "default", "other", kelosv1alpha1.TaskPhasePending)
-	requests = r.requestsForTask(context.Background(), other.DeepCopy())
-	if len(requests) != 0 {
-		t.Fatalf("Expected no requests for non-matching task, got %d", len(requests))
+	otherRequests := r.requestsForTask(context.Background(), other.DeepCopy())
+	if len(otherRequests) != 0 {
+		t.Fatalf("Expected no requests for non-matching task, got %d", len(otherRequests))
 	}
 }
 
@@ -2413,5 +2326,209 @@ func TestRunOnce_ReturnsSourcePollInterval(t *testing.T) {
 	}
 	if interval != 15*time.Second {
 		t.Fatalf("Interval = %v, want %v", interval, 15*time.Second)
+	}
+}
+
+func TestHandleTaskActivity_UpdatesActiveTasksCount(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	ts.Status.ActiveTasks = 3 // stale value
+
+	existingTasks := []kelosv1alpha1.Task{
+		newTask("spawner-1", "default", "spawner", kelosv1alpha1.TaskPhaseRunning),
+		newTask("spawner-2", "default", "spawner", kelosv1alpha1.TaskPhaseSucceeded),
+		newTask("spawner-3", "default", "spawner", kelosv1alpha1.TaskPhasePending),
+	}
+	cl, key := setupTest(t, ts, existingTasks...)
+
+	if err := handleTaskActivity(context.Background(), cl, key, spawnerRuntimeConfig{}); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var updated kelosv1alpha1.TaskSpawner
+	if err := cl.Get(context.Background(), key, &updated); err != nil {
+		t.Fatalf("Getting TaskSpawner: %v", err)
+	}
+	// 1 running + 1 pending = 2 active (succeeded is excluded)
+	if updated.Status.ActiveTasks != 2 {
+		t.Errorf("Expected activeTasks=2, got %d", updated.Status.ActiveTasks)
+	}
+}
+
+func TestHandleTaskActivity_NoUpdateWhenCountUnchanged(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	ts.Status.ActiveTasks = 1
+
+	task1 := newTask("spawner-1", "default", "spawner", kelosv1alpha1.TaskPhaseRunning)
+	task2 := newTask("spawner-2", "default", "spawner", kelosv1alpha1.TaskPhaseSucceeded)
+
+	// Track status updates via interceptor
+	updateCalled := false
+	cl := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		WithObjects(ts, &task1, &task2).
+		WithStatusSubresource(ts).
+		WithInterceptorFuncs(interceptor.Funcs{
+			SubResourceUpdate: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+				if subResourceName == "status" {
+					if _, ok := obj.(*kelosv1alpha1.TaskSpawner); ok {
+						updateCalled = true
+					}
+				}
+				return nil
+			},
+		}).
+		Build()
+	key := types.NamespacedName{Name: ts.Name, Namespace: ts.Namespace}
+
+	if err := handleTaskActivity(context.Background(), cl, key, spawnerRuntimeConfig{}); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if updateCalled {
+		t.Error("Expected no status update when activeTasks count is unchanged")
+	}
+}
+
+func TestHandleTaskActivity_RunsReportingWhenEnabled(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	ts.Spec.When.GitHubIssues.Reporting = &kelosv1alpha1.GitHubReporting{Enabled: true}
+
+	task := kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "spawner-1",
+			Namespace: "default",
+			Labels: map[string]string{
+				"kelos.dev/taskspawner": "spawner",
+			},
+			Annotations: map[string]string{
+				reporting.AnnotationGitHubReporting: "enabled",
+				reporting.AnnotationSourceNumber:    "42",
+				reporting.AnnotationSourceKind:      "issue",
+			},
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   "claude-code",
+			Prompt: "test",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeOAuth,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+			},
+		},
+		Status: kelosv1alpha1.TaskStatus{
+			Phase: kelosv1alpha1.TaskPhasePending,
+		},
+	}
+
+	cl, key := setupTest(t, ts, task)
+
+	apiCalled := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		apiCalled = true
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]int64{"id": 999})
+	}))
+	defer server.Close()
+
+	cfg := spawnerRuntimeConfig{
+		GitHubOwner:      "owner",
+		GitHubRepo:       "repo",
+		GitHubAPIBaseURL: server.URL,
+	}
+
+	if err := handleTaskActivity(context.Background(), cl, key, cfg); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if !apiCalled {
+		t.Error("Expected GitHub API to be called for reporting")
+	}
+
+	// Verify annotations were updated on the task
+	var updated kelosv1alpha1.Task
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(&task), &updated); err != nil {
+		t.Fatalf("Getting updated task: %v", err)
+	}
+	if updated.Annotations[reporting.AnnotationGitHubReportPhase] != "accepted" {
+		t.Errorf("Expected report phase 'accepted', got %q", updated.Annotations[reporting.AnnotationGitHubReportPhase])
+	}
+}
+
+func TestHandleTaskActivity_SkipsReportingWhenDisabled(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	// Reporting not enabled (default)
+
+	task := newTask("spawner-1", "default", "spawner", kelosv1alpha1.TaskPhaseRunning)
+	cl, key := setupTest(t, ts, task)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("GitHub API should not be called when reporting is disabled")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	cfg := spawnerRuntimeConfig{
+		GitHubOwner:      "owner",
+		GitHubRepo:       "repo",
+		GitHubAPIBaseURL: server.URL,
+	}
+
+	if err := handleTaskActivity(context.Background(), cl, key, cfg); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+}
+
+func TestHandleTaskActivity_DoesNotTriggerDiscovery(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	existingTasks := []kelosv1alpha1.Task{
+		newTask("spawner-1", "default", "spawner", kelosv1alpha1.TaskPhaseSucceeded),
+	}
+	cl, key := setupTest(t, ts, existingTasks...)
+
+	// Record discovery metric before
+	beforeDiscovery := testutil.ToFloat64(discoveryTotal)
+
+	if err := handleTaskActivity(context.Background(), cl, key, spawnerRuntimeConfig{}); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	// Discovery metric should not have changed
+	afterDiscovery := testutil.ToFloat64(discoveryTotal)
+	if afterDiscovery != beforeDiscovery {
+		t.Errorf("Expected no discovery cycles to run, but discoveryTotal changed from %v to %v", beforeDiscovery, afterDiscovery)
+	}
+}
+
+func TestHandleTaskActivity_TaskSpawnerNotFound(t *testing.T) {
+	// TaskSpawner does not exist - should return nil (no error)
+	cl := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		Build()
+	key := types.NamespacedName{Name: "nonexistent", Namespace: "default"}
+
+	if err := handleTaskActivity(context.Background(), cl, key, spawnerRuntimeConfig{}); err != nil {
+		t.Fatalf("Expected no error for missing TaskSpawner, got: %v", err)
+	}
+}
+
+func TestHandleTaskActivity_AllTasksTerminal(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	ts.Status.ActiveTasks = 2 // stale value
+
+	existingTasks := []kelosv1alpha1.Task{
+		newTask("spawner-1", "default", "spawner", kelosv1alpha1.TaskPhaseSucceeded),
+		newTask("spawner-2", "default", "spawner", kelosv1alpha1.TaskPhaseFailed),
+	}
+	cl, key := setupTest(t, ts, existingTasks...)
+
+	if err := handleTaskActivity(context.Background(), cl, key, spawnerRuntimeConfig{}); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var updated kelosv1alpha1.TaskSpawner
+	if err := cl.Get(context.Background(), key, &updated); err != nil {
+		t.Fatalf("Getting TaskSpawner: %v", err)
+	}
+	if updated.Status.ActiveTasks != 0 {
+		t.Errorf("Expected activeTasks=0 when all tasks are terminal, got %d", updated.Status.ActiveTasks)
 	}
 }

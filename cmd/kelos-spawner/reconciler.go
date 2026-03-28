@@ -18,7 +18,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
-	"github.com/kelos-dev/kelos/internal/reporting"
 )
 
 type spawnerRuntimeConfig struct {
@@ -59,11 +58,6 @@ func (r *spawnerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Named("taskspawner-loop").
 		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
 		For(&kelosv1alpha1.TaskSpawner{}, builder.WithPredicates(r.taskSpawnerPredicate())).
-		Watches(
-			&kelosv1alpha1.Task{},
-			handler.EnqueueRequestsFromMapFunc(r.requestsForTask),
-			builder.WithPredicates(r.taskPredicate()),
-		).
 		Complete(r)
 }
 
@@ -77,27 +71,9 @@ func runOnce(ctx context.Context, cl client.Client, key types.NamespacedName, cf
 		return 0, fmt.Errorf("fetching TaskSpawner after cycle: %w", err)
 	}
 
-	if reportingEnabled(&ts) {
-		token, err := readGitHubToken(cfg.GitHubTokenFile)
-		if err != nil {
-			return 0, fmt.Errorf("reading GitHub token for reporting: %w", err)
-		}
-
-		reporter := &reporting.TaskReporter{
-			Client: cl,
-			Reporter: &reporting.GitHubReporter{
-				Owner:     cfg.GitHubOwner,
-				Repo:      cfg.GitHubRepo,
-				Token:     token,
-				TokenFile: cfg.GitHubTokenFile,
-				BaseURL:   cfg.GitHubAPIBaseURL,
-				Client:    cfg.HTTPClient,
-			},
-		}
-		if err := runReportingCycle(ctx, cl, key, reporter); err != nil {
-			return 0, err
-		}
-	}
+	// Reporting is handled exclusively by the taskActivityReconciler to
+	// avoid racing with this poll-cycle goroutine.  Task phase changes
+	// trigger the task-activity controller which calls ReportTaskStatus.
 
 	return resolvedPollInterval(&ts), nil
 }
@@ -121,7 +97,33 @@ func resolvedPollInterval(ts *kelosv1alpha1.TaskSpawner) time.Duration {
 	return parsePollInterval(ts.Spec.PollInterval)
 }
 
-func (r *spawnerReconciler) requestsForTask(_ context.Context, obj client.Object) []reconcile.Request {
+// taskActivityReconciler handles Task phase changes, deletion timestamp
+// changes, and deletes for the single managed TaskSpawner. It recomputes
+// status.activeTasks and runs per-Task GitHub reporting without triggering
+// source discovery.
+type taskActivityReconciler struct {
+	client.Client
+	Key    types.NamespacedName
+	Config spawnerRuntimeConfig
+}
+
+func (r *taskActivityReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, error) {
+	return ctrl.Result{}, handleTaskActivity(ctx, r.Client, r.Key, r.Config)
+}
+
+func (r *taskActivityReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		Named("task-activity").
+		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
+		Watches(
+			&kelosv1alpha1.Task{},
+			handler.EnqueueRequestsFromMapFunc(r.requestsForTask),
+			builder.WithPredicates(r.taskPredicate()),
+		).
+		Complete(r)
+}
+
+func (r *taskActivityReconciler) requestsForTask(_ context.Context, obj client.Object) []reconcile.Request {
 	if !matchesSpawnerTask(obj, r.Key) {
 		return nil
 	}
@@ -148,7 +150,7 @@ func (r *spawnerReconciler) taskSpawnerPredicate() predicate.Predicate {
 	}
 }
 
-func (r *spawnerReconciler) taskPredicate() predicate.Predicate {
+func (r *taskActivityReconciler) taskPredicate() predicate.Predicate {
 	return predicate.Funcs{
 		CreateFunc: func(event.CreateEvent) bool {
 			return false

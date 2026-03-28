@@ -18,6 +18,7 @@ func TestRender_NilValues(t *testing.T) {
 	}
 	output := string(data)
 	for _, expected := range []string{
+		"kind: CustomResourceDefinition",
 		"kind: Namespace",
 		"kind: ServiceAccount",
 		"kind: ClusterRole",
@@ -48,6 +49,7 @@ func TestRender_DefaultValues(t *testing.T) {
 	}
 	output := string(data)
 	for _, expected := range []string{
+		"kind: CustomResourceDefinition",
 		"kind: Namespace",
 		"kind: ServiceAccount",
 		"kind: ClusterRole",
@@ -118,19 +120,97 @@ func TestRender_ResourceOrdering(t *testing.T) {
 		t.Fatalf("rendering chart: %v", err)
 	}
 	output := string(data)
-	// Namespace must appear before Deployment and CronJob so that the
-	// namespace exists when namespaced resources are applied.
+	// CRDs must appear before Namespace, and Namespace must appear before
+	// Deployment and CronJob so that dependencies exist when resources are applied.
+	crdIdx := strings.Index(output, "kind: CustomResourceDefinition")
 	nsIdx := strings.Index(output, "kind: Namespace")
 	deployIdx := strings.Index(output, "kind: Deployment")
 	cronIdx := strings.Index(output, "kind: CronJob")
-	if nsIdx < 0 || deployIdx < 0 || cronIdx < 0 {
-		t.Fatal("expected Namespace, Deployment, and CronJob in rendered output")
+	if crdIdx < 0 || nsIdx < 0 || deployIdx < 0 || cronIdx < 0 {
+		t.Fatal("expected CustomResourceDefinition, Namespace, Deployment, and CronJob in rendered output")
+	}
+	if crdIdx >= nsIdx {
+		t.Error("expected CustomResourceDefinition to appear before Namespace")
 	}
 	if nsIdx >= deployIdx {
 		t.Error("expected Namespace to appear before Deployment")
 	}
 	if nsIdx >= cronIdx {
 		t.Error("expected Namespace to appear before CronJob")
+	}
+}
+
+func TestRender_DisableCRDs(t *testing.T) {
+	vals := map[string]interface{}{
+		"crds": map[string]interface{}{
+			"install": false,
+		},
+	}
+	data, err := Render(manifests.ChartFS, vals)
+	if err != nil {
+		t.Fatalf("rendering chart: %v", err)
+	}
+	output := string(data)
+	if strings.Contains(output, "kind: CustomResourceDefinition") {
+		t.Error("expected no CRDs when crds.install is false")
+	}
+	if !strings.Contains(output, "kind: Namespace") {
+		t.Error("expected Namespace to still be present")
+	}
+}
+
+func TestRender_TaskSpawnerTemplatePlaceholdersRemainLiteral(t *testing.T) {
+	data, err := Render(manifests.ChartFS, nil)
+	if err != nil {
+		t.Fatalf("rendering chart: %v", err)
+	}
+	output := string(data)
+	if !strings.Contains(output, `Supports Go text/template variables from the work item, e.g. "kelos-task-{{.Number}}".`) {
+		t.Error("expected branch placeholder example to remain literal in rendered CRD output")
+	}
+	for _, expected := range []string{
+		"Available variables (all sources): {{.ID}}, {{.Title}}, {{.Kind}}",
+		"GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}",
+		"GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}",
+		"Cron sources: {{.Time}}, {{.Schedule}}",
+	} {
+		if count := strings.Count(output, expected); count != 2 {
+			t.Errorf("expected %q to appear twice in TaskSpawner CRD descriptions, got %d", expected, count)
+		}
+	}
+}
+
+func TestRender_CRDKeepAnnotation(t *testing.T) {
+	vals := map[string]interface{}{
+		"crds": map[string]interface{}{
+			"install": true,
+			"keep":    true,
+		},
+	}
+	data, err := Render(manifests.ChartFS, vals)
+	if err != nil {
+		t.Fatalf("rendering chart: %v", err)
+	}
+	output := string(data)
+	if !strings.Contains(output, "helm.sh/resource-policy") {
+		t.Error("expected helm.sh/resource-policy annotation when crds.keep is true")
+	}
+}
+
+func TestRender_CRDNoKeepAnnotation(t *testing.T) {
+	vals := map[string]interface{}{
+		"crds": map[string]interface{}{
+			"install": true,
+			"keep":    false,
+		},
+	}
+	data, err := Render(manifests.ChartFS, vals)
+	if err != nil {
+		t.Fatalf("rendering chart: %v", err)
+	}
+	output := string(data)
+	if strings.Contains(output, "helm.sh/resource-policy") {
+		t.Error("expected no helm.sh/resource-policy annotation when crds.keep is false")
 	}
 }
 

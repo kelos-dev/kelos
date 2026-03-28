@@ -1,0 +1,231 @@
+{{- if .Values.crds.install }}
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.0
+    {{- if .Values.crds.keep }}
+    "helm.sh/resource-policy": keep
+    {{- end }}
+  name: agentconfigs.kelos.dev
+spec:
+  group: kelos.dev
+  names:
+    kind: AgentConfig
+    listKind: AgentConfigList
+    plural: agentconfigs
+    singular: agentconfig
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: AgentConfig is the Schema for the agentconfigs API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: AgentConfigSpec defines the desired state of AgentConfig.
+            properties:
+              agentsMD:
+                description: |-
+                  AgentsMD is written to the agent's instruction file
+                  (e.g., ~/.claude/CLAUDE.md for Claude Code).
+                  This is additive and does not overwrite the repo's own instruction files.
+                type: string
+              mcpServers:
+                description: |-
+                  MCPServers defines MCP (Model Context Protocol) servers to make
+                  available to the agent. Each entry is written to the agent's native
+                  MCP configuration (e.g., ~/.claude.json for Claude Code).
+                items:
+                  description: MCPServerSpec defines an MCP server configuration.
+                  properties:
+                    args:
+                      description: |-
+                        Args are command-line arguments for the server process.
+                        Only used when type is "stdio".
+                      items:
+                        type: string
+                      type: array
+                    command:
+                      description: |-
+                        Command is the executable to run for stdio transport.
+                        Required when type is "stdio".
+                      type: string
+                    env:
+                      additionalProperties:
+                        type: string
+                      description: |-
+                        Env are environment variables for the server process.
+                        Only used when type is "stdio".
+                      type: object
+                    envFrom:
+                      description: |-
+                        EnvFrom references a Secret whose data keys are environment variable
+                        names and values are environment variable values. Only used when
+                        type is "stdio". Values from EnvFrom take precedence over inline Env
+                        for overlapping keys.
+                      properties:
+                        secretRef:
+                          description: SecretRef references the Secret to read data
+                            from.
+                          properties:
+                            name:
+                              description: Name is the name of the secret.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                      required:
+                      - secretRef
+                      type: object
+                    headers:
+                      additionalProperties:
+                        type: string
+                      description: |-
+                        Headers are HTTP headers to include in requests.
+                        Only used when type is "http" or "sse".
+                      type: object
+                    headersFrom:
+                      description: |-
+                        HeadersFrom references a Secret whose data keys are header names
+                        and values are header values. Only used when type is "http" or "sse".
+                        Values from HeadersFrom take precedence over inline Headers for
+                        overlapping keys.
+                      properties:
+                        secretRef:
+                          description: SecretRef references the Secret to read data
+                            from.
+                          properties:
+                            name:
+                              description: Name is the name of the secret.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                      required:
+                      - secretRef
+                      type: object
+                    name:
+                      description: |-
+                        Name identifies this MCP server. Used as the key in the
+                        agent's MCP configuration.
+                      minLength: 1
+                      type: string
+                    type:
+                      description: 'Type is the transport type: "stdio", "http", or
+                        "sse".'
+                      enum:
+                      - stdio
+                      - http
+                      - sse
+                      type: string
+                    url:
+                      description: |-
+                        URL is the server endpoint for http or sse transport.
+                        Required when type is "http" or "sse".
+                      type: string
+                  required:
+                  - name
+                  - type
+                  type: object
+                type: array
+              plugins:
+                description: |-
+                  Plugins defines plugin bundles containing skills and agents.
+                  Each plugin is mounted as a directory and installed using the
+                  agent's native mechanism (e.g., --plugin-dir for Claude Code,
+                  ~/.codex/skills for Codex, extensions for Gemini).
+                items:
+                  description: PluginSpec defines a plugin bundle containing skills
+                    and agents.
+                  properties:
+                    agents:
+                      description: |-
+                        Agents defines sub-agents for this plugin.
+                        Each becomes agents/<name>.md in the plugin directory.
+                      items:
+                        description: AgentDefinition defines a sub-agent within a
+                          plugin.
+                        properties:
+                          content:
+                            type: string
+                          name:
+                            minLength: 1
+                            type: string
+                        required:
+                        - content
+                        - name
+                        type: object
+                      type: array
+                    name:
+                      description: |-
+                        Name is the plugin name. Used as the plugin directory name
+                        and for namespacing in Claude Code (e.g., <name>:skill-name).
+                      minLength: 1
+                      type: string
+                    skills:
+                      description: |-
+                        Skills defines skills for this plugin.
+                        Each becomes skills/<name>/SKILL.md in the plugin directory.
+                      items:
+                        description: SkillDefinition defines a skill within a plugin.
+                        properties:
+                          content:
+                            type: string
+                          name:
+                            minLength: 1
+                            type: string
+                        required:
+                        - content
+                        - name
+                        type: object
+                      type: array
+                  required:
+                  - name
+                  type: object
+                type: array
+              skills:
+                description: |-
+                  Skills defines skills.sh packages to install into the plugin volume.
+                  Each entry references a package in owner/repo format from the skills.sh
+                  ecosystem, installed via "npx skills add" in an init container.
+                items:
+                  description: SkillsShSpec defines a skills.sh package reference.
+                  properties:
+                    skill:
+                      description: |-
+                        Skill selects a specific skill by name from the package.
+                        If empty, all skills in the package are installed.
+                      type: string
+                    source:
+                      description: |-
+                        Source is the skills.sh package in owner/repo format
+                        (e.g., "vercel-labs/agent-skills").
+                      minLength: 1
+                      type: string
+                  required:
+                  - source
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+{{- end }}

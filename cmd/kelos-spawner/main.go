@@ -136,7 +136,16 @@ func main() {
 		Key:    key,
 		Config: cfgArgs,
 	}).SetupWithManager(mgr); err != nil {
-		log.Error(err, "Unable to create controller")
+		log.Error(err, "Unable to create spawner controller")
+		os.Exit(1)
+	}
+
+	if err := (&taskActivityReconciler{
+		Client: cl,
+		Key:    key,
+		Config: cfgArgs,
+	}).SetupWithManager(mgr); err != nil {
+		log.Error(err, "Unable to create task activity controller")
 		os.Exit(1)
 	}
 
@@ -165,6 +174,80 @@ func runReportingCycle(ctx context.Context, cl client.Client, key types.Namespac
 			// Continue with remaining tasks rather than aborting the cycle
 		}
 	}
+	return nil
+}
+
+// handleTaskActivity is the lightweight reconcile path triggered by Task
+// phase changes, deletion timestamp changes, and deletes. It recomputes
+// status.activeTasks on the owning TaskSpawner and runs per-Task GitHub
+// reporting when enabled, without calling source discovery.
+func handleTaskActivity(ctx context.Context, cl client.Client, key types.NamespacedName, cfg spawnerRuntimeConfig) error {
+	log := ctrl.Log.WithName("spawner")
+
+	var ts kelosv1alpha1.TaskSpawner
+	if err := cl.Get(ctx, key, &ts); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("fetching TaskSpawner for task activity: %w", err)
+	}
+
+	// List all Tasks owned by this TaskSpawner to recompute activeTasks.
+	var taskList kelosv1alpha1.TaskList
+	if err := cl.List(ctx, &taskList,
+		client.InNamespace(key.Namespace),
+		client.MatchingLabels{"kelos.dev/taskspawner": key.Name},
+	); err != nil {
+		return fmt.Errorf("listing tasks for activity update: %w", err)
+	}
+
+	activeTasks := 0
+	for i := range taskList.Items {
+		t := &taskList.Items[i]
+		if t.Status.Phase != kelosv1alpha1.TaskPhaseSucceeded && t.Status.Phase != kelosv1alpha1.TaskPhaseFailed {
+			activeTasks++
+		}
+	}
+
+	// Update status.activeTasks if it changed.
+	if ts.Status.ActiveTasks != activeTasks {
+		// Re-fetch for latest resource version before status update.
+		if err := cl.Get(ctx, key, &ts); err != nil {
+			return fmt.Errorf("re-fetching TaskSpawner for active tasks update: %w", err)
+		}
+		ts.Status.ActiveTasks = activeTasks
+		if err := cl.Status().Update(ctx, &ts); err != nil {
+			return fmt.Errorf("updating TaskSpawner activeTasks: %w", err)
+		}
+		log.Info("Updated active tasks count", "activeTasks", activeTasks)
+	}
+
+	// Run per-Task reporting when enabled.
+	if reportingEnabled(&ts) {
+		token, err := readGitHubToken(cfg.GitHubTokenFile)
+		if err != nil {
+			return fmt.Errorf("reading GitHub token for task activity reporting: %w", err)
+		}
+
+		reporter := &reporting.TaskReporter{
+			Client: cl,
+			Reporter: &reporting.GitHubReporter{
+				Owner:     cfg.GitHubOwner,
+				Repo:      cfg.GitHubRepo,
+				Token:     token,
+				TokenFile: cfg.GitHubTokenFile,
+				BaseURL:   cfg.GitHubAPIBaseURL,
+				Client:    cfg.HTTPClient,
+			},
+		}
+
+		for i := range taskList.Items {
+			if err := reporter.ReportTaskStatus(ctx, &taskList.Items[i]); err != nil {
+				log.Error(err, "Reporting task status during activity update", "task", taskList.Items[i].Name)
+			}
+		}
+	}
+
 	return nil
 }
 

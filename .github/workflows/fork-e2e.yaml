@@ -16,20 +16,18 @@ jobs:
   validate-and-test:
     runs-on: ubuntu-latest
     steps:
-      - name: Validate PR head SHA
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ inputs.pr_number }}/head
+
+      - name: Validate checked-out commit matches approved SHA
         run: |
-          actual_sha=$(gh api repos/${{ github.repository }}/pulls/${{ inputs.pr_number }} --jq '.head.sha')
+          actual_sha=$(git rev-parse HEAD)
           if [ "$actual_sha" != "${{ inputs.head_sha }}" ]; then
             echo "::error::PR #${{ inputs.pr_number }} HEAD SHA mismatch: expected ${{ inputs.head_sha }}, got $actual_sha"
             echo "The PR has new commits since approval. Re-review and re-run with the updated SHA."
             exit 1
           fi
-
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.head_sha }}
 
       - uses: actions/setup-go@v5
         with:

@@ -13,55 +13,12 @@ on:
         type: string
 
 jobs:
-  validate-and-test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: refs/pull/${{ inputs.pr_number }}/head
-
-      - name: Validate checked-out commit matches approved SHA
-        run: |
-          actual_sha=$(git rev-parse HEAD)
-          if [ "$actual_sha" != "${{ inputs.head_sha }}" ]; then
-            echo "::error::PR #${{ inputs.pr_number }} HEAD SHA mismatch: expected ${{ inputs.head_sha }}, got $actual_sha"
-            echo "The PR has new commits since approval. Re-review and re-run with the updated SHA."
-            exit 1
-          fi
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
-      - uses: helm/kind-action@v1
-        with:
-          cluster_name: kind
-
-      - name: Build images
-        run: make image VERSION=e2e
-
-      - name: Load images into kind
-        run: |
-          kind load docker-image ghcr.io/kelos-dev/kelos-controller:e2e
-          kind load docker-image ghcr.io/kelos-dev/kelos-spawner:e2e
-          kind load docker-image ghcr.io/kelos-dev/claude-code:e2e
-          kind load docker-image ghcr.io/kelos-dev/codex:e2e
-          kind load docker-image ghcr.io/kelos-dev/gemini:e2e
-          kind load docker-image ghcr.io/kelos-dev/opencode:e2e
-          kind load docker-image ghcr.io/kelos-dev/cursor:e2e
-
-      - name: Build CLI
-        run: make build WHAT=cmd/kelos
-
-      - name: Deploy controller
-        run: |
-          bin/kelos install --version e2e --image-pull-policy Never --disable-heartbeat
-          kubectl wait --for=condition=available deployment/kelos-controller-manager -n kelos-system --timeout=120s
-
-      - name: E2E Test
-        env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
-          GITHUB_TOKEN: ${{ github.token }}
-          KELOS_BIN: ${{ github.workspace }}/bin/kelos
-        run: make test-e2e
+  fork-e2e:
+    uses: ./.github/workflows/reusable-e2e.yaml
+    with:
+      checkout-ref: refs/pull/${{ inputs.pr_number }}/head
+      persist-credentials: false
+      expected-sha: ${{ inputs.head_sha }}
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}

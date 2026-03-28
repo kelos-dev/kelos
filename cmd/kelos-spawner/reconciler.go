@@ -18,7 +18,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
-	"github.com/kelos-dev/kelos/internal/reporting"
 )
 
 type spawnerRuntimeConfig struct {
@@ -72,27 +71,9 @@ func runOnce(ctx context.Context, cl client.Client, key types.NamespacedName, cf
 		return 0, fmt.Errorf("fetching TaskSpawner after cycle: %w", err)
 	}
 
-	if reportingEnabled(&ts) {
-		token, err := readGitHubToken(cfg.GitHubTokenFile)
-		if err != nil {
-			return 0, fmt.Errorf("reading GitHub token for reporting: %w", err)
-		}
-
-		reporter := &reporting.TaskReporter{
-			Client: cl,
-			Reporter: &reporting.GitHubReporter{
-				Owner:     cfg.GitHubOwner,
-				Repo:      cfg.GitHubRepo,
-				Token:     token,
-				TokenFile: cfg.GitHubTokenFile,
-				BaseURL:   cfg.GitHubAPIBaseURL,
-				Client:    cfg.HTTPClient,
-			},
-		}
-		if err := runReportingCycle(ctx, cl, key, reporter); err != nil {
-			return 0, err
-		}
-	}
+	// Reporting is handled exclusively by the taskActivityReconciler to
+	// avoid racing with this poll-cycle goroutine.  Task phase changes
+	// trigger the task-activity controller which calls ReportTaskStatus.
 
 	return resolvedPollInterval(&ts), nil
 }

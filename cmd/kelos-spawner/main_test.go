@@ -2033,118 +2033,32 @@ func TestReportingEnabled_Jira(t *testing.T) {
 	}
 }
 
-func TestRunReportingCycle_ReportsForAnnotatedTasks(t *testing.T) {
+func TestRunOnce_DoesNotCallReporting(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
+	ts.Spec.Suspend = boolPtr(true)
 	ts.Spec.When.GitHubIssues.Reporting = &kelosv1alpha1.GitHubReporting{Enabled: true}
 
-	// Create a task with reporting annotations and a Pending phase
-	task := kelosv1alpha1.Task{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "spawner-1",
-			Namespace: "default",
-			Labels: map[string]string{
-				"kelos.dev/taskspawner": "spawner",
-			},
-			Annotations: map[string]string{
-				reporting.AnnotationGitHubReporting: "enabled",
-				reporting.AnnotationSourceNumber:    "42",
-				reporting.AnnotationSourceKind:      "issue",
-			},
-		},
-		Spec: kelosv1alpha1.TaskSpec{
-			Type:   "claude-code",
-			Prompt: "test",
-			Credentials: kelosv1alpha1.Credentials{
-				Type:      kelosv1alpha1.CredentialTypeOAuth,
-				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
-			},
-		},
-		Status: kelosv1alpha1.TaskStatus{
-			Phase: kelosv1alpha1.TaskPhasePending,
-		},
+	task := newTask("spawner-1", "default", "spawner", kelosv1alpha1.TaskPhasePending)
+	task.Annotations = map[string]string{
+		reporting.AnnotationGitHubReporting: "enabled",
+		reporting.AnnotationSourceNumber:    "42",
+		reporting.AnnotationSourceKind:      "issue",
 	}
 
 	cl, key := setupTest(t, ts, task)
 
-	// Set up a fake GitHub server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]int64{"id": 999})
-	}))
-	defer server.Close()
-
-	reporter := &reporting.TaskReporter{
-		Client: cl,
-		Reporter: &reporting.GitHubReporter{
-			Owner:   "owner",
-			Repo:    "repo",
-			Token:   "token",
-			BaseURL: server.URL,
-		},
-	}
-
-	if err := runReportingCycle(context.Background(), cl, key, reporter); err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
-
-	// Verify annotations were updated
-	var updated kelosv1alpha1.Task
-	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(&task), &updated); err != nil {
-		t.Fatalf("Getting updated task: %v", err)
-	}
-	if updated.Annotations[reporting.AnnotationGitHubReportPhase] != "accepted" {
-		t.Errorf("Expected report phase 'accepted', got %q", updated.Annotations[reporting.AnnotationGitHubReportPhase])
-	}
-	if updated.Annotations[reporting.AnnotationGitHubCommentID] == "" {
-		t.Error("Expected comment ID to be set")
-	}
-}
-
-func TestRunReportingCycle_SkipsTasksWithoutReporting(t *testing.T) {
-	ts := newTaskSpawner("spawner", "default", nil)
-
-	// Task without reporting annotations
-	task := kelosv1alpha1.Task{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "spawner-1",
-			Namespace: "default",
-			Labels: map[string]string{
-				"kelos.dev/taskspawner": "spawner",
-			},
-		},
-		Spec: kelosv1alpha1.TaskSpec{
-			Type:   "claude-code",
-			Prompt: "test",
-			Credentials: kelosv1alpha1.Credentials{
-				Type:      kelosv1alpha1.CredentialTypeOAuth,
-				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
-			},
-		},
-		Status: kelosv1alpha1.TaskStatus{
-			Phase: kelosv1alpha1.TaskPhasePending,
-		},
-	}
-
-	cl, key := setupTest(t, ts, task)
-
-	// Server should never be called
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Error("GitHub API should not be called for tasks without reporting")
+		t.Error("Poll cycle should not call GitHub reporting API; reporting is handled by task-activity controller")
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
 
-	reporter := &reporting.TaskReporter{
-		Client: cl,
-		Reporter: &reporting.GitHubReporter{
-			Owner:   "owner",
-			Repo:    "repo",
-			Token:   "token",
-			BaseURL: server.URL,
-		},
-	}
-
-	if err := runReportingCycle(context.Background(), cl, key, reporter); err != nil {
+	_, err := runOnce(context.Background(), cl, key, spawnerRuntimeConfig{
+		GitHubOwner:      "owner",
+		GitHubRepo:       "repo",
+		GitHubAPIBaseURL: server.URL,
+	})
+	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 }
@@ -2173,11 +2087,10 @@ func TestRunOnce_ReturnsPollIntervalForSuspendedTaskSpawner(t *testing.T) {
 	}
 }
 
-func TestRunOnce_UsesEnvTokenForReporting(t *testing.T) {
+func TestHandleTaskActivity_UsesEnvToken(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "pat-token")
 
 	ts := newTaskSpawner("spawner", "default", nil)
-	ts.Spec.Suspend = boolPtr(true)
 	ts.Spec.When.GitHubIssues.Reporting = &kelosv1alpha1.GitHubReporting{Enabled: true}
 
 	task := newTask("spawner-1", "default", "spawner", kelosv1alpha1.TaskPhasePending)
@@ -2197,7 +2110,7 @@ func TestRunOnce_UsesEnvTokenForReporting(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := runOnce(context.Background(), cl, key, spawnerRuntimeConfig{
+	err := handleTaskActivity(context.Background(), cl, key, spawnerRuntimeConfig{
 		GitHubOwner:      "owner",
 		GitHubRepo:       "repo",
 		GitHubAPIBaseURL: server.URL,

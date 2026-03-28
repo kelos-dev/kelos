@@ -155,28 +155,6 @@ func main() {
 	}
 }
 
-// runReportingCycle lists all Tasks owned by the given TaskSpawner and runs
-// reporting for each one that has GitHub reporting enabled. Running this
-// in the same goroutine as the discovery loop avoids races between Task
-// creation/deletion and annotation patching.
-func runReportingCycle(ctx context.Context, cl client.Client, key types.NamespacedName, reporter *reporting.TaskReporter) error {
-	var taskList kelosv1alpha1.TaskList
-	if err := cl.List(ctx, &taskList,
-		client.InNamespace(key.Namespace),
-		client.MatchingLabels{"kelos.dev/taskspawner": key.Name},
-	); err != nil {
-		return fmt.Errorf("listing tasks for reporting: %w", err)
-	}
-
-	for i := range taskList.Items {
-		if err := reporter.ReportTaskStatus(ctx, &taskList.Items[i]); err != nil {
-			ctrl.Log.WithName("spawner").Error(err, "Reporting task status", "task", taskList.Items[i].Name)
-			// Continue with remaining tasks rather than aborting the cycle
-		}
-	}
-	return nil
-}
-
 // handleTaskActivity is the lightweight reconcile path triggered by Task
 // phase changes, deletion timestamp changes, and deletes. It recomputes
 // status.activeTasks on the owning TaskSpawner and runs per-Task GitHub

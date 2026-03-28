@@ -108,6 +108,11 @@ jobs:
             -u ${{ github.actor }} \
             -p ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set image tag in chart values
+        run: |
+          sed -i 's|tag: "latest"|tag: "${{ github.ref_name }}"|' \
+            internal/manifests/charts/kelos/values.yaml
+
       - name: Package Helm chart
         run: |
           mkdir -p /tmp/charts

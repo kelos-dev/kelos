@@ -34,3 +34,5 @@ spec:
     - Kubernetes resource comparison: use semantic `.Equal()` or `.Cmp()` methods for `resource.Quantity` comparisons, not `reflect.DeepEqual`
     - Provider-agnostic API design: when adding CRD fields or API types, prefer generic abstractions over provider-specific ones (e.g., `none` credential type instead of `bedrock`); use existing generic mechanisms like `PodOverrides.Env` for provider-specific details
     - Idiomatic Helm values: use nested dictionary structures in `values.yaml` (e.g., `controller.resources.requests.cpu`) instead of flat string-based parameters; structured data should be proper YAML dictionaries, not strings
+    - Deploy-dev workflow sync: when adding new controller flags, resource settings, or monitoring config, update `.github/workflows/deploy-dev.yaml` to pass the corresponding values
+    - Controller-driven migration: when introducing breaking changes to deployed resources (e.g., label selector changes), prefer automated migration in the controller over requiring manual user intervention; add a FIXME comment noting when the migration code can be removed

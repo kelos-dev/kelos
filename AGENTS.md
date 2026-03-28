@@ -11,6 +11,8 @@
 - **Consistent guidance across surfaces.** When changing user-facing guidance or instructions, search for all surfaces that reference the same topic (docs, CLI output, templates, code comments) and update them together.
 - **Provider-agnostic API design.** When adding CRD fields or API types, prefer generic, provider-agnostic abstractions over provider-specific ones (e.g., a generic `none` credential type instead of `bedrock`). Provider-specific details should be handled through existing generic mechanisms like `PodOverrides.Env` rather than dedicated fields.
 - **Idiomatic Helm values.** Use nested dictionary structures in `values.yaml` (e.g., `controller.resources.requests.cpu`) instead of flat string-based parameters. Values that represent structured data should be proper YAML dictionaries, not strings.
+- **Deploy-dev workflow sync.** When adding new controller flags, resource settings, or monitoring config, update `.github/workflows/deploy-dev.yaml` to pass the corresponding values.
+- **Controller-driven migration.** When introducing breaking changes to deployed resources (e.g., label selector changes), prefer automated migration in the controller over requiring manual user intervention. Add a FIXME comment noting when the migration code can be removed.
 
 ## Key Makefile Targets
 - `make verify` — run all verification checks (lint, fmt, vet, etc.).
@@ -27,7 +29,7 @@
 - Choose exactly one `/kind` label from: `bug`, `cleanup`, `docs`, `feature`.
 - If there is no associated issue, write "N/A" under the issue section.
 - If the PR does not introduce a user-facing change, write "NONE" in the `release-note` block.
-- If the PR introduces a new API field, CRD change, or user-facing feature, write a meaningful release note describing the change — do not write "NONE".
+- If the PR introduces a new API field, CRD change, or user-facing feature, write a meaningful release note describing the change — do not write "NONE". If the change affects existing deployments (e.g., selector changes, breaking migrations), the release note must describe the required user action.
 - PRs that only modify files under `self-development/` are internal agent improvements — use `/kind cleanup` and write "NONE" in the `release-note` block.
 
 ## Directory Structure

@@ -76,7 +76,7 @@ jobs:
 
   test-e2e:
     if: >-
-      github.event_name == 'push' || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.ok-to-test) || contains(github.event.pull_request.labels.*.name, 'ok-to-test')
+      github.event_name == 'push' || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.ok-to-test) || (contains(github.event.pull_request.labels.*.name, 'ok-to-test') && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

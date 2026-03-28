@@ -41,10 +41,12 @@ jobs:
 
       - name: Validate checked-out commit matches approved SHA
         if: inputs.expected-sha != ''
+        env:
+          EXPECTED_SHA: ${{ inputs.expected-sha }}
         run: |
           actual_sha=$(git rev-parse HEAD)
-          if [ "$actual_sha" != "${{ inputs.expected-sha }}" ]; then
-            echo "::error::HEAD SHA mismatch: expected ${{ inputs.expected-sha }}, got $actual_sha"
+          if [ "$actual_sha" != "$EXPECTED_SHA" ]; then
+            echo "::error::HEAD SHA mismatch: expected $EXPECTED_SHA, got $actual_sha"
             echo "The ref has new commits since approval. Re-review and re-run with the updated SHA."
             exit 1
           fi

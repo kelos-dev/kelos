@@ -174,7 +174,7 @@ func runCycle(ctx context.Context, cl client.Client, key types.NamespacedName, g
 		return fmt.Errorf("fetching TaskSpawner: %w", err)
 	}
 
-	src, err := buildSource(&ts, githubOwner, githubRepo, githubAPIBaseURL, githubTokenFile, jiraBaseURL, jiraProject, jiraJQL, httpClient)
+	src, err := buildSource(&ts, githubOwner, githubRepo, githubAPIBaseURL, githubTokenFile, jiraBaseURL, jiraProject, jiraJQL, httpClient, cl)
 	if err != nil {
 		return fmt.Errorf("building source: %w", err)
 	}
@@ -248,9 +248,15 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 		}
 	}
 
+	// Track which work item IDs have been handled (task exists or will be
+	// created) so webhook sources can acknowledge their events. Items
+	// skipped due to maxConcurrency or budget limits are NOT acknowledged,
+	// allowing them to be rediscovered on the next cycle.
+	var acknowledgedIDs []string
+
 	var newItems []source.WorkItem
 	for _, item := range items {
-		taskName := fmt.Sprintf("%s-%s", ts.Name, item.ID)
+		taskName := fmt.Sprintf("%s-%s", ts.Name, strings.ToLower(item.ID))
 		existing, found := existingTaskMap[taskName]
 		if !found {
 			newItems = append(newItems, item)
@@ -274,7 +280,11 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 			}
 			log.Info("Deleted completed task for retrigger", "task", taskName)
 			newItems = append(newItems, item)
+			continue
 		}
+
+		// Task already exists and no retrigger needed — acknowledge the event
+		acknowledgedIDs = append(acknowledgedIDs, item.ID)
 	}
 
 	// Sort new items by priority labels when configured
@@ -306,11 +316,12 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 			break
 		}
 
-		taskName := fmt.Sprintf("%s-%s", ts.Name, item.ID)
+		taskName := fmt.Sprintf("%s-%s", ts.Name, strings.ToLower(item.ID))
 
 		prompt, err := source.RenderPrompt(ts.Spec.TaskTemplate.PromptTemplate, item)
 		if err != nil {
 			log.Error(err, "rendering prompt", "item", item.ID)
+			acknowledgedIDs = append(acknowledgedIDs, item.ID)
 			continue
 		}
 
@@ -360,6 +371,7 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 			branch, err := source.RenderTemplate(ts.Spec.TaskTemplate.Branch, item)
 			if err != nil {
 				log.Error(err, "rendering branch template", "item", item.ID)
+				acknowledgedIDs = append(acknowledgedIDs, item.ID)
 				continue
 			}
 			task.Spec.Branch = branch
@@ -380,12 +392,23 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 			} else {
 				log.Error(err, "creating Task", "task", taskName)
 			}
+			// Acknowledge even on error/already-exists so the event is not
+			// retried indefinitely for permanently failing items.
+			acknowledgedIDs = append(acknowledgedIDs, item.ID)
 			continue
 		}
 
 		log.Info("Created Task", "task", taskName, "item", item.ID)
+		acknowledgedIDs = append(acknowledgedIDs, item.ID)
 		newTasksCreated++
 		activeTasks++
+	}
+
+	// Acknowledge handled items so webhook sources mark their events as
+	// processed. Items skipped by maxConcurrency/budget remain pending
+	// and will be rediscovered on the next cycle.
+	if ack, ok := src.(source.WebhookAcknowledger); ok {
+		ack.AcknowledgeItems(ctx, acknowledgedIDs)
 	}
 
 	// Update status in a single batch
@@ -561,7 +584,7 @@ func resolveGitHubCommentPolicy(policy *kelosv1alpha1.GitHubCommentPolicy, legac
 	}, nil
 }
 
-func buildSource(ts *kelosv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFile, jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) (source.Source, error) {
+func buildSource(ts *kelosv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFile, jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client, k8sClient client.Client) (source.Source, error) {
 	if ts.Spec.When.GitHubIssues != nil {
 		gh := ts.Spec.When.GitHubIssues
 		token, err := readGitHubToken(tokenFile)
@@ -623,6 +646,42 @@ func buildSource(ts *kelosv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFi
 			Draft:             gh.Draft,
 			PriorityLabels:    gh.PriorityLabels,
 		}, nil
+	}
+
+	if ts.Spec.When.GitHubWebhook != nil {
+		webhook := ts.Spec.When.GitHubWebhook
+		token, err := readGitHubToken(tokenFile)
+		if err != nil {
+			return nil, err
+		}
+		src := &source.GitHubWebhookSource{
+			Client:         k8sClient,
+			Namespace:      webhook.Namespace,
+			SpawnerName:    ts.Name,
+			Labels:         webhook.Labels,
+			ExcludeLabels:  webhook.ExcludeLabels,
+			Author:         webhook.Author,
+			State:          webhook.State,
+			Actions:        webhook.Actions,
+			Draft:          webhook.Draft,
+			PriorityLabels: webhook.PriorityLabels,
+			Owner:          owner,
+			Repo:           repo,
+			Token:          token,
+			BaseURL:        apiBaseURL,
+			HTTPClient:     httpClient,
+		}
+		if webhook.CommentPolicy != nil {
+			src.TriggerComment = webhook.CommentPolicy.TriggerComment
+			src.ExcludeComments = webhook.CommentPolicy.ExcludeComments
+			src.AllowedUsers = webhook.CommentPolicy.AllowedUsers
+			src.AllowedTeams = make([]string, len(webhook.CommentPolicy.AllowedTeams))
+			for i, t := range webhook.CommentPolicy.AllowedTeams {
+				src.AllowedTeams[i] = string(t)
+			}
+			src.MinimumPermission = webhook.CommentPolicy.MinimumPermission
+		}
+		return src, nil
 	}
 
 	if ts.Spec.When.Jira != nil {

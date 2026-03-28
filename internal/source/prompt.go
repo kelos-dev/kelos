@@ -28,8 +28,8 @@ func RenderPrompt(promptTemplate string, item WorkItem) (string, error) {
 
 // RenderTemplate renders a Go text/template string with the given work item's fields.
 // Available variables (all sources): {{.ID}}, {{.Title}}, {{.Kind}}
-// GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
-// GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}
+// GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}, {{.Author}}, {{.State}}, {{.Action}}
+// GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}, {{.Draft}}
 // Cron sources: {{.Time}}, {{.Schedule}}
 func RenderTemplate(tmplStr string, item WorkItem) (string, error) {
 	tmpl, err := template.New("tmpl").Parse(tmplStr)
@@ -52,6 +52,10 @@ func RenderTemplate(tmplStr string, item WorkItem) (string, error) {
 		Comments       string
 		Kind           string
 		Branch         string
+		Author         string
+		State          string
+		Action         string
+		Draft          bool
 		ReviewState    string
 		ReviewComments string
 		Time           string
@@ -66,6 +70,10 @@ func RenderTemplate(tmplStr string, item WorkItem) (string, error) {
 		Comments:       item.Comments,
 		Kind:           kind,
 		Branch:         item.Branch,
+		Author:         item.Author,
+		State:          item.State,
+		Action:         item.Action,
+		Draft:          item.Draft,
 		ReviewState:    item.ReviewState,
 		ReviewComments: item.ReviewComments,
 		Time:           item.Time,

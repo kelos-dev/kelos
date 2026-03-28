@@ -109,6 +109,15 @@ rules:
   - patch
   - update
 - apiGroups:
+  - kelos.dev
+  resources:
+  - webhookevents
+  verbs:
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
   - rbac.authorization.k8s.io
   resources:
   - rolebindings
@@ -152,6 +161,49 @@ rules:
       - patch
       - update
       - watch
+  - apiGroups:
+      - kelos.dev
+    resources:
+      - webhookevents
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - kelos.dev
+    resources:
+      - webhookevents/status
+    verbs:
+      - get
+      - update
+      - patch
+{{- if .Values.webhook.enabled }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kelos-webhook-receiver-role
+rules:
+  - apiGroups:
+      - kelos.dev
+    resources:
+      - webhookevents
+    verbs:
+      - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kelos-webhook-receiver-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kelos-webhook-receiver-role
+subjects:
+  - kind: ServiceAccount
+    name: kelos-webhook-receiver
+    namespace: kelos-system
+{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

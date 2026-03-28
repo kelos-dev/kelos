@@ -794,8 +794,8 @@ spec:
                       Branch is the git branch spawned Tasks should work on.
                       Supports Go text/template variables from the work item, e.g. "kelos-task-{{.Number}}".
                       Available variables (all sources): {{.ID}}, {{.Title}}, {{.Kind}}
-                      GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
-                      GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}
+                      GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}, {{.Author}}, {{.State}}, {{.Action}}
+                      GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}, {{.Draft}}
                       Cron sources: {{.Time}}, {{.Schedule}}
                     type: string
                   credentials:
@@ -1115,8 +1115,8 @@ spec:
                     description: |-
                       PromptTemplate is a Go text/template for rendering the task prompt.
                       Available variables (all sources): {{.ID}}, {{.Title}}, {{.Kind}}
-                      GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
-                      GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}
+                      GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}, {{.Author}}, {{.State}}, {{.Action}}
+                      GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}, {{.Draft}}
                       Cron sources: {{.Time}}, {{.Schedule}}
                     type: string
                   ttlSecondsAfterFinished:
@@ -1471,6 +1471,126 @@ spec:
                       rule: '!(has(self.commentPolicy) && ((has(self.triggerComment)
                         && size(self.triggerComment) > 0) || (has(self.excludeComments)
                         && size(self.excludeComments) > 0)))'
+                  githubWebhook:
+                    description: GitHubWebhook discovers issues and pull requests
+                      from GitHub webhooks.
+                    properties:
+                      actions:
+                        description: |-
+                          Actions filters webhook events by action (e.g., ["opened", "reopened", "labeled"]).
+                          When empty, all actions are processed.
+                        items:
+                          type: string
+                        type: array
+                      author:
+                        description: |-
+                          Author filters issues/PRs by the username of the user who created them
+                          (applied client-side to webhook payloads). When empty, no author filtering
+                          is applied.
+                        type: string
+                      commentPolicy:
+                        description: |-
+                          CommentPolicy configures comment-based workflow control and authorization.
+                          When a trigger comment is set, the source processes issue_comment webhook
+                          events whose comment body matches the trigger command. Authorization
+                          checks (allowedUsers, allowedTeams, minimumPermission) apply to the
+                          comment author. AllowedTeams and minimumPermission require a GitHub
+                          token (provided via the workspace secretRef).
+                        properties:
+                          allowedTeams:
+                            description: |-
+                              AllowedTeams restricts comment control to specific GitHub teams in
+                              org/team-slug format.
+                            items:
+                              description: GitHubTeamRef identifies a GitHub team
+                                in org/team-slug format.
+                              pattern: ^[^/]+/[^/]+$
+                              type: string
+                            type: array
+                          allowedUsers:
+                            description: AllowedUsers restricts comment control to
+                              specific GitHub usernames.
+                            items:
+                              type: string
+                            type: array
+                          excludeComments:
+                            description: |-
+                              ExcludeComments blocks items whose most recent matching command is an
+                              exclude command. When combined with TriggerComment, the most recent
+                              matching command wins.
+                            items:
+                              type: string
+                            type: array
+                          minimumPermission:
+                            description: |-
+                              MinimumPermission restricts comment control to users with at least the
+                              given repository permission.
+                            enum:
+                            - read
+                            - triage
+                            - write
+                            - maintain
+                            - admin
+                            type: string
+                          triggerComment:
+                            description: |-
+                              TriggerComment requires a matching command for the item to be included.
+                              When set alone, only items with a matching command are discovered.
+                            type: string
+                        type: object
+                      draft:
+                        description: |-
+                          Draft filters pull requests by draft state. When unset, both draft and
+                          ready-for-review pull requests are included.
+                        type: boolean
+                      excludeLabels:
+                        description: ExcludeLabels filters out issues/PRs that have
+                          any of these labels (client-side).
+                        items:
+                          type: string
+                        type: array
+                      labels:
+                        description: Labels filters issues/PRs by labels (applied
+                          client-side to webhook payloads).
+                        items:
+                          type: string
+                        type: array
+                      namespace:
+                        description: |-
+                          Namespace is the Kubernetes namespace where WebhookEvent resources are created.
+                          The spawner will watch for GitHub webhook events in this namespace.
+                        type: string
+                      priorityLabels:
+                        description: |-
+                          PriorityLabels defines a label-based priority order for discovered items.
+                          When maxConcurrency limits how many tasks are created per cycle,
+                          items are sorted by the first matching label before task creation.
+                          Index 0 is the highest priority. Items without a matching label
+                          are scheduled last. When empty, items are processed in discovery order.
+                        items:
+                          type: string
+                        type: array
+                      reporting:
+                        description: Reporting configures status reporting back to
+                          GitHub.
+                        properties:
+                          enabled:
+                            description: Enabled posts standard status comments back
+                              to the originating GitHub issue or PR.
+                            type: boolean
+                        type: object
+                      state:
+                        default: open
+                        description: State filters issues/PRs by state (open, closed,
+                          all). Defaults to open.
+                        enum:
+                        - open
+                        - closed
+                        - all
+                        type: string
+                    required:
+                    - namespace
+                    type: object
                   jira:
                     description: Jira discovers issues from a Jira project.
                     properties:
@@ -1614,6 +1734,118 @@ spec:
               totalTasksCreated:
                 description: TotalTasksCreated is the total number of Tasks created.
                 type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.0
+  name: webhookevents.kelos.dev
+spec:
+  group: kelos.dev
+  names:
+    kind: WebhookEvent
+    listKind: WebhookEventList
+    plural: webhookevents
+    singular: webhookevent
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.source
+      name: Source
+      type: string
+    - jsonPath: .status.processed
+      name: Processed
+      type: boolean
+    - jsonPath: .spec.receivedAt
+      name: ReceivedAt
+      type: date
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: WebhookEvent is the Schema for the webhookevents API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: WebhookEventSpec defines the desired state of WebhookEvent.
+            properties:
+              payload:
+                description: Payload is the raw webhook payload as JSON bytes.
+                format: byte
+                type: string
+              receivedAt:
+                description: ReceivedAt is the timestamp when the webhook was received.
+                format: date-time
+                type: string
+              source:
+                description: Source is the webhook source type (e.g., "github", "slack",
+                  "linear").
+                minLength: 1
+                type: string
+              ttlSecondsAfterProcessed:
+                description: |-
+                  TTLSecondsAfterProcessed limits the lifetime of a WebhookEvent after
+                  it has been processed. If set, the event will be automatically deleted
+                  after the given number of seconds once ProcessedAt is set.
+                  Defaults to 7200 (2 hours) when created by the webhook receiver.
+                format: int32
+                minimum: 0
+                type: integer
+            required:
+            - payload
+            - receivedAt
+            - source
+            type: object
+          status:
+            description: WebhookEventStatus defines the observed state of WebhookEvent.
+            properties:
+              message:
+                description: Message provides additional information about processing.
+                type: string
+              processed:
+                description: |-
+                  Processed indicates whether this event has been processed by at least one spawner.
+                  Maintained for backward compatibility; prefer checking ProcessedBy for
+                  per-spawner tracking.
+                type: boolean
+              processedAt:
+                description: ProcessedAt is the timestamp when the event was last
+                  processed.
+                format: date-time
+                type: string
+              processedBy:
+                description: |-
+                  ProcessedBy lists the names of TaskSpawners that have processed this event.
+                  Each spawner appends its name after processing, allowing multiple spawners
+                  to independently react to the same webhook event.
+                items:
+                  type: string
+                type: array
             type: object
         type: object
     served: true

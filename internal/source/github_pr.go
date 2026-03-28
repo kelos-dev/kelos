@@ -161,6 +161,8 @@ func (s *GitHubPullRequestSource) Discover(ctx context.Context) ([]WorkItem, err
 			Comments:       concatCommentBodies(conversationComments),
 			Kind:           "PR",
 			Branch:         pr.Head.Ref,
+			Author:         pr.User.Login,
+			Draft:          pr.Draft,
 			ReviewState:    reviewState,
 			ReviewComments: concatPullRequestReviewComments(reviewComments),
 		}

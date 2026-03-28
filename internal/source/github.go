@@ -144,6 +144,7 @@ func (s *GitHubSource) Discover(ctx context.Context) ([]WorkItem, error) {
 			Labels:   labels,
 			Comments: comments,
 			Kind:     kind,
+			Author:   issue.User.Login,
 		}
 
 		// Record the timestamp of the most recent trigger comment so the

@@ -113,11 +113,11 @@ spec:
                   branch:
                     description: |-
                       Branch is the git branch spawned Tasks should work on.
-                      Supports Go text/template variables from the work item, e.g. "kelos-task-{{.Number}}".
-                      Available variables (all sources): {{.ID}}, {{.Title}}, {{.Kind}}
-                      GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
-                      GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}
-                      Cron sources: {{.Time}}, {{.Schedule}}
+                      Supports Go text/template variables from the work item, e.g. "kelos-task-{{ "{{.Number}}" }}".
+                      Available variables (all sources): {{ "{{.ID}}" }}, {{ "{{.Title}}" }}, {{ "{{.Kind}}" }}
+                      GitHub issue/Jira sources: {{ "{{.Number}}" }}, {{ "{{.Body}}" }}, {{ "{{.URL}}" }}, {{ "{{.Labels}}" }}, {{ "{{.Comments}}" }}
+                      GitHub pull request sources additionally expose: {{ "{{.Branch}}" }}, {{ "{{.ReviewState}}" }}, {{ "{{.ReviewComments}}" }}
+                      Cron sources: {{ "{{.Time}}" }}, {{ "{{.Schedule}}" }}
                     type: string
                   credentials:
                     description: Credentials specifies how to authenticate with the
@@ -435,10 +435,10 @@ spec:
                   promptTemplate:
                     description: |-
                       PromptTemplate is a Go text/template for rendering the task prompt.
-                      Available variables (all sources): {{.ID}}, {{.Title}}, {{.Kind}}
-                      GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
-                      GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}
-                      Cron sources: {{.Time}}, {{.Schedule}}
+                      Available variables (all sources): {{ "{{.ID}}" }}, {{ "{{.Title}}" }}, {{ "{{.Kind}}" }}
+                      GitHub issue/Jira sources: {{ "{{.Number}}" }}, {{ "{{.Body}}" }}, {{ "{{.URL}}" }}, {{ "{{.Labels}}" }}, {{ "{{.Comments}}" }}
+                      GitHub pull request sources additionally expose: {{ "{{.Branch}}" }}, {{ "{{.ReviewState}}" }}, {{ "{{.ReviewComments}}" }}
+                      Cron sources: {{ "{{.Time}}" }}, {{ "{{.Schedule}}" }}
                     type: string
                   ttlSecondsAfterFinished:
                     description: |-

@@ -17,6 +17,10 @@ cd "${REPO_ROOT}"
 # Files explicitly written by the update / verify pipeline.
 GENERATED_FILES=(
   internal/manifests/install-crd.yaml
+  internal/manifests/charts/kelos/templates/crds/agentconfig-crd.yaml
+  internal/manifests/charts/kelos/templates/crds/task-crd.yaml
+  internal/manifests/charts/kelos/templates/crds/taskspawner-crd.yaml
+  internal/manifests/charts/kelos/templates/crds/workspace-crd.yaml
   internal/manifests/charts/kelos/templates/rbac.yaml
   api/v1alpha1/zz_generated.deepcopy.go
 )

@@ -159,6 +159,27 @@ func TestRender_DisableCRDs(t *testing.T) {
 	}
 }
 
+func TestRender_TaskSpawnerTemplatePlaceholdersRemainLiteral(t *testing.T) {
+	data, err := Render(manifests.ChartFS, nil)
+	if err != nil {
+		t.Fatalf("rendering chart: %v", err)
+	}
+	output := string(data)
+	if !strings.Contains(output, `Supports Go text/template variables from the work item, e.g. "kelos-task-{{.Number}}".`) {
+		t.Error("expected branch placeholder example to remain literal in rendered CRD output")
+	}
+	for _, expected := range []string{
+		"Available variables (all sources): {{.ID}}, {{.Title}}, {{.Kind}}",
+		"GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}",
+		"GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}",
+		"Cron sources: {{.Time}}, {{.Schedule}}",
+	} {
+		if count := strings.Count(output, expected); count != 2 {
+			t.Errorf("expected %q to appear twice in TaskSpawner CRD descriptions, got %d", expected, count)
+		}
+	}
+}
+
 func TestRender_CRDKeepAnnotation(t *testing.T) {
 	vals := map[string]interface{}{
 		"crds": map[string]interface{}{

@@ -96,6 +96,7 @@ jobs:
         run: |
           kind load docker-image ghcr.io/kelos-dev/kelos-controller:e2e
           kind load docker-image ghcr.io/kelos-dev/kelos-spawner:e2e
+          kind load docker-image ghcr.io/kelos-dev/kelos-webhook-receiver:e2e
           kind load docker-image ghcr.io/kelos-dev/claude-code:e2e
           kind load docker-image ghcr.io/kelos-dev/codex:e2e
           kind load docker-image ghcr.io/kelos-dev/gemini:e2e

@@ -1,0 +1,44 @@
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: linear-responder
+spec:
+  when:
+    linearWebhook:
+      # Namespace where kelos-webhook-receiver creates WebhookEvent resources
+      namespace: default
+      # Optional: filter by Linear object type (defaults to ["Issue"])
+      # types:
+      #   - Issue
+      # Optional: filter by action (defaults to ["create", "update"])
+      # actions:
+      #   - create
+      # Optional: filter by workflow state name
+      # When empty, all non-terminal states are processed (excludes "Done", "Canceled")
+      states:
+        - Todo
+        - In Progress
+      # Optional: filter by labels
+      # labels:
+      #   - "kelos-task"
+      # Optional: exclude items with these labels
+      # excludeLabels:
+      #   - "skip-kelos"
+  taskTemplate:
+    type: claude-code
+    workspaceRef:
+      name: my-workspace
+    credentials:
+      type: oauth
+      secretRef:
+        name: claude-oauth-token
+    promptTemplate: |
+      Work on the following Linear issue.
+
+      {{ .ID }}: {{ .Title }}
+
+      {{ .Body }}
+
+      Please investigate and resolve this issue, then open a PR with the fix.
+    ttlSecondsAfterFinished: 3600
+  maxConcurrency: 3

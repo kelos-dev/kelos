@@ -29,6 +29,14 @@ type When struct {
 	// +optional
 	GitHubPullRequests *GitHubPullRequests `json:"githubPullRequests,omitempty"`
 
+	// GitHubWebhook discovers issues and pull requests from GitHub webhooks.
+	// +optional
+	GitHubWebhook *GitHubWebhook `json:"githubWebhook,omitempty"`
+
+	// LinearWebhook discovers issues from Linear webhooks.
+	// +optional
+	LinearWebhook *LinearWebhook `json:"linearWebhook,omitempty"`
+
 	// Cron triggers task spawning on a cron schedule.
 	// +optional
 	Cron *Cron `json:"cron,omitempty"`
@@ -260,6 +268,107 @@ type GitHubPullRequests struct {
 	PollInterval string `json:"pollInterval,omitempty"`
 }
 
+// GitHubWebhook discovers issues and pull requests from GitHub webhook events.
+// Instead of polling the GitHub API, work items are discovered from webhook
+// payloads received by the kelos-webhook-receiver and stored as WebhookEvent
+// custom resources.
+type GitHubWebhook struct {
+	// Namespace is the Kubernetes namespace where WebhookEvent resources are created.
+	// The spawner will watch for GitHub webhook events in this namespace.
+	// +kubebuilder:validation:Required
+	Namespace string `json:"namespace"`
+
+	// Labels filters issues/PRs by labels (applied client-side to webhook payloads).
+	// +optional
+	Labels []string `json:"labels,omitempty"`
+
+	// ExcludeLabels filters out issues/PRs that have any of these labels (client-side).
+	// +optional
+	ExcludeLabels []string `json:"excludeLabels,omitempty"`
+
+	// Author filters issues/PRs by the username of the user who created them
+	// (applied client-side to webhook payloads). When empty, no author filtering
+	// is applied.
+	// +optional
+	Author string `json:"author,omitempty"`
+
+	// State filters issues/PRs by state (open, closed, all). Defaults to open.
+	// +kubebuilder:validation:Enum=open;closed;all
+	// +kubebuilder:default=open
+	// +optional
+	State string `json:"state,omitempty"`
+
+	// Actions filters webhook events by action (e.g., ["opened", "reopened", "labeled"]).
+	// When empty, all actions are processed.
+	// +optional
+	Actions []string `json:"actions,omitempty"`
+
+	// Draft filters pull requests by draft state. When unset, both draft and
+	// ready-for-review pull requests are included.
+	// +optional
+	Draft *bool `json:"draft,omitempty"`
+
+	// CommentPolicy configures comment-based workflow control and authorization.
+	// When a trigger comment is set, the source processes issue_comment webhook
+	// events whose comment body matches the trigger command. Authorization
+	// checks (allowedUsers, allowedTeams, minimumPermission) apply to the
+	// comment author. AllowedTeams and minimumPermission require a GitHub
+	// token (provided via the workspace secretRef).
+	// +optional
+	CommentPolicy *GitHubCommentPolicy `json:"commentPolicy,omitempty"`
+
+	// PriorityLabels defines a label-based priority order for discovered items.
+	// When maxConcurrency limits how many tasks are created per cycle,
+	// items are sorted by the first matching label before task creation.
+	// Index 0 is the highest priority. Items without a matching label
+	// are scheduled last. When empty, items are processed in discovery order.
+	// +optional
+	PriorityLabels []string `json:"priorityLabels,omitempty"`
+
+	// Reporting configures status reporting back to GitHub.
+	// +optional
+	Reporting *GitHubReporting `json:"reporting,omitempty"`
+}
+
+// LinearWebhook discovers issues from Linear webhooks.
+// Linear webhooks must be configured to POST to the kelos-webhook-receiver
+// endpoint at /webhook/linear. The webhook receiver creates WebhookEvent
+// CRDs that the spawner processes.
+type LinearWebhook struct {
+	// Namespace is the Kubernetes namespace where WebhookEvent resources are created.
+	// The spawner will watch for Linear webhook events in this namespace.
+	// +kubebuilder:validation:Required
+	Namespace string `json:"namespace"`
+
+	// Types filters webhook events by type (e.g., ["Issue", "Comment", "Project"]).
+	// When empty, defaults to ["Issue"] for backward compatibility.
+	// Supported types: Issue, Comment, IssueLabel, Project, ProjectUpdate, Cycle, Initiative.
+	// +optional
+	Types []string `json:"types,omitempty"`
+
+	// Actions filters webhook events by action (e.g., ["create", "update"]).
+	// When empty, defaults to ["create", "update"] for backward compatibility.
+	// Supported actions: create, update, remove.
+	// +optional
+	Actions []string `json:"actions,omitempty"`
+
+	// States filters issues by workflow state names (e.g., ["Todo", "In Progress"]).
+	// When empty, all non-terminal states are processed (excludes "Done", "Canceled").
+	// Only applies to Issue type events.
+	// +optional
+	States []string `json:"states,omitempty"`
+
+	// Labels filters issues by labels (applied client-side to webhook payloads).
+	// Only applies to Issue type events.
+	// +optional
+	Labels []string `json:"labels,omitempty"`
+
+	// ExcludeLabels filters out issues that have any of these labels (client-side).
+	// Only applies to Issue type events.
+	// +optional
+	ExcludeLabels []string `json:"excludeLabels,omitempty"`
+}
+
 // Jira discovers issues from a Jira project.
 // Authentication is provided via a Secret referenced in the TaskSpawner's
 // namespace. The secret must contain a "JIRA_TOKEN" key. For Jira Cloud,
@@ -353,16 +462,16 @@ type TaskTemplate struct {
 	// Branch is the git branch spawned Tasks should work on.
 	// Supports Go text/template variables from the work item, e.g. "kelos-task-{{.Number}}".
 	// Available variables (all sources): {{.ID}}, {{.Title}}, {{.Kind}}
-	// GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
-	// GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}
+	// GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}, {{.Author}}, {{.State}}, {{.Action}}
+	// GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}, {{.Draft}}
 	// Cron sources: {{.Time}}, {{.Schedule}}
 	// +optional
 	Branch string `json:"branch,omitempty"`
 
 	// PromptTemplate is a Go text/template for rendering the task prompt.
 	// Available variables (all sources): {{.ID}}, {{.Title}}, {{.Kind}}
-	// GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
-	// GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}
+	// GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}, {{.Author}}, {{.State}}, {{.Action}}
+	// GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}, {{.Draft}}
 	// Cron sources: {{.Time}}, {{.Schedule}}
 	// +optional
 	PromptTemplate string `json:"promptTemplate,omitempty"`
@@ -385,7 +494,7 @@ type TaskTemplate struct {
 	// Metadata holds optional labels and annotations for spawned Tasks.
 	// +optional
 	Metadata *TaskTemplateMetadata `json:"metadata,omitempty"`
-
+	
 	// UpstreamRepo is the upstream repository in "owner/repo" format.
 	// When set, spawned Tasks inherit this value and inject
 	// KELOS_UPSTREAM_REPO into the agent container. This is typically

@@ -1,0 +1,38 @@
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: webhook-responder
+spec:
+  when:
+    githubWebhook:
+      # Namespace where kelos-webhook-receiver creates WebhookEvent resources
+      namespace: default
+      # Filter by labels (applied client-side to webhook payloads)
+      labels:
+        - kelos-task
+      # Optional: exclude items with these labels
+      # excludeLabels:
+      #   - "skip-kelos"
+      # Optional: filter by webhook action (e.g., opened, reopened, labeled)
+      # actions:
+      #   - "opened"
+      #   - "reopened"
+      # Optional: post status comments back to GitHub
+      reporting:
+        enabled: true
+  taskTemplate:
+    type: claude-code
+    workspaceRef:
+      name: my-workspace
+    credentials:
+      type: oauth
+      secretRef:
+        name: claude-oauth-token
+    promptTemplate: |
+      Fix the following GitHub {{ .Kind }} and open a PR with the fix.
+
+      {{ .Kind }} #{{ .Number }}: {{ .Title }}
+
+      {{ .Body }}
+    ttlSecondsAfterFinished: 3600
+  maxConcurrency: 3

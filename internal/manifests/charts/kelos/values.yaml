@@ -25,3 +25,29 @@ controller:
   resources:
     requests: {}
     limits: {}
+
+webhook:
+  enabled: false
+  labels: {}
+  image: ghcr.io/kelos/kelos-webhook-receiver
+  replicas: 1
+  port: 8080
+  service:
+    type: ClusterIP
+    port: 80
+  ingress:
+    enabled: false
+    ingressClassName: ""
+    host: ""
+    path: /
+    labels: {}
+    annotations: {}
+    tls: []
+  eventsNamespace: kelos-system
+  extraEnv: []
+  # Name of an existing Secret containing the GitHub webhook secret
+  # The secret must have a key named "secret"
+  githubWebhookSecretName: ""
+  resources:
+    requests: {}
+    limits: {}

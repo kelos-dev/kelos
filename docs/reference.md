@@ -6,8 +6,8 @@
 |-------|-------------|----------|
 | `spec.type` | Agent type (`claude-code`, `codex`, `gemini`, `opencode`, or `cursor`) | Yes |
 | `spec.prompt` | Task prompt for the agent | Yes |
-| `spec.credentials.type` | `api-key`, `oauth`, or `none`. Use `none` to skip built-in credential injection (e.g., for Bedrock, Vertex AI, or Azure OpenAI credentials provided via `podOverrides.env`) | Yes |
-| `spec.credentials.secretRef.name` | Secret name with credentials (not required when `type` is `none`) | Conditional |
+| `spec.credentials.type` | `api-key` or `oauth` | Yes |
+| `spec.credentials.secretRef.name` | Secret name with credentials | Yes |
 | `spec.model` | Model override (e.g., `claude-sonnet-4-20250514`) | No |
 | `spec.image` | Custom agent image override (see [Agent Image Interface](agent-image-interface.md)) | No |
 | `spec.workspaceRef.name` | Name of a Workspace resource to use | No |

@@ -17,6 +17,14 @@ type WorkItem struct {
 	Comments string
 	Kind     string // "Issue" or "PR"
 	Branch   string
+	// Author is the username of the user who created the issue or pull request.
+	Author string
+	// State is the state of the issue or pull request (e.g. "open", "closed").
+	State string
+	// Action is the webhook action that triggered this work item (e.g. "opened", "reopened").
+	Action string
+	// Draft indicates whether a pull request is a draft.
+	Draft bool
 	// ReviewState is the aggregated pull request review state for GitHub PR sources.
 	ReviewState string
 	// ReviewComments contains formatted inline review comments for GitHub PR sources.
@@ -36,6 +44,17 @@ type WorkItem struct {
 // Source discovers work items from an external system.
 type Source interface {
 	Discover(ctx context.Context) ([]WorkItem, error)
+}
+
+// WebhookAcknowledger is implemented by webhook-based sources to support
+// deferred event acknowledgment. Matching events are not marked as processed
+// during Discover; the caller must acknowledge them after task creation or
+// deduplication so that events skipped due to maxConcurrency or budget limits
+// are rediscovered on the next cycle.
+type WebhookAcknowledger interface {
+	// AcknowledgeItems marks the webhook events associated with the given
+	// work item IDs as processed. IDs not in the pending set are ignored.
+	AcknowledgeItems(ctx context.Context, ids []string)
 }
 
 // SortByLabelPriority sorts items in place by the first matching label in

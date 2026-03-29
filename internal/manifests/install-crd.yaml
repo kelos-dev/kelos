@@ -1471,6 +1471,69 @@ spec:
                       rule: '!(has(self.commentPolicy) && ((has(self.triggerComment)
                         && size(self.triggerComment) > 0) || (has(self.excludeComments)
                         && size(self.excludeComments) > 0)))'
+                  githubWebhook:
+                    description: |-
+                      GitHubWebhook configures webhook-driven task spawning from GitHub events.
+                      A global webhook server watches TaskSpawners with this field set and
+                      creates Tasks when incoming webhooks match the configured filters.
+                    properties:
+                      events:
+                        description: |-
+                          Events is the list of GitHub event types to listen for.
+                          e.g., "issue_comment", "pull_request_review", "push", "issues", "pull_request"
+                        items:
+                          type: string
+                        minItems: 1
+                        type: array
+                      filters:
+                        description: |-
+                          Filters refine which events trigger tasks. If multiple filters are
+                          defined, any match triggers a task (OR semantics). If empty, all
+                          events in the Events list trigger tasks.
+                        items:
+                          description: GitHubWebhookFilter defines criteria for matching
+                            a GitHub webhook event.
+                          properties:
+                            action:
+                              description: Action filters by webhook action (e.g.,
+                                "created", "opened", "submitted").
+                              type: string
+                            author:
+                              description: Author filters by the event sender's username.
+                              type: string
+                            bodyContains:
+                              description: BodyContains filters by substring match
+                                on the comment or review body.
+                              type: string
+                            branch:
+                              description: Branch filters push events by branch name
+                                (supports glob patterns).
+                              type: string
+                            draft:
+                              description: Draft filters pull requests by draft status.
+                                nil means no filtering.
+                              type: boolean
+                            event:
+                              description: Event is the GitHub event type this filter
+                                applies to.
+                              type: string
+                            labels:
+                              description: Labels requires the issue or PR to have
+                                all of these labels.
+                              items:
+                                type: string
+                              type: array
+                            state:
+                              description: State filters by issue or PR state ("open",
+                                "closed").
+                              type: string
+                          required:
+                          - event
+                          type: object
+                        type: array
+                    required:
+                    - events
+                    type: object
                   jira:
                     description: Jira discovers issues from a Jira project.
                     properties:
@@ -1509,6 +1572,61 @@ spec:
                     - baseUrl
                     - project
                     - secretRef
+                    type: object
+                  linearWebhook:
+                    description: |-
+                      LinearWebhook configures webhook-driven task spawning from Linear events.
+                      A global webhook server watches TaskSpawners with this field set and
+                      creates Tasks when incoming webhooks match the configured filters.
+                    properties:
+                      filters:
+                        description: |-
+                          Filters refine which events trigger tasks (OR semantics).
+                          If empty, all events matching the Types list trigger tasks.
+                        items:
+                          description: LinearWebhookFilter defines criteria for matching
+                            a Linear webhook event.
+                          properties:
+                            action:
+                              description: Action filters by webhook action ("create",
+                                "update", "remove").
+                              type: string
+                            excludeLabels:
+                              description: ExcludeLabels excludes issues with any
+                                of these labels.
+                              items:
+                                type: string
+                              type: array
+                            labels:
+                              description: Labels requires the issue to have all of
+                                these labels.
+                              items:
+                                type: string
+                              type: array
+                            states:
+                              description: States filters by Linear workflow state
+                                names (e.g., "Todo", "In Progress").
+                              items:
+                                type: string
+                              type: array
+                            type:
+                              description: Type is the Linear resource type this filter
+                                applies to.
+                              type: string
+                          required:
+                          - type
+                          type: object
+                        type: array
+                      types:
+                        description: |-
+                          Types is the list of Linear resource types to listen for.
+                          e.g., "Issue", "Comment", "Project"
+                        items:
+                          type: string
+                        minItems: 1
+                        type: array
+                    required:
+                    - types
                     type: object
                 type: object
             required:

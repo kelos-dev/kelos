@@ -36,6 +36,18 @@ type When struct {
 	// Jira discovers issues from a Jira project.
 	// +optional
 	Jira *Jira `json:"jira,omitempty"`
+
+	// GitHubWebhook configures webhook-driven task spawning from GitHub events.
+	// A global webhook server watches TaskSpawners with this field set and
+	// creates Tasks when incoming webhooks match the configured filters.
+	// +optional
+	GitHubWebhook *GitHubWebhook `json:"githubWebhook,omitempty"`
+
+	// LinearWebhook configures webhook-driven task spawning from Linear events.
+	// A global webhook server watches TaskSpawners with this field set and
+	// creates Tasks when incoming webhooks match the configured filters.
+	// +optional
+	LinearWebhook *LinearWebhook `json:"linearWebhook,omitempty"`
 }
 
 // Cron triggers task spawning on a cron schedule.
@@ -293,6 +305,93 @@ type Jira struct {
 	// When empty, spec.pollInterval is used.
 	// +optional
 	PollInterval string `json:"pollInterval,omitempty"`
+}
+
+// GitHubWebhook configures webhook-driven task spawning from GitHub events.
+type GitHubWebhook struct {
+	// Events is the list of GitHub event types to listen for.
+	// e.g., "issue_comment", "pull_request_review", "push", "issues", "pull_request"
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinItems=1
+	Events []string `json:"events"`
+
+	// Filters refine which events trigger tasks. If multiple filters are
+	// defined, any match triggers a task (OR semantics). If empty, all
+	// events in the Events list trigger tasks.
+	// +optional
+	Filters []GitHubWebhookFilter `json:"filters,omitempty"`
+}
+
+// GitHubWebhookFilter defines criteria for matching a GitHub webhook event.
+type GitHubWebhookFilter struct {
+	// Event is the GitHub event type this filter applies to.
+	// +kubebuilder:validation:Required
+	Event string `json:"event"`
+
+	// Action filters by webhook action (e.g., "created", "opened", "submitted").
+	// +optional
+	Action string `json:"action,omitempty"`
+
+	// BodyContains filters by substring match on the comment or review body.
+	// +optional
+	BodyContains string `json:"bodyContains,omitempty"`
+
+	// Labels requires the issue or PR to have all of these labels.
+	// +optional
+	Labels []string `json:"labels,omitempty"`
+
+	// State filters by issue or PR state ("open", "closed").
+	// +optional
+	State string `json:"state,omitempty"`
+
+	// Branch filters push events by branch name (supports glob patterns).
+	// +optional
+	Branch string `json:"branch,omitempty"`
+
+	// Draft filters pull requests by draft status. nil means no filtering.
+	// +optional
+	Draft *bool `json:"draft,omitempty"`
+
+	// Author filters by the event sender's username.
+	// +optional
+	Author string `json:"author,omitempty"`
+}
+
+// LinearWebhook configures webhook-driven task spawning from Linear events.
+type LinearWebhook struct {
+	// Types is the list of Linear resource types to listen for.
+	// e.g., "Issue", "Comment", "Project"
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinItems=1
+	Types []string `json:"types"`
+
+	// Filters refine which events trigger tasks (OR semantics).
+	// If empty, all events matching the Types list trigger tasks.
+	// +optional
+	Filters []LinearWebhookFilter `json:"filters,omitempty"`
+}
+
+// LinearWebhookFilter defines criteria for matching a Linear webhook event.
+type LinearWebhookFilter struct {
+	// Type is the Linear resource type this filter applies to.
+	// +kubebuilder:validation:Required
+	Type string `json:"type"`
+
+	// Action filters by webhook action ("create", "update", "remove").
+	// +optional
+	Action string `json:"action,omitempty"`
+
+	// States filters by Linear workflow state names (e.g., "Todo", "In Progress").
+	// +optional
+	States []string `json:"states,omitempty"`
+
+	// Labels requires the issue to have all of these labels.
+	// +optional
+	Labels []string `json:"labels,omitempty"`
+
+	// ExcludeLabels excludes issues with any of these labels.
+	// +optional
+	ExcludeLabels []string `json:"excludeLabels,omitempty"`
 }
 
 // TaskTemplateMetadata holds optional labels and annotations for spawned Tasks.

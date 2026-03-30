@@ -1,0 +1,201 @@
+{{- if .Values.webhookServer.sources.github.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kelos-webhook-github
+  namespace: kelos-system
+  labels:
+    app.kubernetes.io/name: kelos
+    app.kubernetes.io/component: webhook-github
+spec:
+  replicas: {{ .Values.webhookServer.sources.github.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kelos
+      app.kubernetes.io/component: webhook-github
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kelos
+        app.kubernetes.io/component: webhook-github
+    spec:
+      serviceAccountName: kelos-webhook
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: webhook-server
+          image: {{ .Values.webhookServer.image }}{{- if .Values.image.tag }}:{{ .Values.image.tag }}{{- end }}
+          {{- if .Values.image.pullPolicy }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- end }}
+          args:
+            - --source=github
+            - --webhook-bind-address=:8443
+            - --metrics-bind-address=:8080
+            - --health-probe-bind-address=:8081
+          env:
+            - name: WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.webhookServer.sources.github.secretName }}
+                  key: WEBHOOK_SECRET
+          ports:
+            - name: webhook
+              containerPort: 8443
+              protocol: TCP
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
+            - name: health
+              containerPort: 8081
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            limits:
+              cpu: 500m
+              memory: 128Mi
+            requests:
+              cpu: 10m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - "ALL"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kelos-webhook-github
+  namespace: kelos-system
+  labels:
+    app.kubernetes.io/name: kelos
+    app.kubernetes.io/component: webhook-github
+spec:
+  type: ClusterIP
+  ports:
+    - name: webhook
+      port: 8443
+      targetPort: webhook
+      protocol: TCP
+    - name: metrics
+      port: 8080
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: kelos
+    app.kubernetes.io/component: webhook-github
+{{- end }}
+
+{{- if .Values.webhookServer.sources.linear.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kelos-webhook-linear
+  namespace: kelos-system
+  labels:
+    app.kubernetes.io/name: kelos
+    app.kubernetes.io/component: webhook-linear
+spec:
+  replicas: {{ .Values.webhookServer.sources.linear.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kelos
+      app.kubernetes.io/component: webhook-linear
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kelos
+        app.kubernetes.io/component: webhook-linear
+    spec:
+      serviceAccountName: kelos-webhook
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: webhook-server
+          image: {{ .Values.webhookServer.image }}{{- if .Values.image.tag }}:{{ .Values.image.tag }}{{- end }}
+          {{- if .Values.image.pullPolicy }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- end }}
+          args:
+            - --source=linear
+            - --webhook-bind-address=:8443
+            - --metrics-bind-address=:8080
+            - --health-probe-bind-address=:8081
+          env:
+            - name: WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.webhookServer.sources.linear.secretName }}
+                  key: WEBHOOK_SECRET
+          ports:
+            - name: webhook
+              containerPort: 8443
+              protocol: TCP
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
+            - name: health
+              containerPort: 8081
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            limits:
+              cpu: 500m
+              memory: 128Mi
+            requests:
+              cpu: 10m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - "ALL"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kelos-webhook-linear
+  namespace: kelos-system
+  labels:
+    app.kubernetes.io/name: kelos
+    app.kubernetes.io/component: webhook-linear
+spec:
+  type: ClusterIP
+  ports:
+    - name: webhook
+      port: 8443
+      targetPort: webhook
+      protocol: TCP
+    - name: metrics
+      port: 8080
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: kelos
+    app.kubernetes.io/component: webhook-linear
+{{- end }}

@@ -1,0 +1,45 @@
+{{- if .Values.webhookServer.ingress.enabled }}
+{{- $githubEnabled := .Values.webhookServer.sources.github.enabled }}
+{{- $linearEnabled := .Values.webhookServer.sources.linear.enabled }}
+{{- if or $githubEnabled $linearEnabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kelos-webhook
+  namespace: kelos-system
+  labels:
+    app.kubernetes.io/name: kelos
+    app.kubernetes.io/component: webhook-ingress
+  {{- with .Values.webhookServer.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.webhookServer.ingress.className }}
+  ingressClassName: {{ .Values.webhookServer.ingress.className }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.webhookServer.ingress.host }}
+      http:
+        paths:
+          {{- if $githubEnabled }}
+          - path: /webhook/github
+            pathType: Prefix
+            backend:
+              service:
+                name: kelos-webhook-github
+                port:
+                  number: 8443
+          {{- end }}
+          {{- if $linearEnabled }}
+          - path: /webhook/linear
+            pathType: Prefix
+            backend:
+              service:
+                name: kelos-webhook-linear
+                port:
+                  number: 8443
+          {{- end }}
+{{- end }}
+{{- end }}

@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/go-logr/logr v1.4.3
+	github.com/google/go-github/v66 v66.0.0
 	github.com/google/uuid v1.6.0
 	github.com/google/yamlfmt v0.21.0
 	github.com/onsi/ginkgo/v2 v2.27.2
@@ -54,6 +55,7 @@ require (
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
+	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/pprof v0.0.0-20250403155104-27863c87afa6 // indirect
 	github.com/google/renameio/v2 v2.0.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect

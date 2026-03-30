@@ -796,6 +796,8 @@ spec:
                       Available variables (all sources): {{.ID}}, {{.Title}}, {{.Kind}}
                       GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
                       GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}
+                      GitHub webhook sources: {{.Event}}, {{.Action}}, {{.Sender}}, {{.Ref}}, {{.Payload}} (full payload access)
+                      Linear webhook sources: {{.Type}}, {{.Action}}, {{.Payload}} (full payload access)
                       Cron sources: {{.Time}}, {{.Schedule}}
                     type: string
                   credentials:
@@ -1117,6 +1119,8 @@ spec:
                       Available variables (all sources): {{.ID}}, {{.Title}}, {{.Kind}}
                       GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
                       GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}
+                      GitHub webhook sources: {{.Event}}, {{.Action}}, {{.Sender}}, {{.Ref}}, {{.Payload}} (full payload access)
+                      Linear webhook sources: {{.Type}}, {{.Action}}, {{.Payload}} (full payload access)
                       Cron sources: {{.Time}}, {{.Schedule}}
                     type: string
                   ttlSecondsAfterFinished:
@@ -1471,6 +1475,67 @@ spec:
                       rule: '!(has(self.commentPolicy) && ((has(self.triggerComment)
                         && size(self.triggerComment) > 0) || (has(self.excludeComments)
                         && size(self.excludeComments) > 0)))'
+                  githubWebhook:
+                    description: GitHubWebhook triggers task spawning on GitHub webhook
+                      events.
+                    properties:
+                      events:
+                        description: |-
+                          Events is the list of GitHub event types to listen for.
+                          e.g., "issue_comment", "pull_request_review", "push", "issues"
+                        items:
+                          type: string
+                        minItems: 1
+                        type: array
+                      filters:
+                        description: |-
+                          Filters refine which events trigger tasks. If multiple filters match
+                          the same event type, any match triggers a task (OR semantics).
+                          If empty, all events in the Events list trigger tasks.
+                        items:
+                          description: GitHubWebhookFilter defines filtering criteria
+                            for GitHub webhook events.
+                          properties:
+                            action:
+                              description: Action filters by webhook action (e.g.,
+                                "created", "opened", "submitted").
+                              type: string
+                            author:
+                              description: Author filters by the event sender's username.
+                              type: string
+                            bodyContains:
+                              description: BodyContains filters by substring match
+                                on the comment/review body.
+                              type: string
+                            branch:
+                              description: Branch filters push events by branch name
+                                (exact match or glob).
+                              type: string
+                            draft:
+                              description: Draft filters PRs by draft status. nil
+                                = don't filter.
+                              type: boolean
+                            event:
+                              description: Event is the GitHub event type this filter
+                                applies to.
+                              type: string
+                            labels:
+                              description: Labels requires the issue/PR to have all
+                                of these labels.
+                              items:
+                                type: string
+                              type: array
+                            state:
+                              description: State filters by issue/PR state ("open",
+                                "closed").
+                              type: string
+                          required:
+                          - event
+                          type: object
+                        type: array
+                    required:
+                    - events
+                    type: object
                   jira:
                     description: Jira discovers issues from a Jira project.
                     properties:
@@ -1510,16 +1575,69 @@ spec:
                     - project
                     - secretRef
                     type: object
+                  linearWebhook:
+                    description: LinearWebhook triggers task spawning on Linear webhook
+                      events.
+                    properties:
+                      filters:
+                        description: |-
+                          Filters refine which events trigger tasks (OR semantics within same type).
+                          If empty, all events in the Types list trigger tasks.
+                        items:
+                          description: LinearWebhookFilter defines filtering criteria
+                            for Linear webhook events.
+                          properties:
+                            action:
+                              description: Action filters by webhook action ("create",
+                                "update", "remove").
+                              type: string
+                            excludeLabels:
+                              description: ExcludeLabels excludes issues with any
+                                of these labels.
+                              items:
+                                type: string
+                              type: array
+                            labels:
+                              description: Labels requires the issue to have all of
+                                these labels.
+                              items:
+                                type: string
+                              type: array
+                            states:
+                              description: States filters by Linear workflow state
+                                names (e.g., "Todo", "In Progress").
+                              items:
+                                type: string
+                              type: array
+                            type:
+                              description: Type is the Linear resource type this filter
+                                applies to.
+                              type: string
+                          required:
+                          - type
+                          type: object
+                        type: array
+                      types:
+                        description: |-
+                          Types is the list of Linear resource types to listen for.
+                          e.g., "Issue", "Comment", "Project"
+                        items:
+                          type: string
+                        minItems: 1
+                        type: array
+                    required:
+                    - types
+                    type: object
                 type: object
             required:
             - taskTemplate
             - when
             type: object
             x-kubernetes-validations:
-            - message: taskTemplate.workspaceRef is required when using githubIssues
-                or githubPullRequests source
-              rule: '!(has(self.when.githubIssues) || has(self.when.githubPullRequests))
-                || has(self.taskTemplate.workspaceRef)'
+            - message: taskTemplate.workspaceRef is required when using githubIssues,
+                githubPullRequests, or githubWebhook source
+              rule: '!(has(self.when.githubIssues) || has(self.when.githubPullRequests)
+                || has(self.when.githubWebhook)) || has(self.taskTemplate.workspaceRef)'
           status:
             description: TaskSpawnerStatus defines the observed state of TaskSpawner.
             properties:

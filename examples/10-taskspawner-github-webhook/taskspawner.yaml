@@ -1,0 +1,132 @@
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: github-webhook-responder
+  namespace: default
+spec:
+  # Respond to GitHub webhook events
+  when:
+    githubWebhook:
+      # Listen for these GitHub event types
+      events:
+        - "issues"
+        - "pull_request"
+        - "issue_comment"
+        - "pull_request_review"
+
+      # Optional filters to refine which events trigger tasks
+      # Multiple filters use OR semantics within the same event type
+      filters:
+        # Respond to newly opened issues
+        - event: "issues"
+          action: "opened"
+
+        # Respond to pull requests opened or ready for review
+        - event: "pull_request"
+          action: "opened"
+          draft: false # Only non-draft PRs
+
+        # Respond to pull requests that get the "review-requested" label
+        - event: "pull_request"
+          action: "labeled"
+          labels: ["review-requested"]
+
+        # Respond to issue comments containing "/kelos"
+        - event: "issue_comment"
+          action: "created"
+          bodyContains: "/kelos"
+
+        # Respond to PR review requests from specific author
+        - event: "pull_request_review"
+          action: "submitted"
+          author: "senior-reviewer"
+
+  # Task template configuration
+  taskTemplate:
+    # Agent type and credentials
+    type: claude-code
+    credentials:
+      type: api-key
+      secretRef:
+        name: claude-credentials
+        key: api-key
+
+    # Reference the repository workspace
+    workspaceRef:
+      name: my-repo-workspace
+
+    # Template for the git branch (optional)
+    branch: "kelos-webhook-{{.Event}}-{{.ID}}"
+
+    # Template for the task prompt
+    promptTemplate: |
+      # GitHub {{.Event | title}} Event: {{.Action}}
+
+      A GitHub webhook event has been triggered that requires attention.
+
+      ## Event Details
+      - **Event Type**: {{.Event}}
+      - **Action**: {{.Action}}
+      - **Triggered by**: @{{.Sender}}
+      {{- if .Title}}
+      - **Title**: {{.Title}}
+      {{- end}}
+      {{- if .URL}}
+      - **URL**: {{.URL}}
+      {{- end}}
+      {{- if .Branch}}
+      - **Branch**: {{.Branch}}
+      {{- end}}
+
+      {{- if eq .Event "issues"}}
+      ## Issue Description
+      {{.Body}}
+
+      ## Task
+      Please review this issue and provide an initial analysis or triage.
+      {{- else if eq .Event "pull_request"}}
+      ## Pull Request Description
+      {{.Body}}
+
+      ## Task
+      Please review this pull request and provide feedback on the code changes.
+      {{- else if eq .Event "issue_comment"}}
+      ## Task
+      A comment was made that mentioned our bot. Please review the comment and respond appropriately.
+      {{- else if eq .Event "pull_request_review"}}
+      ## Task
+      A pull request review was submitted. Please check if any follow-up actions are needed.
+      {{- end}}
+
+      You have full access to the repository through the workspace. Use git commands and code analysis tools as needed.
+
+    # Task metadata (optional)
+    metadata:
+      labels:
+        kelos.dev/trigger: "webhook"
+        kelos.dev/event: "{{.Event}}"
+        kelos.dev/action: "{{.Action}}"
+      annotations:
+        kelos.dev/github-url: "{{.URL}}"
+        kelos.dev/github-sender: "{{.Sender}}"
+
+    # Auto-cleanup completed tasks after 1 hour
+    ttlSecondsAfterFinished: 3600
+
+  # Limit concurrent tasks to prevent overwhelming the system
+  maxConcurrency: 5
+
+---
+# Example workspace configuration (referenced above)
+apiVersion: kelos.dev/v1alpha1
+kind: Workspace
+metadata:
+  name: my-repo-workspace
+  namespace: default
+spec:
+  repo:
+    url: "https://github.com/myorg/myrepo.git"
+    # Optional: reference secret for private repos
+    # secretRef:
+    #   name: github-token
+    #   key: token

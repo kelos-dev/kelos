@@ -1,7 +1,7 @@
 # Image configuration
 REGISTRY ?= ghcr.io/kelos-dev
 VERSION ?= latest
-IMAGE_DIRS ?= cmd/kelos-controller cmd/kelos-spawner cmd/kelos-token-refresher cmd/ghproxy claude-code codex gemini opencode cursor
+IMAGE_DIRS ?= cmd/kelos-controller cmd/kelos-spawner cmd/kelos-token-refresher cmd/kelos-webhook-server cmd/ghproxy claude-code codex gemini opencode cursor
 
 # Version injection for the kelos CLI – only set ldflags when an explicit
 # version is given so that dev builds fall through to runtime/debug info.

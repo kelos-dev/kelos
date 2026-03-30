@@ -32,3 +32,19 @@ controller:
   resources:
     requests: {}
     limits: {}
+webhookServer:
+  image: ghcr.io/kelos-dev/kelos-webhook-server
+  sources:
+    github:
+      enabled: false
+      replicas: 1
+      secretName: ""
+    linear:
+      enabled: false
+      replicas: 1
+      secretName: ""
+  ingress:
+    enabled: false
+    className: ""
+    host: ""
+    annotations: {}

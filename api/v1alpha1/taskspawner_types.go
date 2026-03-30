@@ -36,6 +36,14 @@ type When struct {
 	// Jira discovers issues from a Jira project.
 	// +optional
 	Jira *Jira `json:"jira,omitempty"`
+
+	// GitHubWebhook triggers task spawning on GitHub webhook events.
+	// +optional
+	GitHubWebhook *GitHubWebhook `json:"githubWebhook,omitempty"`
+
+	// LinearWebhook triggers task spawning on Linear webhook events.
+	// +optional
+	LinearWebhook *LinearWebhook `json:"linearWebhook,omitempty"`
 }
 
 // Cron triggers task spawning on a cron schedule.
@@ -295,6 +303,93 @@ type Jira struct {
 	PollInterval string `json:"pollInterval,omitempty"`
 }
 
+// GitHubWebhook configures webhook-driven task spawning from GitHub events.
+type GitHubWebhook struct {
+	// Events is the list of GitHub event types to listen for.
+	// e.g., "issue_comment", "pull_request_review", "push", "issues"
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinItems=1
+	Events []string `json:"events"`
+
+	// Filters refine which events trigger tasks. If multiple filters match
+	// the same event type, any match triggers a task (OR semantics).
+	// If empty, all events in the Events list trigger tasks.
+	// +optional
+	Filters []GitHubWebhookFilter `json:"filters,omitempty"`
+}
+
+// GitHubWebhookFilter defines filtering criteria for GitHub webhook events.
+type GitHubWebhookFilter struct {
+	// Event is the GitHub event type this filter applies to.
+	// +kubebuilder:validation:Required
+	Event string `json:"event"`
+
+	// Action filters by webhook action (e.g., "created", "opened", "submitted").
+	// +optional
+	Action string `json:"action,omitempty"`
+
+	// BodyContains filters by substring match on the comment/review body.
+	// +optional
+	BodyContains string `json:"bodyContains,omitempty"`
+
+	// Labels requires the issue/PR to have all of these labels.
+	// +optional
+	Labels []string `json:"labels,omitempty"`
+
+	// State filters by issue/PR state ("open", "closed").
+	// +optional
+	State string `json:"state,omitempty"`
+
+	// Branch filters push events by branch name (exact match or glob).
+	// +optional
+	Branch string `json:"branch,omitempty"`
+
+	// Draft filters PRs by draft status. nil = don't filter.
+	// +optional
+	Draft *bool `json:"draft,omitempty"`
+
+	// Author filters by the event sender's username.
+	// +optional
+	Author string `json:"author,omitempty"`
+}
+
+// LinearWebhook configures webhook-driven task spawning from Linear events.
+type LinearWebhook struct {
+	// Types is the list of Linear resource types to listen for.
+	// e.g., "Issue", "Comment", "Project"
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinItems=1
+	Types []string `json:"types"`
+
+	// Filters refine which events trigger tasks (OR semantics within same type).
+	// If empty, all events in the Types list trigger tasks.
+	// +optional
+	Filters []LinearWebhookFilter `json:"filters,omitempty"`
+}
+
+// LinearWebhookFilter defines filtering criteria for Linear webhook events.
+type LinearWebhookFilter struct {
+	// Type is the Linear resource type this filter applies to.
+	// +kubebuilder:validation:Required
+	Type string `json:"type"`
+
+	// Action filters by webhook action ("create", "update", "remove").
+	// +optional
+	Action string `json:"action,omitempty"`
+
+	// States filters by Linear workflow state names (e.g., "Todo", "In Progress").
+	// +optional
+	States []string `json:"states,omitempty"`
+
+	// Labels requires the issue to have all of these labels.
+	// +optional
+	Labels []string `json:"labels,omitempty"`
+
+	// ExcludeLabels excludes issues with any of these labels.
+	// +optional
+	ExcludeLabels []string `json:"excludeLabels,omitempty"`
+}
+
 // TaskTemplateMetadata holds optional labels and annotations for spawned Tasks.
 type TaskTemplateMetadata struct {
 	// Labels are merged into the spawned Task's labels. Values support Go
@@ -355,6 +450,8 @@ type TaskTemplate struct {
 	// Available variables (all sources): {{.ID}}, {{.Title}}, {{.Kind}}
 	// GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
 	// GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}
+	// GitHub webhook sources: {{.Event}}, {{.Action}}, {{.Sender}}, {{.Ref}}, {{.Payload}} (full payload access)
+	// Linear webhook sources: {{.Type}}, {{.Action}}, {{.Payload}} (full payload access)
 	// Cron sources: {{.Time}}, {{.Schedule}}
 	// +optional
 	Branch string `json:"branch,omitempty"`
@@ -363,6 +460,8 @@ type TaskTemplate struct {
 	// Available variables (all sources): {{.ID}}, {{.Title}}, {{.Kind}}
 	// GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
 	// GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}
+	// GitHub webhook sources: {{.Event}}, {{.Action}}, {{.Sender}}, {{.Ref}}, {{.Payload}} (full payload access)
+	// Linear webhook sources: {{.Type}}, {{.Action}}, {{.Payload}} (full payload access)
 	// Cron sources: {{.Time}}, {{.Schedule}}
 	// +optional
 	PromptTemplate string `json:"promptTemplate,omitempty"`
@@ -396,7 +495,7 @@ type TaskTemplate struct {
 }
 
 // TaskSpawnerSpec defines the desired state of TaskSpawner.
-// +kubebuilder:validation:XValidation:rule="!(has(self.when.githubIssues) || has(self.when.githubPullRequests)) || has(self.taskTemplate.workspaceRef)",message="taskTemplate.workspaceRef is required when using githubIssues or githubPullRequests source"
+// +kubebuilder:validation:XValidation:rule="!(has(self.when.githubIssues) || has(self.when.githubPullRequests) || has(self.when.githubWebhook)) || has(self.taskTemplate.workspaceRef)",message="taskTemplate.workspaceRef is required when using githubIssues, githubPullRequests, or githubWebhook source"
 type TaskSpawnerSpec struct {
 	// When defines the conditions that trigger task spawning.
 	// +kubebuilder:validation:Required

@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [prod]
+  pull_request:
+    branches: [prod]
+    types: [opened, synchronize, reopened, labeled]
+  merge_group:
+  workflow_dispatch:
+    inputs:
+      ok-to-test:
+        description: Run e2e tests
+        type: boolean
+        default: false
+
+concurrency:
+  group: >-
+    ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}${{
+      github.event.action == 'labeled' && '-labeled' || ''
+    }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.event.action != 'labeled' || github.event.label.name == 'ok-to-test'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        run: make build
+
+  verify:
+    if: github.event.action != 'labeled' || github.event.label.name == 'ok-to-test'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Verify
+        run: make verify
+
+  test:
+    if: github.event.action != 'labeled' || github.event.label.name == 'ok-to-test'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: make test
+
+  test-integration:
+    if: github.event.action != 'labeled' || github.event.label.name == 'ok-to-test'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Integration Test
+        run: make test-integration
+
+  test-e2e:
+    if: >-
+      github.event_name == 'push' || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.ok-to-test) || (contains(github.event.pull_request.labels.*.name, 'ok-to-test') && github.event.pull_request.head.repo.full_name == github.repository)
+    permissions:
+      contents: read
+      issues: read
+    uses: ./.github/workflows/reusable-e2e.yaml
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}

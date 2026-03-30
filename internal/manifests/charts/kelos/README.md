@@ -135,7 +135,9 @@ helm upgrade --install kelos oci://ghcr.io/kelos-dev/charts/kelos \
   --set webhookServer.sources.linear.secretName=linear-webhook-secret \
   --set webhookServer.ingress.enabled=true \
   --set webhookServer.ingress.host=webhooks.your-domain.com \
-  --set webhookServer.ingress.className=nginx
+  --set webhookServer.ingress.className=nginx \
+  --set webhookServer.ingress.tls.enabled=true \
+  --set-json 'webhookServer.ingress.annotations={"cert-manager.io/cluster-issuer":"letsencrypt-prod"}'
 ```
 
 ### Webhook Configuration Options
@@ -157,6 +159,49 @@ webhookServer:
     className: ""           # Ingress class name (e.g., nginx)
     host: ""               # Hostname for webhook endpoints
     annotations: {}        # Additional ingress annotations
+    tls:
+      enabled: false         # Enable TLS for the ingress
+      secretName: ""         # Secret name containing TLS certificate
+```
+
+### TLS Configuration
+
+The webhook ingress supports TLS termination for secure HTTPS connections. TLS is strongly recommended for production deployments.
+
+#### Option 1: Use cert-manager for automatic certificate management
+
+```bash
+# Install cert-manager if not already present
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
+
+# Configure with cert-manager annotations
+helm upgrade --install kelos oci://ghcr.io/kelos-dev/charts/kelos \
+  -n kelos-system \
+  --set webhookServer.sources.github.enabled=true \
+  --set webhookServer.sources.github.secretName=github-webhook-secret \
+  --set webhookServer.ingress.enabled=true \
+  --set webhookServer.ingress.host=webhooks.your-domain.com \
+  --set webhookServer.ingress.className=nginx \
+  --set webhookServer.ingress.tls.enabled=true \
+  --set-json 'webhookServer.ingress.annotations={"cert-manager.io/cluster-issuer":"letsencrypt-prod"}'
+```
+
+#### Option 2: Use existing TLS certificate
+
+```bash
+# Create TLS secret manually
+kubectl create secret tls webhook-tls-secret \
+  --cert=path/to/tls.crt \
+  --key=path/to/tls.key \
+  -n kelos-system
+
+# Configure ingress to use the secret
+helm upgrade --install kelos oci://ghcr.io/kelos-dev/charts/kelos \
+  -n kelos-system \
+  --set webhookServer.ingress.enabled=true \
+  --set webhookServer.ingress.host=webhooks.your-domain.com \
+  --set webhookServer.ingress.tls.enabled=true \
+  --set webhookServer.ingress.tls.secretName=webhook-tls-secret
 ```
 
 ### Webhook Endpoints

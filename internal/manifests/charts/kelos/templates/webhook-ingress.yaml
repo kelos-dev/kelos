@@ -19,6 +19,14 @@ spec:
   {{- if .Values.webhookServer.ingress.className }}
   ingressClassName: {{ .Values.webhookServer.ingress.className }}
   {{- end }}
+  {{- if .Values.webhookServer.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.webhookServer.ingress.host }}
+      {{- if .Values.webhookServer.ingress.tls.secretName }}
+      secretName: {{ .Values.webhookServer.ingress.tls.secretName }}
+      {{- end }}
+  {{- end }}
   rules:
     - host: {{ .Values.webhookServer.ingress.host }}
       http:

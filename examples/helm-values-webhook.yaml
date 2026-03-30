@@ -20,9 +20,17 @@ webhookServer:
     enabled: true
     className: "nginx" # Or your ingress class
     host: "webhooks.your-domain.com"
+
+    # Enable TLS for secure HTTPS connections
+    tls:
+      enabled: true
+      # secretName: ""  # Leave empty for cert-manager auto-generation
+      # secretName: "webhook-tls-secret"  # Or specify existing secret name
+
     annotations:
       cert-manager.io/cluster-issuer: "letsencrypt-prod"
       nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
 
 # Use versioned images for production
 image:

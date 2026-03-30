@@ -48,3 +48,6 @@ webhookServer:
     className: ""
     host: ""
     annotations: {}
+    tls:
+      enabled: false
+      secretName: ""

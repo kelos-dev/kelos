@@ -1,51 +1,172 @@
 apiVersion: kelos.dev/v1alpha1
 kind: TaskSpawner
 metadata:
-  name: linear-webhook-example
+  name: linear-webhook-responder
   namespace: default
 spec:
+  # Respond to Linear webhook events
   when:
     linearWebhook:
+      # Listen for these Linear resource types
       types:
         - "Issue"
-      # Filters use OR semantics — any matching filter triggers a task.
-      # Omitting 'action' matches all actions (create, update, remove).
+        - "Comment"
+        - "IssueLabel"
+
+      # Optional filters to refine which events trigger tasks
+      # Multiple filters use OR semantics within the same resource type
       filters:
-        - action: "create"
-          states:
-            - "Todo"
-            - "In Progress"
-          labels:
-            - "agent-task"
-          excludeLabels:
-            - "no-automation"
-        - action: "update"
-          states:
-            - "Todo"
-            - "In Progress"
-          labels:
-            - "agent-task"
-          excludeLabels:
-            - "no-automation"
+        # Respond to newly created issues
+        - type: "Issue"
+          action: "create"
+
+        # Respond to issues moved to "In Progress" or "In Review" states
+        - type: "Issue"
+          action: "update"
+          states: ["In Progress", "In Review"]
+
+        # Respond to issues with "priority:high" label
+        - type: "Issue"
+          labels: ["priority:high"]
+
+        # Respond to issues with "bug" label but exclude "wontfix"
+        - type: "Issue"
+          labels: ["bug"]
+          excludeLabels: ["wontfix"]
+
+        # Respond to new comments on issues
+        - type: "Comment"
+          action: "create"
+
+        # Respond when "urgent" label is added to issues
+        - type: "IssueLabel"
+          action: "create"
+          # Note: For IssueLabel events, filter by the label name in the payload
+
+  # Task template configuration
   taskTemplate:
+    # Agent type and credentials
     type: claude-code
     credentials:
-      type: oauth
+      type: api-key
       secretRef:
         name: claude-credentials
-        key: token
+        key: api-key
+
+    # Reference the repository workspace
     workspaceRef:
-      name: my-workspace
-    branch: "linear-task-{{.ID}}"
+      name: my-repo-workspace
+
+    # Template for the git branch (optional)
+    branch: "linear-{{.Type}}-{{.ID}}"
+
+    # Template for the task prompt
     promptTemplate: |
-      Linear {{.Type}} {{.Action}}: {{.Title}}
+      # Linear {{.Type}} Event: {{.Action}}
 
-      Linear Issue ID: {{.ID}}
-      State: {{.State}}
-      Labels: {{.Labels}}
+      A Linear webhook event has been triggered that requires attention.
 
-      Please analyze this Linear issue and provide recommendations or implement any requested changes.
+      ## Event Details
+      - **Type**: {{.Type}}
+      - **Action**: {{.Action}}
+      {{- if .Title}}
+      - **Title**: {{.Title}}
+      {{- end}}
+      - **ID**: {{.ID}}
 
-      Full webhook data is available in the payload for detailed analysis if needed.
+      {{- if eq .Type "Issue"}}
+      ## Issue Information
+      {{- if .Payload.data.description}}
+      **Description**: {{.Payload.data.description}}
+      {{- end}}
+      {{- if .Payload.data.state}}
+      **State**: {{.Payload.data.state.name}}
+      {{- end}}
+      {{- if .Payload.data.team}}
+      **Team**: {{.Payload.data.team.name}}
+      {{- end}}
+      {{- if .Payload.data.assignee}}
+      **Assignee**: {{.Payload.data.assignee.name}}
+      {{- end}}
+      {{- if .Payload.data.labels}}
+      **Labels**: {{range .Payload.data.labels}}{{.name}} {{end}}
+      {{- end}}
+      {{- if .Payload.data.url}}
+      **URL**: {{.Payload.data.url}}
+      {{- end}}
+
+      ## Task
+      {{- if eq .Action "create"}}
+      A new issue has been created. Please review the requirements and provide an initial assessment or implementation plan.
+      {{- else if and (eq .Action "update") (and .Payload.data.state (or (eq .Payload.data.state.name "In Progress") (eq .Payload.data.state.name "In Review")))}}
+      This issue has been moved to {{.Payload.data.state.name}} state. Please review the current implementation and provide feedback or continue the work.
+      {{- else if .Payload.data.labels}}
+      This issue has been updated with priority labels. Please review and prioritize accordingly.
+      {{- else}}
+      This issue has been updated. Please review the changes and take appropriate action.
+      {{- end}}
+
+      {{- else if eq .Type "Comment"}}
+      ## Comment Information
+      {{- if .Payload.data.body}}
+      **Comment**: {{.Payload.data.body}}
+      {{- end}}
+      {{- if .Payload.data.user}}
+      **Author**: {{.Payload.data.user.name}}
+      {{- end}}
+      {{- if .Payload.data.issue}}
+      **Issue**: {{.Payload.data.issue.title}}
+      {{- end}}
+
+      ## Task
+      A new comment has been added to an issue. Please review the comment and respond if necessary.
+
+      {{- else if eq .Type "IssueLabel"}}
+      ## Label Change
+      {{- if .Payload.data.label}}
+      **Label**: {{.Payload.data.label.name}}
+      {{- end}}
+      {{- if .Payload.data.issue}}
+      **Issue**: {{.Payload.data.issue.title}}
+      {{- end}}
+
+      ## Task
+      {{- if eq .Action "create"}}
+      A label has been added to an issue. Please review if this requires immediate attention.
+      {{- else}}
+      A label has been removed from an issue. Please review the change and take appropriate action.
+      {{- end}}
+      {{- end}}
+
+      You have full access to the repository through the workspace. Use git commands and analysis tools as needed.
+
+    # Task metadata (optional)
+    metadata:
+      labels:
+        kelos.dev/trigger: "webhook"
+        kelos.dev/source: "linear"
+        kelos.dev/type: "{{.Type}}"
+        kelos.dev/action: "{{.Action}}"
+      annotations:
+        kelos.dev/linear-id: "{{.ID}}"
+
+    # Auto-cleanup completed tasks after 2 hours
+    ttlSecondsAfterFinished: 7200
+
+  # Limit concurrent tasks to prevent overwhelming the system
   maxConcurrency: 3
-  ttlSecondsAfterFinished: 3600
+
+---
+# Example workspace configuration (referenced above)
+apiVersion: kelos.dev/v1alpha1
+kind: Workspace
+metadata:
+  name: my-repo-workspace
+  namespace: default
+spec:
+  repo:
+    url: "https://github.com/myorg/myrepo.git"
+    # Optional: reference secret for private repos
+    # secretRef:
+    #   name: github-token
+    #   key: token

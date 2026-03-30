@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -98,8 +99,12 @@ func main() {
 	mux.Handle("/", handler)
 
 	webhookServer := &http.Server{
-		Addr:    webhookAddr,
-		Handler: mux,
+		Addr:              webhookAddr,
+		Handler:           mux,
+		ReadTimeout:       30 * time.Second,  // Maximum time to read request including body
+		WriteTimeout:      30 * time.Second,  // Maximum time to write response
+		ReadHeaderTimeout: 10 * time.Second,  // Maximum time to read request headers
+		IdleTimeout:       120 * time.Second, // Maximum time for keep-alive connections
 	}
 
 	// Start webhook server in goroutine

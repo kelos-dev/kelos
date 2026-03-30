@@ -127,7 +127,7 @@ func (tb *TaskBuilder) BuildTask(
 
 // renderTemplate renders a Go text template with the given variables.
 func renderTemplate(name, templateStr string, vars map[string]interface{}) (string, error) {
-	tmpl, err := template.New(name).Parse(templateStr)
+	tmpl, err := template.New(name).Option("missingkey=error").Parse(templateStr)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse template: %w", err)
 	}

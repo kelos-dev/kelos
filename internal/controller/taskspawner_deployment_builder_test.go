@@ -1845,6 +1845,14 @@ func TestReconcileCronJob_DeletesStaleDeployment(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "my-spawner",
 			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: "kelos.dev/v1alpha1",
+					Kind:       "TaskSpawner",
+					Name:       "my-spawner",
+					Controller: func() *bool { b := true; return &b }(),
+				},
+			},
 		},
 		Spec: appsv1.DeploymentSpec{
 			Selector: &metav1.LabelSelector{
@@ -1916,6 +1924,14 @@ func TestReconcileDeployment_DeletesStaleCronJob(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "my-spawner",
 			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: "kelos.dev/v1alpha1",
+					Kind:       "TaskSpawner",
+					Name:       "my-spawner",
+					Controller: func() *bool { b := true; return &b }(),
+				},
+			},
 		},
 		Spec: batchv1.CronJobSpec{
 			Schedule: "0 9 * * 1",

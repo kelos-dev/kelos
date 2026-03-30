@@ -617,9 +617,9 @@ func (r *TaskSpawnerReconciler) updateCronJob(ctx context.Context, ts *kelosv1al
 	return nil
 }
 
-// deleteStaleResource deletes a resource by NamespacedName if it exists.
+// deleteStaleResource deletes a resource by NamespacedName if it exists and is owned by a TaskSpawner.
 // This is used to clean up the old resource type when switching between
-// Deployment-based and CronJob-based TaskSpawners.
+// Deployment-based, CronJob-based, and webhook-based TaskSpawners.
 func (r *TaskSpawnerReconciler) deleteStaleResource(ctx context.Context, key types.NamespacedName, obj client.Object, kind string) error {
 	logger := log.FromContext(ctx)
 
@@ -628,6 +628,21 @@ func (r *TaskSpawnerReconciler) deleteStaleResource(ctx context.Context, key typ
 			return nil
 		}
 		return err
+	}
+
+	// Only delete if this resource is owned by a TaskSpawner to avoid deleting unrelated resources
+	ownerRefs := obj.GetOwnerReferences()
+	isOwnedByTaskSpawner := false
+	for _, ref := range ownerRefs {
+		if ref.APIVersion == "kelos.dev/v1alpha1" && ref.Kind == "TaskSpawner" && ref.Controller != nil && *ref.Controller {
+			isOwnedByTaskSpawner = true
+			break
+		}
+	}
+
+	if !isOwnedByTaskSpawner {
+		logger.Info("Skipping deletion of "+kind+" not owned by TaskSpawner", "name", key.Name)
+		return nil
 	}
 
 	if err := r.Delete(ctx, obj); err != nil {

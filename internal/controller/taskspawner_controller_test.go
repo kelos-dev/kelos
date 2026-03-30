@@ -19,7 +19,6 @@ import (
 	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 )
 
-
 func TestIsWebhookBased(t *testing.T) {
 	tests := []struct {
 		name string
@@ -163,6 +162,14 @@ func TestReconcileWebhook(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "test-webhook",
 						Namespace: "default",
+						OwnerReferences: []metav1.OwnerReference{
+							{
+								APIVersion: "kelos.dev/v1alpha1",
+								Kind:       "TaskSpawner",
+								Name:       "test-webhook",
+								Controller: func() *bool { b := true; return &b }(),
+							},
+						},
 					},
 				},
 			},
@@ -194,6 +201,14 @@ func TestReconcileWebhook(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "test-webhook",
 						Namespace: "default",
+						OwnerReferences: []metav1.OwnerReference{
+							{
+								APIVersion: "kelos.dev/v1alpha1",
+								Kind:       "TaskSpawner",
+								Name:       "test-webhook",
+								Controller: func() *bool { b := true; return &b }(),
+							},
+						},
 					},
 				},
 			},

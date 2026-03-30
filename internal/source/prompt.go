@@ -32,7 +32,7 @@ func RenderPrompt(promptTemplate string, item WorkItem) (string, error) {
 // GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}
 // Cron sources: {{.Time}}, {{.Schedule}}
 func RenderTemplate(tmplStr string, item WorkItem) (string, error) {
-	tmpl, err := template.New("tmpl").Parse(tmplStr)
+	tmpl, err := template.New("tmpl").Option("missingkey=error").Parse(tmplStr)
 	if err != nil {
 		return "", fmt.Errorf("parsing template: %w", err)
 	}

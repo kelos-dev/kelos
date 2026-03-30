@@ -90,6 +90,7 @@ spec:
       priorityLabels:
         - priority/critical-urgent
         - priority/important-soon
+      pollInterval: 1m
   maxConcurrency: 3
   taskTemplate:
     model: opus
@@ -101,7 +102,6 @@ spec:
       - update an existing PR to fix the issue
       - comment on the issue or the PR if you cannot fix it
       ...
-  pollInterval: 1m
 ```
 
 The key pattern is `excludeLabels: [kelos/needs-input]` — this creates a feedback loop where the agent works autonomously until it needs human input, then pauses. Removing the label re-queues the issue on the next poll.
@@ -343,6 +343,7 @@ spec:
     githubIssues:
       labels: [bug]
       state: open
+      pollInterval: 5m
   taskTemplate:
     type: claude-code
     workspaceRef:
@@ -352,7 +353,6 @@ spec:
       secretRef:
         name: claude-oauth-token
     promptTemplate: "Fix: {{.Title}}\n{{.Body}}"
-  pollInterval: 5m
 ```
 
 ```bash

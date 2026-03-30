@@ -381,6 +381,19 @@ func matchesFilter(filter v1alpha1.GitHubWebhookFilter, eventData *GitHubEventDa
 						return false
 					}
 				}
+
+			// ExcludeLabels filter (PR must NOT have any of these labels)
+			if len(filter.ExcludeLabels) > 0 {
+				prLabels := make(map[string]bool)
+				for _, label := range pr.Labels {
+					prLabels[label.GetName()] = true
+				}
+				for _, excludeLabel := range filter.ExcludeLabels {
+					if prLabels[excludeLabel] {
+						return false
+					}
+				}
+			}
 			}
 
 			// ExcludeLabels filter (PR must NOT have any of these labels)

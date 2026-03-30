@@ -487,6 +487,152 @@ func TestMatchesGitHubEvent_ExcludeLabelsFilter(t *testing.T) {
 	}
 }
 
+func TestMatchesGitHubEvent_ExcludeLabelsFilter(t *testing.T) {
+	tests := []struct {
+		name      string
+		eventType string
+		spawner   *v1alpha1.GitHubWebhook
+		payload   string
+		want      bool
+	}{
+		{
+			name:      "issue - no excluded labels",
+			eventType: "issues",
+			spawner: &v1alpha1.GitHubWebhook{
+				Events: []string{"issues"},
+				Filters: []v1alpha1.GitHubWebhookFilter{
+					{
+						Event:         "issues",
+						ExcludeLabels: []string{"wontfix", "duplicate"},
+					},
+				},
+			},
+			payload: `{
+				"action": "opened",
+				"issue": {
+					"number": 1,
+					"title": "Test issue",
+					"labels": [
+						{"name": "bug"},
+						{"name": "frontend"}
+					]
+				}
+			}`,
+			want: true,
+		},
+		{
+			name:      "issue - has excluded label",
+			eventType: "issues",
+			spawner: &v1alpha1.GitHubWebhook{
+				Events: []string{"issues"},
+				Filters: []v1alpha1.GitHubWebhookFilter{
+					{
+						Event:         "issues",
+						ExcludeLabels: []string{"wontfix", "duplicate"},
+					},
+				},
+			},
+			payload: `{
+				"action": "opened",
+				"issue": {
+					"number": 1,
+					"title": "Test issue",
+					"labels": [
+						{"name": "bug"},
+						{"name": "wontfix"}
+					]
+				}
+			}`,
+			want: false,
+		},
+		{
+			name:      "PR - no excluded labels",
+			eventType: "pull_request",
+			spawner: &v1alpha1.GitHubWebhook{
+				Events: []string{"pull_request"},
+				Filters: []v1alpha1.GitHubWebhookFilter{
+					{
+						Event:         "pull_request",
+						ExcludeLabels: []string{"do-not-merge", "draft"},
+					},
+				},
+			},
+			payload: `{
+				"action": "opened",
+				"pull_request": {
+					"number": 1,
+					"title": "Test PR",
+					"labels": [
+						{"name": "feature"},
+						{"name": "ready-for-review"}
+					]
+				}
+			}`,
+			want: true,
+		},
+		{
+			name:      "PR - has excluded label",
+			eventType: "pull_request",
+			spawner: &v1alpha1.GitHubWebhook{
+				Events: []string{"pull_request"},
+				Filters: []v1alpha1.GitHubWebhookFilter{
+					{
+						Event:         "pull_request",
+						ExcludeLabels: []string{"do-not-merge", "draft"},
+					},
+				},
+			},
+			payload: `{
+				"action": "opened",
+				"pull_request": {
+					"number": 1,
+					"title": "Test PR",
+					"labels": [
+						{"name": "feature"},
+						{"name": "do-not-merge"}
+					]
+				}
+			}`,
+			want: false,
+		},
+		{
+			name:      "empty labels - should match",
+			eventType: "issues",
+			spawner: &v1alpha1.GitHubWebhook{
+				Events: []string{"issues"},
+				Filters: []v1alpha1.GitHubWebhookFilter{
+					{
+						Event:         "issues",
+						ExcludeLabels: []string{"wontfix"},
+					},
+				},
+			},
+			payload: `{
+				"action": "opened",
+				"issue": {
+					"number": 1,
+					"title": "Test issue",
+					"labels": []
+				}
+			}`,
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := MatchesGitHubEvent(tt.spawner, tt.eventType, []byte(tt.payload))
+			if err != nil {
+				t.Errorf("MatchesGitHubEvent() error = %v", err)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("MatchesGitHubEvent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMatchesGitHubEvent_PullRequestDraftFilter(t *testing.T) {
 	spawner := &v1alpha1.GitHubWebhook{
 		Events: []string{"pull_request"},

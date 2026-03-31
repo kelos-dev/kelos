@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -22,15 +23,18 @@ import (
 )
 
 type spawnerRuntimeConfig struct {
-	GitHubOwner      string
-	GitHubRepo       string
-	GitHubAPIBaseURL string
-	GHProxyURL       string
-	TokenResolver    func(context.Context) (string, error)
-	JiraBaseURL      string
-	JiraProject      string
-	JiraJQL          string
-	HTTPClient       *http.Client
+	GitHubOwner         string
+	GitHubRepo          string
+	GitHubAPIBaseURL    string
+	GHProxyURL          string
+	TokenResolver       func(context.Context) (string, error)
+	JiraBaseURL         string
+	JiraProject         string
+	JiraJQL             string
+	SlackTriggerCommand string
+	SlackChannels       string
+	SlackAllowedUsers   string
+	HTTPClient          *http.Client
 }
 
 type spawnerReconciler struct {
@@ -69,7 +73,7 @@ func (r *spawnerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 func runOnce(ctx context.Context, cl client.Client, key types.NamespacedName, cfg spawnerRuntimeConfig) (time.Duration, error) {
-	if err := runCycleWithProxy(ctx, cl, key, cfg.GitHubOwner, cfg.GitHubRepo, cfg.GHProxyURL, cfg.GitHubAPIBaseURL, cfg.TokenResolver, cfg.JiraBaseURL, cfg.JiraProject, cfg.JiraJQL, cfg.HTTPClient); err != nil {
+	if err := runCycleWithProxy(ctx, cl, key, cfg.GitHubOwner, cfg.GitHubRepo, cfg.GHProxyURL, cfg.GitHubAPIBaseURL, cfg.TokenResolver, cfg.JiraBaseURL, cfg.JiraProject, cfg.JiraJQL, cfg.SlackTriggerCommand, cfg.SlackChannels, cfg.SlackAllowedUsers, cfg.HTTPClient); err != nil {
 		return 0, err
 	}
 
@@ -79,30 +83,44 @@ func runOnce(ctx context.Context, cl client.Client, key types.NamespacedName, cf
 	}
 
 	if reportingEnabled(&ts) {
-		if cfg.TokenResolver == nil {
-			return 0, fmt.Errorf("GitHub reporting is enabled but no token resolver is configured")
-		}
-		resolve := cfg.TokenResolver
-		// Reporting always uses the direct API base URL (writes bypass the proxy).
-		reporter := &reporting.TaskReporter{
-			Client: cl,
-			Reporter: &reporting.GitHubReporter{
-				Owner: cfg.GitHubOwner,
-				Repo:  cfg.GitHubRepo,
-				TokenFunc: func() string {
-					token, err := resolve(ctx)
-					if err != nil {
-						ctrl.Log.WithName("spawner").Error(err, "Resolving GitHub token for reporting")
-						return ""
-					}
-					return token
+		if ts.Spec.When.Slack != nil {
+			botToken := os.Getenv("SLACK_BOT_TOKEN")
+			if botToken == "" {
+				return 0, fmt.Errorf("SLACK_BOT_TOKEN environment variable is required for Slack reporting")
+			}
+			slackReporter := &reporting.SlackTaskReporter{
+				Client:   cl,
+				Reporter: &reporting.SlackReporter{BotToken: botToken},
+			}
+			if err := runSlackReportingCycle(ctx, cl, key, slackReporter); err != nil {
+				return 0, err
+			}
+		} else {
+			if cfg.TokenResolver == nil {
+				return 0, fmt.Errorf("GitHub reporting is enabled but no token resolver is configured")
+			}
+			resolve := cfg.TokenResolver
+			// Reporting always uses the direct API base URL (writes bypass the proxy).
+			reporter := &reporting.TaskReporter{
+				Client: cl,
+				Reporter: &reporting.GitHubReporter{
+					Owner: cfg.GitHubOwner,
+					Repo:  cfg.GitHubRepo,
+					TokenFunc: func() string {
+						token, err := resolve(ctx)
+						if err != nil {
+							ctrl.Log.WithName("spawner").Error(err, "Resolving GitHub token for reporting")
+							return ""
+						}
+						return token
+					},
+					BaseURL: cfg.GitHubAPIBaseURL,
+					Client:  cfg.HTTPClient,
 				},
-				BaseURL: cfg.GitHubAPIBaseURL,
-				Client:  cfg.HTTPClient,
-			},
-		}
-		if err := runReportingCycle(ctx, cl, key, reporter); err != nil {
-			return 0, err
+			}
+			if err := runReportingCycle(ctx, cl, key, reporter); err != nil {
+				return 0, err
+			}
 		}
 	}
 
@@ -121,6 +139,8 @@ func resolvedPollInterval(ts *kelosv1alpha1.TaskSpawner) time.Duration {
 		sourceInterval = ts.Spec.When.GitHubPullRequests.PollInterval
 	case ts.Spec.When.Jira != nil:
 		sourceInterval = ts.Spec.When.Jira.PollInterval
+	case ts.Spec.When.Slack != nil:
+		sourceInterval = ts.Spec.When.Slack.PollInterval
 	}
 	if sourceInterval != "" {
 		return parsePollInterval(sourceInterval)

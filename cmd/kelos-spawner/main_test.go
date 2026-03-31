@@ -141,7 +141,7 @@ func newTask(name, namespace, spawnerName string, phase kelosv1alpha1.TaskPhase)
 func TestBuildSource_GitHubIssuesWithBaseURL(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 
-	src, err := buildSource(context.Background(), ts, "my-org", "my-repo", "https://github.example.com/api/v3", noToken, "", "", "", nil)
+	src, err := buildSource(context.Background(), ts, "my-org", "my-repo", "https://github.example.com/api/v3", noToken, "", "", "", "", "", "", nil) (feat: add Slack as a TaskSpawner source (Socket Mode) (#35))
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestBuildSource_GitHubIssuesWithBaseURL(t *testing.T) {
 func TestBuildSource_GitHubIssuesDefaultBaseURL(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 
-	src, err := buildSource(context.Background(), ts, "kelos-dev", "kelos", "", noToken, "", "", "", nil)
+	src, err := buildSource(context.Background(), ts, "kelos-dev", "kelos", "", noToken, "", "", "", "", "", "", nil) (feat: add Slack as a TaskSpawner source (Socket Mode) (#35))
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestBuildSource_GitHubPullRequests(t *testing.T) {
 		},
 	}
 
-	src, err := buildSource(context.Background(), ts, "kelos-dev", "kelos", "https://github.example.com/api/v3", noToken, "", "", "", nil)
+	src, err := buildSource(context.Background(), ts, "kelos-dev", "kelos", "https://github.example.com/api/v3", noToken, "", "", "", "", "", "", nil) (feat: add Slack as a TaskSpawner source (Socket Mode) (#35))
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestBuildSource_Jira(t *testing.T) {
 	t.Setenv("JIRA_USER", "user@example.com")
 	t.Setenv("JIRA_TOKEN", "jira-api-token")
 
-	src, err := buildSource(context.Background(), ts, "", "", "", noToken, "https://mycompany.atlassian.net", "PROJ", "status = Open", nil)
+	src, err := buildSource(context.Background(), ts, "", "", "", noToken, "https://mycompany.atlassian.net", "PROJ", "status = Open", "", "", "", nil) (feat: add Slack as a TaskSpawner source (Socket Mode) (#35))
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -273,6 +273,46 @@ func TestBuildSource_Jira(t *testing.T) {
 	}
 	if jiraSrc.Token != "jira-api-token" {
 		t.Errorf("Token = %q, want %q", jiraSrc.Token, "jira-api-token")
+	}
+}
+
+func TestBuildSource_Slack(t *testing.T) {
+	t.Setenv("SLACK_BOT_TOKEN", "xoxb-test-token")
+	t.Setenv("SLACK_APP_TOKEN", "xapp-test-token")
+
+	ts := &kelosv1alpha1.TaskSpawner{
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				Slack: &kelosv1alpha1.Slack{
+					SecretRef: kelosv1alpha1.SecretReference{Name: "slack-creds"},
+				},
+			},
+		},
+	}
+
+	src, err := buildSource(ts, "", "", "", "", "", "", "", "/kelos", "C123,C456", "U001,U002", nil)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	slackSrc, ok := src.(*source.SlackSource)
+	if !ok {
+		t.Fatalf("Expected *source.SlackSource, got %T", src)
+	}
+	if slackSrc.BotToken != "xoxb-test-token" {
+		t.Errorf("BotToken = %q, want %q", slackSrc.BotToken, "xoxb-test-token")
+	}
+	if slackSrc.AppToken != "xapp-test-token" {
+		t.Errorf("AppToken = %q, want %q", slackSrc.AppToken, "xapp-test-token")
+	}
+	if slackSrc.TriggerCommand != "/kelos" {
+		t.Errorf("TriggerCommand = %q, want %q", slackSrc.TriggerCommand, "/kelos")
+	}
+	if len(slackSrc.Channels) != 2 || slackSrc.Channels[0] != "C123" || slackSrc.Channels[1] != "C456" {
+		t.Errorf("Channels = %v, want [C123 C456]", slackSrc.Channels)
+	}
+	if len(slackSrc.AllowedUsers) != 2 || slackSrc.AllowedUsers[0] != "U001" || slackSrc.AllowedUsers[1] != "U002" {
+		t.Errorf("AllowedUsers = %v, want [U001 U002]", slackSrc.AllowedUsers)
 	}
 }
 
@@ -585,7 +625,7 @@ func TestRunCycle_BuildSourceFailureCountsDiscoveryErrorAndDuration(t *testing.T
 	beforeErrors := testutil.ToFloat64(discoveryErrorsTotal)
 	beforeDurationCount := histogramSampleCount(t, discoveryDurationSeconds)
 
-	err := runCycle(context.Background(), cl, key, "owner", "repo", "", noToken, "", "", "", nil)
+	err := runCycle(context.Background(), cl, key, "owner", "repo", "", noToken, "", "", "", "", "", "", nil) (feat: add Slack as a TaskSpawner source (Socket Mode) (#35))
 	if err == nil {
 		t.Fatal("Expected buildSource error")
 	}
@@ -1153,7 +1193,7 @@ func TestBuildSource_PriorityLabelsPassedToSource(t *testing.T) {
 		"priority/imporant-soon",
 	}
 
-	src, err := buildSource(context.Background(), ts, "owner", "repo", "", noToken, "", "", "", nil)
+	src, err := buildSource(context.Background(), ts, "owner", "repo", "", noToken, "", "", "", "", "", "", nil) (feat: add Slack as a TaskSpawner source (Socket Mode) (#35))
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -1180,7 +1220,7 @@ func TestRunCycleWithSource_CommentFieldsPassedToSource(t *testing.T) {
 		ExcludeComments: []string{"/kelos needs-input"},
 	}
 
-	src, err := buildSource(context.Background(), ts, "owner", "repo", "", noToken, "", "", "", nil)
+	src, err := buildSource(context.Background(), ts, "owner", "repo", "", noToken, "", "", "", "", "", "", nil) (feat: add Slack as a TaskSpawner source (Socket Mode) (#35))
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -1209,7 +1249,7 @@ func TestBuildSource_CommentPolicyPassedToIssueSource(t *testing.T) {
 		},
 	}
 
-	src, err := buildSource(context.Background(), ts, "owner", "repo", "", noToken, "", "", "", nil)
+	src, err := buildSource(context.Background(), ts, "owner", "repo", "", noToken, "", "", "", "", "", "", nil) (feat: add Slack as a TaskSpawner source (Socket Mode) (#35))
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -1249,7 +1289,7 @@ func TestBuildSource_CommentPolicyPassedToPullRequestSource(t *testing.T) {
 		},
 	}
 
-	src, err := buildSource(context.Background(), ts, "owner", "repo", "", noToken, "", "", "", nil)
+	src, err := buildSource(context.Background(), ts, "owner", "repo", "", noToken, "", "", "", "", "", "", nil) (feat: add Slack as a TaskSpawner source (Socket Mode) (#35))
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -1314,7 +1354,7 @@ func TestBuildSource_CommentPolicyRejectsMixedConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := buildSource(context.Background(), tt.ts, "owner", "repo", "", noToken, "", "", "", nil)
+			_, err := buildSource(context.Background(), tt.ts, "owner", "repo", "", noToken, "", "", "", "", "", "", nil) (feat: add Slack as a TaskSpawner source (Socket Mode) (#35))
 			if err == nil {
 				t.Fatal("Expected error for mixed legacy and commentPolicy config")
 			}
@@ -1846,6 +1886,90 @@ func TestSourceAnnotations_ReportingEnabledPR(t *testing.T) {
 	annotations := sourceAnnotations(ts, item)
 	if annotations[reporting.AnnotationGitHubReporting] != "enabled" {
 		t.Errorf("Expected github-reporting 'enabled', got %q", annotations[reporting.AnnotationGitHubReporting])
+	}
+}
+
+func TestSourceAnnotations_SlackMessage(t *testing.T) {
+	ts := &kelosv1alpha1.TaskSpawner{
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				Slack: &kelosv1alpha1.Slack{},
+			},
+		},
+	}
+
+	item := source.WorkItem{
+		ID:     "1234567890.123456",
+		Kind:   "SlackMessage",
+		Labels: []string{"general", "C123ABC"},
+	}
+
+	annotations := sourceAnnotations(ts, item)
+	if annotations == nil {
+		t.Fatal("Expected annotations, got nil")
+	}
+	if annotations[reporting.AnnotationSlackReporting] != "enabled" {
+		t.Errorf("Expected slack-reporting 'enabled', got %q", annotations[reporting.AnnotationSlackReporting])
+	}
+	if annotations[reporting.AnnotationSlackChannel] != "C123ABC" {
+		t.Errorf("Expected slack-channel 'C123ABC', got %q", annotations[reporting.AnnotationSlackChannel])
+	}
+	if annotations[reporting.AnnotationSlackThreadTS] != "1234567890.123456" {
+		t.Errorf("Expected slack-thread-ts '1234567890.123456', got %q", annotations[reporting.AnnotationSlackThreadTS])
+	}
+}
+
+func TestSourceAnnotations_SlackSlashCommand(t *testing.T) {
+	ts := &kelosv1alpha1.TaskSpawner{
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				Slack: &kelosv1alpha1.Slack{},
+			},
+		},
+	}
+
+	// Slash command IDs are compound strings, not valid Slack timestamps
+	item := source.WorkItem{
+		ID:     "C123ABC:/kelos:trigger-id-abc",
+		Kind:   "SlackMessage",
+		Labels: []string{"general", "C123ABC"},
+	}
+
+	annotations := sourceAnnotations(ts, item)
+	if annotations == nil {
+		t.Fatal("Expected annotations, got nil")
+	}
+	if annotations[reporting.AnnotationSlackReporting] != "enabled" {
+		t.Errorf("Expected slack-reporting 'enabled', got %q", annotations[reporting.AnnotationSlackReporting])
+	}
+	if annotations[reporting.AnnotationSlackChannel] != "C123ABC" {
+		t.Errorf("Expected slack-channel 'C123ABC', got %q", annotations[reporting.AnnotationSlackChannel])
+	}
+	if _, ok := annotations[reporting.AnnotationSlackThreadTS]; ok {
+		t.Errorf("Expected no slack-thread-ts for slash command, got %q", annotations[reporting.AnnotationSlackThreadTS])
+	}
+}
+
+func TestIsSlackTimestamp(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"1234567890.123456", true},
+		{"0.0", true},
+		{"C123ABC:/kelos:trigger-id-abc", false},
+		{"not-a-timestamp", false},
+		{"", false},
+		{"1234567890", false},
+		{".123456", false},
+		{"1234567890.", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := isSlackTimestamp(tt.input); got != tt.want {
+				t.Errorf("isSlackTimestamp(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
 	}
 }
 

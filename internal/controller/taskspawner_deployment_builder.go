@@ -179,6 +179,43 @@ func (b *DeploymentBuilder) buildPodParts(ts *kelosv1alpha1.TaskSpawner, workspa
 		)
 	}
 
+	if ts.Spec.When.Slack != nil {
+		slack := ts.Spec.When.Slack
+		if slack.TriggerCommand != "" {
+			args = append(args, "--slack-trigger-command="+slack.TriggerCommand)
+		}
+		if len(slack.Channels) > 0 {
+			args = append(args, "--slack-channels="+strings.Join(slack.Channels, ","))
+		}
+		if len(slack.AllowedUsers) > 0 {
+			args = append(args, "--slack-allowed-users="+strings.Join(slack.AllowedUsers, ","))
+		}
+		envVars = append(envVars,
+			corev1.EnvVar{
+				Name: "SLACK_BOT_TOKEN",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: slack.SecretRef.Name,
+						},
+						Key: "SLACK_BOT_TOKEN",
+					},
+				},
+			},
+			corev1.EnvVar{
+				Name: "SLACK_APP_TOKEN",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: slack.SecretRef.Name,
+						},
+						Key: "SLACK_APP_TOKEN",
+					},
+				},
+			},
+		)
+	}
+
 	labels := map[string]string{
 		"kelos.dev/name":        "kelos",
 		"kelos.dev/component":   "spawner",

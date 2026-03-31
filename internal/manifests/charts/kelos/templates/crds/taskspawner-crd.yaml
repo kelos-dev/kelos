@@ -1118,6 +1118,57 @@ spec:
                     - message: fieldMapping must include an 'id' key for deduplication
                         and task naming
                       rule: '''id'' in self.fieldMapping'
+                  slack:
+                    description: |-
+                      Slack discovers work items from Slack messages via Socket Mode.
+                      The spawner connects to Slack via an outbound WebSocket (no ingress
+                      required) and listens for messages in the channels the bot is invited to.
+                    properties:
+                      allowedUsers:
+                        description: |-
+                          AllowedUsers optionally restricts which Slack users can trigger tasks.
+                          Values are Slack user IDs (e.g., "U0123456789"). When empty, any user
+                          in the channel can trigger tasks.
+                        items:
+                          type: string
+                        type: array
+                      channels:
+                        description: |-
+                          Channels optionally restricts which Slack channels the bot listens in.
+                          Values are channel IDs (e.g., "C0123456789"). When empty, the bot
+                          listens in every channel it has been invited to.
+                        items:
+                          type: string
+                        type: array
+                      pollInterval:
+                        description: |-
+                          PollInterval overrides spec.pollInterval for this source (e.g., "30s", "5m").
+                          Slack uses Socket Mode (real-time), but Discover() is still called on
+                          this interval to drain accumulated events. When empty, spec.pollInterval
+                          is used.
+                        type: string
+                      secretRef:
+                        description: |-
+                          SecretRef references a Secret containing "SLACK_BOT_TOKEN" and
+                          "SLACK_APP_TOKEN" keys.
+                        properties:
+                          name:
+                            description: Name is the name of the secret.
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      triggerCommand:
+                        description: |-
+                          TriggerCommand is an optional slash command or message prefix that
+                          triggers task creation (e.g., "/kelos", "!fix"). When set, only
+                          messages starting with this prefix trigger tasks and the prefix is
+                          stripped from the prompt. When empty, every non-threaded message in
+                          the channel triggers a task.
+                        type: string
+                    required:
+                    - secretRef
+                    type: object
                 type: object
             required:
             - taskTemplate

@@ -32,6 +32,26 @@ const (
 	// AnnotationGitHubReportPhase records the last Task phase that was
 	// reported to GitHub, preventing duplicate API calls on re-list.
 	AnnotationGitHubReportPhase = "kelos.dev/github-report-phase"
+
+	// AnnotationSlackReporting indicates that Slack reporting is enabled
+	// for this Task.
+	AnnotationSlackReporting = "kelos.dev/slack-reporting"
+
+	// AnnotationSlackChannel records the Slack channel ID where the
+	// originating message was posted.
+	AnnotationSlackChannel = "kelos.dev/slack-channel"
+
+	// AnnotationSlackThreadTS records the originating message timestamp,
+	// used as thread_ts for posting replies.
+	AnnotationSlackThreadTS = "kelos.dev/slack-thread-ts"
+
+	// AnnotationSlackReplyTS stores the message timestamp of the status
+	// reply so subsequent updates edit the same message.
+	AnnotationSlackReplyTS = "kelos.dev/slack-reply-ts"
+
+	// AnnotationSlackReportPhase records the last Task phase that was
+	// reported to Slack, preventing duplicate API calls on re-list.
+	AnnotationSlackReportPhase = "kelos.dev/slack-report-phase"
 )
 
 // TaskReporter watches Tasks and reports status changes to GitHub.
@@ -152,6 +172,116 @@ func (tr *TaskReporter) persistReportingState(ctx context.Context, task *kelosv1
 			return fmt.Errorf("persisting reporting annotations on task %s: task no longer exists", task.Name)
 		}
 		return fmt.Errorf("persisting reporting annotations on task %s: %w", task.Name, err)
+	}
+
+	return nil
+}
+
+// SlackMessenger is the interface for posting and updating Slack messages.
+type SlackMessenger interface {
+	PostThreadReply(ctx context.Context, channel, threadTS, text string) (string, error)
+	UpdateMessage(ctx context.Context, channel, messageTS, text string) error
+}
+
+// SlackTaskReporter watches Tasks and reports status changes to Slack
+// as thread replies on the originating message.
+type SlackTaskReporter struct {
+	Client   client.Client
+	Reporter SlackMessenger
+}
+
+// ReportTaskStatus checks a Task's current phase against its last reported
+// phase and creates or updates the Slack thread reply as needed.
+func (tr *SlackTaskReporter) ReportTaskStatus(ctx context.Context, task *kelosv1alpha1.Task) error {
+	log := ctrl.Log.WithName("slack-reporter")
+
+	annotations := task.Annotations
+	if annotations == nil {
+		return nil
+	}
+
+	if annotations[AnnotationSlackReporting] != "enabled" {
+		return nil
+	}
+
+	channel := annotations[AnnotationSlackChannel]
+	threadTS := annotations[AnnotationSlackThreadTS]
+	if channel == "" || threadTS == "" {
+		return nil
+	}
+
+	var desiredPhase string
+	switch task.Status.Phase {
+	case kelosv1alpha1.TaskPhasePending, kelosv1alpha1.TaskPhaseRunning, kelosv1alpha1.TaskPhaseWaiting:
+		desiredPhase = "accepted"
+	case kelosv1alpha1.TaskPhaseSucceeded:
+		desiredPhase = "succeeded"
+	case kelosv1alpha1.TaskPhaseFailed:
+		desiredPhase = "failed"
+	default:
+		return nil
+	}
+
+	if annotations[AnnotationSlackReportPhase] == desiredPhase {
+		return nil
+	}
+
+	var body string
+	switch desiredPhase {
+	case "accepted":
+		body = FormatSlackAccepted(task.Name)
+	case "succeeded":
+		body = FormatSlackSucceeded(task.Name, task.Status.Results)
+	case "failed":
+		body = FormatSlackFailed(task.Name, task.Status.Message)
+	}
+
+	replyTS := annotations[AnnotationSlackReplyTS]
+	if replyTS == "" {
+		log.Info("Posting Slack thread reply", "task", task.Name, "channel", channel, "phase", desiredPhase)
+		newTS, err := tr.Reporter.PostThreadReply(ctx, channel, threadTS, body)
+		if err != nil {
+			return fmt.Errorf("posting Slack reply for task %s: %w", task.Name, err)
+		}
+		replyTS = newTS
+	} else {
+		log.Info("Updating Slack thread reply", "task", task.Name, "channel", channel, "phase", desiredPhase)
+		if err := tr.Reporter.UpdateMessage(ctx, channel, replyTS, body); err != nil {
+			return fmt.Errorf("updating Slack reply for task %s: %w", task.Name, err)
+		}
+	}
+
+	if err := tr.persistSlackReportingState(ctx, task, replyTS, desiredPhase); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (tr *SlackTaskReporter) persistSlackReportingState(ctx context.Context, task *kelosv1alpha1.Task, replyTS, desiredPhase string) error {
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var current kelosv1alpha1.Task
+		if err := tr.Client.Get(ctx, client.ObjectKeyFromObject(task), &current); err != nil {
+			return err
+		}
+
+		if current.Annotations == nil {
+			current.Annotations = make(map[string]string)
+		}
+		current.Annotations[AnnotationSlackReplyTS] = replyTS
+		current.Annotations[AnnotationSlackReportPhase] = desiredPhase
+
+		if err := tr.Client.Update(ctx, &current); err != nil {
+			return err
+		}
+
+		task.Annotations = current.Annotations
+		return nil
+	}); err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("persisting Slack reporting annotations on task %s: task no longer exists", task.Name)
+		}
+		return fmt.Errorf("persisting Slack reporting annotations on task %s: %w", task.Name, err)
 	}
 
 	return nil

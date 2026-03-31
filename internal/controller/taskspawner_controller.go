@@ -559,13 +559,13 @@ func (r *TaskSpawnerReconciler) updateDeployment(ctx context.Context, ts *kelosv
 	}
 
 	// Compare init containers (token-refresher sidecar)
-	if !reflect.DeepEqual(deploy.Spec.Template.Spec.InitContainers, desired.Spec.Template.Spec.InitContainers) {
+	if !initContainersEqual(deploy.Spec.Template.Spec.InitContainers, desired.Spec.Template.Spec.InitContainers) {
 		deploy.Spec.Template.Spec.InitContainers = desired.Spec.Template.Spec.InitContainers
 		needsUpdate = true
 	}
 
 	// Compare volumes (shared token emptyDir, github-app-secret)
-	if !reflect.DeepEqual(deploy.Spec.Template.Spec.Volumes, desired.Spec.Template.Spec.Volumes) {
+	if !volumesEqual(deploy.Spec.Template.Spec.Volumes, desired.Spec.Template.Spec.Volumes) {
 		deploy.Spec.Template.Spec.Volumes = desired.Spec.Template.Spec.Volumes
 		needsUpdate = true
 	}
@@ -675,13 +675,13 @@ func (r *TaskSpawnerReconciler) updateCronJob(ctx context.Context, ts *kelosv1al
 	}
 
 	// Update init containers if changed
-	if !reflect.DeepEqual(currentPodSpec.InitContainers, desiredPodSpec.InitContainers) {
+	if !initContainersEqual(currentPodSpec.InitContainers, desiredPodSpec.InitContainers) {
 		currentPodSpec.InitContainers = desiredPodSpec.InitContainers
 		needsUpdate = true
 	}
 
 	// Update volumes if changed
-	if !reflect.DeepEqual(currentPodSpec.Volumes, desiredPodSpec.Volumes) {
+	if !volumesEqual(currentPodSpec.Volumes, desiredPodSpec.Volumes) {
 		currentPodSpec.Volumes = desiredPodSpec.Volumes
 		needsUpdate = true
 	}
@@ -961,6 +961,64 @@ func (r *TaskSpawnerReconciler) findTaskSpawnersForTask(ctx context.Context, obj
 			Name:      taskSpawnerName,
 		},
 	}}
+}
+
+// initContainersEqual compares init container slices by checking only the
+// fields the builder sets. Kubernetes adds defaulted fields (securityContext,
+// terminationMessagePath, terminationMessagePolicy) that would cause
+// reflect.DeepEqual to always report false, triggering a reconciliation loop.
+func initContainersEqual(a, b []corev1.Container) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Name != b[i].Name ||
+			a[i].Image != b[i].Image ||
+			a[i].ImagePullPolicy != b[i].ImagePullPolicy ||
+			!reflect.DeepEqual(a[i].RestartPolicy, b[i].RestartPolicy) ||
+			!equalEnvVars(a[i].Env, b[i].Env) ||
+			!reflect.DeepEqual(a[i].VolumeMounts, b[i].VolumeMounts) ||
+			!resourceRequirementsEqual(a[i].Resources, b[i].Resources) {
+			return false
+		}
+	}
+	return true
+}
+
+// volumesEqual compares volume slices by checking only the fields the builder
+// sets. Kubernetes defaults fields like Secret.DefaultMode (to 420) that would
+// cause reflect.DeepEqual to always report false, triggering a reconciliation loop.
+func volumesEqual(a, b []corev1.Volume) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Name != b[i].Name {
+			return false
+		}
+		av := a[i].VolumeSource
+		bv := b[i].VolumeSource
+		if (av.EmptyDir == nil) != (bv.EmptyDir == nil) {
+			return false
+		}
+		if (av.Secret == nil) != (bv.Secret == nil) {
+			return false
+		}
+		if av.Secret != nil && bv.Secret != nil {
+			if av.Secret.SecretName != bv.Secret.SecretName {
+				return false
+			}
+		}
+		if (av.ConfigMap == nil) != (bv.ConfigMap == nil) {
+			return false
+		}
+		if av.ConfigMap != nil && bv.ConfigMap != nil {
+			if av.ConfigMap.Name != bv.ConfigMap.Name {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // resourceRequirementsEqual compares two ResourceRequirements using semantic

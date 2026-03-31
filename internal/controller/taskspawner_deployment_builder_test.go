@@ -3035,3 +3035,103 @@ func TestReconcileDeployment_KeepsDeploymentWithNewLabels(t *testing.T) {
 		t.Errorf("expected kelos.dev/component label in selector")
 	}
 }
+
+func TestInitContainersEqual_IgnoresKubernetesDefaults(t *testing.T) {
+	restartAlways := corev1.ContainerRestartPolicyAlways
+
+	// desired: what the builder produces (no K8s defaults)
+	desired := []corev1.Container{{
+		Name:            "token-refresher",
+		Image:           "ghcr.io/kelos-dev/kelos-token-refresher:main",
+		ImagePullPolicy: corev1.PullAlways,
+		RestartPolicy:   &restartAlways,
+		Env: []corev1.EnvVar{
+			{Name: "APP_ID", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "creds"}, Key: "appID"}}},
+		},
+		VolumeMounts: []corev1.VolumeMount{
+			{Name: "github-token", MountPath: "/shared/token"},
+		},
+		Resources: corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("50m")},
+		},
+	}}
+
+	// actual: what K8s returns after normalization (adds securityContext, terminationMessagePath, etc.)
+	actual := []corev1.Container{{
+		Name:                     "token-refresher",
+		Image:                    "ghcr.io/kelos-dev/kelos-token-refresher:main",
+		ImagePullPolicy:          corev1.PullAlways,
+		RestartPolicy:            &restartAlways,
+		TerminationMessagePath:   "/dev/termination-log",
+		TerminationMessagePolicy: corev1.TerminationMessageReadFile,
+		SecurityContext: &corev1.SecurityContext{
+			Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"NET_RAW"}},
+		},
+		Env: []corev1.EnvVar{
+			{Name: "APP_ID", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "creds"}, Key: "appID"}}},
+		},
+		VolumeMounts: []corev1.VolumeMount{
+			{Name: "github-token", MountPath: "/shared/token"},
+		},
+		Resources: corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("50m")},
+		},
+	}}
+
+	if !initContainersEqual(actual, desired) {
+		t.Fatal("initContainersEqual should ignore K8s-defaulted fields like securityContext and terminationMessagePath")
+	}
+}
+
+func TestInitContainersEqual_DetectsRealChanges(t *testing.T) {
+	a := []corev1.Container{{Name: "refresher", Image: "img:v1"}}
+	b := []corev1.Container{{Name: "refresher", Image: "img:v2"}}
+	if initContainersEqual(a, b) {
+		t.Fatal("should detect image change")
+	}
+
+	if initContainersEqual([]corev1.Container{{Name: "a"}}, nil) {
+		t.Fatal("should detect added init container")
+	}
+}
+
+func TestVolumesEqual_IgnoresSecretDefaultMode(t *testing.T) {
+	// desired: what the builder produces (no DefaultMode)
+	desired := []corev1.Volume{
+		{Name: "github-token", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+		{Name: "github-app-secret", VolumeSource: corev1.VolumeSource{
+			Secret: &corev1.SecretVolumeSource{SecretName: "creds"},
+		}},
+	}
+
+	// actual: what K8s returns (adds DefaultMode: 420)
+	defaultMode := int32(420)
+	actual := []corev1.Volume{
+		{Name: "github-token", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+		{Name: "github-app-secret", VolumeSource: corev1.VolumeSource{
+			Secret: &corev1.SecretVolumeSource{SecretName: "creds", DefaultMode: &defaultMode},
+		}},
+	}
+
+	if !volumesEqual(actual, desired) {
+		t.Fatal("volumesEqual should ignore K8s-defaulted Secret.DefaultMode")
+	}
+}
+
+func TestVolumesEqual_DetectsRealChanges(t *testing.T) {
+	a := []corev1.Volume{{Name: "vol", VolumeSource: corev1.VolumeSource{
+		Secret: &corev1.SecretVolumeSource{SecretName: "secret-a"},
+	}}}
+	b := []corev1.Volume{{Name: "vol", VolumeSource: corev1.VolumeSource{
+		Secret: &corev1.SecretVolumeSource{SecretName: "secret-b"},
+	}}}
+	if volumesEqual(a, b) {
+		t.Fatal("should detect secret name change")
+	}
+
+	if volumesEqual(a, nil) {
+		t.Fatal("should detect removed volume")
+	}
+}

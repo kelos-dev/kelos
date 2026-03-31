@@ -117,8 +117,8 @@ spec:
                       Available variables (all sources): {{ "{{.ID}}" }}, {{ "{{.Title}}" }}, {{ "{{.Kind}}" }}
                       GitHub issue/Jira sources: {{ "{{.Number}}" }}, {{ "{{.Body}}" }}, {{ "{{.URL}}" }}, {{ "{{.Labels}}" }}, {{ "{{.Comments}}" }}
                       GitHub pull request sources additionally expose: {{ "{{.Branch}}" }}, {{ "{{.ReviewState}}" }}, {{ "{{.ReviewComments}}" }}
-                      GitHub webhook sources: {{ "{{.Event}}" }}, {{ "{{.Action}}" }}, {{ "{{.Sender}}" }}, {{ "{{.Ref}}" }}, {{ "{{.Payload}}" }} (full payload access)
-                      Linear webhook sources: {{ "{{.Type}}" }}, {{ "{{.Action}}" }}, {{ "{{.Payload}}" }} (full payload access)
+                      GitHub webhook sources: {{ "{{.Event}}" }}, {{ "{{.Action}}" }}, {{ "{{.Sender}}" }}, {{ "{{.Ref}}" }}, {{ "{{.Repository}}" }}, {{ "{{.Payload}}" }} (full payload access)
+                      Linear webhook sources: {{ "{{.Type}}" }}, {{ "{{.Action}}" }}, {{ "{{.State}}" }}, {{ "{{.Labels}}" }}, {{ "{{.IssueID}}" }}, {{ "{{.Payload}}" }} (full payload access)
                       Cron sources: {{ "{{.Time}}" }}, {{ "{{.Schedule}}" }}
                     type: string
                   credentials:
@@ -440,8 +440,8 @@ spec:
                       Available variables (all sources): {{ "{{.ID}}" }}, {{ "{{.Title}}" }}, {{ "{{.Kind}}" }}
                       GitHub issue/Jira sources: {{ "{{.Number}}" }}, {{ "{{.Body}}" }}, {{ "{{.URL}}" }}, {{ "{{.Labels}}" }}, {{ "{{.Comments}}" }}
                       GitHub pull request sources additionally expose: {{ "{{.Branch}}" }}, {{ "{{.ReviewState}}" }}, {{ "{{.ReviewComments}}" }}
-                      GitHub webhook sources: {{ "{{.Event}}" }}, {{ "{{.Action}}" }}, {{ "{{.Sender}}" }}, {{ "{{.Ref}}" }}, {{ "{{.Payload}}" }} (full payload access)
-                      Linear webhook sources: {{ "{{.Type}}" }}, {{ "{{.Action}}" }}, {{ "{{.Payload}}" }} (full payload access)
+                      GitHub webhook sources: {{ "{{.Event}}" }}, {{ "{{.Action}}" }}, {{ "{{.Sender}}" }}, {{ "{{.Ref}}" }}, {{ "{{.Repository}}" }}, {{ "{{.Payload}}" }} (full payload access)
+                      Linear webhook sources: {{ "{{.Type}}" }}, {{ "{{.Action}}" }}, {{ "{{.State}}" }}, {{ "{{.Labels}}" }}, {{ "{{.IssueID}}" }}, {{ "{{.Payload}}" }} (full payload access)
                       Cron sources: {{ "{{.Time}}" }}, {{ "{{.Schedule}}" }}
                     type: string
                   ttlSecondsAfterFinished:
@@ -1018,9 +1018,10 @@ spec:
             type: object
             x-kubernetes-validations:
             - message: taskTemplate.workspaceRef is required when using githubIssues,
-                githubPullRequests, or githubWebhook source
+                githubPullRequests, githubWebhook, or linearWebhook source
               rule: '!(has(self.when.githubIssues) || has(self.when.githubPullRequests)
-                || has(self.when.githubWebhook)) || has(self.taskTemplate.workspaceRef)'
+                || has(self.when.githubWebhook) || has(self.when.linearWebhook)) ||
+                has(self.taskTemplate.workspaceRef)'
           status:
             description: TaskSpawnerStatus defines the observed state of TaskSpawner.
             properties:

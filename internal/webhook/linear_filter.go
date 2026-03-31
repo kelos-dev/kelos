@@ -3,6 +3,7 @@ package webhook
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/kelos-dev/kelos/api/v1alpha1"
 )
@@ -18,6 +19,9 @@ type LinearEventData struct {
 	// Standard template variables for compatibility
 	ID    string
 	Title string
+	// Extracted convenience fields
+	State  string
+	Labels []string
 }
 
 // ParseLinearWebhook parses a Linear webhook payload using manual JSON parsing.
@@ -59,6 +63,24 @@ func ParseLinearWebhook(payload []byte) (*LinearEventData, error) {
 		// Extract title
 		if title, ok := dataObj["title"].(string); ok {
 			data.Title = title
+		}
+
+		// Extract state
+		if state, ok := dataObj["state"].(map[string]interface{}); ok {
+			if stateName, ok := state["name"].(string); ok {
+				data.State = stateName
+			}
+		}
+
+		// Extract labels
+		if labels, ok := dataObj["labels"].([]interface{}); ok {
+			for _, label := range labels {
+				if labelMap, ok := label.(map[string]interface{}); ok {
+					if labelName, ok := labelMap["name"].(string); ok {
+						data.Labels = append(data.Labels, labelName)
+					}
+				}
+			}
 		}
 	}
 
@@ -227,6 +249,8 @@ func ExtractLinearWorkItem(eventData *LinearEventData) map[string]interface{} {
 		"Type":    eventData.Type,
 		"Action":  eventData.Action,
 		"Payload": eventData.RawPayload,
+		"State":   eventData.State,
+		"Labels":  strings.Join(eventData.Labels, ", "),
 		// Standard variables for compatibility
 		"ID":    eventData.ID,
 		"Title": eventData.Title,

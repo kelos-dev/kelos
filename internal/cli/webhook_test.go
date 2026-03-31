@@ -74,6 +74,11 @@ func TestRenderChart_WebhookGateway(t *testing.T) {
 					"replicas":   1,
 					"secretName": "github-webhook-secret",
 				},
+				"linear": map[string]interface{}{
+					"enabled":    true,
+					"replicas":   1,
+					"secretName": "linear-webhook-secret",
+				},
 			},
 			"gateway": map[string]interface{}{
 				"enabled":          true,
@@ -106,6 +111,8 @@ func TestRenderChart_WebhookGateway(t *testing.T) {
 		"gatewayClassName: istio",
 		"/webhook/github",
 		"kelos-webhook-github",
+		"/webhook/linear",
+		"kelos-webhook-linear",
 	}
 
 	for _, component := range expectedComponents {

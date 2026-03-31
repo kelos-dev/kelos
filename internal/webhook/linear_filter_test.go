@@ -862,6 +862,48 @@ func TestExtractLinearWorkItem_CommentIssueID(t *testing.T) {
 	}
 }
 
+func TestExtractLinearWorkItem_StateAndLabels(t *testing.T) {
+	payload := `{
+		"type":"Issue",
+		"action":"create",
+		"data":{
+			"id":"issue-123",
+			"title":"Test Issue",
+			"state":{"name":"Todo"},
+			"labels":[
+				{"name":"bug"},
+				{"name":"urgent"}
+			]
+		}
+	}`
+
+	eventData, err := ParseLinearWebhook([]byte(payload))
+	if err != nil {
+		t.Fatalf("ParseLinearWebhook() error = %v", err)
+	}
+
+	vars := ExtractLinearWorkItem(eventData)
+
+	if vars["State"] != "Todo" {
+		t.Errorf("ExtractLinearWorkItem() State = %v, want %v", vars["State"], "Todo")
+	}
+	if vars["Labels"] != "bug, urgent" {
+		t.Errorf("ExtractLinearWorkItem() Labels = %v, want %v", vars["Labels"], "bug, urgent")
+	}
+	if vars["ID"] != "issue-123" {
+		t.Errorf("ExtractLinearWorkItem() ID = %v, want %v", vars["ID"], "issue-123")
+	}
+	if vars["Title"] != "Test Issue" {
+		t.Errorf("ExtractLinearWorkItem() Title = %v, want %v", vars["Title"], "Test Issue")
+	}
+	if vars["Type"] != "Issue" {
+		t.Errorf("ExtractLinearWorkItem() Type = %v, want %v", vars["Type"], "Issue")
+	}
+	if vars["Action"] != "create" {
+		t.Errorf("ExtractLinearWorkItem() Action = %v, want %v", vars["Action"], "create")
+	}
+}
+
 func TestParseLinearWebhook(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -936,5 +978,33 @@ func TestParseLinearWebhook(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestParseLinearWebhook_StateAndLabels(t *testing.T) {
+	payload := `{
+		"type":"Issue",
+		"action":"create",
+		"data":{
+			"id":"issue-123",
+			"title":"Test issue",
+			"state":{"name":"Todo"},
+			"labels":[
+				{"name":"bug"},
+				{"name":"urgent"}
+			]
+		}
+	}`
+
+	got, err := ParseLinearWebhook([]byte(payload))
+	if err != nil {
+		t.Fatalf("ParseLinearWebhook() error = %v", err)
+	}
+
+	if got.State != "Todo" {
+		t.Errorf("ParseLinearWebhook() State = %v, want %v", got.State, "Todo")
+	}
+	if len(got.Labels) != 2 || got.Labels[0] != "bug" || got.Labels[1] != "urgent" {
+		t.Errorf("ParseLinearWebhook() Labels = %v, want [bug urgent]", got.Labels)
 	}
 }

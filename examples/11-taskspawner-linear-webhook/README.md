@@ -61,6 +61,9 @@ Linear webhook events provide template variables for task creation:
 - `{{.Action}}` - Webhook action (e.g., "create", "update", "remove")
 - `{{.ID}}` - Resource ID
 - `{{.Title}}` - Issue title (when available)
+- `{{.State}}` - Current workflow state name
+- `{{.Labels}}` - Comma-separated list of labels
+- `{{.IssueID}}` - Parent issue ID (Comment events only)
 - `{{.Payload}}` - Full webhook payload for accessing any field
 
 ### Raw Payload Access
@@ -144,7 +147,7 @@ Linear webhooks follow this general structure:
 - Linear will automatically retry failed webhook deliveries
 
 ### Idempotency
-- Webhook deliveries are tracked by `Linear-Delivery` header
+- Webhook deliveries are tracked by content hash for deduplication
 - Duplicate deliveries (e.g., retries) are ignored
 - Delivery cache entries expire after 24 hours
 
@@ -209,6 +212,5 @@ You can test webhook functionality using curl:
 curl -X POST https://your-kelos-instance.com/webhook/linear \
   -H "Content-Type: application/json" \
   -H "Linear-Signature: your-hmac-signature" \
-  -H "Linear-Delivery: test-delivery-123" \
   -d '{"type":"Issue","action":"create","data":{"id":"test-123","title":"Test Issue"}}'
 ```

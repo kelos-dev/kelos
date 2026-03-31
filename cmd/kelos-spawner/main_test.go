@@ -2328,7 +2328,7 @@ func TestRunOnce_ReturnsPollIntervalForSuspendedTaskSpawner(t *testing.T) {
 
 	cl, key := setupTest(t, ts)
 
-	interval, err := runOnce(context.Background(), cl, key, spawnerRuntimeConfig{})
+	interval, err := runOnce(context.Background(), cl, key, spawnerRuntimeConfig{}, nil)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -2373,7 +2373,7 @@ func TestRunOnce_UsesEnvTokenForReporting(t *testing.T) {
 		GitHubOwner:      "owner",
 		GitHubRepo:       "repo",
 		GitHubAPIBaseURL: server.URL,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -2579,11 +2579,70 @@ func TestRunOnce_ReturnsSourcePollInterval(t *testing.T) {
 
 	cl, key := setupTest(t, ts)
 
-	interval, err := runOnce(context.Background(), cl, key, spawnerRuntimeConfig{})
+	interval, err := runOnce(context.Background(), cl, key, spawnerRuntimeConfig{}, nil)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 	if interval != 15*time.Second {
 		t.Fatalf("Interval = %v, want %v", interval, 15*time.Second)
+	}
+}
+
+func TestRunOnce_UsesPersistentSource(t *testing.T) {
+	ts := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "slack-spawner",
+			Namespace: "default",
+			UID:       types.UID("slack-spawner-uid"),
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				Slack: &kelosv1alpha1.Slack{
+					SecretRef:    kelosv1alpha1.SecretReference{Name: "slack-creds"},
+					PollInterval: "10s",
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+				Credentials: kelosv1alpha1.Credentials{
+					Type:      kelosv1alpha1.CredentialTypeOAuth,
+					SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+				},
+				PromptTemplate: "{{.Body}}",
+			},
+		},
+	}
+
+	cl, key := setupTest(t, ts)
+
+	// Slack reporting requires SLACK_BOT_TOKEN in the environment.
+	t.Setenv("SLACK_BOT_TOKEN", "xoxb-test-token")
+
+	// Pass a fakeSource as the persistent source. This verifies that runOnce
+	// uses the provided source via runCycleWithSource rather than falling
+	// through to buildSourceWithProxy (which would fail for a Slack spawner
+	// with no SLACK_BOT_TOKEN env var set).
+	persistent := &fakeSource{items: []source.WorkItem{
+		{ID: "msg-1", Number: 1, Title: "user", Body: "hello", Kind: "SlackMessage"},
+	}}
+
+	interval, err := runOnce(context.Background(), cl, key, spawnerRuntimeConfig{}, persistent)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if interval != 10*time.Second {
+		t.Fatalf("Interval = %v, want %v", interval, 10*time.Second)
+	}
+
+	// Verify the work item was discovered and a Task was created.
+	var taskList kelosv1alpha1.TaskList
+	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatalf("Listing tasks: %v", err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task, got %d", len(taskList.Items))
+	}
+	if taskList.Items[0].Spec.Prompt != "hello" {
+		t.Fatalf("Task prompt = %q, want %q", taskList.Items[0].Spec.Prompt, "hello")
 	}
 }

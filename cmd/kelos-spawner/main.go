@@ -119,8 +119,37 @@ func main() {
 		HTTPClient:          httpClient,
 	}
 
+	// Check the TaskSpawner CRD to determine the source type. If the CRD
+	// specifies a Slack source, build a persistent SlackSource once at startup.
+	// Slack uses Socket Mode (a long-lived WebSocket), so the source must be
+	// reused across discovery cycles to accumulate events.
+	var persistentSrc source.Source
+	var ts kelosv1alpha1.TaskSpawner
+	// Retry the CRD fetch in case the TaskSpawner hasn't been created yet
+	// (e.g., race during initial deploy).
+	for attempt := 1; ; attempt++ {
+		if err := cl.Get(ctx, key, &ts); err == nil {
+			break
+		} else if attempt >= 5 {
+			log.Error(err, "fetching TaskSpawner to determine source type (giving up after retries)")
+			os.Exit(1)
+		} else {
+			log.Info("TaskSpawner not found, retrying", "attempt", attempt, "backoff", time.Duration(attempt)*time.Second)
+			time.Sleep(time.Duration(attempt) * time.Second)
+		}
+	}
+	if ts.Spec.When.Slack != nil {
+		persistentSrc = &source.SlackSource{
+			BotToken:       os.Getenv("SLACK_BOT_TOKEN"),
+			AppToken:       os.Getenv("SLACK_APP_TOKEN"),
+			TriggerCommand: slackTriggerCommand,
+			Channels:       parseCSV(slackChannels),
+			AllowedUsers:   parseCSV(slackAllowedUsers),
+		}
+	}
+
 	if oneShot {
-		if _, err := runOnce(ctx, cl, key, cfgArgs); err != nil {
+		if _, err := runOnce(ctx, cl, key, cfgArgs, persistentSrc); err != nil {
 			log.Error(err, "Cycle failed")
 			os.Exit(1)
 		}
@@ -143,9 +172,10 @@ func main() {
 	}
 
 	if err := (&spawnerReconciler{
-		Client: cl,
-		Key:    key,
-		Config: cfgArgs,
+		Client:           cl,
+		Key:              key,
+		Config:           cfgArgs,
+		persistentSource: persistentSrc,
 	}).SetupWithManager(mgr); err != nil {
 		log.Error(err, "Unable to create controller")
 		os.Exit(1)

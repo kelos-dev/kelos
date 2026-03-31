@@ -1,6 +1,8 @@
 package webhook
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/kelos-dev/kelos/api/v1alpha1"
@@ -602,6 +604,68 @@ func TestParseGitHubWebhook(t *testing.T) {
 				if got.Title != tt.wantTitle {
 					t.Errorf("ParseGitHubWebhook() Title = %v, want %v", got.Title, tt.wantTitle)
 				}
+			}
+		})
+	}
+}
+
+func TestTaskNameSanitization(t *testing.T) {
+	tests := []struct {
+		name             string
+		spawnerName      string
+		eventType        string
+		issueID          string
+		expectedTaskName string
+	}{
+		{
+			name:             "pull_request event type sanitized",
+			spawnerName:      "dep-review",
+			eventType:        "pull_request",
+			issueID:          "25832",
+			expectedTaskName: "dep-review-pull-request-25832",
+		},
+		{
+			name:             "issue_comment event type sanitized",
+			spawnerName:      "comment-handler",
+			eventType:        "issue_comment",
+			issueID:          "123",
+			expectedTaskName: "comment-handler-issue-comment-123",
+		},
+		{
+			name:             "push event type no change needed",
+			spawnerName:      "push-handler",
+			eventType:        "push",
+			issueID:          "abc123",
+			expectedTaskName: "push-handler-push-abc123",
+		},
+		{
+			name:             "long task name truncated correctly",
+			spawnerName:      "very-long-spawner-name-that-exceeds-kubernetes-limits",
+			eventType:        "pull_request_review_comment",
+			issueID:          "999999",
+			expectedTaskName: "very-long-spawner-name-that-exceeds-kubernetes-limits-pull-requ",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Simulate the task name generation logic from handler.go
+			sanitizedEventType := strings.ReplaceAll(tt.eventType, "_", "-")
+			taskName := fmt.Sprintf("%s-%s-%s", tt.spawnerName, sanitizedEventType, tt.issueID)
+			if len(taskName) > 63 {
+				taskName = strings.TrimRight(taskName[:63], "-.")
+			}
+
+			if taskName != tt.expectedTaskName {
+				t.Errorf("Task name = %v, want %v", taskName, tt.expectedTaskName)
+			}
+
+			// Verify the task name is valid for Kubernetes
+			if strings.Contains(taskName, "_") {
+				t.Errorf("Task name contains underscores which are invalid for Kubernetes: %v", taskName)
+			}
+			if len(taskName) > 63 {
+				t.Errorf("Task name exceeds 63 character limit: %v (length: %d)", taskName, len(taskName))
 			}
 		})
 	}

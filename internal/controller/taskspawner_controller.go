@@ -974,7 +974,7 @@ func initContainersEqual(a, b []corev1.Container) bool {
 	for i := range a {
 		if a[i].Name != b[i].Name ||
 			a[i].Image != b[i].Image ||
-			a[i].ImagePullPolicy != b[i].ImagePullPolicy ||
+			!pullPolicyEqual(a[i].ImagePullPolicy, b[i].ImagePullPolicy) ||
 			!reflect.DeepEqual(a[i].RestartPolicy, b[i].RestartPolicy) ||
 			!equalEnvVars(a[i].Env, b[i].Env) ||
 			!reflect.DeepEqual(a[i].VolumeMounts, b[i].VolumeMounts) ||
@@ -983,6 +983,17 @@ func initContainersEqual(a, b []corev1.Container) bool {
 		}
 	}
 	return true
+}
+
+// pullPolicyEqual returns true when both policies are the same, treating an
+// empty value as "API-server decides". When either side is empty the comparison
+// is skipped because the API server fills in a concrete policy (Always,
+// IfNotPresent) that would never match the empty desired value.
+func pullPolicyEqual(a, b corev1.PullPolicy) bool {
+	if a == "" || b == "" {
+		return true
+	}
+	return a == b
 }
 
 // volumesEqual compares volume slices by checking only the fields the builder

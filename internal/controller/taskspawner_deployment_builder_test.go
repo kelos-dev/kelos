@@ -3085,6 +3085,23 @@ func TestInitContainersEqual_IgnoresKubernetesDefaults(t *testing.T) {
 	}
 }
 
+func TestInitContainersEqual_IgnoresAPIDefaultedPullPolicy(t *testing.T) {
+	// desired: builder leaves ImagePullPolicy empty (Helm default)
+	desired := []corev1.Container{{
+		Name:  "token-refresher",
+		Image: "ghcr.io/kelos-dev/kelos-token-refresher:main",
+	}}
+	// actual: API server filled in "Always"
+	actual := []corev1.Container{{
+		Name:            "token-refresher",
+		Image:           "ghcr.io/kelos-dev/kelos-token-refresher:main",
+		ImagePullPolicy: corev1.PullAlways,
+	}}
+	if !initContainersEqual(actual, desired) {
+		t.Fatal("should treat empty desired pull policy as matching any API-defaulted value")
+	}
+}
+
 func TestInitContainersEqual_DetectsRealChanges(t *testing.T) {
 	a := []corev1.Container{{Name: "refresher", Image: "img:v1"}}
 	b := []corev1.Container{{Name: "refresher", Image: "img:v2"}}

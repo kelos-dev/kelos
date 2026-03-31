@@ -3012,3 +3012,142 @@ func TestReconcileDeployment_KeepsDeploymentWithNewLabels(t *testing.T) {
 		t.Errorf("expected kelos.dev/component label in selector")
 	}
 }
+
+func TestDeploymentBuilder_Slack(t *testing.T) {
+	builder := NewDeploymentBuilder()
+	ts := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-spawner",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				Slack: &kelosv1alpha1.Slack{
+					SecretRef:      kelosv1alpha1.SecretReference{Name: "slack-creds"},
+					TriggerCommand: "/kelos",
+					Channels:       []string{"C123", "C456"},
+					AllowedUsers:   []string{"U001", "U002"},
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+			},
+		},
+	}
+
+	deploy := builder.Build(ts, nil, false)
+
+	if len(deploy.Spec.Template.Spec.Containers) != 1 {
+		t.Fatalf("expected 1 container, got %d", len(deploy.Spec.Template.Spec.Containers))
+	}
+
+	spawner := deploy.Spec.Template.Spec.Containers[0]
+
+	// Check Slack args
+	foundTriggerCommand := false
+	foundChannels := false
+	foundAllowedUsers := false
+	for _, arg := range spawner.Args {
+		switch {
+		case arg == "--slack-trigger-command=/kelos":
+			foundTriggerCommand = true
+		case arg == "--slack-channels=C123,C456":
+			foundChannels = true
+		case arg == "--slack-allowed-users=U001,U002":
+			foundAllowedUsers = true
+		}
+	}
+	if !foundTriggerCommand {
+		t.Errorf("expected --slack-trigger-command arg, got args: %v", spawner.Args)
+	}
+	if !foundChannels {
+		t.Errorf("expected --slack-channels arg, got args: %v", spawner.Args)
+	}
+	if !foundAllowedUsers {
+		t.Errorf("expected --slack-allowed-users arg, got args: %v", spawner.Args)
+	}
+
+	// Check env vars
+	envMap := make(map[string]corev1.EnvVar)
+	for _, env := range spawner.Env {
+		envMap[env.Name] = env
+	}
+
+	botToken, ok := envMap["SLACK_BOT_TOKEN"]
+	if !ok {
+		t.Fatal("expected SLACK_BOT_TOKEN env var")
+	}
+	if botToken.ValueFrom == nil || botToken.ValueFrom.SecretKeyRef == nil {
+		t.Fatal("expected SLACK_BOT_TOKEN to reference a secret")
+	}
+	if botToken.ValueFrom.SecretKeyRef.Name != "slack-creds" {
+		t.Errorf("SLACK_BOT_TOKEN secret name = %q, want %q", botToken.ValueFrom.SecretKeyRef.Name, "slack-creds")
+	}
+	if botToken.ValueFrom.SecretKeyRef.Key != "SLACK_BOT_TOKEN" {
+		t.Errorf("SLACK_BOT_TOKEN secret key = %q, want %q", botToken.ValueFrom.SecretKeyRef.Key, "SLACK_BOT_TOKEN")
+	}
+
+	appToken, ok := envMap["SLACK_APP_TOKEN"]
+	if !ok {
+		t.Fatal("expected SLACK_APP_TOKEN env var")
+	}
+	if appToken.ValueFrom == nil || appToken.ValueFrom.SecretKeyRef == nil {
+		t.Fatal("expected SLACK_APP_TOKEN to reference a secret")
+	}
+	if appToken.ValueFrom.SecretKeyRef.Name != "slack-creds" {
+		t.Errorf("SLACK_APP_TOKEN secret name = %q, want %q", appToken.ValueFrom.SecretKeyRef.Name, "slack-creds")
+	}
+	if appToken.ValueFrom.SecretKeyRef.Key != "SLACK_APP_TOKEN" {
+		t.Errorf("SLACK_APP_TOKEN secret key = %q, want %q", appToken.ValueFrom.SecretKeyRef.Key, "SLACK_APP_TOKEN")
+	}
+}
+
+func TestDeploymentBuilder_SlackMinimal(t *testing.T) {
+	builder := NewDeploymentBuilder()
+	ts := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-spawner",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				Slack: &kelosv1alpha1.Slack{
+					SecretRef: kelosv1alpha1.SecretReference{Name: "slack-creds"},
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+			},
+		},
+	}
+
+	deploy := builder.Build(ts, nil, false)
+
+	if len(deploy.Spec.Template.Spec.Containers) != 1 {
+		t.Fatalf("expected 1 container, got %d", len(deploy.Spec.Template.Spec.Containers))
+	}
+
+	spawner := deploy.Spec.Template.Spec.Containers[0]
+
+	// Verify no optional args are present
+	for _, arg := range spawner.Args {
+		if strings.HasPrefix(arg, "--slack-trigger-command") ||
+			strings.HasPrefix(arg, "--slack-channels") ||
+			strings.HasPrefix(arg, "--slack-allowed-users") {
+			t.Errorf("unexpected Slack arg in minimal config: %s", arg)
+		}
+	}
+
+	// Env vars should still be present (tokens are always required)
+	envMap := make(map[string]corev1.EnvVar)
+	for _, env := range spawner.Env {
+		envMap[env.Name] = env
+	}
+
+	if _, ok := envMap["SLACK_BOT_TOKEN"]; !ok {
+		t.Error("expected SLACK_BOT_TOKEN env var even in minimal config")
+	}
+	if _, ok := envMap["SLACK_APP_TOKEN"]; !ok {
+		t.Error("expected SLACK_APP_TOKEN env var even in minimal config")
+	}
+}

@@ -118,6 +118,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 				"--taskspawner-namespace="+ns.Name,
 				"--github-owner=kelos-dev",
 				"--github-repo=kelos",
+				"--gh-proxy-url="+controller.WorkspaceGHProxyServiceURL(ns.Name, "test-workspace"),
 			))
 
 			By("Verifying the ServiceAccount")
@@ -193,7 +194,9 @@ var _ = Describe("TaskSpawner Controller", func() {
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
 					When: kelosv1alpha1.When{
-						GitHubIssues: &kelosv1alpha1.GitHubIssues{},
+						GitHubIssues: &kelosv1alpha1.GitHubIssues{
+							Reporting: &kelosv1alpha1.GitHubReporting{Enabled: true},
+						},
 					},
 					TaskTemplate: kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
@@ -794,7 +797,8 @@ var _ = Describe("TaskSpawner Controller", func() {
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
 					When: kelosv1alpha1.When{
 						GitHubIssues: &kelosv1alpha1.GitHubIssues{
-							State: "open",
+							State:     "open",
+							Reporting: &kelosv1alpha1.GitHubReporting{Enabled: true},
 						},
 					},
 					TaskTemplate: kelosv1alpha1.TaskTemplate{
@@ -1541,7 +1545,9 @@ var _ = Describe("TaskSpawner Controller", func() {
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
 					When: kelosv1alpha1.When{
-						GitHubIssues: &kelosv1alpha1.GitHubIssues{},
+						GitHubIssues: &kelosv1alpha1.GitHubIssues{
+							Reporting: &kelosv1alpha1.GitHubReporting{Enabled: true},
+						},
 					},
 					TaskTemplate: kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
@@ -1679,7 +1685,9 @@ var _ = Describe("TaskSpawner Controller", func() {
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
 					When: kelosv1alpha1.When{
-						GitHubIssues: &kelosv1alpha1.GitHubIssues{},
+						GitHubIssues: &kelosv1alpha1.GitHubIssues{
+							Reporting: &kelosv1alpha1.GitHubReporting{Enabled: true},
+						},
 					},
 					TaskTemplate: kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",
@@ -1825,7 +1833,9 @@ var _ = Describe("TaskSpawner Controller", func() {
 				},
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
 					When: kelosv1alpha1.When{
-						GitHubIssues: &kelosv1alpha1.GitHubIssues{},
+						GitHubIssues: &kelosv1alpha1.GitHubIssues{
+							Reporting: &kelosv1alpha1.GitHubReporting{Enabled: true},
+						},
 					},
 					TaskTemplate: kelosv1alpha1.TaskTemplate{
 						Type: "claude-code",

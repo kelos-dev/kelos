@@ -53,14 +53,15 @@ jobs:
         run: |
           bin/kelos install --version main --image-pull-policy Always \
             --spawner-resource-requests cpu=100m,memory=128Mi \
+            --ghproxy-resource-requests cpu=10m,memory=64Mi \
             --token-refresher-resource-requests cpu=50m,memory=64Mi \
             --controller-resource-requests cpu=10m,memory=64Mi \
             --controller-resource-limits cpu=500m,memory=128Mi
           kubectl rollout restart deployment/kelos-controller-manager -n kelos-system
           kubectl rollout status deployment/kelos-controller-manager -n kelos-system --timeout=120s
-          kubectl rollout restart deployment/ghproxy -n kelos-system
-          kubectl rollout status deployment/ghproxy -n kelos-system --timeout=120s
+          kubectl rollout restart deployment -l kelos.dev/component=ghproxy -n "${KELOS_NAMESPACE}"
           kubectl rollout restart deployment -l kelos.dev/component=spawner -n "${KELOS_NAMESPACE}"
+          kubectl rollout status deployment -l kelos.dev/component=ghproxy -n "${KELOS_NAMESPACE}" --timeout=120s
           kubectl rollout status deployment -l kelos.dev/component=spawner -n "${KELOS_NAMESPACE}" --timeout=120s
 
       - name: Apply PodMonitoring
@@ -107,13 +108,15 @@ jobs:
           kind: PodMonitoring
           metadata:
             name: ghproxy
-            namespace: kelos-system
+            namespace: ${KELOS_NAMESPACE}
             labels:
-              app.kubernetes.io/name: ghproxy
+              kelos.dev/name: kelos
+              kelos.dev/component: ghproxy
           spec:
             selector:
               matchLabels:
-                app.kubernetes.io/name: ghproxy
+                kelos.dev/name: kelos
+                kelos.dev/component: ghproxy
             endpoints:
               - port: metrics
                 interval: 30s

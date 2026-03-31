@@ -261,6 +261,30 @@ func (r *TaskSpawnerReconciler) reconcileDeployment(ctx context.Context, req ctr
 			}
 		}
 	}
+	if err := validateWorkspaceGHProxyRepoOverride(ts, workspace); err != nil {
+		if deployExists {
+			if deleteErr := r.Delete(ctx, &deploy); deleteErr != nil && !apierrors.IsNotFound(deleteErr) {
+				logger.Error(deleteErr, "Unable to delete Deployment for invalid repo override", "deployment", deploy.Name)
+				return ctrl.Result{}, deleteErr
+			}
+			deployExists = false
+		}
+		r.recordEvent(ts, corev1.EventTypeWarning, "InvalidGitHubRepoOverride", "%s", err.Error())
+		if statusErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			if getErr := r.Get(ctx, req.NamespacedName, ts); getErr != nil {
+				return getErr
+			}
+			ts.Status.Phase = kelosv1alpha1.TaskSpawnerPhaseFailed
+			ts.Status.Message = err.Error()
+			ts.Status.DeploymentName = ""
+			ts.Status.CronJobName = ""
+			return r.Status().Update(ctx, ts)
+		}); statusErr != nil {
+			logger.Error(statusErr, "Unable to update TaskSpawner status for invalid repo override")
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{}, nil
+	}
 
 	// Determine desired replica count based on suspend state
 	desiredReplicas := int32(1)
@@ -373,6 +397,30 @@ func (r *TaskSpawnerReconciler) reconcileCronJob(ctx context.Context, req ctrl.R
 				}
 			}
 		}
+	}
+	if err := validateWorkspaceGHProxyRepoOverride(ts, workspace); err != nil {
+		if cronJobExists {
+			if deleteErr := r.Delete(ctx, &cronJob); deleteErr != nil && !apierrors.IsNotFound(deleteErr) {
+				logger.Error(deleteErr, "Unable to delete CronJob for invalid repo override", "cronJob", cronJob.Name)
+				return ctrl.Result{}, deleteErr
+			}
+			cronJobExists = false
+		}
+		r.recordEvent(ts, corev1.EventTypeWarning, "InvalidGitHubRepoOverride", "%s", err.Error())
+		if statusErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			if getErr := r.Get(ctx, req.NamespacedName, ts); getErr != nil {
+				return getErr
+			}
+			ts.Status.Phase = kelosv1alpha1.TaskSpawnerPhaseFailed
+			ts.Status.Message = err.Error()
+			ts.Status.DeploymentName = ""
+			ts.Status.CronJobName = ""
+			return r.Status().Update(ctx, ts)
+		}); statusErr != nil {
+			logger.Error(statusErr, "Unable to update TaskSpawner status for invalid repo override")
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{}, nil
 	}
 
 	if !cronJobExists {

@@ -30,8 +30,6 @@ import (
 	"github.com/kelos-dev/kelos/internal/taskbuilder"
 )
 
-const ghProxyURL = "http://ghproxy.kelos-system:8888"
-
 var scheme = runtime.NewScheme()
 
 func init() {
@@ -44,6 +42,7 @@ func main() {
 	var namespace string
 	var githubOwner string
 	var githubRepo string
+	var ghProxyURL string
 	var githubAPIBaseURL string
 	var githubTokenFile string
 	var jiraBaseURL string
@@ -55,6 +54,7 @@ func main() {
 	flag.StringVar(&namespace, "taskspawner-namespace", "", "Namespace of the TaskSpawner")
 	flag.StringVar(&githubOwner, "github-owner", "", "GitHub repository owner")
 	flag.StringVar(&githubRepo, "github-repo", "", "GitHub repository name")
+	flag.StringVar(&ghProxyURL, "gh-proxy-url", "", "Workspace ghproxy base URL for GitHub read requests")
 	flag.StringVar(&githubAPIBaseURL, "github-api-base-url", "", "GitHub API base URL for enterprise servers (e.g. https://github.example.com/api/v3)")
 	flag.StringVar(&githubTokenFile, "github-token-file", "", "Path to file containing GitHub token (refreshed by sidecar)")
 	flag.StringVar(&jiraBaseURL, "jira-base-url", "", "Jira instance base URL (e.g. https://mycompany.atlassian.net)")
@@ -96,15 +96,7 @@ func main() {
 
 	log.Info("Starting spawner", "taskspawner", key, "oneShot", oneShot)
 
-	upstreamURL := githubAPIBaseURL
-	if upstreamURL == "" {
-		upstreamURL = "https://api.github.com"
-	}
-	transport := source.NewUpstreamHeaderTransport(
-		source.NewMetricsTransport(http.DefaultTransport),
-		upstreamURL,
-	)
-	httpClient := &http.Client{Transport: transport}
+	httpClient := &http.Client{Transport: source.NewMetricsTransport(http.DefaultTransport)}
 
 	cfgArgs := spawnerRuntimeConfig{
 		GitHubOwner:      githubOwner,
@@ -179,8 +171,12 @@ func runReportingCycle(ctx context.Context, cl client.Client, key types.Namespac
 }
 
 func runCycle(ctx context.Context, cl client.Client, key types.NamespacedName, githubOwner, githubRepo, githubAPIBaseURL, githubTokenFile, jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) error {
+	return runCycleWithProxy(ctx, cl, key, githubOwner, githubRepo, "", githubAPIBaseURL, githubTokenFile, jiraBaseURL, jiraProject, jiraJQL, httpClient)
+}
+
+func runCycleWithProxy(ctx context.Context, cl client.Client, key types.NamespacedName, githubOwner, githubRepo, ghProxyURL, githubAPIBaseURL, githubTokenFile, jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) error {
 	start := time.Now()
-	err := runCycleCore(ctx, cl, key, githubOwner, githubRepo, githubAPIBaseURL, githubTokenFile, jiraBaseURL, jiraProject, jiraJQL, httpClient)
+	err := runCycleCore(ctx, cl, key, githubOwner, githubRepo, ghProxyURL, githubAPIBaseURL, githubTokenFile, jiraBaseURL, jiraProject, jiraJQL, httpClient)
 	discoveryDurationSeconds.Observe(time.Since(start).Seconds())
 	if err != nil {
 		discoveryErrorsTotal.Inc()
@@ -188,13 +184,13 @@ func runCycle(ctx context.Context, cl client.Client, key types.NamespacedName, g
 	return err
 }
 
-func runCycleCore(ctx context.Context, cl client.Client, key types.NamespacedName, githubOwner, githubRepo, githubAPIBaseURL, githubTokenFile, jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) error {
+func runCycleCore(ctx context.Context, cl client.Client, key types.NamespacedName, githubOwner, githubRepo, ghProxyURL, githubAPIBaseURL, githubTokenFile, jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) error {
 	var ts kelosv1alpha1.TaskSpawner
 	if err := cl.Get(ctx, key, &ts); err != nil {
 		return fmt.Errorf("fetching TaskSpawner: %w", err)
 	}
 
-	src, err := buildSource(&ts, githubOwner, githubRepo, githubAPIBaseURL, githubTokenFile, jiraBaseURL, jiraProject, jiraJQL, httpClient)
+	src, err := buildSourceWithProxy(&ts, githubOwner, githubRepo, ghProxyURL, githubAPIBaseURL, githubTokenFile, jiraBaseURL, jiraProject, jiraJQL, httpClient)
 	if err != nil {
 		return fmt.Errorf("building source: %w", err)
 	}
@@ -528,15 +524,25 @@ func resolveGitHubCommentPolicy(policy *kelosv1alpha1.GitHubCommentPolicy, legac
 }
 
 func buildSource(ts *kelosv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFile, jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) (source.Source, error) {
+	return buildSourceWithProxy(ts, owner, repo, "", apiBaseURL, tokenFile, jiraBaseURL, jiraProject, jiraJQL, httpClient)
+}
+
+func buildSourceWithProxy(ts *kelosv1alpha1.TaskSpawner, owner, repo, ghProxyURL, apiBaseURL, tokenFile, jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) (source.Source, error) {
 	if ts.Spec.When.GitHubIssues != nil {
 		gh := ts.Spec.When.GitHubIssues
-		token, err := readGitHubToken(tokenFile)
-		if err != nil {
-			return nil, err
-		}
 		commentPolicy, err := resolveGitHubCommentPolicy(gh.CommentPolicy, gh.TriggerComment, gh.ExcludeComments)
 		if err != nil {
 			return nil, err
+		}
+		baseURL := apiBaseURL
+		token := ""
+		if ghProxyURL != "" {
+			baseURL = ghProxyURL
+		} else {
+			token, err = readGitHubToken(tokenFile)
+			if err != nil {
+				return nil, err
+			}
 		}
 		return &source.GitHubSource{
 			Owner:             owner,
@@ -548,7 +554,7 @@ func buildSource(ts *kelosv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFi
 			Assignee:          gh.Assignee,
 			Author:            gh.Author,
 			Token:             token,
-			BaseURL:           apiBaseURL,
+			BaseURL:           baseURL,
 			Client:            httpClient,
 			TriggerComment:    commentPolicy.TriggerComment,
 			ExcludeComments:   commentPolicy.ExcludeComments,
@@ -561,13 +567,19 @@ func buildSource(ts *kelosv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFi
 
 	if ts.Spec.When.GitHubPullRequests != nil {
 		gh := ts.Spec.When.GitHubPullRequests
-		token, err := readGitHubToken(tokenFile)
-		if err != nil {
-			return nil, err
-		}
 		commentPolicy, err := resolveGitHubCommentPolicy(gh.CommentPolicy, gh.TriggerComment, gh.ExcludeComments)
 		if err != nil {
 			return nil, err
+		}
+		baseURL := apiBaseURL
+		token := ""
+		if ghProxyURL != "" {
+			baseURL = ghProxyURL
+		} else {
+			token, err = readGitHubToken(tokenFile)
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		return &source.GitHubPullRequestSource{
@@ -578,7 +590,7 @@ func buildSource(ts *kelosv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFi
 			State:             gh.State,
 			Author:            gh.Author,
 			Token:             token,
-			BaseURL:           apiBaseURL,
+			BaseURL:           baseURL,
 			Client:            httpClient,
 			ReviewState:       gh.ReviewState,
 			TriggerComment:    commentPolicy.TriggerComment,

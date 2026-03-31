@@ -53,6 +53,10 @@ func main() {
 	var spawnerImagePullPolicy string
 	var spawnerResourceRequests string
 	var spawnerResourceLimits string
+	var ghProxyImage string
+	var ghProxyImagePullPolicy string
+	var ghProxyResourceRequests string
+	var ghProxyResourceLimits string
 	var tokenRefresherImage string
 	var tokenRefresherImagePullPolicy string
 	var tokenRefresherResourceRequests string
@@ -80,6 +84,10 @@ func main() {
 	flag.StringVar(&spawnerImagePullPolicy, "spawner-image-pull-policy", "", "The image pull policy for spawner Deployments (e.g., Always, Never, IfNotPresent).")
 	flag.StringVar(&spawnerResourceRequests, "spawner-resource-requests", "", "Resource requests for spawner containers as comma-separated name=value pairs (e.g., cpu=250m,memory=512Mi).")
 	flag.StringVar(&spawnerResourceLimits, "spawner-resource-limits", "", "Resource limits for spawner containers as comma-separated name=value pairs (e.g., cpu=1,memory=1Gi).")
+	flag.StringVar(&ghProxyImage, "ghproxy-image", controller.DefaultGHProxyImage, "The image to use for workspace ghproxy Deployments.")
+	flag.StringVar(&ghProxyImagePullPolicy, "ghproxy-image-pull-policy", "", "The image pull policy for workspace ghproxy Deployments (e.g., Always, Never, IfNotPresent).")
+	flag.StringVar(&ghProxyResourceRequests, "ghproxy-resource-requests", "", "Resource requests for workspace ghproxy containers as comma-separated name=value pairs (e.g., cpu=50m,memory=64Mi).")
+	flag.StringVar(&ghProxyResourceLimits, "ghproxy-resource-limits", "", "Resource limits for workspace ghproxy containers as comma-separated name=value pairs (e.g., cpu=200m,memory=128Mi).")
 	flag.StringVar(&tokenRefresherImage, "token-refresher-image", controller.DefaultTokenRefresherImage, "The image to use for the token refresher sidecar.")
 	flag.StringVar(&tokenRefresherImagePullPolicy, "token-refresher-image-pull-policy", "", "The image pull policy for the token refresher sidecar (e.g., Always, Never, IfNotPresent).")
 	flag.StringVar(&tokenRefresherResourceRequests, "token-refresher-resource-requests", "", "Resource requests for token refresher sidecars as comma-separated name=value pairs (e.g., cpu=100m,memory=128Mi).")
@@ -114,6 +122,23 @@ func main() {
 		spawnerResources = &corev1.ResourceRequirements{
 			Requests: requests,
 			Limits:   limits,
+		}
+	}
+	var ghProxyResources *corev1.ResourceRequirements
+	ghProxyRequests, err := controller.ParseResourceList(ghProxyResourceRequests)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing --ghproxy-resource-requests: %v\n", err)
+		os.Exit(1)
+	}
+	ghProxyLimits, err := controller.ParseResourceList(ghProxyResourceLimits)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing --ghproxy-resource-limits: %v\n", err)
+		os.Exit(1)
+	}
+	if ghProxyRequests != nil || ghProxyLimits != nil {
+		ghProxyResources = &corev1.ResourceRequirements{
+			Requests: ghProxyRequests,
+			Limits:   ghProxyLimits,
 		}
 	}
 	var tokenRefresherResources *corev1.ResourceRequirements
@@ -214,6 +239,22 @@ func main() {
 	deploymentBuilder.TokenRefresherImage = tokenRefresherImage
 	deploymentBuilder.TokenRefresherImagePullPolicy = corev1.PullPolicy(tokenRefresherImagePullPolicy)
 	deploymentBuilder.TokenRefresherResources = tokenRefresherResources
+	workspaceProxyBuilder := controller.NewWorkspaceGHProxyBuilder()
+	workspaceProxyBuilder.GHProxyImage = ghProxyImage
+	workspaceProxyBuilder.GHProxyImagePullPolicy = corev1.PullPolicy(ghProxyImagePullPolicy)
+	workspaceProxyBuilder.GHProxyResources = ghProxyResources
+	workspaceProxyBuilder.TokenRefresherImage = tokenRefresherImage
+	workspaceProxyBuilder.TokenRefresherImagePullPolicy = corev1.PullPolicy(tokenRefresherImagePullPolicy)
+	workspaceProxyBuilder.TokenRefresherResources = tokenRefresherResources
+	if err = (&controller.WorkspaceReconciler{
+		Client:       mgr.GetClient(),
+		Scheme:       mgr.GetScheme(),
+		ProxyBuilder: workspaceProxyBuilder,
+		Recorder:     mgr.GetEventRecorderFor("kelos-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Workspace")
+		os.Exit(1)
+	}
 	if err = (&controller.TaskSpawnerReconciler{
 		Client:            mgr.GetClient(),
 		Scheme:            mgr.GetScheme(),

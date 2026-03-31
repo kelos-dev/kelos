@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -32,7 +34,7 @@ func TestProxy_ServesFreshCacheWithoutRevalidating(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p := newProxy([]string{upstream.URL}, time.Minute)
+	p := newProxy(upstream.URL, time.Minute, nil)
 	p.now = func() time.Time { return now }
 	proxyServer := httptest.NewServer(p)
 	defer proxyServer.Close()
@@ -87,7 +89,7 @@ func TestProxy_RevalidatesStaleGETWithETag(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p := newProxy([]string{upstream.URL}, time.Second)
+	p := newProxy(upstream.URL, time.Second, nil)
 	p.now = func() time.Time { return now }
 	proxyServer := httptest.NewServer(p)
 	defer proxyServer.Close()
@@ -129,25 +131,20 @@ func TestProxy_RevalidatesStaleGETWithETag(t *testing.T) {
 func TestProxy_SeparatesCacheByUpstream(t *testing.T) {
 	var hits atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("If-None-Match") != "" {
-			w.WriteHeader(http.StatusNotModified)
-			return
-		}
 		hits.Add(1)
 		w.Header().Set("ETag", `"e1"`)
 		w.Header().Set("Content-Type", "application/json")
-		// Differentiate by the upstream header the proxy forwards.
-		w.Write([]byte(`{"hit":` + fmt.Sprintf("%d", hits.Load()) + `}`))
+		w.Write([]byte(`{"hit":1}`))
 	}))
 	defer upstream.Close()
 
-	p := newProxy([]string{upstream.URL + "/public", upstream.URL + "/enterprise"}, time.Minute)
+	p := newProxy(upstream.URL, time.Minute, func() string { return "" })
 	proxyServer := httptest.NewServer(p)
 	defer proxyServer.Close()
 
-	doGET := func(upstreamURL string) {
+	doGET := func() {
 		req, _ := http.NewRequest("GET", proxyServer.URL+"/repos/owner/repo", nil)
-		req.Header.Set(source.UpstreamBaseURLHeader, upstreamURL)
+		req.Header.Set(source.UpstreamBaseURLHeader, "https://ignored.example.com")
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -155,12 +152,10 @@ func TestProxy_SeparatesCacheByUpstream(t *testing.T) {
 		resp.Body.Close()
 	}
 
-	// Two different upstream headers for the same path should produce
-	// two separate cache entries (2 upstream hits).
-	doGET(upstream.URL + "/public")
-	doGET(upstream.URL + "/enterprise")
-	if hits.Load() != 2 {
-		t.Fatalf("expected 2 upstream hits for different upstreams, got %d", hits.Load())
+	doGET()
+	doGET()
+	if hits.Load() != 1 {
+		t.Fatalf("expected 1 upstream hit with fixed configured upstream, got %d", hits.Load())
 	}
 }
 
@@ -173,7 +168,7 @@ func TestProxy_PassesThroughNonGET(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p := newProxy([]string{upstream.URL}, time.Minute)
+	p := newProxy(upstream.URL, time.Minute, nil)
 	proxyServer := httptest.NewServer(p)
 	defer proxyServer.Close()
 
@@ -193,10 +188,9 @@ func TestProxy_PassesThroughNonGET(t *testing.T) {
 	}
 }
 
-func TestProxy_DefaultUpstream(t *testing.T) {
-	// Verify that the cache key includes the default upstream.
-	key := cacheKey(defaultUpstream, "/repos/owner/repo", "")
-	if key != "https://api.github.com|/repos/owner/repo|" {
+func TestProxy_CacheKeyFormat(t *testing.T) {
+	key := cacheKey("/repos/owner/repo", "")
+	if key != "/repos/owner/repo|" {
 		t.Fatalf("unexpected cache key: %s", key)
 	}
 }
@@ -212,7 +206,7 @@ func TestProxy_RewritesLinkHeader(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p := newProxy([]string{upstream.URL}, time.Minute)
+	p := newProxy(upstream.URL, time.Minute, nil)
 	proxyServer := httptest.NewServer(p)
 	defer proxyServer.Close()
 
@@ -247,7 +241,7 @@ func TestProxy_CachedResponsePreservesLinkHeader(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p := newProxy([]string{upstream.URL}, 0)
+	p := newProxy(upstream.URL, 0, nil)
 	proxyServer := httptest.NewServer(p)
 	defer proxyServer.Close()
 
@@ -282,37 +276,20 @@ func TestProxy_CachedResponsePreservesLinkHeader(t *testing.T) {
 	}
 }
 
-func TestProxy_RejectsDisallowedUpstream(t *testing.T) {
-	p := newProxy([]string{"https://api.github.com"}, time.Minute)
-	proxyServer := httptest.NewServer(p)
-	defer proxyServer.Close()
-
-	req, _ := http.NewRequest("GET", proxyServer.URL+"/repos/owner/repo", nil)
-	req.Header.Set(source.UpstreamBaseURLHeader, "https://evil.example.com")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("expected 403 for disallowed upstream, got %d", resp.StatusCode)
-	}
-}
-
-func TestProxy_AllowsConfiguredUpstream(t *testing.T) {
+func TestProxy_UsesConfiguredStaticToken(t *testing.T) {
+	var authHeader string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader = r.Header.Get("Authorization")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"ok":true}`))
 	}))
 	defer upstream.Close()
 
-	p := newProxy([]string{"https://api.github.com", upstream.URL}, time.Minute)
+	p := newProxy(upstream.URL, time.Minute, func() string { return "static-token" })
 	proxyServer := httptest.NewServer(p)
 	defer proxyServer.Close()
 
 	req, _ := http.NewRequest("GET", proxyServer.URL+"/repos/owner/repo", nil)
-	req.Header.Set(source.UpstreamBaseURLHeader, upstream.URL)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -320,18 +297,55 @@ func TestProxy_AllowsConfiguredUpstream(t *testing.T) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200 for allowed upstream, got %d", resp.StatusCode)
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if authHeader != "token static-token" {
+		t.Fatalf("expected static token auth header, got %q", authHeader)
 	}
 }
 
-func TestCacheKeyVariesByAcceptNotAuthorization(t *testing.T) {
-	key1 := cacheKey(defaultUpstream, "/repos/o/r/issues", "application/json")
-	key2 := cacheKey(defaultUpstream, "/repos/o/r/issues", "application/vnd.github.raw+json")
+func TestProxy_UsesTokenFile(t *testing.T) {
+	var authHeader string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstream.Close()
+
+	tmpDir := t.TempDir()
+	tokenFile := filepath.Join(tmpDir, "token")
+	if err := os.WriteFile(tokenFile, []byte("file-token\n"), 0o600); err != nil {
+		t.Fatalf("writing token file: %v", err)
+	}
+
+	p := newProxy(upstream.URL, time.Minute, newTokenResolver("", tokenFile))
+	proxyServer := httptest.NewServer(p)
+	defer proxyServer.Close()
+
+	req, _ := http.NewRequest("GET", proxyServer.URL+"/repos/owner/repo", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if authHeader != "token file-token" {
+		t.Fatalf("expected token file auth header, got %q", authHeader)
+	}
+}
+
+func TestCacheKeyVariesByAccept(t *testing.T) {
+	key1 := cacheKey("/repos/o/r/issues", "application/json")
+	key2 := cacheKey("/repos/o/r/issues", "application/vnd.github.raw+json")
 
 	if key1 == key2 {
 		t.Fatal("expected cache key to vary by Accept header")
 	}
-	if key1 != cacheKey(defaultUpstream, "/repos/o/r/issues", "application/json") {
+	if key1 != cacheKey("/repos/o/r/issues", "application/json") {
 		t.Fatal("expected cache key to be stable for identical inputs")
 	}
 }
@@ -348,7 +362,7 @@ func TestProxy_LogsCacheMiss(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p := newProxy([]string{upstream.URL}, time.Minute)
+	p := newProxy(upstream.URL, time.Minute, nil)
 	p.now = func() time.Time { return now }
 	proxyServer := httptest.NewServer(p)
 	defer proxyServer.Close()

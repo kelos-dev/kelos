@@ -90,10 +90,13 @@ func (b *DeploymentBuilder) buildPodParts(ts *kelosv1alpha1.TaskSpawner, workspa
 			"--github-owner="+owner,
 			"--github-repo="+repo,
 		)
+		if ts.Spec.TaskTemplate.WorkspaceRef != nil {
+			args = append(args, "--gh-proxy-url="+WorkspaceGHProxyServiceURL(ts.Namespace, ts.Spec.TaskTemplate.WorkspaceRef.Name))
+		}
 		if apiBaseURL := gitHubAPIBaseURL(host); apiBaseURL != "" {
 			args = append(args, "--github-api-base-url="+apiBaseURL)
 		}
-		if workspace.SecretRef != nil {
+		if workspace.SecretRef != nil && taskSpawnerNeedsGitHubToken(ts) {
 			if isGitHubApp {
 				// GitHub App: add token refresher as a native sidecar
 				args = append(args, "--github-token-file=/shared/token/GITHUB_TOKEN")
@@ -414,6 +417,34 @@ func githubSourceRepoOverride(ts *kelosv1alpha1.TaskSpawner) string {
 		return ts.Spec.When.GitHubPullRequests.Repo
 	}
 	return ""
+}
+
+func taskSpawnerNeedsGitHubToken(ts *kelosv1alpha1.TaskSpawner) bool {
+	if ts.Spec.When.GitHubIssues != nil && ts.Spec.When.GitHubIssues.Reporting != nil && ts.Spec.When.GitHubIssues.Reporting.Enabled {
+		return true
+	}
+	if ts.Spec.When.GitHubPullRequests != nil && ts.Spec.When.GitHubPullRequests.Reporting != nil && ts.Spec.When.GitHubPullRequests.Reporting.Enabled {
+		return true
+	}
+	return false
+}
+
+func validateWorkspaceGHProxyRepoOverride(ts *kelosv1alpha1.TaskSpawner, workspace *kelosv1alpha1.WorkspaceSpec) error {
+	if workspace == nil {
+		return nil
+	}
+	repoOverride := githubSourceRepoOverride(ts)
+	if repoOverride == "" {
+		return nil
+	}
+
+	workspaceHost, _, _ := parseGitHubRepo(workspace.Repo)
+	overrideHost, _, _ := parseGitHubRepo(repoOverride)
+	if overrideHost == "" || workspaceHost == "" || overrideHost == workspaceHost {
+		return nil
+	}
+
+	return fmt.Errorf("github source repo override host %q does not match Workspace host %q", overrideHost, workspaceHost)
 }
 
 // ParseResourceList parses a comma-separated "name=value" string into a

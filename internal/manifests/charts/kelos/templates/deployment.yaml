@@ -60,6 +60,16 @@ spec:
             {{- if .Values.spawner.resources.limits }}
             - --spawner-resource-limits={{ .Values.spawner.resources.limits }}
             {{- end }}
+            - --ghproxy-image={{ .Values.ghproxy.image }}{{- if .Values.image.tag }}:{{ .Values.image.tag }}{{- end }}
+            {{- if .Values.image.pullPolicy }}
+            - --ghproxy-image-pull-policy={{ .Values.image.pullPolicy }}
+            {{- end }}
+            {{- if .Values.ghproxy.resources.requests }}
+            - --ghproxy-resource-requests={{ .Values.ghproxy.resources.requests }}
+            {{- end }}
+            {{- if .Values.ghproxy.resources.limits }}
+            - --ghproxy-resource-limits={{ .Values.ghproxy.resources.limits }}
+            {{- end }}
             - --token-refresher-image={{ .Values.tokenRefresher.image }}{{- if .Values.image.tag }}:{{ .Values.image.tag }}{{- end }}
             {{- if .Values.image.pullPolicy }}
             - --token-refresher-image-pull-policy={{ .Values.image.pullPolicy }}

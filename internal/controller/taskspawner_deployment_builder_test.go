@@ -197,6 +197,62 @@ func TestGitHubAPIBaseURL(t *testing.T) {
 	}
 }
 
+func TestValidateWorkspaceGHProxyRepoOverride(t *testing.T) {
+	tests := []struct {
+		name      string
+		repo      string
+		wantError bool
+	}{
+		{
+			name:      "same host full URL allowed",
+			repo:      "https://github.com/other/repo.git",
+			wantError: false,
+		},
+		{
+			name:      "owner repo shorthand allowed",
+			repo:      "other/repo",
+			wantError: false,
+		},
+		{
+			name:      "cross host rejected",
+			repo:      "https://github.example.com/other/repo.git",
+			wantError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := &kelosv1alpha1.TaskSpawner{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubIssues: &kelosv1alpha1.GitHubIssues{Repo: tt.repo},
+					},
+				},
+			}
+			workspace := &kelosv1alpha1.WorkspaceSpec{
+				Repo: "https://github.com/kelos-dev/kelos.git",
+			}
+
+			err := validateWorkspaceGHProxyRepoOverride(ts, workspace)
+			if tt.wantError && err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !tt.wantError && err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+		})
+	}
+}
+
+func enableGitHubReporting(ts *kelosv1alpha1.TaskSpawner) {
+	if ts.Spec.When.GitHubIssues != nil {
+		ts.Spec.When.GitHubIssues.Reporting = &kelosv1alpha1.GitHubReporting{Enabled: true}
+	}
+	if ts.Spec.When.GitHubPullRequests != nil {
+		ts.Spec.When.GitHubPullRequests.Reporting = &kelosv1alpha1.GitHubReporting{Enabled: true}
+	}
+}
+
 func TestBuildDeploymentWithEnterpriseURL(t *testing.T) {
 	builder := NewDeploymentBuilder()
 
@@ -274,6 +330,7 @@ func TestDeploymentBuilder_GitHubApp(t *testing.T) {
 			},
 		},
 	}
+	enableGitHubReporting(ts)
 	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/kelos-dev/kelos.git",
 		SecretRef: &kelosv1alpha1.SecretReference{
@@ -354,6 +411,7 @@ func TestDeploymentBuilder_GitHubAppEnterprise(t *testing.T) {
 			},
 		},
 	}
+	enableGitHubReporting(ts)
 	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.example.com/my-org/my-repo.git",
 		SecretRef: &kelosv1alpha1.SecretReference{
@@ -396,6 +454,7 @@ func TestDeploymentBuilder_GitHubAppGitHubCom(t *testing.T) {
 			},
 		},
 	}
+	enableGitHubReporting(ts)
 	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/kelos-dev/kelos.git",
 		SecretRef: &kelosv1alpha1.SecretReference{
@@ -446,6 +505,7 @@ func TestDeploymentBuilder_TokenRefresherResources(t *testing.T) {
 			},
 		},
 	}
+	enableGitHubReporting(ts)
 	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/kelos-dev/kelos.git",
 		SecretRef: &kelosv1alpha1.SecretReference{
@@ -485,6 +545,7 @@ func TestDeploymentBuilder_PAT(t *testing.T) {
 			},
 		},
 	}
+	enableGitHubReporting(ts)
 	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/kelos-dev/kelos.git",
 		SecretRef: &kelosv1alpha1.SecretReference{
@@ -1084,6 +1145,7 @@ func TestUpdateDeployment_PATToGitHubApp(t *testing.T) {
 			},
 		},
 	}
+	enableGitHubReporting(ts)
 	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/kelos-dev/kelos.git",
 		SecretRef: &kelosv1alpha1.SecretReference{
@@ -1181,6 +1243,7 @@ func TestUpdateDeployment_GitHubAppToPAT(t *testing.T) {
 			},
 		},
 	}
+	enableGitHubReporting(ts)
 	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/kelos-dev/kelos.git",
 		SecretRef: &kelosv1alpha1.SecretReference{
@@ -2038,17 +2101,10 @@ func TestBuildCronJob_WithWorkspacePAT(t *testing.T) {
 		t.Errorf("expected --one-shot in args, got: %v", spawner.Args)
 	}
 
-	// Verify GITHUB_TOKEN env var is injected from PAT secret
-	foundTokenEnv := false
 	for _, env := range spawner.Env {
-		if env.Name == "GITHUB_TOKEN" && env.ValueFrom != nil &&
-			env.ValueFrom.SecretKeyRef != nil &&
-			env.ValueFrom.SecretKeyRef.Name == "gh-pat-secret" {
-			foundTokenEnv = true
+		if env.Name == "GITHUB_TOKEN" {
+			t.Fatalf("expected no GITHUB_TOKEN env for cron workspace discovery-only spawner, got: %v", spawner.Env)
 		}
-	}
-	if !foundTokenEnv {
-		t.Errorf("expected GITHUB_TOKEN env from secret gh-pat-secret, got: %v", spawner.Env)
 	}
 }
 
@@ -2084,52 +2140,23 @@ func TestBuildCronJob_WithWorkspaceGitHubApp(t *testing.T) {
 	cronJob := builder.BuildCronJob(ts, workspace, true)
 	podSpec := cronJob.Spec.JobTemplate.Spec.Template.Spec
 
-	// Verify token-refresher init container is present
-	if len(podSpec.InitContainers) != 1 {
-		t.Fatalf("expected 1 init container (token-refresher), got %d", len(podSpec.InitContainers))
+	if len(podSpec.InitContainers) != 0 {
+		t.Fatalf("expected no init containers for cron workspace discovery-only spawner, got %d", len(podSpec.InitContainers))
 	}
-	if podSpec.InitContainers[0].Name != "token-refresher" {
-		t.Errorf("expected init container name %q, got %q", "token-refresher", podSpec.InitContainers[0].Name)
-	}
-
-	// Verify volumes for GitHub App are present
-	foundTokenVol := false
-	foundSecretVol := false
-	for _, vol := range podSpec.Volumes {
-		if vol.Name == "github-token" {
-			foundTokenVol = true
-		}
-		if vol.Name == "github-app-secret" {
-			foundSecretVol = true
-		}
-	}
-	if !foundTokenVol {
-		t.Error("expected github-token volume")
-	}
-	if !foundSecretVol {
-		t.Error("expected github-app-secret volume")
+	if len(podSpec.Volumes) != 0 {
+		t.Fatalf("expected no volumes for cron workspace discovery-only spawner, got %d", len(podSpec.Volumes))
 	}
 
-	// Verify spawner container has token file arg and volume mount
 	spawner := podSpec.Containers[0]
-	foundTokenFileArg := false
 	for _, arg := range spawner.Args {
 		if arg == "--github-token-file=/shared/token/GITHUB_TOKEN" {
-			foundTokenFileArg = true
+			t.Fatalf("expected no github token file arg for cron workspace discovery-only spawner, got: %v", spawner.Args)
 		}
 	}
-	if !foundTokenFileArg {
-		t.Errorf("expected --github-token-file arg, got: %v", spawner.Args)
-	}
-
-	foundTokenMount := false
 	for _, vm := range spawner.VolumeMounts {
-		if vm.Name == "github-token" && vm.MountPath == "/shared/token" {
-			foundTokenMount = true
+		if vm.Name == "github-token" {
+			t.Fatalf("expected no github-token volume mount for cron workspace discovery-only spawner, got: %v", spawner.VolumeMounts)
 		}
-	}
-	if !foundTokenMount {
-		t.Errorf("expected github-token volume mount, got: %v", spawner.VolumeMounts)
 	}
 }
 
@@ -2488,14 +2515,10 @@ func TestDeploymentBuilder_CronJob_TokenRefresherResources(t *testing.T) {
 	}
 
 	cronJob := builder.BuildCronJob(ts, workspace, true)
-	refresher := cronJob.Spec.JobTemplate.Spec.Template.Spec.InitContainers[0]
 	spawner := cronJob.Spec.JobTemplate.Spec.Template.Spec.Containers[0]
 
-	if refresher.Resources.Requests.Cpu().String() != "100m" {
-		t.Errorf("expected token-refresher cpu request 100m on CronJob, got %s", refresher.Resources.Requests.Cpu().String())
-	}
-	if refresher.Resources.Limits.Memory().String() != "256Mi" {
-		t.Errorf("expected token-refresher memory limit 256Mi on CronJob, got %s", refresher.Resources.Limits.Memory().String())
+	if len(cronJob.Spec.JobTemplate.Spec.Template.Spec.InitContainers) != 0 {
+		t.Fatalf("expected no init containers for cron workspace discovery-only spawner, got %d", len(cronJob.Spec.JobTemplate.Spec.Template.Spec.InitContainers))
 	}
 	if len(spawner.Resources.Requests) != 0 || len(spawner.Resources.Limits) != 0 {
 		t.Errorf("expected spawner resources to remain empty on CronJob, got requests=%v limits=%v", spawner.Resources.Requests, spawner.Resources.Limits)
@@ -2519,8 +2542,12 @@ func TestDeploymentBuilder_SpawnerResources_TokenRefresherUnaffected(t *testing.
 			When: kelosv1alpha1.When{
 				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
 			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
+			},
 		},
 	}
+	enableGitHubReporting(ts)
 	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/kelos-dev/kelos.git",
 		SecretRef: &kelosv1alpha1.SecretReference{
@@ -2672,6 +2699,7 @@ func TestUpdateDeployment_TokenRefresherResourcesDrift(t *testing.T) {
 			},
 		},
 	}
+	enableGitHubReporting(ts)
 	workspace := &kelosv1alpha1.WorkspaceSpec{
 		Repo: "https://github.com/kelos-dev/kelos.git",
 		SecretRef: &kelosv1alpha1.SecretReference{
@@ -2789,13 +2817,8 @@ func TestUpdateCronJob_TokenRefresherResourcesDrift(t *testing.T) {
 	if err := cl.Get(ctx, client.ObjectKeyFromObject(cronJob), &updated); err != nil {
 		t.Fatalf("getting CronJob: %v", err)
 	}
-
-	refresher := updated.Spec.JobTemplate.Spec.Template.Spec.InitContainers[0]
-	if refresher.Resources.Requests.Cpu().String() != "100m" {
-		t.Errorf("expected token-refresher cpu request 100m after drift update, got %s", refresher.Resources.Requests.Cpu().String())
-	}
-	if refresher.Resources.Limits.Memory().String() != "256Mi" {
-		t.Errorf("expected token-refresher memory limit 256Mi after drift update, got %s", refresher.Resources.Limits.Memory().String())
+	if len(updated.Spec.JobTemplate.Spec.Template.Spec.InitContainers) != 0 {
+		t.Fatalf("expected no init containers for cron workspace discovery-only spawner, got %d", len(updated.Spec.JobTemplate.Spec.Template.Spec.InitContainers))
 	}
 }
 

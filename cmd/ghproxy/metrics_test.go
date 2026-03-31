@@ -20,7 +20,7 @@ func TestProxy_RecordsMetrics(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p := newProxy([]string{upstream.URL}, time.Minute)
+	p := newProxy(upstream.URL, time.Minute, nil)
 	proxyServer := httptest.NewServer(p)
 	defer proxyServer.Close()
 
@@ -53,7 +53,7 @@ func TestProxy_RecordsFreshCacheHitMetric(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p := newProxy([]string{upstream.URL}, time.Minute)
+	p := newProxy(upstream.URL, time.Minute, nil)
 	proxyServer := httptest.NewServer(p)
 	defer proxyServer.Close()
 
@@ -87,6 +87,7 @@ func TestProxy_RecordsFreshCacheHitMetric(t *testing.T) {
 
 func TestProxy_RecordsRevalidatedCacheHitMetric(t *testing.T) {
 	var reqCount int
+	now := time.Unix(1700000000, 0)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reqCount++
 		if r.Header.Get("If-None-Match") == `"v1"` {
@@ -99,7 +100,8 @@ func TestProxy_RecordsRevalidatedCacheHitMetric(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p := newProxy([]string{upstream.URL}, 0)
+	p := newProxy(upstream.URL, time.Second, nil)
+	p.now = func() time.Time { return now }
 	proxyServer := httptest.NewServer(p)
 	defer proxyServer.Close()
 
@@ -120,6 +122,7 @@ func TestProxy_RecordsRevalidatedCacheHitMetric(t *testing.T) {
 	// First request: cache miss.
 	doGET()
 	// Second request: stale entry is revalidated and served from cache.
+	now = now.Add(2 * time.Second)
 	doGET()
 
 	hitAfter := testutil.ToFloat64(githubAPIRequestsTotal.WithLabelValues("GET", "200", "pulls", "revalidated_hit"))
@@ -136,23 +139,28 @@ func TestProxy_RecordsRevalidatedCacheHitMetric(t *testing.T) {
 	}
 }
 
-func TestProxy_RecordsRejectedUpstreamMetric(t *testing.T) {
-	p := newProxy([]string{"https://api.github.com"}, time.Minute)
+func TestProxy_RecordsNonGETSkipMetric(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"id":1}`))
+	}))
+	defer upstream.Close()
+
+	p := newProxy(upstream.URL, time.Minute, nil)
 	proxyServer := httptest.NewServer(p)
 	defer proxyServer.Close()
 
-	before := testutil.ToFloat64(githubAPIRequestsTotal.WithLabelValues("GET", "403", "issues", "skip"))
+	before := testutil.ToFloat64(githubAPIRequestsTotal.WithLabelValues("POST", "201", "issues", "skip"))
 
-	req, _ := http.NewRequest("GET", proxyServer.URL+"/repos/owner/repo/issues", nil)
-	req.Header.Set(source.UpstreamBaseURLHeader, "https://evil.example.com")
+	req, _ := http.NewRequest("POST", proxyServer.URL+"/repos/owner/repo/issues", nil)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
 
-	after := testutil.ToFloat64(githubAPIRequestsTotal.WithLabelValues("GET", "403", "issues", "skip"))
+	after := testutil.ToFloat64(githubAPIRequestsTotal.WithLabelValues("POST", "201", "issues", "skip"))
 	if after != before+1 {
-		t.Errorf("expected rejected counter to increment by 1, got delta %f", after-before)
+		t.Errorf("expected non-GET skip counter to increment by 1, got delta %f", after-before)
 	}
 }

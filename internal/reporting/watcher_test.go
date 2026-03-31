@@ -576,3 +576,274 @@ func TestReportTaskStatus_NilAnnotations(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 }
+
+func TestSlackTaskReporter_PostsThreadReply(t *testing.T) {
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-task",
+			Namespace: "default",
+			Annotations: map[string]string{
+				AnnotationSlackReporting: "enabled",
+				AnnotationSlackChannel:   "C123ABC",
+				AnnotationSlackThreadTS:  "1234567890.123456",
+			},
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   "claude-code",
+			Prompt: "test",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeOAuth,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+			},
+		},
+		Status: kelosv1alpha1.TaskStatus{
+			Phase: kelosv1alpha1.TaskPhasePending,
+		},
+	}
+
+	cl := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(task).Build()
+
+	var posted []slackReplyRecord
+	reporter := &fakeSlackReporter{
+		postFn: func(ctx context.Context, channel, threadTS, text string) (string, error) {
+			posted = append(posted, slackReplyRecord{method: "post", channel: channel, threadTS: threadTS, text: text})
+			return "1234567890.999999", nil
+		},
+	}
+
+	tr := &SlackTaskReporter{Client: cl, Reporter: reporter}
+
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(posted) != 1 {
+		t.Fatalf("expected 1 post, got %d", len(posted))
+	}
+	if posted[0].channel != "C123ABC" {
+		t.Errorf("channel = %q, want C123ABC", posted[0].channel)
+	}
+	if posted[0].threadTS != "1234567890.123456" {
+		t.Errorf("threadTS = %q, want 1234567890.123456", posted[0].threadTS)
+	}
+
+	// Verify annotations were persisted
+	var updated kelosv1alpha1.Task
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
+		t.Fatalf("getting updated task: %v", err)
+	}
+	if updated.Annotations[AnnotationSlackReportPhase] != "accepted" {
+		t.Errorf("report phase = %q, want accepted", updated.Annotations[AnnotationSlackReportPhase])
+	}
+	if updated.Annotations[AnnotationSlackReplyTS] != "1234567890.999999" {
+		t.Errorf("reply ts = %q, want 1234567890.999999", updated.Annotations[AnnotationSlackReplyTS])
+	}
+}
+
+func TestSlackTaskReporter_UpdatesExistingReply(t *testing.T) {
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-task",
+			Namespace: "default",
+			Annotations: map[string]string{
+				AnnotationSlackReporting:   "enabled",
+				AnnotationSlackChannel:     "C123ABC",
+				AnnotationSlackThreadTS:    "1234567890.123456",
+				AnnotationSlackReplyTS:     "1234567890.999999",
+				AnnotationSlackReportPhase: "accepted",
+			},
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   "claude-code",
+			Prompt: "test",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeOAuth,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+			},
+		},
+		Status: kelosv1alpha1.TaskStatus{
+			Phase:   kelosv1alpha1.TaskPhaseSucceeded,
+			Results: map[string]string{"pr": "https://github.com/org/repo/pull/42"},
+		},
+	}
+
+	cl := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(task).Build()
+
+	var updated []slackReplyRecord
+	reporter := &fakeSlackReporter{
+		updateFn: func(ctx context.Context, channel, messageTS, text string) error {
+			updated = append(updated, slackReplyRecord{method: "update", channel: channel, threadTS: messageTS, text: text})
+			return nil
+		},
+	}
+
+	tr := &SlackTaskReporter{Client: cl, Reporter: reporter}
+
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(updated) != 1 {
+		t.Fatalf("expected 1 update, got %d", len(updated))
+	}
+	if updated[0].channel != "C123ABC" {
+		t.Errorf("channel = %q, want C123ABC", updated[0].channel)
+	}
+	// Verify the message includes the PR URL
+	wantText := FormatSlackSucceeded(task.Name, task.Status.Results)
+	if updated[0].text != wantText {
+		t.Errorf("text = %q, want %q", updated[0].text, wantText)
+	}
+}
+
+func TestSlackTaskReporter_SkipPaths(t *testing.T) {
+	baseTask := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-task",
+			Namespace: "default",
+			Annotations: map[string]string{
+				AnnotationSlackReporting: "enabled",
+				AnnotationSlackChannel:   "C123ABC",
+				AnnotationSlackThreadTS:  "1234567890.123456",
+			},
+		},
+		Status: kelosv1alpha1.TaskStatus{
+			Phase: kelosv1alpha1.TaskPhasePending,
+		},
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(t *kelosv1alpha1.Task)
+	}{
+		{
+			name: "no reporting annotation",
+			mutate: func(t *kelosv1alpha1.Task) {
+				delete(t.Annotations, AnnotationSlackReporting)
+			},
+		},
+		{
+			name: "already reported same phase",
+			mutate: func(t *kelosv1alpha1.Task) {
+				t.Annotations[AnnotationSlackReportPhase] = "accepted"
+			},
+		},
+		{
+			name: "nil annotations",
+			mutate: func(t *kelosv1alpha1.Task) {
+				t.Annotations = nil
+			},
+		},
+		{
+			name: "missing channel",
+			mutate: func(t *kelosv1alpha1.Task) {
+				delete(t.Annotations, AnnotationSlackChannel)
+			},
+		},
+		{
+			name: "empty phase",
+			mutate: func(t *kelosv1alpha1.Task) {
+				t.Status.Phase = ""
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := baseTask.DeepCopy()
+			tt.mutate(task)
+
+			called := false
+			reporter := &fakeSlackReporter{
+				postFn: func(ctx context.Context, channel, threadTS, text string) (string, error) {
+					called = true
+					return "", nil
+				},
+			}
+
+			cl := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(task).Build()
+			tr := &SlackTaskReporter{Client: cl, Reporter: reporter}
+
+			if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if called {
+				t.Error("expected reporter to not be called")
+			}
+		})
+	}
+}
+
+type slackReplyRecord struct {
+	method   string
+	channel  string
+	threadTS string
+	text     string
+}
+
+type fakeSlackReporter struct {
+	postFn   func(ctx context.Context, channel, threadTS, text string) (string, error)
+	updateFn func(ctx context.Context, channel, messageTS, text string) error
+}
+
+func (f *fakeSlackReporter) PostThreadReply(ctx context.Context, channel, threadTS, text string) (string, error) {
+	if f.postFn != nil {
+		return f.postFn(ctx, channel, threadTS, text)
+	}
+	return "fake-reply-ts", nil
+}
+
+func (f *fakeSlackReporter) UpdateMessage(ctx context.Context, channel, messageTS, text string) error {
+	if f.updateFn != nil {
+		return f.updateFn(ctx, channel, messageTS, text)
+	}
+	return nil
+}
+
+func TestSlackTaskReporter_PhaseMapping(t *testing.T) {
+	tests := []struct {
+		name          string
+		phase         kelosv1alpha1.TaskPhase
+		wantDesired   string
+		shouldProcess bool
+	}{
+		{"pending", kelosv1alpha1.TaskPhasePending, "accepted", true},
+		{"running", kelosv1alpha1.TaskPhaseRunning, "accepted", true},
+		{"waiting", kelosv1alpha1.TaskPhaseWaiting, "accepted", true},
+		{"succeeded", kelosv1alpha1.TaskPhaseSucceeded, "succeeded", true},
+		{"failed", kelosv1alpha1.TaskPhaseFailed, "failed", true},
+		{"empty", "", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := &kelosv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-task",
+					Namespace: "default",
+					Annotations: map[string]string{
+						AnnotationSlackReporting: "enabled",
+						AnnotationSlackChannel:   "C123",
+						AnnotationSlackThreadTS:  "1234.5678",
+					},
+				},
+				Status: kelosv1alpha1.TaskStatus{
+					Phase: tt.phase,
+				},
+			}
+
+			if tt.shouldProcess {
+				// Mark as already reported to verify skip logic
+				task.Annotations[AnnotationSlackReportPhase] = tt.wantDesired
+			}
+
+			cl := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(task).Build()
+			tr := &SlackTaskReporter{Client: cl, Reporter: &SlackReporter{BotToken: "xoxb-test"}}
+
+			// Should not error — either skips (empty phase) or skips (already reported)
+			if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}

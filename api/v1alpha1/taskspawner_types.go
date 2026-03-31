@@ -44,6 +44,12 @@ type When struct {
 	// LinearWebhook triggers task spawning on Linear webhook events.
 	// +optional
 	LinearWebhook *LinearWebhook `json:"linearWebhook,omitempty"`
+
+	// Slack discovers work items from Slack messages via Socket Mode.
+	// The spawner connects to Slack via an outbound WebSocket (no ingress
+	// required) and listens for messages in the channels the bot is invited to.
+	// +optional
+	Slack *Slack `json:"slack,omitempty"`
 }
 
 // Cron triggers task spawning on a cron schedule.
@@ -422,6 +428,50 @@ type LinearWebhookFilter struct {
 	// ExcludeLabels excludes issues with any of these labels.
 	// +optional
 	ExcludeLabels []string `json:"excludeLabels,omitempty"`
+}
+
+// Slack discovers work items from Slack messages via Socket Mode.
+// The spawner connects to Slack using an App-Level Token (Socket Mode) and
+// listens for messages in configured channels. No ingress, LoadBalancer, or
+// public URL is required — the connection is outbound only.
+//
+// Authentication is provided via a Secret that must contain two keys:
+//   - SLACK_BOT_TOKEN: Bot User OAuth Token (xoxb-...)
+//   - SLACK_APP_TOKEN: App-Level Token for Socket Mode (xapp-...)
+//
+// The bot must be invited to each channel it should listen in.
+type Slack struct {
+	// SecretRef references a Secret containing "SLACK_BOT_TOKEN" and
+	// "SLACK_APP_TOKEN" keys.
+	// +kubebuilder:validation:Required
+	SecretRef SecretReference `json:"secretRef"`
+
+	// TriggerCommand is an optional slash command or message prefix that
+	// triggers task creation (e.g., "/kelos", "!fix"). When set, only
+	// messages starting with this prefix trigger tasks and the prefix is
+	// stripped from the prompt. When empty, every non-threaded message in
+	// the channel triggers a task.
+	// +optional
+	TriggerCommand string `json:"triggerCommand,omitempty"`
+
+	// Channels optionally restricts which Slack channels the bot listens in.
+	// Values are channel IDs (e.g., "C0123456789"). When empty, the bot
+	// listens in every channel it has been invited to.
+	// +optional
+	Channels []string `json:"channels,omitempty"`
+
+	// AllowedUsers optionally restricts which Slack users can trigger tasks.
+	// Values are Slack user IDs (e.g., "U0123456789"). When empty, any user
+	// in the channel can trigger tasks.
+	// +optional
+	AllowedUsers []string `json:"allowedUsers,omitempty"`
+
+	// PollInterval overrides spec.pollInterval for this source (e.g., "30s", "5m").
+	// Slack uses Socket Mode (real-time), but Discover() is still called on
+	// this interval to drain accumulated events. When empty, spec.pollInterval
+	// is used.
+	// +optional
+	PollInterval string `json:"pollInterval,omitempty"`
 }
 
 // TaskTemplateMetadata holds optional labels and annotations for spawned Tasks.

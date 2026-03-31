@@ -159,6 +159,25 @@ func TestReconcileWebhook(t *testing.T) {
 			wantMessage: "Suspended by user",
 		},
 		{
+			name: "suspended Linear webhook TaskSpawner",
+			ts: &kelosv1alpha1.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-webhook-linear",
+					Namespace: "default",
+				},
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						LinearWebhook: &kelosv1alpha1.LinearWebhook{
+							Types: []string{"Issue"},
+						},
+					},
+				},
+			},
+			isSuspended: true,
+			wantPhase:   kelosv1alpha1.TaskSpawnerPhaseSuspended,
+			wantMessage: "Suspended by user",
+		},
+		{
 			name: "webhook TaskSpawner with stale deployment",
 			ts: &kelosv1alpha1.TaskSpawner{
 				ObjectMeta: metav1.ObjectMeta{

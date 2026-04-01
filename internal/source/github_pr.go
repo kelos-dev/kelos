@@ -26,6 +26,7 @@ type GitHubPullRequestSource struct {
 	ExcludeLabels     []string
 	State             string
 	Author            string
+	ExcludeAuthors    []string
 	Token             string
 	BaseURL           string
 	Client            *http.Client
@@ -198,9 +199,17 @@ func (s *GitHubPullRequestSource) filterPullRequests(pullRequests []githubPullRe
 		excludedLabels[label] = struct{}{}
 	}
 
+	excludedAuthors := make(map[string]struct{}, len(s.ExcludeAuthors))
+	for _, a := range s.ExcludeAuthors {
+		excludedAuthors[a] = struct{}{}
+	}
+
 	filtered := make([]githubPullRequest, 0, len(pullRequests))
 	for _, pr := range pullRequests {
 		if s.Author != "" && pr.User.Login != s.Author {
+			continue
+		}
+		if _, ok := excludedAuthors[pr.User.Login]; ok {
 			continue
 		}
 		if s.Draft != nil && pr.Draft != *s.Draft {

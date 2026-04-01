@@ -467,6 +467,83 @@ func TestDiscoverExcludeLabelsNoMatch(t *testing.T) {
 	}
 }
 
+func TestDiscoverExcludeAuthors(t *testing.T) {
+	issues := []githubIssue{
+		{Number: 1, Title: "Bug 1", Body: "Body 1", HTMLURL: "https://github.com/o/r/issues/1", User: githubUser{Login: "human-user"}},
+		{Number: 2, Title: "Bot issue", Body: "Body 2", HTMLURL: "https://github.com/o/r/issues/2", User: githubUser{Login: "bot-user"}},
+		{Number: 3, Title: "Feature", Body: "Body 3", HTMLURL: "https://github.com/o/r/issues/3", User: githubUser{Login: "another-user"}},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/repos/owner/repo/issues":
+			json.NewEncoder(w).Encode(issues)
+		case strings.HasPrefix(r.URL.Path, "/repos/owner/repo/issues/") && strings.HasSuffix(r.URL.Path, "/comments"):
+			json.NewEncoder(w).Encode([]githubComment{})
+		}
+	}))
+	defer server.Close()
+
+	s := &GitHubSource{
+		Owner:          "owner",
+		Repo:           "repo",
+		ExcludeAuthors: []string{"bot-user"},
+		BaseURL:        server.URL,
+	}
+
+	items, err := s.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+	if items[0].Number != 1 {
+		t.Errorf("expected issue #1 first, got #%d", items[0].Number)
+	}
+	if items[1].Number != 3 {
+		t.Errorf("expected issue #3 second, got #%d", items[1].Number)
+	}
+}
+
+func TestDiscoverExcludeAuthorsMultiple(t *testing.T) {
+	issues := []githubIssue{
+		{Number: 1, Title: "Bug 1", Body: "Body 1", HTMLURL: "https://github.com/o/r/issues/1", User: githubUser{Login: "human-user"}},
+		{Number: 2, Title: "Bot issue", Body: "Body 2", HTMLURL: "https://github.com/o/r/issues/2", User: githubUser{Login: "bot-user"}},
+		{Number: 3, Title: "Dependabot", Body: "Body 3", HTMLURL: "https://github.com/o/r/issues/3", User: githubUser{Login: "dependabot[bot]"}},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/repos/owner/repo/issues":
+			json.NewEncoder(w).Encode(issues)
+		case strings.HasPrefix(r.URL.Path, "/repos/owner/repo/issues/") && strings.HasSuffix(r.URL.Path, "/comments"):
+			json.NewEncoder(w).Encode([]githubComment{})
+		}
+	}))
+	defer server.Close()
+
+	s := &GitHubSource{
+		Owner:          "owner",
+		Repo:           "repo",
+		ExcludeAuthors: []string{"bot-user", "dependabot[bot]"},
+		BaseURL:        server.URL,
+	}
+
+	items, err := s.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	if items[0].Number != 1 {
+		t.Errorf("expected issue #1, got #%d", items[0].Number)
+	}
+}
+
 func TestDiscoverTypesIssuesOnly(t *testing.T) {
 	issues := []githubIssue{
 		{Number: 1, Title: "Bug", Body: "Body", HTMLURL: "https://github.com/o/r/issues/1"},

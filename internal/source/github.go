@@ -34,6 +34,7 @@ type GitHubSource struct {
 	State             string
 	Assignee          string
 	Author            string
+	ExcludeAuthors    []string
 	Token             string
 	BaseURL           string
 	Client            *http.Client
@@ -200,6 +201,11 @@ func (s *GitHubSource) filterItems(issues []githubIssue) []githubIssue {
 		excluded[l] = struct{}{}
 	}
 
+	excludedAuthors := make(map[string]struct{}, len(s.ExcludeAuthors))
+	for _, a := range s.ExcludeAuthors {
+		excludedAuthors[a] = struct{}{}
+	}
+
 	filtered := make([]githubIssue, 0, len(issues))
 	for _, issue := range issues {
 		// Type filtering
@@ -211,6 +217,11 @@ func (s *GitHubSource) filterItems(issues []githubIssue) []githubIssue {
 			if _, ok := types["issues"]; !ok {
 				continue
 			}
+		}
+
+		// Exclude-author filtering
+		if _, ok := excludedAuthors[issue.User.Login]; ok {
+			continue
 		}
 
 		// Exclude-label filtering

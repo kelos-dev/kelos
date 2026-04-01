@@ -21,8 +21,12 @@ type WorkItem struct {
 	ReviewState string
 	// ReviewComments contains formatted inline review comments for GitHub PR sources.
 	ReviewComments string
-	Time           string // Cron trigger time (RFC3339)
-	Schedule       string // Cron schedule expression
+	// ChangedFiles lists file paths modified by a pull request.
+	// Populated when filePatterns is set on a githubPullRequests source
+	// or when the prompt/branch template references {{.ChangedFiles}}.
+	ChangedFiles []string
+	Time         string // Cron trigger time (RFC3339)
+	Schedule     string // Cron schedule expression
 
 	// TriggerTime is the source-provided re-engagement time for this work item.
 	// For GitHub issues it is the most recent matching trigger comment time.

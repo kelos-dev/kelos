@@ -268,10 +268,41 @@ type GitHubPullRequests struct {
 	// +optional
 	Reporting *GitHubReporting `json:"reporting,omitempty"`
 
+	// FilePatterns filters pull requests by changed file paths.
+	// When set, only PRs where at least one changed file matches an include
+	// pattern (and no changed file matches an exclude pattern) are discovered.
+	// Patterns use doublestar syntax (e.g., "*.go", "internal/**", "docs/**/*.md").
+	// When empty, no file-based filtering is applied.
+	// +optional
+	FilePatterns *FilePatternFilter `json:"filePatterns,omitempty"`
+
 	// PollInterval overrides spec.pollInterval for this source (e.g., "30s", "5m").
 	// When empty, spec.pollInterval is used.
 	// +optional
 	PollInterval string `json:"pollInterval,omitempty"`
+}
+
+// FilePatternFilter filters items by changed file paths using glob patterns.
+type FilePatternFilter struct {
+	// Include requires at least one changed file to match any of these glob patterns.
+	// Patterns use doublestar syntax (e.g., "*.go", "internal/**").
+	// When empty, all files are considered matching (only exclude patterns apply).
+	// +optional
+	Include []string `json:"include,omitempty"`
+
+	// Exclude rejects items where any changed file matches any of these glob patterns.
+	// When ExcludeOnly is false (default), any single exclude match rejects the item.
+	// When ExcludeOnly is true, the item is only rejected when ALL changed files
+	// match exclude patterns (i.e., "skip docs-only PRs").
+	// +optional
+	Exclude []string `json:"exclude,omitempty"`
+
+	// ExcludeOnly inverts the exclude logic: instead of rejecting on any single
+	// exclude match, it only rejects items where ALL changed files match exclude
+	// patterns. Useful for filtering out items that only change non-code files.
+	// Defaults to false.
+	// +optional
+	ExcludeOnly bool `json:"excludeOnly,omitempty"`
 }
 
 // Jira discovers issues from a Jira project.
@@ -366,6 +397,13 @@ type GitHubWebhookFilter struct {
 	// Author filters by the event sender's username.
 	// +optional
 	Author string `json:"author,omitempty"`
+
+	// FilePatterns filters events by changed file paths.
+	// For push events, file paths are extracted directly from the payload.
+	// For pull_request events, the file list is fetched from the GitHub API
+	// using the workspace's secretRef for authentication.
+	// +optional
+	FilePatterns *FilePatternFilter `json:"filePatterns,omitempty"`
 }
 
 // LinearWebhook configures webhook-driven task spawning from Linear events.
@@ -508,8 +546,8 @@ type TaskTemplate struct {
 	// Supports Go text/template variables from the work item, e.g. "kelos-task-{{.Number}}".
 	// Available variables (all sources): {{.ID}}, {{.Title}}, {{.Kind}}
 	// GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
-	// GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}
-	// GitHub webhook sources: {{.Event}}, {{.Action}}, {{.Sender}}, {{.Ref}}, {{.Repository}}, {{.Payload}} (full payload access)
+	// GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}, {{.ChangedFiles}}
+	// GitHub webhook sources: {{.Event}}, {{.Action}}, {{.Sender}}, {{.Ref}}, {{.Repository}}, {{.Payload}} (full payload access), {{.ChangedFiles}}
 	// Linear webhook sources: {{.Type}}, {{.Action}}, {{.State}}, {{.Labels}}, {{.IssueID}}, {{.Payload}} (full payload access)
 	// Cron sources: {{.Time}}, {{.Schedule}}
 	// +optional
@@ -518,8 +556,8 @@ type TaskTemplate struct {
 	// PromptTemplate is a Go text/template for rendering the task prompt.
 	// Available variables (all sources): {{.ID}}, {{.Title}}, {{.Kind}}
 	// GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
-	// GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}
-	// GitHub webhook sources: {{.Event}}, {{.Action}}, {{.Sender}}, {{.Ref}}, {{.Repository}}, {{.Payload}} (full payload access)
+	// GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}, {{.ChangedFiles}}
+	// GitHub webhook sources: {{.Event}}, {{.Action}}, {{.Sender}}, {{.Ref}}, {{.Repository}}, {{.Payload}} (full payload access), {{.ChangedFiles}}
 	// Linear webhook sources: {{.Type}}, {{.Action}}, {{.State}}, {{.Labels}}, {{.IssueID}}, {{.Payload}} (full payload access)
 	// Cron sources: {{.Time}}, {{.Schedule}}
 	// +optional

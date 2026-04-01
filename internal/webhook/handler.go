@@ -318,6 +318,18 @@ func (h *WebhookHandler) processWebhook(ctx context.Context, eventType string, p
 			}
 		}
 
+		// Lazily enrich ChangedFiles for PR events when a filter uses
+		// filePatterns or the prompt/branch template references ChangedFiles.
+		// Push events already have ChangedFiles populated from the payload.
+		if parsed.GitHub != nil && len(parsed.GitHub.ChangedFiles) == 0 && spawnerNeedsChangedFiles(spawner) {
+			files, fetchErr := h.enrichPRChangedFiles(ctx, spawner, parsed.GitHub)
+			if fetchErr != nil {
+				spawnerLog.Error(fetchErr, "Failed to fetch PR changed files for file pattern filtering")
+			} else {
+				parsed.GitHub.ChangedFiles = files
+			}
+		}
+
 		// Check if this webhook matches the spawner's filters
 		matches, err := h.matchesSpawner(spawner, eventType, parsed)
 		if err != nil {
@@ -461,4 +473,34 @@ func (h *WebhookHandler) createTask(ctx context.Context, spawner *v1alpha1.TaskS
 	}
 
 	return nil
+}
+
+// spawnerNeedsChangedFiles returns true if the spawner requires changed file
+// data — either because a webhook filter uses filePatterns, or because the
+// prompt/branch template references {{.ChangedFiles}}.
+func spawnerNeedsChangedFiles(spawner *v1alpha1.TaskSpawner) bool {
+	ghw := spawner.Spec.When.GitHubWebhook
+	if ghw == nil {
+		return false
+	}
+	for _, f := range ghw.Filters {
+		if f.FilePatterns != nil {
+			return true
+		}
+	}
+	tmpl := spawner.Spec.TaskTemplate
+	if strings.Contains(tmpl.PromptTemplate, "ChangedFiles") ||
+		strings.Contains(tmpl.Branch, "ChangedFiles") {
+		return true
+	}
+	return false
+}
+
+// enrichPRChangedFiles fetches changed files for PR-related webhook events
+// from the GitHub API. Returns nil for non-PR events.
+func (h *WebhookHandler) enrichPRChangedFiles(ctx context.Context, spawner *v1alpha1.TaskSpawner, eventData *GitHubEventData) ([]string, error) {
+	if eventData.Number == 0 || eventData.Repository == "" {
+		return nil, nil
+	}
+	return fetchPRChangedFiles(ctx, h.client, spawner, eventData.RepositoryOwner, eventData.RepositoryName, eventData.Number)
 }

@@ -116,8 +116,8 @@ spec:
                       Supports Go text/template variables from the work item, e.g. "kelos-task-{{ "{{.Number}}" }}".
                       Available variables (all sources): {{ "{{.ID}}" }}, {{ "{{.Title}}" }}, {{ "{{.Kind}}" }}
                       GitHub issue/Jira sources: {{ "{{.Number}}" }}, {{ "{{.Body}}" }}, {{ "{{.URL}}" }}, {{ "{{.Labels}}" }}, {{ "{{.Comments}}" }}
-                      GitHub pull request sources additionally expose: {{ "{{.Branch}}" }}, {{ "{{.ReviewState}}" }}, {{ "{{.ReviewComments}}" }}
-                      GitHub webhook sources: {{ "{{.Event}}" }}, {{ "{{.Action}}" }}, {{ "{{.Sender}}" }}, {{ "{{.Ref}}" }}, {{ "{{.Repository}}" }}, {{ "{{.Payload}}" }} (full payload access)
+                      GitHub pull request sources additionally expose: {{ "{{.Branch}}" }}, {{ "{{.ReviewState}}" }}, {{ "{{.ReviewComments}}" }}, {{ "{{.ChangedFiles}}" }}
+                      GitHub webhook sources: {{ "{{.Event}}" }}, {{ "{{.Action}}" }}, {{ "{{.Sender}}" }}, {{ "{{.Ref}}" }}, {{ "{{.Repository}}" }}, {{ "{{.Payload}}" }} (full payload access), {{ "{{.ChangedFiles}}" }}
                       Linear webhook sources: {{ "{{.Type}}" }}, {{ "{{.Action}}" }}, {{ "{{.State}}" }}, {{ "{{.Labels}}" }}, {{ "{{.IssueID}}" }}, {{ "{{.Payload}}" }} (full payload access)
                       Cron sources: {{ "{{.Time}}" }}, {{ "{{.Schedule}}" }}
                     type: string
@@ -439,8 +439,8 @@ spec:
                       PromptTemplate is a Go text/template for rendering the task prompt.
                       Available variables (all sources): {{ "{{.ID}}" }}, {{ "{{.Title}}" }}, {{ "{{.Kind}}" }}
                       GitHub issue/Jira sources: {{ "{{.Number}}" }}, {{ "{{.Body}}" }}, {{ "{{.URL}}" }}, {{ "{{.Labels}}" }}, {{ "{{.Comments}}" }}
-                      GitHub pull request sources additionally expose: {{ "{{.Branch}}" }}, {{ "{{.ReviewState}}" }}, {{ "{{.ReviewComments}}" }}
-                      GitHub webhook sources: {{ "{{.Event}}" }}, {{ "{{.Action}}" }}, {{ "{{.Sender}}" }}, {{ "{{.Ref}}" }}, {{ "{{.Repository}}" }}, {{ "{{.Payload}}" }} (full payload access)
+                      GitHub pull request sources additionally expose: {{ "{{.Branch}}" }}, {{ "{{.ReviewState}}" }}, {{ "{{.ReviewComments}}" }}, {{ "{{.ChangedFiles}}" }}
+                      GitHub webhook sources: {{ "{{.Event}}" }}, {{ "{{.Action}}" }}, {{ "{{.Sender}}" }}, {{ "{{.Ref}}" }}, {{ "{{.Repository}}" }}, {{ "{{.Payload}}" }} (full payload access), {{ "{{.ChangedFiles}}" }}
                       Linear webhook sources: {{ "{{.Type}}" }}, {{ "{{.Action}}" }}, {{ "{{.State}}" }}, {{ "{{.Labels}}" }}, {{ "{{.IssueID}}" }}, {{ "{{.Payload}}" }} (full payload access)
                       Cron sources: {{ "{{.Time}}" }}, {{ "{{.Schedule}}" }}
                     type: string
@@ -723,6 +723,39 @@ spec:
                         items:
                           type: string
                         type: array
+                      filePatterns:
+                        description: |-
+                          FilePatterns filters pull requests by changed file paths.
+                          When set, only PRs where at least one changed file matches an include
+                          pattern (and no changed file matches an exclude pattern) are discovered.
+                          Patterns use doublestar syntax (e.g., "*.go", "internal/**", "docs/**/*.md").
+                          When empty, no file-based filtering is applied.
+                        properties:
+                          exclude:
+                            description: |-
+                              Exclude rejects items where any changed file matches any of these glob patterns.
+                              When ExcludeOnly is false (default), any single exclude match rejects the item.
+                              When ExcludeOnly is true, the item is only rejected when ALL changed files
+                              match exclude patterns (i.e., "skip docs-only PRs").
+                            items:
+                              type: string
+                            type: array
+                          excludeOnly:
+                            description: |-
+                              ExcludeOnly inverts the exclude logic: instead of rejecting on any single
+                              exclude match, it only rejects items where ALL changed files match exclude
+                              patterns. Useful for filtering out items that only change non-code files.
+                              Defaults to false.
+                            type: boolean
+                          include:
+                            description: |-
+                              Include requires at least one changed file to match any of these glob patterns.
+                              Patterns use doublestar syntax (e.g., "*.go", "internal/**").
+                              When empty, all files are considered matching (only exclude patterns apply).
+                            items:
+                              type: string
+                            type: array
+                        type: object
                       labels:
                         description: Labels filters pull requests by labels.
                         items:
@@ -846,6 +879,38 @@ spec:
                               items:
                                 type: string
                               type: array
+                            filePatterns:
+                              description: |-
+                                FilePatterns filters events by changed file paths.
+                                For push events, file paths are extracted directly from the payload.
+                                For pull_request events, the file list is fetched from the GitHub API
+                                using the workspace's secretRef for authentication.
+                              properties:
+                                exclude:
+                                  description: |-
+                                    Exclude rejects items where any changed file matches any of these glob patterns.
+                                    When ExcludeOnly is false (default), any single exclude match rejects the item.
+                                    When ExcludeOnly is true, the item is only rejected when ALL changed files
+                                    match exclude patterns (i.e., "skip docs-only PRs").
+                                  items:
+                                    type: string
+                                  type: array
+                                excludeOnly:
+                                  description: |-
+                                    ExcludeOnly inverts the exclude logic: instead of rejecting on any single
+                                    exclude match, it only rejects items where ALL changed files match exclude
+                                    patterns. Useful for filtering out items that only change non-code files.
+                                    Defaults to false.
+                                  type: boolean
+                                include:
+                                  description: |-
+                                    Include requires at least one changed file to match any of these glob patterns.
+                                    Patterns use doublestar syntax (e.g., "*.go", "internal/**").
+                                    When empty, all files are considered matching (only exclude patterns apply).
+                                  items:
+                                    type: string
+                                  type: array
+                              type: object
                             labels:
                               description: Labels requires the issue/PR to have all
                                 of these labels.

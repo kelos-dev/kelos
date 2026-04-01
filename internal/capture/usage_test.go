@@ -132,16 +132,17 @@ func TestParseUsage(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			path := writeTempFile(t, tt.content)
-			got := ParseUsage(tt.agentType, path)
+			lines := readLines(path)
+			got := parseUsage(tt.agentType, lines)
 			assertMapEqual(t, tt.want, got)
 		})
 	}
 }
 
-func TestParseUsageMissingFile(t *testing.T) {
-	got := ParseUsage("claude-code", "/nonexistent/path/file.jsonl")
-	if got != nil {
-		t.Errorf("expected nil for missing file, got %v", got)
+func TestReadLinesMissingFile(t *testing.T) {
+	lines := readLines("/nonexistent/path/file.jsonl")
+	if lines != nil {
+		t.Errorf("expected nil for missing file, got %v", lines)
 	}
 }
 
@@ -152,6 +153,85 @@ func writeTempFile(t *testing.T, content string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func TestParseResponse(t *testing.T) {
+	tests := []struct {
+		name               string
+		agentType          string
+		content            string
+		useNonExistentPath bool
+		want               string
+	}{
+		{
+			name:      "claude-code result with response",
+			agentType: "claude-code",
+			content: `{"type":"assistant","message":"thinking..."}
+{"type":"result","subtype":"success","result":"I need your GitHub username to proceed.","total_cost_usd":0.05,"usage":{"input_tokens":100,"output_tokens":50}}
+`,
+			want: "I need your GitHub username to proceed.",
+		},
+		{
+			name:      "claude-code uses last result",
+			agentType: "claude-code",
+			content: `{"type":"result","result":"first response"}
+{"type":"result","result":"second response"}
+`,
+			want: "second response",
+		},
+		{
+			name:      "cursor result with response",
+			agentType: "cursor",
+			content:   `{"type":"result","subtype":"success","result":"done","usage":{"inputTokens":100,"outputTokens":50}}` + "\n",
+			want:      "done",
+		},
+		{
+			name:      "no result line returns empty",
+			agentType: "claude-code",
+			content:   `{"type":"assistant","message":"thinking"}` + "\n",
+			want:      "",
+		},
+		{
+			name:      "result without result field returns empty",
+			agentType: "claude-code",
+			content:   `{"type":"result","total_cost_usd":0.05}` + "\n",
+			want:      "",
+		},
+		{
+			name:      "empty agent type returns empty",
+			agentType: "",
+			content:   `{"type":"result","result":"hello"}` + "\n",
+			want:      "",
+		},
+		{
+			name:      "unknown agent type returns empty",
+			agentType: "unknown-agent",
+			content:   `{"type":"result","result":"hello"}` + "\n",
+			want:      "",
+		},
+		{
+			name:               "missing file returns empty",
+			agentType:          "claude-code",
+			useNonExistentPath: true,
+			want:               "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var lines [][]byte
+			if tt.useNonExistentPath {
+				lines = readLines("/nonexistent/path/file.jsonl")
+			} else {
+				path := writeTempFile(t, tt.content)
+				lines = readLines(path)
+			}
+			got := parseResponse(tt.agentType, lines)
+			if got != tt.want {
+				t.Errorf("parseResponse() = %q, want %q", got, tt.want)
+			}
+		})
+	}
 }
 
 func assertMapEqual(t *testing.T, want, got map[string]string) {

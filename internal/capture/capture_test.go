@@ -1,6 +1,7 @@
 package capture
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"strings"
@@ -280,6 +281,76 @@ func TestCaptureOutputsUpstreamRepoNoPRs(t *testing.T) {
 		"branch: fix-branch",
 		"commit: abc123",
 		"base-branch: main",
+	}
+	assertOutputLines(t, expected, outputs)
+}
+
+func TestCaptureOutputsWithResponse(t *testing.T) {
+	r := mockRunner{commands: map[string]mockResult{
+		"git rev-parse --is-inside-work-tree": {output: "true"},
+		"git branch --show-current":           {output: "test-branch"},
+		"gh pr list --head test-branch --json url": {
+			output: `[{"url":"https://github.com/org/repo/pull/42"}]`,
+		},
+		"git rev-parse HEAD":                        {output: "abc123"},
+		"git symbolic-ref refs/remotes/origin/HEAD": {output: "refs/remotes/origin/main"},
+	}}
+
+	usageFile := writeTempFile(t, `{"type":"result","result":"I need your GitHub username to proceed.","total_cost_usd":0.05,"usage":{"input_tokens":1000,"output_tokens":500}}`)
+	t.Setenv("KELOS_AGENT_TYPE", "claude-code")
+	t.Setenv("KELOS_BASE_BRANCH", "")
+
+	outputs := captureOutputs(r, usageFile)
+
+	expected := []string{
+		"branch: test-branch",
+		"pr: https://github.com/org/repo/pull/42",
+		"commit: abc123",
+		"base-branch: main",
+		"cost-usd: 0.05",
+		"input-tokens: 1000",
+		"output-tokens: 500",
+		"response: " + base64.StdEncoding.EncodeToString([]byte("I need your GitHub username to proceed.")),
+	}
+	assertOutputLines(t, expected, outputs)
+}
+
+func TestCaptureOutputsMultilineResponse(t *testing.T) {
+	r := mockRunner{commands: map[string]mockResult{
+		"git rev-parse --is-inside-work-tree": {err: fmt.Errorf("not a git repo")},
+	}}
+
+	multiline := "Line one.\nLine two.\nLine three."
+	usageFile := writeTempFile(t, `{"type":"result","result":"Line one.\nLine two.\nLine three.","total_cost_usd":0.01,"usage":{"input_tokens":10,"output_tokens":5}}`)
+	t.Setenv("KELOS_AGENT_TYPE", "claude-code")
+	t.Setenv("KELOS_BASE_BRANCH", "")
+
+	outputs := captureOutputs(r, usageFile)
+
+	expected := []string{
+		"cost-usd: 0.01",
+		"input-tokens: 10",
+		"output-tokens: 5",
+		"response: " + base64.StdEncoding.EncodeToString([]byte(multiline)),
+	}
+	assertOutputLines(t, expected, outputs)
+}
+
+func TestCaptureOutputsNoResponse(t *testing.T) {
+	r := mockRunner{commands: map[string]mockResult{
+		"git rev-parse --is-inside-work-tree": {err: fmt.Errorf("not a git repo")},
+	}}
+
+	usageFile := writeTempFile(t, `{"type":"result","total_cost_usd":0.05,"usage":{"input_tokens":100,"output_tokens":50}}`)
+	t.Setenv("KELOS_AGENT_TYPE", "claude-code")
+	t.Setenv("KELOS_BASE_BRANCH", "")
+
+	outputs := captureOutputs(r, usageFile)
+
+	expected := []string{
+		"cost-usd: 0.05",
+		"input-tokens: 100",
+		"output-tokens: 50",
 	}
 	assertOutputLines(t, expected, outputs)
 }

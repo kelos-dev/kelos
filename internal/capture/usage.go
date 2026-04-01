@@ -8,12 +8,9 @@ import (
 	"strings"
 )
 
-// ParseUsage extracts token usage metrics from the agent output file.
-// Returns nil if the file doesn't exist or the agent type is unknown.
-func ParseUsage(agentType, filePath string) map[string]string {
-	if agentType == "" {
-		return nil
-	}
+// readLines reads all lines from the given file path. Returns nil if the
+// file does not exist or is empty.
+func readLines(filePath string) [][]byte {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil
@@ -26,6 +23,12 @@ func ParseUsage(agentType, filePath string) map[string]string {
 	for scanner.Scan() {
 		lines = append(lines, append([]byte(nil), scanner.Bytes()...))
 	}
+	return lines
+}
+
+// parseUsage extracts token usage metrics from pre-read agent output lines.
+// Returns nil if the agent type is unknown or no usage data is found.
+func parseUsage(agentType string, lines [][]byte) map[string]string {
 	if len(lines) == 0 {
 		return nil
 	}
@@ -208,6 +211,34 @@ func formatNumber(v any) string {
 		return n.String()
 	}
 	return fmt.Sprint(v)
+}
+
+// parseResponse extracts the agent's final response text from pre-read output lines.
+// It looks for the last {"type":"result","result":"..."} JSON line.
+// Only agent types that emit a "result" line with a string "result" field are
+// supported; unknown agent types return "" (the same lines can still be used
+// by parseUsage which handles agent-type dispatch).
+func parseResponse(agentType string, lines [][]byte) string {
+	switch agentType {
+	case "claude-code", "codex", "gemini", "opencode", "cursor":
+		// These agents emit {"type":"result",...} with a "result" field.
+	default:
+		return ""
+	}
+
+	if len(lines) == 0 {
+		return ""
+	}
+
+	last := findLastByType(lines, "result")
+	if last == nil {
+		return ""
+	}
+	result, ok := last["result"].(string)
+	if !ok {
+		return ""
+	}
+	return result
 }
 
 // toInt64 converts a json.Number to int64, returning 0 on failure.

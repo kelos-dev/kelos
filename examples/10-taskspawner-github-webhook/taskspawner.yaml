@@ -14,6 +14,12 @@ spec:
         - "issue_comment"
         - "pull_request_review"
 
+      # Optional: exclude events from specific GitHub usernames (e.g. bots).
+      # Applied before filter evaluation and takes precedence over filter-level author matches.
+      excludeAuthors:
+        - "dependabot[bot]"
+        - "renovate[bot]"
+
       # Optional filters to refine which events trigger tasks
       # Multiple filters use OR semantics within the same event type
       filters:

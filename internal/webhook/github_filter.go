@@ -201,6 +201,15 @@ func MatchesGitHubEvent(spawner *v1alpha1.GitHubWebhook, eventType string, event
 		return false, nil
 	}
 
+	// Check top-level excluded authors before evaluating filters
+	if len(spawner.ExcludeAuthors) > 0 && eventData.Sender != "" {
+		for _, excluded := range spawner.ExcludeAuthors {
+			if excluded == eventData.Sender {
+				return false, nil
+			}
+		}
+	}
+
 	// If no filters, all events of the allowed types match
 	if len(spawner.Filters) == 0 {
 		return true, nil
@@ -230,6 +239,15 @@ func matchesFilter(filter v1alpha1.GitHubWebhookFilter, eventData *GitHubEventDa
 	// Author filter
 	if filter.Author != "" && filter.Author != eventData.Sender {
 		return false
+	}
+
+	// ExcludeAuthors filter
+	if len(filter.ExcludeAuthors) > 0 && eventData.Sender != "" {
+		for _, excluded := range filter.ExcludeAuthors {
+			if excluded == eventData.Sender {
+				return false
+			}
+		}
 	}
 
 	// Branch filter (for push events)

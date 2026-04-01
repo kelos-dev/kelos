@@ -496,6 +496,75 @@ func TestDiscoverPullRequestsFiltersByLabelAuthorDraftAndExcludeLabel(t *testing
 	}
 }
 
+func TestDiscoverPullRequestsExcludeAuthors(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/owner/repo/pulls":
+			json.NewEncoder(w).Encode([]githubPullRequest{
+				{
+					Number:  1,
+					Title:   "Human PR",
+					HTMLURL: "https://github.com/owner/repo/pull/1",
+					User:    githubUser{Login: "human-user"},
+					Head: githubPullRequestHead{
+						Ref: "feature-1",
+						SHA: "head-sha-1",
+					},
+				},
+				{
+					Number:  2,
+					Title:   "Bot PR",
+					HTMLURL: "https://github.com/owner/repo/pull/2",
+					User:    githubUser{Login: "bot-user"},
+					Head: githubPullRequestHead{
+						Ref: "bot-update",
+						SHA: "head-sha-2",
+					},
+				},
+				{
+					Number:  3,
+					Title:   "Dependabot PR",
+					HTMLURL: "https://github.com/owner/repo/pull/3",
+					User:    githubUser{Login: "dependabot[bot]"},
+					Head: githubPullRequestHead{
+						Ref: "dependabot/npm",
+						SHA: "head-sha-3",
+					},
+				},
+			})
+		case "/repos/owner/repo/issues/1/comments":
+			json.NewEncoder(w).Encode([]githubComment{})
+		case "/repos/owner/repo/pulls/1/comments":
+			json.NewEncoder(w).Encode([]githubPullRequestComment{})
+		case "/repos/owner/repo/pulls/1/reviews":
+			json.NewEncoder(w).Encode([]githubPullRequestReview{})
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	s := &GitHubPullRequestSource{
+		Owner:          "owner",
+		Repo:           "repo",
+		BaseURL:        server.URL,
+		ReviewState:    "any",
+		ExcludeAuthors: []string{"bot-user", "dependabot[bot]"},
+	}
+
+	items, err := s.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	if items[0].Number != 1 {
+		t.Errorf("Number = %d, want %d", items[0].Number, 1)
+	}
+}
+
 func TestAggregatePullRequestReviewState(t *testing.T) {
 	tests := []struct {
 		name      string

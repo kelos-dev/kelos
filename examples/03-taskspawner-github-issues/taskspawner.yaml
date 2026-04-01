@@ -8,6 +8,9 @@ spec:
       labels:
         - bug
       state: open
+      # Optional: exclude issues created by specific usernames (e.g. bots)
+      excludeAuthors:
+        - "dependabot[bot]"
       pollInterval: 5m
   taskTemplate:
     type: claude-code

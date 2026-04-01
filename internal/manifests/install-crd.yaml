@@ -1240,6 +1240,13 @@ spec:
                               When set alone, only items with a matching command are discovered.
                             type: string
                         type: object
+                      excludeAuthors:
+                        description: |-
+                          ExcludeAuthors filters out issues created by any of these usernames
+                          (client-side). When empty, no author exclusion is applied.
+                        items:
+                          type: string
+                        type: array
                       excludeComments:
                         description: |-
                           ExcludeComments enables comment-based exclusion. When set, issues
@@ -1384,6 +1391,13 @@ spec:
                           Draft filters pull requests by draft state. When unset, both draft and
                           ready-for-review pull requests are included.
                         type: boolean
+                      excludeAuthors:
+                        description: |-
+                          ExcludeAuthors filters out pull requests opened by any of these usernames
+                          (client-side). When empty, no author exclusion is applied.
+                        items:
+                          type: string
+                        type: array
                       excludeComments:
                         description: |-
                           ExcludeComments enables comment-based exclusion. When set, PRs
@@ -1485,6 +1499,14 @@ spec:
                           type: string
                         minItems: 1
                         type: array
+                      excludeAuthors:
+                        description: |-
+                          ExcludeAuthors excludes webhook events sent by any of these usernames.
+                          This is applied before filter evaluation and takes precedence over
+                          filter-level Author matches.
+                        items:
+                          type: string
+                        type: array
                       filters:
                         description: |-
                           Filters refine which events trigger tasks. If multiple filters match
@@ -1517,6 +1539,12 @@ spec:
                               description: Event is the GitHub event type this filter
                                 applies to.
                               type: string
+                            excludeAuthors:
+                              description: ExcludeAuthors excludes events sent by
+                                any of these usernames.
+                              items:
+                                type: string
+                              type: array
                             excludeLabels:
                               description: ExcludeLabels excludes issues/PRs with
                                 any of these labels.

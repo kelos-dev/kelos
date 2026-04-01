@@ -147,6 +147,113 @@ func TestMatchesGitHubEvent_AuthorFilter(t *testing.T) {
 	}
 }
 
+func TestMatchesGitHubEvent_ExcludeAuthorsTopLevel(t *testing.T) {
+	spawner := &v1alpha1.GitHubWebhook{
+		Events:         []string{"issues"},
+		ExcludeAuthors: []string{"bot-user", "dependabot[bot]"},
+	}
+
+	tests := []struct {
+		name    string
+		payload string
+		want    bool
+	}{
+		{
+			name:    "excluded author is rejected",
+			payload: `{"action":"opened","sender":{"login":"bot-user"}}`,
+			want:    false,
+		},
+		{
+			name:    "another excluded author is rejected",
+			payload: `{"action":"opened","sender":{"login":"dependabot[bot]"}}`,
+			want:    false,
+		},
+		{
+			name:    "non-excluded author is accepted",
+			payload: `{"action":"opened","sender":{"login":"human-user"}}`,
+			want:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseAndMatch(t, spawner, "issues", []byte(tt.payload))
+			if err != nil {
+				t.Errorf("MatchesGitHubEvent() error = %v", err)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("MatchesGitHubEvent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMatchesGitHubEvent_ExcludeAuthorsPerFilter(t *testing.T) {
+	spawner := &v1alpha1.GitHubWebhook{
+		Events: []string{"issues"},
+		Filters: []v1alpha1.GitHubWebhookFilter{
+			{
+				Event:          "issues",
+				Action:         "opened",
+				ExcludeAuthors: []string{"bot-user"},
+			},
+		},
+	}
+
+	tests := []struct {
+		name    string
+		payload string
+		want    bool
+	}{
+		{
+			name:    "excluded author in filter is rejected",
+			payload: `{"action":"opened","sender":{"login":"bot-user"}}`,
+			want:    false,
+		},
+		{
+			name:    "non-excluded author in filter is accepted",
+			payload: `{"action":"opened","sender":{"login":"human-user"}}`,
+			want:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseAndMatch(t, spawner, "issues", []byte(tt.payload))
+			if err != nil {
+				t.Errorf("MatchesGitHubEvent() error = %v", err)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("MatchesGitHubEvent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMatchesGitHubEvent_ExcludeAuthorsTopLevelOverridesFilter(t *testing.T) {
+	// Top-level ExcludeAuthors should reject even if a filter's Author field matches
+	spawner := &v1alpha1.GitHubWebhook{
+		Events:         []string{"issues"},
+		ExcludeAuthors: []string{"bot-user"},
+		Filters: []v1alpha1.GitHubWebhookFilter{
+			{
+				Event:  "issues",
+				Author: "bot-user",
+			},
+		},
+	}
+
+	got, err := parseAndMatch(t, spawner, "issues", []byte(`{"action":"opened","sender":{"login":"bot-user"}}`))
+	if err != nil {
+		t.Fatalf("MatchesGitHubEvent() error = %v", err)
+	}
+	if got {
+		t.Error("Expected top-level ExcludeAuthors to take precedence over filter Author match")
+	}
+}
+
 func TestMatchesGitHubEvent_LabelsFilter(t *testing.T) {
 	spawner := &v1alpha1.GitHubWebhook{
 		Events: []string{"issues"},

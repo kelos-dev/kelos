@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -215,13 +214,6 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Process the webhook
 	_, err = h.processWebhook(ctx, eventType, body, deliveryID)
 	if err != nil {
-		var concErr *MaxConcurrencyError
-		if errors.As(err, &concErr) {
-			log.Info("Webhook processing blocked by rate limit", "eventType", eventType, "deliveryID", deliveryID, "retryAfter", concErr.RetryAfter)
-			w.Header().Set("Retry-After", fmt.Sprintf("%d", concErr.RetryAfter))
-			http.Error(w, "Service unavailable", http.StatusServiceUnavailable)
-			return
-		}
 		log.Error(err, "Failed to process webhook", "eventType", eventType, "deliveryID", deliveryID)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -318,19 +310,16 @@ func (h *WebhookHandler) processWebhook(ctx context.Context, eventType string, p
 		if spawner.Spec.MaxConcurrency != nil && *spawner.Spec.MaxConcurrency > 0 {
 			activeTasks := spawner.Status.ActiveTasks
 			if int32(activeTasks) >= *spawner.Spec.MaxConcurrency {
-				spawnerLog.Info("Max concurrency reached, returning 503",
+				spawnerLog.Info("Max concurrency reached, dropping webhook event",
 					"activeTasks", activeTasks,
-					"maxConcurrency", *spawner.Spec.MaxConcurrency)
-
-				// Return 503 with Retry-After header for this spawner
-				return false, &MaxConcurrencyError{
-					RetryAfter: 60, // Suggest retry after 60 seconds
-				}
+					"maxConcurrency", *spawner.Spec.MaxConcurrency,
+					"reason", "Webhook accepted but task creation skipped due to concurrency limits")
+				continue // Skip this spawner, continue with others
 			}
 		}
 
 		// Check if this webhook matches the spawner's filters
-		matches, err := h.matchesSpawner(spawner, eventType, parsed, payload)
+		matches, err := h.matchesSpawner(spawner, eventType, parsed)
 		if err != nil {
 			spawnerLog.Error(err, "Failed to check spawner match")
 			continue
@@ -356,15 +345,6 @@ func (h *WebhookHandler) processWebhook(ctx context.Context, eventType string, p
 
 	log.Info("Webhook processing completed", "totalSpawners", len(spawners), "tasksCreated", tasksCreated)
 	return tasksCreated > 0, nil
-}
-
-// MaxConcurrencyError represents an error when max concurrency is exceeded.
-type MaxConcurrencyError struct {
-	RetryAfter int
-}
-
-func (e *MaxConcurrencyError) Error() string {
-	return fmt.Sprintf("max concurrency exceeded, retry after %d seconds", e.RetryAfter)
 }
 
 // getMatchingSpawners returns TaskSpawners that match the webhook source.
@@ -394,7 +374,7 @@ func (h *WebhookHandler) getMatchingSpawners(ctx context.Context) ([]*v1alpha1.T
 }
 
 // matchesSpawner checks if the webhook matches the spawner's configuration.
-func (h *WebhookHandler) matchesSpawner(spawner *v1alpha1.TaskSpawner, eventType string, parsed *ParsedWebhook, payload []byte) (bool, error) {
+func (h *WebhookHandler) matchesSpawner(spawner *v1alpha1.TaskSpawner, eventType string, parsed *ParsedWebhook) (bool, error) {
 	switch h.source {
 	case GitHubSource:
 		if spawner.Spec.When.GitHubWebhook == nil {
@@ -414,7 +394,7 @@ func (h *WebhookHandler) matchesSpawner(spawner *v1alpha1.TaskSpawner, eventType
 		if spawner.Spec.When.LinearWebhook == nil {
 			return false, nil
 		}
-		return MatchesLinearEvent(spawner.Spec.When.LinearWebhook, payload)
+		return MatchesLinearEvent(spawner.Spec.When.LinearWebhook, parsed.Linear)
 
 	default:
 		return false, fmt.Errorf("unsupported source: %s", h.source)

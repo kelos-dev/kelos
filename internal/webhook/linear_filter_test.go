@@ -6,6 +6,16 @@ import (
 	"github.com/kelos-dev/kelos/api/v1alpha1"
 )
 
+// parseAndMatchLinear is a test helper that parses a payload and calls MatchesLinearEvent.
+func parseAndMatchLinear(t *testing.T, config *v1alpha1.LinearWebhook, payload []byte) (bool, error) {
+	t.Helper()
+	eventData, err := ParseLinearWebhook(payload)
+	if err != nil {
+		return false, err
+	}
+	return MatchesLinearEvent(config, eventData)
+}
+
 func TestMatchesLinearEvent_TypeFilter(t *testing.T) {
 	spawner := &v1alpha1.LinearWebhook{
 		Types: []string{"Issue", "Comment"},
@@ -37,7 +47,7 @@ func TestMatchesLinearEvent_TypeFilter(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			payload := []byte(`{"type":"` + tt.eventType + `","action":"create","data":{"id":"123"}}`)
-			got, err := MatchesLinearEvent(spawner, payload)
+			got, err := parseAndMatchLinear(t, spawner, payload)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("MatchesLinearEvent() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -79,7 +89,7 @@ func TestMatchesLinearEvent_ActionFilter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := MatchesLinearEvent(spawner, []byte(tt.payload))
+			got, err := parseAndMatchLinear(t, spawner, []byte(tt.payload))
 			if err != nil {
 				t.Errorf("MatchesLinearEvent() error = %v", err)
 				return
@@ -162,7 +172,7 @@ func TestMatchesLinearEvent_StateFilter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := MatchesLinearEvent(spawner, []byte(tt.payload))
+			got, err := parseAndMatchLinear(t, spawner, []byte(tt.payload))
 			if err != nil {
 				t.Errorf("MatchesLinearEvent() error = %v", err)
 				return
@@ -252,7 +262,7 @@ func TestMatchesLinearEvent_LabelsFilter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := MatchesLinearEvent(spawner, []byte(tt.payload))
+			got, err := parseAndMatchLinear(t, spawner, []byte(tt.payload))
 			if err != nil {
 				t.Errorf("MatchesLinearEvent() error = %v", err)
 				return
@@ -357,7 +367,7 @@ func TestMatchesLinearEvent_ExcludeLabelsFilter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := MatchesLinearEvent(spawner, []byte(tt.payload))
+			got, err := parseAndMatchLinear(t, spawner, []byte(tt.payload))
 			if err != nil {
 				t.Errorf("MatchesLinearEvent() error = %v", err)
 				return
@@ -409,7 +419,7 @@ func TestMatchesLinearEvent_ORSemantics(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := MatchesLinearEvent(spawner, []byte(tt.payload))
+			got, err := parseAndMatchLinear(t, spawner, []byte(tt.payload))
 			if err != nil {
 				t.Errorf("MatchesLinearEvent() error = %v", err)
 				return
@@ -451,7 +461,7 @@ func TestMatchesLinearEvent_NoFilters(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := MatchesLinearEvent(spawner, []byte(tt.payload))
+			got, err := parseAndMatchLinear(t, spawner, []byte(tt.payload))
 			if err != nil {
 				t.Errorf("MatchesLinearEvent() error = %v", err)
 				return
@@ -569,7 +579,7 @@ func TestMatchesLinearEvent_CommentLabelsFilter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := MatchesLinearEvent(spawner, []byte(tt.payload))
+			got, err := parseAndMatchLinear(t, spawner, []byte(tt.payload))
 			if err != nil {
 				t.Errorf("MatchesLinearEvent() error = %v", err)
 				return
@@ -694,7 +704,7 @@ func TestMatchesLinearEvent_CommentExcludeLabelsFilter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := MatchesLinearEvent(spawner, []byte(tt.payload))
+			got, err := parseAndMatchLinear(t, spawner, []byte(tt.payload))
 			if err != nil {
 				t.Errorf("MatchesLinearEvent() error = %v", err)
 				return
@@ -758,7 +768,7 @@ func TestMatchesLinearEvent_IssueLabelsRegression(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := MatchesLinearEvent(spawner, []byte(tt.payload))
+			got, err := parseAndMatchLinear(t, spawner, []byte(tt.payload))
 			if err != nil {
 				t.Errorf("MatchesLinearEvent() error = %v", err)
 				return

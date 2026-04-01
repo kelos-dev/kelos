@@ -14,9 +14,9 @@ type LinearEventData struct {
 	Type string
 	// Action (e.g., "create", "update", "remove")
 	Action string
-	// Raw parsed event payload for template access
-	RawPayload map[string]interface{}
-	// Standard template variables for compatibility
+	// Parsed event payload for template access
+	Payload map[string]interface{}
+	// Standard template variables
 	ID    string
 	Title string
 	// Extracted convenience fields
@@ -32,7 +32,7 @@ func ParseLinearWebhook(payload []byte) (*LinearEventData, error) {
 	}
 
 	data := &LinearEventData{
-		RawPayload: raw,
+		Payload: raw,
 	}
 
 	// Extract type from payload
@@ -88,32 +88,26 @@ func ParseLinearWebhook(payload []byte) (*LinearEventData, error) {
 }
 
 // MatchesLinearEvent evaluates whether a Linear webhook event matches the spawner's filters.
-func MatchesLinearEvent(spawner *v1alpha1.LinearWebhook, payload []byte) (bool, error) {
-	// Parse the event for filtering
-	eventData, err := ParseLinearWebhook(payload)
-	if err != nil {
-		return false, fmt.Errorf("failed to parse Linear webhook: %w", err)
-	}
-
+func MatchesLinearEvent(config *v1alpha1.LinearWebhook, eventData *LinearEventData) (bool, error) {
 	// Check if event type is in the allowed list
-	typeAllowed := false
-	for _, allowedType := range spawner.Types {
-		if allowedType == eventData.Type {
-			typeAllowed = true
+	typeMatched := false
+	for _, allowedType := range config.Types {
+		if strings.EqualFold(allowedType, eventData.Type) {
+			typeMatched = true
 			break
 		}
 	}
-	if !typeAllowed {
+	if !typeMatched {
 		return false, nil
 	}
 
 	// If no filters, all events of the allowed types match
-	if len(spawner.Filters) == 0 {
+	if len(config.Filters) == 0 {
 		return true, nil
 	}
 
 	// Apply filters with OR semantics for the same event type
-	for _, filter := range spawner.Filters {
+	for _, filter := range config.Filters {
 		if filter.Type != eventData.Type {
 			continue
 		}
@@ -154,7 +148,7 @@ func matchesLinearFilter(filter v1alpha1.LinearWebhookFilter, eventData *LinearE
 
 	// Get data object for further filtering
 	var dataObj map[string]interface{}
-	if d, ok := eventData.RawPayload["data"].(map[string]interface{}); ok {
+	if d, ok := eventData.Payload["data"].(map[string]interface{}); ok {
 		dataObj = d
 	}
 
@@ -248,18 +242,18 @@ func ExtractLinearWorkItem(eventData *LinearEventData) map[string]interface{} {
 	vars := map[string]interface{}{
 		"Type":    eventData.Type,
 		"Action":  eventData.Action,
-		"Payload": eventData.RawPayload,
+		"Payload": eventData.Payload,
 		"State":   eventData.State,
 		"Labels":  strings.Join(eventData.Labels, ", "),
 		// Standard variables for compatibility
 		"ID":    eventData.ID,
 		"Title": eventData.Title,
-		"Kind":  "webhook",
+		"Kind":  "LinearWebhook",
 	}
 
 	// For Comment events, extract the parent issue ID
 	if eventData.Type == "Comment" {
-		if dataObj, ok := eventData.RawPayload["data"].(map[string]interface{}); ok {
+		if dataObj, ok := eventData.Payload["data"].(map[string]interface{}); ok {
 			if issue, ok := dataObj["issue"].(map[string]interface{}); ok {
 				if issueID, ok := issue["id"].(string); ok {
 					vars["IssueID"] = issueID

@@ -425,16 +425,11 @@ func TestServeHTTP_MaxConcurrencyDropsEvent(t *testing.T) {
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Fatalf("Expected %d, got %d", http.StatusServiceUnavailable, rr.Code)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected %d, got %d", http.StatusOK, rr.Code)
 	}
 
-	// Verify Retry-After header is set
-	if rr.Header().Get("Retry-After") == "" {
-		t.Error("Expected Retry-After header to be set")
-	}
-
-	// Verify no task was created
+	// Verify no task was created — spawner was skipped due to concurrency limits
 	var taskList kelosv1alpha1.TaskList
 	if err := handler.client.List(context.Background(), &taskList); err != nil {
 		t.Fatal(err)

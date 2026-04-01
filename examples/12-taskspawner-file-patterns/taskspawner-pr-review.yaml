@@ -1,0 +1,81 @@
+# Example: Content-aware PR review using filePatterns
+#
+# This TaskSpawner only reviews PRs that touch Go source files,
+# and skips documentation-only PRs. The agent receives the list
+# of changed files in its prompt so it knows what to focus on.
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: go-code-reviewer
+spec:
+  when:
+    githubPullRequests:
+      state: open
+      # Only review PRs that change Go source files
+      filePatterns:
+        include:
+          - "**/*.go"
+        exclude:
+          - "vendor/**"
+  maxConcurrency: 2
+  taskTemplate:
+    type: claude-code
+    credentials:
+      type: oauth
+      secretRef:
+        name: claude-oauth-token
+    workspaceRef:
+      name: my-workspace
+    branch: "{{.Branch}}"
+    promptTemplate: |
+      Review PR #{{.Number}}: {{.Title}}
+
+      {{.Body}}
+
+      ## Changed files
+      {{.ChangedFiles}}
+
+      Please review the Go code changes listed above. Focus on correctness,
+      error handling, and test coverage. Ignore vendor changes.
+    ttlSecondsAfterFinished: 3600
+---
+# Example: Skip documentation-only PRs using excludeOnly
+#
+# This TaskSpawner reviews all PRs except those that only change
+# documentation files.
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: code-reviewer-skip-docs
+spec:
+  when:
+    githubPullRequests:
+      state: open
+      labels:
+        - needs-review
+      filePatterns:
+        exclude:
+          - "docs/**"
+          - "*.md"
+          - "*.txt"
+          - "LICENSE"
+        excludeOnly: true # Only skip if ALL changed files are docs
+  taskTemplate:
+    type: claude-code
+    credentials:
+      type: oauth
+      secretRef:
+        name: claude-oauth-token
+    workspaceRef:
+      name: my-workspace
+    branch: "{{.Branch}}"
+    promptTemplate: |
+      Review PR #{{.Number}}: {{.Title}}
+
+      {{.Body}}
+      {{- if .ChangedFiles}}
+
+      ## Changed files
+      {{.ChangedFiles}}
+      {{- end}}
+    ttlSecondsAfterFinished: 3600

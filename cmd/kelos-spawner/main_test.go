@@ -2646,3 +2646,94 @@ func TestRunOnce_UsesPersistentSource(t *testing.T) {
 		t.Fatalf("Task prompt = %q, want %q", taskList.Items[0].Spec.Prompt, "hello")
 	}
 }
+
+func TestTemplateReferencesChangedFiles(t *testing.T) {
+	tests := []struct {
+		name string
+		ts   *kelosv1alpha1.TaskSpawner
+		want bool
+	}{
+		{
+			name: "prompt template references ChangedFiles",
+			ts: &kelosv1alpha1.TaskSpawner{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
+						PromptTemplate: "Review these files:\n{{.ChangedFiles}}",
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "branch references ChangedFiles",
+			ts: &kelosv1alpha1.TaskSpawner{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
+						Branch: "review-{{.ChangedFiles}}",
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "metadata label references ChangedFiles",
+			ts: &kelosv1alpha1.TaskSpawner{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
+						Metadata: &kelosv1alpha1.TaskTemplateMetadata{
+							Labels: map[string]string{
+								"files": "{{.ChangedFiles}}",
+							},
+						},
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "metadata annotation references ChangedFiles",
+			ts: &kelosv1alpha1.TaskSpawner{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
+						Metadata: &kelosv1alpha1.TaskTemplateMetadata{
+							Annotations: map[string]string{
+								"kelos.dev/files": "{{.ChangedFiles}}",
+							},
+						},
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "no reference to ChangedFiles",
+			ts: &kelosv1alpha1.TaskSpawner{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
+						PromptTemplate: "Review PR #{{.Number}}: {{.Title}}",
+						Branch:         "review-{{.Number}}",
+					},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "empty templates",
+			ts: &kelosv1alpha1.TaskSpawner{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					TaskTemplate: kelosv1alpha1.TaskTemplate{},
+				},
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := templateReferencesChangedFiles(tt.ts)
+			if got != tt.want {
+				t.Errorf("templateReferencesChangedFiles() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

@@ -1,0 +1,92 @@
+# Example: Webhook-driven security review with filePatterns
+#
+# For push events, changed files are extracted from the payload (no API call).
+# For pull_request events, changed files are fetched from the GitHub API
+# using the workspace's secretRef for authentication.
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: webhook-security-reviewer
+spec:
+  when:
+    githubWebhook:
+      events:
+        - "pull_request"
+        - "push"
+      filters:
+        # Only trigger on PRs that touch auth code
+        - event: "pull_request"
+          action: "opened"
+          filePatterns:
+            include:
+              - "internal/auth/**"
+              - "internal/crypto/**"
+        # Trigger on pushes to main that touch auth code
+        - event: "push"
+          branch: "main"
+          filePatterns:
+            include:
+              - "internal/auth/**"
+              - "internal/crypto/**"
+  taskTemplate:
+    type: claude-code
+    credentials:
+      type: oauth
+      secretRef:
+        name: claude-oauth-token
+    workspaceRef:
+      name: my-workspace
+    branch: "kelos-security-review-{{.ID}}"
+    promptTemplate: |
+      Security review for {{.Event}} event by @{{.Sender}}
+      {{- if .Title}}
+      Title: {{.Title}}
+      {{- end}}
+      {{- if .ChangedFiles}}
+
+      ## Changed files
+      {{.ChangedFiles}}
+      {{- end}}
+
+      Focus on: authentication bypass, injection vulnerabilities,
+      credential handling, and access control in the changed files.
+    ttlSecondsAfterFinished: 3600
+---
+# Example: Use {{.ChangedFiles}} in prompt without filtering
+#
+# The spawner automatically fetches the file list from the GitHub API
+# when it detects {{.ChangedFiles}} in the prompt template, even without
+# filePatterns filters configured.
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: webhook-pr-reviewer-with-context
+spec:
+  when:
+    githubWebhook:
+      events:
+        - "pull_request"
+      filters:
+        - event: "pull_request"
+          action: "opened"
+          draft: false
+  taskTemplate:
+    type: claude-code
+    credentials:
+      type: oauth
+      secretRef:
+        name: claude-oauth-token
+    workspaceRef:
+      name: my-workspace
+    promptTemplate: |
+      Review PR #{{.Number}}: {{.Title}}
+
+      {{.Body}}
+      {{- if .ChangedFiles}}
+
+      ## Files changed in this PR
+      {{.ChangedFiles}}
+      {{- end}}
+
+      Please review the code changes and provide feedback.
+    ttlSecondsAfterFinished: 3600

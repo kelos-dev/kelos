@@ -189,3 +189,62 @@ func TestRenderTemplateInvalid(t *testing.T) {
 		t.Fatal("expected error for invalid template")
 	}
 }
+
+func TestRenderPromptChangedFiles(t *testing.T) {
+	item := WorkItem{
+		Number:       10,
+		Title:        "PR with files",
+		Body:         "Changes stuff",
+		Kind:         "PR",
+		ChangedFiles: []string{"internal/handler.go", "internal/handler_test.go"},
+	}
+
+	tmpl := `PR #{{.Number}}: {{.Title}}
+Files:
+{{.ChangedFiles}}`
+	result, err := RenderPrompt(tmpl, item)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(result, "internal/handler.go\ninternal/handler_test.go") {
+		t.Errorf("expected newline-joined changed files in output: %s", result)
+	}
+}
+
+func TestRenderPromptChangedFilesEmpty(t *testing.T) {
+	item := WorkItem{
+		Number: 10,
+		Title:  "PR without files",
+		Body:   "No file data",
+		Kind:   "PR",
+	}
+
+	tmpl := `PR #{{.Number}}{{if .ChangedFiles}}
+Files: {{.ChangedFiles}}{{end}}`
+	result, err := RenderPrompt(tmpl, item)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if strings.Contains(result, "Files:") {
+		t.Errorf("expected no Files section when ChangedFiles is empty: %s", result)
+	}
+}
+
+func TestWorkItemToTemplateVarsChangedFiles(t *testing.T) {
+	item := WorkItem{
+		Number:       5,
+		Kind:         "PR",
+		ChangedFiles: []string{"a.go", "b.go"},
+	}
+
+	vars := WorkItemToTemplateVars(item)
+	cf, ok := vars["ChangedFiles"].(string)
+	if !ok {
+		t.Fatal("ChangedFiles not in template vars")
+	}
+	if cf != "a.go\nb.go" {
+		t.Errorf("ChangedFiles = %q, want %q", cf, "a.go\nb.go")
+	}
+}

@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/bmatcuk/doublestar/v4"
 )
 
 const (
@@ -17,6 +19,66 @@ const (
 	reviewStateApproved         = "approved"
 	reviewStateChangesRequested = "changes_requested"
 )
+
+// FilePatternFilter filters items by changed file paths using glob patterns.
+// This is a source-level mirror of the API type to avoid importing API types
+// in the source package.
+type FilePatternFilter struct {
+	Include     []string
+	Exclude     []string
+	ExcludeOnly bool
+}
+
+// MatchesFilePatterns returns true when the given file list passes the filter.
+// A nil filter matches everything. When ExcludeOnly is false (default), any
+// single exclude match rejects the item. When ExcludeOnly is true, the item
+// is only rejected when ALL changed files match exclude patterns.
+func MatchesFilePatterns(files []string, patterns *FilePatternFilter) bool {
+	if patterns == nil {
+		return true
+	}
+	if len(files) == 0 {
+		return len(patterns.Include) == 0
+	}
+
+	hasIncludeMatch := len(patterns.Include) == 0
+	allMatchExclude := len(patterns.Exclude) > 0
+
+	for _, file := range files {
+		if !patterns.ExcludeOnly {
+			for _, pattern := range patterns.Exclude {
+				if match, _ := doublestar.Match(pattern, file); match {
+					return false
+				}
+			}
+		} else {
+			matchedAnyExclude := false
+			for _, pattern := range patterns.Exclude {
+				if match, _ := doublestar.Match(pattern, file); match {
+					matchedAnyExclude = true
+					break
+				}
+			}
+			if !matchedAnyExclude {
+				allMatchExclude = false
+			}
+		}
+
+		if !hasIncludeMatch {
+			for _, pattern := range patterns.Include {
+				if match, _ := doublestar.Match(pattern, file); match {
+					hasIncludeMatch = true
+					break
+				}
+			}
+		}
+	}
+
+	if patterns.ExcludeOnly && allMatchExclude {
+		return false
+	}
+	return hasIncludeMatch
+}
 
 // GitHubPullRequestSource discovers pull requests from a GitHub repository.
 type GitHubPullRequestSource struct {
@@ -38,6 +100,12 @@ type GitHubPullRequestSource struct {
 	MinimumPermission string
 	Draft             *bool
 	PriorityLabels    []string
+	FilePatterns      *FilePatternFilter
+	// NeedsChangedFiles causes file lists to be fetched for every PR even
+	// when FilePatterns is nil. This mirrors the webhook handler behavior
+	// where templates that reference {{.ChangedFiles}} automatically
+	// trigger file fetching.
+	NeedsChangedFiles bool
 }
 
 type githubUser struct {
@@ -84,6 +152,28 @@ func (s *GitHubPullRequestSource) Discover(ctx context.Context) ([]WorkItem, err
 	}
 
 	pullRequests = s.filterPullRequests(pullRequests)
+
+	// File-pattern filtering runs after cheap label/author/draft filters
+	// but before expensive per-PR review and comment fetches.
+	// When NeedsChangedFiles is true (template references {{.ChangedFiles}}),
+	// files are fetched even without FilePatterns so the template variable
+	// is populated — mirroring the webhook handler behavior.
+	var prFiles map[int][]string
+	if s.FilePatterns != nil || s.NeedsChangedFiles {
+		prFiles = make(map[int][]string)
+		var fileFiltered []githubPullRequest
+		for _, pr := range pullRequests {
+			files, err := s.fetchPRFiles(ctx, pr.Number)
+			if err != nil {
+				return nil, fmt.Errorf("fetching files for PR #%d: %w", pr.Number, err)
+			}
+			if MatchesFilePatterns(files, s.FilePatterns) {
+				fileFiltered = append(fileFiltered, pr)
+				prFiles[pr.Number] = files
+			}
+		}
+		pullRequests = fileFiltered
+	}
 
 	policy := githubCommentPolicy{
 		TriggerComment:    s.TriggerComment,
@@ -164,6 +254,7 @@ func (s *GitHubPullRequestSource) Discover(ctx context.Context) ([]WorkItem, err
 			Branch:         pr.Head.Ref,
 			ReviewState:    reviewState,
 			ReviewComments: concatPullRequestReviewComments(reviewComments),
+			ChangedFiles:   prFiles[pr.Number],
 		}
 
 		item.TriggerTime = s.resolveTriggerTime(triggerTime, commentTriggerTime)
@@ -324,6 +415,33 @@ func (s *GitHubPullRequestSource) fetchPullRequestComments(ctx context.Context, 
 	}
 
 	return allComments, nil
+}
+
+type githubPullRequestFile struct {
+	Filename string `json:"filename"`
+}
+
+func (s *GitHubPullRequestSource) fetchPRFiles(ctx context.Context, number int) ([]string, error) {
+	var allFiles []githubPullRequestFile
+
+	pageURL := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/files?per_page=100",
+		s.baseURL(), s.Owner, s.Repo, number)
+
+	for page := 0; pageURL != "" && page < maxPages; page++ {
+		var files []githubPullRequestFile
+		nextURL, err := s.fetchGitHubPage(ctx, pageURL, &files)
+		if err != nil {
+			return nil, fmt.Errorf("fetching PR files: %w", err)
+		}
+		allFiles = append(allFiles, files...)
+		pageURL = nextURL
+	}
+
+	paths := make([]string, len(allFiles))
+	for i, f := range allFiles {
+		paths[i] = f.Filename
+	}
+	return paths, nil
 }
 
 func (s *GitHubPullRequestSource) fetchGitHubPage(ctx context.Context, pageURL string, out interface{}) (string, error) {

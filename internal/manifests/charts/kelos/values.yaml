@@ -13,6 +13,7 @@ controllerImage: ghcr.io/kelos-dev/kelos-controller
 ghproxy:
   image: ghcr.io/kelos-dev/ghproxy
   allowedUpstreams: "https://api.github.com"
+  cacheTTL: ""
   resources:
     requests: ""
     limits: ""

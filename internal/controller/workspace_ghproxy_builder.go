@@ -4,6 +4,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -26,6 +27,7 @@ type WorkspaceGHProxyBuilder struct {
 	GHProxyImage                  string
 	GHProxyImagePullPolicy        corev1.PullPolicy
 	GHProxyResources              *corev1.ResourceRequirements
+	GHProxyCacheTTL               time.Duration
 	TokenRefresherImage           string
 	TokenRefresherImagePullPolicy corev1.PullPolicy
 	TokenRefresherResources       *corev1.ResourceRequirements
@@ -108,6 +110,9 @@ func (b *WorkspaceGHProxyBuilder) BuildDeployment(workspace *kelosv1alpha1.Works
 	labels := workspaceProxyLabels(workspace.Name)
 	args := []string{
 		"--upstream-base-url=" + workspaceProxyUpstreamBaseURL(workspace),
+	}
+	if b.GHProxyCacheTTL > 0 {
+		args = append(args, "--cache-ttl="+b.GHProxyCacheTTL.String())
 	}
 
 	var env []corev1.EnvVar

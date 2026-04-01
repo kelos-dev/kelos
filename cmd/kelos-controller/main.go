@@ -57,6 +57,7 @@ func main() {
 	var ghProxyImagePullPolicy string
 	var ghProxyResourceRequests string
 	var ghProxyResourceLimits string
+	var ghProxyCacheTTL time.Duration
 	var tokenRefresherImage string
 	var tokenRefresherImagePullPolicy string
 	var tokenRefresherResourceRequests string
@@ -88,6 +89,7 @@ func main() {
 	flag.StringVar(&ghProxyImagePullPolicy, "ghproxy-image-pull-policy", "", "The image pull policy for workspace ghproxy Deployments (e.g., Always, Never, IfNotPresent).")
 	flag.StringVar(&ghProxyResourceRequests, "ghproxy-resource-requests", "", "Resource requests for workspace ghproxy containers as comma-separated name=value pairs (e.g., cpu=50m,memory=64Mi).")
 	flag.StringVar(&ghProxyResourceLimits, "ghproxy-resource-limits", "", "Resource limits for workspace ghproxy containers as comma-separated name=value pairs (e.g., cpu=200m,memory=128Mi).")
+	flag.DurationVar(&ghProxyCacheTTL, "ghproxy-cache-ttl", 0, "Cache TTL for workspace ghproxy instances (e.g., 30s, 1m). When set, passed as --cache-ttl to ghproxy containers. Zero means use the ghproxy default (15s).")
 	flag.StringVar(&tokenRefresherImage, "token-refresher-image", controller.DefaultTokenRefresherImage, "The image to use for the token refresher sidecar.")
 	flag.StringVar(&tokenRefresherImagePullPolicy, "token-refresher-image-pull-policy", "", "The image pull policy for the token refresher sidecar (e.g., Always, Never, IfNotPresent).")
 	flag.StringVar(&tokenRefresherResourceRequests, "token-refresher-resource-requests", "", "Resource requests for token refresher sidecars as comma-separated name=value pairs (e.g., cpu=100m,memory=128Mi).")
@@ -243,6 +245,7 @@ func main() {
 	workspaceProxyBuilder.GHProxyImage = ghProxyImage
 	workspaceProxyBuilder.GHProxyImagePullPolicy = corev1.PullPolicy(ghProxyImagePullPolicy)
 	workspaceProxyBuilder.GHProxyResources = ghProxyResources
+	workspaceProxyBuilder.GHProxyCacheTTL = ghProxyCacheTTL
 	workspaceProxyBuilder.TokenRefresherImage = tokenRefresherImage
 	workspaceProxyBuilder.TokenRefresherImagePullPolicy = corev1.PullPolicy(tokenRefresherImagePullPolicy)
 	workspaceProxyBuilder.TokenRefresherResources = tokenRefresherResources

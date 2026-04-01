@@ -70,6 +70,9 @@ spec:
             {{- if .Values.ghproxy.resources.limits }}
             - --ghproxy-resource-limits={{ .Values.ghproxy.resources.limits }}
             {{- end }}
+            {{- if .Values.ghproxy.cacheTTL }}
+            - --ghproxy-cache-ttl={{ .Values.ghproxy.cacheTTL }}
+            {{- end }}
             - --token-refresher-image={{ .Values.tokenRefresher.image }}{{- if .Values.image.tag }}:{{ .Values.image.tag }}{{- end }}
             {{- if .Values.image.pullPolicy }}
             - --token-refresher-image-pull-policy={{ .Values.image.pullPolicy }}

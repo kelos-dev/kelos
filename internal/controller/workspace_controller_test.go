@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -139,6 +140,34 @@ func TestContainersEqual_UsesSemanticResourceComparison(t *testing.T) {
 	if !containersEqual(a, b) {
 		t.Fatal("expected semantically equal resource quantities to compare equal")
 	}
+}
+
+func TestWorkspaceGHProxyBuilder_CacheTTL(t *testing.T) {
+	workspace := &kelosv1alpha1.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-ws", Namespace: "default"},
+		Spec:       kelosv1alpha1.WorkspaceSpec{Repo: "https://github.com/org/repo.git"},
+	}
+
+	t.Run("includes cache-ttl arg when set", func(t *testing.T) {
+		b := NewWorkspaceGHProxyBuilder()
+		b.GHProxyCacheTTL = 30 * time.Second
+		deploy := b.BuildDeployment(workspace, false)
+		args := deploy.Spec.Template.Spec.Containers[0].Args
+		if !containsArg(args, "--cache-ttl=30s") {
+			t.Fatalf("expected --cache-ttl=30s arg, got %v", args)
+		}
+	})
+
+	t.Run("omits cache-ttl arg when zero", func(t *testing.T) {
+		b := NewWorkspaceGHProxyBuilder()
+		deploy := b.BuildDeployment(workspace, false)
+		args := deploy.Spec.Template.Spec.Containers[0].Args
+		for _, arg := range args {
+			if strings.HasPrefix(arg, "--cache-ttl") {
+				t.Fatalf("expected no --cache-ttl arg, got %v", args)
+			}
+		}
+	})
 }
 
 func containsArg(args []string, want string) bool {

@@ -620,6 +620,36 @@ func TestInstallCommand_NoTokenRefresherResourcesByDefault(t *testing.T) {
 	}
 }
 
+func TestInstallCommand_GHProxyCacheTTLFlag(t *testing.T) {
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{"install", "--dry-run", "--ghproxy-cache-ttl", "30s"})
+
+	output := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "--ghproxy-cache-ttl=30s") {
+		t.Errorf("expected --ghproxy-cache-ttl=30s arg in output")
+	}
+}
+
+func TestInstallCommand_NoGHProxyCacheTTLByDefault(t *testing.T) {
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{"install", "--dry-run"})
+
+	output := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if strings.Contains(output, "--ghproxy-cache-ttl") {
+		t.Error("expected no --ghproxy-cache-ttl when not set")
+	}
+}
+
 func TestInstallCommand_ControllerResourceRequestsFlag(t *testing.T) {
 	cmd := NewRootCommand()
 	cmd.SetArgs([]string{"install", "--dry-run", "--controller-resource-requests", "cpu=10m,memory=64Mi"})

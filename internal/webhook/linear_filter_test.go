@@ -450,6 +450,174 @@ func TestMatchesLinearEvent_ExcludeLabelsCaseInsensitive(t *testing.T) {
 	}
 }
 
+func TestMatchesLinearEvent_LabelsCaseInsensitive(t *testing.T) {
+	spawner := &v1alpha1.LinearWebhook{
+		Types: []string{"Issue"},
+		Filters: []v1alpha1.LinearWebhookFilter{
+			{
+				Type:   "Issue",
+				Labels: []string{"Bug", "Priority:High"},
+			},
+		},
+	}
+
+	tests := []struct {
+		name    string
+		payload string
+		want    bool
+	}{
+		{
+			name: "labels match with different casing",
+			payload: `{
+				"type":"Issue",
+				"action":"create",
+				"data":{
+					"id":"123",
+					"title":"Test issue",
+					"labels":[
+						{"name":"bug"},
+						{"name":"priority:high"}
+					]
+				}
+			}`,
+			want: true,
+		},
+		{
+			name: "labels match with uppercase event labels",
+			payload: `{
+				"type":"Issue",
+				"action":"create",
+				"data":{
+					"id":"123",
+					"title":"Test issue",
+					"labels":[
+						{"name":"BUG"},
+						{"name":"PRIORITY:HIGH"}
+					]
+				}
+			}`,
+			want: true,
+		},
+		{
+			name: "labels match with mixed casing",
+			payload: `{
+				"type":"Issue",
+				"action":"create",
+				"data":{
+					"id":"123",
+					"title":"Test issue",
+					"labels":[
+						{"name":"Bug"},
+						{"name":"Priority:High"},
+						{"name":"frontend"}
+					]
+				}
+			}`,
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			eventData, err := ParseLinearWebhook([]byte(tt.payload))
+			if err != nil {
+				t.Fatalf("ParseLinearWebhook() error = %v", err)
+			}
+			got, err := MatchesLinearEvent(spawner, eventData)
+			if err != nil {
+				t.Errorf("MatchesLinearEvent() error = %v", err)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("MatchesLinearEvent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMatchesLinearEvent_ExcludeLabelsCaseInsensitive(t *testing.T) {
+	spawner := &v1alpha1.LinearWebhook{
+		Types: []string{"Issue"},
+		Filters: []v1alpha1.LinearWebhookFilter{
+			{
+				Type:          "Issue",
+				ExcludeLabels: []string{"WontFix"},
+			},
+		},
+	}
+
+	tests := []struct {
+		name    string
+		payload string
+		want    bool
+	}{
+		{
+			name: "excluded label matches with different casing",
+			payload: `{
+				"type":"Issue",
+				"action":"create",
+				"data":{
+					"id":"123",
+					"title":"Test issue",
+					"labels":[
+						{"name":"bug"},
+						{"name":"wontfix"}
+					]
+				}
+			}`,
+			want: false,
+		},
+		{
+			name: "excluded label matches with uppercase",
+			payload: `{
+				"type":"Issue",
+				"action":"create",
+				"data":{
+					"id":"123",
+					"title":"Test issue",
+					"labels":[
+						{"name":"bug"},
+						{"name":"WONTFIX"}
+					]
+				}
+			}`,
+			want: false,
+		},
+		{
+			name: "no excluded label present",
+			payload: `{
+				"type":"Issue",
+				"action":"create",
+				"data":{
+					"id":"123",
+					"title":"Test issue",
+					"labels":[
+						{"name":"bug"}
+					]
+				}
+			}`,
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			eventData, err := ParseLinearWebhook([]byte(tt.payload))
+			if err != nil {
+				t.Fatalf("ParseLinearWebhook() error = %v", err)
+			}
+			got, err := MatchesLinearEvent(spawner, eventData)
+			if err != nil {
+				t.Errorf("MatchesLinearEvent() error = %v", err)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("MatchesLinearEvent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMatchesLinearEvent_ExcludeLabelsFilter(t *testing.T) {
 	spawner := &v1alpha1.LinearWebhook{
 		Types: []string{"Issue"},

@@ -345,9 +345,12 @@ func (h *WebhookHandler) processWebhook(ctx context.Context, eventType string, p
 		// Lazily enrich labels for Linear Comment events. Linear does not
 		// include issue labels in Comment webhook payloads, so when a
 		// spawner filters Comments by labels we fetch them from the API.
+		// Lazily enrich labels once per delivery. We set the flag after the
+		// call so that a transient API failure does not silently skip label
+		// filtering for all remaining spawners in this loop.
 		if parsed.Linear != nil && !linearLabelsEnriched && spawnerNeedsLinearLabels(spawner, parsed.Linear) {
-			linearLabelsEnriched = true
 			enrichLinearCommentLabels(ctx, spawnerLog, parsed.Linear)
+			linearLabelsEnriched = true
 		}
 
 		// Check if this webhook matches the spawner's filters

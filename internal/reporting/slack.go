@@ -4,9 +4,45 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"regexp"
+	"strings"
 
 	"github.com/slack-go/slack"
 )
+
+var (
+	// reHeading matches Markdown headings (# through ######).
+	reHeading = regexp.MustCompile(`(?m)^#{1,6}\s+(.+)$`)
+	// reBold matches **bold** syntax.
+	reBold = regexp.MustCompile(`\*\*(.+?)\*\*`)
+	// reLink matches [text](url) syntax, allowing one level of balanced parentheses
+	// in the URL (e.g. Wikipedia/RFC links like https://en.wikipedia.org/wiki/Go_(language)).
+	reLink = regexp.MustCompile(`\[([^\]]+)\]\(([^)]*(?:\([^)]*\))[^)]*|[^)]+)\)`)
+	// reStrikethrough matches ~~text~~ syntax.
+	reStrikethrough = regexp.MustCompile(`~~(.+?)~~`)
+)
+
+// convertMarkdownToSlack converts standard Markdown to Slack mrkdwn format.
+func convertMarkdownToSlack(md string) string {
+	s := md
+	// Convert headings to bold text, stripping any inner ** markers.
+	s = reHeading.ReplaceAllStringFunc(s, func(m string) string {
+		inner := reHeading.FindStringSubmatch(m)[1]
+		inner = reBold.ReplaceAllString(inner, "$1") // strip ** before wrapping
+		return "*" + inner + "*"
+	})
+	// Convert remaining **bold** outside headings.
+	s = reBold.ReplaceAllString(s, "*$1*")
+	// Convert [text](url) to <url|text>.
+	s = reLink.ReplaceAllString(s, "<$2|$1>")
+	// Convert ~~strikethrough~~ to ~strikethrough~.
+	s = reStrikethrough.ReplaceAllString(s, "~$1~")
+	// Collapse triple-newlines or more into double.
+	for strings.Contains(s, "\n\n\n") {
+		s = strings.ReplaceAll(s, "\n\n\n", "\n\n")
+	}
+	return s
+}
 
 // decodeResponse decodes a base64-encoded agent response from task results.
 // Returns the raw string if decoding fails (backward compatibility).
@@ -97,16 +133,11 @@ func FormatSlackAccepted(taskName string) SlackMessage {
 // When results contain an agent response or PR URL, they are included.
 func FormatSlackSucceeded(taskName string, results map[string]string) SlackMessage {
 	fallbackText := fmt.Sprintf("Done! (Task: %s)", taskName)
-	blocks := []slack.Block{
-		slack.NewSectionBlock(
-			slack.NewTextBlockObject(slack.MarkdownType, ":white_check_mark: *Done!*", false, false),
-			nil, nil,
-		),
-	}
+	var blocks []slack.Block
 
 	resp := results["response"]
 	pr := results["pr"]
-	decoded := decodeResponse(resp)
+	decoded := convertMarkdownToSlack(decodeResponse(resp))
 
 	if resp != "" {
 		fallbackText = fmt.Sprintf("%s (Task: %s)", decoded, taskName)
@@ -151,7 +182,7 @@ func FormatSlackFailed(taskName, message string, results map[string]string) Slac
 	if results != nil {
 		resp = results["response"]
 	}
-	decoded := decodeResponse(resp)
+	decoded := convertMarkdownToSlack(decodeResponse(resp))
 
 	if resp != "" {
 		fallbackText = fmt.Sprintf("%s (Task: %s)", decoded, taskName)

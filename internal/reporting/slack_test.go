@@ -26,9 +26,8 @@ func TestFormatSlackMessages(t *testing.T) {
 		if got.Text != "PR: https://github.com/org/repo/pull/42 (Task: spawner-1234567890.123456)" {
 			t.Errorf("fallback text = %q", got.Text)
 		}
-		assertBlockCount(t, got.Blocks, 3) // header + PR + context
-		assertSectionText(t, got.Blocks[0], ":white_check_mark: *Done!*")
-		assertSectionContains(t, got.Blocks[1], "https://github.com/org/repo/pull/42")
+		assertBlockCount(t, got.Blocks, 2) // PR + context
+		assertSectionContains(t, got.Blocks[0], "https://github.com/org/repo/pull/42")
 	})
 
 	t.Run("succeeded without results", func(t *testing.T) {
@@ -36,7 +35,7 @@ func TestFormatSlackMessages(t *testing.T) {
 		if got.Text != "Done! (Task: spawner-1234567890.123456)" {
 			t.Errorf("fallback text = %q", got.Text)
 		}
-		assertBlockCount(t, got.Blocks, 2) // header + context
+		assertBlockCount(t, got.Blocks, 1) // context only
 	})
 
 	t.Run("succeeded with empty results", func(t *testing.T) {
@@ -44,7 +43,7 @@ func TestFormatSlackMessages(t *testing.T) {
 		if got.Text != "Done! (Task: spawner-1234567890.123456)" {
 			t.Errorf("fallback text = %q", got.Text)
 		}
-		assertBlockCount(t, got.Blocks, 2) // header + context
+		assertBlockCount(t, got.Blocks, 1) // context only
 	})
 
 	t.Run("succeeded with response", func(t *testing.T) {
@@ -53,8 +52,8 @@ func TestFormatSlackMessages(t *testing.T) {
 		if got.Text != "I need your GitHub username to proceed. (Task: spawner-1234567890.123456)" {
 			t.Errorf("fallback text = %q", got.Text)
 		}
-		assertBlockCount(t, got.Blocks, 3) // header + response + context
-		assertSectionContains(t, got.Blocks[1], "I need your GitHub username to proceed.")
+		assertBlockCount(t, got.Blocks, 2) // response + context
+		assertSectionContains(t, got.Blocks[0], "I need your GitHub username to proceed.")
 	})
 
 	t.Run("succeeded with response and PR", func(t *testing.T) {
@@ -66,9 +65,9 @@ func TestFormatSlackMessages(t *testing.T) {
 		if got.Text != "Added CODEOWNERS entry.\nPR: https://github.com/org/repo/pull/42 (Task: spawner-1234567890.123456)" {
 			t.Errorf("fallback text = %q", got.Text)
 		}
-		assertBlockCount(t, got.Blocks, 4) // header + response + PR + context
-		assertSectionContains(t, got.Blocks[1], "Added CODEOWNERS entry.")
-		assertSectionContains(t, got.Blocks[2], "https://github.com/org/repo/pull/42")
+		assertBlockCount(t, got.Blocks, 3) // response + PR + context
+		assertSectionContains(t, got.Blocks[0], "Added CODEOWNERS entry.")
+		assertSectionContains(t, got.Blocks[1], "https://github.com/org/repo/pull/42")
 	})
 
 	t.Run("succeeded with multiline response", func(t *testing.T) {
@@ -77,7 +76,7 @@ func TestFormatSlackMessages(t *testing.T) {
 		if got.Text != "Line one.\nLine two.\nLine three. (Task: spawner-1234567890.123456)" {
 			t.Errorf("fallback text = %q", got.Text)
 		}
-		assertBlockCount(t, got.Blocks, 3) // header + response + context
+		assertBlockCount(t, got.Blocks, 2) // response + context
 	})
 
 	t.Run("succeeded with non-base64 response fallback", func(t *testing.T) {
@@ -86,7 +85,7 @@ func TestFormatSlackMessages(t *testing.T) {
 		if got.Text != "plain text response (Task: spawner-1234567890.123456)" {
 			t.Errorf("fallback text = %q", got.Text)
 		}
-		assertBlockCount(t, got.Blocks, 3) // header + response + context
+		assertBlockCount(t, got.Blocks, 2) // response + context
 	})
 
 	t.Run("failed with message", func(t *testing.T) {
@@ -116,6 +115,44 @@ func TestFormatSlackMessages(t *testing.T) {
 		assertSectionContains(t, got.Blocks[1], "Could not find the file.")
 		assertSectionContains(t, got.Blocks[2], "Task failed")
 	})
+}
+
+func TestConvertMarkdownToSlack(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"plain text", "hello world", "hello world"},
+		{"h1", "# Summary", "*Summary*"},
+		{"h2", "## Details", "*Details*"},
+		{"h3", "### Notes", "*Notes*"},
+		{"bold", "this is **important**", "this is *important*"},
+		{"link", "see [docs](https://example.com)", "see <https://example.com|docs>"},
+		{"link with parens", "see [Go](https://en.wikipedia.org/wiki/Go_(language))", "see <https://en.wikipedia.org/wiki/Go_(language)|Go>"},
+		{"link with rfc parens", "[RFC](https://tools.ietf.org/html/rfc3986_(URI))", "<https://tools.ietf.org/html/rfc3986_(URI)|RFC>"},
+		{"strikethrough", "~~removed~~", "~removed~"},
+		{"heading mid-text", "intro\n## Section\nbody", "intro\n*Section*\nbody"},
+		{"multiple headings", "## One\ntext\n## Two", "*One*\ntext\n*Two*"},
+		{"collapsed newlines", "a\n\n\n\nb", "a\n\nb"},
+		{"bold inside heading", "## **Important Update**", "*Important Update*"},
+		{"mixed", "## Summary\n**Bold** and [link](https://x.com)\n~~old~~", "*Summary*\n*Bold* and <https://x.com|link>\n~old~"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := convertMarkdownToSlack(tt.in)
+			if got != tt.want {
+				t.Errorf("convertMarkdownToSlack(%q)\n got %q\nwant %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatSlackSucceeded_MarkdownConversion(t *testing.T) {
+	results := map[string]string{"response": b64("## Summary\nI updated the **CODEOWNERS** file.")}
+	got := FormatSlackSucceeded("spawner-1234567890.123456", results)
+	assertSectionContains(t, got.Blocks[0], "*Summary*")
+	assertSectionContains(t, got.Blocks[0], "*CODEOWNERS*")
 }
 
 func b64(s string) string {

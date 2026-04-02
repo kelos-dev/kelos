@@ -605,8 +605,8 @@ func TestSlackTaskReporter_PostsThreadReply(t *testing.T) {
 
 	var posted []slackReplyRecord
 	reporter := &fakeSlackReporter{
-		postFn: func(ctx context.Context, channel, threadTS, text string) (string, error) {
-			posted = append(posted, slackReplyRecord{method: "post", channel: channel, threadTS: threadTS, text: text})
+		postFn: func(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error) {
+			posted = append(posted, slackReplyRecord{method: "post", channel: channel, threadTS: threadTS, msg: msg})
 			return "1234567890.999999", nil
 		},
 	}
@@ -672,11 +672,11 @@ func TestSlackTaskReporter_PostsNewReplyOnPhaseChange(t *testing.T) {
 	var posted []slackReplyRecord
 	updateCalled := false
 	reporter := &fakeSlackReporter{
-		postFn: func(ctx context.Context, channel, threadTS, text string) (string, error) {
-			posted = append(posted, slackReplyRecord{method: "post", channel: channel, threadTS: threadTS, text: text})
+		postFn: func(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error) {
+			posted = append(posted, slackReplyRecord{method: "post", channel: channel, threadTS: threadTS, msg: msg})
 			return "1234567890.888888", nil
 		},
-		updateFn: func(ctx context.Context, channel, messageTS, text string) error {
+		updateFn: func(ctx context.Context, channel, messageTS string, msg SlackMessage) error {
 			updateCalled = true
 			return nil
 		},
@@ -698,9 +698,9 @@ func TestSlackTaskReporter_PostsNewReplyOnPhaseChange(t *testing.T) {
 		t.Errorf("channel = %q, want C123ABC", posted[0].channel)
 	}
 	// Verify the message includes the PR URL
-	wantText := FormatSlackSucceeded(task.Name, task.Status.Results)
-	if posted[0].text != wantText {
-		t.Errorf("text = %q, want %q", posted[0].text, wantText)
+	wantMsg := FormatSlackSucceeded(task.Name, task.Status.Results)
+	if posted[0].msg.Text != wantMsg.Text {
+		t.Errorf("text = %q, want %q", posted[0].msg.Text, wantMsg.Text)
 	}
 
 	// Verify the new reply TS is persisted (overwrites old one)
@@ -772,7 +772,7 @@ func TestSlackTaskReporter_SkipPaths(t *testing.T) {
 
 			called := false
 			reporter := &fakeSlackReporter{
-				postFn: func(ctx context.Context, channel, threadTS, text string) (string, error) {
+				postFn: func(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error) {
 					called = true
 					return "", nil
 				},
@@ -795,24 +795,24 @@ type slackReplyRecord struct {
 	method   string
 	channel  string
 	threadTS string
-	text     string
+	msg      SlackMessage
 }
 
 type fakeSlackReporter struct {
-	postFn   func(ctx context.Context, channel, threadTS, text string) (string, error)
-	updateFn func(ctx context.Context, channel, messageTS, text string) error
+	postFn   func(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error)
+	updateFn func(ctx context.Context, channel, messageTS string, msg SlackMessage) error
 }
 
-func (f *fakeSlackReporter) PostThreadReply(ctx context.Context, channel, threadTS, text string) (string, error) {
+func (f *fakeSlackReporter) PostThreadReply(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error) {
 	if f.postFn != nil {
-		return f.postFn(ctx, channel, threadTS, text)
+		return f.postFn(ctx, channel, threadTS, msg)
 	}
 	return "fake-reply-ts", nil
 }
 
-func (f *fakeSlackReporter) UpdateMessage(ctx context.Context, channel, messageTS, text string) error {
+func (f *fakeSlackReporter) UpdateMessage(ctx context.Context, channel, messageTS string, msg SlackMessage) error {
 	if f.updateFn != nil {
-		return f.updateFn(ctx, channel, messageTS, text)
+		return f.updateFn(ctx, channel, messageTS, msg)
 	}
 	return nil
 }

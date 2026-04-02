@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"strings"
 
 	"github.com/slack-go/slack"
 )
@@ -17,6 +16,14 @@ func decodeResponse(encoded string) string {
 		return encoded
 	}
 	return string(decoded)
+}
+
+// SlackMessage holds the components of a rich Slack message.
+type SlackMessage struct {
+	// Text is the fallback text shown in notifications and accessibility contexts.
+	Text string
+	// Blocks are the Block Kit blocks for rich formatting.
+	Blocks []slack.Block
 }
 
 // SlackReporter posts and updates thread replies in Slack channels.
@@ -35,11 +42,15 @@ func (r *SlackReporter) api() *slack.Client {
 
 // PostThreadReply posts a new message as a thread reply and returns the
 // reply's message timestamp.
-func (r *SlackReporter) PostThreadReply(ctx context.Context, channel, threadTS, text string) (string, error) {
-	_, ts, err := r.api().PostMessageContext(ctx, channel,
-		slack.MsgOptionText(text, false),
+func (r *SlackReporter) PostThreadReply(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error) {
+	opts := []slack.MsgOption{
+		slack.MsgOptionText(msg.Text, false),
 		slack.MsgOptionTS(threadTS),
-	)
+	}
+	if len(msg.Blocks) > 0 {
+		opts = append(opts, slack.MsgOptionBlocks(msg.Blocks...))
+	}
+	_, ts, err := r.api().PostMessageContext(ctx, channel, opts...)
 	if err != nil {
 		return "", fmt.Errorf("posting Slack thread reply: %w", err)
 	}
@@ -47,49 +58,125 @@ func (r *SlackReporter) PostThreadReply(ctx context.Context, channel, threadTS, 
 }
 
 // UpdateMessage updates an existing Slack message in place.
-func (r *SlackReporter) UpdateMessage(ctx context.Context, channel, messageTS, text string) error {
-	_, _, _, err := r.api().UpdateMessageContext(ctx, channel, messageTS,
-		slack.MsgOptionText(text, false),
-	)
+func (r *SlackReporter) UpdateMessage(ctx context.Context, channel, messageTS string, msg SlackMessage) error {
+	opts := []slack.MsgOption{
+		slack.MsgOptionText(msg.Text, false),
+	}
+	if len(msg.Blocks) > 0 {
+		opts = append(opts, slack.MsgOptionBlocks(msg.Blocks...))
+	}
+	_, _, _, err := r.api().UpdateMessageContext(ctx, channel, messageTS, opts...)
 	if err != nil {
 		return fmt.Errorf("updating Slack message: %w", err)
 	}
 	return nil
 }
 
-// FormatSlackAccepted returns the thread reply text for an accepted task.
-func FormatSlackAccepted(taskName string) string {
-	return fmt.Sprintf("Working on your request... (Task: %s)", taskName)
+// contextBlock returns a context block displaying the task name.
+func contextBlock(taskName string) *slack.ContextBlock {
+	return slack.NewContextBlock("",
+		slack.NewTextBlockObject(slack.MarkdownType, fmt.Sprintf("Task: `%s`", taskName), false, false),
+	)
 }
 
-// FormatSlackSucceeded returns the thread reply text for a succeeded task.
+// FormatSlackAccepted returns the Slack message for an accepted task.
+func FormatSlackAccepted(taskName string) SlackMessage {
+	return SlackMessage{
+		Text: fmt.Sprintf("Working on your request... (Task: %s)", taskName),
+		Blocks: []slack.Block{
+			slack.NewSectionBlock(
+				slack.NewTextBlockObject(slack.MarkdownType, ":hourglass_flowing_sand: *Working on your request...*", false, false),
+				nil, nil,
+			),
+			contextBlock(taskName),
+		},
+	}
+}
+
+// FormatSlackSucceeded returns the Slack message for a succeeded task.
 // When results contain an agent response or PR URL, they are included.
-func FormatSlackSucceeded(taskName string, results map[string]string) string {
-	var parts []string
-	if resp := results["response"]; resp != "" {
-		parts = append(parts, decodeResponse(resp))
+func FormatSlackSucceeded(taskName string, results map[string]string) SlackMessage {
+	fallbackText := fmt.Sprintf("Done! (Task: %s)", taskName)
+	blocks := []slack.Block{
+		slack.NewSectionBlock(
+			slack.NewTextBlockObject(slack.MarkdownType, ":white_check_mark: *Done!*", false, false),
+			nil, nil,
+		),
 	}
-	if pr := results["pr"]; pr != "" {
-		parts = append(parts, "PR: "+pr)
+
+	resp := results["response"]
+	pr := results["pr"]
+	decoded := decodeResponse(resp)
+
+	if resp != "" {
+		fallbackText = fmt.Sprintf("%s (Task: %s)", decoded, taskName)
+		blocks = append(blocks, slack.NewSectionBlock(
+			slack.NewTextBlockObject(slack.MarkdownType, decoded, false, false),
+			nil, nil,
+		))
 	}
-	if len(parts) == 0 {
-		return fmt.Sprintf("Done! (Task: %s)", taskName)
+
+	if pr != "" {
+		if resp != "" {
+			fallbackText = fmt.Sprintf("%s\nPR: %s (Task: %s)", decoded, pr, taskName)
+		} else {
+			fallbackText = fmt.Sprintf("PR: %s (Task: %s)", pr, taskName)
+		}
+		blocks = append(blocks, slack.NewSectionBlock(
+			slack.NewTextBlockObject(slack.MarkdownType, fmt.Sprintf(":link: *Pull Request:* <%s>", pr), false, false),
+			nil, nil,
+		))
 	}
-	return fmt.Sprintf("%s (Task: %s)", strings.Join(parts, "\n"), taskName)
+
+	blocks = append(blocks, contextBlock(taskName))
+
+	return SlackMessage{
+		Text:   fallbackText,
+		Blocks: blocks,
+	}
 }
 
-// FormatSlackFailed returns the thread reply text for a failed task.
+// FormatSlackFailed returns the Slack message for a failed task.
 // When a status message or agent response is available, it is included.
-func FormatSlackFailed(taskName, message string, results map[string]string) string {
-	var parts []string
-	if resp := results["response"]; resp != "" {
-		parts = append(parts, decodeResponse(resp))
+func FormatSlackFailed(taskName, message string, results map[string]string) SlackMessage {
+	fallbackText := fmt.Sprintf("Failed. (Task: %s)", taskName)
+	blocks := []slack.Block{
+		slack.NewSectionBlock(
+			slack.NewTextBlockObject(slack.MarkdownType, ":x: *Something went wrong*", false, false),
+			nil, nil,
+		),
 	}
+
+	resp := ""
+	if results != nil {
+		resp = results["response"]
+	}
+	decoded := decodeResponse(resp)
+
+	if resp != "" {
+		fallbackText = fmt.Sprintf("%s (Task: %s)", decoded, taskName)
+		blocks = append(blocks, slack.NewSectionBlock(
+			slack.NewTextBlockObject(slack.MarkdownType, decoded, false, false),
+			nil, nil,
+		))
+	}
+
 	if message != "" {
-		parts = append(parts, "Error: "+message)
+		if resp != "" {
+			fallbackText = fmt.Sprintf("%s\nError: %s (Task: %s)", decoded, message, taskName)
+		} else {
+			fallbackText = fmt.Sprintf("Error: %s (Task: %s)", message, taskName)
+		}
+		blocks = append(blocks, slack.NewSectionBlock(
+			slack.NewTextBlockObject(slack.MarkdownType, fmt.Sprintf(":warning: *Error:* %s", message), false, false),
+			nil, nil,
+		))
 	}
-	if len(parts) == 0 {
-		return fmt.Sprintf("Failed. (Task: %s)", taskName)
+
+	blocks = append(blocks, contextBlock(taskName))
+
+	return SlackMessage{
+		Text:   fallbackText,
+		Blocks: blocks,
 	}
-	return fmt.Sprintf("%s (Task: %s)", strings.Join(parts, "\n"), taskName)
 }

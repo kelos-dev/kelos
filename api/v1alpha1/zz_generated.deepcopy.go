@@ -422,7 +422,7 @@ func (in *GitHubWebhookFilter) DeepCopyInto(out *GitHubWebhookFilter) {
 		in, out := &in.ExcludeAuthors, &out.ExcludeAuthors
 		*out = make([]string, len(*in))
 		copy(*out, *in)
-  }
+	}
 	if in.FilePatterns != nil {
 		in, out := &in.FilePatterns, &out.FilePatterns
 		*out = new(FilePatternFilter)

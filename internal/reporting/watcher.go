@@ -179,8 +179,8 @@ func (tr *TaskReporter) persistReportingState(ctx context.Context, task *kelosv1
 
 // SlackMessenger is the interface for posting and updating Slack messages.
 type SlackMessenger interface {
-	PostThreadReply(ctx context.Context, channel, threadTS, text string) (string, error)
-	UpdateMessage(ctx context.Context, channel, messageTS, text string) error
+	PostThreadReply(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error)
+	UpdateMessage(ctx context.Context, channel, messageTS string, msg SlackMessage) error
 }
 
 // SlackTaskReporter watches Tasks and reports status changes to Slack
@@ -226,18 +226,18 @@ func (tr *SlackTaskReporter) ReportTaskStatus(ctx context.Context, task *kelosv1
 		return nil
 	}
 
-	var body string
+	var msg SlackMessage
 	switch desiredPhase {
 	case "accepted":
-		body = FormatSlackAccepted(task.Name)
+		msg = FormatSlackAccepted(task.Name)
 	case "succeeded":
-		body = FormatSlackSucceeded(task.Name, task.Status.Results)
+		msg = FormatSlackSucceeded(task.Name, task.Status.Results)
 	case "failed":
-		body = FormatSlackFailed(task.Name, task.Status.Message, task.Status.Results)
+		msg = FormatSlackFailed(task.Name, task.Status.Message, task.Status.Results)
 	}
 
 	log.Info("Posting Slack thread reply", "task", task.Name, "channel", channel, "phase", desiredPhase)
-	replyTS, err := tr.Reporter.PostThreadReply(ctx, channel, threadTS, body)
+	replyTS, err := tr.Reporter.PostThreadReply(ctx, channel, threadTS, msg)
 	if err != nil {
 		return fmt.Errorf("posting Slack reply for task %s: %w", task.Name, err)
 	}

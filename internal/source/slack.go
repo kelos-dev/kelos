@@ -163,6 +163,24 @@ func (s *SlackSource) handleEventsAPI(sm *socketmode.Client, evt socketmode.Even
 		channelName = info.Name
 	}
 
+	// For thread replies, fetch the full conversation history so the
+	// follow-up task has complete context. Only process threads where the
+	// bot has already participated to avoid spawning tasks from unrelated
+	// conversations.
+	if innerEvent.ThreadTimeStamp != "" {
+		threadCtx, threadCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer threadCancel()
+		msgs, _, _, err := s.api.GetConversationRepliesContext(threadCtx,
+			&slack.GetConversationRepliesParameters{
+				ChannelID: innerEvent.Channel,
+				Timestamp: innerEvent.ThreadTimeStamp,
+			})
+		if err != nil || !botParticipated(msgs, s.selfUserID) {
+			return
+		}
+		body = formatThreadContext(msgs, s.selfUserID)
+	}
+
 	s.mu.Lock()
 	s.counter++
 	item := buildWorkItem(innerEvent.TimeStamp, s.counter, userName, body, permalink, channelName, innerEvent.Channel)
@@ -221,11 +239,14 @@ func shouldProcess(userID, subtype, threadTS, text, selfUserID, triggerCmd strin
 	case "bot_message", "message_changed", "message_deleted", "message_replied":
 		return "", false
 	}
-	if threadTS != "" {
-		return "", false
-	}
 	if text == "" {
 		return "", false
+	}
+
+	// Thread replies are follow-ups to an existing conversation — let them
+	// through without requiring the trigger command prefix.
+	if threadTS != "" {
+		return text, true
 	}
 
 	if triggerCmd != "" {
@@ -268,6 +289,37 @@ func matchesUser(userID string, allowed []string) bool {
 		}
 	}
 	return false
+}
+
+// botParticipated returns true if any message in the thread was sent by the
+// given bot user ID. This prevents processing thread replies in conversations
+// the bot never participated in.
+func botParticipated(msgs []slack.Message, selfUserID string) bool {
+	for _, m := range msgs {
+		if m.User == selfUserID {
+			return true
+		}
+	}
+	return false
+}
+
+// formatThreadContext formats a Slack thread's messages into a readable
+// conversation string for use as a follow-up task prompt. Messages from the
+// bot itself are labeled as "Agent" while all others use "User".
+func formatThreadContext(msgs []slack.Message, selfUserID string) string {
+	var b strings.Builder
+	b.WriteString("Slack thread conversation:\n")
+	for _, m := range msgs {
+		if m.Text == "" {
+			continue
+		}
+		role := "User"
+		if m.User == selfUserID || m.BotID != "" {
+			role = "Agent"
+		}
+		fmt.Fprintf(&b, "\n%s: %s\n", role, m.Text)
+	}
+	return b.String()
 }
 
 // buildWorkItem constructs a WorkItem from Slack message fields.

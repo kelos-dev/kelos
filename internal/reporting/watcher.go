@@ -236,19 +236,10 @@ func (tr *SlackTaskReporter) ReportTaskStatus(ctx context.Context, task *kelosv1
 		body = FormatSlackFailed(task.Name, task.Status.Message, task.Status.Results)
 	}
 
-	replyTS := annotations[AnnotationSlackReplyTS]
-	if replyTS == "" {
-		log.Info("Posting Slack thread reply", "task", task.Name, "channel", channel, "phase", desiredPhase)
-		newTS, err := tr.Reporter.PostThreadReply(ctx, channel, threadTS, body)
-		if err != nil {
-			return fmt.Errorf("posting Slack reply for task %s: %w", task.Name, err)
-		}
-		replyTS = newTS
-	} else {
-		log.Info("Updating Slack thread reply", "task", task.Name, "channel", channel, "phase", desiredPhase)
-		if err := tr.Reporter.UpdateMessage(ctx, channel, replyTS, body); err != nil {
-			return fmt.Errorf("updating Slack reply for task %s: %w", task.Name, err)
-		}
+	log.Info("Posting Slack thread reply", "task", task.Name, "channel", channel, "phase", desiredPhase)
+	replyTS, err := tr.Reporter.PostThreadReply(ctx, channel, threadTS, body)
+	if err != nil {
+		return fmt.Errorf("posting Slack reply for task %s: %w", task.Name, err)
 	}
 
 	if err := tr.persistSlackReportingState(ctx, task, replyTS, desiredPhase); err != nil {

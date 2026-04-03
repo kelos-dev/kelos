@@ -20,9 +20,10 @@ const (
 // timeout to avoid blocking webhook processing if the API is unresponsive.
 var linearHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
-// linearIssueLabelsQuery is the GraphQL query to fetch labels for an issue.
-const linearIssueLabelsQuery = `query IssueLabels($id: String!) {
+// linearIssueDetailsQuery is the GraphQL query to fetch labels and description for an issue.
+const linearIssueDetailsQuery = `query IssueDetails($id: String!) {
   issue(id: $id) {
+    description
     labels {
       nodes {
         name
@@ -39,7 +40,8 @@ type linearGraphQLRequest struct {
 type linearGraphQLResponse struct {
 	Data struct {
 		Issue struct {
-			Labels struct {
+			Description *string `json:"description"`
+			Labels      struct {
 				Nodes []struct {
 					Name string `json:"name"`
 				} `json:"nodes"`
@@ -51,24 +53,30 @@ type linearGraphQLResponse struct {
 	} `json:"errors,omitempty"`
 }
 
-// fetchLinearIssueLabels fetches labels for a Linear issue by ID using the
-// GraphQL API. The API key is read from the LINEAR_API_KEY environment variable.
-// Returns nil (no error) if the env var is not set, allowing callers to fall
-// back to whatever labels are in the webhook payload.
-func fetchLinearIssueLabels(ctx context.Context, issueID string) ([]string, error) {
-	apiKey := os.Getenv(linearAPIKeyEnvVar)
-	return fetchLinearIssueLabelsFromURL(ctx, defaultLinearAPIURL, apiKey, issueID)
+// linearIssueDetails holds the enriched fields returned by the Linear API.
+type linearIssueDetails struct {
+	Labels      []string
+	Description *string // nil when the API did not return a description
 }
 
-// fetchLinearIssueLabelsFromURL is the testable core of fetchLinearIssueLabels.
+// fetchLinearIssueDetails fetches labels and description for a Linear issue by
+// ID using the GraphQL API. The API key is read from the LINEAR_API_KEY
+// environment variable. Returns nil (no error) if the env var is not set,
+// allowing callers to fall back to whatever data is in the webhook payload.
+func fetchLinearIssueDetails(ctx context.Context, issueID string) (*linearIssueDetails, error) {
+	apiKey := os.Getenv(linearAPIKeyEnvVar)
+	return fetchLinearIssueDetailsFromURL(ctx, defaultLinearAPIURL, apiKey, issueID)
+}
+
+// fetchLinearIssueDetailsFromURL is the testable core of fetchLinearIssueDetails.
 // It accepts the API URL and key explicitly.
-func fetchLinearIssueLabelsFromURL(ctx context.Context, apiURL, apiKey, issueID string) ([]string, error) {
+func fetchLinearIssueDetailsFromURL(ctx context.Context, apiURL, apiKey, issueID string) (*linearIssueDetails, error) {
 	if apiKey == "" {
 		return nil, nil
 	}
 
 	reqBody := linearGraphQLRequest{
-		Query: linearIssueLabelsQuery,
+		Query: linearIssueDetailsQuery,
 		Variables: map[string]interface{}{
 			"id": issueID,
 		},
@@ -106,9 +114,11 @@ func fetchLinearIssueLabelsFromURL(ctx context.Context, apiURL, apiKey, issueID 
 		return nil, fmt.Errorf("Linear API error: %s", gqlResp.Errors[0].Message)
 	}
 
-	var labels []string
-	for _, node := range gqlResp.Data.Issue.Labels.Nodes {
-		labels = append(labels, node.Name)
+	details := &linearIssueDetails{
+		Description: gqlResp.Data.Issue.Description,
 	}
-	return labels, nil
+	for _, node := range gqlResp.Data.Issue.Labels.Nodes {
+		details.Labels = append(details.Labels, node.Name)
+	}
+	return details, nil
 }

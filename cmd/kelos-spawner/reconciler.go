@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -24,18 +23,15 @@ import (
 )
 
 type spawnerRuntimeConfig struct {
-	GitHubOwner         string
-	GitHubRepo          string
-	GitHubAPIBaseURL    string
-	GHProxyURL          string
-	TokenResolver       func(context.Context) (string, error)
-	JiraBaseURL         string
-	JiraProject         string
-	JiraJQL             string
-	SlackTriggerCommand string
-	SlackChannels       string
-	SlackAllowedUsers   string
-	HTTPClient          *http.Client
+	GitHubOwner      string
+	GitHubRepo       string
+	GitHubAPIBaseURL string
+	GHProxyURL       string
+	TokenResolver    func(context.Context) (string, error)
+	JiraBaseURL      string
+	JiraProject      string
+	JiraJQL          string
+	HTTPClient       *http.Client
 }
 
 type spawnerReconciler struct {
@@ -44,8 +40,6 @@ type spawnerReconciler struct {
 	Config spawnerRuntimeConfig
 
 	// persistentSource holds a source that survives across reconcile cycles.
-	// Used for Slack (Socket Mode), where a long-lived WebSocket must persist
-	// so events can accumulate between Discover() calls.
 	persistentSource source.Source
 }
 
@@ -80,12 +74,10 @@ func (r *spawnerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 func runOnce(ctx context.Context, cl client.Client, key types.NamespacedName, cfg spawnerRuntimeConfig, persistentSource source.Source) (time.Duration, error) {
 	if persistentSource != nil {
-		// Reuse the persistent source so its connection survives across
-		// cycles and accumulated events are preserved (e.g. Slack Socket Mode).
 		if err := runCycleWithSource(ctx, cl, key, persistentSource); err != nil {
 			return 0, err
 		}
-	} else if err := runCycleWithProxy(ctx, cl, key, cfg.GitHubOwner, cfg.GitHubRepo, cfg.GHProxyURL, cfg.GitHubAPIBaseURL, cfg.TokenResolver, cfg.JiraBaseURL, cfg.JiraProject, cfg.JiraJQL, cfg.SlackTriggerCommand, cfg.SlackChannels, cfg.SlackAllowedUsers, cfg.HTTPClient); err != nil {
+	} else if err := runCycleWithProxy(ctx, cl, key, cfg.GitHubOwner, cfg.GitHubRepo, cfg.GHProxyURL, cfg.GitHubAPIBaseURL, cfg.TokenResolver, cfg.JiraBaseURL, cfg.JiraProject, cfg.JiraJQL, cfg.HTTPClient); err != nil {
 		return 0, err
 	}
 
@@ -95,44 +87,30 @@ func runOnce(ctx context.Context, cl client.Client, key types.NamespacedName, cf
 	}
 
 	if reportingEnabled(&ts) {
-		if ts.Spec.When.Slack != nil {
-			botToken := os.Getenv("SLACK_BOT_TOKEN")
-			if botToken == "" {
-				return 0, fmt.Errorf("SLACK_BOT_TOKEN environment variable is required for Slack reporting")
-			}
-			slackReporter := &reporting.SlackTaskReporter{
-				Client:   cl,
-				Reporter: &reporting.SlackReporter{BotToken: botToken},
-			}
-			if err := runSlackReportingCycle(ctx, cl, key, slackReporter); err != nil {
-				return 0, err
-			}
-		} else {
-			if cfg.TokenResolver == nil {
-				return 0, fmt.Errorf("GitHub reporting is enabled but no token resolver is configured")
-			}
-			resolve := cfg.TokenResolver
-			// Reporting always uses the direct API base URL (writes bypass the proxy).
-			reporter := &reporting.TaskReporter{
-				Client: cl,
-				Reporter: &reporting.GitHubReporter{
-					Owner: cfg.GitHubOwner,
-					Repo:  cfg.GitHubRepo,
-					TokenFunc: func() string {
-						token, err := resolve(ctx)
-						if err != nil {
-							ctrl.Log.WithName("spawner").Error(err, "Resolving GitHub token for reporting")
-							return ""
-						}
-						return token
-					},
-					BaseURL: cfg.GitHubAPIBaseURL,
-					Client:  cfg.HTTPClient,
+		if cfg.TokenResolver == nil {
+			return 0, fmt.Errorf("GitHub reporting is enabled but no token resolver is configured")
+		}
+		resolve := cfg.TokenResolver
+		// Reporting always uses the direct API base URL (writes bypass the proxy).
+		reporter := &reporting.TaskReporter{
+			Client: cl,
+			Reporter: &reporting.GitHubReporter{
+				Owner: cfg.GitHubOwner,
+				Repo:  cfg.GitHubRepo,
+				TokenFunc: func() string {
+					token, err := resolve(ctx)
+					if err != nil {
+						ctrl.Log.WithName("spawner").Error(err, "Resolving GitHub token for reporting")
+						return ""
+					}
+					return token
 				},
-			}
-			if err := runReportingCycle(ctx, cl, key, reporter); err != nil {
-				return 0, err
-			}
+				BaseURL: cfg.GitHubAPIBaseURL,
+				Client:  cfg.HTTPClient,
+			},
+		}
+		if err := runReportingCycle(ctx, cl, key, reporter); err != nil {
+			return 0, err
 		}
 	}
 
@@ -151,8 +129,6 @@ func resolvedPollInterval(ts *kelosv1alpha1.TaskSpawner) time.Duration {
 		sourceInterval = ts.Spec.When.GitHubPullRequests.PollInterval
 	case ts.Spec.When.Jira != nil:
 		sourceInterval = ts.Spec.When.Jira.PollInterval
-	case ts.Spec.When.Slack != nil:
-		sourceInterval = ts.Spec.When.Slack.PollInterval
 	}
 	if sourceInterval != "" {
 		return parsePollInterval(sourceInterval)

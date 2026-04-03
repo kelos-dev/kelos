@@ -1827,24 +1827,6 @@ spec:
                         items:
                           type: string
                         type: array
-                      pollInterval:
-                        description: |-
-                          PollInterval overrides spec.pollInterval for this source (e.g., "30s", "5m").
-                          Slack uses Socket Mode (real-time), but Discover() is still called on
-                          this interval to drain accumulated events. When empty, spec.pollInterval
-                          is used.
-                        type: string
-                      secretRef:
-                        description: |-
-                          SecretRef references a Secret containing "SLACK_BOT_TOKEN" and
-                          "SLACK_APP_TOKEN" keys.
-                        properties:
-                          name:
-                            description: Name is the name of the secret.
-                            type: string
-                        required:
-                        - name
-                        type: object
                       triggerCommand:
                         description: |-
                           TriggerCommand is an optional slash command or message prefix that
@@ -1853,8 +1835,6 @@ spec:
                           stripped from the prompt. When empty, every non-threaded message in
                           the channel triggers a task.
                         type: string
-                    required:
-                    - secretRef
                     type: object
                 type: object
             required:

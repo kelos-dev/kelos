@@ -53,8 +53,8 @@ type When struct {
 	GenericWebhook *GenericWebhook `json:"webhook,omitempty"`
 
 	// Slack discovers work items from Slack messages via Socket Mode.
-	// The spawner connects to Slack via an outbound WebSocket (no ingress
-	// required) and listens for messages in the channels the bot is invited to.
+	// The centralized kelos-slack-server connects to Slack via an outbound
+	// WebSocket (no ingress required) and routes messages to matching agents.
 	// +optional
 	Slack *Slack `json:"slack,omitempty"`
 }
@@ -521,22 +521,14 @@ type GenericWebhookFilter struct {
 	Pattern string `json:"pattern,omitempty"`
 }
 
-// Slack discovers work items from Slack messages via Socket Mode.
-// The spawner connects to Slack using an App-Level Token (Socket Mode) and
-// listens for messages in configured channels. No ingress, LoadBalancer, or
-// public URL is required — the connection is outbound only.
-//
-// Authentication is provided via a Secret that must contain two keys:
-//   - SLACK_BOT_TOKEN: Bot User OAuth Token (xoxb-...)
-//   - SLACK_APP_TOKEN: App-Level Token for Socket Mode (xapp-...)
+// Slack triggers task spawning from Slack messages via the centralized
+// kelos-slack-server. The server connects to Slack via Socket Mode (outbound
+// WebSocket — no ingress required) and routes messages to matching
+// TaskSpawners. Authentication tokens (SLACK_BOT_TOKEN, SLACK_APP_TOKEN)
+// are configured on the server, not per-TaskSpawner.
 //
 // The bot must be invited to each channel it should listen in.
 type Slack struct {
-	// SecretRef references a Secret containing "SLACK_BOT_TOKEN" and
-	// "SLACK_APP_TOKEN" keys.
-	// +kubebuilder:validation:Required
-	SecretRef SecretReference `json:"secretRef"`
-
 	// TriggerCommand is an optional slash command or message prefix that
 	// triggers task creation (e.g., "/kelos", "!fix"). When set, only
 	// messages starting with this prefix trigger tasks and the prefix is
@@ -556,13 +548,6 @@ type Slack struct {
 	// in the channel can trigger tasks.
 	// +optional
 	AllowedUsers []string `json:"allowedUsers,omitempty"`
-
-	// PollInterval overrides spec.pollInterval for this source (e.g., "30s", "5m").
-	// Slack uses Socket Mode (real-time), but Discover() is still called on
-	// this interval to drain accumulated events. When empty, spec.pollInterval
-	// is used.
-	// +optional
-	PollInterval string `json:"pollInterval,omitempty"`
 }
 
 // TaskTemplateMetadata holds optional labels and annotations for spawned Tasks.

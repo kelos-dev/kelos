@@ -52,6 +52,19 @@ func TestIsWebhookBased(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "Slack TaskSpawner",
+			ts: &kelosv1alpha1.TaskSpawner{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						Slack: &kelosv1alpha1.Slack{
+							TriggerCommand: "/kelos",
+						},
+					},
+				},
+			},
+			want: true,
+		},
+		{
 			name: "polling TaskSpawner",
 			ts: &kelosv1alpha1.TaskSpawner{
 				Spec: kelosv1alpha1.TaskSpawnerSpec{

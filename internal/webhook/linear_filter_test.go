@@ -289,7 +289,6 @@ func TestMatchesLinearEvent_LabelsCaseInsensitive(t *testing.T) {
 		Types: []string{"Issue"},
 		Filters: []v1alpha1.LinearWebhookFilter{
 			{
-				Type:   "Issue",
 				Labels: []string{"Bug", "Priority:High"},
 			},
 		},
@@ -370,6 +369,173 @@ func TestMatchesLinearEvent_LabelsCaseInsensitive(t *testing.T) {
 }
 
 func TestMatchesLinearEvent_ExcludeLabelsCaseInsensitive(t *testing.T) {
+	spawner := &v1alpha1.LinearWebhook{
+		Types: []string{"Issue"},
+		Filters: []v1alpha1.LinearWebhookFilter{
+			{
+				ExcludeLabels: []string{"WontFix"},
+			},
+		},
+	}
+
+	tests := []struct {
+		name    string
+		payload string
+		want    bool
+	}{
+		{
+			name: "excluded label matches with different casing",
+			payload: `{
+				"type":"Issue",
+				"action":"create",
+				"data":{
+					"id":"123",
+					"title":"Test issue",
+					"labels":[
+						{"name":"bug"},
+						{"name":"wontfix"}
+					]
+				}
+			}`,
+			want: false,
+		},
+		{
+			name: "excluded label matches with uppercase",
+			payload: `{
+				"type":"Issue",
+				"action":"create",
+				"data":{
+					"id":"123",
+					"title":"Test issue",
+					"labels":[
+						{"name":"bug"},
+						{"name":"WONTFIX"}
+					]
+				}
+			}`,
+			want: false,
+		},
+		{
+			name: "no excluded label present",
+			payload: `{
+				"type":"Issue",
+				"action":"create",
+				"data":{
+					"id":"123",
+					"title":"Test issue",
+					"labels":[
+						{"name":"bug"}
+					]
+				}
+			}`,
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			eventData, err := ParseLinearWebhook([]byte(tt.payload))
+			if err != nil {
+				t.Fatalf("ParseLinearWebhook() error = %v", err)
+			}
+			got, err := MatchesLinearEvent(spawner, eventData)
+			if err != nil {
+				t.Errorf("MatchesLinearEvent() error = %v", err)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("MatchesLinearEvent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMatchesLinearEvent_TypedLabelsCaseInsensitive(t *testing.T) {
+	spawner := &v1alpha1.LinearWebhook{
+		Types: []string{"Issue"},
+		Filters: []v1alpha1.LinearWebhookFilter{
+			{
+				Type:   "Issue",
+				Labels: []string{"Bug", "Priority:High"},
+			},
+		},
+	}
+
+	tests := []struct {
+		name    string
+		payload string
+		want    bool
+	}{
+		{
+			name: "labels match with different casing",
+			payload: `{
+				"type":"Issue",
+				"action":"create",
+				"data":{
+					"id":"123",
+					"title":"Test issue",
+					"labels":[
+						{"name":"bug"},
+						{"name":"priority:high"}
+					]
+				}
+			}`,
+			want: true,
+		},
+		{
+			name: "labels match with uppercase event labels",
+			payload: `{
+				"type":"Issue",
+				"action":"create",
+				"data":{
+					"id":"123",
+					"title":"Test issue",
+					"labels":[
+						{"name":"BUG"},
+						{"name":"PRIORITY:HIGH"}
+					]
+				}
+			}`,
+			want: true,
+		},
+		{
+			name: "labels match with mixed casing",
+			payload: `{
+				"type":"Issue",
+				"action":"create",
+				"data":{
+					"id":"123",
+					"title":"Test issue",
+					"labels":[
+						{"name":"Bug"},
+						{"name":"Priority:High"},
+						{"name":"frontend"}
+					]
+				}
+			}`,
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			eventData, err := ParseLinearWebhook([]byte(tt.payload))
+			if err != nil {
+				t.Fatalf("ParseLinearWebhook() error = %v", err)
+			}
+			got, err := MatchesLinearEvent(spawner, eventData)
+			if err != nil {
+				t.Errorf("MatchesLinearEvent() error = %v", err)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("MatchesLinearEvent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMatchesLinearEvent_TypedExcludeLabelsCaseInsensitive(t *testing.T) {
 	spawner := &v1alpha1.LinearWebhook{
 		Types: []string{"Issue"},
 		Filters: []v1alpha1.LinearWebhookFilter{
@@ -1382,168 +1548,9 @@ func TestExtractLinearWorkItem(t *testing.T) {
 	assert.Equal(t, expected, result)
 }
 
-func TestSpawnerNeedsLinearLabels(t *testing.T) {
-	tests := []struct {
-		name    string
-		spawner *v1alpha1.TaskSpawner
-		payload string
-		want    bool
-	}{
-		{
-			name: "comment event with typed label filter and no labels in payload",
-			spawner: &v1alpha1.TaskSpawner{
-				Spec: v1alpha1.TaskSpawnerSpec{
-					When: v1alpha1.When{
-						LinearWebhook: &v1alpha1.LinearWebhook{
-							Types: []string{"Comment"},
-							Filters: []v1alpha1.LinearWebhookFilter{
-								{Type: "Comment", Labels: []string{"bug"}},
-							},
-						},
-					},
-				},
-			},
-			payload: `{"type":"Comment","action":"create","data":{"id":"c1","issue":{"id":"i1","title":"Test"}}}`,
-			want:    true,
-		},
-		{
-			name: "comment event with unscoped label filter and no labels in payload",
-			spawner: &v1alpha1.TaskSpawner{
-				Spec: v1alpha1.TaskSpawnerSpec{
-					When: v1alpha1.When{
-						LinearWebhook: &v1alpha1.LinearWebhook{
-							Types: []string{"Comment"},
-							Filters: []v1alpha1.LinearWebhookFilter{
-								{Labels: []string{"bug"}},
-							},
-						},
-					},
-				},
-			},
-			payload: `{"type":"Comment","action":"create","data":{"id":"c1","issue":{"id":"i1","title":"Test"}}}`,
-			want:    true,
-		},
-		{
-			name: "comment event with excludeLabels filter and no labels in payload",
-			spawner: &v1alpha1.TaskSpawner{
-				Spec: v1alpha1.TaskSpawnerSpec{
-					When: v1alpha1.When{
-						LinearWebhook: &v1alpha1.LinearWebhook{
-							Types: []string{"Comment"},
-							Filters: []v1alpha1.LinearWebhookFilter{
-								{Type: "Comment", ExcludeLabels: []string{"wontfix"}},
-							},
-						},
-					},
-				},
-			},
-			payload: `{"type":"Comment","action":"create","data":{"id":"c1","issue":{"id":"i1","title":"Test"}}}`,
-			want:    true,
-		},
-		{
-			name: "comment event with labels already in payload",
-			spawner: &v1alpha1.TaskSpawner{
-				Spec: v1alpha1.TaskSpawnerSpec{
-					When: v1alpha1.When{
-						LinearWebhook: &v1alpha1.LinearWebhook{
-							Types: []string{"Comment"},
-							Filters: []v1alpha1.LinearWebhookFilter{
-								{Type: "Comment", Labels: []string{"bug"}},
-							},
-						},
-					},
-				},
-			},
-			payload: `{"type":"Comment","action":"create","data":{"id":"c1","issue":{"id":"i1","labels":[{"name":"bug"}]}}}`,
-			want:    false,
-		},
-		{
-			name: "comment event with no label filter",
-			spawner: &v1alpha1.TaskSpawner{
-				Spec: v1alpha1.TaskSpawnerSpec{
-					When: v1alpha1.When{
-						LinearWebhook: &v1alpha1.LinearWebhook{
-							Types: []string{"Comment"},
-							Filters: []v1alpha1.LinearWebhookFilter{
-								{Type: "Comment", Action: "create"},
-							},
-						},
-					},
-				},
-			},
-			payload: `{"type":"Comment","action":"create","data":{"id":"c1","issue":{"id":"i1"}}}`,
-			want:    false,
-		},
-		{
-			name: "issue event is not enriched",
-			spawner: &v1alpha1.TaskSpawner{
-				Spec: v1alpha1.TaskSpawnerSpec{
-					When: v1alpha1.When{
-						LinearWebhook: &v1alpha1.LinearWebhook{
-							Types: []string{"Issue"},
-							Filters: []v1alpha1.LinearWebhookFilter{
-								{Type: "Issue", Labels: []string{"bug"}},
-							},
-						},
-					},
-				},
-			},
-			payload: `{"type":"Issue","action":"create","data":{"id":"i1","title":"Test"}}`,
-			want:    false,
-		},
-		{
-			name: "issue-scoped label filter does not trigger enrichment for Comment",
-			spawner: &v1alpha1.TaskSpawner{
-				Spec: v1alpha1.TaskSpawnerSpec{
-					When: v1alpha1.When{
-						LinearWebhook: &v1alpha1.LinearWebhook{
-							Types: []string{"Issue", "Comment"},
-							Filters: []v1alpha1.LinearWebhookFilter{
-								{Type: "Issue", Labels: []string{"bug"}},
-								{Type: "Comment", Action: "create"},
-							},
-						},
-					},
-				},
-			},
-			payload: `{"type":"Comment","action":"create","data":{"id":"c1","issue":{"id":"i1"}}}`,
-			want:    false,
-		},
-		{
-			name: "unscoped label filter triggers enrichment for Comment",
-			spawner: &v1alpha1.TaskSpawner{
-				Spec: v1alpha1.TaskSpawnerSpec{
-					When: v1alpha1.When{
-						LinearWebhook: &v1alpha1.LinearWebhook{
-							Types: []string{"Issue", "Comment"},
-							Filters: []v1alpha1.LinearWebhookFilter{
-								{Labels: []string{"bug"}},
-							},
-						},
-					},
-				},
-			},
-			payload: `{"type":"Comment","action":"create","data":{"id":"c1","issue":{"id":"i1"}}}`,
-			want:    true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			eventData, err := ParseLinearWebhook([]byte(tt.payload))
-			if err != nil {
-				t.Fatalf("ParseLinearWebhook() error = %v", err)
-			}
-			got := spawnerNeedsLinearLabels(tt.spawner, eventData)
-			if got != tt.want {
-				t.Errorf("spawnerNeedsLinearLabels() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestEnrichLinearCommentLabels(t *testing.T) {
-	// Set up a mock Linear API server that returns labels for the issue
+func TestEnrichLinearCommentIssue(t *testing.T) {
+	desc := "A detailed description of the issue"
+	// Set up a mock Linear API server that returns labels and description
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req linearGraphQLRequest
 		json.NewDecoder(r.Body).Decode(&req)
@@ -1551,6 +1558,7 @@ func TestEnrichLinearCommentLabels(t *testing.T) {
 		resp := map[string]interface{}{
 			"data": map[string]interface{}{
 				"issue": map[string]interface{}{
+					"description": desc,
 					"labels": map[string]interface{}{
 						"nodes": []map[string]interface{}{
 							{"name": "bug"},
@@ -1564,11 +1572,11 @@ func TestEnrichLinearCommentLabels(t *testing.T) {
 	}))
 	defer server.Close()
 
-	origFetcher := linearLabelFetcher
-	linearLabelFetcher = func(ctx context.Context, issueID string) ([]string, error) {
-		return fetchLinearIssueLabelsFromURL(ctx, server.URL, "test-key", issueID)
+	origFetcher := linearDetailsFetcher
+	linearDetailsFetcher = func(ctx context.Context, issueID string) (*linearIssueDetails, error) {
+		return fetchLinearIssueDetailsFromURL(ctx, server.URL, "test-key", issueID)
 	}
-	defer func() { linearLabelFetcher = origFetcher }()
+	defer func() { linearDetailsFetcher = origFetcher }()
 
 	payload := `{
 		"type":"Comment",
@@ -1588,7 +1596,7 @@ func TestEnrichLinearCommentLabels(t *testing.T) {
 		t.Fatalf("ParseLinearWebhook() error = %v", err)
 	}
 
-	enrichLinearCommentLabels(context.Background(), logr.Discard(), eventData)
+	enrichLinearCommentIssue(context.Background(), logr.Discard(), eventData)
 
 	// Check that labels were injected into the payload
 	dataObj := eventData.Payload["data"].(map[string]interface{})
@@ -1614,14 +1622,106 @@ func TestEnrichLinearCommentLabels(t *testing.T) {
 	if len(eventData.Labels) != 2 || eventData.Labels[0] != "bug" || eventData.Labels[1] != "priority:high" {
 		t.Errorf("Expected eventData.Labels = [bug priority:high], got %v", eventData.Labels)
 	}
+
+	// Check that description was injected
+	gotDesc, ok := issue["description"].(string)
+	if !ok {
+		t.Fatal("Expected description to be injected into issue")
+	}
+	if gotDesc != desc {
+		t.Errorf("Expected description %q, got %q", desc, gotDesc)
+	}
 }
 
-func TestEnrichLinearCommentLabels_MatchesFilterAfterEnrichment(t *testing.T) {
+func TestEnrichLinearCommentIssue_PreservesExistingDescription(t *testing.T) {
+	apiDesc := "Description from API"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]interface{}{
+			"data": map[string]interface{}{
+				"issue": map[string]interface{}{
+					"description": apiDesc,
+					"labels": map[string]interface{}{
+						"nodes": []map[string]interface{}{
+							{"name": "bug"},
+						},
+					},
+				},
+			},
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	origFetcher := linearDetailsFetcher
+	linearDetailsFetcher = func(ctx context.Context, issueID string) (*linearIssueDetails, error) {
+		return fetchLinearIssueDetailsFromURL(ctx, server.URL, "test-key", issueID)
+	}
+	defer func() { linearDetailsFetcher = origFetcher }()
+
+	// Payload already has a description — it should NOT be overwritten
+	payload := `{
+		"type":"Comment",
+		"action":"create",
+		"data":{
+			"id":"comment-123",
+			"body":"Test comment",
+			"issue":{
+				"id":"issue-456",
+				"title":"Parent issue",
+				"description":"Existing description"
+			}
+		}
+	}`
+
+	eventData, err := ParseLinearWebhook([]byte(payload))
+	if err != nil {
+		t.Fatalf("ParseLinearWebhook() error = %v", err)
+	}
+
+	enrichLinearCommentIssue(context.Background(), logr.Discard(), eventData)
+
+	dataObj := eventData.Payload["data"].(map[string]interface{})
+	issue := dataObj["issue"].(map[string]interface{})
+
+	gotDesc, ok := issue["description"].(string)
+	if !ok {
+		t.Fatal("Expected description in issue")
+	}
+	if gotDesc != "Existing description" {
+		t.Errorf("Expected existing description to be preserved, got %q", gotDesc)
+	}
+}
+
+func TestEnrichLinearCommentIssue_SkipsNonCommentEvents(t *testing.T) {
+	called := false
+	origFetcher := linearDetailsFetcher
+	linearDetailsFetcher = func(ctx context.Context, issueID string) (*linearIssueDetails, error) {
+		called = true
+		return &linearIssueDetails{Labels: []string{"bug"}}, nil
+	}
+	defer func() { linearDetailsFetcher = origFetcher }()
+
+	payload := `{"type":"Issue","action":"create","data":{"id":"i1","title":"Test"}}`
+	eventData, err := ParseLinearWebhook([]byte(payload))
+	if err != nil {
+		t.Fatalf("ParseLinearWebhook() error = %v", err)
+	}
+
+	enrichLinearCommentIssue(context.Background(), logr.Discard(), eventData)
+
+	if called {
+		t.Error("Expected enrichment to be skipped for non-Comment events")
+	}
+}
+
+func TestEnrichLinearCommentIssue_MatchesFilterAfterEnrichment(t *testing.T) {
+	desc := "Issue description"
 	// End-to-end test: Comment payload without labels -> enrich -> filter matches
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := map[string]interface{}{
 			"data": map[string]interface{}{
 				"issue": map[string]interface{}{
+					"description": desc,
 					"labels": map[string]interface{}{
 						"nodes": []map[string]interface{}{
 							{"name": "bug"},
@@ -1635,11 +1735,11 @@ func TestEnrichLinearCommentLabels_MatchesFilterAfterEnrichment(t *testing.T) {
 	}))
 	defer server.Close()
 
-	origFetcher := linearLabelFetcher
-	linearLabelFetcher = func(ctx context.Context, issueID string) ([]string, error) {
-		return fetchLinearIssueLabelsFromURL(ctx, server.URL, "test-key", issueID)
+	origFetcher := linearDetailsFetcher
+	linearDetailsFetcher = func(ctx context.Context, issueID string) (*linearIssueDetails, error) {
+		return fetchLinearIssueDetailsFromURL(ctx, server.URL, "test-key", issueID)
 	}
-	defer func() { linearLabelFetcher = origFetcher }()
+	defer func() { linearDetailsFetcher = origFetcher }()
 
 	config := &v1alpha1.LinearWebhook{
 		Types: []string{"Comment"},
@@ -1674,7 +1774,7 @@ func TestEnrichLinearCommentLabels_MatchesFilterAfterEnrichment(t *testing.T) {
 	}
 
 	// Enrich
-	enrichLinearCommentLabels(context.Background(), logr.Discard(), eventData)
+	enrichLinearCommentIssue(context.Background(), logr.Discard(), eventData)
 
 	// After enrichment — filter should match
 	matched, err = MatchesLinearEvent(config, eventData)
@@ -1683,5 +1783,12 @@ func TestEnrichLinearCommentLabels_MatchesFilterAfterEnrichment(t *testing.T) {
 	}
 	if !matched {
 		t.Error("Expected match after enrichment")
+	}
+
+	// Verify description was also injected
+	dataObj := eventData.Payload["data"].(map[string]interface{})
+	issue := dataObj["issue"].(map[string]interface{})
+	if issue["description"] != desc {
+		t.Errorf("Expected description %q, got %v", desc, issue["description"])
 	}
 }

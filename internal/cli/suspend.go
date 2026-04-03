@@ -6,7 +6,6 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
@@ -50,30 +49,24 @@ func newSuspendTaskSpawnerCommand(cfg *ClientConfig) *cobra.Command {
 			ctx := context.Background()
 			key := client.ObjectKey{Name: args[0], Namespace: ns}
 
-			alreadySuspended := false
-			if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-				ts := &kelosv1alpha1.TaskSpawner{}
-				if err := cl.Get(ctx, key, ts); err != nil {
-					return fmt.Errorf("getting task spawner: %w", err)
-				}
+			ts := &kelosv1alpha1.TaskSpawner{}
+			if err := cl.Get(ctx, key, ts); err != nil {
+				return fmt.Errorf("getting task spawner: %w", err)
+			}
 
-				if ts.Spec.Suspend != nil && *ts.Spec.Suspend {
-					alreadySuspended = true
-					return nil
-				}
+			if ts.Spec.Suspend != nil && *ts.Spec.Suspend {
+				fmt.Fprintf(os.Stdout, "taskspawner/%s is already suspended\n", args[0])
+				return nil
+			}
 
-				suspend := true
-				ts.Spec.Suspend = &suspend
-				return cl.Update(ctx, ts)
-			}); err != nil {
+			base := ts.DeepCopy()
+			suspend := true
+			ts.Spec.Suspend = &suspend
+			if err := cl.Patch(ctx, ts, client.MergeFrom(base)); err != nil {
 				return fmt.Errorf("suspending task spawner: %w", err)
 			}
 
-			if alreadySuspended {
-				fmt.Fprintf(os.Stdout, "taskspawner/%s is already suspended\n", args[0])
-			} else {
-				fmt.Fprintf(os.Stdout, "taskspawner/%s suspended\n", args[0])
-			}
+			fmt.Fprintf(os.Stdout, "taskspawner/%s suspended\n", args[0])
 			return nil
 		},
 	}
@@ -121,30 +114,24 @@ func newResumeTaskSpawnerCommand(cfg *ClientConfig) *cobra.Command {
 			ctx := context.Background()
 			key := client.ObjectKey{Name: args[0], Namespace: ns}
 
-			notSuspended := false
-			if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-				ts := &kelosv1alpha1.TaskSpawner{}
-				if err := cl.Get(ctx, key, ts); err != nil {
-					return fmt.Errorf("getting task spawner: %w", err)
-				}
+			ts := &kelosv1alpha1.TaskSpawner{}
+			if err := cl.Get(ctx, key, ts); err != nil {
+				return fmt.Errorf("getting task spawner: %w", err)
+			}
 
-				if ts.Spec.Suspend == nil || !*ts.Spec.Suspend {
-					notSuspended = true
-					return nil
-				}
+			if ts.Spec.Suspend == nil || !*ts.Spec.Suspend {
+				fmt.Fprintf(os.Stdout, "taskspawner/%s is not suspended\n", args[0])
+				return nil
+			}
 
-				suspend := false
-				ts.Spec.Suspend = &suspend
-				return cl.Update(ctx, ts)
-			}); err != nil {
+			base := ts.DeepCopy()
+			suspend := false
+			ts.Spec.Suspend = &suspend
+			if err := cl.Patch(ctx, ts, client.MergeFrom(base)); err != nil {
 				return fmt.Errorf("resuming task spawner: %w", err)
 			}
 
-			if notSuspended {
-				fmt.Fprintf(os.Stdout, "taskspawner/%s is not suspended\n", args[0])
-			} else {
-				fmt.Fprintf(os.Stdout, "taskspawner/%s resumed\n", args[0])
-			}
+			fmt.Fprintf(os.Stdout, "taskspawner/%s resumed\n", args[0])
 			return nil
 		},
 	}

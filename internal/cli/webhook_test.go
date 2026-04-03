@@ -18,6 +18,11 @@ func TestRenderChart_WebhookServers(t *testing.T) {
 					"replicas":   1,
 					"secretName": "github-webhook-secret",
 				},
+				"linear": map[string]interface{}{
+					"enabled":    true,
+					"replicas":   1,
+					"secretName": "linear-webhook-secret",
+				},
 			},
 			"ingress": map[string]interface{}{
 				"enabled":   true,
@@ -40,12 +45,16 @@ func TestRenderChart_WebhookServers(t *testing.T) {
 	// Check for webhook components
 	expectedComponents := []string{
 		"name: kelos-webhook-github",
+		"name: kelos-webhook-linear",
 		"kind: Ingress",
 		"name: kelos-webhook-role",
 		"name: kelos-webhook",
 		"app.kubernetes.io/component: webhook-github",
+		"app.kubernetes.io/component: webhook-linear",
 		"--source=github",
+		"--source=linear",
 		"github-webhook-secret",
+		"linear-webhook-secret",
 	}
 
 	for _, component := range expectedComponents {
@@ -64,6 +73,11 @@ func TestRenderChart_WebhookGateway(t *testing.T) {
 					"enabled":    true,
 					"replicas":   1,
 					"secretName": "github-webhook-secret",
+				},
+				"linear": map[string]interface{}{
+					"enabled":    true,
+					"replicas":   1,
+					"secretName": "linear-webhook-secret",
 				},
 			},
 			"gateway": map[string]interface{}{
@@ -97,6 +111,8 @@ func TestRenderChart_WebhookGateway(t *testing.T) {
 		"gatewayClassName: istio",
 		"/webhook/github",
 		"kelos-webhook-github",
+		"/webhook/linear",
+		"kelos-webhook-linear",
 	}
 
 	for _, component := range expectedComponents {
@@ -111,6 +127,9 @@ func TestRenderChart_WebhookServersDisabled(t *testing.T) {
 		"webhookServer": map[string]interface{}{
 			"sources": map[string]interface{}{
 				"github": map[string]interface{}{
+					"enabled": false,
+				},
+				"linear": map[string]interface{}{
 					"enabled": false,
 				},
 			},
@@ -130,7 +149,9 @@ func TestRenderChart_WebhookServersDisabled(t *testing.T) {
 	// Should not contain webhook components when disabled
 	unexpectedComponents := []string{
 		"name: kelos-webhook-github",
+		"name: kelos-webhook-linear",
 		"--source=github",
+		"--source=linear",
 		"name: kelos-webhook-role",
 	}
 

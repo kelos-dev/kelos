@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-logr/logr"
@@ -123,13 +124,38 @@ func TestServeHTTP_AcceptsValidSignature(t *testing.T) {
 }
 
 func TestServeHTTP_DuplicateDeliveryIsIdempotent(t *testing.T) {
-	handler := newTestHandler(t)
+	spawner := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "dedup-gh-spawner",
+			Namespace: "default",
+			UID:       "dedup-gh-uid",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
+					Events: []string{"issues"},
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+				Credentials: kelosv1alpha1.Credentials{
+					Type: "api-key",
+				},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
+					Name: "test-workspace",
+				},
+				PromptTemplate: "{{.Title}}",
+			},
+		},
+	}
+
+	handler := newTestHandler(t, spawner)
 
 	payload := []byte(issuesPayload)
 	sig := signPayload(payload, []byte(testSecret))
 	deliveryID := "duplicate-delivery-id"
 
-	// First request
+	// First request — should create a task
 	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
 	req.Header.Set(GitHubEventHeader, "issues")
 	req.Header.Set(GitHubSignatureHeader, sig)
@@ -141,7 +167,15 @@ func TestServeHTTP_DuplicateDeliveryIsIdempotent(t *testing.T) {
 		t.Fatalf("First request: expected %d, got %d", http.StatusOK, rr.Code)
 	}
 
-	// Second request with same delivery ID
+	var taskList kelosv1alpha1.TaskList
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task after first request, got %d", len(taskList.Items))
+	}
+
+	// Second request with same delivery ID — dedup should prevent a second task
 	req = httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
 	req.Header.Set(GitHubEventHeader, "issues")
 	req.Header.Set(GitHubSignatureHeader, sig)
@@ -151,6 +185,13 @@ func TestServeHTTP_DuplicateDeliveryIsIdempotent(t *testing.T) {
 
 	if rr.Code != http.StatusOK {
 		t.Errorf("Duplicate request: expected %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Errorf("Expected still 1 task after duplicate request, got %d", len(taskList.Items))
 	}
 }
 
@@ -451,5 +492,209 @@ func TestServeHTTP_RepositoryFilterRejectsWrongRepo(t *testing.T) {
 
 	if len(taskList.Items) != 0 {
 		t.Errorf("Expected 0 tasks for wrong repo, got %d", len(taskList.Items))
+	}
+}
+
+// --- Linear HTTP handler tests ---
+
+// newLinearTestHandler creates a WebhookHandler for Linear backed by a fake client.
+func newLinearTestHandler(t *testing.T, objs ...client.Object) *WebhookHandler {
+	t.Helper()
+	scheme := runtime.NewScheme()
+	if err := kelosv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(objs...).
+		WithStatusSubresource(&kelosv1alpha1.TaskSpawner{}).
+		Build()
+
+	tb, err := taskbuilder.NewTaskBuilder(fakeClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return &WebhookHandler{
+		client:        fakeClient,
+		source:        LinearSource,
+		log:           logr.Discard(),
+		taskBuilder:   tb,
+		secret:        []byte(testSecret),
+		deliveryCache: NewDeliveryCache(context.Background()),
+	}
+}
+
+const linearIssuePayload = `{
+	"type": "Issue",
+	"action": "create",
+	"data": {
+		"id": "LIN-42",
+		"title": "Linear Test Issue",
+		"state": {"name": "Todo"},
+		"labels": [{"name": "agent-task"}]
+	}
+}`
+
+func TestLinearServeHTTP_RejectsInvalidSignature(t *testing.T) {
+	handler := newLinearTestHandler(t)
+
+	payload := []byte(linearIssuePayload)
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
+	req.Header.Set(LinearSignatureHeader, "invalid")
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("Expected %d, got %d", http.StatusUnauthorized, rr.Code)
+	}
+}
+
+func TestLinearServeHTTP_AcceptsValidSignature(t *testing.T) {
+	handler := newLinearTestHandler(t)
+
+	payload := []byte(linearIssuePayload)
+	sig := computeHMAC(payload, []byte(testSecret))
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
+	req.Header.Set(LinearSignatureHeader, sig)
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("Expected %d, got %d", http.StatusOK, rr.Code)
+	}
+}
+
+func TestLinearServeHTTP_CreatesTaskForMatchingSpawner(t *testing.T) {
+	spawner := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "linear-spawner",
+			Namespace: "default",
+			UID:       "linear-uid-123",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				LinearWebhook: &kelosv1alpha1.LinearWebhook{
+					Types: []string{"Issue"},
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+				Credentials: kelosv1alpha1.Credentials{
+					Type: "api-key",
+				},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
+					Name: "test-workspace",
+				},
+				PromptTemplate: "{{.Title}}",
+			},
+		},
+	}
+
+	handler := newLinearTestHandler(t, spawner)
+
+	payload := []byte(linearIssuePayload)
+	sig := computeHMAC(payload, []byte(testSecret))
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
+	req.Header.Set(LinearSignatureHeader, sig)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	// Verify the task was created
+	var taskList kelosv1alpha1.TaskList
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task, got %d", len(taskList.Items))
+	}
+
+	task := taskList.Items[0]
+	if task.Labels["kelos.dev/taskspawner"] != "linear-spawner" {
+		t.Errorf("Expected taskspawner label 'linear-spawner', got %q", task.Labels["kelos.dev/taskspawner"])
+	}
+	if task.Spec.Prompt != "Linear Test Issue" {
+		t.Errorf("Expected prompt 'Linear Test Issue', got %q", task.Spec.Prompt)
+	}
+	// Task name should use the parsed type "issue" not the generic "linear"
+	if !strings.Contains(task.Name, "issue") {
+		t.Errorf("Expected task name to contain 'issue', got %q", task.Name)
+	}
+}
+
+func TestLinearServeHTTP_DuplicateBodyIsIdempotent(t *testing.T) {
+	spawner := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "dedup-spawner",
+			Namespace: "default",
+			UID:       "dedup-uid",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				LinearWebhook: &kelosv1alpha1.LinearWebhook{
+					Types: []string{"Issue"},
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+				Credentials: kelosv1alpha1.Credentials{
+					Type: "api-key",
+				},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
+					Name: "test-workspace",
+				},
+				PromptTemplate: "{{.Title}}",
+			},
+		},
+	}
+
+	handler := newLinearTestHandler(t, spawner)
+
+	payload := []byte(linearIssuePayload)
+	sig := computeHMAC(payload, []byte(testSecret))
+
+	// First request — should create a task
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
+	req.Header.Set(LinearSignatureHeader, sig)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("First request: expected %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task after first request, got %d", len(taskList.Items))
+	}
+
+	// Second request with identical body — dedup via body hash, no new task
+	req = httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
+	req.Header.Set(LinearSignatureHeader, sig)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("Duplicate request: expected %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Errorf("Expected still 1 task after duplicate request, got %d", len(taskList.Items))
 	}
 }

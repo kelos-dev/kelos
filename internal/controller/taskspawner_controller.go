@@ -59,7 +59,7 @@ func isCronBased(ts *kelosv1alpha1.TaskSpawner) bool {
 
 // isWebhookBased returns true if the TaskSpawner is webhook-driven.
 func isWebhookBased(ts *kelosv1alpha1.TaskSpawner) bool {
-	return ts.Spec.When.GitHubWebhook != nil
+	return ts.Spec.When.GitHubWebhook != nil || ts.Spec.When.LinearWebhook != nil
 }
 
 // Reconcile handles TaskSpawner reconciliation.

@@ -1,6 +1,6 @@
 # Example Helm values to enable webhook servers
 
-# Enable webhook server for GitHub
+# Enable webhook servers for both GitHub and Linear
 webhookServer:
   sources:
     # Enable GitHub webhook server
@@ -8,6 +8,12 @@ webhookServer:
       enabled: true
       replicas: 2 # For high availability
       secretName: github-webhook-secret # Must contain WEBHOOK_SECRET key
+
+    # Enable Linear webhook server
+    linear:
+      enabled: true
+      replicas: 1
+      secretName: linear-webhook-secret # Must contain WEBHOOK_SECRET key
 
   # Enable ingress for external webhook access (traditional Ingress API)
   ingress:

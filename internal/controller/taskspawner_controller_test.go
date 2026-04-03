@@ -39,6 +39,19 @@ func TestIsWebhookBased(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "Linear webhook TaskSpawner",
+			ts: &kelosv1alpha1.TaskSpawner{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						LinearWebhook: &kelosv1alpha1.LinearWebhook{
+							Types: []string{"Issue"},
+						},
+					},
+				},
+			},
+			want: true,
+		},
+		{
 			name: "polling TaskSpawner",
 			ts: &kelosv1alpha1.TaskSpawner{
 				Spec: kelosv1alpha1.TaskSpawnerSpec{
@@ -108,7 +121,7 @@ func TestReconcileWebhook(t *testing.T) {
 			wantMessage: "Webhook-driven TaskSpawner ready",
 		},
 		{
-			name: "suspended webhook TaskSpawner",
+			name: "suspended GitHub webhook TaskSpawner",
 			ts: &kelosv1alpha1.TaskSpawner{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-webhook",
@@ -118,6 +131,25 @@ func TestReconcileWebhook(t *testing.T) {
 					When: kelosv1alpha1.When{
 						GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
 							Events: []string{"issues"},
+						},
+					},
+				},
+			},
+			isSuspended: true,
+			wantPhase:   kelosv1alpha1.TaskSpawnerPhaseSuspended,
+			wantMessage: "Suspended by user",
+		},
+		{
+			name: "suspended Linear webhook TaskSpawner",
+			ts: &kelosv1alpha1.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-webhook-linear",
+					Namespace: "default",
+				},
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						LinearWebhook: &kelosv1alpha1.LinearWebhook{
+							Types: []string{"Issue"},
 						},
 					},
 				},

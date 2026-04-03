@@ -796,7 +796,8 @@ spec:
                       Available variables (all sources): {{.ID}}, {{.Title}}, {{.Kind}}
                       GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
                       GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}
-                      GitHub webhook sources: {{.Event}}, {{.Action}}, {{.Sender}}, {{.Ref}}, {{.Payload}} (full payload access)
+                      GitHub webhook sources: {{.Event}}, {{.Action}}, {{.Sender}}, {{.Ref}}, {{.Repository}}, {{.Payload}} (full payload access)
+                      Linear webhook sources: {{.Type}}, {{.Action}}, {{.State}}, {{.Labels}}, {{.IssueID}}, {{.Payload}}
                       Cron sources: {{.Time}}, {{.Schedule}}
                     type: string
                   credentials:
@@ -1118,7 +1119,8 @@ spec:
                       Available variables (all sources): {{.ID}}, {{.Title}}, {{.Kind}}
                       GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
                       GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}
-                      GitHub webhook sources: {{.Event}}, {{.Action}}, {{.Sender}}, {{.Ref}}, {{.Payload}} (full payload access)
+                      GitHub webhook sources: {{.Event}}, {{.Action}}, {{.Sender}}, {{.Ref}}, {{.Repository}}, {{.Payload}} (full payload access)
+                      Linear webhook sources: {{.Type}}, {{.Action}}, {{.State}}, {{.Labels}}, {{.IssueID}}, {{.Payload}}
                       Cron sources: {{.Time}}, {{.Schedule}}
                     type: string
                   ttlSecondsAfterFinished:
@@ -1612,6 +1614,66 @@ spec:
                     - project
                     - secretRef
                     type: object
+                  linearWebhook:
+                    description: LinearWebhook triggers task spawning on Linear webhook
+                      events.
+                    properties:
+                      filters:
+                        description: |-
+                          Filters refine which events trigger tasks (OR semantics within same type).
+                          If empty, all events in the Types list trigger tasks.
+                        items:
+                          description: |-
+                            LinearWebhookFilter defines filtering criteria for Linear webhook events.
+                            When Type is set, the filter only applies to events of that resource type.
+                            When Type is empty, the filter applies to all resource types in the parent
+                            LinearWebhook.Types list.
+                          properties:
+                            action:
+                              description: Action filters by webhook action ("create",
+                                "update", "remove").
+                              enum:
+                              - create
+                              - update
+                              - remove
+                              - ""
+                              type: string
+                            excludeLabels:
+                              description: ExcludeLabels excludes issues with any
+                                of these labels.
+                              items:
+                                type: string
+                              type: array
+                            labels:
+                              description: Labels requires the issue to have all of
+                                these labels.
+                              items:
+                                type: string
+                              type: array
+                            states:
+                              description: States filters by Linear workflow state
+                                names (e.g., "Todo", "In Progress").
+                              items:
+                                type: string
+                              type: array
+                            type:
+                              description: |-
+                                Type scopes this filter to a specific Linear resource type (e.g., "Issue",
+                                "Comment"). When empty, the filter applies to all types in the parent Types list.
+                              type: string
+                          type: object
+                        type: array
+                      types:
+                        description: |-
+                          Types is the list of Linear resource types to listen for.
+                          e.g., "Issue", "Comment", "Project"
+                        items:
+                          type: string
+                        minItems: 1
+                        type: array
+                    required:
+                    - types
+                    type: object
                 type: object
             required:
             - taskTemplate
@@ -1619,9 +1681,10 @@ spec:
             type: object
             x-kubernetes-validations:
             - message: taskTemplate.workspaceRef is required when using githubIssues,
-                githubPullRequests, or githubWebhook source
+                githubPullRequests, githubWebhook, or linearWebhook source
               rule: '!(has(self.when.githubIssues) || has(self.when.githubPullRequests)
-                || has(self.when.githubWebhook)) || has(self.taskTemplate.workspaceRef)'
+                || has(self.when.githubWebhook) || has(self.when.linearWebhook)) ||
+                has(self.taskTemplate.workspaceRef)'
           status:
             description: TaskSpawnerStatus defines the observed state of TaskSpawner.
             properties:

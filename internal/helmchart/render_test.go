@@ -214,6 +214,59 @@ func TestRender_CRDNoKeepAnnotation(t *testing.T) {
 	}
 }
 
+func TestRender_LinearWebhookApiKeySecret(t *testing.T) {
+	tests := []struct {
+		name             string
+		apiKeySecretName string
+		wantEnvVar       bool
+	}{
+		{
+			name:             "apiKeySecretName set injects LINEAR_API_KEY env var",
+			apiKeySecretName: "my-linear-api-secret",
+			wantEnvVar:       true,
+		},
+		{
+			name:             "apiKeySecretName empty omits LINEAR_API_KEY env var",
+			apiKeySecretName: "",
+			wantEnvVar:       false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vals := map[string]interface{}{
+				"webhookServer": map[string]interface{}{
+					"sources": map[string]interface{}{
+						"linear": map[string]interface{}{
+							"enabled":          true,
+							"replicas":         1,
+							"secretName":       "linear-webhook-secret",
+							"apiKeySecretName": tt.apiKeySecretName,
+						},
+					},
+				},
+			}
+			data, err := Render(manifests.ChartFS, vals)
+			if err != nil {
+				t.Fatalf("rendering chart: %v", err)
+			}
+			output := string(data)
+			if tt.wantEnvVar {
+				if !strings.Contains(output, "LINEAR_API_KEY") {
+					t.Error("expected LINEAR_API_KEY env var in rendered output")
+				}
+				if !strings.Contains(output, tt.apiKeySecretName) {
+					t.Errorf("expected secret name %q in rendered output", tt.apiKeySecretName)
+				}
+			} else {
+				if strings.Contains(output, "LINEAR_API_KEY") {
+					t.Error("expected no LINEAR_API_KEY env var in rendered output")
+				}
+			}
+		})
+	}
+}
+
 func TestRender_ParseableOutput(t *testing.T) {
 	vals := map[string]interface{}{
 		"image": map[string]interface{}{

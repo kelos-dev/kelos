@@ -1,0 +1,51 @@
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: linear-webhook-example
+  namespace: default
+spec:
+  when:
+    linearWebhook:
+      types:
+        - "Issue"
+      # Filters use OR semantics — any matching filter triggers a task.
+      # Omitting 'action' matches all actions (create, update, remove).
+      filters:
+        - action: "create"
+          states:
+            - "Todo"
+            - "In Progress"
+          labels:
+            - "agent-task"
+          excludeLabels:
+            - "no-automation"
+        - action: "update"
+          states:
+            - "Todo"
+            - "In Progress"
+          labels:
+            - "agent-task"
+          excludeLabels:
+            - "no-automation"
+  taskTemplate:
+    type: claude-code
+    credentials:
+      type: oauth
+      secretRef:
+        name: claude-credentials
+        key: token
+    workspaceRef:
+      name: my-workspace
+    branch: "linear-task-{{.ID}}"
+    promptTemplate: |
+      Linear {{.Type}} {{.Action}}: {{.Title}}
+
+      Linear Issue ID: {{.ID}}
+      State: {{.State}}
+      Labels: {{.Labels}}
+
+      Please analyze this Linear issue and provide recommendations or implement any requested changes.
+
+      Full webhook data is available in the payload for detailed analysis if needed.
+  maxConcurrency: 3
+  ttlSecondsAfterFinished: 3600

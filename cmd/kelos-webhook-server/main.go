@@ -41,7 +41,7 @@ func main() {
 		enableLeaderElection bool
 	)
 
-	flag.StringVar(&source, "source", "", "Webhook source type (github)")
+	flag.StringVar(&source, "source", "", "Webhook source type (github or linear)")
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.StringVar(&webhookAddr, "webhook-bind-address", ":8443", "The address the webhook endpoint binds to.")
@@ -63,9 +63,11 @@ func main() {
 	switch source {
 	case "github":
 		webhookSource = webhook.GitHubSource
+	case "linear":
+		webhookSource = webhook.LinearSource
 	default:
 		setupLog.Error(fmt.Errorf("invalid source: %s", source),
-			"Source must be 'github'")
+			"Source must be 'github' or 'linear'")
 		os.Exit(1)
 	}
 

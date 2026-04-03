@@ -43,6 +43,11 @@ webhookServer:
       enabled: false
       replicas: 1
       secretName: ""
+    linear:
+      enabled: false
+      replicas: 1
+      secretName: ""
+      apiKeySecretName: ""
   resources:
     limits:
       cpu: 500m

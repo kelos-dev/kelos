@@ -24,6 +24,16 @@ func ValidateGitHubSignature(payload []byte, signature string, secret []byte) er
 	return validateHMACSignature(payload, expectedSig, secret)
 }
 
+// ValidateLinearSignature validates a Linear webhook signature.
+// Linear sends signatures as raw HMAC-SHA256 hex digest.
+func ValidateLinearSignature(payload []byte, signature string, secret []byte) error {
+	if signature == "" {
+		return fmt.Errorf("missing signature")
+	}
+
+	return validateHMACSignature(payload, signature, secret)
+}
+
 // validateHMACSignature performs HMAC-SHA256 validation against the expected hex digest.
 func validateHMACSignature(payload []byte, expectedSig string, secret []byte) error {
 	mac := hmac.New(sha256.New, secret)

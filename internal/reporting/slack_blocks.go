@@ -35,7 +35,11 @@ const (
 	segTable
 	segList
 	segHeader
+	segDivider
 )
+
+// reInlineCode matches `code` spans.
+var reInlineCode = regexp.MustCompile("`([^`]+)`")
 
 // segment is a contiguous chunk of parsed markdown content.
 type segment struct {
@@ -56,6 +60,8 @@ var (
 	unorderedListRe = regexp.MustCompile(`^(\s*)[-*]\s+(.+)$`)
 	// orderedListRe matches ordered list items: 1. item, 2. item
 	orderedListRe = regexp.MustCompile(`^(\s*)\d+\.\s+(.+)$`)
+	// dividerRe matches horizontal rule lines: ---, ***, ___  (three or more of the same character)
+	dividerRe = regexp.MustCompile(`^\s*(?:---+|___+|\*\*\*+)\s*$`)
 )
 
 // parseMarkdownSegments splits markdown text into typed segments.
@@ -66,6 +72,13 @@ func parseMarkdownSegments(text string) []segment {
 	i := 0
 	for i < len(lines) {
 		line := lines[i]
+
+		// Check for divider (---, ***, ___).
+		if dividerRe.MatchString(line) {
+			segments = append(segments, segment{typ: segDivider})
+			i++
+			continue
+		}
 
 		// Check for header.
 		if m := headerRe.FindStringSubmatch(line); m != nil {
@@ -99,9 +112,16 @@ func parseMarkdownSegments(text string) []segment {
 		if unorderedListRe.MatchString(line) {
 			var listLines []string
 			j := i
-			for j < len(lines) && unorderedListRe.MatchString(lines[j]) {
-				listLines = append(listLines, lines[j])
-				j++
+			for j < len(lines) {
+				if unorderedListRe.MatchString(lines[j]) {
+					listLines = append(listLines, lines[j])
+					j++
+				} else if strings.TrimSpace(lines[j]) == "" && j+1 < len(lines) && unorderedListRe.MatchString(lines[j+1]) {
+					// Skip blank lines between list items.
+					j++
+				} else {
+					break
+				}
 			}
 			segments = append(segments, segment{typ: segList, lines: listLines})
 			i = j
@@ -112,9 +132,16 @@ func parseMarkdownSegments(text string) []segment {
 		if orderedListRe.MatchString(line) {
 			var listLines []string
 			j := i
-			for j < len(lines) && orderedListRe.MatchString(lines[j]) {
-				listLines = append(listLines, lines[j])
-				j++
+			for j < len(lines) {
+				if orderedListRe.MatchString(lines[j]) {
+					listLines = append(listLines, lines[j])
+					j++
+				} else if strings.TrimSpace(lines[j]) == "" && j+1 < len(lines) && orderedListRe.MatchString(lines[j+1]) {
+					// Skip blank lines between list items.
+					j++
+				} else {
+					break
+				}
 			}
 			segments = append(segments, segment{typ: segList, lines: listLines})
 			i = j
@@ -126,7 +153,8 @@ func parseMarkdownSegments(text string) []segment {
 		j := i
 		for j < len(lines) {
 			l := lines[j]
-			if headerRe.MatchString(l) ||
+			if dividerRe.MatchString(l) ||
+				headerRe.MatchString(l) ||
 				unorderedListRe.MatchString(l) ||
 				orderedListRe.MatchString(l) {
 				break
@@ -163,6 +191,8 @@ func responseToBlocks(text string) []slack.Block {
 
 	for _, seg := range segments {
 		switch seg.typ {
+		case segDivider:
+			blocks = append(blocks, slack.NewDividerBlock())
 		case segHeader:
 			blocks = append(blocks, headerBlock(seg.lines[0]))
 		case segTable:
@@ -186,7 +216,9 @@ func responseToBlocks(text string) []slack.Block {
 }
 
 // headerBlock creates a Slack HeaderBlock from header text.
+// HeaderBlocks only support plain text, so backtick code spans are stripped.
 func headerBlock(text string) *slack.HeaderBlock {
+	text = reInlineCode.ReplaceAllString(text, "$1")
 	return slack.NewHeaderBlock(
 		slack.NewTextBlockObject(slack.PlainTextType, text, false, false),
 	)
@@ -247,6 +279,41 @@ func cellsToRichText(cells []string) []*slack.RichTextBlock {
 	return blocks
 }
 
+// parseRichTextElements splits text on inline code spans (`code`) and returns
+// a slice of RichTextSectionElement with appropriate styling.
+func parseRichTextElements(text string) []slack.RichTextSectionElement {
+	var elements []slack.RichTextSectionElement
+	codeStyle := &slack.RichTextSectionTextStyle{Code: true}
+
+	matches := reInlineCode.FindAllStringIndex(text, -1)
+	if len(matches) == 0 {
+		return []slack.RichTextSectionElement{
+			slack.NewRichTextSectionTextElement(text, nil),
+		}
+	}
+
+	pos := 0
+	for _, loc := range matches {
+		// Text before the code span.
+		if loc[0] > pos {
+			elements = append(elements,
+				slack.NewRichTextSectionTextElement(text[pos:loc[0]], nil))
+		}
+		// The code span content (strip backticks).
+		code := text[loc[0]+1 : loc[1]-1]
+		elements = append(elements,
+			slack.NewRichTextSectionTextElement(code, codeStyle))
+		pos = loc[1]
+	}
+	// Trailing text after last code span.
+	if pos < len(text) {
+		elements = append(elements,
+			slack.NewRichTextSectionTextElement(text[pos:], nil))
+	}
+
+	return elements
+}
+
 // listBlock creates Slack RichTextBlock(s) from markdown list lines.
 func listBlock(lines []string) []slack.Block {
 	if len(lines) == 0 {
@@ -270,7 +337,7 @@ func listBlock(lines []string) []slack.Block {
 			continue
 		}
 		items = append(items, slack.NewRichTextSection(
-			slack.NewRichTextSectionTextElement(text, nil),
+			parseRichTextElements(text)...,
 		))
 	}
 

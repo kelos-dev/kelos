@@ -201,14 +201,9 @@ func tableBlock(lines []string) *slack.TableBlock {
 
 	table := slack.NewTableBlock("")
 
-	// Parse header row to determine column count and settings.
+	// Parse header row to determine column count.
 	headerCells := parseCells(lines[0])
 	numCols := len(headerCells)
-	settings := make([]slack.ColumnSetting, numCols)
-	for i := range settings {
-		settings[i] = slack.ColumnSetting{IsWrapped: true}
-	}
-	table.WithColumnSettings(settings...)
 
 	// Add header row.
 	table.AddRow(cellsToRichText(headerCells)...)

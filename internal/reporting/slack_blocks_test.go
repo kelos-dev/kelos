@@ -133,9 +133,6 @@ func TestResponseToBlocks(t *testing.T) {
 		if len(table.Rows) != 2 {
 			t.Errorf("expected 2 rows (header + 1 data), got %d", len(table.Rows))
 		}
-		if len(table.ColumnSettings) != 2 {
-			t.Errorf("expected 2 column settings, got %d", len(table.ColumnSettings))
-		}
 	})
 
 	t.Run("unordered list becomes RichTextBlock", func(t *testing.T) {

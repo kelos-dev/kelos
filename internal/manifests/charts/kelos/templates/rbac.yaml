@@ -299,6 +299,7 @@ rules:
       - get
       - list
       - update
+      - watch
   - apiGroups:
       - kelos.dev
     resources:

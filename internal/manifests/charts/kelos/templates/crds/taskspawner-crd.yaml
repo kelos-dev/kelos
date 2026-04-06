@@ -1149,6 +1149,94 @@ spec:
                           the channel triggers a task.
                         type: string
                     type: object
+                  webhook:
+                    description: |-
+                      Webhook triggers task spawning from arbitrary HTTP POST payloads.
+                      Any system that can send an HTTP POST with a JSON body can trigger
+                      tasks through this source. The URL path is /webhook/<source> and
+                      the HMAC secret is read from the <SOURCE>_WEBHOOK_SECRET env var.
+                    properties:
+                      deliveryIDHeader:
+                        description: |-
+                          DeliveryIDHeader is the HTTP header containing a unique delivery
+                          identifier for idempotency. If empty, a SHA-256 hash of the body
+                          is used.
+                        type: string
+                      fieldMapping:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          FieldMapping maps JSONPath expressions to WorkItem template variables.
+                          Each key is a template variable name (available as {{ "{{.Key}}" }} in
+                          promptTemplate and branch), and each value is a JSONPath expression
+                          evaluated against the request body.
+                          The "id" key is required — it provides the unique identifier used for
+                          deduplication and task naming.
+                        type: object
+                      filters:
+                        description: |-
+                          Filters define conditions that must ALL match for a webhook delivery
+                          to trigger a task (AND semantics across filters). Each filter extracts
+                          a field via JSONPath and matches it against an exact value or regex
+                          pattern. If empty, all deliveries trigger tasks.
+                        items:
+                          description: |-
+                            GenericWebhookFilter defines a condition for filtering generic webhook payloads.
+                            Exactly one of Value or Pattern must be set.
+                          properties:
+                            field:
+                              description: Field is a JSONPath expression selecting
+                                the payload field to match.
+                              type: string
+                            pattern:
+                              description: |-
+                                Pattern requires a regex match against the extracted field value.
+                                Mutually exclusive with Value.
+                              type: string
+                            value:
+                              description: |-
+                                Value requires an exact string match against the extracted field value.
+                                Mutually exclusive with Pattern.
+                              type: string
+                          required:
+                          - field
+                          type: object
+                          x-kubernetes-validations:
+                          - message: exactly one of value or pattern must be set
+                            rule: has(self.value) != (has(self.pattern) && size(self.pattern)
+                              > 0)
+                        type: array
+                      signatureHeader:
+                        default: X-Webhook-Signature-256
+                        description: |-
+                          SignatureHeader is the HTTP header containing the HMAC signature.
+                          Defaults to "X-Webhook-Signature-256".
+                        type: string
+                      signaturePrefix:
+                        default: sha256=
+                        description: |-
+                          SignaturePrefix is the prefix before the hex digest in the signature
+                          header value (e.g., "sha256=" for GitHub-style signatures). Set to
+                          empty string if the header contains the raw hex digest (Linear-style).
+                          Defaults to "sha256=".
+                        type: string
+                      source:
+                        description: |-
+                          Source is a short identifier for this webhook source (e.g., "notion",
+                          "sentry", "drata"). It determines:
+                            - The URL path: /webhook/<source>
+                            - The env var for HMAC validation: <SOURCE>_WEBHOOK_SECRET
+                          Must be lowercase alphanumeric with optional hyphens.
+                        pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$
+                        type: string
+                    required:
+                    - fieldMapping
+                    - source
+                    type: object
+                    x-kubernetes-validations:
+                    - message: fieldMapping must include an 'id' key for deduplication
+                        and task naming
+                      rule: '''id'' in self.fieldMapping'
                 type: object
             required:
             - taskTemplate

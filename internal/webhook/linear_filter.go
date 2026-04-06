@@ -193,22 +193,47 @@ func matchesLinearFilter(filter *v1alpha1.LinearWebhookFilter, eventData *Linear
 	return true
 }
 
-// linearDetailsFetcher is the function used to fetch issue details (labels and
-// description) from the Linear API. It is a package-level variable so tests
-// can swap in a stub.
-var linearDetailsFetcher = fetchLinearIssueDetails
-
-// enrichLinearCommentIssue fetches labels and description from the Linear API
-// for Comment events and injects them into the parsed payload so that
-// downstream label filtering and template rendering work correctly. This is
-// called unconditionally for all Comment events — it is cheap (single GraphQL
-// call) and prevents template crashes when prompts reference fields like
-// {{.Payload.data.issue.description}}.
-func enrichLinearCommentIssue(ctx context.Context, log logr.Logger, eventData *LinearEventData) {
+// spawnerNeedsLinearLabels returns true if the spawner has any filter that
+// uses Labels or ExcludeLabels and the parsed event is a Comment whose issue
+// labels are missing from the payload (the common case for Linear Comment
+// webhooks).
+func spawnerNeedsLinearLabels(spawner *v1alpha1.TaskSpawner, eventData *LinearEventData) bool {
 	if eventData.Type != "Comment" {
-		return
+		return false
 	}
 
+	lw := spawner.Spec.When.LinearWebhook
+	if lw == nil {
+		return false
+	}
+
+	// Check if any Comment-scoped (or unscoped) filter uses label-based filtering
+	for _, f := range lw.Filters {
+		if f.Type != "" && !strings.EqualFold(f.Type, "Comment") {
+			continue
+		}
+		if len(f.Labels) > 0 || len(f.ExcludeLabels) > 0 {
+			// Only enrich if issue labels are absent from the payload
+			dataObj, _ := eventData.Payload["data"].(map[string]interface{})
+			if dataObj == nil {
+				return true
+			}
+			labels := extractLabels(dataObj)
+			return labels == nil
+		}
+	}
+
+	return false
+}
+
+// linearLabelFetcher is the function used to fetch issue labels from the
+// Linear API. It is a package-level variable so tests can swap in a stub.
+var linearLabelFetcher = fetchLinearIssueLabels
+
+// enrichLinearCommentLabels fetches labels from the Linear API for Comment
+// events and injects them into the parsed payload at data.issue.labels so
+// that downstream label filtering works.
+func enrichLinearCommentLabels(ctx context.Context, log logr.Logger, eventData *LinearEventData) {
 	dataObj, _ := eventData.Payload["data"].(map[string]interface{})
 	if dataObj == nil {
 		return
@@ -217,7 +242,7 @@ func enrichLinearCommentIssue(ctx context.Context, log logr.Logger, eventData *L
 	// Extract the parent issue ID from data.issue.id
 	issue, _ := dataObj["issue"].(map[string]interface{})
 	if issue == nil {
-		log.Info("Comment webhook has no issue object, cannot enrich")
+		log.Info("Comment webhook has no issue object, cannot enrich labels")
 		return
 	}
 
@@ -229,40 +254,35 @@ func enrichLinearCommentIssue(ctx context.Context, log logr.Logger, eventData *L
 		issueID = fmt.Sprintf("%.0f", id)
 	}
 	if issueID == "" {
-		log.Info("Comment webhook has no issue ID, cannot enrich")
+		log.Info("Comment webhook has no issue ID, cannot enrich labels")
 		return
 	}
 
-	details, err := linearDetailsFetcher(ctx, issueID)
+	labels, err := linearLabelFetcher(ctx, issueID)
 	if err != nil {
-		log.Error(err, "Failed to fetch Linear issue details", "issueID", issueID)
+		log.Error(err, "Failed to fetch Linear issue labels", "issueID", issueID)
 		return
 	}
-	if details == nil {
-		// LINEAR_API_KEY not set — enrichment cannot proceed.
-		log.Info("LINEAR_API_KEY not set, cannot enrich Comment event with issue details from Linear API")
+	if labels == nil {
+		// LINEAR_API_KEY not set — label-based filtering on Comment events will
+		// not work because Linear does not include issue labels in Comment
+		// webhook payloads.
+		log.Info("LINEAR_API_KEY not set, cannot enrich Comment event with issue labels from Linear API")
 		return
 	}
 
-	log.Info("Enriched Comment event with issue details from Linear API", "issueID", issueID, "labels", details.Labels)
+	log.Info("Enriched Comment event with issue labels from Linear API", "issueID", issueID, "labels", labels)
 
 	// Inject labels into data.issue.labels as []interface{} matching the
 	// format that extractLabels/matchesLinearFilter expect.
-	labelObjs := make([]interface{}, len(details.Labels))
-	for i, name := range details.Labels {
+	labelObjs := make([]interface{}, len(labels))
+	for i, name := range labels {
 		labelObjs[i] = map[string]interface{}{"name": name}
 	}
 	issue["labels"] = labelObjs
 
 	// Also update the convenience field on LinearEventData
-	eventData.Labels = details.Labels
-
-	// Inject description only if not already present in the payload
-	if details.Description != nil {
-		if _, exists := issue["description"]; !exists {
-			issue["description"] = *details.Description
-		}
-	}
+	eventData.Labels = labels
 }
 
 // ExtractLinearWorkItem converts Linear webhook data to template variables.

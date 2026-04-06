@@ -280,15 +280,6 @@ func (h *WebhookHandler) processWebhook(ctx context.Context, eventType string, p
 
 	log.Info("Processing webhook event", "resourceID", parsed.ID, "title", parsed.Title)
 
-	// Unconditionally enrich Linear Comment events with issue details
-	// (labels + description) before evaluating spawner filters. Linear does
-	// not include these fields in Comment webhook payloads, which causes
-	// label filtering to miss and template rendering to crash. This is a
-	// single cheap GraphQL call per delivery.
-	if parsed.Linear != nil {
-		enrichLinearCommentIssue(ctx, log, parsed.Linear)
-	}
-
 	// Get all TaskSpawners that match this source type
 	spawners, err := h.getMatchingSpawners(ctx)
 	if err != nil {
@@ -303,6 +294,7 @@ func (h *WebhookHandler) processWebhook(ctx context.Context, eventType string, p
 	log.Info("Found matching TaskSpawners", "count", len(spawners))
 
 	tasksCreated := 0
+	linearLabelsEnriched := false
 
 	for _, spawner := range spawners {
 		spawnerLog := log.WithValues("spawner", spawner.Name, "namespace", spawner.Namespace)
@@ -327,6 +319,17 @@ func (h *WebhookHandler) processWebhook(ctx context.Context, eventType string, p
 			}
 		}
 
+		// Lazily enrich labels for Linear Comment events. Linear does not
+		// include issue labels in Comment webhook payloads, so when a
+		// spawner filters Comments by labels we fetch them from the API.
+		// Lazily enrich labels once per delivery. We set the flag after the
+		// call so that a transient API failure does not silently skip label
+		// filtering for all remaining spawners in this loop.
+		if parsed.Linear != nil && !linearLabelsEnriched && spawnerNeedsLinearLabels(spawner, parsed.Linear) {
+			enrichLinearCommentLabels(ctx, spawnerLog, parsed.Linear)
+			linearLabelsEnriched = true
+		}
+
 		// Lazily enrich ChangedFiles for PR events when a filter uses
 		// filePatterns or the prompt/branch template references ChangedFiles.
 		// Push events already have ChangedFiles populated from the payload.
@@ -337,6 +340,17 @@ func (h *WebhookHandler) processWebhook(ctx context.Context, eventType string, p
 			} else {
 				parsed.GitHub.ChangedFiles = files
 			}
+		}
+
+		// Lazily enrich labels for Linear Comment events. Linear does not
+		// include issue labels in Comment webhook payloads, so when a
+		// spawner filters Comments by labels we fetch them from the API.
+		// Lazily enrich labels once per delivery. We set the flag after the
+		// call so that a transient API failure does not silently skip label
+		// filtering for all remaining spawners in this loop.
+		if parsed.Linear != nil && !linearLabelsEnriched && spawnerNeedsLinearLabels(spawner, parsed.Linear) {
+			enrichLinearCommentLabels(ctx, spawnerLog, parsed.Linear)
+			linearLabelsEnriched = true
 		}
 
 		// Check if this webhook matches the spawner's filters

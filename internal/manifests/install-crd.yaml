@@ -1808,8 +1808,8 @@ spec:
                   slack:
                     description: |-
                       Slack discovers work items from Slack messages via Socket Mode.
-                      The spawner connects to Slack via an outbound WebSocket (no ingress
-                      required) and listens for messages in the channels the bot is invited to.
+                      The centralized kelos-slack-server connects to Slack via an outbound
+                      WebSocket (no ingress required) and routes messages to matching agents.
                     properties:
                       allowedUsers:
                         description: |-

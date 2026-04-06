@@ -34,6 +34,10 @@ spec:
       type: oauth
       secretRef:
         name: kelos-credentials
+    podOverrides:
+      env:
+        - name: CLAUDE_CODE_EFFORT_LEVEL
+          value: "max"
     agentConfigRef:
       name: kelos-dev-agent
     promptTemplate: |
@@ -136,6 +140,10 @@ spec:
       type: oauth
       secretRef:
         name: kelos-credentials
+    podOverrides:
+      env:
+        - name: CLAUDE_CODE_EFFORT_LEVEL
+          value: "max"
     agentConfigRef:
       name: pai-planner-agent
     promptTemplate: |
@@ -308,6 +316,10 @@ spec:
       type: oauth
       secretRef:
         name: kelos-credentials
+    podOverrides:
+      env:
+        - name: CLAUDE_CODE_EFFORT_LEVEL
+          value: "max"
     agentConfigRef:
       name: pai-reviewer-agent
     promptTemplate: |

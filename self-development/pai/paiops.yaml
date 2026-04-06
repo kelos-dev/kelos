@@ -30,13 +30,14 @@ spec:
     model: opus
     type: claude-code
     ttlSecondsAfterFinished: 600
-    env:
-      - name: CLAUDE_CODE_EFFORT_LEVEL
-        value: "max"
     credentials:
       type: oauth
       secretRef:
         name: kelos-credentials
+    podOverrides:
+      env:
+        - name: CLAUDE_CODE_EFFORT_LEVEL
+          value: "max"
     agentConfigRef:
       name: kelos-dev-agent
     promptTemplate: |
@@ -135,13 +136,14 @@ spec:
     model: opus
     type: claude-code
     ttlSecondsAfterFinished: 3600
-    env:
-      - name: CLAUDE_CODE_EFFORT_LEVEL
-        value: "max"
     credentials:
       type: oauth
       secretRef:
         name: kelos-credentials
+    podOverrides:
+      env:
+        - name: CLAUDE_CODE_EFFORT_LEVEL
+          value: "max"
     agentConfigRef:
       name: pai-planner-agent
     promptTemplate: |
@@ -310,13 +312,14 @@ spec:
     model: opus
     type: claude-code
     ttlSecondsAfterFinished: 600
-    env:
-      - name: CLAUDE_CODE_EFFORT_LEVEL
-        value: "max"
     credentials:
       type: oauth
       secretRef:
         name: kelos-credentials
+    podOverrides:
+      env:
+        - name: CLAUDE_CODE_EFFORT_LEVEL
+          value: "max"
     agentConfigRef:
       name: pai-reviewer-agent
     promptTemplate: |

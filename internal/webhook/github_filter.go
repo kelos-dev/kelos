@@ -34,6 +34,10 @@ type GitHubEventData struct {
 	Body   string
 	URL    string
 	Branch string
+	// PullRequestAPIURL is the GitHub API URL for the pull request associated
+	// with an issue_comment event. It is extracted from issue.pull_request.url
+	// and used to lazily fetch the PR's head branch when needed.
+	PullRequestAPIURL string
 }
 
 // ParseGitHubWebhook parses a GitHub webhook payload using the go-github SDK.
@@ -126,6 +130,13 @@ func ParseGitHubWebhook(eventType string, payload []byte) (*GitHubEventData, err
 			data.Number = issue.GetNumber()
 			data.Body = issue.GetBody()
 			data.URL = issue.GetHTMLURL()
+			// When the comment is on a pull request, store the API URL so the
+			// handler can lazily fetch the PR's head branch.
+			if issue.IsPullRequest() {
+				if links := issue.GetPullRequestLinks(); links != nil {
+					data.PullRequestAPIURL = links.GetURL()
+				}
+			}
 		}
 
 	case *github.PullRequestReviewEvent:
@@ -393,6 +404,12 @@ func matchesFilter(filter v1alpha1.GitHubWebhookFilter, eventData *GitHubEventDa
 	}
 
 	return true
+}
+
+// needsBranchEnrichment returns true if the event is an issue_comment on a pull
+// request and the Branch field has not been populated yet.
+func needsBranchEnrichment(eventData *GitHubEventData) bool {
+	return eventData.Branch == "" && eventData.PullRequestAPIURL != ""
 }
 
 // ExtractGitHubWorkItem extracts template variables from GitHub webhook events for task creation.

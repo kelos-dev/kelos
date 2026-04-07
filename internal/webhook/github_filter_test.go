@@ -1027,3 +1027,109 @@ func TestMatchesGitHubEvent_RepositoryFiltering(t *testing.T) {
 		})
 	}
 }
+
+func TestParseGitHubWebhook_IssueCommentOnPR_ExtractsPullRequestAPIURL(t *testing.T) {
+	payload := `{
+		"action": "created",
+		"sender": {"login": "testuser"},
+		"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}},
+		"issue": {
+			"number": 42,
+			"title": "Test PR",
+			"body": "PR body",
+			"html_url": "https://github.com/org/repo/pull/42",
+			"state": "open",
+			"pull_request": {
+				"url": "https://api.github.com/repos/org/repo/pulls/42",
+				"html_url": "https://github.com/org/repo/pull/42"
+			}
+		},
+		"comment": {"body": "/review"}
+	}`
+
+	got, err := ParseGitHubWebhook("issue_comment", []byte(payload))
+	if err != nil {
+		t.Fatalf("ParseGitHubWebhook() error = %v", err)
+	}
+
+	if got.PullRequestAPIURL != "https://api.github.com/repos/org/repo/pulls/42" {
+		t.Errorf("PullRequestAPIURL = %q, want %q", got.PullRequestAPIURL, "https://api.github.com/repos/org/repo/pulls/42")
+	}
+	if got.Number != 42 {
+		t.Errorf("Number = %d, want 42", got.Number)
+	}
+	// Branch should be empty at parse time (enriched lazily)
+	if got.Branch != "" {
+		t.Errorf("Branch should be empty at parse time, got %q", got.Branch)
+	}
+}
+
+func TestParseGitHubWebhook_IssueCommentOnIssue_NoPullRequestAPIURL(t *testing.T) {
+	payload := `{
+		"action": "created",
+		"sender": {"login": "testuser"},
+		"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}},
+		"issue": {
+			"number": 10,
+			"title": "Plain Issue",
+			"body": "Issue body",
+			"html_url": "https://github.com/org/repo/issues/10",
+			"state": "open"
+		},
+		"comment": {"body": "hello"}
+	}`
+
+	got, err := ParseGitHubWebhook("issue_comment", []byte(payload))
+	if err != nil {
+		t.Fatalf("ParseGitHubWebhook() error = %v", err)
+	}
+
+	if got.PullRequestAPIURL != "" {
+		t.Errorf("PullRequestAPIURL should be empty for plain issues, got %q", got.PullRequestAPIURL)
+	}
+}
+
+func TestNeedsBranchEnrichment(t *testing.T) {
+	tests := []struct {
+		name      string
+		eventData *GitHubEventData
+		want      bool
+	}{
+		{
+			name: "needs enrichment - PR comment with no branch",
+			eventData: &GitHubEventData{
+				PullRequestAPIURL: "https://api.github.com/repos/org/repo/pulls/42",
+			},
+			want: true,
+		},
+		{
+			name: "no enrichment needed - branch already set",
+			eventData: &GitHubEventData{
+				Branch:            "feature-branch",
+				PullRequestAPIURL: "https://api.github.com/repos/org/repo/pulls/42",
+			},
+			want: false,
+		},
+		{
+			name: "no enrichment needed - plain issue comment",
+			eventData: &GitHubEventData{
+				PullRequestAPIURL: "",
+			},
+			want: false,
+		},
+		{
+			name:      "no enrichment needed - empty event data",
+			eventData: &GitHubEventData{},
+			want:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := needsBranchEnrichment(tt.eventData)
+			if got != tt.want {
+				t.Errorf("needsBranchEnrichment() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

@@ -293,6 +293,13 @@ func (h *WebhookHandler) processWebhook(ctx context.Context, eventType string, p
 
 	log.Info("Found matching TaskSpawners", "count", len(spawners))
 
+	// Lazily enrich the Branch field for issue_comment events on pull
+	// requests. The GitHub issue_comment payload does not include the PR's
+	// head ref, so we fetch it from the API once per delivery.
+	if parsed.GitHub != nil && needsBranchEnrichment(parsed.GitHub) {
+		enrichGitHubIssueCommentBranch(ctx, log, parsed.GitHub)
+	}
+
 	tasksCreated := 0
 	linearLabelsEnriched := false
 

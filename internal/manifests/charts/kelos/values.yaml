@@ -43,6 +43,7 @@ webhookServer:
       enabled: false
       replicas: 1
       secretName: ""
+      githubSecretName: ""
     linear:
       enabled: false
       replicas: 1

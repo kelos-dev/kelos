@@ -40,6 +40,32 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.webhookServer.sources.github.secretName }}
                   key: WEBHOOK_SECRET
+            {{- if .Values.webhookServer.sources.github.githubSecretName }}
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.webhookServer.sources.github.githubSecretName }}
+                  key: GITHUB_TOKEN
+                  optional: true
+            - name: GITHUB_APP_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.webhookServer.sources.github.githubSecretName }}
+                  key: appID
+                  optional: true
+            - name: GITHUB_APP_INSTALLATION_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.webhookServer.sources.github.githubSecretName }}
+                  key: installationID
+                  optional: true
+            - name: GITHUB_APP_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.webhookServer.sources.github.githubSecretName }}
+                  key: privateKey
+                  optional: true
+            {{- end }}
           ports:
             - name: webhook
               containerPort: 8443

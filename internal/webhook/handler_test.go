@@ -495,6 +495,86 @@ func TestServeHTTP_RepositoryFilterRejectsWrongRepo(t *testing.T) {
 	}
 }
 
+func TestServeHTTP_IssueCommentOnPR_EnrichesBranch(t *testing.T) {
+	// Swap the fetcher to return a known branch
+	orig := githubPRBranchFetcher
+	defer func() { githubPRBranchFetcher = orig }()
+	githubPRBranchFetcher = func(ctx context.Context, prAPIURL string) (string, error) {
+		return "feature-branch", nil
+	}
+
+	spawner := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pr-comment-spawner",
+			Namespace: "default",
+			UID:       "test-uid-branch",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
+					Events: []string{"issue_comment"},
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+				Credentials: kelosv1alpha1.Credentials{
+					Type: "api-key",
+				},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
+					Name: "test-workspace",
+				},
+				PromptTemplate: "Review PR on branch {{.Branch}}",
+			},
+		},
+	}
+
+	handler := newTestHandler(t, spawner)
+
+	payload := []byte(`{
+		"action": "created",
+		"sender": {"login": "testuser"},
+		"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}},
+		"issue": {
+			"number": 42,
+			"title": "Test PR",
+			"body": "PR body",
+			"html_url": "https://github.com/org/repo/pull/42",
+			"state": "open",
+			"pull_request": {
+				"url": "https://api.github.com/repos/org/repo/pulls/42",
+				"html_url": "https://github.com/org/repo/pull/42"
+			}
+		},
+		"comment": {"body": "/review"}
+	}`)
+	sig := signPayload(payload, []byte(testSecret))
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
+	req.Header.Set(GitHubEventHeader, "issue_comment")
+	req.Header.Set(GitHubSignatureHeader, sig)
+	req.Header.Set(GitHubDeliveryHeader, "branch-enrich-delivery")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task, got %d", len(taskList.Items))
+	}
+
+	task := taskList.Items[0]
+	if task.Spec.Prompt != "Review PR on branch feature-branch" {
+		t.Errorf("Expected prompt with enriched branch, got %q", task.Spec.Prompt)
+	}
+}
+
 // --- Linear HTTP handler tests ---
 
 // newLinearTestHandler creates a WebhookHandler for Linear backed by a fake client.

@@ -578,6 +578,66 @@ func TestIsJobFailed(t *testing.T) {
 	}
 }
 
+func TestJobFailureMessage(t *testing.T) {
+	tests := []struct {
+		name       string
+		conditions []batchv1.JobCondition
+		want       string
+	}{
+		{
+			name:       "No conditions",
+			conditions: nil,
+			want:       "Task failed",
+		},
+		{
+			name: "Reason and message",
+			conditions: []batchv1.JobCondition{
+				{
+					Type:    batchv1.JobFailed,
+					Status:  corev1.ConditionTrue,
+					Reason:  "DeadlineExceeded",
+					Message: "Job was active longer than specified deadline",
+				},
+			},
+			want: "Task failed: DeadlineExceeded: Job was active longer than specified deadline",
+		},
+		{
+			name: "Reason only",
+			conditions: []batchv1.JobCondition{
+				{
+					Type:   batchv1.JobFailed,
+					Status: corev1.ConditionTrue,
+					Reason: "BackoffLimitExceeded",
+				},
+			},
+			want: "Task failed: BackoffLimitExceeded",
+		},
+		{
+			name: "No reason or message",
+			conditions: []batchv1.JobCondition{
+				{
+					Type:   batchv1.JobFailed,
+					Status: corev1.ConditionTrue,
+				},
+			},
+			want: "Task failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			job := &batchv1.Job{
+				Status: batchv1.JobStatus{
+					Conditions: tt.conditions,
+				},
+			}
+			if got := jobFailureMessage(job); got != tt.want {
+				t.Errorf("jobFailureMessage() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestLatestTaskPodName(t *testing.T) {
 	now := time.Now()
 	pods := []corev1.Pod{

@@ -42,6 +42,11 @@ type GitHubEventData struct {
 	// yet — the {{.ChangedFiles}} template variable is deferred to a follow-up
 	// to resolve API design questions (slice vs pre-joined string, fetch gating).
 	ChangedFiles []string
+	// Comment-specific fields for issue_comment, pull_request_review,
+	// and pull_request_review_comment events.
+	CommentAuthor string
+	CommentBody   string
+	CommentURL    string
 	// PullRequestAPIURL is the GitHub API URL for the pull request associated
 	// with an issue_comment event. It is extracted from issue.pull_request.url
 	// and used to lazily fetch the PR's head branch when needed.
@@ -132,6 +137,11 @@ func ParseGitHubWebhook(eventType string, payload []byte) (*GitHubEventData, err
 	case *github.IssueCommentEvent:
 		data.Action = e.GetAction()
 		data.Sender = e.GetSender().GetLogin()
+		if comment := e.GetComment(); comment != nil {
+			data.CommentAuthor = comment.GetUser().GetLogin()
+			data.CommentBody = comment.GetBody()
+			data.CommentURL = comment.GetHTMLURL()
+		}
 		if issue := e.GetIssue(); issue != nil {
 			data.ID = fmt.Sprintf("%d", issue.GetNumber())
 			data.Title = issue.GetTitle()
@@ -150,6 +160,11 @@ func ParseGitHubWebhook(eventType string, payload []byte) (*GitHubEventData, err
 	case *github.PullRequestReviewEvent:
 		data.Action = e.GetAction()
 		data.Sender = e.GetSender().GetLogin()
+		if review := e.GetReview(); review != nil {
+			data.CommentAuthor = review.GetUser().GetLogin()
+			data.CommentBody = review.GetBody()
+			data.CommentURL = review.GetHTMLURL()
+		}
 		if pr := e.GetPullRequest(); pr != nil {
 			data.ID = fmt.Sprintf("%d", pr.GetNumber())
 			data.Title = pr.GetTitle()
@@ -164,6 +179,11 @@ func ParseGitHubWebhook(eventType string, payload []byte) (*GitHubEventData, err
 	case *github.PullRequestReviewCommentEvent:
 		data.Action = e.GetAction()
 		data.Sender = e.GetSender().GetLogin()
+		if comment := e.GetComment(); comment != nil {
+			data.CommentAuthor = comment.GetUser().GetLogin()
+			data.CommentBody = comment.GetBody()
+			data.CommentURL = comment.GetHTMLURL()
+		}
 		if pr := e.GetPullRequest(); pr != nil {
 			data.ID = fmt.Sprintf("%d", pr.GetNumber())
 			data.Title = pr.GetTitle()
@@ -470,6 +490,15 @@ func ExtractGitHubWorkItem(eventData *GitHubEventData) map[string]interface{} {
 	}
 	if eventData.Branch != "" {
 		vars["Branch"] = eventData.Branch
+	}
+	if eventData.CommentAuthor != "" {
+		vars["CommentAuthor"] = eventData.CommentAuthor
+	}
+	if eventData.CommentBody != "" {
+		vars["CommentBody"] = eventData.CommentBody
+	}
+	if eventData.CommentURL != "" {
+		vars["CommentURL"] = eventData.CommentURL
 	}
 
 	return vars

@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -171,6 +172,73 @@ func TestTTLExpired(t *testing.T) {
 					t.Errorf("ttlExpired() requeueAfter = %v, want between %v and %v",
 						requeueAfter, tt.wantRequeueMin, tt.wantRequeueMax)
 				}
+			}
+		})
+	}
+}
+
+func TestReconcileSkipsJobCreationForTerminalTasks(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelosv1alpha1.AddToScheme(scheme))
+
+	tests := []struct {
+		name  string
+		phase kelosv1alpha1.TaskPhase
+	}{
+		{name: "Failed task", phase: kelosv1alpha1.TaskPhaseFailed},
+		{name: "Succeeded task", phase: kelosv1alpha1.TaskPhaseSucceeded},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := &kelosv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "terminal-task",
+					Namespace:  "default",
+					Finalizers: []string{taskFinalizer},
+				},
+				Spec: kelosv1alpha1.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "test",
+					Credentials: kelosv1alpha1.Credentials{
+						Type: kelosv1alpha1.CredentialTypeNone,
+					},
+				},
+				Status: kelosv1alpha1.TaskStatus{
+					Phase: tt.phase,
+				},
+			}
+
+			cl := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithStatusSubresource(task).
+				WithObjects(task).
+				Build()
+
+			r := &TaskReconciler{
+				Client:       cl,
+				Scheme:       scheme,
+				BranchLocker: NewBranchLocker(),
+			}
+
+			result, err := r.Reconcile(context.Background(), ctrl.Request{
+				NamespacedName: client.ObjectKeyFromObject(task),
+			})
+			if err != nil {
+				t.Fatalf("Reconcile() error: %v", err)
+			}
+			if result.Requeue || result.RequeueAfter != 0 {
+				t.Errorf("Reconcile() result = %+v, want no requeue for terminal task", result)
+			}
+
+			// Verify no Job was created
+			var jobs batchv1.JobList
+			if err := cl.List(context.Background(), &jobs, client.InNamespace("default")); err != nil {
+				t.Fatalf("listing jobs: %v", err)
+			}
+			if len(jobs.Items) != 0 {
+				t.Errorf("expected no jobs, got %d", len(jobs.Items))
 			}
 		})
 	}

@@ -105,6 +105,15 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 	// Create Job if it doesn't exist
 	if !jobExists {
+		// Do not recreate a Job for a task that already reached a terminal phase.
+		// After a Job is garbage-collected (TTL or owner deletion) the controller
+		// would otherwise reset a Failed/Succeeded task back to Pending, causing
+		// an infinite restart loop.
+		if task.Status.Phase == kelosv1alpha1.TaskPhaseFailed || task.Status.Phase == kelosv1alpha1.TaskPhaseSucceeded {
+			logger.V(1).Info("Task already in terminal phase, skipping Job creation", "phase", task.Status.Phase)
+			return ctrl.Result{}, nil
+		}
+
 		if len(task.Spec.DependsOn) > 0 {
 			ready, result, err := r.checkDependencies(ctx, &task)
 			if err != nil || !ready {

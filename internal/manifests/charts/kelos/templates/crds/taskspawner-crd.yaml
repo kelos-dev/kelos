@@ -1140,6 +1140,17 @@ spec:
                         items:
                           type: string
                         type: array
+                      excludeCommands:
+                        description: |-
+                          ExcludeCommands optionally rejects messages whose text (after stripping
+                          leading @-mentions) starts with any of these prefixes. This provides
+                          negative routing so a spawner can avoid firing on messages intended for
+                          another spawner. This filter applies to all message events including
+                          thread replies, but does NOT apply to slash commands (Slack strips the
+                          command name from the payload before delivery).
+                        items:
+                          type: string
+                        type: array
                       mentionUserIDs:
                         description: |-
                           MentionUserIDs optionally requires that the message @-mentions at least

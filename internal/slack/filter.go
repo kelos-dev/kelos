@@ -54,18 +54,19 @@ func MatchesSpawner(slackCfg *v1alpha1.Slack, msg *SlackMessageData) bool {
 			return false
 		}
 	}
+	// ExcludeCommands filter: reject messages matching any excluded prefix.
+	// Applied consistently for all message types including thread replies.
+	if matchesExcludeCommands(msg.Text, slackCfg.ExcludeCommands) {
+		return false
+	}
 	return true
 }
 
 // ProcessTriggerCommand checks whether the message text matches the TaskSpawner's
-// trigger command prefix. For thread replies, the trigger is not required.
-// Returns the processed body and true if the message should be processed.
-func ProcessTriggerCommand(text, threadTS, triggerCmd string) (string, bool) {
-	// Thread replies are follow-ups — no trigger required
-	if threadTS != "" {
-		return text, true
-	}
-
+// trigger command prefix. Leading @-mentions are stripped before matching so that
+// "@bot /cmd args" works the same as "/cmd args". Returns the processed body
+// (with prefix removed) and true if the message should be processed.
+func ProcessTriggerCommand(text, triggerCmd string) (string, bool) {
 	if triggerCmd != "" {
 		// Strip leading Slack mentions so "@bot /cmd args" works like "/cmd args"
 		cleaned := stripLeadingMentions(text)
@@ -144,6 +145,22 @@ func stripLeadingMentions(text string) string {
 		}
 		s = s[end+1:]
 	}
+}
+
+// matchesExcludeCommands returns true if the message text (after stripping
+// leading @-mentions) starts with any of the exclude command prefixes.
+// When it returns true, the spawner should NOT process this message.
+func matchesExcludeCommands(text string, excludeCommands []string) bool {
+	if len(excludeCommands) == 0 {
+		return false
+	}
+	cleaned := stripLeadingMentions(text)
+	for _, prefix := range excludeCommands {
+		if strings.HasPrefix(cleaned, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // matchesMention returns true if the message text contains an @-mention of

@@ -204,12 +204,14 @@ func (h *SlackHandler) routeMessage(ctx context.Context, msg *SlackMessageData) 
 			continue
 		}
 
-		// Check trigger command (per-spawner, since each TaskSpawner can have a different trigger).
-		// Slash commands skip the trigger check — the command name itself acts as the trigger,
-		// and cmd.Text only contains the arguments after the command name.
-		body, ok := ProcessTriggerCommand(msg.Text, msg.ThreadTS, slackCfg.TriggerCommand)
+		// Slash commands skip the trigger check — the command name itself acts
+		// as the trigger and cmd.Text only contains the arguments.
+		var body string
+		var ok bool
 		if msg.IsSlashCommand {
 			body, ok = msg.Body, true
+		} else {
+			body, ok = ProcessTriggerCommand(msg.Text, slackCfg.TriggerCommand)
 		}
 		if !ok {
 			continue

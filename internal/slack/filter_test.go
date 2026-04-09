@@ -142,6 +142,42 @@ func TestMatchesSpawner(t *testing.T) {
 			msg:  &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> help"},
 			want: false,
 		},
+		{
+			name: "excludeCommands rejects matching message",
+			slackCfg: &v1alpha1.Slack{
+				MentionUserIDs:  []string{"UBOT1"},
+				ExcludeCommands: []string{"/solve"},
+			},
+			msg:  &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> /solve fix this"},
+			want: false,
+		},
+		{
+			name: "excludeCommands allows non-matching message",
+			slackCfg: &v1alpha1.Slack{
+				MentionUserIDs:  []string{"UBOT1"},
+				ExcludeCommands: []string{"/solve"},
+			},
+			msg:  &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> this is broken"},
+			want: true,
+		},
+		{
+			name: "excludeCommands NOT bypassed for thread replies",
+			slackCfg: &v1alpha1.Slack{
+				MentionUserIDs:  []string{"UBOT1"},
+				ExcludeCommands: []string{"/solve"},
+			},
+			msg:  &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> /solve go", ThreadTS: "1234567890.123456"},
+			want: false,
+		},
+		{
+			name: "excludeCommands allows thread reply without excluded prefix",
+			slackCfg: &v1alpha1.Slack{
+				MentionUserIDs:  []string{"UBOT1"},
+				ExcludeCommands: []string{"/solve"},
+			},
+			msg:  &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> more context", ThreadTS: "1234567890.123456"},
+			want: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -158,13 +194,12 @@ func TestProcessTriggerCommand(t *testing.T) {
 	tests := []struct {
 		name       string
 		text       string
-		threadTS   string
 		triggerCmd string
 		wantBody   string
 		wantOK     bool
 	}{
 		{
-			name:       "no trigger command, top-level message",
+			name:       "no trigger command",
 			text:       "hello world",
 			triggerCmd: "",
 			wantBody:   "hello world",
@@ -199,22 +234,6 @@ func TestProcessTriggerCommand(t *testing.T) {
 			wantOK:     false,
 		},
 		{
-			name:       "thread reply bypasses trigger",
-			text:       "follow up message",
-			threadTS:   "1234567890.123456",
-			triggerCmd: "/kelos",
-			wantBody:   "follow up message",
-			wantOK:     true,
-		},
-		{
-			name:       "thread reply with no trigger configured",
-			text:       "follow up",
-			threadTS:   "1234567890.123456",
-			triggerCmd: "",
-			wantBody:   "follow up",
-			wantOK:     true,
-		},
-		{
 			name:       "mention before trigger command",
 			text:       "<@UBOT1> /kelos fix the bug",
 			triggerCmd: "/kelos",
@@ -239,7 +258,7 @@ func TestProcessTriggerCommand(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotBody, gotOK := ProcessTriggerCommand(tt.text, tt.threadTS, tt.triggerCmd)
+			gotBody, gotOK := ProcessTriggerCommand(tt.text, tt.triggerCmd)
 			if gotBody != tt.wantBody || gotOK != tt.wantOK {
 				t.Errorf("ProcessTriggerCommand() = (%q, %v), want (%q, %v)",
 					gotBody, gotOK, tt.wantBody, tt.wantOK)
@@ -436,6 +455,34 @@ func TestMatchesMention(t *testing.T) {
 	}
 }
 
+func TestMatchesExcludeCommands(t *testing.T) {
+	tests := []struct {
+		name            string
+		text            string
+		excludeCommands []string
+		want            bool
+	}{
+		{"empty list never matches", "/solve fix", nil, false},
+		{"exact prefix matches", "/solve fix", []string{"/solve"}, true},
+		{"non-matching prefix", "/triage check", []string{"/solve"}, false},
+		{"mention before excluded prefix", "<@UBOT1> /solve fix", []string{"/solve"}, true},
+		{"mention with display name", "<@UBOT1|gravity> /solve fix", []string{"/solve"}, true},
+		{"multiple excludes, first matches", "/solve fix", []string{"/solve", "/deploy"}, true},
+		{"multiple excludes, second matches", "/deploy now", []string{"/solve", "/deploy"}, true},
+		{"multiple excludes, none match", "hello world", []string{"/solve", "/deploy"}, false},
+		{"text is just the command", "/solve", []string{"/solve"}, true},
+		{"empty text", "", []string{"/solve"}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := matchesExcludeCommands(tt.text, tt.excludeCommands); got != tt.want {
+				t.Errorf("matchesExcludeCommands() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestStripLeadingMentions(t *testing.T) {
 	tests := []struct {
 		name string
@@ -456,6 +503,80 @@ func TestStripLeadingMentions(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := stripLeadingMentions(tt.text); got != tt.want {
 				t.Errorf("stripLeadingMentions() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestTriageSolverRouting validates the full end-to-end routing for the
+// triage/solver spawner configuration used in dquality.
+func TestTriageSolverRouting(t *testing.T) {
+	triageCfg := &v1alpha1.Slack{
+		MentionUserIDs:  []string{"UBOT1"},
+		ExcludeCommands: []string{"/solve"},
+		Channels:        []string{"C1"},
+	}
+	solverCfg := &v1alpha1.Slack{
+		MentionUserIDs: []string{"UBOT1"},
+		TriggerCommand: "/solve",
+		Channels:       []string{"C1"},
+	}
+
+	scenarios := []struct {
+		name       string
+		msg        *SlackMessageData
+		wantTriage bool
+		wantSolver bool
+	}{
+		{
+			name:       "top-level mention triggers triage only",
+			msg:        &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> this endpoint is broken"},
+			wantTriage: true,
+			wantSolver: false,
+		},
+		{
+			name:       "top-level /solve triggers solver only",
+			msg:        &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> /solve fix it"},
+			wantTriage: false,
+			wantSolver: true,
+		},
+		{
+			name:       "thread reply with mention triggers triage only",
+			msg:        &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> more context", ThreadTS: "123.456"},
+			wantTriage: true,
+			wantSolver: false,
+		},
+		{
+			name:       "thread reply with /solve triggers solver only",
+			msg:        &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> /solve go ahead", ThreadTS: "123.456"},
+			wantTriage: false,
+			wantSolver: true,
+		},
+		{
+			name:       "no mention triggers neither",
+			msg:        &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "this is broken"},
+			wantTriage: false,
+			wantSolver: false,
+		},
+	}
+
+	for _, sc := range scenarios {
+		t.Run(sc.name, func(t *testing.T) {
+			triageMatch := MatchesSpawner(triageCfg, sc.msg)
+			if triageMatch {
+				_, triageMatch = ProcessTriggerCommand(sc.msg.Text, triageCfg.TriggerCommand)
+			}
+
+			solverMatch := MatchesSpawner(solverCfg, sc.msg)
+			if solverMatch {
+				_, solverMatch = ProcessTriggerCommand(sc.msg.Text, solverCfg.TriggerCommand)
+			}
+
+			if triageMatch != sc.wantTriage {
+				t.Errorf("triage: got %v, want %v", triageMatch, sc.wantTriage)
+			}
+			if solverMatch != sc.wantSolver {
+				t.Errorf("solver: got %v, want %v", solverMatch, sc.wantSolver)
 			}
 		})
 	}

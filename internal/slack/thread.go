@@ -43,9 +43,9 @@ func FormatThreadContext(msgs []goslack.Message, botUserID string) string {
 }
 
 // FetchThreadContext fetches the full thread history and returns formatted
-// context if the bot has participated. Returns ("", false, nil) when the bot
-// has not participated, and a non-nil error for Slack API failures.
-func FetchThreadContext(ctx context.Context, api *goslack.Client, channelID, threadTS, botUserID string) (string, bool, error) {
+// context. The caller decides whether to process the message — this function
+// always returns the thread body when the API call succeeds.
+func FetchThreadContext(ctx context.Context, api *goslack.Client, channelID, threadTS, botUserID string) (string, error) {
 	threadCtx, cancel := context.WithTimeout(ctx, threadFetchTimeout)
 	defer cancel()
 
@@ -55,12 +55,8 @@ func FetchThreadContext(ctx context.Context, api *goslack.Client, channelID, thr
 			Timestamp: threadTS,
 		})
 	if err != nil {
-		return "", false, fmt.Errorf("fetching thread replies: %w", err)
+		return "", fmt.Errorf("fetching thread replies: %w", err)
 	}
 
-	if !BotParticipated(msgs, botUserID) {
-		return "", false, nil
-	}
-
-	return FormatThreadContext(msgs, botUserID), true, nil
+	return FormatThreadContext(msgs, botUserID), nil
 }

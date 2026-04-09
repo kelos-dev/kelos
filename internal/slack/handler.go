@@ -127,17 +127,17 @@ func (h *SlackHandler) handleEventsAPI(ctx context.Context, evt socketmode.Event
 	// Enrich message with user info, permalink, channel name
 	msg := h.enrichMessage(ctx, innerEvent)
 
-	// For thread replies, fetch full thread context
+	// For thread replies, fetch full thread context so the agent sees
+	// the entire conversation. Spawner filters (mentionUserIDs,
+	// triggerCommand) decide whether to process the message.
 	if innerEvent.ThreadTimeStamp != "" {
-		body, ok, err := FetchThreadContext(ctx, h.api, innerEvent.Channel, innerEvent.ThreadTimeStamp, h.botUserID)
+		body, err := FetchThreadContext(ctx, h.api, innerEvent.Channel, innerEvent.ThreadTimeStamp, h.botUserID)
 		if err != nil {
 			h.log.Error(err, "Failed to fetch thread context", "channel", innerEvent.Channel, "threadTS", innerEvent.ThreadTimeStamp)
 			return
 		}
-		if !ok {
-			return
-		}
 		msg.Body = body
+		msg.HasThreadContext = true
 	}
 
 	h.routeMessage(ctx, msg)
@@ -232,7 +232,7 @@ func (h *SlackHandler) routeMessage(ctx context.Context, msg *SlackMessageData) 
 
 		// Use thread context body if available (thread replies), otherwise use trigger-processed body
 		taskMsg := *msg
-		if msg.ThreadTS == "" || msg.Body == msg.Text {
+		if !msg.HasThreadContext {
 			taskMsg.Body = body
 		}
 

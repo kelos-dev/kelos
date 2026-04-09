@@ -28,6 +28,9 @@ type SlackMessageData struct {
 	Permalink string
 	// Body is the processed message body (trigger prefix stripped, or full thread context).
 	Body string
+	// HasThreadContext indicates that Body contains full thread context
+	// rather than the raw message text.
+	HasThreadContext bool
 	// IsSlashCommand indicates this came from a slash command rather than a message event.
 	IsSlashCommand bool
 	// SlashCommandID is the composite ID for slash commands (channelID:command:triggerID).

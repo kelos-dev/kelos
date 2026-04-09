@@ -407,6 +407,10 @@ spec:
       8. Post a PR comment with the review summary as described in the prompt file.
          The comment MUST start with `/kelos needs-input`.
 
+      ## Variables
+
+      - reviewer_mention: @gunju-kim 리뷰 부탁드립니다.
+
       ## Rules
 
       - Do NOT open PRs, push code, or modify any files

@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  REGISTRY: public.ecr.aws/anomalo/kelos
+  REGISTRY: 580663733917.dkr.ecr.us-west-1.amazonaws.com/kelos
 
 jobs:
   determine-version:
@@ -50,12 +50,10 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::580663733917:role/github-actions
-          aws-region: us-east-1
+          aws-region: us-west-1
 
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
-        with:
-          registry-type: public
 
       - name: Build and push image
         env:
@@ -78,12 +76,10 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::580663733917:role/github-actions
-          aws-region: us-east-1
+          aws-region: us-west-1
 
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
-        with:
-          registry-type: public
 
       - name: Create and push multi-arch manifests
         env:
@@ -158,11 +154,11 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::580663733917:role/github-actions
-          aws-region: us-east-1
+          aws-region: us-west-1
 
       - name: Login to Amazon ECR for Helm
         run: |
-          aws ecr-public get-login-password --region us-east-1 | helm registry login --username AWS --password-stdin public.ecr.aws
+          aws ecr get-login-password --region us-west-1 | helm registry login --username AWS --password-stdin 580663733917.dkr.ecr.us-west-1.amazonaws.com
 
       - name: Set image tag in chart values
         run: |
@@ -181,4 +177,4 @@ jobs:
 
       - name: Push Helm chart to ECR
         run: |
-          helm push /tmp/charts/kelos-${{ steps.version.outputs.version }}.tgz oci://public.ecr.aws/anomalo/kelos/charts
+          helm push /tmp/charts/kelos-${{ steps.version.outputs.version }}.tgz oci://580663733917.dkr.ecr.us-west-1.amazonaws.com/kelos/charts

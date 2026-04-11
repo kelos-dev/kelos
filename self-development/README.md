@@ -182,7 +182,7 @@ Picks up open GitHub issues labeled `needs-actor` and performs automated triage.
 3. Checks if the issue references outdated APIs, flags, or features
 4. Detects duplicate issues
 5. Assesses priority (`priority/important-soon`, `priority/important-longterm`, `priority/backlog`)
-6. Recommends an actor — assigns `actor/kelos` if the issue has clear scope and verifiable criteria, otherwise assigns `actor/human`. `kind/api` issues always get `actor/human` because new user-facing APIs must be reviewed and discussed with a maintainer before any PR is opened.
+6. Recommends an actor — assigns `actor/kelos` if the issue has clear scope and verifiable criteria, otherwise assigns `actor/human`. `kind/api` issues always get `actor/human` and are **not** marked `triage-accepted`, because new user-facing APIs must be reviewed and discussed with a maintainer before any PR is opened.
 
 Posts a single triage comment with its findings, adds the `kelos/needs-input` label (to prevent re-triage), and posts a `/kelos needs-input` comment (to prevent workers from picking up the issue before maintainer review).
 

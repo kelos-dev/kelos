@@ -155,7 +155,13 @@ spec:
       If recommending `actor/kelos`:
         `gh issue edit {{.Number}} --add-label triage-accepted --add-label actor/kelos --remove-label needs-triage --remove-label needs-actor`
 
-      If recommending `actor/human`:
+      If recommending `actor/human` for a `kind/api` issue:
+        `gh issue edit {{.Number}} --add-label actor/human --remove-label needs-actor`
+        Do NOT add `triage-accepted` or remove `needs-triage` for `kind/api`
+        issues — API surface changes require human review before the triage
+        is accepted.
+
+      If recommending `actor/human` for a non-`kind/api` issue:
         `gh issue edit {{.Number}} --add-label triage-accepted --add-label actor/human --remove-label needs-triage --remove-label needs-actor`
 
       The `triage-accepted` label prevents re-triage.

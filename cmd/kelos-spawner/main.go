@@ -481,6 +481,9 @@ func reportingEnabled(ts *kelosv1alpha1.TaskSpawner) bool {
 	if ts.Spec.When.GitHubPullRequests != nil && ts.Spec.When.GitHubPullRequests.Reporting != nil {
 		return ts.Spec.When.GitHubPullRequests.Reporting.Enabled
 	}
+	if ts.Spec.When.GitHubWebhook != nil && ts.Spec.When.GitHubWebhook.Reporting != nil {
+		return ts.Spec.When.GitHubWebhook.Reporting.Enabled
+	}
 	return false
 }
 

@@ -11,7 +11,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 	"github.com/kelos-dev/kelos/internal/reporting"
@@ -74,16 +73,14 @@ func (r *reportingReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Named("webhook-reporting").
 		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
 		For(&kelosv1alpha1.Task{}, builder.WithPredicates(
-			predicate.Or(
-				predicate.GenerationChangedPredicate{},
-				reportingAnnotationPredicate{},
-			),
+			reportingAnnotationPredicate{},
 		)).
 		Complete(r)
 }
 
 // reportingAnnotationPredicate triggers reconciliation when a Task's status
-// phase changes (reflected in annotations by the reporting watcher).
+// phase changes. Status sub-resource updates do not bump metadata.generation,
+// so GenerationChangedPredicate alone would miss them.
 type reportingAnnotationPredicate struct{}
 
 func (reportingAnnotationPredicate) Create(_ event.CreateEvent) bool   { return true }

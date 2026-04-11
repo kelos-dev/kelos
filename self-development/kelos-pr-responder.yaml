@@ -73,12 +73,11 @@ spec:
       Task:
       - 0. Set up your working branch. Kelos has already checked out {{.Branch}} for you. Run this exactly:
         ```
-        git fetch --unshallow || true
         if git remote get-url upstream >/dev/null 2>&1; then
-          git fetch upstream main
+          git fetch upstream main --depth 100
           git rebase upstream/main
         else
-          git fetch origin main
+          git fetch origin main --depth 100
           git rebase origin/main
         fi
         ```

@@ -92,11 +92,10 @@ spec:
 
       ## Your tasks
 
-      ### 0. Set up full history
+      ### 0. Fetch main branch
       Run this before reviewing:
         ```
-        git fetch --unshallow || true
-        git fetch origin main
+        git fetch origin main --depth 100
         ```
 
       ### 1. Understand the context

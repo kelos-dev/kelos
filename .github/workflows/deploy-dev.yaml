@@ -73,14 +73,25 @@ jobs:
               limits:
                 cpu: 500m
                 memory: 128Mi
+          webhookServer:
+            sources:
+              github:
+                enabled: true
+                secretName: github-webhook-secret
+            resources:
+              requests:
+                cpu: 100m
+                memory: 128Mi
           EOF
           bin/kelos install -f /tmp/kelos-dev-values.yaml
           kubectl rollout restart deployment/kelos-controller-manager -n kelos-system
           kubectl rollout status deployment/kelos-controller-manager -n kelos-system --timeout=120s
           kubectl rollout restart deployment -l kelos.dev/component=ghproxy -n "${KELOS_NAMESPACE}"
           kubectl rollout restart deployment -l kelos.dev/component=spawner -n "${KELOS_NAMESPACE}"
+          kubectl rollout restart deployment/kelos-webhook-github -n kelos-system
           kubectl rollout status deployment -l kelos.dev/component=ghproxy -n "${KELOS_NAMESPACE}" --timeout=120s
           kubectl rollout status deployment -l kelos.dev/component=spawner -n "${KELOS_NAMESPACE}" --timeout=120s
+          kubectl rollout status deployment/kelos-webhook-github -n kelos-system --timeout=120s
 
       - name: Apply PodMonitoring
         run: |
@@ -135,6 +146,23 @@ jobs:
               matchLabels:
                 kelos.dev/name: kelos
                 kelos.dev/component: ghproxy
+            endpoints:
+              - port: metrics
+                interval: 30s
+          ---
+          apiVersion: monitoring.googleapis.com/v1
+          kind: PodMonitoring
+          metadata:
+            name: kelos-webhook-github
+            namespace: kelos-system
+            labels:
+              app.kubernetes.io/name: kelos
+              app.kubernetes.io/component: webhook-github
+          spec:
+            selector:
+              matchLabels:
+                app.kubernetes.io/name: kelos
+                app.kubernetes.io/component: webhook-github
             endpoints:
               - port: metrics
                 interval: 30s

@@ -35,19 +35,19 @@ metadata:
   name: kelos-reviewer
 spec:
   when:
-    githubPullRequests:
-      state: open
-      commentPolicy:
-        triggerComment: /kelos review
-        excludeComments:
-          - /kelos needs-input
-        allowedUsers:
-          - gjkim42
-          - kelos-bot[bot]
-      draft: false
-      reporting:
-        enabled: true
-      pollInterval: 1m
+    githubWebhook:
+      repository: "kelos-dev/kelos"
+      events:
+        - "issue_comment"
+      filters:
+        - event: "issue_comment"
+          action: "created"
+          bodyContains: "/kelos review"
+          author: "gjkim42"
+        - event: "issue_comment"
+          action: "created"
+          bodyContains: "/kelos review"
+          author: "kelos-bot[bot]"
   maxConcurrency: 3
   taskTemplate:
     workspaceRef:

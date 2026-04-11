@@ -429,19 +429,10 @@ func ExtractGitHubWorkItem(eventData *GitHubEventData) map[string]interface{} {
 		"Kind":  "webhook",
 	}
 
-	// Add number, body, URL if available
-	if eventData.Number > 0 {
-		vars["Number"] = eventData.Number
-	}
-	if eventData.Body != "" {
-		vars["Body"] = eventData.Body
-	}
-	if eventData.URL != "" {
-		vars["URL"] = eventData.URL
-	}
-	if eventData.Branch != "" {
-		vars["Branch"] = eventData.Branch
-	}
+	vars["Number"] = eventData.Number
+	vars["Body"] = eventData.Body
+	vars["URL"] = eventData.URL
+	vars["Branch"] = eventData.Branch
 
 	return vars
 }

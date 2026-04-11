@@ -19,8 +19,8 @@ spec:
   taskTemplate:
     workspaceRef:
       name: kelos-agent
-    model: opus
-    type: claude-code
+    model: gpt-5.4
+    type: codex
     ttlSecondsAfterFinished: 3600
     credentials:
       type: oauth

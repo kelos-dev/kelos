@@ -53,16 +53,28 @@ The token needs these permissions:
 
 Create a secret with your AI agent credentials:
 
-**For OAuth (Claude Code):**
+**For Claude Code (OAuth):**
 ```bash
 kubectl create secret generic kelos-credentials \
   --from-literal=CLAUDE_CODE_OAUTH_TOKEN=<your-claude-oauth-token>
 ```
 
-**For API Key:**
+**For Claude Code (API Key):**
 ```bash
 kubectl create secret generic kelos-credentials \
   --from-literal=ANTHROPIC_API_KEY=<your-api-key>
+```
+
+**For Codex (OAuth):**
+```bash
+kubectl create secret generic kelos-credentials \
+  --from-literal=CODEX_AUTH_JSON=<your-codex-auth-json>
+```
+
+**For Codex (API Key):**
+```bash
+kubectl create secret generic kelos-credentials \
+  --from-literal=CODEX_API_KEY=<your-openai-api-key>
 ```
 
 ## TaskSpawners
@@ -173,7 +185,7 @@ Picks up open GitHub issues labeled `needs-actor` and performs automated triage.
 | | |
 |---|---|
 | **Trigger** | GitHub Issues with `needs-actor` label |
-| **Model** | Opus |
+| **Model** | GPT-5.4 (Codex) |
 | **Concurrency** | 8 |
 
 **For each issue, the agent:**
@@ -350,7 +362,7 @@ To adapt these examples for your own repository:
    ```yaml
    spec:
      taskTemplate:
-       model: sonnet  # or opus for more complex tasks
+       model: sonnet  # or opus, gpt-5.4, etc. depending on the agent type
    ```
 
 ## Feedback Loop Pattern

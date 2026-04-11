@@ -96,7 +96,7 @@ spec:
       Task:
       - 0. Set up your working branch. Run this exactly:
         ```
-        git fetch --unshallow || true; git fetch origin main; git rebase origin/main
+        git fetch origin main --depth 100; git rebase origin/main
         ```
       - 1. Check if a PR already exists for branch kelos-task-{{.Number}}.
 

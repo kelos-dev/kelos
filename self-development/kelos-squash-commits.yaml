@@ -55,10 +55,9 @@ spec:
       - Branch: {{.Branch}}
 
       Steps:
-      1. Fetch full history:
+      1. Fetch main branch:
          ```
-         git fetch --unshallow || true
-         git fetch origin main
+         git fetch origin main --depth 100
          ```
 
       2. Rebase the branch on origin/main:

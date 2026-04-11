@@ -55,11 +55,10 @@ spec:
       - Branch: {{.Branch}}
 
       Steps:
-      1. Check out the branch and fetch full history:
+      1. Fetch full history:
          ```
          git fetch --unshallow || true
          git fetch origin main
-         git checkout {{.Branch}}
          ```
 
       2. Rebase the branch on origin/main:

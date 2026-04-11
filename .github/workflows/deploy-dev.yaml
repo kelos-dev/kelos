@@ -51,13 +51,30 @@ jobs:
 
       - name: Install kelos
         run: |
-          bin/kelos install --version main --image-pull-policy Always \
-            --spawner-resource-requests cpu=100m,memory=128Mi \
-            --ghproxy-resource-requests cpu=10m,memory=64Mi \
-            --ghproxy-cache-ttl 50s \
-            --token-refresher-resource-requests cpu=50m,memory=64Mi \
-            --controller-resource-requests cpu=10m,memory=64Mi \
-            --controller-resource-limits cpu=500m,memory=128Mi
+          cat > /tmp/kelos-dev-values.yaml <<'EOF'
+          image:
+            tag: main
+            pullPolicy: Always
+          spawner:
+            resources:
+              requests: "cpu=100m,memory=128Mi"
+          ghproxy:
+            cacheTTL: 50s
+            resources:
+              requests: "cpu=10m,memory=64Mi"
+          tokenRefresher:
+            resources:
+              requests: "cpu=50m,memory=64Mi"
+          controller:
+            resources:
+              requests:
+                cpu: 10m
+                memory: 64Mi
+              limits:
+                cpu: 500m
+                memory: 128Mi
+          EOF
+          bin/kelos install -f /tmp/kelos-dev-values.yaml
           kubectl rollout restart deployment/kelos-controller-manager -n kelos-system
           kubectl rollout status deployment/kelos-controller-manager -n kelos-system --timeout=120s
           kubectl rollout restart deployment -l kelos.dev/component=ghproxy -n "${KELOS_NAMESPACE}"

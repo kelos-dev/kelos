@@ -39,6 +39,10 @@ func main() {
 		probeAddr            string
 		webhookAddr          string
 		enableLeaderElection bool
+		githubOwner          string
+		githubRepo           string
+		githubTokenFile      string
+		githubAPIBaseURL     string
 	)
 
 	flag.StringVar(&source, "source", "", "Webhook source type (github or linear)")
@@ -46,6 +50,10 @@ func main() {
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.StringVar(&webhookAddr, "webhook-bind-address", ":8443", "The address the webhook endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false, "Enable leader election for controller manager.")
+	flag.StringVar(&githubOwner, "github-owner", "", "GitHub repository owner for reporting.")
+	flag.StringVar(&githubRepo, "github-repo", "", "GitHub repository name for reporting.")
+	flag.StringVar(&githubTokenFile, "github-token-file", "", "Path to file containing GitHub token for reporting.")
+	flag.StringVar(&githubAPIBaseURL, "github-api-base-url", "", "GitHub API base URL for reporting (defaults to https://api.github.com).")
 
 	opts, applyVerbosity := logging.SetupZapOptions(flag.CommandLine)
 	flag.Parse()
@@ -119,6 +127,24 @@ func main() {
 			os.Exit(1)
 		}
 	}()
+
+	// Set up reporting reconciler when GitHub credentials are provided
+	if githubOwner != "" && githubRepo != "" {
+		reportingReconciler := &reportingReconciler{
+			Client: mgr.GetClient(),
+			config: reportingConfig{
+				GitHubOwner:      githubOwner,
+				GitHubRepo:       githubRepo,
+				GitHubTokenFile:  githubTokenFile,
+				GitHubAPIBaseURL: githubAPIBaseURL,
+			},
+		}
+		if err := reportingReconciler.SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "Unable to create reporting controller")
+			os.Exit(1)
+		}
+		setupLog.Info("Reporting controller enabled", "owner", githubOwner, "repo", githubRepo)
+	}
 
 	// Add health checks
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

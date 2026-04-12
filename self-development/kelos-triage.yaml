@@ -11,8 +11,6 @@ spec:
       filters:
         - event: issues
           action: opened
-          labels:
-            - needs-actor
           excludeLabels:
             - triage-accepted
           state: open

@@ -32,7 +32,7 @@ spec:
 
       ## Instructions
 
-      1. Check out the PR branch and identify all changes to API definition files
+      1. Identify all changes to API definition files in the current branch
          (OpenAPI specs, protobuf definitions, GraphQL schemas, or typed API routes).
       2. Run structural diff tools if available (e.g., `oasdiff diff`, `buf breaking`).
       3. For each detected change, classify it:

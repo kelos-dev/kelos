@@ -24,7 +24,7 @@ spec:
       1. Locate all API definition files in this repository (OpenAPI YAML/JSON,
          protobuf .proto files, GraphQL .graphql schemas, or typed route definitions).
       2. Compare the current API surface against the latest released/tagged version:
-         - `git diff $(git describe --tags --abbrev=0)..HEAD -- '*.proto' '*.yaml' '*.graphql'`
+         - `git diff $(git describe --tags --abbrev=0)..HEAD -- '*.proto' '*.yaml' '*.json' '*.graphql'`
       3. Identify any unreleased breaking changes that have accumulated since the last release.
       4. Check for API hygiene issues:
          - Deprecated fields without removal timelines

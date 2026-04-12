@@ -86,9 +86,6 @@ jobs:
             cacheTTL: 50s
             resources:
               requests: "cpu=10m,memory=64Mi"
-          tokenRefresher:
-            resources:
-              requests: "cpu=50m,memory=64Mi"
           controller:
             resources:
               requests:

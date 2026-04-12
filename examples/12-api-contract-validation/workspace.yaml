@@ -1,0 +1,10 @@
+apiVersion: kelos.dev/v1alpha1
+kind: Workspace
+metadata:
+  name: api-service-workspace
+spec:
+  # TODO: Replace with your API service repository URL
+  repo: https://github.com/your-org/your-api-service.git
+  ref: main
+  secretRef:
+    name: github-token

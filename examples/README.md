@@ -22,6 +22,7 @@ Ready-to-use patterns and YAML manifests for orchestrating AI agents with Kelos.
 | [09-bedrock-credentials](09-bedrock-credentials/) | Run an agent using AWS Bedrock with static credentials or IRSA |
 | [10-taskspawner-github-webhook](10-taskspawner-github-webhook/) | Respond to GitHub webhook events (issues, PRs, pushes) in real time |
 | [11-taskspawner-linear-webhook](11-taskspawner-linear-webhook/) | Respond to Linear webhook events (issues, comments) in real time |
+| [12-api-contract-validation](12-api-contract-validation/) | API contract validation pipeline with webhook, cron, and task dependencies |
 
 ## How to Use
 

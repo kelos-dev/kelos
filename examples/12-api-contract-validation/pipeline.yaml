@@ -1,0 +1,50 @@
+# Stage 1: Identify all affected consumers
+apiVersion: kelos.dev/v1alpha1
+kind: Task
+metadata:
+  name: identify-consumers
+spec:
+  type: claude-code
+  workspaceRef:
+    name: api-service-workspace
+  credentials:
+    type: api-key
+    secretRef:
+      name: anthropic-api-key
+  branch: api-migration/v2
+  prompt: |
+    A breaking API change has been approved for the user-service API.
+
+    1. Read CONSUMERS.md or search the organization for repositories that import
+       this API's client package or reference its endpoints.
+    2. For each consumer, identify which breaking fields/endpoints they use.
+    3. Output a structured summary: consumer repo, affected endpoints, migration effort (low/medium/high).
+
+    Commit a file `migration-plan.md` summarizing your findings and push the branch.
+---
+# Stage 2: Generate migration guide (waits for identify-consumers to succeed)
+apiVersion: kelos.dev/v1alpha1
+kind: Task
+metadata:
+  name: generate-migration-guide
+spec:
+  type: claude-code
+  workspaceRef:
+    name: api-service-workspace
+  credentials:
+    type: api-key
+    secretRef:
+      name: anthropic-api-key
+  branch: api-migration/v2
+  dependsOn:
+    - identify-consumers
+  prompt: |
+    The consumer analysis is complete on branch
+    {{index .Deps "identify-consumers" "Results" "branch"}}.
+
+    Read `migration-plan.md` and generate a comprehensive migration guide:
+    1. Step-by-step instructions for each breaking change
+    2. Before/after code examples for each consumer language (Go, Python, TypeScript)
+    3. A deprecation timeline with recommended milestones
+
+    Commit `MIGRATION_GUIDE.md` and open a PR with `gh pr create`.

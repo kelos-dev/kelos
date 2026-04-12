@@ -1,0 +1,40 @@
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: weekly-api-compatibility-audit
+spec:
+  when:
+    cron:
+      schedule: "0 8 * * 1" # Every Monday at 8:00 AM UTC
+  taskTemplate:
+    type: claude-code
+    workspaceRef:
+      name: api-service-workspace
+    agentConfigRef:
+      name: api-validator-config
+    credentials:
+      type: api-key
+      secretRef:
+        name: anthropic-api-key
+    promptTemplate: |
+      Scheduled weekly API compatibility audit — {{.Time}}
+
+      ## Instructions
+
+      1. Locate all API definition files in this repository (OpenAPI YAML/JSON,
+         protobuf .proto files, GraphQL .graphql schemas, or typed route definitions).
+      2. Compare the current API surface against the latest released/tagged version:
+         - `git diff $(git describe --tags --abbrev=0)..HEAD -- '*.proto' '*.yaml' '*.graphql'`
+      3. Identify any unreleased breaking changes that have accumulated since the last release.
+      4. Check for API hygiene issues:
+         - Deprecated fields without removal timelines
+         - Undocumented endpoints or parameters
+         - Inconsistent naming conventions across endpoints
+         - Missing or outdated API version headers
+      5. Create a GitHub issue summarizing the audit findings with:
+         - A table of unreleased breaking changes
+         - Recommended actions (add deprecation notices, bump API version, etc.)
+         - Priority classification (critical / warning / info)
+
+      Use `gh issue create` with the label `api-audit` for the findings report.
+    ttlSecondsAfterFinished: 3600

@@ -40,19 +40,13 @@ spec:
        - Propose example TaskSpawner configs for new use cases
        - Consider both technical and non-technical audiences
 
-    2. **Workflow Improvements**
-       - Analyze existing self-development configs in `self-development/`
-       - Suggest better patterns, prompts, or automation flows
-       - Identify inefficiencies or gaps in current autonomous workflows
-       - Propose improvements backed by concrete examples
-
-    3. **Integration Opportunities**
+    2. **Integration Opportunities**
        - Identify tools and platforms Kelos could integrate with (CI systems, monitoring, chat ops, etc.)
        - Evaluate how Kelos could fit into existing developer toolchains
        - Propose specific integration designs with example configs
        - Consider ecosystem partners and complementary projects
 
-    4. **New CRDs & API Extensions**
+    3. **New CRDs & API Extensions**
        - Review existing CRDs and identify limitations or missing features
        - Propose new Custom Resource Definitions that would expand Kelos's capabilities
        - Suggest extensions to existing CRDs with concrete use cases
@@ -69,5 +63,10 @@ spec:
     - Do not create duplicate issues — check existing issues first with `gh issue list`
     - Back proposals with evidence: read the codebase, check existing issues, and reference real examples
     - Keep changes minimal and focused
-    - Before creating output, review recent issues labeled "generated-by-kelos" (`gh issue list --label generated-by-kelos --limit 10`) to avoid overlap with other agents and to learn what has been well-received vs dismissed
+    - Before creating output, review recent issues labeled "generated-by-kelos" (`gh issue list --label generated-by-kelos --state open --limit 50 --json number,title`) to avoid overlap with other agents and to learn what has been well-received vs dismissed
+    - The following areas are handled by other agents — do not create issues about them:
+      - Self-development workflow improvements, prompt tuning, config alignment → kelos-self-update
+      - Documentation, CLI UX, error messages → kelos-fake-user
+      - Agent configuration based on PR reviews → kelos-config-update
+      - Coding agent image version updates → kelos-image-update
     - If after reviewing existing issues you cannot identify something genuinely new and actionable, exit without creating an issue or PR. Not every run needs to produce output

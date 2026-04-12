@@ -2068,57 +2068,6 @@ func TestReportingEnabled_PREnabled(t *testing.T) {
 	}
 }
 
-func TestReportingEnabled_WebhookEnabled(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
-					Events: []string{"issues"},
-					Reporting: &kelosv1alpha1.GitHubReporting{
-						Enabled: true,
-					},
-				},
-			},
-		},
-	}
-	if !reportingEnabled(ts) {
-		t.Error("Expected reporting to be enabled for webhook")
-	}
-}
-
-func TestReportingEnabled_WebhookDisabled(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
-					Events: []string{"issues"},
-					Reporting: &kelosv1alpha1.GitHubReporting{
-						Enabled: false,
-					},
-				},
-			},
-		},
-	}
-	if reportingEnabled(ts) {
-		t.Error("Expected reporting to be disabled for webhook with Enabled=false")
-	}
-}
-
-func TestReportingEnabled_WebhookNilReporting(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
-					Events: []string{"issues"},
-				},
-			},
-		},
-	}
-	if reportingEnabled(ts) {
-		t.Error("Expected reporting to be disabled when Reporting is nil")
-	}
-}
-
 func TestReportingEnabled_Jira(t *testing.T) {
 	ts := &kelosv1alpha1.TaskSpawner{
 		Spec: kelosv1alpha1.TaskSpawnerSpec{

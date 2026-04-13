@@ -118,7 +118,9 @@ func (h *SlackHandler) handleEventsAPI(ctx context.Context, evt socketmode.Event
 		return
 	}
 
-	if !shouldProcess(innerEvent.User, innerEvent.SubType, innerEvent.Text, h.botUserID) {
+	hasContent := innerEvent.Text != "" ||
+		(innerEvent.Message != nil && len(innerEvent.Message.Attachments) > 0)
+	if !shouldProcess(innerEvent.User, innerEvent.SubType, hasContent, h.botUserID) {
 		h.log.V(1).Info("Message filtered by shouldProcess",
 			"user", innerEvent.User, "subtype", innerEvent.SubType, "channel", innerEvent.Channel)
 		return
@@ -362,13 +364,24 @@ func (h *SlackHandler) enrichMessage(ctx context.Context, event *slackevents.Mes
 		channelName = info.Name
 	}
 
+	body := event.Text
+	if event.Message != nil && len(event.Message.Attachments) > 0 {
+		if attachText := formatAttachments(event.Message.Attachments); attachText != "" {
+			if body != "" {
+				body = body + "\n" + attachText
+			} else {
+				body = attachText
+			}
+		}
+	}
+
 	return &SlackMessageData{
 		UserID:      event.User,
 		ChannelID:   event.Channel,
 		ChannelName: channelName,
 		UserName:    userName,
 		Text:        event.Text,
-		Body:        event.Text,
+		Body:        body,
 		ThreadTS:    event.ThreadTimeStamp,
 		Timestamp:   event.TimeStamp,
 		Permalink:   permalink,
@@ -389,7 +402,8 @@ func newSocketModeClient(api *goslack.Client) *socketmode.Client {
 
 // shouldProcess decides whether a Slack message should be processed.
 // It filters out bot messages, self-messages, and message subtypes we don't handle.
-func shouldProcess(userID, subtype, text, selfUserID string) bool {
+// hasContent should be true when the message has text or attachments.
+func shouldProcess(userID, subtype string, hasContent bool, selfUserID string) bool {
 	if userID == selfUserID {
 		return false
 	}
@@ -397,5 +411,5 @@ func shouldProcess(userID, subtype, text, selfUserID string) bool {
 	case "bot_message", "message_changed", "message_deleted", "message_replied":
 		return false
 	}
-	return text != ""
+	return hasContent
 }

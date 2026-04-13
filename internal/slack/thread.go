@@ -30,16 +30,49 @@ func FormatThreadContext(msgs []goslack.Message, botUserID string) string {
 	var b strings.Builder
 	b.WriteString("Slack thread conversation:\n")
 	for _, m := range msgs {
-		if m.Text == "" {
+		attachText := formatAttachments(m.Attachments)
+		if m.Text == "" && attachText == "" {
 			continue
 		}
 		role := "User"
 		if m.User == botUserID || m.BotID != "" {
 			role = "Agent"
 		}
-		fmt.Fprintf(&b, "\n%s: %s\n", role, m.Text)
+		if m.Text != "" {
+			fmt.Fprintf(&b, "\n%s: %s\n", role, m.Text)
+		}
+		if attachText != "" {
+			if m.Text == "" {
+				fmt.Fprintf(&b, "\n%s: [attachment]\n%s\n", role, attachText)
+			} else {
+				fmt.Fprintf(&b, "%s\n", attachText)
+			}
+		}
 	}
 	return b.String()
+}
+
+// formatAttachments extracts text content from Slack message attachments
+// (forwarded messages, unfurls, etc.) and returns a formatted string.
+// Returns empty string if there are no text-bearing attachments.
+func formatAttachments(attachments []goslack.Attachment) string {
+	var parts []string
+	for _, a := range attachments {
+		var lines []string
+		if a.Pretext != "" {
+			lines = append(lines, a.Pretext)
+		}
+		if a.Text != "" {
+			lines = append(lines, "> "+strings.ReplaceAll(a.Text, "\n", "\n> "))
+		}
+		if a.Fallback != "" && a.Text == "" {
+			lines = append(lines, "> "+strings.ReplaceAll(a.Fallback, "\n", "\n> "))
+		}
+		if len(lines) > 0 {
+			parts = append(parts, strings.Join(lines, "\n"))
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 // FetchThreadContext fetches the full thread history and returns formatted

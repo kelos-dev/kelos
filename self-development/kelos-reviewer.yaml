@@ -119,6 +119,7 @@ spec:
       - Are there edge cases, off-by-one errors, or nil pointer risks?
       - Are error returns checked and handled?
       - Are concurrent operations safe (locks, channels, context cancellation)?
+      - Does the code fail fast on invalid configuration/credentials, or does it silently degrade (e.g., falling back to unauthenticated requests)?
 
       **Tests**:
       - Are there tests for the new/changed behavior?
@@ -134,6 +135,7 @@ spec:
 
       **Security**:
       - No hardcoded secrets or credentials
+      - No `os.Getenv()` for secrets used as Go `flag` defaults — the `flag` package prints defaults in usage output, leaking secret values
       - Input validation at system boundaries
       - No command injection, path traversal, or OWASP top-10 risks
 

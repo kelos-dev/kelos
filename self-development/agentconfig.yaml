@@ -31,3 +31,10 @@ spec:
     - Commit messages: do not include PR links in commit messages
     - When making structural changes (adding new files, configs, or components), update related documentation (especially README files) to stay in sync
     - Kubernetes resource comparison: use semantic `.Equal()` or `.Cmp()` methods for `resource.Quantity` comparisons, not `reflect.DeepEqual`
+    - Never use `os.Getenv()` for secrets as Go `flag` defaults: Go's `flag` package prints default values in usage/help output, which leaks secret values; use an empty default and read the env var after `flag.Parse()`
+    - Fail fast on invalid configuration: do not silently fall back to degraded behavior (e.g., unauthenticated requests) when configuration or credentials are invalid or missing; return an error or exit immediately
+    - TaskSpawner conventions (for `self-development/` YAML files):
+      - Prefer webhook-based triggers (`githubWebhook`) over poll-based (`githubPullRequests`) for real-time event-driven tasks
+      - The `{{.Branch}}` template variable is empty for issue-only events; use `{{if .Branch}}{{.Branch}}{{else}}main{{end}}` when it may be empty
+      - The `issue_comment` webhook event fires for both issues and pull requests; design prompts to detect and handle both contexts
+      - Do not include manual PR branch checkout instructions in prompts — Kelos already checks out the PR branch automatically

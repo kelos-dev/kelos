@@ -14,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -862,5 +863,445 @@ func TestSlackTaskReporter_PhaseMapping(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 		})
+	}
+}
+
+type fakeProgressReader struct {
+	text string
+}
+
+func (f *fakeProgressReader) ReadProgress(ctx context.Context, namespace, podName, container, agentType string) string {
+	return f.text
+}
+
+func TestSlackTaskReporter_PostsProgressReply(t *testing.T) {
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-task",
+			Namespace: "default",
+			UID:       "uid-123",
+			Annotations: map[string]string{
+				AnnotationSlackReporting:   "enabled",
+				AnnotationSlackChannel:     "C123ABC",
+				AnnotationSlackThreadTS:    "1234567890.123456",
+				AnnotationSlackReplyTS:     "1234567890.999999",
+				AnnotationSlackReportPhase: "accepted",
+			},
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   "claude-code",
+			Prompt: "test",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeOAuth,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+			},
+		},
+		Status: kelosv1alpha1.TaskStatus{
+			Phase:   kelosv1alpha1.TaskPhaseRunning,
+			PodName: "test-pod",
+		},
+	}
+
+	cl := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(task).Build()
+
+	var posted []slackReplyRecord
+	updateCalled := false
+	reporter := &fakeSlackReporter{
+		postFn: func(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error) {
+			posted = append(posted, slackReplyRecord{method: "post", channel: channel, threadTS: threadTS, msg: msg})
+			return "1234567890.111111", nil
+		},
+		updateFn: func(ctx context.Context, channel, messageTS string, msg SlackMessage) error {
+			updateCalled = true
+			return nil
+		},
+	}
+
+	tr := &SlackTaskReporter{
+		Client:         cl,
+		Reporter:       reporter,
+		ProgressReader: &fakeProgressReader{text: "Searching through release tags..."},
+	}
+
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if updateCalled {
+		t.Error("UpdateMessage should not be called for progress updates")
+	}
+	if len(posted) != 1 {
+		t.Fatalf("expected 1 post, got %d", len(posted))
+	}
+	if posted[0].channel != "C123ABC" {
+		t.Errorf("channel = %q, want C123ABC", posted[0].channel)
+	}
+	if posted[0].threadTS != "1234567890.123456" {
+		t.Errorf("threadTS = %q, want original thread TS", posted[0].threadTS)
+	}
+	if posted[0].msg.Text != "Searching through release tags..." {
+		t.Errorf("text = %q, want progress text", posted[0].msg.Text)
+	}
+}
+
+func TestSlackTaskReporter_SkipsProgressWhenNoReader(t *testing.T) {
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-task",
+			Namespace: "default",
+			Annotations: map[string]string{
+				AnnotationSlackReporting:   "enabled",
+				AnnotationSlackChannel:     "C123ABC",
+				AnnotationSlackThreadTS:    "1234567890.123456",
+				AnnotationSlackReportPhase: "accepted",
+			},
+		},
+		Status: kelosv1alpha1.TaskStatus{
+			Phase:   kelosv1alpha1.TaskPhaseRunning,
+			PodName: "test-pod",
+		},
+	}
+
+	cl := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(task).Build()
+
+	called := false
+	reporter := &fakeSlackReporter{
+		postFn: func(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error) {
+			called = true
+			return "", nil
+		},
+	}
+
+	// No ProgressReader set
+	tr := &SlackTaskReporter{Client: cl, Reporter: reporter}
+
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if called {
+		t.Error("expected no Slack API call when ProgressReader is nil")
+	}
+}
+
+func TestSlackTaskReporter_SkipsProgressWhenNoPod(t *testing.T) {
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-task",
+			Namespace: "default",
+			Annotations: map[string]string{
+				AnnotationSlackReporting:   "enabled",
+				AnnotationSlackChannel:     "C123ABC",
+				AnnotationSlackThreadTS:    "1234567890.123456",
+				AnnotationSlackReportPhase: "accepted",
+			},
+		},
+		Status: kelosv1alpha1.TaskStatus{
+			Phase:   kelosv1alpha1.TaskPhasePending,
+			PodName: "", // No pod yet
+		},
+	}
+
+	cl := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(task).Build()
+
+	called := false
+	reporter := &fakeSlackReporter{
+		postFn: func(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error) {
+			called = true
+			return "", nil
+		},
+	}
+
+	tr := &SlackTaskReporter{
+		Client:         cl,
+		Reporter:       reporter,
+		ProgressReader: &fakeProgressReader{text: "something"},
+	}
+
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if called {
+		t.Error("expected no Slack API call when pod name is empty")
+	}
+}
+
+func TestSlackTaskReporter_SkipsProgressWhenEmpty(t *testing.T) {
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-task",
+			Namespace: "default",
+			Annotations: map[string]string{
+				AnnotationSlackReporting:   "enabled",
+				AnnotationSlackChannel:     "C123ABC",
+				AnnotationSlackThreadTS:    "1234567890.123456",
+				AnnotationSlackReportPhase: "accepted",
+			},
+		},
+		Status: kelosv1alpha1.TaskStatus{
+			Phase:   kelosv1alpha1.TaskPhaseRunning,
+			PodName: "test-pod",
+		},
+	}
+
+	cl := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(task).Build()
+
+	called := false
+	reporter := &fakeSlackReporter{
+		postFn: func(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error) {
+			called = true
+			return "", nil
+		},
+	}
+
+	tr := &SlackTaskReporter{
+		Client:         cl,
+		Reporter:       reporter,
+		ProgressReader: &fakeProgressReader{text: ""}, // Empty text
+	}
+
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if called {
+		t.Error("expected no Slack API call when progress text is empty")
+	}
+}
+
+func TestSlackTaskReporter_DeduplicatesProgress(t *testing.T) {
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-task",
+			Namespace: "default",
+			UID:       "uid-456",
+			Annotations: map[string]string{
+				AnnotationSlackReporting:   "enabled",
+				AnnotationSlackChannel:     "C123ABC",
+				AnnotationSlackThreadTS:    "1234567890.123456",
+				AnnotationSlackReplyTS:     "1234567890.999999",
+				AnnotationSlackReportPhase: "accepted",
+			},
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   "claude-code",
+			Prompt: "test",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeOAuth,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+			},
+		},
+		Status: kelosv1alpha1.TaskStatus{
+			Phase:   kelosv1alpha1.TaskPhaseRunning,
+			PodName: "test-pod",
+		},
+	}
+
+	cl := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(task).Build()
+
+	postCount := 0
+	reporter := &fakeSlackReporter{
+		postFn: func(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error) {
+			postCount++
+			return "1234567890.111111", nil
+		},
+	}
+
+	tr := &SlackTaskReporter{
+		Client:         cl,
+		Reporter:       reporter,
+		ProgressReader: &fakeProgressReader{text: "Same progress text"},
+	}
+
+	// First call should post
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if postCount != 1 {
+		t.Fatalf("expected 1 post on first call, got %d", postCount)
+	}
+
+	// Second call with same text should NOT post
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if postCount != 1 {
+		t.Errorf("expected still 1 post (deduplicated), got %d", postCount)
+	}
+}
+
+func TestSlackTaskReporter_PostsOnNewText(t *testing.T) {
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-task",
+			Namespace: "default",
+			UID:       "uid-789",
+			Annotations: map[string]string{
+				AnnotationSlackReporting:   "enabled",
+				AnnotationSlackChannel:     "C123ABC",
+				AnnotationSlackThreadTS:    "1234567890.123456",
+				AnnotationSlackReplyTS:     "1234567890.999999",
+				AnnotationSlackReportPhase: "accepted",
+			},
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   "claude-code",
+			Prompt: "test",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeOAuth,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+			},
+		},
+		Status: kelosv1alpha1.TaskStatus{
+			Phase:   kelosv1alpha1.TaskPhaseRunning,
+			PodName: "test-pod",
+		},
+	}
+
+	cl := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(task).Build()
+
+	var postedTexts []string
+	reporter := &fakeSlackReporter{
+		postFn: func(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error) {
+			postedTexts = append(postedTexts, msg.Text)
+			return "1234567890.111111", nil
+		},
+	}
+
+	pr := &fakeProgressReader{text: "First update"}
+
+	tr := &SlackTaskReporter{
+		Client:         cl,
+		Reporter:       reporter,
+		ProgressReader: pr,
+	}
+
+	// First call
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Change the text
+	pr.text = "Second update"
+
+	// Second call with different text should post again
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(postedTexts) != 2 {
+		t.Fatalf("expected 2 posts, got %d", len(postedTexts))
+	}
+	if postedTexts[0] != "First update" {
+		t.Errorf("first post = %q, want 'First update'", postedTexts[0])
+	}
+	if postedTexts[1] != "Second update" {
+		t.Errorf("second post = %q, want 'Second update'", postedTexts[1])
+	}
+}
+
+func TestSlackTaskReporter_ClearsProgressCacheOnTerminal(t *testing.T) {
+	// First, seed the progress cache via a running task
+	runningTask := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-task",
+			Namespace: "default",
+			UID:       "uid-clear",
+			Annotations: map[string]string{
+				AnnotationSlackReporting:   "enabled",
+				AnnotationSlackChannel:     "C123ABC",
+				AnnotationSlackThreadTS:    "1234567890.123456",
+				AnnotationSlackReplyTS:     "1234567890.999999",
+				AnnotationSlackReportPhase: "accepted",
+			},
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   "claude-code",
+			Prompt: "test",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeOAuth,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+			},
+		},
+		Status: kelosv1alpha1.TaskStatus{
+			Phase:   kelosv1alpha1.TaskPhaseRunning,
+			PodName: "test-pod",
+		},
+	}
+
+	cl := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(runningTask).Build()
+
+	reporter := &fakeSlackReporter{
+		postFn: func(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error) {
+			return "1234567890.111111", nil
+		},
+	}
+
+	tr := &SlackTaskReporter{
+		Client:         cl,
+		Reporter:       reporter,
+		ProgressReader: &fakeProgressReader{text: "Working on it..."},
+	}
+
+	// Post a progress update to populate the cache
+	if err := tr.ReportTaskStatus(context.Background(), runningTask); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify cache is populated
+	tr.mu.Lock()
+	if _, ok := tr.lastProgress["uid-clear"]; !ok {
+		t.Error("expected progress cache to be populated")
+	}
+	tr.mu.Unlock()
+
+	// Simulate task completing by creating a new task object with succeeded phase.
+	// We rebuild the fake client with the succeeded task to allow annotation persistence.
+	succeededTask := runningTask.DeepCopy()
+	succeededTask.Status.Phase = kelosv1alpha1.TaskPhaseSucceeded
+	succeededTask.Status.Results = map[string]string{"response": "done"}
+
+	cl2 := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(succeededTask).Build()
+	tr.Client = cl2
+
+	if err := tr.ReportTaskStatus(context.Background(), succeededTask); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify cache was cleared
+	tr.mu.Lock()
+	if _, ok := tr.lastProgress["uid-clear"]; ok {
+		t.Error("expected progress cache to be cleared after terminal phase")
+	}
+	tr.mu.Unlock()
+}
+
+func TestSlackTaskReporter_SweepsStaleProgressEntries(t *testing.T) {
+	reporter := &fakeSlackReporter{
+		postFn: func(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error) {
+			return "fake-ts", nil
+		},
+	}
+
+	tr := &SlackTaskReporter{
+		Reporter: reporter,
+	}
+
+	// Seed cache with entries for two tasks
+	tr.setLastProgress("uid-active", "some text")
+	tr.setLastProgress("uid-deleted", "other text")
+
+	// Sweep with only the active UID
+	activeUIDs := map[types.UID]bool{
+		"uid-active": true,
+	}
+	tr.SweepProgressCache(activeUIDs)
+
+	tr.mu.Lock()
+	defer tr.mu.Unlock()
+
+	if _, ok := tr.lastProgress["uid-active"]; !ok {
+		t.Error("expected active UID to remain in cache")
+	}
+	if _, ok := tr.lastProgress["uid-deleted"]; ok {
+		t.Error("expected deleted UID to be swept from cache")
 	}
 }

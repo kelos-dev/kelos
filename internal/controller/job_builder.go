@@ -493,6 +493,20 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 		}
 
 		mainContainer.VolumeMounts = []corev1.VolumeMount{volumeMount}
+
+		// Append user-defined workspace volumes to the pod and agent container.
+		for _, wv := range workspace.Volumes {
+			volumes = append(volumes, corev1.Volume{
+				Name:         wv.Name,
+				VolumeSource: wv.Source,
+			})
+			mainContainer.VolumeMounts = append(mainContainer.VolumeMounts, corev1.VolumeMount{
+				Name:      wv.Name,
+				MountPath: wv.MountPath,
+				ReadOnly:  wv.ReadOnly,
+			})
+		}
+
 		mainContainer.WorkingDir = WorkspaceMountPath + "/repo"
 	}
 

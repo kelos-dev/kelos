@@ -1,12 +1,18 @@
 package helmchart
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/kelos-dev/kelos/internal/manifests"
 	sigyaml "sigs.k8s.io/yaml"
 )
+
+// imageLatestRe matches actual image references with :latest tag (e.g.,
+// "ghcr.io/kelos-dev/kelos-controller:latest") while ignoring occurrences
+// of ":latest" inside CRD description strings.
+var imageLatestRe = regexp.MustCompile(`ghcr\.io/[^:\s]+:latest`)
 
 func TestRender_NilValues(t *testing.T) {
 	data, err := Render(manifests.ChartFS, nil)
@@ -73,8 +79,8 @@ func TestRender_VersionOverride(t *testing.T) {
 		t.Fatalf("rendering chart: %v", err)
 	}
 	output := string(data)
-	if strings.Contains(output, ":latest") {
-		t.Error("expected no :latest tags in rendered output")
+	if imageLatestRe.MatchString(output) {
+		t.Error("expected no :latest image tags in rendered output")
 	}
 	if !strings.Contains(output, ":v1.2.3") {
 		t.Error("expected :v1.2.3 tags in rendered output")

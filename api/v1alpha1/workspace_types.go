@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -26,6 +27,27 @@ type WorkspaceFile struct {
 
 	// Content is the file content to write.
 	Content string `json:"content"`
+}
+
+// WorkspaceVolume defines an additional volume to mount into the agent
+// container (and setup containers, once supported).
+type WorkspaceVolume struct {
+	// Name is the volume name (must be unique across workspace volumes).
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// MountPath is the absolute path where the volume is mounted.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern="^/"
+	MountPath string `json:"mountPath"`
+
+	// ReadOnly mounts the volume as read-only when true.
+	// +optional
+	ReadOnly bool `json:"readOnly,omitempty"`
+
+	// Source is the Kubernetes volume source (e.g. PersistentVolumeClaim,
+	// ConfigMap, Secret, EmptyDir).
+	Source corev1.VolumeSource `json:"source"`
 }
 
 // WorkspaceSpec defines the desired state of Workspace.
@@ -58,6 +80,14 @@ type WorkspaceSpec struct {
 	// like "CLAUDE.md" or "AGENTS.md".
 	// +optional
 	Files []WorkspaceFile `json:"files,omitempty"`
+
+	// Volumes are additional volumes mounted into the agent container.
+	// They do not replace the workspace volume — they are supplementary
+	// mounts (e.g. a PVC with pre-populated dependencies or shared data).
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="self.map(v, v.name).size() == self.size()",message="volume names must be unique"
+	// +kubebuilder:validation:XValidation:rule="self.all(v, v.name != 'workspace' && v.name != 'kelos-plugin')",message="volume names 'workspace' and 'kelos-plugin' are reserved"
+	Volumes []WorkspaceVolume `json:"volumes,omitempty"`
 }
 
 // +genclient

@@ -44,7 +44,7 @@ var agentConfigs = []agentTestConfig{
 		SecretName:     "codex-credentials",
 		SecretKey:      "CODEX_AUTH_JSON",
 		SecretValue:    &codexAuthJSON,
-		Model:          "gpt-5.1-codex-mini",
+		Model:          "gpt-5.4-mini",
 		EnvVar:         "CODEX_AUTH_JSON",
 	},
 }

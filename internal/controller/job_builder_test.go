@@ -4688,3 +4688,369 @@ func TestBuildJob_WorkspaceEmptyVolumes(t *testing.T) {
 		t.Errorf("Expected 1 volume mount (workspace only), got %d", len(container.VolumeMounts))
 	}
 }
+
+func TestBuildJob_WorkspaceSetup(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-ws-setup",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/example/repo.git",
+		Ref:  "main",
+		Setup: []kelosv1alpha1.SetupContainer{
+			{
+				Name:    "install-deps",
+				Image:   "node:22-alpine",
+				Command: []string{"sh", "-c", "npm ci"},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	// Init containers: git-clone + install-deps = 2
+	initCs := job.Spec.Template.Spec.InitContainers
+	if len(initCs) != 2 {
+		t.Fatalf("Expected 2 init containers, got %d", len(initCs))
+	}
+
+	setupC := initCs[1]
+	if setupC.Name != "install-deps" {
+		t.Errorf("Setup container name = %q, want %q", setupC.Name, "install-deps")
+	}
+	if setupC.Image != "node:22-alpine" {
+		t.Errorf("Setup container image = %q, want %q", setupC.Image, "node:22-alpine")
+	}
+	if len(setupC.Command) != 3 || setupC.Command[2] != "npm ci" {
+		t.Errorf("Setup container command = %v, want [sh -c npm ci]", setupC.Command)
+	}
+
+	// Setup container should mount workspace volume.
+	if len(setupC.VolumeMounts) != 1 {
+		t.Fatalf("Expected 1 volume mount on setup container, got %d", len(setupC.VolumeMounts))
+	}
+	if setupC.VolumeMounts[0].Name != WorkspaceVolumeName {
+		t.Errorf("Setup container mount name = %q, want %q", setupC.VolumeMounts[0].Name, WorkspaceVolumeName)
+	}
+	if setupC.VolumeMounts[0].MountPath != WorkspaceMountPath {
+		t.Errorf("Setup container mount path = %q, want %q", setupC.VolumeMounts[0].MountPath, WorkspaceMountPath)
+	}
+
+	// Setup container should have WorkingDir set to the repo path.
+	if setupC.WorkingDir != WorkspaceMountPath+"/repo" {
+		t.Errorf("Setup container WorkingDir = %q, want %q", setupC.WorkingDir, WorkspaceMountPath+"/repo")
+	}
+
+	// Setup container should run as agent UID.
+	if setupC.SecurityContext == nil || setupC.SecurityContext.RunAsUser == nil || *setupC.SecurityContext.RunAsUser != AgentUID {
+		t.Error("Expected setup container to run as agent UID")
+	}
+}
+
+func TestBuildJob_WorkspaceSetupMultiple(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-ws-setup-multi",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Build project",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/example/repo.git",
+		Setup: []kelosv1alpha1.SetupContainer{
+			{
+				Name:    "install-deps",
+				Image:   "node:22-alpine",
+				Command: []string{"sh", "-c", "npm ci"},
+			},
+			{
+				Name:    "generate-protos",
+				Image:   "bufbuild/buf:latest",
+				Command: []string{"sh", "-c", "buf generate"},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	// Init containers: git-clone + 2 setup = 3
+	initCs := job.Spec.Template.Spec.InitContainers
+	if len(initCs) != 3 {
+		t.Fatalf("Expected 3 init containers, got %d", len(initCs))
+	}
+
+	// Verify ordering.
+	wantNames := []string{"git-clone", "install-deps", "generate-protos"}
+	for i, name := range wantNames {
+		if initCs[i].Name != name {
+			t.Errorf("InitContainers[%d].Name = %q, want %q", i, initCs[i].Name, name)
+		}
+	}
+}
+
+func TestBuildJob_WorkspaceSetupWithVolumes(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-setup-vols",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/example/repo.git",
+		Volumes: []kelosv1alpha1.WorkspaceVolume{
+			{
+				Name:      "npm-cache",
+				MountPath: "/workspace/repo/node_modules",
+				ReadOnly:  true,
+				Source: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: "shared-npm-cache",
+						ReadOnly:  true,
+					},
+				},
+			},
+		},
+		Setup: []kelosv1alpha1.SetupContainer{
+			{
+				Name:    "install-deps",
+				Image:   "node:22-alpine",
+				Command: []string{"sh", "-c", "npm ci --prefer-offline"},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	initCs := job.Spec.Template.Spec.InitContainers
+	// Find the setup container.
+	var setupC *corev1.Container
+	for i := range initCs {
+		if initCs[i].Name == "install-deps" {
+			setupC = &initCs[i]
+			break
+		}
+	}
+	if setupC == nil {
+		t.Fatal("Setup container 'install-deps' not found")
+	}
+
+	// Setup container should have workspace + user volume mounts.
+	if len(setupC.VolumeMounts) != 2 {
+		t.Fatalf("Expected 2 volume mounts on setup container, got %d", len(setupC.VolumeMounts))
+	}
+	if setupC.VolumeMounts[0].Name != WorkspaceVolumeName {
+		t.Errorf("Setup mount[0] = %q, want %q", setupC.VolumeMounts[0].Name, WorkspaceVolumeName)
+	}
+	if setupC.VolumeMounts[1].Name != "npm-cache" {
+		t.Errorf("Setup mount[1] = %q, want %q", setupC.VolumeMounts[1].Name, "npm-cache")
+	}
+	if setupC.VolumeMounts[1].MountPath != "/workspace/repo/node_modules" {
+		t.Errorf("Setup mount[1] path = %q, want %q", setupC.VolumeMounts[1].MountPath, "/workspace/repo/node_modules")
+	}
+	if !setupC.VolumeMounts[1].ReadOnly {
+		t.Error("Expected npm-cache mount to be read-only in setup container")
+	}
+}
+
+func TestBuildJob_WorkspaceSetupWithEnvVars(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-setup-env",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/example/repo.git",
+		Setup: []kelosv1alpha1.SetupContainer{
+			{
+				Name:    "install-deps",
+				Image:   "node:22-alpine",
+				Command: []string{"sh", "-c", "npm ci"},
+				Env: []kelosv1alpha1.EnvVar{
+					{Name: "NODE_ENV", Value: "production"},
+					{Name: "NPM_CONFIG_CACHE", Value: "/tmp/.npm"},
+				},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	initCs := job.Spec.Template.Spec.InitContainers
+	var setupC *corev1.Container
+	for i := range initCs {
+		if initCs[i].Name == "install-deps" {
+			setupC = &initCs[i]
+			break
+		}
+	}
+	if setupC == nil {
+		t.Fatal("Setup container 'install-deps' not found")
+	}
+
+	if len(setupC.Env) != 2 {
+		t.Fatalf("Expected 2 env vars, got %d", len(setupC.Env))
+	}
+
+	envMap := make(map[string]string)
+	for _, e := range setupC.Env {
+		envMap[e.Name] = e.Value
+	}
+	if envMap["NODE_ENV"] != "production" {
+		t.Errorf("NODE_ENV = %q, want %q", envMap["NODE_ENV"], "production")
+	}
+	if envMap["NPM_CONFIG_CACHE"] != "/tmp/.npm" {
+		t.Errorf("NPM_CONFIG_CACHE = %q, want %q", envMap["NPM_CONFIG_CACHE"], "/tmp/.npm")
+	}
+}
+
+func TestBuildJob_WorkspaceSetupOrdering(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-setup-order",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/example/repo.git",
+		Files: []kelosv1alpha1.WorkspaceFile{
+			{Path: "CLAUDE.md", Content: "Instructions"},
+		},
+		Setup: []kelosv1alpha1.SetupContainer{
+			{
+				Name:    "install-deps",
+				Image:   "node:22-alpine",
+				Command: []string{"sh", "-c", "npm ci"},
+			},
+		},
+	}
+
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
+		Plugins: []kelosv1alpha1.PluginSpec{
+			{
+				Name: "tools",
+				Skills: []kelosv1alpha1.SkillDefinition{
+					{Name: "deploy", Content: "Deploy content"},
+				},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, workspace, agentConfig, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	// Expected order: git-clone, workspace-files, install-deps, plugin-setup
+	initCs := job.Spec.Template.Spec.InitContainers
+	if len(initCs) != 4 {
+		t.Fatalf("Expected 4 init containers, got %d", len(initCs))
+	}
+
+	wantNames := []string{"git-clone", "workspace-files", "install-deps", "plugin-setup"}
+	for i, name := range wantNames {
+		if initCs[i].Name != name {
+			t.Errorf("InitContainers[%d].Name = %q, want %q", i, initCs[i].Name, name)
+		}
+	}
+}
+
+func TestBuildJob_WorkspaceEmptySetup(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-empty-setup",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo:  "https://github.com/example/repo.git",
+		Setup: []kelosv1alpha1.SetupContainer{}, // explicitly empty
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	// Only git-clone init container should exist.
+	initCs := job.Spec.Template.Spec.InitContainers
+	if len(initCs) != 1 {
+		t.Fatalf("Expected 1 init container (git-clone only), got %d", len(initCs))
+	}
+	if initCs[0].Name != "git-clone" {
+		t.Errorf("InitContainers[0].Name = %q, want %q", initCs[0].Name, "git-clone")
+	}
+}

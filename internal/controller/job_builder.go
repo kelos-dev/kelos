@@ -495,15 +495,47 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 		mainContainer.VolumeMounts = []corev1.VolumeMount{volumeMount}
 
 		// Append user-defined workspace volumes to the pod and agent container.
+		var userVolumeMounts []corev1.VolumeMount
 		for _, wv := range workspace.Volumes {
 			volumes = append(volumes, corev1.Volume{
 				Name:         wv.Name,
 				VolumeSource: wv.Source,
 			})
-			mainContainer.VolumeMounts = append(mainContainer.VolumeMounts, corev1.VolumeMount{
+			vm := corev1.VolumeMount{
 				Name:      wv.Name,
 				MountPath: wv.MountPath,
 				ReadOnly:  wv.ReadOnly,
+			}
+			userVolumeMounts = append(userVolumeMounts, vm)
+			mainContainer.VolumeMounts = append(mainContainer.VolumeMounts, vm)
+		}
+
+		// Append user-defined setup init containers.  They run after git clone
+		// and file injection but before the agent, and receive both the workspace
+		// volume and any user-defined volumes.
+		for _, sc := range workspace.Setup {
+			mounts := make([]corev1.VolumeMount, 0, 1+len(userVolumeMounts))
+			mounts = append(mounts, volumeMount)
+			mounts = append(mounts, userVolumeMounts...)
+
+			var setupEnvVars []corev1.EnvVar
+			for _, e := range sc.Env {
+				setupEnvVars = append(setupEnvVars, corev1.EnvVar{
+					Name:  e.Name,
+					Value: e.Value,
+				})
+			}
+
+			initContainers = append(initContainers, corev1.Container{
+				Name:         sc.Name,
+				Image:        sc.Image,
+				Command:      sc.Command,
+				Env:          setupEnvVars,
+				VolumeMounts: mounts,
+				WorkingDir:   WorkspaceMountPath + "/repo",
+				SecurityContext: &corev1.SecurityContext{
+					RunAsUser: &agentUID,
+				},
 			})
 		}
 

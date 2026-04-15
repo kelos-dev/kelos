@@ -2169,6 +2169,66 @@ spec:
                 required:
                 - name
                 type: object
+              setup:
+                description: |-
+                  Setup are init containers that run after git clone (and file injection)
+                  but before the agent container starts.  Each container receives the
+                  workspace volume and any user-defined volumes.  Use this for dependency
+                  installation, code generation, or other pre-agent setup steps.
+                items:
+                  description: |-
+                    SetupContainer defines an init container that runs after git clone but
+                    before the agent container starts.  Setup containers receive the workspace
+                    volume mount (at /workspace) and any user-defined workspace volumes.
+                  properties:
+                    command:
+                      description: Command is the entrypoint array (passed to the
+                        container as the command).
+                      items:
+                        type: string
+                      minItems: 1
+                      type: array
+                    env:
+                      description: Env are additional environment variables for the
+                        container.
+                      items:
+                        description: EnvVar represents an environment variable present
+                          in a container.
+                        properties:
+                          name:
+                            description: Name of the environment variable.
+                            minLength: 1
+                            type: string
+                          value:
+                            description: Value of the environment variable.
+                            type: string
+                        required:
+                        - name
+                        - value
+                        type: object
+                      type: array
+                    image:
+                      description: Image is the container image to run.
+                      minLength: 1
+                      type: string
+                    name:
+                      description: Name is the init container name (must be unique
+                        across setup containers).
+                      minLength: 1
+                      type: string
+                  required:
+                  - command
+                  - image
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-validations:
+                - message: setup container names must be unique
+                  rule: self.map(sc, sc.name).size() == self.size()
+                - message: setup container names 'git-clone', 'remote-setup', 'branch-setup',
+                    'workspace-files', 'plugin-setup', and 'skills-install' are reserved
+                  rule: self.all(sc, !['git-clone','remote-setup','branch-setup','workspace-files','plugin-setup','skills-install'].exists(r,
+                    r == sc.name))
               volumes:
                 description: |-
                   Volumes are additional volumes mounted into the agent container.
@@ -2177,7 +2237,7 @@ spec:
                 items:
                   description: |-
                     WorkspaceVolume defines an additional volume to mount into the agent
-                    container (and setup containers, once supported).
+                    container and setup containers.
                   properties:
                     mountPath:
                       description: MountPath is the absolute path where the volume

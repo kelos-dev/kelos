@@ -29,8 +29,39 @@ type WorkspaceFile struct {
 	Content string `json:"content"`
 }
 
+// SetupContainer defines an init container that runs after git clone but
+// before the agent container starts.  Setup containers receive the workspace
+// volume mount (at /workspace) and any user-defined workspace volumes.
+type SetupContainer struct {
+	// Name is the init container name (must be unique across setup containers).
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// Image is the container image to run.
+	// +kubebuilder:validation:MinLength=1
+	Image string `json:"image"`
+
+	// Command is the entrypoint array (passed to the container as the command).
+	// +kubebuilder:validation:MinItems=1
+	Command []string `json:"command"`
+
+	// Env are additional environment variables for the container.
+	// +optional
+	Env []EnvVar `json:"env,omitempty"`
+}
+
+// EnvVar represents an environment variable present in a container.
+type EnvVar struct {
+	// Name of the environment variable.
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// Value of the environment variable.
+	Value string `json:"value"`
+}
+
 // WorkspaceVolume defines an additional volume to mount into the agent
-// container (and setup containers, once supported).
+// container and setup containers.
 type WorkspaceVolume struct {
 	// Name is the volume name (must be unique across workspace volumes).
 	// +kubebuilder:validation:MinLength=1
@@ -88,6 +119,15 @@ type WorkspaceSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self.map(v, v.name).size() == self.size()",message="volume names must be unique"
 	// +kubebuilder:validation:XValidation:rule="self.all(v, v.name != 'workspace' && v.name != 'kelos-plugin')",message="volume names 'workspace' and 'kelos-plugin' are reserved"
 	Volumes []WorkspaceVolume `json:"volumes,omitempty"`
+
+	// Setup are init containers that run after git clone (and file injection)
+	// but before the agent container starts.  Each container receives the
+	// workspace volume and any user-defined volumes.  Use this for dependency
+	// installation, code generation, or other pre-agent setup steps.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="self.map(sc, sc.name).size() == self.size()",message="setup container names must be unique"
+	// +kubebuilder:validation:XValidation:rule="self.all(sc, !['git-clone','remote-setup','branch-setup','workspace-files','plugin-setup','skills-install'].exists(r, r == sc.name))",message="setup container names 'git-clone', 'remote-setup', 'branch-setup', 'workspace-files', 'plugin-setup', and 'skills-install' are reserved"
+	Setup []SetupContainer `json:"setup,omitempty"`
 }
 
 // +genclient

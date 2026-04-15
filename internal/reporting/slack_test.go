@@ -97,7 +97,7 @@ func TestFormatSlackTransitionMessages(t *testing.T) {
 	})
 
 	t.Run("failed with message", func(t *testing.T) {
-		got := FormatSlackTransitionMessage("failed","spawner-1234567890.123456", "pod OOMKilled", nil)
+		got := FormatSlackTransitionMessage("failed", "spawner-1234567890.123456", "pod OOMKilled", nil)
 		if got.Text != "Error: pod OOMKilled (Task: spawner-1234567890.123456)" {
 			t.Errorf("fallback text = %q", got.Text)
 		}
@@ -106,7 +106,7 @@ func TestFormatSlackTransitionMessages(t *testing.T) {
 	})
 
 	t.Run("failed without message", func(t *testing.T) {
-		got := FormatSlackTransitionMessage("failed","spawner-1234567890.123456", "", nil)
+		got := FormatSlackTransitionMessage("failed", "spawner-1234567890.123456", "", nil)
 		if got.Text != "Failed. (Task: spawner-1234567890.123456)" {
 			t.Errorf("fallback text = %q", got.Text)
 		}
@@ -115,7 +115,7 @@ func TestFormatSlackTransitionMessages(t *testing.T) {
 
 	t.Run("failed with response", func(t *testing.T) {
 		results := map[string]string{"response": b64("Could not find the file.")}
-		got := FormatSlackTransitionMessage("failed","spawner-1234567890.123456", "Task failed", results)
+		got := FormatSlackTransitionMessage("failed", "spawner-1234567890.123456", "Task failed", results)
 		if got.Text != "Could not find the file.\nError: Task failed (Task: spawner-1234567890.123456)" {
 			t.Errorf("fallback text = %q", got.Text)
 		}

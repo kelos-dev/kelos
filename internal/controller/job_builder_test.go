@@ -4449,3 +4449,242 @@ func TestBuildJob_NoneCredentials_ServiceAccountName(t *testing.T) {
 		t.Errorf("AWS_REGION = %q, want %q", env.Value, "us-west-2")
 	}
 }
+
+func TestBuildJob_WorkspaceVolumes(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-ws-volumes",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/example/repo.git",
+		Ref:  "main",
+		Volumes: []kelosv1alpha1.WorkspaceVolume{
+			{
+				Name:      "npm-cache",
+				MountPath: "/workspace/repo/node_modules",
+				ReadOnly:  true,
+				Source: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: "shared-npm-cache",
+						ReadOnly:  true,
+					},
+				},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	// Should have workspace + user-defined volume.
+	podVolumes := job.Spec.Template.Spec.Volumes
+	if len(podVolumes) != 2 {
+		t.Fatalf("Expected 2 volumes (workspace + npm-cache), got %d", len(podVolumes))
+	}
+	if podVolumes[1].Name != "npm-cache" {
+		t.Errorf("Expected volume name %q, got %q", "npm-cache", podVolumes[1].Name)
+	}
+	if podVolumes[1].PersistentVolumeClaim == nil || podVolumes[1].PersistentVolumeClaim.ClaimName != "shared-npm-cache" {
+		t.Errorf("Expected PVC claimName %q", "shared-npm-cache")
+	}
+
+	// Agent container should have both volume mounts.
+	container := job.Spec.Template.Spec.Containers[0]
+	if len(container.VolumeMounts) != 2 {
+		t.Fatalf("Expected 2 volume mounts, got %d", len(container.VolumeMounts))
+	}
+	if container.VolumeMounts[0].Name != WorkspaceVolumeName {
+		t.Errorf("First mount should be workspace, got %q", container.VolumeMounts[0].Name)
+	}
+	if container.VolumeMounts[1].Name != "npm-cache" {
+		t.Errorf("Second mount should be npm-cache, got %q", container.VolumeMounts[1].Name)
+	}
+	if container.VolumeMounts[1].MountPath != "/workspace/repo/node_modules" {
+		t.Errorf("Mount path = %q, want %q", container.VolumeMounts[1].MountPath, "/workspace/repo/node_modules")
+	}
+	if !container.VolumeMounts[1].ReadOnly {
+		t.Error("Expected npm-cache mount to be read-only")
+	}
+}
+
+func TestBuildJob_WorkspaceVolumesMultiple(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-ws-multi-vol",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Train model",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/example/repo.git",
+		Volumes: []kelosv1alpha1.WorkspaceVolume{
+			{
+				Name:      "data",
+				MountPath: "/workspace/data",
+				ReadOnly:  true,
+				Source: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+						ClaimName: "training-data",
+						ReadOnly:  true,
+					},
+				},
+			},
+			{
+				Name:      "config",
+				MountPath: "/workspace/config",
+				Source: corev1.VolumeSource{
+					ConfigMap: &corev1.ConfigMapVolumeSource{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "app-config"},
+					},
+				},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	// workspace + 2 user volumes = 3
+	if len(job.Spec.Template.Spec.Volumes) != 3 {
+		t.Errorf("Expected 3 volumes, got %d", len(job.Spec.Template.Spec.Volumes))
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+	if len(container.VolumeMounts) != 3 {
+		t.Errorf("Expected 3 volume mounts, got %d", len(container.VolumeMounts))
+	}
+
+	// Verify ordering: workspace, data, config
+	wantNames := []string{WorkspaceVolumeName, "data", "config"}
+	for i, name := range wantNames {
+		if container.VolumeMounts[i].Name != name {
+			t.Errorf("VolumeMounts[%d].Name = %q, want %q", i, container.VolumeMounts[i].Name, name)
+		}
+	}
+
+	// config mount should not be read-only (default)
+	if container.VolumeMounts[2].ReadOnly {
+		t.Error("Expected config mount to be read-write")
+	}
+}
+
+func TestBuildJob_WorkspaceVolumesWithPlugins(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-vol-plugins",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/example/repo.git",
+		Volumes: []kelosv1alpha1.WorkspaceVolume{
+			{
+				Name:      "cache",
+				MountPath: "/cache",
+				Source: corev1.VolumeSource{
+					EmptyDir: &corev1.EmptyDirVolumeSource{},
+				},
+			},
+		},
+	}
+
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
+		Plugins: []kelosv1alpha1.PluginSpec{
+			{
+				Name: "tools",
+				Skills: []kelosv1alpha1.SkillDefinition{
+					{Name: "deploy", Content: "Deploy content"},
+				},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, workspace, agentConfig, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	// workspace + cache + plugin = 3 volumes
+	if len(job.Spec.Template.Spec.Volumes) != 3 {
+		t.Errorf("Expected 3 volumes, got %d", len(job.Spec.Template.Spec.Volumes))
+	}
+
+	// Agent container: workspace + cache + plugin = 3 mounts
+	container := job.Spec.Template.Spec.Containers[0]
+	if len(container.VolumeMounts) != 3 {
+		t.Errorf("Expected 3 volume mounts, got %d", len(container.VolumeMounts))
+	}
+}
+
+func TestBuildJob_WorkspaceEmptyVolumes(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-empty-vol",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo:    "https://github.com/example/repo.git",
+		Volumes: []kelosv1alpha1.WorkspaceVolume{}, // explicitly empty
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	// Only the workspace volume should exist.
+	if len(job.Spec.Template.Spec.Volumes) != 1 {
+		t.Errorf("Expected 1 volume (workspace only), got %d", len(job.Spec.Template.Spec.Volumes))
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+	if len(container.VolumeMounts) != 1 {
+		t.Errorf("Expected 1 volume mount (workspace only), got %d", len(container.VolumeMounts))
+	}
+}

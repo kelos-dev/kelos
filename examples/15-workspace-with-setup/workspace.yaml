@@ -1,0 +1,22 @@
+apiVersion: kelos.dev/v1alpha1
+kind: Workspace
+metadata:
+  name: my-app-with-setup
+spec:
+  repo: https://github.com/your-org/your-repo.git
+  ref: main
+  secretRef:
+    name: github-token
+  volumes:
+    - name: npm-cache
+      mountPath: /workspace/repo/node_modules
+      source:
+        persistentVolumeClaim:
+          claimName: shared-npm-cache
+  setup:
+    - name: install-deps
+      image: node:22-alpine
+      command: ["sh", "-c", "npm ci --prefer-offline"]
+    - name: generate-protos
+      image: bufbuild/buf:latest
+      command: ["sh", "-c", "buf generate"]

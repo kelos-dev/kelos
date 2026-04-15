@@ -370,11 +370,11 @@ func (h *SlackHandler) enrichMessage(ctx context.Context, event *slackevents.Mes
 		UserID:    event.User,
 		ChannelID: event.Channel,
 		UserName:  userName,
-		Text:        event.Text,
-		Body:        body,
-		ThreadTS:    event.ThreadTimeStamp,
-		Timestamp:   event.TimeStamp,
-		Permalink:   permalink,
+		Text:      event.Text,
+		Body:      body,
+		ThreadTS:  event.ThreadTimeStamp,
+		Timestamp: event.TimeStamp,
+		Permalink: permalink,
 	}
 }
 

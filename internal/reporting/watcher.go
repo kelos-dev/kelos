@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/slack-go/slack"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
@@ -178,19 +179,39 @@ func (tr *TaskReporter) persistReportingState(ctx context.Context, task *kelosv1
 // SlackMessenger is the interface for posting and updating Slack messages.
 type SlackMessenger interface {
 	PostThreadReply(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error)
+	UpdateMessage(ctx context.Context, channel, messageTS string, msg SlackMessage) error
+}
+
+// activityState tracks the target message for activity indicator updates.
+// The activity indicator is rendered as an additional context element on
+// whichever message is currently the latest in the thread (the accepted
+// message initially, then each progress snapshot as they are posted).
+type activityState struct {
+	// MessageTS is the Slack timestamp of the message being updated with
+	// the activity context element.
+	MessageTS string
+	// BaseMsg holds the original blocks and text of the target message,
+	// before the activity context element was appended.
+	BaseMsg SlackMessage
+	// LastText is the last activity string appended, used for deduplication.
+	LastText string
 }
 
 // SlackTaskReporter watches Tasks and reports status changes to Slack
 // as thread replies on the originating message. When a ProgressReader is
 // configured, it also posts periodic progress updates extracted from the
-// agent's pod logs while the task is running.
+// agent's pod logs while the task is running. When an ActivityReader is
+// configured, it posts and updates short activity indicators between
+// progress snapshots.
 type SlackTaskReporter struct {
 	Client         client.Client
 	Reporter       SlackMessenger
 	ProgressReader ProgressReader
+	ActivityReader ActivityReader
 
 	mu           sync.Mutex
-	lastProgress map[types.UID]string // taskUID -> last posted text
+	lastProgress map[types.UID]string         // taskUID -> last posted text
+	activity     map[types.UID]*activityState // taskUID -> current activity indicator
 }
 
 // ReportTaskStatus checks a Task's current phase against its last reported
@@ -237,13 +258,20 @@ func (tr *SlackTaskReporter) ReportTaskStatus(ctx context.Context, task *kelosv1
 	msg := FormatSlackTransitionMessage(desiredPhase, task.Name, task.Status.Message, task.Status.Results)
 
 	log.Info("Posting Slack thread reply", "task", task.Name, "channel", channel, "phase", desiredPhase)
-	if _, err := tr.Reporter.PostThreadReply(ctx, channel, threadTS, msg); err != nil {
+	replyTS, err := tr.Reporter.PostThreadReply(ctx, channel, threadTS, msg)
+	if err != nil {
 		return fmt.Errorf("posting Slack reply for task %s: %w", task.Name, err)
 	}
 
-	// Clean up progress cache when reporting a terminal phase.
+	// Track the accepted message so the activity loop can update it.
+	if desiredPhase == "accepted" && replyTS != "" {
+		tr.setActivityTarget(task.UID, replyTS, msg)
+	}
+
+	// Clean up caches when reporting a terminal phase.
 	if desiredPhase == "succeeded" || desiredPhase == "failed" {
 		tr.clearProgressCache(task.UID)
+		tr.clearActivityState(task.UID)
 	}
 
 	if err := tr.persistSlackReportingState(ctx, task, desiredPhase); err != nil {
@@ -319,12 +347,20 @@ func (tr *SlackTaskReporter) updateProgress(ctx context.Context, task *kelosv1al
 
 	msg := SlackMessage{Text: text}
 	log.V(1).Info("Posting Slack progress update", "task", task.Name)
-	if _, err := tr.Reporter.PostThreadReply(ctx, channel, threadTS, msg); err != nil {
+	replyTS, err := tr.Reporter.PostThreadReply(ctx, channel, threadTS, msg)
+	if err != nil {
 		log.Error(err, "Failed to post Slack progress update", "task", task.Name)
 		return nil
 	}
 
 	tr.setLastProgress(task.UID, text)
+
+	// Point the activity indicator at this new progress message so
+	// subsequent activity ticks update its context block.
+	if replyTS != "" {
+		tr.setActivityTarget(task.UID, replyTS, msg)
+	}
+
 	return nil
 }
 
@@ -367,4 +403,138 @@ func (tr *SlackTaskReporter) SweepProgressCache(activeUIDs map[types.UID]bool) {
 			delete(tr.lastProgress, uid)
 		}
 	}
+	for uid := range tr.activity {
+		if !activeUIDs[uid] {
+			delete(tr.activity, uid)
+		}
+	}
+}
+
+// UpdateActivityIndicator reads the agent's current action from pod logs and
+// updates the context block of the latest thread message (accepted or progress
+// snapshot) to include a short activity line. This is called on a faster
+// cadence (e.g. 5s) than the progress snapshot loop. All errors are non-fatal.
+func (tr *SlackTaskReporter) UpdateActivityIndicator(ctx context.Context, task *kelosv1alpha1.Task) {
+	if tr.ActivityReader == nil {
+		return
+	}
+
+	log := ctrl.Log.WithName("slack-activity")
+
+	annotations := task.Annotations
+	if annotations == nil {
+		return
+	}
+	if annotations[AnnotationSlackReporting] != "enabled" {
+		return
+	}
+	if annotations[AnnotationSlackReportPhase] != "accepted" {
+		return
+	}
+
+	// Only update activity for running tasks.
+	if task.Status.Phase != kelosv1alpha1.TaskPhaseRunning {
+		return
+	}
+
+	podName := task.Status.PodName
+	if podName == "" {
+		return
+	}
+
+	channel := annotations[AnnotationSlackChannel]
+	if channel == "" {
+		return
+	}
+
+	containerName := task.Spec.Type
+	if containerName == "" {
+		containerName = "claude-code"
+	}
+
+	text := tr.ActivityReader.ReadActivity(ctx, task.Namespace, podName, containerName, task.Spec.Type)
+	if text == "" {
+		return
+	}
+
+	tr.mu.Lock()
+	state := tr.activity[task.UID]
+	if state == nil || state.MessageTS == "" {
+		// No target message yet — the accepted message hasn't been posted.
+		tr.mu.Unlock()
+		return
+	}
+	if state.LastText == text {
+		tr.mu.Unlock()
+		return
+	}
+	messageTS := state.MessageTS
+	baseMsg := state.BaseMsg
+	tr.mu.Unlock()
+
+	// Rebuild the message: base blocks + activity context element.
+	msg := appendActivityContext(baseMsg, text)
+
+	if err := tr.Reporter.UpdateMessage(ctx, channel, messageTS, msg); err != nil {
+		log.V(1).Info("Failed to update activity indicator", "task", task.Name, "error", err)
+		return
+	}
+
+	tr.mu.Lock()
+	if s := tr.activity[task.UID]; s != nil && s.MessageTS == messageTS {
+		s.LastText = text
+	}
+	tr.mu.Unlock()
+}
+
+// setActivityTarget records the message that the activity loop should update
+// with context block activity indicators.
+func (tr *SlackTaskReporter) setActivityTarget(uid types.UID, messageTS string, baseMsg SlackMessage) {
+	tr.mu.Lock()
+	defer tr.mu.Unlock()
+	if tr.activity == nil {
+		tr.activity = make(map[types.UID]*activityState)
+	}
+	tr.activity[uid] = &activityState{
+		MessageTS: messageTS,
+		BaseMsg:   baseMsg,
+	}
+}
+
+// clearActivityState removes all activity state for a task.
+func (tr *SlackTaskReporter) clearActivityState(uid types.UID) {
+	tr.mu.Lock()
+	defer tr.mu.Unlock()
+	delete(tr.activity, uid)
+}
+
+// appendActivityContext returns a copy of baseMsg with an additional context
+// element showing the current activity text. If the last block in baseMsg is
+// already a ContextBlock, the activity element is appended to it. Otherwise
+// a new ContextBlock is added.
+func appendActivityContext(baseMsg SlackMessage, activityText string) SlackMessage {
+	// If baseMsg has no blocks, there is nothing safe to attach to
+	// without hiding the text content — skip the update.
+	if len(baseMsg.Blocks) == 0 {
+		return baseMsg
+	}
+
+	activityElement := slack.NewTextBlockObject(slack.MarkdownType, activityText, false, false)
+
+	blocks := make([]slack.Block, len(baseMsg.Blocks))
+	copy(blocks, baseMsg.Blocks)
+
+	if ctx, ok := blocks[len(blocks)-1].(*slack.ContextBlock); ok {
+		// Clone the context block and append the activity element.
+		newElements := make([]slack.MixedElement, len(ctx.ContextElements.Elements), len(ctx.ContextElements.Elements)+1)
+		copy(newElements, ctx.ContextElements.Elements)
+		newElements = append(newElements, activityElement)
+		newCtx := slack.NewContextBlock(ctx.BlockID, newElements...)
+		blocks[len(blocks)-1] = newCtx
+		return SlackMessage{Text: baseMsg.Text, Blocks: blocks}
+	}
+
+	// Last block is not a context block — append a new one.
+	blocks = append(blocks, slack.NewContextBlock("", activityElement))
+	return SlackMessage{Text: baseMsg.Text, Blocks: blocks}
 }

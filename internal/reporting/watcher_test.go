@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"sync"
 	"testing"
 
+	"github.com/slack-go/slack"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -781,7 +783,8 @@ type slackReplyRecord struct {
 }
 
 type fakeSlackReporter struct {
-	postFn func(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error)
+	postFn   func(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error)
+	updateFn func(ctx context.Context, channel, messageTS string, msg SlackMessage) error
 }
 
 func (f *fakeSlackReporter) PostThreadReply(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error) {
@@ -789,6 +792,13 @@ func (f *fakeSlackReporter) PostThreadReply(ctx context.Context, channel, thread
 		return f.postFn(ctx, channel, threadTS, msg)
 	}
 	return "fake-reply-ts", nil
+}
+
+func (f *fakeSlackReporter) UpdateMessage(ctx context.Context, channel, messageTS string, msg SlackMessage) error {
+	if f.updateFn != nil {
+		return f.updateFn(ctx, channel, messageTS, msg)
+	}
+	return nil
 }
 
 func TestSlackTaskReporter_PhaseMapping(t *testing.T) {
@@ -1268,5 +1278,473 @@ func TestSlackTaskReporter_SweepsStaleProgressEntries(t *testing.T) {
 	}
 	if _, ok := tr.lastProgress["uid-deleted"]; ok {
 		t.Error("expected deleted UID to be swept from cache")
+	}
+}
+
+// --- Activity indicator tests ---
+
+type fakeActivityReader struct {
+	text string
+}
+
+func (f *fakeActivityReader) ReadActivity(ctx context.Context, namespace, podName, container, agentType string) string {
+	return f.text
+}
+
+func newRunningTaskWithAnnotations(name string, uid types.UID, annotations map[string]string) *kelosv1alpha1.Task {
+	return &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Namespace:   "default",
+			UID:         uid,
+			Annotations: annotations,
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   "claude-code",
+			Prompt: "test",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeOAuth,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+			},
+		},
+		Status: kelosv1alpha1.TaskStatus{
+			Phase:   kelosv1alpha1.TaskPhaseRunning,
+			PodName: "test-pod",
+		},
+	}
+}
+
+func TestSlackTaskReporter_UpdatesAcceptedMessageWithActivity(t *testing.T) {
+	task := newRunningTaskWithAnnotations("test-task", "uid-act-1", map[string]string{
+		AnnotationSlackReporting:   "enabled",
+		AnnotationSlackChannel:     "C123ABC",
+		AnnotationSlackThreadTS:    "1234567890.123456",
+		AnnotationSlackReportPhase: "accepted",
+	})
+
+	var updates []slackReplyRecord
+	reporter := &fakeSlackReporter{
+		updateFn: func(ctx context.Context, channel, messageTS string, msg SlackMessage) error {
+			updates = append(updates, slackReplyRecord{method: "update", channel: channel, threadTS: messageTS, msg: msg})
+			return nil
+		},
+	}
+
+	baseMsg := FormatSlackTransitionMessage("accepted", task.Name, "", nil)
+	tr := &SlackTaskReporter{
+		Reporter:       reporter,
+		ActivityReader: &fakeActivityReader{text: "Reading `main.go`..."},
+	}
+	// Simulate the accepted message having been posted.
+	tr.setActivityTarget(task.UID, "1234567890.accepted", baseMsg)
+
+	tr.UpdateActivityIndicator(context.Background(), task)
+
+	if len(updates) != 1 {
+		t.Fatalf("expected 1 update, got %d", len(updates))
+	}
+	if updates[0].channel != "C123ABC" {
+		t.Errorf("channel = %q, want C123ABC", updates[0].channel)
+	}
+	if updates[0].threadTS != "1234567890.accepted" {
+		t.Errorf("messageTS = %q, want accepted TS", updates[0].threadTS)
+	}
+	// The updated message should have the original blocks + activity in context.
+	if updates[0].msg.Text != baseMsg.Text {
+		t.Errorf("fallback text changed: got %q", updates[0].msg.Text)
+	}
+	// Should have more blocks than the base (activity appended to context).
+	if len(updates[0].msg.Blocks) < len(baseMsg.Blocks) {
+		t.Errorf("expected at least %d blocks, got %d", len(baseMsg.Blocks), len(updates[0].msg.Blocks))
+	}
+}
+
+func TestSlackTaskReporter_UpdatesActivityInPlace(t *testing.T) {
+	task := newRunningTaskWithAnnotations("test-task", "uid-act-2", map[string]string{
+		AnnotationSlackReporting:   "enabled",
+		AnnotationSlackChannel:     "C123ABC",
+		AnnotationSlackThreadTS:    "1234567890.123456",
+		AnnotationSlackReportPhase: "accepted",
+	})
+
+	var updates []slackReplyRecord
+	reporter := &fakeSlackReporter{
+		updateFn: func(ctx context.Context, channel, messageTS string, msg SlackMessage) error {
+			updates = append(updates, slackReplyRecord{method: "update", channel: channel, threadTS: messageTS, msg: msg})
+			return nil
+		},
+	}
+
+	ar := &fakeActivityReader{text: "Reading `main.go`..."}
+	baseMsg := FormatSlackTransitionMessage("accepted", task.Name, "", nil)
+	tr := &SlackTaskReporter{
+		Reporter:       reporter,
+		ActivityReader: ar,
+	}
+	tr.setActivityTarget(task.UID, "1234567890.accepted", baseMsg)
+
+	// First call updates the accepted message with activity.
+	tr.UpdateActivityIndicator(context.Background(), task)
+
+	// Change activity text and call again — should update in place again.
+	ar.text = "Running `make test`..."
+	tr.UpdateActivityIndicator(context.Background(), task)
+
+	if len(updates) != 2 {
+		t.Fatalf("expected 2 updates, got %d", len(updates))
+	}
+	if updates[1].threadTS != "1234567890.accepted" {
+		t.Errorf("update messageTS = %q, want accepted TS", updates[1].threadTS)
+	}
+}
+
+func TestSlackTaskReporter_SkipsActivityWhenUnchanged(t *testing.T) {
+	task := newRunningTaskWithAnnotations("test-task", "uid-act-3", map[string]string{
+		AnnotationSlackReporting:   "enabled",
+		AnnotationSlackChannel:     "C123ABC",
+		AnnotationSlackThreadTS:    "1234567890.123456",
+		AnnotationSlackReportPhase: "accepted",
+	})
+
+	updateCount := 0
+	reporter := &fakeSlackReporter{
+		updateFn: func(ctx context.Context, channel, messageTS string, msg SlackMessage) error {
+			updateCount++
+			return nil
+		},
+	}
+
+	baseMsg := FormatSlackTransitionMessage("accepted", task.Name, "", nil)
+	tr := &SlackTaskReporter{
+		Reporter:       reporter,
+		ActivityReader: &fakeActivityReader{text: "Thinking..."},
+	}
+	tr.setActivityTarget(task.UID, "1234567890.accepted", baseMsg)
+
+	tr.UpdateActivityIndicator(context.Background(), task)
+	tr.UpdateActivityIndicator(context.Background(), task) // Same text
+
+	if updateCount != 1 {
+		t.Errorf("expected 1 update (dedup second), got %d", updateCount)
+	}
+}
+
+func TestSlackTaskReporter_SkipsActivityWhenNoTarget(t *testing.T) {
+	task := newRunningTaskWithAnnotations("test-task", "uid-no-target", map[string]string{
+		AnnotationSlackReporting:   "enabled",
+		AnnotationSlackChannel:     "C123ABC",
+		AnnotationSlackThreadTS:    "1234567890.123456",
+		AnnotationSlackReportPhase: "accepted",
+	})
+
+	updateCalled := false
+	reporter := &fakeSlackReporter{
+		updateFn: func(ctx context.Context, channel, messageTS string, msg SlackMessage) error {
+			updateCalled = true
+			return nil
+		},
+	}
+
+	// No activity target set — accepted message not yet posted.
+	tr := &SlackTaskReporter{
+		Reporter:       reporter,
+		ActivityReader: &fakeActivityReader{text: "Reading..."},
+	}
+
+	tr.UpdateActivityIndicator(context.Background(), task)
+
+	if updateCalled {
+		t.Error("expected no update when no activity target is set")
+	}
+}
+
+func TestSlackTaskReporter_ActivitySkipPaths(t *testing.T) {
+	tests := []struct {
+		name   string
+		task   *kelosv1alpha1.Task
+		reader ActivityReader
+	}{
+		{
+			name: "no activity reader",
+			task: newRunningTaskWithAnnotations("t", "uid-1", map[string]string{
+				AnnotationSlackReporting:   "enabled",
+				AnnotationSlackChannel:     "C123",
+				AnnotationSlackThreadTS:    "1234.5678",
+				AnnotationSlackReportPhase: "accepted",
+			}),
+			reader: nil,
+		},
+		{
+			name: "reporting not enabled",
+			task: newRunningTaskWithAnnotations("t", "uid-2", map[string]string{
+				AnnotationSlackChannel:     "C123",
+				AnnotationSlackThreadTS:    "1234.5678",
+				AnnotationSlackReportPhase: "accepted",
+			}),
+			reader: &fakeActivityReader{text: "something"},
+		},
+		{
+			name: "not yet accepted",
+			task: newRunningTaskWithAnnotations("t", "uid-3", map[string]string{
+				AnnotationSlackReporting: "enabled",
+				AnnotationSlackChannel:   "C123",
+				AnnotationSlackThreadTS:  "1234.5678",
+			}),
+			reader: &fakeActivityReader{text: "something"},
+		},
+		{
+			name: "no pod name",
+			task: func() *kelosv1alpha1.Task {
+				t := newRunningTaskWithAnnotations("t", "uid-4", map[string]string{
+					AnnotationSlackReporting:   "enabled",
+					AnnotationSlackChannel:     "C123",
+					AnnotationSlackThreadTS:    "1234.5678",
+					AnnotationSlackReportPhase: "accepted",
+				})
+				t.Status.PodName = ""
+				return t
+			}(),
+			reader: &fakeActivityReader{text: "something"},
+		},
+		{
+			name: "empty activity text",
+			task: newRunningTaskWithAnnotations("t", "uid-5", map[string]string{
+				AnnotationSlackReporting:   "enabled",
+				AnnotationSlackChannel:     "C123",
+				AnnotationSlackThreadTS:    "1234.5678",
+				AnnotationSlackReportPhase: "accepted",
+			}),
+			reader: &fakeActivityReader{text: ""},
+		},
+		{
+			name: "task not running",
+			task: func() *kelosv1alpha1.Task {
+				t := newRunningTaskWithAnnotations("t", "uid-6", map[string]string{
+					AnnotationSlackReporting:   "enabled",
+					AnnotationSlackChannel:     "C123",
+					AnnotationSlackThreadTS:    "1234.5678",
+					AnnotationSlackReportPhase: "accepted",
+				})
+				t.Status.Phase = kelosv1alpha1.TaskPhasePending
+				return t
+			}(),
+			reader: &fakeActivityReader{text: "something"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			updateCalled := false
+			reporter := &fakeSlackReporter{
+				updateFn: func(ctx context.Context, channel, messageTS string, msg SlackMessage) error {
+					updateCalled = true
+					return nil
+				},
+			}
+
+			tr := &SlackTaskReporter{
+				Reporter:       reporter,
+				ActivityReader: tt.reader,
+			}
+			// Seed a target so skip is due to the test condition, not missing target.
+			if tt.reader != nil {
+				tr.setActivityTarget(tt.task.UID, "ts-seed", SlackMessage{Text: "base"})
+			}
+
+			tr.UpdateActivityIndicator(context.Background(), tt.task)
+
+			if updateCalled {
+				t.Error("expected no Slack API call")
+			}
+		})
+	}
+}
+
+func TestSlackTaskReporter_AcceptedPostSetsActivityTarget(t *testing.T) {
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-task",
+			Namespace: "default",
+			UID:       "uid-accepted-target",
+			Annotations: map[string]string{
+				AnnotationSlackReporting: "enabled",
+				AnnotationSlackChannel:   "C123ABC",
+				AnnotationSlackThreadTS:  "1234567890.123456",
+			},
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   "claude-code",
+			Prompt: "test",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeOAuth,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+			},
+		},
+		Status: kelosv1alpha1.TaskStatus{
+			Phase: kelosv1alpha1.TaskPhasePending,
+		},
+	}
+
+	cl := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(task).Build()
+
+	reporter := &fakeSlackReporter{
+		postFn: func(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error) {
+			return "1234567890.accepted", nil
+		},
+	}
+
+	tr := &SlackTaskReporter{
+		Client:   cl,
+		Reporter: reporter,
+	}
+
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	tr.mu.Lock()
+	state := tr.activity[task.UID]
+	tr.mu.Unlock()
+	if state == nil {
+		t.Fatal("expected activity state to be set after accepted post")
+	}
+	if state.MessageTS != "1234567890.accepted" {
+		t.Errorf("messageTS = %q, want accepted TS", state.MessageTS)
+	}
+}
+
+func TestSlackTaskReporter_ProgressPostUpdatesActivityTarget(t *testing.T) {
+	task := newRunningTaskWithAnnotations("test-task", "uid-progress-target", map[string]string{
+		AnnotationSlackReporting:   "enabled",
+		AnnotationSlackChannel:     "C123ABC",
+		AnnotationSlackThreadTS:    "1234567890.123456",
+		AnnotationSlackReportPhase: "accepted",
+	})
+
+	cl := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(task).Build()
+
+	postCount := 0
+	reporter := &fakeSlackReporter{
+		postFn: func(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error) {
+			postCount++
+			return fmt.Sprintf("ts-progress-%d", postCount), nil
+		},
+	}
+
+	tr := &SlackTaskReporter{
+		Client:         cl,
+		Reporter:       reporter,
+		ProgressReader: &fakeProgressReader{text: "I found the issue."},
+	}
+	// Seed initial target (from accepted post).
+	tr.setActivityTarget(task.UID, "ts-accepted", SlackMessage{Text: "accepted"})
+
+	// Trigger progress update.
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Activity target should now point to the progress message.
+	tr.mu.Lock()
+	state := tr.activity[task.UID]
+	tr.mu.Unlock()
+	if state == nil {
+		t.Fatal("expected activity state after progress post")
+	}
+	if state.MessageTS != "ts-progress-1" {
+		t.Errorf("messageTS = %q, want progress TS", state.MessageTS)
+	}
+	// LastText should be reset so activity updates on the new message.
+	if state.LastText != "" {
+		t.Errorf("LastText = %q, want empty (reset for new target)", state.LastText)
+	}
+}
+
+func TestSlackTaskReporter_SweepClearsActivityState(t *testing.T) {
+	reporter := &fakeSlackReporter{}
+	tr := &SlackTaskReporter{Reporter: reporter}
+
+	// Seed activity state.
+	tr.mu.Lock()
+	tr.activity = map[types.UID]*activityState{
+		"uid-active":  {MessageTS: "ts-1", LastText: "Working..."},
+		"uid-deleted": {MessageTS: "ts-2", LastText: "Reading..."},
+	}
+	tr.mu.Unlock()
+
+	tr.SweepProgressCache(map[types.UID]bool{"uid-active": true})
+
+	tr.mu.Lock()
+	defer tr.mu.Unlock()
+	if _, ok := tr.activity["uid-active"]; !ok {
+		t.Error("expected active UID to remain in activity cache")
+	}
+	if _, ok := tr.activity["uid-deleted"]; ok {
+		t.Error("expected deleted UID to be swept from activity cache")
+	}
+}
+
+func TestAppendActivityContext_AppendsToExistingContext(t *testing.T) {
+	baseMsg := FormatSlackTransitionMessage("accepted", "test-task", "", nil)
+	result := appendActivityContext(baseMsg, "Reading `main.go`...")
+
+	// Should have same number of blocks (activity appended to existing context block).
+	if len(result.Blocks) != len(baseMsg.Blocks) {
+		t.Fatalf("block count = %d, want %d (appended to existing context)", len(result.Blocks), len(baseMsg.Blocks))
+	}
+
+	// Last block should be a context block with 2 elements (task name + activity).
+	lastBlock := result.Blocks[len(result.Blocks)-1]
+	ctx, ok := lastBlock.(*slack.ContextBlock)
+	if !ok {
+		t.Fatalf("last block: expected *ContextBlock, got %T", lastBlock)
+	}
+	if len(ctx.ContextElements.Elements) != 2 {
+		t.Errorf("context elements = %d, want 2", len(ctx.ContextElements.Elements))
+	}
+}
+
+func TestAppendActivityContext_AddsNewContextBlock(t *testing.T) {
+	// Message with no context block at the end.
+	baseMsg := SlackMessage{
+		Text:   "Just text",
+		Blocks: []slack.Block{slack.NewSectionBlock(slack.NewTextBlockObject(slack.PlainTextType, "hello", false, false), nil, nil)},
+	}
+	result := appendActivityContext(baseMsg, "Thinking...")
+
+	if len(result.Blocks) != 2 {
+		t.Fatalf("block count = %d, want 2 (section + new context)", len(result.Blocks))
+	}
+
+	ctx, ok := result.Blocks[1].(*slack.ContextBlock)
+	if !ok {
+		t.Fatalf("block 1: expected *ContextBlock, got %T", result.Blocks[1])
+	}
+	if len(ctx.ContextElements.Elements) != 1 {
+		t.Errorf("context elements = %d, want 1", len(ctx.ContextElements.Elements))
+	}
+}
+
+func TestAppendActivityContext_SkipsTextOnlyMessages(t *testing.T) {
+	baseMsg := SlackMessage{Text: "I found the issue in the config.", Blocks: nil}
+	result := appendActivityContext(baseMsg, "Reading `main.go`...")
+
+	// Should return the base message unchanged — no blocks added.
+	if len(result.Blocks) != 0 {
+		t.Fatalf("block count = %d, want 0 (text-only message unchanged)", len(result.Blocks))
+	}
+	if result.Text != baseMsg.Text {
+		t.Errorf("text changed: got %q", result.Text)
+	}
+}
+
+func TestAppendActivityContext_DoesNotMutateBase(t *testing.T) {
+	baseMsg := FormatSlackTransitionMessage("accepted", "test-task", "", nil)
+	originalBlockCount := len(baseMsg.Blocks)
+
+	_ = appendActivityContext(baseMsg, "Reading...")
+
+	if len(baseMsg.Blocks) != originalBlockCount {
+		t.Errorf("base message mutated: blocks went from %d to %d", originalBlockCount, len(baseMsg.Blocks))
 	}
 }

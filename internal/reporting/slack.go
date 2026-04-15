@@ -57,6 +57,21 @@ func (r *SlackReporter) PostThreadReply(ctx context.Context, channel, threadTS s
 	return ts, nil
 }
 
+// UpdateMessage updates an existing Slack message in place.
+func (r *SlackReporter) UpdateMessage(ctx context.Context, channel, messageTS string, msg SlackMessage) error {
+	opts := []slack.MsgOption{
+		slack.MsgOptionText(msg.Text, false),
+	}
+	if len(msg.Blocks) > 0 {
+		opts = append(opts, slack.MsgOptionBlocks(msg.Blocks...))
+	}
+	_, _, _, err := r.api().UpdateMessageContext(ctx, channel, messageTS, opts...)
+	if err != nil {
+		return fmt.Errorf("updating Slack message: %w", err)
+	}
+	return nil
+}
+
 // contextBlock returns a context block displaying the task name.
 func contextBlock(taskName string) *slack.ContextBlock {
 	return slack.NewContextBlock("",

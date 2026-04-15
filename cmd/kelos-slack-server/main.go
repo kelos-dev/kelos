@@ -41,12 +41,14 @@ func main() {
 		probeAddr            string
 		enableLeaderElection bool
 		reportingInterval    time.Duration
+		activityInterval     time.Duration
 	)
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false, "Enable leader election for controller manager.")
 	flag.DurationVar(&reportingInterval, "reporting-interval", 30*time.Second, "How often to run the Slack reporting cycle.")
+	flag.DurationVar(&activityInterval, "activity-interval", 5*time.Second, "How often to update Slack activity indicators.")
 
 	opts, applyVerbosity := logging.SetupZapOptions(flag.CommandLine)
 	flag.Parse()
@@ -105,14 +107,33 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Build the shared SlackTaskReporter used by both the reporting and
+	// activity loops. Sharing the instance ensures activity state is
+	// correctly cleared when a progress snapshot is posted.
+	slackReporter := &reporting.SlackTaskReporter{
+		Client:         mgr.GetClient(),
+		Reporter:       &reporting.SlackReporter{BotToken: botToken},
+		ProgressReader: &reporting.DefaultProgressReader{Clientset: clientset},
+		ActivityReader: &reporting.DefaultActivityReader{Clientset: clientset},
+	}
+
 	// Register reporting loop as a leader-elected runnable.
 	if err := mgr.Add(&reportingRunnable{
-		client:    mgr.GetClient(),
-		clientset: clientset,
-		botToken:  botToken,
-		interval:  reportingInterval,
+		client:   mgr.GetClient(),
+		reporter: slackReporter,
+		interval: reportingInterval,
 	}); err != nil {
 		setupLog.Error(err, "Unable to register reporting loop with manager")
+		os.Exit(1)
+	}
+
+	// Register activity indicator loop as a leader-elected runnable.
+	if err := mgr.Add(&activityRunnable{
+		client:   mgr.GetClient(),
+		reporter: slackReporter,
+		interval: activityInterval,
+	}); err != nil {
+		setupLog.Error(err, "Unable to register activity loop with manager")
 		os.Exit(1)
 	}
 
@@ -152,30 +173,40 @@ func (r *slackRunnable) NeedLeaderElection() bool { return true }
 
 // reportingRunnable wraps the reporting loop as a leader-elected manager.Runnable.
 type reportingRunnable struct {
-	client    client.Client
-	clientset kubernetes.Interface
-	botToken  string
-	interval  time.Duration
+	client   client.Client
+	reporter *reporting.SlackTaskReporter
+	interval time.Duration
 }
 
 func (r *reportingRunnable) Start(ctx context.Context) error {
 	setupLog.Info("Starting Slack reporting loop", "interval", r.interval)
-	runReportingLoop(ctx, r.client, r.clientset, r.botToken, r.interval)
+	runReportingLoop(ctx, r.client, r.reporter, r.interval)
 	return nil
 }
 
 func (r *reportingRunnable) NeedLeaderElection() bool { return true }
 
+// activityRunnable wraps the activity indicator loop as a leader-elected
+// manager.Runnable. It shares the SlackTaskReporter with the reporting loop.
+type activityRunnable struct {
+	client   client.Client
+	reporter *reporting.SlackTaskReporter
+	interval time.Duration
+}
+
+func (r *activityRunnable) Start(ctx context.Context) error {
+	setupLog.Info("Starting Slack activity indicator loop", "interval", r.interval)
+	runActivityLoop(ctx, r.client, r.reporter, r.interval)
+	return nil
+}
+
+func (r *activityRunnable) NeedLeaderElection() bool { return true }
+
 // runReportingLoop periodically reports Slack task status for ALL Slack-annotated
 // Tasks cluster-wide. This replaces the per-TaskSpawner reporting that previously
 // ran in each spawner pod.
-func runReportingLoop(ctx context.Context, cl client.Client, cs kubernetes.Interface, botToken string, interval time.Duration) {
+func runReportingLoop(ctx context.Context, cl client.Client, slackReporter *reporting.SlackTaskReporter, interval time.Duration) {
 	log := ctrl.Log.WithName("slack-reporter")
-	slackReporter := &reporting.SlackTaskReporter{
-		Client:         cl,
-		Reporter:       &reporting.SlackReporter{BotToken: botToken},
-		ProgressReader: &reporting.DefaultProgressReader{Clientset: cs},
-	}
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -214,4 +245,30 @@ func runSlackReportingCycle(ctx context.Context, cl client.Client, reporter *rep
 	reporter.SweepProgressCache(activeUIDs)
 
 	return nil
+}
+
+// runActivityLoop periodically updates activity indicators for running tasks.
+// It runs on a faster cadence than the reporting loop.
+func runActivityLoop(ctx context.Context, cl client.Client, reporter *reporting.SlackTaskReporter, interval time.Duration) {
+	log := ctrl.Log.WithName("slack-activity")
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			var taskList kelosv1alpha1.TaskList
+			if err := cl.List(ctx, &taskList, &client.ListOptions{}); err != nil {
+				log.Error(err, "Listing tasks for activity update")
+				continue
+			}
+
+			for i := range taskList.Items {
+				reporter.UpdateActivityIndicator(ctx, &taskList.Items[i])
+			}
+		}
+	}
 }

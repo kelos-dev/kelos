@@ -2,28 +2,19 @@ name: CI
 
 on:
   push:
-    branches: [prod]
+    branches: [prod, main]
   pull_request:
-    branches: [prod]
-    types: [opened, synchronize, reopened, labeled]
+    branches: [prod, main]
+    types: [opened, synchronize, reopened]
   merge_group:
   workflow_dispatch:
-    inputs:
-      ok-to-test:
-        description: Run e2e tests
-        type: boolean
-        default: false
 
 concurrency:
-  group: >-
-    ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}${{
-      github.event.action == 'labeled' && '-labeled' || ''
-    }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
   build:
-    if: github.event.action != 'labeled' || github.event.label.name == 'ok-to-test'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,7 +27,6 @@ jobs:
         run: make build
 
   verify:
-    if: github.event.action != 'labeled' || github.event.label.name == 'ok-to-test'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,7 +39,6 @@ jobs:
         run: make verify
 
   test:
-    if: github.event.action != 'labeled' || github.event.label.name == 'ok-to-test'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -62,7 +51,6 @@ jobs:
         run: make test
 
   test-integration:
-    if: github.event.action != 'labeled' || github.event.label.name == 'ok-to-test'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -75,8 +63,6 @@ jobs:
         run: make test-integration
 
   test-e2e:
-    if: >-
-      github.event_name == 'push' || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.ok-to-test) || (contains(github.event.pull_request.labels.*.name, 'ok-to-test') && github.event.pull_request.head.repo.full_name == github.repository)
     permissions:
       contents: read
       issues: read

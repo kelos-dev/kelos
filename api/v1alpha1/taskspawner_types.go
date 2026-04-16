@@ -51,6 +51,12 @@ type When struct {
 	// the HMAC secret is read from the <SOURCE>_WEBHOOK_SECRET env var.
 	// +optional
 	GenericWebhook *GenericWebhook `json:"webhook,omitempty"`
+
+	// Slack discovers work items from Slack messages via Socket Mode.
+	// The centralized kelos-slack-server connects to Slack via an outbound
+	// WebSocket (no ingress required) and routes messages to matching agents.
+	// +optional
+	Slack *Slack `json:"slack,omitempty"`
 }
 
 // Cron triggers task spawning on a cron schedule.
@@ -481,6 +487,29 @@ type GenericWebhookFilter struct {
 	// Mutually exclusive with Value.
 	// +optional
 	Pattern string `json:"pattern,omitempty"`
+}
+
+// Slack triggers task spawning from Slack messages via the centralized
+// kelos-slack-server. The server connects to Slack via Socket Mode (outbound
+// WebSocket — no ingress required) and routes messages to matching
+// TaskSpawners. Authentication tokens (SLACK_BOT_TOKEN, SLACK_APP_TOKEN)
+// are configured on the server, not per-TaskSpawner.
+//
+// The bot must be invited to each channel it should listen in.
+type Slack struct {
+	// Channels optionally restricts which Slack channels the bot listens in.
+	// Values are channel IDs (e.g., "C0123456789"). When empty, the bot
+	// listens in every channel it has been invited to.
+	// +optional
+	Channels []string `json:"channels,omitempty"`
+
+	// MentionUserIDs optionally requires that the message @-mentions at least
+	// one of the specified Slack user IDs (e.g., "U0123456789"). In Slack,
+	// mentions appear as <@USER_ID> or <@USER_ID|display-name> in the message
+	// text. When empty, no mention is required. This filter is bypassed for
+	// slash commands but still required for thread replies.
+	// +optional
+	MentionUserIDs []string `json:"mentionUserIDs,omitempty"`
 }
 
 // TaskTemplateMetadata holds optional labels and annotations for spawned Tasks.

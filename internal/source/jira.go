@@ -45,11 +45,15 @@ type jiraIssue struct {
 }
 
 type jiraIssueFields struct {
-	Summary   string         `json:"summary"`
-	Status    *jiraStatus    `json:"status,omitempty"`
-	Labels    []string       `json:"labels"`
-	Comment   *jiraComments  `json:"comment,omitempty"`
-	IssueType *jiraIssueType `json:"issuetype,omitempty"`
+	Summary string `json:"summary"`
+	// Description is a plain string for Jira Data Center/Server and an
+	// Atlassian Document Format object for Jira Cloud; commentBodyToString
+	// handles both.
+	Description interface{}    `json:"description,omitempty"`
+	Status      *jiraStatus    `json:"status,omitempty"`
+	Labels      []string       `json:"labels"`
+	Comment     *jiraComments  `json:"comment,omitempty"`
+	IssueType   *jiraIssueType `json:"issuetype,omitempty"`
 }
 
 type jiraStatus struct {
@@ -97,6 +101,7 @@ func (s *JiraSource) Discover(ctx context.Context) ([]WorkItem, error) {
 			ID:       issue.Key,
 			Number:   number,
 			Title:    issue.Fields.Summary,
+			Body:     commentBodyToString(issue.Fields.Description),
 			URL:      fmt.Sprintf("%s/browse/%s", strings.TrimRight(s.BaseURL, "/"), issue.Key),
 			Labels:   issue.Fields.Labels,
 			Comments: comments,
@@ -160,7 +165,7 @@ func (s *JiraSource) fetchIssuesPage(ctx context.Context, startAt int) (*jiraSea
 	params.Set("jql", s.buildJQL())
 	params.Set("maxResults", strconv.Itoa(maxJiraResults))
 	params.Set("startAt", strconv.Itoa(startAt))
-	params.Set("fields", "summary,status,labels,comment,issuetype")
+	params.Set("fields", "summary,description,status,labels,comment,issuetype")
 	u.RawQuery = params.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)

@@ -283,7 +283,7 @@ func (f *Framework) WaitForJobCompletion(name string) {
 			}
 		}
 		return false
-	}, 5*time.Minute, 10*time.Second).Should(BeTrue())
+	}, 5*time.Minute, 2*time.Second).Should(BeTrue())
 }
 
 // WaitForDeploymentAvailable waits for a Deployment to reach the available condition.
@@ -299,7 +299,7 @@ func (f *Framework) WaitForDeploymentAvailable(name string) {
 			}
 		}
 		return false
-	}, 2*time.Minute, 10*time.Second).Should(BeTrue())
+	}, 2*time.Minute, 2*time.Second).Should(BeTrue())
 }
 
 // WaitForCronJobCreated waits for a CronJob with the given name to appear.
@@ -307,7 +307,7 @@ func (f *Framework) WaitForCronJobCreated(name string) {
 	Eventually(func() error {
 		_, err := f.Clientset.BatchV1().CronJobs(f.Namespace).Get(context.TODO(), name, metav1.GetOptions{})
 		return err
-	}, 2*time.Minute, 10*time.Second).Should(Succeed())
+	}, 2*time.Minute, 2*time.Second).Should(Succeed())
 }
 
 // GetTaskPhase returns the phase of a Task.

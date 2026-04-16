@@ -51,6 +51,12 @@ type When struct {
 	// the HMAC secret is read from the <SOURCE>_WEBHOOK_SECRET env var.
 	// +optional
 	GenericWebhook *GenericWebhook `json:"webhook,omitempty"`
+
+	// Slack discovers work items from Slack messages via Socket Mode.
+	// The centralized kelos-slack-server connects to Slack via an outbound
+	// WebSocket (no ingress required) and routes messages to matching agents.
+	// +optional
+	Slack *Slack `json:"slack,omitempty"`
 }
 
 // Cron triggers task spawning on a cron schedule.
@@ -517,6 +523,50 @@ type GenericWebhookFilter struct {
 	// Mutually exclusive with Value.
 	// +optional
 	Pattern string `json:"pattern,omitempty"`
+}
+
+// Slack triggers task spawning from Slack messages via the centralized
+// kelos-slack-server. The server connects to Slack via Socket Mode (outbound
+// WebSocket — no ingress required) and routes messages to matching
+// TaskSpawners. Authentication tokens (SLACK_BOT_TOKEN, SLACK_APP_TOKEN)
+// are configured on the server, not per-TaskSpawner.
+//
+// The bot must be invited to each channel it should listen in; the Channels
+// field is a post-delivery filter, not a privacy scope.
+//
+// Bot mention (@bot) is implicitly required by default. The handler knows its
+// own bot user ID from the Slack auth response. When Triggers are configured,
+// each trigger's regex pattern is AND'd with the implicit mention requirement
+// (unless MentionOptional is set). Multiple triggers use OR semantics.
+// Empty triggers = every bot mention fires.
+type Slack struct {
+	// Channels optionally restricts which Slack channels the bot listens in.
+	// Values are channel IDs (e.g., "C0123456789"). When empty, the bot
+	// listens in every channel it has been invited to.
+	// +optional
+	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:Pattern=`^[CG][A-Z0-9]{8,}$`
+	Channels []string `json:"channels,omitempty"`
+
+	// Triggers define regex patterns that must match the message text.
+	// Bot mention is implicitly required unless MentionOptional is set.
+	// Multiple triggers use OR semantics. When empty, every bot mention fires.
+	// +optional
+	// +kubebuilder:validation:MaxItems=8
+	Triggers []SlackTrigger `json:"triggers,omitempty"`
+}
+
+// SlackTrigger defines a regex pattern trigger for Slack messages.
+type SlackTrigger struct {
+	// Pattern is a Go RE2 regex matched against message text (unanchored).
+	// +optional
+	// +kubebuilder:validation:MaxLength=256
+	Pattern string `json:"pattern,omitempty"`
+
+	// MentionOptional, when true, fires the trigger on pattern match alone
+	// without requiring a bot @-mention.
+	// +optional
+	MentionOptional *bool `json:"mentionOptional,omitempty"`
 }
 
 // TaskTemplateMetadata holds optional labels and annotations for spawned Tasks.

@@ -102,3 +102,15 @@ webhookServer:
     tls:
       enabled: false
       certificateRefs: []
+slackServer:
+  enabled: false
+  image: ghcr.io/kelos-dev/kelos-slack-server
+  replicas: 1
+  secretName: ""
+  resources:
+    limits:
+      cpu: 500m
+      memory: 128Mi
+    requests:
+      cpu: 10m
+      memory: 64Mi

@@ -6623,6 +6623,45 @@ spec:
                     required:
                     - types
                     type: object
+                  slack:
+                    description: |-
+                      Slack discovers work items from Slack messages via Socket Mode.
+                      The centralized kelos-slack-server connects to Slack via an outbound
+                      WebSocket (no ingress required) and routes messages to matching agents.
+                    properties:
+                      channels:
+                        description: |-
+                          Channels optionally restricts which Slack channels the bot listens in.
+                          Values are channel IDs (e.g., "C0123456789"). When empty, the bot
+                          listens in every channel it has been invited to.
+                        items:
+                          pattern: ^[CG][A-Z0-9]{8,}$
+                          type: string
+                        maxItems: 64
+                        type: array
+                      triggers:
+                        description: |-
+                          Triggers define regex patterns that must match the message text.
+                          Bot mention is implicitly required unless MentionOptional is set.
+                          Multiple triggers use OR semantics. When empty, every bot mention fires.
+                        items:
+                          description: SlackTrigger defines a regex pattern trigger
+                            for Slack messages.
+                          properties:
+                            mentionOptional:
+                              description: |-
+                                MentionOptional, when true, fires the trigger on pattern match alone
+                                without requiring a bot @-mention.
+                              type: boolean
+                            pattern:
+                              description: Pattern is a Go RE2 regex matched against
+                                message text (unanchored).
+                              maxLength: 256
+                              type: string
+                          type: object
+                        maxItems: 8
+                        type: array
+                    type: object
                   webhook:
                     description: |-
                       GenericWebhook triggers task spawning from arbitrary HTTP POST payloads.

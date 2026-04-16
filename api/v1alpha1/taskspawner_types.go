@@ -279,10 +279,35 @@ type GitHubPullRequests struct {
 	// +optional
 	Reporting *GitHubReporting `json:"reporting,omitempty"`
 
+	// FilePatterns filters pull requests by changed file paths.
+	// Files matching Exclude are removed first; the PR passes when at least
+	// one remaining file matches Include (or Include is empty and files remain).
+	// Patterns use doublestar syntax (e.g., "*.go", "internal/**", "docs/**/*.md").
+	// When empty, no file-based filtering is applied.
+	// +optional
+	FilePatterns *FilePatterns `json:"filePatterns,omitempty"`
+
 	// PollInterval overrides spec.pollInterval for this source (e.g., "30s", "5m").
 	// When empty, spec.pollInterval is used.
 	// +optional
 	PollInterval string `json:"pollInterval,omitempty"`
+}
+
+// FilePatterns filters items by changed file paths using doublestar glob patterns.
+// Semantics: files matching any Exclude pattern are removed first, then the item
+// passes when at least one remaining file matches any Include pattern (or Include
+// is empty and at least one file remains after exclusion).
+type FilePatterns struct {
+	// Include requires at least one file (after Exclude removal) to match any of
+	// these glob patterns. When empty, the item passes as long as at least one
+	// file remains after Exclude filtering.
+	// +optional
+	Include []string `json:"include,omitempty"`
+
+	// Exclude removes matching files from consideration before Include runs.
+	// An item whose changed files all match Exclude is rejected.
+	// +optional
+	Exclude []string `json:"exclude,omitempty"`
 }
 
 // Jira discovers issues from a Jira project.
@@ -387,6 +412,13 @@ type GitHubWebhookFilter struct {
 	// ExcludeAuthors excludes events sent by any of these usernames.
 	// +optional
 	ExcludeAuthors []string `json:"excludeAuthors,omitempty"`
+
+	// FilePatterns filters events by changed file paths.
+	// For push events, file paths are extracted directly from the payload.
+	// For pull_request events, the file list is fetched from the GitHub API
+	// using the workspace's secretRef for authentication.
+	// +optional
+	FilePatterns *FilePatterns `json:"filePatterns,omitempty"`
 }
 
 // LinearWebhook configures webhook-driven task spawning from Linear events.

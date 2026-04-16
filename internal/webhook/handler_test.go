@@ -604,6 +604,72 @@ func TestServeHTTP_IssueCommentOnPR_EnrichesBranch(t *testing.T) {
 	}
 }
 
+func TestSpawnerNeedsChangedFiles(t *testing.T) {
+	tests := []struct {
+		name    string
+		spawner *kelosv1alpha1.TaskSpawner
+		want    bool
+	}{
+		{
+			name: "filePatterns in filter",
+			spawner: &kelosv1alpha1.TaskSpawner{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
+							Events: []string{"push"},
+							Filters: []kelosv1alpha1.GitHubWebhookFilter{
+								{
+									Event: "push",
+									FilePatterns: &kelosv1alpha1.FilePatterns{
+										Include: []string{"*.go"},
+									},
+								},
+							},
+						},
+					},
+					TaskTemplate: kelosv1alpha1.TaskTemplate{},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "no filePatterns in filters",
+			spawner: &kelosv1alpha1.TaskSpawner{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
+							Events: []string{"push"},
+						},
+					},
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
+						PromptTemplate: "{{.Title}}",
+					},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "nil GitHubWebhook",
+			spawner: &kelosv1alpha1.TaskSpawner{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When:         kelosv1alpha1.When{},
+					TaskTemplate: kelosv1alpha1.TaskTemplate{},
+				},
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := spawnerNeedsChangedFiles(tt.spawner)
+			if got != tt.want {
+				t.Errorf("spawnerNeedsChangedFiles() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // --- Linear HTTP handler tests ---
 
 // newLinearTestHandler creates a WebhookHandler for Linear backed by a fake client.

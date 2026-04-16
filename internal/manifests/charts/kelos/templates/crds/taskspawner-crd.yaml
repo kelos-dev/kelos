@@ -745,6 +745,30 @@ spec:
                         items:
                           type: string
                         type: array
+                      filePatterns:
+                        description: |-
+                          FilePatterns filters pull requests by changed file paths.
+                          Files matching Exclude are removed first; the PR passes when at least
+                          one remaining file matches Include (or Include is empty and files remain).
+                          Patterns use doublestar syntax (e.g., "*.go", "internal/**", "docs/**/*.md").
+                          When empty, no file-based filtering is applied.
+                        properties:
+                          exclude:
+                            description: |-
+                              Exclude removes matching files from consideration before Include runs.
+                              An item whose changed files all match Exclude is rejected.
+                            items:
+                              type: string
+                            type: array
+                          include:
+                            description: |-
+                              Include requires at least one file (after Exclude removal) to match any of
+                              these glob patterns. When empty, the item passes as long as at least one
+                              file remains after Exclude filtering.
+                            items:
+                              type: string
+                            type: array
+                        type: object
                       labels:
                         description: Labels filters pull requests by labels.
                         items:
@@ -882,6 +906,29 @@ spec:
                               items:
                                 type: string
                               type: array
+                            filePatterns:
+                              description: |-
+                                FilePatterns filters events by changed file paths.
+                                For push events, file paths are extracted directly from the payload.
+                                For pull_request events, the file list is fetched from the GitHub API
+                                using the workspace's secretRef for authentication.
+                              properties:
+                                exclude:
+                                  description: |-
+                                    Exclude removes matching files from consideration before Include runs.
+                                    An item whose changed files all match Exclude is rejected.
+                                  items:
+                                    type: string
+                                  type: array
+                                include:
+                                  description: |-
+                                    Include requires at least one file (after Exclude removal) to match any of
+                                    these glob patterns. When empty, the item passes as long as at least one
+                                    file remains after Exclude filtering.
+                                  items:
+                                    type: string
+                                  type: array
+                              type: object
                             labels:
                               description: Labels requires the issue/PR to have all
                                 of these labels.

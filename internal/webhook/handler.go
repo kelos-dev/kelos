@@ -49,12 +49,13 @@ type ParsedWebhook struct {
 
 // WebhookHandler handles webhook requests for a specific source type.
 type WebhookHandler struct {
-	client        client.Client
-	source        WebhookSource
-	log           logr.Logger
-	taskBuilder   *taskbuilder.TaskBuilder
-	secret        []byte
-	deliveryCache *DeliveryCache
+	client           client.Client
+	source           WebhookSource
+	log              logr.Logger
+	taskBuilder      *taskbuilder.TaskBuilder
+	secret           []byte
+	deliveryCache    *DeliveryCache
+	githubAPIBaseURL string
 }
 
 // DeliveryCache tracks processed webhook deliveries for idempotency.
@@ -130,12 +131,13 @@ func NewWebhookHandler(ctx context.Context, client client.Client, source Webhook
 	}
 
 	return &WebhookHandler{
-		client:        client,
-		source:        source,
-		log:           log,
-		taskBuilder:   taskBuilder,
-		secret:        secret,
-		deliveryCache: NewDeliveryCache(ctx),
+		client:           client,
+		source:           source,
+		log:              log,
+		taskBuilder:      taskBuilder,
+		secret:           secret,
+		deliveryCache:    NewDeliveryCache(ctx),
+		githubAPIBaseURL: os.Getenv("GITHUB_API_BASE_URL"),
 	}, nil
 }
 
@@ -385,6 +387,19 @@ func (h *WebhookHandler) processWebhook(ctx context.Context, eventType string, p
 			linearLabelsEnriched = true
 		}
 
+		// Lazily enrich ChangedFiles for PR events when a filter uses
+		// filePatterns. Push events already have ChangedFiles from the payload.
+		// Evaluating filters against incomplete data is unsafe, so skip
+		// the spawner entirely when file fetching fails.
+		if parsed.GitHub != nil && len(parsed.GitHub.ChangedFiles) == 0 && spawnerNeedsChangedFiles(spawner) {
+			files, fetchErr := h.enrichPRChangedFiles(ctx, spawner, parsed.GitHub)
+			if fetchErr != nil {
+				spawnerLog.Error(fetchErr, "Failed to fetch PR changed files, skipping spawner")
+				continue
+			}
+			parsed.GitHub.ChangedFiles = files
+		}
+
 		// Check if this webhook matches the spawner's filters
 		matches, err := h.matchesSpawner(spawner, eventType, parsed)
 		if err != nil {
@@ -551,6 +566,30 @@ func (h *WebhookHandler) createTask(ctx context.Context, spawner *v1alpha1.TaskS
 	}
 
 	return nil
+}
+
+// spawnerNeedsChangedFiles returns true if any webhook filter uses filePatterns,
+// meaning changed file data must be fetched for PR events.
+func spawnerNeedsChangedFiles(spawner *v1alpha1.TaskSpawner) bool {
+	ghw := spawner.Spec.When.GitHubWebhook
+	if ghw == nil {
+		return false
+	}
+	for _, f := range ghw.Filters {
+		if f.FilePatterns != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// enrichPRChangedFiles fetches changed files for PR-related webhook events
+// from the GitHub API. Returns nil for non-PR events.
+func (h *WebhookHandler) enrichPRChangedFiles(ctx context.Context, spawner *v1alpha1.TaskSpawner, eventData *GitHubEventData) ([]string, error) {
+	if eventData.Number == 0 || eventData.Repository == "" {
+		return nil, nil
+	}
+	return fetchPRChangedFiles(ctx, h.client, spawner, h.githubAPIBaseURL, eventData.RepositoryOwner, eventData.RepositoryName, eventData.Number)
 }
 
 // getGenericSpawners returns all TaskSpawners that have a generic webhook

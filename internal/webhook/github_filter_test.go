@@ -1028,6 +1028,224 @@ func TestMatchesGitHubEvent_RepositoryFiltering(t *testing.T) {
 	}
 }
 
+func TestExtractPushEventFiles(t *testing.T) {
+	payload := `{
+		"ref": "refs/heads/main",
+		"head_commit": {"id": "abc123"},
+		"sender": {"login": "user1"},
+		"commits": [
+			{
+				"id": "commit1",
+				"added": ["new_file.go"],
+				"removed": ["old_file.go"],
+				"modified": ["changed.go"]
+			},
+			{
+				"id": "commit2",
+				"added": ["another.go"],
+				"removed": [],
+				"modified": ["changed.go"]
+			}
+		],
+		"repository": {
+			"full_name": "owner/repo",
+			"name": "repo",
+			"owner": {"login": "owner"}
+		}
+	}`
+
+	eventData, err := ParseGitHubWebhook("push", []byte(payload))
+	if err != nil {
+		t.Fatalf("ParseGitHubWebhook() error = %v", err)
+	}
+
+	if len(eventData.ChangedFiles) == 0 {
+		t.Fatal("expected ChangedFiles to be populated for push events")
+	}
+
+	// changed.go should only appear once (deduplication)
+	count := 0
+	for _, f := range eventData.ChangedFiles {
+		if f == "changed.go" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected changed.go once, got %d times in %v", count, eventData.ChangedFiles)
+	}
+
+	want := map[string]bool{
+		"new_file.go": false,
+		"old_file.go": false,
+		"changed.go":  false,
+		"another.go":  false,
+	}
+	for _, f := range eventData.ChangedFiles {
+		want[f] = true
+	}
+	for f, found := range want {
+		if !found {
+			t.Errorf("expected %q in ChangedFiles", f)
+		}
+	}
+}
+
+func TestMatchesGitHubEvent_FilePatterns(t *testing.T) {
+	pushPayload := `{
+		"ref": "refs/heads/main",
+		"head_commit": {"id": "abc123"},
+		"sender": {"login": "user1"},
+		"commits": [
+			{
+				"id": "commit1",
+				"added": ["internal/handler.go"],
+				"removed": [],
+				"modified": ["docs/guide.md"]
+			}
+		],
+		"repository": {
+			"full_name": "owner/repo",
+			"name": "repo",
+			"owner": {"login": "owner"}
+		}
+	}`
+
+	tests := []struct {
+		name    string
+		spawner *v1alpha1.GitHubWebhook
+		want    bool
+	}{
+		{
+			name: "include matches go file",
+			spawner: &v1alpha1.GitHubWebhook{
+				Events: []string{"push"},
+				Filters: []v1alpha1.GitHubWebhookFilter{
+					{
+						Event: "push",
+						FilePatterns: &v1alpha1.FilePatterns{
+							Include: []string{"internal/**"},
+						},
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "include does not match",
+			spawner: &v1alpha1.GitHubWebhook{
+				Events: []string{"push"},
+				Filters: []v1alpha1.GitHubWebhookFilter{
+					{
+						Event: "push",
+						FilePatterns: &v1alpha1.FilePatterns{
+							Include: []string{"cmd/**"},
+						},
+					},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "exclude removes docs then internal file remains",
+			spawner: &v1alpha1.GitHubWebhook{
+				Events: []string{"push"},
+				Filters: []v1alpha1.GitHubWebhookFilter{
+					{
+						Event: "push",
+						FilePatterns: &v1alpha1.FilePatterns{
+							Exclude: []string{"docs/**"},
+						},
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "no filePatterns matches all",
+			spawner: &v1alpha1.GitHubWebhook{
+				Events: []string{"push"},
+				Filters: []v1alpha1.GitHubWebhookFilter{
+					{Event: "push"},
+				},
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseAndMatch(t, tt.spawner, "push", []byte(pushPayload))
+			if err != nil {
+				t.Fatalf("parseAndMatch() error = %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("MatchesGitHubEvent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractGitHubWorkItemNoChangedFiles(t *testing.T) {
+	eventData := &GitHubEventData{
+		Event: "issues",
+	}
+
+	vars := ExtractGitHubWorkItem(eventData)
+	if _, ok := vars["ChangedFiles"]; ok {
+		t.Error("ChangedFiles should not be set in template vars")
+	}
+}
+
+func TestMatchesWebhookFilePatterns(t *testing.T) {
+	tests := []struct {
+		name     string
+		files    []string
+		patterns *v1alpha1.FilePatterns
+		want     bool
+	}{
+		{
+			name:     "nil patterns matches all",
+			files:    []string{"any.go"},
+			patterns: nil,
+			want:     true,
+		},
+		{
+			name:  "exclude removes all files rejects",
+			files: []string{"docs/guide.md", "README.md"},
+			patterns: &v1alpha1.FilePatterns{
+				Exclude: []string{"docs/**", "*.md"},
+			},
+			want: false,
+		},
+		{
+			name:  "exclude does not remove all passes",
+			files: []string{"docs/guide.md", "main.go"},
+			patterns: &v1alpha1.FilePatterns{
+				Exclude: []string{"docs/**"},
+			},
+			want: true,
+		},
+		{
+			name:  "include with exclude - vendor excluded then include matches",
+			files: []string{"vendor/x.go", "main.go"},
+			patterns: &v1alpha1.FilePatterns{
+				Include: []string{"**/*.go"},
+				Exclude: []string{"vendor/**"},
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := matchesWebhookFilePatterns(tt.files, tt.patterns)
+			if got != tt.want {
+				t.Errorf("matchesWebhookFilePatterns() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseGitHubWebhook_IssueCommentOnPR_ExtractsPullRequestAPIURL(t *testing.T) {
 	payload := `{
 		"action": "created",

@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/bmatcuk/doublestar/v4"
 )
 
 const (
@@ -17,6 +19,56 @@ const (
 	reviewStateApproved         = "approved"
 	reviewStateChangesRequested = "changes_requested"
 )
+
+// MatchesFilePaths returns true when the given file list passes the
+// include/exclude filter with remove-then-match semantics.
+// Files matching any exclude pattern are removed first; the item passes when
+// at least one remaining file matches any include pattern (or include is empty
+// and at least one file remains after exclusion).
+// Both nil/empty include and exclude means everything passes.
+func MatchesFilePaths(files, include, exclude []string) bool {
+	if len(include) == 0 && len(exclude) == 0 {
+		return true
+	}
+	if len(files) == 0 {
+		return false
+	}
+
+	// Phase 1: remove files matching any exclude pattern.
+	var remaining []string
+	for _, file := range files {
+		excluded := false
+		for _, pattern := range exclude {
+			if match, _ := doublestar.Match(pattern, file); match {
+				excluded = true
+				break
+			}
+		}
+		if !excluded {
+			remaining = append(remaining, file)
+		}
+	}
+
+	// All files excluded → reject.
+	if len(remaining) == 0 {
+		return false
+	}
+
+	// Phase 2: if include is empty, any surviving file is sufficient.
+	if len(include) == 0 {
+		return true
+	}
+
+	// Phase 2: at least one remaining file must match an include pattern.
+	for _, file := range remaining {
+		for _, pattern := range include {
+			if match, _ := doublestar.Match(pattern, file); match {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 // GitHubPullRequestSource discovers pull requests from a GitHub repository.
 type GitHubPullRequestSource struct {
@@ -38,6 +90,8 @@ type GitHubPullRequestSource struct {
 	MinimumPermission string
 	Draft             *bool
 	PriorityLabels    []string
+	FileInclude       []string
+	FileExclude       []string
 }
 
 type githubUser struct {
@@ -84,6 +138,23 @@ func (s *GitHubPullRequestSource) Discover(ctx context.Context) ([]WorkItem, err
 	}
 
 	pullRequests = s.filterPullRequests(pullRequests)
+
+	// File-pattern filtering runs after cheap label/author/draft filters
+	// but before expensive per-PR review and comment fetches.
+	hasFileFilter := len(s.FileInclude) > 0 || len(s.FileExclude) > 0
+	if hasFileFilter {
+		var fileFiltered []githubPullRequest
+		for _, pr := range pullRequests {
+			files, err := s.fetchPRFiles(ctx, pr.Number)
+			if err != nil {
+				return nil, fmt.Errorf("fetching files for PR #%d: %w", pr.Number, err)
+			}
+			if MatchesFilePaths(files, s.FileInclude, s.FileExclude) {
+				fileFiltered = append(fileFiltered, pr)
+			}
+		}
+		pullRequests = fileFiltered
+	}
 
 	policy := githubCommentPolicy{
 		TriggerComment:    s.TriggerComment,
@@ -324,6 +395,39 @@ func (s *GitHubPullRequestSource) fetchPullRequestComments(ctx context.Context, 
 	}
 
 	return allComments, nil
+}
+
+type githubPullRequestFile struct {
+	Filename string `json:"filename"`
+}
+
+func (s *GitHubPullRequestSource) fetchPRFiles(ctx context.Context, number int) ([]string, error) {
+	var allFiles []githubPullRequestFile
+
+	pageURL := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/files?per_page=100",
+		s.baseURL(), s.Owner, s.Repo, number)
+
+	var page int
+	for page = 0; pageURL != "" && page < maxPages; page++ {
+		var files []githubPullRequestFile
+		nextURL, err := s.fetchGitHubPage(ctx, pageURL, &files)
+		if err != nil {
+			return nil, fmt.Errorf("fetching PR files: %w", err)
+		}
+		allFiles = append(allFiles, files...)
+		pageURL = nextURL
+	}
+
+	// A partial file list is not safe for include/exclude decisions.
+	if pageURL != "" && page >= maxPages {
+		return nil, fmt.Errorf("PR #%d has more than %d pages of changed files; file list truncated, refusing to evaluate filters on incomplete data", number, maxPages)
+	}
+
+	paths := make([]string, len(allFiles))
+	for i, f := range allFiles {
+		paths[i] = f.Filename
+	}
+	return paths, nil
 }
 
 func (s *GitHubPullRequestSource) fetchGitHubPage(ctx context.Context, pageURL string, out interface{}) (string, error) {

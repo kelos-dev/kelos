@@ -609,7 +609,7 @@ func buildSourceWithProxy(ctx context.Context, ts *kelosv1alpha1.TaskSpawner, ow
 			}
 		}
 
-		return &source.GitHubPullRequestSource{
+		src := &source.GitHubPullRequestSource{
 			Owner:             owner,
 			Repo:              repo,
 			Labels:            gh.Labels,
@@ -628,7 +628,12 @@ func buildSourceWithProxy(ctx context.Context, ts *kelosv1alpha1.TaskSpawner, ow
 			MinimumPermission: commentPolicy.MinimumPermission,
 			Draft:             gh.Draft,
 			PriorityLabels:    gh.PriorityLabels,
-		}, nil
+		}
+		if gh.FilePatterns != nil {
+			src.FileInclude = gh.FilePatterns.Include
+			src.FileExclude = gh.FilePatterns.Exclude
+		}
+		return src, nil
 	}
 
 	if ts.Spec.When.Jira != nil {

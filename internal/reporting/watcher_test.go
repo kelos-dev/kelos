@@ -1507,14 +1507,14 @@ func TestSlackTaskReporter_ActivitySkipPaths(t *testing.T) {
 			reader: &fakeActivityReader{text: "something"},
 		},
 		{
-			name: "empty activity text",
+			name: "no channel",
 			task: newRunningTaskWithAnnotations("t", "uid-5", map[string]string{
 				AnnotationSlackReporting:   "enabled",
-				AnnotationSlackChannel:     "C123",
+				AnnotationSlackChannel:     "",
 				AnnotationSlackThreadTS:    "1234.5678",
 				AnnotationSlackReportPhase: "accepted",
 			}),
-			reader: &fakeActivityReader{text: ""},
+			reader: &fakeActivityReader{text: "something"},
 		},
 		{
 			name: "task not running",
@@ -1681,6 +1681,42 @@ func TestSlackTaskReporter_SweepClearsActivityState(t *testing.T) {
 	}
 	if _, ok := tr.activity["uid-deleted"]; ok {
 		t.Error("expected deleted UID to be swept from activity cache")
+	}
+}
+
+func TestSlackTaskReporter_EmptyActivityUsesIdlePhrase(t *testing.T) {
+	task := newRunningTaskWithAnnotations("test-task", "uid-idle", map[string]string{
+		AnnotationSlackReporting:   "enabled",
+		AnnotationSlackChannel:     "C123ABC",
+		AnnotationSlackThreadTS:    "1234567890.123456",
+		AnnotationSlackReportPhase: "accepted",
+	})
+
+	var updates []slackReplyRecord
+	reporter := &fakeSlackReporter{
+		updateFn: func(ctx context.Context, channel, messageTS string, msg SlackMessage) error {
+			updates = append(updates, slackReplyRecord{method: "update", channel: channel, threadTS: messageTS, msg: msg})
+			return nil
+		},
+	}
+
+	baseMsg := FormatSlackTransitionMessage("accepted", task.Name, "", nil)
+	tr := &SlackTaskReporter{
+		Reporter:       reporter,
+		ActivityReader: &fakeActivityReader{text: ""}, // Empty — triggers idle phrase
+	}
+	tr.setActivityTarget(task.UID, "1234567890.accepted", baseMsg)
+
+	// First call should post an idle phrase.
+	tr.UpdateActivityIndicator(context.Background(), task)
+	if len(updates) != 1 {
+		t.Fatalf("expected 1 update, got %d", len(updates))
+	}
+
+	// Second call should post a different idle phrase (tick incremented).
+	tr.UpdateActivityIndicator(context.Background(), task)
+	if len(updates) != 2 {
+		t.Fatalf("expected 2 updates, got %d", len(updates))
 	}
 }
 

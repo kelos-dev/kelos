@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,38 @@ import (
 	"k8s.io/client-go/kubernetes"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
+
+// idlePhrases are shown when the agent is active but not executing a tool.
+// The slice is cycled through based on a hash of the task UID plus a tick
+// index so each task starts at a different position.
+var idlePhrases = []string{
+	"Thinking...",
+	"Pondering...",
+	"Reasoning...",
+	"Analyzing...",
+	"Working...",
+	"Processing...",
+	"Considering...",
+	"Evaluating...",
+	"Deliberating...",
+	"Reflecting...",
+	"Synthesizing...",
+	"Formulating...",
+	"Investigating...",
+	"Examining...",
+	"Contemplating...",
+}
+
+// IdlePhrase returns a rotating idle phrase for a given task UID and tick
+// index. The starting position is derived from the UID so different tasks
+// do not all begin with "Thinking...".
+func IdlePhrase(uid string, tick int) string {
+	h := fnv.New32a()
+	h.Write([]byte(uid))
+	n := len(idlePhrases)
+	offset := int(h.Sum32() % uint32(n))
+	return idlePhrases[(offset+tick%n)%n]
+}
 
 // ActivityReader reads a short activity string from a running task's pod logs.
 type ActivityReader interface {
@@ -93,8 +126,9 @@ func extractClaudeActivity(r io.Reader) string {
 					lastActivity = s
 				}
 			case "text":
-				// If the last block is text (thinking/responding), mark as thinking.
-				lastActivity = "Thinking..."
+				// Text block means the agent moved past any prior tool_use.
+				// Clear tool activity so the caller falls back to idle phrases.
+				lastActivity = ""
 			}
 		}
 	}
@@ -188,7 +222,7 @@ func extractCodexActivity(r io.Reader) string {
 						lastActivity = "Running command..."
 					}
 				case "agent_message":
-					lastActivity = "Thinking..."
+					lastActivity = ""
 				}
 			}
 		}
@@ -222,7 +256,7 @@ func extractGeminiActivity(r io.Reader) string {
 			}
 		case "message":
 			if event.Role == "assistant" {
-				lastActivity = "Thinking..."
+				lastActivity = ""
 			}
 		}
 	}
@@ -314,7 +348,7 @@ func extractOpenCodeActivity(r io.Reader) string {
 		case "step_start":
 			lastActivity = "Working..."
 		case "text":
-			lastActivity = "Thinking..."
+			lastActivity = ""
 		}
 	}
 

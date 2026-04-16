@@ -57,9 +57,9 @@ func TestExtractClaudeActivity_ToolUse(t *testing.T) {
 			want:  "Using CustomTool...",
 		},
 		{
-			name:  "text block returns thinking",
+			name:  "text block clears tool activity",
 			input: `{"type":"assistant","message":{"content":[{"type":"text","text":"Let me analyze this code."}]}}`,
-			want:  "Thinking...",
+			want:  "",
 		},
 		{
 			name: "last tool wins",
@@ -128,9 +128,9 @@ func TestExtractCodexActivity(t *testing.T) {
 			want:  "Running `npm test`...",
 		},
 		{
-			name:  "agent message",
+			name:  "agent message clears tool activity",
 			input: `{"type":"item.started","item":{"type":"agent_message"}}`,
-			want:  "Thinking...",
+			want:  "",
 		},
 		{
 			name:  "empty command",
@@ -181,9 +181,9 @@ func TestExtractGeminiActivity(t *testing.T) {
 			want:  "Editing `src/handler.go`...",
 		},
 		{
-			name:  "assistant message",
+			name:  "assistant message clears tool activity",
 			input: `{"type":"message","role":"assistant","content":"Let me check."}`,
-			want:  "Thinking...",
+			want:  "",
 		},
 		{
 			name:  "unknown tool",
@@ -219,9 +219,9 @@ func TestExtractOpenCodeActivity(t *testing.T) {
 			want:  "Working...",
 		},
 		{
-			name:  "text event",
+			name:  "text event clears tool activity",
 			input: `{"type":"text","text":"analyzing..."}`,
-			want:  "Thinking...",
+			want:  "",
 		},
 		{
 			name:  "empty input",
@@ -302,5 +302,47 @@ func TestClaudeToolActivity_EmptyToolName(t *testing.T) {
 	got := claudeToolActivity("", nil)
 	if got != "" {
 		t.Errorf("got %q, want empty", got)
+	}
+}
+
+func TestExtractClaudeActivity_TextClearsToolActivity(t *testing.T) {
+	// A tool_use followed by a text block should return empty, not the tool activity.
+	input := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/a/b.go"}}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"I see the issue now."}]}}`
+	got := ExtractActivity(strings.NewReader(input), "claude-code")
+	if got != "" {
+		t.Errorf("got %q, want empty (text should clear tool activity)", got)
+	}
+}
+
+func TestIdlePhrase_Rotates(t *testing.T) {
+	// Successive ticks should produce different phrases.
+	a := IdlePhrase("test-uid", 0)
+	b := IdlePhrase("test-uid", 1)
+	if a == b {
+		t.Errorf("expected different phrases for consecutive ticks, got %q both times", a)
+	}
+}
+
+func TestIdlePhrase_DifferentUIDs(t *testing.T) {
+	// Different UIDs at the same tick should (usually) start at different offsets.
+	a := IdlePhrase("uid-aaa", 0)
+	b := IdlePhrase("uid-bbb", 0)
+	if a == b {
+		t.Logf("same phrase for different UIDs at tick 0: %q (possible but unlikely)", a)
+	}
+}
+
+func TestIdlePhrase_ValidPhrase(t *testing.T) {
+	phrase := IdlePhrase("any-uid", 42)
+	found := false
+	for _, p := range idlePhrases {
+		if p == phrase {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("IdlePhrase returned %q which is not in idlePhrases", phrase)
 	}
 }

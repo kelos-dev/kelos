@@ -195,6 +195,8 @@ type activityState struct {
 	BaseMsg SlackMessage
 	// LastText is the last activity string appended, used for deduplication.
 	LastText string
+	// Tick is incremented on each activity cycle for rotating idle phrases.
+	Tick int
 }
 
 // SlackTaskReporter watches Tasks and reports status changes to Slack
@@ -453,9 +455,6 @@ func (tr *SlackTaskReporter) UpdateActivityIndicator(ctx context.Context, task *
 	}
 
 	text := tr.ActivityReader.ReadActivity(ctx, task.Namespace, podName, containerName, task.Spec.Type)
-	if text == "" {
-		return
-	}
 
 	tr.mu.Lock()
 	state := tr.activity[task.UID]
@@ -463,6 +462,12 @@ func (tr *SlackTaskReporter) UpdateActivityIndicator(ctx context.Context, task *
 		// No target message yet — the accepted message hasn't been posted.
 		tr.mu.Unlock()
 		return
+	}
+	tick := state.Tick
+	state.Tick++
+	if text == "" {
+		// No tool activity — use a rotating idle phrase.
+		text = IdlePhrase(string(task.UID), tick)
 	}
 	if state.LastText == text {
 		tr.mu.Unlock()
@@ -474,6 +479,17 @@ func (tr *SlackTaskReporter) UpdateActivityIndicator(ctx context.Context, task *
 
 	// Rebuild the message: base blocks + activity context element.
 	msg := appendActivityContext(baseMsg, text)
+
+	// appendActivityContext is a no-op for text-only messages (no blocks).
+	// Skip the API call to avoid wasting Slack rate-limit quota.
+	if len(msg.Blocks) == 0 {
+		tr.mu.Lock()
+		if s := tr.activity[task.UID]; s != nil && s.MessageTS == messageTS {
+			s.LastText = text
+		}
+		tr.mu.Unlock()
+		return
+	}
 
 	if err := tr.Reporter.UpdateMessage(ctx, channel, messageTS, msg); err != nil {
 		log.V(1).Info("Failed to update activity indicator", "task", task.Name, "error", err)

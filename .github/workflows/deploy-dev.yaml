@@ -107,6 +107,12 @@ jobs:
                 enabled: true
                 secretName: github-webhook-secret
                 githubSecretName: github-webhook-secret
+              generic:
+                enabled: true
+                extraEnv:
+                  - name: LINEAR_COMMENT_WEBHOOK_SECRET
+                    secretName: linear-comment-webhook-secret
+                    key: WEBHOOK_SECRET
             resources:
               requests:
                 cpu: 100m
@@ -118,9 +124,11 @@ jobs:
           kubectl rollout restart deployment -l kelos.dev/component=ghproxy -n "${KELOS_NAMESPACE}"
           kubectl rollout restart deployment -l kelos.dev/component=spawner -n "${KELOS_NAMESPACE}"
           kubectl rollout restart deployment/kelos-webhook-github -n kelos-system
+          kubectl rollout restart deployment/kelos-webhook-generic -n kelos-system
           kubectl rollout status deployment -l kelos.dev/component=ghproxy -n "${KELOS_NAMESPACE}" --timeout=120s
           kubectl rollout status deployment -l kelos.dev/component=spawner -n "${KELOS_NAMESPACE}" --timeout=120s
           kubectl rollout status deployment/kelos-webhook-github -n kelos-system --timeout=120s
+          kubectl rollout status deployment/kelos-webhook-generic -n kelos-system --timeout=120s
 
       - name: Apply PodMonitoring
         run: |
@@ -192,6 +200,23 @@ jobs:
               matchLabels:
                 app.kubernetes.io/name: kelos
                 app.kubernetes.io/component: webhook-github
+            endpoints:
+              - port: metrics
+                interval: 30s
+          ---
+          apiVersion: monitoring.googleapis.com/v1
+          kind: PodMonitoring
+          metadata:
+            name: kelos-webhook-generic
+            namespace: kelos-system
+            labels:
+              app.kubernetes.io/name: kelos
+              app.kubernetes.io/component: webhook-generic
+          spec:
+            selector:
+              matchLabels:
+                app.kubernetes.io/name: kelos
+                app.kubernetes.io/component: webhook-generic
             endpoints:
               - port: metrics
                 interval: 30s

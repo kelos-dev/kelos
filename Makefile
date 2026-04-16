@@ -15,6 +15,7 @@ endif
 
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.31.0
+E2E_PROCS ?= 1
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -52,7 +53,7 @@ test-integration: envtest ## Run integration tests (envtest).
 
 .PHONY: test-e2e
 test-e2e: ginkgo ## Run e2e tests (requires cluster and agent credentials).
-	$(GINKGO) -v --timeout 30m ./test/e2e/...
+	$(GINKGO) -v --timeout 30m --procs=$(E2E_PROCS) ./test/e2e/...
 
 .PHONY: update
 update: controller-gen yamlfmt shfmt ## Run all generators and formatters.

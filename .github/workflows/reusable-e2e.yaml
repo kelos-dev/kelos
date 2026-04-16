@@ -180,6 +180,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           E2E_SKILLS_GITHUB_TOKEN: ${{ steps.private-skills-token.outputs.token || secrets.E2E_SKILLS_GITHUB_TOKEN }}
           E2E_SESSION_WEB_TOKEN: kelos-e2e-token
+          E2E_PROCS: '4'
           KELOS_BIN: ${{ github.workspace }}/bin/kelos
         run: make test-e2e
 

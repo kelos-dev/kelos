@@ -1737,6 +1737,31 @@ spec:
                     required:
                     - types
                     type: object
+                  slack:
+                    description: |-
+                      Slack discovers work items from Slack messages via Socket Mode.
+                      The centralized kelos-slack-server connects to Slack via an outbound
+                      WebSocket (no ingress required) and routes messages to matching agents.
+                    properties:
+                      channels:
+                        description: |-
+                          Channels optionally restricts which Slack channels the bot listens in.
+                          Values are channel IDs (e.g., "C0123456789"). When empty, the bot
+                          listens in every channel it has been invited to.
+                        items:
+                          type: string
+                        type: array
+                      mentionUserIDs:
+                        description: |-
+                          MentionUserIDs optionally requires that the message @-mentions at least
+                          one of the specified Slack user IDs (e.g., "U0123456789"). In Slack,
+                          mentions appear as <@USER_ID> or <@USER_ID|display-name> in the message
+                          text. When empty, no mention is required. This filter is bypassed for
+                          slash commands but still required for thread replies.
+                        items:
+                          type: string
+                        type: array
+                    type: object
                   webhook:
                     description: |-
                       GenericWebhook triggers task spawning from arbitrary HTTP POST payloads.

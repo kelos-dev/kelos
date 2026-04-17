@@ -1,0 +1,13 @@
+apiVersion: kelos.dev/v1alpha1
+kind: Task
+metadata:
+  name: fix-frontend-bug
+spec:
+  type: claude-code
+  prompt: "Fix the CSS regression in the header component"
+  credentials:
+    type: apiKey
+    secretRef:
+      name: anthropic-key
+  workspaceRef:
+    name: my-app-with-setup

@@ -709,8 +709,8 @@ func TestInstallCommand_DryRun_Version(t *testing.T) {
 		}
 	})
 
-	if strings.Contains(output, ":latest") {
-		t.Errorf("expected all :latest tags to be replaced, got:\n%s", output[:min(len(output), 500)])
+	if imageLatestRe.MatchString(output) {
+		t.Errorf("expected all :latest image tags to be replaced, got:\n%s", output[:min(len(output), 500)])
 	}
 	if !strings.Contains(output, ":v0.5.0") {
 		t.Errorf("expected :v0.5.0 tags in dry-run output, got:\n%s", output[:min(len(output), 500)])

@@ -1,0 +1,17 @@
+apiVersion: kelos.dev/v1alpha1
+kind: Workspace
+metadata:
+  name: my-app-cached
+spec:
+  repo: https://github.com/your-org/your-repo.git
+  ref: main
+  secretRef:
+    name: github-token
+  volumes:
+    - name: npm-cache
+      mountPath: /workspace/repo/node_modules
+      readOnly: true
+      source:
+        persistentVolumeClaim:
+          claimName: shared-npm-cache
+          readOnly: true

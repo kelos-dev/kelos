@@ -1,0 +1,74 @@
+# Example: Content-aware PR review using filePatterns
+#
+# This TaskSpawner only reviews PRs that touch Go source files,
+# skipping vendor-only and documentation-only PRs.
+# Semantics: files matching exclude are removed first, then at least one
+# remaining file must match an include pattern.
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: go-code-reviewer
+spec:
+  when:
+    githubPullRequests:
+      state: open
+      # Only review PRs that change Go source files (excluding vendor)
+      filePatterns:
+        include:
+          - "**/*.go"
+        exclude:
+          - "vendor/**"
+  maxConcurrency: 2
+  taskTemplate:
+    type: claude-code
+    credentials:
+      type: oauth
+      secretRef:
+        name: claude-oauth-token
+    workspaceRef:
+      name: my-workspace
+    branch: "{{.Branch}}"
+    promptTemplate: |
+      Review PR #{{.Number}}: {{.Title}}
+
+      {{.Body}}
+
+      Please review the Go code changes. Focus on correctness,
+      error handling, and test coverage. Ignore vendor changes.
+    ttlSecondsAfterFinished: 3600
+---
+# Example: Skip documentation-only PRs
+#
+# This TaskSpawner reviews all PRs except those that only change
+# documentation files. With remove-then-match semantics, exclude
+# removes doc files first — if nothing remains, the PR is skipped.
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: code-reviewer-skip-docs
+spec:
+  when:
+    githubPullRequests:
+      state: open
+      labels:
+        - needs-review
+      filePatterns:
+        exclude:
+          - "docs/**"
+          - "*.md"
+          - "*.txt"
+          - "LICENSE"
+  taskTemplate:
+    type: claude-code
+    credentials:
+      type: oauth
+      secretRef:
+        name: claude-oauth-token
+    workspaceRef:
+      name: my-workspace
+    branch: "{{.Branch}}"
+    promptTemplate: |
+      Review PR #{{.Number}}: {{.Title}}
+
+      {{.Body}}
+    ttlSecondsAfterFinished: 3600

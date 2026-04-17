@@ -361,6 +361,14 @@ spec:
                           - name
                           type: object
                         type: array
+                      labels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          Labels specifies additional labels to apply to the Job and its Pod.
+                          These are merged with the built-in labels. If a user-specified label
+                          conflicts with a built-in one, the built-in takes precedence.
+                        type: object
                       nodeSelector:
                         additionalProperties:
                           type: string
@@ -737,6 +745,30 @@ spec:
                         items:
                           type: string
                         type: array
+                      filePatterns:
+                        description: |-
+                          FilePatterns filters pull requests by changed file paths.
+                          Files matching Exclude are removed first; the PR passes when at least
+                          one remaining file matches Include (or Include is empty and files remain).
+                          Patterns use doublestar syntax (e.g., "*.go", "internal/**", "docs/**/*.md").
+                          When empty, no file-based filtering is applied.
+                        properties:
+                          exclude:
+                            description: |-
+                              Exclude removes matching files from consideration before Include runs.
+                              An item whose changed files all match Exclude is rejected.
+                            items:
+                              type: string
+                            type: array
+                          include:
+                            description: |-
+                              Include requires at least one file (after Exclude removal) to match any of
+                              these glob patterns. When empty, the item passes as long as at least one
+                              file remains after Exclude filtering.
+                            items:
+                              type: string
+                            type: array
+                        type: object
                       labels:
                         description: Labels filters pull requests by labels.
                         items:
@@ -874,6 +906,29 @@ spec:
                               items:
                                 type: string
                               type: array
+                            filePatterns:
+                              description: |-
+                                FilePatterns filters events by changed file paths.
+                                For push events, file paths are extracted directly from the payload.
+                                For pull_request events, the file list is fetched from the GitHub API
+                                using the workspace's secretRef for authentication.
+                              properties:
+                                exclude:
+                                  description: |-
+                                    Exclude removes matching files from consideration before Include runs.
+                                    An item whose changed files all match Exclude is rejected.
+                                  items:
+                                    type: string
+                                  type: array
+                                include:
+                                  description: |-
+                                    Include requires at least one file (after Exclude removal) to match any of
+                                    these glob patterns. When empty, the item passes as long as at least one
+                                    file remains after Exclude filtering.
+                                  items:
+                                    type: string
+                                  type: array
+                              type: object
                             labels:
                               description: Labels requires the issue/PR to have all
                                 of these labels.
@@ -995,6 +1050,74 @@ spec:
                     required:
                     - types
                     type: object
+                  webhook:
+                    description: |-
+                      GenericWebhook triggers task spawning from arbitrary HTTP POST payloads.
+                      Any system that can send an HTTP POST with a JSON body can trigger
+                      tasks through this source. The URL path is /webhook/<source> and
+                      the HMAC secret is read from the <SOURCE>_WEBHOOK_SECRET env var.
+                    properties:
+                      fieldMapping:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          FieldMapping maps JSONPath expressions to WorkItem template variables.
+                          Each key is a template variable name (available as {{ "{{.Key}}" }} in
+                          promptTemplate and branch), and each value is a JSONPath expression
+                          evaluated against the request body.
+                          The "id" key is required — it provides the unique identifier used for
+                          deduplication and task naming.
+                        type: object
+                      filters:
+                        description: |-
+                          Filters define conditions that must ALL match for a webhook delivery
+                          to trigger a task (AND semantics across filters). Each filter extracts
+                          a field via JSONPath and matches it against an exact value or regex
+                          pattern. If empty, all deliveries trigger tasks.
+                        items:
+                          description: |-
+                            GenericWebhookFilter defines a condition for filtering generic webhook payloads.
+                            Exactly one of Value or Pattern must be set.
+                          properties:
+                            field:
+                              description: Field is a JSONPath expression selecting
+                                the payload field to match.
+                              type: string
+                            pattern:
+                              description: |-
+                                Pattern requires a regex match against the extracted field value.
+                                Mutually exclusive with Value.
+                              type: string
+                            value:
+                              description: |-
+                                Value requires an exact string match against the extracted field value.
+                                Mutually exclusive with Pattern.
+                              type: string
+                          required:
+                          - field
+                          type: object
+                          x-kubernetes-validations:
+                          - message: exactly one of value or pattern must be set
+                            rule: has(self.value) != (has(self.pattern) && size(self.pattern)
+                              > 0)
+                        type: array
+                      source:
+                        description: |-
+                          Source is a short identifier for this webhook source (e.g., "notion",
+                          "sentry", "drata"). It determines:
+                            - The URL path: /webhook/<source>
+                            - The env var for HMAC validation: <SOURCE>_WEBHOOK_SECRET
+                          Must be lowercase alphanumeric with optional hyphens.
+                        pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$
+                        type: string
+                    required:
+                    - fieldMapping
+                    - source
+                    type: object
+                    x-kubernetes-validations:
+                    - message: fieldMapping must include an 'id' key for deduplication
+                        and task naming
+                      rule: '''id'' in self.fieldMapping'
                 type: object
             required:
             - taskTemplate

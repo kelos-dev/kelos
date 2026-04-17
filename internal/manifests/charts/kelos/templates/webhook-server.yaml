@@ -232,3 +232,103 @@ spec:
     app.kubernetes.io/name: kelos
     app.kubernetes.io/component: webhook-linear
 {{- end }}
+
+{{- if .Values.webhookServer.sources.generic.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kelos-webhook-generic
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: kelos
+    app.kubernetes.io/component: webhook-generic
+spec:
+  replicas: {{ .Values.webhookServer.sources.generic.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kelos
+      app.kubernetes.io/component: webhook-generic
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kelos
+        app.kubernetes.io/component: webhook-generic
+    spec:
+      serviceAccountName: kelos-webhook
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: webhook-server
+          image: {{ .Values.webhookServer.image }}{{- if .Values.image.tag }}:{{ .Values.image.tag }}{{- end }}
+          {{- if .Values.image.pullPolicy }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- end }}
+          args:
+            - --source=generic
+            - --webhook-bind-address=:8443
+            - --metrics-bind-address=:8080
+            - --health-probe-bind-address=:8081
+          {{- if .Values.webhookServer.sources.generic.secretName }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.webhookServer.sources.generic.secretName }}
+          {{- end }}
+          ports:
+            - name: webhook
+              containerPort: 8443
+              protocol: TCP
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
+            - name: health
+              containerPort: 8081
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          {{- if .Values.webhookServer.resources }}
+          resources:
+            {{- toYaml .Values.webhookServer.resources | nindent 12 }}
+          {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            seccompProfile:
+              type: RuntimeDefault
+            capabilities:
+              drop:
+                - "ALL"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kelos-webhook-generic
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: kelos
+    app.kubernetes.io/component: webhook-generic
+spec:
+  type: ClusterIP
+  ports:
+    - name: webhook
+      port: 8443
+      targetPort: webhook
+      protocol: TCP
+    - name: metrics
+      port: 8080
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: kelos
+    app.kubernetes.io/component: webhook-generic
+{{- end }}

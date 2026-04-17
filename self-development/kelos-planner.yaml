@@ -26,25 +26,28 @@ metadata:
   name: kelos-planner
 spec:
   when:
-    githubIssues:
-      state: open
-      commentPolicy:
-        triggerComment: "/kelos plan"
-        excludeComments:
-          - "/kelos needs-input"
-        allowedUsers:
-          - gjkim42
-          - kelos-bot[bot]
-      reporting:
-        enabled: true
-      pollInterval: 1m
+    githubWebhook:
+      repository: kelos-dev/kelos
+      events:
+        - issue_comment
+      filters:
+        - event: issue_comment
+          action: created
+          bodyContains: /kelos plan
+          state: open
+          author: gjkim42
+        - event: issue_comment
+          action: created
+          bodyContains: /kelos plan
+          state: open
+          author: kelos-bot[bot]
   maxConcurrency: 2
   taskTemplate:
     workspaceRef:
       name: kelos-agent
     model: opus
     type: claude-code
-    ttlSecondsAfterFinished: 3600
+    ttlSecondsAfterFinished: 864000
     credentials:
       type: oauth
       secretRef:
@@ -69,15 +72,21 @@ spec:
       or change labels.
 
       ---
+      Webhook:
+      - Event: {{.Event}}
+      - Action: {{.Action}}
+      - Sender: {{.Sender}}
+      - URL: {{.URL}}
+
       Issue #{{.Number}}: {{.Title}}
       {{.Body}}
-      {{if .Comments}}
-      Comments:
-      {{.Comments}}
-      {{end}}
       ---
 
       ## Your tasks
+
+      ### 0. Confirm the target is an issue
+      If `gh pr view {{.Number}}` succeeds, this comment was posted on a pull request.
+      Exit without posting anything in that case.
 
       ### 1. Refresh issue context
       Re-read the latest issue state and all comments:
@@ -125,14 +134,11 @@ spec:
       ## Open Questions & Risks
 
       - <Question or risk, if any — or "None identified">
-
-      /kelos needs-input
       ```
 
       ## Rules
 
       - Do NOT open PRs, push code, or modify any files
       - Do NOT change labels or assignees
-      - Do NOT trigger other automation (except the `/kelos needs-input` line above)
+      - Do NOT trigger other automation
       - Post exactly one comment per run
-      - The comment MUST end with a standalone `/kelos needs-input` line

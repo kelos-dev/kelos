@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"sync"
 	"testing"
 )
@@ -193,51 +192,34 @@ func TestResolveToken_StaticToken(t *testing.T) {
 	}
 }
 
-func TestResolveToken_TokenFile(t *testing.T) {
-	tmpFile := t.TempDir() + "/token"
-	if err := os.WriteFile(tmpFile, []byte("file-token\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	r := &GitHubReporter{Token: "static-token", TokenFile: tmpFile}
-	if got := r.resolveToken(); got != "file-token" {
-		t.Errorf("Expected %q, got %q", "file-token", got)
+func TestResolveToken_TokenFunc(t *testing.T) {
+	r := &GitHubReporter{Token: "static-token", TokenFunc: func() string { return "func-token" }}
+	if got := r.resolveToken(); got != "func-token" {
+		t.Errorf("Expected %q, got %q", "func-token", got)
 	}
 }
 
-func TestResolveToken_TokenFileRotation(t *testing.T) {
-	tmpFile := t.TempDir() + "/token"
-	if err := os.WriteFile(tmpFile, []byte("first-token"), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	r := &GitHubReporter{TokenFile: tmpFile}
+func TestResolveToken_TokenFuncDynamic(t *testing.T) {
+	current := "first-token"
+	r := &GitHubReporter{TokenFunc: func() string { return current }}
 	if got := r.resolveToken(); got != "first-token" {
 		t.Errorf("Expected %q, got %q", "first-token", got)
 	}
 
-	// Simulate token rotation by writing a new token
-	if err := os.WriteFile(tmpFile, []byte("rotated-token"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	current = "rotated-token"
 	if got := r.resolveToken(); got != "rotated-token" {
 		t.Errorf("Expected %q after rotation, got %q", "rotated-token", got)
 	}
 }
 
-func TestResolveToken_TokenFileMissing(t *testing.T) {
-	r := &GitHubReporter{Token: "fallback", TokenFile: "/nonexistent/token"}
+func TestResolveToken_NilTokenFunc(t *testing.T) {
+	r := &GitHubReporter{Token: "fallback"}
 	if got := r.resolveToken(); got != "fallback" {
 		t.Errorf("Expected fallback %q, got %q", "fallback", got)
 	}
 }
 
-func TestCreateComment_UsesTokenFile(t *testing.T) {
-	tmpFile := t.TempDir() + "/token"
-	if err := os.WriteFile(tmpFile, []byte("file-based-token"), 0600); err != nil {
-		t.Fatal(err)
-	}
-
+func TestCreateComment_UsesTokenFunc(t *testing.T) {
 	var gotAuth string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
@@ -249,7 +231,7 @@ func TestCreateComment_UsesTokenFile(t *testing.T) {
 	reporter := &GitHubReporter{
 		Owner:     "owner",
 		Repo:      "repo",
-		TokenFile: tmpFile,
+		TokenFunc: func() string { return "func-based-token" },
 		BaseURL:   server.URL,
 	}
 
@@ -257,8 +239,8 @@ func TestCreateComment_UsesTokenFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
-	if gotAuth != "token file-based-token" {
-		t.Errorf("Expected auth %q, got %q", "token file-based-token", gotAuth)
+	if gotAuth != "token func-based-token" {
+		t.Errorf("Expected auth %q, got %q", "token func-based-token", gotAuth)
 	}
 }
 

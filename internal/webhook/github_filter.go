@@ -9,6 +9,7 @@ import (
 	"github.com/google/go-github/v66/github"
 
 	"github.com/kelos-dev/kelos/api/v1alpha1"
+	"github.com/kelos-dev/kelos/internal/source"
 )
 
 // GitHubEventData holds parsed GitHub event information for template rendering.
@@ -39,6 +40,13 @@ type GitHubEventData struct {
 	CommentAuthor string
 	CommentBody   string
 	CommentURL    string
+	// ChangedFiles lists file paths modified by the event.
+	// For push events, populated from the payload. For PR events, lazily
+	// fetched from the GitHub API when a webhook filter uses FilePatterns.
+	// NOTE: intentionally not exposed in ExtractGitHubWorkItem template vars
+	// yet — the {{.ChangedFiles}} template variable is deferred to a follow-up
+	// to resolve API design questions (slice vs pre-joined string, fetch gating).
+	ChangedFiles []string
 	// PullRequestAPIURL is the GitHub API URL for the pull request associated
 	// with an issue_comment event. It is extracted from issue.pull_request.url
 	// and used to lazily fetch the PR's head branch when needed.
@@ -198,6 +206,7 @@ func ParseGitHubWebhook(eventType string, payload []byte) (*GitHubEventData, err
 			data.ID = hc.GetID()
 		}
 		data.Title = fmt.Sprintf("Push to %s", data.Branch)
+		data.ChangedFiles = extractPushEventFiles(e)
 
 	default:
 		// For other event types, try to extract sender from raw JSON
@@ -288,6 +297,13 @@ func matchesFilter(filter v1alpha1.GitHubWebhookFilter, eventData *GitHubEventDa
 		}
 		matched, _ := filepath.Match(filter.Branch, eventData.Branch)
 		if !matched {
+			return false
+		}
+	}
+
+	// File patterns filter
+	if filter.FilePatterns != nil {
+		if !matchesWebhookFilePatterns(eventData.ChangedFiles, filter.FilePatterns) {
 			return false
 		}
 	}
@@ -473,4 +489,30 @@ func ExtractGitHubWorkItem(eventData *GitHubEventData) map[string]interface{} {
 	}
 
 	return vars
+}
+
+// extractPushEventFiles collects all changed file paths from a push event's commits.
+func extractPushEventFiles(e *github.PushEvent) []string {
+	seen := make(map[string]struct{})
+	var files []string
+	for _, commit := range e.Commits {
+		for _, batch := range [][]string{commit.Added, commit.Removed, commit.Modified} {
+			for _, f := range batch {
+				if _, ok := seen[f]; !ok {
+					seen[f] = struct{}{}
+					files = append(files, f)
+				}
+			}
+		}
+	}
+	return files
+}
+
+// matchesWebhookFilePatterns checks whether the given changed files match the
+// filter's FilePatterns using the shared source.MatchesFilePaths logic.
+func matchesWebhookFilePatterns(files []string, patterns *v1alpha1.FilePatterns) bool {
+	if patterns == nil {
+		return true
+	}
+	return source.MatchesFilePaths(files, patterns.Include, patterns.Exclude)
 }

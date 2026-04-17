@@ -344,33 +344,24 @@ func TestDeploymentBuilder_GitHubApp(t *testing.T) {
 		t.Fatalf("expected 1 container, got %d", len(deploy.Spec.Template.Spec.Containers))
 	}
 
-	if len(deploy.Spec.Template.Spec.InitContainers) != 1 {
-		t.Fatalf("expected 1 init container, got %d", len(deploy.Spec.Template.Spec.InitContainers))
+	if len(deploy.Spec.Template.Spec.InitContainers) != 0 {
+		t.Fatalf("expected 0 init containers, got %d", len(deploy.Spec.Template.Spec.InitContainers))
+	}
+
+	if len(deploy.Spec.Template.Spec.Volumes) != 0 {
+		t.Fatalf("expected 0 volumes, got %d", len(deploy.Spec.Template.Spec.Volumes))
 	}
 
 	spawner := deploy.Spec.Template.Spec.Containers[0]
-	refresher := deploy.Spec.Template.Spec.InitContainers[0]
 
 	if spawner.Name != "spawner" {
 		t.Errorf("container name = %q, want %q", spawner.Name, "spawner")
 	}
-	if refresher.Name != "token-refresher" {
-		t.Errorf("init container name = %q, want %q", refresher.Name, "token-refresher")
-	}
 
-	if refresher.RestartPolicy == nil || *refresher.RestartPolicy != corev1.ContainerRestartPolicyAlways {
-		t.Errorf("token-refresher RestartPolicy = %v, want %q", refresher.RestartPolicy, corev1.ContainerRestartPolicyAlways)
-	}
-
-	found := false
 	for _, arg := range spawner.Args {
 		if arg == "--github-token-file=/shared/token/GITHUB_TOKEN" {
-			found = true
-			break
+			t.Error("spawner should not have --github-token-file arg in GitHub App mode")
 		}
-	}
-	if !found {
-		t.Errorf("spawner args missing --github-token-file flag: %v", spawner.Args)
 	}
 
 	for _, env := range spawner.Env {
@@ -379,18 +370,49 @@ func TestDeploymentBuilder_GitHubApp(t *testing.T) {
 		}
 	}
 
-	if len(deploy.Spec.Template.Spec.Volumes) != 2 {
-		t.Fatalf("expected 2 volumes, got %d", len(deploy.Spec.Template.Spec.Volumes))
+	if len(spawner.VolumeMounts) != 0 {
+		t.Fatalf("expected 0 volume mounts, got %d", len(spawner.VolumeMounts))
 	}
 
-	if len(refresher.Env) != 2 {
-		t.Fatalf("token-refresher expected 2 env vars, got %d", len(refresher.Env))
+	envMap := make(map[string]corev1.EnvVar)
+	for _, env := range spawner.Env {
+		envMap[env.Name] = env
 	}
-	if refresher.Env[0].Name != "APP_ID" {
-		t.Errorf("first env var = %q, want %q", refresher.Env[0].Name, "APP_ID")
+
+	appID, ok := envMap["GITHUB_APP_ID"]
+	if !ok {
+		t.Fatal("expected GITHUB_APP_ID env var")
 	}
-	if refresher.Env[1].Name != "INSTALLATION_ID" {
-		t.Errorf("second env var = %q, want %q", refresher.Env[1].Name, "INSTALLATION_ID")
+	if appID.ValueFrom == nil || appID.ValueFrom.SecretKeyRef == nil {
+		t.Fatal("expected GITHUB_APP_ID to reference a secret")
+	}
+	if appID.ValueFrom.SecretKeyRef.Name != "github-app-creds" {
+		t.Errorf("GITHUB_APP_ID secret name = %q, want %q", appID.ValueFrom.SecretKeyRef.Name, "github-app-creds")
+	}
+	if appID.ValueFrom.SecretKeyRef.Key != "appID" {
+		t.Errorf("GITHUB_APP_ID secret key = %q, want %q", appID.ValueFrom.SecretKeyRef.Key, "appID")
+	}
+
+	installationID, ok := envMap["GITHUB_APP_INSTALLATION_ID"]
+	if !ok {
+		t.Fatal("expected GITHUB_APP_INSTALLATION_ID env var")
+	}
+	if installationID.ValueFrom == nil || installationID.ValueFrom.SecretKeyRef == nil {
+		t.Fatal("expected GITHUB_APP_INSTALLATION_ID to reference a secret")
+	}
+	if installationID.ValueFrom.SecretKeyRef.Key != "installationID" {
+		t.Errorf("GITHUB_APP_INSTALLATION_ID secret key = %q, want %q", installationID.ValueFrom.SecretKeyRef.Key, "installationID")
+	}
+
+	privateKey, ok := envMap["GITHUB_APP_PRIVATE_KEY"]
+	if !ok {
+		t.Fatal("expected GITHUB_APP_PRIVATE_KEY env var")
+	}
+	if privateKey.ValueFrom == nil || privateKey.ValueFrom.SecretKeyRef == nil {
+		t.Fatal("expected GITHUB_APP_PRIVATE_KEY to reference a secret")
+	}
+	if privateKey.ValueFrom.SecretKeyRef.Key != "privateKey" {
+		t.Errorf("GITHUB_APP_PRIVATE_KEY secret key = %q, want %q", privateKey.ValueFrom.SecretKeyRef.Key, "privateKey")
 	}
 }
 
@@ -421,19 +443,25 @@ func TestDeploymentBuilder_GitHubAppEnterprise(t *testing.T) {
 
 	deploy := builder.Build(ts, workspace, true)
 
-	refresher := deploy.Spec.Template.Spec.InitContainers[0]
+	spawner := deploy.Spec.Template.Spec.Containers[0]
 
-	// Enterprise host should have 3 env vars: APP_ID, INSTALLATION_ID, GITHUB_API_BASE_URL
-	if len(refresher.Env) != 3 {
-		t.Fatalf("token-refresher expected 3 env vars for enterprise, got %d: %v", len(refresher.Env), refresher.Env)
+	envMap := make(map[string]corev1.EnvVar)
+	for _, env := range spawner.Env {
+		envMap[env.Name] = env
 	}
 
-	apiBaseURLEnv := refresher.Env[2]
-	if apiBaseURLEnv.Name != "GITHUB_API_BASE_URL" {
-		t.Errorf("third env var = %q, want %q", apiBaseURLEnv.Name, "GITHUB_API_BASE_URL")
+	if _, ok := envMap["GITHUB_APP_ID"]; !ok {
+		t.Fatal("expected GITHUB_APP_ID env var")
 	}
-	if apiBaseURLEnv.Value != "https://github.example.com/api/v3" {
-		t.Errorf("GITHUB_API_BASE_URL = %q, want %q", apiBaseURLEnv.Value, "https://github.example.com/api/v3")
+	if _, ok := envMap["GITHUB_APP_INSTALLATION_ID"]; !ok {
+		t.Fatal("expected GITHUB_APP_INSTALLATION_ID env var")
+	}
+	if _, ok := envMap["GITHUB_APP_PRIVATE_KEY"]; !ok {
+		t.Fatal("expected GITHUB_APP_PRIVATE_KEY env var")
+	}
+
+	if _, ok := envMap["GITHUB_API_BASE_URL"]; ok {
+		t.Error("GITHUB_API_BASE_URL env var should not be injected (passed via --github-api-base-url arg)")
 	}
 }
 
@@ -464,67 +492,24 @@ func TestDeploymentBuilder_GitHubAppGitHubCom(t *testing.T) {
 
 	deploy := builder.Build(ts, workspace, true)
 
-	refresher := deploy.Spec.Template.Spec.InitContainers[0]
-
-	// github.com host should have only 2 env vars: APP_ID, INSTALLATION_ID (no GITHUB_API_BASE_URL)
-	if len(refresher.Env) != 2 {
-		t.Fatalf("token-refresher expected 2 env vars for github.com, got %d: %v", len(refresher.Env), refresher.Env)
-	}
-	for _, env := range refresher.Env {
-		if env.Name == "GITHUB_API_BASE_URL" {
-			t.Error("token-refresher should not have GITHUB_API_BASE_URL for github.com")
-		}
-	}
-}
-
-func TestDeploymentBuilder_TokenRefresherResources(t *testing.T) {
-	builder := NewDeploymentBuilder()
-	builder.TokenRefresherResources = &corev1.ResourceRequirements{
-		Requests: corev1.ResourceList{
-			corev1.ResourceCPU:    resource.MustParse("100m"),
-			corev1.ResourceMemory: resource.MustParse("128Mi"),
-		},
-		Limits: corev1.ResourceList{
-			corev1.ResourceCPU:    resource.MustParse("200m"),
-			corev1.ResourceMemory: resource.MustParse("256Mi"),
-		},
-	}
-
-	ts := &kelosv1alpha1.TaskSpawner{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-spawner",
-			Namespace: "default",
-		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
-			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
-				Type:         "claude-code",
-				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
-			},
-		},
-	}
-	enableGitHubReporting(ts)
-	workspace := &kelosv1alpha1.WorkspaceSpec{
-		Repo: "https://github.com/kelos-dev/kelos.git",
-		SecretRef: &kelosv1alpha1.SecretReference{
-			Name: "github-app-creds",
-		},
-	}
-
-	deploy := builder.Build(ts, workspace, true)
-	refresher := deploy.Spec.Template.Spec.InitContainers[0]
 	spawner := deploy.Spec.Template.Spec.Containers[0]
 
-	if refresher.Resources.Requests.Cpu().String() != "100m" {
-		t.Errorf("expected token-refresher cpu request 100m, got %s", refresher.Resources.Requests.Cpu().String())
+	envMap := make(map[string]corev1.EnvVar)
+	for _, env := range spawner.Env {
+		envMap[env.Name] = env
 	}
-	if refresher.Resources.Limits.Memory().String() != "256Mi" {
-		t.Errorf("expected token-refresher memory limit 256Mi, got %s", refresher.Resources.Limits.Memory().String())
+
+	if _, ok := envMap["GITHUB_APP_ID"]; !ok {
+		t.Fatal("expected GITHUB_APP_ID env var")
 	}
-	if len(spawner.Resources.Requests) != 0 || len(spawner.Resources.Limits) != 0 {
-		t.Errorf("expected spawner resources to remain empty, got requests=%v limits=%v", spawner.Resources.Requests, spawner.Resources.Limits)
+	if _, ok := envMap["GITHUB_APP_INSTALLATION_ID"]; !ok {
+		t.Fatal("expected GITHUB_APP_INSTALLATION_ID env var")
+	}
+	if _, ok := envMap["GITHUB_APP_PRIVATE_KEY"]; !ok {
+		t.Fatal("expected GITHUB_APP_PRIVATE_KEY env var")
+	}
+	if _, ok := envMap["GITHUB_API_BASE_URL"]; ok {
+		t.Error("spawner should not have GITHUB_API_BASE_URL for github.com")
 	}
 }
 
@@ -1173,12 +1158,15 @@ func TestUpdateDeployment_PATToGitHubApp(t *testing.T) {
 		DeploymentBuilder: builder,
 	}
 
-	// Verify initial state: PAT mode (no init containers, no volumes)
-	if len(deploy.Spec.Template.Spec.InitContainers) != 0 {
-		t.Fatalf("expected 0 init containers in PAT mode, got %d", len(deploy.Spec.Template.Spec.InitContainers))
+	// Verify initial state: PAT mode
+	foundToken := false
+	for _, env := range deploy.Spec.Template.Spec.Containers[0].Env {
+		if env.Name == "GITHUB_TOKEN" {
+			foundToken = true
+		}
 	}
-	if len(deploy.Spec.Template.Spec.Volumes) != 0 {
-		t.Fatalf("expected 0 volumes in PAT mode, got %d", len(deploy.Spec.Template.Spec.Volumes))
+	if !foundToken {
+		t.Fatal("expected GITHUB_TOKEN env var in PAT mode")
 	}
 
 	// Switch to GitHub App mode
@@ -1192,37 +1180,33 @@ func TestUpdateDeployment_PATToGitHubApp(t *testing.T) {
 		t.Fatalf("getting deployment: %v", err)
 	}
 
-	// Verify GitHub App mode: init container, volumes, volume mounts added
-	if len(updated.Spec.Template.Spec.InitContainers) != 1 {
-		t.Fatalf("expected 1 init container after switch to GitHub App, got %d", len(updated.Spec.Template.Spec.InitContainers))
-	}
-	if updated.Spec.Template.Spec.InitContainers[0].Name != "token-refresher" {
-		t.Errorf("init container name = %q, want %q", updated.Spec.Template.Spec.InitContainers[0].Name, "token-refresher")
-	}
-	if len(updated.Spec.Template.Spec.Volumes) != 2 {
-		t.Fatalf("expected 2 volumes after switch to GitHub App, got %d", len(updated.Spec.Template.Spec.Volumes))
-	}
-	if len(updated.Spec.Template.Spec.Containers[0].VolumeMounts) != 1 {
-		t.Fatalf("expected 1 volume mount on spawner after switch to GitHub App, got %d", len(updated.Spec.Template.Spec.Containers[0].VolumeMounts))
-	}
-
-	// Verify no GITHUB_TOKEN env var (should use token file instead)
+	// Verify no GITHUB_TOKEN env var
 	for _, env := range updated.Spec.Template.Spec.Containers[0].Env {
 		if env.Name == "GITHUB_TOKEN" {
 			t.Error("spawner should not have GITHUB_TOKEN env var in GitHub App mode")
 		}
 	}
 
-	// Verify --github-token-file arg is present
-	found := false
+	// Verify GitHub App env vars are present
+	envMap := make(map[string]corev1.EnvVar)
+	for _, env := range updated.Spec.Template.Spec.Containers[0].Env {
+		envMap[env.Name] = env
+	}
+	if _, ok := envMap["GITHUB_APP_ID"]; !ok {
+		t.Error("expected GITHUB_APP_ID env var after switch to GitHub App")
+	}
+	if _, ok := envMap["GITHUB_APP_INSTALLATION_ID"]; !ok {
+		t.Error("expected GITHUB_APP_INSTALLATION_ID env var after switch to GitHub App")
+	}
+	if _, ok := envMap["GITHUB_APP_PRIVATE_KEY"]; !ok {
+		t.Error("expected GITHUB_APP_PRIVATE_KEY env var after switch to GitHub App")
+	}
+
+	// Verify --github-token-file arg is NOT present
 	for _, arg := range updated.Spec.Template.Spec.Containers[0].Args {
 		if arg == "--github-token-file=/shared/token/GITHUB_TOKEN" {
-			found = true
-			break
+			t.Error("should not have --github-token-file arg in GitHub App mode")
 		}
-	}
-	if !found {
-		t.Errorf("expected --github-token-file arg after switch to GitHub App, got args: %v", updated.Spec.Template.Spec.Containers[0].Args)
 	}
 }
 
@@ -1271,12 +1255,13 @@ func TestUpdateDeployment_GitHubAppToPAT(t *testing.T) {
 		DeploymentBuilder: builder,
 	}
 
-	// Verify initial state: GitHub App mode
-	if len(deploy.Spec.Template.Spec.InitContainers) != 1 {
-		t.Fatalf("expected 1 init container in GitHub App mode, got %d", len(deploy.Spec.Template.Spec.InitContainers))
+	// Verify initial state: GitHub App mode env vars
+	initialEnvMap := make(map[string]bool)
+	for _, env := range deploy.Spec.Template.Spec.Containers[0].Env {
+		initialEnvMap[env.Name] = true
 	}
-	if len(deploy.Spec.Template.Spec.Volumes) != 2 {
-		t.Fatalf("expected 2 volumes in GitHub App mode, got %d", len(deploy.Spec.Template.Spec.Volumes))
+	if !initialEnvMap["GITHUB_APP_ID"] {
+		t.Fatal("expected GITHUB_APP_ID env var in GitHub App mode")
 	}
 
 	// Switch to PAT mode
@@ -1290,23 +1275,14 @@ func TestUpdateDeployment_GitHubAppToPAT(t *testing.T) {
 		t.Fatalf("getting deployment: %v", err)
 	}
 
-	// Verify PAT mode: init containers, volumes, and volume mounts removed
-	if len(updated.Spec.Template.Spec.InitContainers) != 0 {
-		t.Errorf("expected 0 init containers after switch to PAT, got %d", len(updated.Spec.Template.Spec.InitContainers))
-	}
-	if len(updated.Spec.Template.Spec.Volumes) != 0 {
-		t.Errorf("expected 0 volumes after switch to PAT, got %d", len(updated.Spec.Template.Spec.Volumes))
-	}
-	if len(updated.Spec.Template.Spec.Containers[0].VolumeMounts) != 0 {
-		t.Errorf("expected 0 volume mounts on spawner after switch to PAT, got %d", len(updated.Spec.Template.Spec.Containers[0].VolumeMounts))
-	}
-
 	// Verify GITHUB_TOKEN env var is present
 	foundToken := false
 	for _, env := range updated.Spec.Template.Spec.Containers[0].Env {
 		if env.Name == "GITHUB_TOKEN" {
 			foundToken = true
-			break
+		}
+		if env.Name == "GITHUB_APP_ID" || env.Name == "GITHUB_APP_INSTALLATION_ID" || env.Name == "GITHUB_APP_PRIVATE_KEY" {
+			t.Errorf("should not have %s env var after switch to PAT", env.Name)
 		}
 	}
 	if !foundToken {
@@ -2479,92 +2455,6 @@ func TestDeploymentBuilder_CronJob_SpawnerResources(t *testing.T) {
 	}
 }
 
-func TestDeploymentBuilder_CronJob_TokenRefresherResources(t *testing.T) {
-	builder := NewDeploymentBuilder()
-	builder.TokenRefresherResources = &corev1.ResourceRequirements{
-		Requests: corev1.ResourceList{
-			corev1.ResourceCPU: resource.MustParse("100m"),
-		},
-		Limits: corev1.ResourceList{
-			corev1.ResourceMemory: resource.MustParse("256Mi"),
-		},
-	}
-
-	ts := &kelosv1alpha1.TaskSpawner{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-spawner",
-			Namespace: "default",
-		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				Cron: &kelosv1alpha1.Cron{
-					Schedule: "*/5 * * * *",
-				},
-			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
-				Type:         "claude-code",
-				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
-			},
-		},
-	}
-	workspace := &kelosv1alpha1.WorkspaceSpec{
-		Repo: "https://github.com/kelos-dev/kelos.git",
-		SecretRef: &kelosv1alpha1.SecretReference{
-			Name: "github-app-creds",
-		},
-	}
-
-	cronJob := builder.BuildCronJob(ts, workspace, true)
-	spawner := cronJob.Spec.JobTemplate.Spec.Template.Spec.Containers[0]
-
-	if len(cronJob.Spec.JobTemplate.Spec.Template.Spec.InitContainers) != 0 {
-		t.Fatalf("expected no init containers for cron workspace discovery-only spawner, got %d", len(cronJob.Spec.JobTemplate.Spec.Template.Spec.InitContainers))
-	}
-	if len(spawner.Resources.Requests) != 0 || len(spawner.Resources.Limits) != 0 {
-		t.Errorf("expected spawner resources to remain empty on CronJob, got requests=%v limits=%v", spawner.Resources.Requests, spawner.Resources.Limits)
-	}
-}
-
-func TestDeploymentBuilder_SpawnerResources_TokenRefresherUnaffected(t *testing.T) {
-	builder := NewDeploymentBuilder()
-	builder.SpawnerResources = &corev1.ResourceRequirements{
-		Requests: corev1.ResourceList{
-			corev1.ResourceCPU: resource.MustParse("250m"),
-		},
-	}
-
-	ts := &kelosv1alpha1.TaskSpawner{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-spawner",
-			Namespace: "default",
-		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
-			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
-				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
-			},
-		},
-	}
-	enableGitHubReporting(ts)
-	workspace := &kelosv1alpha1.WorkspaceSpec{
-		Repo: "https://github.com/kelos-dev/kelos.git",
-		SecretRef: &kelosv1alpha1.SecretReference{
-			Name: "github-app-creds",
-		},
-	}
-
-	deploy := builder.Build(ts, workspace, true)
-	if len(deploy.Spec.Template.Spec.InitContainers) != 1 {
-		t.Fatalf("expected 1 init container, got %d", len(deploy.Spec.Template.Spec.InitContainers))
-	}
-	refresher := deploy.Spec.Template.Spec.InitContainers[0]
-	if len(refresher.Resources.Requests) != 0 || len(refresher.Resources.Limits) != 0 {
-		t.Errorf("expected token-refresher to have no resources, got requests=%v limits=%v", refresher.Resources.Requests, refresher.Resources.Limits)
-	}
-}
-
 func TestUpdateDeployment_ResourcesDrift(t *testing.T) {
 	builder := NewDeploymentBuilder()
 	ts := &kelosv1alpha1.TaskSpawner{
@@ -2679,146 +2569,6 @@ func TestUpdateCronJob_ResourcesDrift(t *testing.T) {
 	spawner := updated.Spec.JobTemplate.Spec.Template.Spec.Containers[0]
 	if spawner.Resources.Requests.Cpu().String() != "100m" {
 		t.Errorf("expected cpu request 100m after drift update, got %s", spawner.Resources.Requests.Cpu().String())
-	}
-}
-
-func TestUpdateDeployment_TokenRefresherResourcesDrift(t *testing.T) {
-	builder := NewDeploymentBuilder()
-	ts := &kelosv1alpha1.TaskSpawner{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-spawner",
-			Namespace: "default",
-		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
-			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
-				Type:         "claude-code",
-				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
-			},
-		},
-	}
-	enableGitHubReporting(ts)
-	workspace := &kelosv1alpha1.WorkspaceSpec{
-		Repo: "https://github.com/kelos-dev/kelos.git",
-		SecretRef: &kelosv1alpha1.SecretReference{
-			Name: "github-app-creds",
-		},
-	}
-
-	deploy := builder.Build(ts, workspace, true)
-
-	scheme := runtime.NewScheme()
-	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(appsv1.AddToScheme(scheme))
-	utilruntime.Must(kelosv1alpha1.AddToScheme(scheme))
-
-	cl := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(ts, deploy).
-		WithStatusSubresource(ts).
-		Build()
-
-	builder.TokenRefresherResources = &corev1.ResourceRequirements{
-		Requests: corev1.ResourceList{
-			corev1.ResourceCPU: resource.MustParse("100m"),
-		},
-		Limits: corev1.ResourceList{
-			corev1.ResourceMemory: resource.MustParse("256Mi"),
-		},
-	}
-
-	r := &TaskSpawnerReconciler{
-		Client:            cl,
-		Scheme:            scheme,
-		DeploymentBuilder: builder,
-	}
-
-	ctx := context.Background()
-	if err := r.updateDeployment(ctx, ts, deploy, workspace, true, 1); err != nil {
-		t.Fatalf("updateDeployment error: %v", err)
-	}
-
-	var updated appsv1.Deployment
-	if err := cl.Get(ctx, client.ObjectKeyFromObject(deploy), &updated); err != nil {
-		t.Fatalf("getting deployment: %v", err)
-	}
-
-	refresher := updated.Spec.Template.Spec.InitContainers[0]
-	if refresher.Resources.Requests.Cpu().String() != "100m" {
-		t.Errorf("expected token-refresher cpu request 100m after drift update, got %s", refresher.Resources.Requests.Cpu().String())
-	}
-	if refresher.Resources.Limits.Memory().String() != "256Mi" {
-		t.Errorf("expected token-refresher memory limit 256Mi after drift update, got %s", refresher.Resources.Limits.Memory().String())
-	}
-}
-
-func TestUpdateCronJob_TokenRefresherResourcesDrift(t *testing.T) {
-	builder := NewDeploymentBuilder()
-	ts := &kelosv1alpha1.TaskSpawner{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-spawner",
-			Namespace: "default",
-		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				Cron: &kelosv1alpha1.Cron{
-					Schedule: "*/5 * * * *",
-				},
-			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
-				Type:         "claude-code",
-				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "ws"},
-			},
-		},
-	}
-	workspace := &kelosv1alpha1.WorkspaceSpec{
-		Repo: "https://github.com/kelos-dev/kelos.git",
-		SecretRef: &kelosv1alpha1.SecretReference{
-			Name: "github-app-creds",
-		},
-	}
-
-	cronJob := builder.BuildCronJob(ts, workspace, true)
-
-	scheme := runtime.NewScheme()
-	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(batchv1.AddToScheme(scheme))
-	utilruntime.Must(kelosv1alpha1.AddToScheme(scheme))
-
-	cl := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(ts, cronJob).
-		WithStatusSubresource(ts).
-		Build()
-
-	builder.TokenRefresherResources = &corev1.ResourceRequirements{
-		Requests: corev1.ResourceList{
-			corev1.ResourceCPU: resource.MustParse("100m"),
-		},
-		Limits: corev1.ResourceList{
-			corev1.ResourceMemory: resource.MustParse("256Mi"),
-		},
-	}
-
-	r := &TaskSpawnerReconciler{
-		Client:            cl,
-		Scheme:            scheme,
-		DeploymentBuilder: builder,
-	}
-
-	ctx := context.Background()
-	if err := r.updateCronJob(ctx, ts, cronJob, workspace, true, false); err != nil {
-		t.Fatalf("updateCronJob error: %v", err)
-	}
-
-	var updated batchv1.CronJob
-	if err := cl.Get(ctx, client.ObjectKeyFromObject(cronJob), &updated); err != nil {
-		t.Fatalf("getting CronJob: %v", err)
-	}
-	if len(updated.Spec.JobTemplate.Spec.Template.Spec.InitContainers) != 0 {
-		t.Fatalf("expected no init containers for cron workspace discovery-only spawner, got %d", len(updated.Spec.JobTemplate.Spec.Template.Spec.InitContainers))
 	}
 }
 

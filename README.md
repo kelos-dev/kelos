@@ -22,7 +22,7 @@
 
 Kelos lets you **define your development workflow as Kubernetes resources** and run it continuously. Declare what triggers agents, what they do, and how they hand off — Kelos handles the rest.
 
-Kelos develops Kelos through seven TaskSpawners run 24/7: triaging issues, planning implementations, fixing bugs, responding to PR feedback, testing DX, brainstorming improvements, and tuning their own prompts. [See the full pipeline below.](#kelos-developing-kelos)
+Kelos develops Kelos through TaskSpawners running 24/7: triaging issues, planning implementations, fixing bugs, responding to PR feedback, reviewing code, squashing commits, updating agent images, testing DX, brainstorming improvements, and tuning their own prompts and configs. [See the full pipeline below.](#kelos-developing-kelos)
 
 Supports **Claude Code**, **OpenAI Codex**, **Google Gemini**, **OpenCode**, **Cursor**, and [custom agent images](docs/agent-image-interface.md).
 
@@ -43,70 +43,11 @@ Kelos is built on four resources:
 3. **AgentConfigs** — Reusable bundles of agent instructions (`AGENTS.md`, `CLAUDE.md`), plugins (skills and agents), and MCP servers.
 4. **TaskSpawners** — Orchestration engines that react to external triggers (GitHub, Cron) to automatically manage agent lifecycles.
 
-<details>
-<summary>TaskSpawner — Automatic Task Creation from External Sources</summary>
-
-TaskSpawner watches external sources (e.g., GitHub Issues) and automatically creates Tasks for each discovered item.
-
-```
-                    polls         new issues
- TaskSpawner ─────────────▶ GitHub Issues
-      │        ◀─────────────
-      │
-      ├──creates──▶ Task: fix-bugs-1
-      └──creates──▶ Task: fix-bugs-2
-```
-
-</details>
-
 ## Kelos Developing Kelos
 
-Kelos develops itself. Seven TaskSpawners run 24/7, each handling a different part of the development lifecycle — fully autonomous.
+Kelos develops itself. TaskSpawners run 24/7, each handling a different part of the development lifecycle — fully autonomous.
 
-<img width="2694" height="1966" alt="kelos-self-development" src="https://github.com/user-attachments/assets/a205f0c6-9eb4-4001-8ee6-5c8ab187fbea" />
-
-| TaskSpawner | Trigger | Model | Description |
-|---|---|---|---|
-| **kelos-workers** | GitHub Issues (`actor/kelos`) | Opus | Picks up issues, creates or updates PRs, self-reviews, and ensures CI passes |
-| **kelos-pr-responder** | GitHub Pull Requests (`generated-by-kelos`, `changes_requested`) | Opus | Re-engages on PR review feedback and updates the existing branch incrementally |
-| **kelos-planner** | GitHub Issues (`/kelos plan` comment) | Opus | Investigates an issue and posts a structured implementation plan — advisory only, no code changes |
-| **kelos-triage** | GitHub Issues (`needs-actor`) | Opus | Classifies issues by kind/priority, detects duplicates, and recommends an actor |
-| **kelos-fake-user** | Cron (daily 09:00 UTC) | Sonnet | Tests DX as a new user — follows docs, tries CLI workflows, files issues for problems found |
-| **kelos-fake-strategist** | Cron (every 12 hours) | Opus | Explores new use cases, workflow improvements, and integration opportunities |
-| **kelos-self-update** | Cron (daily 06:00 UTC) | Opus | Reviews and tunes prompts, configs, and workflow files — the pipeline improves itself |
-
-Here's a trimmed snippet of `kelos-workers.yaml` — enough to show the pattern:
-
-```yaml
-apiVersion: kelos.dev/v1alpha1
-kind: TaskSpawner
-metadata:
-  name: kelos-workers
-spec:
-  when:
-    githubIssues:
-      labels: [actor/kelos]
-      excludeLabels: [kelos/needs-input]
-      priorityLabels:
-        - priority/critical-urgent
-        - priority/important-soon
-      pollInterval: 1m
-  maxConcurrency: 3
-  taskTemplate:
-    model: opus
-    type: claude-code
-    branch: "kelos-task-{{.Number}}"
-    promptTemplate: |
-      You are a coding agent. You either
-      - create a PR to fix the issue
-      - update an existing PR to fix the issue
-      - comment on the issue or the PR if you cannot fix it
-      ...
-```
-
-The key pattern is `excludeLabels: [kelos/needs-input]` — this creates a feedback loop where the agent works autonomously until it needs human input, then pauses. Removing the label re-queues the issue on the next poll.
-
-See the full manifest at [`self-development/kelos-workers.yaml`](self-development/kelos-workers.yaml) and the [`self-development/` README](self-development/README.md) for setup instructions.
+See the [`self-development/` README](self-development/README.md) for the full pipeline: manifests, triggers, models, and setup instructions.
 
 ## Why Kelos?
 
@@ -142,8 +83,17 @@ This creates a single-node cluster and configures your kubeconfig automatically.
 
 ### 1. Install the CLI
 
+Install using the script:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/kelos-dev/kelos/main/hack/install.sh | bash
+```
+
+Or using Homebrew:
+
+```bash
+brew tap kelos-dev/tap
+brew install kelos
 ```
 
 <details>
@@ -162,6 +112,16 @@ kelos install
 ```
 
 This installs the Kelos controller and CRDs into the `kelos-system` namespace.
+
+For chart-native customization, pass Helm values to `kelos install`:
+
+```bash
+kelos install -f values.yaml
+kelos install --set webhookServer.sources.github.enabled=true
+```
+
+`kelos install` manages CRDs separately, so `crds.install` must be omitted or set to `false`.
+For the full values schema and advanced examples, see [the Helm chart README](internal/manifests/charts/kelos/README.md).
 
 Verify the installation:
 

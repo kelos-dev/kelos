@@ -19,9 +19,6 @@ const (
 	// DefaultSpawnerImage is the default image for the spawner binary.
 	DefaultSpawnerImage = "ghcr.io/kelos-dev/kelos-spawner:latest"
 
-	// DefaultTokenRefresherImage is the default image for the token refresher sidecar.
-	DefaultTokenRefresherImage = "ghcr.io/kelos-dev/kelos-token-refresher:latest"
-
 	// SpawnerServiceAccount is the service account used by spawner Deployments.
 	SpawnerServiceAccount = "kelos-spawner"
 
@@ -31,30 +28,23 @@ const (
 
 // DeploymentBuilder constructs Kubernetes Deployments for TaskSpawners.
 type DeploymentBuilder struct {
-	SpawnerImage                  string
-	SpawnerImagePullPolicy        corev1.PullPolicy
-	SpawnerResources              *corev1.ResourceRequirements
-	TokenRefresherImage           string
-	TokenRefresherImagePullPolicy corev1.PullPolicy
-	TokenRefresherResources       *corev1.ResourceRequirements
+	SpawnerImage           string
+	SpawnerImagePullPolicy corev1.PullPolicy
+	SpawnerResources       *corev1.ResourceRequirements
 }
 
 // NewDeploymentBuilder creates a new DeploymentBuilder.
 func NewDeploymentBuilder() *DeploymentBuilder {
 	return &DeploymentBuilder{
-		SpawnerImage:        DefaultSpawnerImage,
-		TokenRefresherImage: DefaultTokenRefresherImage,
+		SpawnerImage: DefaultSpawnerImage,
 	}
 }
 
 // spawnerPodParts holds the components needed to build a spawner pod template.
 type spawnerPodParts struct {
-	args           []string
-	envVars        []corev1.EnvVar
-	volumes        []corev1.Volume
-	volumeMounts   []corev1.VolumeMount
-	initContainers []corev1.Container
-	labels         map[string]string
+	args    []string
+	envVars []corev1.EnvVar
+	labels  map[string]string
 }
 
 // buildPodParts computes the args, env, volumes, and labels that are shared
@@ -66,9 +56,6 @@ func (b *DeploymentBuilder) buildPodParts(ts *kelosv1alpha1.TaskSpawner, workspa
 	}
 
 	var envVars []corev1.EnvVar
-	var volumes []corev1.Volume
-	var volumeMounts []corev1.VolumeMount
-	var initContainers []corev1.Container
 
 	if workspace != nil {
 		host, owner, repo := parseGitHubRepo(workspace.Repo)
@@ -98,35 +85,10 @@ func (b *DeploymentBuilder) buildPodParts(ts *kelosv1alpha1.TaskSpawner, workspa
 		}
 		if workspace.SecretRef != nil && taskSpawnerNeedsGitHubToken(ts) {
 			if isGitHubApp {
-				// GitHub App: add token refresher as a native sidecar
-				args = append(args, "--github-token-file=/shared/token/GITHUB_TOKEN")
-
-				volumes = append(volumes,
-					corev1.Volume{
-						Name: "github-token",
-						VolumeSource: corev1.VolumeSource{
-							EmptyDir: &corev1.EmptyDirVolumeSource{},
-						},
-					},
-					corev1.Volume{
-						Name: "github-app-secret",
-						VolumeSource: corev1.VolumeSource{
-							Secret: &corev1.SecretVolumeSource{
-								SecretName: workspace.SecretRef.Name,
-							},
-						},
-					},
-				)
-
-				volumeMounts = append(volumeMounts, corev1.VolumeMount{
-					Name:      "github-token",
-					MountPath: "/shared/token",
-					ReadOnly:  true,
-				})
-
-				refresherEnv := []corev1.EnvVar{
-					{
-						Name: "APP_ID",
+				// GitHub App: inject credentials as env vars for in-process token generation
+				envVars = append(envVars,
+					corev1.EnvVar{
+						Name: "GITHUB_APP_ID",
 						ValueFrom: &corev1.EnvVarSource{
 							SecretKeyRef: &corev1.SecretKeySelector{
 								LocalObjectReference: corev1.LocalObjectReference{
@@ -136,8 +98,8 @@ func (b *DeploymentBuilder) buildPodParts(ts *kelosv1alpha1.TaskSpawner, workspa
 							},
 						},
 					},
-					{
-						Name: "INSTALLATION_ID",
+					corev1.EnvVar{
+						Name: "GITHUB_APP_INSTALLATION_ID",
 						ValueFrom: &corev1.EnvVarSource{
 							SecretKeyRef: &corev1.SecretKeySelector{
 								LocalObjectReference: corev1.LocalObjectReference{
@@ -147,37 +109,18 @@ func (b *DeploymentBuilder) buildPodParts(ts *kelosv1alpha1.TaskSpawner, workspa
 							},
 						},
 					},
-				}
-				if apiBaseURL := gitHubAPIBaseURL(host); apiBaseURL != "" {
-					refresherEnv = append(refresherEnv, corev1.EnvVar{
-						Name:  "GITHUB_API_BASE_URL",
-						Value: apiBaseURL,
-					})
-				}
-
-				restartPolicyAlways := corev1.ContainerRestartPolicyAlways
-				refresherContainer := corev1.Container{
-					Name:            "token-refresher",
-					Image:           b.TokenRefresherImage,
-					ImagePullPolicy: b.TokenRefresherImagePullPolicy,
-					RestartPolicy:   &restartPolicyAlways,
-					Env:             refresherEnv,
-					VolumeMounts: []corev1.VolumeMount{
-						{
-							Name:      "github-token",
-							MountPath: "/shared/token",
-						},
-						{
-							Name:      "github-app-secret",
-							MountPath: "/etc/github-app",
-							ReadOnly:  true,
+					corev1.EnvVar{
+						Name: "GITHUB_APP_PRIVATE_KEY",
+						ValueFrom: &corev1.EnvVarSource{
+							SecretKeyRef: &corev1.SecretKeySelector{
+								LocalObjectReference: corev1.LocalObjectReference{
+									Name: workspace.SecretRef.Name,
+								},
+								Key: "privateKey",
+							},
 						},
 					},
-				}
-				if b.TokenRefresherResources != nil {
-					refresherContainer.Resources = *b.TokenRefresherResources
-				}
-				initContainers = append(initContainers, refresherContainer)
+				)
 			} else {
 				// PAT: inject GITHUB_TOKEN from secret
 				envVars = append(envVars, corev1.EnvVar{
@@ -244,20 +187,17 @@ func (b *DeploymentBuilder) buildPodParts(ts *kelosv1alpha1.TaskSpawner, workspa
 	}
 
 	return spawnerPodParts{
-		args:           args,
-		envVars:        envVars,
-		volumes:        volumes,
-		volumeMounts:   volumeMounts,
-		initContainers: initContainers,
-		labels:         labels,
+		args:    args,
+		envVars: envVars,
+		labels:  labels,
 	}
 }
 
 // Build creates a Deployment for the given TaskSpawner.
 // The workspace parameter provides the repository URL and optional secretRef
 // for GitHub API authentication. The isGitHubApp parameter indicates whether
-// the workspace secret contains GitHub App credentials, which requires a
-// token refresher sidecar.
+// the workspace secret contains GitHub App credentials, which are injected as
+// env vars for in-process token generation.
 func (b *DeploymentBuilder) Build(ts *kelosv1alpha1.TaskSpawner, workspace *kelosv1alpha1.WorkspaceSpec, isGitHubApp bool) *appsv1.Deployment {
 	replicas := int32(1)
 	p := b.buildPodParts(ts, workspace, isGitHubApp)
@@ -268,7 +208,6 @@ func (b *DeploymentBuilder) Build(ts *kelosv1alpha1.TaskSpawner, workspace *kelo
 		ImagePullPolicy: b.SpawnerImagePullPolicy,
 		Args:            p.args,
 		Env:             p.envVars,
-		VolumeMounts:    p.volumeMounts,
 		Ports: []corev1.ContainerPort{
 			{
 				Name:          "metrics",
@@ -299,8 +238,6 @@ func (b *DeploymentBuilder) Build(ts *kelosv1alpha1.TaskSpawner, workspace *kelo
 				Spec: corev1.PodSpec{
 					ServiceAccountName: SpawnerServiceAccount,
 					RestartPolicy:      corev1.RestartPolicyAlways,
-					Volumes:            p.volumes,
-					InitContainers:     p.initContainers,
 					Containers:         []corev1.Container{spawnerContainer},
 				},
 			},
@@ -328,7 +265,6 @@ func (b *DeploymentBuilder) BuildCronJob(ts *kelosv1alpha1.TaskSpawner, workspac
 		ImagePullPolicy: b.SpawnerImagePullPolicy,
 		Args:            args,
 		Env:             p.envVars,
-		VolumeMounts:    p.volumeMounts,
 	}
 	if b.SpawnerResources != nil {
 		spawnerContainer.Resources = *b.SpawnerResources
@@ -363,8 +299,6 @@ func (b *DeploymentBuilder) BuildCronJob(ts *kelosv1alpha1.TaskSpawner, workspac
 						Spec: corev1.PodSpec{
 							ServiceAccountName: SpawnerServiceAccount,
 							RestartPolicy:      corev1.RestartPolicyNever,
-							Volumes:            p.volumes,
-							InitContainers:     p.initContainers,
 							Containers:         []corev1.Container{spawnerContainer},
 						},
 					},

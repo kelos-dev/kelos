@@ -205,6 +205,70 @@ kubectl create secret generic jira-credentials \
   --from-literal=JIRA_TOKEN=<your-pat>
 ```
 
+### Linear Webhooks
+
+React to Linear webhook events in real time — issues, comments, and more. The webhook server receives events from Linear and creates Tasks for matching items.
+
+```yaml
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: linear-responder
+spec:
+  when:
+    linearWebhook:
+      types:
+        - "Issue"
+      filters:
+        - action: "create"
+          states:
+            - "Todo"
+            - "In Progress"
+          labels:
+            - "agent-task"
+          excludeLabels:
+            - "no-automation"
+        - action: "update"
+          states:
+            - "Todo"
+            - "In Progress"
+          labels:
+            - "agent-task"
+          excludeLabels:
+            - "no-automation"
+  taskTemplate:
+    type: claude-code
+    workspaceRef:
+      name: my-workspace
+    credentials:
+      type: oauth
+      secretRef:
+        name: claude-oauth-token
+    promptTemplate: |
+      Linear {{.Type}} {{.Action}}: {{.Title}}
+
+      Linear Issue ID: {{.ID}}
+      State: {{.State}}
+      Labels: {{.Labels}}
+
+      Please analyze this Linear issue and take appropriate action.
+    branch: "linear-task-{{.ID}}"
+  maxConcurrency: 3
+```
+
+**Setup:** Configure the `kelos-webhook-server` for Linear in your Helm values and create a webhook secret:
+
+```bash
+kubectl create secret generic linear-webhook-secret \
+  --from-literal=WEBHOOK_SECRET=your-linear-webhook-secret
+```
+
+Then configure a webhook in Linear (Settings → API → Webhooks) pointing to `https://your-webhook-domain/webhook/linear` with the same secret. See [example 11](../examples/11-taskspawner-linear-webhook/) for full setup instructions including optional Linear API key configuration for Comment label enrichment.
+
+**Filtering options:** `types` (required — e.g., `"Issue"`, `"Comment"`), and per-filter fields: `action` (`create`, `update`, `remove`), `states`, `labels`, `excludeLabels`.
+
+**Linear-specific variables:** `{{.Type}}` (resource type), `{{.State}}` (workflow state), `{{.Action}}` (webhook action), `{{.IssueID}}` (parent issue ID for Comment events), `{{.Labels}}`, `{{.Payload}}` (full payload access).
+
 ### Cron
 
 Run agents on a schedule — dependency updates, code health checks, or periodic maintenance.
@@ -236,28 +300,31 @@ spec:
 
 All `promptTemplate` and `branch` fields support Go `text/template` syntax. Available variables depend on the source:
 
-| Variable | GitHub Issues | GitHub PRs | GitHub Webhook | Jira | Cron |
-|----------|--------------|------------|----------------|------|------|
-| `{{.ID}}` | Issue number (string) | PR number (string) | Issue/PR number or commit ID | Issue key (e.g., `ENG-42`) | Date-time string |
-| `{{.Number}}` | Issue number (int) | PR number (int) | Issue/PR number | `0` | `0` |
-| `{{.Title}}` | Issue title | PR title | Issue/PR title | Issue summary | Trigger time (RFC3339) |
-| `{{.Body}}` | Issue body | PR body | Issue/PR/comment body | Issue description | Empty |
-| `{{.URL}}` | Issue URL | PR URL | Issue/PR URL | Issue URL | Empty |
-| `{{.Labels}}` | Comma-separated | Comma-separated | Empty | Comma-separated | Empty |
-| `{{.Comments}}` | Issue comments | PR comments | Empty | Issue comments | Empty |
-| `{{.Kind}}` | `"Issue"` | `"PR"` | `"webhook"` | Jira issue type | `"Issue"` |
-| `{{.Event}}` | Empty | Empty | Event type (e.g., `"issues"`) | Empty | Empty |
-| `{{.Action}}` | Empty | Empty | Action (e.g., `"opened"`) | Empty | Empty |
-| `{{.Sender}}` | Empty | Empty | Event sender username | Empty | Empty |
-| `{{.Branch}}` | Empty | PR head branch | PR/push branch | Empty | Empty |
-| `{{.Ref}}` | Empty | Empty | Git ref (e.g., `"refs/heads/main"`) | Empty | Empty |
-| `{{.Repository}}` | Empty | Empty | `owner/repo` format | Empty | Empty |
-| `{{.RepositoryOwner}}` | Empty | Empty | Repository owner login | Empty | Empty |
-| `{{.RepositoryName}}` | Empty | Empty | Repository name only | Empty | Empty |
-| `{{.Payload}}` | Empty | Empty | Full webhook payload | Empty | Empty |
-| `{{.ReviewState}}` | Empty | `approved` / `changes_requested` | Empty | Empty | Empty |
-| `{{.ReviewComments}}` | Empty | Inline review comments | Empty | Empty | Empty |
-| `{{.Time}}` | Empty | Empty | Empty | Empty | Trigger time (RFC3339) |
+| Variable | GitHub Issues | GitHub PRs | GitHub Webhook | Jira | Linear Webhook | Cron |
+|----------|--------------|------------|----------------|------|----------------|------|
+| `{{.ID}}` | Issue number (string) | PR number (string) | Issue/PR number or commit ID | Issue key (e.g., `ENG-42`) | Linear resource ID | Date-time string |
+| `{{.Number}}` | Issue number (int) | PR number (int) | Issue/PR number | `0` | Empty | `0` |
+| `{{.Title}}` | Issue title | PR title | Issue/PR title | Issue summary | Resource title | Trigger time (RFC3339) |
+| `{{.Body}}` | Issue body | PR body | Issue/PR/comment body | Issue description | Empty | Empty |
+| `{{.URL}}` | Issue URL | PR URL | Issue/PR URL | Issue URL | Empty | Empty |
+| `{{.Labels}}` | Comma-separated | Comma-separated | Empty | Comma-separated | Comma-separated | Empty |
+| `{{.Comments}}` | Issue comments | PR comments | Empty | Issue comments | Empty | Empty |
+| `{{.Kind}}` | `"Issue"` | `"PR"` | `"webhook"` | Jira issue type | `"LinearWebhook"` | `"Issue"` |
+| `{{.Event}}` | Empty | Empty | Event type (e.g., `"issues"`) | Empty | Empty | Empty |
+| `{{.Action}}` | Empty | Empty | Action (e.g., `"opened"`) | Empty | Action (e.g., `"create"`, `"update"`) | Empty |
+| `{{.Sender}}` | Empty | Empty | Event sender username | Empty | Empty | Empty |
+| `{{.Branch}}` | Empty | PR head branch | PR/push branch | Empty | Empty | Empty |
+| `{{.Ref}}` | Empty | Empty | Git ref (e.g., `"refs/heads/main"`) | Empty | Empty | Empty |
+| `{{.Repository}}` | Empty | Empty | `owner/repo` format | Empty | Empty | Empty |
+| `{{.RepositoryOwner}}` | Empty | Empty | Repository owner login | Empty | Empty | Empty |
+| `{{.RepositoryName}}` | Empty | Empty | Repository name only | Empty | Empty | Empty |
+| `{{.Payload}}` | Empty | Empty | Full webhook payload | Empty | Full Linear webhook payload | Empty |
+| `{{.ReviewState}}` | Empty | `approved` / `changes_requested` | Empty | Empty | Empty | Empty |
+| `{{.ReviewComments}}` | Empty | Inline review comments | Empty | Empty | Empty | Empty |
+| `{{.Type}}` | Empty | Empty | Empty | Empty | Resource type (e.g., `"Issue"`, `"Comment"`) | Empty |
+| `{{.State}}` | Empty | Empty | Empty | Empty | Workflow state (e.g., `"Todo"`, `"In Progress"`) | Empty |
+| `{{.IssueID}}` | Empty | Empty | Empty | Empty | Parent issue ID (Comment events only) | Empty |
+| `{{.Time}}` | Empty | Empty | Empty | Empty | Empty | Trigger time (RFC3339) |
 
 ## Direct Task Creation: Workflow Integration
 

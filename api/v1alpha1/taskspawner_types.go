@@ -44,6 +44,13 @@ type When struct {
 	// LinearWebhook triggers task spawning on Linear webhook events.
 	// +optional
 	LinearWebhook *LinearWebhook `json:"linearWebhook,omitempty"`
+
+	// GenericWebhook triggers task spawning from arbitrary HTTP POST payloads.
+	// Any system that can send an HTTP POST with a JSON body can trigger
+	// tasks through this source. The URL path is /webhook/<source> and
+	// the HMAC secret is read from the <SOURCE>_WEBHOOK_SECRET env var.
+	// +optional
+	GenericWebhook *GenericWebhook `json:"webhook,omitempty"`
 }
 
 // Cron triggers task spawning on a cron schedule.
@@ -272,10 +279,35 @@ type GitHubPullRequests struct {
 	// +optional
 	Reporting *GitHubReporting `json:"reporting,omitempty"`
 
+	// FilePatterns filters pull requests by changed file paths.
+	// Files matching Exclude are removed first; the PR passes when at least
+	// one remaining file matches Include (or Include is empty and files remain).
+	// Patterns use doublestar syntax (e.g., "*.go", "internal/**", "docs/**/*.md").
+	// When empty, no file-based filtering is applied.
+	// +optional
+	FilePatterns *FilePatterns `json:"filePatterns,omitempty"`
+
 	// PollInterval overrides spec.pollInterval for this source (e.g., "30s", "5m").
 	// When empty, spec.pollInterval is used.
 	// +optional
 	PollInterval string `json:"pollInterval,omitempty"`
+}
+
+// FilePatterns filters items by changed file paths using doublestar glob patterns.
+// Semantics: files matching any Exclude pattern are removed first, then the item
+// passes when at least one remaining file matches any Include pattern (or Include
+// is empty and at least one file remains after exclusion).
+type FilePatterns struct {
+	// Include requires at least one file (after Exclude removal) to match any of
+	// these glob patterns. When empty, the item passes as long as at least one
+	// file remains after Exclude filtering.
+	// +optional
+	Include []string `json:"include,omitempty"`
+
+	// Exclude removes matching files from consideration before Include runs.
+	// An item whose changed files all match Exclude is rejected.
+	// +optional
+	Exclude []string `json:"exclude,omitempty"`
 }
 
 // Jira discovers issues from a Jira project.
@@ -380,6 +412,13 @@ type GitHubWebhookFilter struct {
 	// ExcludeAuthors excludes events sent by any of these usernames.
 	// +optional
 	ExcludeAuthors []string `json:"excludeAuthors,omitempty"`
+
+	// FilePatterns filters events by changed file paths.
+	// For push events, file paths are extracted directly from the payload.
+	// For pull_request events, the file list is fetched from the GitHub API
+	// using the workspace's secretRef for authentication.
+	// +optional
+	FilePatterns *FilePatterns `json:"filePatterns,omitempty"`
 }
 
 // LinearWebhook configures webhook-driven task spawning from Linear events.
@@ -422,6 +461,58 @@ type LinearWebhookFilter struct {
 	// ExcludeLabels excludes issues with any of these labels.
 	// +optional
 	ExcludeLabels []string `json:"excludeLabels,omitempty"`
+}
+
+// GenericWebhook configures webhook-driven task spawning from arbitrary HTTP
+// POST payloads with JSON bodies. Any system that can send an HTTP POST can
+// trigger tasks through this source. The URL path is /webhook/<source> and
+// the HMAC secret is read from the <SOURCE>_WEBHOOK_SECRET env var (e.g.,
+// source "notion" uses NOTION_WEBHOOK_SECRET).
+// +kubebuilder:validation:XValidation:rule="'id' in self.fieldMapping",message="fieldMapping must include an 'id' key for deduplication and task naming"
+type GenericWebhook struct {
+	// Source is a short identifier for this webhook source (e.g., "notion",
+	// "sentry", "drata"). It determines:
+	//   - The URL path: /webhook/<source>
+	//   - The env var for HMAC validation: <SOURCE>_WEBHOOK_SECRET
+	// Must be lowercase alphanumeric with optional hyphens.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`
+	Source string `json:"source"`
+
+	// FieldMapping maps JSONPath expressions to WorkItem template variables.
+	// Each key is a template variable name (available as {{.Key}} in
+	// promptTemplate and branch), and each value is a JSONPath expression
+	// evaluated against the request body.
+	// The "id" key is required — it provides the unique identifier used for
+	// deduplication and task naming.
+	// +kubebuilder:validation:Required
+	FieldMapping map[string]string `json:"fieldMapping"`
+
+	// Filters define conditions that must ALL match for a webhook delivery
+	// to trigger a task (AND semantics across filters). Each filter extracts
+	// a field via JSONPath and matches it against an exact value or regex
+	// pattern. If empty, all deliveries trigger tasks.
+	// +optional
+	Filters []GenericWebhookFilter `json:"filters,omitempty"`
+}
+
+// GenericWebhookFilter defines a condition for filtering generic webhook payloads.
+// Exactly one of Value or Pattern must be set.
+// +kubebuilder:validation:XValidation:rule="has(self.value) != (has(self.pattern) && size(self.pattern) > 0)",message="exactly one of value or pattern must be set"
+type GenericWebhookFilter struct {
+	// Field is a JSONPath expression selecting the payload field to match.
+	// +kubebuilder:validation:Required
+	Field string `json:"field"`
+
+	// Value requires an exact string match against the extracted field value.
+	// Mutually exclusive with Pattern.
+	// +optional
+	Value *string `json:"value,omitempty"`
+
+	// Pattern requires a regex match against the extracted field value.
+	// Mutually exclusive with Value.
+	// +optional
+	Pattern string `json:"pattern,omitempty"`
 }
 
 // TaskTemplateMetadata holds optional labels and annotations for spawned Tasks.

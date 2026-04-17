@@ -22,7 +22,6 @@ make image REGISTRY="${REGISTRY}" VERSION="${LOCAL_IMAGE_TAG}"
 images=(
   "${REGISTRY}/kelos-controller:${LOCAL_IMAGE_TAG}"
   "${REGISTRY}/kelos-spawner:${LOCAL_IMAGE_TAG}"
-  "${REGISTRY}/kelos-token-refresher:${LOCAL_IMAGE_TAG}"
   "${REGISTRY}/claude-code:${LOCAL_IMAGE_TAG}"
   "${REGISTRY}/codex:${LOCAL_IMAGE_TAG}"
   "${REGISTRY}/gemini:${LOCAL_IMAGE_TAG}"

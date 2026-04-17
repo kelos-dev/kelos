@@ -18,6 +18,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	"github.com/kelos-dev/kelos/internal/githubapp"
 	"github.com/kelos-dev/kelos/internal/logging"
 	"github.com/kelos-dev/kelos/internal/webhook"
 )
@@ -34,11 +35,16 @@ func init() {
 
 func main() {
 	var (
-		source               string
-		metricsAddr          string
-		probeAddr            string
-		webhookAddr          string
-		enableLeaderElection bool
+		source                  string
+		metricsAddr             string
+		probeAddr               string
+		webhookAddr             string
+		enableLeaderElection    bool
+		githubToken             string
+		githubAppID             string
+		githubAppInstallationID string
+		githubAppPrivateKey     string
+		githubAPIBaseURL        string
 	)
 
 	flag.StringVar(&source, "source", "", "Webhook source type (github or linear)")
@@ -46,6 +52,11 @@ func main() {
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.StringVar(&webhookAddr, "webhook-bind-address", ":8443", "The address the webhook endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false, "Enable leader election for controller manager.")
+	flag.StringVar(&githubToken, "github-token", "", "GitHub personal access token for API calls (env: GITHUB_TOKEN)")
+	flag.StringVar(&githubAppID, "github-app-id", "", "GitHub App ID for installation token generation (env: GITHUB_APP_ID)")
+	flag.StringVar(&githubAppInstallationID, "github-app-installation-id", "", "GitHub App installation ID (env: GITHUB_APP_INSTALLATION_ID)")
+	flag.StringVar(&githubAppPrivateKey, "github-app-private-key", "", "GitHub App private key in PEM format (env: GITHUB_APP_PRIVATE_KEY)")
+	flag.StringVar(&githubAPIBaseURL, "github-api-base-url", "", "GitHub API base URL for enterprise servers (env: GITHUB_API_BASE_URL)")
 
 	opts, applyVerbosity := logging.SetupZapOptions(flag.CommandLine)
 	flag.Parse()
@@ -57,6 +68,23 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(opts)))
 
+	// Fall back to environment variables for credentials not passed via flags.
+	if githubToken == "" {
+		githubToken = os.Getenv("GITHUB_TOKEN")
+	}
+	if githubAppID == "" {
+		githubAppID = os.Getenv("GITHUB_APP_ID")
+	}
+	if githubAppInstallationID == "" {
+		githubAppInstallationID = os.Getenv("GITHUB_APP_INSTALLATION_ID")
+	}
+	if githubAppPrivateKey == "" {
+		githubAppPrivateKey = os.Getenv("GITHUB_APP_PRIVATE_KEY")
+	}
+	if githubAPIBaseURL == "" {
+		githubAPIBaseURL = os.Getenv("GITHUB_API_BASE_URL")
+	}
+
 	// Validate source parameter
 	source = strings.ToLower(strings.TrimSpace(source))
 	var webhookSource webhook.WebhookSource
@@ -65,9 +93,11 @@ func main() {
 		webhookSource = webhook.GitHubSource
 	case "linear":
 		webhookSource = webhook.LinearSource
+	case "generic":
+		webhookSource = webhook.GenericSource
 	default:
 		setupLog.Error(fmt.Errorf("invalid source: %s", source),
-			"Source must be 'github' or 'linear'")
+			"Source must be 'github', 'linear', or 'generic'")
 		os.Exit(1)
 	}
 
@@ -86,6 +116,26 @@ func main() {
 	// Set up signal handling context
 	ctx := ctrl.SetupSignalHandler()
 
+	// Set up GitHub token resolver for PR branch enrichment
+	if githubToken != "" {
+		webhook.SetGitHubTokenResolver(func(context.Context) (string, error) { return githubToken, nil })
+	} else if githubAppID != "" && githubAppInstallationID != "" && githubAppPrivateKey != "" {
+		creds, err := githubapp.ParseCredentials(map[string][]byte{
+			"appID":          []byte(githubAppID),
+			"installationID": []byte(githubAppInstallationID),
+			"privateKey":     []byte(githubAppPrivateKey),
+		})
+		if err != nil {
+			setupLog.Error(err, "Failed to parse GitHub App credentials")
+			os.Exit(1)
+		}
+		tc := githubapp.NewTokenClient()
+		if githubAPIBaseURL != "" {
+			tc.BaseURL = githubAPIBaseURL
+		}
+		webhook.SetGitHubTokenResolver(githubapp.NewTokenProvider(tc, creds).Token)
+	}
+
 	// Create webhook handler
 	handler, err := webhook.NewWebhookHandler(
 		ctx,
@@ -98,9 +148,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Set up HTTP server for webhooks
+	// Set up HTTP server for webhooks.
+	// Generic source uses /webhook/<source> paths; others use root.
 	mux := http.NewServeMux()
-	mux.Handle("/", handler)
+	if webhookSource == webhook.GenericSource {
+		mux.Handle("/webhook/", handler)
+	} else {
+		mux.Handle("/", handler)
+	}
 
 	webhookServer := &http.Server{
 		Addr:              webhookAddr,

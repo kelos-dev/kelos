@@ -100,6 +100,20 @@ func createAndCompleteTask(nsName, taskName, spawner, model string) *kelosv1alph
 	}
 	Expect(k8sClient.Create(ctx, task)).Should(Succeed())
 
+	taskKey := types.NamespacedName{Name: taskName, Namespace: nsName}
+	createdTask := &kelosv1alpha1.Task{}
+	Eventually(func() bool {
+		if err := k8sClient.Get(ctx, taskKey, createdTask); err != nil {
+			return false
+		}
+		for _, f := range createdTask.Finalizers {
+			if f == "kelos.dev/finalizer" {
+				return true
+			}
+		}
+		return false
+	}, metricsTimeout, metricsInterval).Should(BeTrue())
+
 	jobKey := types.NamespacedName{Name: taskName, Namespace: nsName}
 	createdJob := &batchv1.Job{}
 	Eventually(func() bool {
@@ -114,7 +128,6 @@ func createAndCompleteTask(nsName, taskName, spawner, model string) *kelosv1alph
 		return k8sClient.Status().Update(ctx, createdJob)
 	}, metricsTimeout, metricsInterval).Should(Succeed())
 
-	taskKey := types.NamespacedName{Name: taskName, Namespace: nsName}
 	Eventually(func() kelosv1alpha1.TaskPhase {
 		var t kelosv1alpha1.Task
 		if err := k8sClient.Get(ctx, taskKey, &t); err != nil {

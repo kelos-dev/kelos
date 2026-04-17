@@ -19,21 +19,26 @@ on:
         description: If set, validate the checked-out merge commit includes this PR head SHA
         type: string
         default: ''
-    secrets:
-      CLAUDE_CODE_OAUTH_TOKEN:
-        required: true
-      CODEX_AUTH_JSON:
-        required: true
+      use-environment-secrets:
+        description: Whether to load secrets from a GitHub environment
+        type: boolean
+        default: false
+      environment-name:
+        description: GitHub environment name to use when loading environment secrets
+        type: string
+        default: ''
+
 
 jobs:
   e2e:
+    if: ${{ !inputs.use-environment-secrets }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
       # TaskSpawner E2E injects github.token into make test-e2e and calls the
       # GitHub Issues API to discover issues and comments.
       issues: read
-    steps:
+    steps: &e2e_steps
       - uses: actions/checkout@v4
         if: inputs.checkout-ref == ''
         with:
@@ -45,6 +50,21 @@ jobs:
           ref: ${{ inputs.checkout-ref }}
           persist-credentials: ${{ inputs.persist-credentials }}
           fetch-depth: 2
+
+      - name: Validate E2E secrets
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+        run: |
+          if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+            echo "::error::CLAUDE_CODE_OAUTH_TOKEN is required"
+            exit 1
+          fi
+
+          if [ -z "$CODEX_AUTH_JSON" ]; then
+            echo "::error::CODEX_AUTH_JSON is required"
+            exit 1
+          fi
 
       - name: Validate checked-out commit matches approved SHA
         if: inputs.expected-sha != ''
@@ -115,3 +135,15 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           KELOS_BIN: ${{ github.workspace }}/bin/kelos
         run: make test-e2e
+
+  e2e-with-environment:
+    if: ${{ inputs.use-environment-secrets }}
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.environment-name }}
+    permissions:
+      contents: read
+      # TaskSpawner E2E injects github.token into make test-e2e and calls the
+      # GitHub Issues API to discover issues and comments.
+      issues: read
+    steps: *e2e_steps

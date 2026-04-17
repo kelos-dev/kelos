@@ -30,6 +30,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -60,7 +61,7 @@ type TokenClient struct {
 func NewTokenClient() *TokenClient {
 	return &TokenClient{
 		BaseURL: defaultGitHubAPIURL,
-		Client:  http.DefaultClient,
+		Client:  &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
@@ -202,4 +203,55 @@ func generateJWT(creds *Credentials) (string, error) {
 
 func base64URLEncode(data []byte) string {
 	return base64.RawURLEncoding.EncodeToString(data)
+}
+
+// tokenExpiryMargin is the safety margin before token expiry. Tokens are
+// refreshed when less than this duration remains until expiration.
+const tokenExpiryMargin = 5 * time.Minute
+
+// TokenProvider generates and caches GitHub App installation tokens.
+// It is safe for concurrent use.
+type TokenProvider struct {
+	mu        sync.Mutex
+	client    *TokenClient
+	creds     *Credentials
+	token     string
+	expiresAt time.Time
+}
+
+// NewTokenProvider creates a TokenProvider that generates installation tokens
+// using the given client and credentials. The client's BaseURL determines the
+// GitHub API endpoint (set it for GitHub Enterprise).
+func NewTokenProvider(client *TokenClient, creds *Credentials) *TokenProvider {
+	return &TokenProvider{
+		client: client,
+		creds:  creds,
+	}
+}
+
+// Token returns a valid GitHub App installation token, generating a new one
+// if the cached token is expired or about to expire. If refresh fails but
+// the cached token has not actually expired, it is returned as a fallback
+// so that transient outages do not cause premature auth failures.
+func (tp *TokenProvider) Token(ctx context.Context) (string, error) {
+	tp.mu.Lock()
+	defer tp.mu.Unlock()
+
+	now := time.Now()
+	if tp.token != "" && now.Add(tokenExpiryMargin).Before(tp.expiresAt) {
+		return tp.token, nil
+	}
+
+	resp, err := tp.client.GenerateInstallationToken(ctx, tp.creds)
+	if err != nil {
+		// Fall back to cached token if it has not actually expired yet
+		if tp.token != "" && now.Before(tp.expiresAt) {
+			return tp.token, nil
+		}
+		return "", fmt.Errorf("generating installation token: %w", err)
+	}
+
+	tp.token = resp.Token
+	tp.expiresAt = resp.ExpiresAt
+	return tp.token, nil
 }

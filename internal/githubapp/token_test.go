@@ -23,6 +23,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -239,6 +240,157 @@ func TestGenerateInstallationToken(t *testing.T) {
 	}
 	if !resp.ExpiresAt.Equal(expiresAt) {
 		t.Errorf("ExpiresAt = %v, want %v", resp.ExpiresAt, expiresAt)
+	}
+}
+
+func TestTokenProvider_CachesToken(t *testing.T) {
+	_, keyPEM := generateTestKey(t)
+
+	callCount := 0
+	expiresAt := time.Now().Add(1 * time.Hour).UTC().Truncate(time.Second)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"token":      "ghs_cached_token",
+			"expires_at": expiresAt.Format(time.RFC3339),
+		})
+	}))
+	defer server.Close()
+
+	creds, err := ParseCredentials(map[string][]byte{
+		"appID":          []byte("12345"),
+		"installationID": []byte("67890"),
+		"privateKey":     keyPEM,
+	})
+	if err != nil {
+		t.Fatalf("ParseCredentials: %v", err)
+	}
+
+	tc := &TokenClient{BaseURL: server.URL, Client: server.Client()}
+	provider := NewTokenProvider(tc, creds)
+
+	token1, err := provider.Token(context.Background())
+	if err != nil {
+		t.Fatalf("First Token() call: %v", err)
+	}
+	if token1 != "ghs_cached_token" {
+		t.Errorf("Token = %q, want %q", token1, "ghs_cached_token")
+	}
+
+	token2, err := provider.Token(context.Background())
+	if err != nil {
+		t.Fatalf("Second Token() call: %v", err)
+	}
+	if token2 != "ghs_cached_token" {
+		t.Errorf("Token = %q, want %q", token2, "ghs_cached_token")
+	}
+
+	if callCount != 1 {
+		t.Errorf("Expected 1 API call (cached), got %d", callCount)
+	}
+}
+
+func TestTokenProvider_RefreshesExpiredToken(t *testing.T) {
+	_, keyPEM := generateTestKey(t)
+
+	callCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"token":      fmt.Sprintf("ghs_token_%d", callCount),
+			"expires_at": time.Now().Add(1 * time.Minute).UTC().Format(time.RFC3339),
+		})
+	}))
+	defer server.Close()
+
+	creds, err := ParseCredentials(map[string][]byte{
+		"appID":          []byte("12345"),
+		"installationID": []byte("67890"),
+		"privateKey":     keyPEM,
+	})
+	if err != nil {
+		t.Fatalf("ParseCredentials: %v", err)
+	}
+
+	tc := &TokenClient{BaseURL: server.URL, Client: server.Client()}
+	provider := NewTokenProvider(tc, creds)
+
+	// First call generates a token that expires in 1 minute (within the
+	// 5-minute safety margin), so the next call must refresh.
+	token1, err := provider.Token(context.Background())
+	if err != nil {
+		t.Fatalf("First Token() call: %v", err)
+	}
+	if token1 != "ghs_token_1" {
+		t.Errorf("Token = %q, want %q", token1, "ghs_token_1")
+	}
+
+	token2, err := provider.Token(context.Background())
+	if err != nil {
+		t.Fatalf("Second Token() call: %v", err)
+	}
+	if token2 != "ghs_token_2" {
+		t.Errorf("Token = %q, want %q", token2, "ghs_token_2")
+	}
+
+	if callCount != 2 {
+		t.Errorf("Expected 2 API calls (expired token refreshed), got %d", callCount)
+	}
+}
+
+func TestTokenProvider_FallsBackOnRefreshError(t *testing.T) {
+	_, keyPEM := generateTestKey(t)
+
+	callCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if callCount == 1 {
+			// First call succeeds with a token expiring in 3 minutes
+			// (within the 5-minute margin, so next call will try to refresh)
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"token":      "ghs_still_valid",
+				"expires_at": time.Now().Add(3 * time.Minute).UTC().Format(time.RFC3339),
+			})
+			return
+		}
+		// Second call fails (simulating transient outage)
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte(`{"message":"Service temporarily unavailable"}`))
+	}))
+	defer server.Close()
+
+	creds, err := ParseCredentials(map[string][]byte{
+		"appID":          []byte("12345"),
+		"installationID": []byte("67890"),
+		"privateKey":     keyPEM,
+	})
+	if err != nil {
+		t.Fatalf("ParseCredentials: %v", err)
+	}
+
+	tc := &TokenClient{BaseURL: server.URL, Client: server.Client()}
+	provider := NewTokenProvider(tc, creds)
+
+	// First call: get a token that's within the expiry margin but not yet expired
+	token1, err := provider.Token(context.Background())
+	if err != nil {
+		t.Fatalf("First Token() call: %v", err)
+	}
+	if token1 != "ghs_still_valid" {
+		t.Errorf("Token = %q, want %q", token1, "ghs_still_valid")
+	}
+
+	// Second call: refresh fails, but token hasn't actually expired so it's returned
+	token2, err := provider.Token(context.Background())
+	if err != nil {
+		t.Fatalf("Second Token() call should fall back, got error: %v", err)
+	}
+	if token2 != "ghs_still_valid" {
+		t.Errorf("Token = %q, want %q (fallback to cached)", token2, "ghs_still_valid")
 	}
 }
 

@@ -58,10 +58,6 @@ func main() {
 	var ghProxyResourceRequests string
 	var ghProxyResourceLimits string
 	var ghProxyCacheTTL time.Duration
-	var tokenRefresherImage string
-	var tokenRefresherImagePullPolicy string
-	var tokenRefresherResourceRequests string
-	var tokenRefresherResourceLimits string
 	var telemetryReport bool
 	var telemetryEndpoint string
 	var telemetryEnvironment string
@@ -90,10 +86,6 @@ func main() {
 	flag.StringVar(&ghProxyResourceRequests, "ghproxy-resource-requests", "", "Resource requests for workspace ghproxy containers as comma-separated name=value pairs (e.g., cpu=50m,memory=64Mi).")
 	flag.StringVar(&ghProxyResourceLimits, "ghproxy-resource-limits", "", "Resource limits for workspace ghproxy containers as comma-separated name=value pairs (e.g., cpu=200m,memory=128Mi).")
 	flag.DurationVar(&ghProxyCacheTTL, "ghproxy-cache-ttl", 0, "Cache TTL for workspace ghproxy instances (e.g., 30s, 1m). When set, passed as --cache-ttl to ghproxy containers. Zero means use the ghproxy default (15s).")
-	flag.StringVar(&tokenRefresherImage, "token-refresher-image", controller.DefaultTokenRefresherImage, "The image to use for the token refresher sidecar.")
-	flag.StringVar(&tokenRefresherImagePullPolicy, "token-refresher-image-pull-policy", "", "The image pull policy for the token refresher sidecar (e.g., Always, Never, IfNotPresent).")
-	flag.StringVar(&tokenRefresherResourceRequests, "token-refresher-resource-requests", "", "Resource requests for token refresher sidecars as comma-separated name=value pairs (e.g., cpu=100m,memory=128Mi).")
-	flag.StringVar(&tokenRefresherResourceLimits, "token-refresher-resource-limits", "", "Resource limits for token refresher sidecars as comma-separated name=value pairs (e.g., cpu=200m,memory=256Mi).")
 	flag.BoolVar(&telemetryReport, "telemetry-report", false, "Run a one-shot telemetry report and exit.")
 	flag.StringVar(&telemetryEndpoint, "telemetry-endpoint", telemetry.DefaultPostHogEndpoint, "The PostHog endpoint for sending telemetry reports.")
 	flag.StringVar(&telemetryEnvironment, "telemetry-environment", "production", "The environment label for telemetry reports (e.g., production, development).")
@@ -143,24 +135,6 @@ func main() {
 			Limits:   ghProxyLimits,
 		}
 	}
-	var tokenRefresherResources *corev1.ResourceRequirements
-	tokenRefresherRequests, err := controller.ParseResourceList(tokenRefresherResourceRequests)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing --token-refresher-resource-requests: %v\n", err)
-		os.Exit(1)
-	}
-	tokenRefresherLimits, err := controller.ParseResourceList(tokenRefresherResourceLimits)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing --token-refresher-resource-limits: %v\n", err)
-		os.Exit(1)
-	}
-	if tokenRefresherRequests != nil || tokenRefresherLimits != nil {
-		tokenRefresherResources = &corev1.ResourceRequirements{
-			Requests: tokenRefresherRequests,
-			Limits:   tokenRefresherLimits,
-		}
-	}
-
 	if telemetryReport {
 		log := ctrl.Log.WithName("telemetry")
 		cfg := ctrl.GetConfigOrDie()
@@ -238,17 +212,11 @@ func main() {
 	deploymentBuilder.SpawnerImage = spawnerImage
 	deploymentBuilder.SpawnerImagePullPolicy = corev1.PullPolicy(spawnerImagePullPolicy)
 	deploymentBuilder.SpawnerResources = spawnerResources
-	deploymentBuilder.TokenRefresherImage = tokenRefresherImage
-	deploymentBuilder.TokenRefresherImagePullPolicy = corev1.PullPolicy(tokenRefresherImagePullPolicy)
-	deploymentBuilder.TokenRefresherResources = tokenRefresherResources
 	workspaceProxyBuilder := controller.NewWorkspaceGHProxyBuilder()
 	workspaceProxyBuilder.GHProxyImage = ghProxyImage
 	workspaceProxyBuilder.GHProxyImagePullPolicy = corev1.PullPolicy(ghProxyImagePullPolicy)
 	workspaceProxyBuilder.GHProxyResources = ghProxyResources
 	workspaceProxyBuilder.GHProxyCacheTTL = ghProxyCacheTTL
-	workspaceProxyBuilder.TokenRefresherImage = tokenRefresherImage
-	workspaceProxyBuilder.TokenRefresherImagePullPolicy = corev1.PullPolicy(tokenRefresherImagePullPolicy)
-	workspaceProxyBuilder.TokenRefresherResources = tokenRefresherResources
 	if err = (&controller.WorkspaceReconciler{
 		Client:       mgr.GetClient(),
 		Scheme:       mgr.GetScheme(),

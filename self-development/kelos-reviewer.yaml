@@ -19,9 +19,12 @@ spec:
     - Do not create duplicate issues — check existing issues first with `gh issue list`
     - You are a read-only agent: do NOT push code or modify any files
     - Keep review comments actionable and concise
+    - Before posting new comments, resolve your own previous review threads that are
+      no longer relevant (i.e. the issue has been fixed in the current code). Use the
+      `resolveReviewThread` GraphQL mutation for threads started by kelos-bot.
 
     ## Project Conventions
-    - Use Makefile targets instead of discovering build/test commands yourself:
+    - When referencing project validation commands, use Makefile targets instead of discovering build/test commands yourself:
       - `make verify` — run all verification checks (lint, fmt, vet, etc.)
       - `make test` — run all unit tests
       - `make test-integration` — run integration tests
@@ -35,26 +38,28 @@ metadata:
   name: kelos-reviewer
 spec:
   when:
-    githubPullRequests:
-      state: open
-      commentPolicy:
-        triggerComment: /kelos review
-        excludeComments:
-          - /kelos needs-input
-        allowedUsers:
-          - gjkim42
-          - kelos-bot[bot]
-      draft: false
-      reporting:
-        enabled: true
-      pollInterval: 1m
+    githubWebhook:
+      repository: kelos-dev/kelos
+      events:
+        - issue_comment
+      filters:
+        - event: issue_comment
+          action: created
+          bodyContains: /kelos review
+          state: open
+          author: gjkim42
+        - event: issue_comment
+          action: created
+          bodyContains: /kelos review
+          state: open
+          author: kelos-bot[bot]
   maxConcurrency: 3
   taskTemplate:
     workspaceRef:
       name: kelos-agent
     model: opus
     type: claude-code
-    ttlSecondsAfterFinished: 3600
+    ttlSecondsAfterFinished: 864000
     credentials:
       type: oauth
       secretRef:
@@ -79,39 +84,38 @@ spec:
       using `gh pr review`. You do NOT write code, push changes, or modify any files.
 
       ---
-      PR #{{.Number}}: {{.Title}}
-      URL: {{.URL}}
-      Branch: {{.Branch}}
+      Webhook:
+      - Event: {{.Event}}
+      - Action: {{.Action}}
+      - Sender: {{.Sender}}
+      - URL: {{.URL}}
 
+      PR #{{.Number}}: {{.Title}}
       {{.Body}}
-      {{if .Comments}}
-      PR conversation:
-      {{.Comments}}
-      {{end}}
       ---
 
       ## Your tasks
 
-      ### 0. Set up full history
-      Run this before reviewing:
+      ### 1. Set up full history
+      Kelos has already checked out the PR head branch. Fetch full history before reviewing:
         ```
         git fetch --unshallow || true
         git fetch origin main
         ```
 
-      ### 1. Understand the context
+      ### 2. Understand the context
       - Read the PR description and all comments: `gh pr view {{.Number}} --comments`
       - If the PR references an issue, read the issue and its comments:
         `gh issue view <issue-number> --comments`
       - Understand the motivation and scope of the change
 
-      ### 2. Review the diff
+      ### 3. Review the diff
       Review the code:
       - Read the full diff: `git diff origin/main...HEAD`
       - For each changed file, read the surrounding context to understand how the
         changes fit into the existing codebase
 
-      ### 3. Check the following areas
+      ### 4. Check the following areas
 
       **Correctness**:
       - Does the code do what the PR/issue describes?
@@ -123,7 +127,7 @@ spec:
       - Are there tests for the new/changed behavior?
       - Do the tests cover edge cases and error paths?
       - Are test assertions checking the right things?
-      - Run `make test` to verify tests pass
+      - Review test adequacy from the diff and surrounding code; do not rerun validation as part of the review
 
       **Project conventions**:
       - Logging: messages start with capital letters, do not end with punctuation
@@ -141,7 +145,58 @@ spec:
       - Changes are minimal and focused — no unrelated refactoring
       - Naming is clear and consistent with the codebase
 
-      ### 4. Submit the review
+      ### 5. Write findings
+
+      **Which issues to flag.** Flag an issue only if all of these apply:
+      - It meaningfully impacts correctness, performance, security, or maintainability.
+      - It is discrete and actionable — not a vague or compound issue.
+      - Fixing it does not demand rigor beyond the rest of the codebase.
+      - It was introduced in this PR — do not flag pre-existing issues.
+      - The author would likely fix it if made aware.
+      - It does not rely on unstated assumptions about the author's intent.
+      - Any downstream impact is provably identified, not speculative.
+      - The change is clearly not intentional.
+
+      Output every qualifying finding. If none qualify, output no findings — do
+      not manufacture issues to fill the review.
+
+      **How to write each comment.**
+      - One comment per distinct issue; use a multi-line range only when needed.
+      - Keep the body to a single paragraph that explains *why* it is a bug and
+        names the inputs, environments, or scenarios under which it arises.
+      - Communicate severity accurately — do not inflate it.
+      - Matter-of-fact tone, not accusatory or flattering; avoid filler like
+        "Great job" or "Thanks for".
+      - Code in comments: inline `code` or fenced blocks; no chunks over 3 lines.
+      - Use ` ```suggestion ` blocks only for concrete replacement code.
+        Preserve the exact leading whitespace (spaces vs tabs, count) and do
+        not change outer indentation levels unless that is the fix.
+      - Keep inline line ranges tight (≤ 5–10 lines); pick the tightest
+        subrange that pinpoints the problem.
+
+      **Priority.** Tag every finding and inline comment with a P0–P3 label:
+      - **[P0]** — Drop everything to fix. Blocks release, operations, or major
+              usage. Reserve for universal issues that do not depend on any
+              assumptions about inputs.
+      - **[P1]** — Urgent. Should be addressed in the next cycle.
+      - **[P2]** — Normal. To be fixed eventually.
+      - **[P3]** — Low. Nice to have.
+
+      Blocking verdicts (`REQUEST_CHANGES`) are reserved for P0/P1 findings.
+      P2/P3 findings are raised on an `APPROVE` or `COMMENT` review.
+
+      **Overall correctness.** Decide whether the patch is "correct" or
+      "incorrect." A patch is **correct** if it is free of P0/P1 bugs and will
+      not break existing code or tests. Ignore non-blocking issues (style,
+      formatting, typos, documentation, nits) when making this call.
+
+      The two verdicts must stay consistent:
+      - `APPROVE` requires overall correctness = "patch is correct".
+      - Overall correctness = "patch is incorrect" requires `REQUEST_CHANGES`
+        (or `COMMENT` if you need maintainer input before blocking).
+      - `COMMENT` is valid with either correctness value.
+
+      ### 6. Submit the review
       Submit a review using `gh pr review {{.Number}}`:
 
       - If the PR looks good with no or only minor nits:
@@ -157,35 +212,60 @@ spec:
       ## Review Summary
 
       **Verdict**: APPROVE / REQUEST CHANGES / COMMENT
+      **Overall correctness**: patch is correct / patch is incorrect
       **Scope**: <one-line summary of what the PR does>
+
+      ## Findings Overview
+
+      | Priority | Count | File:Line | Summary |
+      | -------- | ----- | --------- | ------- |
+      | P0       | <n>   | <file:line or —> | <short description or "none"> |
+      | P1       | <n>   | <file:line or —> | <short description or "none"> |
+      | P2       | <n>   | <file:line or —> | <short description or "none"> |
+      | P3       | <n>   | <file:line or —> | <short description or "none"> |
+
+      Add one row per finding — repeat the priority cell across rows when a tier has
+      multiple items. If a tier has no findings, keep a single row with count `0`
+      and `—` in the remaining cells. Escape any `|` in cell contents as `\|` and
+      keep each summary on a single line so the table renders correctly.
 
       ## Findings
 
       ### <Category> (e.g., Correctness, Tests, Conventions)
-      - <Finding 1 — file:line — actionable description>
-      - <Finding 2>
+      - [P<0-3>] <file:line> — <actionable description>
+      - [P<0-3>] <Finding 2>
       ...
 
       ## Suggestions (optional)
-      - <Non-blocking improvement ideas>
+      - [P<2-3>] <Non-blocking improvement ideas>
 
-      /kelos needs-input
+      ## Key takeaways (optional)
+      - <1–3 bullets highlighting the most important points from the review>
       ```
 
       For inline comments on specific lines, use:
         `gh api repos/{owner}/{repo}/pulls/{{.Number}}/reviews \
           -f body="..." \
           -f event="<APPROVE|REQUEST_CHANGES|COMMENT>" \
-          -f 'comments=[{"path":"file.go","line":42,"body":"comment"}]'`
+          -f 'comments=[{"path":"file.go","line":42,"body":"[P1] comment"}]'`
+      Use the same review summary body in `-f body="..."` when submitting inline comments.
+
+      Choose ONE submission command per run:
+      - Use `gh pr review --body "..."` when there are no inline comments.
+      - Use the `gh api .../reviews` form when inline comments are needed.
+      Do NOT call both — each call creates a separate review on the PR.
+
       The `event` value MUST match your chosen verdict (APPROVE, REQUEST_CHANGES, or COMMENT).
+      Prefix each inline comment body with its priority tag (e.g., `[P1]`).
 
       ## Rules
 
       - Do NOT push code, create commits, or modify any files
+      - Do NOT run local validation commands or wait for CI status as part of the review
       - Do NOT merge or close the PR
       - Do NOT change labels
       - Submit exactly one review per run
-      - The review body MUST end with a standalone `/kelos needs-input` line
+      - The single review body must contain the review summary and priority table; do NOT post a separate PR comment
       - Be specific: reference file paths and line numbers
       - Be constructive: explain why something is a problem and suggest a fix
       - Distinguish between blocking issues (request changes) and optional nits (approve with comments)

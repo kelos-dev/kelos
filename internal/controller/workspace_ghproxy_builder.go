@@ -24,20 +24,16 @@ const (
 
 // WorkspaceGHProxyBuilder constructs Services and Deployments for workspace-scoped ghproxy instances.
 type WorkspaceGHProxyBuilder struct {
-	GHProxyImage                  string
-	GHProxyImagePullPolicy        corev1.PullPolicy
-	GHProxyResources              *corev1.ResourceRequirements
-	GHProxyCacheTTL               time.Duration
-	TokenRefresherImage           string
-	TokenRefresherImagePullPolicy corev1.PullPolicy
-	TokenRefresherResources       *corev1.ResourceRequirements
+	GHProxyImage           string
+	GHProxyImagePullPolicy corev1.PullPolicy
+	GHProxyResources       *corev1.ResourceRequirements
+	GHProxyCacheTTL        time.Duration
 }
 
 // NewWorkspaceGHProxyBuilder creates a new WorkspaceGHProxyBuilder.
 func NewWorkspaceGHProxyBuilder() *WorkspaceGHProxyBuilder {
 	return &WorkspaceGHProxyBuilder{
-		GHProxyImage:        DefaultGHProxyImage,
-		TokenRefresherImage: DefaultTokenRefresherImage,
+		GHProxyImage: DefaultGHProxyImage,
 	}
 }
 
@@ -116,38 +112,13 @@ func (b *WorkspaceGHProxyBuilder) BuildDeployment(workspace *kelosv1alpha1.Works
 	}
 
 	var env []corev1.EnvVar
-	var volumes []corev1.Volume
-	var volumeMounts []corev1.VolumeMount
-	var initContainers []corev1.Container
 
 	if workspace.Spec.SecretRef != nil {
 		if isGitHubApp {
-			args = append(args, "--github-token-file=/shared/token/GITHUB_TOKEN")
-			volumes = append(volumes,
-				corev1.Volume{
-					Name: "github-token",
-					VolumeSource: corev1.VolumeSource{
-						EmptyDir: &corev1.EmptyDirVolumeSource{},
-					},
-				},
-				corev1.Volume{
-					Name: "github-app-secret",
-					VolumeSource: corev1.VolumeSource{
-						Secret: &corev1.SecretVolumeSource{
-							SecretName: workspace.Spec.SecretRef.Name,
-						},
-					},
-				},
-			)
-			volumeMounts = append(volumeMounts, corev1.VolumeMount{
-				Name:      "github-token",
-				MountPath: "/shared/token",
-				ReadOnly:  true,
-			})
-
-			refresherEnv := []corev1.EnvVar{
-				{
-					Name: "APP_ID",
+			// GitHub App: inject credentials as env vars for in-process token generation
+			env = append(env,
+				corev1.EnvVar{
+					Name: "GITHUB_APP_ID",
 					ValueFrom: &corev1.EnvVarSource{
 						SecretKeyRef: &corev1.SecretKeySelector{
 							LocalObjectReference: corev1.LocalObjectReference{Name: workspace.Spec.SecretRef.Name},
@@ -155,8 +126,8 @@ func (b *WorkspaceGHProxyBuilder) BuildDeployment(workspace *kelosv1alpha1.Works
 						},
 					},
 				},
-				{
-					Name: "INSTALLATION_ID",
+				corev1.EnvVar{
+					Name: "GITHUB_APP_INSTALLATION_ID",
 					ValueFrom: &corev1.EnvVarSource{
 						SecretKeyRef: &corev1.SecretKeySelector{
 							LocalObjectReference: corev1.LocalObjectReference{Name: workspace.Spec.SecretRef.Name},
@@ -164,39 +135,18 @@ func (b *WorkspaceGHProxyBuilder) BuildDeployment(workspace *kelosv1alpha1.Works
 						},
 					},
 				},
-			}
-			host, _, _ := parseGitHubRepo(workspace.Spec.Repo)
-			if apiBaseURL := gitHubAPIBaseURL(host); apiBaseURL != "" {
-				refresherEnv = append(refresherEnv, corev1.EnvVar{
-					Name:  "GITHUB_API_BASE_URL",
-					Value: apiBaseURL,
-				})
-			}
-
-			restartPolicyAlways := corev1.ContainerRestartPolicyAlways
-			refresher := corev1.Container{
-				Name:            "token-refresher",
-				Image:           b.TokenRefresherImage,
-				ImagePullPolicy: b.TokenRefresherImagePullPolicy,
-				RestartPolicy:   &restartPolicyAlways,
-				Env:             refresherEnv,
-				VolumeMounts: []corev1.VolumeMount{
-					{
-						Name:      "github-token",
-						MountPath: "/shared/token",
-					},
-					{
-						Name:      "github-app-secret",
-						MountPath: "/etc/github-app",
-						ReadOnly:  true,
+				corev1.EnvVar{
+					Name: "GITHUB_APP_PRIVATE_KEY",
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{Name: workspace.Spec.SecretRef.Name},
+							Key:                  "privateKey",
+						},
 					},
 				},
-			}
-			if b.TokenRefresherResources != nil {
-				refresher.Resources = *b.TokenRefresherResources
-			}
-			initContainers = append(initContainers, refresher)
+			)
 		} else {
+			// PAT: inject GITHUB_TOKEN from secret
 			env = append(env, corev1.EnvVar{
 				Name: "GITHUB_TOKEN",
 				ValueFrom: &corev1.EnvVarSource{
@@ -215,7 +165,6 @@ func (b *WorkspaceGHProxyBuilder) BuildDeployment(workspace *kelosv1alpha1.Works
 		ImagePullPolicy: b.GHProxyImagePullPolicy,
 		Args:            args,
 		Env:             env,
-		VolumeMounts:    volumeMounts,
 		SecurityContext: &corev1.SecurityContext{
 			AllowPrivilegeEscalation: ptrTo(false),
 			Capabilities: &corev1.Capabilities{
@@ -259,9 +208,7 @@ func (b *WorkspaceGHProxyBuilder) BuildDeployment(workspace *kelosv1alpha1.Works
 					SecurityContext: &corev1.PodSecurityContext{
 						RunAsNonRoot: ptrTo(true),
 					},
-					Volumes:        volumes,
-					InitContainers: initContainers,
-					Containers:     []corev1.Container{container},
+					Containers: []corev1.Container{container},
 				},
 			},
 		},

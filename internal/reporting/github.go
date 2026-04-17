@@ -7,23 +7,21 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strconv"
-	"strings"
 )
 
 const defaultBaseURL = "https://api.github.com"
 
 // GitHubReporter posts and updates issue/PR comments on GitHub.
-// TokenFile is the path to a file containing the GitHub token. When set,
-// the token is re-read from disk on every API call so that rotated
-// credentials (e.g. GitHub App installation tokens refreshed by a sidecar)
-// are picked up automatically.
+// TokenFunc, when set, is called on every API request to resolve the current
+// token. This supports dynamic credentials such as GitHub App installation
+// tokens that are refreshed in-process. When TokenFunc is nil the static
+// Token field is used instead.
 type GitHubReporter struct {
 	Owner     string
 	Repo      string
-	Token     string // static token (used when TokenFile is empty)
-	TokenFile string // path to token file; re-read on each request
+	Token     string        // static token (used when TokenFunc is nil)
+	TokenFunc func() string // dynamic token resolver; takes precedence over Token
 	BaseURL   string
 	Client    *http.Client
 }
@@ -114,17 +112,12 @@ func (r *GitHubReporter) UpdateComment(ctx context.Context, commentID int64, bod
 	return nil
 }
 
-// resolveToken returns the current GitHub token. When TokenFile is set the
-// token is re-read from disk on every call so that rotated credentials are
-// picked up automatically. Falls back to the static Token field.
+// resolveToken returns the current GitHub token. When TokenFunc is set it
+// is called to resolve the token dynamically. Falls back to the static
+// Token field.
 func (r *GitHubReporter) resolveToken() string {
-	if r.TokenFile != "" {
-		data, err := os.ReadFile(r.TokenFile)
-		if err == nil {
-			if t := strings.TrimSpace(string(data)); t != "" {
-				return t
-			}
-		}
+	if r.TokenFunc != nil {
+		return r.TokenFunc()
 	}
 	return r.Token
 }

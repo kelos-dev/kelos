@@ -21,6 +21,35 @@ import (
 	"github.com/kelos-dev/kelos/internal/taskbuilder"
 )
 
+// newGenericTestHandler creates a WebhookHandler for generic webhooks backed by a fake client.
+func newGenericTestHandler(t *testing.T, objs ...client.Object) *WebhookHandler {
+	t.Helper()
+	scheme := runtime.NewScheme()
+	if err := kelosv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(objs...).
+		WithStatusSubresource(&kelosv1alpha1.TaskSpawner{}).
+		Build()
+
+	tb, err := taskbuilder.NewTaskBuilder(fakeClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return &WebhookHandler{
+		client:        fakeClient,
+		source:        GenericSource,
+		log:           logr.Discard(),
+		taskBuilder:   tb,
+		secret:        nil, // Generic source uses per-source secrets
+		deliveryCache: NewDeliveryCache(context.Background()),
+	}
+}
+
 const testSecret = "test-webhook-secret"
 
 // signPayload computes the GitHub-style HMAC-SHA256 signature for a payload.
@@ -575,6 +604,72 @@ func TestServeHTTP_IssueCommentOnPR_EnrichesBranch(t *testing.T) {
 	}
 }
 
+func TestSpawnerNeedsChangedFiles(t *testing.T) {
+	tests := []struct {
+		name    string
+		spawner *kelosv1alpha1.TaskSpawner
+		want    bool
+	}{
+		{
+			name: "filePatterns in filter",
+			spawner: &kelosv1alpha1.TaskSpawner{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
+							Events: []string{"push"},
+							Filters: []kelosv1alpha1.GitHubWebhookFilter{
+								{
+									Event: "push",
+									FilePatterns: &kelosv1alpha1.FilePatterns{
+										Include: []string{"*.go"},
+									},
+								},
+							},
+						},
+					},
+					TaskTemplate: kelosv1alpha1.TaskTemplate{},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "no filePatterns in filters",
+			spawner: &kelosv1alpha1.TaskSpawner{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
+							Events: []string{"push"},
+						},
+					},
+					TaskTemplate: kelosv1alpha1.TaskTemplate{
+						PromptTemplate: "{{.Title}}",
+					},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "nil GitHubWebhook",
+			spawner: &kelosv1alpha1.TaskSpawner{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When:         kelosv1alpha1.When{},
+					TaskTemplate: kelosv1alpha1.TaskTemplate{},
+				},
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := spawnerNeedsChangedFiles(tt.spawner)
+			if got != tt.want {
+				t.Errorf("spawnerNeedsChangedFiles() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // --- Linear HTTP handler tests ---
 
 // newLinearTestHandler creates a WebhookHandler for Linear backed by a fake client.
@@ -776,5 +871,493 @@ func TestLinearServeHTTP_DuplicateBodyIsIdempotent(t *testing.T) {
 	}
 	if len(taskList.Items) != 1 {
 		t.Errorf("Expected still 1 task after duplicate request, got %d", len(taskList.Items))
+	}
+}
+
+// --- Generic webhook HTTP handler tests ---
+
+const genericNotionPayload = `{
+	"type": "page.updated",
+	"data": {
+		"id": "page-abc-123",
+		"properties": {
+			"Name": {"title": [{"plain_text": "Fix login bug"}]},
+			"Status": {"select": {"name": "Ready for AI"}},
+			"Description": {"rich_text": [{"plain_text": "Users report login failures"}]}
+		}
+	}
+}`
+
+func TestGenericServeHTTP_RejectsMissingSourcePath(t *testing.T) {
+	handler := newGenericTestHandler(t)
+
+	payload := []byte(genericNotionPayload)
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("Expected %d for missing source path, got %d", http.StatusBadRequest, rr.Code)
+	}
+}
+
+func TestGenericServeHTTP_AcceptsUnknownSource(t *testing.T) {
+	handler := newGenericTestHandler(t)
+
+	payload := []byte(genericNotionPayload)
+	req := httptest.NewRequest(http.MethodPost, "/webhook/unknown", bytes.NewReader(payload))
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("Expected %d for unknown source with no matching spawners, got %d", http.StatusOK, rr.Code)
+	}
+}
+
+func TestGenericServeHTTP_CreatesTaskForMatchingSpawner(t *testing.T) {
+	spawner := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "notion-handler",
+			Namespace: "default",
+			UID:       "notion-uid-123",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GenericWebhook: &kelosv1alpha1.GenericWebhook{
+					Source: "notion",
+					FieldMapping: map[string]string{
+						"id":    "$.data.id",
+						"title": "$.data.properties.Name.title[0].plain_text",
+					},
+					Filters: []kelosv1alpha1.GenericWebhookFilter{
+						{
+							Field: "$.type",
+							Value: strPtr("page.updated"),
+						},
+						{
+							Field: "$.data.properties.Status.select.name",
+							Value: strPtr("Ready for AI"),
+						},
+					},
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+				Credentials: kelosv1alpha1.Credentials{
+					Type: "api-key",
+				},
+				PromptTemplate: "{{.title}}",
+			},
+		},
+	}
+
+	handler := newGenericTestHandler(t, spawner)
+
+	payload := []byte(genericNotionPayload)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook/notion", bytes.NewReader(payload))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task, got %d", len(taskList.Items))
+	}
+
+	task := taskList.Items[0]
+	if task.Labels["kelos.dev/taskspawner"] != "notion-handler" {
+		t.Errorf("Expected taskspawner label 'notion-handler', got %q", task.Labels["kelos.dev/taskspawner"])
+	}
+	if task.Spec.Prompt != "Fix login bug" {
+		t.Errorf("Expected prompt 'Fix login bug', got %q", task.Spec.Prompt)
+	}
+}
+
+func TestGenericServeHTTP_SkipsNonMatchingFilters(t *testing.T) {
+	spawner := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "notion-handler",
+			Namespace: "default",
+			UID:       "notion-uid-456",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GenericWebhook: &kelosv1alpha1.GenericWebhook{
+					Source: "notion",
+					FieldMapping: map[string]string{
+						"id": "$.data.id",
+					},
+					Filters: []kelosv1alpha1.GenericWebhookFilter{
+						{
+							Field: "$.type",
+							Value: strPtr("page.deleted"), // Won't match
+						},
+					},
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+				Credentials: kelosv1alpha1.Credentials{
+					Type: "api-key",
+				},
+			},
+		},
+	}
+
+	handler := newGenericTestHandler(t, spawner)
+
+	payload := []byte(genericNotionPayload) // type is "page.updated"
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook/notion", bytes.NewReader(payload))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(taskList.Items) != 0 {
+		t.Errorf("Expected 0 tasks for non-matching filter, got %d", len(taskList.Items))
+	}
+}
+
+func TestGenericServeHTTP_SkipsWrongSourceName(t *testing.T) {
+	// Spawner listens for "notion" but webhook comes to /webhook/sentry
+	spawner := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "notion-handler",
+			Namespace: "default",
+			UID:       "notion-uid-789",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GenericWebhook: &kelosv1alpha1.GenericWebhook{
+					Source: "notion",
+					FieldMapping: map[string]string{
+						"id": "$.data.id",
+					},
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+				Credentials: kelosv1alpha1.Credentials{
+					Type: "api-key",
+				},
+			},
+		},
+	}
+
+	handler := newGenericTestHandler(t, spawner)
+
+	payload := []byte(`{"action":"created"}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook/sentry", bytes.NewReader(payload))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(taskList.Items) != 0 {
+		t.Errorf("Expected 0 tasks for wrong source name, got %d", len(taskList.Items))
+	}
+}
+
+func TestGenericServeHTTP_DuplicateBodyIsIdempotent(t *testing.T) {
+	spawner := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "dedup-generic",
+			Namespace: "default",
+			UID:       "dedup-generic-uid",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GenericWebhook: &kelosv1alpha1.GenericWebhook{
+					Source: "notion",
+					FieldMapping: map[string]string{
+						"id": "$.data.id",
+					},
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+				Credentials: kelosv1alpha1.Credentials{
+					Type: "api-key",
+				},
+				PromptTemplate: "test",
+			},
+		},
+	}
+
+	handler := newGenericTestHandler(t, spawner)
+
+	payload := []byte(genericNotionPayload)
+
+	// First request
+	req := httptest.NewRequest(http.MethodPost, "/webhook/notion", bytes.NewReader(payload))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("First request: expected %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task after first request, got %d", len(taskList.Items))
+	}
+
+	// Second request with identical body — should be deduped
+	req = httptest.NewRequest(http.MethodPost, "/webhook/notion", bytes.NewReader(payload))
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("Duplicate request: expected %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Errorf("Expected still 1 task after duplicate request, got %d", len(taskList.Items))
+	}
+}
+
+func TestGenericServeHTTP_DuplicateIDDifferentBodyIsIdempotent(t *testing.T) {
+	// Same logical event (same mapped id) but different JSON encoding should
+	// still deduplicate via the id-based delivery ID, not the body hash.
+	spawner := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "dedup-id-generic",
+			Namespace: "default",
+			UID:       "dedup-id-generic-uid",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GenericWebhook: &kelosv1alpha1.GenericWebhook{
+					Source: "notion",
+					FieldMapping: map[string]string{
+						"id": "$.data.id",
+					},
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+				Credentials: kelosv1alpha1.Credentials{
+					Type: "api-key",
+				},
+				PromptTemplate: "test",
+			},
+		},
+	}
+
+	handler := newGenericTestHandler(t, spawner)
+
+	// First request
+	payload1 := []byte(`{"data":{"id":"page-abc-123"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhook/notion", bytes.NewReader(payload1))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("First request: expected %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task after first request, got %d", len(taskList.Items))
+	}
+
+	// Second request — same id but different JSON (extra field, different whitespace)
+	payload2 := []byte(`{ "data" : { "id" : "page-abc-123" , "extra": true } }`)
+	req = httptest.NewRequest(http.MethodPost, "/webhook/notion", bytes.NewReader(payload2))
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("Duplicate request: expected %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Errorf("Expected still 1 task after retry with same id, got %d", len(taskList.Items))
+	}
+}
+
+func TestGenericServeHTTP_MultipleSpawnersNoFieldLeak(t *testing.T) {
+	// Spawner A maps "severity" from the payload; Spawner B does not.
+	// Before the fix, Fields were never reset between spawner iterations,
+	// so Spawner B's task template would see Spawner A's "severity" field.
+	spawnerA := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "notion-a",
+			Namespace: "default",
+			UID:       "notion-a-uid",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GenericWebhook: &kelosv1alpha1.GenericWebhook{
+					Source: "notion",
+					FieldMapping: map[string]string{
+						"id":       "$.data.id",
+						"title":    "$.data.properties.Name.title[0].plain_text",
+						"severity": "$.data.properties.Status.select.name",
+					},
+					Filters: []kelosv1alpha1.GenericWebhookFilter{
+						{Field: "$.type", Value: strPtr("page.updated")},
+					},
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+				Credentials: kelosv1alpha1.Credentials{
+					Type: "api-key",
+				},
+				PromptTemplate: "A:{{.title}}",
+			},
+		},
+	}
+
+	spawnerB := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "notion-b",
+			Namespace: "default",
+			UID:       "notion-b-uid",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GenericWebhook: &kelosv1alpha1.GenericWebhook{
+					Source: "notion",
+					FieldMapping: map[string]string{
+						"id":    "$.data.id",
+						"title": "$.data.properties.Name.title[0].plain_text",
+					},
+					Filters: []kelosv1alpha1.GenericWebhookFilter{
+						{Field: "$.type", Value: strPtr("page.updated")},
+					},
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+				Credentials: kelosv1alpha1.Credentials{
+					Type: "api-key",
+				},
+				PromptTemplate: "B:{{.title}}",
+			},
+		},
+	}
+
+	handler := newGenericTestHandler(t, spawnerA, spawnerB)
+
+	payload := []byte(genericNotionPayload)
+	req := httptest.NewRequest(http.MethodPost, "/webhook/notion", bytes.NewReader(payload))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(taskList.Items) != 2 {
+		t.Fatalf("Expected 2 tasks, got %d", len(taskList.Items))
+	}
+
+	// Verify Spawner B's task does not contain Spawner A's "severity" field
+	// by checking that parsed.Generic.Fields only has keys from B's fieldMapping.
+	// We verify indirectly: both tasks should have correct prompts and the
+	// GenericEventData should have been reset between calls.
+	for _, task := range taskList.Items {
+		if task.Labels["kelos.dev/taskspawner"] == "notion-b" {
+			if task.Spec.Prompt != "B:Fix login bug" {
+				t.Errorf("Expected prompt 'B:Fix login bug', got %q", task.Spec.Prompt)
+			}
+		}
+		if task.Labels["kelos.dev/taskspawner"] == "notion-a" {
+			if task.Spec.Prompt != "A:Fix login bug" {
+				t.Errorf("Expected prompt 'A:Fix login bug', got %q", task.Spec.Prompt)
+			}
+		}
+	}
+}
+
+func TestGenericServeHTTP_HyphenatedSourceName(t *testing.T) {
+	spawner := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-tool-handler",
+			Namespace: "default",
+			UID:       "my-tool-uid",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GenericWebhook: &kelosv1alpha1.GenericWebhook{
+					Source: "my-tool",
+					FieldMapping: map[string]string{
+						"id": "$.id",
+					},
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+				Credentials: kelosv1alpha1.Credentials{
+					Type: "api-key",
+				},
+				PromptTemplate: "test",
+			},
+		},
+	}
+
+	handler := newGenericTestHandler(t, spawner)
+
+	payload := []byte(`{"id":"123"}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook/my-tool", bytes.NewReader(payload))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task for hyphenated source, got %d", len(taskList.Items))
 	}
 }

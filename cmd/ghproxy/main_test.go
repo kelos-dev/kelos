@@ -7,8 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -140,7 +138,7 @@ func TestProxy_SeparatesCacheByUpstream(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p := newProxy(upstream.URL, time.Minute, func() string { return "" })
+	p := newProxy(upstream.URL, time.Minute, func(context.Context) string { return "" })
 	proxyServer := httptest.NewServer(p)
 	defer proxyServer.Close()
 
@@ -287,7 +285,7 @@ func TestProxy_UsesConfiguredStaticToken(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p := newProxy(upstream.URL, time.Minute, func() string { return "static-token" })
+	p := newProxy(upstream.URL, time.Minute, func(context.Context) string { return "static-token" })
 	proxyServer := httptest.NewServer(p)
 	defer proxyServer.Close()
 
@@ -303,40 +301,6 @@ func TestProxy_UsesConfiguredStaticToken(t *testing.T) {
 	}
 	if authHeader != "token static-token" {
 		t.Fatalf("expected static token auth header, got %q", authHeader)
-	}
-}
-
-func TestProxy_UsesTokenFile(t *testing.T) {
-	var authHeader string
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authHeader = r.Header.Get("Authorization")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"ok":true}`))
-	}))
-	defer upstream.Close()
-
-	tmpDir := t.TempDir()
-	tokenFile := filepath.Join(tmpDir, "token")
-	if err := os.WriteFile(tokenFile, []byte("file-token\n"), 0o600); err != nil {
-		t.Fatalf("writing token file: %v", err)
-	}
-
-	p := newProxy(upstream.URL, time.Minute, newTokenResolver("", tokenFile))
-	proxyServer := httptest.NewServer(p)
-	defer proxyServer.Close()
-
-	req, _ := http.NewRequest("GET", proxyServer.URL+"/repos/owner/repo", nil)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200, got %d", resp.StatusCode)
-	}
-	if authHeader != "token file-token" {
-		t.Fatalf("expected token file auth header, got %q", authHeader)
 	}
 }
 

@@ -741,7 +741,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 	})
 
 	Context("When creating a TaskSpawner with GitHub App workspace", func() {
-		It("Should create a Deployment with token-refresher sidecar", func() {
+		It("Should create a Deployment with GitHub App env vars", func() {
 			By("Creating a namespace")
 			ns := &corev1.Namespace{
 				ObjectMeta: metav1.ObjectMeta{
@@ -827,64 +827,38 @@ var _ = Describe("TaskSpawner Controller", func() {
 				return err == nil
 			}, timeout, interval).Should(BeTrue())
 
-			By("Verifying the Deployment has 1 container (spawner) and 1 native sidecar init container (token-refresher)")
+			By("Verifying the Deployment has 1 container (spawner) and no init containers")
 			Expect(createdDeploy.Spec.Template.Spec.Containers).To(HaveLen(1))
-			Expect(createdDeploy.Spec.Template.Spec.InitContainers).To(HaveLen(1))
+			Expect(createdDeploy.Spec.Template.Spec.InitContainers).To(BeEmpty())
 
 			spawner := createdDeploy.Spec.Template.Spec.Containers[0]
 			Expect(spawner.Name).To(Equal("spawner"))
 
-			refresher := createdDeploy.Spec.Template.Spec.InitContainers[0]
-			Expect(refresher.Name).To(Equal("token-refresher"))
-			Expect(refresher.Image).To(Equal(controller.DefaultTokenRefresherImage))
-
-			By("Verifying the token-refresher uses native sidecar (restartPolicy: Always)")
-			Expect(refresher.RestartPolicy).NotTo(BeNil())
-			Expect(*refresher.RestartPolicy).To(Equal(corev1.ContainerRestartPolicyAlways))
-
-			By("Verifying the spawner has --github-token-file flag")
-			Expect(spawner.Args).To(ContainElement("--github-token-file=/shared/token/GITHUB_TOKEN"))
+			By("Verifying the spawner does NOT have --github-token-file flag")
+			Expect(spawner.Args).NotTo(ContainElement("--github-token-file=/shared/token/GITHUB_TOKEN"))
 
 			By("Verifying the spawner does NOT have GITHUB_TOKEN env var")
 			for _, env := range spawner.Env {
 				Expect(env.Name).NotTo(Equal("GITHUB_TOKEN"))
 			}
 
-			By("Verifying the token-refresher has APP_ID and INSTALLATION_ID env vars")
-			Expect(refresher.Env).To(HaveLen(2))
-			Expect(refresher.Env[0].Name).To(Equal("APP_ID"))
-			Expect(refresher.Env[0].ValueFrom.SecretKeyRef.Name).To(Equal("github-app-creds"))
-			Expect(refresher.Env[0].ValueFrom.SecretKeyRef.Key).To(Equal("appID"))
-			Expect(refresher.Env[1].Name).To(Equal("INSTALLATION_ID"))
-			Expect(refresher.Env[1].ValueFrom.SecretKeyRef.Name).To(Equal("github-app-creds"))
-			Expect(refresher.Env[1].ValueFrom.SecretKeyRef.Key).To(Equal("installationID"))
+			By("Verifying the spawner has GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY env vars")
+			Expect(spawner.Env).To(HaveLen(3))
+			Expect(spawner.Env[0].Name).To(Equal("GITHUB_APP_ID"))
+			Expect(spawner.Env[0].ValueFrom.SecretKeyRef.Name).To(Equal("github-app-creds"))
+			Expect(spawner.Env[0].ValueFrom.SecretKeyRef.Key).To(Equal("appID"))
+			Expect(spawner.Env[1].Name).To(Equal("GITHUB_APP_INSTALLATION_ID"))
+			Expect(spawner.Env[1].ValueFrom.SecretKeyRef.Name).To(Equal("github-app-creds"))
+			Expect(spawner.Env[1].ValueFrom.SecretKeyRef.Key).To(Equal("installationID"))
+			Expect(spawner.Env[2].Name).To(Equal("GITHUB_APP_PRIVATE_KEY"))
+			Expect(spawner.Env[2].ValueFrom.SecretKeyRef.Name).To(Equal("github-app-creds"))
+			Expect(spawner.Env[2].ValueFrom.SecretKeyRef.Key).To(Equal("privateKey"))
 
-			By("Verifying the Deployment has 2 volumes")
-			Expect(createdDeploy.Spec.Template.Spec.Volumes).To(HaveLen(2))
+			By("Verifying the Deployment has no volumes")
+			Expect(createdDeploy.Spec.Template.Spec.Volumes).To(BeEmpty())
 
-			var tokenVol, secretVol *corev1.Volume
-			for i, v := range createdDeploy.Spec.Template.Spec.Volumes {
-				switch v.Name {
-				case "github-token":
-					tokenVol = &createdDeploy.Spec.Template.Spec.Volumes[i]
-				case "github-app-secret":
-					secretVol = &createdDeploy.Spec.Template.Spec.Volumes[i]
-				}
-			}
-			Expect(tokenVol).NotTo(BeNil())
-			Expect(tokenVol.EmptyDir).NotTo(BeNil())
-			Expect(secretVol).NotTo(BeNil())
-			Expect(secretVol.Secret).NotTo(BeNil())
-			Expect(secretVol.Secret.SecretName).To(Equal("github-app-creds"))
-
-			By("Verifying the spawner mounts the shared token volume (read-only)")
-			Expect(spawner.VolumeMounts).To(HaveLen(1))
-			Expect(spawner.VolumeMounts[0].Name).To(Equal("github-token"))
-			Expect(spawner.VolumeMounts[0].MountPath).To(Equal("/shared/token"))
-			Expect(spawner.VolumeMounts[0].ReadOnly).To(BeTrue())
-
-			By("Verifying the token-refresher mounts both volumes")
-			Expect(refresher.VolumeMounts).To(HaveLen(2))
+			By("Verifying the spawner has no volume mounts")
+			Expect(spawner.VolumeMounts).To(BeEmpty())
 		})
 	})
 
@@ -1500,7 +1474,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 	})
 
 	Context("When switching workspace secret from PAT to GitHub App", func() {
-		It("Should update the Deployment to add token-refresher sidecar", func() {
+		It("Should update the Deployment to add GitHub App env vars and remove GITHUB_TOKEN", func() {
 			By("Creating a namespace")
 			ns := &corev1.Namespace{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1601,36 +1575,45 @@ var _ = Describe("TaskSpawner Controller", func() {
 				return k8sClient.Update(ctx, secret)
 			}, timeout, interval).Should(Succeed())
 
-			By("Verifying the Deployment is updated to GitHub App mode with token-refresher sidecar")
-			Eventually(func() int {
+			By("Verifying the Deployment is updated to GitHub App mode with env vars")
+			Eventually(func() bool {
 				err := k8sClient.Get(ctx, deployLookupKey, createdDeploy)
 				if err != nil {
-					return -1
+					return false
 				}
-				return len(createdDeploy.Spec.Template.Spec.InitContainers)
-			}, timeout, interval).Should(Equal(1))
+				for _, env := range createdDeploy.Spec.Template.Spec.Containers[0].Env {
+					if env.Name == "GITHUB_APP_ID" {
+						return true
+					}
+				}
+				return false
+			}, timeout, interval).Should(BeTrue())
 
-			Expect(createdDeploy.Spec.Template.Spec.InitContainers[0].Name).To(Equal("token-refresher"))
-			Expect(createdDeploy.Spec.Template.Spec.InitContainers[0].Image).To(Equal(controller.DefaultTokenRefresherImage))
+			By("Verifying no init containers or volumes")
+			Expect(createdDeploy.Spec.Template.Spec.InitContainers).To(BeEmpty())
+			Expect(createdDeploy.Spec.Template.Spec.Volumes).To(BeEmpty())
 
-			By("Verifying volumes are added")
-			Expect(createdDeploy.Spec.Template.Spec.Volumes).To(HaveLen(2))
-
-			By("Verifying spawner has volume mount and --github-token-file arg")
 			spawner := createdDeploy.Spec.Template.Spec.Containers[0]
-			Expect(spawner.VolumeMounts).To(HaveLen(1))
-			Expect(spawner.VolumeMounts[0].Name).To(Equal("github-token"))
-			Expect(spawner.Args).To(ContainElement("--github-token-file=/shared/token/GITHUB_TOKEN"))
+
+			By("Verifying spawner has no volume mounts and no --github-token-file arg")
+			Expect(spawner.VolumeMounts).To(BeEmpty())
+			Expect(spawner.Args).NotTo(ContainElement("--github-token-file=/shared/token/GITHUB_TOKEN"))
 
 			By("Verifying GITHUB_TOKEN env var is removed")
 			for _, env := range spawner.Env {
 				Expect(env.Name).NotTo(Equal("GITHUB_TOKEN"))
 			}
+
+			By("Verifying GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY env vars are present")
+			Expect(spawner.Env).To(HaveLen(3))
+			Expect(spawner.Env[0].Name).To(Equal("GITHUB_APP_ID"))
+			Expect(spawner.Env[1].Name).To(Equal("GITHUB_APP_INSTALLATION_ID"))
+			Expect(spawner.Env[2].Name).To(Equal("GITHUB_APP_PRIVATE_KEY"))
 		})
 	})
 
 	Context("When switching workspace secret from GitHub App to PAT", func() {
-		It("Should update the Deployment to remove token-refresher sidecar", func() {
+		It("Should update the Deployment to remove GitHub App env vars and add GITHUB_TOKEN", func() {
 			By("Creating a namespace")
 			ns := &corev1.Namespace{
 				ObjectMeta: metav1.ObjectMeta{
@@ -1714,13 +1697,18 @@ var _ = Describe("TaskSpawner Controller", func() {
 				if err != nil {
 					return false
 				}
-				return len(createdDeploy.Spec.Template.Spec.InitContainers) == 1
+				for _, env := range createdDeploy.Spec.Template.Spec.Containers[0].Env {
+					if env.Name == "GITHUB_APP_ID" {
+						return true
+					}
+				}
+				return false
 			}, timeout, interval).Should(BeTrue())
 
-			By("Verifying initial state: GitHub App mode")
-			Expect(createdDeploy.Spec.Template.Spec.InitContainers[0].Name).To(Equal("token-refresher"))
-			Expect(createdDeploy.Spec.Template.Spec.Volumes).To(HaveLen(2))
-			Expect(createdDeploy.Spec.Template.Spec.Containers[0].VolumeMounts).To(HaveLen(1))
+			By("Verifying initial state: GitHub App mode (env vars, no init containers, no volumes)")
+			Expect(createdDeploy.Spec.Template.Spec.InitContainers).To(BeEmpty())
+			Expect(createdDeploy.Spec.Template.Spec.Volumes).To(BeEmpty())
+			Expect(createdDeploy.Spec.Template.Spec.Containers[0].Env).To(HaveLen(3))
 
 			By("Switching the secret to PAT credentials")
 			Eventually(func() error {
@@ -1734,33 +1722,35 @@ var _ = Describe("TaskSpawner Controller", func() {
 				return k8sClient.Update(ctx, secret)
 			}, timeout, interval).Should(Succeed())
 
-			By("Verifying the Deployment is updated to PAT mode (init containers removed)")
-			Eventually(func() int {
+			By("Verifying the Deployment is updated to PAT mode (GITHUB_TOKEN env var present)")
+			Eventually(func() bool {
 				err := k8sClient.Get(ctx, deployLookupKey, createdDeploy)
 				if err != nil {
-					return -1
+					return false
 				}
-				return len(createdDeploy.Spec.Template.Spec.InitContainers)
-			}, timeout, interval).Should(Equal(0))
+				for _, env := range createdDeploy.Spec.Template.Spec.Containers[0].Env {
+					if env.Name == "GITHUB_TOKEN" {
+						return true
+					}
+				}
+				return false
+			}, timeout, interval).Should(BeTrue())
 
-			By("Verifying volumes are removed")
-			Expect(createdDeploy.Spec.Template.Spec.Volumes).To(BeEmpty())
-
-			By("Verifying volume mounts are removed")
-			Expect(createdDeploy.Spec.Template.Spec.Containers[0].VolumeMounts).To(BeEmpty())
-
-			By("Verifying GITHUB_TOKEN env var is present")
 			spawner := createdDeploy.Spec.Template.Spec.Containers[0]
-			foundToken := false
-			for _, env := range spawner.Env {
-				if env.Name == "GITHUB_TOKEN" {
-					foundToken = true
-					break
-				}
-			}
-			Expect(foundToken).To(BeTrue(), "expected GITHUB_TOKEN env var after switch to PAT")
 
-			By("Verifying --github-token-file arg is removed")
+			By("Verifying GitHub App env vars are removed")
+			for _, env := range spawner.Env {
+				Expect(env.Name).NotTo(Equal("GITHUB_APP_ID"))
+				Expect(env.Name).NotTo(Equal("GITHUB_APP_INSTALLATION_ID"))
+				Expect(env.Name).NotTo(Equal("GITHUB_APP_PRIVATE_KEY"))
+			}
+
+			By("Verifying no init containers, volumes, or volume mounts")
+			Expect(createdDeploy.Spec.Template.Spec.InitContainers).To(BeEmpty())
+			Expect(createdDeploy.Spec.Template.Spec.Volumes).To(BeEmpty())
+			Expect(spawner.VolumeMounts).To(BeEmpty())
+
+			By("Verifying --github-token-file arg is not present")
 			Expect(spawner.Args).NotTo(ContainElement("--github-token-file=/shared/token/GITHUB_TOKEN"))
 		})
 	})
@@ -1877,16 +1867,21 @@ var _ = Describe("TaskSpawner Controller", func() {
 			}, timeout, interval).Should(Succeed())
 
 			By("Verifying the Deployment is updated to GitHub App mode")
-			Eventually(func() int {
+			Eventually(func() bool {
 				err := k8sClient.Get(ctx, deployLookupKey, createdDeploy)
 				if err != nil {
-					return -1
+					return false
 				}
-				return len(createdDeploy.Spec.Template.Spec.InitContainers)
-			}, timeout, interval).Should(Equal(1))
+				for _, env := range createdDeploy.Spec.Template.Spec.Containers[0].Env {
+					if env.Name == "GITHUB_APP_ID" {
+						return true
+					}
+				}
+				return false
+			}, timeout, interval).Should(BeTrue())
 
-			Expect(createdDeploy.Spec.Template.Spec.InitContainers[0].Name).To(Equal("token-refresher"))
-			Expect(createdDeploy.Spec.Template.Spec.Volumes).To(HaveLen(2))
+			Expect(createdDeploy.Spec.Template.Spec.InitContainers).To(BeEmpty())
+			Expect(createdDeploy.Spec.Template.Spec.Volumes).To(BeEmpty())
 		})
 	})
 

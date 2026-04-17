@@ -5,25 +5,39 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened, labeled]
+    types: [opened, synchronize, reopened]
   merge_group:
-  workflow_dispatch:
-    inputs:
-      ok-to-test:
-        description: Run e2e tests
-        type: boolean
-        default: false
 
 concurrency:
-  group: >-
-    ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}${{
-      github.event.action == 'labeled' && '-labeled' || ''
-    }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
+  set-pr-e2e-pending:
+    if: >-
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group'
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+    steps:
+      - name: Set pending PR E2E status
+        uses: actions/github-script@v7
+        env:
+          TARGET_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          TARGET_URL: ${{ github.event.pull_request.html_url || format('{0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id) }}
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.TARGET_SHA,
+              state: 'pending',
+              context: 'pr-e2e',
+              description: 'Waiting for test-e2e to complete',
+              target_url: process.env.TARGET_URL,
+            })
+
   build:
-    if: github.event.action != 'labeled' || github.event.label.name == 'ok-to-test'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,7 +50,6 @@ jobs:
         run: make build
 
   verify:
-    if: github.event.action != 'labeled' || github.event.label.name == 'ok-to-test'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,7 +62,6 @@ jobs:
         run: make verify
 
   test:
-    if: github.event.action != 'labeled' || github.event.label.name == 'ok-to-test'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -62,7 +74,6 @@ jobs:
         run: make test
 
   test-integration:
-    if: github.event.action != 'labeled' || github.event.label.name == 'ok-to-test'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -76,11 +87,98 @@ jobs:
 
   test-e2e:
     if: >-
-      github.event_name == 'push' || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.ok-to-test) || (contains(github.event.pull_request.labels.*.name, 'ok-to-test') && github.event.pull_request.head.repo.full_name == github.repository)
+      github.event_name == 'push' || github.event_name == 'merge_group' || (
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository
+      )
     permissions:
       contents: read
       issues: read
     uses: ./.github/workflows/reusable-e2e.yaml
-    secrets:
-      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-      CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+    secrets: inherit
+
+  report-pr-e2e-status:
+    if: >-
+      always() && (
+        (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+        || github.event_name == 'merge_group'
+      )
+    needs:
+      - set-pr-e2e-pending
+      - test-e2e
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      statuses: write
+    steps:
+      - name: Report PR E2E status
+        uses: actions/github-script@v7
+        env:
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          CURRENT_RUN_ATTEMPT: ${{ github.run_attempt }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          TARGET_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          TEST_E2E_RESULT: ${{ needs.test-e2e.result }}
+          WORKFLOW_EVENT: ${{ github.event_name }}
+          WORKFLOW_NAME: CI
+        with:
+          script: |
+            const currentRunId = Number(process.env.CURRENT_RUN_ID)
+            const currentRunAttempt = Number(process.env.CURRENT_RUN_ATTEMPT)
+            const targetSha = process.env.TARGET_SHA
+            const result = process.env.TEST_E2E_RESULT
+
+            if (result === 'skipped') {
+              core.info('test-e2e was skipped, leaving pr-e2e unchanged')
+              return
+            }
+
+            const { data: runs } = await github.rest.actions.listWorkflowRunsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              event: process.env.WORKFLOW_EVENT,
+              head_sha: targetSha,
+              per_page: 100,
+            })
+
+            const latestRun = runs.workflow_runs
+              .filter((run) => run.name === process.env.WORKFLOW_NAME)
+              .sort((left, right) => {
+                const createdDiff = Date.parse(right.created_at) - Date.parse(left.created_at)
+                if (createdDiff !== 0) return createdDiff
+                if (left.id !== right.id) return right.id - left.id
+                return (right.run_attempt || 1) - (left.run_attempt || 1)
+              })[0]
+
+            if (!latestRun) {
+              core.info(`No ${process.env.WORKFLOW_NAME} workflow runs found for ${targetSha}`)
+              return
+            }
+
+            if (latestRun.id !== currentRunId || (latestRun.run_attempt || 1) !== currentRunAttempt) {
+              core.info(`Skipping stale status update from run ${currentRunId} attempt ${currentRunAttempt}`)
+              return
+            }
+
+            let state = 'pending'
+            let description = 'Waiting for test-e2e to complete'
+
+            if (result === 'success') {
+              state = 'success'
+              description = 'test-e2e succeeded'
+            } else if (result === 'failure' || result === 'cancelled') {
+              state = 'failure'
+              description = `test-e2e ${result}`
+            }
+
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: targetSha,
+              state,
+              context: 'pr-e2e',
+              description,
+              target_url: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
+            })

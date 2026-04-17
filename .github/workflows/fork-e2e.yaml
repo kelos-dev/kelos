@@ -1,27 +1,94 @@
 name: Fork E2E
 
 on:
-  workflow_dispatch:
-    inputs:
-      pr_number:
-        description: PR number to test
-        required: true
-        type: number
-      head_sha:
-        description: Approved HEAD SHA of the fork PR
-        required: true
-        type: string
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: fork-e2e-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
+  set-pr-e2e-pending:
+    if: >-
+      github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+    steps:
+      - name: Set pending PR E2E status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.payload.pull_request.head.sha,
+              state: 'pending',
+              context: 'pr-e2e',
+              description: 'Waiting for Fork E2E to complete',
+              target_url: context.payload.pull_request.html_url,
+            })
+
   fork-e2e:
+    if: >-
+      github.event.pull_request.head.repo.full_name != github.repository
     permissions:
       contents: read
       issues: read
     uses: ./.github/workflows/reusable-e2e.yaml
     with:
-      checkout-ref: refs/pull/${{ inputs.pr_number }}/merge
+      checkout-ref: refs/pull/${{ github.event.pull_request.number }}/merge
       persist-credentials: false
-      expected-head-sha: ${{ inputs.head_sha }}
-    secrets:
-      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-      CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+      expected-head-sha: ${{ github.event.pull_request.head.sha }}
+      use-environment-secrets: true
+      environment-name: ok-to-test
+    secrets: inherit
+
+  report-pr-e2e-status:
+    if: >-
+      always() && github.event.pull_request.head.repo.full_name != github.repository
+    needs:
+      - set-pr-e2e-pending
+      - fork-e2e
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      statuses: write
+    steps:
+      - name: Report PR E2E status
+        uses: actions/github-script@v7
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          FORK_E2E_RESULT: ${{ needs.fork-e2e.result }}
+        with:
+          script: |
+            const result = process.env.FORK_E2E_RESULT
+            const prHeadSha = process.env.PR_HEAD_SHA
+
+            let state = 'pending'
+            let description = 'Waiting for Fork E2E to complete'
+
+            if (result === 'success') {
+              state = 'success'
+              description = 'Fork E2E succeeded'
+            } else if (result === 'failure' || result === 'cancelled') {
+              state = 'failure'
+              description = `Fork E2E ${result}`
+            } else if (result === 'skipped') {
+              core.info('Fork E2E was skipped, leaving pr-e2e unchanged')
+              return
+            }
+
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: prHeadSha,
+              state,
+              context: 'pr-e2e',
+              description,
+              target_url: `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
+            })

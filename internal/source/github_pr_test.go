@@ -991,6 +991,297 @@ func TestAppendReviewBodies(t *testing.T) {
 	}
 }
 
+func TestMatchesFilePaths(t *testing.T) {
+	tests := []struct {
+		name    string
+		files   []string
+		include []string
+		exclude []string
+		want    bool
+	}{
+		{
+			name:  "nil patterns matches everything",
+			files: []string{"foo.go", "bar.md"},
+			want:  true,
+		},
+		{
+			name:    "include match",
+			files:   []string{"internal/auth/handler.go", "README.md"},
+			include: []string{"internal/auth/**"},
+			want:    true,
+		},
+		{
+			name:    "include no match",
+			files:   []string{"docs/guide.md", "README.md"},
+			include: []string{"internal/**"},
+			want:    false,
+		},
+		{
+			name:    "exclude removes file then include matches remaining",
+			files:   []string{"internal/auth/handler.go", "vendor/lib.go"},
+			exclude: []string{"vendor/**"},
+			want:    true,
+		},
+		{
+			name:    "exclude no match passes",
+			files:   []string{"internal/auth/handler.go"},
+			exclude: []string{"vendor/**"},
+			want:    true,
+		},
+		{
+			name:    "include and exclude combined - excluded file removed then include matches",
+			files:   []string{"internal/auth/handler.go", "internal/auth/handler_test.go"},
+			include: []string{"internal/**"},
+			exclude: []string{"**/*_test.go"},
+			want:    true,
+		},
+		{
+			name:    "exclude removes all files rejects",
+			files:   []string{"docs/guide.md", "README.md"},
+			exclude: []string{"docs/**", "*.md"},
+			want:    false,
+		},
+		{
+			name:    "exclude does not remove all files passes",
+			files:   []string{"docs/guide.md", "internal/handler.go"},
+			exclude: []string{"docs/**", "*.md"},
+			want:    true,
+		},
+		{
+			name:    "exclude with include - excluded removed then include matches remaining",
+			files:   []string{"internal/handler.go", "docs/guide.md"},
+			include: []string{"internal/**"},
+			exclude: []string{"docs/**"},
+			want:    true,
+		},
+		{
+			name:    "include with exclude - vendor file excluded then include matches",
+			files:   []string{"vendor/x.go", "main.go"},
+			include: []string{"**/*.go"},
+			exclude: []string{"vendor/**"},
+			want:    true,
+		},
+		{
+			name:    "include with exclude - all remaining excluded no include match",
+			files:   []string{"vendor/x.go"},
+			include: []string{"**/*.go"},
+			exclude: []string{"vendor/**"},
+			want:    false,
+		},
+		{
+			name:    "empty files with include patterns does not match",
+			files:   []string{},
+			include: []string{"*.go"},
+			want:    false,
+		},
+		{
+			name:    "empty files with exclude-only patterns does not match",
+			files:   []string{},
+			exclude: []string{"docs/**"},
+			want:    false,
+		},
+		{
+			name:  "empty files with empty patterns matches",
+			files: []string{},
+			want:  true,
+		},
+		{
+			name:    "glob star pattern",
+			files:   []string{"main.go", "util.go"},
+			include: []string{"*.go"},
+			want:    true,
+		},
+		{
+			name:    "doublestar recursive pattern",
+			files:   []string{"a/b/c/deep.go"},
+			include: []string{"a/**/deep.go"},
+			want:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := MatchesFilePaths(tt.files, tt.include, tt.exclude)
+			if got != tt.want {
+				t.Errorf("MatchesFilePaths() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDiscoverPullRequestsWithFilePatterns(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/owner/repo/pulls":
+			json.NewEncoder(w).Encode([]githubPullRequest{
+				{
+					Number:  1,
+					Title:   "Backend change",
+					HTMLURL: "https://github.com/owner/repo/pull/1",
+					Head:    githubPullRequestHead{Ref: "feature-1", SHA: "sha-1"},
+				},
+				{
+					Number:  2,
+					Title:   "Docs only",
+					HTMLURL: "https://github.com/owner/repo/pull/2",
+					Head:    githubPullRequestHead{Ref: "docs-update", SHA: "sha-2"},
+				},
+			})
+		case "/repos/owner/repo/pulls/1/files":
+			json.NewEncoder(w).Encode([]githubPullRequestFile{
+				{Filename: "internal/handler.go"},
+				{Filename: "internal/handler_test.go"},
+			})
+		case "/repos/owner/repo/pulls/2/files":
+			json.NewEncoder(w).Encode([]githubPullRequestFile{
+				{Filename: "docs/guide.md"},
+				{Filename: "README.md"},
+			})
+		case "/repos/owner/repo/pulls/1/reviews":
+			json.NewEncoder(w).Encode([]githubPullRequestReview{})
+		case "/repos/owner/repo/issues/1/comments":
+			json.NewEncoder(w).Encode([]githubComment{})
+		case "/repos/owner/repo/pulls/1/comments":
+			json.NewEncoder(w).Encode([]githubPullRequestComment{})
+		default:
+			// PR 2 shouldn't reach review/comment fetches since it's filtered out
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	s := &GitHubPullRequestSource{
+		Owner:       "owner",
+		Repo:        "repo",
+		BaseURL:     server.URL,
+		FileInclude: []string{"internal/**"},
+	}
+
+	items, err := s.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	if items[0].Number != 1 {
+		t.Errorf("expected PR #1, got #%d", items[0].Number)
+	}
+}
+
+func TestDiscoverPullRequestsExcludeOnlyFilePatterns(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/owner/repo/pulls":
+			json.NewEncoder(w).Encode([]githubPullRequest{
+				{
+					Number:  1,
+					Title:   "Mixed change",
+					HTMLURL: "https://github.com/owner/repo/pull/1",
+					Head:    githubPullRequestHead{Ref: "mixed", SHA: "sha-1"},
+				},
+				{
+					Number:  2,
+					Title:   "Docs only",
+					HTMLURL: "https://github.com/owner/repo/pull/2",
+					Head:    githubPullRequestHead{Ref: "docs", SHA: "sha-2"},
+				},
+			})
+		case "/repos/owner/repo/pulls/1/files":
+			json.NewEncoder(w).Encode([]githubPullRequestFile{
+				{Filename: "internal/handler.go"},
+				{Filename: "docs/guide.md"},
+			})
+		case "/repos/owner/repo/pulls/2/files":
+			json.NewEncoder(w).Encode([]githubPullRequestFile{
+				{Filename: "docs/guide.md"},
+				{Filename: "README.md"},
+			})
+		case "/repos/owner/repo/pulls/1/reviews":
+			json.NewEncoder(w).Encode([]githubPullRequestReview{})
+		case "/repos/owner/repo/issues/1/comments":
+			json.NewEncoder(w).Encode([]githubComment{})
+		case "/repos/owner/repo/pulls/1/comments":
+			json.NewEncoder(w).Encode([]githubPullRequestComment{})
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	// With remove-then-match semantics: exclude removes docs/md files,
+	// PR #1 has internal/handler.go remaining → passes.
+	// PR #2 has all files excluded → rejected.
+	s := &GitHubPullRequestSource{
+		Owner:       "owner",
+		Repo:        "repo",
+		BaseURL:     server.URL,
+		FileExclude: []string{"docs/**", "*.md"},
+	}
+
+	items, err := s.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item (docs-only PR excluded), got %d", len(items))
+	}
+	if items[0].Number != 1 {
+		t.Errorf("expected PR #1, got #%d", items[0].Number)
+	}
+}
+
+func TestDiscoverPullRequestsNoFileFetchWithoutFilter(t *testing.T) {
+	filesFetched := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/owner/repo/pulls":
+			json.NewEncoder(w).Encode([]githubPullRequest{
+				{
+					Number:  1,
+					Title:   "Some PR",
+					HTMLURL: "https://github.com/owner/repo/pull/1",
+					Head:    githubPullRequestHead{Ref: "feature-1", SHA: "sha-1"},
+				},
+			})
+		case "/repos/owner/repo/pulls/1/files":
+			filesFetched = true
+			json.NewEncoder(w).Encode([]githubPullRequestFile{
+				{Filename: "main.go"},
+			})
+		case "/repos/owner/repo/pulls/1/reviews":
+			json.NewEncoder(w).Encode([]githubPullRequestReview{})
+		case "/repos/owner/repo/issues/1/comments":
+			json.NewEncoder(w).Encode([]githubComment{})
+		case "/repos/owner/repo/pulls/1/comments":
+			json.NewEncoder(w).Encode([]githubPullRequestComment{})
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	s := &GitHubPullRequestSource{
+		Owner:   "owner",
+		Repo:    "repo",
+		BaseURL: server.URL,
+	}
+
+	items, err := s.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if filesFetched {
+		t.Error("Expected files API to NOT be called when no file filter is configured")
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+}
+
 func TestResolvePullRequestTriggerTime(t *testing.T) {
 	reviewTime := time.Date(2026, 1, 5, 12, 0, 0, 0, time.UTC)
 	commentTime := time.Date(2026, 1, 4, 12, 0, 0, 0, time.UTC)

@@ -38,7 +38,7 @@ RUN mkdir -p /home/agent/.cursor && chown -R agent:agent /home/agent
 
 USER agent
 
-ARG CURSOR_CLI_VERSION=2026.03.30-a5d3e17
+ARG CURSOR_CLI_VERSION=2026.04.15-dccdccd
 RUN ARCH=$(uname -m) \
     && case "$ARCH" in x86_64) ARCH="x64" ;; aarch64) ARCH="arm64" ;; esac \
     && INSTALL_DIR="$HOME/.local/share/cursor-agent/versions/${CURSOR_CLI_VERSION}" \

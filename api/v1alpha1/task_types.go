@@ -54,6 +54,12 @@ type Credentials struct {
 
 // PodOverrides defines optional overrides for the agent pod.
 type PodOverrides struct {
+	// Labels specifies additional labels to apply to the Job and its Pod.
+	// These are merged with the built-in labels. If a user-specified label
+	// conflicts with a built-in one, the built-in takes precedence.
+	// +optional
+	Labels map[string]string `json:"labels,omitempty"`
+
 	// Resources defines resource limits and requests for the agent container.
 	// +optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`

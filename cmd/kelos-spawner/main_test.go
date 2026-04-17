@@ -31,6 +31,8 @@ import (
 	"github.com/kelos-dev/kelos/internal/source"
 )
 
+var noToken = func(context.Context) (string, error) { return "", nil }
+
 type fakeSource struct {
 	items []source.WorkItem
 }
@@ -139,7 +141,7 @@ func newTask(name, namespace, spawnerName string, phase kelosv1alpha1.TaskPhase)
 func TestBuildSource_GitHubIssuesWithBaseURL(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 
-	src, err := buildSource(ts, "my-org", "my-repo", "https://github.example.com/api/v3", "", "", "", "", nil)
+	src, err := buildSource(context.Background(), ts, "my-org", "my-repo", "https://github.example.com/api/v3", noToken, "", "", "", nil)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -162,7 +164,7 @@ func TestBuildSource_GitHubIssuesWithBaseURL(t *testing.T) {
 func TestBuildSource_GitHubIssuesDefaultBaseURL(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 
-	src, err := buildSource(ts, "kelos-dev", "kelos", "", "", "", "", "", nil)
+	src, err := buildSource(context.Background(), ts, "kelos-dev", "kelos", "", noToken, "", "", "", nil)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -188,7 +190,7 @@ func TestBuildSource_GitHubPullRequests(t *testing.T) {
 		},
 	}
 
-	src, err := buildSource(ts, "kelos-dev", "kelos", "https://github.example.com/api/v3", "", "", "", "", nil)
+	src, err := buildSource(context.Background(), ts, "kelos-dev", "kelos", "https://github.example.com/api/v3", noToken, "", "", "", nil)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -248,7 +250,7 @@ func TestBuildSource_Jira(t *testing.T) {
 	t.Setenv("JIRA_USER", "user@example.com")
 	t.Setenv("JIRA_TOKEN", "jira-api-token")
 
-	src, err := buildSource(ts, "", "", "", "", "https://mycompany.atlassian.net", "PROJ", "status = Open", nil)
+	src, err := buildSource(context.Background(), ts, "", "", "", noToken, "https://mycompany.atlassian.net", "PROJ", "status = Open", nil)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -583,7 +585,7 @@ func TestRunCycle_BuildSourceFailureCountsDiscoveryErrorAndDuration(t *testing.T
 	beforeErrors := testutil.ToFloat64(discoveryErrorsTotal)
 	beforeDurationCount := histogramSampleCount(t, discoveryDurationSeconds)
 
-	err := runCycle(context.Background(), cl, key, "owner", "repo", "", "", "", "", "", nil)
+	err := runCycle(context.Background(), cl, key, "owner", "repo", "", noToken, "", "", "", nil)
 	if err == nil {
 		t.Fatal("Expected buildSource error")
 	}
@@ -1151,7 +1153,7 @@ func TestBuildSource_PriorityLabelsPassedToSource(t *testing.T) {
 		"priority/imporant-soon",
 	}
 
-	src, err := buildSource(ts, "owner", "repo", "", "", "", "", "", nil)
+	src, err := buildSource(context.Background(), ts, "owner", "repo", "", noToken, "", "", "", nil)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -1178,7 +1180,7 @@ func TestRunCycleWithSource_CommentFieldsPassedToSource(t *testing.T) {
 		ExcludeComments: []string{"/kelos needs-input"},
 	}
 
-	src, err := buildSource(ts, "owner", "repo", "", "", "", "", "", nil)
+	src, err := buildSource(context.Background(), ts, "owner", "repo", "", noToken, "", "", "", nil)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -1207,7 +1209,7 @@ func TestBuildSource_CommentPolicyPassedToIssueSource(t *testing.T) {
 		},
 	}
 
-	src, err := buildSource(ts, "owner", "repo", "", "", "", "", "", nil)
+	src, err := buildSource(context.Background(), ts, "owner", "repo", "", noToken, "", "", "", nil)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -1247,7 +1249,7 @@ func TestBuildSource_CommentPolicyPassedToPullRequestSource(t *testing.T) {
 		},
 	}
 
-	src, err := buildSource(ts, "owner", "repo", "", "", "", "", "", nil)
+	src, err := buildSource(context.Background(), ts, "owner", "repo", "", noToken, "", "", "", nil)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -1312,7 +1314,7 @@ func TestBuildSource_CommentPolicyRejectsMixedConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := buildSource(tt.ts, "owner", "repo", "", "", "", "", "", nil)
+			_, err := buildSource(context.Background(), tt.ts, "owner", "repo", "", noToken, "", "", "", nil)
 			if err == nil {
 				t.Fatal("Expected error for mixed legacy and commentPolicy config")
 			}
@@ -2221,9 +2223,7 @@ func TestRunOnce_ReturnsPollIntervalForSuspendedTaskSpawner(t *testing.T) {
 	}
 }
 
-func TestRunOnce_UsesEnvTokenForReporting(t *testing.T) {
-	t.Setenv("GITHUB_TOKEN", "pat-token")
-
+func TestRunOnce_UsesTokenResolverForReporting(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 	ts.Spec.Suspend = boolPtr(true)
 	ts.Spec.When.GitHubIssues.Reporting = &kelosv1alpha1.GitHubReporting{Enabled: true}
@@ -2249,6 +2249,7 @@ func TestRunOnce_UsesEnvTokenForReporting(t *testing.T) {
 		GitHubOwner:      "owner",
 		GitHubRepo:       "repo",
 		GitHubAPIBaseURL: server.URL,
+		TokenResolver:    newGitHubTokenResolver("pat-token", "", "", "", ""),
 	})
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
@@ -2256,6 +2257,19 @@ func TestRunOnce_UsesEnvTokenForReporting(t *testing.T) {
 
 	if gotAuth != "token pat-token" {
 		t.Fatalf("Authorization = %q, want %q", gotAuth, "token pat-token")
+	}
+}
+
+func TestRunOnce_ErrorsWhenReportingEnabledWithoutTokenResolver(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	ts.Spec.Suspend = boolPtr(true)
+	ts.Spec.When.GitHubIssues.Reporting = &kelosv1alpha1.GitHubReporting{Enabled: true}
+
+	cl, key := setupTest(t, ts)
+
+	_, err := runOnce(context.Background(), cl, key, spawnerRuntimeConfig{})
+	if err == nil {
+		t.Fatal("Expected error when reporting is enabled but no token resolver is configured")
 	}
 }
 

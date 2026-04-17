@@ -570,8 +570,13 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 	var serviceAccountName string
 	var activeDeadlineSeconds *int64
 	var nodeSelector map[string]string
+	var extraLabels map[string]string
 
 	if po := task.Spec.PodOverrides; po != nil {
+		if po.Labels != nil {
+			extraLabels = po.Labels
+		}
+
 		if po.Resources != nil {
 			mainContainer.Resources = *po.Resources
 		}
@@ -627,16 +632,28 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 		},
 	}
 
+	builtinLabels := map[string]string{
+		"kelos.dev/name":       "kelos",
+		"kelos.dev/component":  "task",
+		"kelos.dev/managed-by": "kelos-controller",
+		"kelos.dev/task":       task.Name,
+	}
+
+	// Merge user-specified labels with built-in labels.
+	// Built-in labels take precedence over user-specified ones.
+	jobLabels := make(map[string]string, len(builtinLabels)+len(extraLabels))
+	for k, v := range extraLabels {
+		jobLabels[k] = v
+	}
+	for k, v := range builtinLabels {
+		jobLabels[k] = v
+	}
+
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      task.Name,
 			Namespace: task.Namespace,
-			Labels: map[string]string{
-				"kelos.dev/name":       "kelos",
-				"kelos.dev/component":  "task",
-				"kelos.dev/managed-by": "kelos-controller",
-				"kelos.dev/task":       task.Name,
-			},
+			Labels:    jobLabels,
 		},
 		Spec: batchv1.JobSpec{
 			BackoffLimit:          &backoffLimit,
@@ -644,12 +661,7 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 			ActiveDeadlineSeconds: activeDeadlineSeconds,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"kelos.dev/name":       "kelos",
-						"kelos.dev/component":  "task",
-						"kelos.dev/managed-by": "kelos-controller",
-						"kelos.dev/task":       task.Name,
-					},
+					Labels: jobLabels,
 				},
 				Spec: corev1.PodSpec{
 					RestartPolicy:      corev1.RestartPolicyNever,

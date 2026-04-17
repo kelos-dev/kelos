@@ -3,6 +3,8 @@ package cli
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -149,7 +151,7 @@ func TestParseManifests_EmbeddedCRDs(t *testing.T) {
 
 func renderDefaultChart(t *testing.T) []byte {
 	t.Helper()
-	vals := buildHelmValues("v0.0.0-test", "", false, "", "", "", "", "", "", "")
+	vals := buildHelmValues("v0.0.0-test", "", false, "", "", "", "", "")
 	data, err := helmchart.Render(manifests.ChartFS, vals)
 	if err != nil {
 		t.Fatalf("rendering chart: %v", err)
@@ -178,7 +180,7 @@ func TestRenderChart_DefaultValues(t *testing.T) {
 }
 
 func TestDisableChartCRDs(t *testing.T) {
-	vals := disableChartCRDs(buildHelmValues("latest", "", false, "", "", "", "", "", "", ""))
+	vals := disableChartCRDs(buildHelmValues("latest", "", false, "", "", "", "", ""))
 	crds, ok := vals["crds"].(map[string]interface{})
 	if !ok {
 		t.Fatal("expected crds values to be present")
@@ -197,7 +199,7 @@ func TestDisableChartCRDs(t *testing.T) {
 }
 
 func TestRenderChart_ControllerOnlyExcludesCRDs(t *testing.T) {
-	vals := disableChartCRDs(buildHelmValues("v0.0.0-test", "", false, "", "", "", "", "", "", ""))
+	vals := disableChartCRDs(buildHelmValues("v0.0.0-test", "", false, "", "", "", "", ""))
 	data, err := helmchart.Render(manifests.ChartFS, vals)
 	if err != nil {
 		t.Fatalf("rendering chart: %v", err)
@@ -221,7 +223,7 @@ func TestRenderChart_ControllerOnlyExcludesCRDs(t *testing.T) {
 }
 
 func TestRenderChart_VersionSubstitution(t *testing.T) {
-	vals := buildHelmValues("v0.5.0", "", false, "", "", "", "", "", "", "")
+	vals := buildHelmValues("v0.5.0", "", false, "", "", "", "", "")
 	data, err := helmchart.Render(manifests.ChartFS, vals)
 	if err != nil {
 		t.Fatalf("rendering chart: %v", err)
@@ -235,7 +237,7 @@ func TestRenderChart_VersionSubstitution(t *testing.T) {
 }
 
 func TestRenderChart_ImageArgs(t *testing.T) {
-	vals := buildHelmValues("v0.3.0", "", false, "", "", "", "", "", "", "")
+	vals := buildHelmValues("v0.3.0", "", false, "", "", "", "", "")
 	data, err := helmchart.Render(manifests.ChartFS, vals)
 	if err != nil {
 		t.Fatalf("rendering chart: %v", err)
@@ -246,7 +248,6 @@ func TestRenderChart_ImageArgs(t *testing.T) {
 		"--gemini-image=ghcr.io/kelos-dev/gemini:v0.3.0",
 		"--opencode-image=ghcr.io/kelos-dev/opencode:v0.3.0",
 		"--spawner-image=ghcr.io/kelos-dev/kelos-spawner:v0.3.0",
-		"--token-refresher-image=ghcr.io/kelos-dev/kelos-token-refresher:v0.3.0",
 	}
 	for _, arg := range versionedArgs {
 		if !bytes.Contains(data, []byte(arg)) {
@@ -256,7 +257,7 @@ func TestRenderChart_ImageArgs(t *testing.T) {
 }
 
 func TestRenderChart_ImagePullPolicy(t *testing.T) {
-	vals := buildHelmValues("v0.1.0", "Always", false, "", "", "", "", "", "", "")
+	vals := buildHelmValues("v0.1.0", "Always", false, "", "", "", "", "")
 	data, err := helmchart.Render(manifests.ChartFS, vals)
 	if err != nil {
 		t.Fatalf("rendering chart: %v", err)
@@ -270,7 +271,6 @@ func TestRenderChart_ImagePullPolicy(t *testing.T) {
 		"--gemini-image-pull-policy=Always",
 		"--opencode-image-pull-policy=Always",
 		"--spawner-image-pull-policy=Always",
-		"--token-refresher-image-pull-policy=Always",
 	} {
 		if !bytes.Contains(data, []byte(arg)) {
 			t.Errorf("expected %q in rendered output", arg)
@@ -279,7 +279,7 @@ func TestRenderChart_ImagePullPolicy(t *testing.T) {
 }
 
 func TestRenderChart_NoPullPolicyByDefault(t *testing.T) {
-	vals := buildHelmValues("latest", "", false, "", "", "", "", "", "", "")
+	vals := buildHelmValues("latest", "", false, "", "", "", "", "")
 	data, err := helmchart.Render(manifests.ChartFS, vals)
 	if err != nil {
 		t.Fatalf("rendering chart: %v", err)
@@ -293,7 +293,7 @@ func TestRenderChart_NoPullPolicyByDefault(t *testing.T) {
 }
 
 func TestRenderChart_DisableHeartbeat(t *testing.T) {
-	vals := buildHelmValues("latest", "", true, "", "", "", "", "", "", "")
+	vals := buildHelmValues("latest", "", true, "", "", "", "", "")
 	data, err := helmchart.Render(manifests.ChartFS, vals)
 	if err != nil {
 		t.Fatalf("rendering chart: %v", err)
@@ -320,7 +320,7 @@ func TestRenderChart_DisableHeartbeat(t *testing.T) {
 }
 
 func TestRenderChart_EnableHeartbeat(t *testing.T) {
-	vals := buildHelmValues("latest", "", false, "", "", "", "", "", "", "")
+	vals := buildHelmValues("latest", "", false, "", "", "", "", "")
 	data, err := helmchart.Render(manifests.ChartFS, vals)
 	if err != nil {
 		t.Fatalf("rendering chart: %v", err)
@@ -509,6 +509,112 @@ func TestInstallCommand_VersionFlag(t *testing.T) {
 	}
 }
 
+func TestInstallCommand_ValuesFileFlag(t *testing.T) {
+	dir := t.TempDir()
+	valuesPath := filepath.Join(dir, "values.yaml")
+	values := `webhookServer:
+  sources:
+    github:
+      enabled: true
+      secretName: github-webhook-secret
+`
+	if err := os.WriteFile(valuesPath, []byte(values), 0o644); err != nil {
+		t.Fatalf("writing values file: %v", err)
+	}
+
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{"install", "--dry-run", "--values", valuesPath})
+
+	output := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "name: kelos-webhook-github") {
+		t.Fatalf("expected webhook deployment in output, got:\n%s", output[:min(len(output), 500)])
+	}
+	if !strings.Contains(output, "name: github-webhook-secret") {
+		t.Fatalf("expected webhook secret name from values file in output, got:\n%s", output[:min(len(output), 500)])
+	}
+}
+
+func TestInstallCommand_ValuesFromStdin(t *testing.T) {
+	cmd := NewRootCommand()
+	cmd.SetIn(strings.NewReader(`webhookServer:
+  sources:
+    github:
+      enabled: true
+      secretName: stdin-webhook-secret
+`))
+	cmd.SetArgs([]string{"install", "--dry-run", "--values", "-"})
+
+	output := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "name: kelos-webhook-github") {
+		t.Fatalf("expected webhook deployment in output, got:\n%s", output[:min(len(output), 500)])
+	}
+	if !strings.Contains(output, "name: stdin-webhook-secret") {
+		t.Fatalf("expected webhook secret name from stdin values in output, got:\n%s", output[:min(len(output), 500)])
+	}
+}
+
+func TestInstallCommand_SetFileFlag(t *testing.T) {
+	dir := t.TempDir()
+	secretPath := filepath.Join(dir, "secret-name.txt")
+	if err := os.WriteFile(secretPath, []byte("file-webhook-secret"), 0o644); err != nil {
+		t.Fatalf("writing set-file input: %v", err)
+	}
+
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{
+		"install",
+		"--dry-run",
+		"--set", "webhookServer.sources.github.enabled=true",
+		"--set-file", "webhookServer.sources.github.secretName=" + secretPath,
+	})
+
+	output := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "name: kelos-webhook-github") {
+		t.Fatalf("expected webhook deployment in output, got:\n%s", output[:min(len(output), 500)])
+	}
+	if !strings.Contains(output, "name: file-webhook-secret") {
+		t.Fatalf("expected webhook secret name from --set-file in output, got:\n%s", output[:min(len(output), 500)])
+	}
+}
+
+func TestInstallCommand_SetOverridesCompatibilityFlag(t *testing.T) {
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{
+		"install",
+		"--dry-run",
+		"--image-pull-policy", "Always",
+		"--set", "image.pullPolicy=Never",
+	})
+
+	output := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "imagePullPolicy: Never") {
+		t.Fatalf("expected --set to override compatibility flag, got:\n%s", output[:min(len(output), 500)])
+	}
+	if strings.Contains(output, "imagePullPolicy: Always") {
+		t.Fatalf("did not expect compatibility flag value to win, got:\n%s", output[:min(len(output), 500)])
+	}
+}
+
 func TestInstallCommand_DisableHeartbeatFlag(t *testing.T) {
 	cmd := NewRootCommand()
 	cmd.SetArgs([]string{"install", "--dry-run", "--disable-heartbeat"})
@@ -554,36 +660,6 @@ func TestInstallCommand_SpawnerResourceLimitsFlag(t *testing.T) {
 	}
 }
 
-func TestInstallCommand_TokenRefresherResourceRequestsFlag(t *testing.T) {
-	cmd := NewRootCommand()
-	cmd.SetArgs([]string{"install", "--dry-run", "--token-refresher-resource-requests", "cpu=100m,memory=128Mi"})
-
-	output := captureStdout(t, func() {
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	if !strings.Contains(output, "--token-refresher-resource-requests=cpu=100m,memory=128Mi") {
-		t.Errorf("expected --token-refresher-resource-requests arg in output")
-	}
-}
-
-func TestInstallCommand_TokenRefresherResourceLimitsFlag(t *testing.T) {
-	cmd := NewRootCommand()
-	cmd.SetArgs([]string{"install", "--dry-run", "--token-refresher-resource-limits", "cpu=200m,memory=256Mi"})
-
-	output := captureStdout(t, func() {
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	if !strings.Contains(output, "--token-refresher-resource-limits=cpu=200m,memory=256Mi") {
-		t.Errorf("expected --token-refresher-resource-limits arg in output")
-	}
-}
-
 func TestInstallCommand_NoSpawnerResourcesByDefault(t *testing.T) {
 	cmd := NewRootCommand()
 	cmd.SetArgs([]string{"install", "--dry-run"})
@@ -599,24 +675,6 @@ func TestInstallCommand_NoSpawnerResourcesByDefault(t *testing.T) {
 	}
 	if strings.Contains(output, "--spawner-resource-limits") {
 		t.Error("expected no --spawner-resource-limits when not set")
-	}
-}
-
-func TestInstallCommand_NoTokenRefresherResourcesByDefault(t *testing.T) {
-	cmd := NewRootCommand()
-	cmd.SetArgs([]string{"install", "--dry-run"})
-
-	output := captureStdout(t, func() {
-		if err := cmd.Execute(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	if strings.Contains(output, "--token-refresher-resource-requests") {
-		t.Error("expected no --token-refresher-resource-requests when not set")
-	}
-	if strings.Contains(output, "--token-refresher-resource-limits") {
-		t.Error("expected no --token-refresher-resource-limits when not set")
 	}
 }
 
@@ -709,7 +767,7 @@ func TestInstallCommand_NoControllerResourcesByDefault(t *testing.T) {
 }
 
 func TestRenderChart_ControllerResources(t *testing.T) {
-	vals := buildHelmValues("latest", "", false, "", "", "", "", "cpu=100m,memory=256Mi", "cpu=1,memory=512Mi", "")
+	vals := buildHelmValues("latest", "", false, "", "", "cpu=100m,memory=256Mi", "cpu=1,memory=512Mi", "")
 	data, err := helmchart.Render(manifests.ChartFS, vals)
 	if err != nil {
 		t.Fatalf("rendering chart: %v", err)
@@ -729,7 +787,7 @@ func TestRenderChart_ControllerResources(t *testing.T) {
 }
 
 func TestRenderChart_NoControllerResourcesByDefault(t *testing.T) {
-	vals := buildHelmValues("latest", "", false, "", "", "", "", "", "", "")
+	vals := buildHelmValues("latest", "", false, "", "", "", "", "")
 	data, err := helmchart.Render(manifests.ChartFS, vals)
 	if err != nil {
 		t.Fatalf("rendering chart: %v", err)
@@ -747,7 +805,7 @@ func TestRenderChart_NoControllerResourcesByDefault(t *testing.T) {
 }
 
 func TestRenderChart_SpawnerResources(t *testing.T) {
-	vals := buildHelmValues("latest", "", false, "cpu=250m,memory=512Mi", "cpu=1,memory=1Gi", "", "", "", "", "")
+	vals := buildHelmValues("latest", "", false, "cpu=250m,memory=512Mi", "cpu=1,memory=1Gi", "", "", "")
 	data, err := helmchart.Render(manifests.ChartFS, vals)
 	if err != nil {
 		t.Fatalf("rendering chart: %v", err)
@@ -760,22 +818,8 @@ func TestRenderChart_SpawnerResources(t *testing.T) {
 	}
 }
 
-func TestRenderChart_TokenRefresherResources(t *testing.T) {
-	vals := buildHelmValues("latest", "", false, "", "", "cpu=100m,memory=128Mi", "cpu=200m,memory=256Mi", "", "", "")
-	data, err := helmchart.Render(manifests.ChartFS, vals)
-	if err != nil {
-		t.Fatalf("rendering chart: %v", err)
-	}
-	if !bytes.Contains(data, []byte("--token-refresher-resource-requests=cpu=100m,memory=128Mi")) {
-		t.Error("expected --token-refresher-resource-requests in rendered output")
-	}
-	if !bytes.Contains(data, []byte("--token-refresher-resource-limits=cpu=200m,memory=256Mi")) {
-		t.Error("expected --token-refresher-resource-limits in rendered output")
-	}
-}
-
 func TestRenderChart_NoSpawnerResourcesByDefault(t *testing.T) {
-	vals := buildHelmValues("latest", "", false, "", "", "", "", "", "", "")
+	vals := buildHelmValues("latest", "", false, "", "", "", "", "")
 	data, err := helmchart.Render(manifests.ChartFS, vals)
 	if err != nil {
 		t.Fatalf("rendering chart: %v", err)
@@ -785,20 +829,6 @@ func TestRenderChart_NoSpawnerResourcesByDefault(t *testing.T) {
 	}
 	if bytes.Contains(data, []byte("spawner-resource-limits")) {
 		t.Error("expected no spawner-resource-limits when not set")
-	}
-}
-
-func TestRenderChart_NoTokenRefresherResourcesByDefault(t *testing.T) {
-	vals := buildHelmValues("latest", "", false, "", "", "", "", "", "", "")
-	data, err := helmchart.Render(manifests.ChartFS, vals)
-	if err != nil {
-		t.Fatalf("rendering chart: %v", err)
-	}
-	if bytes.Contains(data, []byte("token-refresher-resource-requests")) {
-		t.Error("expected no token-refresher-resource-requests when not set")
-	}
-	if bytes.Contains(data, []byte("token-refresher-resource-limits")) {
-		t.Error("expected no token-refresher-resource-limits when not set")
 	}
 }
 
@@ -931,17 +961,15 @@ func TestWaitForCustomResourceDeletion_RespectsContextCancellation(t *testing.T)
 
 func TestBuildHelmValues(t *testing.T) {
 	tests := []struct {
-		name                           string
-		version                        string
-		pullPolicy                     string
-		disableHeartbeat               bool
-		spawnerResourceRequests        string
-		spawnerResourceLimits          string
-		tokenRefresherResourceRequests string
-		tokenRefresherResourceLimits   string
-		controllerResourceRequests     string
-		controllerResourceLimits       string
-		checkFn                        func(t *testing.T, vals map[string]interface{})
+		name                       string
+		version                    string
+		pullPolicy                 string
+		disableHeartbeat           bool
+		spawnerResourceRequests    string
+		spawnerResourceLimits      string
+		controllerResourceRequests string
+		controllerResourceLimits   string
+		checkFn                    func(t *testing.T, vals map[string]interface{})
 	}{
 		{
 			name:    "default values",
@@ -959,9 +987,6 @@ func TestBuildHelmValues(t *testing.T) {
 				}
 				if _, ok := vals["spawner"]; ok {
 					t.Error("expected no spawner key when empty")
-				}
-				if _, ok := vals["tokenRefresher"]; ok {
-					t.Error("expected no tokenRefresher key when empty")
 				}
 				if _, ok := vals["controller"]; ok {
 					t.Error("expected no controller key when empty")
@@ -1015,30 +1040,6 @@ func TestBuildHelmValues(t *testing.T) {
 			},
 		},
 		{
-			name:                           "with token refresher resource requests",
-			version:                        "latest",
-			tokenRefresherResourceRequests: "cpu=100m,memory=128Mi",
-			checkFn: func(t *testing.T, vals map[string]interface{}) {
-				tr := vals["tokenRefresher"].(map[string]interface{})
-				res := tr["resources"].(map[string]interface{})
-				if res["requests"] != "cpu=100m,memory=128Mi" {
-					t.Errorf("expected tokenRefresher.resources.requests=cpu=100m,memory=128Mi, got %v", res["requests"])
-				}
-			},
-		},
-		{
-			name:                         "with token refresher resource limits",
-			version:                      "latest",
-			tokenRefresherResourceLimits: "cpu=200m,memory=256Mi",
-			checkFn: func(t *testing.T, vals map[string]interface{}) {
-				tr := vals["tokenRefresher"].(map[string]interface{})
-				res := tr["resources"].(map[string]interface{})
-				if res["limits"] != "cpu=200m,memory=256Mi" {
-					t.Errorf("expected tokenRefresher.resources.limits=cpu=200m,memory=256Mi, got %v", res["limits"])
-				}
-			},
-		},
-		{
 			name:                       "with controller resource requests",
 			version:                    "latest",
 			controllerResourceRequests: "cpu=10m,memory=64Mi",
@@ -1073,14 +1074,275 @@ func TestBuildHelmValues(t *testing.T) {
 				tt.disableHeartbeat,
 				tt.spawnerResourceRequests,
 				tt.spawnerResourceLimits,
-				tt.tokenRefresherResourceRequests,
-				tt.tokenRefresherResourceLimits,
 				tt.controllerResourceRequests,
 				tt.controllerResourceLimits,
 				"",
 			)
 			tt.checkFn(t, vals)
 		})
+	}
+}
+
+func TestBuildInstallValues_MergesWithPrecedence(t *testing.T) {
+	dir := t.TempDir()
+	valuesOnePath := filepath.Join(dir, "values-one.yaml")
+	valuesTwoPath := filepath.Join(dir, "values-two.yaml")
+	secretPath := filepath.Join(dir, "secret-name.txt")
+
+	valuesOne := `image:
+  tag: values-tag-1
+  pullPolicy: Never
+ghproxy:
+  cacheTTL: 10s
+webhookServer:
+  sources:
+    github:
+      enabled: true
+`
+	valuesTwo := `image:
+  tag: values-tag-2
+ghproxy:
+  cacheTTL: 20s
+`
+	if err := os.WriteFile(valuesOnePath, []byte(valuesOne), 0o644); err != nil {
+		t.Fatalf("writing first values file: %v", err)
+	}
+	if err := os.WriteFile(valuesTwoPath, []byte(valuesTwo), 0o644); err != nil {
+		t.Fatalf("writing second values file: %v", err)
+	}
+	if err := os.WriteFile(secretPath, []byte("github-secret-from-file"), 0o644); err != nil {
+		t.Fatalf("writing set-file content: %v", err)
+	}
+
+	vals, err := buildInstallValues(strings.NewReader(""), installValuesOptions{
+		defaultImageTag: "default-tag",
+		valuesFiles:     []string{valuesOnePath, valuesTwoPath},
+		setValues:       []string{"image.pullPolicy=IfNotPresent", "ghproxy.cacheTTL=30s"},
+		setStringValues: []string{"image.tag=set-string-tag", "ghproxy.allowedUpstreams=https://github.example.com/api/v3"},
+		setFileValues:   []string{"webhookServer.sources.github.secretName=" + secretPath},
+		flagValues: helmValuesOptions{
+			imageTag:        nonEmptyStringPtr("flag-tag"),
+			pullPolicy:      "Always",
+			ghproxyCacheTTL: "45s",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	image := vals["image"].(map[string]interface{})
+	if image["tag"] != "set-string-tag" {
+		t.Fatalf("expected image.tag from explicit override, got %v", image["tag"])
+	}
+	if image["pullPolicy"] != "IfNotPresent" {
+		t.Fatalf("expected image.pullPolicy from explicit override, got %v", image["pullPolicy"])
+	}
+
+	ghproxy := vals["ghproxy"].(map[string]interface{})
+	if ghproxy["cacheTTL"] != "30s" {
+		t.Fatalf("expected ghproxy.cacheTTL from explicit override, got %v", ghproxy["cacheTTL"])
+	}
+	if ghproxy["allowedUpstreams"] != "https://github.example.com/api/v3" {
+		t.Fatalf("expected ghproxy.allowedUpstreams from --set-string, got %v", ghproxy["allowedUpstreams"])
+	}
+
+	webhookServer := vals["webhookServer"].(map[string]interface{})
+	sources := webhookServer["sources"].(map[string]interface{})
+	github := sources["github"].(map[string]interface{})
+	if github["enabled"] != true {
+		t.Fatalf("expected webhook GitHub source enabled from values file, got %v", github["enabled"])
+	}
+	if github["secretName"] != "github-secret-from-file" {
+		t.Fatalf("expected webhook secret name from --set-file, got %v", github["secretName"])
+	}
+
+	crds := vals["crds"].(map[string]interface{})
+	if crds["install"] != false {
+		t.Fatalf("expected crds.install to be forced false, got %v", crds["install"])
+	}
+}
+
+func TestBuildInstallValues_UsesDefaultImageTagOnlyWhenUnset(t *testing.T) {
+	vals, err := buildInstallValues(strings.NewReader(""), installValuesOptions{
+		defaultImageTag: "v1.2.3",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	image := vals["image"].(map[string]interface{})
+	if image["tag"] != "v1.2.3" {
+		t.Fatalf("expected default image tag, got %v", image["tag"])
+	}
+
+	overrideVals, err := buildInstallValues(strings.NewReader(""), installValuesOptions{
+		defaultImageTag: "v1.2.3",
+		setValues:       []string{"image.tag=custom-tag"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error building override values: %v", err)
+	}
+	overrideImage := overrideVals["image"].(map[string]interface{})
+	if overrideImage["tag"] != "custom-tag" {
+		t.Fatalf("expected explicit image tag to win, got %v", overrideImage["tag"])
+	}
+}
+
+func TestBuildInstallValues_ReadsValuesFromStdin(t *testing.T) {
+	vals, err := buildInstallValues(strings.NewReader(`webhookServer:
+  sources:
+    github:
+      enabled: true
+      secretName: stdin-webhook-secret
+`), installValuesOptions{
+		defaultImageTag: "v1.2.3",
+		valuesFiles:     []string{"-"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	webhookServer := vals["webhookServer"].(map[string]interface{})
+	sources := webhookServer["sources"].(map[string]interface{})
+	github := sources["github"].(map[string]interface{})
+	if github["secretName"] != "stdin-webhook-secret" {
+		t.Fatalf("expected secret name from stdin values, got %v", github["secretName"])
+	}
+}
+
+func TestBuildInstallValues_SetStringPreservesStrings(t *testing.T) {
+	vals, err := buildInstallValues(strings.NewReader(""), installValuesOptions{
+		defaultImageTag: "v1.2.3",
+		setStringValues: []string{"webhookServer.sources.github.replicas=2"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	webhookServer := vals["webhookServer"].(map[string]interface{})
+	sources := webhookServer["sources"].(map[string]interface{})
+	github := sources["github"].(map[string]interface{})
+	replicas, ok := github["replicas"].(string)
+	if !ok {
+		t.Fatalf("expected replicas to remain a string, got %T", github["replicas"])
+	}
+	if replicas != "2" {
+		t.Fatalf("expected replicas string value 2, got %q", replicas)
+	}
+}
+
+func TestBuildInstallValues_RejectsCRDsInstallTrue(t *testing.T) {
+	_, err := buildInstallValues(strings.NewReader(""), installValuesOptions{
+		defaultImageTag: "v1.2.3",
+		setValues:       []string{"crds.install=true"},
+	})
+	if err == nil {
+		t.Fatal("expected crds.install=true to be rejected")
+	}
+	if !strings.Contains(err.Error(), "crds.install") {
+		t.Fatalf("expected crds.install error, got %v", err)
+	}
+}
+
+func TestBuildInstallValues_RejectsNonMapCRDs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad-crds.yaml")
+	if err := os.WriteFile(path, []byte("crds: notamap\n"), 0o644); err != nil {
+		t.Fatalf("writing values file: %v", err)
+	}
+
+	_, err := buildInstallValues(strings.NewReader(""), installValuesOptions{
+		defaultImageTag: "v1.2.3",
+		valuesFiles:     []string{path},
+	})
+	if err == nil {
+		t.Fatal("expected non-map crds to be rejected")
+	}
+	if !strings.Contains(err.Error(), "crds must be a map") {
+		t.Fatalf("expected 'crds must be a map' error, got %v", err)
+	}
+}
+
+func TestBuildInstallValues_MultipleFilesLaterWins(t *testing.T) {
+	dir := t.TempDir()
+	firstPath := filepath.Join(dir, "first.yaml")
+	secondPath := filepath.Join(dir, "second.yaml")
+	if err := os.WriteFile(firstPath, []byte("image:\n  pullPolicy: Always\n"), 0o644); err != nil {
+		t.Fatalf("writing first values file: %v", err)
+	}
+	if err := os.WriteFile(secondPath, []byte("image:\n  pullPolicy: Never\n"), 0o644); err != nil {
+		t.Fatalf("writing second values file: %v", err)
+	}
+
+	vals, err := buildInstallValues(strings.NewReader(""), installValuesOptions{
+		defaultImageTag: "v1.2.3",
+		valuesFiles:     []string{firstPath, secondPath},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	image := vals["image"].(map[string]interface{})
+	if image["pullPolicy"] != "Never" {
+		t.Fatalf("expected later values file to win, got %v", image["pullPolicy"])
+	}
+}
+
+func TestBuildInstallValues_MissingValuesFile(t *testing.T) {
+	_, err := buildInstallValues(strings.NewReader(""), installValuesOptions{
+		defaultImageTag: "v1.2.3",
+		valuesFiles:     []string{filepath.Join(t.TempDir(), "does-not-exist.yaml")},
+	})
+	if err == nil {
+		t.Fatal("expected missing values file to error")
+	}
+	if !strings.Contains(err.Error(), "reading values file") {
+		t.Fatalf("expected 'reading values file' error, got %v", err)
+	}
+}
+
+func TestBuildInstallValues_InvalidYAMLValuesFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "invalid.yaml")
+	if err := os.WriteFile(path, []byte("image:\n  tag: v1\n  - not yaml\n"), 0o644); err != nil {
+		t.Fatalf("writing values file: %v", err)
+	}
+
+	_, err := buildInstallValues(strings.NewReader(""), installValuesOptions{
+		defaultImageTag: "v1.2.3",
+		valuesFiles:     []string{path},
+	})
+	if err == nil {
+		t.Fatal("expected invalid YAML values file to error")
+	}
+	if !strings.Contains(err.Error(), "reading values file") {
+		t.Fatalf("expected 'reading values file' error, got %v", err)
+	}
+}
+
+func TestBuildInstallValues_DoubleStdinRejected(t *testing.T) {
+	_, err := buildInstallValues(strings.NewReader("image:\n  tag: v1\n"), installValuesOptions{
+		defaultImageTag: "v1.2.3",
+		valuesFiles:     []string{"-", "-"},
+	})
+	if err == nil {
+		t.Fatal("expected double stdin to error")
+	}
+	if !strings.Contains(err.Error(), "'-' can only be used once") {
+		t.Fatalf("expected double-stdin error, got %v", err)
+	}
+}
+
+func TestBuildInstallValues_SetStringOverridesSet(t *testing.T) {
+	vals, err := buildInstallValues(strings.NewReader(""), installValuesOptions{
+		defaultImageTag: "v1.2.3",
+		setValues:       []string{"image.tag=from-set"},
+		setStringValues: []string{"image.tag=from-set-string"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	image := vals["image"].(map[string]interface{})
+	if image["tag"] != "from-set-string" {
+		t.Fatalf("expected --set-string to win over --set for same key, got %v", image["tag"])
 	}
 }
 

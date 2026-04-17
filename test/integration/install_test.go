@@ -1,6 +1,8 @@
 package integration
 
 import (
+	"os"
+	"path/filepath"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -35,12 +37,17 @@ func clearNamespaceFinalizers() {
 }
 
 // deleteControllerResources removes the non-CRD resources created by install
-// without touching the CRDs, keeping the envtest environment intact.
+// without touching the CRDs, keeping the envtest environment intact. Includes
+// optional cluster-scoped webhook RBAC so tests that enable webhook sources
+// start from a clean slate and cannot satisfy assertions against stale state
+// left by a previous test.
 func deleteControllerResources() {
 	for _, obj := range []client.Object{
 		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "kelos-controller-rolebinding"}},
 		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "kelos-controller-role"}},
 		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "kelos-spawner-role"}},
+		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "kelos-webhook-rolebinding"}},
+		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "kelos-webhook-role"}},
 	} {
 		_ = client.IgnoreNotFound(k8sClient.Delete(ctx, obj))
 	}
@@ -158,25 +165,72 @@ var _ = Describe("Install/Uninstall", Ordered, func() {
 			Expect(root2.Execute()).To(Succeed())
 		})
 
-		It("Should forward token refresher resource flags to the controller deployment", func() {
+		It("Should apply Helm values file overrides", func() {
+			valuesPath := filepath.Join(GinkgoT().TempDir(), "values.yaml")
+			values := `webhookServer:
+  sources:
+    github:
+      enabled: true
+      secretName: github-webhook-secret
+`
+			Expect(os.WriteFile(valuesPath, []byte(values), 0o644)).To(Succeed())
+
 			root := cli.NewRootCommand()
 			root.SetArgs([]string{
 				"install",
 				"--kubeconfig", kubeconfigPath,
-				"--token-refresher-resource-requests", "cpu=100m,memory=128Mi",
-				"--token-refresher-resource-limits", "cpu=200m,memory=256Mi",
+				"--values", valuesPath,
 			})
 			Expect(root.Execute()).To(Succeed())
 
-			dep := &appsv1.Deployment{}
+			webhookDep := &appsv1.Deployment{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
-				Name:      "kelos-controller-manager",
+				Name:      "kelos-webhook-github",
 				Namespace: "kelos-system",
-			}, dep)).To(Succeed())
+			}, webhookDep)).To(Succeed())
 
-			args := dep.Spec.Template.Spec.Containers[0].Args
-			Expect(args).To(ContainElement("--token-refresher-resource-requests=cpu=100m,memory=128Mi"))
-			Expect(args).To(ContainElement("--token-refresher-resource-limits=cpu=200m,memory=256Mi"))
+			env := webhookDep.Spec.Template.Spec.Containers[0].Env
+			Expect(env).NotTo(BeEmpty())
+			Expect(env[0].ValueFrom).NotTo(BeNil())
+			Expect(env[0].ValueFrom.SecretKeyRef).NotTo(BeNil())
+			Expect(env[0].ValueFrom.SecretKeyRef.Name).To(Equal("github-webhook-secret"))
+		})
+
+		It("Should support Linear-only webhook installs", func() {
+			valuesPath := filepath.Join(GinkgoT().TempDir(), "values.yaml")
+			values := `webhookServer:
+  sources:
+    linear:
+      enabled: true
+      secretName: linear-webhook-secret
+`
+			Expect(os.WriteFile(valuesPath, []byte(values), 0o644)).To(Succeed())
+
+			root := cli.NewRootCommand()
+			root.SetArgs([]string{
+				"install",
+				"--kubeconfig", kubeconfigPath,
+				"--values", valuesPath,
+			})
+			Expect(root.Execute()).To(Succeed())
+
+			webhookDep := &appsv1.Deployment{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "kelos-webhook-linear",
+				Namespace: "kelos-system",
+			}, webhookDep)).To(Succeed())
+			Expect(webhookDep.Spec.Template.Spec.ServiceAccountName).To(Equal("kelos-webhook"))
+
+			webhookSA := &corev1.ServiceAccount{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "kelos-webhook",
+				Namespace: "kelos-system",
+			}, webhookSA)).To(Succeed())
+
+			webhookCRB := &rbacv1.ClusterRoleBinding{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name: "kelos-webhook-rolebinding",
+			}, webhookCRB)).To(Succeed())
 		})
 	})
 
@@ -274,6 +328,82 @@ var _ = Describe("Install/Uninstall", Ordered, func() {
 				err := k8sClient.List(ctx, &taskList)
 				// After CRDs are deleted, listing will fail
 				return err != nil || len(taskList.Items) == 0
+			}, 30*time.Second, 100*time.Millisecond).Should(BeTrue())
+		})
+
+		It("Should remove optional webhook RBAC", func() {
+			valuesPath := filepath.Join(GinkgoT().TempDir(), "values.yaml")
+			values := `webhookServer:
+  sources:
+    github:
+      enabled: true
+      secretName: github-webhook-secret
+`
+			Expect(os.WriteFile(valuesPath, []byte(values), 0o644)).To(Succeed())
+
+			root := cli.NewRootCommand()
+			root.SetArgs([]string{
+				"install",
+				"--kubeconfig", kubeconfigPath,
+				"--values", valuesPath,
+			})
+			Expect(root.Execute()).To(Succeed())
+
+			webhookCR := &rbacv1.ClusterRole{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name: "kelos-webhook-role",
+			}, webhookCR)).To(Succeed())
+
+			root2 := cli.NewRootCommand()
+			root2.SetArgs([]string{"uninstall", "--kubeconfig", kubeconfigPath})
+			Expect(root2.Execute()).To(Succeed())
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: "kelos-webhook-role"}, &rbacv1.ClusterRole{})
+				return apierrors.IsNotFound(err)
+			}, 30*time.Second, 100*time.Millisecond).Should(BeTrue())
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: "kelos-webhook-rolebinding"}, &rbacv1.ClusterRoleBinding{})
+				return apierrors.IsNotFound(err)
+			}, 30*time.Second, 100*time.Millisecond).Should(BeTrue())
+		})
+
+		It("Should remove optional webhook RBAC for Linear-only installs", func() {
+			valuesPath := filepath.Join(GinkgoT().TempDir(), "values.yaml")
+			values := `webhookServer:
+  sources:
+    linear:
+      enabled: true
+      secretName: linear-webhook-secret
+`
+			Expect(os.WriteFile(valuesPath, []byte(values), 0o644)).To(Succeed())
+
+			root := cli.NewRootCommand()
+			root.SetArgs([]string{
+				"install",
+				"--kubeconfig", kubeconfigPath,
+				"--values", valuesPath,
+			})
+			Expect(root.Execute()).To(Succeed())
+
+			webhookCR := &rbacv1.ClusterRole{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name: "kelos-webhook-role",
+			}, webhookCR)).To(Succeed())
+
+			root2 := cli.NewRootCommand()
+			root2.SetArgs([]string{"uninstall", "--kubeconfig", kubeconfigPath})
+			Expect(root2.Execute()).To(Succeed())
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: "kelos-webhook-role"}, &rbacv1.ClusterRole{})
+				return apierrors.IsNotFound(err)
+			}, 30*time.Second, 100*time.Millisecond).Should(BeTrue())
+
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: "kelos-webhook-rolebinding"}, &rbacv1.ClusterRoleBinding{})
+				return apierrors.IsNotFound(err)
 			}, 30*time.Second, 100*time.Millisecond).Should(BeTrue())
 		})
 	})

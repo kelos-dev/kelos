@@ -81,15 +81,30 @@ func TestWorkspaceReconciler_CreatesGitHubAppProxyResources(t *testing.T) {
 	if len(deploy.OwnerReferences) != 1 || deploy.OwnerReferences[0].Name != "example-workspace" {
 		t.Fatalf("expected Deployment ownerReference to Workspace, got %v", deploy.OwnerReferences)
 	}
-	if len(deploy.Spec.Template.Spec.InitContainers) != 1 {
-		t.Fatalf("expected 1 init container, got %d", len(deploy.Spec.Template.Spec.InitContainers))
+	if len(deploy.Spec.Template.Spec.InitContainers) != 0 {
+		t.Fatalf("expected 0 init containers, got %d", len(deploy.Spec.Template.Spec.InitContainers))
 	}
 	args := deploy.Spec.Template.Spec.Containers[0].Args
 	if !containsArg(args, "--upstream-base-url=https://github.example.com/api/v3") {
 		t.Fatalf("expected enterprise upstream arg, got %v", args)
 	}
-	if !containsArg(args, "--github-token-file=/shared/token/GITHUB_TOKEN") {
-		t.Fatalf("expected github token file arg, got %v", args)
+	if containsArg(args, "--github-token-file=/shared/token/GITHUB_TOKEN") {
+		t.Fatalf("did not expect github-token-file arg, got %v", args)
+	}
+	env := deploy.Spec.Template.Spec.Containers[0].Env
+	foundAppID, foundInstallationID, foundPrivateKey := false, false, false
+	for _, e := range env {
+		switch e.Name {
+		case "GITHUB_APP_ID":
+			foundAppID = true
+		case "GITHUB_APP_INSTALLATION_ID":
+			foundInstallationID = true
+		case "GITHUB_APP_PRIVATE_KEY":
+			foundPrivateKey = true
+		}
+	}
+	if !foundAppID || !foundInstallationID || !foundPrivateKey {
+		t.Fatalf("expected all GitHub App credential env vars, got %v", env)
 	}
 
 	var svc corev1.Service

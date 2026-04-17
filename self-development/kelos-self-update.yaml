@@ -82,7 +82,7 @@ spec:
 
       2. **Configuration Alignment**
          - Check that resource requests/limits, models, TTLs, and other settings are appropriate
-         - Verify that labels, excludeLabels, and filters are correct and consistent
+         - Verify that webhook repositories, events, labels, excludeLabels, and filters are correct and consistent
          - Ensure AgentConfig instructions in `agentconfig.yaml` match the project's current conventions in `CLAUDE.md`
          - Look for inconsistencies between TaskSpawners that should share the same configuration
 

@@ -26,7 +26,7 @@ type spawnerRuntimeConfig struct {
 	GitHubRepo       string
 	GitHubAPIBaseURL string
 	GHProxyURL       string
-	GitHubTokenFile  string
+	TokenResolver    func(context.Context) (string, error)
 	JiraBaseURL      string
 	JiraProject      string
 	JiraJQL          string
@@ -69,7 +69,7 @@ func (r *spawnerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 func runOnce(ctx context.Context, cl client.Client, key types.NamespacedName, cfg spawnerRuntimeConfig) (time.Duration, error) {
-	if err := runCycleWithProxy(ctx, cl, key, cfg.GitHubOwner, cfg.GitHubRepo, cfg.GHProxyURL, cfg.GitHubAPIBaseURL, cfg.GitHubTokenFile, cfg.JiraBaseURL, cfg.JiraProject, cfg.JiraJQL, cfg.HTTPClient); err != nil {
+	if err := runCycleWithProxy(ctx, cl, key, cfg.GitHubOwner, cfg.GitHubRepo, cfg.GHProxyURL, cfg.GitHubAPIBaseURL, cfg.TokenResolver, cfg.JiraBaseURL, cfg.JiraProject, cfg.JiraJQL, cfg.HTTPClient); err != nil {
 		return 0, err
 	}
 
@@ -79,21 +79,26 @@ func runOnce(ctx context.Context, cl client.Client, key types.NamespacedName, cf
 	}
 
 	if reportingEnabled(&ts) {
-		token, err := readGitHubToken(cfg.GitHubTokenFile)
-		if err != nil {
-			return 0, fmt.Errorf("reading GitHub token for reporting: %w", err)
+		if cfg.TokenResolver == nil {
+			return 0, fmt.Errorf("GitHub reporting is enabled but no token resolver is configured")
 		}
-
+		resolve := cfg.TokenResolver
 		// Reporting always uses the direct API base URL (writes bypass the proxy).
 		reporter := &reporting.TaskReporter{
 			Client: cl,
 			Reporter: &reporting.GitHubReporter{
-				Owner:     cfg.GitHubOwner,
-				Repo:      cfg.GitHubRepo,
-				Token:     token,
-				TokenFile: cfg.GitHubTokenFile,
-				BaseURL:   cfg.GitHubAPIBaseURL,
-				Client:    cfg.HTTPClient,
+				Owner: cfg.GitHubOwner,
+				Repo:  cfg.GitHubRepo,
+				TokenFunc: func() string {
+					token, err := resolve(ctx)
+					if err != nil {
+						ctrl.Log.WithName("spawner").Error(err, "Resolving GitHub token for reporting")
+						return ""
+					}
+					return token
+				},
+				BaseURL: cfg.GitHubAPIBaseURL,
+				Client:  cfg.HTTPClient,
 			},
 		}
 		if err := runReportingCycle(ctx, cl, key, reporter); err != nil {

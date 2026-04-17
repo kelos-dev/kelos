@@ -73,16 +73,6 @@ spec:
             {{- if .Values.ghproxy.cacheTTL }}
             - --ghproxy-cache-ttl={{ .Values.ghproxy.cacheTTL }}
             {{- end }}
-            - --token-refresher-image={{ .Values.tokenRefresher.image }}{{- if .Values.image.tag }}:{{ .Values.image.tag }}{{- end }}
-            {{- if .Values.image.pullPolicy }}
-            - --token-refresher-image-pull-policy={{ .Values.image.pullPolicy }}
-            {{- end }}
-            {{- if .Values.tokenRefresher.resources.requests }}
-            - --token-refresher-resource-requests={{ .Values.tokenRefresher.resources.requests }}
-            {{- end }}
-            {{- if .Values.tokenRefresher.resources.limits }}
-            - --token-refresher-resource-limits={{ .Values.tokenRefresher.resources.limits }}
-            {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

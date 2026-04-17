@@ -82,54 +82,34 @@ func TestFetchGitHubPRBranchWithToken_EmptyToken(t *testing.T) {
 	}
 }
 
-func TestTokenProvider_PATPreferred(t *testing.T) {
-	t.Setenv(githubTokenEnvVar, "ghp_my_pat_token")
-	// Also set App vars to prove PAT takes precedence
-	t.Setenv(githubAppIDEnvVar, "12345")
-	t.Setenv(githubInstallationIDEnvVar, "67890")
-	t.Setenv(githubPrivateKeyEnvVar, "fake-key")
+func TestSetGitHubTokenResolver(t *testing.T) {
+	orig := githubTokenResolver
+	defer func() { githubTokenResolver = orig }()
 
-	tp := &tokenProvider{}
-	token, err := tp.Token(context.Background())
+	SetGitHubTokenResolver(func(context.Context) (string, error) {
+		return "injected-token", nil
+	})
+
+	token, err := githubTokenResolver(context.Background())
 	if err != nil {
-		t.Fatalf("Token() error = %v", err)
+		t.Fatalf("resolver() error = %v", err)
 	}
-	if token != "ghp_my_pat_token" {
-		t.Errorf("Token() = %q, want %q", token, "ghp_my_pat_token")
+	if token != "injected-token" {
+		t.Errorf("resolver() = %q, want %q", token, "injected-token")
 	}
 }
 
-func TestTokenProvider_NoCredentials(t *testing.T) {
-	// Ensure no env vars are set
-	t.Setenv(githubTokenEnvVar, "")
-	t.Setenv(githubAppIDEnvVar, "")
-	t.Setenv(githubInstallationIDEnvVar, "")
-	t.Setenv(githubPrivateKeyEnvVar, "")
+func TestFetchGitHubPRBranch_NilResolver(t *testing.T) {
+	orig := githubTokenResolver
+	defer func() { githubTokenResolver = orig }()
 
-	tp := &tokenProvider{}
-	token, err := tp.Token(context.Background())
+	githubTokenResolver = nil
+	branch, err := fetchGitHubPRBranch(context.Background(), "http://unused")
 	if err != nil {
-		t.Fatalf("Token() error = %v", err)
+		t.Fatalf("fetchGitHubPRBranch() error = %v", err)
 	}
-	if token != "" {
-		t.Errorf("Token() = %q, want empty", token)
-	}
-}
-
-func TestTokenProvider_PartialAppCredentials(t *testing.T) {
-	// Only set some app vars — should return empty, not error
-	t.Setenv(githubTokenEnvVar, "")
-	t.Setenv(githubAppIDEnvVar, "12345")
-	t.Setenv(githubInstallationIDEnvVar, "")
-	t.Setenv(githubPrivateKeyEnvVar, "")
-
-	tp := &tokenProvider{}
-	token, err := tp.Token(context.Background())
-	if err != nil {
-		t.Fatalf("Token() error = %v", err)
-	}
-	if token != "" {
-		t.Errorf("Token() = %q, want empty for partial credentials", token)
+	if branch != "" {
+		t.Errorf("fetchGitHubPRBranch() = %q, want empty for nil resolver", branch)
 	}
 }
 

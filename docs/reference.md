@@ -351,15 +351,24 @@ The `kelos` CLI lets you manage the full lifecycle without writing YAML.
 
 ### `kelos install` Flags
 
-- `--version`: Override the image tag used for controller and bundled agent images
+- `--values, -f`: Load Helm values from a YAML file; repeat to merge multiple files, or use `-` to read from stdin
+- `--set`: Set chart values with Helm `key=value` syntax
+- `--set-string`: Set string chart values with Helm `key=value` syntax
+- `--set-file`: Set chart values from file contents with Helm `key=path` syntax
+- `--version`: Override the image tag used for controller and bundled agent images; shorthand for `image.tag`
 - `--image-pull-policy`: Set `imagePullPolicy` on controller-managed images
 - `--disable-heartbeat`: Do not install the telemetry heartbeat CronJob
 - `--spawner-resource-requests`: Resource requests for spawner containers as comma-separated `name=value` pairs
 - `--spawner-resource-limits`: Resource limits for spawner containers as comma-separated `name=value` pairs
-- `--token-refresher-resource-requests`: Resource requests for token refresher sidecars as comma-separated `name=value` pairs, for example `cpu=100m,memory=128Mi`
-- `--token-refresher-resource-limits`: Resource limits for token refresher sidecars as comma-separated `name=value` pairs, for example `cpu=200m,memory=256Mi`
+- `--ghproxy-resource-requests`: Resource requests for workspace ghproxy containers as comma-separated `name=value` pairs
+- `--ghproxy-resource-limits`: Resource limits for workspace ghproxy containers as comma-separated `name=value` pairs
+- `--ghproxy-allowed-upstreams`: Comma-separated list of allowed upstream base URLs for ghproxy
+- `--ghproxy-cache-ttl`: Cache TTL for workspace ghproxy instances
 - `--controller-resource-requests`: Resource requests for the controller container as comma-separated `name=value` pairs, for example `cpu=10m,memory=64Mi`
 - `--controller-resource-limits`: Resource limits for the controller container as comma-separated `name=value` pairs, for example `cpu=500m,memory=128Mi`
+
+`kelos install` renders the embedded Helm chart but still manages CRDs separately, so `crds.install` must be omitted or set to `false`.
+When the same key is set multiple ways, precedence is: chart defaults, then `--values` files, then compatibility install flags, then explicit `--set`, `--set-string`, and `--set-file` overrides.
 
 ### `kelos run` Flags
 

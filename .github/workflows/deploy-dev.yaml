@@ -49,21 +49,78 @@ jobs:
           location: ${{ env.GKE_CLUSTER_LOCATION }}
           project_id: ${{ env.GCP_PROJECT_ID }}
 
+      - name: Apply github-webhook-secret
+        env:
+          KELOS_WEBHOOK_SECRET: ${{ secrets.KELOS_WEBHOOK_SECRET }}
+          KELOS_GITHUB_APP_ID: ${{ secrets.KELOS_GITHUB_APP_ID }}
+          KELOS_GITHUB_APP_INSTALLATION_ID: ${{ secrets.KELOS_GITHUB_APP_INSTALLATION_ID }}
+          KELOS_GITHUB_APP_PRIVATE_KEY: ${{ secrets.KELOS_GITHUB_APP_PRIVATE_KEY }}
+        run: |
+          # Apply the full github-webhook-secret from repo secrets so the
+          # workflow is self-sufficient and the secret state is portable to
+          # other clusters. Holds both the HMAC WEBHOOK_SECRET and the
+          # GitHub App credentials the webhook server uses to resolve
+          # .Branch for issue_comment events on pull requests.
+          KEY_FILE=$(mktemp)
+          trap 'rm -f "$KEY_FILE"' EXIT
+          printf '%s' "$KELOS_GITHUB_APP_PRIVATE_KEY" > "$KEY_FILE"
+          kubectl create secret generic github-webhook-secret \
+            --namespace kelos-system \
+            --from-literal=WEBHOOK_SECRET="$KELOS_WEBHOOK_SECRET" \
+            --from-literal=appID="$KELOS_GITHUB_APP_ID" \
+            --from-literal=installationID="$KELOS_GITHUB_APP_INSTALLATION_ID" \
+            --from-file=privateKey="$KEY_FILE" \
+            --dry-run=client -o yaml \
+            | kubectl apply -f -
+
       - name: Install kelos
         run: |
-          bin/kelos install --version main --image-pull-policy Always \
-            --spawner-resource-requests cpu=100m,memory=128Mi \
-            --ghproxy-resource-requests cpu=10m,memory=64Mi \
-            --ghproxy-cache-ttl 50s \
-            --token-refresher-resource-requests cpu=50m,memory=64Mi \
-            --controller-resource-requests cpu=10m,memory=64Mi \
-            --controller-resource-limits cpu=500m,memory=128Mi
+          cat > /tmp/kelos-dev-values.yaml <<'EOF'
+          image:
+            tag: main
+            pullPolicy: Always
+          spawner:
+            resources:
+              requests: "cpu=100m,memory=128Mi"
+          ghproxy:
+            cacheTTL: 50s
+            resources:
+              requests: "cpu=10m,memory=64Mi"
+          controller:
+            resources:
+              requests:
+                cpu: 10m
+                memory: 64Mi
+              limits:
+                cpu: 500m
+                memory: 128Mi
+          # NOTE: webhookServer.gateway is intentionally left at chart default
+          # (disabled). The dev cluster already has a Gateway
+          # (kelos-webhook-gateway) and HTTPRoute (kelos-webhook-route) applied
+          # out of band — they use GKE CertMap via
+          # networking.gke.io/certmap annotation, which the chart's gateway
+          # template cannot express. Managing them via helm would fight the
+          # out-of-band config, so they stay manual.
+          webhookServer:
+            sources:
+              github:
+                enabled: true
+                secretName: github-webhook-secret
+                githubSecretName: github-webhook-secret
+            resources:
+              requests:
+                cpu: 100m
+                memory: 128Mi
+          EOF
+          bin/kelos install -f /tmp/kelos-dev-values.yaml
           kubectl rollout restart deployment/kelos-controller-manager -n kelos-system
           kubectl rollout status deployment/kelos-controller-manager -n kelos-system --timeout=120s
           kubectl rollout restart deployment -l kelos.dev/component=ghproxy -n "${KELOS_NAMESPACE}"
           kubectl rollout restart deployment -l kelos.dev/component=spawner -n "${KELOS_NAMESPACE}"
+          kubectl rollout restart deployment/kelos-webhook-github -n kelos-system
           kubectl rollout status deployment -l kelos.dev/component=ghproxy -n "${KELOS_NAMESPACE}" --timeout=120s
           kubectl rollout status deployment -l kelos.dev/component=spawner -n "${KELOS_NAMESPACE}" --timeout=120s
+          kubectl rollout status deployment/kelos-webhook-github -n kelos-system --timeout=120s
 
       - name: Apply PodMonitoring
         run: |
@@ -118,6 +175,23 @@ jobs:
               matchLabels:
                 kelos.dev/name: kelos
                 kelos.dev/component: ghproxy
+            endpoints:
+              - port: metrics
+                interval: 30s
+          ---
+          apiVersion: monitoring.googleapis.com/v1
+          kind: PodMonitoring
+          metadata:
+            name: kelos-webhook-github
+            namespace: kelos-system
+            labels:
+              app.kubernetes.io/name: kelos
+              app.kubernetes.io/component: webhook-github
+          spec:
+            selector:
+              matchLabels:
+                app.kubernetes.io/name: kelos
+                app.kubernetes.io/component: webhook-github
             endpoints:
               - port: metrics
                 interval: 30s

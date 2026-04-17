@@ -4,25 +4,23 @@ metadata:
   name: kelos-squash-commits
 spec:
   when:
-    githubPullRequests:
-      state: open
-      commentPolicy:
-        triggerComment: /kelos squash-commits
-        excludeComments:
-          - /kelos squash-commits-done
-        allowedUsers:
-          - gjkim42
-          - kelos-bot[bot]
-      reporting:
-        enabled: true
-      pollInterval: 1m
+    githubWebhook:
+      repository: kelos-dev/kelos
+      events:
+        - issue_comment
+      filters:
+        - event: issue_comment
+          action: created
+          bodyContains: /kelos squash-commits
+          state: open
+          author: gjkim42
   maxConcurrency: 1
   taskTemplate:
     workspaceRef:
       name: kelos-agent
     model: sonnet
     type: claude-code
-    ttlSecondsAfterFinished: 3600
+    ttlSecondsAfterFinished: 864000
     credentials:
       type: oauth
       secretRef:
@@ -50,16 +48,20 @@ spec:
     promptTemplate: |
       You are a coding agent. Your only task is to rebase and squash commits on a PR branch.
 
+      Webhook:
+      - Event: {{.Event}}
+      - Action: {{.Action}}
+      - Sender: {{.Sender}}
+      - URL: {{.URL}}
+
       Pull request:
       - PR #{{.Number}}: {{.Title}}
-      - Branch: {{.Branch}}
 
       Steps:
-      1. Check out the branch and fetch full history:
+      1. Kelos has already checked out the PR head branch. Fetch full history:
          ```
          git fetch --unshallow || true
          git fetch origin main
-         git checkout {{.Branch}}
          ```
 
       2. Rebase the branch on origin/main:
@@ -82,7 +84,7 @@ spec:
 
       5. Force push the result:
          ```
-         git push --force-with-lease origin {{.Branch}}
+         git push --force-with-lease origin HEAD
          ```
 
       6. Update the PR description if needed:
@@ -93,7 +95,7 @@ spec:
          - Extract the linked issue number from the PR body (look for `Closes #N`, `Fixes #N`, etc.)
          - Run: `gh issue edit <issue-number> --add-label kelos/needs-input`
 
-      8. Post a comment on PR #{{.Number}} whose first line is `/kelos squash-commits-done` to signal completion.
+      8. Post a comment on PR #{{.Number}} whose first line is `Squash complete.` to signal completion.
 
       Important:
       - Do NOT start any new development work

@@ -1808,6 +1808,9 @@ func TestBuildJob_PodOverridesAllFields(t *testing.T) {
 				SecretRef: &kelosv1alpha1.SecretReference{Name: "openai-secret"},
 			},
 			PodOverrides: &kelosv1alpha1.PodOverrides{
+				Labels: map[string]string{
+					"team": "platform",
+				},
 				Resources: &corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
 						corev1.ResourceMemory: resource.MustParse("4Gi"),
@@ -1830,6 +1833,14 @@ func TestBuildJob_PodOverridesAllFields(t *testing.T) {
 	}
 
 	container := job.Spec.Template.Spec.Containers[0]
+
+	// Labels
+	if job.Labels["team"] != "platform" {
+		t.Errorf("Expected job label team=platform, got %q", job.Labels["team"])
+	}
+	if job.Spec.Template.Labels["team"] != "platform" {
+		t.Errorf("Expected pod label team=platform, got %q", job.Spec.Template.Labels["team"])
+	}
 
 	// Resources
 	memLimit := container.Resources.Limits[corev1.ResourceMemory]
@@ -1856,6 +1867,88 @@ func TestBuildJob_PodOverridesAllFields(t *testing.T) {
 	// NodeSelector
 	if job.Spec.Template.Spec.NodeSelector["pool"] != "agents" {
 		t.Errorf("Expected nodeSelector pool=agents, got %q", job.Spec.Template.Spec.NodeSelector["pool"])
+	}
+}
+
+func TestBuildJob_PodOverridesLabels(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-labels",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+			PodOverrides: &kelosv1alpha1.PodOverrides{
+				Labels: map[string]string{
+					"team":        "platform",
+					"cost-center": "engineering",
+				},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	// Custom labels should be present on both the Job and Pod template.
+	for _, labels := range []map[string]string{job.Labels, job.Spec.Template.Labels} {
+		if labels["team"] != "platform" {
+			t.Errorf("Expected label team=platform, got %q", labels["team"])
+		}
+		if labels["cost-center"] != "engineering" {
+			t.Errorf("Expected label cost-center=engineering, got %q", labels["cost-center"])
+		}
+		// Built-in labels should still be present.
+		if labels["kelos.dev/task"] != "test-labels" {
+			t.Errorf("Expected built-in label kelos.dev/task=test-labels, got %q", labels["kelos.dev/task"])
+		}
+	}
+}
+
+func TestBuildJob_PodOverridesLabelsBuiltinPrecedence(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-labels-precedence",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+			PodOverrides: &kelosv1alpha1.PodOverrides{
+				Labels: map[string]string{
+					"kelos.dev/component": "should-be-overridden",
+					"custom":              "allowed",
+				},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	// Built-in label should take precedence over user-specified conflict.
+	for _, labels := range []map[string]string{job.Labels, job.Spec.Template.Labels} {
+		if labels["kelos.dev/component"] != "task" {
+			t.Errorf("Expected built-in kelos.dev/component=task to take precedence, got %q", labels["kelos.dev/component"])
+		}
+		if labels["custom"] != "allowed" {
+			t.Errorf("Expected custom label custom=allowed, got %q", labels["custom"])
+		}
 	}
 }
 

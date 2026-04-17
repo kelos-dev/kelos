@@ -291,6 +291,14 @@ spec:
                       - name
                       type: object
                     type: array
+                  labels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      Labels specifies additional labels to apply to the Job and its Pod.
+                      These are merged with the built-in labels. If a user-specified label
+                      conflicts with a built-in one, the built-in takes precedence.
+                    type: object
                   nodeSelector:
                     additionalProperties:
                       type: string

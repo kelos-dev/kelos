@@ -19,6 +19,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
+	"github.com/kelos-dev/kelos/internal/githubapp"
 	"github.com/kelos-dev/kelos/internal/logging"
 	"github.com/kelos-dev/kelos/internal/source"
 )
@@ -51,15 +52,15 @@ type proxy struct {
 	upstreamBaseURL string
 	cacheTTL        time.Duration
 	now             func() time.Time
-	tokenResolver   func() string
+	tokenResolver   func(ctx context.Context) string
 }
 
-func newProxy(upstreamBaseURL string, cacheTTL time.Duration, tokenResolver func() string) *proxy {
+func newProxy(upstreamBaseURL string, cacheTTL time.Duration, tokenResolver func(ctx context.Context) string) *proxy {
 	if upstreamBaseURL == "" {
 		upstreamBaseURL = defaultUpstream
 	}
 	if tokenResolver == nil {
-		tokenResolver = func() string { return "" }
+		tokenResolver = func(context.Context) string { return "" }
 	}
 	return &proxy{
 		cache: make(map[string]*cacheEntry),
@@ -173,7 +174,7 @@ func (p *proxy) doNonGET(upstream string, r *http.Request) (*responsePayload, er
 			outReq.Header.Set(h, v)
 		}
 	}
-	if token := p.tokenResolver(); token != "" {
+	if token := p.tokenResolver(r.Context()); token != "" {
 		outReq.Header.Set("Authorization", "token "+token)
 	}
 
@@ -238,7 +239,7 @@ func (p *proxy) doGETUpstream(log logr.Logger, upstream, key, requestURI string,
 			outReq.Header.Set(h, v)
 		}
 	}
-	if token := p.tokenResolver(); token != "" {
+	if token := p.tokenResolver(ctx); token != "" {
 		outReq.Header.Set("Authorization", "token "+token)
 	}
 	if entry != nil {
@@ -357,31 +358,39 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Write(payload.body)
 }
 
-func newTokenResolver(staticToken, tokenFile string) func() string {
-	var (
-		mu          sync.Mutex
-		cached      string
-		cachedAt    time.Time
-		refreshRate = 30 * time.Second
-	)
-	return func() string {
-		if tokenFile == "" {
-			return strings.TrimSpace(staticToken)
+// newTokenResolver returns a function that resolves a GitHub API token.
+// It prefers a static PAT, then falls back to GitHub App credentials.
+func newTokenResolver(token, appID, installID, privateKey, apiBaseURL string) func(context.Context) string {
+	if token != "" {
+		return func(context.Context) string { return token }
+	}
+	if appID == "" || installID == "" || privateKey == "" {
+		return func(context.Context) string { return "" }
+	}
+
+	creds, err := githubapp.ParseCredentials(map[string][]byte{
+		"appID":          []byte(appID),
+		"installationID": []byte(installID),
+		"privateKey":     []byte(privateKey),
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to parse GitHub App credentials: %v\n", err)
+		os.Exit(1)
+	}
+
+	tc := githubapp.NewTokenClient()
+	if apiBaseURL != "" {
+		tc.BaseURL = apiBaseURL
+	}
+	provider := githubapp.NewTokenProvider(tc, creds)
+
+	return func(ctx context.Context) string {
+		t, err := provider.Token(ctx)
+		if err != nil {
+			ctrl.Log.WithName("ghproxy").Error(err, "Resolving GitHub App token")
+			return ""
 		}
-		mu.Lock()
-		defer mu.Unlock()
-		if cached != "" && time.Since(cachedAt) < refreshRate {
-			return cached
-		}
-		data, err := os.ReadFile(tokenFile)
-		if err == nil {
-			if token := strings.TrimSpace(string(data)); token != "" {
-				cached = token
-				cachedAt = time.Now()
-				return token
-			}
-		}
-		return strings.TrimSpace(staticToken)
+		return t
 	}
 }
 
@@ -389,13 +398,19 @@ func main() {
 	var listenAddr string
 	var metricsAddr string
 	var upstreamBaseURL string
-	var githubTokenFile string
 	var cacheTTL time.Duration
+	var githubToken string
+	var githubAppID string
+	var githubAppInstallationID string
+	var githubAppPrivateKey string
 	flag.StringVar(&listenAddr, "listen-address", ":8888", "Address to listen on")
 	flag.StringVar(&metricsAddr, "metrics-address", ":9090", "Address to serve Prometheus metrics on")
 	flag.StringVar(&upstreamBaseURL, "upstream-base-url", defaultUpstream, "GitHub API base URL to proxy")
-	flag.StringVar(&githubTokenFile, "github-token-file", "", "Path to file containing GitHub token")
 	flag.DurationVar(&cacheTTL, "cache-ttl", defaultCacheTTL, "Duration to serve cached GET responses without upstream revalidation")
+	flag.StringVar(&githubToken, "github-token", "", "GitHub personal access token (env: GITHUB_TOKEN)")
+	flag.StringVar(&githubAppID, "github-app-id", "", "GitHub App ID for installation token generation (env: GITHUB_APP_ID)")
+	flag.StringVar(&githubAppInstallationID, "github-app-installation-id", "", "GitHub App installation ID (env: GITHUB_APP_INSTALLATION_ID)")
+	flag.StringVar(&githubAppPrivateKey, "github-app-private-key", "", "GitHub App private key in PEM format (env: GITHUB_APP_PRIVATE_KEY)")
 
 	opts, applyVerbosity := logging.SetupZapOptions(flag.CommandLine)
 	flag.Parse()
@@ -408,7 +423,21 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(opts)))
 	log := ctrl.Log.WithName("ghproxy")
 
-	p := newProxy(upstreamBaseURL, cacheTTL, newTokenResolver(os.Getenv("GITHUB_TOKEN"), githubTokenFile))
+	// Fall back to environment variables for credentials not passed via flags.
+	if githubToken == "" {
+		githubToken = os.Getenv("GITHUB_TOKEN")
+	}
+	if githubAppID == "" {
+		githubAppID = os.Getenv("GITHUB_APP_ID")
+	}
+	if githubAppInstallationID == "" {
+		githubAppInstallationID = os.Getenv("GITHUB_APP_INSTALLATION_ID")
+	}
+	if githubAppPrivateKey == "" {
+		githubAppPrivateKey = os.Getenv("GITHUB_APP_PRIVATE_KEY")
+	}
+
+	p := newProxy(upstreamBaseURL, cacheTTL, newTokenResolver(githubToken, githubAppID, githubAppInstallationID, githubAppPrivateKey, upstreamBaseURL))
 
 	srv := &http.Server{
 		Addr:         listenAddr,

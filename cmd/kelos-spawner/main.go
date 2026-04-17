@@ -24,6 +24,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	"github.com/kelos-dev/kelos/internal/githubapp"
 	"github.com/kelos-dev/kelos/internal/logging"
 	"github.com/kelos-dev/kelos/internal/reporting"
 	"github.com/kelos-dev/kelos/internal/source"
@@ -44,7 +45,10 @@ func main() {
 	var githubRepo string
 	var ghProxyURL string
 	var githubAPIBaseURL string
-	var githubTokenFile string
+	var githubToken string
+	var githubAppID string
+	var githubAppInstallationID string
+	var githubAppPrivateKey string
 	var jiraBaseURL string
 	var jiraProject string
 	var jiraJQL string
@@ -56,7 +60,10 @@ func main() {
 	flag.StringVar(&githubRepo, "github-repo", "", "GitHub repository name")
 	flag.StringVar(&ghProxyURL, "gh-proxy-url", "", "Workspace ghproxy base URL for GitHub read requests")
 	flag.StringVar(&githubAPIBaseURL, "github-api-base-url", "", "GitHub API base URL for enterprise servers (e.g. https://github.example.com/api/v3)")
-	flag.StringVar(&githubTokenFile, "github-token-file", "", "Path to file containing GitHub token (refreshed by sidecar)")
+	flag.StringVar(&githubToken, "github-token", "", "GitHub personal access token (env: GITHUB_TOKEN)")
+	flag.StringVar(&githubAppID, "github-app-id", "", "GitHub App ID for installation token generation (env: GITHUB_APP_ID)")
+	flag.StringVar(&githubAppInstallationID, "github-app-installation-id", "", "GitHub App installation ID (env: GITHUB_APP_INSTALLATION_ID)")
+	flag.StringVar(&githubAppPrivateKey, "github-app-private-key", "", "GitHub App private key in PEM format (env: GITHUB_APP_PRIVATE_KEY)")
 	flag.StringVar(&jiraBaseURL, "jira-base-url", "", "Jira instance base URL (e.g. https://mycompany.atlassian.net)")
 	flag.StringVar(&jiraProject, "jira-project", "", "Jira project key")
 	flag.StringVar(&jiraJQL, "jira-jql", "", "Optional JQL filter for Jira issues")
@@ -73,6 +80,20 @@ func main() {
 	logger := zap.New(zap.UseFlagOptions(opts))
 	ctrl.SetLogger(logger)
 	log := ctrl.Log.WithName("spawner")
+
+	// Fall back to environment variables for credentials not passed via flags.
+	if githubToken == "" {
+		githubToken = os.Getenv("GITHUB_TOKEN")
+	}
+	if githubAppID == "" {
+		githubAppID = os.Getenv("GITHUB_APP_ID")
+	}
+	if githubAppInstallationID == "" {
+		githubAppInstallationID = os.Getenv("GITHUB_APP_INSTALLATION_ID")
+	}
+	if githubAppPrivateKey == "" {
+		githubAppPrivateKey = os.Getenv("GITHUB_APP_PRIVATE_KEY")
+	}
 
 	if name == "" || namespace == "" {
 		log.Error(fmt.Errorf("--taskspawner-name and --taskspawner-namespace are required"), "invalid flags")
@@ -98,12 +119,14 @@ func main() {
 
 	httpClient := &http.Client{Transport: source.NewMetricsTransport(http.DefaultTransport)}
 
+	tokenResolver := newGitHubTokenResolver(githubToken, githubAppID, githubAppInstallationID, githubAppPrivateKey, githubAPIBaseURL)
+
 	cfgArgs := spawnerRuntimeConfig{
 		GitHubOwner:      githubOwner,
 		GitHubRepo:       githubRepo,
 		GitHubAPIBaseURL: githubAPIBaseURL,
 		GHProxyURL:       ghProxyURL,
-		GitHubTokenFile:  githubTokenFile,
+		TokenResolver:    tokenResolver,
 		JiraBaseURL:      jiraBaseURL,
 		JiraProject:      jiraProject,
 		JiraJQL:          jiraJQL,
@@ -170,13 +193,13 @@ func runReportingCycle(ctx context.Context, cl client.Client, key types.Namespac
 	return nil
 }
 
-func runCycle(ctx context.Context, cl client.Client, key types.NamespacedName, githubOwner, githubRepo, githubAPIBaseURL, githubTokenFile, jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) error {
-	return runCycleWithProxy(ctx, cl, key, githubOwner, githubRepo, "", githubAPIBaseURL, githubTokenFile, jiraBaseURL, jiraProject, jiraJQL, httpClient)
+func runCycle(ctx context.Context, cl client.Client, key types.NamespacedName, githubOwner, githubRepo, githubAPIBaseURL string, tokenResolver func(context.Context) (string, error), jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) error {
+	return runCycleWithProxy(ctx, cl, key, githubOwner, githubRepo, "", githubAPIBaseURL, tokenResolver, jiraBaseURL, jiraProject, jiraJQL, httpClient)
 }
 
-func runCycleWithProxy(ctx context.Context, cl client.Client, key types.NamespacedName, githubOwner, githubRepo, ghProxyURL, githubAPIBaseURL, githubTokenFile, jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) error {
+func runCycleWithProxy(ctx context.Context, cl client.Client, key types.NamespacedName, githubOwner, githubRepo, ghProxyURL, githubAPIBaseURL string, tokenResolver func(context.Context) (string, error), jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) error {
 	start := time.Now()
-	err := runCycleCore(ctx, cl, key, githubOwner, githubRepo, ghProxyURL, githubAPIBaseURL, githubTokenFile, jiraBaseURL, jiraProject, jiraJQL, httpClient)
+	err := runCycleCore(ctx, cl, key, githubOwner, githubRepo, ghProxyURL, githubAPIBaseURL, tokenResolver, jiraBaseURL, jiraProject, jiraJQL, httpClient)
 	discoveryDurationSeconds.Observe(time.Since(start).Seconds())
 	if err != nil {
 		discoveryErrorsTotal.Inc()
@@ -184,13 +207,13 @@ func runCycleWithProxy(ctx context.Context, cl client.Client, key types.Namespac
 	return err
 }
 
-func runCycleCore(ctx context.Context, cl client.Client, key types.NamespacedName, githubOwner, githubRepo, ghProxyURL, githubAPIBaseURL, githubTokenFile, jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) error {
+func runCycleCore(ctx context.Context, cl client.Client, key types.NamespacedName, githubOwner, githubRepo, ghProxyURL, githubAPIBaseURL string, tokenResolver func(context.Context) (string, error), jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) error {
 	var ts kelosv1alpha1.TaskSpawner
 	if err := cl.Get(ctx, key, &ts); err != nil {
 		return fmt.Errorf("fetching TaskSpawner: %w", err)
 	}
 
-	src, err := buildSourceWithProxy(&ts, githubOwner, githubRepo, ghProxyURL, githubAPIBaseURL, githubTokenFile, jiraBaseURL, jiraProject, jiraJQL, httpClient)
+	src, err := buildSourceWithProxy(ctx, &ts, githubOwner, githubRepo, ghProxyURL, githubAPIBaseURL, tokenResolver, jiraBaseURL, jiraProject, jiraJQL, httpClient)
 	if err != nil {
 		return fmt.Errorf("building source: %w", err)
 	}
@@ -526,11 +549,11 @@ func resolveGitHubCommentPolicy(policy *kelosv1alpha1.GitHubCommentPolicy, legac
 	}, nil
 }
 
-func buildSource(ts *kelosv1alpha1.TaskSpawner, owner, repo, apiBaseURL, tokenFile, jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) (source.Source, error) {
-	return buildSourceWithProxy(ts, owner, repo, "", apiBaseURL, tokenFile, jiraBaseURL, jiraProject, jiraJQL, httpClient)
+func buildSource(ctx context.Context, ts *kelosv1alpha1.TaskSpawner, owner, repo, apiBaseURL string, tokenResolver func(context.Context) (string, error), jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) (source.Source, error) {
+	return buildSourceWithProxy(ctx, ts, owner, repo, "", apiBaseURL, tokenResolver, jiraBaseURL, jiraProject, jiraJQL, httpClient)
 }
 
-func buildSourceWithProxy(ts *kelosv1alpha1.TaskSpawner, owner, repo, ghProxyURL, apiBaseURL, tokenFile, jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) (source.Source, error) {
+func buildSourceWithProxy(ctx context.Context, ts *kelosv1alpha1.TaskSpawner, owner, repo, ghProxyURL, apiBaseURL string, tokenResolver func(context.Context) (string, error), jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) (source.Source, error) {
 	if ts.Spec.When.GitHubIssues != nil {
 		gh := ts.Spec.When.GitHubIssues
 		commentPolicy, err := resolveGitHubCommentPolicy(gh.CommentPolicy, gh.TriggerComment, gh.ExcludeComments)
@@ -541,8 +564,8 @@ func buildSourceWithProxy(ts *kelosv1alpha1.TaskSpawner, owner, repo, ghProxyURL
 		token := ""
 		if ghProxyURL != "" {
 			baseURL = ghProxyURL
-		} else {
-			token, err = readGitHubToken(tokenFile)
+		} else if tokenResolver != nil {
+			token, err = tokenResolver(ctx)
 			if err != nil {
 				return nil, err
 			}
@@ -579,14 +602,14 @@ func buildSourceWithProxy(ts *kelosv1alpha1.TaskSpawner, owner, repo, ghProxyURL
 		token := ""
 		if ghProxyURL != "" {
 			baseURL = ghProxyURL
-		} else {
-			token, err = readGitHubToken(tokenFile)
+		} else if tokenResolver != nil {
+			token, err = tokenResolver(ctx)
 			if err != nil {
 				return nil, err
 			}
 		}
 
-		return &source.GitHubPullRequestSource{
+		src := &source.GitHubPullRequestSource{
 			Owner:             owner,
 			Repo:              repo,
 			Labels:            gh.Labels,
@@ -605,7 +628,12 @@ func buildSourceWithProxy(ts *kelosv1alpha1.TaskSpawner, owner, repo, ghProxyURL
 			MinimumPermission: commentPolicy.MinimumPermission,
 			Draft:             gh.Draft,
 			PriorityLabels:    gh.PriorityLabels,
-		}, nil
+		}
+		if gh.FilePatterns != nil {
+			src.FileInclude = gh.FilePatterns.Include
+			src.FileExclude = gh.FilePatterns.Exclude
+		}
+		return src, nil
 	}
 
 	if ts.Spec.When.Jira != nil {
@@ -637,22 +665,31 @@ func buildSourceWithProxy(ts *kelosv1alpha1.TaskSpawner, owner, repo, ghProxyURL
 	return nil, fmt.Errorf("no source configured in TaskSpawner %s/%s", ts.Namespace, ts.Name)
 }
 
-func readGitHubToken(tokenFile string) (string, error) {
-	token := os.Getenv("GITHUB_TOKEN")
-	if tokenFile == "" {
-		return token, nil
+// newGitHubTokenResolver returns a function that resolves a GitHub API token.
+// It prefers a static PAT, then falls back to GitHub App credentials.
+func newGitHubTokenResolver(token, appID, installID, privateKey, apiBaseURL string) func(context.Context) (string, error) {
+	if token != "" {
+		return func(context.Context) (string, error) { return token, nil }
+	}
+	if appID == "" || installID == "" || privateKey == "" {
+		return nil
 	}
 
-	data, err := os.ReadFile(tokenFile)
+	creds, err := githubapp.ParseCredentials(map[string][]byte{
+		"appID":          []byte(appID),
+		"installationID": []byte(installID),
+		"privateKey":     []byte(privateKey),
+	})
 	if err != nil {
-		if os.IsNotExist(err) {
-			ctrl.Log.WithName("spawner").Info("Token file not yet available, proceeding without token", "path", tokenFile)
-			return token, nil
-		}
-		return "", fmt.Errorf("reading token file %s: %w", tokenFile, err)
+		fmt.Fprintf(os.Stderr, "Failed to parse GitHub App credentials: %v\n", err)
+		os.Exit(1)
 	}
 
-	return strings.TrimSpace(string(data)), nil
+	tc := githubapp.NewTokenClient()
+	if apiBaseURL != "" {
+		tc.BaseURL = apiBaseURL
+	}
+	return githubapp.NewTokenProvider(tc, creds).Token
 }
 
 func priorityLabelsForTaskSpawner(ts *kelosv1alpha1.TaskSpawner) []string {

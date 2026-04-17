@@ -63,40 +63,31 @@ jobs:
           script: |
             const eventName = context.eventName
             let body = ''
-            let actor = ''
             let issueNumber = 0
 
             if (eventName === 'issue_comment' || eventName === 'pull_request_review_comment') {
               body = context.payload.comment?.body || ''
-              actor = context.payload.comment?.user?.login || ''
               issueNumber = context.payload.issue?.number || context.payload.pull_request?.number || 0
             } else if (eventName === 'pull_request_review') {
               body = context.payload.review?.body || ''
-              actor = context.payload.review?.user?.login || ''
               issueNumber = context.payload.pull_request?.number || context.payload.issue?.number || 0
             } else if (eventName === 'issues') {
               body = context.payload.issue?.body || ''
-              actor = context.payload.issue?.user?.login || ''
               issueNumber = context.payload.issue?.number || 0
             } else if (eventName === 'pull_request_target') {
               body = context.payload.pull_request?.body || ''
-              actor = context.payload.pull_request?.user?.login || ''
               issueNumber = context.payload.pull_request?.number || 0
             } else {
               core.setFailed(`Unsupported event for label workflow: ${eventName}`)
               return
             }
 
-            // Keep body and actor tied to the same event source so a review,
-            // comment, issue, or PR body cannot inherit another object's
-            // commands or author.
             const strippedBody = body.replace(/<!--[\s\S]*?-->/g, '')
             const hasCommand =
               /^\s*\/(?:remove-)?(?:kind|priority|actor)\s+.+$/m.test(strippedBody) ||
               /^\s*\/(?:remove-)?triage-accepted\s*$/m.test(strippedBody)
 
             core.setOutput('body', body)
-            core.setOutput('actor', actor)
             core.setOutput('issue_number', String(issueNumber))
             core.setOutput('has_command', hasCommand ? 'true' : 'false')
 
@@ -104,26 +95,10 @@ jobs:
               core.info('No label commands found in selected source body')
               return
             }
-
-            if (!actor) {
-              core.setFailed('Could not determine actor for label command')
-              return
-            }
             if (!issueNumber) {
               core.setFailed('Could not determine issue number for label command')
               return
             }
-      - name: Check permission
-        if: steps.context.outputs.has_command == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          PERMISSION=$(gh api "repos/${{ github.repository }}/collaborators/${{ steps.context.outputs.actor }}/permission" -q .permission)
-          if [[ "$PERMISSION" != "admin" && "$PERMISSION" != "write" ]]; then
-            echo "User ${{ steps.context.outputs.actor }} does not have write permission (permission=$PERMISSION)"
-            exit 1
-          fi
-
       - name: Apply labels
         if: steps.context.outputs.has_command == 'true'
         uses: actions/github-script@v7

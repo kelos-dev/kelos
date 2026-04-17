@@ -27,11 +27,6 @@ spawner:
   resources:
     requests: ""
     limits: ""
-tokenRefresher:
-  image: ghcr.io/kelos-dev/kelos-token-refresher
-  resources:
-    requests: ""
-    limits: ""
 controller:
   resources:
     requests: {}
@@ -49,6 +44,13 @@ webhookServer:
       replicas: 1
       secretName: ""
       apiKeySecretName: ""
+    generic:
+      enabled: false
+      replicas: 1
+      # Name of a Secret containing per-source HMAC keys as individual keys.
+      # Each key should be named <SOURCE>_WEBHOOK_SECRET (e.g.,
+      # NOTION_WEBHOOK_SECRET, SENTRY_WEBHOOK_SECRET).
+      secretName: ""
   resources:
     limits:
       cpu: 500m

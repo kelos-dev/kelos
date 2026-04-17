@@ -75,6 +75,22 @@ func TestIsWebhookBased(t *testing.T) {
 			},
 			want: false,
 		},
+		{
+			name: "generic webhook TaskSpawner",
+			ts: &kelosv1alpha1.TaskSpawner{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GenericWebhook: &kelosv1alpha1.GenericWebhook{
+							Source: "notion",
+							FieldMapping: map[string]string{
+								"id": "$.data.id",
+							},
+						},
+					},
+				},
+			},
+			want: true,
+		},
 	}
 
 	for _, tt := range tests {

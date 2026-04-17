@@ -2,9 +2,12 @@ package slack
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/go-logr/logr"
+	"github.com/slack-go/slack/slackevents"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -169,4 +172,89 @@ func TestCreateTaskAlreadyExists(t *testing.T) {
 	if err := h.createTask(context.Background(), spawner, msg); err != nil {
 		t.Fatalf("Second createTask() should not error on AlreadyExists, got: %v", err)
 	}
+}
+
+func TestReadJoinMessage(t *testing.T) {
+	tests := []struct {
+		name        string
+		fileContent string
+		noFile      bool
+		wantMsg     string
+		wantErr     bool
+	}{
+		{
+			name:        "reads and trims message from file",
+			fileContent: "Hello! I'm Kelos bot. Mention me to get started.\n",
+			wantMsg:     "Hello! I'm Kelos bot. Mention me to get started.",
+		},
+		{
+			name:    "empty file path returns empty string",
+			noFile:  true,
+			wantMsg: "",
+		},
+		{
+			name:        "empty file content returns empty string",
+			fileContent: "   \n",
+			wantMsg:     "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := &SlackHandler{log: logr.Discard()}
+
+			if !tt.noFile {
+				dir := t.TempDir()
+				path := filepath.Join(dir, "join-message.txt")
+				if err := os.WriteFile(path, []byte(tt.fileContent), 0o644); err != nil {
+					t.Fatalf("WriteFile: %v", err)
+				}
+				h.joinMessageFile = path
+			}
+
+			got, err := h.readJoinMessage()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("readJoinMessage() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if got != tt.wantMsg {
+				t.Errorf("readJoinMessage() = %q, want %q", got, tt.wantMsg)
+			}
+		})
+	}
+}
+
+func TestReadJoinMessageMissingFile(t *testing.T) {
+	h := &SlackHandler{
+		log:             logr.Discard(),
+		joinMessageFile: "/nonexistent/path/join-message.txt",
+	}
+
+	_, err := h.readJoinMessage()
+	if err == nil {
+		t.Fatal("Expected error for missing file, got nil")
+	}
+}
+
+func TestHandleMemberJoinedChannelIgnoresOtherUsers(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "join-message.txt")
+	if err := os.WriteFile(path, []byte("Welcome!"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	h := &SlackHandler{
+		log:             logr.Discard(),
+		botUserID:       "UBOT",
+		joinMessageFile: path,
+		// api is nil — if handleMemberJoinedChannel tries to post for a
+		// non-bot user it will panic, which is the desired failure mode here.
+	}
+
+	evt := &slackevents.MemberJoinedChannelEvent{
+		User:    "UOTHER",
+		Channel: "C123",
+	}
+
+	// Should return without attempting to post (no panic = pass).
+	h.handleMemberJoinedChannel(context.Background(), evt)
 }

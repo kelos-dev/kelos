@@ -35,6 +35,11 @@ type GitHubEventData struct {
 	Body   string
 	URL    string
 	Branch string
+	// Comment-specific fields for issue_comment, pull_request_review,
+	// and pull_request_review_comment events.
+	CommentAuthor string
+	CommentBody   string
+	CommentURL    string
 	// ChangedFiles lists file paths modified by the event.
 	// For push events, populated from the payload. For PR events, lazily
 	// fetched from the GitHub API when a webhook filter uses FilePatterns.
@@ -132,6 +137,11 @@ func ParseGitHubWebhook(eventType string, payload []byte) (*GitHubEventData, err
 	case *github.IssueCommentEvent:
 		data.Action = e.GetAction()
 		data.Sender = e.GetSender().GetLogin()
+		if comment := e.GetComment(); comment != nil {
+			data.CommentAuthor = comment.GetUser().GetLogin()
+			data.CommentBody = comment.GetBody()
+			data.CommentURL = comment.GetHTMLURL()
+		}
 		if issue := e.GetIssue(); issue != nil {
 			data.ID = fmt.Sprintf("%d", issue.GetNumber())
 			data.Title = issue.GetTitle()
@@ -150,6 +160,11 @@ func ParseGitHubWebhook(eventType string, payload []byte) (*GitHubEventData, err
 	case *github.PullRequestReviewEvent:
 		data.Action = e.GetAction()
 		data.Sender = e.GetSender().GetLogin()
+		if review := e.GetReview(); review != nil {
+			data.CommentAuthor = review.GetUser().GetLogin()
+			data.CommentBody = review.GetBody()
+			data.CommentURL = review.GetHTMLURL()
+		}
 		if pr := e.GetPullRequest(); pr != nil {
 			data.ID = fmt.Sprintf("%d", pr.GetNumber())
 			data.Title = pr.GetTitle()
@@ -164,6 +179,11 @@ func ParseGitHubWebhook(eventType string, payload []byte) (*GitHubEventData, err
 	case *github.PullRequestReviewCommentEvent:
 		data.Action = e.GetAction()
 		data.Sender = e.GetSender().GetLogin()
+		if comment := e.GetComment(); comment != nil {
+			data.CommentAuthor = comment.GetUser().GetLogin()
+			data.CommentBody = comment.GetBody()
+			data.CommentURL = comment.GetHTMLURL()
+		}
 		if pr := e.GetPullRequest(); pr != nil {
 			data.ID = fmt.Sprintf("%d", pr.GetNumber())
 			data.Title = pr.GetTitle()
@@ -457,6 +477,15 @@ func ExtractGitHubWorkItem(eventData *GitHubEventData) map[string]interface{} {
 	}
 	if eventData.Branch != "" {
 		vars["Branch"] = eventData.Branch
+	}
+	if eventData.CommentAuthor != "" {
+		vars["CommentAuthor"] = eventData.CommentAuthor
+	}
+	if eventData.CommentBody != "" {
+		vars["CommentBody"] = eventData.CommentBody
+	}
+	if eventData.CommentURL != "" {
+		vars["CommentURL"] = eventData.CommentURL
 	}
 
 	return vars

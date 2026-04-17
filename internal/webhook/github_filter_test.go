@@ -1282,6 +1282,145 @@ func TestParseGitHubWebhook_IssueCommentOnPR_ExtractsPullRequestAPIURL(t *testin
 	}
 }
 
+func TestParseGitHubWebhook_IssueComment_ExtractsCommentFields(t *testing.T) {
+	payload := `{
+		"action": "created",
+		"sender": {"login": "testuser"},
+		"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}},
+		"issue": {
+			"number": 42,
+			"title": "Test PR",
+			"body": "PR body",
+			"html_url": "https://github.com/org/repo/pull/42",
+			"state": "open"
+		},
+		"comment": {
+			"body": "/review please",
+			"html_url": "https://github.com/org/repo/pull/42#issuecomment-123",
+			"user": {"login": "commenter"}
+		}
+	}`
+
+	got, err := ParseGitHubWebhook("issue_comment", []byte(payload))
+	if err != nil {
+		t.Fatalf("ParseGitHubWebhook() error = %v", err)
+	}
+	if got.CommentAuthor != "commenter" {
+		t.Errorf("CommentAuthor = %q, want %q", got.CommentAuthor, "commenter")
+	}
+	if got.CommentBody != "/review please" {
+		t.Errorf("CommentBody = %q, want %q", got.CommentBody, "/review please")
+	}
+	if got.CommentURL != "https://github.com/org/repo/pull/42#issuecomment-123" {
+		t.Errorf("CommentURL = %q, want %q", got.CommentURL, "https://github.com/org/repo/pull/42#issuecomment-123")
+	}
+}
+
+func TestParseGitHubWebhook_PullRequestReviewComment_ExtractsCommentFields(t *testing.T) {
+	payload := `{
+		"action": "created",
+		"sender": {"login": "testuser"},
+		"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}},
+		"pull_request": {
+			"number": 99,
+			"title": "Fix bug",
+			"body": "Fixes the bug",
+			"html_url": "https://github.com/org/repo/pull/99",
+			"head": {"ref": "fix-branch"}
+		},
+		"comment": {
+			"body": "nit: rename this variable",
+			"html_url": "https://github.com/org/repo/pull/99#discussion_r456",
+			"user": {"login": "reviewer"}
+		}
+	}`
+
+	got, err := ParseGitHubWebhook("pull_request_review_comment", []byte(payload))
+	if err != nil {
+		t.Fatalf("ParseGitHubWebhook() error = %v", err)
+	}
+	if got.CommentAuthor != "reviewer" {
+		t.Errorf("CommentAuthor = %q, want %q", got.CommentAuthor, "reviewer")
+	}
+	if got.CommentBody != "nit: rename this variable" {
+		t.Errorf("CommentBody = %q, want %q", got.CommentBody, "nit: rename this variable")
+	}
+	if got.CommentURL != "https://github.com/org/repo/pull/99#discussion_r456" {
+		t.Errorf("CommentURL = %q, want %q", got.CommentURL, "https://github.com/org/repo/pull/99#discussion_r456")
+	}
+}
+
+func TestParseGitHubWebhook_PullRequestReview_ExtractsCommentFields(t *testing.T) {
+	payload := `{
+		"action": "submitted",
+		"sender": {"login": "testuser"},
+		"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}},
+		"pull_request": {
+			"number": 50,
+			"title": "Add feature",
+			"body": "New feature",
+			"html_url": "https://github.com/org/repo/pull/50",
+			"head": {"ref": "feat-branch"}
+		},
+		"review": {
+			"body": "LGTM with minor comments",
+			"html_url": "https://github.com/org/repo/pull/50#pullrequestreview-789",
+			"user": {"login": "lead-reviewer"}
+		}
+	}`
+
+	got, err := ParseGitHubWebhook("pull_request_review", []byte(payload))
+	if err != nil {
+		t.Fatalf("ParseGitHubWebhook() error = %v", err)
+	}
+	if got.CommentAuthor != "lead-reviewer" {
+		t.Errorf("CommentAuthor = %q, want %q", got.CommentAuthor, "lead-reviewer")
+	}
+	if got.CommentBody != "LGTM with minor comments" {
+		t.Errorf("CommentBody = %q, want %q", got.CommentBody, "LGTM with minor comments")
+	}
+	if got.CommentURL != "https://github.com/org/repo/pull/50#pullrequestreview-789" {
+		t.Errorf("CommentURL = %q, want %q", got.CommentURL, "https://github.com/org/repo/pull/50#pullrequestreview-789")
+	}
+}
+
+func TestExtractGitHubWorkItemCommentFields(t *testing.T) {
+	eventData := &GitHubEventData{
+		Event:         "pull_request_review_comment",
+		CommentAuthor: "reviewer",
+		CommentBody:   "nit: rename this",
+		CommentURL:    "https://github.com/org/repo/pull/99#discussion_r456",
+	}
+
+	vars := ExtractGitHubWorkItem(eventData)
+	if vars["CommentAuthor"] != "reviewer" {
+		t.Errorf("CommentAuthor = %v, want %q", vars["CommentAuthor"], "reviewer")
+	}
+	if vars["CommentBody"] != "nit: rename this" {
+		t.Errorf("CommentBody = %v, want %q", vars["CommentBody"], "nit: rename this")
+	}
+	if vars["CommentURL"] != "https://github.com/org/repo/pull/99#discussion_r456" {
+		t.Errorf("CommentURL = %v, want %q", vars["CommentURL"], "https://github.com/org/repo/pull/99#discussion_r456")
+	}
+}
+
+func TestExtractGitHubWorkItemNoCommentFields(t *testing.T) {
+	eventData := &GitHubEventData{
+		Event: "push",
+	}
+
+	vars := ExtractGitHubWorkItem(eventData)
+	if _, ok := vars["CommentAuthor"]; ok {
+		t.Error("CommentAuthor should not be set for non-comment events")
+	}
+	if _, ok := vars["CommentBody"]; ok {
+		t.Error("CommentBody should not be set for non-comment events")
+	}
+	if _, ok := vars["CommentURL"]; ok {
+		t.Error("CommentURL should not be set for non-comment events")
+	}
+}
+
 func TestParseGitHubWebhook_IssueCommentOnIssue_NoPullRequestAPIURL(t *testing.T) {
 	payload := `{
 		"action": "created",

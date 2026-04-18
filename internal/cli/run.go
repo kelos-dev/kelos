@@ -100,6 +100,9 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 					return fmt.Errorf("prompt file is empty")
 				}
 			}
+			if strings.TrimSpace(prompt) == "" {
+				return fmt.Errorf("--prompt must not be empty")
+			}
 
 			// Auto-create secret from token if no explicit secret is set.
 			if secret == "" && cfg.Config != nil {

@@ -158,6 +158,9 @@ func (tc *TokenClient) GenerateInstallationToken(ctx context.Context, creds *Cre
 	}
 	req.Header.Set("Authorization", "Bearer "+jwt)
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	resp, err := tc.httpClient().Do(req)
 	if err != nil {

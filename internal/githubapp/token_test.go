@@ -431,6 +431,9 @@ func TestGenerateInstallationToken_WithRepositories(t *testing.T) {
 
 	var receivedBody map[string]interface{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if ct := r.Header.Get("Content-Type"); ct != "application/json" {
+			t.Errorf("Content-Type = %q, want application/json", ct)
+		}
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Fatalf("reading request body: %v", err)
@@ -498,9 +501,11 @@ func TestGenerateInstallationToken_NilOpts(t *testing.T) {
 	expiresAt := time.Now().Add(1 * time.Hour).UTC().Truncate(time.Second)
 
 	var requestBodyEmpty bool
+	var contentTypeSet bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		requestBodyEmpty = len(body) == 0
+		contentTypeSet = r.Header.Get("Content-Type") == "application/json"
 
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -528,6 +533,9 @@ func TestGenerateInstallationToken_NilOpts(t *testing.T) {
 	}
 	if !requestBodyEmpty {
 		t.Error("expected empty request body for nil opts")
+	}
+	if contentTypeSet {
+		t.Error("expected no Content-Type header for nil opts")
 	}
 
 	// Empty repositories should also send no body

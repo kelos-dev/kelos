@@ -617,13 +617,6 @@ type TaskTemplate struct {
 	// githubPullRequests.repo by the spawner, but can be set explicitly.
 	// +optional
 	UpstreamRepo string `json:"upstreamRepo,omitempty"`
-
-	// Repositories limits the GitHub App installation token to these
-	// repository names for spawned Tasks. When set and the workspace uses
-	// GitHub App authentication, the generated GITHUB_TOKEN can only access
-	// the listed repositories.
-	// +optional
-	Repositories []string `json:"repositories,omitempty"`
 }
 
 // TaskSpawnerSpec defines the desired state of TaskSpawner.

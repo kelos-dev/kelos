@@ -103,9 +103,6 @@ func (tb *TaskBuilder) BuildTask(
 	if taskTemplate.UpstreamRepo != "" {
 		task.Spec.UpstreamRepo = taskTemplate.UpstreamRepo
 	}
-	if len(taskTemplate.Repositories) > 0 {
-		task.Spec.Repositories = taskTemplate.Repositories
-	}
 
 	// Apply template metadata
 	if taskTemplate.Metadata != nil {

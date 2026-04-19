@@ -154,15 +154,6 @@ type TaskSpec struct {
 	// PodOverrides allows customizing the agent pod configuration.
 	// +optional
 	PodOverrides *PodOverrides `json:"podOverrides,omitempty"`
-
-	// Repositories limits the GitHub App installation token to these
-	// repository names. When set and the workspace uses GitHub App
-	// authentication, the generated GITHUB_TOKEN can only access the
-	// listed repositories. Ignored when the workspace uses a PAT.
-	// Repository names are relative to the installation owner
-	// (e.g., "my-repo", not "org/my-repo").
-	// +optional
-	Repositories []string `json:"repositories,omitempty"`
 }
 
 // TaskStatus defines the observed state of Task.

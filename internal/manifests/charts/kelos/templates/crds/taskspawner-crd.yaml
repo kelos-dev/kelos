@@ -452,15 +452,6 @@ spec:
                       Linear webhook sources: {{ "{{.Type}}" }}, {{ "{{.Action}}" }}, {{ "{{.State}}" }}, {{ "{{.Labels}}" }}, {{ "{{.IssueID}}" }}, {{ "{{.Payload}}" }}
                       Cron sources: {{ "{{.Time}}" }}, {{ "{{.Schedule}}" }}
                     type: string
-                  repositories:
-                    description: |-
-                      Repositories limits the GitHub App installation token to these
-                      repository names for spawned Tasks. When set and the workspace uses
-                      GitHub App authentication, the generated GITHUB_TOKEN can only access
-                      the listed repositories.
-                    items:
-                      type: string
-                    type: array
                   ttlSecondsAfterFinished:
                     description: |-
                       TTLSecondsAfterFinished limits the lifetime of a Task that has finished

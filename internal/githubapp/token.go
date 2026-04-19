@@ -17,6 +17,7 @@ limitations under the License.
 package githubapp
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"crypto/rand"
@@ -49,6 +50,14 @@ type Credentials struct {
 type TokenResponse struct {
 	Token     string
 	ExpiresAt time.Time
+}
+
+// TokenOptions configures optional scoping for installation tokens.
+type TokenOptions struct {
+	// Repositories limits the token to these repository names.
+	// Names are relative to the installation owner (e.g., "my-repo",
+	// not "org/my-repo").
+	Repositories []string `json:"repositories,omitempty"`
 }
 
 // TokenClient generates GitHub App installation tokens.
@@ -125,14 +134,25 @@ func parsePrivateKey(pemBytes []byte) (*rsa.PrivateKey, error) {
 }
 
 // GenerateInstallationToken exchanges GitHub App credentials for an installation token.
-func (tc *TokenClient) GenerateInstallationToken(ctx context.Context, creds *Credentials) (*TokenResponse, error) {
+// When opts is non-nil and contains Repositories, the token is scoped to those repositories.
+func (tc *TokenClient) GenerateInstallationToken(ctx context.Context, creds *Credentials, opts *TokenOptions) (*TokenResponse, error) {
 	jwt, err := generateJWT(creds)
 	if err != nil {
 		return nil, fmt.Errorf("generating JWT: %w", err)
 	}
 
 	url := fmt.Sprintf("%s/app/installations/%s/access_tokens", tc.baseURL(), creds.InstallationID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+
+	var body io.Reader
+	if opts != nil && len(opts.Repositories) > 0 {
+		payload, err := json.Marshal(opts)
+		if err != nil {
+			return nil, fmt.Errorf("marshaling token options: %w", err)
+		}
+		body = bytes.NewReader(payload)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -242,7 +262,7 @@ func (tp *TokenProvider) Token(ctx context.Context) (string, error) {
 		return tp.token, nil
 	}
 
-	resp, err := tp.client.GenerateInstallationToken(ctx, tp.creds)
+	resp, err := tp.client.GenerateInstallationToken(ctx, tp.creds, nil)
 	if err != nil {
 		// Fall back to cached token if it has not actually expired yet
 		if tp.token != "" && now.Before(tp.expiresAt) {

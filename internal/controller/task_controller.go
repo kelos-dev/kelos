@@ -378,7 +378,10 @@ func (r *TaskReconciler) resolveGitHubAppToken(ctx context.Context, task *kelosv
 		}
 	}
 
-	tokenResp, err := tc.GenerateInstallationToken(ctx, creds)
+	opts := &githubapp.TokenOptions{
+		Repositories: task.Spec.Repositories,
+	}
+	tokenResp, err := tc.GenerateInstallationToken(ctx, creds, opts)
 	if err != nil {
 		return nil, fmt.Errorf("generating installation token: %w", err)
 	}

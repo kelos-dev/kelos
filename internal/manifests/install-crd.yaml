@@ -599,6 +599,17 @@ spec:
               prompt:
                 description: Prompt is the task prompt to send to the agent.
                 type: string
+              repositories:
+                description: |-
+                  Repositories limits the GitHub App installation token to these
+                  repository names. When set and the workspace uses GitHub App
+                  authentication, the generated GITHUB_TOKEN can only access the
+                  listed repositories. Ignored when the workspace uses a PAT.
+                  Repository names are relative to the installation owner
+                  (e.g., "my-repo", not "org/my-repo").
+                items:
+                  type: string
+                type: array
               ttlSecondsAfterFinished:
                 description: |-
                   TTLSecondsAfterFinished limits the lifetime of a Task that has finished

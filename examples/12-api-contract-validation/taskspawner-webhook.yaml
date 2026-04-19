@@ -1,0 +1,54 @@
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: api-contract-validator
+spec:
+  when:
+    githubWebhook:
+      events:
+        - "issue_comment"
+      filters:
+        - event: "issue_comment"
+          action: "created"
+          bodyContains: "/validate-api"
+  maxConcurrency: 2
+  taskTemplate:
+    type: claude-code
+    workspaceRef:
+      name: api-service-workspace
+    agentConfigRef:
+      name: api-validator-config
+    credentials:
+      type: api-key
+      secretRef:
+        name: anthropic-api-key
+    branch: "kelos/api-validation-{{.ID}}"
+    promptTemplate: |
+      An API contract validation was requested.
+
+      Event: {{.Event}} — {{.Action}}
+      Triggered by: @{{.Sender}}
+      PR URL: {{.URL}}
+
+      ## Instructions
+
+      1. Identify all changes to API definition files in the current branch
+         (OpenAPI specs, protobuf definitions, GraphQL schemas, or typed API routes).
+      2. Run structural diff tools if available (e.g., `oasdiff diff`, `buf breaking`).
+      3. For each detected change, classify it:
+         - **Non-breaking**: additive fields, new optional parameters, new endpoints
+         - **Potentially breaking**: changed response shapes, renamed fields, type changes
+         - **Breaking**: removed fields/endpoints, changed required parameters
+      4. For breaking changes, analyze whether any known consumer actually uses the
+         affected field/endpoint (check consumer repos if accessible).
+      5. Post a review comment on the PR summarizing findings:
+         - List of changes with classification
+         - Impact assessment for each breaking change
+         - Suggested backward-compatible alternatives (deprecation, default values, versioning)
+      6. If all changes are non-breaking, approve with a summary comment.
+
+      Use `gh pr review` to post your findings.
+    metadata:
+      labels:
+        kelos.dev/use-case: "api-validation"
+    ttlSecondsAfterFinished: 3600

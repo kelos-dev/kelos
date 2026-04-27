@@ -4,25 +4,48 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 )
 
 // resolveContent returns the content string directly, or if it starts with "@",
-// reads the content from the referenced file path.
+// reads the content from the referenced file path. A leading "~" or "~/" in the
+// file path is expanded to the current user's home directory, since os.ReadFile
+// does not perform shell-style tilde expansion.
 func resolveContent(s string) (string, error) {
 	if s == "" {
 		return "", nil
 	}
 	if strings.HasPrefix(s, "@") {
-		data, err := os.ReadFile(s[1:])
+		path, err := expandHome(s[1:])
+		if err != nil {
+			return "", fmt.Errorf("reading file %s: %w", s[1:], err)
+		}
+		data, err := os.ReadFile(path)
 		if err != nil {
 			return "", fmt.Errorf("reading file %s: %w", s[1:], err)
 		}
 		return strings.TrimRight(string(data), "\n"), nil
 	}
 	return s, nil
+}
+
+// expandHome replaces a leading "~" or "~/" in path with the current user's
+// home directory. Other paths (including "~user" forms) are returned unchanged.
+func expandHome(path string) (string, error) {
+	if path != "~" && !strings.HasPrefix(path, "~/") {
+		return path, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("expanding ~: %w", err)
+	}
+	if path == "~" {
+		return home, nil
+	}
+	return filepath.Join(home, path[2:]), nil
 }
 
 // parseNameContent splits a "name=content" or "name=@file" string into name

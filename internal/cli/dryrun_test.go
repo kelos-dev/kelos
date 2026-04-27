@@ -1199,4 +1199,106 @@ func TestResolveContent(t *testing.T) {
 			t.Fatal("expected error for missing file")
 		}
 	})
+
+	t.Run("file reference expands ~ to home directory", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("HOME", dir)
+
+		f := filepath.Join(dir, "token.txt")
+		if err := os.WriteFile(f, []byte("home-content"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		got, err := resolveContent("@~/token.txt")
+		if err != nil {
+			t.Fatalf("expected ~ to expand, got error: %v", err)
+		}
+		if got != "home-content" {
+			t.Errorf("expected %q, got %q", "home-content", got)
+		}
+	})
+
+	t.Run("file reference with ~ for missing file reports original path", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("HOME", dir)
+
+		_, err := resolveContent("@~/does-not-exist")
+		if err == nil {
+			t.Fatal("expected error for missing file under ~")
+		}
+		if !strings.Contains(err.Error(), "~/does-not-exist") {
+			t.Errorf("expected error to reference original ~ path, got: %v", err)
+		}
+	})
+}
+
+func TestExpandHome(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"empty string", "", ""},
+		{"absolute path", "/etc/hosts", "/etc/hosts"},
+		{"relative path", "rel/path", "rel/path"},
+		{"bare tilde", "~", dir},
+		{"tilde with slash", "~/", dir},
+		{"tilde subpath", "~/.codex/auth.json", filepath.Join(dir, ".codex/auth.json")},
+		{"named user not expanded", "~someone/file", "~someone/file"},
+		{"tilde in middle not expanded", "/etc/~/foo", "/etc/~/foo"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := expandHome(tt.input)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("expandHome(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunCommand_DryRun_CodexOAuthToken_FileRef_HomeDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	authFile := filepath.Join(home, "auth.json")
+	if err := os.WriteFile(authFile, []byte(`{"token":"from-home"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfgDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "config.yaml")
+	cfg := "oauthToken: \"@~/auth.json\"\ntype: codex\n"
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{
+		"run",
+		"--config", cfgPath,
+		"--dry-run",
+		"--prompt", "hello",
+		"--name", "codex-home-task",
+		"--namespace", "test-ns",
+	})
+
+	output := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "type: oauth") {
+		t.Errorf("expected credential 'type: oauth' in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "kelos-credentials") {
+		t.Errorf("expected 'kelos-credentials' secret reference in output, got:\n%s", output)
+	}
 }

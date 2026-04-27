@@ -1203,3 +1203,125 @@ func TestPrintTaskDetailMinimal(t *testing.T) {
 		}
 	}
 }
+
+func TestEffectivePollInterval(t *testing.T) {
+	tests := []struct {
+		name string
+		ts   *kelosv1alpha1.TaskSpawner
+		want string
+	}{
+		{
+			name: "github issues source override wins over top-level",
+			ts: &kelosv1alpha1.TaskSpawner{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubIssues: &kelosv1alpha1.GitHubIssues{PollInterval: "2m"},
+					},
+					PollInterval: "5m",
+				},
+			},
+			want: "2m",
+		},
+		{
+			name: "github issues falls back to top-level when source empty",
+			ts: &kelosv1alpha1.TaskSpawner{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubIssues: &kelosv1alpha1.GitHubIssues{},
+					},
+					PollInterval: "5m",
+				},
+			},
+			want: "5m",
+		},
+		{
+			name: "github pull requests source override wins over top-level",
+			ts: &kelosv1alpha1.TaskSpawner{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{PollInterval: "45s"},
+					},
+					PollInterval: "5m",
+				},
+			},
+			want: "45s",
+		},
+		{
+			name: "jira source override wins over top-level",
+			ts: &kelosv1alpha1.TaskSpawner{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						Jira: &kelosv1alpha1.Jira{PollInterval: "1m"},
+					},
+					PollInterval: "10m",
+				},
+			},
+			want: "1m",
+		},
+		{
+			name: "cron source uses top-level since it has no per-source override",
+			ts: &kelosv1alpha1.TaskSpawner{
+				Spec: kelosv1alpha1.TaskSpawnerSpec{
+					When: kelosv1alpha1.When{
+						Cron: &kelosv1alpha1.Cron{Schedule: "*/5 * * * *"},
+					},
+					PollInterval: "3m",
+				},
+			},
+			want: "3m",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := effectivePollInterval(tt.ts); got != tt.want {
+				t.Errorf("effectivePollInterval() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPrintTaskSpawnerDetailShowsPerSourcePollInterval(t *testing.T) {
+	spawner := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-spawner",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubIssues: &kelosv1alpha1.GitHubIssues{
+					PollInterval: "2m",
+					Labels:       []string{"bug"},
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+			},
+			PollInterval: "5m",
+		},
+		Status: kelosv1alpha1.TaskSpawnerStatus{
+			Phase: kelosv1alpha1.TaskSpawnerPhaseRunning,
+		},
+	}
+
+	var buf bytes.Buffer
+	printTaskSpawnerDetail(&buf, spawner)
+	output := buf.String()
+
+	var pollLine string
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, "Poll Interval:") {
+			pollLine = line
+			break
+		}
+	}
+	if pollLine == "" {
+		t.Fatalf("expected Poll Interval line in output, got:\n%s", output)
+	}
+	if !strings.Contains(pollLine, "2m") {
+		t.Errorf("expected per-source poll interval 2m in line %q", pollLine)
+	}
+	if strings.Contains(pollLine, "5m") {
+		t.Errorf("expected deprecated top-level poll interval (5m) not to appear in line %q", pollLine)
+	}
+}

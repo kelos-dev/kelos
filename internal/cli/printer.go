@@ -181,6 +181,21 @@ func printTaskSpawnerTable(w io.Writer, spawners []kelosv1alpha1.TaskSpawner, al
 	tw.Flush()
 }
 
+// effectivePollInterval returns the poll interval that the spawner actually
+// uses, mirroring the resolution in cmd/kelos-spawner: the active source's
+// pollInterval takes precedence over the deprecated spec.pollInterval.
+func effectivePollInterval(ts *kelosv1alpha1.TaskSpawner) string {
+	switch {
+	case ts.Spec.When.GitHubIssues != nil && ts.Spec.When.GitHubIssues.PollInterval != "":
+		return ts.Spec.When.GitHubIssues.PollInterval
+	case ts.Spec.When.GitHubPullRequests != nil && ts.Spec.When.GitHubPullRequests.PollInterval != "":
+		return ts.Spec.When.GitHubPullRequests.PollInterval
+	case ts.Spec.When.Jira != nil && ts.Spec.When.Jira.PollInterval != "":
+		return ts.Spec.When.Jira.PollInterval
+	}
+	return ts.Spec.PollInterval
+}
+
 func printTaskSpawnerDetail(w io.Writer, ts *kelosv1alpha1.TaskSpawner) {
 	printField(w, "Name", ts.Name)
 	printField(w, "Namespace", ts.Namespace)
@@ -241,7 +256,7 @@ func printTaskSpawnerDetail(w io.Writer, ts *kelosv1alpha1.TaskSpawner) {
 	if ts.Spec.TaskTemplate.Model != "" {
 		printField(w, "Model", ts.Spec.TaskTemplate.Model)
 	}
-	printField(w, "Poll Interval", ts.Spec.PollInterval)
+	printField(w, "Poll Interval", effectivePollInterval(ts))
 	if ts.Status.DeploymentName != "" {
 		printField(w, "Deployment", ts.Status.DeploymentName)
 	}

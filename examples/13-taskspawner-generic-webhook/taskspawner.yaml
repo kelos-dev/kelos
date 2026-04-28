@@ -5,11 +5,12 @@ metadata:
   namespace: default
 spec:
   # Respond to arbitrary HTTP POST events delivered to /webhook/sentry.
-  # The HMAC secret is read from the SENTRY_WEBHOOK_SECRET env var.
+  # NOTE: the generic webhook endpoint does not currently validate
+  # request signatures — restrict ingress at the network layer. See
+  # https://github.com/kelos-dev/kelos/issues/1040.
   when:
     webhook:
-      # Short identifier — determines the URL path (/webhook/<source>)
-      # and the env var for HMAC validation (<SOURCE>_WEBHOOK_SECRET).
+      # Short identifier — determines the URL path (/webhook/<source>).
       source: sentry
 
       # JSONPath → template variable. The "id" key is required and is

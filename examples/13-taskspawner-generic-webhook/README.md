@@ -14,18 +14,16 @@ the stack trace and opens a PR with a fix.
 ## Prerequisites
 
 1. **Webhook server**: deploy `kelos-webhook-server` with the generic source enabled
-2. **Webhook secret**: a Kubernetes Secret containing `SENTRY_WEBHOOK_SECRET`
-3. **Sender configuration**: a Sentry (or other system's) webhook integration
+2. **Sender configuration**: a Sentry (or other system's) webhook integration
    pointed at `/webhook/sentry`
+3. **Network restrictions**: the generic endpoint is currently
+   unauthenticated — see [Webhook Security](#webhook-security)
 
 ## Setup
 
 ### 1. Enable the generic source
 
-Enable `webhookServer.sources.generic` in your Helm values and reference a
-Secret holding one HMAC key per source. Each key must be named
-`<SOURCE>_WEBHOOK_SECRET` (uppercased), so this example uses
-`SENTRY_WEBHOOK_SECRET`.
+Enable `webhookServer.sources.generic` in your Helm values:
 
 ```yaml
 # Helm values
@@ -34,30 +32,20 @@ webhookServer:
     generic:
       enabled: true
       replicas: 1
-      secretName: generic-webhook-secrets
 ```
 
-### 2. Create the webhook secret
+### 2. Configure the sender
 
-```bash
-kubectl create secret generic generic-webhook-secrets \
-  --from-literal=SENTRY_WEBHOOK_SECRET=<your-sentry-webhook-secret>
-```
+Point the upstream system at `https://your-webhook-domain/webhook/sentry`.
 
-To support more sources from the same webhook server, add additional keys
-to the same Secret (e.g., `--from-literal=NOTION_WEBHOOK_SECRET=...`).
+For Sentry: Settings → Integrations → Custom Webhook, with the URL above.
 
-### 3. Configure the sender
+> The endpoint does not currently validate signatures, so the webhook
+> integration's secret/signing settings have no effect on Kelos. Restrict
+> access at the network layer instead — see
+> [Webhook Security](#webhook-security).
 
-Point the upstream system at `https://your-webhook-domain/webhook/sentry`
-and configure it to sign requests with HMAC-SHA256 using the secret above.
-The webhook server expects the signature in the `X-Hub-Signature-256`
-header with a `sha256=` prefix (the same scheme GitHub uses).
-
-For Sentry: Settings → Integrations → Custom Webhook, with the URL above
-and the same secret.
-
-### 4. Deploy the TaskSpawner
+### 3. Deploy the TaskSpawner
 
 ```bash
 kubectl apply -f taskspawner.yaml
@@ -67,10 +55,8 @@ kubectl apply -f taskspawner.yaml
 
 ### `source`
 
-Lowercase alphanumeric identifier (with optional hyphens). Determines:
-
-- The webhook URL path: `/webhook/<source>`
-- The env var the server looks up for HMAC validation: `<SOURCE>_WEBHOOK_SECRET`
+Lowercase alphanumeric identifier (with optional hyphens). Determines the
+webhook URL path: `/webhook/<source>`.
 
 Each TaskSpawner declares one `source`; multiple TaskSpawners can share a
 source to fan out a single event into different work streams.
@@ -152,18 +138,30 @@ regex), so the Task is created.
 
 ## Webhook Security
 
-- HMAC-SHA256 signature in `X-Hub-Signature-256` (`sha256=<hex>`)
-- The server selects the per-source secret from the `<SOURCE>_WEBHOOK_SECRET`
-  env var at request time, so one server can validate many sources from
-  one Secret
-- Invalid signatures return HTTP 401
-- Senders that emit a different signature header are not currently
-  supported
+> [!WARNING]
+> **The generic webhook endpoint is currently unauthenticated.** The
+> handler accepts any POST that targets `/webhook/<source>` and matches a
+> registered TaskSpawner — request signatures are not validated. Per-source
+> HMAC validation is tracked in
+> [#1040](https://github.com/kelos-dev/kelos/issues/1040).
+
+Until that lands, restrict access at the network layer:
+
+- Use a `NetworkPolicy` to allow ingress only from known sender CIDRs
+  (Sentry publishes its egress IP ranges).
+- Front the endpoint with an Ingress / Gateway that enforces IP allowlisting
+  or mTLS.
+- Keep the webhook Service on a private network and avoid `LoadBalancer`
+  exposure on the public internet unless ingress is otherwise restricted.
+
+The Helm chart's `webhookServer.sources.generic.secretName` field is
+reserved for future HMAC validation; it currently mounts env vars that
+no code reads.
 
 ## Troubleshooting
 
 - **Tasks not being created** — check the webhook server logs for
-  signature failures, missing-secret errors, or filter mismatches.
+  request errors or filter mismatches.
 - **`fieldMapping must include an 'id' key`** — the CRD enforces an `id`
   key in `fieldMapping`. Add one whose JSONPath produces a stable,
   unique identifier per logical event.
@@ -178,5 +176,4 @@ regex), so the Task is created.
 
 ```bash
 kubectl delete -f taskspawner.yaml
-kubectl delete secret generic-webhook-secrets
 ```

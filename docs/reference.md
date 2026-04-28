@@ -170,7 +170,7 @@ GitHub Apps are preferred over PATs for production use because they offer fine-g
 | `spec.when.linearWebhook.filters[].states` | Filter by workflow state names (e.g., `"Todo"`, `"In Progress"`) | No |
 | `spec.when.linearWebhook.filters[].labels` | Require the issue to have all of these labels | No |
 | `spec.when.linearWebhook.filters[].excludeLabels` | Exclude issues with any of these labels | No |
-| `spec.when.webhook.source` | Short identifier for the generic webhook source (lowercase alphanumeric with optional hyphens). Determines the URL path (`/webhook/<source>`) and the HMAC env var (`<SOURCE>_WEBHOOK_SECRET`) | Yes (when using webhook) |
+| `spec.when.webhook.source` | Short identifier for the generic webhook source (lowercase alphanumeric with optional hyphens). Determines the URL path (`/webhook/<source>`). The endpoint is currently unauthenticated — see [#1040](https://github.com/kelos-dev/kelos/issues/1040) | Yes (when using webhook) |
 | `spec.when.webhook.fieldMapping` | Map of template variable name → JSONPath expression evaluated against the request body. Each key becomes a top-level template variable. Lowercase `id`, `title`, `body`, `url` are also exposed as `{{.ID}}`, `{{.Title}}`, `{{.Body}}`, `{{.URL}}`. The `id` key is required (used for delivery deduplication and Task naming) | Yes (when using webhook) |
 | `spec.when.webhook.filters[].field` | JSONPath expression selecting the payload field to match | Yes (per filter) |
 | `spec.when.webhook.filters[].value` | Require an exact string match against the extracted field value (mutually exclusive with `pattern`) | Conditional |

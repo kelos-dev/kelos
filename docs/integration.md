@@ -281,7 +281,7 @@ metadata:
 spec:
   when:
     webhook:
-      source: sentry            # URL: /webhook/sentry, secret: SENTRY_WEBHOOK_SECRET
+      source: sentry            # URL: /webhook/sentry
       fieldMapping:
         id: "$.data.event.event_id"   # required — used for deduplication and task naming
         title: "$.data.event.title"
@@ -312,13 +312,7 @@ spec:
   maxConcurrency: 3
 ```
 
-**Setup:** Enable the `generic` source on `kelos-webhook-server` in your Helm values, then create a Secret containing one HMAC key per source. Each key must be named `<SOURCE>_WEBHOOK_SECRET` (uppercased). For example, with `source: sentry` and `source: notion`:
-
-```bash
-kubectl create secret generic generic-webhook-secrets \
-  --from-literal=SENTRY_WEBHOOK_SECRET=<your-sentry-secret> \
-  --from-literal=NOTION_WEBHOOK_SECRET=<your-notion-secret>
-```
+**Setup:** Enable the `generic` source on `kelos-webhook-server` in your Helm values:
 
 ```yaml
 # Helm values
@@ -326,14 +320,22 @@ webhookServer:
   sources:
     generic:
       enabled: true
-      secretName: generic-webhook-secrets
 ```
 
-The webhook URL is `https://your-webhook-domain/webhook/<source>` (e.g., `/webhook/sentry`). The server validates each delivery against the matching `<SOURCE>_WEBHOOK_SECRET` using `X-Hub-Signature-256` (`sha256=<hex>`), the same scheme GitHub uses. Senders that emit a different signature header are not currently supported.
+The webhook URL is `https://your-webhook-domain/webhook/<source>` (e.g., `/webhook/sentry`).
+
+> [!WARNING]
+> **The generic webhook endpoint is currently unauthenticated.** The handler does not validate request signatures, so any client that can reach `/webhook/<source>` and matches a registered TaskSpawner can trigger Task creation. Until per-source HMAC validation is implemented (tracked in [#1040](https://github.com/kelos-dev/kelos/issues/1040)), restrict access at the network layer:
+>
+> - Use a `NetworkPolicy` to limit ingress to known sender CIDRs.
+> - Front the endpoint with an Ingress / Gateway that enforces IP allowlisting or mTLS.
+> - Avoid exposing the webhook Service as `LoadBalancer` on a public network unless ingress is otherwise restricted.
+>
+> The `webhookServer.sources.generic.secretName` Helm value is reserved for future HMAC validation; it currently mounts env vars that no code reads.
 
 **Configuration:**
 
-- **`source`** *(required)* — short identifier (lowercase alphanumeric with optional hyphens) that determines both the URL path (`/webhook/<source>`) and the HMAC env var (`<SOURCE>_WEBHOOK_SECRET`).
+- **`source`** *(required)* — short identifier (lowercase alphanumeric with optional hyphens) that determines the URL path (`/webhook/<source>`).
 - **`fieldMapping`** *(required)* — map of template variable name → JSONPath expression evaluated against the request body. Each key becomes `{{.Key}}` in `promptTemplate` and `branch`. Lowercase keys `id`, `title`, `body`, and `url` are also exposed under their canonical uppercase aliases (`{{.ID}}`, `{{.Title}}`, `{{.Body}}`, `{{.URL}}`) for compatibility with templates written for the GitHub or Linear sources. The **`id` key is required** — it is used for delivery deduplication and Task naming. Missing fields produce empty strings (no error); only malformed JSONPath expressions fail.
 - **`filters[]`** *(optional)* — list of conditions that must ALL match for a delivery to trigger a Task (AND semantics across filters). Each filter has a `field` (JSONPath) and exactly one of:
   - `value` — exact string match against the extracted value

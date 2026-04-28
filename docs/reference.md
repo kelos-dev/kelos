@@ -109,6 +109,7 @@ GitHub Apps are preferred over PATs for production use because they offer fine-g
 | `spec.mcpServers[].url` | Server endpoint (http/sse only) | No |
 | `spec.mcpServers[].headers` | HTTP headers (http/sse only) | No |
 | `spec.mcpServers[].env` | Environment variables for server process (stdio only) | No |
+| `spec.mcpServers[].cwd` | Working directory in which the stdio command is spawned (stdio only); useful for servers that must run from a specific project root (e.g., `php artisan boost:mcp` from a Laravel root) | No |
 
 ## TaskSpawner
 

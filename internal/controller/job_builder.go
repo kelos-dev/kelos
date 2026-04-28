@@ -817,6 +817,7 @@ type mcpServerJSON struct {
 	URL     string            `json:"url,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
+	Cwd     string            `json:"cwd,omitempty"`
 }
 
 // buildMCPServersJSON converts MCPServerSpec entries into a JSON string
@@ -840,6 +841,7 @@ func buildMCPServersJSON(servers []kelosv1alpha1.MCPServerSpec) (string, error) 
 			URL:     s.URL,
 			Headers: s.Headers,
 			Env:     s.Env,
+			Cwd:     s.WorkingDir,
 		}
 		mcpMap[s.Name] = entry
 	}

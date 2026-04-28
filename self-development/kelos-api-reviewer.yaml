@@ -19,9 +19,12 @@ spec:
     - Do not create duplicate issues — check existing issues first with `gh issue list`
     - You are a read-only agent: do NOT push code or modify any files
     - Keep review comments actionable and concise
+    - Before posting new comments, resolve your own previous review threads that are
+      no longer relevant (i.e. the issue has been fixed in the current code). Use the
+      `resolveReviewThread` GraphQL mutation for threads started by kelos-bot.
 
     ## Project Conventions
-    - Use Makefile targets instead of discovering build/test commands yourself:
+    - When referencing project validation commands, use Makefile targets instead of discovering build/test commands yourself:
       - `make verify` — run all verification checks (lint, fmt, vet, etc.)
       - `make update` — update all generated files
       - `make test` — run all unit tests
@@ -181,7 +184,7 @@ spec:
         `gh pr review {{.Number}} --comment --body "..."`
 
       For inline comments on specific lines, use:
-        `gh api repos/{owner}/{repo}/pulls/{{.Number}}/reviews \
+        `gh api repos/:owner/:repo/pulls/{{.Number}}/reviews \
           -f body="..." \
           -f event="<APPROVE|REQUEST_CHANGES|COMMENT>" \
           -f 'comments=[{"path":"file.go","line":42,"body":"comment"}]'`

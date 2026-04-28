@@ -135,30 +135,35 @@ jobs:
               return
             }
 
-            const { data: runs } = await github.rest.actions.listWorkflowRunsForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              event: process.env.WORKFLOW_EVENT,
-              head_sha: targetSha,
-              per_page: 100,
-            })
+            // The workflow-runs listing is advisory — used only to detect a
+            // strictly newer run that has superseded us. The listing API is
+            // eventually consistent and may not yet include the in-flight
+            // current run, so an empty or stale listing must not block the
+            // status write or pr-e2e gets stuck on pending (see #1029).
+            let supersededBy = null
+            try {
+              const { data: runs } = await github.rest.actions.listWorkflowRunsForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                event: process.env.WORKFLOW_EVENT,
+                head_sha: targetSha,
+                per_page: 100,
+              })
 
-            const latestRun = runs.workflow_runs
-              .filter((run) => run.name === process.env.WORKFLOW_NAME)
-              .sort((left, right) => {
-                const createdDiff = Date.parse(right.created_at) - Date.parse(left.created_at)
-                if (createdDiff !== 0) return createdDiff
-                if (left.id !== right.id) return right.id - left.id
-                return (right.run_attempt || 1) - (left.run_attempt || 1)
-              })[0]
-
-            if (!latestRun) {
-              core.info(`No ${process.env.WORKFLOW_NAME} workflow runs found for ${targetSha}`)
-              return
+              supersededBy = runs.workflow_runs
+                .filter((run) => run.name === process.env.WORKFLOW_NAME)
+                .find((run) => {
+                  if (run.id === currentRunId) {
+                    return (run.run_attempt || 1) > currentRunAttempt
+                  }
+                  return run.id > currentRunId
+                })
+            } catch (err) {
+              core.warning(`Failed to list workflow runs for ${targetSha} (proceeding with status update): ${err.message}`)
             }
 
-            if (latestRun.id !== currentRunId || (latestRun.run_attempt || 1) !== currentRunAttempt) {
-              core.info(`Skipping stale status update from run ${currentRunId} attempt ${currentRunAttempt}`)
+            if (supersededBy) {
+              core.info(`Skipping stale status update from run ${currentRunId} attempt ${currentRunAttempt}; superseded by run ${supersededBy.id} attempt ${supersededBy.run_attempt || 1}`)
               return
             }
 

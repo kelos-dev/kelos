@@ -75,8 +75,6 @@ spec:
         limits:
           ephemeral-storage: "4Gi"
       env:
-        - name: CLAUDE_CODE_EFFORT_LEVEL
-          value: "max"
         - name: GIT_AUTHOR_NAME
           value: "Gunju Kim"
         - name: GIT_AUTHOR_EMAIL

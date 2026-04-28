@@ -70,9 +70,6 @@ spec:
           ephemeral-storage: "4Gi"
         limits:
           ephemeral-storage: "4Gi"
-      env:
-        - name: CLAUDE_CODE_EFFORT_LEVEL
-          value: "max"
     branch: "{{if .Branch}}{{.Branch}}{{else}}main{{end}}"
     agentConfigRef:
       name: kelos-api-reviewer-agent

@@ -40,9 +40,6 @@ spec:
           ephemeral-storage: "2Gi"
         limits:
           ephemeral-storage: "2Gi"
-      env:
-        - name: CLAUDE_CODE_EFFORT_LEVEL
-          value: "max"
     agentConfigRef:
       name: kelos-dev-agent
     promptTemplate: |

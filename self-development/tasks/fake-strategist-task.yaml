@@ -24,9 +24,6 @@ spec:
         ephemeral-storage: "2Gi"
       limits:
         ephemeral-storage: "2Gi"
-    env:
-      - name: CLAUDE_CODE_EFFORT_LEVEL
-        value: "max"
   prompt: |
     You are a strategic product thinker for the Kelos framework — a Kubernetes-native controller that runs autonomous AI coding agents.
     Your goal is to find new and better ways to use Kelos — expanding its reach, improving its workflows, and identifying opportunities for growth.

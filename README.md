@@ -220,6 +220,71 @@ $ echo "Fix the flaky test" | kelos run --prompt-file -
 
 The agent clones your repo, makes changes, and can push a branch or open a PR.
 
+### Agent-specific examples
+
+Kelos supports multiple built-in agent images. Set `type` in `~/.kelos/config.yaml` (or use `--type` with `kelos run`) and provide credentials that match the selected agent.
+
+**OpenAI Codex**
+
+Use OAuth credentials created by `codex auth login`:
+
+```yaml
+type: codex
+oauthToken: "@~/.codex/auth.json"
+model: gpt-5.1-codex-max
+workspace:
+  repo: https://github.com/your-org/your-repo.git
+  ref: main
+  token: <github-token>
+```
+
+Or use an OpenAI API key. Kelos injects it into the agent pod as `CODEX_API_KEY`:
+
+```yaml
+type: codex
+apiKey: <openai-api-key>
+model: gpt-5.1-codex
+```
+
+**Google Gemini**
+
+Gemini uses API-key credentials, injected as `GEMINI_API_KEY`:
+
+```yaml
+type: gemini
+apiKey: <gemini-api-key>
+model: gemini-3-pro
+workspace:
+  repo: https://github.com/your-org/your-repo.git
+  ref: main
+```
+
+**OpenCode**
+
+OpenCode can run with a provider API key, or with `apiKey: none` for models/providers that do not need Kelos-managed credentials:
+
+```yaml
+type: opencode
+apiKey: <provider-api-key>
+model: opencode/big-pickle
+```
+
+```yaml
+type: opencode
+apiKey: none
+model: opencode/big-pickle
+```
+
+Run any of these configurations with the same CLI flow:
+
+```bash
+kelos run -p "Update the README examples" --type codex
+kelos run -p "Fix the flaky test" --type gemini --model gemini-3-pro
+kelos run -p "Review this repository" --type opencode
+```
+
+When a workspace token is configured, the agent pod also receives `GITHUB_TOKEN`/`GH_TOKEN` so it can push branches and open PRs.
+
 > **Tip:** If something goes wrong, check the controller logs with
 > `kubectl logs deployment/kelos-controller-manager -n kelos-system`.
 

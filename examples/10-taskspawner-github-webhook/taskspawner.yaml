@@ -71,7 +71,7 @@ spec:
 
     # Template for the task prompt
     promptTemplate: |
-      # GitHub {{.Event | title}} Event: {{.Action}}
+      # GitHub {{.Event}} Event: {{.Action}}
 
       A GitHub webhook event has been triggered that requires attention.
 
@@ -82,22 +82,22 @@ spec:
       {{- if .Title}}
       - **Title**: {{.Title}}
       {{- end}}
-      {{- if .URL}}
-      - **URL**: {{.URL}}
+      {{- with index . "URL"}}
+      - **URL**: {{.}}
       {{- end}}
-      {{- if .Branch}}
-      - **Branch**: {{.Branch}}
+      {{- with index . "Branch"}}
+      - **Branch**: {{.}}
       {{- end}}
 
       {{- if eq .Event "issues"}}
       ## Issue Description
-      {{.Body}}
+      {{with index . "Body"}}{{.}}{{end}}
 
       ## Task
       Please review this issue and provide an initial analysis or triage.
       {{- else if eq .Event "pull_request"}}
       ## Pull Request Description
-      {{.Body}}
+      {{with index . "Body"}}{{.}}{{end}}
 
       ## Task
       Please review this pull request and provide feedback on the code changes.

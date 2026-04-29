@@ -137,28 +137,38 @@ func TestIsNone(t *testing.T) {
 
 func TestFormatNote(t *testing.T) {
 	tests := []struct {
-		name string
-		note string
-		pr   string
-		want []string
+		name   string
+		note   string
+		pr     string
+		author string
+		want   []string
 	}{
 		{
-			name: "single line",
-			note: "Added a feature",
-			pr:   "42",
-			want: []string{"- Added a feature (#42)"},
+			name:   "single line with author",
+			note:   "Added a feature",
+			pr:     "42",
+			author: "octocat",
+			want:   []string{"- Added a feature (#42, @octocat)"},
 		},
 		{
-			name: "multi-line",
-			note: "Fixed bug A\nFixed bug B",
-			pr:   "99",
-			want: []string{"- Fixed bug A (#99)", "- Fixed bug B (#99)"},
+			name:   "multi-line with author",
+			note:   "Fixed bug A\nFixed bug B",
+			pr:     "99",
+			author: "octocat",
+			want:   []string{"- Fixed bug A (#99, @octocat)", "- Fixed bug B (#99, @octocat)"},
+		},
+		{
+			name:   "missing author falls back to PR only",
+			note:   "Added a feature",
+			pr:     "42",
+			author: "",
+			want:   []string{"- Added a feature (#42)"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := formatNote(tt.note, tt.pr)
+			got := formatNote(tt.note, tt.pr, tt.author)
 			if len(got) != len(tt.want) {
 				t.Fatalf("formatNote() returned %d lines, want %d", len(got), len(tt.want))
 			}

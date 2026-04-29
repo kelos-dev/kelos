@@ -42,10 +42,15 @@ var categories = []category{
 	{Label: "kind/docs", Heading: "Documentation"},
 }
 
-// prData mirrors the JSON returned by `gh pr view --json body,labels`.
+// prData mirrors the JSON returned by `gh pr view --json author,body,labels`.
 type prData struct {
+	Author prAuthor  `json:"author"`
 	Body   string    `json:"body"`
 	Labels []prLabel `json:"labels"`
+}
+
+type prAuthor struct {
+	Login string `json:"login"`
 }
 
 type prLabel struct {
@@ -97,7 +102,7 @@ func main() {
 			labelSet[l.Name] = true
 		}
 
-		formatted := formatNote(note, pr)
+		formatted := formatNote(note, pr, data.Author.Login)
 		matched := false
 		for _, cat := range categories {
 			if labelSet[cat.Label] {
@@ -186,9 +191,9 @@ func parsePRNumbers(gitLogOutput string) []string {
 	return numbers
 }
 
-// fetchPR retrieves the body and labels of a PR via the GitHub CLI.
+// fetchPR retrieves the author, body, and labels of a PR via the GitHub CLI.
 func fetchPR(number string) (*prData, error) {
-	out, err := runCommand("gh", "pr", "view", number, "--json", "body,labels")
+	out, err := runCommand("gh", "pr", "view", number, "--json", "author,body,labels")
 	if err != nil {
 		return nil, err
 	}
@@ -227,12 +232,17 @@ func IsNone(note string) bool {
 	return strings.EqualFold(strings.TrimSpace(note), "none")
 }
 
-// formatNote formats a release note with a PR reference.
-func formatNote(note, pr string) []string {
+// formatNote formats a release note with a PR reference and author handle.
+func formatNote(note, pr, author string) []string {
+	suffix := fmt.Sprintf("(#%s", pr)
+	if author != "" {
+		suffix += ", @" + author
+	}
+	suffix += ")"
 	var lines []string
 	for _, line := range strings.Split(note, "\n") {
 		if line != "" {
-			lines = append(lines, fmt.Sprintf("- %s (#%s)", line, pr))
+			lines = append(lines, fmt.Sprintf("- %s %s", line, suffix))
 		}
 	}
 	return lines

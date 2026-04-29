@@ -35,23 +35,23 @@ func resolveCredentialValue(v string) string {
 
 func newRunCommand(cfg *ClientConfig) *cobra.Command {
 	var (
-		prompt         string
-		promptFile     string
-		agentType      string
-		secret         string
-		credentialType string
-		model          string
-		image          string
-		name           string
-		watch          bool
-		workspace      string
-		dryRun         bool
-		yes            bool
-		timeout        string
-		envFlags       []string
-		agentConfigRef string
-		dependsOn      []string
-		branch         string
+		prompt          string
+		promptFile      string
+		agentType       string
+		secret          string
+		credentialType  string
+		model           string
+		image           string
+		name            string
+		watch           bool
+		workspace       string
+		dryRun          bool
+		yes             bool
+		timeout         string
+		envFlags        []string
+		agentConfigRefs []string
+		dependsOn       []string
+		branch          string
 	)
 
 	cmd := &cobra.Command{
@@ -75,7 +75,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 					workspace = c.Workspace.Name
 				}
 				if !cmd.Flags().Changed("agent-config") && c.AgentConfig != "" {
-					agentConfigRef = c.AgentConfig
+					agentConfigRefs = []string{c.AgentConfig}
 				}
 			}
 
@@ -258,9 +258,15 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 				}
 			}
 
-			if agentConfigRef != "" {
+			if len(agentConfigRefs) == 1 {
 				task.Spec.AgentConfigRef = &kelosv1alpha1.AgentConfigReference{
-					Name: agentConfigRef,
+					Name: agentConfigRefs[0],
+				}
+			} else if len(agentConfigRefs) > 1 {
+				for _, name := range agentConfigRefs {
+					task.Spec.AgentConfigRefs = append(task.Spec.AgentConfigRefs, kelosv1alpha1.AgentConfigReference{
+						Name: name,
+					})
 				}
 			}
 
@@ -332,7 +338,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation prompts")
 	cmd.Flags().StringVar(&timeout, "timeout", "", "maximum execution time for the agent (e.g. 30m, 1h)")
 	cmd.Flags().StringArrayVar(&envFlags, "env", nil, "additional environment variables for the agent (NAME=VALUE)")
-	cmd.Flags().StringVar(&agentConfigRef, "agent-config", "", "name of AgentConfig resource to use")
+	cmd.Flags().StringArrayVar(&agentConfigRefs, "agent-config", nil, "name of AgentConfig resource(s) to use (repeatable)")
 	cmd.Flags().StringArrayVar(&dependsOn, "depends-on", nil, "Task names this task depends on (repeatable)")
 	cmd.Flags().StringVar(&branch, "branch", "", "Git branch to work on")
 

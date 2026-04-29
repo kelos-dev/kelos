@@ -88,6 +88,9 @@ func (tb *TaskBuilder) BuildTask(
 	if taskTemplate.AgentConfigRef != nil {
 		task.Spec.AgentConfigRef = taskTemplate.AgentConfigRef
 	}
+	if len(taskTemplate.AgentConfigRefs) > 0 {
+		task.Spec.AgentConfigRefs = taskTemplate.AgentConfigRefs
+	}
 	if len(taskTemplate.DependsOn) > 0 {
 		task.Spec.DependsOn = taskTemplate.DependsOn
 	}

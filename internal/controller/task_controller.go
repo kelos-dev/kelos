@@ -244,20 +244,25 @@ func (r *TaskReconciler) createJob(ctx context.Context, task *kelosv1alpha1.Task
 	}
 
 	var agentConfig *kelosv1alpha1.AgentConfigSpec
-	if task.Spec.AgentConfigRef != nil {
-		var ac kelosv1alpha1.AgentConfig
-		if err := r.Get(ctx, client.ObjectKey{
-			Namespace: task.Namespace,
-			Name:      task.Spec.AgentConfigRef.Name,
-		}, &ac); err != nil {
-			if apierrors.IsNotFound(err) {
-				logger.Info("AgentConfig not found yet, requeuing", "agentConfig", task.Spec.AgentConfigRef.Name)
-				return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+	if refs := ResolveAgentConfigRefs(&task.Spec); len(refs) > 0 {
+		var specs []kelosv1alpha1.AgentConfigSpec
+		for _, ref := range refs {
+			var ac kelosv1alpha1.AgentConfig
+			if err := r.Get(ctx, client.ObjectKey{
+				Namespace: task.Namespace,
+				Name:      ref.Name,
+			}, &ac); err != nil {
+				if apierrors.IsNotFound(err) {
+					logger.Info("AgentConfig not found yet, requeuing", "agentConfig", ref.Name)
+					return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+				}
+				logger.Error(err, "Unable to fetch AgentConfig", "agentConfig", ref.Name)
+				return ctrl.Result{}, err
 			}
-			logger.Error(err, "Unable to fetch AgentConfig", "agentConfig", task.Spec.AgentConfigRef.Name)
-			return ctrl.Result{}, err
+			specs = append(specs, ac.Spec)
 		}
-		agentConfig = &ac.Spec
+
+		agentConfig = MergeAgentConfigs(specs)
 
 		if len(agentConfig.MCPServers) > 0 {
 			resolved, err := r.resolveMCPServerSecrets(ctx, task.Namespace, agentConfig.MCPServers)

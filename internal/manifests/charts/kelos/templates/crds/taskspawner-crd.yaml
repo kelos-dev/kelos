@@ -110,6 +110,25 @@ spec:
                     required:
                     - name
                     type: object
+                  agentConfigRefs:
+                    description: |-
+                      AgentConfigRefs references an ordered list of AgentConfig resources.
+                      Configs are merged in order: agentsMD is concatenated, plugins/skills
+                      are appended, mcpServers are appended with later entries winning on
+                      name collision. Mutually exclusive with AgentConfigRef.
+                      When set, spawned Tasks inherit this agent config reference list.
+                    items:
+                      description: AgentConfigReference refers to an AgentConfig resource
+                        by name.
+                      properties:
+                        name:
+                          description: Name is the name of the AgentConfig resource.
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    minItems: 1
+                    type: array
                   branch:
                     description: |-
                       Branch is the git branch spawned Tasks should work on.
@@ -498,6 +517,9 @@ spec:
                 - credentials
                 - type
                 type: object
+                x-kubernetes-validations:
+                - message: agentConfigRef and agentConfigRefs are mutually exclusive
+                  rule: '!(has(self.agentConfigRef) && has(self.agentConfigRefs))'
               when:
                 description: When defines the conditions that trigger task spawning.
                 properties:

@@ -637,6 +637,47 @@ func TestRunCycleWithSource_AgentConfigRefForwarded(t *testing.T) {
 	}
 }
 
+func TestRunCycleWithSource_AgentConfigRefsForwarded(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	ts.Spec.TaskTemplate.AgentConfigRefs = []kelosv1alpha1.AgentConfigReference{
+		{Name: "base-config"},
+		{Name: "role-config"},
+	}
+	cl, key := setupTest(t, ts)
+
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{ID: "1", Title: "Item 1"},
+		},
+	}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatalf("Listing tasks: %v", err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task, got %d", len(taskList.Items))
+	}
+
+	task := taskList.Items[0]
+	if task.Spec.AgentConfigRef != nil {
+		t.Error("Expected AgentConfigRef to be nil when AgentConfigRefs is used")
+	}
+	if len(task.Spec.AgentConfigRefs) != 2 {
+		t.Fatalf("Expected 2 AgentConfigRefs, got %d", len(task.Spec.AgentConfigRefs))
+	}
+	if task.Spec.AgentConfigRefs[0].Name != "base-config" {
+		t.Errorf("Expected AgentConfigRefs[0].Name %q, got %q", "base-config", task.Spec.AgentConfigRefs[0].Name)
+	}
+	if task.Spec.AgentConfigRefs[1].Name != "role-config" {
+		t.Errorf("Expected AgentConfigRefs[1].Name %q, got %q", "role-config", task.Spec.AgentConfigRefs[1].Name)
+	}
+}
+
 func TestRunCycleWithSource_PodOverridesForwarded(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 	ts.Spec.TaskTemplate.PodOverrides = &kelosv1alpha1.PodOverrides{

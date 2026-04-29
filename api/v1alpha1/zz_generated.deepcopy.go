@@ -943,6 +943,11 @@ func (in *TaskSpec) DeepCopyInto(out *TaskSpec) {
 		*out = new(AgentConfigReference)
 		**out = **in
 	}
+	if in.AgentConfigRefs != nil {
+		in, out := &in.AgentConfigRefs, &out.AgentConfigRefs
+		*out = make([]AgentConfigReference, len(*in))
+		copy(*out, *in)
+	}
 	if in.DependsOn != nil {
 		in, out := &in.DependsOn, &out.DependsOn
 		*out = make([]string, len(*in))
@@ -1018,6 +1023,11 @@ func (in *TaskTemplate) DeepCopyInto(out *TaskTemplate) {
 		in, out := &in.AgentConfigRef, &out.AgentConfigRef
 		*out = new(AgentConfigReference)
 		**out = **in
+	}
+	if in.AgentConfigRefs != nil {
+		in, out := &in.AgentConfigRefs, &out.AgentConfigRefs
+		*out = make([]AgentConfigReference, len(*in))
+		copy(*out, *in)
 	}
 	if in.DependsOn != nil {
 		in, out := &in.DependsOn, &out.DependsOn

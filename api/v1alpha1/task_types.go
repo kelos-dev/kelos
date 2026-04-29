@@ -89,6 +89,8 @@ type PodOverrides struct {
 }
 
 // TaskSpec defines the desired state of Task.
+//
+// +kubebuilder:validation:XValidation:rule="!(has(self.agentConfigRef) && has(self.agentConfigRefs))",message="agentConfigRef and agentConfigRefs are mutually exclusive"
 type TaskSpec struct {
 	// Type specifies the agent type (e.g., claude-code).
 	// +kubebuilder:validation:Required
@@ -121,6 +123,14 @@ type TaskSpec struct {
 	// AgentConfigRef references an AgentConfig resource.
 	// +optional
 	AgentConfigRef *AgentConfigReference `json:"agentConfigRef,omitempty"`
+
+	// AgentConfigRefs references an ordered list of AgentConfig resources.
+	// Configs are merged in order: agentsMD is concatenated, plugins/skills
+	// are appended, mcpServers are appended with later entries winning on
+	// name collision. Mutually exclusive with AgentConfigRef.
+	// +optional
+	// +kubebuilder:validation:MinItems=1
+	AgentConfigRefs []AgentConfigReference `json:"agentConfigRefs,omitempty"`
 
 	// DependsOn lists Task names that must succeed before this Task starts.
 	// +optional

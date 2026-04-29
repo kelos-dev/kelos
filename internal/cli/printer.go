@@ -43,7 +43,13 @@ func printTaskTable(w io.Writer, tasks []kelosv1alpha1.Task, allNamespaces bool)
 			workspace = t.Spec.WorkspaceRef.Name
 		}
 		agentConfig := "-"
-		if t.Spec.AgentConfigRef != nil {
+		if len(t.Spec.AgentConfigRefs) > 0 {
+			names := make([]string, len(t.Spec.AgentConfigRefs))
+			for i, ref := range t.Spec.AgentConfigRefs {
+				names[i] = ref.Name
+			}
+			agentConfig = strings.Join(names, ",")
+		} else if t.Spec.AgentConfigRef != nil {
 			agentConfig = t.Spec.AgentConfigRef.Name
 		}
 		dur := taskDuration(&t.Status)
@@ -83,7 +89,13 @@ func printTaskDetail(w io.Writer, t *kelosv1alpha1.Task) {
 	if t.Spec.WorkspaceRef != nil {
 		printField(w, "Workspace", t.Spec.WorkspaceRef.Name)
 	}
-	if t.Spec.AgentConfigRef != nil {
+	if len(t.Spec.AgentConfigRefs) > 0 {
+		names := make([]string, len(t.Spec.AgentConfigRefs))
+		for i, ref := range t.Spec.AgentConfigRefs {
+			names[i] = ref.Name
+		}
+		printField(w, "Agent Configs", strings.Join(names, ", "))
+	} else if t.Spec.AgentConfigRef != nil {
 		printField(w, "Agent Config", t.Spec.AgentConfigRef.Name)
 	}
 	if t.Spec.TTLSecondsAfterFinished != nil {

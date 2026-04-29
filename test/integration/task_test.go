@@ -3509,4 +3509,95 @@ var _ = Describe("Task Controller", func() {
 			}
 		})
 	})
+
+	Context("When creating a Task with multiple AgentConfigs", func() {
+		It("Should merge AgentConfigs and create a Job with concatenated agentsMD", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-task-multi-agentconfig",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with API key")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+			By("Creating base AgentConfig")
+			baseConfig := &kelosv1alpha1.AgentConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "base-config",
+					Namespace: ns.Name,
+				},
+				Spec: kelosv1alpha1.AgentConfigSpec{
+					AgentsMD: "## Environment\nShared environment instructions",
+				},
+			}
+			Expect(k8sClient.Create(ctx, baseConfig)).Should(Succeed())
+
+			By("Creating role AgentConfig")
+			roleConfig := &kelosv1alpha1.AgentConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "role-config",
+					Namespace: ns.Name,
+				},
+				Spec: kelosv1alpha1.AgentConfigSpec{
+					AgentsMD: "## Identity\nWorker agent role",
+				},
+			}
+			Expect(k8sClient.Create(ctx, roleConfig)).Should(Succeed())
+
+			By("Creating a Task referencing both AgentConfigs")
+			task := &kelosv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "task-multi-agentconfig",
+					Namespace: ns.Name,
+				},
+				Spec: kelosv1alpha1.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "Test multi agentconfig merge",
+					Credentials: kelosv1alpha1.Credentials{
+						Type:      kelosv1alpha1.CredentialTypeAPIKey,
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
+					},
+					AgentConfigRefs: []kelosv1alpha1.AgentConfigReference{
+						{Name: "base-config"},
+						{Name: "role-config"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, task)).Should(Succeed())
+
+			By("Verifying a Job is created")
+			createdJob := &batchv1.Job{}
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: task.Name, Namespace: ns.Name}, createdJob)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Verifying KELOS_AGENTS_MD contains merged content")
+			container := createdJob.Spec.Template.Spec.Containers[0]
+			var agentsMD string
+			for _, env := range container.Env {
+				if env.Name == "KELOS_AGENTS_MD" {
+					agentsMD = env.Value
+					break
+				}
+			}
+			Expect(agentsMD).To(ContainSubstring("## Environment"))
+			Expect(agentsMD).To(ContainSubstring("Shared environment instructions"))
+			Expect(agentsMD).To(ContainSubstring("## Identity"))
+			Expect(agentsMD).To(ContainSubstring("Worker agent role"))
+			Expect(strings.Index(agentsMD, "## Environment")).To(BeNumerically("<", strings.Index(agentsMD, "## Identity")))
+		})
+	})
 })

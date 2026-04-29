@@ -533,6 +533,8 @@ type TaskTemplateMetadata struct {
 }
 
 // TaskTemplate defines the template for spawned Tasks.
+//
+// +kubebuilder:validation:XValidation:rule="!(has(self.agentConfigRef) && has(self.agentConfigRefs))",message="agentConfigRef and agentConfigRefs are mutually exclusive"
 type TaskTemplate struct {
 	// Type specifies the agent type (e.g., claude-code).
 	// +kubebuilder:validation:Required
@@ -565,6 +567,15 @@ type TaskTemplate struct {
 	// When set, spawned Tasks inherit this agent config reference.
 	// +optional
 	AgentConfigRef *AgentConfigReference `json:"agentConfigRef,omitempty"`
+
+	// AgentConfigRefs references an ordered list of AgentConfig resources.
+	// Configs are merged in order: agentsMD is concatenated, plugins/skills
+	// are appended, mcpServers are appended with later entries winning on
+	// name collision. Mutually exclusive with AgentConfigRef.
+	// When set, spawned Tasks inherit this agent config reference list.
+	// +optional
+	// +kubebuilder:validation:MinItems=1
+	AgentConfigRefs []AgentConfigReference `json:"agentConfigRefs,omitempty"`
 
 	// DependsOn lists Task names that spawned Tasks depend on.
 	// +optional

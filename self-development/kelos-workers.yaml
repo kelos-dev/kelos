@@ -44,15 +44,11 @@ spec:
         - event: issue_comment
           action: created
           bodyContains: /kelos pick-up
-          labels:
-            - actor/kelos
           state: open
           author: gjkim42
         - event: issue_comment
           action: created
           bodyContains: /kelos pick-up
-          labels:
-            - actor/kelos
           state: open
           author: kelos-bot[bot]
   maxConcurrency: 3

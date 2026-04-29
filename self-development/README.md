@@ -12,7 +12,7 @@ Each TaskSpawner references an `AgentConfig` that defines git identity, comment 
 
 | TaskSpawner | Trigger | Model | Description |
 |---|---|---|---|
-| **kelos-workers** | Webhook: issue comment/label (`actor/kelos`) | Opus | Picks up issues, creates or updates PRs, self-reviews, and ensures CI passes |
+| **kelos-workers** | Webhook: issue comment `/kelos pick-up` | Opus | Picks up issues, creates or updates PRs, self-reviews, and ensures CI passes |
 | **kelos-planner** | Webhook: issue comment `/kelos plan` | Opus | Investigates an issue and posts a structured implementation plan — advisory only, no code changes |
 | **kelos-reviewer** | Webhook: PR comment `/kelos review` | Opus | Reviews PRs on demand — analyzes code, checks conventions, and submits structured reviews |
 | **kelos-api-reviewer** | Webhook: issue/PR comment `/kelos api-review` | Opus | Reviews Kubernetes API design on issues or PRs — naming, compatibility, CRD validation |
@@ -27,11 +27,11 @@ Each TaskSpawner references an `AgentConfig` that defines git identity, comment 
 
 ### kelos-workers.yaml
 
-Picks up open GitHub issues labeled `actor/kelos` and creates autonomous agent tasks to fix them.
+Picks up open GitHub issues when a maintainer posts `/kelos pick-up` and creates autonomous agent tasks to fix them.
 
 | | |
 |---|---|
-| **Trigger** | GitHub issue comment/label webhooks for issues labeled `actor/kelos` |
+| **Trigger** | GitHub `issue_comment` webhook with `/kelos pick-up` |
 | **Model** | Opus |
 | **Concurrency** | 3 |
 

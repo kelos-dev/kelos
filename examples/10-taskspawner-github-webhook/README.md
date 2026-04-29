@@ -80,8 +80,8 @@ promptTemplate: |
   Action: {{.Action}}
   Triggered by: {{.Sender}}
 
-  {{if .Title}}Title: {{.Title}}{{end}}
-  {{if .URL}}URL: {{.URL}}{{end}}
+  {{with index . "Title"}}Title: {{.}}{{end}}
+  {{with index . "URL"}}URL: {{.}}{{end}}
 
   Please investigate and take appropriate action.
 

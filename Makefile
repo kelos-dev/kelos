@@ -50,7 +50,7 @@ test-integration: envtest ## Run integration tests (envtest).
 
 .PHONY: test-e2e
 test-e2e: ginkgo ## Run e2e tests (requires cluster and agent credentials).
-	$(GINKGO) -v --timeout 20m ./test/e2e/...
+	$(GINKGO) -v --timeout 20m -p ./test/e2e/...
 
 .PHONY: update
 update: controller-gen yamlfmt shfmt ## Run all generators and formatters.

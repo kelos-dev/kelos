@@ -1,0 +1,27 @@
+# Helm values for the Kelos release in kelos-system.
+# Mirrors the current cluster spec; Gateway/HTTPRoute is managed manually
+# outside the chart.
+
+image:
+  pullPolicy: IfNotPresent
+
+telemetry:
+  enabled: true
+
+webhookServer:
+  sources:
+    github:
+      enabled: true
+      replicas: 1
+      secretName: github-webhook-secret
+  resources:
+    limits:
+      cpu: 500m
+      memory: 128Mi
+    requests:
+      cpu: 10m
+      memory: 64Mi
+  ingress:
+    enabled: false
+  gateway:
+    enabled: false

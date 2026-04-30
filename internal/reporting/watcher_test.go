@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path"
 	"strconv"
 	"sync"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -34,6 +36,25 @@ type commentRecord struct {
 	number int
 	id     int64
 	body   string
+}
+
+type updateCountingClient struct {
+	client.Client
+	mu      sync.Mutex
+	updates int
+}
+
+func (c *updateCountingClient) Update(ctx context.Context, obj client.Object, opts ...client.UpdateOption) error {
+	c.mu.Lock()
+	c.updates++
+	c.mu.Unlock()
+	return c.Client.Update(ctx, obj, opts...)
+}
+
+func (c *updateCountingClient) updateCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.updates
 }
 
 type conflictOnceClient struct {
@@ -78,13 +99,16 @@ func newTestServer(t *testing.T) (*httptest.Server, *[]commentRecord) {
 			nextID++
 			records = append(records, commentRecord{
 				method: "create",
+				id:     nextID,
 				body:   body.Body,
 			})
 			w.WriteHeader(http.StatusCreated)
 			json.NewEncoder(w).Encode(commentResponse{ID: nextID})
 		case http.MethodPatch:
+			id, _ := strconv.ParseInt(path.Base(r.URL.Path), 10, 64)
 			records = append(records, commentRecord{
 				method: "update",
+				id:     id,
 				body:   body.Body,
 			})
 			w.WriteHeader(http.StatusOK)
@@ -541,6 +565,207 @@ func TestReportTaskStatus_CorruptedCommentIDReturnsError(t *testing.T) {
 	err := tr.ReportTaskStatus(context.Background(), task)
 	if err == nil {
 		t.Fatal("Expected error for corrupted comment ID, got nil")
+	}
+}
+
+func TestReportTaskStatus_CachePopulatedAfterCreate(t *testing.T) {
+	server, _ := newTestServer(t)
+	defer server.Close()
+
+	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, map[string]string{
+		AnnotationGitHubReporting: "enabled",
+		AnnotationSourceNumber:    "42",
+		AnnotationSourceKind:      "issue",
+	})
+	task.UID = types.UID("uid-create")
+
+	cache := NewReportStateCache()
+	tr := &TaskReporter{
+		Client: fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(task).Build(),
+		Reporter: &GitHubReporter{
+			Owner: "owner", Repo: "repo", Token: "token", BaseURL: server.URL,
+		},
+		Cache: cache,
+	}
+
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	got, ok := cache.load(task.UID)
+	if !ok {
+		t.Fatal("Expected cache entry after successful report")
+	}
+	if got.phase != "accepted" {
+		t.Errorf("Expected cached phase 'accepted', got %q", got.phase)
+	}
+	if got.commentID == 0 {
+		t.Error("Expected non-zero cached comment ID")
+	}
+}
+
+// TestReportTaskStatus_CacheFallbackUpdatesExistingComment exercises the
+// cache-stale read race: the in-memory Task lacks the comment-ID annotation
+// (because the previous reconcile's annotation Update has not propagated to
+// the cached read yet) but the in-memory cache still has it, so the reporter
+// must update the existing comment instead of creating a new one.
+func TestReportTaskStatus_CacheFallbackUpdatesExistingComment(t *testing.T) {
+	server, records := newTestServer(t)
+	defer server.Close()
+
+	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhaseSucceeded, map[string]string{
+		AnnotationGitHubReporting: "enabled",
+		AnnotationSourceNumber:    "42",
+		AnnotationSourceKind:      "issue",
+	})
+	task.UID = types.UID("uid-fallback")
+
+	cache := NewReportStateCache()
+	cache.store(task.UID, 7777, "accepted")
+
+	tr := &TaskReporter{
+		Client: fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(task).Build(),
+		Reporter: &GitHubReporter{
+			Owner: "owner", Repo: "repo", Token: "token", BaseURL: server.URL,
+		},
+		Cache: cache,
+	}
+
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if len(*records) != 1 {
+		t.Fatalf("Expected 1 API call, got %d", len(*records))
+	}
+	if (*records)[0].method != "update" {
+		t.Errorf("Expected update via cached comment ID, got %s", (*records)[0].method)
+	}
+	if (*records)[0].id != 7777 {
+		t.Errorf("Expected cached comment ID 7777 to be patched, got %d", (*records)[0].id)
+	}
+}
+
+// TestReportTaskStatus_CacheShortCircuitsDuplicateReport simulates two
+// reconciles firing for the same phase before the annotation Update has
+// propagated to the cached read. The first call posts the comment; the second
+// must not post a duplicate even though the Task object it sees still has no
+// AnnotationGitHubReportPhase.
+func TestReportTaskStatus_CacheShortCircuitsDuplicateReport(t *testing.T) {
+	server, records := newTestServer(t)
+	defer server.Close()
+
+	annotations := map[string]string{
+		AnnotationGitHubReporting: "enabled",
+		AnnotationSourceNumber:    "42",
+		AnnotationSourceKind:      "issue",
+	}
+
+	first := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, annotations)
+	first.UID = types.UID("uid-shortcircuit")
+	first.ResourceVersion = ""
+
+	cl := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(first).Build()
+	cache := NewReportStateCache()
+	tr := &TaskReporter{
+		Client: cl,
+		Reporter: &GitHubReporter{
+			Owner: "owner", Repo: "repo", Token: "token", BaseURL: server.URL,
+		},
+		Cache: cache,
+	}
+
+	if err := tr.ReportTaskStatus(context.Background(), first); err != nil {
+		t.Fatalf("First report failed: %v", err)
+	}
+
+	// Simulate a stale cached read: a second copy of the Task that has not yet
+	// observed the annotation Update from the first reconcile.
+	stale := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, map[string]string{
+		AnnotationGitHubReporting: "enabled",
+		AnnotationSourceNumber:    "42",
+		AnnotationSourceKind:      "issue",
+	})
+	stale.UID = types.UID("uid-shortcircuit")
+
+	if err := tr.ReportTaskStatus(context.Background(), stale); err != nil {
+		t.Fatalf("Second report failed: %v", err)
+	}
+
+	if len(*records) != 1 {
+		t.Fatalf("Expected exactly 1 GitHub API call, got %d (%+v)", len(*records), *records)
+	}
+	if (*records)[0].method != "create" {
+		t.Errorf("Expected the single call to be a create, got %s", (*records)[0].method)
+	}
+}
+
+// TestReportTaskStatus_SkipsRepeatedNoOpPersist verifies that when both the
+// cache and the annotation already record the desired phase + comment ID, no
+// GitHub API call and no Task Update is issued — guarding against reconcile
+// churn on informer resync where the same phase is observed repeatedly.
+func TestReportTaskStatus_SkipsRepeatedNoOpPersist(t *testing.T) {
+	server, records := newTestServer(t)
+	defer server.Close()
+
+	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, map[string]string{
+		AnnotationGitHubReporting:   "enabled",
+		AnnotationSourceNumber:      "42",
+		AnnotationSourceKind:        "issue",
+		AnnotationGitHubCommentID:   "9999",
+		AnnotationGitHubReportPhase: "accepted",
+	})
+	task.UID = types.UID("uid-noop")
+
+	cache := NewReportStateCache()
+	cache.store(task.UID, 9999, "accepted")
+
+	counted := &updateCountingClient{
+		Client: fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(task).Build(),
+	}
+	tr := &TaskReporter{
+		Client: counted,
+		Reporter: &GitHubReporter{
+			Owner: "owner", Repo: "repo", Token: "token", BaseURL: server.URL,
+		},
+		Cache: cache,
+	}
+
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if len(*records) != 0 {
+		t.Errorf("Expected no GitHub API calls, got %d", len(*records))
+	}
+	if counted.updateCount() != 0 {
+		t.Errorf("Expected no Task Updates, got %d", counted.updateCount())
+	}
+}
+
+func TestReportTaskStatus_NilCache(t *testing.T) {
+	server, records := newTestServer(t)
+	defer server.Close()
+
+	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, map[string]string{
+		AnnotationGitHubReporting: "enabled",
+		AnnotationSourceNumber:    "42",
+		AnnotationSourceKind:      "issue",
+	})
+
+	tr := &TaskReporter{
+		Client: fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(task).Build(),
+		Reporter: &GitHubReporter{
+			Owner: "owner", Repo: "repo", Token: "token", BaseURL: server.URL,
+		},
+		// Cache intentionally nil — callers without race exposure (poll-driven
+		// spawner) should keep working.
+	}
+
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if len(*records) != 1 || (*records)[0].method != "create" {
+		t.Errorf("Expected one create call with nil cache, got %+v", *records)
 	}
 }
 

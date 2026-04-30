@@ -30,6 +30,10 @@ type reportingConfig struct {
 type reportingReconciler struct {
 	client.Client
 	config reportingConfig
+	// cache survives across reconciles to backstop the AnnotationGitHubCommentID
+	// annotation on fast Pending→Succeeded transitions where the annotation
+	// Update has not yet propagated to the controller-runtime cache.
+	cache *reporting.ReportStateCache
 }
 
 func (r *reportingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -66,6 +70,7 @@ func (r *reportingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			},
 			BaseURL: r.config.GitHubAPIBaseURL,
 		},
+		Cache: r.cache,
 	}
 
 	if err := reporter.ReportTaskStatus(ctx, &task); err != nil {
@@ -77,6 +82,9 @@ func (r *reportingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 }
 
 func (r *reportingReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if r.cache == nil {
+		r.cache = reporting.NewReportStateCache()
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("webhook-reporting").
 		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).

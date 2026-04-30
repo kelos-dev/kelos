@@ -3180,68 +3180,86 @@ func TestBuildJob_AgentConfigMCPServers(t *testing.T) {
 }
 
 func TestBuildJob_AgentConfigMCPServersStdioCwd(t *testing.T) {
-	builder := NewJobBuilder()
-	task := &kelosv1alpha1.Task{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-mcp-cwd",
-			Namespace: "default",
-		},
-		Spec: kelosv1alpha1.TaskSpec{
-			Type:   AgentTypeClaudeCode,
-			Prompt: "Fix issue",
-			Credentials: kelosv1alpha1.Credentials{
-				Type:      kelosv1alpha1.CredentialTypeAPIKey,
-				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
-			},
-		},
+	// The MCP env var is wired identically for every agent type that
+	// supports MCP; per-agent translation of the `cwd` field happens in
+	// each agent's entrypoint script (Object.assign for claude-code,
+	// cursor, gemini; field-by-field TOML emission for codex). This test
+	// pins the Go-side contract: the same KELOS_MCP_SERVERS payload, with
+	// `cwd` populated, is delivered to every agent type.
+	agentTypes := []string{
+		AgentTypeClaudeCode,
+		AgentTypeCodex,
+		AgentTypeCursor,
+		AgentTypeGemini,
+		AgentTypeOpenCode,
 	}
 
-	agentConfig := &kelosv1alpha1.AgentConfigSpec{
-		MCPServers: []kelosv1alpha1.MCPServerSpec{
-			{
-				Name:       "laravel-boost",
-				Type:       "stdio",
-				Command:    "php",
-				Args:       []string{"artisan", "boost:mcp"},
-				WorkingDir: "/workspace/repo",
-			},
-		},
-	}
+	for _, agentType := range agentTypes {
+		t.Run(agentType, func(t *testing.T) {
+			builder := NewJobBuilder()
+			task := &kelosv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-mcp-cwd",
+					Namespace: "default",
+				},
+				Spec: kelosv1alpha1.TaskSpec{
+					Type:   agentType,
+					Prompt: "Fix issue",
+					Credentials: kelosv1alpha1.Credentials{
+						Type:      kelosv1alpha1.CredentialTypeAPIKey,
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+					},
+				},
+			}
 
-	job, err := builder.Build(task, nil, agentConfig, task.Spec.Prompt)
-	if err != nil {
-		t.Fatalf("Build() returned error: %v", err)
-	}
+			agentConfig := &kelosv1alpha1.AgentConfigSpec{
+				MCPServers: []kelosv1alpha1.MCPServerSpec{
+					{
+						Name:       "laravel-boost",
+						Type:       "stdio",
+						Command:    "php",
+						Args:       []string{"artisan", "boost:mcp"},
+						WorkingDir: "/workspace/repo",
+					},
+				},
+			}
 
-	container := job.Spec.Template.Spec.Containers[0]
-	var mcpJSON string
-	for _, env := range container.Env {
-		if env.Name == "KELOS_MCP_SERVERS" {
-			mcpJSON = env.Value
-		}
-	}
-	if mcpJSON == "" {
-		t.Fatal("Expected KELOS_MCP_SERVERS env var to be set")
-	}
+			job, err := builder.Build(task, nil, agentConfig, task.Spec.Prompt)
+			if err != nil {
+				t.Fatalf("Build() returned error: %v", err)
+			}
 
-	var parsed struct {
-		MCPServers map[string]struct {
-			Type    string   `json:"type"`
-			Command string   `json:"command"`
-			Args    []string `json:"args"`
-			Cwd     string   `json:"cwd"`
-		} `json:"mcpServers"`
-	}
-	if err := json.Unmarshal([]byte(mcpJSON), &parsed); err != nil {
-		t.Fatalf("Failed to parse KELOS_MCP_SERVERS JSON: %v", err)
-	}
+			container := job.Spec.Template.Spec.Containers[0]
+			var mcpJSON string
+			for _, env := range container.Env {
+				if env.Name == "KELOS_MCP_SERVERS" {
+					mcpJSON = env.Value
+				}
+			}
+			if mcpJSON == "" {
+				t.Fatal("Expected KELOS_MCP_SERVERS env var to be set")
+			}
 
-	boost, ok := parsed.MCPServers["laravel-boost"]
-	if !ok {
-		t.Fatal("Expected 'laravel-boost' MCP server entry")
-	}
-	if boost.Cwd != "/workspace/repo" {
-		t.Errorf("Expected cwd '/workspace/repo', got %q", boost.Cwd)
+			var parsed struct {
+				MCPServers map[string]struct {
+					Type    string   `json:"type"`
+					Command string   `json:"command"`
+					Args    []string `json:"args"`
+					Cwd     string   `json:"cwd"`
+				} `json:"mcpServers"`
+			}
+			if err := json.Unmarshal([]byte(mcpJSON), &parsed); err != nil {
+				t.Fatalf("Failed to parse KELOS_MCP_SERVERS JSON: %v", err)
+			}
+
+			boost, ok := parsed.MCPServers["laravel-boost"]
+			if !ok {
+				t.Fatal("Expected 'laravel-boost' MCP server entry")
+			}
+			if boost.Cwd != "/workspace/repo" {
+				t.Errorf("Expected cwd '/workspace/repo', got %q", boost.Cwd)
+			}
+		})
 	}
 }
 

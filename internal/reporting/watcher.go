@@ -24,6 +24,15 @@ const (
 	// AnnotationSourceNumber records the issue or pull request number.
 	AnnotationSourceNumber = "kelos.dev/source-number"
 
+	// AnnotationSourceOwner records the GitHub repository owner the event came
+	// from. The webhook reporter uses this so it can post comments on the
+	// originating repository even when it differs from the Task's Workspace.
+	AnnotationSourceOwner = "kelos.dev/source-owner"
+
+	// AnnotationSourceRepo records the GitHub repository name the event came
+	// from. Pairs with AnnotationSourceOwner.
+	AnnotationSourceRepo = "kelos.dev/source-repo"
+
 	// AnnotationGitHubCommentID stores the GitHub comment ID for the status
 	// comment created by the reporter so subsequent updates edit the same
 	// comment.

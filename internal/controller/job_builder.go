@@ -80,6 +80,15 @@ const (
 	ClaudeCodeUID = AgentUID
 )
 
+// reservedEnvNames lists env var names that PodOverrides.Env must never
+// supply, even when the controller does not populate them on this Job.
+// These names drive entrypoint behavior the user is not allowed to forge,
+// because doing so would amount to executing arbitrary commands or code
+// inside the agent container before the user-supplied agent process runs.
+var reservedEnvNames = map[string]struct{}{
+	"KELOS_SETUP_COMMAND": {},
+}
+
 // JobBuilder constructs Kubernetes Jobs for Tasks.
 type JobBuilder struct {
 	ClaudeCodeImage           string
@@ -492,6 +501,17 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 			initContainers = append(initContainers, injectionContainer)
 		}
 
+		if len(workspace.SetupCommand) > 0 {
+			setupJSON, err := json.Marshal(workspace.SetupCommand)
+			if err != nil {
+				return nil, fmt.Errorf("marshalling setup command: %w", err)
+			}
+			mainContainer.Env = append(mainContainer.Env, corev1.EnvVar{
+				Name:  "KELOS_SETUP_COMMAND",
+				Value: string(setupJSON),
+			})
+		}
+
 		mainContainer.VolumeMounts = []corev1.VolumeMount{volumeMount}
 		mainContainer.WorkingDir = WorkspaceMountPath + "/repo"
 	}
@@ -587,15 +607,23 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 
 		if len(po.Env) > 0 {
 			// Filter out user env vars that collide with built-in names
-			// so that built-in vars always take precedence.
+			// so that built-in vars always take precedence. Names in
+			// reservedEnvNames are dropped unconditionally even when the
+			// controller has not populated them on this Job, because they
+			// drive entrypoint behavior (e.g. KELOS_SETUP_COMMAND triggers
+			// arbitrary command execution before the agent starts).
 			builtinNames := make(map[string]struct{}, len(mainContainer.Env))
 			for _, e := range mainContainer.Env {
 				builtinNames[e.Name] = struct{}{}
 			}
 			for _, e := range po.Env {
-				if _, exists := builtinNames[e.Name]; !exists {
-					mainContainer.Env = append(mainContainer.Env, e)
+				if _, exists := builtinNames[e.Name]; exists {
+					continue
 				}
+				if _, reserved := reservedEnvNames[e.Name]; reserved {
+					continue
+				}
+				mainContainer.Env = append(mainContainer.Env, e)
 			}
 		}
 

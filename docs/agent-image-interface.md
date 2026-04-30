@@ -44,6 +44,13 @@ Kelos sets the following reserved environment variables on agent containers:
 | `KELOS_BASE_BRANCH` | The base branch (workspace `ref`) for the task | When workspace has a non-empty `ref` |
 | `KELOS_AGENTS_MD` | User-level instructions from AgentConfig | When `agentConfigRef` is set and `agentsMD` is non-empty |
 | `KELOS_PLUGIN_DIR` | Path to plugin directory containing skills and agents | When `agentConfigRef` is set and `plugins` is non-empty |
+| `KELOS_SETUP_COMMAND` | JSON-encoded exec-form array from `Workspace.spec.setupCommand`, executed by the entrypoint before the agent starts | When the workspace defines `setupCommand` |
+
+> The names listed in this table are reserved. `PodOverrides.Env` entries that
+> reuse a reserved name are dropped so the built-in value always wins; do not
+> set them manually. `KELOS_SETUP_COMMAND` is additionally dropped from
+> `PodOverrides.Env` even when the workspace does not define `setupCommand`,
+> because it drives entrypoint command execution.
 
 ### 4. User ID
 
@@ -63,6 +70,21 @@ USER agent
 When a workspace is configured, Kelos mounts the cloned repository at
 `/workspace/repo` and sets `WorkingDir` on the container accordingly. The
 entrypoint script does not need to handle directory changes.
+
+### 6. Pre-agent setup command
+
+When a workspace defines `Workspace.spec.setupCommand`, the controller
+JSON-encodes the exec-form array and sets it on `KELOS_SETUP_COMMAND`. The
+entrypoint must decode it and exec the command from the working directory
+before invoking the agent. The semantics match Kubernetes
+`lifecycle.postStart.exec.command`: the array is passed directly to exec
+with no shell interpretation, and a non-zero exit aborts the task before
+the agent runs (the entrypoint must propagate the exit code).
+
+The reference entrypoints emit `---KELOS_SETUP_COMMAND_START---`,
+`---KELOS_SETUP_COMMAND_DONE---`, and `---KELOS_SETUP_COMMAND_FAILED---`
+banners on stderr so users can distinguish setup failures from agent
+failures when tailing pod logs.
 
 ## Output Capture
 

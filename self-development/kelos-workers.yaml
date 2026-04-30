@@ -51,6 +51,8 @@ spec:
           bodyContains: /kelos pick-up
           state: open
           author: kelos-bot[bot]
+      reporting:
+        enabled: true
   maxConcurrency: 3
   taskTemplate:
     workspaceRef:

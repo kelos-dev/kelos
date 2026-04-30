@@ -31,6 +31,8 @@ spec:
             - generated-by-kelos
           state: open
           draft: false
+      reporting:
+        enabled: true
   maxConcurrency: 2
   taskTemplate:
     workspaceRef:

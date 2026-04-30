@@ -54,6 +54,8 @@ spec:
           bodyContains: /kelos api-review
           state: open
           author: kelos-bot[bot]
+      reporting:
+        enabled: true
   maxConcurrency: 3
   taskTemplate:
     workspaceRef:

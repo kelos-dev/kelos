@@ -21,6 +21,8 @@ spec:
           excludeLabels:
             - triage-accepted
           state: open
+      reporting:
+        enabled: true
   maxConcurrency: 8
   taskTemplate:
     workspaceRef:

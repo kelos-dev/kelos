@@ -41,6 +41,8 @@ spec:
           bodyContains: /kelos plan
           state: open
           author: kelos-bot[bot]
+      reporting:
+        enabled: true
   maxConcurrency: 2
   taskTemplate:
     workspaceRef:

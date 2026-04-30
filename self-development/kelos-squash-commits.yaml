@@ -14,6 +14,8 @@ spec:
           bodyContains: /kelos squash-commits
           state: open
           author: gjkim42
+      reporting:
+        enabled: true
   maxConcurrency: 1
   taskTemplate:
     workspaceRef:

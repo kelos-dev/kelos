@@ -354,8 +354,8 @@ The `kelos` CLI lets you manage the full lifecycle without writing YAML.
 | `kelos run` | Create and run a new Task |
 | `kelos create workspace` | Create a Workspace resource |
 | `kelos create agentconfig` | Create an AgentConfig resource |
-| `kelos get <resource> [name]` | List resources or view a specific resource (`tasks`, `taskspawners`, `workspaces`) |
-| `kelos delete <resource> <name>` | Delete a resource |
+| `kelos get <resource> [name]` | List resources or view a specific resource (`tasks`, `taskspawners`, `workspaces`, `agentconfigs`) |
+| `kelos delete <resource> [name]` | Delete a resource (`tasks`, `taskspawners`, `workspaces`, `agentconfigs`) |
 | `kelos logs <task-name> [-f]` | View or stream logs from a task |
 | `kelos suspend taskspawner <name>` | Pause a TaskSpawner (stops polling, running tasks continue) |
 | `kelos resume taskspawner <name>` | Resume a paused TaskSpawner |
@@ -404,6 +404,11 @@ When the same key is set multiple ways, precedence is: chart defaults, then `--v
 - `--output, -o`: Output format (`yaml` or `json`)
 - `--detail, -d`: Show detailed information for a specific resource
 - `--all-namespaces, -A`: List resources across all namespaces
+- `--phase`: (`kelos get task` only) Filter tasks by phase; repeatable or comma-separated. Valid values: `Pending`, `Running`, `Waiting`, `Succeeded`, `Failed`
+
+### `kelos delete` Flags
+
+- `--all`: Delete every resource of the given type in the namespace; mutually exclusive with a resource name. Supported by `task`, `workspace`, `taskspawner`, and `agentconfig` subcommands
 
 ### Common Flags
 

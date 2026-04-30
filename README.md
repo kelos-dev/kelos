@@ -501,8 +501,8 @@ See the [`self-development/` README](self-development/README.md) for the full pi
 | `kelos uninstall` | Uninstall Kelos from the cluster |
 | `kelos init` | Initialize `~/.kelos/config.yaml` |
 | `kelos run` | Create and run a new Task |
-| `kelos get <resource> [name]` | List resources or view a specific resource (`tasks`, `taskspawners`, `workspaces`) |
-| `kelos delete <resource> <name>` | Delete a resource |
+| `kelos get <resource> [name]` | List resources or view a specific resource (`tasks`, `taskspawners`, `workspaces`, `agentconfigs`) |
+| `kelos delete <resource> [name]` | Delete a resource (`tasks`, `taskspawners`, `workspaces`, `agentconfigs`); supports `--all` to delete every resource of that type in the namespace |
 | `kelos logs <task-name> [-f]` | View or stream logs from a task |
 | `kelos suspend taskspawner <name>` | Pause a TaskSpawner |
 | `kelos resume taskspawner <name>` | Resume a paused TaskSpawner |

@@ -134,7 +134,7 @@ type MCPServerSpec struct {
 	// Relative paths are resolved by the agent against its own current
 	// working directory; absolute paths are recommended.
 	// +optional
-	WorkingDir string `json:"cwd,omitempty"`
+	WorkingDir string `json:"workingDir,omitempty"`
 }
 
 // SecretValuesSource selects a Secret to populate values from.

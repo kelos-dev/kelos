@@ -496,7 +496,8 @@ func sourceAnnotations(ts *kelosv1alpha1.TaskSpawner, item source.WorkItem) map[
 }
 
 // reportingEnabled returns true when GitHub reporting is configured and enabled
-// on the TaskSpawner.
+// on the TaskSpawner. This only covers polling-based sources (Issues, PRs);
+// webhook-based reporting is handled by the webhook server and its handler.
 func reportingEnabled(ts *kelosv1alpha1.TaskSpawner) bool {
 	if ts.Spec.When.GitHubIssues != nil && ts.Spec.When.GitHubIssues.Reporting != nil {
 		return ts.Spec.When.GitHubIssues.Reporting.Enabled

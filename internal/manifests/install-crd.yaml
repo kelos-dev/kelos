@@ -6507,6 +6507,15 @@ spec:
                           - event
                           type: object
                         type: array
+                      reporting:
+                        description: Reporting configures status reporting back to
+                          the originating GitHub issue or PR.
+                        properties:
+                          enabled:
+                            description: Enabled posts standard status comments back
+                              to the originating GitHub issue or PR.
+                            type: boolean
+                        type: object
                       repository:
                         description: |-
                           Repository restricts webhooks to a specific repository (owner/repo format).

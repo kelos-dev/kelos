@@ -45,6 +45,7 @@ func main() {
 		githubAppInstallationID string
 		githubAppPrivateKey     string
 		githubAPIBaseURL        string
+		githubTokenFile         string
 	)
 
 	flag.StringVar(&source, "source", "", "Webhook source type (github or linear)")
@@ -57,6 +58,7 @@ func main() {
 	flag.StringVar(&githubAppInstallationID, "github-app-installation-id", "", "GitHub App installation ID (env: GITHUB_APP_INSTALLATION_ID)")
 	flag.StringVar(&githubAppPrivateKey, "github-app-private-key", "", "GitHub App private key in PEM format (env: GITHUB_APP_PRIVATE_KEY)")
 	flag.StringVar(&githubAPIBaseURL, "github-api-base-url", "", "GitHub API base URL for enterprise servers (env: GITHUB_API_BASE_URL)")
+	flag.StringVar(&githubTokenFile, "github-token-file", "", "Path to file containing GitHub token for reporting.")
 
 	opts, applyVerbosity := logging.SetupZapOptions(flag.CommandLine)
 	flag.Parse()
@@ -116,10 +118,16 @@ func main() {
 	// Set up signal handling context
 	ctx := ctrl.SetupSignalHandler()
 
-	// Set up GitHub token resolver for PR branch enrichment
-	if githubToken != "" {
-		webhook.SetGitHubTokenResolver(func(context.Context) (string, error) { return githubToken, nil })
-	} else if githubAppID != "" && githubAppInstallationID != "" && githubAppPrivateKey != "" {
+	// Build a unified GitHub token resolver from any configured credential
+	// source. Used for PR branch enrichment in the webhook handler and for
+	// status reporting on Tasks. Precedence: --github-token, GitHub App,
+	// --github-token-file. The static --github-token already absorbed the
+	// GITHUB_TOKEN env fallback above.
+	var tokenResolver func(context.Context) (string, error)
+	switch {
+	case githubToken != "":
+		tokenResolver = func(context.Context) (string, error) { return githubToken, nil }
+	case githubAppID != "" && githubAppInstallationID != "" && githubAppPrivateKey != "":
 		creds, err := githubapp.ParseCredentials(map[string][]byte{
 			"appID":          []byte(githubAppID),
 			"installationID": []byte(githubAppInstallationID),
@@ -133,7 +141,19 @@ func main() {
 		if githubAPIBaseURL != "" {
 			tc.BaseURL = githubAPIBaseURL
 		}
-		webhook.SetGitHubTokenResolver(githubapp.NewTokenProvider(tc, creds).Token)
+		tokenResolver = githubapp.NewTokenProvider(tc, creds).Token
+	case githubTokenFile != "":
+		tokenResolver = func(context.Context) (string, error) {
+			data, err := os.ReadFile(githubTokenFile)
+			if err != nil {
+				return "", fmt.Errorf("reading token file %q: %w", githubTokenFile, err)
+			}
+			return strings.TrimSpace(string(data)), nil
+		}
+	}
+
+	if tokenResolver != nil {
+		webhook.SetGitHubTokenResolver(tokenResolver)
 	}
 
 	// Create webhook handler
@@ -174,6 +194,30 @@ func main() {
 			os.Exit(1)
 		}
 	}()
+
+	// Start the reporting reconciler whenever the GitHub webhook source has a
+	// token resolver available. Owner and repo come from per-Task annotations
+	// stamped by the webhook handler from the originating event payload, so
+	// one webhook server can report against many repositories. Other sources
+	// (linear, generic) never produce GitHub-reporting tasks, so the
+	// reconciler stays disabled there even when GITHUB_TOKEN is set.
+	if webhookSource == webhook.GitHubSource && tokenResolver != nil {
+		reportingReconciler := &reportingReconciler{
+			Client: mgr.GetClient(),
+			config: reportingConfig{
+				TokenResolver:    tokenResolver,
+				GitHubAPIBaseURL: githubAPIBaseURL,
+			},
+		}
+		if err := reportingReconciler.SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "Unable to create reporting controller")
+			os.Exit(1)
+		}
+		setupLog.Info("Reporting controller enabled")
+	} else if webhookSource == webhook.GitHubSource {
+		setupLog.Info("Reporting controller disabled: no GitHub credentials configured. " +
+			"Set --github-token, --github-app-* flags, or --github-token-file to enable status reporting on Tasks")
+	}
 
 	// Add health checks
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

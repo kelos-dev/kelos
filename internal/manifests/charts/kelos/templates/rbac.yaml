@@ -252,6 +252,8 @@ rules:
       - create
       - get
       - list
+      - watch
+      - update
   - apiGroups:
       - kelos.dev
     resources:

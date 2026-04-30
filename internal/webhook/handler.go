@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/kelos-dev/kelos/api/v1alpha1"
+	"github.com/kelos-dev/kelos/internal/reporting"
 	"github.com/kelos-dev/kelos/internal/taskbuilder"
 )
 
@@ -561,6 +563,21 @@ func (h *WebhookHandler) createTask(ctx context.Context, spawner *v1alpha1.TaskS
 		return fmt.Errorf("failed to build task: %w", err)
 	}
 
+	// Stamp reporting annotations for GitHub webhook sources when reporting is enabled.
+	if h.source == GitHubSource && parsed.GitHub != nil && parsed.GitHub.Number > 0 &&
+		spawner.Spec.When.GitHubWebhook != nil &&
+		spawner.Spec.When.GitHubWebhook.Reporting != nil &&
+		spawner.Spec.When.GitHubWebhook.Reporting.Enabled {
+		if task.Annotations == nil {
+			task.Annotations = make(map[string]string)
+		}
+		task.Annotations[reporting.AnnotationGitHubReporting] = "enabled"
+		task.Annotations[reporting.AnnotationSourceKind] = webhookSourceKind(eventType, parsed.GitHub)
+		task.Annotations[reporting.AnnotationSourceNumber] = strconv.Itoa(parsed.GitHub.Number)
+		task.Annotations[reporting.AnnotationSourceOwner] = parsed.GitHub.RepositoryOwner
+		task.Annotations[reporting.AnnotationSourceRepo] = parsed.GitHub.RepositoryName
+	}
+
 	if err := h.client.Create(ctx, task); err != nil {
 		return fmt.Errorf("failed to create task: %w", err)
 	}
@@ -607,4 +624,19 @@ func (h *WebhookHandler) getGenericSpawners(ctx context.Context) []*v1alpha1.Tas
 		}
 	}
 	return spawners
+}
+
+// webhookSourceKind determines the reporting source kind from a GitHub webhook event.
+func webhookSourceKind(eventType string, eventData *GitHubEventData) string {
+	switch eventType {
+	case "pull_request", "pull_request_review", "pull_request_review_comment", "pull_request_target":
+		return "pull-request"
+	case "issue_comment":
+		if eventData.PullRequestAPIURL != "" {
+			return "pull-request"
+		}
+		return "issue"
+	default:
+		return "issue"
+	}
 }

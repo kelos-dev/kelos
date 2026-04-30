@@ -18,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	"github.com/kelos-dev/kelos/internal/reporting"
 	"github.com/kelos-dev/kelos/internal/taskbuilder"
 )
 
@@ -301,6 +302,274 @@ func TestServeHTTP_CreatesTaskForMatchingSpawner(t *testing.T) {
 	}
 	if task.OwnerReferences[0].Kind != "TaskSpawner" {
 		t.Errorf("Expected owner ref kind 'TaskSpawner', got %q", task.OwnerReferences[0].Kind)
+	}
+}
+
+func TestServeHTTP_StampsReportingAnnotationsWhenEnabled(t *testing.T) {
+	spawner := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "reporting-spawner",
+			Namespace: "default",
+			UID:       "reporting-uid",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
+					Events: []string{"issues"},
+					Reporting: &kelosv1alpha1.GitHubReporting{
+						Enabled: true,
+					},
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+				Credentials: kelosv1alpha1.Credentials{
+					Type: "api-key",
+				},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
+					Name: "test-workspace",
+				},
+				PromptTemplate: "{{.Title}}",
+			},
+		},
+	}
+
+	handler := newTestHandler(t, spawner)
+
+	payload := []byte(issuesPayload)
+	sig := signPayload(payload, []byte(testSecret))
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
+	req.Header.Set(GitHubEventHeader, "issues")
+	req.Header.Set(GitHubSignatureHeader, sig)
+	req.Header.Set(GitHubDeliveryHeader, "reporting-delivery")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task, got %d", len(taskList.Items))
+	}
+
+	task := taskList.Items[0]
+	if task.Annotations[reporting.AnnotationGitHubReporting] != "enabled" {
+		t.Errorf("Expected github-reporting 'enabled', got %q", task.Annotations[reporting.AnnotationGitHubReporting])
+	}
+	if task.Annotations[reporting.AnnotationSourceKind] != "issue" {
+		t.Errorf("Expected source-kind 'issue', got %q", task.Annotations[reporting.AnnotationSourceKind])
+	}
+	if task.Annotations[reporting.AnnotationSourceNumber] != "42" {
+		t.Errorf("Expected source-number '42', got %q", task.Annotations[reporting.AnnotationSourceNumber])
+	}
+	if task.Annotations[reporting.AnnotationSourceOwner] != "org" {
+		t.Errorf("Expected source-owner 'org', got %q", task.Annotations[reporting.AnnotationSourceOwner])
+	}
+	if task.Annotations[reporting.AnnotationSourceRepo] != "repo" {
+		t.Errorf("Expected source-repo 'repo', got %q", task.Annotations[reporting.AnnotationSourceRepo])
+	}
+}
+
+func TestServeHTTP_NoReportingAnnotationsWhenDisabled(t *testing.T) {
+	spawner := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "no-reporting-spawner",
+			Namespace: "default",
+			UID:       "no-reporting-uid",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
+					Events: []string{"issues"},
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+				Credentials: kelosv1alpha1.Credentials{
+					Type: "api-key",
+				},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
+					Name: "test-workspace",
+				},
+				PromptTemplate: "{{.Title}}",
+			},
+		},
+	}
+
+	handler := newTestHandler(t, spawner)
+
+	payload := []byte(issuesPayload)
+	sig := signPayload(payload, []byte(testSecret))
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
+	req.Header.Set(GitHubEventHeader, "issues")
+	req.Header.Set(GitHubSignatureHeader, sig)
+	req.Header.Set(GitHubDeliveryHeader, "no-reporting-delivery")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task, got %d", len(taskList.Items))
+	}
+
+	task := taskList.Items[0]
+	if _, ok := task.Annotations[reporting.AnnotationGitHubReporting]; ok {
+		t.Error("Expected no github-reporting annotation when reporting is not enabled")
+	}
+}
+
+func TestServeHTTP_ReportingAnnotationsPullRequest(t *testing.T) {
+	spawner := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pr-reporting-spawner",
+			Namespace: "default",
+			UID:       "pr-reporting-uid",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
+					Events: []string{"pull_request"},
+					Reporting: &kelosv1alpha1.GitHubReporting{
+						Enabled: true,
+					},
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+				Credentials: kelosv1alpha1.Credentials{
+					Type: "api-key",
+				},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
+					Name: "test-workspace",
+				},
+				PromptTemplate: "{{.Title}}",
+			},
+		},
+	}
+
+	handler := newTestHandler(t, spawner)
+
+	payload := []byte(`{
+		"action": "opened",
+		"sender": {"login": "testuser"},
+		"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}},
+		"pull_request": {
+			"number": 99,
+			"title": "Test PR",
+			"body": "PR body",
+			"html_url": "https://github.com/org/repo/pull/99",
+			"state": "open",
+			"head": {"ref": "feature-branch"}
+		}
+	}`)
+	sig := signPayload(payload, []byte(testSecret))
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
+	req.Header.Set(GitHubEventHeader, "pull_request")
+	req.Header.Set(GitHubSignatureHeader, sig)
+	req.Header.Set(GitHubDeliveryHeader, "pr-reporting-delivery")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task, got %d", len(taskList.Items))
+	}
+
+	task := taskList.Items[0]
+	if task.Annotations[reporting.AnnotationGitHubReporting] != "enabled" {
+		t.Errorf("Expected github-reporting 'enabled', got %q", task.Annotations[reporting.AnnotationGitHubReporting])
+	}
+	if task.Annotations[reporting.AnnotationSourceKind] != "pull-request" {
+		t.Errorf("Expected source-kind 'pull-request', got %q", task.Annotations[reporting.AnnotationSourceKind])
+	}
+	if task.Annotations[reporting.AnnotationSourceNumber] != "99" {
+		t.Errorf("Expected source-number '99', got %q", task.Annotations[reporting.AnnotationSourceNumber])
+	}
+	if task.Annotations[reporting.AnnotationSourceOwner] != "org" {
+		t.Errorf("Expected source-owner 'org', got %q", task.Annotations[reporting.AnnotationSourceOwner])
+	}
+	if task.Annotations[reporting.AnnotationSourceRepo] != "repo" {
+		t.Errorf("Expected source-repo 'repo', got %q", task.Annotations[reporting.AnnotationSourceRepo])
+	}
+}
+
+func TestWebhookSourceKind(t *testing.T) {
+	tests := []struct {
+		name      string
+		eventType string
+		eventData *GitHubEventData
+		want      string
+	}{
+		{
+			name:      "issues event",
+			eventType: "issues",
+			eventData: &GitHubEventData{Event: "issues"},
+			want:      "issue",
+		},
+		{
+			name:      "pull_request event",
+			eventType: "pull_request",
+			eventData: &GitHubEventData{Event: "pull_request"},
+			want:      "pull-request",
+		},
+		{
+			name:      "pull_request_review event",
+			eventType: "pull_request_review",
+			eventData: &GitHubEventData{Event: "pull_request_review"},
+			want:      "pull-request",
+		},
+		{
+			name:      "issue_comment on issue",
+			eventType: "issue_comment",
+			eventData: &GitHubEventData{Event: "issue_comment"},
+			want:      "issue",
+		},
+		{
+			name:      "issue_comment on PR",
+			eventType: "issue_comment",
+			eventData: &GitHubEventData{Event: "issue_comment", PullRequestAPIURL: "https://api.github.com/repos/o/r/pulls/1"},
+			want:      "pull-request",
+		},
+		{
+			name:      "push event",
+			eventType: "push",
+			eventData: &GitHubEventData{Event: "push"},
+			want:      "issue",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := webhookSourceKind(tt.eventType, tt.eventData)
+			if got != tt.want {
+				t.Errorf("webhookSourceKind(%q) = %q, want %q", tt.eventType, got, tt.want)
+			}
+		})
 	}
 }
 

@@ -369,6 +369,10 @@ type GitHubWebhook struct {
 	// If empty, all events in the Events list trigger tasks.
 	// +optional
 	Filters []GitHubWebhookFilter `json:"filters,omitempty"`
+
+	// Reporting configures status reporting back to the originating GitHub issue or PR.
+	// +optional
+	Reporting *GitHubReporting `json:"reporting,omitempty"`
 }
 
 // GitHubWebhookFilter defines filtering criteria for GitHub webhook events.

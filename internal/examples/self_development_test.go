@@ -24,9 +24,10 @@ func TestSelfDevelopmentGitHubSpawnersUseWebhooks(t *testing.T) {
 	}{
 		{file: "kelos-workers.yaml", events: []string{"issue_comment"}},
 		{file: "kelos-planner.yaml", events: []string{"issue_comment"}},
-		{file: "kelos-reviewer.yaml", events: []string{"issue_comment"}},
+		{file: "kelos-reviewer.yaml", events: []string{"issue_comment", "pull_request_review"}},
+		{file: "kelos-api-reviewer.yaml", events: []string{"issue_comment", "pull_request_review"}},
 		{file: "kelos-pr-responder.yaml", events: []string{"issue_comment", "pull_request_review"}},
-		{file: "kelos-squash-commits.yaml", events: []string{"issue_comment"}},
+		{file: "kelos-squash-commits.yaml", events: []string{"issue_comment", "pull_request_review"}},
 		{file: "kelos-triage.yaml", events: []string{"issues"}},
 	}
 

@@ -43,6 +43,7 @@ spec:
       repository: kelos-dev/kelos
       events:
         - issue_comment
+        - pull_request_review
       filters:
         - event: issue_comment
           action: created
@@ -51,6 +52,16 @@ spec:
           author: gjkim42
         - event: issue_comment
           action: created
+          bodyContains: /kelos api-review
+          state: open
+          author: kelos-bot[bot]
+        - event: pull_request_review
+          action: submitted
+          bodyContains: /kelos api-review
+          state: open
+          author: gjkim42
+        - event: pull_request_review
+          action: submitted
           bodyContains: /kelos api-review
           state: open
           author: kelos-bot[bot]

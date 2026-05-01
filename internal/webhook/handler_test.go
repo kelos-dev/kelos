@@ -797,8 +797,8 @@ func TestServeHTTP_IssueCommentOnPR_EnrichesBranch(t *testing.T) {
 	// Swap the fetcher to return a known branch
 	orig := githubPRBranchFetcher
 	defer func() { githubPRBranchFetcher = orig }()
-	githubPRBranchFetcher = func(ctx context.Context, prAPIURL string) (string, error) {
-		return "feature-branch", nil
+	githubPRBranchFetcher = func(ctx context.Context, prAPIURL string) (githubPRHeadInfo, error) {
+		return githubPRHeadInfo{Branch: "feature-branch", SHA: "enriched-sha-456"}, nil
 	}
 
 	spawner := &kelosv1alpha1.TaskSpawner{
@@ -1628,5 +1628,236 @@ func TestGenericServeHTTP_HyphenatedSourceName(t *testing.T) {
 	}
 	if len(taskList.Items) != 1 {
 		t.Fatalf("Expected 1 task for hyphenated source, got %d", len(taskList.Items))
+	}
+}
+
+func TestServeHTTP_ChecksAnnotationsForPRWebhook(t *testing.T) {
+	spawner := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "checks-spawner",
+			Namespace: "default",
+			UID:       "checks-uid",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
+					Events: []string{"pull_request"},
+					Reporting: &kelosv1alpha1.GitHubReporting{
+						Enabled: true,
+						Checks:  &kelosv1alpha1.GitHubChecksReporting{Name: "My Check"},
+					},
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+				Credentials: kelosv1alpha1.Credentials{
+					Type: "api-key",
+				},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
+					Name: "test-workspace",
+				},
+				PromptTemplate: "{{.Title}}",
+			},
+		},
+	}
+
+	handler := newTestHandler(t, spawner)
+
+	payload := []byte(`{
+		"action": "opened",
+		"sender": {"login": "testuser"},
+		"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}},
+		"pull_request": {
+			"number": 42,
+			"title": "Test PR",
+			"body": "PR body",
+			"html_url": "https://github.com/org/repo/pull/42",
+			"state": "open",
+			"head": {"ref": "feature-branch", "sha": "deadbeef123"}
+		}
+	}`)
+	sig := signPayload(payload, []byte(testSecret))
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
+	req.Header.Set(GitHubEventHeader, "pull_request")
+	req.Header.Set(GitHubSignatureHeader, sig)
+	req.Header.Set(GitHubDeliveryHeader, "checks-delivery")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task, got %d", len(taskList.Items))
+	}
+
+	task := taskList.Items[0]
+	if task.Annotations[reporting.AnnotationGitHubReporting] != "enabled" {
+		t.Errorf("Expected github-reporting 'enabled', got %q", task.Annotations[reporting.AnnotationGitHubReporting])
+	}
+	if task.Annotations[reporting.AnnotationGitHubChecks] != "enabled" {
+		t.Errorf("Expected github-checks 'enabled', got %q", task.Annotations[reporting.AnnotationGitHubChecks])
+	}
+	if task.Annotations[reporting.AnnotationSourceSHA] != "deadbeef123" {
+		t.Errorf("Expected source-sha 'deadbeef123', got %q", task.Annotations[reporting.AnnotationSourceSHA])
+	}
+	if task.Annotations[reporting.AnnotationGitHubCheckName] != "My Check" {
+		t.Errorf("Expected check name 'My Check', got %q", task.Annotations[reporting.AnnotationGitHubCheckName])
+	}
+	if task.Annotations[reporting.AnnotationSourceKind] != "pull-request" {
+		t.Errorf("Expected source-kind 'pull-request', got %q", task.Annotations[reporting.AnnotationSourceKind])
+	}
+}
+
+func TestServeHTTP_ChecksAnnotationsSkippedForNonPRWebhook(t *testing.T) {
+	spawner := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "checks-issue-spawner",
+			Namespace: "default",
+			UID:       "checks-issue-uid",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
+					Events: []string{"issues", "pull_request"},
+					Reporting: &kelosv1alpha1.GitHubReporting{
+						Enabled: true,
+						Checks:  &kelosv1alpha1.GitHubChecksReporting{},
+					},
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+				Credentials: kelosv1alpha1.Credentials{
+					Type: "api-key",
+				},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
+					Name: "test-workspace",
+				},
+				PromptTemplate: "{{.Title}}",
+			},
+		},
+	}
+
+	handler := newTestHandler(t, spawner)
+
+	payload := []byte(issuesPayload)
+	sig := signPayload(payload, []byte(testSecret))
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
+	req.Header.Set(GitHubEventHeader, "issues")
+	req.Header.Set(GitHubSignatureHeader, sig)
+	req.Header.Set(GitHubDeliveryHeader, "checks-issue-delivery")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task, got %d", len(taskList.Items))
+	}
+
+	task := taskList.Items[0]
+	// Comment reporting should be enabled
+	if task.Annotations[reporting.AnnotationGitHubReporting] != "enabled" {
+		t.Errorf("Expected github-reporting 'enabled', got %q", task.Annotations[reporting.AnnotationGitHubReporting])
+	}
+	// Checks should NOT be stamped for issue events even when checks is configured
+	if _, ok := task.Annotations[reporting.AnnotationGitHubChecks]; ok {
+		t.Error("Expected no github-checks annotation for issue event")
+	}
+	if _, ok := task.Annotations[reporting.AnnotationSourceSHA]; ok {
+		t.Error("Expected no source-sha annotation for issue event")
+	}
+}
+
+func TestServeHTTP_ChecksOnlyWithoutCommentReporting(t *testing.T) {
+	spawner := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "checks-only-spawner",
+			Namespace: "default",
+			UID:       "checks-only-uid",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
+					Events: []string{"pull_request"},
+					Reporting: &kelosv1alpha1.GitHubReporting{
+						Checks: &kelosv1alpha1.GitHubChecksReporting{},
+					},
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+				Credentials: kelosv1alpha1.Credentials{
+					Type: "api-key",
+				},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
+					Name: "test-workspace",
+				},
+				PromptTemplate: "{{.Title}}",
+			},
+		},
+	}
+
+	handler := newTestHandler(t, spawner)
+
+	payload := []byte(`{
+		"action": "opened",
+		"sender": {"login": "testuser"},
+		"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}},
+		"pull_request": {
+			"number": 10,
+			"title": "Checks Only PR",
+			"body": "",
+			"html_url": "https://github.com/org/repo/pull/10",
+			"state": "open",
+			"head": {"ref": "feature", "sha": "aaa111bbb222"}
+		}
+	}`)
+	sig := signPayload(payload, []byte(testSecret))
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
+	req.Header.Set(GitHubEventHeader, "pull_request")
+	req.Header.Set(GitHubSignatureHeader, sig)
+	req.Header.Set(GitHubDeliveryHeader, "checks-only-delivery")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task, got %d", len(taskList.Items))
+	}
+
+	task := taskList.Items[0]
+	// Comment reporting should NOT be set
+	if _, ok := task.Annotations[reporting.AnnotationGitHubReporting]; ok {
+		t.Error("Expected no github-reporting annotation when Enabled is false")
+	}
+	// Checks should be set
+	if task.Annotations[reporting.AnnotationGitHubChecks] != "enabled" {
+		t.Errorf("Expected github-checks 'enabled', got %q", task.Annotations[reporting.AnnotationGitHubChecks])
+	}
+	if task.Annotations[reporting.AnnotationSourceSHA] != "aaa111bbb222" {
+		t.Errorf("Expected source-sha 'aaa111bbb222', got %q", task.Annotations[reporting.AnnotationSourceSHA])
 	}
 }

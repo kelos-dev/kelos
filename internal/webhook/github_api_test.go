@@ -16,6 +16,7 @@ func TestFetchGitHubPRBranchWithToken(t *testing.T) {
 		statusCode int
 		response   interface{}
 		wantBranch string
+		wantSHA    string
 		wantErr    bool
 	}{
 		{
@@ -24,9 +25,11 @@ func TestFetchGitHubPRBranchWithToken(t *testing.T) {
 			response: map[string]interface{}{
 				"head": map[string]interface{}{
 					"ref": "feature-branch",
+					"sha": "abc123",
 				},
 			},
 			wantBranch: "feature-branch",
+			wantSHA:    "abc123",
 		},
 		{
 			name:       "API error",
@@ -40,9 +43,11 @@ func TestFetchGitHubPRBranchWithToken(t *testing.T) {
 			response: map[string]interface{}{
 				"head": map[string]interface{}{
 					"ref": "",
+					"sha": "",
 				},
 			},
 			wantBranch: "",
+			wantSHA:    "",
 		},
 	}
 
@@ -60,25 +65,28 @@ func TestFetchGitHubPRBranchWithToken(t *testing.T) {
 			}))
 			defer server.Close()
 
-			branch, err := fetchGitHubPRBranchWithToken(context.Background(), server.URL, "test-token")
+			head, err := fetchGitHubPRBranchWithToken(context.Background(), server.URL, "test-token")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("fetchGitHubPRBranchWithToken() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if branch != tt.wantBranch {
-				t.Errorf("fetchGitHubPRBranchWithToken() = %q, want %q", branch, tt.wantBranch)
+			if head.Branch != tt.wantBranch {
+				t.Errorf("fetchGitHubPRBranchWithToken() Branch = %q, want %q", head.Branch, tt.wantBranch)
+			}
+			if head.SHA != tt.wantSHA {
+				t.Errorf("fetchGitHubPRBranchWithToken() SHA = %q, want %q", head.SHA, tt.wantSHA)
 			}
 		})
 	}
 }
 
 func TestFetchGitHubPRBranchWithToken_EmptyToken(t *testing.T) {
-	branch, err := fetchGitHubPRBranchWithToken(context.Background(), "http://unused", "")
+	head, err := fetchGitHubPRBranchWithToken(context.Background(), "http://unused", "")
 	if err != nil {
 		t.Errorf("Expected no error for empty token, got %v", err)
 	}
-	if branch != "" {
-		t.Errorf("Expected empty branch for empty token, got %q", branch)
+	if head.Branch != "" {
+		t.Errorf("Expected empty branch for empty token, got %q", head.Branch)
 	}
 }
 
@@ -104,12 +112,12 @@ func TestFetchGitHubPRBranch_NilResolver(t *testing.T) {
 	defer func() { githubTokenResolver = orig }()
 
 	githubTokenResolver = nil
-	branch, err := fetchGitHubPRBranch(context.Background(), "http://unused")
+	head, err := fetchGitHubPRBranch(context.Background(), "http://unused")
 	if err != nil {
 		t.Fatalf("fetchGitHubPRBranch() error = %v", err)
 	}
-	if branch != "" {
-		t.Errorf("fetchGitHubPRBranch() = %q, want empty for nil resolver", branch)
+	if head.Branch != "" {
+		t.Errorf("fetchGitHubPRBranch() Branch = %q, want empty for nil resolver", head.Branch)
 	}
 }
 
@@ -118,12 +126,12 @@ func TestEnrichGitHubIssueCommentBranch(t *testing.T) {
 	orig := githubPRBranchFetcher
 	defer func() { githubPRBranchFetcher = orig }()
 
-	t.Run("enriches branch from API", func(t *testing.T) {
-		githubPRBranchFetcher = func(ctx context.Context, prAPIURL string) (string, error) {
+	t.Run("enriches branch and SHA from API", func(t *testing.T) {
+		githubPRBranchFetcher = func(ctx context.Context, prAPIURL string) (githubPRHeadInfo, error) {
 			if prAPIURL != "https://api.github.com/repos/org/repo/pulls/42" {
 				t.Errorf("Unexpected prAPIURL: %s", prAPIURL)
 			}
-			return "my-feature-branch", nil
+			return githubPRHeadInfo{Branch: "my-feature-branch", SHA: "abc123sha"}, nil
 		}
 
 		eventData := &GitHubEventData{
@@ -135,12 +143,15 @@ func TestEnrichGitHubIssueCommentBranch(t *testing.T) {
 		if eventData.Branch != "my-feature-branch" {
 			t.Errorf("Expected Branch = %q, got %q", "my-feature-branch", eventData.Branch)
 		}
+		if eventData.HeadSHA != "abc123sha" {
+			t.Errorf("Expected HeadSHA = %q, got %q", "abc123sha", eventData.HeadSHA)
+		}
 	})
 
 	t.Run("no-op when PullRequestAPIURL is empty", func(t *testing.T) {
-		githubPRBranchFetcher = func(ctx context.Context, prAPIURL string) (string, error) {
+		githubPRBranchFetcher = func(ctx context.Context, prAPIURL string) (githubPRHeadInfo, error) {
 			t.Error("Fetcher should not be called when PullRequestAPIURL is empty")
-			return "", nil
+			return githubPRHeadInfo{}, nil
 		}
 
 		eventData := &GitHubEventData{}
@@ -149,11 +160,14 @@ func TestEnrichGitHubIssueCommentBranch(t *testing.T) {
 		if eventData.Branch != "" {
 			t.Errorf("Expected empty Branch, got %q", eventData.Branch)
 		}
+		if eventData.HeadSHA != "" {
+			t.Errorf("Expected empty HeadSHA, got %q", eventData.HeadSHA)
+		}
 	})
 
 	t.Run("handles no credentials gracefully", func(t *testing.T) {
-		githubPRBranchFetcher = func(ctx context.Context, prAPIURL string) (string, error) {
-			return "", nil // simulates no credentials configured
+		githubPRBranchFetcher = func(ctx context.Context, prAPIURL string) (githubPRHeadInfo, error) {
+			return githubPRHeadInfo{}, nil // simulates no credentials configured
 		}
 
 		eventData := &GitHubEventData{
@@ -164,6 +178,9 @@ func TestEnrichGitHubIssueCommentBranch(t *testing.T) {
 
 		if eventData.Branch != "" {
 			t.Errorf("Expected empty Branch when no credentials configured, got %q", eventData.Branch)
+		}
+		if eventData.HeadSHA != "" {
+			t.Errorf("Expected empty HeadSHA when no credentials configured, got %q", eventData.HeadSHA)
 		}
 	})
 }

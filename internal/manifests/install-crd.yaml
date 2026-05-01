@@ -6190,6 +6190,22 @@ spec:
                         description: Reporting configures status reporting back to
                           the originating GitHub issue.
                         properties:
+                          checks:
+                            description: |-
+                              Checks creates GitHub Check Runs for pull request tasks. When nil,
+                              no Check Runs are created. Supported for githubPullRequests and
+                              githubWebhook sources with pull-request event types.
+                            properties:
+                              name:
+                                description: |-
+                                  Name overrides the default Check Run name ("Kelos: <taskspawner-name>").
+                                  This name appears in branch protection rule configuration and the PR
+                                  Checks tab. The default is stable across releases; note that renaming
+                                  the TaskSpawner changes the default and may require updating any branch
+                                  protection rules that reference it.
+                                maxLength: 100
+                                type: string
+                            type: object
                           enabled:
                             description: Enabled posts standard status comments back
                               to the originating GitHub issue or PR.
@@ -6227,6 +6243,9 @@ spec:
                       rule: '!(has(self.commentPolicy) && ((has(self.triggerComment)
                         && size(self.triggerComment) > 0) || (has(self.excludeComments)
                         && size(self.excludeComments) > 0)))'
+                    - message: checks reporting is not supported for githubIssues
+                        source
+                      rule: '!has(self.reporting) || !has(self.reporting.checks)'
                   githubPullRequests:
                     description: GitHubPullRequests discovers pull requests from a
                       GitHub repository.
@@ -6365,6 +6384,22 @@ spec:
                         description: Reporting configures status reporting back to
                           the originating GitHub pull request.
                         properties:
+                          checks:
+                            description: |-
+                              Checks creates GitHub Check Runs for pull request tasks. When nil,
+                              no Check Runs are created. Supported for githubPullRequests and
+                              githubWebhook sources with pull-request event types.
+                            properties:
+                              name:
+                                description: |-
+                                  Name overrides the default Check Run name ("Kelos: <taskspawner-name>").
+                                  This name appears in branch protection rule configuration and the PR
+                                  Checks tab. The default is stable across releases; note that renaming
+                                  the TaskSpawner changes the default and may require updating any branch
+                                  protection rules that reference it.
+                                maxLength: 100
+                                type: string
+                            type: object
                           enabled:
                             description: Enabled posts standard status comments back
                               to the originating GitHub issue or PR.
@@ -6416,6 +6451,7 @@ spec:
                           e.g., "issue_comment", "pull_request_review", "push", "issues"
                         items:
                           type: string
+                        maxItems: 20
                         minItems: 1
                         type: array
                       excludeAuthors:
@@ -6511,6 +6547,22 @@ spec:
                         description: Reporting configures status reporting back to
                           the originating GitHub issue or PR.
                         properties:
+                          checks:
+                            description: |-
+                              Checks creates GitHub Check Runs for pull request tasks. When nil,
+                              no Check Runs are created. Supported for githubPullRequests and
+                              githubWebhook sources with pull-request event types.
+                            properties:
+                              name:
+                                description: |-
+                                  Name overrides the default Check Run name ("Kelos: <taskspawner-name>").
+                                  This name appears in branch protection rule configuration and the PR
+                                  Checks tab. The default is stable across releases; note that renaming
+                                  the TaskSpawner changes the default and may require updating any branch
+                                  protection rules that reference it.
+                                maxLength: 100
+                                type: string
+                            type: object
                           enabled:
                             description: Enabled posts standard status comments back
                               to the originating GitHub issue or PR.
@@ -6524,6 +6576,12 @@ spec:
                     required:
                     - events
                     type: object
+                    x-kubernetes-validations:
+                    - message: checks reporting requires at least one pull-request
+                        event type
+                      rule: '!has(self.reporting) || !has(self.reporting.checks) ||
+                        self.events.exists(e, e in [''pull_request'', ''pull_request_review'',
+                        ''pull_request_review_comment'', ''pull_request_target''])'
                   jira:
                     description: Jira discovers issues from a Jira project.
                     properties:

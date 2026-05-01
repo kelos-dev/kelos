@@ -61,10 +61,38 @@ type Cron struct {
 }
 
 // GitHubReporting configures status reporting back to GitHub.
+// All GitHub sources (issues, pull requests, webhooks) support comment
+// reporting via the Enabled field. The Checks field is supported for
+// githubPullRequests and for githubWebhook sources that include at least
+// one pull-request event type; other sources reject it via CEL validation.
 type GitHubReporting struct {
 	// Enabled posts standard status comments back to the originating GitHub issue or PR.
 	// +optional
 	Enabled bool `json:"enabled,omitempty"`
+
+	// Checks creates GitHub Check Runs for pull request tasks. When nil,
+	// no Check Runs are created. Supported for githubPullRequests and
+	// githubWebhook sources with pull-request event types.
+	// +optional
+	Checks *GitHubChecksReporting `json:"checks,omitempty"`
+}
+
+// GitHubChecksReporting configures GitHub Check Run reporting for pull
+// request tasks, enabling branch protection and merge queue integration.
+// When present, the spawner creates a Check Run when a task starts (status:
+// in_progress) and updates it when the task completes (conclusion:
+// success/failure). The check name appears in the Check Run title, while
+// the task name appears in the summary.
+// Requires the GitHub token to have checks:write permission.
+type GitHubChecksReporting struct {
+	// Name overrides the default Check Run name ("Kelos: <taskspawner-name>").
+	// This name appears in branch protection rule configuration and the PR
+	// Checks tab. The default is stable across releases; note that renaming
+	// the TaskSpawner changes the default and may require updating any branch
+	// protection rules that reference it.
+	// +optional
+	// +kubebuilder:validation:MaxLength=100
+	Name string `json:"name,omitempty"`
 }
 
 // GitHubTeamRef identifies a GitHub team in org/team-slug format.
@@ -109,6 +137,7 @@ type GitHubCommentPolicy struct {
 // fork but issues should be discovered from the upstream repository.
 // If the workspace has a secretRef, it is used for GitHub API authentication.
 // +kubebuilder:validation:XValidation:rule="!(has(self.commentPolicy) && ((has(self.triggerComment) && size(self.triggerComment) > 0) || (has(self.excludeComments) && size(self.excludeComments) > 0)))",message="commentPolicy cannot be used with triggerComment or excludeComments"
+// +kubebuilder:validation:XValidation:rule="!has(self.reporting) || !has(self.reporting.checks)",message="checks reporting is not supported for githubIssues source"
 type GitHubIssues struct {
 	// Repo optionally overrides the repository to poll for issues, in
 	// "owner/repo" format or as a full URL. When empty, the repository
@@ -346,11 +375,13 @@ type Jira struct {
 }
 
 // GitHubWebhook configures webhook-driven task spawning from GitHub events.
+// +kubebuilder:validation:XValidation:rule="!has(self.reporting) || !has(self.reporting.checks) || self.events.exists(e, e in ['pull_request', 'pull_request_review', 'pull_request_review_comment', 'pull_request_target'])",message="checks reporting requires at least one pull-request event type"
 type GitHubWebhook struct {
 	// Events is the list of GitHub event types to listen for.
 	// e.g., "issue_comment", "pull_request_review", "push", "issues"
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=20
 	Events []string `json:"events"`
 
 	// Repository restricts webhooks to a specific repository (owner/repo format).

@@ -17,6 +17,8 @@ func TestReportingAnnotationPredicate_Create(t *testing.T) {
 		want        bool
 	}{
 		{name: "reporting enabled", annotations: map[string]string{reporting.AnnotationGitHubReporting: "enabled"}, want: true},
+		{name: "checks enabled", annotations: map[string]string{reporting.AnnotationGitHubChecks: "enabled"}, want: true},
+		{name: "both enabled", annotations: map[string]string{reporting.AnnotationGitHubReporting: "enabled", reporting.AnnotationGitHubChecks: "enabled"}, want: true},
 		{name: "reporting disabled value", annotations: map[string]string{reporting.AnnotationGitHubReporting: "disabled"}, want: false},
 		{name: "missing annotation", annotations: nil, want: false},
 		{name: "unrelated annotations only", annotations: map[string]string{"other": "value"}, want: false},
@@ -54,6 +56,13 @@ func TestReportingAnnotationPredicate_Update(t *testing.T) {
 			oldPhase:    kelosv1alpha1.TaskPhaseRunning,
 			newPhase:    kelosv1alpha1.TaskPhaseRunning,
 			want:        false,
+		},
+		{
+			name:        "checks only, phase changed",
+			annotations: map[string]string{reporting.AnnotationGitHubChecks: "enabled"},
+			oldPhase:    kelosv1alpha1.TaskPhasePending,
+			newPhase:    kelosv1alpha1.TaskPhaseRunning,
+			want:        true,
 		},
 		{
 			name:        "missing annotation, phase changed",

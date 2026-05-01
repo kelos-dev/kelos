@@ -1307,6 +1307,97 @@ func TestParseGitHubWebhook_IssueCommentOnIssue_NoPullRequestAPIURL(t *testing.T
 	}
 }
 
+func TestParseGitHubWebhook_HeadSHA(t *testing.T) {
+	tests := []struct {
+		name      string
+		eventType string
+		payload   string
+		wantSHA   string
+	}{
+		{
+			name:      "pull_request event extracts head SHA",
+			eventType: "pull_request",
+			payload: `{
+				"action": "opened",
+				"sender": {"login": "testuser"},
+				"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}},
+				"pull_request": {
+					"number": 1,
+					"title": "Test PR",
+					"html_url": "https://github.com/org/repo/pull/1",
+					"state": "open",
+					"head": {"ref": "feature", "sha": "abc123def456"}
+				}
+			}`,
+			wantSHA: "abc123def456",
+		},
+		{
+			name:      "pull_request_review event extracts head SHA",
+			eventType: "pull_request_review",
+			payload: `{
+				"action": "submitted",
+				"sender": {"login": "reviewer"},
+				"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}},
+				"review": {"state": "approved"},
+				"pull_request": {
+					"number": 2,
+					"title": "Review PR",
+					"html_url": "https://github.com/org/repo/pull/2",
+					"state": "open",
+					"head": {"ref": "feature", "sha": "deadbeef0000"}
+				}
+			}`,
+			wantSHA: "deadbeef0000",
+		},
+		{
+			name:      "pull_request_review_comment event extracts head SHA",
+			eventType: "pull_request_review_comment",
+			payload: `{
+				"action": "created",
+				"sender": {"login": "reviewer"},
+				"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}},
+				"comment": {"body": "nit"},
+				"pull_request": {
+					"number": 3,
+					"title": "Comment PR",
+					"html_url": "https://github.com/org/repo/pull/3",
+					"state": "open",
+					"head": {"ref": "feature", "sha": "cafebabe1234"}
+				}
+			}`,
+			wantSHA: "cafebabe1234",
+		},
+		{
+			name:      "issues event has no head SHA",
+			eventType: "issues",
+			payload: `{
+				"action": "opened",
+				"sender": {"login": "testuser"},
+				"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}},
+				"issue": {
+					"number": 5,
+					"title": "Bug",
+					"html_url": "https://github.com/org/repo/issues/5",
+					"state": "open"
+				}
+			}`,
+			wantSHA: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseGitHubWebhook(tt.eventType, []byte(tt.payload))
+			if err != nil {
+				t.Fatalf("ParseGitHubWebhook() error = %v", err)
+			}
+			if got.HeadSHA != tt.wantSHA {
+				t.Errorf("HeadSHA = %q, want %q", got.HeadSHA, tt.wantSHA)
+			}
+		})
+	}
+}
+
 func TestNeedsBranchEnrichment(t *testing.T) {
 	tests := []struct {
 		name      string

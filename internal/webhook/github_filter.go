@@ -42,6 +42,9 @@ type GitHubEventData struct {
 	// yet — the {{.ChangedFiles}} template variable is deferred to a follow-up
 	// to resolve API design questions (slice vs pre-joined string, fetch gating).
 	ChangedFiles []string
+	// HeadSHA is the commit SHA of the pull request head for PR-related events.
+	// Used by checks reporting to associate Check Runs with the correct commit.
+	HeadSHA string
 	// PullRequestAPIURL is the GitHub API URL for the pull request associated
 	// with an issue_comment event. It is extracted from issue.pull_request.url
 	// and used to lazily fetch the PR's head branch when needed.
@@ -126,6 +129,7 @@ func ParseGitHubWebhook(eventType string, payload []byte) (*GitHubEventData, err
 			data.URL = pr.GetHTMLURL()
 			if head := pr.GetHead(); head != nil {
 				data.Branch = head.GetRef()
+				data.HeadSHA = head.GetSHA()
 			}
 		}
 
@@ -158,6 +162,7 @@ func ParseGitHubWebhook(eventType string, payload []byte) (*GitHubEventData, err
 			data.URL = pr.GetHTMLURL()
 			if head := pr.GetHead(); head != nil {
 				data.Branch = head.GetRef()
+				data.HeadSHA = head.GetSHA()
 			}
 		}
 
@@ -172,6 +177,7 @@ func ParseGitHubWebhook(eventType string, payload []byte) (*GitHubEventData, err
 			data.URL = pr.GetHTMLURL()
 			if head := pr.GetHead(); head != nil {
 				data.Branch = head.GetRef()
+				data.HeadSHA = head.GetSHA()
 			}
 		}
 

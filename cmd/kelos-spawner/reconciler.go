@@ -78,28 +78,38 @@ func runOnce(ctx context.Context, cl client.Client, key types.NamespacedName, cf
 		return 0, fmt.Errorf("fetching TaskSpawner after cycle: %w", err)
 	}
 
-	if reportingEnabled(&ts) {
+	if reportingEnabled(&ts) || checksReportingEnabled(&ts) {
 		if cfg.TokenResolver == nil {
 			return 0, fmt.Errorf("GitHub reporting is enabled but no token resolver is configured")
 		}
 		resolve := cfg.TokenResolver
+		tokenFunc := func() string {
+			token, err := resolve(ctx)
+			if err != nil {
+				ctrl.Log.WithName("spawner").Error(err, "Resolving GitHub token for reporting")
+				return ""
+			}
+			return token
+		}
 		// Reporting always uses the direct API base URL (writes bypass the proxy).
 		reporter := &reporting.TaskReporter{
 			Client: cl,
 			Reporter: &reporting.GitHubReporter{
-				Owner: cfg.GitHubOwner,
-				Repo:  cfg.GitHubRepo,
-				TokenFunc: func() string {
-					token, err := resolve(ctx)
-					if err != nil {
-						ctrl.Log.WithName("spawner").Error(err, "Resolving GitHub token for reporting")
-						return ""
-					}
-					return token
-				},
-				BaseURL: cfg.GitHubAPIBaseURL,
-				Client:  cfg.HTTPClient,
+				Owner:     cfg.GitHubOwner,
+				Repo:      cfg.GitHubRepo,
+				TokenFunc: tokenFunc,
+				BaseURL:   cfg.GitHubAPIBaseURL,
+				Client:    cfg.HTTPClient,
 			},
+		}
+		if checksReportingEnabled(&ts) {
+			reporter.ChecksReporter = &reporting.ChecksReporter{
+				Owner:     cfg.GitHubOwner,
+				Repo:      cfg.GitHubRepo,
+				TokenFunc: tokenFunc,
+				BaseURL:   cfg.GitHubAPIBaseURL,
+				Client:    cfg.HTTPClient,
+			}
 		}
 		if err := runReportingCycle(ctx, cl, key, reporter); err != nil {
 			return 0, err

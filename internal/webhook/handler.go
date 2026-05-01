@@ -563,19 +563,30 @@ func (h *WebhookHandler) createTask(ctx context.Context, spawner *v1alpha1.TaskS
 		return fmt.Errorf("failed to build task: %w", err)
 	}
 
-	// Stamp reporting annotations for GitHub webhook sources when reporting is enabled.
+	// Stamp reporting annotations for GitHub webhook sources when reporting is configured.
 	if h.source == GitHubSource && parsed.GitHub != nil && parsed.GitHub.Number > 0 &&
 		spawner.Spec.When.GitHubWebhook != nil &&
-		spawner.Spec.When.GitHubWebhook.Reporting != nil &&
-		spawner.Spec.When.GitHubWebhook.Reporting.Enabled {
-		if task.Annotations == nil {
-			task.Annotations = make(map[string]string)
+		spawner.Spec.When.GitHubWebhook.Reporting != nil {
+		rep := spawner.Spec.When.GitHubWebhook.Reporting
+		if rep.Enabled || rep.Checks != nil {
+			if task.Annotations == nil {
+				task.Annotations = make(map[string]string)
+			}
+			task.Annotations[reporting.AnnotationSourceKind] = webhookSourceKind(eventType, parsed.GitHub)
+			task.Annotations[reporting.AnnotationSourceNumber] = strconv.Itoa(parsed.GitHub.Number)
+			task.Annotations[reporting.AnnotationSourceOwner] = parsed.GitHub.RepositoryOwner
+			task.Annotations[reporting.AnnotationSourceRepo] = parsed.GitHub.RepositoryName
 		}
-		task.Annotations[reporting.AnnotationGitHubReporting] = "enabled"
-		task.Annotations[reporting.AnnotationSourceKind] = webhookSourceKind(eventType, parsed.GitHub)
-		task.Annotations[reporting.AnnotationSourceNumber] = strconv.Itoa(parsed.GitHub.Number)
-		task.Annotations[reporting.AnnotationSourceOwner] = parsed.GitHub.RepositoryOwner
-		task.Annotations[reporting.AnnotationSourceRepo] = parsed.GitHub.RepositoryName
+		if rep.Enabled {
+			task.Annotations[reporting.AnnotationGitHubReporting] = "enabled"
+		}
+		if rep.Checks != nil && parsed.GitHub.HeadSHA != "" {
+			task.Annotations[reporting.AnnotationGitHubChecks] = "enabled"
+			task.Annotations[reporting.AnnotationSourceSHA] = parsed.GitHub.HeadSHA
+			if rep.Checks.Name != "" {
+				task.Annotations[reporting.AnnotationGitHubCheckName] = rep.Checks.Name
+			}
+		}
 	}
 
 	if err := h.client.Create(ctx, task); err != nil {

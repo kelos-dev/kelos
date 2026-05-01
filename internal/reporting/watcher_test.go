@@ -769,6 +769,514 @@ func TestReportTaskStatus_NilCache(t *testing.T) {
 	}
 }
 
+// --- Check Run reporting tests ---
+
+type checkRunRecord struct {
+	method      string
+	name        string
+	headSHA     string
+	status      string
+	conclusion  string
+	outputTitle string
+}
+
+func newTestChecksServer(t *testing.T) (*httptest.Server, *[]checkRunRecord) {
+	t.Helper()
+	var (
+		mu      sync.Mutex
+		records []checkRunRecord
+		nextID  int64 = 5000
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		switch r.Method {
+		case http.MethodPost:
+			var body createCheckRunRequest
+			json.NewDecoder(r.Body).Decode(&body)
+			nextID++
+			records = append(records, checkRunRecord{
+				method:  "create",
+				name:    body.Name,
+				headSHA: body.HeadSHA,
+				status:  body.Status,
+			})
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(checkRunResponse{ID: nextID})
+		case http.MethodPatch:
+			var body updateCheckRunRequest
+			json.NewDecoder(r.Body).Decode(&body)
+			outputTitle := ""
+			if body.Output != nil {
+				outputTitle = body.Output.Title
+			}
+			records = append(records, checkRunRecord{
+				method:      "update",
+				status:      body.Status,
+				conclusion:  body.Conclusion,
+				outputTitle: outputTitle,
+			})
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(checkRunResponse{})
+		}
+	}))
+
+	return server, &records
+}
+
+func TestReportTaskStatus_CreatesCheckRunOnPending(t *testing.T) {
+	server, records := newTestChecksServer(t)
+	defer server.Close()
+
+	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, map[string]string{
+		AnnotationGitHubChecks:    "enabled",
+		AnnotationSourceSHA:       "abc123def",
+		AnnotationGitHubCheckName: "Kelos: my-spawner",
+	})
+	task.Labels = map[string]string{"kelos.dev/taskspawner": "my-spawner"}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		WithObjects(task).
+		Build()
+
+	checksReporter := &ChecksReporter{
+		Owner:   "owner",
+		Repo:    "repo",
+		Token:   "token",
+		BaseURL: server.URL,
+	}
+
+	tr := &TaskReporter{
+		Client:         cl,
+		Reporter:       &GitHubReporter{Owner: "o", Repo: "r", Token: "t"},
+		ChecksReporter: checksReporter,
+	}
+
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if len(*records) != 1 {
+		t.Fatalf("Expected 1 check run API call, got %d", len(*records))
+	}
+	if (*records)[0].method != "create" {
+		t.Errorf("Expected create, got %s", (*records)[0].method)
+	}
+	if (*records)[0].name != "Kelos: my-spawner" {
+		t.Errorf("Expected name %q, got %q", "Kelos: my-spawner", (*records)[0].name)
+	}
+	if (*records)[0].headSHA != "abc123def" {
+		t.Errorf("Expected headSHA %q, got %q", "abc123def", (*records)[0].headSHA)
+	}
+	if (*records)[0].status != "in_progress" {
+		t.Errorf("Expected status %q, got %q", "in_progress", (*records)[0].status)
+	}
+
+	var updated kelosv1alpha1.Task
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
+		t.Fatalf("Getting updated task: %v", err)
+	}
+	if updated.Annotations[AnnotationGitHubCheckReportPhase] != "in_progress" {
+		t.Errorf("Expected check report phase 'in_progress', got %q", updated.Annotations[AnnotationGitHubCheckReportPhase])
+	}
+	if updated.Annotations[AnnotationGitHubCheckRunID] == "" {
+		t.Error("Expected check run ID to be set")
+	}
+}
+
+func TestReportTaskStatus_UpdatesCheckRunOnSucceeded(t *testing.T) {
+	server, records := newTestChecksServer(t)
+	defer server.Close()
+
+	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhaseSucceeded, map[string]string{
+		AnnotationGitHubChecks:           "enabled",
+		AnnotationSourceSHA:              "abc123def",
+		AnnotationGitHubCheckName:        "Kelos: my-spawner",
+		AnnotationGitHubCheckRunID:       "5001",
+		AnnotationGitHubCheckReportPhase: "in_progress",
+	})
+	task.Labels = map[string]string{"kelos.dev/taskspawner": "my-spawner"}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		WithObjects(task).
+		Build()
+
+	checksReporter := &ChecksReporter{
+		Owner:   "owner",
+		Repo:    "repo",
+		Token:   "token",
+		BaseURL: server.URL,
+	}
+
+	tr := &TaskReporter{
+		Client:         cl,
+		Reporter:       &GitHubReporter{Owner: "o", Repo: "r", Token: "t"},
+		ChecksReporter: checksReporter,
+	}
+
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if len(*records) != 1 {
+		t.Fatalf("Expected 1 API call, got %d", len(*records))
+	}
+	if (*records)[0].method != "update" {
+		t.Errorf("Expected update, got %s", (*records)[0].method)
+	}
+	if (*records)[0].status != "completed" {
+		t.Errorf("Expected status 'completed', got %q", (*records)[0].status)
+	}
+	if (*records)[0].conclusion != "success" {
+		t.Errorf("Expected conclusion 'success', got %q", (*records)[0].conclusion)
+	}
+
+	var updated kelosv1alpha1.Task
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
+		t.Fatalf("Getting updated task: %v", err)
+	}
+	if updated.Annotations[AnnotationGitHubCheckReportPhase] != "succeeded" {
+		t.Errorf("Expected check report phase 'succeeded', got %q", updated.Annotations[AnnotationGitHubCheckReportPhase])
+	}
+}
+
+func TestReportTaskStatus_UpdatesCheckRunOnFailed(t *testing.T) {
+	server, records := newTestChecksServer(t)
+	defer server.Close()
+
+	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhaseFailed, map[string]string{
+		AnnotationGitHubChecks:           "enabled",
+		AnnotationSourceSHA:              "abc123def",
+		AnnotationGitHubCheckName:        "Kelos: my-spawner",
+		AnnotationGitHubCheckRunID:       "5001",
+		AnnotationGitHubCheckReportPhase: "in_progress",
+	})
+	task.Labels = map[string]string{"kelos.dev/taskspawner": "my-spawner"}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		WithObjects(task).
+		Build()
+
+	checksReporter := &ChecksReporter{
+		Owner:   "owner",
+		Repo:    "repo",
+		Token:   "token",
+		BaseURL: server.URL,
+	}
+
+	tr := &TaskReporter{
+		Client:         cl,
+		Reporter:       &GitHubReporter{Owner: "o", Repo: "r", Token: "t"},
+		ChecksReporter: checksReporter,
+	}
+
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if len(*records) != 1 {
+		t.Fatalf("Expected 1 API call, got %d", len(*records))
+	}
+	if (*records)[0].conclusion != "failure" {
+		t.Errorf("Expected conclusion 'failure', got %q", (*records)[0].conclusion)
+	}
+
+	var updated kelosv1alpha1.Task
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
+		t.Fatalf("Getting updated task: %v", err)
+	}
+	if updated.Annotations[AnnotationGitHubCheckReportPhase] != "failed" {
+		t.Errorf("Expected check report phase 'failed', got %q", updated.Annotations[AnnotationGitHubCheckReportPhase])
+	}
+}
+
+func TestReportTaskStatus_SkipsDuplicateCheckReport(t *testing.T) {
+	server, records := newTestChecksServer(t)
+	defer server.Close()
+
+	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, map[string]string{
+		AnnotationGitHubChecks:           "enabled",
+		AnnotationSourceSHA:              "abc123def",
+		AnnotationGitHubCheckRunID:       "5001",
+		AnnotationGitHubCheckReportPhase: "in_progress",
+	})
+
+	cl := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		WithObjects(task).
+		Build()
+
+	checksReporter := &ChecksReporter{
+		Owner:   "owner",
+		Repo:    "repo",
+		Token:   "token",
+		BaseURL: server.URL,
+	}
+
+	tr := &TaskReporter{
+		Client:         cl,
+		Reporter:       &GitHubReporter{Owner: "o", Repo: "r", Token: "t"},
+		ChecksReporter: checksReporter,
+	}
+
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if len(*records) != 0 {
+		t.Errorf("Expected 0 API calls (already reported), got %d", len(*records))
+	}
+}
+
+func TestReportTaskStatus_ChecksSkipsWithoutSHA(t *testing.T) {
+	server, records := newTestChecksServer(t)
+	defer server.Close()
+
+	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, map[string]string{
+		AnnotationGitHubChecks: "enabled",
+		// No AnnotationSourceSHA
+	})
+
+	cl := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		WithObjects(task).
+		Build()
+
+	checksReporter := &ChecksReporter{
+		Owner:   "owner",
+		Repo:    "repo",
+		Token:   "token",
+		BaseURL: server.URL,
+	}
+
+	tr := &TaskReporter{
+		Client:         cl,
+		Reporter:       &GitHubReporter{Owner: "o", Repo: "r", Token: "t"},
+		ChecksReporter: checksReporter,
+	}
+
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if len(*records) != 0 {
+		t.Errorf("Expected 0 API calls (no SHA), got %d", len(*records))
+	}
+}
+
+func TestReportTaskStatus_BothCommentAndChecks(t *testing.T) {
+	commentServer, commentRecords := newTestServer(t)
+	defer commentServer.Close()
+
+	checksServer, checksRecords := newTestChecksServer(t)
+	defer checksServer.Close()
+
+	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, map[string]string{
+		AnnotationGitHubReporting: "enabled",
+		AnnotationGitHubChecks:    "enabled",
+		AnnotationSourceNumber:    "42",
+		AnnotationSourceKind:      "pull-request",
+		AnnotationSourceSHA:       "abc123def",
+		AnnotationGitHubCheckName: "Kelos: my-spawner",
+	})
+	task.Labels = map[string]string{"kelos.dev/taskspawner": "my-spawner"}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		WithObjects(task).
+		Build()
+
+	tr := &TaskReporter{
+		Client: cl,
+		Reporter: &GitHubReporter{
+			Owner:   "owner",
+			Repo:    "repo",
+			Token:   "token",
+			BaseURL: commentServer.URL,
+		},
+		ChecksReporter: &ChecksReporter{
+			Owner:   "owner",
+			Repo:    "repo",
+			Token:   "token",
+			BaseURL: checksServer.URL,
+		},
+	}
+
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if len(*commentRecords) != 1 {
+		t.Errorf("Expected 1 comment API call, got %d", len(*commentRecords))
+	}
+	if len(*checksRecords) != 1 {
+		t.Errorf("Expected 1 checks API call, got %d", len(*checksRecords))
+	}
+}
+
+func TestReportTaskStatus_ChecksFallbackName(t *testing.T) {
+	server, records := newTestChecksServer(t)
+	defer server.Close()
+
+	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, map[string]string{
+		AnnotationGitHubChecks: "enabled",
+		AnnotationSourceSHA:    "abc123def",
+		// No AnnotationGitHubCheckName — should fall back to label
+	})
+	task.Labels = map[string]string{"kelos.dev/taskspawner": "fallback-spawner"}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		WithObjects(task).
+		Build()
+
+	tr := &TaskReporter{
+		Client:         cl,
+		Reporter:       &GitHubReporter{Owner: "o", Repo: "r", Token: "t"},
+		ChecksReporter: &ChecksReporter{Owner: "o", Repo: "r", Token: "t", BaseURL: server.URL},
+	}
+
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if len(*records) != 1 {
+		t.Fatalf("Expected 1 API call, got %d", len(*records))
+	}
+	if (*records)[0].name != "Kelos: fallback-spawner" {
+		t.Errorf("Expected fallback name %q, got %q", "Kelos: fallback-spawner", (*records)[0].name)
+	}
+}
+
+func TestReportTaskStatus_CheckRunCachePopulatedAfterCreate(t *testing.T) {
+	server, _ := newTestChecksServer(t)
+	defer server.Close()
+
+	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, map[string]string{
+		AnnotationGitHubChecks:    "enabled",
+		AnnotationSourceSHA:       "abc123def",
+		AnnotationGitHubCheckName: "Kelos: my-spawner",
+	})
+	task.UID = types.UID("uid-check-create")
+
+	cache := NewReportStateCache()
+	tr := &TaskReporter{
+		Client:         fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(task).Build(),
+		Reporter:       &GitHubReporter{Owner: "o", Repo: "r", Token: "t"},
+		ChecksReporter: &ChecksReporter{Owner: "o", Repo: "r", Token: "t", BaseURL: server.URL},
+		Cache:          cache,
+	}
+
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	got, ok := cache.load(task.UID)
+	if !ok {
+		t.Fatal("Expected cache entry after successful check run report")
+	}
+	if got.checkPhase != "in_progress" {
+		t.Errorf("Expected cached check phase 'in_progress', got %q", got.checkPhase)
+	}
+	if got.checkRunID == 0 {
+		t.Error("Expected non-zero cached check run ID")
+	}
+}
+
+// TestReportTaskStatus_CheckRunCacheFallbackUpdatesExisting exercises the
+// cache-stale read race for check runs: the in-memory Task lacks the
+// check-run-ID annotation but the in-memory cache still has it, so the
+// reporter must update the existing check run instead of creating a new one.
+func TestReportTaskStatus_CheckRunCacheFallbackUpdatesExisting(t *testing.T) {
+	server, records := newTestChecksServer(t)
+	defer server.Close()
+
+	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhaseSucceeded, map[string]string{
+		AnnotationGitHubChecks:    "enabled",
+		AnnotationSourceSHA:       "abc123def",
+		AnnotationGitHubCheckName: "Kelos: my-spawner",
+	})
+	task.UID = types.UID("uid-check-fallback")
+
+	cache := NewReportStateCache()
+	cache.storeCheckRun(task.UID, 9001, "in_progress")
+
+	tr := &TaskReporter{
+		Client:         fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(task).Build(),
+		Reporter:       &GitHubReporter{Owner: "o", Repo: "r", Token: "t"},
+		ChecksReporter: &ChecksReporter{Owner: "o", Repo: "r", Token: "t", BaseURL: server.URL},
+		Cache:          cache,
+	}
+
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if len(*records) != 1 {
+		t.Fatalf("Expected 1 API call, got %d", len(*records))
+	}
+	if (*records)[0].method != "update" {
+		t.Errorf("Expected update via cached check run ID, got %s", (*records)[0].method)
+	}
+}
+
+// TestReportTaskStatus_CheckRunCacheShortCircuitsDuplicate simulates two
+// reconciles firing for the same check run phase before the annotation Update
+// propagates. The first call creates the check run; the second must not create
+// a duplicate.
+func TestReportTaskStatus_CheckRunCacheShortCircuitsDuplicate(t *testing.T) {
+	server, records := newTestChecksServer(t)
+	defer server.Close()
+
+	annotations := map[string]string{
+		AnnotationGitHubChecks:    "enabled",
+		AnnotationSourceSHA:       "abc123def",
+		AnnotationGitHubCheckName: "Kelos: my-spawner",
+	}
+
+	first := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, annotations)
+	first.UID = types.UID("uid-check-shortcircuit")
+	first.ResourceVersion = ""
+
+	cl := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(first).Build()
+	cache := NewReportStateCache()
+	tr := &TaskReporter{
+		Client:         cl,
+		Reporter:       &GitHubReporter{Owner: "o", Repo: "r", Token: "t"},
+		ChecksReporter: &ChecksReporter{Owner: "o", Repo: "r", Token: "t", BaseURL: server.URL},
+		Cache:          cache,
+	}
+
+	if err := tr.ReportTaskStatus(context.Background(), first); err != nil {
+		t.Fatalf("First report failed: %v", err)
+	}
+
+	// Simulate a stale cached read: a second copy of the Task that has not yet
+	// observed the annotation Update from the first reconcile.
+	stale := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, map[string]string{
+		AnnotationGitHubChecks:    "enabled",
+		AnnotationSourceSHA:       "abc123def",
+		AnnotationGitHubCheckName: "Kelos: my-spawner",
+	})
+	stale.UID = types.UID("uid-check-shortcircuit")
+
+	if err := tr.ReportTaskStatus(context.Background(), stale); err != nil {
+		t.Fatalf("Second report failed: %v", err)
+	}
+
+	if len(*records) != 1 {
+		t.Fatalf("Expected exactly 1 GitHub API call, got %d (%+v)", len(*records), *records)
+	}
+	if (*records)[0].method != "create" {
+		t.Errorf("Expected the single call to be a create, got %s", (*records)[0].method)
+	}
+}
+
 func TestReportTaskStatus_NilAnnotations(t *testing.T) {
 	task := &kelosv1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{

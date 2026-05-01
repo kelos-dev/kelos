@@ -2124,6 +2124,177 @@ func TestReportingEnabled_Jira(t *testing.T) {
 	}
 }
 
+func TestChecksReportingEnabled_PREnabled(t *testing.T) {
+	ts := &kelosv1alpha1.TaskSpawner{
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
+					Reporting: &kelosv1alpha1.GitHubReporting{Checks: &kelosv1alpha1.GitHubChecksReporting{}},
+				},
+			},
+		},
+	}
+	if !checksReportingEnabled(ts) {
+		t.Error("Expected checks reporting to be enabled")
+	}
+}
+
+func TestChecksReportingEnabled_PRDisabled(t *testing.T) {
+	ts := &kelosv1alpha1.TaskSpawner{
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
+					Reporting: &kelosv1alpha1.GitHubReporting{Enabled: true},
+				},
+			},
+		},
+	}
+	if checksReportingEnabled(ts) {
+		t.Error("Expected checks reporting to be disabled when only comment reporting is enabled")
+	}
+}
+
+func TestChecksReportingEnabled_Issues(t *testing.T) {
+	ts := &kelosv1alpha1.TaskSpawner{
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubIssues: &kelosv1alpha1.GitHubIssues{
+					Reporting: &kelosv1alpha1.GitHubReporting{Enabled: true},
+				},
+			},
+		},
+	}
+	if checksReportingEnabled(ts) {
+		t.Error("Expected checks reporting to be disabled for issues source")
+	}
+}
+
+func TestChecksReportingEnabled_NoReportingField(t *testing.T) {
+	ts := &kelosv1alpha1.TaskSpawner{
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{},
+			},
+		},
+	}
+	if checksReportingEnabled(ts) {
+		t.Error("Expected checks reporting to be disabled when Reporting is nil")
+	}
+}
+
+func TestSourceAnnotations_ChecksEnabled(t *testing.T) {
+	ts := &kelosv1alpha1.TaskSpawner{
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
+					Reporting: &kelosv1alpha1.GitHubReporting{
+						Checks: &kelosv1alpha1.GitHubChecksReporting{Name: "My Custom Check"},
+					},
+				},
+			},
+		},
+	}
+
+	item := source.WorkItem{
+		ID:      "10",
+		Number:  10,
+		Kind:    "PR",
+		HeadSHA: "deadbeef123",
+	}
+
+	annotations := sourceAnnotations(ts, item)
+	if annotations[reporting.AnnotationGitHubChecks] != "enabled" {
+		t.Errorf("Expected github-checks 'enabled', got %q", annotations[reporting.AnnotationGitHubChecks])
+	}
+	if annotations[reporting.AnnotationSourceSHA] != "deadbeef123" {
+		t.Errorf("Expected source-sha 'deadbeef123', got %q", annotations[reporting.AnnotationSourceSHA])
+	}
+	if annotations[reporting.AnnotationGitHubCheckName] != "My Custom Check" {
+		t.Errorf("Expected check name 'My Custom Check', got %q", annotations[reporting.AnnotationGitHubCheckName])
+	}
+}
+
+func TestSourceAnnotations_ChecksAndCommentsEnabled(t *testing.T) {
+	ts := &kelosv1alpha1.TaskSpawner{
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
+					Reporting: &kelosv1alpha1.GitHubReporting{
+						Enabled: true,
+						Checks:  &kelosv1alpha1.GitHubChecksReporting{},
+					},
+				},
+			},
+		},
+	}
+
+	item := source.WorkItem{
+		ID:      "5",
+		Number:  5,
+		Kind:    "PR",
+		HeadSHA: "abc123",
+	}
+
+	annotations := sourceAnnotations(ts, item)
+	if annotations[reporting.AnnotationGitHubReporting] != "enabled" {
+		t.Errorf("Expected github-reporting 'enabled', got %q", annotations[reporting.AnnotationGitHubReporting])
+	}
+	if annotations[reporting.AnnotationGitHubChecks] != "enabled" {
+		t.Errorf("Expected github-checks 'enabled', got %q", annotations[reporting.AnnotationGitHubChecks])
+	}
+}
+
+func TestSourceAnnotations_ChecksNoSHA(t *testing.T) {
+	ts := &kelosv1alpha1.TaskSpawner{
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
+					Reporting: &kelosv1alpha1.GitHubReporting{Checks: &kelosv1alpha1.GitHubChecksReporting{}},
+				},
+			},
+		},
+	}
+
+	item := source.WorkItem{
+		ID:     "10",
+		Number: 10,
+		Kind:   "PR",
+		// HeadSHA intentionally empty
+	}
+
+	annotations := sourceAnnotations(ts, item)
+	if annotations[reporting.AnnotationGitHubChecks] != "enabled" {
+		t.Errorf("Expected github-checks 'enabled', got %q", annotations[reporting.AnnotationGitHubChecks])
+	}
+	if _, ok := annotations[reporting.AnnotationSourceSHA]; ok {
+		t.Error("Expected no source-sha annotation when HeadSHA is empty")
+	}
+}
+
+func TestSourceAnnotations_ChecksNoCustomName(t *testing.T) {
+	ts := &kelosv1alpha1.TaskSpawner{
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
+					Reporting: &kelosv1alpha1.GitHubReporting{Checks: &kelosv1alpha1.GitHubChecksReporting{}},
+				},
+			},
+		},
+	}
+
+	item := source.WorkItem{
+		ID:      "10",
+		Number:  10,
+		Kind:    "PR",
+		HeadSHA: "sha",
+	}
+
+	annotations := sourceAnnotations(ts, item)
+	if _, ok := annotations[reporting.AnnotationGitHubCheckName]; ok {
+		t.Error("Expected no check-name annotation when CheckName is not configured")
+	}
+}
+
 func TestRunReportingCycle_ReportsForAnnotatedTasks(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 	ts.Spec.When.GitHubIssues.Reporting = &kelosv1alpha1.GitHubReporting{Enabled: true}

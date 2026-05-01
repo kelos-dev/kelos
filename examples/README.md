@@ -32,6 +32,7 @@ Production-tested TaskSpawner patterns for common AI agent workflows. Most refer
 | Example | Description |
 |---------|-------------|
 | [14-dependency-review-spawner](14-dependency-review-spawner/) | Auto-review Renovate/Dependabot PRs: assess risk, auto-approve safe bumps, escalate risky ones |
+| [15-pr-risk-assessment-spawner](15-pr-risk-assessment-spawner/) | Rate every PR on a 5-point risk scale, auto-approve low-risk, flag medium+ for humans |
 
 ## How to Use
 

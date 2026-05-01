@@ -119,6 +119,7 @@ jobs:
           kind load docker-image ghcr.io/kelos-dev/gemini:e2e
           kind load docker-image ghcr.io/kelos-dev/opencode:e2e
           kind load docker-image ghcr.io/kelos-dev/cursor:e2e
+          kind load docker-image ghcr.io/kelos-dev/kelos-slack-server:e2e
 
       - name: Build CLI
         run: make build WHAT=cmd/kelos

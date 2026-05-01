@@ -4,13 +4,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/google/go-github/v66/github"
+	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/kelos-dev/kelos/api/v1alpha1"
 	"github.com/kelos-dev/kelos/internal/source"
 )
+
+var filterLog = ctrl.Log.WithName("webhook-filter")
 
 // GitHubEventData holds parsed GitHub event information for template rendering.
 type GitHubEventData struct {
@@ -364,6 +368,50 @@ func matchesFilter(filter v1alpha1.GitHubWebhookFilter, eventData *GitHubEventDa
 			}
 		}
 
+		// BodyPattern filter
+		if filter.BodyPattern != "" {
+			var body string
+			if issueEvent, ok := e.(*github.IssuesEvent); ok {
+				if issue := issueEvent.GetIssue(); issue != nil {
+					body = issue.GetBody()
+				}
+			} else if commentEvent, ok := e.(*github.IssueCommentEvent); ok {
+				if comment := commentEvent.GetComment(); comment != nil {
+					body = comment.GetBody()
+				}
+			}
+			matched, err := matchesPattern(body, filter.BodyPattern)
+			if err != nil {
+				filterLog.Error(err, "Invalid bodyPattern regex, rejecting event", "pattern", filter.BodyPattern)
+				return false
+			}
+			if !matched {
+				return false
+			}
+		}
+
+		// ExcludeBodyPatterns filter (body must not match any pattern)
+		if len(filter.ExcludeBodyPatterns) > 0 {
+			var body string
+			if issueEvent, ok := e.(*github.IssuesEvent); ok {
+				if issue := issueEvent.GetIssue(); issue != nil {
+					body = issue.GetBody()
+				}
+			} else if commentEvent, ok := e.(*github.IssueCommentEvent); ok {
+				if comment := commentEvent.GetComment(); comment != nil {
+					body = comment.GetBody()
+				}
+			}
+			matched, err := matchesAnyPattern(body, filter.ExcludeBodyPatterns)
+			if err != nil {
+				filterLog.Error(err, "Invalid excludeBodyPatterns regex, rejecting event")
+				return false
+			}
+			if matched {
+				return false
+			}
+		}
+
 	case *github.PullRequestEvent, *github.PullRequestReviewEvent, *github.PullRequestReviewCommentEvent:
 		var pr *github.PullRequest
 		switch event := e.(type) {
@@ -432,10 +480,81 @@ func matchesFilter(filter v1alpha1.GitHubWebhookFilter, eventData *GitHubEventDa
 					}
 				}
 			}
+
+			// BodyPattern filter for PRs and reviews
+			if filter.BodyPattern != "" {
+				var body string
+				if _, ok := e.(*github.PullRequestEvent); ok {
+					body = pr.GetBody()
+				} else if reviewEvent, ok := e.(*github.PullRequestReviewEvent); ok {
+					if review := reviewEvent.GetReview(); review != nil {
+						body = review.GetBody()
+					}
+				} else if commentEvent, ok := e.(*github.PullRequestReviewCommentEvent); ok {
+					if comment := commentEvent.GetComment(); comment != nil {
+						body = comment.GetBody()
+					}
+				}
+				matched, err := matchesPattern(body, filter.BodyPattern)
+				if err != nil {
+					filterLog.Error(err, "Invalid bodyPattern regex, rejecting event", "pattern", filter.BodyPattern)
+					return false
+				}
+				if !matched {
+					return false
+				}
+			}
+
+			// ExcludeBodyPatterns filter for PRs and reviews
+			if len(filter.ExcludeBodyPatterns) > 0 {
+				var body string
+				if _, ok := e.(*github.PullRequestEvent); ok {
+					body = pr.GetBody()
+				} else if reviewEvent, ok := e.(*github.PullRequestReviewEvent); ok {
+					if review := reviewEvent.GetReview(); review != nil {
+						body = review.GetBody()
+					}
+				} else if commentEvent, ok := e.(*github.PullRequestReviewCommentEvent); ok {
+					if comment := commentEvent.GetComment(); comment != nil {
+						body = comment.GetBody()
+					}
+				}
+				matched, err := matchesAnyPattern(body, filter.ExcludeBodyPatterns)
+				if err != nil {
+					filterLog.Error(err, "Invalid excludeBodyPatterns regex, rejecting event")
+					return false
+				}
+				if matched {
+					return false
+				}
+			}
 		}
 	}
 
 	return true
+}
+
+// matchesPattern returns true if body matches the given regular expression.
+func matchesPattern(body string, pattern string) (bool, error) {
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return false, fmt.Errorf("Invalid body pattern %q: %w", pattern, err)
+	}
+	return re.MatchString(body), nil
+}
+
+// matchesAnyPattern returns true if body matches at least one of the regular expressions.
+func matchesAnyPattern(body string, patterns []string) (bool, error) {
+	for _, p := range patterns {
+		re, err := regexp.Compile(p)
+		if err != nil {
+			return false, fmt.Errorf("Invalid body pattern %q: %w", p, err)
+		}
+		if re.MatchString(body) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // needsBranchEnrichment returns true if the event is an issue_comment on a pull

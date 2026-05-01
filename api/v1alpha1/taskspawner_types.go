@@ -385,9 +385,31 @@ type GitHubWebhookFilter struct {
 	// +optional
 	Action string `json:"action,omitempty"`
 
-	// BodyContains filters by substring match on the comment/review body.
+	// BodyContains filters by case-sensitive substring match on the
+	// comment/review body.
+	// Deprecated: use BodyPattern instead, which supports regex.
 	// +optional
+	// +kubebuilder:validation:MaxLength=1024
 	BodyContains string `json:"bodyContains,omitempty"`
+
+	// BodyPattern requires the comment/review body to match the given
+	// regular expression. The pattern is matched against the full body
+	// using Go regexp syntax (re2).
+	// When both BodyPattern and ExcludeBodyPatterns are set, the body must
+	// match BodyPattern AND must not match any ExcludeBodyPatterns entry.
+	// +optional
+	// +kubebuilder:validation:MaxLength=1024
+	BodyPattern string `json:"bodyPattern,omitempty"`
+
+	// ExcludeBodyPatterns excludes events whose comment/review body matches
+	// any of the given regular expressions. Each entry is checked
+	// independently — the event is excluded if the body matches ANY entry.
+	// Patterns use Go regexp syntax (re2).
+	// +optional
+	// +kubebuilder:validation:MaxItems=10
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=1024
+	ExcludeBodyPatterns []string `json:"excludeBodyPatterns,omitempty"`
 
 	// Labels requires the issue/PR to have all of these labels.
 	// +optional

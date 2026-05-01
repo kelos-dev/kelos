@@ -33,6 +33,7 @@ spec:
           draft: false
       reporting:
         enabled: true
+        checks: {}
   maxConcurrency: 2
   taskTemplate:
     workspaceRef:

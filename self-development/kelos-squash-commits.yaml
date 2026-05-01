@@ -22,6 +22,7 @@ spec:
           author: gjkim42
       reporting:
         enabled: true
+        checks: {}
   maxConcurrency: 1
   taskTemplate:
     workspaceRef:

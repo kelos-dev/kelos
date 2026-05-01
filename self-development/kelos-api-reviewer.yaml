@@ -67,6 +67,7 @@ spec:
           author: kelos-bot[bot]
       reporting:
         enabled: true
+        checks: {}
   maxConcurrency: 3
   taskTemplate:
     workspaceRef:

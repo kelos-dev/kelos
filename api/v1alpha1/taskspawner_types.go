@@ -375,6 +375,14 @@ type GitHubWebhook struct {
 	Reporting *GitHubReporting `json:"reporting,omitempty"`
 }
 
+// CommentOn values scope issue_comment-event filters to a specific subject.
+const (
+	// CommentOnIssue matches issue_comment events posted on plain issues.
+	CommentOnIssue = "Issue"
+	// CommentOnPullRequest matches issue_comment events posted on pull requests.
+	CommentOnPullRequest = "PullRequest"
+)
+
 // GitHubWebhookFilter defines filtering criteria for GitHub webhook events.
 type GitHubWebhookFilter struct {
 	// Event is the GitHub event type this filter applies to.
@@ -430,6 +438,14 @@ type GitHubWebhookFilter struct {
 	// Draft filters PRs by draft status. nil = don't filter.
 	// +optional
 	Draft *bool `json:"draft,omitempty"`
+
+	// CommentOn scopes issue_comment-event filters to comments posted on a
+	// specific subject. GitHub fires issue_comment for both plain issues
+	// and pull requests; "Issue" matches only the former, "PullRequest"
+	// only the latter. Empty matches both. Ignored for other events.
+	// +optional
+	// +kubebuilder:validation:Enum=Issue;PullRequest
+	CommentOn string `json:"commentOn,omitempty"`
 
 	// Author filters by the event sender's username.
 	// +optional

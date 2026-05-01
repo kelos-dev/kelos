@@ -553,6 +553,133 @@ func TestMatchesGitHubEvent_PullRequestDraftFilter(t *testing.T) {
 	}
 }
 
+func TestMatchesGitHubEvent_IssueCommentCommentOnFilter(t *testing.T) {
+	prCommentPayload := `{
+		"action": "created",
+		"sender": {"login": "user"},
+		"issue": {
+			"number": 1,
+			"title": "Test PR",
+			"state": "open",
+			"html_url": "https://github.com/owner/repo/pull/1",
+			"pull_request": {
+				"url": "https://api.github.com/repos/owner/repo/pulls/1",
+				"html_url": "https://github.com/owner/repo/pull/1"
+			}
+		},
+		"comment": {"body": "/kelos pick-up"}
+	}`
+	issueCommentPayload := `{
+		"action": "created",
+		"sender": {"login": "user"},
+		"issue": {
+			"number": 2,
+			"title": "Test Issue",
+			"state": "open",
+			"html_url": "https://github.com/owner/repo/issues/2"
+		},
+		"comment": {"body": "/kelos pick-up"}
+	}`
+
+	tests := []struct {
+		name      string
+		commentOn string
+		payload   string
+		want      bool
+	}{
+		{
+			name:      "Issue scope matches plain issue comment",
+			commentOn: v1alpha1.CommentOnIssue,
+			payload:   issueCommentPayload,
+			want:      true,
+		},
+		{
+			name:      "Issue scope rejects PR comment",
+			commentOn: v1alpha1.CommentOnIssue,
+			payload:   prCommentPayload,
+			want:      false,
+		},
+		{
+			name:      "PullRequest scope matches PR comment",
+			commentOn: v1alpha1.CommentOnPullRequest,
+			payload:   prCommentPayload,
+			want:      true,
+		},
+		{
+			name:      "PullRequest scope rejects plain issue comment",
+			commentOn: v1alpha1.CommentOnPullRequest,
+			payload:   issueCommentPayload,
+			want:      false,
+		},
+		{
+			name:      "Empty CommentOn matches plain issue comment",
+			commentOn: "",
+			payload:   issueCommentPayload,
+			want:      true,
+		},
+		{
+			name:      "Empty CommentOn matches PR comment",
+			commentOn: "",
+			payload:   prCommentPayload,
+			want:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spawner := &v1alpha1.GitHubWebhook{
+				Events: []string{"issue_comment"},
+				Filters: []v1alpha1.GitHubWebhookFilter{
+					{
+						Event:     "issue_comment",
+						CommentOn: tt.commentOn,
+					},
+				},
+			}
+			got, err := parseAndMatch(t, spawner, "issue_comment", []byte(tt.payload))
+			if err != nil {
+				t.Fatalf("MatchesGitHubEvent() error = %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("MatchesGitHubEvent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestMatchesGitHubEvent_CommentOnIgnoredOnIssuesEvent verifies that the
+// CommentOn filter is silently ignored on non-issue_comment events. The
+// filter is meaningful only for issue_comment, which is ambiguous between
+// issues and PRs; other events are already unambiguous.
+func TestMatchesGitHubEvent_CommentOnIgnoredOnIssuesEvent(t *testing.T) {
+	spawner := &v1alpha1.GitHubWebhook{
+		Events: []string{"issues"},
+		Filters: []v1alpha1.GitHubWebhookFilter{
+			{
+				Event:     "issues",
+				CommentOn: v1alpha1.CommentOnPullRequest,
+			},
+		},
+	}
+	payload := `{
+		"action": "opened",
+		"sender": {"login": "user"},
+		"issue": {
+			"number": 7,
+			"title": "Test issue",
+			"state": "open",
+			"html_url": "https://github.com/owner/repo/issues/7"
+		}
+	}`
+	got, err := parseAndMatch(t, spawner, "issues", []byte(payload))
+	if err != nil {
+		t.Fatalf("MatchesGitHubEvent() error = %v", err)
+	}
+	if !got {
+		t.Errorf("CommentOn should be ignored on issues events, but filter rejected the event")
+	}
+}
+
 func TestMatchesGitHubEvent_BodyContainsPullRequest(t *testing.T) {
 	spawner := &v1alpha1.GitHubWebhook{
 		Events: []string{"pull_request"},

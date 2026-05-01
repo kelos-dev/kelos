@@ -318,6 +318,25 @@ func matchesFilter(filter v1alpha1.GitHubWebhookFilter, eventData *GitHubEventDa
 			issue = commentEvent.GetIssue()
 		}
 
+		// CommentOn filter scopes issue_comment events to issues vs PRs.
+		// GitHub fires issue_comment for both; the issue payload's
+		// pull_request field is non-nil only when the comment is on a PR.
+		if filter.CommentOn != "" {
+			if _, ok := e.(*github.IssueCommentEvent); ok && issue != nil {
+				isPR := issue.IsPullRequest()
+				switch filter.CommentOn {
+				case v1alpha1.CommentOnIssue:
+					if isPR {
+						return false
+					}
+				case v1alpha1.CommentOnPullRequest:
+					if !isPR {
+						return false
+					}
+				}
+			}
+		}
+
 		if issue != nil {
 			// State filter
 			if filter.State != "" && filter.State != issue.GetState() {

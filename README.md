@@ -488,7 +488,7 @@ See the [`self-development/` README](self-development/README.md) for the full pi
 | Resource | Key Fields | Full Spec |
 |----------|-----------|-----------|
 | **Task** | `type`, `prompt`, `credentials`, `workspaceRef`, `dependsOn`, `branch` | [Reference](docs/reference.md#task) |
-| **Workspace** | `repo`, `ref`, `secretRef` (PAT or GitHub App), `files` | [Reference](docs/reference.md#workspace) |
+| **Workspace** | `repo`, `ref`, `secretRef` (PAT or GitHub App), `files`, `setupCommand` | [Reference](docs/reference.md#workspace) |
 | **AgentConfig** | `agentsMD`, `plugins`, `mcpServers` | [Reference](docs/reference.md#agentconfig) |
 | **TaskSpawner** | `when`, `taskTemplate`, `pollInterval`, `maxConcurrency` | [Reference](docs/reference.md#taskspawner) |
 

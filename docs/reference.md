@@ -57,6 +57,29 @@ If template rendering fails (e.g., missing key), the raw prompt string is used a
 | `spec.remotes[].url` | Git remote URL | Yes (per remote) |
 | `spec.files[].path` | Relative file path inside the repository (e.g., `CLAUDE.md`) | Yes (per file) |
 | `spec.files[].content` | File content to write | Yes (per file) |
+| `spec.setupCommand` | Exec-form command run in `/workspace/repo` after the repo is cloned, the ref is checked out, remotes are configured, and files are written, but before the agent process starts. Runs as the agent UID with all injected env vars; a non-zero exit fails the Task. Use `["sh", "-c", "<script>"]` for shell pipelines (see [Setup Command](#workspace-setup-command) below) | No |
+
+### Workspace Setup Command
+
+Use `spec.setupCommand` to install language dependencies, prime build caches, or run any other prerequisite step that must complete before the agent inspects the codebase. The command follows the same exec-form convention as Kubernetes `container.command` and `lifecycle.postStart.exec.command` — the array is passed directly to `exec` with no shell interpretation.
+
+```yaml
+apiVersion: kelos.dev/v1alpha1
+kind: Workspace
+metadata:
+  name: node-app-workspace
+spec:
+  repo: https://github.com/your-org/your-repo.git
+  ref: main
+  setupCommand: ["sh", "-c", "npm install && npm run build"]
+```
+
+Notes:
+
+- Runs after the repo has been cloned and checked out, additional remotes have been added, and any `spec.files` entries have been written.
+- Runs before the agent process starts; if it exits non-zero, the agent never runs and the Task fails.
+- Executes in `/workspace/repo` as the agent UID (61100), with access to all built-in Kelos env vars and any `Task.spec.podOverrides.env` entries from the Task that references this Workspace.
+- The default form is exec-style; for shell pipelines, environment expansion, or multi-step scripts, wrap the command with `["sh", "-c", "<script>"]`.
 
 ### Workspace Authentication
 

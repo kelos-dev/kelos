@@ -96,7 +96,7 @@ var _ = Describe("Task with skills.sh AgentConfig", func() {
 		f.WaitForJobCompletion("skills-task")
 
 		By("verifying Task status is Succeeded")
-		Expect(f.GetTaskPhase("skills-task")).To(Equal("Succeeded"))
+		f.WaitForTaskPhase("skills-task", "Succeeded")
 
 		By("getting Job logs")
 		logs := f.GetJobLogs("skills-task")

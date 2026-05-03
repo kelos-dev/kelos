@@ -2,7 +2,6 @@ package e2e
 
 import (
 	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
@@ -43,7 +42,7 @@ var _ = Describe("OpenCode Task", func() {
 		f.WaitForJobCompletion("opencode-task")
 
 		By("verifying Task status is Succeeded")
-		Expect(f.GetTaskPhase("opencode-task")).To(Equal("Succeeded"))
+		f.WaitForTaskPhase("opencode-task", "Succeeded")
 
 		By("getting Job logs")
 		logs := f.GetJobLogs("opencode-task")

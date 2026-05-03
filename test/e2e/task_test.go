@@ -49,7 +49,7 @@ func describeAgentTests(cfg agentTestConfig) {
 			f.WaitForJobCompletion("basic-task")
 
 			By("verifying Task status is Succeeded")
-			Expect(f.GetTaskPhase("basic-task")).To(Equal("Succeeded"))
+			f.WaitForTaskPhase("basic-task", "Succeeded")
 
 			By("getting Job logs")
 			logs := f.GetJobLogs("basic-task")
@@ -105,7 +105,7 @@ func describeAgentTests(cfg agentTestConfig) {
 			f.WaitForJobCompletion("ws-task")
 
 			By("verifying Task status is Succeeded")
-			Expect(f.GetTaskPhase("ws-task")).To(Equal("Succeeded"))
+			f.WaitForTaskPhase("ws-task", "Succeeded")
 
 			By("getting Job logs")
 			logs := f.GetJobLogs("ws-task")
@@ -166,7 +166,7 @@ func describeAgentTests(cfg agentTestConfig) {
 			f.WaitForJobCompletion("outputs-task")
 
 			By("verifying Task status is Succeeded")
-			Expect(f.GetTaskPhase("outputs-task")).To(Equal("Succeeded"))
+			f.WaitForTaskPhase("outputs-task", "Succeeded")
 
 			By("verifying output markers appear in Pod logs")
 			logs := f.GetJobLogs("outputs-task")
@@ -248,19 +248,17 @@ func describeAgentTests(cfg agentTestConfig) {
 			})
 
 			By("verifying Task B enters Waiting phase while Task A runs")
-			Eventually(func() string {
-				return f.GetTaskPhase("dep-chain-b")
-			}, 30*time.Second, time.Second).Should(Equal("Waiting"))
+			f.WaitForTaskPhase("dep-chain-b", "Waiting")
 
 			By("waiting for Task A to complete")
 			f.WaitForJobCreation("dep-chain-a")
 			f.WaitForJobCompletion("dep-chain-a")
-			Expect(f.GetTaskPhase("dep-chain-a")).To(Equal("Succeeded"))
+			f.WaitForTaskPhase("dep-chain-a", "Succeeded")
 
 			By("waiting for Task B to start and complete after Task A succeeds")
 			f.WaitForJobCreation("dep-chain-b")
 			f.WaitForJobCompletion("dep-chain-b")
-			Expect(f.GetTaskPhase("dep-chain-b")).To(Equal("Succeeded"))
+			f.WaitForTaskPhase("dep-chain-b", "Succeeded")
 		})
 	})
 
@@ -348,7 +346,7 @@ var _ = Describe("Task with make available", func() {
 		f.WaitForJobCompletion("make-task")
 
 		By("verifying Task status is Succeeded")
-		Expect(f.GetTaskPhase("make-task")).To(Equal("Succeeded"))
+		f.WaitForTaskPhase("make-task", "Succeeded")
 
 		By("getting Job logs")
 		logs := f.GetJobLogs("make-task")
@@ -413,7 +411,7 @@ var _ = Describe("Task with workspace and secretRef", func() {
 		f.WaitForJobCompletion("github-task")
 
 		By("verifying Task status is Succeeded")
-		Expect(f.GetTaskPhase("github-task")).To(Equal("Succeeded"))
+		f.WaitForTaskPhase("github-task", "Succeeded")
 
 		By("getting Job logs")
 		logs := f.GetJobLogs("github-task")

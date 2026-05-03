@@ -317,6 +317,19 @@ func (f *Framework) GetTaskPhase(name string) string {
 	return string(task.Status.Phase)
 }
 
+// WaitForTaskPhase waits for a Task's status.phase to reach the expected value.
+// The Task controller updates phase asynchronously after the underlying Job
+// transitions, so callers must poll rather than read once.
+func (f *Framework) WaitForTaskPhase(name, phase string) {
+	Eventually(func() string {
+		task, err := f.KelosClientset.ApiV1alpha1().Tasks(f.Namespace).Get(context.TODO(), name, metav1.GetOptions{})
+		if err != nil {
+			return ""
+		}
+		return string(task.Status.Phase)
+	}, 2*time.Minute, time.Second).Should(Equal(phase), "Task %s did not reach phase %s", name, phase)
+}
+
 // GetTaskOutputs returns the outputs of a Task as a joined string.
 func (f *Framework) GetTaskOutputs(name string) string {
 	task, err := f.KelosClientset.ApiV1alpha1().Tasks(f.Namespace).Get(context.TODO(), name, metav1.GetOptions{})

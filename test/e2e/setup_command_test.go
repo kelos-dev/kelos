@@ -64,7 +64,7 @@ var _ = Describe("Workspace setupCommand", func() {
 		f.WaitForJobCompletion("setup-task")
 
 		By("verifying Task status is Succeeded")
-		Expect(f.GetTaskPhase("setup-task")).To(Equal("Succeeded"))
+		f.WaitForTaskPhase("setup-task", "Succeeded")
 
 		By("verifying setup banners appear in Pod logs")
 		logs := f.GetJobLogs("setup-task")

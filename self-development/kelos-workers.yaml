@@ -38,6 +38,8 @@ spec:
   when:
     githubWebhook:
       repository: kelos-dev/kelos
+      excludeAuthors:
+        - kelos-bot[bot]
       events:
         - issue_comment
       filters:
@@ -47,12 +49,6 @@ spec:
           commentOn: Issue
           state: open
           author: gjkim42
-        - event: issue_comment
-          action: created
-          bodyContains: /kelos pick-up
-          commentOn: Issue
-          state: open
-          author: kelos-bot[bot]
       reporting:
         enabled: true
   maxConcurrency: 3

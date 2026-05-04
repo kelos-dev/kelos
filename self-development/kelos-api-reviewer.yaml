@@ -41,6 +41,8 @@ spec:
   when:
     githubWebhook:
       repository: kelos-dev/kelos
+      excludeAuthors:
+        - kelos-bot[bot]
       events:
         - issue_comment
         - pull_request_review
@@ -50,21 +52,11 @@ spec:
           bodyContains: /kelos api-review
           state: open
           author: gjkim42
-        - event: issue_comment
-          action: created
-          bodyContains: /kelos api-review
-          state: open
-          author: kelos-bot[bot]
         - event: pull_request_review
           action: submitted
           bodyContains: /kelos api-review
           state: open
           author: gjkim42
-        - event: pull_request_review
-          action: submitted
-          bodyContains: /kelos api-review
-          state: open
-          author: kelos-bot[bot]
       reporting:
         enabled: true
         checks: {}

@@ -190,7 +190,10 @@ GitHub Apps are preferred over PATs for production use because they offer fine-g
 | `spec.when.githubWebhook.filters[].draft` | Filter PRs by draft status | No |
 | `spec.when.githubWebhook.filters[].author` | Filter by the event sender's username | No |
 | `spec.when.githubWebhook.filters[].excludeAuthors` | Exclude events sent by any of these usernames | No |
-| `spec.when.githubWebhook.filters[].bodyContains` | Filter by substring match on the comment/review body | No |
+| `spec.when.githubWebhook.filters[].bodyContains` | **Deprecated.** Filter by case-sensitive substring match on the comment/review body. Use `bodyPattern` instead | No |
+| `spec.when.githubWebhook.filters[].bodyPattern` | Require the comment/review body to match a Go re2 regular expression. When combined with `excludeBodyPatterns`, the body must match this pattern AND not match any exclude entry | No |
+| `spec.when.githubWebhook.filters[].excludeBodyPatterns` | Exclude events whose comment/review body matches any of these Go re2 regular expressions (OR semantics) | No |
+| `spec.when.githubWebhook.filters[].commentOn` | Scope `issue_comment` events to comments posted on a specific subject: `"Issue"` matches plain issues, `"PullRequest"` matches pull requests. Empty matches both. Ignored for other events | No |
 | `spec.when.linearWebhook.types` | Linear resource types to listen for (e.g., `"Issue"`, `"Comment"`) | Yes (when using linearWebhook) |
 | `spec.when.linearWebhook.filters[].type` | Scope filter to a specific resource type | No |
 | `spec.when.linearWebhook.filters[].action` | Filter by webhook action: `create`, `update`, or `remove` | No |

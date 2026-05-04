@@ -32,6 +32,9 @@ spec:
         - event: "pull_request_review_comment"
           action: "created"
           bodyContains: "/kelos pick-up"
+      reporting:
+        enabled: true
+        checks: {}
   maxConcurrency: 5
   taskTemplate:
     workspaceRef:
@@ -143,6 +146,9 @@ spec:
         - event: "pull_request_review_comment"
           action: "created"
           bodyContains: "/kelos plan"
+      reporting:
+        enabled: true
+        checks: {}
   maxConcurrency: 2
   taskTemplate:
     workspaceRef:
@@ -250,6 +256,9 @@ spec:
         - event: "pull_request_review_comment"
           action: "created"
           bodyContains: "/kelos approve"
+      reporting:
+        enabled: true
+        checks: {}
   maxConcurrency: 5
   taskTemplate:
     workspaceRef:
@@ -333,6 +342,9 @@ spec:
         - event: "pull_request_review_comment"
           action: "created"
           bodyContains: "/kelos review"
+      reporting:
+        enabled: true
+        checks: {}
   maxConcurrency: 3
   taskTemplate:
     workspaceRef:

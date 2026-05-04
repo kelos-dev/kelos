@@ -318,7 +318,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 			fmt.Fprintf(os.Stdout, "task/%s created\n", name)
 
 			if watch {
-				return watchTask(ctx, cl, name, ns)
+				return watchTask(ctx, cl, name, ns, os.Stdout, os.Stderr)
 			}
 			return nil
 		},
@@ -350,7 +350,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 	return cmd
 }
 
-func watchTask(ctx context.Context, cl client.Client, name, namespace string) error {
+func watchTask(ctx context.Context, cl client.Client, name, namespace string, out, errOut io.Writer) error {
 	var lastPhase kelosv1alpha1.TaskPhase
 	for {
 		task := &kelosv1alpha1.Task{}
@@ -359,12 +359,16 @@ func watchTask(ctx context.Context, cl client.Client, name, namespace string) er
 		}
 
 		if task.Status.Phase != lastPhase {
-			fmt.Fprintf(os.Stdout, "task/%s %s\n", name, task.Status.Phase)
+			fmt.Fprintf(out, "task/%s %s\n", name, task.Status.Phase)
 			lastPhase = task.Status.Phase
 		}
 
-		if task.Status.Phase == kelosv1alpha1.TaskPhaseSucceeded || task.Status.Phase == kelosv1alpha1.TaskPhaseFailed {
+		switch task.Status.Phase {
+		case kelosv1alpha1.TaskPhaseSucceeded:
 			return nil
+		case kelosv1alpha1.TaskPhaseFailed:
+			fmt.Fprintf(errOut, "Run 'kelos logs %s' to view agent output, or 'kelos get tasks %s -d' for details.\n", name, name)
+			return fmt.Errorf("task %s failed", name)
 		}
 
 		time.Sleep(2 * time.Second)

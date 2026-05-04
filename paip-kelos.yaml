@@ -14,6 +14,7 @@ webhookServer:
       enabled: true
       replicas: 1
       secretName: github-webhook-secret
+      githubSecretName: kelos-bot
   resources:
     limits:
       cpu: 500m

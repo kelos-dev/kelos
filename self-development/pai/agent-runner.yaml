@@ -386,8 +386,8 @@ spec:
          - For each unresolved bot thread, check if the issue has been fixed in the current code
          - Resolve fixed threads using the `resolveReviewThread` GraphQL mutation
 
-      5. Review the changes following the guidelines below, then post inline
-         review comments using `gh api` for each issue found:
+      5. Review the changes following the priority labeling guidelines in the AgentConfig,
+         then post inline review comments using `gh api` for each issue found:
          ```
          gh api repos/{owner}/{repo}/pulls/{{.Number}}/comments \
            -f body="<comment>" \
@@ -397,26 +397,8 @@ spec:
            -f side="RIGHT"
          ```
 
-      6. Post a PR comment whose first line is `/kelos needs-input` with a
-         brief summary of findings (or "No issues found").
-
-      ## 리뷰 지침
-
-      **핵심 원칙: 간결하고 실용적인 피드백만 제공**
-
-      - 실제 문제가 있는 코드에만 인라인 코멘트 작성
-      - 버그, 보안 취약점, 성능 이슈 등 수정이 필요한 부분 위주로 지적
-      - 사소한 스타일 이슈나 주관적 선호는 생략
-      - 칭찬이나 장황한 설명 불필요
-      - 한 이슈당 1-2문장으로 핵심만 전달
-
-      ## 리뷰 우선순위 (문제 있을 때만)
-      1. 버그/로직 오류
-      2. 보안 취약점
-      3. 성능 문제
-      4. 테스트 누락 (중요 로직에 한해)
-
-      문제가 없으면 인라인 리뷰를 달지 않아도 됨.
+      6. Post a PR comment with `/kelos needs-input` followed by a brief summary
+         of findings (or "No issues found").
 
       ## Rules
 

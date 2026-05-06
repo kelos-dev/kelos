@@ -179,6 +179,8 @@ func printTaskSpawnerTable(w io.Writer, spawners []kelosv1alpha1.TaskSpawner, al
 			}
 		} else if s.Spec.When.LinearWebhook != nil {
 			source = "Linear Webhook"
+		} else if s.Spec.When.GenericWebhook != nil {
+			source = "Generic Webhook (" + s.Spec.When.GenericWebhook.Source + ")"
 		}
 		if allNamespaces {
 			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%d\t%s\n",
@@ -263,6 +265,10 @@ func printTaskSpawnerDetail(w io.Writer, ts *kelosv1alpha1.TaskSpawner) {
 		lw := ts.Spec.When.LinearWebhook
 		printField(w, "Source", "Linear Webhook")
 		printField(w, "Types", fmt.Sprintf("%v", lw.Types))
+	} else if ts.Spec.When.GenericWebhook != nil {
+		gw := ts.Spec.When.GenericWebhook
+		printField(w, "Source", "Generic Webhook")
+		printField(w, "Webhook Source", gw.Source)
 	}
 	printField(w, "Task Type", ts.Spec.TaskTemplate.Type)
 	if ts.Spec.TaskTemplate.Model != "" {

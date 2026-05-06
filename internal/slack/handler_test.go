@@ -316,3 +316,37 @@ func TestCreateTaskAlreadyExists(t *testing.T) {
 		t.Fatalf("Second createTask() should not error on AlreadyExists, got: %v", err)
 	}
 }
+
+func TestHandleMemberJoinedChannelIgnoresOtherUsers(t *testing.T) {
+	h := &SlackHandler{
+		log:         logr.Discard(),
+		botUserID:   "UBOT",
+		joinMessage: "Welcome!",
+		// api is nil — if handleMemberJoinedChannel tries to post for a
+		// non-bot user it will panic, which is the desired failure mode here.
+	}
+
+	evt := &slackevents.MemberJoinedChannelEvent{
+		User:    "UOTHER",
+		Channel: "C123",
+	}
+
+	// Should return without attempting to post (no panic = pass).
+	h.handleMemberJoinedChannel(context.Background(), evt)
+}
+
+func TestHandleMemberJoinedChannelSkipsEmptyMessage(t *testing.T) {
+	h := &SlackHandler{
+		log:       logr.Discard(),
+		botUserID: "UBOT",
+		// joinMessage is empty — should not attempt to post.
+		// api is nil — would panic if it tried.
+	}
+
+	evt := &slackevents.MemberJoinedChannelEvent{
+		User:    "UBOT",
+		Channel: "C123",
+	}
+
+	h.handleMemberJoinedChannel(context.Background(), evt)
+}

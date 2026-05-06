@@ -1,0 +1,14 @@
+{{- if .Values.slackServer.joinMessage }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kelos-slack-server-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: kelos
+    app.kubernetes.io/component: slack-server
+data:
+  join-message.txt: |
+    {{- .Values.slackServer.joinMessage | nindent 4 }}
+{{- end }}

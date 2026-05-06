@@ -107,6 +107,8 @@ slackServer:
   image: ghcr.io/kelos-dev/kelos-slack-server
   replicas: 1
   secretName: ""
+  # Message posted when the bot joins a channel. Leave empty to disable.
+  joinMessage: ""
   resources:
     limits:
       cpu: 500m

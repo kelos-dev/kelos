@@ -71,12 +71,15 @@ func main() {
 
 	ctx := ctrl.SetupSignalHandler()
 
+	joinMessageFile := os.Getenv("SLACK_JOIN_MESSAGE_FILE")
+
 	// Create the Slack handler
 	handler, err := kelosslack.NewSlackHandler(
 		ctx,
 		mgr.GetClient(),
 		botToken,
 		appToken,
+		joinMessageFile,
 		ctrl.Log.WithName("slack"),
 	)
 	if err != nil {

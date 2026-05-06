@@ -44,6 +44,10 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.slackServer.secretName }}
                   key: SLACK_APP_TOKEN
+            {{- if .Values.slackServer.joinMessage }}
+            - name: SLACK_JOIN_MESSAGE_FILE
+              value: /etc/kelos/join-message.txt
+            {{- end }}
           ports:
             - name: metrics
               containerPort: 8080
@@ -67,6 +71,12 @@ spec:
           resources:
             {{- toYaml .Values.slackServer.resources | nindent 12 }}
           {{- end }}
+          {{- if .Values.slackServer.joinMessage }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/kelos
+              readOnly: true
+          {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -75,4 +85,10 @@ spec:
             capabilities:
               drop:
                 - "ALL"
+      {{- if .Values.slackServer.joinMessage }}
+      volumes:
+        - name: config
+          configMap:
+            name: kelos-slack-server-config
+      {{- end }}
 {{- end }}

@@ -35,7 +35,10 @@ const (
 	AnnotationSlackThreadTS = "kelos.dev/slack-thread-ts"
 )
 
-const enrichCallTimeout = 5 * time.Second
+const (
+	enrichCallTimeout  = 5 * time.Second
+	postMessageTimeout = 5 * time.Second
+)
 
 // SlackHandler handles Slack messages via Socket Mode and routes them to
 // matching TaskSpawners. It is the centralized equivalent of the per-TaskSpawner
@@ -47,11 +50,13 @@ type SlackHandler struct {
 	api         *goslack.Client
 	sm          *socketmode.Client
 	botUserID   string
+	joinMessage string
 	cancel      context.CancelFunc
 }
 
 // NewSlackHandler creates a new handler. Call Start to begin listening.
-func NewSlackHandler(ctx context.Context, cl client.Client, botToken, appToken string, log logr.Logger) (*SlackHandler, error) {
+// If joinMessageFile is non-empty, the bot posts its contents when added to a channel.
+func NewSlackHandler(ctx context.Context, cl client.Client, botToken, appToken, joinMessageFile string, log logr.Logger) (*SlackHandler, error) {
 	api := goslack.New(botToken, goslack.OptionAppLevelToken(appToken))
 
 	authResp, err := api.AuthTestContext(ctx)
@@ -66,6 +71,18 @@ func NewSlackHandler(ctx context.Context, cl client.Client, botToken, appToken s
 
 	log.Info("Authenticated with Slack", "botUserID", authResp.UserID)
 
+	var joinMessage string
+	if joinMessageFile != "" {
+		data, err := os.ReadFile(joinMessageFile)
+		if err != nil {
+			return nil, fmt.Errorf("reading join message file %s: %w", joinMessageFile, err)
+		}
+		joinMessage = strings.TrimSpace(string(data))
+		if joinMessage != "" {
+			log.Info("Join channel message enabled", "file", joinMessageFile)
+		}
+	}
+
 	return &SlackHandler{
 		client:      cl,
 		log:         log,
@@ -73,6 +90,7 @@ func NewSlackHandler(ctx context.Context, cl client.Client, botToken, appToken s
 		api:         api,
 		sm:          newSocketModeClient(api),
 		botUserID:   authResp.UserID,
+		joinMessage: joinMessage,
 	}, nil
 }
 
@@ -126,13 +144,39 @@ func (h *SlackHandler) handleEventsAPI(ctx context.Context, evt socketmode.Event
 	}
 	h.sm.Ack(*evt.Request)
 
-	innerEvent, ok := eventsAPIEvent.InnerEvent.Data.(*slackevents.MessageEvent)
-	if !ok {
+	switch inner := eventsAPIEvent.InnerEvent.Data.(type) {
+	case *slackevents.MemberJoinedChannelEvent:
+		h.handleMemberJoinedChannel(ctx, inner)
+	case *slackevents.MessageEvent:
+		h.handleMessageEvent(ctx, inner)
+	default:
+		return
+	}
+}
+
+// handleMemberJoinedChannel posts a welcome message when the bot itself is
+// added to a channel. The message text is read from the file pointed to by
+// joinMessageFile. If the file is not configured or cannot be read, the
+// event is silently ignored.
+func (h *SlackHandler) handleMemberJoinedChannel(ctx context.Context, evt *slackevents.MemberJoinedChannelEvent) {
+	if evt.User != h.botUserID {
 		return
 	}
 
-	// MessageEvent.UnmarshalJSON always populates Message, even for regular
-	// (non-subtype) messages, by re-unmarshaling top-level JSON into Message.
+	if h.joinMessage == "" {
+		return
+	}
+
+	h.log.Info("Bot added to channel, posting join message", "channel", evt.Channel)
+
+	postCtx, cancel := context.WithTimeout(ctx, postMessageTimeout)
+	defer cancel()
+	if _, _, err := h.api.PostMessageContext(postCtx, evt.Channel, goslack.MsgOptionText(h.joinMessage, false)); err != nil {
+		h.log.Error(err, "Failed to post join message", "channel", evt.Channel)
+	}
+}
+
+func (h *SlackHandler) handleMessageEvent(ctx context.Context, innerEvent *slackevents.MessageEvent) {
 	hasContent := innerEvent.Text != "" ||
 		(innerEvent.Message != nil && len(innerEvent.Message.Attachments) > 0)
 	if !shouldProcess(innerEvent.User, innerEvent.SubType, hasContent, h.botUserID) {

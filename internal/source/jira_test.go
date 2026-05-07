@@ -11,9 +11,7 @@ import (
 
 func TestJiraDiscover(t *testing.T) {
 	response := jiraSearchResponse{
-		StartAt:    0,
-		MaxResults: 100,
-		Total:      2,
+		IsLast: true,
 		Issues: []jiraIssue{
 			{
 				Key: "PROJ-1",
@@ -39,7 +37,7 @@ func TestJiraDiscover(t *testing.T) {
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/rest/api/2/search" {
+		if r.URL.Path == "/rest/api/2/search/jql" {
 			json.NewEncoder(w).Encode(response)
 		}
 	}))
@@ -94,9 +92,9 @@ func TestJiraDiscover(t *testing.T) {
 func TestJiraDiscoverJQLFilter(t *testing.T) {
 	var receivedJQL string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/rest/api/2/search" {
+		if r.URL.Path == "/rest/api/2/search/jql" {
 			receivedJQL = r.URL.Query().Get("jql")
-			json.NewEncoder(w).Encode(jiraSearchResponse{})
+			json.NewEncoder(w).Encode(jiraSearchResponse{IsLast: true})
 		}
 	}))
 	defer server.Close()
@@ -121,9 +119,9 @@ func TestJiraDiscoverJQLFilter(t *testing.T) {
 func TestJiraDiscoverDefaultJQL(t *testing.T) {
 	var receivedJQL string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/rest/api/2/search" {
+		if r.URL.Path == "/rest/api/2/search/jql" {
 			receivedJQL = r.URL.Query().Get("jql")
-			json.NewEncoder(w).Encode(jiraSearchResponse{})
+			json.NewEncoder(w).Encode(jiraSearchResponse{IsLast: true})
 		}
 	}))
 	defer server.Close()
@@ -147,9 +145,9 @@ func TestJiraDiscoverDefaultJQL(t *testing.T) {
 func TestJiraDiscoverAuth(t *testing.T) {
 	var authHeader string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/rest/api/2/search" {
+		if r.URL.Path == "/rest/api/2/search/jql" {
 			authHeader = r.Header.Get("Authorization")
-			json.NewEncoder(w).Encode(jiraSearchResponse{})
+			json.NewEncoder(w).Encode(jiraSearchResponse{IsLast: true})
 		}
 	}))
 	defer server.Close()
@@ -217,7 +215,7 @@ func TestJiraDiscoverAPIError(t *testing.T) {
 
 func TestJiraDiscoverEmptyResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(jiraSearchResponse{})
+		json.NewEncoder(w).Encode(jiraSearchResponse{IsLast: true})
 	}))
 	defer server.Close()
 
@@ -237,21 +235,18 @@ func TestJiraDiscoverEmptyResponse(t *testing.T) {
 
 func TestJiraDiscoverPagination(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		startAt := r.URL.Query().Get("startAt")
-		if startAt == "0" || startAt == "" {
+		token := r.URL.Query().Get("nextPageToken")
+		if token == "" {
 			json.NewEncoder(w).Encode(jiraSearchResponse{
-				StartAt:    0,
-				MaxResults: 1,
-				Total:      2,
+				NextPageToken: "page-2",
+				IsLast:        false,
 				Issues: []jiraIssue{
 					{Key: "PROJ-1", Fields: jiraIssueFields{Summary: "Issue 1"}},
 				},
 			})
 		} else {
 			json.NewEncoder(w).Encode(jiraSearchResponse{
-				StartAt:    1,
-				MaxResults: 1,
-				Total:      2,
+				IsLast: true,
 				Issues: []jiraIssue{
 					{Key: "PROJ-2", Fields: jiraIssueFields{Summary: "Issue 2"}},
 				},
@@ -280,7 +275,7 @@ func TestJiraDiscoverPagination(t *testing.T) {
 
 func TestJiraDiscoverComments(t *testing.T) {
 	response := jiraSearchResponse{
-		Total: 1,
+		IsLast: true,
 		Issues: []jiraIssue{
 			{
 				Key: "PROJ-42",
@@ -340,7 +335,7 @@ func TestJiraDiscoverADFComments(t *testing.T) {
 	}
 
 	response := jiraSearchResponse{
-		Total: 1,
+		IsLast: true,
 		Issues: []jiraIssue{
 			{
 				Key: "PROJ-1",
@@ -381,7 +376,7 @@ func TestJiraDiscoverADFComments(t *testing.T) {
 
 func TestJiraDiscoverNoIssueType(t *testing.T) {
 	response := jiraSearchResponse{
-		Total: 1,
+		IsLast: true,
 		Issues: []jiraIssue{
 			{
 				Key: "PROJ-1",
@@ -415,9 +410,9 @@ func TestJiraDiscoverNoIssueType(t *testing.T) {
 func TestJiraDiscoverJQLWithOrderBy(t *testing.T) {
 	var receivedJQL string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/rest/api/2/search" {
+		if r.URL.Path == "/rest/api/2/search/jql" {
 			receivedJQL = r.URL.Query().Get("jql")
-			json.NewEncoder(w).Encode(jiraSearchResponse{})
+			json.NewEncoder(w).Encode(jiraSearchResponse{IsLast: true})
 		}
 	}))
 	defer server.Close()

@@ -550,6 +550,75 @@ func TestPrintTaskSpawnerDetailLinearWebhook(t *testing.T) {
 	}
 }
 
+func TestPrintTaskSpawnerTableGenericWebhook(t *testing.T) {
+	spawners := []kelosv1alpha1.TaskSpawner{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "sentry-fixer",
+				CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
+			},
+			Spec: kelosv1alpha1.TaskSpawnerSpec{
+				When: kelosv1alpha1.When{
+					GenericWebhook: &kelosv1alpha1.GenericWebhook{
+						Source:       "sentry",
+						FieldMapping: map[string]string{"id": "$.id"},
+					},
+				},
+			},
+			Status: kelosv1alpha1.TaskSpawnerStatus{
+				Phase: kelosv1alpha1.TaskSpawnerPhaseRunning,
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	printTaskSpawnerTable(&buf, spawners, false)
+	output := buf.String()
+
+	if !strings.Contains(output, "Generic Webhook (sentry)") {
+		t.Errorf("expected 'Generic Webhook (sentry)' as source in output, got %q", output)
+	}
+}
+
+func TestPrintTaskSpawnerDetailGenericWebhook(t *testing.T) {
+	spawner := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "sentry-fixer",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GenericWebhook: &kelosv1alpha1.GenericWebhook{
+					Source:       "sentry",
+					FieldMapping: map[string]string{"id": "$.id"},
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+			},
+			PollInterval: "5m",
+		},
+		Status: kelosv1alpha1.TaskSpawnerStatus{
+			Phase:             kelosv1alpha1.TaskSpawnerPhaseRunning,
+			TotalDiscovered:   1,
+			TotalTasksCreated: 1,
+		},
+	}
+
+	var buf bytes.Buffer
+	printTaskSpawnerDetail(&buf, spawner)
+	output := buf.String()
+
+	for _, expected := range []string{
+		"Source:", "Generic Webhook",
+		"Webhook Source:     sentry",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Errorf("expected %q in detail output, got %q", expected, output)
+		}
+	}
+}
+
 func TestPrintTaskSpawnerDetailGitHubPullRequests(t *testing.T) {
 	spawner := &kelosv1alpha1.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{

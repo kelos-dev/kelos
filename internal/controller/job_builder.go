@@ -591,6 +591,9 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 	var activeDeadlineSeconds *int64
 	var nodeSelector map[string]string
 	var extraLabels map[string]string
+	var tolerations []corev1.Toleration
+	var affinity *corev1.Affinity
+	var imagePullSecrets []corev1.LocalObjectReference
 
 	if po := task.Spec.PodOverrides; po != nil {
 		if po.Labels != nil {
@@ -629,6 +632,18 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 
 		if po.NodeSelector != nil {
 			nodeSelector = po.NodeSelector
+		}
+
+		if len(po.Tolerations) > 0 {
+			tolerations = po.Tolerations
+		}
+
+		if po.Affinity != nil {
+			affinity = po.Affinity
+		}
+
+		if len(po.ImagePullSecrets) > 0 {
+			imagePullSecrets = po.ImagePullSecrets
 		}
 
 		if po.ServiceAccountName != "" {
@@ -725,6 +740,9 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 					Volumes:            volumes,
 					Containers:         []corev1.Container{mainContainer},
 					NodeSelector:       nodeSelector,
+					Tolerations:        tolerations,
+					Affinity:           affinity,
+					ImagePullSecrets:   imagePullSecrets,
 				},
 			},
 		},

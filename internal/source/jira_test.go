@@ -379,6 +379,88 @@ func TestJiraDiscoverADFComments(t *testing.T) {
 	}
 }
 
+func TestJiraDiscoverDescription(t *testing.T) {
+	// Jira Cloud returns descriptions as Atlassian Document Format objects,
+	// while Jira Data Center/Server returns them as plain strings.
+	adfDescription := map[string]interface{}{
+		"type":    "doc",
+		"version": 1,
+		"content": []interface{}{
+			map[string]interface{}{
+				"type": "paragraph",
+				"content": []interface{}{
+					map[string]interface{}{
+						"type": "text",
+						"text": "Cloud description text",
+					},
+				},
+			},
+		},
+	}
+
+	response := jiraSearchResponse{
+		Total: 3,
+		Issues: []jiraIssue{
+			{
+				Key: "PROJ-1",
+				Fields: jiraIssueFields{
+					Summary:     "Data Center issue",
+					Description: "Plain string description",
+				},
+			},
+			{
+				Key: "PROJ-2",
+				Fields: jiraIssueFields{
+					Summary:     "Cloud issue",
+					Description: adfDescription,
+				},
+			},
+			{
+				Key: "PROJ-3",
+				Fields: jiraIssueFields{
+					Summary: "Issue without description",
+				},
+			},
+		},
+	}
+
+	var receivedFields string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/rest/api/2/search" {
+			receivedFields = r.URL.Query().Get("fields")
+			json.NewEncoder(w).Encode(response)
+		}
+	}))
+	defer server.Close()
+
+	s := &JiraSource{
+		BaseURL: server.URL,
+		Project: "PROJ",
+	}
+
+	items, err := s.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(receivedFields, "description") {
+		t.Errorf("expected fields param to request description, got %q", receivedFields)
+	}
+
+	if len(items) != 3 {
+		t.Fatalf("expected 3 items, got %d", len(items))
+	}
+	if items[0].Body != "Plain string description" {
+		t.Errorf("expected Body %q, got %q", "Plain string description", items[0].Body)
+	}
+	if items[1].Body != "Cloud description text" {
+		t.Errorf("expected Body %q, got %q", "Cloud description text", items[1].Body)
+	}
+	if items[2].Body != "" {
+		t.Errorf("expected empty Body for missing description, got %q", items[2].Body)
+	}
+}
+
 func TestJiraDiscoverNoIssueType(t *testing.T) {
 	response := jiraSearchResponse{
 		Total: 1,

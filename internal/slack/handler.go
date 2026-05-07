@@ -18,21 +18,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/kelos-dev/kelos/api/v1alpha1"
+	"github.com/kelos-dev/kelos/internal/reporting"
 	"github.com/kelos-dev/kelos/internal/taskbuilder"
-)
-
-const (
-	// AnnotationSlackReporting indicates that Slack reporting is enabled
-	// for this Task.
-	AnnotationSlackReporting = "kelos.dev/slack-reporting"
-
-	// AnnotationSlackChannel records the Slack channel ID where the
-	// originating message was posted.
-	AnnotationSlackChannel = "kelos.dev/slack-channel"
-
-	// AnnotationSlackThreadTS records the originating message timestamp,
-	// used as thread_ts for posting replies.
-	AnnotationSlackThreadTS = "kelos.dev/slack-thread-ts"
 )
 
 const (
@@ -316,11 +303,13 @@ func (h *SlackHandler) createTask(ctx context.Context, spawner *v1alpha1.TaskSpa
 	}
 	sum := sha256.Sum256([]byte(hashInput))
 	shortHash := hex.EncodeToString(sum[:])[:12]
-	taskName := fmt.Sprintf("%s-slack-%s", spawner.Name, shortHash)
-	if len(taskName) > 63 {
-		fullSum := sha256.Sum256([]byte(taskName))
-		taskName = fmt.Sprintf("slack-%s", hex.EncodeToString(fullSum[:])[:12])
+	// Truncate spawner name to leave room for "-slack-" (7) + hash (12) = 19 chars
+	name := spawner.Name
+	const maxPrefix = 63 - 7 - 12 // 44
+	if len([]rune(name)) > maxPrefix {
+		name = strings.TrimRight(string([]rune(name)[:maxPrefix]), "-.")
 	}
+	taskName := fmt.Sprintf("%s-slack-%s", name, shortHash)
 
 	// Resolve GVK for owner reference
 	gvks, _, err := h.client.Scheme().ObjectKinds(spawner)
@@ -349,17 +338,24 @@ func (h *SlackHandler) createTask(ctx context.Context, spawner *v1alpha1.TaskSpa
 	if task.Annotations == nil {
 		task.Annotations = make(map[string]string)
 	}
-	task.Annotations[AnnotationSlackReporting] = "enabled"
-	task.Annotations[AnnotationSlackChannel] = msg.ChannelID
+	task.Annotations[reporting.AnnotationSlackReporting] = "enabled"
+	task.Annotations[reporting.AnnotationSlackChannel] = msg.ChannelID
+	task.Annotations[reporting.AnnotationSlackUserID] = msg.UserID
 
-	// Only set thread_ts for real message timestamps (not slash command composite IDs).
-	// Slash commands intentionally skip status reporting — there is no thread to reply to.
+	// Only enable Slack reporting label and thread_ts for real message
+	// timestamps. Slash commands have no thread to reply to, so skip the
+	// label to avoid the reporter listing them every cycle.
 	if !msg.IsSlashCommand {
+		if task.Labels == nil {
+			task.Labels = make(map[string]string)
+		}
+		task.Labels[reporting.LabelSlackReporting] = "enabled"
+
 		threadTS := msg.Timestamp
 		if msg.ThreadTS != "" {
 			threadTS = msg.ThreadTS
 		}
-		task.Annotations[AnnotationSlackThreadTS] = threadTS
+		task.Annotations[reporting.AnnotationSlackThreadTS] = threadTS
 	}
 
 	if err := h.client.Create(ctx, task); err != nil {

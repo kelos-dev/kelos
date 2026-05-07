@@ -25,6 +25,14 @@ Ready-to-use patterns and YAML manifests for orchestrating AI agents with Kelos.
 | [12-taskspawner-file-patterns](12-taskspawner-file-patterns/) | Filter GitHub PR / push webhooks by changed-file glob patterns |
 | [13-taskspawner-generic-webhook](13-taskspawner-generic-webhook/) | Respond to arbitrary HTTP POST events (Sentry, Notion, Slack, etc.) using JSONPath field mapping and filters |
 
+### Use Case Patterns
+
+Production-tested TaskSpawner patterns for common AI agent workflows. Most reference one of two [shared AgentConfig resources](shared-agent-configs.yaml) (read-only or solver).
+
+| Example | Description |
+|---------|-------------|
+| [14-dependency-review-spawner](14-dependency-review-spawner/) | Auto-review Renovate/Dependabot PRs: assess risk, auto-approve safe bumps, escalate risky ones |
+
 ## How to Use
 
 1. Pick an example directory.

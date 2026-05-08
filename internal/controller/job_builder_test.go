@@ -4934,3 +4934,291 @@ func TestBuildJob_PodOverridesContainerSecurityContext(t *testing.T) {
 		t.Errorf("Expected Capabilities.Drop=[ALL], got %+v", csc.Capabilities)
 	}
 }
+
+func TestBuildJob_ExtraContainers_ReservedNameRejected(t *testing.T) {
+	builder := NewJobBuilder()
+	for _, name := range []string{"agent", "git-clone", "remote-setup", "branch-setup", "workspace-files", "plugin-setup", "skills-install"} {
+		t.Run(name, func(t *testing.T) {
+			task := &kelosv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-reserved-extra-" + name,
+					Namespace: "default",
+				},
+				Spec: kelosv1alpha1.TaskSpec{
+					Type:   AgentTypeClaudeCode,
+					Prompt: "Extra container with reserved name",
+					Credentials: kelosv1alpha1.Credentials{
+						Type:      kelosv1alpha1.CredentialTypeAPIKey,
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+					},
+					PodOverrides: &kelosv1alpha1.PodOverrides{
+						ExtraContainers: []corev1.Container{
+							{Name: name, Image: "postgres:16"},
+						},
+					},
+				},
+			}
+
+			_, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+			if err == nil {
+				t.Fatalf("Build() with reserved extra container name %q: expected error, got nil", name)
+			}
+			if !strings.Contains(err.Error(), "reserved") {
+				t.Errorf("Build() error = %v, want error mentioning reserved", err)
+			}
+		})
+	}
+}
+
+func TestBuildJob_ExtraContainers_DuplicateNameRejected(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-duplicate-extra",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Extra containers with duplicate names",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+			PodOverrides: &kelosv1alpha1.PodOverrides{
+				ExtraContainers: []corev1.Container{
+					{Name: "db", Image: "postgres:16"},
+					{Name: "db", Image: "redis:7"},
+				},
+			},
+		},
+	}
+
+	_, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err == nil {
+		t.Fatal("Build() with duplicate extra container names: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "duplicate") {
+		t.Errorf("Build() error = %v, want error mentioning duplicate", err)
+	}
+}
+
+func TestBuildJob_ExtraContainers_AddedToContainers(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-extra-containers",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Task with an extra container",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+			PodOverrides: &kelosv1alpha1.PodOverrides{
+				ExtraContainers: []corev1.Container{
+					{Name: "proxy", Image: "envoyproxy/envoy:v1.30"},
+				},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	// Extra container should be in containers alongside the agent.
+	if len(job.Spec.Template.Spec.Containers) != 2 {
+		t.Fatalf("Expected 2 containers (agent + extra), got %d", len(job.Spec.Template.Spec.Containers))
+	}
+
+	extra := job.Spec.Template.Spec.Containers[1]
+	if extra.Name != "proxy" {
+		t.Errorf("Expected extra container name %q, got %q", "proxy", extra.Name)
+	}
+	if extra.Image != "envoyproxy/envoy:v1.30" {
+		t.Errorf("Expected extra container image %q, got %q", "envoyproxy/envoy:v1.30", extra.Image)
+	}
+}
+
+func TestBuildJob_InitContainers_AppendedAfterBuiltins(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-init-containers",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Task with user init containers",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+			PodOverrides: &kelosv1alpha1.PodOverrides{
+				InitContainers: []corev1.Container{
+					{Name: "db", Image: "postgres:16"},
+				},
+			},
+		},
+	}
+
+	workspace := &kelosv1alpha1.WorkspaceSpec{
+		Repo: "https://github.com/example/repo.git",
+		SecretRef: &kelosv1alpha1.SecretReference{
+			Name: "gh-token",
+		},
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	// User init container should come after the built-in git-clone init container.
+	inits := job.Spec.Template.Spec.InitContainers
+	if len(inits) < 2 {
+		t.Fatalf("Expected at least 2 init containers, got %d", len(inits))
+	}
+
+	// The last init container should be the user-supplied one.
+	last := inits[len(inits)-1]
+	if last.Name != "db" {
+		t.Errorf("Expected last init container to be user-supplied %q, got %q", "db", last.Name)
+	}
+	if last.Image != "postgres:16" {
+		t.Errorf("Expected init container image %q, got %q", "postgres:16", last.Image)
+	}
+
+	// Verify built-in (git-clone) comes before user init container.
+	if inits[0].Name != "git-clone" {
+		t.Errorf("Expected first init container to be %q, got %q", "git-clone", inits[0].Name)
+	}
+}
+
+func TestBuildJob_InitContainers_ReservedNameRejected(t *testing.T) {
+	builder := NewJobBuilder()
+	for _, name := range []string{"agent", "git-clone", "plugin-setup", "skills-install"} {
+		t.Run(name, func(t *testing.T) {
+			task := &kelosv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-reserved-init-" + name,
+					Namespace: "default",
+				},
+				Spec: kelosv1alpha1.TaskSpec{
+					Type:   AgentTypeClaudeCode,
+					Prompt: "Init container with reserved name",
+					Credentials: kelosv1alpha1.Credentials{
+						Type:      kelosv1alpha1.CredentialTypeAPIKey,
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+					},
+					PodOverrides: &kelosv1alpha1.PodOverrides{
+						InitContainers: []corev1.Container{
+							{Name: name, Image: "postgres:16"},
+						},
+					},
+				},
+			}
+
+			_, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+			if err == nil {
+				t.Fatalf("Build() with reserved init container name %q: expected error, got nil", name)
+			}
+			if !strings.Contains(err.Error(), "reserved") {
+				t.Errorf("Build() error = %v, want error mentioning reserved", err)
+			}
+		})
+	}
+}
+
+func TestBuildJob_InitContainers_RestartPolicyPreserved(t *testing.T) {
+	builder := NewJobBuilder()
+	restartAlways := corev1.ContainerRestartPolicyAlways
+
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-init-restart-policy",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Task with init containers",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+			PodOverrides: &kelosv1alpha1.PodOverrides{
+				InitContainers: []corev1.Container{
+					{Name: "db", Image: "postgres:16", RestartPolicy: &restartAlways},
+					{Name: "migrate", Image: "flyway:10"},
+				},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	inits := job.Spec.Template.Spec.InitContainers
+	var foundDB, foundMigrate bool
+	for _, ic := range inits {
+		switch ic.Name {
+		case "db":
+			foundDB = true
+			// User set restartPolicy=Always for sidecar semantics — should be preserved.
+			if ic.RestartPolicy == nil || *ic.RestartPolicy != corev1.ContainerRestartPolicyAlways {
+				t.Errorf("Init container %q: expected restartPolicy=Always, got %v", ic.Name, ic.RestartPolicy)
+			}
+		case "migrate":
+			foundMigrate = true
+			// User did not set restartPolicy — should remain nil (one-shot init).
+			if ic.RestartPolicy != nil {
+				t.Errorf("Init container %q: expected nil restartPolicy, got %v", ic.Name, *ic.RestartPolicy)
+			}
+		}
+	}
+	if !foundDB {
+		t.Error("Init container 'db' not found in initContainers")
+	}
+	if !foundMigrate {
+		t.Error("Init container 'migrate' not found in initContainers")
+	}
+}
+
+func TestBuildJob_CrossListNameCollisionRejected(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-cross-collision",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Colliding names across extra and init",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+			PodOverrides: &kelosv1alpha1.PodOverrides{
+				ExtraContainers: []corev1.Container{
+					{Name: "db", Image: "postgres:16"},
+				},
+				InitContainers: []corev1.Container{
+					{Name: "db", Image: "postgres:16"},
+				},
+			},
+		},
+	}
+
+	_, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err == nil {
+		t.Fatal("Build() with same name in extraContainers and initContainers: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "both extraContainers and initContainers") {
+		t.Errorf("Build() error = %v, want error mentioning both lists", err)
+	}
+}

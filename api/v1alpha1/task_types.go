@@ -113,6 +113,26 @@ type PodOverrides struct {
 	// PSS restricted namespace.
 	// +optional
 	ContainerSecurityContext *corev1.SecurityContext `json:"containerSecurityContext,omitempty"`
+
+	// ExtraContainers is a list of additional containers to run alongside
+	// the agent container in the same pod. These share the pod's network
+	// namespace (accessible via localhost) and can mount user-supplied
+	// volumes from the Volumes field. Container names must not collide
+	// with Kelos-reserved container names (e.g. "git-clone",
+	// "plugin-setup", "skills-install").
+	// +optional
+	ExtraContainers []corev1.Container `json:"extraContainers,omitempty"`
+
+	// InitContainers is a list of additional init containers to run in the
+	// agent pod. They are placed after all Kelos built-in init containers
+	// (git-clone, remote-setup, branch-setup, workspace-files,
+	// plugin-setup, skills-install), ensuring the workspace is ready
+	// before they start. Set restartPolicy: Always for sidecar semantics
+	// (long-running services like databases) or leave it unset for
+	// one-shot init tasks. Container names must not collide with
+	// Kelos-reserved container names.
+	// +optional
+	InitContainers []corev1.Container `json:"initContainers,omitempty"`
 }
 
 // TaskSpec defines the desired state of Task.

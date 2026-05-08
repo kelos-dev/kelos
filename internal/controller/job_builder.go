@@ -662,6 +662,37 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 		}
 	}
 
+	// Build the final containers list: agent container plus any extra containers.
+	containers := []corev1.Container{mainContainer}
+
+	if po := task.Spec.PodOverrides; po != nil {
+		if len(po.ExtraContainers) > 0 {
+			if err := validateExtraContainers(po.ExtraContainers); err != nil {
+				return nil, err
+			}
+			containers = append(containers, po.ExtraContainers...)
+		}
+
+		// User-supplied init containers are appended after all Kelos built-in
+		// init containers, ensuring the workspace and plugins are ready before
+		// they start. Users can set restartPolicy: Always for sidecar semantics
+		// (long-running services like databases) or leave it unset for
+		// one-shot init tasks (migrations, schema setup, etc.).
+		if len(po.InitContainers) > 0 {
+			if err := validateExtraContainers(po.InitContainers); err != nil {
+				return nil, err
+			}
+			initContainers = append(initContainers, po.InitContainers...)
+		}
+
+		// Check for name collisions across extraContainers and initContainers.
+		if len(po.ExtraContainers) > 0 && len(po.InitContainers) > 0 {
+			if err := validateNoContainerNameCollision(po.ExtraContainers, po.InitContainers); err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	// PodFailurePolicy ensures only pod disruptions (e.g. node scale-down,
 	// preemption) consume the backoff budget while application crashes fail the
 	// Job immediately.
@@ -723,7 +754,7 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 					ServiceAccountName: serviceAccountName,
 					InitContainers:     initContainers,
 					Volumes:            volumes,
-					Containers:         []corev1.Container{mainContainer},
+					Containers:         containers,
 					NodeSelector:       nodeSelector,
 				},
 			},
@@ -800,6 +831,50 @@ func validateUserVolumes(volumes []corev1.Volume) error {
 			return fmt.Errorf("podOverrides.volumes: duplicate volume name %q", v.Name)
 		}
 		seen[v.Name] = struct{}{}
+	}
+	return nil
+}
+
+// reservedContainerNames is the set of container names that Kelos uses
+// internally. User-supplied extra/init containers must not use these names.
+var reservedContainerNames = map[string]struct{}{
+	"agent":           {},
+	"git-clone":       {},
+	"remote-setup":    {},
+	"branch-setup":    {},
+	"workspace-files": {},
+	"plugin-setup":    {},
+	"skills-install":  {},
+}
+
+// validateExtraContainers ensures no user-supplied container name collides
+// with a Kelos-reserved name or duplicates another container name in the list.
+func validateExtraContainers(containers []corev1.Container) error {
+	seen := make(map[string]struct{}, len(containers))
+	for _, c := range containers {
+		if _, reserved := reservedContainerNames[c.Name]; reserved {
+			return fmt.Errorf("podOverrides: %q is a Kelos-reserved container name", c.Name)
+		}
+		if _, dup := seen[c.Name]; dup {
+			return fmt.Errorf("podOverrides: duplicate container name %q", c.Name)
+		}
+		seen[c.Name] = struct{}{}
+	}
+	return nil
+}
+
+// validateNoContainerNameCollision ensures no container name appears in both
+// extraContainers and initContainers. Kubernetes requires all container names
+// within a pod to be unique.
+func validateNoContainerNameCollision(extra, init []corev1.Container) error {
+	names := make(map[string]struct{}, len(extra))
+	for _, c := range extra {
+		names[c.Name] = struct{}{}
+	}
+	for _, c := range init {
+		if _, exists := names[c.Name]; exists {
+			return fmt.Errorf("podOverrides: container name %q appears in both extraContainers and initContainers", c.Name)
+		}
 	}
 	return nil
 }

@@ -130,7 +130,7 @@ spec:
           labels: ["bug"]
         - event: "issue_comment"
           action: "created"
-          bodyContains: "/kelos"
+          bodyPattern: "/kelos"
   taskTemplate:
     type: claude-code
     workspaceRef:
@@ -152,7 +152,7 @@ spec:
 
 **Setup:** Configure your GitHub repository to send webhooks to your Kelos instance and create a secret with the webhook signing secret. See [example 10](../examples/10-taskspawner-github-webhook/) for full setup instructions.
 
-**Filtering options:** `events` (required), `repository`, `excludeAuthors`, and per-filter fields: `action`, `labels`, `excludeLabels`, `state`, `branch`, `draft`, `author`, `bodyContains`.
+**Filtering options:** `events` (required), `repository`, `excludeAuthors`, and per-filter fields: `action`, `labels`, `excludeLabels`, `state`, `branch`, `draft`, `author`, `bodyPattern`.
 
 **Webhook-specific variables:** `{{.Event}}`, `{{.Action}}`, `{{.Sender}}`, `{{.Ref}}`, `{{.Repository}}`, `{{.Payload}}` (full payload access).
 

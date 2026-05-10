@@ -33,10 +33,9 @@ type JiraSource struct {
 }
 
 type jiraSearchResponse struct {
-	StartAt    int         `json:"startAt"`
-	MaxResults int         `json:"maxResults"`
-	Total      int         `json:"total"`
-	Issues     []jiraIssue `json:"issues"`
+	Issues        []jiraIssue `json:"issues"`
+	NextPageToken string      `json:"nextPageToken"`
+	IsLast        bool        `json:"isLast"`
 }
 
 type jiraIssue struct {
@@ -109,19 +108,19 @@ func (s *JiraSource) Discover(ctx context.Context) ([]WorkItem, error) {
 
 func (s *JiraSource) fetchAllIssues(ctx context.Context) ([]jiraIssue, error) {
 	var allIssues []jiraIssue
-	startAt := 0
+	var nextPageToken string
 
 	for page := 0; page < maxJiraPages; page++ {
-		result, err := s.fetchIssuesPage(ctx, startAt)
+		result, err := s.fetchIssuesPage(ctx, nextPageToken)
 		if err != nil {
 			return nil, err
 		}
 		allIssues = append(allIssues, result.Issues...)
 
-		if startAt+len(result.Issues) >= result.Total {
+		if result.IsLast || result.NextPageToken == "" {
 			break
 		}
-		startAt += len(result.Issues)
+		nextPageToken = result.NextPageToken
 	}
 
 	return allIssues, nil
@@ -150,8 +149,8 @@ func splitJQLOrderBy(jql string) (filter, orderBy string) {
 	return strings.TrimSpace(jql[:idx]), strings.TrimSpace(jql[idx:])
 }
 
-func (s *JiraSource) fetchIssuesPage(ctx context.Context, startAt int) (*jiraSearchResponse, error) {
-	u, err := url.Parse(strings.TrimRight(s.BaseURL, "/") + "/rest/api/2/search")
+func (s *JiraSource) fetchIssuesPage(ctx context.Context, nextPageToken string) (*jiraSearchResponse, error) {
+	u, err := url.Parse(strings.TrimRight(s.BaseURL, "/") + "/rest/api/2/search/jql")
 	if err != nil {
 		return nil, fmt.Errorf("parsing base URL: %w", err)
 	}
@@ -159,7 +158,9 @@ func (s *JiraSource) fetchIssuesPage(ctx context.Context, startAt int) (*jiraSea
 	params := url.Values{}
 	params.Set("jql", s.buildJQL())
 	params.Set("maxResults", strconv.Itoa(maxJiraResults))
-	params.Set("startAt", strconv.Itoa(startAt))
+	if nextPageToken != "" {
+		params.Set("nextPageToken", nextPageToken)
+	}
 	params.Set("fields", "summary,status,labels,comment,issuetype")
 	u.RawQuery = params.Encode()
 

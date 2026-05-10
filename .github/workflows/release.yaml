@@ -27,18 +27,26 @@ jobs:
   build-images:
     needs: determine-version
     strategy:
+      fail-fast: false
       matrix:
         arch: [amd64, arm64]
+        image:
+          - cmd/kelos-controller
+          - cmd/kelos-spawner
+          - cmd/ghproxy
+          - cmd/kelos-webhook-server
+          - cmd/kelos-slack-server
+          - claude-code
+          - codex
+          - gemini
+          - opencode
+          - cursor
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -50,10 +58,22 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Determine image name
+        id: meta
+        run: echo "name=$(basename ${{ matrix.image }})" >> "$GITHUB_OUTPUT"
+
       - name: Build and push image
-        env:
-          VERSION: ${{ needs.determine-version.outputs.version }}
-        run: make image IMAGE_PLATFORMS=linux/${{ matrix.arch }} PUSH=true VERSION="$VERSION-${{ matrix.arch }}"
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.image }}/Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          push: true
+          tags: ghcr.io/kelos-dev/${{ steps.meta.outputs.name }}:${{ needs.determine-version.outputs.version }}-${{ matrix.arch }}
+          build-args: |
+            LDFLAGS=-X github.com/kelos-dev/kelos/internal/version.Version=${{ needs.determine-version.outputs.version }}
+          cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}-${{ matrix.arch }}
 
   merge-manifests:
     needs: [determine-version, build-images]

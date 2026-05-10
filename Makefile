@@ -86,19 +86,9 @@ PUSH ?= false
 
 .PHONY: image
 image: ## Build docker images (use WHAT, IMAGE_PLATFORMS, PUSH=true to customize).
-	@for dir in $(filter cmd/%,$(or $(WHAT),$(IMAGE_DIRS))); do \
-		name=$$(basename $$dir); \
-		for arch in $(IMAGE_ARCHES); do \
-			GOOS=linux GOARCH=$$arch $(MAKE) build WHAT=$$dir; \
-			mv bin/$$name bin/$${name}-linux-$$arch; \
-		done; \
-	done
-	@for arch in $(IMAGE_ARCHES); do \
-		GOOS=linux GOARCH=$$arch $(MAKE) build WHAT=cmd/kelos-capture; \
-		mv bin/kelos-capture bin/kelos-capture-linux-$$arch; \
-	done
 	@for dir in $(or $(WHAT),$(IMAGE_DIRS)); do \
 		docker buildx build --platform $(IMAGE_PLATFORMS) \
+			--build-arg LDFLAGS="$(LDFLAGS)" \
 			$(if $(filter true,$(PUSH)),--push,--load) \
 			-t $(REGISTRY)/$$(basename $$dir):$(VERSION) \
 			-f $$dir/Dockerfile .; \

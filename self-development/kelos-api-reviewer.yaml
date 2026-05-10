@@ -164,10 +164,29 @@ spec:
       - Are there breaking changes to existing field semantics?
       - Is the field or type correctly versioned (alpha/beta/stable)?
       - Are deprecated fields marked with `+deprecated` and documented?
+      - Is the API surface minimal — only fields immediately needed, no
+        speculative additions? API is hard to change once shipped, so
+        push back on fields that anticipate future use without a concrete
+        caller.
+      - Will existing in-cluster resources still apply after this change?
+        Flag scalar ↔ array kind changes on existing fields, newly added
+        `MinLength`/`Required`/tightened validation on fields that
+        previously accepted absence/empty values, and field removals
+        without a `+deprecated` transition. Replace by deprecation, not
+        deletion.
+      - Were stale manifests in `examples/` and `self-development/`
+        updated to the new form when the schema changed? An unswept tree
+        leaves users with broken YAMLs after the CRD upgrade.
 
       **CRD and validation**:
       - Are kubebuilder validation markers correct and complete?
       - Are enum validations up to date with all valid values?
+      - Do enum docstrings match the `+kubebuilder:validation:Enum` marker?
+        Flag when the godoc invites a value (e.g. "empty matches both") that
+        the marker would then reject — either extend the enum to include
+        `""` so the explicit form is accepted, or tighten the wording to
+        "Omit to match both" so no one writes the form the API server
+        rejects.
       - Are min/max constraints reasonable?
       - Are XValidation rules correct for cross-field validation?
       - If CRD or API types changed, were `make update` artifacts included in the PR?

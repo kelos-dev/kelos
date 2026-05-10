@@ -13,6 +13,7 @@ spec:
         - event: issue_comment
           action: created
           bodyContains: /kelos squash-commits
+          commentOn: PullRequest
           state: open
           author: gjkim42
         - event: pull_request_review
@@ -51,7 +52,7 @@ spec:
           value: "Gunju Kim"
         - name: GIT_COMMITTER_EMAIL
           value: "gjkim042@gmail.com"
-    branch: "{{.Branch}}"
+    branch: '{{with index . "Branch"}}{{.}}{{else}}main{{end}}'
     agentConfigRef:
       name: kelos-dev-agent
     promptTemplate: |

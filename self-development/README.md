@@ -423,7 +423,7 @@ To adapt these examples for your own repository:
    | `{{.Event}}` | GitHub webhook event type | `issue_comment`, `issues`, `pull_request_review`, etc. | Empty |
    | `{{.Action}}` | GitHub webhook action | `created`, `labeled`, `submitted`, etc. | Empty |
    | `{{.Sender}}` | GitHub username that triggered the webhook | GitHub login | Empty |
-   | `{{.Branch}}` | Branch name when present in the webhook payload | Usually PR head branch or push branch | Empty |
+   | `{{.Branch}}` | Branch name when present in the webhook payload | PR head branch or pushed branch; empty for issue events | Empty |
    | `{{.Kind}}` | Type of work item | `"webhook"` | `"Issue"` |
    | `{{.Time}}` | Trigger time (RFC3339) | Empty | Cron tick time (e.g., `"2026-02-07T09:00:00Z"`) |
    | `{{.Schedule}}` | Cron schedule expression | Empty | Schedule string (e.g., `"0 * * * *"`) |

@@ -81,6 +81,24 @@ type PodOverrides struct {
 	// +optional
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
 
+	// Tolerations allows agent pods to be scheduled on nodes with matching
+	// taints. Use with NodeSelector or Affinity to target dedicated node
+	// pools (e.g., GPU nodes, AI-agent pools).
+	// +optional
+	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
+
+	// Affinity specifies node, pod, and pod-anti affinity rules for the
+	// agent pod. Useful for spreading agents across nodes (anti-affinity)
+	// or expressing scheduling preferences beyond simple NodeSelector.
+	// +optional
+	Affinity *corev1.Affinity `json:"affinity,omitempty"`
+
+	// ImagePullSecrets specifies secrets used to pull container images
+	// from private registries. Required when the agent image (or any
+	// init container image) lives in a private registry.
+	// +optional
+	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
+
 	// ServiceAccountName sets the pod's service account.
 	// Use with workload identity systems such as IRSA on EKS, GKE
 	// Workload Identity, or Azure Workload Identity.

@@ -1962,6 +1962,159 @@ func TestBuildJob_PodOverridesNodeSelector(t *testing.T) {
 	}
 }
 
+func TestBuildJob_PodOverridesTolerations(t *testing.T) {
+	builder := NewJobBuilder()
+	tolerations := []corev1.Toleration{
+		{
+			Key:      "dedicated",
+			Operator: corev1.TolerationOpEqual,
+			Value:    "ai-agents",
+			Effect:   corev1.TaintEffectNoSchedule,
+		},
+		{
+			Key:      "gpu",
+			Operator: corev1.TolerationOpExists,
+			Effect:   corev1.TaintEffectNoSchedule,
+		},
+	}
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-tolerations",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+			PodOverrides: &kelosv1alpha1.PodOverrides{
+				Tolerations: tolerations,
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	got := job.Spec.Template.Spec.Tolerations
+	if len(got) != len(tolerations) {
+		t.Fatalf("Expected %d tolerations, got %d", len(tolerations), len(got))
+	}
+	for i, want := range tolerations {
+		if got[i].Key != want.Key || got[i].Operator != want.Operator ||
+			got[i].Value != want.Value || got[i].Effect != want.Effect {
+			t.Errorf("Toleration[%d] = %+v, want %+v", i, got[i], want)
+		}
+	}
+}
+
+func TestBuildJob_PodOverridesAffinity(t *testing.T) {
+	builder := NewJobBuilder()
+	affinity := &corev1.Affinity{
+		PodAntiAffinity: &corev1.PodAntiAffinity{
+			PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{
+				{
+					Weight: 100,
+					PodAffinityTerm: corev1.PodAffinityTerm{
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"kelos.dev/component": "task",
+							},
+						},
+						TopologyKey: "kubernetes.io/hostname",
+					},
+				},
+			},
+		},
+	}
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-affinity",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+			PodOverrides: &kelosv1alpha1.PodOverrides{
+				Affinity: affinity,
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	got := job.Spec.Template.Spec.Affinity
+	if got == nil {
+		t.Fatal("Expected Affinity to be set")
+	}
+	if got.PodAntiAffinity == nil {
+		t.Fatal("Expected PodAntiAffinity to be set")
+	}
+	terms := got.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution
+	if len(terms) != 1 {
+		t.Fatalf("Expected 1 weighted pod-anti-affinity term, got %d", len(terms))
+	}
+	if terms[0].Weight != 100 {
+		t.Errorf("Expected weight 100, got %d", terms[0].Weight)
+	}
+	if terms[0].PodAffinityTerm.TopologyKey != "kubernetes.io/hostname" {
+		t.Errorf("Expected topologyKey kubernetes.io/hostname, got %q",
+			terms[0].PodAffinityTerm.TopologyKey)
+	}
+}
+
+func TestBuildJob_PodOverridesImagePullSecrets(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-image-pull-secrets",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Image:  "registry.corp.internal/agents/claude-code:v1",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+			PodOverrides: &kelosv1alpha1.PodOverrides{
+				ImagePullSecrets: []corev1.LocalObjectReference{
+					{Name: "corp-registry-creds"},
+					{Name: "secondary-registry-creds"},
+				},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	got := job.Spec.Template.Spec.ImagePullSecrets
+	if len(got) != 2 {
+		t.Fatalf("Expected 2 imagePullSecrets, got %d", len(got))
+	}
+	if got[0].Name != "corp-registry-creds" {
+		t.Errorf("imagePullSecrets[0] = %q, want %q", got[0].Name, "corp-registry-creds")
+	}
+	if got[1].Name != "secondary-registry-creds" {
+		t.Errorf("imagePullSecrets[1] = %q, want %q", got[1].Name, "secondary-registry-creds")
+	}
+}
+
 func TestBuildJob_PodOverridesAllFields(t *testing.T) {
 	builder := NewJobBuilder()
 	task := &kelosv1alpha1.Task{
@@ -1991,6 +2144,35 @@ func TestBuildJob_PodOverridesAllFields(t *testing.T) {
 				},
 				NodeSelector: map[string]string{
 					"pool": "agents",
+				},
+				Tolerations: []corev1.Toleration{
+					{
+						Key:      "dedicated",
+						Operator: corev1.TolerationOpEqual,
+						Value:    "ai-agents",
+						Effect:   corev1.TaintEffectNoSchedule,
+					},
+				},
+				Affinity: &corev1.Affinity{
+					NodeAffinity: &corev1.NodeAffinity{
+						PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{
+							{
+								Weight: 80,
+								Preference: corev1.NodeSelectorTerm{
+									MatchExpressions: []corev1.NodeSelectorRequirement{
+										{
+											Key:      "node.kubernetes.io/instance-type",
+											Operator: corev1.NodeSelectorOpIn,
+											Values:   []string{"m5.2xlarge"},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+				ImagePullSecrets: []corev1.LocalObjectReference{
+					{Name: "corp-registry-creds"},
 				},
 			},
 		},
@@ -2036,6 +2218,23 @@ func TestBuildJob_PodOverridesAllFields(t *testing.T) {
 	// NodeSelector
 	if job.Spec.Template.Spec.NodeSelector["pool"] != "agents" {
 		t.Errorf("Expected nodeSelector pool=agents, got %q", job.Spec.Template.Spec.NodeSelector["pool"])
+	}
+
+	// Tolerations
+	tols := job.Spec.Template.Spec.Tolerations
+	if len(tols) != 1 || tols[0].Key != "dedicated" || tols[0].Value != "ai-agents" {
+		t.Errorf("Expected tolerations [dedicated=ai-agents], got %+v", tols)
+	}
+
+	// Affinity
+	if job.Spec.Template.Spec.Affinity == nil || job.Spec.Template.Spec.Affinity.NodeAffinity == nil {
+		t.Fatal("Expected NodeAffinity to be set")
+	}
+
+	// ImagePullSecrets
+	ips := job.Spec.Template.Spec.ImagePullSecrets
+	if len(ips) != 1 || ips[0].Name != "corp-registry-creds" {
+		t.Errorf("Expected imagePullSecrets [corp-registry-creds], got %+v", ips)
 	}
 }
 
@@ -2158,6 +2357,21 @@ func TestBuildJob_NoPodOverrides(t *testing.T) {
 	// No NodeSelector.
 	if job.Spec.Template.Spec.NodeSelector != nil {
 		t.Error("Expected no NodeSelector when PodOverrides is nil")
+	}
+
+	// No Tolerations.
+	if job.Spec.Template.Spec.Tolerations != nil {
+		t.Error("Expected no Tolerations when PodOverrides is nil")
+	}
+
+	// No Affinity.
+	if job.Spec.Template.Spec.Affinity != nil {
+		t.Error("Expected no Affinity when PodOverrides is nil")
+	}
+
+	// No ImagePullSecrets.
+	if job.Spec.Template.Spec.ImagePullSecrets != nil {
+		t.Error("Expected no ImagePullSecrets when PodOverrides is nil")
 	}
 }
 

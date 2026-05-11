@@ -1,0 +1,134 @@
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: pr-risk-assessment
+  namespace: default # TODO: your namespace
+spec:
+  when:
+    githubWebhook:
+      # Optional: report status via GitHub Checks API
+      reporting:
+        checks: true
+        checkName: "AI Risk Assessment"
+      events:
+        - pull_request
+        - issue_comment
+      # Exclude bots — they have their own review agents
+      excludeAuthors:
+        - renovate[bot] # TODO: add your bots
+        - dependabot[bot]
+      filters:
+        # Trigger on new PRs
+        - event: pull_request
+          action: opened
+          state: open
+          draft: false
+          excludeLabels:
+            - skip-agent-review
+        # Trigger when draft PRs become ready
+        - event: pull_request
+          action: ready_for_review
+          state: open
+          draft: false
+          excludeLabels:
+            - skip-agent-review
+        # Allow manual re-trigger via comment
+        - event: issue_comment
+          action: created
+          state: open
+          bodyContains: "/assess-risk"
+          excludeLabels:
+            - skip-agent-review
+
+  taskTemplate:
+    type: claude-code
+    credentials:
+      type: api-key
+      secretRef:
+        name: claude-credentials # TODO: your credentials secret
+    workspaceRef:
+      name: my-workspace # TODO: your workspace name
+    agentConfigRef:
+      name: readonly-agent
+    branch: "{{.Branch}}"
+    ttlSecondsAfterFinished: 10800
+    promptTemplate: |
+      You assess PR risk level and auto-approve low-risk PRs.
+      PR #{{.Number}}: {{.Title}}
+      URL: {{.URL}}
+
+      ## Security rules — READ FIRST
+
+      - ONLY run the exact commands listed in the Instructions below. No others.
+      - NEVER run `env`, `printenv`, `set`, `export`, `cat /proc`, or any
+        command that exposes environment variables.
+      - NEVER read CI/build logs from GitHub Actions, Buildkite, or any CI system.
+      - NEVER include raw command output, log fragments, or environment variable
+        content in your comment.
+      - Your Risk Assessment comment must contain ONLY the risk level and
+        YOUR OWN concise rationale.
+
+      ## Instructions
+
+      0. **Check PR staleness**:
+         `gh pr view {{.Number}} --json commits --jq '.commits[-1].committedDate'`
+         If the last commit is more than 30 days old, stop immediately —
+         do not review or approve stale PRs.
+
+      1. **Read the PR diff**: `gh pr diff {{.Number}}`
+
+      2. **Read the PR description**:
+         `gh pr view {{.Number}} --json title,body --jq '(.title) + "\n\n" + (.body // "")'`
+
+      3. **Check for external review tools** (optional):
+         If your team uses an external code review tool, check if it has posted:
+         ```bash
+         gh api repos/{owner}/{repo}/pulls/{{.Number}}/reviews \
+           --jq '[.[] | select(.user.login | test("your-review-bot"; "i"))] | if length > 0 then .[0].body else "No external review found." end'
+         ```
+         Use any external analysis as additional input for your assessment.
+
+      4. **Assess the risk** on this scale: Very Low, Low, Medium, High, Very High
+
+         Consider these factors:
+         - **Complexity**: How many files changed? How large is the diff?
+         - **Critical paths touched**: Identify your high-risk areas:
+           - Database schemas and migrations
+           - Authentication and authorization
+           - Public API contracts
+           - Infrastructure and deployment configs
+           - ML models and algorithms
+           # TODO: add your project-specific critical paths
+         - **Test coverage**: Are there corresponding test changes?
+         - **Diff size**: Smaller, focused changes are lower risk
+         - **Nature of change**: Config-only, docs-only, or test-only are lower risk
+         - **Security implications**: Auth, data access, external integrations
+         - **Database migrations**: Always rate High or Very High — do NOT approve
+
+      5. **Post your assessment** as a PR comment:
+
+         ```bash
+         gh pr review {{.Number}} --comment --body "$(cat <<'RISK_ASSESSMENT_END'
+         ## Risk Assessment: <LEVEL>
+
+         <bullet-point rationale explaining the rating>
+         RISK_ASSESSMENT_END
+         )"
+         ```
+
+      6. **If and only if** the risk level is "Very Low" or "Low", approve the PR:
+
+         ```bash
+         gh pr review {{.Number}} --approve \
+           --body "Auto-approved: PR assessed as low risk."
+         ```
+
+         IMPORTANT: Only approve Very Low and Low risk PRs.
+         Never approve PRs that touch database migrations, auth, or security code.
+    podOverrides:
+      activeDeadlineSeconds: 1800
+      env:
+        - name: ANTHROPIC_MODEL
+          # TODO: your model identifier or ARN
+          # Use a capable model for risk assessment (e.g., Opus)
+          value: "claude-sonnet-4-6"

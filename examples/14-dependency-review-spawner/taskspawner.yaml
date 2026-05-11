@@ -1,0 +1,154 @@
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: dependency-review
+  namespace: default # TODO: your namespace
+spec:
+  when:
+    githubWebhook:
+      # TODO: your repository (owner/repo format)
+      repository: myorg/myrepo
+      events:
+        - pull_request
+      filters:
+        # Trigger on PRs opened or reopened by the dependency bot
+        - event: pull_request
+          action: opened
+          author: renovate[bot] # TODO: or "dependabot[bot]"
+          state: open
+          draft: false
+          excludeLabels:
+            - skip-agent-review
+        - event: pull_request
+          action: reopened
+          author: renovate[bot] # TODO: or "dependabot[bot]"
+          state: open
+          draft: false
+          excludeLabels:
+            - skip-agent-review
+
+  taskTemplate:
+    type: claude-code
+    credentials:
+      type: api-key
+      secretRef:
+        name: claude-credentials # TODO: your credentials secret
+    workspaceRef:
+      name: my-workspace # TODO: your workspace name
+    agentConfigRef:
+      name: readonly-agent
+    branch: "{{.Branch}}"
+    ttlSecondsAfterFinished: 10800
+    promptTemplate: |
+      # Dependency Upgrade Review Agent
+
+      You are reviewing a dependency upgrade PR authored by a dependency bot.
+      Your goal is to determine whether this upgrade is safe to merge
+      without human intervention.
+
+      ## Review Process
+
+      ### 1. Identify the dependency and change scope
+      - Parse the PR title and body to identify the package(s) being upgraded
+      - Determine if this is a patch, minor, or major version bump
+      - Check if it's a direct dependency or transitive
+
+      ### 2. Analyze usage in the codebase
+      - Search for all imports/usages of the package
+      - Identify which features and APIs of the package are used
+      - Check for any pinned version constraints or compatibility notes
+
+      ### 3. Research the upgrade
+      - Read the PR body for changelog/release notes (bots typically include these)
+      - Identify breaking changes, deprecations, and new features
+      - Check if any APIs we use were changed or removed
+
+      ### 4. Assess risk level
+      Rate the upgrade as one of:
+      - **Safe to merge**: Patch bump with no breaking changes, or minor bump
+        where none of the changed APIs are used in our codebase
+      - **Likely safe**: Minor bump with relevant changes but low risk
+      - **Needs human review**: Breaking changes affecting our code,
+        or security-sensitive dependency (auth, crypto, DB drivers)
+
+      ### 5. Identify the best human reviewer (when needed)
+      If the risk assessment is "Needs human review":
+      - Find all files that import or use the affected package(s)
+      - Run `git log -n 50 --format='%ae' -- <file>` on those files to find
+        frequent committers
+      - Resolve the top committer to a GitHub username:
+        `gh api 'search/users?q=<email>+in:email' --jq '.items[0].login'`
+      - If you cannot determine a reviewer, fall back to a default:
+        `# TODO: your fallback reviewer username`
+      - Request their review: `gh pr edit {{.Number}} --add-reviewer <username>`
+
+      ### 6. Run tests (when possible)
+      - Run your project's test suite (e.g., `make test`, `pytest`, `npm test`)
+      - If tests pass and the upgrade is patch/minor, increase confidence
+      - If tests fail, report the failures and mark as needs human review
+      - Set a 2-minute timeout on test commands to avoid hanging
+
+      ### 7. Post your review
+      Use `gh pr review` to post your assessment:
+      - For "Safe to merge": approve the PR with your analysis summary
+      - For "Likely safe": comment with your analysis, do not approve
+      - For "Needs human review": comment with your analysis and flag concerns
+
+      ## Review Format
+
+      Structure your PR review comment as:
+
+      ```
+      ## Dependency Review: <package-name> <old-version> -> <new-version>
+
+      **Change type**: patch | minor | major
+      **Risk assessment**: Safe to merge | Likely safe | Needs human review
+
+      ### Usage in codebase
+      <where and how the package is used>
+
+      ### Changelog summary
+      <relevant changes from the release notes>
+
+      ### Breaking changes
+      <any breaking changes and whether they affect us>
+
+      ### Test results
+      <test results if run>
+
+      ### Recommendation
+      <final recommendation with reasoning>
+      ```
+
+      ## Task
+
+      Review this dependency upgrade PR:
+
+      PR #{{.Number}}: {{.Title}}
+      URL: {{.URL}}
+
+      PR Description:
+      {{.Body}}
+
+      Instructions:
+      1. Check out the PR branch
+      2. Identify which packages are being upgraded and the version bump type
+      3. Search the codebase for all usages of the affected package(s)
+      4. Read the changelog/release notes included in the PR body
+      5. Determine if any breaking changes affect our usage
+      6. Run the relevant test suite (2-minute timeout)
+      7. Post your review using `gh pr review {{.Number}}`
+      8. If "Needs human review": request formal review with `gh pr edit {{.Number}} --add-reviewer <username>`
+      9. Add the `agent-reviewed` label: `gh pr edit {{.Number}} --add-label agent-reviewed`
+
+      ## Restrictions
+      - Do not modify any code — this is a review-only agent
+      - Do not push commits to the PR branch
+      - Never approve upgrades to security-sensitive packages (crypto, auth,
+        TLS, database drivers) without flagging for human review
+    podOverrides:
+      activeDeadlineSeconds: 1800
+      env:
+        - name: ANTHROPIC_MODEL
+          # TODO: your model identifier or ARN
+          value: "claude-sonnet-4-6"

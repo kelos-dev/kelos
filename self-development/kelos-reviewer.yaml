@@ -48,12 +48,12 @@ spec:
       filters:
         - event: issue_comment
           action: created
-          bodyContains: /kelos review
+          bodyPattern: /kelos review
           state: open
           author: gjkim42
         - event: pull_request_review
           action: submitted
-          bodyContains: /kelos review
+          bodyPattern: /kelos review
           state: open
           author: gjkim42
       reporting:
@@ -78,7 +78,7 @@ spec:
           ephemeral-storage: "4Gi"
         limits:
           ephemeral-storage: "4Gi"
-    branch: "{{.Branch}}"
+    branch: '{{with index . "Branch"}}{{.}}{{else}}main{{end}}'
     agentConfigRef:
       name: kelos-reviewer-agent
     promptTemplate: |
@@ -141,28 +141,78 @@ spec:
       - Are there edge cases, off-by-one errors, or nil pointer risks?
       - Are error returns checked and handled?
       - Are concurrent operations safe (locks, channels, context cancellation)?
+      - Does the code fail fast on invalid configuration / missing
+        credentials, or does it silently fall back to degraded behavior
+        (e.g., unauthenticated requests, nil/empty returns that mask the
+        failure)? Flag silent degradation as P1 — operators should see the
+        error, not discover it later from confusing symptoms.
 
       **Tests**:
       - Are there tests for the new/changed behavior?
       - Do the tests cover edge cases and error paths?
       - Are test assertions checking the right things?
       - Review test adequacy from the diff and surrounding code; do not rerun validation as part of the review
+      - For e2e `WaitFor*` helpers using `Eventually`, flag any use of the
+        global Gomega `Expect()` inside the polling block — Gomega does not
+        retry on `Expect` failures, so a transient API error short-circuits
+        the poller. Either inline the call and return a zero value on error,
+        or use the `Eventually(func(g Gomega) { ... })` form. P2.
+      - When a handler has both early-return guards and a primary action
+        (post a message, create a resource, emit a metric), flag tests that
+        cover only the no-op branches and leave the happy path untested.
+        Require at least one positive case verifying the primary action runs
+        with the right arguments — even if production code needs a new seam
+        (interface, function field, fake client) added to make it testable.
+        P2/P3 depending on action criticality.
+      - For printer/formatter tests asserting a `label: value` line is
+        emitted, flag `strings.Contains(output, "value")` checks that match
+        only the bare value — these often pass vacuously when the value
+        also appears in the resource's `Name` or other fixture context.
+        Require the full `"label: value"` substring (or a regex). P2.
 
       **Project conventions**:
       - Logging: messages start with capital letters, do not end with punctuation
       - Generated files: if API types or CRDs changed, were `make update` artifacts included?
       - Commit messages: concise, no PR links
       - PR description: follows `.github/PULL_REQUEST_TEMPLATE.md` format
+      - For PRs whose diff touches only files under `self-development/`,
+        require `/kind cleanup` and `release-note: NONE` regardless of how
+        the change is framed (bug fix, feature, etc.). Classify by file
+        location, not by problem nature. P2 if the wrong `/kind` label is
+        applied — `check-pr-labels` CI will accept it, so the reviewer is
+        the last line of defense.
 
       **Security**:
       - No hardcoded secrets or credentials
       - Input validation at system boundaries
       - No command injection, path traversal, or OWASP top-10 risks
+      - Flag any use of `os.Getenv()` for a secret as a Go `flag` package
+        default value — Go prints flag defaults in `--help` output, leaking
+        the secret. Require an empty default and reading the env var after
+        `flag.Parse()`. P1.
+
+      **Documentation accuracy**:
+      - Docs, READMEs, and code comments must describe what the code
+        actually does, not what it should do. Flag unimplemented behavior
+        ("X is filtered", "Y is HMAC-validated") that the code does not
+        enforce — partial enforcement should be documented as partial. P1
+        when a security guarantee is overstated; P2 otherwise.
+      - In CRD reference docs, flag bare field references that omit the
+        owning kind when the field lives on a sibling CRD (e.g. cite
+        `Task.spec.podOverrides.env`, not bare `podOverrides.env`, when
+        documenting a Workspace section). A reader of one CRD's reference
+        page should be able to locate any cited field without already
+        knowing the layout of the others. P2.
 
       **Code quality**:
       - No unnecessary code, comments, or dead variables
       - Changes are minimal and focused — no unrelated refactoring
       - Naming is clear and consistent with the codebase
+      - When a CLI command can fail for a named resource (task, spawner,
+        workspace, etc.), flag error messages that omit the resource name —
+        operators piping or batching invocations need an actionable signal
+        from `Error: ...`. Prefer `fmt.Errorf("task %s failed", name)` over
+        `errors.New("task failed")`. P2.
 
       ### 5. Write findings
 

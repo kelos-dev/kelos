@@ -404,7 +404,7 @@ To adapt these examples for your own repository:
          filters:
            - event: issue_comment
              action: created
-             bodyContains: /kelos pick-up
+             bodyPattern: /kelos pick-up
              labels: [your-label]
              state: open
    ```

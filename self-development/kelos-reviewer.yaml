@@ -48,12 +48,12 @@ spec:
       filters:
         - event: issue_comment
           action: created
-          bodyContains: /kelos review
+          bodyPattern: /kelos review
           state: open
           author: gjkim42
         - event: pull_request_review
           action: submitted
-          bodyContains: /kelos review
+          bodyPattern: /kelos review
           state: open
           author: gjkim42
       reporting:

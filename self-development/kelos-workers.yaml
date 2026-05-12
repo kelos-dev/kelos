@@ -45,7 +45,7 @@ spec:
       filters:
         - event: issue_comment
           action: created
-          bodyContains: /kelos pick-up
+          bodyPattern: /kelos pick-up
           commentOn: Issue
           state: open
           author: gjkim42

@@ -177,6 +177,7 @@ GitHub Apps are preferred over PATs for production use because they offer fine-g
 | `spec.when.githubPullRequests.draft` | Filter by draft state | No |
 | `spec.when.githubPullRequests.priorityLabels` | Priority-order labels for task selection when `maxConcurrency` is set; index 0 is highest priority | No |
 | `spec.when.githubPullRequests.reporting.enabled` | Post status comments (started, succeeded, failed) back to the GitHub pull request | No |
+| `spec.when.githubPullRequests.reporting.checks.name` | Creates a GitHub Check Run for each PR task, enabling branch protection and merge queue integration. Sets the Check Run name (defaults to `"Kelos: <taskspawner-name>"`, max 100 chars). The token used by the workspace must have `checks:write` permission. Not supported on `githubIssues` (rejected by CEL validation). | No |
 | `spec.when.githubPullRequests.pollInterval` | Per-source poll interval override (e.g., `"30s"`, `"5m"`); takes precedence over `spec.pollInterval` | No |
 | `spec.when.githubWebhook.events` | GitHub event types to listen for (e.g., `"issues"`, `"pull_request"`, `"push"`, `"issue_comment"`) | Yes (when using githubWebhook) |
 | `spec.when.githubWebhook.repository` | Restrict webhooks to a specific repository (`owner/repo` format); if empty, webhooks from any repository are accepted | No |
@@ -194,6 +195,8 @@ GitHub Apps are preferred over PATs for production use because they offer fine-g
 | `spec.when.githubWebhook.filters[].bodyPattern` | Require the comment/review body to match a Go re2 regular expression. When combined with `excludeBodyPatterns`, the body must match this pattern AND not match any exclude entry | No |
 | `spec.when.githubWebhook.filters[].excludeBodyPatterns` | Exclude events whose comment/review body matches any of these Go re2 regular expressions (OR semantics) | No |
 | `spec.when.githubWebhook.filters[].commentOn` | Scope `issue_comment` events to comments posted on a specific subject: `"Issue"` matches plain issues, `"PullRequest"` matches pull requests. Empty matches both. Ignored for other events | No |
+| `spec.when.githubWebhook.reporting.enabled` | Post status comments (started, succeeded, failed) back to the originating issue or PR | No |
+| `spec.when.githubWebhook.reporting.checks.name` | Creates a GitHub Check Run for tasks spawned by PR-related webhook events, enabling branch protection and merge queue integration. Sets the Check Run name (defaults to `"Kelos: <taskspawner-name>"`, max 100 chars). The token used by the workspace must have `checks:write` permission. Requires `events` to include at least one of `pull_request`, `pull_request_review`, `pull_request_review_comment`, or `pull_request_target` (enforced by CEL validation). | No |
 | `spec.when.linearWebhook.types` | Linear resource types to listen for (e.g., `"Issue"`, `"Comment"`) | Yes (when using linearWebhook) |
 | `spec.when.linearWebhook.filters[].type` | Scope filter to a specific resource type | No |
 | `spec.when.linearWebhook.filters[].action` | Filter by webhook action: `create`, `update`, or `remove` | No |

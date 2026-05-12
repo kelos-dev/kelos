@@ -106,6 +106,26 @@ spec:
 
 **Additional filters:** `reviewState`, `author`, `draft`.
 
+**Status reporting:** Two independent options:
+
+- `reporting.enabled: true` posts status comments (started, succeeded, failed) on the PR.
+- `reporting.checks.name` creates a GitHub Check Run for each PR task, so the run can be required by branch protection rules or referenced from a merge queue. The Check Run starts as `in_progress` when the task begins and is updated to `success` or `failure` on completion. The name defaults to `"Kelos: <taskspawner-name>"` and appears in branch protection rule configuration and the PR Checks tab; the token referenced by the workspace must have `checks:write` permission.
+
+```yaml
+spec:
+  when:
+    githubPullRequests:
+      labels: [needs-review]
+      reporting:
+        enabled: true            # status comments on the PR
+        checks:
+          name: kelos/pr-review  # required-status-check name (optional override)
+```
+
+To require the Check Run before merge, open the GitHub repository's **Settings → Branches → Branch protection rule** for the target branch, enable **Require status checks to pass before merging**, and add the same name (`kelos/pr-review` or the default `Kelos: <taskspawner-name>`) to the required checks list. Renaming the TaskSpawner changes the default name, so pin the name with `reporting.checks.name` if you reference it from branch protection or merge queue config.
+
+> **Note:** `reporting.checks` is supported for `githubPullRequests` and for `githubWebhook` sources that include a pull-request event type. It is rejected at admission for `githubIssues` sources.
+
 ### GitHub Webhooks
 
 React to GitHub webhook events in real time — issues, pull requests, pushes, reviews, and more. Unlike the polling-based GitHub Issues and Pull Requests sources, webhooks provide instant response to repository events.
@@ -153,6 +173,8 @@ spec:
 **Setup:** Configure your GitHub repository to send webhooks to your Kelos instance and create a secret with the webhook signing secret. See [example 10](../examples/10-taskspawner-github-webhook/) for full setup instructions.
 
 **Filtering options:** `events` (required), `repository`, `excludeAuthors`, and per-filter fields: `action`, `labels`, `excludeLabels`, `state`, `branch`, `draft`, `author`, `bodyContains`.
+
+**Status reporting:** Like `githubPullRequests`, the webhook source supports `reporting.enabled` (status comments back to the originating issue or PR) and `reporting.checks.name` (GitHub Check Runs for branch protection). Check Runs require `events` to include at least one pull-request event type (`pull_request`, `pull_request_review`, `pull_request_review_comment`, or `pull_request_target`); the configuration is rejected at admission otherwise.
 
 **Webhook-specific variables:** `{{.Event}}`, `{{.Action}}`, `{{.Sender}}`, `{{.Ref}}`, `{{.Repository}}`, `{{.Payload}}` (full payload access).
 

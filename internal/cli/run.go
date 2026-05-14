@@ -413,7 +413,11 @@ func oauthSecretKey(agentType string) string {
 // If skipConfirm is false and the secret already exists, the user is prompted
 // before overriding.
 func ensureGitHubAppSecret(cfg *ClientConfig, name string, appCfg *GitHubAppConfig, skipConfirm bool) error {
-	privateKey, err := os.ReadFile(appCfg.PrivateKeyPath)
+	privateKeyPath, err := expandHome(appCfg.PrivateKeyPath)
+	if err != nil {
+		return fmt.Errorf("expanding privateKeyPath %s: %w", appCfg.PrivateKeyPath, err)
+	}
+	privateKey, err := os.ReadFile(privateKeyPath)
 	if err != nil {
 		return fmt.Errorf("reading private key file %s: %w", appCfg.PrivateKeyPath, err)
 	}

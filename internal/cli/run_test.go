@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -69,5 +70,32 @@ func TestWatchTask_FailedReturnsError(t *testing.T) {
 	}
 	if !strings.Contains(hint, "kelos get tasks task-bad -d") {
 		t.Errorf("stderr = %q, want it to suggest 'kelos get tasks task-bad -d'", hint)
+	}
+}
+
+// TestEnsureGitHubAppSecret_ExpandsTildeInPrivateKeyPath verifies that a
+// leading "~" in privateKeyPath is expanded to the user's home directory
+// before the file is read. Regression test for issue #1134, where a
+// tilde-prefixed path documented in the README and reference docs was
+// passed verbatim to os.ReadFile, producing a misleading "no such file"
+// error.
+func TestEnsureGitHubAppSecret_ExpandsTildeInPrivateKeyPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	appCfg := &GitHubAppConfig{
+		AppID:          "12345",
+		InstallationID: "67890",
+		PrivateKeyPath: "~/missing.pem",
+	}
+
+	err := ensureGitHubAppSecret(&ClientConfig{}, "test-secret", appCfg, true)
+	if err == nil {
+		t.Fatal("expected error for missing private key file, got nil")
+	}
+
+	expanded := filepath.Join(dir, "missing.pem")
+	if !strings.Contains(err.Error(), expanded) {
+		t.Errorf("expected error to reference expanded path %q (tilde must be expanded before os.ReadFile), got: %v", expanded, err)
 	}
 }

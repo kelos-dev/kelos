@@ -19,7 +19,7 @@ Each TaskSpawner references an `AgentConfig` that defines git identity, comment 
 | **kelos-pr-responder** | Webhook: PR review/comment on `generated-by-kelos` PRs | Opus | Re-engages on PR review feedback and updates the existing branch incrementally |
 | **kelos-triage** | Webhook: issue opened/labeled/reopened (`needs-actor`) | Opus | Classifies issues by kind/priority, detects duplicates, and recommends an actor |
 | **kelos-fake-user** | Cron (daily 09:00 UTC) | Sonnet | Tests DX as a new user — follows docs, tries CLI workflows, files issues for problems found |
-| **kelos-fake-strategist** | Cron (every 12 hours) | Opus | Explores new use cases, workflow improvements, and integration opportunities |
+| **kelos-fake-strategist** | Cron (every 12 hours) | Opus | Explores new use cases, integration opportunities, and CRD/API extensions |
 | **kelos-config-update** | Cron (daily 18:00 UTC) | Opus | Reviews recent PR feedback and updates agent configuration (conventions, prompts, configs) accordingly |
 | **kelos-self-update** | Cron (daily 06:00 UTC) | Opus | Reviews and tunes prompts, configs, and workflow files — the pipeline improves itself |
 | **kelos-image-update** | Cron (daily 03:00 UTC) | Sonnet | Checks for newer agent image versions (Claude Code, Codex, Gemini, etc.) and creates PRs to update them |

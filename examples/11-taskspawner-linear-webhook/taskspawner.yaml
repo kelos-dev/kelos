@@ -46,5 +46,5 @@ spec:
       Please analyze this Linear issue and provide recommendations or implement any requested changes.
 
       Full webhook data is available in the payload for detailed analysis if needed.
+    ttlSecondsAfterFinished: 3600
   maxConcurrency: 3
-  ttlSecondsAfterFinished: 3600

@@ -52,6 +52,5 @@ spec:
       URL:      {{.URL}}
 
       Investigate the stack trace in the payload and open a PR with a fix.
-
+    ttlSecondsAfterFinished: 3600
   maxConcurrency: 3
-  ttlSecondsAfterFinished: 3600

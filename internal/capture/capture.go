@@ -3,6 +3,7 @@ package capture
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -88,6 +89,15 @@ func captureOutputs(r runner, usageFile string) []string {
 		if v, ok := usage[key]; ok {
 			outputs = append(outputs, key+": "+v)
 		}
+	}
+
+	// Emit the agent's visible response text so reporters (Slack thread
+	// replies, GitHub PR comments) can surface the answer to the user
+	// instead of only the task title and token counts. Base64-encoded
+	// because the text may span multiple lines, which would otherwise
+	// break the line-delimited KELOS_OUTPUTS contract.
+	if response := ParseResponse(agentType, usageFile); response != "" {
+		outputs = append(outputs, "response: "+base64.StdEncoding.EncodeToString([]byte(response)))
 	}
 
 	return outputs

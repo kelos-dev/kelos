@@ -24,6 +24,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	"github.com/kelos-dev/kelos/internal/contextfetch"
 	"github.com/kelos-dev/kelos/internal/githubapp"
 	"github.com/kelos-dev/kelos/internal/logging"
 	"github.com/kelos-dev/kelos/internal/reporting"
@@ -342,6 +343,16 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 		maxTotalTasks = int(*ts.Spec.MaxTotalTasks)
 	}
 
+	var contextFetcher *contextfetch.Fetcher
+	if len(ts.Spec.TaskTemplate.ContextSources) > 0 {
+		contextFetcher = &contextfetch.Fetcher{
+			Client:     cl,
+			HTTPClient: http.DefaultClient,
+			Namespace:  ts.Namespace,
+			Logger:     log,
+		}
+	}
+
 	newTasksCreated := 0
 	for _, item := range newItems {
 		// Enforce max concurrency limit
@@ -359,6 +370,16 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 		taskName := fmt.Sprintf("%s-%s", ts.Name, item.ID)
 
 		templateVars := source.WorkItemToTemplateVars(item)
+
+		// Enrich with external context sources
+		if contextFetcher != nil {
+			contextData, err := contextFetcher.FetchAll(ctx, ts.Spec.TaskTemplate.ContextSources, templateVars)
+			if err != nil {
+				log.Error(err, "Fetching context sources", "item", item.ID)
+				continue
+			}
+			templateVars["Context"] = contextData
+		}
 
 		tb, err := taskbuilder.NewTaskBuilder(cl)
 		if err != nil {

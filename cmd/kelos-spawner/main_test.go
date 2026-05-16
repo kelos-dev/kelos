@@ -29,6 +29,7 @@ import (
 	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 	"github.com/kelos-dev/kelos/internal/reporting"
 	"github.com/kelos-dev/kelos/internal/source"
+	"strings"
 )
 
 var noToken = func(context.Context) (string, error) { return "", nil }
@@ -2687,5 +2688,189 @@ func TestRunOnce_ReturnsSourcePollInterval(t *testing.T) {
 	}
 	if interval != 15*time.Second {
 		t.Fatalf("Interval = %v, want %v", interval, 15*time.Second)
+	}
+}
+
+func TestRunCycleWithSource_ContextSources(t *testing.T) {
+	// Serve a fake external API that returns context data.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"severity":"critical","affected_users":42}`))
+	}))
+	defer srv.Close()
+
+	ts := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ctx-spawner",
+			Namespace: "default",
+			UID:       "ctx-spawner-uid",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+				Credentials: kelosv1alpha1.Credentials{
+					Type:      kelosv1alpha1.CredentialTypeOAuth,
+					SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+				},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "test-ws"},
+				PromptTemplate: `Fix bug #{{.Number}}: {{.Title}}
+{{- if .Context.errorInfo}}
+
+Error context: {{.Context.errorInfo}}
+{{- end}}`,
+				ContextSources: []kelosv1alpha1.ContextSource{{
+					Name: "errorInfo",
+					HTTP: &kelosv1alpha1.HTTPContextSource{
+						URL:           srv.URL + "/errors/{{.Number}}",
+						AllowInsecure: true,
+					},
+				}},
+			},
+		},
+	}
+
+	cl, key := setupTest(t, ts)
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{ID: "10", Number: 10, Title: "Connection timeout"},
+		},
+	}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatalf("Listing tasks: %v", err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task, got %d", len(taskList.Items))
+	}
+
+	prompt := taskList.Items[0].Spec.Prompt
+	if !strings.Contains(prompt, "Connection timeout") {
+		t.Errorf("Prompt should contain title, got: %s", prompt)
+	}
+	if !strings.Contains(prompt, `{"severity":"critical","affected_users":42}`) {
+		t.Errorf("Prompt should contain context source data, got: %s", prompt)
+	}
+}
+
+func TestRunCycleWithSource_ContextSources_OptionalFailure(t *testing.T) {
+	// Serve a fake external API that always fails.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	ts := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ctx-opt-spawner",
+			Namespace: "default",
+			UID:       "ctx-opt-spawner-uid",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+				Credentials: kelosv1alpha1.Credentials{
+					Type:      kelosv1alpha1.CredentialTypeOAuth,
+					SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+				},
+				WorkspaceRef:   &kelosv1alpha1.WorkspaceReference{Name: "test-ws"},
+				PromptTemplate: `Fix #{{.Number}}`,
+				ContextSources: []kelosv1alpha1.ContextSource{{
+					Name: "optional",
+					HTTP: &kelosv1alpha1.HTTPContextSource{
+						URL:           srv.URL,
+						AllowInsecure: true,
+					},
+					FailurePolicy: kelosv1alpha1.ContextSourceFailurePolicyIgnore,
+				}},
+			},
+		},
+	}
+
+	cl, key := setupTest(t, ts)
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{ID: "20", Number: 20, Title: "Bug"},
+		},
+	}
+
+	// Task should still be created despite context source failure.
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatalf("Listing tasks: %v", err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task, got %d", len(taskList.Items))
+	}
+}
+
+func TestRunCycleWithSource_ContextSources_RequiredFailure(t *testing.T) {
+	// Serve a fake external API that always fails.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	ts := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ctx-req-spawner",
+			Namespace: "default",
+			UID:       "ctx-req-spawner-uid",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+				Credentials: kelosv1alpha1.Credentials{
+					Type:      kelosv1alpha1.CredentialTypeOAuth,
+					SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+				},
+				WorkspaceRef:   &kelosv1alpha1.WorkspaceReference{Name: "test-ws"},
+				PromptTemplate: `Fix #{{.Number}}`,
+				ContextSources: []kelosv1alpha1.ContextSource{{
+					Name: "required",
+					HTTP: &kelosv1alpha1.HTTPContextSource{
+						URL:           srv.URL,
+						AllowInsecure: true,
+					},
+					FailurePolicy: kelosv1alpha1.ContextSourceFailurePolicyFail,
+				}},
+			},
+		},
+	}
+
+	cl, key := setupTest(t, ts)
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{ID: "30", Number: 30, Title: "Bug"},
+		},
+	}
+
+	// Cycle should succeed (error is per-item, not cycle-level) but no task created.
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatalf("Listing tasks: %v", err)
+	}
+	if len(taskList.Items) != 0 {
+		t.Fatalf("Expected 0 tasks (required context source failed), got %d", len(taskList.Items))
 	}
 }

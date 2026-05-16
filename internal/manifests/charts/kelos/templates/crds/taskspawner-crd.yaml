@@ -139,7 +139,159 @@ spec:
                       GitHub webhook sources: {{ "{{.Event}}" }}, {{ "{{.Action}}" }}, {{ "{{.Sender}}" }}, {{ "{{.Ref}}" }}, {{ "{{.Repository}}" }}, {{ "{{.Payload}}" }} (full payload access)
                       Linear webhook sources: {{ "{{.Type}}" }}, {{ "{{.Action}}" }}, {{ "{{.State}}" }}, {{ "{{.Labels}}" }}, {{ "{{.IssueID}}" }}, {{ "{{.Payload}}" }}
                       Cron sources: {{ "{{.Time}}" }}, {{ "{{.Schedule}}" }}
+                      When contextSources are configured: .Context.NAME for each source
                     type: string
+                  contextSources:
+                    description: |-
+                      ContextSources declares external data sources to query before task
+                      creation. Each source's response is available as .Context.NAME
+                      in promptTemplate, branch, and metadata templates. Sources are
+                      fetched in parallel during the discovery cycle.
+                    items:
+                      description: |-
+                        ContextSource declares an external data source whose fetched value is
+                        available as .Context.NAME in promptTemplate, branch, and metadata
+                        templates. The name must be a valid Go template identifier since it is
+                        used as a key under the .Context template variable. Exactly one source
+                        kind must be set.
+                      properties:
+                        failurePolicy:
+                          default: Fail
+                          description: |-
+                            FailurePolicy determines behavior when this source fails to fetch.
+                            Fail skips task creation for this work item; Ignore uses an empty
+                            string for the context variable and logs a warning. Defaults to Fail.
+                          enum:
+                          - Fail
+                          - Ignore
+                          type: string
+                        http:
+                          description: HTTP fetches context from an HTTP(S) endpoint.
+                          properties:
+                            allowInsecure:
+                              description: AllowInsecure permits plain HTTP (non-TLS)
+                                URLs. Defaults to false.
+                              type: boolean
+                            body:
+                              description: Body is a Go text/template for POST request
+                                bodies.
+                              type: string
+                            headers:
+                              additionalProperties:
+                                type: string
+                              description: |-
+                                Headers are static HTTP headers to include in the request.
+                                Values support Go text/template variables from the work item.
+                              type: object
+                            headersFrom:
+                              description: |-
+                                HeadersFrom sources HTTP header values from Kubernetes Secrets.
+                                These are merged with inline Headers; HeadersFrom values take
+                                precedence on conflict.
+                              items:
+                                description: HTTPHeaderSource defines an HTTP header
+                                  whose value comes from a Secret key.
+                                properties:
+                                  header:
+                                    description: Header is the HTTP header name (e.g.,
+                                      "Authorization").
+                                    minLength: 1
+                                    type: string
+                                  secretKey:
+                                    description: |-
+                                      SecretKey is the key within the Secret's data whose value is used
+                                      as the header value.
+                                    minLength: 1
+                                    type: string
+                                  secretName:
+                                    description: SecretName is the name of the Secret
+                                      in the same namespace as the TaskSpawner.
+                                    minLength: 1
+                                    type: string
+                                required:
+                                - header
+                                - secretKey
+                                - secretName
+                                type: object
+                              maxItems: 16
+                              type: array
+                            maxResponseBytes:
+                              default: 32768
+                              description: |-
+                                MaxResponseBytes limits the response body size read from the
+                                endpoint. Prevents oversized responses from inflating prompts.
+                                Defaults to 32768 (32 KiB).
+                              format: int32
+                              maximum: 131072
+                              minimum: 1
+                              type: integer
+                            method:
+                              default: GET
+                              description: Method is the HTTP method to use. Defaults
+                                to GET.
+                              enum:
+                              - GET
+                              - POST
+                              type: string
+                            responseFilter:
+                              description: |-
+                                ResponseFilter optionally extracts a subset of the response body.
+                                When set, only the extracted value is stored as the context variable.
+                                When absent, the entire response body is stored as a string.
+                              properties:
+                                expression:
+                                  description: |-
+                                    Expression is the filter expression in the specified language.
+                                    For JSONPath, use expressions like "$.data.value".
+                                  minLength: 1
+                                  type: string
+                                type:
+                                  description: Type is the filter language.
+                                  enum:
+                                  - JSONPath
+                                  type: string
+                              required:
+                              - expression
+                              - type
+                              type: object
+                            timeoutSeconds:
+                              default: 10
+                              description: TimeoutSeconds is the per-request timeout.
+                                Defaults to 10.
+                              format: int32
+                              maximum: 60
+                              minimum: 1
+                              type: integer
+                            url:
+                              description: |-
+                                URL is the HTTP(S) endpoint to fetch. Supports Go text/template
+                                variables from the work item (e.g., "https://api.example.com/items/{{ "{{.Number}}" }}").
+                                HTTPS is required unless AllowInsecure is set.
+                              minLength: 1
+                              type: string
+                          required:
+                          - url
+                          type: object
+                        name:
+                          description: |-
+                            Name identifies this context source. The fetched value is available
+                            as .Context.NAME in promptTemplate, branch, and metadata templates.
+                          maxLength: 64
+                          minLength: 1
+                          pattern: ^[a-zA-Z][a-zA-Z0-9_]*$
+                          type: string
+                      required:
+                      - name
+                      type: object
+                      x-kubernetes-validations:
+                      - message: exactly one source kind must be set (currently only
+                          http is supported)
+                        rule: has(self.http)
+                    maxItems: 8
+                    type: array
+                    x-kubernetes-validations:
+                    - message: contextSources names must be unique
+                      rule: self.map(s, s.name).size() == self.size()
                   credentials:
                     description: Credentials specifies how to authenticate with the
                       agent.
@@ -2893,6 +3045,7 @@ spec:
                       GitHub webhook sources: {{ "{{.Event}}" }}, {{ "{{.Action}}" }}, {{ "{{.Sender}}" }}, {{ "{{.Ref}}" }}, {{ "{{.Repository}}" }}, {{ "{{.Payload}}" }} (full payload access)
                       Linear webhook sources: {{ "{{.Type}}" }}, {{ "{{.Action}}" }}, {{ "{{.State}}" }}, {{ "{{.Labels}}" }}, {{ "{{.IssueID}}" }}, {{ "{{.Payload}}" }}
                       Cron sources: {{ "{{.Time}}" }}, {{ "{{.Schedule}}" }}
+                      When contextSources are configured: .Context.NAME for each source
                     type: string
                   ttlSecondsAfterFinished:
                     description: |-

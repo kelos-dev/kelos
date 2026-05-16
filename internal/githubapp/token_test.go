@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -230,7 +231,7 @@ func TestGenerateInstallationToken(t *testing.T) {
 		Client:  server.Client(),
 	}
 
-	resp, err := tc.GenerateInstallationToken(context.Background(), creds)
+	resp, err := tc.GenerateInstallationToken(context.Background(), creds, nil)
 	if err != nil {
 		t.Fatalf("GenerateInstallationToken: %v", err)
 	}
@@ -417,8 +418,136 @@ func TestGenerateInstallationToken_Error(t *testing.T) {
 		Client:  server.Client(),
 	}
 
-	_, err = tc.GenerateInstallationToken(context.Background(), creds)
+	_, err = tc.GenerateInstallationToken(context.Background(), creds, nil)
 	if err == nil {
 		t.Error("expected error for 401 response")
+	}
+}
+
+func TestGenerateInstallationToken_WithRepositories(t *testing.T) {
+	_, keyPEM := generateTestKey(t)
+
+	expiresAt := time.Now().Add(1 * time.Hour).UTC().Truncate(time.Second)
+
+	var receivedBody map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if ct := r.Header.Get("Content-Type"); ct != "application/json" {
+			t.Errorf("Content-Type = %q, want application/json", ct)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("reading request body: %v", err)
+		}
+		if len(body) > 0 {
+			if err := json.Unmarshal(body, &receivedBody); err != nil {
+				t.Fatalf("unmarshaling request body: %v", err)
+			}
+		}
+
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"token":      "ghs_scoped_token",
+			"expires_at": expiresAt.Format(time.RFC3339),
+		})
+	}))
+	defer server.Close()
+
+	creds, err := ParseCredentials(map[string][]byte{
+		"appID":          []byte("12345"),
+		"installationID": []byte("67890"),
+		"privateKey":     keyPEM,
+	})
+	if err != nil {
+		t.Fatalf("ParseCredentials: %v", err)
+	}
+
+	tc := &TokenClient{
+		BaseURL: server.URL,
+		Client:  server.Client(),
+	}
+
+	opts := &TokenOptions{
+		Repositories: []string{"my-repo", "other-repo"},
+	}
+	resp, err := tc.GenerateInstallationToken(context.Background(), creds, opts)
+	if err != nil {
+		t.Fatalf("GenerateInstallationToken: %v", err)
+	}
+
+	if resp.Token != "ghs_scoped_token" {
+		t.Errorf("Token = %q, want %q", resp.Token, "ghs_scoped_token")
+	}
+
+	// Verify the request body contained the repositories
+	repos, ok := receivedBody["repositories"]
+	if !ok {
+		t.Fatal("request body missing 'repositories' field")
+	}
+	repoList, ok := repos.([]interface{})
+	if !ok {
+		t.Fatalf("repositories is not an array: %T", repos)
+	}
+	if len(repoList) != 2 {
+		t.Errorf("repositories length = %d, want 2", len(repoList))
+	}
+	if repoList[0] != "my-repo" || repoList[1] != "other-repo" {
+		t.Errorf("repositories = %v, want [my-repo other-repo]", repoList)
+	}
+}
+
+func TestGenerateInstallationToken_NilOpts(t *testing.T) {
+	_, keyPEM := generateTestKey(t)
+
+	expiresAt := time.Now().Add(1 * time.Hour).UTC().Truncate(time.Second)
+
+	var requestBodyEmpty bool
+	var contentType string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		requestBodyEmpty = len(body) == 0
+		contentType = r.Header.Get("Content-Type")
+
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"token":      "ghs_unscoped",
+			"expires_at": expiresAt.Format(time.RFC3339),
+		})
+	}))
+	defer server.Close()
+
+	creds, err := ParseCredentials(map[string][]byte{
+		"appID":          []byte("12345"),
+		"installationID": []byte("67890"),
+		"privateKey":     keyPEM,
+	})
+	if err != nil {
+		t.Fatalf("ParseCredentials: %v", err)
+	}
+
+	tc := &TokenClient{BaseURL: server.URL, Client: server.Client()}
+
+	// nil opts should send no body (backward compatible)
+	_, err = tc.GenerateInstallationToken(context.Background(), creds, nil)
+	if err != nil {
+		t.Fatalf("GenerateInstallationToken: %v", err)
+	}
+	if !requestBodyEmpty {
+		t.Error("expected empty request body for nil opts")
+	}
+	if contentType != "" {
+		t.Errorf("expected no Content-Type header for nil opts, got %q", contentType)
+	}
+
+	// Empty repositories should also send no body
+	requestBodyEmpty = false
+	_, err = tc.GenerateInstallationToken(context.Background(), creds, &TokenOptions{})
+	if err != nil {
+		t.Fatalf("GenerateInstallationToken with empty opts: %v", err)
+	}
+	if !requestBodyEmpty {
+		t.Error("expected empty request body for empty opts")
+	}
+	if contentType != "" {
+		t.Errorf("expected no Content-Type header for empty opts, got %q", contentType)
 	}
 }

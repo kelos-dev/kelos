@@ -383,7 +383,23 @@ func (r *TaskReconciler) resolveGitHubAppToken(ctx context.Context, task *kelosv
 		}
 	}
 
-	tokenResp, err := tc.GenerateInstallationToken(ctx, creds)
+	// Scope the installation token to repos declared in the workspace.
+	// This includes the primary repo and any additional remotes.
+	var repos []string
+	if workspace.Repo != "" {
+		if _, _, repoName := parseGitHubRepo(workspace.Repo); repoName != "" {
+			repos = append(repos, repoName)
+		}
+	}
+	for _, remote := range workspace.Remotes {
+		if _, _, repoName := parseGitHubRepo(remote.URL); repoName != "" {
+			repos = append(repos, repoName)
+		}
+	}
+	opts := &githubapp.TokenOptions{
+		Repositories: repos,
+	}
+	tokenResp, err := tc.GenerateInstallationToken(ctx, creds, opts)
 	if err != nil {
 		return nil, fmt.Errorf("generating installation token: %w", err)
 	}

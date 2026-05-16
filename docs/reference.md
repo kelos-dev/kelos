@@ -212,6 +212,10 @@ GitHub Apps are preferred over PATs for production use because they offer fine-g
 | `spec.when.webhook.filters[].field` | JSONPath expression selecting the payload field to match | Yes (per filter) |
 | `spec.when.webhook.filters[].value` | Require an exact string match against the extracted field value (mutually exclusive with `pattern`) | Conditional |
 | `spec.when.webhook.filters[].pattern` | Require a regex match against the extracted field value (mutually exclusive with `value`) | Conditional |
+| `spec.when.jira.baseUrl` | Jira instance URL (e.g., `https://mycompany.atlassian.net`) | Yes (when using jira) |
+| `spec.when.jira.project` | Jira project key (e.g., `PROJ`) | Yes (when using jira) |
+| `spec.when.jira.jql` | Optional JQL filter appended to the default query; when set, the full query is `project = <project> AND (<jql>)` | No |
+| `spec.when.jira.secretRef.name` | Secret containing `JIRA_TOKEN` (required) and optionally `JIRA_USER` for Jira Cloud Basic auth; omit `JIRA_USER` for Jira Data Center/Server Bearer auth | Yes (when using jira) |
 | `spec.when.jira.pollInterval` | Per-source poll interval override (e.g., `"30s"`, `"5m"`); takes precedence over `spec.pollInterval` | No |
 | `spec.when.cron.schedule` | Cron schedule expression (e.g., `"0 * * * *"`) | Yes (when using cron) |
 | `spec.taskTemplate.type` | Agent type (`claude-code`, `codex`, `gemini`, `opencode`, or `cursor`) | Yes |

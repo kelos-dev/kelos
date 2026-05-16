@@ -137,6 +137,12 @@ metadata:
   name: kelos-spawner-role
 rules:
   - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - get
+  - apiGroups:
       - kelos.dev
     resources:
       - taskspawners
@@ -236,6 +242,12 @@ kind: ClusterRole
 metadata:
   name: kelos-webhook-role
 rules:
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - get
   - apiGroups:
       - kelos.dev
     resources:

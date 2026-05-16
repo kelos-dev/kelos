@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/kelos-dev/kelos/api/v1alpha1"
+	"github.com/kelos-dev/kelos/internal/contextfetch"
 	"github.com/kelos-dev/kelos/internal/reporting"
 	"github.com/kelos-dev/kelos/internal/taskbuilder"
 )
@@ -527,6 +528,21 @@ func (h *WebhookHandler) createTask(ctx context.Context, spawner *v1alpha1.TaskS
 	}
 
 	log.Info("Extracted template variables", "ID", templateVars["ID"], "Title", templateVars["Title"], "Action", templateVars["Action"])
+
+	// Enrich with external context sources
+	if len(spawner.Spec.TaskTemplate.ContextSources) > 0 {
+		fetcher := &contextfetch.Fetcher{
+			Client:     h.client,
+			HTTPClient: http.DefaultClient,
+			Namespace:  spawner.Namespace,
+			Logger:     log,
+		}
+		contextData, err := fetcher.FetchAll(ctx, spawner.Spec.TaskTemplate.ContextSources, templateVars)
+		if err != nil {
+			return fmt.Errorf("fetching context sources: %w", err)
+		}
+		templateVars["Context"] = contextData
+	}
 
 	// Build unique task name using a hash of the delivery ID to avoid collisions.
 	// Hashing gives uniform 12-hex-char suffix regardless of input length,

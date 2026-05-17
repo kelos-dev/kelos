@@ -44,11 +44,15 @@ if [ -n "${KELOS_AGENTS_MD:-}" ]; then
   printf '%s' "$KELOS_AGENTS_MD" >~/.codex/AGENTS.md
 fi
 
-# Install each plugin as a Codex skill directory under ~/.codex/skills
+# Install each plugin as a Codex skill directory under ~/.codex/skills.
+# Codex CLI 0.130.0 does not accept `--enable skills` (the feature-flag
+# name is rejected as unknown), so the skill files land on disk but are
+# not surfaced to the agent. Until we bump CODEX_VERSION to a release
+# that supports skills, AgentConfigs should put the load-bearing
+# guidance in agentsMD (which becomes ~/.codex/AGENTS.md and IS read).
 if [ -n "${KELOS_PLUGIN_DIR:-}" ] && [ -d "${KELOS_PLUGIN_DIR}" ]; then
   for plugindir in "${KELOS_PLUGIN_DIR}"/*/; do
     [ -d "$plugindir" ] || continue
-    # Copy skills into ~/.codex/skills/<plugin>/<skill>/SKILL.md
     if [ -d "${plugindir}skills" ]; then
       for skilldir in "${plugindir}skills"/*/; do
         [ -d "$skilldir" ] || continue

@@ -11,7 +11,7 @@ itself once it is running.
 | --- | --- | --- | --- |
 | `GITHUB_APP_CLIENT_ID` | Task `podOverrides.envFrom` (Secret) | `github-app-token` | JWT `iss` claim — GitHub now accepts Client ID alongside numeric App ID for App authentication. |
 | `GITHUB_APP_INSTALLATION_ID` | Task `podOverrides.envFrom` (Secret) | `github-app-token` | Installation to mint the token for. |
-| `GITHUB_APP_PRIVATE_KEY` | Task `podOverrides.envFrom` (Secret) | `kelos-agent-setup` | Written to `/etc/kelos-agent/github-app.pem` once at startup; the helper reads from the file, not the env var, on each call. |
+| `GITHUB_APP_PRIVATE_KEY` | Task `podOverrides.envFrom` (Secret) | `kelos-agent-setup` | Written to `$HOME/.kelos-agent/github-app.pem` once at startup; the helper reads from the file, not the env var, on each call. `$HOME` (not `/etc/`) because the container runs as the non-root `agent` user. |
 | `KUBERNETES_CLUSTER_NAME` | Task `podOverrides.env` (literal) | `kelos-agent-setup` | Optional human-readable cluster name baked into `~/.kube/config`. Defaults to `in-cluster`. |
 
 All three GitHub App variables are mutually required — `kelos-agent-setup`
@@ -33,4 +33,4 @@ would either limit the agent to short tasks or require a rotation
 sidecar. The credential helper mints a new token on each git call, so
 the pod can run for hours without thinking about expiry, and the only
 long-lived secret on disk is the App's RSA private key (read-only,
-0600, under `/etc/kelos-agent/`).
+0600, under `$HOME/.kelos-agent/`).

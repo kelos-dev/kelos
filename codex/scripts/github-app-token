@@ -11,7 +11,7 @@ set -euo pipefail
 : "${GITHUB_APP_CLIENT_ID:?GITHUB_APP_CLIENT_ID is required}"
 : "${GITHUB_APP_INSTALLATION_ID:?GITHUB_APP_INSTALLATION_ID is required}"
 
-PEM_FILE="${GITHUB_APP_PRIVATE_KEY_FILE:-/etc/kelos-agent/github-app.pem}"
+PEM_FILE="${GITHUB_APP_PRIVATE_KEY_FILE:-${HOME:-/home/agent}/.kelos-agent/github-app.pem}"
 if [[ ! -r "$PEM_FILE" ]]; then
   echo "github-app-token: private key not readable at $PEM_FILE" >&2
   exit 1

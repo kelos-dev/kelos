@@ -26,7 +26,9 @@ setup_github_app_credentials() {
   fi
 
   local pem_dir pem_file
-  pem_dir="/etc/kelos-agent"
+  # $HOME owned by the agent user (UID 61100) per Dockerfile; /etc is
+  # not writable by a non-root container.
+  pem_dir="${HOME:-/home/agent}/.kelos-agent"
   pem_file="${pem_dir}/github-app.pem"
   # umask 077 ensures the dir + file are owner-only without an extra chmod.
   (umask 077 && mkdir -p "$pem_dir" && printf '%s' "$GITHUB_APP_PRIVATE_KEY" >"$pem_file")

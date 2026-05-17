@@ -126,6 +126,15 @@ type MCPServerSpec struct {
 	// for overlapping keys.
 	// +optional
 	EnvFrom *SecretValuesSource `json:"envFrom,omitempty"`
+
+	// WorkingDir is the working directory in which a stdio MCP server
+	// command is spawned. Only used when type is "stdio". Useful for
+	// servers that must run from a specific project root (for example,
+	// "php artisan boost:mcp" requires the Laravel project root as cwd).
+	// Relative paths are resolved by the agent against its own current
+	// working directory; absolute paths are recommended.
+	// +optional
+	WorkingDir string `json:"workingDir,omitempty"`
 }
 
 // SecretValuesSource selects a Secret to populate values from.

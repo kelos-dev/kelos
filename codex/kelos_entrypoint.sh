@@ -71,6 +71,7 @@ for (const [name, s] of Object.entries(servers)) {
   toml += `[mcp_servers.${JSON.stringify(name)}]\n`;
   if (s.command) toml += `command = ${JSON.stringify(s.command)}\n`;
   if (s.args && s.args.length) toml += `args = ${JSON.stringify(s.args)}\n`;
+  if (s.cwd) toml += `cwd = ${JSON.stringify(s.cwd)}\n`;
   if (s.url) toml += `url = ${JSON.stringify(s.url)}\n`;
   if (s.headers) {
     const h = Object.entries(s.headers).map(([k,v]) => `${JSON.stringify(k)} = ${JSON.stringify(v)}`).join(", ");

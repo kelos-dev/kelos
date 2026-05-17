@@ -7,6 +7,8 @@ RUN apt-get update && apt-get install -y \
     curl \
     ca-certificates \
     git \
+    jq \
+    openssl \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
@@ -16,6 +18,17 @@ RUN apt-get update && apt-get install -y \
     && apt-get update \
     && apt-get install -y gh \
     && rm -rf /var/lib/apt/lists/*
+
+# kubectl — pinned to a stable minor matching what the cluster runs.
+# Tasks that need cluster introspection use this against the in-cluster
+# API server via the mounted ServiceAccount token.
+ARG KUBECTL_VERSION=v1.31.0
+RUN ARCH=$(dpkg --print-architecture) \
+    && curl -fsSL -o /usr/local/bin/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${ARCH}/kubectl" \
+    && curl -fsSL -o /tmp/kubectl.sha256 "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${ARCH}/kubectl.sha256" \
+    && echo "$(cat /tmp/kubectl.sha256)  /usr/local/bin/kubectl" | sha256sum -c - \
+    && chmod +x /usr/local/bin/kubectl \
+    && rm /tmp/kubectl.sha256
 
 RUN ARCH=$(dpkg --print-architecture) \
     && TARBALL="go${GO_VERSION}.linux-${ARCH}.tar.gz" \
@@ -32,6 +45,18 @@ RUN npm install -g @openai/codex@${CODEX_VERSION}
 
 COPY codex/kelos_entrypoint.sh /kelos_entrypoint.sh
 RUN chmod +x /kelos_entrypoint.sh
+
+# Helper scripts for tasks that need git push + cluster read access. Each
+# is a no-op when the corresponding env vars are unset, so adding them
+# costs nothing for Q&A-style tasks that don't mount the github-app
+# Secret or the ServiceAccount token. See codex/bin/README for the
+# env contract.
+COPY codex/bin/github-app-credential-helper /usr/local/bin/github-app-credential-helper
+COPY codex/bin/github-app-token /usr/local/bin/github-app-token
+COPY codex/bin/kelos-agent-setup /usr/local/bin/kelos-agent-setup
+RUN chmod +x /usr/local/bin/github-app-credential-helper \
+    /usr/local/bin/github-app-token \
+    /usr/local/bin/kelos-agent-setup
 
 ARG TARGETARCH
 COPY bin/kelos-capture-linux-${TARGETARCH} /kelos/kelos-capture

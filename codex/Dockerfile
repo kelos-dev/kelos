@@ -49,11 +49,11 @@ RUN chmod +x /kelos_entrypoint.sh
 # Helper scripts for tasks that need git push + cluster read access. Each
 # is a no-op when the corresponding env vars are unset, so adding them
 # costs nothing for Q&A-style tasks that don't mount the github-app
-# Secret or the ServiceAccount token. See codex/bin/README for the
+# Secret or the ServiceAccount token. See codex/scripts/README for the
 # env contract.
-COPY codex/bin/github-app-credential-helper /usr/local/bin/github-app-credential-helper
-COPY codex/bin/github-app-token /usr/local/bin/github-app-token
-COPY codex/bin/kelos-agent-setup /usr/local/bin/kelos-agent-setup
+COPY codex/scripts/github-app-credential-helper /usr/local/bin/github-app-credential-helper
+COPY codex/scripts/github-app-token /usr/local/bin/github-app-token
+COPY codex/scripts/kelos-agent-setup /usr/local/bin/kelos-agent-setup
 RUN chmod +x /usr/local/bin/github-app-credential-helper \
     /usr/local/bin/github-app-token \
     /usr/local/bin/kelos-agent-setup

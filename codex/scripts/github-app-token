@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Print a fresh GitHub App installation token to stdout. Used by the git
+# credential helper and the `gh` wrapper.
+#
+# Reads the GitHub App identity from env (CLIENT_ID is accepted by GitHub
+# as the JWT iss claim — no separate numeric App ID is required for this
+# flow). The signing key is read from a fixed on-disk path written by the
+# agent setup step.
+set -euo pipefail
+
+: "${GITHUB_APP_CLIENT_ID:?GITHUB_APP_CLIENT_ID is required}"
+: "${GITHUB_APP_INSTALLATION_ID:?GITHUB_APP_INSTALLATION_ID is required}"
+
+PEM_FILE="${GITHUB_APP_PRIVATE_KEY_FILE:-/etc/kelos-agent/github-app.pem}"
+if [[ ! -r "$PEM_FILE" ]]; then
+  echo "github-app-token: private key not readable at $PEM_FILE" >&2
+  exit 1
+fi
+
+b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+
+now=$(date +%s)
+iat=$((now - 60))
+exp=$((now + 540))
+
+header=$(printf '{"alg":"RS256","typ":"JWT"}' | b64url)
+payload=$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' "$iat" "$exp" "$GITHUB_APP_CLIENT_ID" | b64url)
+signature=$(printf '%s.%s' "$header" "$payload" |
+  openssl dgst -sha256 -sign "$PEM_FILE" -binary |
+  b64url)
+jwt="${header}.${payload}.${signature}"
+
+# Bounded retry with exponential backoff. Worst-case total wait is ~33s
+# across 3 attempts (10 + 1 + 10 + 2 + 10). Non-zero exit on exhaustion
+# stops git / gh from hanging waiting for credentials that won't arrive.
+attempts=3
+response=""
+for ((i = 1; i <= attempts; i++)); do
+  if response=$(curl -fsSL \
+    --connect-timeout 5 \
+    --max-time 10 \
+    -X POST \
+    -H "Authorization: Bearer $jwt" \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    "https://api.github.com/app/installations/${GITHUB_APP_INSTALLATION_ID}/access_tokens"); then
+    break
+  fi
+  if ((i == attempts)); then
+    echo "github-app-token: failed to mint installation token after ${attempts} attempts" >&2
+    exit 1
+  fi
+  sleep $((2 ** (i - 1)))
+done
+
+printf '%s' "$response" | jq -er '.token'

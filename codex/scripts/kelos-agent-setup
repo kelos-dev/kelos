@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# Pre-agent setup for tasks that need git push + cluster read access:
+#
+#   1. Materialise the GitHub App private key from $GITHUB_APP_PRIVATE_KEY
+#      onto disk so the credential helper can sign JWTs with it.
+#   2. Wire git's credential.helper at the global config level so every
+#      `git push` / `gh` call mints a fresh installation token. No static
+#      GITHUB_TOKEN is ever written; tokens are short-lived and per-call.
+#   3. Synthesise a ~/.kube/config from the projected ServiceAccount
+#      token so kubectl, helm, etc. resolve a named cluster — Kelos's
+#      job spec already mounts the token, but downstream tooling that
+#      reads $KUBECONFIG needs an explicit file to work cleanly.
+#
+# This script is a no-op when GITHUB_APP_CLIENT_ID is unset, so it can be
+# called unconditionally from kelos_entrypoint.sh; only tasks whose
+# podOverrides include the github-app secret pay the cost.
+set -euo pipefail
+
+setup_github_app_credentials() {
+  if [[ -z "${GITHUB_APP_CLIENT_ID:-}" ]]; then
+    return 0
+  fi
+  if [[ -z "${GITHUB_APP_PRIVATE_KEY:-}" ]]; then
+    echo "kelos-agent-setup: GITHUB_APP_CLIENT_ID set but GITHUB_APP_PRIVATE_KEY missing" >&2
+    exit 1
+  fi
+
+  local pem_dir pem_file
+  pem_dir="/etc/kelos-agent"
+  pem_file="${pem_dir}/github-app.pem"
+  # umask 077 ensures the dir + file are owner-only without an extra chmod.
+  (umask 077 && mkdir -p "$pem_dir" && printf '%s' "$GITHUB_APP_PRIVATE_KEY" >"$pem_file")
+
+  git config --global credential.helper /usr/local/bin/github-app-credential-helper
+  git config --global credential.useHttpPath true
+}
+
+setup_kubeconfig() {
+  local sa_dir="/var/run/secrets/kubernetes.io/serviceaccount"
+  if [[ ! -r "${sa_dir}/token" ]]; then
+    echo "kelos-agent-setup: no service-account token at ${sa_dir} — skipping kubeconfig" >&2
+    return 0
+  fi
+
+  local cluster_name namespace kube_dir
+  cluster_name="${KUBERNETES_CLUSTER_NAME:-in-cluster}"
+  namespace="$(cat "${sa_dir}/namespace")"
+  kube_dir="${HOME:-/root}/.kube"
+  install -d -m 700 "${kube_dir}"
+
+  cat >"${kube_dir}/config" <<EOF
+apiVersion: v1
+kind: Config
+clusters:
+  - name: ${cluster_name}
+    cluster:
+      server: https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT}
+      certificate-authority: ${sa_dir}/ca.crt
+users:
+  - name: ${cluster_name}
+    user:
+      tokenFile: ${sa_dir}/token
+contexts:
+  - name: ${cluster_name}
+    context:
+      cluster: ${cluster_name}
+      user: ${cluster_name}
+      namespace: ${namespace}
+current-context: ${cluster_name}
+EOF
+  chmod 600 "${kube_dir}/config"
+}
+
+setup_github_app_credentials
+setup_kubeconfig

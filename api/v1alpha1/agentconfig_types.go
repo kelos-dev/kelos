@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -117,8 +118,14 @@ type MCPServerSpec struct {
 
 	// Env are environment variables for the server process.
 	// Only used when type is "stdio".
+	//
+	// Each entry must set Name and either Value (a literal string) or
+	// ValueFrom (a reference to a key in a Secret or ConfigMap). Only the
+	// SecretKeyRef and ConfigMapKeyRef variants of ValueFrom are supported;
+	// FieldRef and ResourceFieldRef are pod-scoped and have no meaning for
+	// MCP server processes.
 	// +optional
-	Env map[string]string `json:"env,omitempty"`
+	Env []corev1.EnvVar `json:"env,omitempty"`
 
 	// EnvFrom references a Secret whose data keys are environment variable
 	// names and values are environment variable values. Only used when

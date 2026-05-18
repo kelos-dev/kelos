@@ -60,6 +60,7 @@ type TaskReconciler struct {
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods/log,verbs=get
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 // Reconcile handles Task reconciliation.
@@ -451,27 +452,130 @@ func (r *TaskReconciler) resolveMCPServerSecrets(ctx context.Context, namespace 
 			resolved[i].HeadersFrom = nil
 		}
 
-		if server.EnvFrom != nil {
-			var secret corev1.Secret
-			if err := r.Get(ctx, client.ObjectKey{
-				Namespace: namespace,
-				Name:      server.EnvFrom.SecretRef.Name,
-			}, &secret); err != nil {
-				return nil, fmt.Errorf("fetching envFrom secret %q for MCP server %q: %w", server.EnvFrom.SecretRef.Name, server.Name, err)
-			}
-			merged := make(map[string]string, len(server.Env)+len(secret.Data))
-			for key, value := range server.Env {
-				merged[key] = value
-			}
-			for key, value := range secret.Data {
-				merged[key] = string(value)
-			}
-			resolved[i].Env = merged
-			resolved[i].EnvFrom = nil
+		resolvedEnv, err := r.resolveMCPServerEnv(ctx, namespace, server)
+		if err != nil {
+			return nil, err
 		}
+		resolved[i].Env = resolvedEnv
+		resolved[i].EnvFrom = nil
 	}
 
 	return resolved, nil
+}
+
+// resolveMCPServerEnv resolves the Env entries of a single MCP server to a
+// slice of literal Name/Value pairs. Entries with ValueFrom are resolved by
+// fetching the referenced Secret key or ConfigMap key. EnvFrom (whole-secret)
+// is then merged on top so its keys take precedence on collision, matching
+// the existing behaviour.
+func (r *TaskReconciler) resolveMCPServerEnv(ctx context.Context, namespace string, server kelosv1alpha1.MCPServerSpec) ([]corev1.EnvVar, error) {
+	// Resolve inline Env entries into a map keyed by name so EnvFrom can
+	// override and so the final list has no duplicate names.
+	values := make(map[string]string, len(server.Env))
+	order := make([]string, 0, len(server.Env))
+	for _, entry := range server.Env {
+		if entry.Name == "" {
+			return nil, fmt.Errorf("MCP server %q has an env entry with an empty name", server.Name)
+		}
+		if _, seen := values[entry.Name]; !seen {
+			order = append(order, entry.Name)
+		}
+
+		value, err := r.resolveEnvVarValue(ctx, namespace, server.Name, entry)
+		if err != nil {
+			return nil, err
+		}
+		values[entry.Name] = value
+	}
+
+	if server.EnvFrom != nil {
+		var secret corev1.Secret
+		if err := r.Get(ctx, client.ObjectKey{
+			Namespace: namespace,
+			Name:      server.EnvFrom.SecretRef.Name,
+		}, &secret); err != nil {
+			return nil, fmt.Errorf("fetching envFrom secret %q for MCP server %q: %w", server.EnvFrom.SecretRef.Name, server.Name, err)
+		}
+		for key, value := range secret.Data {
+			if _, seen := values[key]; !seen {
+				order = append(order, key)
+			}
+			values[key] = string(value)
+		}
+	}
+
+	if len(order) == 0 {
+		return nil, nil
+	}
+	out := make([]corev1.EnvVar, 0, len(order))
+	for _, name := range order {
+		out = append(out, corev1.EnvVar{Name: name, Value: values[name]})
+	}
+	return out, nil
+}
+
+// resolveEnvVarValue returns the resolved string value for a single EnvVar
+// entry on an MCP server. Literal Value entries pass through; ValueFrom is
+// resolved against Secret or ConfigMap. FieldRef and ResourceFieldRef are
+// rejected because they refer to pod-scoped information that has no meaning
+// for an MCP server process.
+func (r *TaskReconciler) resolveEnvVarValue(ctx context.Context, namespace, serverName string, entry corev1.EnvVar) (string, error) {
+	if entry.ValueFrom == nil {
+		return entry.Value, nil
+	}
+	if entry.Value != "" {
+		return "", fmt.Errorf("MCP server %q env %q: value and valueFrom are mutually exclusive", serverName, entry.Name)
+	}
+
+	src := entry.ValueFrom
+	switch {
+	case src.SecretKeyRef != nil:
+		ref := src.SecretKeyRef
+		var secret corev1.Secret
+		if err := r.Get(ctx, client.ObjectKey{
+			Namespace: namespace,
+			Name:      ref.Name,
+		}, &secret); err != nil {
+			if apierrors.IsNotFound(err) && ref.Optional != nil && *ref.Optional {
+				return "", nil
+			}
+			return "", fmt.Errorf("fetching secret %q for MCP server %q env %q: %w", ref.Name, serverName, entry.Name, err)
+		}
+		raw, ok := secret.Data[ref.Key]
+		if !ok {
+			if ref.Optional != nil && *ref.Optional {
+				return "", nil
+			}
+			return "", fmt.Errorf("secret %q has no key %q for MCP server %q env %q", ref.Name, ref.Key, serverName, entry.Name)
+		}
+		return string(raw), nil
+	case src.ConfigMapKeyRef != nil:
+		ref := src.ConfigMapKeyRef
+		var cm corev1.ConfigMap
+		if err := r.Get(ctx, client.ObjectKey{
+			Namespace: namespace,
+			Name:      ref.Name,
+		}, &cm); err != nil {
+			if apierrors.IsNotFound(err) && ref.Optional != nil && *ref.Optional {
+				return "", nil
+			}
+			return "", fmt.Errorf("fetching configmap %q for MCP server %q env %q: %w", ref.Name, serverName, entry.Name, err)
+		}
+		if value, ok := cm.Data[ref.Key]; ok {
+			return value, nil
+		}
+		if raw, ok := cm.BinaryData[ref.Key]; ok {
+			return string(raw), nil
+		}
+		if ref.Optional != nil && *ref.Optional {
+			return "", nil
+		}
+		return "", fmt.Errorf("configmap %q has no key %q for MCP server %q env %q", ref.Name, ref.Key, serverName, entry.Name)
+	case src.FieldRef != nil, src.ResourceFieldRef != nil:
+		return "", fmt.Errorf("MCP server %q env %q: fieldRef and resourceFieldRef are not supported", serverName, entry.Name)
+	default:
+		return "", fmt.Errorf("MCP server %q env %q: valueFrom must set secretKeyRef or configMapKeyRef", serverName, entry.Name)
+	}
 }
 
 // updateStatus updates Task status based on Job status.

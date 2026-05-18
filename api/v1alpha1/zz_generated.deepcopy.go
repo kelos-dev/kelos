@@ -629,9 +629,9 @@ func (in *MCPServerSpec) DeepCopyInto(out *MCPServerSpec) {
 	}
 	if in.Env != nil {
 		in, out := &in.Env, &out.Env
-		*out = make(map[string]string, len(*in))
-		for key, val := range *in {
-			(*out)[key] = val
+		*out = make([]v1.EnvVar, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
 	if in.EnvFrom != nil {

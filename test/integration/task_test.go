@@ -422,8 +422,8 @@ var _ = Describe("Task Controller", func() {
 							Type:    "stdio",
 							Command: "npx",
 							Args:    []string{"-y", "@bytebase/dbhub"},
-							Env: map[string]string{
-								"DSN": "postgres://localhost/db",
+							Env: []corev1.EnvVar{
+								{Name: "DSN", Value: "postgres://localhost/db"},
 							},
 							EnvFrom: &kelosv1alpha1.SecretValuesSource{
 								SecretRef: kelosv1alpha1.SecretReference{Name: "mcp-db-env"},
@@ -662,6 +662,132 @@ var _ = Describe("Task Controller", func() {
 			Expect(json.Unmarshal([]byte(mcpJSON), &parsed)).Should(Succeed())
 			Expect(parsed.MCPServers["github"].Headers["Authorization"]).To(Equal("Bearer from-secret"))
 			Expect(parsed.MCPServers["github"].Headers["X-Inline"]).To(Equal("preserved"))
+		})
+
+		It("Should resolve env valueFrom secretKeyRef and configMapKeyRef", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-task-mcp-env-value-from",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with API key")
+			apiSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, apiSecret)).Should(Succeed())
+
+			By("Creating a Secret holding the password under a single key")
+			passwordSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "mcp-db-password",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"password": "hunter2",
+				},
+			}
+			Expect(k8sClient.Create(ctx, passwordSecret)).Should(Succeed())
+
+			By("Creating a ConfigMap holding the host under a single key")
+			hostCM := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "mcp-db-host",
+					Namespace: ns.Name,
+				},
+				Data: map[string]string{
+					"host": "db.internal",
+				},
+			}
+			Expect(k8sClient.Create(ctx, hostCM)).Should(Succeed())
+
+			By("Creating an AgentConfig with env.valueFrom")
+			agentConfig := &kelosv1alpha1.AgentConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "mcp-value-from-config",
+					Namespace: ns.Name,
+				},
+				Spec: kelosv1alpha1.AgentConfigSpec{
+					MCPServers: []kelosv1alpha1.MCPServerSpec{
+						{
+							Name:    "local-db",
+							Type:    "stdio",
+							Command: "npx",
+							Args:    []string{"-y", "@bytebase/dbhub"},
+							Env: []corev1.EnvVar{
+								{Name: "DSN", Value: "postgres://localhost/db"},
+								{Name: "DB_PASSWORD", ValueFrom: &corev1.EnvVarSource{
+									SecretKeyRef: &corev1.SecretKeySelector{
+										LocalObjectReference: corev1.LocalObjectReference{Name: "mcp-db-password"},
+										Key:                  "password",
+									},
+								}},
+								{Name: "DB_HOST", ValueFrom: &corev1.EnvVarSource{
+									ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+										LocalObjectReference: corev1.LocalObjectReference{Name: "mcp-db-host"},
+										Key:                  "host",
+									},
+								}},
+							},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, agentConfig)).Should(Succeed())
+
+			By("Creating a Task referencing the AgentConfig")
+			task := &kelosv1alpha1.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "task-mcp-value-from",
+					Namespace: ns.Name,
+				},
+				Spec: kelosv1alpha1.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "Resolve MCP env valueFrom",
+					Credentials: kelosv1alpha1.Credentials{
+						Type:      kelosv1alpha1.CredentialTypeAPIKey,
+						SecretRef: &kelosv1alpha1.SecretReference{Name: "anthropic-api-key"},
+					},
+					AgentConfigRef: &kelosv1alpha1.AgentConfigReference{Name: "mcp-value-from-config"},
+				},
+			}
+			Expect(k8sClient.Create(ctx, task)).Should(Succeed())
+
+			By("Verifying a Job is created")
+			createdJob := &batchv1.Job{}
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: task.Name, Namespace: ns.Name}, createdJob)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Verifying KELOS_MCP_SERVERS contains values resolved from Secret and ConfigMap")
+			container := createdJob.Spec.Template.Spec.Containers[0]
+			var mcpJSON string
+			for _, env := range container.Env {
+				if env.Name == "KELOS_MCP_SERVERS" {
+					mcpJSON = env.Value
+					break
+				}
+			}
+			Expect(mcpJSON).NotTo(BeEmpty())
+
+			var parsed struct {
+				MCPServers map[string]struct {
+					Env map[string]string `json:"env"`
+				} `json:"mcpServers"`
+			}
+			Expect(json.Unmarshal([]byte(mcpJSON), &parsed)).Should(Succeed())
+			Expect(parsed.MCPServers["local-db"].Env["DSN"]).To(Equal("postgres://localhost/db"))
+			Expect(parsed.MCPServers["local-db"].Env["DB_PASSWORD"]).To(Equal("hunter2"))
+			Expect(parsed.MCPServers["local-db"].Env["DB_HOST"]).To(Equal("db.internal"))
 		})
 	})
 

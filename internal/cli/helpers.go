@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+
+	corev1 "k8s.io/api/core/v1"
 
 	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 )
@@ -82,7 +85,7 @@ func parseMCPFlag(s string) (kelosv1alpha1.MCPServerSpec, error) {
 		Args    []string          `json:"args,omitempty"`
 		URL     string            `json:"url,omitempty"`
 		Headers map[string]string `json:"headers,omitempty"`
-		Env     map[string]string `json:"env,omitempty"`
+		Env     json.RawMessage   `json:"env,omitempty"`
 	}
 	if err := json.Unmarshal([]byte(content), &raw); err != nil {
 		return kelosv1alpha1.MCPServerSpec{}, fmt.Errorf("invalid --mcp %q JSON: %w", name, err)
@@ -96,6 +99,11 @@ func parseMCPFlag(s string) (kelosv1alpha1.MCPServerSpec, error) {
 		return kelosv1alpha1.MCPServerSpec{}, fmt.Errorf("--mcp %q: unsupported type %q (must be stdio, http, or sse)", name, raw.Type)
 	}
 
+	env, err := parseMCPEnv(name, raw.Env)
+	if err != nil {
+		return kelosv1alpha1.MCPServerSpec{}, err
+	}
+
 	return kelosv1alpha1.MCPServerSpec{
 		Name:    name,
 		Type:    raw.Type,
@@ -103,8 +111,52 @@ func parseMCPFlag(s string) (kelosv1alpha1.MCPServerSpec, error) {
 		Args:    raw.Args,
 		URL:     raw.URL,
 		Headers: raw.Headers,
-		Env:     raw.Env,
+		Env:     env,
 	}, nil
+}
+
+// parseMCPEnv accepts the env field of a --mcp JSON payload in either of two
+// shapes:
+//
+//   - a []corev1.EnvVar list with full valueFrom support, e.g.
+//     [{"name":"FOO","value":"bar"},{"name":"BAZ","valueFrom":{...}}]
+//   - a {"NAME":"VALUE",...} map, retained as shorthand for the common case of
+//     literal values
+//
+// Both decode into []corev1.EnvVar so downstream code only deals with one
+// shape.
+func parseMCPEnv(name string, raw json.RawMessage) ([]corev1.EnvVar, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	trimmed := strings.TrimLeft(string(raw), " \t\n\r")
+	if strings.HasPrefix(trimmed, "[") {
+		var list []corev1.EnvVar
+		if err := json.Unmarshal(raw, &list); err != nil {
+			return nil, fmt.Errorf("--mcp %q: invalid env list: %w", name, err)
+		}
+		return list, nil
+	}
+	if strings.HasPrefix(trimmed, "{") {
+		var asMap map[string]string
+		if err := json.Unmarshal(raw, &asMap); err != nil {
+			return nil, fmt.Errorf("--mcp %q: invalid env map: %w", name, err)
+		}
+		if len(asMap) == 0 {
+			return nil, nil
+		}
+		keys := make([]string, 0, len(asMap))
+		for k := range asMap {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		out := make([]corev1.EnvVar, 0, len(asMap))
+		for _, k := range keys {
+			out = append(out, corev1.EnvVar{Name: k, Value: asMap[k]})
+		}
+		return out, nil
+	}
+	return nil, fmt.Errorf("--mcp %q: env must be an array or object", name)
 }
 
 // parseSkillsShFlag parses a --skills-sh flag value in the format

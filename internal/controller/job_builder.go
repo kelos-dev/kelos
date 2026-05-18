@@ -916,6 +916,8 @@ type mcpServerJSON struct {
 
 // buildMCPServersJSON converts MCPServerSpec entries into a JSON string
 // that matches the .mcp.json format: {"mcpServers":{"name":{...},...}}.
+// Env entries must already be resolved to literal Name/Value pairs by
+// resolveMCPServerSecrets — any remaining ValueFrom is treated as a bug.
 func buildMCPServersJSON(servers []kelosv1alpha1.MCPServerSpec) (string, error) {
 	mcpMap := make(map[string]mcpServerJSON, len(servers))
 	for _, s := range servers {
@@ -928,13 +930,17 @@ func buildMCPServersJSON(servers []kelosv1alpha1.MCPServerSpec) (string, error) 
 		if _, exists := mcpMap[s.Name]; exists {
 			return "", fmt.Errorf("duplicate MCP server name %q", s.Name)
 		}
+		envMap, err := envVarsToMap(s.Name, s.Env)
+		if err != nil {
+			return "", err
+		}
 		entry := mcpServerJSON{
 			Type:    s.Type,
 			Command: s.Command,
 			Args:    s.Args,
 			URL:     s.URL,
 			Headers: s.Headers,
-			Env:     s.Env,
+			Env:     envMap,
 		}
 		mcpMap[s.Name] = entry
 	}
@@ -946,4 +952,23 @@ func buildMCPServersJSON(servers []kelosv1alpha1.MCPServerSpec) (string, error) 
 		return "", fmt.Errorf("marshalling MCP servers: %w", err)
 	}
 	return string(data), nil
+}
+
+// envVarsToMap flattens a resolved []corev1.EnvVar into the map shape used by
+// the .mcp.json env field. ValueFrom must already have been resolved.
+func envVarsToMap(serverName string, env []corev1.EnvVar) (map[string]string, error) {
+	if len(env) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]string, len(env))
+	for _, e := range env {
+		if e.Name == "" {
+			return nil, fmt.Errorf("MCP server %q has an env entry with an empty name", serverName)
+		}
+		if e.ValueFrom != nil {
+			return nil, fmt.Errorf("MCP server %q env %q: valueFrom must be resolved before rendering", serverName, e.Name)
+		}
+		out[e.Name] = e.Value
+	}
+	return out, nil
 }

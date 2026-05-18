@@ -130,7 +130,7 @@ func TestParseMCPFlag_FileRef(t *testing.T) {
 	}
 }
 
-func TestParseMCPFlag_HeadersAndEnv(t *testing.T) {
+func TestParseMCPFlag_HeadersAndEnvMapShorthand(t *testing.T) {
 	input := `secure={"type":"http","url":"https://mcp.example.com","headers":{"Authorization":"Bearer tok"},"env":{"KEY":"val"}}`
 	spec, err := parseMCPFlag(input)
 	if err != nil {
@@ -139,7 +139,37 @@ func TestParseMCPFlag_HeadersAndEnv(t *testing.T) {
 	if spec.Headers["Authorization"] != "Bearer tok" {
 		t.Errorf("Headers = %v, want Authorization header", spec.Headers)
 	}
-	if spec.Env["KEY"] != "val" {
-		t.Errorf("Env = %v, want KEY=val", spec.Env)
+	if len(spec.Env) != 1 || spec.Env[0].Name != "KEY" || spec.Env[0].Value != "val" {
+		t.Errorf("Env = %+v, want [{KEY=val}]", spec.Env)
+	}
+}
+
+func TestParseMCPFlag_EnvAsEnvVarList(t *testing.T) {
+	input := `local={"type":"stdio","command":"dbhub","env":[` +
+		`{"name":"DSN","value":"postgres://localhost/db"},` +
+		`{"name":"DB_PASSWORD","valueFrom":{"secretKeyRef":{"name":"mcp-secret","key":"password"}}}` +
+		`]}`
+	spec, err := parseMCPFlag(input)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if len(spec.Env) != 2 {
+		t.Fatalf("Env length = %d, want 2", len(spec.Env))
+	}
+	if spec.Env[0].Name != "DSN" || spec.Env[0].Value != "postgres://localhost/db" {
+		t.Errorf("Env[0] = %+v, want DSN=postgres://localhost/db", spec.Env[0])
+	}
+	if spec.Env[1].Name != "DB_PASSWORD" || spec.Env[1].ValueFrom == nil ||
+		spec.Env[1].ValueFrom.SecretKeyRef == nil ||
+		spec.Env[1].ValueFrom.SecretKeyRef.Name != "mcp-secret" ||
+		spec.Env[1].ValueFrom.SecretKeyRef.Key != "password" {
+		t.Errorf("Env[1] = %+v, want DB_PASSWORD valueFrom secretKeyRef", spec.Env[1])
+	}
+}
+
+func TestParseMCPFlag_EnvInvalidShape(t *testing.T) {
+	input := `bad={"type":"stdio","command":"x","env":"notanobject"}`
+	if _, err := parseMCPFlag(input); err == nil {
+		t.Fatal("expected error for non-object env, got nil")
 	}
 }

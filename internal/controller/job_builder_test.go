@@ -3484,7 +3484,9 @@ func TestBuildJob_AgentConfigMCPServers(t *testing.T) {
 				Type:    "stdio",
 				Command: "npx",
 				Args:    []string{"-y", "@bytebase/dbhub"},
-				Env:     map[string]string{"DSN": "postgres://localhost/db"},
+				Env: []corev1.EnvVar{
+					{Name: "DSN", Value: "postgres://localhost/db"},
+				},
 			},
 		},
 	}

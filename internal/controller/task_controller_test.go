@@ -421,8 +421,8 @@ func TestResolveMCPServerSecrets_EnvFrom(t *testing.T) {
 			Type:    "stdio",
 			Command: "npx",
 			Args:    []string{"-y", "@bytebase/dbhub"},
-			Env: map[string]string{
-				"DSN": "postgres://localhost/db",
+			Env: []corev1.EnvVar{
+				{Name: "DSN", Value: "postgres://localhost/db"},
 			},
 			EnvFrom: &kelosv1alpha1.SecretValuesSource{
 				SecretRef: kelosv1alpha1.SecretReference{Name: "mcp-env"},
@@ -435,18 +435,229 @@ func TestResolveMCPServerSecrets_EnvFrom(t *testing.T) {
 		t.Fatalf("resolveMCPServerSecrets() error = %v", err)
 	}
 
-	if got := resolved[0].Env["DB_PASSWORD"]; got != "secret-pass" {
-		t.Errorf("DB_PASSWORD = %q, want %q", got, "secret-pass")
+	got := envVarMap(resolved[0].Env)
+	if got["DB_PASSWORD"] != "secret-pass" {
+		t.Errorf("DB_PASSWORD = %q, want %q", got["DB_PASSWORD"], "secret-pass")
 	}
-	if got := resolved[0].Env["DB_HOST"]; got != "db.internal" {
-		t.Errorf("DB_HOST = %q, want %q", got, "db.internal")
+	if got["DB_HOST"] != "db.internal" {
+		t.Errorf("DB_HOST = %q, want %q", got["DB_HOST"], "db.internal")
 	}
-	if got := resolved[0].Env["DSN"]; got != "postgres://localhost/db" {
-		t.Errorf("DSN = %q, want %q", got, "postgres://localhost/db")
+	if got["DSN"] != "postgres://localhost/db" {
+		t.Errorf("DSN = %q, want %q", got["DSN"], "postgres://localhost/db")
 	}
 	if resolved[0].EnvFrom != nil {
 		t.Fatal("EnvFrom should be nil after resolution")
 	}
+}
+
+func TestResolveMCPServerSecrets_EnvValueFromSecretKey(t *testing.T) {
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "mcp-secret", Namespace: "default"},
+		Data: map[string][]byte{
+			"db-password": []byte("hunter2"),
+		},
+	}
+
+	r := newReconcilerWithFakeClient(secret)
+	servers := []kelosv1alpha1.MCPServerSpec{
+		{
+			Name:    "local-db",
+			Type:    "stdio",
+			Command: "dbhub",
+			Env: []corev1.EnvVar{
+				{Name: "DSN", Value: "postgres://localhost/db"},
+				{Name: "DB_PASSWORD", ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "mcp-secret"},
+						Key:                  "db-password",
+					},
+				}},
+			},
+		},
+	}
+
+	resolved, err := r.resolveMCPServerSecrets(context.Background(), "default", servers)
+	if err != nil {
+		t.Fatalf("resolveMCPServerSecrets() error = %v", err)
+	}
+
+	got := envVarMap(resolved[0].Env)
+	if got["DB_PASSWORD"] != "hunter2" {
+		t.Errorf("DB_PASSWORD = %q, want %q", got["DB_PASSWORD"], "hunter2")
+	}
+	if got["DSN"] != "postgres://localhost/db" {
+		t.Errorf("DSN = %q, want %q", got["DSN"], "postgres://localhost/db")
+	}
+	for _, e := range resolved[0].Env {
+		if e.ValueFrom != nil {
+			t.Errorf("ValueFrom for %q should be nil after resolution, got %+v", e.Name, e.ValueFrom)
+		}
+	}
+}
+
+func TestResolveMCPServerSecrets_EnvValueFromConfigMapKey(t *testing.T) {
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "mcp-config", Namespace: "default"},
+		Data: map[string]string{
+			"host": "db.internal",
+		},
+	}
+
+	r := newReconcilerWithFakeClient(cm)
+	servers := []kelosv1alpha1.MCPServerSpec{
+		{
+			Name:    "local-db",
+			Type:    "stdio",
+			Command: "dbhub",
+			Env: []corev1.EnvVar{
+				{Name: "DB_HOST", ValueFrom: &corev1.EnvVarSource{
+					ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "mcp-config"},
+						Key:                  "host",
+					},
+				}},
+			},
+		},
+	}
+
+	resolved, err := r.resolveMCPServerSecrets(context.Background(), "default", servers)
+	if err != nil {
+		t.Fatalf("resolveMCPServerSecrets() error = %v", err)
+	}
+
+	got := envVarMap(resolved[0].Env)
+	if got["DB_HOST"] != "db.internal" {
+		t.Errorf("DB_HOST = %q, want %q", got["DB_HOST"], "db.internal")
+	}
+}
+
+func TestResolveMCPServerSecrets_EnvValueFromMissingKey(t *testing.T) {
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "mcp-secret", Namespace: "default"},
+		Data:       map[string][]byte{"other": []byte("x")},
+	}
+	r := newReconcilerWithFakeClient(secret)
+	servers := []kelosv1alpha1.MCPServerSpec{
+		{
+			Name: "local",
+			Type: "stdio",
+			Env: []corev1.EnvVar{
+				{Name: "DB_PASSWORD", ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "mcp-secret"},
+						Key:                  "missing",
+					},
+				}},
+			},
+		},
+	}
+
+	if _, err := r.resolveMCPServerSecrets(context.Background(), "default", servers); err == nil {
+		t.Fatal("expected error for missing secret key, got nil")
+	}
+}
+
+func TestResolveMCPServerSecrets_EnvValueFromOptionalMissingKey(t *testing.T) {
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "mcp-secret", Namespace: "default"},
+		Data:       map[string][]byte{"other": []byte("x")},
+	}
+	optional := true
+	r := newReconcilerWithFakeClient(secret)
+	servers := []kelosv1alpha1.MCPServerSpec{
+		{
+			Name: "local",
+			Type: "stdio",
+			Env: []corev1.EnvVar{
+				{Name: "DB_PASSWORD", ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "mcp-secret"},
+						Key:                  "missing",
+						Optional:             &optional,
+					},
+				}},
+			},
+		},
+	}
+
+	resolved, err := r.resolveMCPServerSecrets(context.Background(), "default", servers)
+	if err != nil {
+		t.Fatalf("resolveMCPServerSecrets() error = %v", err)
+	}
+	got := envVarMap(resolved[0].Env)
+	if got["DB_PASSWORD"] != "" {
+		t.Errorf("DB_PASSWORD = %q, want empty for optional missing key", got["DB_PASSWORD"])
+	}
+}
+
+func TestResolveMCPServerSecrets_EnvValueFromUnsupportedFieldRef(t *testing.T) {
+	r := newReconcilerWithFakeClient()
+	servers := []kelosv1alpha1.MCPServerSpec{
+		{
+			Name: "local",
+			Type: "stdio",
+			Env: []corev1.EnvVar{
+				{Name: "NODE", ValueFrom: &corev1.EnvVarSource{
+					FieldRef: &corev1.ObjectFieldSelector{FieldPath: "spec.nodeName"},
+				}},
+			},
+		},
+	}
+
+	_, err := r.resolveMCPServerSecrets(context.Background(), "default", servers)
+	if err == nil {
+		t.Fatal("expected error for fieldRef, got nil")
+	}
+	if !strings.Contains(err.Error(), "not supported") {
+		t.Errorf("error = %q, want it to mention 'not supported'", err)
+	}
+}
+
+func TestResolveMCPServerSecrets_EnvFromOverridesValueFrom(t *testing.T) {
+	keySecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "key-secret", Namespace: "default"},
+		Data:       map[string][]byte{"value": []byte("from-key")},
+	}
+	bulkSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "bulk-secret", Namespace: "default"},
+		Data:       map[string][]byte{"SHARED": []byte("from-bulk")},
+	}
+
+	r := newReconcilerWithFakeClient(keySecret, bulkSecret)
+	servers := []kelosv1alpha1.MCPServerSpec{
+		{
+			Name: "local",
+			Type: "stdio",
+			Env: []corev1.EnvVar{
+				{Name: "SHARED", ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "key-secret"},
+						Key:                  "value",
+					},
+				}},
+			},
+			EnvFrom: &kelosv1alpha1.SecretValuesSource{
+				SecretRef: kelosv1alpha1.SecretReference{Name: "bulk-secret"},
+			},
+		},
+	}
+
+	resolved, err := r.resolveMCPServerSecrets(context.Background(), "default", servers)
+	if err != nil {
+		t.Fatalf("resolveMCPServerSecrets() error = %v", err)
+	}
+	got := envVarMap(resolved[0].Env)
+	if got["SHARED"] != "from-bulk" {
+		t.Errorf("SHARED = %q, want %q (envFrom should win)", got["SHARED"], "from-bulk")
+	}
+}
+
+func envVarMap(env []corev1.EnvVar) map[string]string {
+	out := make(map[string]string, len(env))
+	for _, e := range env {
+		out[e.Name] = e.Value
+	}
+	return out
 }
 
 func TestResolveMCPServerSecrets_SecretTakesPrecedence(t *testing.T) {

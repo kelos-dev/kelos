@@ -416,6 +416,20 @@ func (h *WebhookHandler) processWebhook(ctx context.Context, eventType string, p
 
 		spawnerLog.Info("Webhook matches spawner filters - creating task")
 
+		// Check if an active task already exists for this spawner + source item.
+		// This prevents duplicate tasks when multiple webhook events fire for the
+		// same PR/issue (e.g., label added while a babysitter task is running).
+		sourceBranch := webhookBranch(parsed)
+		if sourceBranch != "" {
+			active, err := h.hasActiveTaskForBranch(ctx, spawner, sourceBranch)
+			if err != nil {
+				spawnerLog.Error(err, "Failed to check for active tasks, proceeding with creation")
+			} else if active {
+				spawnerLog.Info("Active task already exists for this branch, skipping", "branch", sourceBranch)
+				continue
+			}
+		}
+
 		// Create task for this spawner
 		err = h.createTask(ctx, spawner, eventType, parsed, deliveryID)
 		if err != nil {
@@ -528,13 +542,9 @@ func (h *WebhookHandler) createTask(ctx context.Context, spawner *v1alpha1.TaskS
 
 	log.Info("Extracted template variables", "ID", templateVars["ID"], "Title", templateVars["Title"], "Action", templateVars["Action"])
 
-	// Build unique task name using a hash of the delivery ID to avoid collisions.
-	// Hashing gives uniform 12-hex-char suffix regardless of input length,
-	// avoiding the collision risk of simple prefix truncation.
-	sanitizedEventType := strings.ReplaceAll(eventType, "_", "-")
-	sum := sha256.Sum256([]byte(deliveryID))
-	shortHash := hex.EncodeToString(sum[:])[:12]
-	taskName := fmt.Sprintf("%s-%s-%s", spawner.Name, sanitizedEventType, shortHash)
+	// Build a human-readable task name including repo and PR/issue number when
+	// available, with a short delivery hash suffix for uniqueness across retriggers.
+	taskName := buildWebhookTaskName(spawner.Name, eventType, parsed, deliveryID)
 	if len(taskName) > 63 {
 		taskName = strings.TrimRight(taskName[:63], "-.")
 	}
@@ -596,6 +606,40 @@ func (h *WebhookHandler) createTask(ctx context.Context, spawner *v1alpha1.TaskS
 	return nil
 }
 
+// hasActiveTaskForBranch checks whether an active (non-terminal) task already
+// exists for the given spawner and branch. This prevents duplicate task creation
+// when multiple webhook events fire for the same PR/issue while a task is
+// already Pending, Running, or Waiting.
+func (h *WebhookHandler) hasActiveTaskForBranch(ctx context.Context, spawner *v1alpha1.TaskSpawner, branch string) (bool, error) {
+	var taskList v1alpha1.TaskList
+	if err := h.client.List(ctx, &taskList,
+		client.InNamespace(spawner.Namespace),
+		client.MatchingLabels{"kelos.dev/taskspawner": spawner.Name},
+	); err != nil {
+		return false, fmt.Errorf("listing tasks for spawner %s: %w", spawner.Name, err)
+	}
+
+	for i := range taskList.Items {
+		task := &taskList.Items[i]
+		if task.Status.Phase == v1alpha1.TaskPhaseSucceeded || task.Status.Phase == v1alpha1.TaskPhaseFailed {
+			continue
+		}
+		if task.Spec.Branch == branch {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// webhookBranch extracts the branch from a parsed webhook event.
+func webhookBranch(parsed *ParsedWebhook) string {
+	if parsed.GitHub != nil {
+		return parsed.GitHub.Branch
+	}
+	return ""
+}
+
 // spawnerNeedsChangedFiles returns true if any webhook filter uses filePatterns,
 // meaning changed file data must be fetched for PR events.
 func spawnerNeedsChangedFiles(spawner *v1alpha1.TaskSpawner) bool {
@@ -635,6 +679,60 @@ func (h *WebhookHandler) getGenericSpawners(ctx context.Context) []*v1alpha1.Tas
 		}
 	}
 	return spawners
+}
+
+// buildWebhookTaskName constructs a human-readable task name that includes the
+// repo name and PR/issue number when available. Format:
+//
+//	<spawner>-<repo>-<kind><number>-<hash>  (e.g., "babysitter-dquality-pr-30170-a1b2c3d4")
+//
+// Falls back to the legacy format when no number is available:
+//
+//	<spawner>-<eventType>-<hash>
+func buildWebhookTaskName(spawnerName, eventType string, parsed *ParsedWebhook, deliveryID string) string {
+	sum := sha256.Sum256([]byte(deliveryID))
+	shortHash := hex.EncodeToString(sum[:])[:8]
+
+	if parsed.GitHub != nil && parsed.GitHub.Number > 0 && parsed.GitHub.RepositoryName != "" {
+		kind := "pr"
+		if eventType == "issues" || (eventType == "issue_comment" && parsed.GitHub.PullRequestAPIURL == "") {
+			kind = "issue"
+		}
+		safeRepo := sanitizeK8sNameSegment(parsed.GitHub.RepositoryName)
+		return fmt.Sprintf("%s-%s-%s-%d-%s", spawnerName, safeRepo, kind, parsed.GitHub.Number, shortHash)
+	}
+
+	if parsed.Linear != nil && parsed.ID != "" {
+		linearType := strings.ToLower(parsed.Linear.Type)
+		if linearType == "" {
+			linearType = "linear"
+		}
+		safeID := sanitizeK8sNameSegment(parsed.ID)
+		return fmt.Sprintf("%s-%s-%s-%s", spawnerName, linearType, safeID, shortHash)
+	}
+
+	if parsed.Generic != nil && parsed.ID != "" {
+		sanitizedID := sanitizeK8sNameSegment(parsed.ID)
+		sanitizedSource := sanitizeK8sNameSegment(eventType)
+		return fmt.Sprintf("%s-%s-%s-%s", spawnerName, sanitizedSource, sanitizedID, shortHash)
+	}
+
+	sanitizedEventType := sanitizeK8sNameSegment(eventType)
+	return fmt.Sprintf("%s-%s-%s", spawnerName, sanitizedEventType, shortHash)
+}
+
+// sanitizeK8sNameSegment lowercases a string and strips characters that are
+// invalid in Kubernetes resource names (must match [a-z0-9-]).
+func sanitizeK8sNameSegment(s string) string {
+	s = strings.ToLower(s)
+	s = strings.ReplaceAll(s, "_", "-")
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // webhookSourceKind determines the reporting source kind from a GitHub webhook event.

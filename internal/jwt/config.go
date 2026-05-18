@@ -31,12 +31,19 @@ const (
 )
 
 // IdentityProfile is a set of claims for a single principal. Matches
-// assay's IdentityProfileSchema (config/schema.ts:68).
+// assay's IdentityProfileSchema (config/schema.ts:68) with two
+// Alpheya-specific extensions:
+//   - Ext carries the nested `ext` object some downstream services
+//     read (e.g., ext.sub, ext.preferred_username) — see the oauth2-proxy
+//     token shape in non-prod.
+//   - Aud is intentionally NOT here; the audience is consistent across
+//     all profiles and lives on TokenSigningConfig.
 type IdentityProfile struct {
-	Sub   string   `json:"sub"`
-	Roles []string `json:"roles"`
-	Email string   `json:"email,omitempty"`
-	Name  string   `json:"name,omitempty"`
+	Sub   string         `json:"sub"`
+	Roles []string       `json:"roles"`
+	Email string         `json:"email,omitempty"`
+	Name  string         `json:"name,omitempty"`
+	Ext   map[string]any `json:"ext,omitempty"`
 }
 
 // TokenSigningConfig is the full signing configuration. KeyMaterial is
@@ -45,6 +52,7 @@ type TokenSigningConfig struct {
 	Algorithm        Algorithm
 	KeyID            string
 	Issuer           string
+	Audience         string
 	ExpiresInSeconds int
 	DefaultClaims    IdentityProfile
 	Profiles         map[string]IdentityProfile
@@ -55,6 +63,7 @@ const (
 	EnvAlgorithm     = "ALPHEYA_TOKEN_SIGNING_ALGORITHM"
 	EnvKeyID         = "ALPHEYA_TOKEN_SIGNING_KEY_ID"
 	EnvIssuer        = "ALPHEYA_TOKEN_SIGNING_ISSUER"
+	EnvAudience      = "ALPHEYA_TOKEN_SIGNING_AUDIENCE"
 	EnvExpiresIn     = "ALPHEYA_TOKEN_SIGNING_EXPIRES_IN"
 	EnvDefaultClaims = "ALPHEYA_TOKEN_SIGNING_DEFAULT_CLAIMS"
 	EnvProfiles      = "ALPHEYA_TOKEN_SIGNING_PROFILES"
@@ -86,6 +95,11 @@ func LoadConfigFromEnv() (*TokenSigningConfig, error) {
 	if cfg.Issuer == "" {
 		return nil, fmt.Errorf("%s is required", EnvIssuer)
 	}
+
+	// Audience is optional in the type system but required in practice
+	// for any Alpheya service that validates aud. Left optional here so
+	// callers writing tests or non-Alpheya integrations can omit it.
+	cfg.Audience = os.Getenv(EnvAudience)
 
 	if v := os.Getenv(EnvExpiresIn); v != "" {
 		n, err := strconv.Atoi(v)

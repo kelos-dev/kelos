@@ -19,9 +19,10 @@ itself once it is running.
 | `ALPHEYA_TOKEN_SIGNING_KEY_FILE` | Task `podOverrides.env` (literal path) | `kelos-jwt`, `curl` (wrapper) | Optional fallback when `KEY` is unset. Useful when the secret is mounted as a file. |
 | `ALPHEYA_TOKEN_SIGNING_ALGORITHM` | Task `podOverrides.env` (literal) | `kelos-jwt`, `curl` (wrapper) | `RS256` (default) or `HS256`. |
 | `ALPHEYA_TOKEN_SIGNING_ISSUER` | Task `podOverrides.env` (literal) | `kelos-jwt`, `curl` (wrapper) | JWT `iss` claim. Required. |
+| `ALPHEYA_TOKEN_SIGNING_AUDIENCE` | Task `podOverrides.env` (literal) | `kelos-jwt`, `curl` (wrapper) | JWT `aud` claim. Optional but required in practice for any Alpheya service that validates audience (`alpheya` in non-prod). |
 | `ALPHEYA_TOKEN_SIGNING_KEY_ID` | Task `podOverrides.env` (literal) | `kelos-jwt`, `curl` (wrapper) | Optional JWT header `kid` for key rotation. |
 | `ALPHEYA_TOKEN_SIGNING_EXPIRES_IN` | Task `podOverrides.env` (literal) | `kelos-jwt`, `curl` (wrapper) | TTL in seconds. Default `3600`. Range `[60, 86400]`. |
-| `ALPHEYA_TOKEN_SIGNING_DEFAULT_CLAIMS` | Task `podOverrides.env` (literal JSON) | `kelos-jwt`, `curl` (wrapper) | `{"sub":...,"roles":[...],"email"?:...,"name"?:...}`. Required. |
+| `ALPHEYA_TOKEN_SIGNING_DEFAULT_CLAIMS` | Task `podOverrides.env` (literal JSON) | `kelos-jwt`, `curl` (wrapper) | `{"sub":...,"roles":[...],"email"?:...,"name"?:...,"ext"?:{...}}`. Required. The optional `ext` object is emitted as a nested claim verbatim (matches oauth2-proxy's token shape). |
 | `ALPHEYA_TOKEN_SIGNING_PROFILES` | Task `podOverrides.env` (literal JSON) | `kelos-jwt`, `curl` (wrapper) | Optional `{profileName: claims}` map for per-request identity. |
 | `ALPHEYA_TOKEN_SIGNING_HOSTS` | Task `podOverrides.env` (literal JSON or CSV) | `curl` (wrapper) | JSON map `{"host":"service"}` decoupling wire host from auth service name, OR CSV of hosts (service name = host). When unset, `curl` is a pure passthrough. |
 | `ALPHEYA_TOKEN_PROFILE` | Per-call env (literal) | `curl` (wrapper) | Optional. Appended as `:profile` to the resolved service before signing, for one-off privilege bumps. |

@@ -82,11 +82,17 @@ func (s *Signer) Sign(service string) (string, error) {
 		"exp":   now + int64(s.cfg.ExpiresInSeconds),
 		"iss":   s.cfg.Issuer,
 	}
+	if s.cfg.Audience != "" {
+		payload["aud"] = s.cfg.Audience
+	}
 	if claims.Email != "" {
 		payload["email"] = claims.Email
 	}
 	if claims.Name != "" {
 		payload["name"] = claims.Name
+	}
+	if len(claims.Ext) > 0 {
+		payload["ext"] = claims.Ext
 	}
 
 	headerJSON, err := json.Marshal(header)

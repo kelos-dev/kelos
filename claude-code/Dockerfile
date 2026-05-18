@@ -37,12 +37,12 @@ ARG TARGETARCH
 COPY bin/kelos-capture-linux-${TARGETARCH} /kelos/kelos-capture
 
 RUN useradd -u 61100 -m -s /bin/bash claude
-RUN mkdir -p /home/claude/.claude && chown -R claude:claude /home/claude
+RUN mkdir -p /home/claude/.claude /home/claude/.local/bin && chown -R claude:claude /home/claude
 
 USER claude
 
 ENV GOPATH="/home/claude/go"
-ENV PATH="${GOPATH}/bin:${PATH}"
+ENV PATH="/home/claude/.local/bin:${GOPATH}/bin:${PATH}"
 
 WORKDIR /workspace
 

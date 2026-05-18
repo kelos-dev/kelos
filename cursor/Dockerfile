@@ -34,7 +34,7 @@ ARG TARGETARCH
 COPY bin/kelos-capture-linux-${TARGETARCH} /kelos/kelos-capture
 
 RUN useradd -u 61100 -m -s /bin/bash agent
-RUN mkdir -p /home/agent/.cursor && chown -R agent:agent /home/agent
+RUN mkdir -p /home/agent/.cursor /home/agent/.local/bin && chown -R agent:agent /home/agent
 
 USER agent
 

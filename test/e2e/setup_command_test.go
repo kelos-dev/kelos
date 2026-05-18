@@ -77,6 +77,65 @@ var _ = Describe("Workspace setupCommand", func() {
 		Expect(logs).To(ContainSubstring("setup-ran-from-workspace"))
 	})
 
+	It("should resolve binaries installed by setupCommand into $HOME/.local/bin from PATH", func() {
+		By("creating OAuth credentials secret")
+		f.CreateSecret("claude-credentials",
+			"CLAUDE_CODE_OAUTH_TOKEN="+oauthToken)
+
+		By("creating a Workspace whose setupCommand drops an executable into $HOME/.local/bin")
+		f.CreateWorkspace(&kelosv1alpha1.Workspace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "e2e-setup-path-workspace",
+			},
+			Spec: kelosv1alpha1.WorkspaceSpec{
+				Repo: "https://github.com/kelos-dev/kelos.git",
+				Ref:  "main",
+				SetupCommand: []string{
+					"sh", "-c",
+					`set -e
+mkdir -p "$HOME/.local/bin"
+cat >"$HOME/.local/bin/kelos-setup-probe" <<'EOF'
+#!/bin/sh
+echo kelos-setup-probe-on-path
+EOF
+chmod +x "$HOME/.local/bin/kelos-setup-probe"`,
+				},
+			},
+		})
+
+		By("creating a Task that invokes the installed binary by name")
+		f.CreateTask(&kelosv1alpha1.Task{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "setup-path-task",
+			},
+			Spec: kelosv1alpha1.TaskSpec{
+				Type:   "claude-code",
+				Model:  testModel,
+				Prompt: "Run the command 'kelos-setup-probe' and print its output verbatim.",
+				Credentials: kelosv1alpha1.Credentials{
+					Type:      kelosv1alpha1.CredentialTypeOAuth,
+					SecretRef: &kelosv1alpha1.SecretReference{Name: "claude-credentials"},
+				},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "e2e-setup-path-workspace"},
+			},
+		})
+
+		By("waiting for Job to be created")
+		f.WaitForJobCreation("setup-path-task")
+
+		By("waiting for Job to complete")
+		f.WaitForJobCompletion("setup-path-task")
+
+		By("verifying Task status is Succeeded")
+		f.WaitForTaskPhase("setup-path-task", "Succeeded")
+
+		By("verifying the agent resolved the installed binary via PATH")
+		logs := f.GetJobLogs("setup-path-task")
+		GinkgoWriter.Printf("Job logs:\n%s\n", logs)
+		Expect(logs).To(ContainSubstring("---KELOS_SETUP_COMMAND_DONE---"))
+		Expect(logs).To(ContainSubstring("kelos-setup-probe-on-path"))
+	})
+
 	It("should fail the Task when setupCommand exits non-zero", func() {
 		By("creating OAuth credentials secret")
 		f.CreateSecret("claude-credentials",

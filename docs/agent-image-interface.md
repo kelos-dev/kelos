@@ -71,7 +71,31 @@ When a workspace is configured, Kelos mounts the cloned repository at
 `/workspace/repo` and sets `WorkingDir` on the container accordingly. The
 entrypoint script does not need to handle directory changes.
 
-### 6. Pre-agent setup command
+### 6. User-writable bin directory on PATH
+
+The image must provide a writable directory on `PATH` so that `setupCommand`
+can install additional tools and have them resolved by name from the agent
+process. The reference images use `$HOME/.local/bin` (the conventional XDG /
+PEP 370 user-install location used by `pip install --user`, `npm config set
+prefix ~/.local`, and similar tooling). The directory is pre-created and
+owned by the agent user, and `PATH` is set so that it (and `$GOPATH/bin`)
+take precedence over system directories.
+
+Custom images should follow the same convention. Example:
+
+```dockerfile
+RUN useradd -u 61100 -m -s /bin/bash agent
+RUN mkdir -p /home/agent/.local/bin && chown -R agent:agent /home/agent
+USER agent
+ENV GOPATH="/home/agent/go"
+ENV PATH="/home/agent/.local/bin:${GOPATH}/bin:${PATH}"
+```
+
+With this in place, a workspace `setupCommand` such as
+`["sh","-c","pip install --user some-tool"]` will land the binary on `PATH`
+for the agent process that follows.
+
+### 7. Pre-agent setup command
 
 When a workspace defines `Workspace.spec.setupCommand`, the controller
 JSON-encodes the exec-form array and sets it on `KELOS_SETUP_COMMAND`. The

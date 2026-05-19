@@ -1,12 +1,10 @@
-apiVersion: kelos.dev/v1alpha2
-kind: SessionSpawner
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
 metadata:
   name: kelos-pr-responder
 spec:
   when:
     githubWebhook:
-      gatewayRef:
-        name: kelos
       repository: kelos-dev/kelos
       excludeAuthors:
         - kelos-bot[bot]
@@ -16,53 +14,84 @@ spec:
       filters:
         - event: issue_comment
           action: created
-          bodyPattern: '(?m)^/kelos pick-up[ \t]*\r?$'
+          bodyContains: /kelos pick-up
           commentOn: PullRequest
           state: open
           author: gjkim42
         - event: pull_request_review
           action: submitted
-          bodyPattern: '(?m)^/kelos pick-up[ \t]*\r?$'
+          bodyContains: /kelos pick-up
           state: open
           draft: false
-          author: gjkim42
-  sessionTemplate:
-    volumeClaimTemplate:
-      accessModes:
-        - ReadWriteOnce
+      reporting:
+        enabled: true
+        checks: {}
+  maxConcurrency: 2
+  taskTemplate:
+    workspaceRef:
+      name: kelos-agent
+    model: opus
+    type: claude-code
+    ttlSecondsAfterFinished: 864000
+    credentials:
+      type: oauth
+      secretRef:
+        name: kelos-credentials
+    podOverrides:
       resources:
         requests:
-          storage: 10Gi
-    worker:
-      workspaceRef:
-        name: kelos-session-agent
-      model: gpt-5.6-sol
-      effort: xhigh
-      type: codex
-      credentials:
-        type: oauth
-        secretRef:
-          name: kelos-credentials
-      podOverrides:
-        resources:
-          requests:
-            cpu: "250m"
-            memory: "512Mi"
-            ephemeral-storage: "20Gi"
-          limits:
-            ephemeral-storage: "20Gi"
-        env:
-          - name: GIT_AUTHOR_NAME
-            value: "Gunju Kim"
-          - name: GIT_AUTHOR_EMAIL
-            value: "gjkim042@gmail.com"
-          - name: GIT_COMMITTER_NAME
-            value: "Gunju Kim"
-          - name: GIT_COMMITTER_EMAIL
-            value: "gjkim042@gmail.com"
-      agentConfigRefs:
-        - name: base-agent
-    initialBranch: "{{.Branch}}"
-    initialPrompt: |
-      Let's address {{.URL}}
-      Find the best way to address it.
+          cpu: "250m"
+          memory: "1Gi"
+          ephemeral-storage: "4Gi"
+        limits:
+          ephemeral-storage: "4Gi"
+      env:
+        - name: GIT_AUTHOR_NAME
+          value: "Gunju Kim"
+        - name: GIT_AUTHOR_EMAIL
+          value: "gjkim042@gmail.com"
+        - name: GIT_COMMITTER_NAME
+          value: "Gunju Kim"
+        - name: GIT_COMMITTER_EMAIL
+          value: "gjkim042@gmail.com"
+    branch: "{{.Branch}}"
+    agentConfigRef:
+      name: kelos-dev-agent
+    promptTemplate: |
+      You are a coding agent updating an existing PR in response to review feedback.
+
+      Webhook:
+      - Event: {{.Event}}
+      - Action: {{.Action}}
+      - Sender: {{.Sender}}
+      - URL: {{.URL}}
+
+      Pull request:
+      - PR #{{.Number}}: {{.Title}}
+      - URL: {{.URL}}
+
+      Task:
+      - 1. Kelos has already checked out the PR head branch. Rebase onto main before making changes:
+        ```
+        git fetch --unshallow || true
+        if git remote get-url upstream >/dev/null 2>&1; then
+          git fetch upstream main
+          git rebase upstream/main
+        else
+          git fetch origin main
+          git rebase origin/main
+        fi
+        ```
+      - 2. Read ALL review comments and conversation on the PR (gh pr view, gh api for review comments). If `KELOS_UPSTREAM_REPO` is set, use it with `gh pr ... --repo "$KELOS_UPSTREAM_REPO"` and target that repo in `gh api`.
+      - 3. Read ALL comments on the linked issue referenced by the PR body. First determine the linked issue number from the PR body, then run `gh issue view <linked-issue-number> --comments`. If `KELOS_UPSTREAM_REPO` is set, use `--repo "$KELOS_UPSTREAM_REPO"`.
+      - 4. Read the existing diff (git diff main...HEAD) to understand what has already been done. Do NOT start over or rewrite from scratch.
+      - 5. Make only the incremental changes needed to address review feedback or remaining issues. Preserve existing work. If there is nothing actionable to change, exit without code changes or comments.
+      - 6. Commit and push your changes to origin on the PR head branch (use `git push origin HEAD`).
+      - 7. /review the PR to verify your changes address the feedback. If changes are needed, make them, run `make verify` and `make test`, commit and push, then /review again. Repeat until the review passes.
+      - 8. Update the PR title and description to reflect the final diff. The PR body MUST contain a standard closing keyword reference on its own line (e.g., `Fixes #123` or `Closes #123`). Do not embed the issue number in natural language. Ensure the PR has labels "generated-by-kelos" and "ok-to-test" (use `gh pr edit {{.Number}} --add-label generated-by-kelos --add-label ok-to-test` if missing). If `KELOS_UPSTREAM_REPO` is set, include `--repo "$KELOS_UPSTREAM_REPO"`.
+      - 9. After pushing, actively check CI status with `gh pr checks {{.Number}}` (if `KELOS_UPSTREAM_REPO` is set, add `--repo "$KELOS_UPSTREAM_REPO"`). If any checks fail, investigate the failures, fix them, commit and push, then check again. Do not request review until CI passes.
+
+      Post-checklist:
+      - If the PR is ready for human review, you need more information, or you cannot make progress, post a plain-English PR comment explaining the current state. Maintainers can resume the PR later with `/kelos pick-up`. When all review feedback was already addressed in previous commits and no new comments require action, keep the explanation brief (e.g. "All review feedback was addressed in previous commits. Ready for re-review.") instead of repeating a full status breakdown. Never post duplicate or near-identical status messages.
+      - If you find anything worth considering (e.g. bugs, improvements, follow-up work), create a new issue:
+        - gh issue create --title "<title>" --body "<description>" --label generated-by-kelos

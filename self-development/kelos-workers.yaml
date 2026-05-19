@@ -69,7 +69,7 @@ spec:
           author: gjkim42
       reporting:
         enabled: true
-  maxConcurrency: 3
+  maxConcurrency: 8
   taskTemplate:
     workspaceRef:
       name: kelos-agent

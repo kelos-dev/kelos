@@ -26,7 +26,7 @@ spec:
       reporting:
         enabled: true
         checks: {}
-  maxConcurrency: 2
+  maxConcurrency: 8
   taskTemplate:
     workspaceRef:
       name: kelos-agent

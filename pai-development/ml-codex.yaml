@@ -28,7 +28,7 @@ spec:
         name: codex-credentials
     branch: "gjkim-codex-task-{{.Number}}"
     agentConfigRef:
-      name: kelos-dev-agent
+      name: kelos-codex-dev-agent
     promptTemplate: |
       You are a coding agent (Codex). You handle issues triggered by `/kelos codex pick-up`.
 
@@ -118,7 +118,7 @@ spec:
         name: codex-credentials
     branch: "{{.Branch}}"
     agentConfigRef:
-      name: kelos-dev-agent
+      name: kelos-codex-dev-agent
     promptTemplate: |
       You are a coding agent (Codex) updating an existing PR in response to `/kelos codex pick-up`.
 
@@ -193,7 +193,7 @@ spec:
         name: codex-credentials
     branch: "{{.Branch}}"
     agentConfigRef:
-      name: pai-reviewer-agent
+      name: pai-codex-reviewer-agent
     promptTemplate: |
       You are a code review agent (Codex). Your only task is to review a PR and post
       inline review comments on problematic code.

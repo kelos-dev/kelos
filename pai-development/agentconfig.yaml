@@ -86,4 +86,96 @@ spec:
             3. If a JIRA issue handle (e.g., `GHEREQ-238`, `PAIP-123`) can be extracted from the commit message, branch name, or conversation context, prefix the PR title with `[$JIRA_ISSUE_HANDLE] `
             4. Use `gh pr create` with a body that matches the template structure
             5. After creating the PR, assign it to gunju-kim: `gh pr edit <number> --add-assignee gunju-kim`
-            
+
+---
+
+apiVersion: kelos.dev/v1alpha1
+kind: AgentConfig
+metadata:
+  name: kelos-codex-dev-agent
+spec:
+  agentsMD: |
+    # Kelos Codex Development Agent
+
+    ## Environment
+    You are running in an ephemeral container environment. Your file system
+    changes disappear after the task completes. Persist work by creating PRs,
+    issues, or comments.
+
+    ## Identity
+    - Always run at the start: `git config user.name "Gunju Kim" && git config user.email "gunju.kim@navercorp.com"
+    - When commenting on issues or PRs, always start with "🤖 **Kelos Codex Agent** @gunju-kim\n\n"
+      so it is clearly distinguishable from human comments and from the Claude
+      agent, and triggers a notification
+
+    ## Standards
+    - Do not create duplicate issues — check existing issues first with `gh issue list`
+    - Keep changes minimal and focused
+    - When creating or updating pull requests, always follow the instructions in the "pull-request" skill
+  mcpServers:
+    - name: mcp-atlassian
+      type: stdio
+      command: uvx
+      args:
+        - "--python"
+        - "3.12"
+        - "mcp-atlassian"
+      env:
+        CONFLUENCE_URL: "https://wiki.navercorp.com"
+        CONFLUENCE_SPACES_FILTER: "PAIP,PLACEAIREQ"
+        JIRA_URL: "https://jira.navercorp.com"
+        JIRA_PROJECTS_FILTER: "PLACEAI,PLACEAIREQ"
+      envFrom:
+        secretRef:
+          name: pai-mcp-secrets
+    - name: staging-airflow
+      type: stdio
+      command: uvx
+      args:
+        - "mcp-server-apache-airflow"
+        - "--read-only"
+      env:
+        AIRFLOW_HOST: "https://paip-stg-airflow-web.io.naver.com"
+        AIRFLOW_USERNAME: "admin"
+      envFrom:
+        secretRef:
+          name: pai-mcp-secrets
+  plugins:
+    - name: pai-ml
+      skills:
+        - name: commit
+          content: |
+            ---
+            name: commit
+            description: Create a commit. The skill should be triggered on each code commit including squashes.
+            ---
+
+            # Create a commit
+
+            The commit message should be structured as follows:
+            ```
+            <type>[optional scope]: <description>
+
+            [optional body]
+
+            [optional footer(s)]
+            ```
+        - name: pull-request
+          content: |
+            ---
+            name: pull-request
+            description: ALWAYS use this skill for ANY pull request creation or update. This skill MUST be followed whenever the user wants to create, open or update a PR.
+            ---
+
+            # Create or Update Pull Request
+
+            ## Instructions
+
+            PR description은 항상 한글로 작성합니다.
+
+            1. Check if `.github/PULL_REQUEST_TEMPLATE.md` exists
+            2. If it exists, read the file and follow its format exactly when creating the PR body
+            3. If a JIRA issue handle (e.g., `GHEREQ-238`, `PAIP-123`) can be extracted from the commit message, branch name, or conversation context, prefix the PR title with `[$JIRA_ISSUE_HANDLE] `
+            4. Use `gh pr create` with a body that matches the template structure
+            5. After creating the PR, assign it to gunju-kim: `gh pr edit <number> --add-assignee gunju-kim`
+

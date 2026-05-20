@@ -1,10 +1,10 @@
 apiVersion: kelos.dev/v1alpha1
 kind: Workspace
 metadata:
-  name: agent-runner-workspace
+  name: ml-workspace
 spec:
-  ref: main
-  repo: https://oss.navercorp.com/pai/agent-runner
+  ref: develop
+  repo: https://oss.navercorp.com/pai/ml
   secretRef:
     name: kelos-bot
   setupCommand:
@@ -13,20 +13,17 @@ spec:
     - |
       set -eu
       curl -LsSf https://astral.sh/uv/0.10.4/install.sh | sh
-      mkdir -p "$HOME/go/bin"
-      ln -sf "$HOME/.local/bin/uv" "$HOME/go/bin/uv"
-      ln -sf "$HOME/.local/bin/uvx" "$HOME/go/bin/uvx"
 
 ---
 
 apiVersion: kelos.dev/v1alpha1
 kind: TaskSpawner
 metadata:
-  name: agent-runner-workers
+  name: ml-workers
 spec:
   when:
     githubWebhook:
-      repository: pai/agent-runner
+      repository: pai/ml
       events:
         - "issue_comment"
       filters:
@@ -36,10 +33,10 @@ spec:
           commentOn: "Issue"
       reporting:
         enabled: true
-  maxConcurrency: 5
+  maxConcurrency: 8
   taskTemplate:
     workspaceRef:
-      name: agent-runner-workspace
+      name: ml-workspace
     model: opus
     type: claude-code
     ttlSecondsAfterFinished: 600
@@ -63,19 +60,19 @@ spec:
       Task:
       - 0. Set up your environment:
         ```
-        git fetch origin main
+        git fetch origin develop
         curl -LsSf https://astral.sh/uv/0.10.4/install.sh | sh && . $HOME/.local/bin/env && uv tool install pre-commit && pre-commit install
         ```
 
-      - 1. Kelos has already checked out branch gjkim-kelos-task-{{.Number}}. Rebase onto main:
+      - 1. Kelos has already checked out branch gjkim-kelos-task-{{.Number}}. Rebase onto develop:
         ```
-        git rebase origin/main
+        git rebase origin/develop
         ```
       - 2. Check if a PR already exists for branch gjkim-kelos-task-{{.Number}}.
 
       If a PR already exists:
       - 3a. Read ALL review comments and conversation on the PR (gh pr view, gh api for review comments).
-      - 4a. Read the existing diff (git diff main...HEAD) to understand what has already been done. Do NOT start over or rewrite from scratch.
+      - 4a. Read the existing diff (git diff develop...HEAD) to understand what has already been done. Do NOT start over or rewrite from scratch.
       - 5a. Make only the incremental changes needed to address review feedback or remaining issues. Preserve existing work.
       - 6a. Commit and push your changes to origin gjkim-kelos-task-{{.Number}}.
       - 7a. /review the PR to verify your changes address the feedback. If changes are needed, make them, commit and push, then /review again. Repeat until the review passes.
@@ -103,11 +100,11 @@ spec:
 apiVersion: kelos.dev/v1alpha1
 kind: TaskSpawner
 metadata:
-  name: agent-runner-pr-responder
+  name: ml-pr-responder
 spec:
   when:
     githubWebhook:
-      repository: pai/agent-runner
+      repository: pai/ml
       events:
         - "issue_comment"
         - "pull_request_review"
@@ -126,10 +123,10 @@ spec:
       reporting:
         enabled: true
         checks: {}
-  maxConcurrency: 5
+  maxConcurrency: 8
   taskTemplate:
     workspaceRef:
-      name: agent-runner-workspace
+      name: ml-workspace
     model: opus
     type: claude-code
     ttlSecondsAfterFinished: 600
@@ -153,16 +150,16 @@ spec:
       Task:
       - 0. Set up your environment:
         ```
-        git fetch origin main
+        git fetch origin develop
         curl -LsSf https://astral.sh/uv/0.10.4/install.sh | sh && . $HOME/.local/bin/env && uv tool install pre-commit && pre-commit install
         ```
-      - 1. Kelos has already checked out the PR head branch. Rebase onto main before making changes:
+      - 1. Kelos has already checked out the PR head branch. Rebase onto develop before making changes:
         ```
-        git rebase origin/main
+        git rebase origin/develop
         ```
       - 2. Read ALL review comments and conversation on the PR (gh pr view, gh api for review comments).
       - 3. Read ALL comments on the linked issue referenced by the PR body. First determine the linked issue number from the PR body, then run `gh issue view <linked-issue-number> --comments`.
-      - 4. Read the existing diff (git diff main...HEAD) to understand what has already been done. Do NOT start over or rewrite from scratch.
+      - 4. Read the existing diff (git diff develop...HEAD) to understand what has already been done. Do NOT start over or rewrite from scratch.
       - 5. Make only the incremental changes needed to address review feedback or remaining issues. Preserve existing work. If there is nothing actionable to change, exit without code changes or comments.
       - 6. Commit and push your changes to origin on the PR head branch (use `git push origin HEAD`).
       - 7. /review the PR to verify your changes address the feedback. If changes are needed, make them, commit and push, then /review again. Repeat until the review passes.
@@ -179,11 +176,11 @@ spec:
 apiVersion: kelos.dev/v1alpha1
 kind: TaskSpawner
 metadata:
-  name: agent-runner-planner
+  name: ml-planner
 spec:
   when:
     githubWebhook:
-      repository: pai/agent-runner
+      repository: pai/ml
       events:
         - "issue_comment"
         - "pull_request_review"
@@ -204,7 +201,7 @@ spec:
   maxConcurrency: 2
   taskTemplate:
     workspaceRef:
-      name: agent-runner-workspace
+      name: ml-workspace
     model: opus
     type: claude-code
     ttlSecondsAfterFinished: 3600
@@ -289,11 +286,11 @@ spec:
 apiVersion: kelos.dev/v1alpha1
 kind: TaskSpawner
 metadata:
-  name: agent-runner-rebase
+  name: ml-rebase
 spec:
   when:
     githubWebhook:
-      repository: pai/agent-runner
+      repository: pai/ml
       events:
         - "issue_comment"
         - "pull_request_review"
@@ -314,7 +311,7 @@ spec:
   maxConcurrency: 5
   taskTemplate:
     workspaceRef:
-      name: agent-runner-workspace
+      name: ml-workspace
     model: sonnet
     type: claude-code
     ttlSecondsAfterFinished: 600
@@ -373,11 +370,11 @@ spec:
 apiVersion: kelos.dev/v1alpha1
 kind: TaskSpawner
 metadata:
-  name: agent-runner-reviewer
+  name: ml-reviewer
 spec:
   when:
     githubWebhook:
-      repository: pai/agent-runner
+      repository: pai/ml
       events:
         - "issue_comment"
         - "pull_request_review"
@@ -398,7 +395,7 @@ spec:
   maxConcurrency: 3
   taskTemplate:
     workspaceRef:
-      name: agent-runner-workspace
+      name: ml-workspace
     model: opus
     type: claude-code
     ttlSecondsAfterFinished: 600
@@ -418,20 +415,25 @@ spec:
 
       ## Steps
 
-      1. Kelos has already checked out the PR head branch. Read the PR diff:
+      1. Clone the paiops repository for reference:
+         ```
+         git clone --depth 1 "https://$(gh auth token)@oss.navercorp.com/pai/paiops.git" ./paiops
+         ```
+
+      2. Kelos has already checked out the PR head branch. Read the PR diff:
          ```
          gh pr diff {{.Number}}
          ```
 
-      2. Read the relevant source files to understand context around the changed code.
+      3. Read the relevant source files to understand context around the changed code.
 
-      3. Resolve outdated review threads from previous reviews:
+      4. Resolve outdated review threads from previous reviews:
          - Use `gh api graphql` to query all unresolved review threads on the PR
          - Only consider threads started by the bot user (kelos-bot)
          - For each unresolved bot thread, check if the issue has been fixed in the current code
          - Resolve fixed threads using the `resolveReviewThread` GraphQL mutation
 
-      4. Review the changes following the priority labeling guidelines in the AgentConfig,
+      5. Review the changes following the priority labeling guidelines in the AgentConfig,
          then post inline review comments using `gh api` for each issue found:
          ```
          gh api repos/{owner}/{repo}/pulls/{{.Number}}/comments \
@@ -442,7 +444,7 @@ spec:
            -f side="RIGHT"
          ```
 
-      5. Post a PR comment with `/kelos needs-input` followed by a brief summary
+      6. Post a PR comment with `/kelos needs-input` followed by a brief summary
          of findings (or "No issues found").
 
       ## Rules

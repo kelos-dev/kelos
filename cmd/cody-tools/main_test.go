@@ -127,6 +127,48 @@ func TestAtlassianStartupDiagnosticsDoNotLogAuthorization(t *testing.T) {
 	}
 }
 
+func TestAtlassianStartupDiagnosticsLogsSanitizedStringPayloadPreview(t *testing.T) {
+	upstream := mockMCPServer(t, "Authorization: Basic very-secret-token for user.name@example.com failed; api_token=secret-value")
+	defer upstream.Close()
+
+	var logs bytes.Buffer
+	err := validateAtlassianAccess(context.Background(), upstream.Client(), config{
+		upstreamURL:   upstream.URL,
+		authorization: "Basic token",
+		expectedSite:  "https://wgen4.atlassian.net",
+	}, slog.New(slog.NewJSONHandler(&logs, nil)))
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	logText := logs.String()
+	for _, sensitive := range []string{"very-secret-token", "user.name@example.com", "secret-value"} {
+		if strings.Contains(logText, sensitive) {
+			t.Fatalf("logs contain sensitive detail %q: %s", sensitive, logText)
+		}
+	}
+	for _, want := range []string{
+		`"payload_shape":"string"`,
+		`"payload_preview":`,
+		`Basic [REDACTED]`,
+		`[EMAIL]`,
+		`api_token=[REDACTED]`,
+	} {
+		if !strings.Contains(logText, want) {
+			t.Fatalf("logs missing %s: %s", want, logText)
+		}
+	}
+}
+
+func TestPayloadPreviewTruncates(t *testing.T) {
+	preview := payloadPreview(strings.Repeat("x", payloadPreviewLen+10))
+	if len(preview) != payloadPreviewLen {
+		t.Fatalf("preview len = %d, want %d", len(preview), payloadPreviewLen)
+	}
+	if !strings.HasSuffix(preview, "...") {
+		t.Fatalf("preview should end with ellipsis: %q", preview)
+	}
+}
+
 func TestValidateAtlassianAccessFailsForMultipleSites(t *testing.T) {
 	upstream := mockMCPServer(t, []any{
 		map[string]any{"url": "https://wgen4.atlassian.net"},
@@ -163,7 +205,7 @@ func TestValidateAtlassianAccessSucceedsForWgen4Only(t *testing.T) {
 	}
 }
 
-func mockMCPServer(t *testing.T, resources []any) *httptest.Server {
+func mockMCPServer(t *testing.T, resources any) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Basic token" {

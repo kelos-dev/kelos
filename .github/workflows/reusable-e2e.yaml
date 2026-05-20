@@ -114,6 +114,7 @@ jobs:
           kind load docker-image ghcr.io/kelos-dev/kelos-controller:e2e
           kind load docker-image ghcr.io/kelos-dev/kelos-spawner:e2e
           kind load docker-image ghcr.io/kelos-dev/ghproxy:e2e
+          kind load docker-image ghcr.io/kelos-dev/cody-tools:e2e
           kind load docker-image ghcr.io/kelos-dev/claude-code:e2e
           kind load docker-image ghcr.io/kelos-dev/codex:e2e
           kind load docker-image ghcr.io/kelos-dev/gemini:e2e

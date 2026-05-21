@@ -400,14 +400,32 @@ To adapt these examples for your own repository:
      when:
        githubWebhook:
          repository: your-org/your-repo
+         excludeAuthors:
+           - your-bot[bot]            # avoid self-trigger loops
          events: [issue_comment]
          filters:
            - event: issue_comment
              action: created
              bodyPattern: /kelos pick-up
+             commentOn: Issue          # or PullRequest, depending on spawner
+             author: your-maintainer   # maintainer-approval gate
              labels: [your-label]
              state: open
    ```
+
+   Webhook filter fields the shipped self-development spawners rely on:
+
+   | Field | Where it lives | Purpose |
+   |---|---|---|
+   | `excludeAuthors` | `TaskSpawner.spec.when.githubWebhook` (top-level) | Drop events sent by listed usernames before filter evaluation; use this to exclude your own bot account and prevent self-trigger loops. |
+   | `bodyPattern` | `TaskSpawner.spec.when.githubWebhook.filters[]` | Go re2 regex match against the comment/review body — the modern replacement for substring-only matching. |
+   | `excludeBodyPatterns` | `TaskSpawner.spec.when.githubWebhook.filters[]` | Companion to `bodyPattern`: a list of regexes that, if any match, drop the event. Use to carve out bot-echo replies that would otherwise match `bodyPattern`. |
+   | `commentOn` | `TaskSpawner.spec.when.githubWebhook.filters[]` | Scopes `issue_comment` events to `Issue` or `PullRequest`. GitHub fires `issue_comment` for both, so set this to keep issue-only spawners off PRs (and vice versa). |
+   | `author` | `TaskSpawner.spec.when.githubWebhook.filters[]` | Restrict matches to a single sender's username — the maintainer-approval gate every shipped spawner uses. |
+   | `draft` | `TaskSpawner.spec.when.githubWebhook.filters[]` | Match by PR draft status. Set `false` to skip drafts; omit to match both. |
+
+   See [docs/reference.md](../docs/reference.md#taskspawner) for the full
+   `TaskSpawner.spec.when.githubWebhook` field reference.
 
 3. **Customize the prompt:**
    - Edit `spec.taskTemplate.promptTemplate` to match your workflow

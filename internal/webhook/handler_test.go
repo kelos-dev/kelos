@@ -225,6 +225,170 @@ func TestServeHTTP_DuplicateDeliveryIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestServeHTTP_SkipsDuplicateTaskForSameBranch(t *testing.T) {
+	spawner := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "branch-dedup-spawner",
+			Namespace: "default",
+			UID:       "branch-dedup-uid",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
+					Events: []string{"pull_request"},
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+				Credentials: kelosv1alpha1.Credentials{
+					Type: "api-key",
+				},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
+					Name: "test-workspace",
+				},
+				PromptTemplate: "{{.Title}}",
+				Branch:         "{{.Branch}}",
+			},
+		},
+	}
+
+	// Pre-existing active task for the same branch
+	existingTask := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "branch-dedup-spawner-repo-pr-99-aabbccdd",
+			Namespace: "default",
+			Labels: map[string]string{
+				"kelos.dev/taskspawner": "branch-dedup-spawner",
+			},
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Branch: "feature-branch",
+			Type:   "claude-code",
+		},
+		Status: kelosv1alpha1.TaskStatus{
+			Phase: kelosv1alpha1.TaskPhaseRunning,
+		},
+	}
+
+	handler := newTestHandler(t, spawner, existingTask)
+
+	payload := []byte(`{
+		"action": "labeled",
+		"sender": {"login": "testuser"},
+		"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}},
+		"pull_request": {
+			"number": 99,
+			"title": "Test PR",
+			"body": "PR body",
+			"html_url": "https://github.com/org/repo/pull/99",
+			"state": "open",
+			"head": {"ref": "feature-branch"}
+		}
+	}`)
+	sig := signPayload(payload, []byte(testSecret))
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
+	req.Header.Set(GitHubEventHeader, "pull_request")
+	req.Header.Set(GitHubSignatureHeader, sig)
+	req.Header.Set(GitHubDeliveryHeader, "new-delivery-for-same-pr")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Errorf("Expected still 1 task (deduplication), got %d", len(taskList.Items))
+	}
+}
+
+func TestServeHTTP_AllowsTaskForSameBranchAfterCompletion(t *testing.T) {
+	spawner := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "branch-retrigger-spawner",
+			Namespace: "default",
+			UID:       "branch-retrigger-uid",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
+					Events: []string{"pull_request"},
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+				Credentials: kelosv1alpha1.Credentials{
+					Type: "api-key",
+				},
+				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
+					Name: "test-workspace",
+				},
+				PromptTemplate: "{{.Title}}",
+				Branch:         "{{.Branch}}",
+			},
+		},
+	}
+
+	// Pre-existing completed task for the same branch — should NOT block new task
+	completedTask := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "branch-retrigger-spawner-repo-pr-99-oldold01",
+			Namespace: "default",
+			Labels: map[string]string{
+				"kelos.dev/taskspawner": "branch-retrigger-spawner",
+			},
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Branch: "feature-branch",
+			Type:   "claude-code",
+		},
+		Status: kelosv1alpha1.TaskStatus{
+			Phase: kelosv1alpha1.TaskPhaseSucceeded,
+		},
+	}
+
+	handler := newTestHandler(t, spawner, completedTask)
+
+	payload := []byte(`{
+		"action": "labeled",
+		"sender": {"login": "testuser"},
+		"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}},
+		"pull_request": {
+			"number": 99,
+			"title": "Test PR",
+			"body": "PR body",
+			"html_url": "https://github.com/org/repo/pull/99",
+			"state": "open",
+			"head": {"ref": "feature-branch"}
+		}
+	}`)
+	sig := signPayload(payload, []byte(testSecret))
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
+	req.Header.Set(GitHubEventHeader, "pull_request")
+	req.Header.Set(GitHubSignatureHeader, sig)
+	req.Header.Set(GitHubDeliveryHeader, "retrigger-delivery")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+	if len(taskList.Items) != 2 {
+		t.Errorf("Expected 2 tasks (completed + new), got %d", len(taskList.Items))
+	}
+}
+
 func TestServeHTTP_CreatesTaskForMatchingSpawner(t *testing.T) {
 	spawner := &kelosv1alpha1.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1859,5 +2023,110 @@ func TestServeHTTP_ChecksOnlyWithoutCommentReporting(t *testing.T) {
 	}
 	if task.Annotations[reporting.AnnotationSourceSHA] != "aaa111bbb222" {
 		t.Errorf("Expected source-sha 'aaa111bbb222', got %q", task.Annotations[reporting.AnnotationSourceSHA])
+	}
+}
+
+func TestBuildWebhookTaskName(t *testing.T) {
+	tests := []struct {
+		name       string
+		spawner    string
+		eventType  string
+		parsed     *ParsedWebhook
+		deliveryID string
+		wantPrefix string
+	}{
+		{
+			name:      "GitHub PR includes repo and number",
+			spawner:   "babysitter",
+			eventType: "pull_request",
+			parsed: &ParsedWebhook{
+				ID: "30170",
+				GitHub: &GitHubEventData{
+					Number:         30170,
+					RepositoryName: "dquality",
+				},
+			},
+			deliveryID: "delivery-1",
+			wantPrefix: "babysitter-dquality-pr-30170-",
+		},
+		{
+			name:      "GitHub issue includes repo and number",
+			spawner:   "triage",
+			eventType: "issues",
+			parsed: &ParsedWebhook{
+				ID: "42",
+				GitHub: &GitHubEventData{
+					Number:         42,
+					RepositoryName: "myrepo",
+				},
+			},
+			deliveryID: "delivery-2",
+			wantPrefix: "triage-myrepo-issue-42-",
+		},
+		{
+			name:      "GitHub repo name is lowercased and sanitized",
+			spawner:   "worker",
+			eventType: "pull_request",
+			parsed: &ParsedWebhook{
+				ID: "5",
+				GitHub: &GitHubEventData{
+					Number:         5,
+					RepositoryName: "DataQuality_App",
+				},
+			},
+			deliveryID: "delivery-uppercase",
+			wantPrefix: "worker-dataquality-app-pr-5-",
+		},
+		{
+			name:      "GitHub issue_comment on PR uses pr kind",
+			spawner:   "responder",
+			eventType: "issue_comment",
+			parsed: &ParsedWebhook{
+				ID: "100",
+				GitHub: &GitHubEventData{
+					Number:            100,
+					RepositoryName:    "myrepo",
+					PullRequestAPIURL: "https://api.github.com/repos/org/myrepo/pulls/100",
+				},
+			},
+			deliveryID: "delivery-3",
+			wantPrefix: "responder-myrepo-pr-100-",
+		},
+		{
+			name:      "Linear includes type and ID",
+			spawner:   "linear-worker",
+			eventType: "issue",
+			parsed: &ParsedWebhook{
+				ID:     "LIN-99",
+				Linear: &LinearEventData{Type: "Issue", ID: "LIN-99"},
+			},
+			deliveryID: "delivery-4",
+			wantPrefix: "linear-worker-issue-lin-99-",
+		},
+		{
+			name:      "fallback uses event type",
+			spawner:   "generic",
+			eventType: "push",
+			parsed: &ParsedWebhook{
+				GitHub: &GitHubEventData{
+					Number:         0,
+					RepositoryName: "",
+				},
+			},
+			deliveryID: "delivery-5",
+			wantPrefix: "generic-push-",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildWebhookTaskName(tt.spawner, tt.eventType, tt.parsed, tt.deliveryID)
+			if !strings.HasPrefix(got, tt.wantPrefix) {
+				t.Errorf("buildWebhookTaskName() = %q, want prefix %q", got, tt.wantPrefix)
+			}
+			if len(got) > 63 {
+				t.Errorf("buildWebhookTaskName() length %d exceeds 63", len(got))
+			}
+		})
 	}
 }

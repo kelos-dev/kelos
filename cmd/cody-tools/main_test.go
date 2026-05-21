@@ -69,6 +69,131 @@ func TestAtlassianHandlerRejectsUnknownSubroute(t *testing.T) {
 	}
 }
 
+func TestAikidoHandlerProxiesReadOnlyRequestsWithServerSideAuth(t *testing.T) {
+	var gotAuth string
+	var gotCookie string
+	var gotPath string
+	var gotQuery string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotCookie = r.Header.Get("Cookie")
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"items":[]}`))
+	}))
+	defer upstream.Close()
+
+	s := &server{
+		cfg: config{
+			aikidoAPIBaseURL:    upstream.URL + "/api/public/v1",
+			aikidoAuthorization: "Bearer server-secret",
+		},
+		httpClient: upstream.Client(),
+		logger:     testLogger(),
+		ready:      true,
+	}
+	req := httptest.NewRequest(http.MethodGet, "/aikido/open-issue-groups?filter_code_repo_name=payments-api&page=0", nil)
+	req.Header.Set("Authorization", "Bearer client-secret")
+	req.Header.Set("Cookie", "session=client")
+	rec := httptest.NewRecorder()
+
+	s.handleAikido(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if gotAuth != "Bearer server-secret" {
+		t.Fatalf("Authorization = %q", gotAuth)
+	}
+	if gotCookie != "" {
+		t.Fatalf("Cookie forwarded = %q", gotCookie)
+	}
+	if gotPath != "/api/public/v1/open-issue-groups" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if gotQuery != "filter_code_repo_name=payments-api&page=0" {
+		t.Fatalf("query = %q", gotQuery)
+	}
+}
+
+func TestAikidoHandlerRejectsWriteMethods(t *testing.T) {
+	s := &server{
+		cfg: config{
+			aikidoAPIBaseURL:    "https://app.aikido.dev/api/public/v1",
+			aikidoAuthorization: "Bearer server-secret",
+		},
+		httpClient: http.DefaultClient,
+		logger:     testLogger(),
+	}
+	req := httptest.NewRequest(http.MethodPost, "/aikido/open-issue-groups", nil)
+	rec := httptest.NewRecorder()
+
+	s.handleAikido(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if rec.Header().Get("Allow") != http.MethodGet {
+		t.Fatalf("Allow = %q", rec.Header().Get("Allow"))
+	}
+}
+
+func TestAikidoHandlerRequiresServerSideAuth(t *testing.T) {
+	s := &server{
+		cfg: config{
+			aikidoAPIBaseURL: "https://app.aikido.dev/api/public/v1",
+		},
+		httpClient: http.DefaultClient,
+		logger:     testLogger(),
+	}
+	req := httptest.NewRequest(http.MethodGet, "/aikido/open-issue-groups", nil)
+	rec := httptest.NewRecorder()
+
+	s.handleAikido(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d", rec.Code)
+	}
+}
+
+func TestAikidoHandlerBlocksRedirectsToUnexpectedHosts(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://evil.example/steal", http.StatusFound)
+	}))
+	defer upstream.Close()
+
+	s := &server{
+		cfg: config{
+			aikidoAPIBaseURL:    upstream.URL + "/api/public/v1",
+			aikidoAuthorization: "Bearer server-secret",
+		},
+		httpClient: upstream.Client(),
+		logger:     testLogger(),
+	}
+	req := httptest.NewRequest(http.MethodGet, "/aikido/open-issue-groups", nil)
+	rec := httptest.NewRecorder()
+
+	s.handleAikido(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d", rec.Code)
+	}
+}
+
+func TestAikidoAuthorizationFromEnv(t *testing.T) {
+	if got := aikidoAuthorizationFromEnv("Bearer exact", "ignored"); got != "Bearer exact" {
+		t.Fatalf("exact authorization = %q", got)
+	}
+	if got := aikidoAuthorizationFromEnv("", "raw-token"); got != "Bearer raw-token" {
+		t.Fatalf("raw token authorization = %q", got)
+	}
+	if got := aikidoAuthorizationFromEnv("", "Basic encoded"); got != "Basic encoded" {
+		t.Fatalf("preformatted authorization = %q", got)
+	}
+}
+
 func TestParseRPCRequestLogFields(t *testing.T) {
 	fields := parseRPCRequestLogFields([]byte(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"createJiraIssue","arguments":{}}}`))
 	if fields.Method != "tools/call" {

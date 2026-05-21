@@ -18,14 +18,21 @@ import (
 )
 
 const (
-	defaultAddr        = ":8080"
-	defaultUpstreamURL = "https://mcp.atlassian.com/v1/mcp"
-	defaultSiteURL     = "https://wgen4.atlassian.net"
+	defaultAddr             = ":8080"
+	defaultUpstreamURL      = "https://mcp.atlassian.com/v1/mcp"
+	defaultSiteURL          = "https://wgen4.atlassian.net"
+	defaultAikidoAPIBaseURL = "https://app.aikido.dev/api/public/v1"
 
-	envAddr          = "CODY_TOOLS_ADDR"
-	envUpstreamURL   = "CODY_TOOLS_ATLASSIAN_UPSTREAM_URL"
-	envAuthorization = "CODY_TOOLS_ATLASSIAN_AUTHORIZATION"
-	envExpectedSite  = "CODY_TOOLS_ATLASSIAN_EXPECTED_SITE_URL"
+	envAddr                  = "CODY_TOOLS_ADDR"
+	envUpstreamURL           = "CODY_TOOLS_ATLASSIAN_UPSTREAM_URL"
+	envAuthorization         = "CODY_TOOLS_ATLASSIAN_AUTHORIZATION"
+	envExpectedSite          = "CODY_TOOLS_ATLASSIAN_EXPECTED_SITE_URL"
+	envAikidoAPIBaseURL      = "CODY_TOOLS_AIKIDO_API_BASE_URL"
+	envAikidoAuthorization   = "CODY_TOOLS_AIKIDO_AUTHORIZATION"
+	envAikidoAPIKey          = "AIKIDO_API_KEY"
+	aikidoRoute              = "/aikido"
+	atlassianRoute           = "/mcp/atlassian"
+	aikidoAuthorizationError = "aikido credentials are not configured"
 )
 
 var hopByHopHeaders = map[string]struct{}{
@@ -40,10 +47,12 @@ var hopByHopHeaders = map[string]struct{}{
 }
 
 type config struct {
-	addr          string
-	upstreamURL   string
-	authorization string
-	expectedSite  string
+	addr                string
+	upstreamURL         string
+	authorization       string
+	expectedSite        string
+	aikidoAPIBaseURL    string
+	aikidoAuthorization string
 }
 
 type server struct {
@@ -87,10 +96,12 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/readyz", s.handleReady)
-	mux.HandleFunc("/mcp/atlassian", s.handleAtlassian)
-	mux.HandleFunc("/mcp/atlassian/", s.handleAtlassian)
+	mux.HandleFunc(atlassianRoute, s.handleAtlassian)
+	mux.HandleFunc(atlassianRoute+"/", s.handleAtlassian)
+	mux.HandleFunc(aikidoRoute, s.handleAikido)
+	mux.HandleFunc(aikidoRoute+"/", s.handleAikido)
 
-	logger.Info("cody-tools listening", "addr", cfg.addr, "route", "/mcp/atlassian")
+	logger.Info("cody-tools listening", "addr", cfg.addr, "routes", []string{atlassianRoute, aikidoRoute})
 	if err := http.ListenAndServe(cfg.addr, mux); err != nil {
 		logger.Error("server failed", "error", err)
 		os.Exit(1)
@@ -99,10 +110,12 @@ func main() {
 
 func loadConfig() (config, error) {
 	cfg := config{
-		addr:          strings.TrimSpace(os.Getenv(envAddr)),
-		upstreamURL:   strings.TrimSpace(os.Getenv(envUpstreamURL)),
-		authorization: strings.TrimSpace(os.Getenv(envAuthorization)),
-		expectedSite:  strings.TrimSpace(os.Getenv(envExpectedSite)),
+		addr:                strings.TrimSpace(os.Getenv(envAddr)),
+		upstreamURL:         strings.TrimSpace(os.Getenv(envUpstreamURL)),
+		authorization:       strings.TrimSpace(os.Getenv(envAuthorization)),
+		expectedSite:        strings.TrimSpace(os.Getenv(envExpectedSite)),
+		aikidoAPIBaseURL:    strings.TrimSpace(os.Getenv(envAikidoAPIBaseURL)),
+		aikidoAuthorization: aikidoAuthorizationFromEnv(os.Getenv(envAikidoAuthorization), os.Getenv(envAikidoAPIKey)),
 	}
 	if cfg.addr == "" {
 		cfg.addr = defaultAddr
@@ -113,16 +126,57 @@ func loadConfig() (config, error) {
 	if cfg.expectedSite == "" {
 		cfg.expectedSite = defaultSiteURL
 	}
+	if cfg.aikidoAPIBaseURL == "" {
+		cfg.aikidoAPIBaseURL = defaultAikidoAPIBaseURL
+	}
 	if cfg.authorization == "" {
 		return config{}, fmt.Errorf("%s is required", envAuthorization)
 	}
-	if _, err := url.ParseRequestURI(cfg.upstreamURL); err != nil {
-		return config{}, fmt.Errorf("%s is invalid: %w", envUpstreamURL, err)
+	if err := validateURL(envUpstreamURL, cfg.upstreamURL); err != nil {
+		return config{}, err
 	}
-	if _, err := url.ParseRequestURI(cfg.expectedSite); err != nil {
-		return config{}, fmt.Errorf("%s is invalid: %w", envExpectedSite, err)
+	if err := validateURL(envExpectedSite, cfg.expectedSite); err != nil {
+		return config{}, err
+	}
+	if err := validateURL(envAikidoAPIBaseURL, cfg.aikidoAPIBaseURL); err != nil {
+		return config{}, err
 	}
 	return cfg, nil
+}
+
+func validateURL(name, raw string) error {
+	parsed, err := url.ParseRequestURI(raw)
+	if err != nil {
+		return fmt.Errorf("%s is invalid: %w", name, err)
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return fmt.Errorf("%s must include scheme and host", name)
+	}
+	return nil
+}
+
+func aikidoAuthorizationFromEnv(rawAuthorization, rawAPIKey string) string {
+	if authorization := strings.TrimSpace(rawAuthorization); authorization != "" {
+		return authorization
+	}
+	apiKey := strings.TrimSpace(rawAPIKey)
+	if apiKey == "" {
+		return ""
+	}
+	fields := strings.Fields(apiKey)
+	if len(fields) > 1 && isAuthorizationScheme(fields[0]) {
+		return apiKey
+	}
+	return "Bearer " + apiKey
+}
+
+func isAuthorizationScheme(value string) bool {
+	switch strings.ToLower(value) {
+	case "basic", "bearer":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *server) handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -138,7 +192,7 @@ func (s *server) handleReady(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *server) handleAtlassian(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/mcp/atlassian" && r.URL.Path != "/mcp/atlassian/" {
+	if r.URL.Path != atlassianRoute && r.URL.Path != atlassianRoute+"/" {
 		http.NotFound(w, r)
 		return
 	}
@@ -155,7 +209,7 @@ func (s *server) handleAtlassian(w http.ResponseWriter, r *http.Request) {
 	duration := time.Since(start)
 	logArgs := []any{
 		"adapter", "atlassian",
-		"route", "/mcp/atlassian",
+		"route", atlassianRoute,
 		"method", fields.Method,
 		"tool", fields.Tool,
 		"http_method", r.Method,
@@ -168,6 +222,129 @@ func (s *server) handleAtlassian(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.logger.Info("mcp_request", logArgs...)
+}
+
+func (s *server) handleAikido(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != aikidoRoute && !strings.HasPrefix(r.URL.Path, aikidoRoute+"/") {
+		http.NotFound(w, r)
+		return
+	}
+
+	start := time.Now()
+	status, err := s.forwardAikido(w, r)
+	duration := time.Since(start)
+	logArgs := []any{
+		"adapter", "aikido",
+		"route", aikidoRoute,
+		"path", strings.TrimPrefix(r.URL.Path, aikidoRoute),
+		"http_method", r.Method,
+		"status", status,
+		"duration_ms", duration.Milliseconds(),
+	}
+	if err != nil {
+		logArgs = append(logArgs, "error", err)
+		s.logger.Error("api_proxy_request_failed", logArgs...)
+		return
+	}
+	s.logger.Info("api_proxy_request", logArgs...)
+}
+
+func (s *server) forwardAikido(w http.ResponseWriter, inbound *http.Request) (int, error) {
+	if inbound.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return http.StatusMethodNotAllowed, fmt.Errorf("method %s is not allowed", inbound.Method)
+	}
+	if s.cfg.aikidoAuthorization == "" {
+		http.Error(w, aikidoAuthorizationError, http.StatusServiceUnavailable)
+		return http.StatusServiceUnavailable, errors.New(aikidoAuthorizationError)
+	}
+
+	upstreamURL, expectedHost, err := buildAikidoUpstreamURL(s.cfg.aikidoAPIBaseURL, inbound.URL)
+	if err != nil {
+		http.Error(w, "invalid upstream", http.StatusInternalServerError)
+		return http.StatusInternalServerError, err
+	}
+
+	req, err := http.NewRequestWithContext(inbound.Context(), http.MethodGet, upstreamURL.String(), nil)
+	if err != nil {
+		http.Error(w, "build upstream request", http.StatusInternalServerError)
+		return http.StatusInternalServerError, err
+	}
+	copyRequestHeaders(req.Header, inbound.Header)
+	req.Header.Del("Authorization")
+	req.Header.Del("Cookie")
+	req.Header.Set("Authorization", s.cfg.aikidoAuthorization)
+	if req.Header.Get("Accept") == "" {
+		req.Header.Set("Accept", "application/json")
+	}
+
+	resp, err := s.doAikido(req, expectedHost)
+	if err != nil {
+		http.Error(w, "upstream request failed", http.StatusBadGateway)
+		return http.StatusBadGateway, err
+	}
+	defer resp.Body.Close()
+
+	copyResponseHeaders(w.Header(), resp.Header)
+	w.WriteHeader(resp.StatusCode)
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		return resp.StatusCode, err
+	}
+	return resp.StatusCode, nil
+}
+
+func (s *server) doAikido(req *http.Request, expectedHost string) (*http.Response, error) {
+	client := *s.httpClient
+	client.CheckRedirect = func(redirectReq *http.Request, _ []*http.Request) error {
+		if !sameHost(redirectReq.URL.Host, expectedHost) {
+			return fmt.Errorf("blocked redirect to unexpected host %s", redirectReq.URL.Host)
+		}
+		redirectReq.Header.Del("Authorization")
+		redirectReq.Header.Del("Cookie")
+		redirectReq.Header.Set("Authorization", s.cfg.aikidoAuthorization)
+		return nil
+	}
+	return client.Do(req)
+}
+
+func buildAikidoUpstreamURL(baseRaw string, inbound *url.URL) (*url.URL, string, error) {
+	baseURL, err := url.Parse(baseRaw)
+	if err != nil {
+		return nil, "", err
+	}
+	if baseURL.Scheme == "" || baseURL.Host == "" {
+		return nil, "", fmt.Errorf("missing scheme or host in %q", baseRaw)
+	}
+	if inbound.Path != aikidoRoute && !strings.HasPrefix(inbound.Path, aikidoRoute+"/") {
+		return nil, "", fmt.Errorf("path %q does not match %s route", inbound.Path, aikidoRoute)
+	}
+
+	upstreamURL := *baseURL
+	suffix := strings.TrimPrefix(inbound.Path, aikidoRoute)
+	upstreamURL.Path = joinURLPath(baseURL.Path, suffix)
+	upstreamURL.RawQuery = inbound.RawQuery
+	upstreamURL.Fragment = ""
+	return &upstreamURL, strings.ToLower(baseURL.Host), nil
+}
+
+func joinURLPath(basePath, suffix string) string {
+	basePath = strings.TrimRight(basePath, "/")
+	suffix = strings.TrimLeft(suffix, "/")
+	if suffix == "" {
+		if basePath == "" {
+			return "/"
+		}
+		return basePath
+	}
+	if basePath == "" {
+		return "/" + suffix
+	}
+	return basePath + "/" + suffix
+}
+
+func sameHost(actual, expected string) bool {
+	return strings.EqualFold(actual, expected)
 }
 
 func readBody(r *http.Request) ([]byte, error) {

@@ -125,6 +125,101 @@ func TestRouteMessageThreadContextBody(t *testing.T) {
 	}
 }
 
+func TestRouteMessageBotAllowlist(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(v1alpha1.AddToScheme(scheme))
+
+	tests := []struct {
+		name          string
+		allowedBotIDs []string
+		wantTasks     int
+	}{
+		{
+			name:          "allowed bot creates task",
+			allowedBotIDs: []string{"BTRUSTED1"},
+			wantTasks:     1,
+		},
+		{
+			name:          "non-allowlisted bot does not create task",
+			allowedBotIDs: []string{"BOTHERBOT"},
+			wantTasks:     0,
+		},
+		{
+			name:      "empty allowlist does not create task",
+			wantTasks: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spawner := &v1alpha1.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-spawner",
+					Namespace: "default",
+					UID:       "spawner-uid",
+				},
+				Spec: v1alpha1.TaskSpawnerSpec{
+					When: v1alpha1.When{
+						Slack: &v1alpha1.Slack{
+							AllowedBotIDs: tt.allowedBotIDs,
+						},
+					},
+					TaskTemplate: v1alpha1.TaskTemplate{
+						Type: "claude-code",
+						Credentials: v1alpha1.Credentials{
+							Type: v1alpha1.CredentialTypeNone,
+						},
+						PromptTemplate: "{{.Body}}",
+					},
+				},
+			}
+
+			cl := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(spawner.DeepCopy()).
+				Build()
+
+			tb, err := taskbuilder.NewTaskBuilder(cl)
+			if err != nil {
+				t.Fatalf("NewTaskBuilder: %v", err)
+			}
+
+			h := &SlackHandler{
+				client:      cl,
+				log:         logr.Discard(),
+				taskBuilder: tb,
+				botUserID:   "UBOT",
+				botID:       "BCODY",
+			}
+
+			msg := &SlackMessageData{
+				BotID:        "BTRUSTED1",
+				IsBotMessage: true,
+				ChannelID:    "C1",
+				Text:         "<@UBOT> fix the security issue",
+				Body:         "<@UBOT> fix the security issue",
+				Timestamp:    "1111111111.111111",
+			}
+
+			h.routeMessage(context.Background(), msg)
+
+			var tasks v1alpha1.TaskList
+			if err := cl.List(context.Background(), &tasks); err != nil {
+				t.Fatalf("List tasks: %v", err)
+			}
+			if len(tasks.Items) != tt.wantTasks {
+				t.Fatalf("Expected %d tasks, got %d", tt.wantTasks, len(tasks.Items))
+			}
+			if tt.wantTasks == 1 {
+				if got := tasks.Items[0].Annotations["kelos.dev/slack-bot-id"]; got != "BTRUSTED1" {
+					t.Errorf("slack bot annotation = %q, want %q", got, "BTRUSTED1")
+				}
+			}
+		})
+	}
+}
+
 // TestMessageEventAttachmentsOnRegularMessage verifies that the slack-go
 // library's custom UnmarshalJSON populates Message (and thus
 // Message.Attachments) even for regular top-level messages that have no

@@ -234,6 +234,7 @@ GitHub Apps are preferred over PATs for production use because they offer fine-g
 | `spec.when.linearWebhook.filters[].labels` | Require the issue to have all of these labels | No |
 | `spec.when.linearWebhook.filters[].excludeLabels` | Exclude issues with any of these labels | No |
 | `spec.when.slack.channels` | Restrict which Slack channels the bot listens in (channel IDs like `"C0123456789"`); when empty, listens in all invited channels | No |
+| `spec.when.slack.allowedBotIDs` | Allow specific Slack bot authors to trigger this TaskSpawner (bot IDs like `"B0123456789"`); when empty, bot-authored messages are ignored | No |
 | `spec.when.slack.triggers[].pattern` | RE2 regex matched against message text (unanchored); leading `<@USER_ID>` mentions are stripped before matching; bot mention required unless `mentionOptional` is set; multiple triggers use OR semantics; when empty, every bot mention fires | No |
 | `spec.when.slack.triggers[].mentionOptional` | When `true`, fire on pattern match alone without requiring a bot @-mention | No |
 | `spec.when.slack.excludePatterns` | RE2 regex patterns that reject messages when any pattern matches (OR semantics); leading `<@USER_ID>` mentions are stripped before matching; does not apply to slash commands | No |

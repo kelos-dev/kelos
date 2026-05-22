@@ -32,6 +32,10 @@ type SlackMessageData struct {
 	// HasThreadContext indicates that Body contains full thread context
 	// rather than the raw message text.
 	HasThreadContext bool
+	// BotID is the Slack bot ID when the message author is a bot.
+	BotID string
+	// IsBotMessage indicates this came from a bot-authored Slack event.
+	IsBotMessage bool
 	// IsSlashCommand indicates this came from a slash command rather than a message event.
 	IsSlashCommand bool
 	// SlashCommandID is the composite ID for slash commands (channelID:command:triggerID).
@@ -75,6 +79,9 @@ func MatchesSpawner(slackCfg *v1alpha1.Slack, msg *SlackMessageData, botUserID s
 	// Slash commands bypass mention, trigger, and exclude filters.
 	if msg.IsSlashCommand {
 		return true
+	}
+	if msg.IsBotMessage && !matchesAllowedBotID(msg.BotID, slackCfg.AllowedBotIDs) {
+		return false
 	}
 	var positiveMatch bool
 	if len(slackCfg.Triggers) == 0 {
@@ -122,6 +129,19 @@ func matchesChannel(channelID string, allowed []string) bool {
 	}
 	for _, id := range allowed {
 		if id == channelID {
+			return true
+		}
+	}
+	return false
+}
+
+// matchesAllowedBotID returns true when botID is explicitly allowlisted.
+func matchesAllowedBotID(botID string, allowed []string) bool {
+	if botID == "" || len(allowed) == 0 {
+		return false
+	}
+	for _, id := range allowed {
+		if id == botID {
 			return true
 		}
 	}

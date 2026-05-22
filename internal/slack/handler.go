@@ -335,6 +335,21 @@ func (h *SlackHandler) handleSelfHandoffEvent(ctx context.Context, event selfHan
 	return true
 }
 
+// HandleReportedTerminalMessage evaluates a terminal Slack reporter message for
+// a Cody self-handoff. This covers final responses written by the reporter via
+// chat.update, which do not reliably arrive as ordinary new-message events.
+func (h *SlackHandler) HandleReportedTerminalMessage(ctx context.Context, msg reporting.SlackTerminalMessage) error {
+	h.handleSelfHandoffEvent(ctx, selfHandoffEvent{
+		UserID:    h.botUserID,
+		BotID:     h.botID,
+		Text:      msg.Text,
+		ChannelID: msg.ChannelID,
+		ThreadTS:  msg.ThreadTS,
+		Timestamp: msg.MessageTS,
+	}, strings.TrimSpace(msg.Text) != "")
+	return nil
+}
+
 func (h *SlackHandler) postSelfHandoffStopNotice(ctx context.Context, channelID, threadTS string, replies []goslack.Message) {
 	if threadHasSelfHandoffStopNotice(replies, h.botUserID, h.botID) {
 		return

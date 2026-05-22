@@ -446,6 +446,19 @@ type SlackMessenger interface {
 	UpdateMessage(ctx context.Context, channel, messageTS string, msg SlackMessage) error
 }
 
+// SlackTerminalMessage is a Slack message written for a Task's terminal phase.
+type SlackTerminalMessage struct {
+	ChannelID string
+	ThreadTS  string
+	MessageTS string
+	Text      string
+}
+
+// SlackTerminalMessageHandler receives terminal Slack messages after they are
+// posted or updated. Handlers are best-effort and must not be required for
+// reporting to succeed.
+type SlackTerminalMessageHandler func(ctx context.Context, msg SlackTerminalMessage) error
+
 // activityState tracks the target message for activity indicator updates.
 // The activity indicator is rendered as an additional context element on
 // whichever message is currently the latest in the thread (the accepted
@@ -470,10 +483,11 @@ type activityState struct {
 // configured, it posts and updates short activity indicators between
 // progress snapshots.
 type SlackTaskReporter struct {
-	Client         client.Client
-	Reporter       SlackMessenger
-	ProgressReader ProgressReader
-	ActivityReader ActivityReader
+	Client                 client.Client
+	Reporter               SlackMessenger
+	ProgressReader         ProgressReader
+	ActivityReader         ActivityReader
+	TerminalMessageHandler SlackTerminalMessageHandler
 
 	mu           sync.Mutex
 	lastProgress map[types.UID]string         // taskUID -> last posted text
@@ -535,6 +549,7 @@ func (tr *SlackTaskReporter) ReportTaskStatus(ctx context.Context, task *kelosv1
 			if err := tr.Reporter.UpdateMessage(ctx, channel, progressTS, msgs[0]); err != nil {
 				log.Error(err, "Failed to update progress message with final result, posting new reply", "task", task.Name)
 			} else {
+				tr.handleTerminalSlackMessage(ctx, task, channel, threadTS, progressTS, msgs[0])
 				// Post any continuation messages as new thread replies.
 				for _, msg := range msgs[1:] {
 					if _, err := tr.Reporter.PostThreadReply(ctx, channel, threadTS, msg); err != nil {
@@ -558,6 +573,9 @@ func (tr *SlackTaskReporter) ReportTaskStatus(ctx context.Context, task *kelosv1
 		}
 		if i == 0 {
 			firstReplyTS = replyTS
+			if desiredPhase == "succeeded" || desiredPhase == "failed" {
+				tr.handleTerminalSlackMessage(ctx, task, channel, threadTS, replyTS, msg)
+			}
 		}
 	}
 
@@ -577,6 +595,29 @@ func (tr *SlackTaskReporter) ReportTaskStatus(ctx context.Context, task *kelosv1
 	}
 
 	return nil
+}
+
+func (tr *SlackTaskReporter) handleTerminalSlackMessage(ctx context.Context, task *kelosv1alpha1.Task, channel, threadTS, messageTS string, msg SlackMessage) {
+	if tr.TerminalMessageHandler == nil {
+		return
+	}
+	if err := tr.TerminalMessageHandler(ctx, SlackTerminalMessage{
+		ChannelID: channel,
+		ThreadTS:  threadTS,
+		MessageTS: messageTS,
+		Text:      terminalSlackMessageText(task, msg),
+	}); err != nil {
+		ctrl.Log.WithName("slack-reporter").Error(err, "Terminal Slack message handler failed", "task", task.Name, "channel", channel)
+	}
+}
+
+func terminalSlackMessageText(task *kelosv1alpha1.Task, msg SlackMessage) string {
+	if task.Status.Results != nil {
+		if response := task.Status.Results["response"]; response != "" {
+			return decodeResponse(response)
+		}
+	}
+	return msg.Text
 }
 
 func (tr *SlackTaskReporter) persistSlackReportingState(ctx context.Context, task *kelosv1alpha1.Task, desiredPhase string) error {

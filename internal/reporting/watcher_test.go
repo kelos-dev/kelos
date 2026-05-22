@@ -2124,6 +2124,12 @@ func TestSlackTaskReporter_EditsProgressMessageOnTerminalPhase(t *testing.T) {
 		ProgressReader: &fakeProgressReader{text: "Working on the analysis..."},
 	}
 
+	var terminalMessages []SlackTerminalMessage
+	tr.TerminalMessageHandler = func(ctx context.Context, msg SlackTerminalMessage) error {
+		terminalMessages = append(terminalMessages, msg)
+		return nil
+	}
+
 	// Post a progress update (simulates the running phase).
 	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
 		t.Fatalf("unexpected error posting progress: %v", err)
@@ -2131,12 +2137,15 @@ func TestSlackTaskReporter_EditsProgressMessageOnTerminalPhase(t *testing.T) {
 	if len(posts) != 1 {
 		t.Fatalf("expected 1 post (progress), got %d", len(posts))
 	}
+	if len(terminalMessages) != 0 {
+		t.Fatalf("expected no terminal messages for progress update, got %d", len(terminalMessages))
+	}
 
 	// Transition to succeeded.
 	succeededTask := task.DeepCopy()
 	succeededTask.Status.Phase = kelosv1alpha1.TaskPhaseSucceeded
 	succeededTask.Status.Message = "Here is the final answer."
-	succeededTask.Status.Results = map[string]string{"response": "done"}
+	succeededTask.Status.Results = map[string]string{"response": "ZG9uZQ=="}
 
 	cl2 := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(succeededTask).Build()
 	tr.Client = cl2
@@ -2163,6 +2172,21 @@ func TestSlackTaskReporter_EditsProgressMessageOnTerminalPhase(t *testing.T) {
 	}
 	if len(terminalUpdate.msg.Blocks) == 0 {
 		t.Error("expected final update to include blocks")
+	}
+	if len(terminalMessages) != 1 {
+		t.Fatalf("expected 1 terminal message handler call, got %d", len(terminalMessages))
+	}
+	if terminalMessages[0].ChannelID != "C123ABC" {
+		t.Errorf("terminal channel = %q, want C123ABC", terminalMessages[0].ChannelID)
+	}
+	if terminalMessages[0].ThreadTS != "1234567890.123456" {
+		t.Errorf("terminal thread = %q, want 1234567890.123456", terminalMessages[0].ThreadTS)
+	}
+	if terminalMessages[0].MessageTS != "ts-progress" {
+		t.Errorf("terminal message ts = %q, want ts-progress", terminalMessages[0].MessageTS)
+	}
+	if terminalMessages[0].Text != "done" {
+		t.Errorf("terminal text = %q, want raw response", terminalMessages[0].Text)
 	}
 }
 
@@ -2194,6 +2218,11 @@ func TestSlackTaskReporter_FallsBackToPostOnUpdateFailure(t *testing.T) {
 		Reporter:       reporter,
 		ProgressReader: &fakeProgressReader{text: "Working on it..."},
 	}
+	var terminalMessages []SlackTerminalMessage
+	tr.TerminalMessageHandler = func(ctx context.Context, msg SlackTerminalMessage) error {
+		terminalMessages = append(terminalMessages, msg)
+		return nil
+	}
 
 	// Post a progress update.
 	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
@@ -2203,7 +2232,7 @@ func TestSlackTaskReporter_FallsBackToPostOnUpdateFailure(t *testing.T) {
 	// Transition to succeeded — update will fail, should fall back to post.
 	succeededTask := task.DeepCopy()
 	succeededTask.Status.Phase = kelosv1alpha1.TaskPhaseSucceeded
-	succeededTask.Status.Results = map[string]string{"response": "done"}
+	succeededTask.Status.Results = map[string]string{"response": "ZG9uZQ=="}
 
 	cl2 := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(succeededTask).Build()
 	tr.Client = cl2
@@ -2215,6 +2244,12 @@ func TestSlackTaskReporter_FallsBackToPostOnUpdateFailure(t *testing.T) {
 	// Should have fallen back to posting a new reply (2 total: progress + final).
 	if len(posts) != 2 {
 		t.Errorf("expected 2 posts (progress + fallback), got %d", len(posts))
+	}
+	if len(terminalMessages) != 1 {
+		t.Fatalf("expected 1 terminal message handler call for fallback post, got %d", len(terminalMessages))
+	}
+	if terminalMessages[0].Text != "done" {
+		t.Errorf("terminal text = %q, want raw response", terminalMessages[0].Text)
 	}
 }
 

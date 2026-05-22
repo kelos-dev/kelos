@@ -23,13 +23,9 @@ New Slack entrypoints:
 - `@cody !dev ...`
 - `@cody !review ...`
 
-New GitHub entrypoint:
-
-- `/cody review` on configured pull request repositories
-- optional `cody-review` PR label on configured repositories
-
 No router persona, no automatic handoff, no new Kelos CRD/API fields, no new
-service accounts, and no Slack channel whitelist.
+service accounts, no Slack channel whitelist, and no GitHub triggers in Phase
+1.
 
 All Phase 1 persona TaskSpawners reuse the current Cody runtime shape:
 
@@ -37,14 +33,15 @@ All Phase 1 persona TaskSpawners reuse the current Cody runtime shape:
 - `image: docker.io/alpheya/codex:main`
 - `credentials.secretRef.name: cody-codex-credentials`
 - `podOverrides.serviceAccountName: cody-debugger`
-- current GitHub App env from `cody-github-app`
+- current GitHub App env from `cody-github-app`, used by the agent for GitHub
+  API/clone/PR operations when a Slack request requires them
 - current JWT signing env from `cody-jwt-signing`
 - `podOverrides.labels.cody.alpheya.com/tools-client: "true"`
 
-Important naming detail: `cody-github-app` and `cody-webhook-github` are
-Kubernetes Secret names. The actual GitHub App currently wired through those
-Secrets is the existing `cursor` GitHub App, ID `3429269`, using Key Vault keys
-named `cursor-github-app-*`.
+Important naming detail: `cody-github-app` is a Kubernetes Secret name, not the
+GitHub App name. The actual GitHub App currently wired through that Secret is
+the existing `cursor` GitHub App, ID `3429269`, using Key Vault keys named
+`cursor-github-app-*`.
 
 Persona-specific RBAC and narrower pod env are intentionally deferred.
 
@@ -65,33 +62,16 @@ while users type `@cody !ticket ...`, `@cody !dev ...`, or
 | `@cody !exp debug X` | existing `cody-debug-alpha-slack` | Unchanged. |
 | `@cody !ticket create a ticket for X` | new `cody-ticket-slack` | New reserved prefix. |
 | `@cody !dev fix ALPM-123` | new `cody-dev-slack` | New reserved prefix. |
-| `@cody !review https://github.com/.../pull/123` | new `cody-pr-reviewer-slack` | New reserved prefix. |
+| `@cody !review https://github.com/.../pull/123` | new `cody-pr-reviewer-slack` | New reserved prefix. Slack-only trigger; include a PR URL. |
 | `!dev fix X` without `@cody` | no Cody task | `mentionOptional` must not be set. |
-
-### GitHub routing
-
-GitHub PR review is supported in Phase 1, but Kelos requires a concrete
-`workspaceRef` for GitHub webhook and PR sources. Therefore GitHub review must
-be configured per repository/workspace in Phase 1.
-
-Do not create a wildcard "all repos" GitHub reviewer TaskSpawner unless Kelos
-later supports dynamic workspace selection.
-
-For each canary repo, create:
-
-- one `Workspace`
-- one GitHub PR reviewer TaskSpawner that references that workspace
-
-Supported GitHub triggers for a configured repo:
-
-- `issue_comment` on a PR with body matching `^/cody review\b`
-- `pull_request` labeled with `cody-review`
 
 ## Non-Goals
 
 - No router persona.
 - No Phase 1 automatic handoff.
 - No new Kelos code, CRD, controller, webhook, or image change.
+- No GitHub webhook, GitHub PR polling, GitHub comment, or GitHub label
+  triggers.
 - No Slack `channels[]` filtering.
 - No Slack `mentionOptional: true`.
 - No new service accounts or RBAC.
@@ -117,14 +97,12 @@ Do not otherwise change the stable debugger TaskSpawner.
 
 `non-prod/kelos/kustomization.yaml`
 
-Add the new AgentConfigs, Slack TaskSpawners, and GitHub reviewer resources.
-Keep ordering readable:
+Add the new AgentConfigs and Slack TaskSpawners. Keep ordering readable:
 
 1. secrets/tools
 2. RBAC
 3. AgentConfigs
-4. Workspaces
-5. TaskSpawners
+4. TaskSpawners
 
 ### Add new files
 
@@ -138,12 +116,8 @@ Required:
 - `non-prod/kelos/taskspawner-cody-dev.yaml`
 - `non-prod/kelos/taskspawner-cody-pr-reviewer-slack.yaml`
 
-GitHub PR review, per canary repo:
-
-- `non-prod/kelos/workspace-cody-pr-reviewer-<repo>.yaml`
-- `non-prod/kelos/taskspawner-cody-pr-reviewer-github-<repo>.yaml`
-
-Use repo-specific filenames so adding a second repo is mechanical and reviewable.
+Use persona-specific filenames so future routes can be added mechanically and
+reviewed separately.
 
 ## Shared TaskSpawner Runtime
 
@@ -234,7 +208,7 @@ Required behavior:
 - use evidence over guesses
 - never expose secrets
 - use PRs for mutations
-- keep Slack/GitHub replies concise
+- keep user-visible replies concise
 - if the request belongs to another persona, say which `@cody !...` command to
   use instead of doing the work
 
@@ -337,7 +311,7 @@ Next: <one concrete ask>
 
 ### `cody-pr-reviewer`
 
-Purpose: review pull requests from Slack or GitHub.
+Purpose: review pull requests from Slack-provided PR URLs.
 
 Use `agentConfigRefs`:
 
@@ -357,9 +331,7 @@ Required instructions:
 - Prefer actionable findings with file/line references.
 - If no material issues are found, say that clearly and list remaining test
   gaps or residual risk.
-- For GitHub-triggered reviews, comment on the PR/check through Kelos reporting
-  when available.
-- For Slack-triggered reviews, reply in the Slack thread.
+- Reply in the Slack thread.
 
 Review output shape:
 
@@ -499,93 +471,6 @@ Slack TaskSpawner requirements:
 - no `mentionOptional`
 - no `allowedBotIDs` unless a separate trusted bot use case is approved
 
-## GitHub PR Reviewer
-
-GitHub review requires per-repo resources.
-
-### Workspace template
-
-```yaml
-apiVersion: kelos.dev/v1alpha1
-kind: Workspace
-metadata:
-  name: cody-pr-reviewer-<repo>
-  namespace: kelos-system
-spec:
-  repo: https://github.com/quantum-wealth/<repo>.git
-  ref: main
-  secretRef:
-    name: cody-webhook-github
-```
-
-Use `cody-webhook-github` for Workspace auth because Kelos Workspace GitHub App
-auth expects Secret keys `appID`, `installationID`, and `privateKey`. That
-Secret points at the existing `cursor` GitHub App, ID `3429269`. The
-`cody-github-app` Secret is for the Cody agent helper scripts and uses
-different key names (`GITHUB_APP_CLIENT_ID`, `GITHUB_APP_INSTALLATION_ID`,
-`GITHUB_APP_PRIVATE_KEY`), so it is not the right Workspace secret.
-
-### GitHub TaskSpawner template
-
-```yaml
-apiVersion: kelos.dev/v1alpha1
-kind: TaskSpawner
-metadata:
-  name: cody-pr-reviewer-github-<repo>
-  namespace: kelos-system
-spec:
-  maxConcurrency: 2
-  when:
-    githubWebhook:
-      events:
-        - issue_comment
-        - pull_request
-      repository: quantum-wealth/<repo>
-      filters:
-        - event: issue_comment
-          action: created
-          commentOn: PullRequest
-          bodyPattern: '^/cody review\b'
-        - event: pull_request
-          action: labeled
-          labels:
-            - cody-review
-      reporting:
-        enabled: true
-        checks:
-          name: Cody PR reviewer
-  taskTemplate:
-    # shared runtime block from this spec
-    workspaceRef:
-      name: cody-pr-reviewer-<repo>
-    branch: "{{.Branch}}"
-    agentConfigRefs:
-      - name: cody-base
-      - name: cody-pr-reviewer
-      - name: cody-atlassian-mcp
-    promptTemplate: |
-      Cody PR review request from GitHub.
-
-      Repository: {{.Repository}}
-      PR: {{.URL}}
-      Branch: {{.Branch}}
-      Triggered by: {{.Sender}}
-
-      Comment or review body:
-      {{.CommentBody}}
-
-      Review the pull request and report findings through the configured
-      GitHub reporting path.
-    metadata:
-      labels:
-        cody.alpheya.com/persona: pr-reviewer
-        cody.alpheya.com/source: github
-```
-
-Implementation note: do not configure a GitHub reviewer until the first canary
-repo is selected and its Workspace credentials are confirmed. Slack `@cody
-!review <PR URL>` can still ship independently.
-
 ## Validation Plan
 
 ### Static validation
@@ -617,14 +502,6 @@ Slack:
    - Expect existing `cody-debug-slack`.
 5. Send `@cody !alpha debug some-service`.
    - Expect existing `cody-debug-alpha-slack`.
-
-GitHub, per canary repo:
-
-1. Comment `/cody review` on a PR.
-   - Expect one Task from `cody-pr-reviewer-github-<repo>`.
-   - Expect GitHub reporting/check status if configured.
-2. Add label `cody-review` to a PR.
-   - Expect one Task from `cody-pr-reviewer-github-<repo>`.
 
 Kubernetes:
 
@@ -662,6 +539,6 @@ After Phase 1 behavior is proven:
 - split service accounts by persona
 - remove tenant Secret read access from ticket creator and PR reviewer
 - remove JWT signing env from personas that do not need it
-- decide whether GitHub review should be deployed repo-by-repo or whether
-  Kelos needs dynamic workspace selection
+- evaluate GitHub webhook/PR polling triggers later, after Slack-only Phase 1
+  proves useful and repository/workspace ownership is clear
 - implement Phase 2 handoff with structured Task results

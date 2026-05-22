@@ -29,8 +29,8 @@ TaskSpawners and AgentConfigs in `k8s-platform-gitops`:
 
 Independent work is solved by invoking a specific persona through explicit
 mentioned bang-prefixed Slack commands such as `@cody !ticket`,
-`@cody !dev`, and `@cody !review`, or through source-specific GitHub
-triggers. Phase 1 has no router persona.
+`@cody !dev`, and `@cody !review`. Phase 1 has no router persona and no
+GitHub triggers.
 Automatic handoff needs one additional Kelos primitive: a controller path that
 watches finished Tasks, reads structured `status.results`, and creates child
 Tasks from a configured handoff template.
@@ -53,8 +53,8 @@ Kelos already has most of the building blocks needed for personas:
 | `when.slack.excludePatterns[]` | Rejects messages that match any exclude pattern. | Reserve `!ticket`, `!dev`, and `!review` so the existing catch-all debugger does not also answer. |
 | `when.slack.channels[]` | Restricts Slack channel IDs. | Not used in Phase 1; do not introduce a channel whitelist for personas. |
 | `when.slack.allowedBotIDs[]` | Allows trusted Slack bot authors to trigger a spawner. | Lets a workflow bot invoke Cody without allowing all bot loops. |
-| `when.githubWebhook` | Filters GitHub events/actions/body regex/labels/file patterns. | Good fit for `/cody review` and PR lifecycle triggers. |
-| `when.githubPullRequests` | Polls PRs by state, labels, review state, file patterns, and comment policy. | Good fit for review queues when webhooks are not desired. |
+| `when.githubWebhook` | Filters GitHub events/actions/body regex/labels/file patterns. | Future option for PR lifecycle triggers after Phase 1. |
+| `when.githubPullRequests` | Polls PRs by state, labels, review state, file patterns, and comment policy. | Future option for review queues after Phase 1. |
 | `commentPolicy` | Supports trigger comments plus `allowedUsers`, `allowedTeams`, and `minimumPermission`. | Safer GitHub command invocation than open comments. |
 | `taskTemplate.agentConfigRefs[]` | Merges multiple AgentConfigs in order. | Compose shared Cody base, tool bundles, and persona-specific instructions. |
 | `Task.spec.dependsOn` | Waits for named Tasks to succeed; fails downstream if dependency fails; detects cycles. | Supports statically declared pipelines. |
@@ -134,14 +134,14 @@ the agent has no deterministic helper for emitting extra result keys such as
   that a different scoped agent should continue.
 - Keep persona behavior scoped by trigger and AgentConfig in Phase 1, while
   reusing the existing Cody runtime permissions to avoid RBAC churn.
-- Keep Slack and GitHub UX predictable: one request should not accidentally
+- Keep invocation and reporting UX predictable: one request should not accidentally
   spawn several personas unless that is explicitly configured.
 - Preserve the existing Cody debugger route while new personas are introduced.
 - Phase 1 must have no impact outside the newly reserved persona prefixes:
   normal `@cody ...` and existing `@cody !alpha` / `@cody !exp` requests
   continue to route exactly as they do today.
 - Make every automatic handoff auditable through Task labels, owner references,
-  status results, Slack/GitHub reporting, and Kubernetes events.
+  status results, source reporting, and Kubernetes events.
 
 ## Non-Goals
 
@@ -155,6 +155,8 @@ the agent has no deterministic helper for emitting extra result keys such as
   release.
 - Do not replace human code review. Cody dev output remains PR-based.
 - Do not introduce a router persona in Phase 1.
+- Do not introduce GitHub webhook, GitHub PR polling, GitHub comment, or GitHub
+  label triggers in Phase 1.
 - Do not modify the existing `cody-debug-slack` matching behavior except to
   reserve `!ticket`, `!dev`, and `!review` for the new persona routes.
 
@@ -164,7 +166,7 @@ A Cody persona is not just an `AgentConfig`. It is the full operational route.
 
 | Layer | Persona-specific? | Example |
 | --- | --- | --- |
-| Trigger | Yes | Slack `@cody !ticket ...`, GitHub PR comment `^/cody review\b`. |
+| Trigger | Yes | Phase 1 Slack commands such as `@cody !ticket ...`; future GitHub PR comments or labels can be added later. |
 | Prompt template | Yes | "Create an ALPM ticket from this Slack thread." |
 | AgentConfig stack | Yes | `cody-base`, `cody-ticket-creator`, `cody-atlassian-mcp`. |
 | Credentials | Usually shared for model, scoped for tools | Codex OAuth shared, Jira token via `cody-tools`. |
@@ -179,8 +181,8 @@ A Cody persona is not just an `AgentConfig`. It is the full operational route.
 | Persona | Invocation | Primary job | Tools | Allowed handoff |
 | --- | --- | --- | --- | --- |
 | `ticket-creator` | `@cody !ticket ...`, Jira/GitHub issue trigger later | Create or update Jira with concise acceptance criteria and evidence. | Atlassian MCP, Slack thread context, optional GitHub read. | `dev` when the ticket is actionable and the user asked for implementation. |
-| `dev` | `@cody !dev ...`, `/cody dev`, or handoff from ticket/debug | Implement small code or GitOps changes and open a PR. | GitHub App, repo workspace, optional read-only cluster for debugging. | `pr-reviewer` when a PR was opened. |
-| `pr-reviewer` | `@cody !review ...`, GitHub PR webhook/comment, or handoff from dev | Review a PR for correctness, tests, security, and Cody-specific risks. | GitHub read/comment/checks, repo workspace, optional changed-file context. | `dev` only for explicitly requested fix follow-up, and with loop guard. |
+| `dev` | `@cody !dev ...` or handoff from ticket/debug | Implement small code or GitOps changes and open a PR. | GitHub App, repo workspace, optional read-only cluster for debugging. | `pr-reviewer` when a PR was opened. |
+| `pr-reviewer` | `@cody !review <PR URL>` or handoff from dev | Review a PR for correctness, tests, security, and Cody-specific risks. | GitHub read, repo workspace, optional changed-file context. | `dev` only for explicitly requested fix follow-up, and with loop guard. |
 | `debugger` | existing normal `@cody ...` route and existing `@cody !alpha` / `@cody !exp` route | Diagnose non-prod service/platform issues and open PRs only when evidence-backed. | Current debug toolkit, read-only cluster, GitHub App, Atlassian MCP, Aikido proxy. | `ticket-creator` for backlog-only work, `dev` for a small confirmed fix. |
 
 The key design choice is that most persona selection should happen before the
@@ -206,6 +208,8 @@ The Phase 1 compatibility rule is strict:
 - The persona TaskSpawners should not set `mentionOptional: true`.
 - Do not add Slack `channels[]` in Phase 1; personas should follow the same
   channel reachability model as current Cody.
+- Do not add GitHub webhook, GitHub PR polling, GitHub comment, or GitHub label
+  triggers in Phase 1.
 
 This intentionally changes routing for `@cody !ticket`, `@cody !dev`, and
 `@cody !review`: those prefixes become reserved persona entrypoints instead
@@ -228,8 +232,8 @@ spec:
 
     You are Cody, an Alpheya internal agent. Stay scoped to the
     requested persona. Prefer evidence over guesses. Do not expose
-    secrets. Use PRs for mutations. Reply in the originating thread or
-    GitHub item when reporting is enabled.
+    secrets. Use PRs for mutations. Reply through the source that invoked
+    the task.
 ```
 
 Then add one config per persona:
@@ -366,12 +370,8 @@ spec:
               key: GITHUB_APP_PRIVATE_KEY
 ```
 
-For a PR reviewer, prefer GitHub webhook or GitHub PR polling rather than
-Slack-only invocation. Slack `@cody !review <PR URL>` can exist, but review is
-more reliable when the source event includes repository, PR number, branch,
-changed files, and reporting metadata.
-
-If a Slack reviewer canary is needed, use the same mentioned command pattern:
+For a PR reviewer in Phase 1, use the same mentioned command pattern and
+require the Slack request to include a PR URL:
 
 ```yaml
 when:
@@ -389,72 +389,6 @@ excludePatterns:
   - '^!(alpha|exp)\b'
   - '^!(ticket|dev|review)\b'
 ```
-
-### GitHub PR reviewer route
-
-Use GitHub webhook for fast `/cody review` style commands:
-
-```yaml
-apiVersion: kelos.dev/v1alpha1
-kind: TaskSpawner
-metadata:
-  name: cody-pr-reviewer-github
-  namespace: kelos-system
-spec:
-  maxConcurrency: 4
-  when:
-    githubWebhook:
-      events:
-        - issue_comment
-        - pull_request
-      repository: quantum-wealth/redesigned-spork
-      filters:
-        - event: issue_comment
-          action: created
-          commentOn: PullRequest
-          bodyPattern: '^/cody review\b'
-        - event: pull_request
-          action: labeled
-          labels:
-            - cody-review
-      reporting:
-        enabled: true
-        checks:
-          name: "Cody PR reviewer"
-  taskTemplate:
-    type: codex
-    credentials:
-      type: oauth
-      secretRef:
-        name: cody-codex-credentials
-    workspaceRef:
-      name: redesigned-spork
-    branch: "{{.Branch}}"
-    image: docker.io/alpheya/codex:main
-    agentConfigRefs:
-      - name: cody-base
-      - name: cody-pr-reviewer
-    promptTemplate: |
-      Review this pull request as Cody PR reviewer.
-
-      Repository: {{.Repository}}
-      PR: {{.URL}}
-      Branch: {{.Branch}}
-      Triggered by: {{.Sender}}
-
-      Comment or event:
-      {{.CommentBody}}
-    metadata:
-      labels:
-        cody.alpheya.com/persona: pr-reviewer
-        cody.alpheya.com/source: github
-```
-
-For broad deployment across many repos, either create one TaskSpawner per
-repository/workspace or add explicit repository/workspace mapping. The current
-Kelos webhook `taskTemplate.workspaceRef` points at one workspace, so a single
-wildcard PR reviewer spawner is not enough unless the workspace can safely
-represent all target repos.
 
 ### Phase 1 runtime permissions
 
@@ -741,10 +675,11 @@ Add:
 
 - `taskspawner-cody-ticket.yaml`
 - `taskspawner-cody-dev.yaml`
-- `taskspawner-cody-pr-reviewer.yaml`
+- `taskspawner-cody-pr-reviewer-slack.yaml`
 
-Start with Slack for ticket/dev and GitHub webhook or PR polling for review.
-If a Slack PR-review canary is used, it should use `@cody !review`.
+Start with Slack for ticket, dev, and review. `@cody !review` should require a
+PR URL in the Slack message. Do not add GitHub webhook, GitHub PR polling,
+GitHub comment, or GitHub label triggers in Phase 1.
 
 ### Step 4: Reuse the existing service account
 
@@ -864,9 +799,10 @@ Default policy:
 ### Authorization
 
 Slack has channel and bot allowlists but no per-user authorization in the
-TaskSpawner API today. Use GitHub `commentPolicy` for review/dev commands that
-need user authorization. For Slack, restrict risky personas to private/internal
-channels until Slack user authorization exists.
+TaskSpawner API today. For future GitHub commands, use GitHub `commentPolicy`
+for review/dev commands that need user authorization. Phase 1 must not add
+Slack channel allowlists; it should use the same channel reachability model as
+current Cody.
 
 ### Secrets
 
@@ -915,9 +851,6 @@ metadata:
 
 ## Open Questions
 
-- Which repos should have PR reviewer webhooks first?
-- Should Slack `@cody !review` exist in Phase 1, or should review be
-  GitHub-only?
 - Should the ticket creator create only ALPM issues, or should it support
   project selection?
 - Should handoff prompts be base64-only to avoid line-break issues in
@@ -931,9 +864,10 @@ Ship Phase 1 first:
 
 1. Add `cody-base`, `cody-ticket-creator`, `cody-dev`, and
    `cody-pr-reviewer` AgentConfigs.
-2. Add Slack TaskSpawners for `@cody !ticket` and `@cody !dev` commands with
-   no `channels[]` and no `mentionOptional`.
-3. Add a GitHub reviewer TaskSpawner for one canary repo.
+2. Add Slack TaskSpawners for `@cody !ticket`, `@cody !dev`, and
+   `@cody !review` commands with no `channels[]` and no `mentionOptional`.
+3. Keep GitHub webhook, GitHub PR polling, GitHub comment, and GitHub label
+   triggers out of Phase 1.
 4. Update `cody-debug-slack.excludePatterns` only to reserve `!ticket`,
    `!dev`, and `!review`; do not change `cody-debug-alpha-slack`.
 5. Reuse `serviceAccountName: cody-debugger` and the existing Cody pod env for

@@ -73,7 +73,7 @@ func printNextSteps(configPath string) {
 	fmt.Fprintln(os.Stdout, "Next steps:")
 	fmt.Fprintln(os.Stdout, "")
 	fmt.Fprintln(os.Stdout, "1. Get your credentials:")
-	fmt.Fprintln(os.Stdout, "   • Claude Code (OAuth): https://claude.ai/settings/developer")
+	fmt.Fprintln(os.Stdout, "   • Claude Code (OAuth): run 'claude setup-token' (token saved to ~/.claude/credentials.json)")
 	fmt.Fprintln(os.Stdout, "   • Claude Code (API key): https://console.anthropic.com/settings/keys")
 	fmt.Fprintln(os.Stdout, "   • Codex (API key): https://platform.openai.com/api-keys")
 	fmt.Fprintln(os.Stdout, "   • Gemini (API key): https://aistudio.google.com/app/apikey")

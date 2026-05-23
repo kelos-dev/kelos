@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,6 +76,34 @@ func TestInitCommand_ForceOverwrites(t *testing.T) {
 	}
 	if string(data) == "existing" {
 		t.Fatal("expected file to be overwritten")
+	}
+}
+
+func TestPrintNextSteps_ClaudeCodeOAuthUsesSetupToken(t *testing.T) {
+	origStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("creating pipe: %v", err)
+	}
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = origStdout })
+
+	printNextSteps("/tmp/config.yaml")
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("closing pipe: %v", err)
+	}
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatalf("reading captured output: %v", err)
+	}
+	output := buf.String()
+
+	if !strings.Contains(output, "Claude Code (OAuth): run 'claude setup-token'") {
+		t.Errorf("expected next-steps output to instruct running 'claude setup-token' for Claude Code OAuth, got:\n%s", output)
+	}
+	if strings.Contains(output, "https://claude.ai/settings/developer") {
+		t.Errorf("next-steps output must not link to https://claude.ai/settings/developer (API key page, not OAuth), got:\n%s", output)
 	}
 }
 

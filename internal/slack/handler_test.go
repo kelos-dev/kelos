@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/kelos-dev/kelos/api/v1alpha1"
@@ -281,6 +282,61 @@ func TestMessageEventAttachmentsOnRegularMessage(t *testing.T) {
 	}
 }
 
+func TestHandleMessageEventSkipsBotMentionDuplicate(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(v1alpha1.AddToScheme(scheme))
+
+	spawner := &v1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-spawner",
+			Namespace: "default",
+			UID:       "spawner-uid",
+		},
+		Spec: v1alpha1.TaskSpawnerSpec{
+			When: v1alpha1.When{
+				Slack: &v1alpha1.Slack{},
+			},
+			TaskTemplate: v1alpha1.TaskTemplate{
+				Type: "claude-code",
+				Credentials: v1alpha1.Credentials{
+					Type: v1alpha1.CredentialTypeNone,
+				},
+				PromptTemplate: "{{.Body}}",
+			},
+		},
+	}
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(spawner.DeepCopy()).
+		Build()
+	tb, err := taskbuilder.NewTaskBuilder(cl)
+	if err != nil {
+		t.Fatalf("NewTaskBuilder: %v", err)
+	}
+	h := &SlackHandler{
+		client:      cl,
+		log:         logr.Discard(),
+		taskBuilder: tb,
+		botUserID:   "UBOT",
+	}
+
+	h.handleMessageEvent(context.Background(), &slackevents.MessageEvent{
+		User:      "U123",
+		Channel:   "C123",
+		Text:      "<@UBOT> hello",
+		TimeStamp: "1111111111.111111",
+	})
+
+	var tasks v1alpha1.TaskList
+	if err := cl.List(context.Background(), &tasks); err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	if len(tasks.Items) != 0 {
+		t.Fatalf("Expected bot mention message event to be skipped, got %d tasks", len(tasks.Items))
+	}
+}
+
 func TestCreateTaskLongSpawnerName(t *testing.T) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
@@ -423,6 +479,78 @@ func TestCreateTaskAlreadyExists(t *testing.T) {
 	// Second call with same message should not return an error (AlreadyExists is handled)
 	if err := h.createTask(context.Background(), spawner, msg); err != nil {
 		t.Fatalf("Second createTask() should not error on AlreadyExists, got: %v", err)
+	}
+}
+
+func TestCreateTurnForSessionSkipsDuplicateSlackMessage(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(v1alpha1.AddToScheme(scheme))
+
+	session := &v1alpha1.AgentSession{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cody-session-slack-sess-test",
+			Namespace: "default",
+		},
+		Spec: v1alpha1.AgentSessionSpec{
+			Source: v1alpha1.AgentSessionSource{
+				Type:      "SlackThread",
+				ChannelID: "C123",
+				RootTS:    "1111111111.111111",
+			},
+			TaskSpawnerRef: v1alpha1.TaskSpawnerReference{Name: "cody-session-slack"},
+			MaxQueuedTurns: 5,
+		},
+	}
+	existingTurn := &v1alpha1.AgentTurn{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cody-session-slack-sess-test-t-0001",
+			Namespace: "default",
+			Labels: map[string]string{
+				LabelAgentSession: session.Name,
+			},
+		},
+		Spec: v1alpha1.AgentTurnSpec{
+			SessionRef: v1alpha1.AgentSessionReference{Name: session.Name},
+			Sequence:   1,
+			Source: v1alpha1.AgentTurnSource{
+				Type:      "SlackMessage",
+				ChannelID: "C123",
+				RootTS:    "1111111111.111111",
+				MessageTS: "1111111111.111111",
+				UserID:    "U123",
+			},
+		},
+	}
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(session.DeepCopy(), existingTurn.DeepCopy()).
+		Build()
+	h := &SlackHandler{
+		client: cl,
+		log:    logr.Discard(),
+	}
+
+	msg := &SlackMessageData{
+		UserID:    "U123",
+		ChannelID: "C123",
+		Text:      "<@UBOT> !session hello",
+		Timestamp: "1111111111.111111",
+	}
+
+	if err := h.createTurnForSession(context.Background(), session, msg); err != nil {
+		t.Fatalf("createTurnForSession() error = %v", err)
+	}
+
+	var turns v1alpha1.AgentTurnList
+	if err := cl.List(context.Background(), &turns, client.InNamespace("default"), client.MatchingLabels{LabelAgentSession: session.Name}); err != nil {
+		t.Fatalf("List turns: %v", err)
+	}
+	if len(turns.Items) != 1 {
+		t.Fatalf("Expected duplicate Slack message to keep 1 turn, got %d", len(turns.Items))
+	}
+	if got := turns.Items[0].Name; got != existingTurn.Name {
+		t.Fatalf("Unexpected turn preserved: got %q, want %q", got, existingTurn.Name)
 	}
 }
 

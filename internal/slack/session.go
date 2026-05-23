@@ -177,6 +177,19 @@ func (h *SlackHandler) createSessionAndFirstTurn(ctx context.Context, spawner *v
 }
 
 func (h *SlackHandler) createTurnForSession(ctx context.Context, session *v1alpha1.AgentSession, msg *SlackMessageData) error {
+	exists, err := h.turnExistsForSlackMessage(ctx, session, msg)
+	if err != nil {
+		return err
+	}
+	if exists {
+		h.log.Info("AgentTurn already exists for Slack message, skipping",
+			"session", session.Name,
+			"channel", msg.ChannelID,
+			"rootTS", rootThreadTS(msg),
+			"messageTS", msg.Timestamp)
+		return nil
+	}
+
 	if session.Spec.MaxQueuedTurns > 0 {
 		count, err := h.countQueuedOrRunningTurns(ctx, session)
 		if err != nil {
@@ -249,6 +262,27 @@ func (h *SlackHandler) createTurnForSession(ctx context.Context, session *v1alph
 		return fmt.Errorf("creating AgentTurn: %w", err)
 	}
 	return nil
+}
+
+func (h *SlackHandler) turnExistsForSlackMessage(ctx context.Context, session *v1alpha1.AgentSession, msg *SlackMessageData) (bool, error) {
+	if msg == nil || msg.Timestamp == "" {
+		return false, nil
+	}
+	var list v1alpha1.AgentTurnList
+	if err := h.client.List(ctx, &list, client.InNamespace(session.Namespace), client.MatchingLabels{LabelAgentSession: session.Name}); err != nil {
+		return false, err
+	}
+	rootTS := rootThreadTS(msg)
+	for _, turn := range list.Items {
+		source := turn.Spec.Source
+		if source.Type == "SlackMessage" &&
+			source.ChannelID == msg.ChannelID &&
+			source.RootTS == rootTS &&
+			source.MessageTS == msg.Timestamp {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (h *SlackHandler) populateTurnTranscript(ctx context.Context, session *v1alpha1.AgentSession, turn *v1alpha1.AgentTurn) error {

@@ -194,6 +194,11 @@ func (h *SlackHandler) handleMessageEvent(ctx context.Context, innerEvent *slack
 	}, hasContent) {
 		return
 	}
+	if hasBotMention(innerEvent.Text, h.botUserID) {
+		h.log.V(1).Info("Message event with bot mention skipped; app_mention handles mention routing",
+			"user", innerEvent.User, "botID", innerEvent.BotID, "channel", innerEvent.Channel)
+		return
+	}
 	if !shouldProcess(innerEvent.User, innerEvent.SubType, hasContent, h.botUserID, innerEvent.BotID, h.botID) {
 		h.log.V(1).Info("Message filtered by shouldProcess",
 			"user", innerEvent.User, "subtype", innerEvent.SubType, "botID", innerEvent.BotID, "channel", innerEvent.Channel)

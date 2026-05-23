@@ -33,7 +33,7 @@ Picks up open GitHub issues when a maintainer posts `/kelos pick-up` and creates
 |---|---|
 | **Trigger** | GitHub `issue_comment` webhook with `/kelos pick-up` |
 | **Model** | Opus |
-| **Concurrency** | 3 |
+| **Concurrency** | 8 |
 
 **Key features:**
 - Automatically checks for existing PRs and updates them incrementally
@@ -136,7 +136,7 @@ Picks up open GitHub pull requests labeled `generated-by-kelos` when a reviewer 
 |---|---|
 | **Trigger** | GitHub PR review/comment webhooks on `generated-by-kelos` pull requests |
 | **Model** | Opus |
-| **Concurrency** | 2 |
+| **Concurrency** | 8 |
 
 **Key features:**
 - Reuses the existing PR branch instead of starting over

@@ -129,12 +129,17 @@ func main() {
 		ActivityReader:         &reporting.DefaultActivityReader{Clientset: clientset},
 		TerminalMessageHandler: handler.HandleReportedTerminalMessage,
 	}
+	turnReporter := &reporting.SlackTurnReporter{
+		Client:   mgr.GetClient(),
+		Reporter: slackReporter.Reporter,
+	}
 
 	// Register reporting loop as a leader-elected runnable.
 	if err := mgr.Add(&reportingRunnable{
-		client:   mgr.GetClient(),
-		reporter: slackReporter,
-		interval: reportingInterval,
+		client:       mgr.GetClient(),
+		taskReporter: slackReporter,
+		turnReporter: turnReporter,
+		interval:     reportingInterval,
 	}); err != nil {
 		setupLog.Error(err, "Unable to register reporting loop with manager")
 		os.Exit(1)
@@ -186,14 +191,15 @@ func (r *slackRunnable) NeedLeaderElection() bool { return true }
 
 // reportingRunnable wraps the reporting loop as a leader-elected manager.Runnable.
 type reportingRunnable struct {
-	client   client.Client
-	reporter *reporting.SlackTaskReporter
-	interval time.Duration
+	client       client.Client
+	taskReporter *reporting.SlackTaskReporter
+	turnReporter *reporting.SlackTurnReporter
+	interval     time.Duration
 }
 
 func (r *reportingRunnable) Start(ctx context.Context) error {
 	setupLog.Info("Starting Slack reporting loop", "interval", r.interval)
-	runReportingLoop(ctx, r.client, r.reporter, r.interval)
+	runReportingLoop(ctx, r.client, r.taskReporter, r.turnReporter, r.interval)
 	return nil
 }
 
@@ -218,7 +224,7 @@ func (r *activityRunnable) NeedLeaderElection() bool { return true }
 // runReportingLoop periodically reports Slack task status for ALL Slack-annotated
 // Tasks cluster-wide. This replaces the per-TaskSpawner reporting that previously
 // ran in each spawner pod.
-func runReportingLoop(ctx context.Context, cl client.Client, slackReporter *reporting.SlackTaskReporter, interval time.Duration) {
+func runReportingLoop(ctx context.Context, cl client.Client, taskReporter *reporting.SlackTaskReporter, turnReporter *reporting.SlackTurnReporter, interval time.Duration) {
 	log := ctrl.Log.WithName("slack-reporter")
 
 	ticker := time.NewTicker(interval)
@@ -229,7 +235,7 @@ func runReportingLoop(ctx context.Context, cl client.Client, slackReporter *repo
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := runSlackReportingCycle(ctx, cl, slackReporter, log); err != nil {
+			if err := runSlackReportingCycle(ctx, cl, taskReporter, turnReporter, log); err != nil {
 				log.Error(err, "Reporting cycle failed")
 			}
 		}
@@ -239,7 +245,7 @@ func runReportingLoop(ctx context.Context, cl client.Client, slackReporter *repo
 // runSlackReportingCycle lists all Tasks with Slack reporting enabled and
 // reports their status. Unlike the spawner version, this is not scoped to
 // a single TaskSpawner.
-func runSlackReportingCycle(ctx context.Context, cl client.Client, reporter *reporting.SlackTaskReporter, log logr.Logger) error {
+func runSlackReportingCycle(ctx context.Context, cl client.Client, taskReporter *reporting.SlackTaskReporter, turnReporter *reporting.SlackTurnReporter, log logr.Logger) error {
 	var taskList kelosv1alpha1.TaskList
 	if err := cl.List(ctx, &taskList, client.MatchingLabels{reporting.LabelSlackReporting: "enabled"}); err != nil {
 		return fmt.Errorf("Listing tasks for Slack reporting: %w", err)
@@ -249,13 +255,25 @@ func runSlackReportingCycle(ctx context.Context, cl client.Client, reporter *rep
 	for i := range taskList.Items {
 		task := &taskList.Items[i]
 		activeUIDs[task.UID] = true
-		if err := reporter.ReportTaskStatus(ctx, task); err != nil {
+		if err := taskReporter.ReportTaskStatus(ctx, task); err != nil {
 			log.Error(err, "Failed to report task status",
 				"task", task.Name, "namespace", task.Namespace)
 		}
 	}
 
-	reporter.SweepProgressCache(activeUIDs)
+	taskReporter.SweepProgressCache(activeUIDs)
+
+	var turnList kelosv1alpha1.AgentTurnList
+	if err := cl.List(ctx, &turnList, client.MatchingLabels{reporting.LabelSlackReporting: "enabled"}); err != nil {
+		return fmt.Errorf("Listing AgentTurns for Slack reporting: %w", err)
+	}
+	for i := range turnList.Items {
+		turn := &turnList.Items[i]
+		if err := turnReporter.ReportTurnStatus(ctx, turn); err != nil {
+			log.Error(err, "Failed to report AgentTurn status",
+				"turn", turn.Name, "namespace", turn.Namespace)
+		}
+	}
 
 	return nil
 }

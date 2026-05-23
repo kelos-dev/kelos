@@ -32,6 +32,14 @@ func (c *FakeApiV1alpha1) AgentConfigs(namespace string) v1alpha1.AgentConfigInt
 	return newFakeAgentConfigs(c, namespace)
 }
 
+func (c *FakeApiV1alpha1) AgentSessions(namespace string) v1alpha1.AgentSessionInterface {
+	return newFakeAgentSessions(c, namespace)
+}
+
+func (c *FakeApiV1alpha1) AgentTurns(namespace string) v1alpha1.AgentTurnInterface {
+	return newFakeAgentTurns(c, namespace)
+}
+
 func (c *FakeApiV1alpha1) Tasks(namespace string) v1alpha1.TaskInterface {
 	return newFakeTasks(c, namespace)
 }

@@ -89,7 +89,7 @@ PUSH ?= false
 # kelos-curl are the JWT signing helpers (port of assay's
 # TokenSigningProvider, see internal/jwt). kelos-curl shadows real curl
 # at /usr/local/bin/curl so JWT injection is transparent to the agent.
-AGENT_IMAGE_BINARIES ?= kelos-capture kelos-jwt kelos-curl
+AGENT_IMAGE_BINARIES ?= kelos-capture kelos-jwt kelos-curl kelos-session-runner
 
 .PHONY: image
 image: ## Build docker images (use WHAT, IMAGE_PLATFORMS, PUSH=true to customize).

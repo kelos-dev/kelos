@@ -132,6 +132,33 @@ func TestFormatThreadContext_FallbackOnly(t *testing.T) {
 	}
 }
 
+func TestBuildSlackDeltaTranscript(t *testing.T) {
+	msgs := []goslack.Message{
+		{Msg: goslack.Msg{Timestamp: "1710000000.000001", User: "U1", Text: "root"}},
+		{Msg: goslack.Msg{Timestamp: "1710000001.000001", User: "UBOT", BotID: "B-CODY", Text: "old Cody answer"}},
+		{Msg: goslack.Msg{Timestamp: "1710000002.000001", User: "U2", Text: "side note"}},
+		{Msg: goslack.Msg{Timestamp: "1710000003.000001", User: "U3", Text: "<@UBOT> next turn"}},
+		{Msg: goslack.Msg{Timestamp: "1710000004.000001", User: "U4", Text: "future message"}},
+	}
+
+	got, size, err := BuildSlackDeltaTranscript(msgs, "UBOT", "B-CODY", "1710000001.000001", "1710000003.000001")
+	if err != nil {
+		t.Fatalf("BuildSlackDeltaTranscript() error = %v", err)
+	}
+	if size != len([]byte(got)) {
+		t.Fatalf("size = %d, want %d", size, len([]byte(got)))
+	}
+	if strings.Contains(got, "old Cody answer") {
+		t.Fatalf("expected Cody-authored message to be excluded, got:\n%s", got)
+	}
+	if strings.Contains(got, "future message") {
+		t.Fatalf("expected message after upper bound to be excluded, got:\n%s", got)
+	}
+	if !strings.Contains(got, "side note") || !strings.Contains(got, "<@UBOT> next turn") {
+		t.Fatalf("expected side conversation and explicit turn in transcript, got:\n%s", got)
+	}
+}
+
 func TestFormatAttachments(t *testing.T) {
 	t.Run("empty attachments", func(t *testing.T) {
 		result := formatAttachments(nil)

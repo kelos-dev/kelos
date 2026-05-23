@@ -207,6 +207,17 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "Task")
 		os.Exit(1)
 	}
+	if err = (&controller.AgentSessionReconciler{
+		Client:      mgr.GetClient(),
+		Scheme:      mgr.GetScheme(),
+		JobBuilder:  jobBuilder,
+		Clientset:   clientset,
+		TokenClient: githubapp.NewTokenClient(),
+		Recorder:    mgr.GetEventRecorderFor("kelos-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "AgentSession")
+		os.Exit(1)
+	}
 
 	deploymentBuilder := controller.NewDeploymentBuilder()
 	deploymentBuilder.SpawnerImage = spawnerImage

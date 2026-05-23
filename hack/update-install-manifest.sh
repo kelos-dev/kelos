@@ -217,6 +217,8 @@ generate_chart_crd_templates() {
   mkdir -p "${CHART_CRD_DIR}"
 
   write_chart_crd_template "${source}" "CustomResourceDefinition" "agentconfigs.kelos.dev" "${CHART_CRD_DIR}/agentconfig-crd.yaml"
+  write_chart_crd_template "${source}" "CustomResourceDefinition" "agentsessions.kelos.dev" "${CHART_CRD_DIR}/agentsession-crd.yaml"
+  write_chart_crd_template "${source}" "CustomResourceDefinition" "agentturns.kelos.dev" "${CHART_CRD_DIR}/agentturn-crd.yaml"
   write_chart_crd_template "${source}" "CustomResourceDefinition" "tasks.kelos.dev" "${CHART_CRD_DIR}/task-crd.yaml"
   write_chart_crd_template "${source}" "CustomResourceDefinition" "taskspawners.kelos.dev" "${CHART_CRD_DIR}/taskspawner-crd.yaml"
   write_chart_crd_template "${source}" "CustomResourceDefinition" "workspaces.kelos.dev" "${CHART_CRD_DIR}/workspace-crd.yaml"

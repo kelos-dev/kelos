@@ -133,6 +133,60 @@ func (b *JobBuilder) Build(task *kelosv1alpha1.Task, workspace *kelosv1alpha1.Wo
 	}
 }
 
+// BuildSessionRunner creates a Job for an AgentSession by reusing the normal
+// agent job construction path, then replacing the one-shot entrypoint with the
+// session runner command.
+func (b *JobBuilder) BuildSessionRunner(session *kelosv1alpha1.AgentSession, workspace *kelosv1alpha1.WorkspaceSpec, agentConfig *kelosv1alpha1.AgentConfigSpec) (*batchv1.Job, error) {
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      session.Name,
+			Namespace: session.Namespace,
+			Labels: map[string]string{
+				"kelos.dev/taskspawner": session.Spec.TaskSpawnerRef.Name,
+			},
+		},
+		Spec: taskSpecFromTemplate(session.Spec.TaskTemplateSnapshot),
+	}
+	job, err := b.Build(task, workspace, agentConfig, "Kelos Cody Slack session runner")
+	if err != nil {
+		return nil, err
+	}
+	job.Labels["kelos.dev/component"] = "agent-session"
+	job.Labels["kelos.dev/agent-session"] = session.Name
+	job.Spec.Template.Labels["kelos.dev/component"] = "agent-session"
+	job.Spec.Template.Labels["kelos.dev/agent-session"] = session.Name
+	if len(job.Spec.Template.Spec.Containers) == 0 {
+		return nil, fmt.Errorf("session runner job has no containers")
+	}
+	c := &job.Spec.Template.Spec.Containers[0]
+	c.Command = []string{"/kelos-session-runner"}
+	c.Args = nil
+	c.Env = append(c.Env,
+		corev1.EnvVar{Name: "KELOS_AGENT_SESSION_NAME", Value: session.Name},
+		corev1.EnvVar{Name: "KELOS_AGENT_SESSION_NAMESPACE", Value: session.Namespace},
+	)
+	return job, nil
+}
+
+func taskSpecFromTemplate(t kelosv1alpha1.TaskTemplate) kelosv1alpha1.TaskSpec {
+	spec := kelosv1alpha1.TaskSpec{
+		Type:                    t.Type,
+		Credentials:             t.Credentials,
+		Prompt:                  "Kelos Cody Slack session runner",
+		Model:                   t.Model,
+		Image:                   t.Image,
+		WorkspaceRef:            t.WorkspaceRef,
+		AgentConfigRef:          t.AgentConfigRef,
+		AgentConfigRefs:         append([]kelosv1alpha1.AgentConfigReference(nil), t.AgentConfigRefs...),
+		DependsOn:               append([]string(nil), t.DependsOn...),
+		Branch:                  t.Branch,
+		UpstreamRepo:            t.UpstreamRepo,
+		TTLSecondsAfterFinished: t.TTLSecondsAfterFinished,
+		PodOverrides:            t.PodOverrides,
+	}
+	return spec
+}
+
 // apiKeyEnvVar returns the environment variable name used for API key
 // credentials for the given agent type.
 func apiKeyEnvVar(agentType string) string {

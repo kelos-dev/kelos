@@ -26,6 +26,10 @@ import (
 type Interface interface {
 	// AgentConfigs returns a AgentConfigInformer.
 	AgentConfigs() AgentConfigInformer
+	// AgentSessions returns a AgentSessionInformer.
+	AgentSessions() AgentSessionInformer
+	// AgentTurns returns a AgentTurnInformer.
+	AgentTurns() AgentTurnInformer
 	// Tasks returns a TaskInformer.
 	Tasks() TaskInformer
 	// TaskSpawners returns a TaskSpawnerInformer.
@@ -48,6 +52,16 @@ func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakList
 // AgentConfigs returns a AgentConfigInformer.
 func (v *version) AgentConfigs() AgentConfigInformer {
 	return &agentConfigInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
+// AgentSessions returns a AgentSessionInformer.
+func (v *version) AgentSessions() AgentSessionInformer {
+	return &agentSessionInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
+// AgentTurns returns a AgentTurnInformer.
+func (v *version) AgentTurns() AgentTurnInformer {
+	return &agentTurnInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }
 
 // Tasks returns a TaskInformer.

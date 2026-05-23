@@ -395,6 +395,10 @@ func (h *SlackHandler) handleSlashCommand(ctx context.Context, evt socketmode.Ev
 
 // routeMessage finds all matching TaskSpawners and creates tasks for each.
 func (h *SlackHandler) routeMessage(ctx context.Context, msg *SlackMessageData) {
+	if h.routeSessionFollowUp(ctx, msg) {
+		return
+	}
+
 	spawners, err := h.getMatchingSpawners(ctx)
 	if err != nil {
 		h.log.Error(err, "Failed to get matching spawners")
@@ -435,6 +439,16 @@ func (h *SlackHandler) routeMessage(ctx context.Context, msg *SlackMessageData) 
 		}
 
 		taskMsg := *msg
+
+		if slackSessionEnabled(slackCfg) {
+			spawnerLog.Info("Message matches session-enabled TaskSpawner — creating AgentSession turn", "channel", msg.ChannelID, "user", msg.UserID)
+			if err := h.createSessionAndFirstTurn(ctx, spawner, &taskMsg); err != nil {
+				spawnerLog.Error(err, "Failed to create AgentSession turn")
+				threadTS := rootThreadTS(msg)
+				h.postSessionNotice(ctx, msg.ChannelID, threadTS, fmt.Sprintf("Could not start Cody session: %v", err))
+			}
+			continue
+		}
 
 		spawnerLog.Info("Message matches TaskSpawner — creating task", "channel", msg.ChannelID, "user", msg.UserID)
 

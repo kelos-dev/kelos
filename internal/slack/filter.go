@@ -158,6 +158,12 @@ func hasBotMention(text string, botUserID string) bool {
 		strings.Contains(text, fmt.Sprintf("<@%s|", botUserID))
 }
 
+// HasBotMention returns true if the message text contains an @-mention of the
+// bot user ID.
+func HasBotMention(text string, botUserID string) bool {
+	return hasBotMention(text, botUserID)
+}
+
 // stripLeadingMentions removes Slack mention tokens (<@USERID> or
 // <@USERID|display-name>) from the beginning of text so that trigger
 // and exclude pattern matching targets semantic content.
@@ -174,6 +180,11 @@ func stripLeadingMentions(text string) string {
 		}
 		s = s[end+1:]
 	}
+}
+
+// StripLeadingMentions removes Slack mention tokens from the beginning of text.
+func StripLeadingMentions(text string) string {
+	return stripLeadingMentions(text)
 }
 
 // matchesExcludePatterns returns true if the message text matches any of

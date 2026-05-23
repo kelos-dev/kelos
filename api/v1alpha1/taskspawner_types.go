@@ -644,6 +644,12 @@ type Slack struct {
 	// +kubebuilder:validation:items:MinLength=1
 	// +kubebuilder:validation:items:MaxLength=256
 	ExcludePatterns []string `json:"excludePatterns,omitempty"`
+
+	// Session enables thread-scoped session behavior for matching Slack
+	// messages. When unset or disabled, Slack messages keep the existing
+	// one-shot Task behavior.
+	// +optional
+	Session *SlackSession `json:"session,omitempty"`
 }
 
 // SlackTrigger defines a regex pattern trigger for Slack messages.
@@ -659,6 +665,46 @@ type SlackTrigger struct {
 	// without requiring a bot @-mention.
 	// +optional
 	MentionOptional *bool `json:"mentionOptional,omitempty"`
+}
+
+// SlackSessionContextWindow controls which Slack messages are provided to a
+// follow-up turn.
+type SlackSessionContextWindow string
+
+const (
+	// SlackSessionContextWindowSinceLastAgentMessage includes Slack messages
+	// after Cody's last terminal response and through the triggering mention.
+	SlackSessionContextWindowSinceLastAgentMessage SlackSessionContextWindow = "SinceLastAgentMessage"
+)
+
+// SlackSession configures Slack thread-scoped AgentSession behavior.
+type SlackSession struct {
+	// Enabled switches matching Slack messages from one-shot Task creation to
+	// AgentSession/AgentTurn creation.
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// RequireMentionForTurns requires every follow-up turn to explicitly
+	// mention the Slack bot. The first implementation only supports true.
+	// +optional
+	RequireMentionForTurns *bool `json:"requireMentionForTurns,omitempty"`
+
+	// ContextWindow controls which Slack transcript segment is included in
+	// each turn prompt.
+	// +optional
+	// +kubebuilder:validation:Enum=SinceLastAgentMessage
+	ContextWindow SlackSessionContextWindow `json:"contextWindow,omitempty"`
+
+	// IdleTimeout closes an idle session after no queued or running turns
+	// remain for this duration. Defaults to 1h when omitted.
+	// +optional
+	IdleTimeout *metav1.Duration `json:"idleTimeout,omitempty"`
+
+	// MaxQueuedTurns limits queued follow-up turns per session. Defaults to 5
+	// when omitted.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	MaxQueuedTurns *int32 `json:"maxQueuedTurns,omitempty"`
 }
 
 // ContextSourceFailurePolicy determines behavior when a context source fails.

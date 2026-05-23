@@ -178,6 +178,8 @@ RUN --mount=type=secret,id=github_token \
 
 ARG TARGETARCH
 COPY bin/kelos-capture-linux-${TARGETARCH} /kelos/kelos-capture
+COPY bin/kelos-session-runner-linux-${TARGETARCH} /kelos-session-runner
+RUN chmod +x /kelos-session-runner
 
 # JWT signing helpers — port of ai-agent/assay TokenSigningProvider.
 # kelos-jwt: explicit CLI for shell scripts and debug commands.

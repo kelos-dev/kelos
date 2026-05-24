@@ -445,7 +445,7 @@ spec:
 kelos run -p "Fix the bug" --agent-config my-config
 ```
 
-- `agentsMD` is written to `~/.claude/CLAUDE.md` (user-level, additive with the repo's own instructions).
+- `agentsMD` is written to the agent's user-level instructions file (additive with the repo's own instructions). The destination depends on the agent type: `~/.claude/CLAUDE.md` for Claude Code, `~/.gemini/GEMINI.md` for Gemini, `~/.codex/AGENTS.md` for Codex, `~/.config/opencode/AGENTS.md` for OpenCode, and `~/.cursor/AGENTS.md` for Cursor.
 - `plugins` are mounted as plugin directories and passed via `--plugin-dir`.
 - `mcpServers` are written to the agent's native MCP configuration. Supports `stdio`, `http`, and `sse` transport types.
 

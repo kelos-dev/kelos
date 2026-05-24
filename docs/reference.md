@@ -151,7 +151,7 @@ GitHub Apps are preferred over PATs for production use because they offer fine-g
 
 | Field | Description | Required |
 |-------|-------------|----------|
-| `spec.agentsMD` | Agent instructions (e.g. `AGENTS.md`, `CLAUDE.md`) written to `~/.claude/CLAUDE.md` (additive with repo files) | No |
+| `spec.agentsMD` | Agent instructions written to the agent's user-level instructions file, additive with repo files. The destination depends on the agent type: `~/.claude/CLAUDE.md` (Claude Code), `~/.gemini/GEMINI.md` (Gemini), `~/.codex/AGENTS.md` (Codex), `~/.config/opencode/AGENTS.md` (OpenCode), `~/.cursor/AGENTS.md` (Cursor) | No |
 | `spec.plugins[].name` | Plugin name (used as directory name and namespace) | Yes (per plugin) |
 | `spec.plugins[].skills[].name` | Skill name (becomes `skills/<name>/SKILL.md`) | Yes (per skill) |
 | `spec.plugins[].skills[].content` | Skill content (markdown with frontmatter) | Yes (per skill) |

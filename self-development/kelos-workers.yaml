@@ -128,9 +128,15 @@ spec:
       - 4a. Read the existing diff (git diff main...HEAD) to understand what has already been done. Do NOT start over or rewrite from scratch.
       - 5a. Make only the incremental changes needed to address review feedback or remaining issues. Preserve existing work.
       - 6a. Commit and push your changes to origin kelos-task-{{.Number}}.
-      - 7a. /review the PR to verify your changes address the feedback. If changes are needed, make them, run `make verify` and `make test`, commit and push, then /review again. Repeat until the review passes.
+      - 7a. Self-review your work locally before requesting `/review`: re-read `git diff origin/main...HEAD`, run `make verify` and `make test`, and address obvious issues yourself. Then /review the PR to verify your changes address the feedback. If changes are needed, make them, run `make verify` and `make test`, commit and push, then /review again. Repeat until the review passes.
       - 8a. Update the PR title and description to reflect the final diff. The PR body MUST contain a standard closing keyword reference on its own line (e.g., `Fixes #{{.Number}}` or `Closes #{{.Number}}`). Do not embed the issue number in natural language. Ensure the PR has labels "generated-by-kelos" and "ok-to-test" (use `gh pr edit kelos-task-{{.Number}} --add-label generated-by-kelos --add-label ok-to-test` if missing).
       - 9a. After pushing, actively check CI status with `gh pr checks`. If any checks fail, investigate the failures, fix them, commit and push, then check again. Do not request review until CI passes.
+      - 10a. Squash all commits on this branch into a single commit before signaling the PR is ready:
+        - `MB=$(git merge-base origin/main HEAD)`
+        - If `git rev-list --count $MB..HEAD` is 1, skip squashing.
+        - Otherwise: `git reset --soft "$MB"`, then `git commit` with a single concise message (one line, under 72 chars, no PR link) describing the final change.
+        - Force push: `git push --force-with-lease origin HEAD`.
+        - The squash does not change the tree, so CI results from step 9a remain valid; no need to re-wait for checks.
 
       If no PR exists:
       - 3b. Investigate the issue #{{.Number}}.
@@ -140,9 +146,15 @@ spec:
         - Only implement what the issue explicitly asks for. If you discover related improvements, create separate issues for them.
       - 4b. Create a commit that fixes the issue.
       - 5b. Push your branch to origin kelos-task-{{.Number}}.
-      - 6b. Create a PR with labels "generated-by-kelos" and "ok-to-test" (use `gh pr create --label generated-by-kelos --label ok-to-test`), then /review it. If changes are needed, make them, run `make verify` and `make test`, commit and push, then /review again. Repeat until the review passes.
+      - 6b. Create a PR with labels "generated-by-kelos" and "ok-to-test" (use `gh pr create --label generated-by-kelos --label ok-to-test`). Self-review your work locally before requesting `/review`: re-read `git diff origin/main...HEAD`, run `make verify` and `make test`, and address obvious issues yourself. Then /review it. If changes are needed, make them, run `make verify` and `make test`, commit and push, then /review again. Repeat until the review passes.
       - 7b. Update the PR title and description to reflect the final diff. The PR body MUST contain a standard closing keyword reference on its own line (e.g., `Fixes #{{.Number}}` or `Closes #{{.Number}}`). Do not embed the issue number in natural language.
       - 8b. After pushing, actively check CI status with `gh pr checks`. If any checks fail, investigate the failures, fix them, commit and push, then check again. Do not request review until CI passes.
+      - 9b. Squash all commits on this branch into a single commit before signaling the PR is ready:
+        - `MB=$(git merge-base origin/main HEAD)`
+        - If `git rev-list --count $MB..HEAD` is 1, skip squashing.
+        - Otherwise: `git reset --soft "$MB"`, then `git commit` with a single concise message (one line, under 72 chars, no PR link) describing the final change.
+        - Force push: `git push --force-with-lease origin HEAD`.
+        - The squash does not change the tree, so CI results from step 8b remain valid; no need to re-wait for checks.
 
       Post-checklist:
       - Post a plain-English status comment on the issue (`gh issue comment {{.Number}} --body "..."`) for any of the following situations, explaining what happened:

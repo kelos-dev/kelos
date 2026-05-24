@@ -36,6 +36,7 @@ spec:
         - event: issue_comment
           action: created
           bodyPattern: /kelos plan
+          commentOn: Issue
           state: open
           author: gjkim42
       reporting:
@@ -79,10 +80,6 @@ spec:
       ---
 
       ## Your tasks
-
-      ### 0. Confirm the target is an issue
-      If `gh pr view {{.Number}}` succeeds, this comment was posted on a pull request.
-      Exit without posting anything in that case.
 
       ### 1. Refresh issue context
       Re-read the latest issue state and all comments:

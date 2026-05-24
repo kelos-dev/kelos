@@ -50,6 +50,13 @@ spec:
         - event: issue_comment
           action: created
           bodyPattern: /kelos api-review
+          commentOn: Issue
+          state: open
+          author: gjkim42
+        - event: issue_comment
+          action: created
+          bodyPattern: /kelos api-review
+          commentOn: PullRequest
           state: open
           author: gjkim42
         - event: pull_request_review

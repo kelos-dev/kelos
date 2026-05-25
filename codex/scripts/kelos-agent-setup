@@ -1,39 +1,23 @@
 #!/usr/bin/env bash
 # Pre-agent setup for tasks that need git push + cluster read access:
 #
-#   1. Materialise the GitHub App private key from $GITHUB_APP_PRIVATE_KEY
-#      onto disk so the credential helper can sign JWTs with it.
-#   2. Wire git's credential.helper at the global config level so every
-#      `git push` / `gh` call mints a fresh installation token. No static
-#      GITHUB_TOKEN is ever written; tokens are short-lived and per-call.
-#   3. Synthesise a ~/.kube/config from the projected ServiceAccount
+#   1. Wire git's credential.helper at the global config level so every
+#      `git push` call obtains a fresh installation token from cody-tools.
+#      No GitHub App private key is written inside the task pod.
+#   2. Synthesise a ~/.kube/config from the projected ServiceAccount
 #      token so kubectl, helm, etc. resolve a named cluster — Kelos's
 #      job spec already mounts the token, but downstream tooling that
 #      reads $KUBECONFIG needs an explicit file to work cleanly.
 #
-# This script is a no-op when GITHUB_APP_CLIENT_ID is unset, so it can be
-# called unconditionally from kelos_entrypoint.sh; only tasks whose
-# podOverrides include the github-app secret pay the cost.
+# This script is safe to call unconditionally from kelos_entrypoint.sh.
 set -euo pipefail
 
-setup_github_app_credentials() {
-  if [[ -z "${GITHUB_APP_CLIENT_ID:-}" ]]; then
+setup_github_broker_credentials() {
+  if [[ -z "${CODY_TOOLS_GITHUB_BASE_URL:-}" ]]; then
     return 0
   fi
-  if [[ -z "${GITHUB_APP_PRIVATE_KEY:-}" ]]; then
-    echo "kelos-agent-setup: GITHUB_APP_CLIENT_ID set but GITHUB_APP_PRIVATE_KEY missing" >&2
-    exit 1
-  fi
 
-  local pem_dir pem_file
-  # $HOME owned by the agent user (UID 61100) per Dockerfile; /etc is
-  # not writable by a non-root container.
-  pem_dir="${HOME:-/home/agent}/.kelos-agent"
-  pem_file="${pem_dir}/github-app.pem"
-  # umask 077 ensures the dir + file are owner-only without an extra chmod.
-  (umask 077 && mkdir -p "$pem_dir" && printf '%s' "$GITHUB_APP_PRIVATE_KEY" >"$pem_file")
-
-  git config --global credential.helper /usr/local/bin/github-app-credential-helper
+  git config --global credential.helper /usr/local/bin/cody-github-credential-helper
   git config --global credential.useHttpPath true
 }
 
@@ -83,6 +67,6 @@ EOF
   chmod 600 "${kube_dir}/config"
 }
 
-setup_github_app_credentials
+setup_github_broker_credentials
 setup_git_identity
 setup_kubeconfig

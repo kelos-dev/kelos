@@ -123,11 +123,11 @@ RUN npm install -g @openai/codex@${CODEX_VERSION}
 COPY codex/kelos_entrypoint.sh /kelos_entrypoint.sh
 RUN chmod +x /kelos_entrypoint.sh
 
-# Helper scripts for tasks that need git push + cluster read access. Each
-# is a no-op when the corresponding env vars are unset, so adding them
-# costs nothing for Q&A-style tasks that don't mount the github-app
-# Secret or the ServiceAccount token. See codex/scripts/README for the
-# env contract.
+# Helper scripts for tasks that need git push + cluster read access. GitHub
+# tokens are brokered by cody-tools; the task pod does not receive the
+# GitHub App private key. See codex/scripts/README for the env contract.
+COPY codex/scripts/cody-github-credential-helper /usr/local/bin/cody-github-credential-helper
+COPY codex/scripts/cody-github-token /usr/local/bin/cody-github-token
 COPY codex/scripts/github-app-credential-helper /usr/local/bin/github-app-credential-helper
 COPY codex/scripts/github-app-token /usr/local/bin/github-app-token
 COPY codex/scripts/kelos-agent-setup /usr/local/bin/kelos-agent-setup
@@ -139,7 +139,9 @@ COPY codex/scripts/kelos-agent-setup /usr/local/bin/kelos-agent-setup
 COPY codex/scripts/gh /usr/local/bin/gh
 COPY codex/scripts/npm /usr/local/bin/npm
 COPY codex/scripts/pnpm /usr/local/bin/pnpm
-RUN chmod +x /usr/local/bin/github-app-credential-helper \
+RUN chmod +x /usr/local/bin/cody-github-credential-helper \
+    /usr/local/bin/cody-github-token \
+    /usr/local/bin/github-app-credential-helper \
     /usr/local/bin/github-app-token \
     /usr/local/bin/kelos-agent-setup \
     /usr/local/bin/gh \

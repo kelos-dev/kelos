@@ -190,6 +190,48 @@ func TestParseCredentials(t *testing.T) {
 	}
 }
 
+func TestParseCredentialValues(t *testing.T) {
+	_, keyPEM := generateTestKey(t)
+
+	creds, err := ParseCredentialValues(" Iv123 ", " 67890 ", string(keyPEM))
+	if err != nil {
+		t.Fatalf("ParseCredentialValues: %v", err)
+	}
+	if creds.AppID != "Iv123" {
+		t.Errorf("AppID = %q, want %q", creds.AppID, "Iv123")
+	}
+	if creds.InstallationID != "67890" {
+		t.Errorf("InstallationID = %q, want %q", creds.InstallationID, "67890")
+	}
+	if creds.PrivateKey == nil {
+		t.Fatal("PrivateKey is nil")
+	}
+}
+
+func TestParseCredentialValuesRequiresAllFields(t *testing.T) {
+	_, keyPEM := generateTestKey(t)
+
+	tests := []struct {
+		name           string
+		appID          string
+		installationID string
+		privateKey     string
+	}{
+		{name: "missing appID", installationID: "67890", privateKey: string(keyPEM)},
+		{name: "missing installationID", appID: "12345", privateKey: string(keyPEM)},
+		{name: "missing private key", appID: "12345", installationID: "67890"},
+		{name: "invalid private key", appID: "12345", installationID: "67890", privateKey: "not-a-key"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := ParseCredentialValues(tt.appID, tt.installationID, tt.privateKey); err == nil {
+				t.Fatal("expected error")
+			}
+		})
+	}
+}
+
 func TestGenerateInstallationToken(t *testing.T) {
 	_, keyPEM := generateTestKey(t)
 

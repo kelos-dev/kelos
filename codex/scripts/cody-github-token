@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Print a fresh GitHub App installation token from cody-tools.
+set -euo pipefail
+
+purpose="token"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+  --purpose)
+    if [[ $# -lt 2 || -z "$2" ]]; then
+      echo "cody-github-token: --purpose requires a value" >&2
+      exit 2
+    fi
+    purpose="$2"
+    shift 2
+    ;;
+  *)
+    echo "cody-github-token: unknown argument: $1" >&2
+    exit 2
+    ;;
+  esac
+done
+
+: "${CODY_TOOLS_GITHUB_BASE_URL:?CODY_TOOLS_GITHUB_BASE_URL is required}"
+
+base_url="${CODY_TOOLS_GITHUB_BASE_URL%/}"
+payload=$(jq -cn --arg purpose "$purpose" '{purpose:$purpose}')
+
+attempts=3
+response=""
+for ((i = 1; i <= attempts; i++)); do
+  if response=$(curl -fsSL \
+    --connect-timeout 5 \
+    --max-time 10 \
+    -X POST \
+    -H "Accept: application/json" \
+    -H "Content-Type: application/json" \
+    --data "$payload" \
+    "${base_url}/app/installations/token"); then
+    break
+  fi
+  if ((i == attempts)); then
+    echo "cody-github-token: failed to get installation token from cody-tools after ${attempts} attempts" >&2
+    exit 1
+  fi
+  sleep $((2 ** (i - 1)))
+done
+
+printf '%s' "$response" | jq -er '.token'

@@ -2,7 +2,11 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"io"
 	"log/slog"
 	"net/http"
@@ -11,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kelos-dev/kelos/internal/githubapp"
 )
 
 func TestAtlassianHandlerInjectsServerSideAuth(t *testing.T) {
@@ -68,6 +74,168 @@ func TestAtlassianHandlerRejectsUnknownSubroute(t *testing.T) {
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d", rec.Code)
+	}
+}
+
+func TestGitHubTokenHandlerMintsInstallationToken(t *testing.T) {
+	expiresAt := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	var callCount int
+	var requestBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s", r.Method)
+		}
+		if r.URL.Path != "/app/installations/67890/access_tokens" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		if auth := r.Header.Get("Authorization"); !strings.HasPrefix(auth, "Bearer ") {
+			t.Fatalf("Authorization = %q", auth)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		requestBody = string(body)
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]any{
+			"token":      "ghs_broker_token",
+			"expires_at": expiresAt.Format(time.RFC3339),
+		})
+	}))
+	defer upstream.Close()
+
+	s := newGitHubTestServer(t, upstream)
+	req := httptest.NewRequest(http.MethodPost, githubTokenRoute, strings.NewReader(`{"purpose":"gh"}`))
+	rec := httptest.NewRecorder()
+
+	s.handleGitHub(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if callCount != 1 {
+		t.Fatalf("upstream call count = %d", callCount)
+	}
+	if requestBody != "" {
+		t.Fatalf("upstream body = %q, want empty body", requestBody)
+	}
+	var response githubTokenResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Token != "ghs_broker_token" {
+		t.Fatalf("token = %q", response.Token)
+	}
+	if response.Source != "github_app_installation" {
+		t.Fatalf("source = %q", response.Source)
+	}
+	if !response.ExpiresAt.Equal(expiresAt) {
+		t.Fatalf("expires_at = %v, want %v", response.ExpiresAt, expiresAt)
+	}
+}
+
+func TestGitHubTokenHandlerRejectsDownscopingFields(t *testing.T) {
+	var called bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer upstream.Close()
+
+	s := newGitHubTestServer(t, upstream)
+	req := httptest.NewRequest(http.MethodPost, githubTokenRoute, strings.NewReader(`{"purpose":"gh","repositories":["quantum-wealth/order-service"]}`))
+	rec := httptest.NewRecorder()
+
+	s.handleGitHub(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if called {
+		t.Fatal("upstream should not be called for downscoped request")
+	}
+}
+
+func TestGitHubCredentialHandlerReturnsCredentialForGitHubHost(t *testing.T) {
+	expiresAt := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]any{
+			"token":      "ghs_credential_token",
+			"expires_at": expiresAt.Format(time.RFC3339),
+		})
+	}))
+	defer upstream.Close()
+
+	s := newGitHubTestServer(t, upstream)
+	req := httptest.NewRequest(http.MethodPost, githubCredentialRoute, strings.NewReader(`{"protocol":"https","host":"github.com","path":"quantum-wealth/order-service.git"}`))
+	rec := httptest.NewRecorder()
+
+	s.handleGitHub(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var response githubCredentialResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Username != "x-access-token" {
+		t.Fatalf("username = %q", response.Username)
+	}
+	if response.Password != "ghs_credential_token" {
+		t.Fatalf("password = %q", response.Password)
+	}
+	if response.ExpiresAt == nil {
+		t.Fatal("expires_at is nil")
+	}
+	if !response.ExpiresAt.Equal(expiresAt) {
+		t.Fatalf("expires_at = %v, want %v", response.ExpiresAt, expiresAt)
+	}
+}
+
+func TestGitHubCredentialHandlerReturnsEmptyCredentialForUnsupportedHost(t *testing.T) {
+	var called bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer upstream.Close()
+
+	s := newGitHubTestServer(t, upstream)
+	req := httptest.NewRequest(http.MethodPost, githubCredentialRoute, strings.NewReader(`{"protocol":"https","host":"gitlab.com","path":"quantum-wealth/order-service.git"}`))
+	rec := httptest.NewRecorder()
+
+	s.handleGitHub(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if called {
+		t.Fatal("upstream should not be called for unsupported credential host")
+	}
+	var response githubCredentialResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Username != "" || response.Password != "" {
+		t.Fatalf("unexpected credential response: %#v", response)
+	}
+	if response.ExpiresAt != nil {
+		t.Fatalf("unexpected credential expiry: %v", response.ExpiresAt)
+	}
+}
+
+func TestGitHubTokenHandlerRequiresConfiguredCredentials(t *testing.T) {
+	s := &server{logger: testLogger(), githubTokenClient: githubapp.NewTokenClient()}
+	req := httptest.NewRequest(http.MethodPost, githubTokenRoute, strings.NewReader(`{"purpose":"gh"}`))
+	rec := httptest.NewRecorder()
+
+	s.handleGitHub(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -760,6 +928,34 @@ func newContextTestServer(upstream *httptest.Server) *server {
 		logger:     testLogger(),
 		ready:      true,
 	}
+}
+
+func newGitHubTestServer(t *testing.T, upstream *httptest.Server) *server {
+	t.Helper()
+	creds := testGitHubCredentials(t)
+	return &server{
+		githubTokenClient: &githubapp.TokenClient{BaseURL: upstream.URL, Client: upstream.Client()},
+		githubCredentials: creds,
+		logger:            testLogger(),
+		ready:             true,
+	}
+}
+
+func testGitHubCredentials(t *testing.T) *githubapp.Credentials {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generating key: %v", err)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(key),
+	})
+	creds, err := githubapp.ParseCredentialValues("12345", "67890", string(keyPEM))
+	if err != nil {
+		t.Fatalf("parse credentials: %v", err)
+	}
+	return creds
 }
 
 func testLogger() *slog.Logger {

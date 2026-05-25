@@ -100,6 +100,30 @@ func ParseCredentials(data map[string][]byte) (*Credentials, error) {
 	}, nil
 }
 
+// ParseCredentialValues parses GitHub App credentials from explicit values.
+func ParseCredentialValues(appID, installationID, privateKeyPEM string) (*Credentials, error) {
+	appID = strings.TrimSpace(appID)
+	if appID == "" {
+		return nil, fmt.Errorf("missing appID")
+	}
+	installationID = strings.TrimSpace(installationID)
+	if installationID == "" {
+		return nil, fmt.Errorf("missing installationID")
+	}
+	if strings.TrimSpace(privateKeyPEM) == "" {
+		return nil, fmt.Errorf("missing privateKey")
+	}
+	key, err := parsePrivateKey([]byte(privateKeyPEM))
+	if err != nil {
+		return nil, fmt.Errorf("parsing private key: %w", err)
+	}
+	return &Credentials{
+		AppID:          appID,
+		InstallationID: installationID,
+		PrivateKey:     key,
+	}, nil
+}
+
 // parsePrivateKey supports PKCS1 and PKCS8 PEM-encoded RSA private keys.
 func parsePrivateKey(pemBytes []byte) (*rsa.PrivateKey, error) {
 	block, _ := pem.Decode(pemBytes)

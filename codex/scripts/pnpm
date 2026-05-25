@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# pnpm wrapper: mints a fresh GitHub App installation token and exports it
-# as NODE_AUTH_TOKEN before exec'ing the real pnpm binary.
+# pnpm wrapper: requests a fresh GitHub App installation token from cody-tools
+# and exports it as NODE_AUTH_TOKEN before exec'ing the real pnpm binary.
 #
 # Sits at /usr/local/bin/pnpm, which is ahead of /usr/bin/pnpm in PATH, so
 # any `pnpm` invocation (from the agent, from shells, from scripts) picks
@@ -24,10 +24,8 @@
 set -euo pipefail
 
 if [[ -z "${NODE_AUTH_TOKEN:-}" ]]; then
-  if [[ -n "${GITHUB_APP_CLIENT_ID:-}" ]]; then
-    NODE_AUTH_TOKEN=$(/usr/local/bin/github-app-token)
-    export NODE_AUTH_TOKEN
-  fi
+  NODE_AUTH_TOKEN=$(/usr/local/bin/cody-github-token --purpose pnpm)
+  export NODE_AUTH_TOKEN
 fi
 
 exec /usr/bin/pnpm "$@"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# npm wrapper: mints a fresh GitHub App installation token and exports it
-# as NODE_AUTH_TOKEN before exec'ing the real npm binary.
+# npm wrapper: requests a fresh GitHub App installation token from cody-tools
+# and exports it as NODE_AUTH_TOKEN before exec'ing the real npm binary.
 #
 # Sits at /usr/local/bin/npm, which is ahead of /usr/bin/npm in PATH, so
 # any `npm` invocation (from the agent, from shells, from hooks) picks up
@@ -21,10 +21,8 @@
 set -euo pipefail
 
 if [[ -z "${NODE_AUTH_TOKEN:-}" ]]; then
-  if [[ -n "${GITHUB_APP_CLIENT_ID:-}" ]]; then
-    NODE_AUTH_TOKEN=$(/usr/local/bin/github-app-token)
-    export NODE_AUTH_TOKEN
-  fi
+  NODE_AUTH_TOKEN=$(/usr/local/bin/cody-github-token --purpose npm)
+  export NODE_AUTH_TOKEN
 fi
 
 exec /usr/bin/npm "$@"

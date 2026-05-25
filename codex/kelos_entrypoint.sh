@@ -13,10 +13,10 @@ set -uo pipefail
 PROMPT="${1:?Prompt argument is required}"
 
 # Optional pre-agent setup. No-op unless the matching env vars are
-# present: GITHUB_APP_CLIENT_ID for git push via App installation tokens
-# and a mounted ServiceAccount token for kubectl. Tasks that don't need
-# either pay no cost; tasks that do get a configured git credential
-# helper and ~/.kube/config before the agent runs.
+# present: CODY_TOOLS_GITHUB_BASE_URL for git push via cody-tools brokered
+# GitHub App installation tokens and a mounted ServiceAccount token for
+# kubectl. Tasks that don't need either pay no cost; tasks that do get a
+# configured git credential helper and ~/.kube/config before the agent runs.
 /usr/local/bin/kelos-agent-setup
 
 # Write auth.json from env var for OAuth/ChatGPT credential flow.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# gh wrapper: mints a fresh GitHub App installation token and exports it
-# as GH_TOKEN before exec'ing the real gh binary.
+# gh wrapper: requests a fresh GitHub App installation token from cody-tools
+# and exports it as GH_TOKEN before exec'ing the real gh binary.
 #
 # Sits at /usr/local/bin/gh, which is ahead of /usr/bin/gh in PATH, so any
 # `gh` invocation (from the agent, from shells, from hooks) gets App auth
@@ -12,10 +12,8 @@
 set -euo pipefail
 
 if [[ -z "${GH_TOKEN:-}" && -z "${GITHUB_TOKEN:-}" ]]; then
-  if [[ -n "${GITHUB_APP_CLIENT_ID:-}" ]]; then
-    GH_TOKEN=$(/usr/local/bin/github-app-token)
-    export GH_TOKEN
-  fi
+  GH_TOKEN=$(/usr/local/bin/cody-github-token --purpose gh)
+  export GH_TOKEN
 fi
 
 exec /usr/bin/gh "$@"

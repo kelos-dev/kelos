@@ -40,7 +40,7 @@ Kelos sets the following reserved environment variables on agent containers:
 | `GH_TOKEN` | GitHub token for `gh` CLI (github.com) | When workspace has a `secretRef` and repo is on github.com |
 | `GH_ENTERPRISE_TOKEN` | GitHub token for `gh` CLI (GitHub Enterprise) | When workspace has a `secretRef` and repo is on a GitHub Enterprise host |
 | `GH_HOST` | Hostname for GitHub Enterprise | When repo is on a GitHub Enterprise host |
-| `KELOS_AGENT_TYPE` | The agent type (`claude-code`, `codex`, `gemini`, `opencode`, `cursor`) | Always |
+| `KELOS_AGENT_TYPE` | The agent type (`claude-code`, `codex`, `gemini`, `opencode`, `cursor`, `antigravity`) | Always |
 | `KELOS_BASE_BRANCH` | The base branch (workspace `ref`) for the task | When workspace has a non-empty `ref` |
 | `KELOS_AGENTS_MD` | User-level instructions from AgentConfig | When `agentConfigRef` is set and `agentsMD` is non-empty |
 | `KELOS_PLUGIN_DIR` | Path to plugin directory containing skills and agents | When `agentConfigRef` is set and `plugins` is non-empty |
@@ -181,3 +181,16 @@ the agent exits non-zero.
 - `gemini/kelos_entrypoint.sh` — wraps the `gemini` CLI (Google Gemini).
 - `opencode/kelos_entrypoint.sh` — wraps the `opencode` CLI (OpenCode).
 - `cursor/kelos_entrypoint.sh` — wraps the `agent` CLI (Cursor).
+- `antigravity/kelos_entrypoint.sh` — wraps the `agy` CLI (Google Antigravity).
+
+## Agent-type-specific notes
+
+### `antigravity`
+
+The Antigravity (`agy`) CLI does not currently have a documented
+non-interactive API-key or OAuth-token environment variable, so Kelos
+restricts `Task.spec.credentials.type` to `none` for this agent type and
+the controller does not inject a built-in credential env var. Operators
+who need authenticated runs should supply credentials via
+`Task.spec.podOverrides.env` (or a mounted Secret) using whatever variable
+the `agy` binary expects.

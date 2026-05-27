@@ -4036,6 +4036,7 @@ spec:
                 - gemini
                 - opencode
                 - cursor
+                - antigravity
                 type: string
               upstreamRepo:
                 description: |-
@@ -8165,6 +8166,7 @@ spec:
                     - gemini
                     - opencode
                     - cursor
+                    - antigravity
                     type: string
                   upstreamRepo:
                     description: |-

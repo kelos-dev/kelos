@@ -345,7 +345,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 	cmd.MarkFlagsMutuallyExclusive("prompt", "prompt-file")
 
 	_ = cmd.RegisterFlagCompletionFunc("credential-type", cobra.FixedCompletions([]string{"api-key", "oauth", "none"}, cobra.ShellCompDirectiveNoFileComp))
-	_ = cmd.RegisterFlagCompletionFunc("type", cobra.FixedCompletions([]string{"claude-code", "codex", "gemini", "opencode", "cursor"}, cobra.ShellCompDirectiveNoFileComp))
+	_ = cmd.RegisterFlagCompletionFunc("type", cobra.FixedCompletions([]string{"claude-code", "codex", "gemini", "opencode", "cursor", "antigravity"}, cobra.ShellCompDirectiveNoFileComp))
 
 	return cmd
 }

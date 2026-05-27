@@ -49,6 +49,8 @@ func main() {
 	var openCodeImagePullPolicy string
 	var cursorImage string
 	var cursorImagePullPolicy string
+	var antigravityImage string
+	var antigravityImagePullPolicy string
 	var spawnerImage string
 	var spawnerImagePullPolicy string
 	var spawnerResourceRequests string
@@ -77,6 +79,8 @@ func main() {
 	flag.StringVar(&openCodeImagePullPolicy, "opencode-image-pull-policy", "", "The image pull policy for OpenCode agent containers (e.g., Always, Never, IfNotPresent).")
 	flag.StringVar(&cursorImage, "cursor-image", controller.CursorImage, "The image to use for Cursor CLI agent containers.")
 	flag.StringVar(&cursorImagePullPolicy, "cursor-image-pull-policy", "", "The image pull policy for Cursor CLI agent containers (e.g., Always, Never, IfNotPresent).")
+	flag.StringVar(&antigravityImage, "antigravity-image", controller.AntigravityImage, "The image to use for Antigravity CLI agent containers.")
+	flag.StringVar(&antigravityImagePullPolicy, "antigravity-image-pull-policy", "", "The image pull policy for Antigravity CLI agent containers (e.g., Always, Never, IfNotPresent).")
 	flag.StringVar(&spawnerImage, "spawner-image", controller.DefaultSpawnerImage, "The image to use for spawner Deployments.")
 	flag.StringVar(&spawnerImagePullPolicy, "spawner-image-pull-policy", "", "The image pull policy for spawner Deployments (e.g., Always, Never, IfNotPresent).")
 	flag.StringVar(&spawnerResourceRequests, "spawner-resource-requests", "", "Resource requests for spawner containers as comma-separated name=value pairs (e.g., cpu=250m,memory=512Mi).")
@@ -195,6 +199,8 @@ func main() {
 	jobBuilder.OpenCodeImagePullPolicy = corev1.PullPolicy(openCodeImagePullPolicy)
 	jobBuilder.CursorImage = cursorImage
 	jobBuilder.CursorImagePullPolicy = corev1.PullPolicy(cursorImagePullPolicy)
+	jobBuilder.AntigravityImage = antigravityImage
+	jobBuilder.AntigravityImagePullPolicy = corev1.PullPolicy(antigravityImagePullPolicy)
 	if err = (&controller.TaskReconciler{
 		Client:       mgr.GetClient(),
 		Scheme:       mgr.GetScheme(),

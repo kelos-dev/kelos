@@ -4,7 +4,7 @@
 
 | Field | Description | Required |
 |-------|-------------|----------|
-| `spec.type` | Agent type (`claude-code`, `codex`, `gemini`, `opencode`, or `cursor`) | Yes |
+| `spec.type` | Agent type (`claude-code`, `codex`, `gemini`, `opencode`, `cursor`, or `antigravity`) | Yes |
 | `spec.prompt` | Task prompt for the agent | Yes |
 | `spec.credentials.type` | `api-key`, `oauth`, or `none`. Use `none` to skip built-in credential injection (e.g., for Bedrock, Vertex AI, or Azure OpenAI credentials provided via `podOverrides.env`) | Yes |
 | `spec.credentials.secretRef.name` | Secret name with credentials (see [secret format](#task-credential-secret-format) below; not required when `type` is `none`) | Conditional |
@@ -59,6 +59,7 @@ The secret referenced by `spec.credentials.secretRef.name` must contain a single
 | `gemini` | `api-key` or `oauth` | `GEMINI_API_KEY` |
 | `opencode` | `api-key` or `oauth` | `OPENCODE_API_KEY` |
 | `cursor` | `api-key` or `oauth` | `CURSOR_API_KEY` |
+| `antigravity` | only `none` supported | n/a — supply credentials via `spec.podOverrides.env` |
 
 Example for `claude-code` with an API key:
 
@@ -244,7 +245,7 @@ GitHub Apps are preferred over PATs for production use because they offer fine-g
 | `spec.when.webhook.filters[].pattern` | Require a regex match against the extracted field value (mutually exclusive with `value`) | Conditional |
 | `spec.when.jira.pollInterval` | Per-source poll interval override (e.g., `"30s"`, `"5m"`); takes precedence over `spec.pollInterval` | No |
 | `spec.when.cron.schedule` | Cron schedule expression (e.g., `"0 * * * *"`) | Yes (when using cron) |
-| `spec.taskTemplate.type` | Agent type (`claude-code`, `codex`, `gemini`, `opencode`, or `cursor`) | Yes |
+| `spec.taskTemplate.type` | Agent type (`claude-code`, `codex`, `gemini`, `opencode`, `cursor`, or `antigravity`) | Yes |
 | `spec.taskTemplate.credentials` | Credentials for the agent (same as Task) | Yes |
 | `spec.taskTemplate.model` | Model override for spawned Tasks. Same pass-through behavior as `Task.spec.model`: either an agent-native shorthand (e.g., `sonnet`, `opus` for Claude Code) or a versioned ID (e.g., `claude-sonnet-4-6`) is valid | No |
 | `spec.taskTemplate.image` | Custom agent image override (see [Agent Image Interface](agent-image-interface.md)) | No |
@@ -397,7 +398,7 @@ The `token` and `githubApp` fields are mutually exclusive. If both `name` and `r
 
 | Field | Description |
 |-------|-------------|
-| `type` | Default agent type (`claude-code`, `codex`, `gemini`, `opencode`, or `cursor`) |
+| `type` | Default agent type (`claude-code`, `codex`, `gemini`, `opencode`, `cursor`, or `antigravity`) |
 | `model` | Default model override |
 | `namespace` | Default Kubernetes namespace |
 | `agentConfig` | Default AgentConfig resource name |

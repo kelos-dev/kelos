@@ -4059,6 +4059,7 @@ spec:
                     - gemini
                     - opencode
                     - cursor
+                    - antigravity
                     type: string
                   upstreamRepo:
                     description: |-

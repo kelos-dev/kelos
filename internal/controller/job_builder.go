@@ -30,6 +30,9 @@ const (
 	// CursorImage is the default image for Cursor CLI agent.
 	CursorImage = "ghcr.io/kelos-dev/cursor:latest"
 
+	// AntigravityImage is the default image for Google Antigravity CLI agent.
+	AntigravityImage = "ghcr.io/kelos-dev/antigravity:latest"
+
 	// AgentTypeClaudeCode is the agent type for Claude Code.
 	AgentTypeClaudeCode = "claude-code"
 
@@ -44,6 +47,9 @@ const (
 
 	// AgentTypeCursor is the agent type for Cursor CLI.
 	AgentTypeCursor = "cursor"
+
+	// AgentTypeAntigravity is the agent type for Google Antigravity CLI.
+	AgentTypeAntigravity = "antigravity"
 
 	// GitCloneImage is the image used for cloning git repositories.
 	GitCloneImage = "alpine/git:v2.47.2"
@@ -91,26 +97,29 @@ var reservedEnvNames = map[string]struct{}{
 
 // JobBuilder constructs Kubernetes Jobs for Tasks.
 type JobBuilder struct {
-	ClaudeCodeImage           string
-	ClaudeCodeImagePullPolicy corev1.PullPolicy
-	CodexImage                string
-	CodexImagePullPolicy      corev1.PullPolicy
-	GeminiImage               string
-	GeminiImagePullPolicy     corev1.PullPolicy
-	OpenCodeImage             string
-	OpenCodeImagePullPolicy   corev1.PullPolicy
-	CursorImage               string
-	CursorImagePullPolicy     corev1.PullPolicy
+	ClaudeCodeImage            string
+	ClaudeCodeImagePullPolicy  corev1.PullPolicy
+	CodexImage                 string
+	CodexImagePullPolicy       corev1.PullPolicy
+	GeminiImage                string
+	GeminiImagePullPolicy      corev1.PullPolicy
+	OpenCodeImage              string
+	OpenCodeImagePullPolicy    corev1.PullPolicy
+	CursorImage                string
+	CursorImagePullPolicy      corev1.PullPolicy
+	AntigravityImage           string
+	AntigravityImagePullPolicy corev1.PullPolicy
 }
 
 // NewJobBuilder creates a new JobBuilder.
 func NewJobBuilder() *JobBuilder {
 	return &JobBuilder{
-		ClaudeCodeImage: ClaudeCodeImage,
-		CodexImage:      CodexImage,
-		GeminiImage:     GeminiImage,
-		OpenCodeImage:   OpenCodeImage,
-		CursorImage:     CursorImage,
+		ClaudeCodeImage:  ClaudeCodeImage,
+		CodexImage:       CodexImage,
+		GeminiImage:      GeminiImage,
+		OpenCodeImage:    OpenCodeImage,
+		CursorImage:      CursorImage,
+		AntigravityImage: AntigravityImage,
 	}
 }
 
@@ -128,6 +137,11 @@ func (b *JobBuilder) Build(task *kelosv1alpha1.Task, workspace *kelosv1alpha1.Wo
 		return b.buildAgentJob(task, workspace, agentConfig, b.OpenCodeImage, b.OpenCodeImagePullPolicy, prompt)
 	case AgentTypeCursor:
 		return b.buildAgentJob(task, workspace, agentConfig, b.CursorImage, b.CursorImagePullPolicy, prompt)
+	case AgentTypeAntigravity:
+		if task.Spec.Credentials.Type != kelosv1alpha1.CredentialTypeNone {
+			return nil, fmt.Errorf("agent type %q requires credentials.type %q (api-key and oauth are not yet supported)", AgentTypeAntigravity, kelosv1alpha1.CredentialTypeNone)
+		}
+		return b.buildAgentJob(task, workspace, agentConfig, b.AntigravityImage, b.AntigravityImagePullPolicy, prompt)
 	default:
 		return nil, fmt.Errorf("unsupported agent type: %s", task.Spec.Type)
 	}

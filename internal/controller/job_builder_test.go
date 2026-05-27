@@ -1712,6 +1712,163 @@ func TestBuildCursorJob_OAuthCredentials(t *testing.T) {
 	}
 }
 
+func TestBuildAntigravityJob_DefaultImage(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-antigravity",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeAntigravity,
+			Prompt: "Fix the bug",
+			Credentials: kelosv1alpha1.Credentials{
+				Type: kelosv1alpha1.CredentialTypeNone,
+			},
+			Model: "gemini-2.5-pro",
+		},
+	}
+
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+
+	if container.Image != AntigravityImage {
+		t.Errorf("Expected image %q, got %q", AntigravityImage, container.Image)
+	}
+
+	if container.Name != AgentTypeAntigravity {
+		t.Errorf("Expected container name %q, got %q", AgentTypeAntigravity, container.Name)
+	}
+
+	if len(container.Command) != 1 || container.Command[0] != "/kelos_entrypoint.sh" {
+		t.Errorf("Expected command [/kelos_entrypoint.sh], got %v", container.Command)
+	}
+
+	if len(container.Args) != 1 || container.Args[0] != "Fix the bug" {
+		t.Errorf("Expected args [Fix the bug], got %v", container.Args)
+	}
+
+	foundKelosModel := false
+	foundAgentType := false
+	for _, env := range container.Env {
+		if env.Name == "KELOS_MODEL" {
+			foundKelosModel = true
+			if env.Value != "gemini-2.5-pro" {
+				t.Errorf("KELOS_MODEL value: expected %q, got %q", "gemini-2.5-pro", env.Value)
+			}
+		}
+		if env.Name == "KELOS_AGENT_TYPE" {
+			foundAgentType = true
+			if env.Value != AgentTypeAntigravity {
+				t.Errorf("KELOS_AGENT_TYPE value: expected %q, got %q", AgentTypeAntigravity, env.Value)
+			}
+		}
+		if env.Name == "ANTHROPIC_API_KEY" ||
+			env.Name == "CODEX_API_KEY" ||
+			env.Name == "GEMINI_API_KEY" ||
+			env.Name == "OPENCODE_API_KEY" ||
+			env.Name == "CURSOR_API_KEY" ||
+			env.Name == "CLAUDE_CODE_OAUTH_TOKEN" {
+			t.Errorf("%s should not be set for antigravity agent type (credentials.type: none)", env.Name)
+		}
+	}
+	if !foundKelosModel {
+		t.Error("Expected KELOS_MODEL env var to be set")
+	}
+	if !foundAgentType {
+		t.Error("Expected KELOS_AGENT_TYPE env var to be set")
+	}
+}
+
+func TestBuildAntigravityJob_CustomImage(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-antigravity-custom",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeAntigravity,
+			Prompt: "Refactor the module",
+			Credentials: kelosv1alpha1.Credentials{
+				Type: kelosv1alpha1.CredentialTypeNone,
+			},
+			Image: "my-antigravity:v2",
+		},
+	}
+
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+
+	if container.Image != "my-antigravity:v2" {
+		t.Errorf("Expected image %q, got %q", "my-antigravity:v2", container.Image)
+	}
+
+	if len(container.Command) != 1 || container.Command[0] != "/kelos_entrypoint.sh" {
+		t.Errorf("Expected command [/kelos_entrypoint.sh], got %v", container.Command)
+	}
+}
+
+func TestBuildAntigravityJob_RejectsAPIKey(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-antigravity-apikey",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeAntigravity,
+			Prompt: "Hello",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "agy-secret"},
+			},
+		},
+	}
+
+	_, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err == nil {
+		t.Fatal("Expected error when antigravity is paired with api-key credentials, got nil")
+	}
+	if !strings.Contains(err.Error(), AgentTypeAntigravity) {
+		t.Errorf("Error should mention agent type %q: %v", AgentTypeAntigravity, err)
+	}
+	if !strings.Contains(err.Error(), "none") {
+		t.Errorf("Error should mention required credential type %q: %v", "none", err)
+	}
+}
+
+func TestBuildAntigravityJob_RejectsOAuth(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-antigravity-oauth",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeAntigravity,
+			Prompt: "Hello",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeOAuth,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "agy-oauth"},
+			},
+		},
+	}
+
+	_, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err == nil {
+		t.Fatal("Expected error when antigravity is paired with oauth credentials, got nil")
+	}
+}
+
 func TestBuildClaudeCodeJob_UnsupportedType(t *testing.T) {
 	builder := NewJobBuilder()
 	task := &kelosv1alpha1.Task{

@@ -44,7 +44,7 @@ Kelos defines four custom resources:
 
 A Task runs an AI agent with a prompt. Key fields:
 
-- `spec.type` (required): `claude-code`, `codex`, `gemini`, `opencode`, or `cursor`
+- `spec.type` (required): `claude-code`, `codex`, `gemini`, `opencode`, `cursor`, or `antigravity`
 - `spec.prompt` (required): The task prompt
 - `spec.credentials` (required): `type` (`api-key` or `oauth`) and `secretRef.name`
 - `spec.workspaceRef.name`: Reference to a Workspace
@@ -243,6 +243,7 @@ Available result keys: `branch`, `commit`, `base-branch`, `pr`, `input-tokens`, 
 | `gemini` | `gemini` | `GEMINI_API_KEY` |
 | `opencode` | `opencode` | `OPENCODE_API_KEY` |
 | `cursor` | `agent` (Cursor) | `CURSOR_API_KEY` |
+| `antigravity` | `agy` (Google Antigravity) | n/a (only `credentials.type: none` supported; supply credentials via `podOverrides.env`) |
 
 ## References
 

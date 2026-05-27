@@ -8,9 +8,7 @@ Scope: `k8s-platform-gitops/non-prod/kelos`.
 
 Kelos code changes: none.
 
-This spec assumes the broader design in
-`specs/2026-05-22-12-00-cody-personas-and-handoffs.md`, but narrows the work
-to the exact GitOps-only changes needed for Phase 1.
+This spec describes the exact GitOps-only changes needed for Phase 1.
 
 ## Summary
 
@@ -23,9 +21,9 @@ New Slack entrypoints:
 - `@cody !dev ...`
 - `@cody !review ...`
 
-No router persona, no automatic handoff, no new Kelos CRD/API fields, no new
-service accounts, no Slack channel whitelist, and no GitHub triggers in Phase
-1.
+No router persona, no automatic cross-persona routing, no new Kelos CRD/API
+fields, no new service accounts, no Slack channel whitelist, and no GitHub
+triggers in Phase 1.
 
 All Phase 1 persona TaskSpawners reuse the current Cody runtime shape:
 
@@ -68,7 +66,7 @@ while users type `@cody !ticket ...`, `@cody !dev ...`, or
 ## Non-Goals
 
 - No router persona.
-- No Phase 1 automatic handoff.
+- No Phase 1 automatic cross-persona routing.
 - No new Kelos code, CRD, controller, webhook, or image change.
 - No GitHub webhook, GitHub PR polling, GitHub comment, or GitHub label
   triggers.
@@ -541,4 +539,3 @@ After Phase 1 behavior is proven:
 - remove JWT signing env from personas that do not need it
 - evaluate GitHub webhook/PR polling triggers later, after Slack-only Phase 1
   proves useful and repository/workspace ownership is clear
-- implement Phase 2 handoff with structured Task results

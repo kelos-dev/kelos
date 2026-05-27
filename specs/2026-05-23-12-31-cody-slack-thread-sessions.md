@@ -311,7 +311,7 @@ the first `AgentTurn`. If not, create a one-shot `Task` as today.
 
 For thread replies:
 
-1. Ignore messages from Cody itself except existing self-handoff logic.
+1. Ignore messages from Cody itself.
 2. If the reply does not mention Cody, do not create a turn.
 3. If the reply mentions Cody and an active matching `AgentSession` exists,
    create an `AgentTurn` for that session.
@@ -333,8 +333,9 @@ Follow-up behavior:
 - `@cody !dev please continue` inside a normal debug session is rejected as a
   route mismatch.
 
-Cross-persona handoffs remain separate from this feature and should continue to
-use explicit handoff lines or separate sessions.
+Switching personas remains explicit. A user should start the target persona
+route with its normal `@cody !...` command rather than relying on automatic
+cross-persona routing.
 
 ## Context Window Construction
 

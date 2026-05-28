@@ -443,3 +443,86 @@ spec:
       - Do NOT change labels or assignees
       - Post inline comments only on lines that have actual issues
       - The final PR comment MUST start with `/kelos needs-input`
+
+---
+
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: paiops-squash-commits
+spec:
+  when:
+    githubWebhook:
+      repository: pai/paiops
+      events:
+        - "issue_comment"
+        - "pull_request_review"
+      filters:
+        - event: "issue_comment"
+          action: "created"
+          bodyContains: "/kelos squash-commits"
+          commentOn: "PullRequest"
+        - event: "pull_request_review"
+          action: "submitted"
+          bodyContains: "/kelos squash-commits"
+      reporting:
+        enabled: true
+        checks: {}
+  taskTemplate:
+    workspaceRef:
+      name: paiops-workspace
+    model: sonnet
+    type: claude-code
+    ttlSecondsAfterFinished: 600
+    credentials:
+      type: oauth
+      secretRef:
+        name: kelos-credentials
+    branch: "{{.Branch}}"
+    agentConfigRef:
+      name: kelos-dev-agent
+    promptTemplate: |
+      You are a coding agent. Your only task is to rebase and squash commits on a PR branch.
+
+      Pull request #{{.Number}}: {{.Title}}
+      URL: {{.URL}}
+
+      Steps:
+      1. Kelos has already checked out the PR head branch. Fetch full history:
+         ```
+         git fetch --unshallow || true
+         git fetch origin main
+         ```
+
+      2. Rebase the branch on origin/main:
+         ```
+         git rebase origin/main
+         ```
+
+      3. Squash all commits after origin/main into a single commit:
+         - Find the merge base: `git merge-base origin/main HEAD`
+         - Count commits after the merge base
+         - If there is only 1 commit, skip squashing
+         - Otherwise, use `git reset --soft <merge-base>` then create a single commit with the first commit's message
+
+      4. Update the commit message if needed:
+         - Extract the linked issue number from the PR body: `gh pr view {{.Number}} --json body --jq .body`
+         - Read the linked issue to understand what was done
+         - Read the PR description
+         - If the current commit message does not accurately describe the changes, amend it with a better message
+         - Keep the commit message concise (one line, under 72 characters)
+
+      5. Force push the result:
+         ```
+         git push --force-with-lease origin HEAD
+         ```
+
+      6. Update the PR description if needed:
+         - If the PR description does not accurately describe the changes, update it using `gh pr edit`
+
+      7. Post a `/kelos needs-input` comment on PR #{{.Number}} with "Squash complete." to signal completion.
+
+      Important:
+      - Do NOT start any new development work
+      - Do NOT modify any source code
+      - Only rebase, squash commits, and update descriptions as needed

@@ -33,7 +33,6 @@ spec:
           commentOn: "Issue"
       reporting:
         enabled: true
-  maxConcurrency: 5
   taskTemplate:
     workspaceRef:
       name: deploy-workspace
@@ -123,7 +122,6 @@ spec:
       reporting:
         enabled: true
         checks: {}
-  maxConcurrency: 5
   taskTemplate:
     workspaceRef:
       name: deploy-workspace
@@ -198,7 +196,6 @@ spec:
       reporting:
         enabled: true
         checks: {}
-  maxConcurrency: 2
   taskTemplate:
     workspaceRef:
       name: deploy-workspace
@@ -308,7 +305,6 @@ spec:
       reporting:
         enabled: true
         checks: {}
-  maxConcurrency: 5
   taskTemplate:
     workspaceRef:
       name: deploy-workspace
@@ -392,7 +388,6 @@ spec:
       reporting:
         enabled: true
         checks: {}
-  maxConcurrency: 3
   taskTemplate:
     workspaceRef:
       name: deploy-workspace

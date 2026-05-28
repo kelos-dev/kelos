@@ -15,7 +15,6 @@ spec:
           commentOn: "Issue"
       reporting:
         enabled: true
-  maxConcurrency: 8
   taskTemplate:
     workspaceRef:
       name: ml-workspace
@@ -105,7 +104,6 @@ spec:
       reporting:
         enabled: true
         checks: {}
-  maxConcurrency: 8
   taskTemplate:
     workspaceRef:
       name: ml-workspace
@@ -180,7 +178,6 @@ spec:
       reporting:
         enabled: true
         checks: {}
-  maxConcurrency: 3
   taskTemplate:
     workspaceRef:
       name: ml-workspace

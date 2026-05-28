@@ -184,7 +184,7 @@ func (h *SlackHandler) handleMessageEvent(ctx context.Context, innerEvent *slack
 			h.log.Error(err, "Failed to fetch thread context, falling back to message text",
 				"channel", innerEvent.Channel, "threadTS", innerEvent.ThreadTimeStamp)
 		} else {
-			msg.Body = body
+			msg.Body = body + "\n---\nThe last user message in this thread is what triggered this task. Respond to it specifically. Prior messages and agent responses are context.\n"
 			msg.HasThreadContext = true
 		}
 	}

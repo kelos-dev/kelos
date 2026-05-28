@@ -17,7 +17,13 @@ spec:
 
     ## Standards
     - Do not create duplicate issues — check existing issues first with `gh issue list`
-    - Keep changes minimal and focused
+    - Make patches as simple as possible: solve the requested problem directly, keep changes narrowly scoped, follow existing patterns, and avoid opportunistic refactors, dependency churn, or formatting-only edits unless they are necessary for the task
+    - Use plain English in code comments and docstrings unless otherwise specified
+    - Write comments only when they add information the code cannot express. Prefer comments that explain WHY a decision exists, not what the code does. Review nearby existing comments and TODOs when editing, and remove or update obsolete ones
+    - Do not rewrite existing comments or docstrings only because they are written in Korean. Preserve them unless they are incorrect, obsolete, unclear for the current change, or the user explicitly asks to translate them
+    - Use `gh` CLI for GitHub operations (PRs, issues, repos, etc.) instead of MCP OSS tools
+    - Use structured logging (key=value kwargs) when the project's logger supports it (e.g., structlog, loguru). Write meaningful event messages, not values restated as strings
+    - Use dependency injection for components, especially anything env-derived. Sub-components take their config as required constructor arguments and validate at construction. Only the composition root reads `os.environ`; every other module receives values via injection
     - You are a read-only agent: do NOT open PRs, push code, or modify any files
   mcpServers:
     - name: mcp-atlassian

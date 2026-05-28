@@ -617,15 +617,6 @@ type Slack struct {
 	// +kubebuilder:validation:items:Pattern=`^[CG][A-Z0-9]{8,}$`
 	Channels []string `json:"channels,omitempty"`
 
-	// AllowedBotIDs allows specific Slack bot authors to trigger this
-	// TaskSpawner. Values are Slack bot IDs (e.g., "B0123456789"). When empty,
-	// bot-authored messages are ignored. Human-authored messages are not
-	// affected by this field.
-	// +optional
-	// +kubebuilder:validation:MaxItems=32
-	// +kubebuilder:validation:items:Pattern=`^B[A-Z0-9]{6,}$`
-	AllowedBotIDs []string `json:"allowedBotIDs,omitempty"`
-
 	// Triggers define regex patterns that must match the message text.
 	// Bot mention is implicitly required unless MentionOptional is set.
 	// Multiple triggers use OR semantics. When empty, every bot mention fires.

@@ -527,8 +527,7 @@ If `maxQueuedTurns` is exceeded, reject the new turn with a thread reply.
 - Cody still receives only the credentials configured by the originating
   `TaskSpawner`/`AgentConfig`.
 - Follow-up turns cannot switch to another route or permission surface.
-- Bot-authored messages can only start or continue sessions if allowed by the
-  existing Slack bot allowlist.
+- Bot-authored messages cannot start or continue sessions.
 - Unmentioned side conversation is context only, never an executable command.
 - Slack token stays in `kelos-slack-server` or the Slack delivery service, not
   inside Cody.

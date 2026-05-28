@@ -175,7 +175,7 @@ func (h *SlackHandler) handleMessageEvent(ctx context.Context, innerEvent *slack
 			"user", innerEvent.User, "botID", innerEvent.BotID, "channel", innerEvent.Channel)
 		return
 	}
-	if !shouldProcess(innerEvent.User, innerEvent.SubType, hasContent, h.botUserID, innerEvent.BotID, h.botID) {
+	if !shouldProcess(innerEvent.User, innerEvent.SubType, hasContent, h.botUserID, innerEvent.BotID) {
 		h.log.V(1).Info("Message filtered by shouldProcess",
 			"user", innerEvent.User, "subtype", innerEvent.SubType, "botID", innerEvent.BotID, "channel", innerEvent.Channel)
 		return
@@ -203,7 +203,7 @@ func (h *SlackHandler) handleMessageEvent(ctx context.Context, innerEvent *slack
 
 func (h *SlackHandler) handleAppMentionEvent(ctx context.Context, innerEvent *slackevents.AppMentionEvent) {
 	hasContent := innerEvent.Text != ""
-	if !shouldProcess(innerEvent.User, "", hasContent, h.botUserID, innerEvent.BotID, h.botID) {
+	if !shouldProcess(innerEvent.User, "", hasContent, h.botUserID, innerEvent.BotID) {
 		h.log.V(1).Info("App mention filtered by shouldProcess",
 			"user", innerEvent.User, "botID", innerEvent.BotID, "channel", innerEvent.Channel)
 		return
@@ -519,11 +519,9 @@ func newSocketModeClient(api *goslack.Client) *socketmode.Client {
 }
 
 // shouldProcess decides whether a Slack message should be processed.
-// It filters out self messages and message subtypes we don't handle.
-// Bot-authored messages with a non-self bot_id are routed to TaskSpawner
-// matching, where each Slack config decides whether that bot is allowlisted.
+// It filters out bot messages, self messages, and message subtypes we don't handle.
 // hasContent should be true when the message has text or attachments.
-func shouldProcess(userID, subtype string, hasContent bool, selfUserID, botID, selfBotID string) bool {
+func shouldProcess(userID, subtype string, hasContent bool, selfUserID, botID string) bool {
 	if !hasContent {
 		return false
 	}
@@ -531,7 +529,7 @@ func shouldProcess(userID, subtype string, hasContent bool, selfUserID, botID, s
 		return false
 	}
 	if botID != "" {
-		return selfBotID == "" || botID != selfBotID
+		return false
 	}
 	switch subtype {
 	case "bot_message", "message_changed", "message_deleted", "message_replied":

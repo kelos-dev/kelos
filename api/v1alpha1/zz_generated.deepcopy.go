@@ -1232,11 +1232,6 @@ func (in *Slack) DeepCopyInto(out *Slack) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
-	if in.AllowedBotIDs != nil {
-		in, out := &in.AllowedBotIDs, &out.AllowedBotIDs
-		*out = make([]string, len(*in))
-		copy(*out, *in)
-	}
 	if in.Triggers != nil {
 		in, out := &in.Triggers, &out.Triggers
 		*out = make([]SlackTrigger, len(*in))

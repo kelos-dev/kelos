@@ -13332,17 +13332,6 @@ spec:
                       The centralized kelos-slack-server connects to Slack via an outbound
                       WebSocket (no ingress required) and routes messages to matching agents.
                     properties:
-                      allowedBotIDs:
-                        description: |-
-                          AllowedBotIDs allows specific Slack bot authors to trigger this
-                          TaskSpawner. Values are Slack bot IDs (e.g., "B0123456789"). When empty,
-                          bot-authored messages are ignored. Human-authored messages are not
-                          affected by this field.
-                        items:
-                          pattern: ^B[A-Z0-9]{6,}$
-                          type: string
-                        maxItems: 32
-                        type: array
                       channels:
                         description: |-
                           Channels optionally restricts which Slack channels the bot listens in.

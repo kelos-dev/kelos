@@ -467,7 +467,7 @@ Slack TaskSpawner requirements:
 
 - no `channels[]`
 - no `mentionOptional`
-- no `allowedBotIDs` unless a separate trusted bot use case is approved
+- no bot-authored Slack triggers
 
 ## Validation Plan
 

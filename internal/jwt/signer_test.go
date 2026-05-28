@@ -509,4 +509,3 @@ func TestLoadConfigFromEnv_RejectsExpiresInOutOfRange(t *testing.T) {
 		t.Fatal("expected error for too-large ExpiresIn")
 	}
 }
-

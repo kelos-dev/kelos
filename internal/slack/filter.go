@@ -80,7 +80,7 @@ func MatchesSpawner(slackCfg *v1alpha1.Slack, msg *SlackMessageData, botUserID s
 	if msg.IsSlashCommand {
 		return true
 	}
-	if msg.IsBotMessage && !matchesAllowedBotID(msg.BotID, slackCfg.AllowedBotIDs) {
+	if msg.IsBotMessage {
 		return false
 	}
 	var positiveMatch bool
@@ -129,19 +129,6 @@ func matchesChannel(channelID string, allowed []string) bool {
 	}
 	for _, id := range allowed {
 		if id == channelID {
-			return true
-		}
-	}
-	return false
-}
-
-// matchesAllowedBotID returns true when botID is explicitly allowlisted.
-func matchesAllowedBotID(botID string, allowed []string) bool {
-	if botID == "" || len(allowed) == 0 {
-		return false
-	}
-	for _, id := range allowed {
-		if id == botID {
 			return true
 		}
 	}

@@ -87,7 +87,6 @@ Sketch:
 ```go
 type Slack struct {
     Channels []string `json:"channels,omitempty"`
-    AllowedBotIDs []string `json:"allowedBotIDs,omitempty"`
     Triggers []SlackTrigger `json:"triggers,omitempty"`
     ExcludePatterns []string `json:"excludePatterns,omitempty"`
     Session *SlackSession `json:"session,omitempty"`

@@ -273,45 +273,15 @@ func TestMatchesSpawner(t *testing.T) {
 			want:      true,
 		},
 		{
-			name:      "bot message rejected without allowlist",
+			name:      "bot message rejected",
 			slackCfg:  &v1alpha1.Slack{},
 			msg:       &SlackMessageData{BotID: "BTRUSTED1", IsBotMessage: true, ChannelID: "C1", Text: "<@UBOT1> fix the login page"},
 			botUserID: "UBOT1",
 			want:      false,
 		},
 		{
-			name: "bot message rejected when bot id missing",
-			slackCfg: &v1alpha1.Slack{
-				AllowedBotIDs: []string{"BTRUSTED1"},
-			},
-			msg:       &SlackMessageData{IsBotMessage: true, ChannelID: "C1", Text: "<@UBOT1> fix the login page"},
-			botUserID: "UBOT1",
-			want:      false,
-		},
-		{
-			name: "bot message rejected when bot id is not allowlisted",
-			slackCfg: &v1alpha1.Slack{
-				AllowedBotIDs: []string{"BTRUSTED1"},
-			},
-			msg:       &SlackMessageData{BotID: "BOTHERBOT", IsBotMessage: true, ChannelID: "C1", Text: "<@UBOT1> fix the login page"},
-			botUserID: "UBOT1",
-			want:      false,
-		},
-		{
-			name: "bot message allowed when bot id is allowlisted",
-			slackCfg: &v1alpha1.Slack{
-				AllowedBotIDs: []string{"BTRUSTED1"},
-			},
-			msg:       &SlackMessageData{BotID: "BTRUSTED1", IsBotMessage: true, ChannelID: "C1", Text: "<@UBOT1> fix the login page"},
-			botUserID: "UBOT1",
-			want:      true,
-		},
-		{
-			name: "allowlisted bot message still requires trigger match",
-			slackCfg: &v1alpha1.Slack{
-				AllowedBotIDs: []string{"BTRUSTED1"},
-				Triggers:      []v1alpha1.SlackTrigger{{Pattern: "deploy"}},
-			},
+			name:      "bot message rejected even with bot id",
+			slackCfg:  &v1alpha1.Slack{},
 			msg:       &SlackMessageData{BotID: "BTRUSTED1", IsBotMessage: true, ChannelID: "C1", Text: "<@UBOT1> fix the login page"},
 			botUserID: "UBOT1",
 			want:      false,
@@ -400,7 +370,6 @@ func TestShouldProcess(t *testing.T) {
 		hasContent bool
 		selfUserID string
 		botID      string
-		selfBotID  string
 		want       bool
 	}{
 		{
@@ -418,14 +387,13 @@ func TestShouldProcess(t *testing.T) {
 			want:       false,
 		},
 		{
-			name:       "bot_message subtype with allowlist candidate passes to spawner matching",
+			name:       "bot_message subtype with bot id filtered",
 			userID:     "U1",
 			subtype:    "bot_message",
 			botID:      "BTRUSTED1",
-			selfBotID:  "BCODY",
 			hasContent: true,
 			selfUserID: "UBOT",
-			want:       true,
+			want:       false,
 		},
 		{
 			name:       "bot_message subtype without bot id filtered",
@@ -440,7 +408,6 @@ func TestShouldProcess(t *testing.T) {
 			userID:     "U1",
 			subtype:    "bot_message",
 			botID:      "BCODY",
-			selfBotID:  "BCODY",
 			hasContent: true,
 			selfUserID: "UBOT",
 			want:       false,
@@ -480,7 +447,7 @@ func TestShouldProcess(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := shouldProcess(tt.userID, tt.subtype, tt.hasContent, tt.selfUserID, tt.botID, tt.selfBotID)
+			got := shouldProcess(tt.userID, tt.subtype, tt.hasContent, tt.selfUserID, tt.botID)
 			if got != tt.want {
 				t.Errorf("shouldProcess() = %v, want %v", got, tt.want)
 			}

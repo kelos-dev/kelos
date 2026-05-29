@@ -204,6 +204,18 @@ spec:
         page should be able to locate any cited field without already
         knowing the layout of the others. P2.
 
+      **Documentation completeness**:
+      - When a PR introduces or changes user-facing surface — a new or
+        renamed CRD/API field, a CRD schema change, a new CLI command or
+        flag, or a new user-facing feature/behavior — require the matching
+        docs update in the same PR and request it from the author when it
+        is missing. The canonical reference is `docs/reference.md` (the CRD
+        field tables and the `CLI Reference` section); a new feature or
+        workflow may also need `README.md` and an `examples/` entry. Flag a
+        user-facing change that ships with no doc update as P2. Internal-only
+        changes (refactors, tests, files under `self-development/`, or code
+        that does not alter observable behavior) do not need docs.
+
       **Code quality**:
       - No unnecessary code, comments, or dead variables
       - Changes are minimal and focused — no unrelated refactoring

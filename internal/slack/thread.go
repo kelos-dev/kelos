@@ -17,12 +17,9 @@ const threadFetchTimeout = 10 * time.Second
 // non-empty message is prefixed with [TRIGGERING MESSAGE] to indicate which
 // message spawned the task.
 func FormatThreadContext(msgs []goslack.Message, botUserID string) string {
-	lastIdx := -1
-	for i, m := range msgs {
-		attachText := formatAttachments(m.Attachments)
-		if m.Text != "" || attachText != "" {
-			lastIdx = i
-		}
+	lastIdx := len(msgs) - 1
+	for lastIdx >= 0 && msgs[lastIdx].Text == "" && len(msgs[lastIdx].Attachments) == 0 {
+		lastIdx--
 	}
 
 	var b strings.Builder

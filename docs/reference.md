@@ -256,6 +256,7 @@ GitHub Apps are preferred over PATs for production use because they offer fine-g
 | `spec.taskTemplate.podOverrides` | Pod customization for spawned Tasks (resources, timeout, env, nodeSelector, serviceAccountName, volumes, volumeMounts, podSecurityContext, containerSecurityContext) | No |
 | `spec.taskTemplate.metadata.labels` | Labels merged into spawned Tasks; values support the same Go template variables as `branch`/`promptTemplate`; the `kelos.dev/taskspawner` label is always set to the TaskSpawner name and overrides any user value for that key | No |
 | `spec.taskTemplate.metadata.annotations` | Annotations merged into spawned Tasks; values support the same Go template variables as `branch`/`promptTemplate`; source annotations (e.g. `kelos.dev/source-kind`) are applied after rendering and override conflicting user values | No |
+| `spec.taskTemplate.contextSources` | External data sources fetched in parallel before task creation; each source's value is exposed as `{{.Context.NAME}}` in `branch`, `promptTemplate`, and `metadata` templates (see [Context Sources](#context-sources) below). Maximum 8 entries; names must be unique | No |
 | `spec.taskTemplate.upstreamRepo` | Upstream repository in `owner/repo` format; injected as `KELOS_UPSTREAM_REPO` into the agent container. Typically auto-derived from `githubIssues.repo`/`githubPullRequests.repo`, but can be set explicitly for fork workflows | No |
 | `spec.pollInterval` | How often to poll the source (default: `5m`). Deprecated: use per-source `pollInterval` instead | No |
 | `spec.maxConcurrency` | Limit max concurrent running tasks (important for cost control) | No |
@@ -298,6 +299,72 @@ The `promptTemplate` field uses Go `text/template` syntax. Available variables d
 | `{{.Schedule}}` | Cron schedule expression | Empty | Empty | Empty | Empty | Empty | Empty | Schedule string (e.g., `"0 * * * *"`) |
 
 > **Generic Webhook only:** any additional keys declared in `spec.when.webhook.fieldMapping` are also exposed as top-level template variables (e.g., `fieldMapping: {severity: "$.level"}` makes `{{.severity}}` available).
+
+> **Context sources:** when `spec.taskTemplate.contextSources` is configured, each entry's fetched value is exposed as `{{.Context.NAME}}` (e.g., a source named `jira` is available as `{{.Context.jira}}`). The same `.Context` map is also available in `spec.taskTemplate.branch` and `spec.taskTemplate.metadata` templates. See [Context Sources](#context-sources) for details.
+
+<a id="context-sources"></a>
+
+### Context Sources
+
+`spec.taskTemplate.contextSources` lets a TaskSpawner fetch external data at task-creation time and inject the result as template variables. For each work item, all of its sources are fetched in parallel during the spawning cycle, and the fetched value becomes available as `{{.Context.NAME}}` in `promptTemplate`, `branch`, and `metadata` templates. A TaskSpawner may declare up to 8 sources; names must be unique and match `^[a-zA-Z][a-zA-Z0-9_]*$`.
+
+| Field | Description | Required |
+|-------|-------------|----------|
+| `spec.taskTemplate.contextSources[].name` | Identifier used as the template key (`{{.Context.<name>}}`). Must match `^[a-zA-Z][a-zA-Z0-9_]*$`, 1–64 characters | Yes |
+| `spec.taskTemplate.contextSources[].http` | HTTP(S) source configuration. Currently the only supported source kind; exactly one source kind must be set | Yes |
+| `spec.taskTemplate.contextSources[].http.url` | Endpoint to fetch. Supports Go `text/template` variables from the work item (e.g., `https://api.example.com/items/{{.Number}}`). HTTPS is required unless `allowInsecure` is set | Yes (per source) |
+| `spec.taskTemplate.contextSources[].http.method` | HTTP method: `GET` or `POST` (default: `GET`) | No |
+| `spec.taskTemplate.contextSources[].http.headers` | Static HTTP headers. Values support Go `text/template` variables from the work item | No |
+| `spec.taskTemplate.contextSources[].http.headersFrom` | HTTP header values sourced from Kubernetes Secrets in the same namespace as the TaskSpawner. Each entry sets `header` to the HTTP header name, `secretName` to the Secret name, and `secretKey` to the key within the Secret. Merged with `headers`; `headersFrom` wins on conflict. Maximum 16 entries | No |
+| `spec.taskTemplate.contextSources[].http.body` | Request body template (Go `text/template`); used with `POST` | No |
+| `spec.taskTemplate.contextSources[].http.responseFilter.type` | Filter language for extracting a subset of the response. Currently only `JSONPath` is supported | No |
+| `spec.taskTemplate.contextSources[].http.responseFilter.expression` | Filter expression (e.g., `$.data.value` for JSONPath). When set, only the extracted value is stored; otherwise the entire response body is used | Conditional |
+| `spec.taskTemplate.contextSources[].http.allowInsecure` | Permit plain HTTP (non-TLS) URLs (default: `false`) | No |
+| `spec.taskTemplate.contextSources[].http.timeoutSeconds` | Per-request timeout in seconds, 1–60 (default: `10`) | No |
+| `spec.taskTemplate.contextSources[].http.maxResponseBytes` | Maximum response body size in bytes, 1–131072 (default: `32768`, i.e. 32 KiB). Caps the amount injected into the prompt | No |
+| `spec.taskTemplate.contextSources[].failurePolicy` | Behavior when the source fails to fetch: `Fail` skips task creation for the work item; `Ignore` substitutes an empty string and logs a warning (default: `Fail`) | No |
+
+Example — fetch a Jira issue description over HTTP and inject it into a prompt triggered by a GitHub issue:
+
+```yaml
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: enrich-from-jira
+spec:
+  when:
+    githubIssues:
+      labels: ["needs-jira-context"]
+  taskTemplate:
+    type: claude-code
+    workspaceRef:
+      name: my-workspace
+    credentials:
+      type: api-key
+      secretRef:
+        name: claude-credentials
+    contextSources:
+      - name: jira
+        failurePolicy: Ignore
+        http:
+          # This example assumes the GitHub issue title is the Jira issue key
+          # (e.g. "PROJ-123"). Adjust the URL/template to however your issues
+          # reference Jira.
+          url: "https://your-org.atlassian.net/rest/api/3/issue/{{.Title}}"
+          headersFrom:
+            - header: Authorization
+              secretName: jira-credentials
+              secretKey: authorization
+          responseFilter:
+            type: JSONPath
+            expression: "$.fields.description"
+          timeoutSeconds: 15
+    promptTemplate: |
+      Address GitHub issue #{{.Number}}: {{.Title}}
+
+      Linked Jira description:
+      {{.Context.jira}}
+```
 
 ## Task Status
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
@@ -818,4 +819,42 @@ func parsePollInterval(s string) time.Duration {
 		return 5 * time.Minute
 	}
 	return d
+}
+
+// onCompletionAnnotation returns the serialized onCompletion hooks config
+// to stamp onto spawned Tasks, or empty string when not configured.
+func onCompletionAnnotation(ts *kelosv1alpha1.TaskSpawner) string {
+	if ts.Spec.OnCompletion == nil || len(ts.Spec.OnCompletion.Hooks) == 0 {
+		return ""
+	}
+	data, err := json.Marshal(ts.Spec.OnCompletion.Hooks)
+	if err != nil {
+		ctrl.Log.WithName("spawner").Error(err, "Serializing onCompletion hooks")
+		return ""
+	}
+	return string(data)
+}
+
+// runWebhookReportingCycle lists all Tasks owned by the given TaskSpawner and
+// dispatches pending webhook notifications for those in terminal phases.
+func runWebhookReportingCycle(ctx context.Context, cl client.Client, key types.NamespacedName, httpClient *http.Client) error {
+	var taskList kelosv1alpha1.TaskList
+	if err := cl.List(ctx, &taskList, client.InNamespace(key.Namespace), client.MatchingLabels{"kelos.dev/taskspawner": key.Name}); err != nil {
+		return fmt.Errorf("listing tasks for webhook reporting: %w", err)
+	}
+
+	reporter := &reporting.WebhookReporter{
+		Client:     cl,
+		HTTPClient: httpClient,
+		SecretReader: &reporting.KubeSecretReader{
+			Client: cl,
+		},
+	}
+
+	for i := range taskList.Items {
+		if err := reporter.ReportWebhooks(ctx, &taskList.Items[i]); err != nil {
+			ctrl.Log.WithName("spawner").Error(err, "Webhook reporting", "task", taskList.Items[i].Name)
+		}
+	}
+	return nil
 }

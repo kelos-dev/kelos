@@ -291,11 +291,21 @@ func TestRenderChart_NoPullPolicyByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rendering chart: %v", err)
 	}
-	if bytes.Contains(data, []byte("imagePullPolicy:")) {
-		t.Error("expected no imagePullPolicy when not set")
+	objs, err := parseManifests(data)
+	if err != nil {
+		t.Fatalf("parsing rendered chart: %v", err)
 	}
-	if bytes.Contains(data, []byte("-pull-policy=")) {
-		t.Error("expected no -pull-policy args when not set")
+	for _, obj := range objs {
+		if obj.GetKind() == "CustomResourceDefinition" {
+			continue
+		}
+		raw, _ := obj.MarshalJSON()
+		if bytes.Contains(raw, []byte("imagePullPolicy")) {
+			t.Errorf("expected no imagePullPolicy in %s/%s when not set", obj.GetKind(), obj.GetName())
+		}
+		if bytes.Contains(raw, []byte("-pull-policy=")) {
+			t.Errorf("expected no -pull-policy args in %s/%s when not set", obj.GetKind(), obj.GetName())
+		}
 	}
 }
 

@@ -61,6 +61,8 @@ type PodOverrides struct {
 	Labels map[string]string `json:"labels,omitempty"`
 
 	// Resources defines resource limits and requests for the agent container.
+	// Applies only to the agent container; configure additional containers
+	// directly via ExtraContainers or ExtraInitContainers.
 	// +optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 
@@ -74,6 +76,8 @@ type PodOverrides struct {
 	// Env specifies additional environment variables for the agent container.
 	// These are appended after the built-in env vars (credentials, model, GitHub token).
 	// If a user-specified env var conflicts with a built-in one, the built-in takes precedence.
+	// Applies only to the agent container; configure additional containers
+	// directly via ExtraContainers or ExtraInitContainers.
 	// +optional
 	Env []corev1.EnvVar `json:"env,omitempty"`
 
@@ -114,7 +118,8 @@ type PodOverrides struct {
 	// VolumeMounts is a list of additional volume mounts to add to the
 	// agent container. Names must reference either a user-supplied volume
 	// from Volumes or a Kelos-managed volume ("workspace", "kelos-plugin").
-	// Init containers are not exposed via this field.
+	// Applies only to the agent container; configure additional containers
+	// directly via ExtraContainers or ExtraInitContainers.
 	// +optional
 	VolumeMounts []corev1.VolumeMount `json:"volumeMounts,omitempty"`
 
@@ -128,9 +133,54 @@ type PodOverrides struct {
 	// ContainerSecurityContext is applied to the agent container. Use
 	// this to declare allowPrivilegeEscalation=false, capabilities.drop=[ALL],
 	// readOnlyRootFilesystem=true, etc., so the spawned pod can land in a
-	// PSS restricted namespace.
+	// PSS restricted namespace. Applies only to the agent container;
+	// configure additional containers directly via ExtraContainers or
+	// ExtraInitContainers.
 	// +optional
 	ContainerSecurityContext *corev1.SecurityContext `json:"containerSecurityContext,omitempty"`
+
+	// ExtraContainers is a list of additional containers to run alongside
+	// the agent container in the same pod. These share the pod's network
+	// namespace (accessible via localhost) and can mount user-supplied
+	// volumes from the Volumes field.
+	// Applies only to extra containers; to configure the agent container
+	// itself, use the Resources, Env, VolumeMounts, and
+	// ContainerSecurityContext fields.
+	// Container names must not collide with Kelos-reserved container
+	// names: claude-code, codex, gemini, opencode, cursor, git-clone,
+	// remote-setup, branch-setup, workspace-files, plugin-setup,
+	// skills-install.
+	// +optional
+	// +kubebuilder:validation:MaxItems=8
+	// +listType=map
+	// +listMapKey=name
+	// +kubebuilder:validation:XValidation:rule="self.all(c, c.name != '')",message="extraContainers[].name must not be empty"
+	// +kubebuilder:validation:XValidation:rule="self.all(c, !(c.name in ['claude-code', 'codex', 'gemini', 'opencode', 'cursor', 'git-clone', 'remote-setup', 'branch-setup', 'workspace-files', 'plugin-setup', 'skills-install']))",message="extraContainers[].name must not use a Kelos-reserved container name"
+	ExtraContainers []corev1.Container `json:"extraContainers,omitempty"`
+
+	// ExtraInitContainers is a list of additional init containers to run
+	// in the agent pod. They are placed after all Kelos built-in init
+	// containers (git-clone, remote-setup, branch-setup, workspace-files,
+	// plugin-setup, skills-install), ensuring the workspace is ready
+	// before they start. Set restartPolicy: Always for sidecar semantics
+	// (long-running services like databases) or leave it unset for
+	// one-shot init tasks.
+	// Containers can mount user-supplied volumes from the Volumes field
+	// as well as Kelos-managed volumes (workspace, kelos-plugin). Note
+	// that the workspace volume uses FSGroup-based permissions; containers
+	// running as a UID outside the pod's FSGroup will not have write
+	// access to the workspace.
+	// Container names must not collide with Kelos-reserved container
+	// names: claude-code, codex, gemini, opencode, cursor, git-clone,
+	// remote-setup, branch-setup, workspace-files, plugin-setup,
+	// skills-install.
+	// +optional
+	// +kubebuilder:validation:MaxItems=8
+	// +listType=map
+	// +listMapKey=name
+	// +kubebuilder:validation:XValidation:rule="self.all(c, c.name != '')",message="extraInitContainers[].name must not be empty"
+	// +kubebuilder:validation:XValidation:rule="self.all(c, !(c.name in ['claude-code', 'codex', 'gemini', 'opencode', 'cursor', 'git-clone', 'remote-setup', 'branch-setup', 'workspace-files', 'plugin-setup', 'skills-install']))",message="extraInitContainers[].name must not use a Kelos-reserved container name"
+	ExtraInitContainers []corev1.Container `json:"extraInitContainers,omitempty"`
 }
 
 // TaskSpec defines the desired state of Task.

@@ -13,11 +13,21 @@ const threadFetchTimeout = 10 * time.Second
 
 // FormatThreadContext formats a Slack thread's messages into a readable
 // conversation string for use as a follow-up task prompt. Messages from the
-// bot itself are labeled as "Agent" while all others use "User".
+// bot itself are labeled as "Agent" while all others use "User". The last
+// non-empty message is prefixed with [TRIGGERING MESSAGE] to indicate which
+// message spawned the task.
 func FormatThreadContext(msgs []goslack.Message, botUserID string) string {
+	lastIdx := -1
+	for i, m := range msgs {
+		attachText := formatAttachments(m.Attachments)
+		if m.Text != "" || attachText != "" {
+			lastIdx = i
+		}
+	}
+
 	var b strings.Builder
 	b.WriteString("Slack thread conversation:\n")
-	for _, m := range msgs {
+	for i, m := range msgs {
 		attachText := formatAttachments(m.Attachments)
 		if m.Text == "" && attachText == "" {
 			continue
@@ -26,13 +36,17 @@ func FormatThreadContext(msgs []goslack.Message, botUserID string) string {
 		if m.User == botUserID || m.BotID != "" {
 			role = "Agent"
 		}
+		prefix := ""
+		if i == lastIdx {
+			prefix = "[TRIGGERING MESSAGE] "
+		}
 		switch {
 		case m.Text != "" && attachText != "":
-			fmt.Fprintf(&b, "\n%s: %s\n%s\n", role, m.Text, attachText)
+			fmt.Fprintf(&b, "\n%s%s: %s\n%s\n", prefix, role, m.Text, attachText)
 		case m.Text != "":
-			fmt.Fprintf(&b, "\n%s: %s\n", role, m.Text)
+			fmt.Fprintf(&b, "\n%s%s: %s\n", prefix, role, m.Text)
 		default:
-			fmt.Fprintf(&b, "\n%s: [attachment]\n%s\n", role, attachText)
+			fmt.Fprintf(&b, "\n%s%s: [attachment]\n%s\n", prefix, role, attachText)
 		}
 	}
 	return b.String()

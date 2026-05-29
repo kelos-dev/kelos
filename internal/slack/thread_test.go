@@ -26,8 +26,8 @@ func TestFormatThreadContext(t *testing.T) {
 	if !strings.Contains(result, "Agent: Working on it") {
 		t.Error("Expected bot message to be labeled as Agent")
 	}
-	if !strings.Contains(result, "User: any updates?") {
-		t.Error("Expected follow-up user message")
+	if !strings.Contains(result, "[TRIGGERING MESSAGE] User: any updates?") {
+		t.Error("Expected last user message to have triggering prefix")
 	}
 	// Empty text message should be skipped
 	if strings.Count(result, "User:") != 2 || strings.Count(result, "Agent:") != 1 {
@@ -43,8 +43,8 @@ func TestFormatThreadContext_BotIDMessage(t *testing.T) {
 
 	result := FormatThreadContext(msgs, "UBOT")
 
-	if !strings.Contains(result, "Agent: Bot response") {
-		t.Error("Expected message with BotID to be labeled as Agent")
+	if !strings.Contains(result, "[TRIGGERING MESSAGE] Agent: Bot response") {
+		t.Error("Expected last message with BotID to be labeled as triggering Agent")
 	}
 }
 
@@ -68,6 +68,9 @@ func TestFormatThreadContext_WithAttachments(t *testing.T) {
 	if !strings.Contains(result, "> Original forwarded message content") {
 		t.Errorf("Expected attachment text to appear blockquoted, got:\n%s", result)
 	}
+	if !strings.Contains(result, "[TRIGGERING MESSAGE] User: <@UBOT> investigate this") {
+		t.Errorf("Expected last message to have triggering prefix, got:\n%s", result)
+	}
 }
 
 func TestFormatThreadContext_AttachmentOnly(t *testing.T) {
@@ -89,6 +92,9 @@ func TestFormatThreadContext_AttachmentOnly(t *testing.T) {
 	if !strings.Contains(result, "> Forwarded without commentary") {
 		t.Errorf("Expected attachment text to appear, got:\n%s", result)
 	}
+	if !strings.Contains(result, "[TRIGGERING MESSAGE] User: <@UBOT> look at this") {
+		t.Errorf("Expected last message to have triggering prefix, got:\n%s", result)
+	}
 }
 
 func TestFormatThreadContext_AttachmentWithPretext(t *testing.T) {
@@ -104,8 +110,8 @@ func TestFormatThreadContext_AttachmentWithPretext(t *testing.T) {
 
 	result := FormatThreadContext(msgs, "UBOT")
 
-	if !strings.Contains(result, "User: Check this out") {
-		t.Error("Expected user text")
+	if !strings.Contains(result, "[TRIGGERING MESSAGE] User: Check this out") {
+		t.Errorf("Expected triggering prefix on single message, got:\n%s", result)
 	}
 	if !strings.Contains(result, "Message from #general") {
 		t.Errorf("Expected pretext to appear, got:\n%s", result)
@@ -127,6 +133,9 @@ func TestFormatThreadContext_FallbackOnly(t *testing.T) {
 
 	result := FormatThreadContext(msgs, "UBOT")
 
+	if !strings.Contains(result, "[TRIGGERING MESSAGE] User: [attachment]") {
+		t.Errorf("Expected triggering prefix on attachment-only message, got:\n%s", result)
+	}
 	if !strings.Contains(result, "> Fallback text for unsupported attachment") {
 		t.Errorf("Expected fallback text when no primary text, got:\n%s", result)
 	}

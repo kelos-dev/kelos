@@ -199,3 +199,6 @@ jobs:
 
       - name: Apply self-development resources
         run: kubectl apply -f self-development/ -n "${KELOS_NAMESPACE}"
+
+      - name: Apply kanon-development resources
+        run: kubectl apply -f kanon-development/ -n "${KELOS_NAMESPACE}"

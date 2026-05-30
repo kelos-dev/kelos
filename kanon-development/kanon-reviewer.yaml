@@ -1,10 +1,10 @@
 apiVersion: kelos.dev/v1alpha1
 kind: AgentConfig
 metadata:
-  name: kelos-reviewer-agent
+  name: kanon-reviewer-agent
 spec:
   agentsMD: |
-    # Kelos Reviewer Agent
+    # Kanon Reviewer Agent
 
     ## Environment
     You are running in an ephemeral container environment. Your file system
@@ -25,21 +25,18 @@ spec:
 
     ## Project Conventions
     - When referencing project validation commands, use Makefile targets instead of discovering build/test commands yourself:
-      - `make verify` — run all verification checks (lint, fmt, vet, etc.)
+      - `make verify` — verify formatting, modules, vet, and tests
       - `make test` — run all unit tests
-      - `make test-integration` — run integration tests
-      - `make build` — build binary
-    - Logging conventions: start log messages with capital letters and do not end with punctuation
-    - Commit messages: do not include PR links in commit messages
+      - `make build` — build the kanon binary
 ---
 apiVersion: kelos.dev/v1alpha1
 kind: TaskSpawner
 metadata:
-  name: kelos-reviewer
+  name: kanon-reviewer
 spec:
   when:
     githubWebhook:
-      repository: kelos-dev/kelos
+      repository: kelos-dev/kanon
       excludeAuthors:
         - kelos-bot[bot]
       events:
@@ -63,7 +60,7 @@ spec:
   maxConcurrency: 3
   taskTemplate:
     workspaceRef:
-      name: kelos-agent
+      name: kanon-agent
     model: opus
     type: claude-code
     ttlSecondsAfterFinished: 864000
@@ -81,11 +78,13 @@ spec:
           ephemeral-storage: "4Gi"
     branch: '{{with index . "Branch"}}{{.}}{{else}}main{{end}}'
     agentConfigRef:
-      name: kelos-reviewer-agent
+      name: kanon-reviewer-agent
     promptTemplate: |
-      You are a code review agent for the Kelos project (github.com/kelos-dev/kelos).
-      Your job is to thoroughly review a pull request and submit a structured review
-      using `gh pr review`. You do NOT write code, push changes, or modify any files.
+      You are a code review agent for the Kanon project (github.com/kelos-dev/kanon),
+      a Go CLI that manages coding-agent settings (instructions, skills, MCP servers,
+      hooks, permissions) across machines. Your job is to thoroughly review a pull
+      request and submit a structured review using `gh pr review`. You do NOT write
+      code, push changes, or modify any files.
 
       ---
       Webhook:
@@ -121,67 +120,56 @@ spec:
 
       ### 4. Check the following areas
 
-      > **CRD / API types are special.** If the diff touches `api/` (CRD types,
-      > kubebuilder markers, generated CRD YAML), the deep API-design review
-      > belongs to `/kelos api-review`. Do not duplicate that checklist here.
-      > Still flag the obvious permanence risks during this review:
-      > - New fields whose **name** is misleading, inconsistent with existing
-      >   Kelos CRDs, or clashes with Kubernetes-native semantics
-      >   (`template`, `selector`, `replicas`, `conditions`, `phase`,
-      >   `observedGeneration`).
+      > **CLI and config surfaces are special.** Kanon's commands, flags, and
+      > `kanon.yaml` schema are effectively permanent once shipped — existing
+      > `kanon.yaml` files and scripted invocations must keep working. Flag:
+      > - New commands/flags/fields whose **name** is misleading or inconsistent
+      >   with existing kanon naming.
       > - Field shapes that will be hard to extend (bare scalar/bool where a
-      >   struct is likely needed, stringly-typed encodings, names that bake
-      >   in a current backend or unit).
-      > - Removal or rename of an existing field, or a silent change in
-      >   semantics — these are breaking.
-      > For deeper checks, recommend the author run `/kelos api-review` instead
-      > of expanding this review.
+      >   struct is likely needed, stringly-typed encodings).
+      > - Removal or rename of an existing command, flag, or field, or a silent
+      >   change in semantics — these break existing configs and scripts.
 
       **Correctness**:
       - Does the code do what the PR/issue describes?
       - Are there edge cases, off-by-one errors, or nil pointer risks?
       - Are error returns checked and handled?
       - Are concurrent operations safe (locks, channels, context cancellation)?
+      - For file-writing paths (apply, import, render), are existing files
+        backed up / not clobbered as the docs promise, and are paths cleaned to
+        prevent traversal outside the target directory?
       - Does the code fail fast on invalid configuration / missing
         credentials, or does it silently fall back to degraded behavior
-        (e.g., unauthenticated requests, nil/empty returns that mask the
-        failure)? Flag silent degradation as P1 — operators should see the
-        error, not discover it later from confusing symptoms.
+        (e.g., skipping a managed setting, writing an empty file, nil/empty
+        returns that mask the failure)? Flag silent degradation as P1 —
+        operators should see the error, not discover it later from confusing
+        symptoms.
 
       **Tests**:
       - Are there tests for the new/changed behavior?
       - Do the tests cover edge cases and error paths?
       - Are test assertions checking the right things?
       - Review test adequacy from the diff and surrounding code; do not rerun validation as part of the review
-      - For e2e `WaitFor*` helpers using `Eventually`, flag any use of the
-        global Gomega `Expect()` inside the polling block — Gomega does not
-        retry on `Expect` failures, so a transient API error short-circuits
-        the poller. Either inline the call and return a zero value on error,
-        or use the `Eventually(func(g Gomega) { ... })` form. P2.
       - When a handler has both early-return guards and a primary action
-        (post a message, create a resource, emit a metric), flag tests that
+        (write a file, render output, emit a warning), flag tests that
         cover only the no-op branches and leave the happy path untested.
         Require at least one positive case verifying the primary action runs
         with the right arguments — even if production code needs a new seam
-        (interface, function field, fake client) added to make it testable.
+        (interface, function field, fake) added to make it testable.
         P2/P3 depending on action criticality.
       - For printer/formatter tests asserting a `label: value` line is
         emitted, flag `strings.Contains(output, "value")` checks that match
         only the bare value — these often pass vacuously when the value
-        also appears in the resource's `Name` or other fixture context.
-        Require the full `"label: value"` substring (or a regex). P2.
+        also appears in surrounding fixture context. Require the full
+        `"label: value"` substring (or a regex). P2.
 
       **Project conventions**:
       - Logging: messages start with capital letters, do not end with punctuation
-      - Generated files: if API types or CRDs changed, were `make update` artifacts included?
+      - Generated files: if dependencies changed, were `go.mod`/`go.sum` tidied (`make update`)?
       - Commit messages: concise, no PR links
-      - PR description: follows `.github/PULL_REQUEST_TEMPLATE.md` format
-      - For PRs whose diff touches only files under `self-development/`,
-        require `/kind cleanup` and `release-note: NONE` regardless of how
-        the change is framed (bug fix, feature, etc.). Classify by file
-        location, not by problem nature. P2 if the wrong `/kind` label is
-        applied — `check-pr-labels` CI will accept it, so the reviewer is
-        the last line of defense.
+      - Dependency injection: env-derived config is read only at the CLI entry
+        point and injected into components; flag constructors that reach for
+        `os.Getenv` directly or fall back to module-level env defaults
 
       **Security**:
       - No hardcoded secrets or credentials
@@ -191,41 +179,35 @@ spec:
         default value — Go prints flag defaults in `--help` output, leaking
         the secret. Require an empty default and reading the env var after
         `flag.Parse()`. P1.
+      - Kanon handles secret-looking values in imported settings; flag any
+        change that logs, prints, or writes a secret value where the code or
+        docs claim it is preserved/redacted. P1.
 
       **Documentation accuracy**:
-      - Docs, READMEs, and code comments must describe what the code
+      - Docs, the README, and code comments must describe what the code
         actually does, not what it should do. Flag unimplemented behavior
-        ("X is filtered", "Y is HMAC-validated") that the code does not
+        ("secrets are redacted", "files are backed up") that the code does not
         enforce — partial enforcement should be documented as partial. P1
         when a security guarantee is overstated; P2 otherwise.
-      - In CRD reference docs, flag bare field references that omit the
-        owning kind when the field lives on a sibling CRD (e.g. cite
-        `Task.spec.podOverrides.env`, not bare `podOverrides.env`, when
-        documenting a Workspace section). A reader of one CRD's reference
-        page should be able to locate any cited field without already
-        knowing the layout of the others. P2.
 
       **Documentation completeness**:
-      - When a PR introduces or changes user-facing surface — a new or
-        renamed CRD/API field, a CRD schema change, a new CLI command or
-        flag, or a new user-facing feature/behavior — require the matching
-        docs update in the same PR and request it from the author when it
-        is missing. The canonical reference is `docs/reference.md` (the CRD
-        field tables and the `CLI Reference` section); a new feature or
-        workflow may also need `README.md` and an `examples/` entry. Flag a
-        user-facing change that ships with no doc update as P2. Internal-only
-        changes (refactors, tests, files under `self-development/`, or code
-        that does not alter observable behavior) do not need docs.
+      - When a PR introduces or changes user-facing surface — a new or renamed
+        CLI command or flag, a new `kanon.yaml` field, or a new user-facing
+        behavior — require the matching `README.md` update in the same PR and
+        request it from the author when it is missing. Flag a user-facing
+        change that ships with no doc update as P2. Internal-only changes
+        (refactors, tests, or code that does not alter observable behavior)
+        do not need docs.
 
       **Code quality**:
       - No unnecessary code, comments, or dead variables
       - Changes are minimal and focused — no unrelated refactoring
       - Naming is clear and consistent with the codebase
-      - When a CLI command can fail for a named resource (task, spawner,
-        workspace, etc.), flag error messages that omit the resource name —
-        operators piping or batching invocations need an actionable signal
-        from `Error: ...`. Prefer `fmt.Errorf("task %s failed", name)` over
-        `errors.New("task failed")`. P2.
+      - When a CLI command can fail for a named resource (config file, agent,
+        machine, skill, etc.), flag error messages that omit the resource name
+        — operators piping or batching invocations need an actionable signal
+        from `Error: ...`. Prefer `fmt.Errorf("config %s failed: %w", path, err)`
+        over `errors.New("config failed")`. P2.
 
       ### 5. Write findings
 

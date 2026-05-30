@@ -1,0 +1,139 @@
+apiVersion: kelos.dev/v1alpha1
+kind: AgentConfig
+metadata:
+  name: kanon-workers-agent
+spec:
+  agentsMD: |
+    # Kanon Worker Agent
+
+    Kanon (github.com/kelos-dev/kanon) is a Go CLI that manages coding-agent
+    settings (instructions, skills, MCP servers, hooks, permissions) across
+    multiple machines.
+
+    ## Environment
+    You are running in an ephemeral container environment. Your file system
+    changes disappear after the task completes. Persist work by creating PRs,
+    issues, or comments.
+
+    ## Identity
+    - When commenting on issues or PRs, always start with "🤖 **Kelos Worker Agent** @gjkim42\n\n"
+      so it is clearly distinguishable from human comments and triggers a notification
+
+    ## Standards
+    - Do not create duplicate issues — check existing issues first with `gh issue list`
+    - Keep changes minimal and focused
+
+    ## Project Conventions
+    - Use Makefile targets instead of discovering build/test commands yourself:
+      - `make verify` — verify formatting, modules, vet, and tests
+      - `make update` — run formatters and update module metadata
+      - `make test` — run all unit tests
+      - `make build` — build the kanon binary
+---
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: kanon-workers
+spec:
+  when:
+    githubWebhook:
+      repository: kelos-dev/kanon
+      excludeAuthors:
+        - kelos-bot[bot]
+      events:
+        - issue_comment
+      filters:
+        - event: issue_comment
+          action: created
+          bodyPattern: /kelos pick-up
+          commentOn: Issue
+          state: open
+          author: gjkim42
+      reporting:
+        enabled: true
+  maxConcurrency: 8
+  taskTemplate:
+    workspaceRef:
+      name: kanon-agent
+    model: opus
+    type: claude-code
+    ttlSecondsAfterFinished: 864000
+    credentials:
+      type: oauth
+      secretRef:
+        name: kelos-credentials
+    podOverrides:
+      resources:
+        requests:
+          cpu: "250m"
+          memory: "512Mi"
+          ephemeral-storage: "4Gi"
+        limits:
+          ephemeral-storage: "4Gi"
+      env:
+        - name: GIT_AUTHOR_NAME
+          value: "Gunju Kim"
+        - name: GIT_AUTHOR_EMAIL
+          value: "gjkim042@gmail.com"
+        - name: GIT_COMMITTER_NAME
+          value: "Gunju Kim"
+        - name: GIT_COMMITTER_EMAIL
+          value: "gjkim042@gmail.com"
+    branch: "kanon-task-{{.Number}}"
+    agentConfigRef:
+      name: kanon-workers-agent
+    promptTemplate: |
+      You are a coding agent. You either
+      - create a PR to fix the issue
+      - update an existing PR to fix the issue
+      - comment on the issue or the PR if you cannot fix it
+
+      Webhook:
+      - Event: {{.Event}}
+      - Action: {{.Action}}
+      - Sender: {{.Sender}}
+      - URL: {{.URL}}
+
+      Task:
+      - 0. Refresh the latest issue state:
+        - Re-read the issue and all comments: `gh issue view {{.Number}} --comments`
+      - 1. Set up your working branch. Run this exactly:
+        ```
+        git fetch --unshallow || true; git fetch origin main; git rebase origin/main
+        ```
+      - 2. Check if a PR already exists for branch kanon-task-{{.Number}}.
+
+      If a PR already exists:
+      - 3a. Read ALL review comments and conversation on the PR (gh pr view, gh api for review comments).
+        - Also read ALL comments on the linked issue (gh issue view {{.Number}} --comments), not just the PR.
+      - 4a. Read the existing diff (git diff main...HEAD) to understand what has already been done. Do NOT start over or rewrite from scratch.
+      - 5a. Make only the incremental changes needed to address review feedback or remaining issues. Preserve existing work.
+      - 6a. Commit and push your changes to origin kanon-task-{{.Number}}.
+      - 7a. /review the PR locally to verify your changes address the feedback. If issues are found, fix them, run `make verify` and `make test`, commit and push, then /review again. Repeat until the local review passes.
+      - 8a. Update the PR title and description to reflect the final diff. The PR body MUST contain a standard closing keyword reference on its own line (e.g., `Fixes #{{.Number}}` or `Closes #{{.Number}}`). Do not embed the issue number in natural language. Ensure the PR has the label "generated-by-kelos" (use `gh pr edit kanon-task-{{.Number}} --add-label generated-by-kelos` if missing).
+      - 9a. After pushing, actively check CI status with `gh pr checks`. If any checks fail, investigate the failures, fix them, commit and push, then check again.
+      - 10a. If the branch has more than one commit (`[ "$(git rev-list --count origin/main..HEAD)" -gt 1 ]`), squash all commits on the branch into a single commit before requesting external review. Use `git reset --soft $(git merge-base HEAD origin/main)` followed by `git commit` and `git push --force-with-lease origin kanon-task-{{.Number}}`. Do not use `git rebase -i` — interactive commands are not supported. Skip the squash and force-push entirely if the branch is already a single commit, to avoid an unnecessary CI re-run.
+      - 11a. After the squash + force-push (if any), actively check CI status with `gh pr checks` again. If any checks fail, investigate the failures, fix them, commit and push, then check again. Do not request external review until CI passes. Then request a review by posting a comment on the PR: `gh pr comment kanon-task-{{.Number}} --body "/kelos review"`. The reviewer agent will post its findings asynchronously as a PR review.
+
+      If no PR exists:
+      - 3b. Investigate the issue #{{.Number}}.
+        - Read ALL comments on the issue (gh issue view {{.Number}} --comments), including maintainer feedback and linked issues/PRs.
+        - If previous PRs for this issue were closed, read their reviews to understand why before choosing your approach.
+        - Search the codebase for existing constants, types, and patterns before creating new ones. Do not duplicate definitions.
+        - Only implement what the issue explicitly asks for. If you discover related improvements, create separate issues for them.
+      - 4b. Create a commit that fixes the issue.
+      - 5b. Push your branch to origin kanon-task-{{.Number}}.
+      - 6b. Create a PR with the label "generated-by-kelos" (use `gh pr create --label generated-by-kelos`).
+      - 7b. /review the PR locally to verify your work. If issues are found, fix them, run `make verify` and `make test`, commit and push, then /review again. Repeat until the local review passes.
+      - 8b. Update the PR title and description to reflect the final diff. The PR body MUST contain a standard closing keyword reference on its own line (e.g., `Fixes #{{.Number}}` or `Closes #{{.Number}}`). Do not embed the issue number in natural language.
+      - 9b. After pushing, actively check CI status with `gh pr checks`. If any checks fail, investigate the failures, fix them, commit and push, then check again.
+      - 10b. If the branch has more than one commit (`[ "$(git rev-list --count origin/main..HEAD)" -gt 1 ]`), squash all commits on the branch into a single commit before requesting external review. Use `git reset --soft $(git merge-base HEAD origin/main)` followed by `git commit` and `git push --force-with-lease origin kanon-task-{{.Number}}`. Do not use `git rebase -i` — interactive commands are not supported. Skip the squash and force-push entirely if the branch is already a single commit, to avoid an unnecessary CI re-run.
+      - 11b. After the squash + force-push (if any), actively check CI status with `gh pr checks` again. If any checks fail, investigate the failures, fix them, commit and push, then check again. Do not request external review until CI passes. Then request a review by posting a comment on the PR: `gh pr comment kanon-task-{{.Number}} --body "/kelos review"`. The reviewer agent will post its findings asynchronously as a PR review.
+
+      Post-checklist:
+      - Post a plain-English status comment on the issue (`gh issue comment {{.Number}} --body "..."`) for any of the following situations, explaining what happened:
+        - The PR is ready for review.
+        - You commented on the issue or the PR for more information.
+        - You cannot make any progress on the issue, explain why.
+      - If you find anything worth considering (e.g. bugs, improvements, follow-up work), create a new issue:
+        - gh issue create --title "<title>" --body "<description>" --label generated-by-kelos

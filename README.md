@@ -487,7 +487,7 @@ See the [Integration guide](docs/integration.md) for examples of both approaches
 
 Kelos develops Kelos. TaskSpawners run 24/7, each handling a different part of the development lifecycle — triaging issues, planning implementations, fixing bugs, responding to PR feedback, reviewing code, squashing commits, updating agent images, testing DX, brainstorming improvements, and tuning their own prompts and configs.
 
-See the [`self-development/` README](self-development/README.md) for the full pipeline: manifests, triggers, models, and setup instructions.
+See the [`self-development/` README](self-development/README.md) for the full pipeline: manifests, triggers, models, and setup instructions. The same pattern develops the sibling [`kelos-dev/kanon`](https://github.com/kelos-dev/kanon) project — see [`kanon-development/`](kanon-development/README.md).
 
 ## Reference
 

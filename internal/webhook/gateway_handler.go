@@ -110,9 +110,9 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	source, err := gatewaySourceForType(gateway.Spec.Type)
+	source, err := gatewaySource(&gateway.Spec)
 	if err != nil {
-		log.Error(err, "Unsupported gateway type", "type", gateway.Spec.Type)
+		log.Error(err, "Invalid gateway configuration")
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -169,8 +169,10 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		spawnersListed = true
 		// The spawners are already scoped by gatewayRef, so derive the dedup id
-		// from their fieldMapping regardless of the spawner's source name.
-		deliveryID = extractGatewayGenericDeliveryID(name, body, scopedSpawners)
+		// from their fieldMapping regardless of the spawner's source name. The
+		// prefix is namespace-qualified so same-named gateways in different
+		// namespaces do not collide in the process-wide delivery cache.
+		deliveryID = extractGatewayGenericDeliveryID(namespace+"/"+name, body, scopedSpawners)
 		log.Info("WARNING: accepting generic webhook without signature verification", "deliveryID", deliveryID)
 	}
 
@@ -217,6 +219,10 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // handlerForGateway builds a per-request WebhookHandler that shares the gateway
 // handler's task builder and delivery cache.
 func (g *GatewayHandler) handlerForGateway(gw *v1alpha1.WebhookGateway, source WebhookSource, secret []byte, tokenResolver func(context.Context) (string, error)) *WebhookHandler {
+	var apiBaseURL string
+	if gw.Spec.GitHub != nil {
+		apiBaseURL = gw.Spec.GitHub.APIBaseURL
+	}
 	return &WebhookHandler{
 		client:           g.client,
 		source:           source,
@@ -224,7 +230,7 @@ func (g *GatewayHandler) handlerForGateway(gw *v1alpha1.WebhookGateway, source W
 		taskBuilder:      g.taskBuilder,
 		secret:           secret,
 		deliveryCache:    g.deliveryCache,
-		githubAPIBaseURL: gw.Spec.APIBaseURL,
+		githubAPIBaseURL: apiBaseURL,
 		tokenResolver:    tokenResolver,
 		gatewayName:      gw.Name,
 	}
@@ -266,45 +272,61 @@ func (g *GatewayHandler) listGatewayScopedSpawners(ctx context.Context, namespac
 	return spawners, nil
 }
 
-// resolveGatewaySecret reads the HMAC secret for a github/linear gateway.
+// resolveGatewaySecret reads the inbound HMAC secret for a github/linear gateway.
 func (g *GatewayHandler) resolveGatewaySecret(ctx context.Context, gw *v1alpha1.WebhookGateway) ([]byte, error) {
-	if gw.Spec.SecretRef == nil {
+	ref := gatewaySecretRef(&gw.Spec)
+	if ref == nil {
 		return nil, fmt.Errorf("gateway %s/%s has no secretRef", gw.Namespace, gw.Name)
 	}
 	var secret corev1.Secret
-	if err := g.client.Get(ctx, types.NamespacedName{Namespace: gw.Namespace, Name: gw.Spec.SecretRef.Name}, &secret); err != nil {
-		return nil, fmt.Errorf("fetching gateway secret %s: %w", gw.Spec.SecretRef.Name, err)
+	if err := g.client.Get(ctx, types.NamespacedName{Namespace: gw.Namespace, Name: ref.Name}, &secret); err != nil {
+		return nil, fmt.Errorf("fetching gateway secret %s: %w", ref.Name, err)
 	}
 	value := secret.Data[gatewayWebhookSecretKey]
 	if len(value) == 0 {
-		return nil, fmt.Errorf("gateway secret %s is missing key %q", gw.Spec.SecretRef.Name, gatewayWebhookSecretKey)
+		return nil, fmt.Errorf("gateway secret %s is missing key %q", ref.Name, gatewayWebhookSecretKey)
 	}
 	return value, nil
 }
 
-// resolveGatewayTokenResolver builds a GitHub token resolver from the gateway's
-// credentialsRef. Returns nil when no credentialsRef is configured.
+// resolveGatewayTokenResolver builds a GitHub token resolver from a github
+// gateway's credentialsRef. Returns nil when not a github gateway or no
+// credentialsRef is configured.
 func (g *GatewayHandler) resolveGatewayTokenResolver(ctx context.Context, gw *v1alpha1.WebhookGateway) (func(context.Context) (string, error), error) {
-	if gw.Spec.CredentialsRef == nil {
+	if gw.Spec.GitHub == nil || gw.Spec.GitHub.CredentialsRef == nil {
 		return nil, nil
 	}
 	var secret corev1.Secret
-	if err := g.client.Get(ctx, types.NamespacedName{Namespace: gw.Namespace, Name: gw.Spec.CredentialsRef.Name}, &secret); err != nil {
-		return nil, fmt.Errorf("fetching gateway credentials %s: %w", gw.Spec.CredentialsRef.Name, err)
+	if err := g.client.Get(ctx, types.NamespacedName{Namespace: gw.Namespace, Name: gw.Spec.GitHub.CredentialsRef.Name}, &secret); err != nil {
+		return nil, fmt.Errorf("fetching gateway credentials %s: %w", gw.Spec.GitHub.CredentialsRef.Name, err)
 	}
-	return githubapp.NewSecretTokenResolver(secret.Data, gw.Spec.APIBaseURL)
+	return githubapp.NewSecretTokenResolver(secret.Data, gw.Spec.GitHub.APIBaseURL)
 }
 
-// gatewaySourceForType maps a WebhookGateway type to the internal WebhookSource.
-func gatewaySourceForType(t v1alpha1.WebhookGatewayType) (WebhookSource, error) {
-	switch t {
-	case v1alpha1.WebhookGatewayTypeGitHub:
+// gatewaySource maps a WebhookGateway spec to the internal WebhookSource based on
+// which provider sub-struct is set.
+func gatewaySource(spec *v1alpha1.WebhookGatewaySpec) (WebhookSource, error) {
+	switch {
+	case spec.GitHub != nil:
 		return GitHubSource, nil
-	case v1alpha1.WebhookGatewayTypeLinear:
+	case spec.Linear != nil:
 		return LinearSource, nil
-	case v1alpha1.WebhookGatewayTypeGeneric:
+	case spec.Generic != nil:
 		return GenericSource, nil
 	default:
-		return "", fmt.Errorf("unsupported gateway type %q", t)
+		return "", fmt.Errorf("no source configured: exactly one of github, linear, or generic is required")
+	}
+}
+
+// gatewaySecretRef returns the inbound HMAC secretRef for the gateway's source,
+// or nil for generic gateways.
+func gatewaySecretRef(spec *v1alpha1.WebhookGatewaySpec) *v1alpha1.SecretReference {
+	switch {
+	case spec.GitHub != nil:
+		return &spec.GitHub.SecretRef
+	case spec.Linear != nil:
+		return &spec.Linear.SecretRef
+	default:
+		return nil
 	}
 }

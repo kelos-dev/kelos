@@ -1,7 +1,7 @@
 # A webhook TaskSpawner bound to the GitHub Enterprise gateway via gatewayRef.
 # The gateway authenticates inbound deliveries and fans out only to spawners in
 # its own namespace that reference it. Point the GitHub Enterprise repository
-# webhook at the gateway's path (status.url on the "ghe" gateway:
+# webhook at the gateway's path (status.path on the "ghe" gateway:
 # /webhook/default/ghe), relative to the configured webhook host.
 apiVersion: kelos.dev/v1alpha1
 kind: TaskSpawner

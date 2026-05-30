@@ -4,13 +4,15 @@ A `WebhookGateway` is a per-channel authentication and routing boundary for
 webhook-driven TaskSpawners. Instead of one "universal" webhook server with a
 single shared `WEBHOOK_SECRET` and a single GitHub backend, each gateway:
 
+- is configured by exactly one provider sub-struct — `spec.github`,
+  `spec.linear`, or `spec.generic` — whose presence selects the source;
 - owns one inbound path, `/webhook/<namespace>/<name>` (surfaced in
-  `status.url`);
-- carries its own HMAC secret (`secretRef`) used to verify inbound deliveries
-  (github/linear);
-- for `github`, carries its own outbound API base URL (`apiBaseURL`) and
-  credentials (`credentialsRef`) used for pull-request file enrichment and
-  status reporting;
+  `status.path`);
+- carries its own HMAC secret (`github.secretRef` / `linear.secretRef`) used to
+  verify inbound deliveries;
+- for `github`, carries its own outbound API base URL (`github.apiBaseURL`) and
+  credentials (`github.credentialsRef`) used for pull-request file enrichment
+  and status reporting;
 - fans out only to TaskSpawners **in its own namespace** that reference it via
   `when.<source>Webhook.gatewayRef`.
 
@@ -46,7 +48,7 @@ kubectl create secret generic ghe-credentials \
 
 Repeat for the `github-com-webhook` and `github-com-credentials` Secrets.
 
-> The `credentialsRef` Secret is for the webhook server's **outbound** API calls
+> The `github.credentialsRef` Secret is for the webhook server's **outbound** API calls
 > (PR-file enrichment and status reporting). Task execution (cloning and pushing
 > the repo) uses the **Workspace's** `secretRef`, which is configured separately
 > on the referenced `Workspace`.
@@ -71,23 +73,23 @@ webhookServer:
 ```sh
 kubectl apply -f webhookgateway.yaml
 kubectl get webhookgateways
-# NAME         TYPE     URL                      PHASE
-# github-com   github   /webhook/default/github-com   Authenticated
-# ghe          github   /webhook/default/ghe          Authenticated
+# NAME         PATH                          PHASE
+# github-com   /webhook/default/github-com   Authenticated
+# ghe          /webhook/default/ghe          Authenticated
 
 kubectl apply -f taskspawner.yaml
 ```
 
 Configure each GitHub instance's repository webhook to POST to the gateway's
-`status.url`, relative to your configured webhook host — for example
+`status.path`, relative to your configured webhook host — for example
 `https://webhooks.example.com/webhook/default/ghe` — using the matching webhook
-secret. The gateway verifies the HMAC signature with that gateway's `secretRef`
-and creates a Task for the `ghe-comment-responder` spawner.
+secret. The gateway verifies the HMAC signature with that gateway's
+`github.secretRef` and creates a Task for the `ghe-comment-responder` spawner.
 
 ## Notes
 
-- `apiBaseURL` and `credentialsRef` are only valid for `github` gateways.
-- `linear` gateways use `secretRef` only.
+- `apiBaseURL` and `credentialsRef` live under `spec.github` (GitHub-only).
+- `linear` gateways carry only `linear.secretRef`.
 - `generic` gateways are accepted but **not signature-verified** in this version
   (the gateway's `status.phase` is `Unauthenticated`); restrict access at the
   network layer until a per-provider verification scheme is added.

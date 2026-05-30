@@ -131,21 +131,21 @@ func (r *reportingReconciler) resolveReportingCreds(ctx context.Context, task *k
 	if err := r.Get(ctx, types.NamespacedName{Namespace: task.Namespace, Name: gwName}, &gw); err != nil {
 		return nil, "", fmt.Errorf("fetching webhook gateway %s: %w", gwName, err)
 	}
-	if gw.Spec.CredentialsRef == nil {
-		return nil, "", fmt.Errorf("webhook gateway %s has no credentialsRef for reporting", gwName)
+	if gw.Spec.GitHub == nil || gw.Spec.GitHub.CredentialsRef == nil {
+		return nil, "", fmt.Errorf("webhook gateway %s has no github.credentialsRef for reporting", gwName)
 	}
 	var secret corev1.Secret
-	if err := r.Get(ctx, types.NamespacedName{Namespace: task.Namespace, Name: gw.Spec.CredentialsRef.Name}, &secret); err != nil {
-		return nil, "", fmt.Errorf("fetching webhook gateway credentials %s: %w", gw.Spec.CredentialsRef.Name, err)
+	if err := r.Get(ctx, types.NamespacedName{Namespace: task.Namespace, Name: gw.Spec.GitHub.CredentialsRef.Name}, &secret); err != nil {
+		return nil, "", fmt.Errorf("fetching webhook gateway credentials %s: %w", gw.Spec.GitHub.CredentialsRef.Name, err)
 	}
-	resolver, err := githubapp.NewSecretTokenResolver(secret.Data, gw.Spec.APIBaseURL)
+	resolver, err := githubapp.NewSecretTokenResolver(secret.Data, gw.Spec.GitHub.APIBaseURL)
 	if err != nil {
 		return nil, "", fmt.Errorf("building token resolver for gateway %s: %w", gwName, err)
 	}
 	if resolver == nil {
 		return nil, "", fmt.Errorf("webhook gateway %s credentials contain no usable token", gwName)
 	}
-	return resolver, gw.Spec.APIBaseURL, nil
+	return resolver, gw.Spec.GitHub.APIBaseURL, nil
 }
 
 func (r *reportingReconciler) SetupWithManager(mgr ctrl.Manager) error {

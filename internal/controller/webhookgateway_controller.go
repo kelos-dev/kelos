@@ -30,7 +30,7 @@ type WebhookGatewayReconciler struct {
 // +kubebuilder:rbac:groups=kelos.dev,resources=webhookgateways,verbs=get;list;watch
 // +kubebuilder:rbac:groups=kelos.dev,resources=webhookgateways/status,verbs=get;update;patch
 
-// Reconcile derives status.url and the authentication phase for a WebhookGateway.
+// Reconcile derives status.path and the authentication phase for a WebhookGateway.
 func (r *WebhookGatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
@@ -43,7 +43,7 @@ func (r *WebhookGatewayReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
-	url := "/webhook/" + gw.Namespace + "/" + gw.Name
+	path := "/webhook/" + gw.Namespace + "/" + gw.Name
 
 	phase, message, requeue, err := r.evaluate(ctx, &gw)
 	if err != nil {
@@ -54,7 +54,7 @@ func (r *WebhookGatewayReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// a newer generation onto status derived from an older spec.
 	observedGen := gw.Generation
 
-	if gw.Status.URL != url || gw.Status.Phase != phase || gw.Status.Message != message ||
+	if gw.Status.Path != path || gw.Status.Phase != phase || gw.Status.Message != message ||
 		gw.Status.ObservedGeneration != observedGen {
 		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 			if getErr := r.Get(ctx, req.NamespacedName, &gw); getErr != nil {
@@ -65,7 +65,7 @@ func (r *WebhookGatewayReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				// reconcile is already queued for the new generation.
 				return nil
 			}
-			gw.Status.URL = url
+			gw.Status.Path = path
 			gw.Status.Phase = phase
 			gw.Status.Message = message
 			gw.Status.ObservedGeneration = observedGen
@@ -86,35 +86,49 @@ func (r *WebhookGatewayReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 // requeues (requeue=true) when a referenced Secret is not yet present so the
 // gateway becomes Authenticated once the Secret is created.
 func (r *WebhookGatewayReconciler) evaluate(ctx context.Context, gw *kelosv1alpha1.WebhookGateway) (kelosv1alpha1.WebhookGatewayPhase, string, bool, error) {
-	if gw.Spec.Type == kelosv1alpha1.WebhookGatewayTypeGeneric {
+	switch {
+	case gw.Spec.Generic != nil:
 		return kelosv1alpha1.WebhookGatewayPhaseUnauthenticated,
 			"Generic gateways have no verification scheme; inbound deliveries are accepted without authentication. Restrict access at the network layer.",
 			false, nil
-	}
 
-	// github and linear require an HMAC secret to verify inbound deliveries.
-	if gw.Spec.SecretRef == nil {
-		return kelosv1alpha1.WebhookGatewayPhaseSecretMissing,
-			"secretRef is required for github and linear gateways", false, nil
-	}
-	if missing, err := r.secretMissing(ctx, gw.Namespace, gw.Spec.SecretRef.Name); err != nil {
-		return "", "", false, err
-	} else if missing {
-		return kelosv1alpha1.WebhookGatewayPhaseSecretMissing,
-			fmt.Sprintf("HMAC secret %q not found", gw.Spec.SecretRef.Name), true, nil
-	}
-
-	// github gateways may also reference outbound API credentials.
-	if gw.Spec.Type == kelosv1alpha1.WebhookGatewayTypeGitHub && gw.Spec.CredentialsRef != nil {
-		if missing, err := r.secretMissing(ctx, gw.Namespace, gw.Spec.CredentialsRef.Name); err != nil {
-			return "", "", false, err
-		} else if missing {
-			return kelosv1alpha1.WebhookGatewayPhaseSecretMissing,
-				fmt.Sprintf("credentials secret %q not found", gw.Spec.CredentialsRef.Name), true, nil
+	case gw.Spec.GitHub != nil:
+		// Inbound HMAC secret, then optionally the outbound API credentials.
+		if phase, msg, requeue, err := r.checkSecret(ctx, gw.Namespace, gw.Spec.GitHub.SecretRef.Name, "HMAC secret"); err != nil || phase != "" {
+			return phase, msg, requeue, err
 		}
-	}
+		if gw.Spec.GitHub.CredentialsRef != nil {
+			if phase, msg, requeue, err := r.checkSecret(ctx, gw.Namespace, gw.Spec.GitHub.CredentialsRef.Name, "credentials secret"); err != nil || phase != "" {
+				return phase, msg, requeue, err
+			}
+		}
+		return kelosv1alpha1.WebhookGatewayPhaseAuthenticated, "", false, nil
 
-	return kelosv1alpha1.WebhookGatewayPhaseAuthenticated, "", false, nil
+	case gw.Spec.Linear != nil:
+		if phase, msg, requeue, err := r.checkSecret(ctx, gw.Namespace, gw.Spec.Linear.SecretRef.Name, "HMAC secret"); err != nil || phase != "" {
+			return phase, msg, requeue, err
+		}
+		return kelosv1alpha1.WebhookGatewayPhaseAuthenticated, "", false, nil
+
+	default:
+		// The CEL "exactly one of" rule should prevent reaching here.
+		return kelosv1alpha1.WebhookGatewayPhaseSecretMissing,
+			"no source configured: exactly one of github, linear, or generic is required", false, nil
+	}
+}
+
+// checkSecret returns a SecretMissing phase (with a requeue) when the named
+// Secret is absent, or an empty phase when it is present.
+func (r *WebhookGatewayReconciler) checkSecret(ctx context.Context, namespace, name, kind string) (kelosv1alpha1.WebhookGatewayPhase, string, bool, error) {
+	missing, err := r.secretMissing(ctx, namespace, name)
+	if err != nil {
+		return "", "", false, err
+	}
+	if missing {
+		return kelosv1alpha1.WebhookGatewayPhaseSecretMissing,
+			fmt.Sprintf("%s %q not found", kind, name), true, nil
+	}
+	return "", "", false, nil
 }
 
 func (r *WebhookGatewayReconciler) secretMissing(ctx context.Context, namespace, name string) (bool, error) {
@@ -151,12 +165,25 @@ func (r *WebhookGatewayReconciler) findGatewaysForSecret(ctx context.Context, ob
 	var requests []reconcile.Request
 	for i := range list.Items {
 		gw := &list.Items[i]
-		if (gw.Spec.SecretRef != nil && gw.Spec.SecretRef.Name == secret.Name) ||
-			(gw.Spec.CredentialsRef != nil && gw.Spec.CredentialsRef.Name == secret.Name) {
+		if gatewayReferencesSecret(gw, secret.Name) {
 			requests = append(requests, reconcile.Request{
 				NamespacedName: types.NamespacedName{Namespace: gw.Namespace, Name: gw.Name},
 			})
 		}
 	}
 	return requests
+}
+
+// gatewayReferencesSecret reports whether the gateway references the named
+// Secret — the inbound HMAC secret or, for github, the outbound credentials.
+func gatewayReferencesSecret(gw *kelosv1alpha1.WebhookGateway, name string) bool {
+	switch {
+	case gw.Spec.GitHub != nil:
+		return gw.Spec.GitHub.SecretRef.Name == name ||
+			(gw.Spec.GitHub.CredentialsRef != nil && gw.Spec.GitHub.CredentialsRef.Name == name)
+	case gw.Spec.Linear != nil:
+		return gw.Spec.Linear.SecretRef.Name == name
+	default:
+		return false
+	}
 }

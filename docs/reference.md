@@ -373,7 +373,7 @@ spec:
 
 A `WebhookGateway` is a per-channel authentication and routing boundary for
 webhook-driven TaskSpawners. It owns one inbound path,
-`/webhook/<namespace>/<name>` (surfaced in `status.url`), verifies inbound
+`/webhook/<namespace>/<name>` (surfaced in `status.path`), verifies inbound
 deliveries against its own secret (github/linear), and fans out only to
 TaskSpawners in its own namespace that reference it via `gatewayRef`. This
 enables per-tenant secrets and multiple GitHub instances (github.com plus GitHub
@@ -381,19 +381,35 @@ Enterprise) without a per-instance Deployment. Enable the gateway server with
 `webhookServer.gatewayServer.enabled` in the Helm chart. See
 [example 14](../examples/14-webhookgateway).
 
+Exactly one provider sub-struct (`spec.github`, `spec.linear`, or `spec.generic`)
+must be set; the one that is present selects the source.
+
 | Field | Description | Required |
 | --- | --- | --- |
-| `spec.type` | Webhook source: `github`, `linear`, or `generic`. Selects the signature scheme used to verify inbound deliveries | Yes |
-| `spec.secretRef.name` | Secret holding the HMAC secret (under a `webhook-secret` key) used to verify inbound deliveries | Yes for `github`/`linear` (CEL-enforced); unused for `generic` |
-| `spec.apiBaseURL` | GitHub API base URL for outbound calls (PR-file enrichment, status reporting, and GitHub App token minting), e.g. `https://ghe.example.com/api/v3`. Defaults to `https://api.github.com`. Only valid for `github` (CEL-enforced) | No |
-| `spec.credentialsRef.name` | Secret holding outbound GitHub API credentials — a `GITHUB_TOKEN` key (PAT) or GitHub App keys (`appID`, `installationID`, `privateKey`). Only valid for `github` (CEL-enforced) | No |
-| `status.url` | Derived inbound path, `/webhook/<namespace>/<name>`, relative to the configured webhook host | — |
+| `spec.github` | GitHub gateway configuration (see below). Set exactly one of `github`/`linear`/`generic` | Conditional |
+| `spec.github.secretRef.name` | Secret holding the inbound HMAC secret (under a `webhook-secret` key) | Yes (for github) |
+| `spec.github.apiBaseURL` | GitHub API base URL for outbound calls (PR-file enrichment, status reporting, and GitHub App token minting), e.g. `https://ghe.example.com/api/v3`. Defaults to `https://api.github.com` | No |
+| `spec.github.credentialsRef.name` | Secret holding outbound GitHub API credentials — a `GITHUB_TOKEN` key (PAT) or GitHub App keys (`appID`, `installationID`, `privateKey`) | No |
+| `spec.linear.secretRef.name` | Secret holding the inbound HMAC secret (under a `webhook-secret` key) | Yes (for linear) |
+| `spec.generic` | Generic gateway configuration (no fields yet; deliveries are accepted without verification) | Conditional |
+| `status.path` | Derived inbound path, `/webhook/<namespace>/<name>`, relative to the configured webhook host | — |
 | `status.phase` | `Authenticated`, `SecretMissing`, or `Unauthenticated` (generic gateways are always `Unauthenticated` until a verification scheme is added) | — |
 
 > `generic` gateways are accepted but **not** signature-verified in this version;
 > restrict access at the network layer. Task execution (clone/push) credentials
 > come from the Workspace's `secretRef`, separate from a gateway's
-> `credentialsRef`.
+> `github.credentialsRef`.
+
+### "Gateway" terminology
+
+Several distinct "gateway" concepts coexist:
+
+| Term | What it is |
+| --- | --- |
+| `WebhookGateway` (CRD) | The per-channel auth/routing resource described above. |
+| `gatewayRef` | The field on a TaskSpawner webhook source that binds it to a `WebhookGateway`. |
+| `Gateway` (gateway.networking.k8s.io) | The Gateway-API ingress object that fronts the webhook server; created by the chart as `kelos-webhook-gateway` when `webhookServer.gateway.enabled`. |
+| `webhookServer.gateway*` (Helm values) | `webhookServer.gateway` configures the Gateway-API `Gateway`/`HTTPRoute`; `webhookServer.gatewayServer` enables the gateway-mode webhook server that serves `WebhookGateway` paths. |
 
 ## Task Status
 

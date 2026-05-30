@@ -52,25 +52,27 @@ func reconcileGateway(t *testing.T, objs ...client.Object) (*kelosv1alpha1.Webho
 func TestWebhookGatewayReconciler_GenericIsUnauthenticated(t *testing.T) {
 	gw := &kelosv1alpha1.WebhookGateway{
 		ObjectMeta: metav1.ObjectMeta{Name: "gen", Namespace: "default"},
-		Spec:       kelosv1alpha1.WebhookGatewaySpec{Type: kelosv1alpha1.WebhookGatewayTypeGeneric},
+		Spec:       kelosv1alpha1.WebhookGatewaySpec{Generic: &kelosv1alpha1.GenericGateway{}},
 	}
 	got, _ := reconcileGateway(t, gw)
 	if got.Status.Phase != kelosv1alpha1.WebhookGatewayPhaseUnauthenticated {
 		t.Errorf("phase = %q, want Unauthenticated", got.Status.Phase)
 	}
-	if got.Status.URL != "/webhook/default/gen" {
-		t.Errorf("url = %q, want /webhook/default/gen", got.Status.URL)
+	if got.Status.Path != "/webhook/default/gen" {
+		t.Errorf("path = %q, want /webhook/default/gen", got.Status.Path)
 	}
 }
 
-func TestWebhookGatewayReconciler_GitHubMissingSecretRef(t *testing.T) {
+func TestWebhookGatewayReconciler_NoSourceConfigured(t *testing.T) {
+	// The CEL "exactly one of" rule rejects this in a real cluster; the fake
+	// client does not enforce CEL, so this exercises the controller's guard.
 	gw := &kelosv1alpha1.WebhookGateway{
-		ObjectMeta: metav1.ObjectMeta{Name: "gh", Namespace: "default"},
-		Spec:       kelosv1alpha1.WebhookGatewaySpec{Type: kelosv1alpha1.WebhookGatewayTypeGitHub},
+		ObjectMeta: metav1.ObjectMeta{Name: "empty", Namespace: "default"},
+		Spec:       kelosv1alpha1.WebhookGatewaySpec{},
 	}
 	got, _ := reconcileGateway(t, gw)
 	if got.Status.Phase != kelosv1alpha1.WebhookGatewayPhaseSecretMissing {
-		t.Errorf("phase = %q, want SecretMissing", got.Status.Phase)
+		t.Errorf("phase = %q, want SecretMissing for no configured source", got.Status.Phase)
 	}
 }
 
@@ -78,8 +80,9 @@ func TestWebhookGatewayReconciler_GitHubSecretAbsentRequeues(t *testing.T) {
 	gw := &kelosv1alpha1.WebhookGateway{
 		ObjectMeta: metav1.ObjectMeta{Name: "gh", Namespace: "default"},
 		Spec: kelosv1alpha1.WebhookGatewaySpec{
-			Type:      kelosv1alpha1.WebhookGatewayTypeGitHub,
-			SecretRef: &kelosv1alpha1.SecretReference{Name: "absent"},
+			GitHub: &kelosv1alpha1.GitHubGateway{
+				SecretRef: kelosv1alpha1.SecretReference{Name: "absent"},
+			},
 		},
 	}
 	got, res := reconcileGateway(t, gw)
@@ -95,8 +98,10 @@ func TestWebhookGatewayReconciler_GitHubAuthenticated(t *testing.T) {
 	gw := &kelosv1alpha1.WebhookGateway{
 		ObjectMeta: metav1.ObjectMeta{Name: "gh", Namespace: "default"},
 		Spec: kelosv1alpha1.WebhookGatewaySpec{
-			Type:      kelosv1alpha1.WebhookGatewayTypeGitHub,
-			SecretRef: &kelosv1alpha1.SecretReference{Name: "gh-secret"},
+			GitHub: &kelosv1alpha1.GitHubGateway{
+				SecretRef:  kelosv1alpha1.SecretReference{Name: "gh-secret"},
+				APIBaseURL: "https://ghe.example.com/api/v3",
+			},
 		},
 	}
 	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "gh-secret", Namespace: "default"}}
@@ -109,13 +114,30 @@ func TestWebhookGatewayReconciler_GitHubAuthenticated(t *testing.T) {
 	}
 }
 
+func TestWebhookGatewayReconciler_LinearAuthenticated(t *testing.T) {
+	gw := &kelosv1alpha1.WebhookGateway{
+		ObjectMeta: metav1.ObjectMeta{Name: "lin", Namespace: "default"},
+		Spec: kelosv1alpha1.WebhookGatewaySpec{
+			Linear: &kelosv1alpha1.LinearGateway{
+				SecretRef: kelosv1alpha1.SecretReference{Name: "lin-secret"},
+			},
+		},
+	}
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "lin-secret", Namespace: "default"}}
+	got, _ := reconcileGateway(t, gw, secret)
+	if got.Status.Phase != kelosv1alpha1.WebhookGatewayPhaseAuthenticated {
+		t.Errorf("phase = %q, want Authenticated", got.Status.Phase)
+	}
+}
+
 func TestWebhookGatewayReconciler_GitHubCredentialsAbsent(t *testing.T) {
 	gw := &kelosv1alpha1.WebhookGateway{
 		ObjectMeta: metav1.ObjectMeta{Name: "gh", Namespace: "default"},
 		Spec: kelosv1alpha1.WebhookGatewaySpec{
-			Type:           kelosv1alpha1.WebhookGatewayTypeGitHub,
-			SecretRef:      &kelosv1alpha1.SecretReference{Name: "gh-secret"},
-			CredentialsRef: &kelosv1alpha1.SecretReference{Name: "absent-creds"},
+			GitHub: &kelosv1alpha1.GitHubGateway{
+				SecretRef:      kelosv1alpha1.SecretReference{Name: "gh-secret"},
+				CredentialsRef: &kelosv1alpha1.SecretReference{Name: "absent-creds"},
+			},
 		},
 	}
 	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "gh-secret", Namespace: "default"}}

@@ -1,31 +1,31 @@
 # WebhookGateway is a per-channel authentication and routing boundary for
-# webhook-driven TaskSpawners. Each gateway owns one inbound path
-# (/webhook/<namespace>/<name>, surfaced in status.url) and, for github/linear,
-# the HMAC secret used to verify deliveries. A TaskSpawner opts in via
-# when.<source>Webhook.gatewayRef.
+# webhook-driven TaskSpawners. The provider sub-struct that is set
+# (github / linear / generic) selects the source and carries its config; each
+# gateway owns one inbound path (/webhook/<namespace>/<name>, surfaced in
+# status.path) and, for github/linear, the HMAC secret used to verify deliveries.
+# A TaskSpawner opts in via when.<source>Webhook.gatewayRef.
 #
 # This example serves two GitHub instances from one gateway server: github.com
 # and a GitHub Enterprise server. Each gateway carries its own webhook secret
-# and, for GitHub, its own outbound API base URL and credentials — so the two
-# instances are fully isolated without running a separate webhook Deployment per
-# instance.
+# and outbound API base URL and credentials — so the two instances are fully
+# isolated without running a separate webhook Deployment per instance.
 apiVersion: kelos.dev/v1alpha1
 kind: WebhookGateway
 metadata:
   name: github-com
   namespace: default
 spec:
-  type: github
-  # Secret holding the HMAC secret configured on the GitHub webhook, under a
-  # "webhook-secret" key.
-  secretRef:
-    name: github-com-webhook
-  # Outbound API credentials for PR-file enrichment and status reporting. The
-  # Secret holds either a GITHUB_TOKEN key (PAT) or GitHub App keys (appID,
-  # installationID, privateKey). apiBaseURL is omitted, so https://api.github.com
-  # is used.
-  credentialsRef:
-    name: github-com-credentials
+  github:
+    # Secret holding the HMAC secret configured on the GitHub webhook, under a
+    # "webhook-secret" key.
+    secretRef:
+      name: github-com-webhook
+    # Outbound API credentials for PR-file enrichment and status reporting. The
+    # Secret holds either a GITHUB_TOKEN key (PAT) or GitHub App keys (appID,
+    # installationID, privateKey). apiBaseURL is omitted, so
+    # https://api.github.com is used.
+    credentialsRef:
+      name: github-com-credentials
 ---
 apiVersion: kelos.dev/v1alpha1
 kind: WebhookGateway
@@ -33,11 +33,11 @@ metadata:
   name: ghe
   namespace: default
 spec:
-  type: github
-  # Full GitHub Enterprise API base URL. GitHub App installation tokens are
-  # minted against this URL, and PR-file enrichment / status reporting target it.
-  apiBaseURL: https://ghe.example.com/api/v3
-  secretRef:
-    name: ghe-webhook
-  credentialsRef:
-    name: ghe-credentials
+  github:
+    # Full GitHub Enterprise API base URL. GitHub App installation tokens are
+    # minted against this URL, and PR-file enrichment / status reporting target it.
+    apiBaseURL: https://ghe.example.com/api/v3
+    secretRef:
+      name: ghe-webhook
+    credentialsRef:
+      name: ghe-credentials

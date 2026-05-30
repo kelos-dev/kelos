@@ -15394,11 +15394,8 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.type
-      name: Type
-      type: string
-    - jsonPath: .status.url
-      name: URL
+    - jsonPath: .status.path
+      name: Path
       type: string
     - jsonPath: .status.phase
       name: Phase
@@ -15434,57 +15431,73 @@ spec:
           metadata:
             type: object
           spec:
-            description: WebhookGatewaySpec defines the desired state of a WebhookGateway.
+            description: |-
+              WebhookGatewaySpec defines the desired state of a WebhookGateway. Exactly one
+              of GitHub, Linear, or Generic must be set; the field that is present selects
+              the webhook source and carries its provider-specific configuration.
             properties:
-              apiBaseURL:
-                description: |-
-                  APIBaseURL is the GitHub API base URL used for outbound API calls (pull
-                  request file enrichment and status reporting), e.g.
-                  "https://ghe.example.com/api/v3" for a GitHub Enterprise instance. When
-                  empty, "https://api.github.com" is used. Only valid for github gateways.
-                type: string
-              credentialsRef:
-                description: |-
-                  CredentialsRef references a Secret holding GitHub API credentials (a
-                  personal access token or GitHub App credentials) used for outbound API
-                  calls. Only valid for github gateways.
-                properties:
-                  name:
-                    description: Name is the name of the secret.
-                    type: string
-                required:
-                - name
+              generic:
+                description: Generic configures a gateway for arbitrary HTTP POST
+                  deliveries.
                 type: object
-              secretRef:
-                description: |-
-                  SecretRef references a Secret holding the HMAC secret used to verify
-                  inbound deliveries. Required for github and linear gateways. Unused for
-                  generic gateways, which are accepted without verification in this version.
+              github:
+                description: GitHub configures a gateway for GitHub webhook deliveries.
                 properties:
-                  name:
-                    description: Name is the name of the secret.
+                  apiBaseURL:
+                    description: |-
+                      APIBaseURL is the GitHub API base URL used for outbound API calls (pull
+                      request file enrichment and status reporting, and GitHub App token
+                      minting), e.g. "https://ghe.example.com/api/v3" for a GitHub Enterprise
+                      instance. When empty, "https://api.github.com" is used.
                     type: string
+                  credentialsRef:
+                    description: |-
+                      CredentialsRef references a Secret holding GitHub API credentials used for
+                      outbound API calls: a personal access token under the GITHUB_TOKEN key, or
+                      GitHub App credentials (appID, installationID, privateKey).
+                    properties:
+                      name:
+                        description: Name is the name of the secret.
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  secretRef:
+                    description: |-
+                      SecretRef references a Secret holding the HMAC secret (under a
+                      "webhook-secret" key) used to verify inbound deliveries.
+                    properties:
+                      name:
+                        description: Name is the name of the secret.
+                        type: string
+                    required:
+                    - name
+                    type: object
                 required:
-                - name
+                - secretRef
                 type: object
-              type:
-                description: |-
-                  Type identifies the webhook source this gateway serves. It selects the
-                  signature scheme used to verify inbound deliveries.
-                enum:
-                - github
-                - linear
-                - generic
-                type: string
-            required:
-            - type
+              linear:
+                description: Linear configures a gateway for Linear webhook deliveries.
+                properties:
+                  secretRef:
+                    description: |-
+                      SecretRef references a Secret holding the HMAC secret (under a
+                      "webhook-secret" key) used to verify inbound deliveries.
+                    properties:
+                      name:
+                        description: Name is the name of the secret.
+                        type: string
+                    required:
+                    - name
+                    type: object
+                required:
+                - secretRef
+                type: object
             type: object
             x-kubernetes-validations:
-            - message: secretRef is required for github and linear gateways
-              rule: self.type == 'generic' || has(self.secretRef)
-            - message: apiBaseURL and credentialsRef are only valid for github gateways
-              rule: (!has(self.apiBaseURL) && !has(self.credentialsRef)) || self.type
-                == 'github'
+            - message: exactly one of github, linear, or generic must be set
+              rule: (has(self.github)?1:0)+(has(self.linear)?1:0)+(has(self.generic)?1:0)
+                == 1
           status:
             description: WebhookGatewayStatus defines the observed state of a WebhookGateway.
             properties:
@@ -15497,14 +15510,14 @@ spec:
                   by the controller.
                 format: int64
                 type: integer
-              phase:
-                description: Phase summarizes the gateway's authentication state.
-                type: string
-              url:
+              path:
                 description: |-
-                  URL is the inbound path this gateway listens on, derived as
+                  Path is the inbound path this gateway listens on, derived as
                   /webhook/<namespace>/<name>. It is relative to the externally configured
                   webhook host.
+                type: string
+              phase:
+                description: Phase summarizes the gateway's authentication state.
                 type: string
             type: object
         type: object

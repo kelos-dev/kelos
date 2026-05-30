@@ -54,8 +54,9 @@ func githubGateway(name, namespace, secretName string) *kelosv1alpha1.WebhookGat
 	return &kelosv1alpha1.WebhookGateway{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
 		Spec: kelosv1alpha1.WebhookGatewaySpec{
-			Type:      kelosv1alpha1.WebhookGatewayTypeGitHub,
-			SecretRef: &kelosv1alpha1.SecretReference{Name: secretName},
+			GitHub: &kelosv1alpha1.GitHubGateway{
+				SecretRef: kelosv1alpha1.SecretReference{Name: secretName},
+			},
 		},
 	}
 }
@@ -220,7 +221,7 @@ func TestGatewayServeHTTP_ScopesToGatewayRefAndNamespace(t *testing.T) {
 func TestGatewayServeHTTP_GenericNoVerificationCreatesTask(t *testing.T) {
 	gw := &kelosv1alpha1.WebhookGateway{
 		ObjectMeta: metav1.ObjectMeta{Name: "gen", Namespace: "default"},
-		Spec:       kelosv1alpha1.WebhookGatewaySpec{Type: kelosv1alpha1.WebhookGatewayTypeGeneric},
+		Spec:       kelosv1alpha1.WebhookGatewaySpec{Generic: &kelosv1alpha1.GenericGateway{}},
 	}
 	spawner := &kelosv1alpha1.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{Name: "gen-spawner", Namespace: "default", UID: types.UID("gen-spawner")},
@@ -301,6 +302,27 @@ func TestGatewayServeHTTP_SpawnerListErrorReturns500(t *testing.T) {
 	// silently drops the delivery.
 	if rr.Code != http.StatusInternalServerError {
 		t.Errorf("Expected 500 on spawner List failure, got %d", rr.Code)
+	}
+}
+
+func TestExtractGatewayGenericDeliveryID_NamespaceScoped(t *testing.T) {
+	body := []byte(`{"id":"evt-1"}`)
+	sp := &kelosv1alpha1.TaskSpawner{
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{GenericWebhook: &kelosv1alpha1.GenericWebhook{
+				Source:       "sentry",
+				FieldMapping: map[string]string{"id": "$.id"},
+			}},
+		},
+	}
+	spawners := []*kelosv1alpha1.TaskSpawner{sp}
+
+	// Same-named gateways in different namespaces must not collide in the
+	// process-wide delivery cache.
+	a := extractGatewayGenericDeliveryID("ns-a/gw", body, spawners)
+	b := extractGatewayGenericDeliveryID("ns-b/gw", body, spawners)
+	if a == b {
+		t.Errorf("expected distinct delivery IDs across namespaces, both = %q", a)
 	}
 }
 

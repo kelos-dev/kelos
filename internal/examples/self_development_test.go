@@ -13,6 +13,7 @@ import (
 	sigyaml "sigs.k8s.io/yaml"
 
 	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	"github.com/kelos-dev/kelos/internal/webhook"
 )
 
 func TestSelfDevelopmentGitHubSpawnersUseWebhooks(t *testing.T) {
@@ -56,6 +57,80 @@ func TestSelfDevelopmentGitHubSpawnersUseWebhooks(t *testing.T) {
 			}
 			if len(ts.Spec.When.GitHubWebhook.Filters) == 0 {
 				t.Fatalf("expected %s to define webhook filters", tt.file)
+			}
+		})
+	}
+}
+
+// TestKelosReviewerTriggerableByBot verifies the kelos-reviewer spawner accepts
+// a `/kelos review` request posted by the Kelos bot itself, not only by human
+// maintainers. Workers post `/kelos review` after pushing their changes, so the
+// reviewer must not exclude `kelos-bot[bot]`.
+func TestKelosReviewerTriggerableByBot(t *testing.T) {
+	t.Parallel()
+	assertReviewerTriggerableByBot(t, "kelos-reviewer.yaml", "/kelos review")
+}
+
+// TestKelosAPIReviewerTriggerableByBot verifies the kelos-api-reviewer spawner
+// accepts a `/kelos api-review` request posted by the Kelos bot itself, not only
+// by human maintainers. Workers post `/kelos api-review` after pushing API
+// changes, so the reviewer must not exclude `kelos-bot[bot]`.
+func TestKelosAPIReviewerTriggerableByBot(t *testing.T) {
+	t.Parallel()
+	assertReviewerTriggerableByBot(t, "kelos-api-reviewer.yaml", "/kelos api-review")
+}
+
+// assertReviewerTriggerableByBot checks that the given reviewer spawner triggers
+// for both the Kelos bot and a maintainer posting bodyPattern on an open PR, but
+// not for an unauthorized user.
+func assertReviewerTriggerableByBot(t *testing.T, file, bodyPattern string) {
+	t.Helper()
+
+	ts := readSelfDevelopmentTaskSpawner(t, file)
+	spawner := ts.Spec.When.GitHubWebhook
+	if spawner == nil {
+		t.Fatalf("expected %s to use githubWebhook", file)
+	}
+
+	reviewComment := func(author string) []byte {
+		return []byte(`{
+			"action": "created",
+			"sender": {"login": "` + author + `"},
+			"issue": {
+				"number": 1,
+				"state": "open",
+				"pull_request": {"url": "https://api.github.com/repos/kelos-dev/kelos/pulls/1"}
+			},
+			"comment": {"body": "` + bodyPattern + `"},
+			"repository": {"full_name": "kelos-dev/kelos", "owner": {"login": "kelos-dev"}, "name": "kelos"}
+		}`)
+	}
+
+	tests := []struct {
+		name   string
+		author string
+		want   bool
+	}{
+		{name: "kelos bot triggers review", author: "kelos-bot[bot]", want: true},
+		{name: "maintainer triggers review", author: "gjkim42", want: true},
+		{name: "unauthorized user does not trigger review", author: "mallory", want: false},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			eventData, err := webhook.ParseGitHubWebhook("issue_comment", reviewComment(tt.author))
+			if err != nil {
+				t.Fatalf("ParseGitHubWebhook() error = %v", err)
+			}
+			got, err := webhook.MatchesGitHubEvent(spawner, "issue_comment", eventData)
+			if err != nil {
+				t.Fatalf("MatchesGitHubEvent() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("MatchesGitHubEvent() = %v, want %v", got, tt.want)
 			}
 		})
 	}

@@ -41,8 +41,6 @@ spec:
   when:
     githubWebhook:
       repository: kelos-dev/kelos
-      excludeAuthors:
-        - kelos-bot[bot]
       events:
         - issue_comment
         - pull_request_review
@@ -52,6 +50,13 @@ spec:
           bodyPattern: /kelos api-review
           state: open
           author: gjkim42
+        # Allow the Kelos bot to request an API review on the PRs it opens, e.g.
+        # when a worker posts `/kelos api-review` after pushing API changes.
+        - event: issue_comment
+          action: created
+          bodyPattern: /kelos api-review
+          state: open
+          author: kelos-bot[bot]
         - event: pull_request_review
           action: submitted
           bodyPattern: /kelos api-review

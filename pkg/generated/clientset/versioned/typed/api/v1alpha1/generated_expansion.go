@@ -24,4 +24,6 @@ type TaskExpansion interface{}
 
 type TaskSpawnerExpansion interface{}
 
+type WebhookGatewayExpansion interface{}
+
 type WorkspaceExpansion interface{}

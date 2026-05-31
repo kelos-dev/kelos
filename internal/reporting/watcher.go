@@ -36,6 +36,13 @@ const (
 	// from. Pairs with AnnotationSourceOwner.
 	AnnotationSourceRepo = "kelos.dev/source-repo"
 
+	// AnnotationWebhookGateway records the name of the WebhookGateway (in the
+	// Task's namespace) that created the Task. The reporting reconciler uses it
+	// to resolve per-gateway GitHub credentials and API base URL, so reporting
+	// targets the correct GitHub instance (github.com or a GitHub Enterprise
+	// server). Absent for Tasks created via the legacy per-source server.
+	AnnotationWebhookGateway = "kelos.dev/webhook-gateway"
+
 	// AnnotationGitHubCommentID stores the GitHub comment ID for the status
 	// comment created by the reporter so subsequent updates edit the same
 	// comment.

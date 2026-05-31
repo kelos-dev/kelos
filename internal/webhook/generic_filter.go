@@ -149,9 +149,35 @@ func ExtractGenericWorkItem(eventData *GenericEventData) map[string]interface{} 
 // JSON encoding differs between deliveries. Falls back to a SHA-256 hash
 // of the body when no spawner maps an id for this source.
 func extractGenericDeliveryID(sourceName string, body []byte, spawners []*v1alpha1.TaskSpawner) string {
+	if id, ok := genericIDFromSpawners(body, spawners, sourceName); ok {
+		return "generic-" + sourceName + "-" + id
+	}
+	sum := sha256.Sum256(body)
+	return "generic-" + sourceName + "-" + hex.EncodeToString(sum[:])
+}
+
+// extractGatewayGenericDeliveryID derives a stable delivery ID for a generic
+// WebhookGateway delivery. The spawners are already scoped by gatewayRef, so the
+// "id" fieldMapping is used regardless of the spawner's Source field. The prefix
+// (the gateway name) keeps IDs distinct across gateways.
+func extractGatewayGenericDeliveryID(prefix string, body []byte, spawners []*v1alpha1.TaskSpawner) string {
+	if id, ok := genericIDFromSpawners(body, spawners, ""); ok {
+		return "generic-" + prefix + "-" + id
+	}
+	sum := sha256.Sum256(body)
+	return "generic-" + prefix + "-" + hex.EncodeToString(sum[:])
+}
+
+// genericIDFromSpawners extracts the mapped "id" value from the first spawner
+// that declares an "id" fieldMapping. When sourceFilter is non-empty, only
+// spawners whose Source equals it are considered.
+func genericIDFromSpawners(body []byte, spawners []*v1alpha1.TaskSpawner, sourceFilter string) (string, bool) {
 	for _, sp := range spawners {
 		wh := sp.Spec.When.GenericWebhook
-		if wh == nil || wh.Source != sourceName {
+		if wh == nil {
+			continue
+		}
+		if sourceFilter != "" && wh.Source != sourceFilter {
 			continue
 		}
 		idExpr, ok := wh.FieldMapping["id"]
@@ -160,21 +186,19 @@ func extractGenericDeliveryID(sourceName string, body []byte, spawners []*v1alph
 		}
 		var payload interface{}
 		if err := json.Unmarshal(body, &payload); err != nil {
-			break // Invalid JSON — fall through to body hash
+			return "", false // Invalid JSON — fall through to body hash
 		}
 		val, err := jsonpath.Get(idExpr, payload)
 		if err != nil || val == nil {
-			break // Missing or unparseable — fall through to body hash
+			return "", false // Missing or unparseable — fall through to body hash
 		}
 		idStr := fmt.Sprintf("%v", val)
 		if idStr != "" {
-			return "generic-" + sourceName + "-" + idStr
+			return idStr, true
 		}
-		break
+		return "", false
 	}
-	// Fallback: body hash
-	sum := sha256.Sum256(body)
-	return "generic-" + sourceName + "-" + hex.EncodeToString(sum[:])
+	return "", false
 }
 
 // extractSourceFromPath extracts the source name from a URL path like

@@ -1,0 +1,46 @@
+# A webhook TaskSpawner bound to the GitHub Enterprise gateway via gatewayRef.
+# The gateway authenticates inbound deliveries and fans out only to spawners in
+# its own namespace that reference it. Point the GitHub Enterprise repository
+# webhook at the gateway's path (status.path on the "ghe" gateway:
+# /webhook/default/ghe), relative to the configured webhook host.
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: ghe-comment-responder
+  namespace: default
+spec:
+  when:
+    githubWebhook:
+      # Bind this spawner to the GitHub Enterprise gateway. A github block can
+      # only reference a github-type gateway.
+      gatewayRef:
+        name: ghe
+      events:
+        - issue_comment
+      filters:
+        - event: issue_comment
+          action: created
+          bodyPattern: "^/kelos"
+  taskTemplate:
+    type: claude-code
+    credentials:
+      type: oauth
+      secretRef:
+        name: claude-credentials
+    # The workspace clones from and pushes to the GitHub Enterprise instance.
+    # Its secretRef provides the clone/push credentials — separate from the
+    # gateway's outbound API credentials, which are used only for webhook-side
+    # enrichment and status reporting.
+    workspaceRef:
+      name: ghe-workspace
+    branch: "kelos-{{.ID}}"
+    promptTemplate: |
+      A maintainer commented on a GitHub Enterprise issue or pull request.
+
+      Repository: {{.Repository}}
+      Author:     {{.Sender}}
+      Comment:    {{.Body}}
+
+      Address the request and open a pull request with your changes.
+    ttlSecondsAfterFinished: 3600
+  maxConcurrency: 3

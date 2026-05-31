@@ -47,8 +47,10 @@ type When struct {
 
 	// GenericWebhook triggers task spawning from arbitrary HTTP POST payloads.
 	// Any system that can send an HTTP POST with a JSON body can trigger
-	// tasks through this source. The URL path is /webhook/<source> and
-	// the HMAC secret is read from the <SOURCE>_WEBHOOK_SECRET env var.
+	// tasks through this source. On the legacy per-source server the URL path is
+	// /webhook/<source>; deliveries are NOT signature-verified, so restrict
+	// access at the network layer. Set gatewayRef to route through a
+	// WebhookGateway instead.
 	// +optional
 	GenericWebhook *GenericWebhook `json:"webhook,omitempty"`
 
@@ -390,6 +392,13 @@ type GitHubWebhook struct {
 	// +kubebuilder:validation:MaxItems=20
 	Events []string `json:"events"`
 
+	// GatewayRef binds this source to a WebhookGateway in the same namespace.
+	// When set, deliveries are served (and authenticated) by that gateway, and
+	// the legacy per-source webhook server ignores this spawner. When empty, the
+	// spawner is served by the legacy per-source server.
+	// +optional
+	GatewayRef *GatewayReference `json:"gatewayRef,omitempty"`
+
 	// Repository restricts webhooks to a specific repository (owner/repo format).
 	// If empty, webhooks from any repository are accepted.
 	// +optional
@@ -508,6 +517,13 @@ type LinearWebhook struct {
 	// +kubebuilder:validation:MinItems=1
 	Types []string `json:"types"`
 
+	// GatewayRef binds this source to a WebhookGateway in the same namespace.
+	// When set, deliveries are served (and authenticated) by that gateway, and
+	// the legacy per-source webhook server ignores this spawner. When empty, the
+	// spawner is served by the legacy per-source server.
+	// +optional
+	GatewayRef *GatewayReference `json:"gatewayRef,omitempty"`
+
 	// Filters refine which events trigger tasks (OR semantics within same type).
 	// If empty, all events in the Types list trigger tasks.
 	// +optional
@@ -544,19 +560,26 @@ type LinearWebhookFilter struct {
 
 // GenericWebhook configures webhook-driven task spawning from arbitrary HTTP
 // POST payloads with JSON bodies. Any system that can send an HTTP POST can
-// trigger tasks through this source. The URL path is /webhook/<source> and
-// the HMAC secret is read from the <SOURCE>_WEBHOOK_SECRET env var (e.g.,
-// source "notion" uses NOTION_WEBHOOK_SECRET).
+// trigger tasks through this source. On the legacy per-source server the URL
+// path is /webhook/<source> and deliveries are NOT signature-verified, so
+// restrict access at the network layer. Set gatewayRef to route through a
+// WebhookGateway instead.
 // +kubebuilder:validation:XValidation:rule="'id' in self.fieldMapping",message="fieldMapping must include an 'id' key for deduplication and task naming"
 type GenericWebhook struct {
 	// Source is a short identifier for this webhook source (e.g., "notion",
-	// "sentry", "drata"). It determines:
-	//   - The URL path: /webhook/<source>
-	//   - The env var for HMAC validation: <SOURCE>_WEBHOOK_SECRET
-	// Must be lowercase alphanumeric with optional hyphens.
+	// "sentry", "drata"). On the legacy per-source server it determines the URL
+	// path: /webhook/<source>. Must be lowercase alphanumeric with optional
+	// hyphens. Ignored for routing when gatewayRef is set.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`
 	Source string `json:"source"`
+
+	// GatewayRef binds this source to a WebhookGateway in the same namespace.
+	// When set, deliveries are served by that gateway, and the legacy per-source
+	// webhook server ignores this spawner. When empty, the spawner is served by
+	// the legacy per-source server.
+	// +optional
+	GatewayRef *GatewayReference `json:"gatewayRef,omitempty"`
 
 	// FieldMapping maps JSONPath expressions to WorkItem template variables.
 	// Each key is a template variable name (available as {{.Key}} in

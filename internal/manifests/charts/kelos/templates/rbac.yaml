@@ -86,6 +86,7 @@ rules:
   - kelos.dev
   resources:
   - agentconfigs
+  - webhookgateways
   - workspaces
   verbs:
   - get
@@ -116,6 +117,7 @@ rules:
   resources:
   - tasks/status
   - taskspawners/status
+  - webhookgateways/status
   verbs:
   - get
   - patch
@@ -235,7 +237,7 @@ subjects:
   - kind: ServiceAccount
     name: kelos-controller
     namespace: kelos-system
-{{- if or .Values.webhookServer.sources.github.enabled .Values.webhookServer.sources.linear.enabled }}
+{{- if or .Values.webhookServer.sources.github.enabled .Values.webhookServer.sources.linear.enabled .Values.webhookServer.gatewayServer.enabled }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -248,6 +250,14 @@ rules:
       - secrets
     verbs:
       - get
+  - apiGroups:
+      - kelos.dev
+    resources:
+      - webhookgateways
+    verbs:
+      - get
+      - list
+      - watch
   - apiGroups:
       - kelos.dev
     resources:

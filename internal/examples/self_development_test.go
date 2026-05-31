@@ -58,6 +58,9 @@ func TestSelfDevelopmentGitHubSpawnersUseWebhooks(t *testing.T) {
 			if len(ts.Spec.When.GitHubWebhook.Filters) == 0 {
 				t.Fatalf("expected %s to define webhook filters", tt.file)
 			}
+			if gr := ts.Spec.When.GitHubWebhook.GatewayRef; gr == nil || gr.Name != "kelos" {
+				t.Fatalf("expected %s to route through WebhookGateway %q via gatewayRef, got %+v", tt.file, "kelos", gr)
+			}
 		})
 	}
 }
@@ -133,6 +136,40 @@ func assertReviewerTriggerableByBot(t *testing.T, file, bodyPattern string) {
 				t.Fatalf("MatchesGitHubEvent() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestSelfDevelopmentWebhookGateway verifies the self-development WebhookGateway
+// manifest is a well-formed github gateway whose name matches the gatewayRef the
+// spawners use.
+func TestSelfDevelopmentWebhookGateway(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join("..", "..", "self-development", "webhookgateway.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading %s: %v", path, err)
+	}
+
+	var gw kelosv1alpha1.WebhookGateway
+	if err := sigyaml.Unmarshal(data, &gw); err != nil {
+		t.Fatalf("decoding WebhookGateway from %s: %v", path, err)
+	}
+
+	if gw.Name != "kelos" {
+		t.Fatalf("expected gateway name %q (to match the spawners' gatewayRef), got %q", "kelos", gw.Name)
+	}
+	if gw.Spec.GitHub == nil {
+		t.Fatalf("expected a github gateway")
+	}
+	if gw.Spec.Linear != nil || gw.Spec.Generic != nil {
+		t.Fatalf("expected only the github provider sub-struct to be set")
+	}
+	if gw.Spec.GitHub.SecretRef.Name == "" {
+		t.Fatalf("expected github.secretRef.name to be set for inbound HMAC verification")
+	}
+	if gw.Spec.GitHub.CredentialsRef == nil || gw.Spec.GitHub.CredentialsRef.Name == "" {
+		t.Fatalf("expected github.credentialsRef.name to be set for reporting/enrichment")
 	}
 }
 

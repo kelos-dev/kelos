@@ -797,7 +797,7 @@ func TestServeHTTP_IssueCommentOnPR_EnrichesBranch(t *testing.T) {
 	// Swap the fetcher to return a known branch
 	orig := githubPRBranchFetcher
 	defer func() { githubPRBranchFetcher = orig }()
-	githubPRBranchFetcher = func(ctx context.Context, prAPIURL string) (githubPRHeadInfo, error) {
+	githubPRBranchFetcher = func(ctx context.Context, prAPIURL, token string) (githubPRHeadInfo, error) {
 		return githubPRHeadInfo{Branch: "feature-branch", SHA: "enriched-sha-456"}, nil
 	}
 

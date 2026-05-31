@@ -5,6 +5,8 @@ metadata:
 spec:
   when:
     githubWebhook:
+      gatewayRef:
+        name: kelos
       repository: kelos-dev/kelos
       events:
         - issue_comment

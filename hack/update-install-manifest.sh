@@ -220,6 +220,7 @@ generate_chart_crd_templates() {
   write_chart_crd_template "${source}" "CustomResourceDefinition" "tasks.kelos.dev" "${CHART_CRD_DIR}/task-crd.yaml"
   write_chart_crd_template "${source}" "CustomResourceDefinition" "taskspawners.kelos.dev" "${CHART_CRD_DIR}/taskspawner-crd.yaml"
   write_chart_crd_template "${source}" "CustomResourceDefinition" "workspaces.kelos.dev" "${CHART_CRD_DIR}/workspace-crd.yaml"
+  write_chart_crd_template "${source}" "CustomResourceDefinition" "webhookgateways.kelos.dev" "${CHART_CRD_DIR}/webhookgateway-crd.yaml"
 }
 
 if [[ "$(grep -Fxc "${START_MARKER}" "${CHART_RBAC}")" -ne 1 ]]; then

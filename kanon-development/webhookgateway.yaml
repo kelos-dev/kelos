@@ -1,0 +1,28 @@
+# WebhookGateway authenticates GitHub webhook deliveries for the kelos-dev/kanon
+# repository and routes them to the kanon-development TaskSpawners that reference
+# it via githubWebhook.gatewayRef. It replaces the legacy per-source webhook
+# server for these spawners.
+#
+# Apply this in the same namespace as the TaskSpawners. The gateway's inbound
+# path is /webhook/<namespace>/kanon (surfaced in status.path); point the
+# kelos-dev/kanon repository webhook at it. It reuses the shared
+# github-webhook-secret (the same Secret the self-development 'kelos' gateway
+# uses), since the dev deployment shares one webhook secret and one GitHub App
+# installation across both repositories.
+apiVersion: kelos.dev/v1alpha1
+kind: WebhookGateway
+metadata:
+  name: kanon
+spec:
+  github:
+    # HMAC secret shared with the GitHub repository webhook, under a
+    # "webhook-secret" key.
+    secretRef:
+      name: github-webhook-secret
+    # Outbound GitHub API credentials for PR-file enrichment and status
+    # reporting (these spawners enable reporting/checks). Reuses
+    # github-webhook-secret, which also holds the API credentials: a PAT under
+    # the GITHUB_TOKEN key, or GitHub App keys (appID, installationID,
+    # privateKey). The credential needs repo and checks:write.
+    credentialsRef:
+      name: github-webhook-secret

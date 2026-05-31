@@ -21,18 +21,36 @@ type githubPRHeadInfo struct {
 	SHA    string
 }
 
-// githubPRBranchFetcher is the function used to fetch a PR's head info from
-// the GitHub API. It is a package-level variable so tests can swap in a stub.
-var githubPRBranchFetcher = fetchGitHubPRBranch
+// githubPRBranchFetcher fetches a PR's head info from the GitHub API given an
+// explicit token. It is a package-level variable so tests can swap in a stub.
+var githubPRBranchFetcher = fetchGitHubPRBranchWithToken
 
-// githubTokenResolver resolves a GitHub API token. It must be set via
-// SetGitHubTokenResolver before the webhook server starts processing events.
+// githubTokenResolver resolves a GitHub API token for the legacy --source mode.
+// It is set via SetGitHubTokenResolver before the webhook server starts
+// processing events. In gateway mode the per-request handler carries its own
+// resolver (built from the gateway's credentialsRef) instead.
 var githubTokenResolver func(context.Context) (string, error)
 
-// SetGitHubTokenResolver sets the token resolver used for GitHub API calls
-// (e.g. enriching issue_comment events with PR branch info).
+// SetGitHubTokenResolver sets the process-wide token resolver used for GitHub
+// API calls in legacy --source mode (e.g. enriching issue_comment events with
+// PR branch info).
 func SetGitHubTokenResolver(resolver func(context.Context) (string, error)) {
 	githubTokenResolver = resolver
+}
+
+// resolveGitHubToken returns a GitHub API token using the handler's per-instance
+// resolver when set (gateway mode), otherwise the process-wide resolver (legacy
+// mode). Returns an empty string when neither is configured, letting callers
+// fall back gracefully.
+func (h *WebhookHandler) resolveGitHubToken(ctx context.Context) (string, error) {
+	resolver := h.tokenResolver
+	if resolver == nil {
+		resolver = githubTokenResolver
+	}
+	if resolver == nil {
+		return "", nil
+	}
+	return resolver(ctx)
 }
 
 // githubPRResponse is the minimal structure needed to extract the head branch
@@ -44,24 +62,11 @@ type githubPRResponse struct {
 	} `json:"head"`
 }
 
-// fetchGitHubPRBranch fetches the head branch and SHA for a pull request using
-// the GitHub REST API. It resolves the token via the token provider, which
-// supports both GITHUB_TOKEN (PAT) and GitHub App credentials.
-// Returns a zero-value githubPRHeadInfo when no credentials are configured,
-// allowing callers to fall back gracefully.
-func fetchGitHubPRBranch(ctx context.Context, prAPIURL string) (githubPRHeadInfo, error) {
-	if githubTokenResolver == nil {
-		return githubPRHeadInfo{}, nil
-	}
-	token, err := githubTokenResolver(ctx)
-	if err != nil {
-		return githubPRHeadInfo{}, err
-	}
-	return fetchGitHubPRBranchWithToken(ctx, prAPIURL, token)
-}
-
-// fetchGitHubPRBranchWithToken is the testable core of fetchGitHubPRBranch.
-// It accepts the token explicitly.
+// fetchGitHubPRBranchWithToken fetches the head branch and SHA for a pull
+// request using the GitHub REST API. The prAPIURL comes from the webhook
+// payload, so it already targets the correct host (github.com or a GitHub
+// Enterprise instance). Returns a zero-value githubPRHeadInfo when the token is
+// empty, allowing callers to fall back gracefully.
 func fetchGitHubPRBranchWithToken(ctx context.Context, prAPIURL, token string) (githubPRHeadInfo, error) {
 	if token == "" {
 		return githubPRHeadInfo{}, nil
@@ -96,13 +101,20 @@ func fetchGitHubPRBranchWithToken(ctx context.Context, prAPIURL, token string) (
 // enrichGitHubIssueCommentBranch fetches the PR's head branch and SHA from the
 // GitHub API and sets them on the event data. This is called lazily for
 // issue_comment events on pull requests, since GitHub does not include the PR's
-// head ref or SHA in the issue_comment webhook payload.
-func enrichGitHubIssueCommentBranch(ctx context.Context, log logr.Logger, eventData *GitHubEventData) {
+// head ref or SHA in the issue_comment webhook payload. The token is resolved
+// from the handler (per-gateway in gateway mode, process-wide in legacy mode).
+func (h *WebhookHandler) enrichGitHubIssueCommentBranch(ctx context.Context, log logr.Logger, eventData *GitHubEventData) {
 	if eventData.PullRequestAPIURL == "" {
 		return
 	}
 
-	head, err := githubPRBranchFetcher(ctx, eventData.PullRequestAPIURL)
+	token, err := h.resolveGitHubToken(ctx)
+	if err != nil {
+		log.Error(err, "Failed to resolve GitHub token for issue_comment enrichment", "prAPIURL", eventData.PullRequestAPIURL)
+		return
+	}
+
+	head, err := githubPRBranchFetcher(ctx, eventData.PullRequestAPIURL, token)
 	if err != nil {
 		log.Error(err, "Failed to fetch PR head for issue_comment event", "prAPIURL", eventData.PullRequestAPIURL)
 		return

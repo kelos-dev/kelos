@@ -56,17 +56,18 @@ jobs:
           KELOS_GITHUB_APP_INSTALLATION_ID: ${{ secrets.KELOS_GITHUB_APP_INSTALLATION_ID }}
           KELOS_GITHUB_APP_PRIVATE_KEY: ${{ secrets.KELOS_GITHUB_APP_PRIVATE_KEY }}
         run: |
-          # Apply the full github-webhook-secret from repo secrets so the
-          # workflow is self-sufficient and the secret state is portable to
-          # other clusters. Holds both the HMAC WEBHOOK_SECRET and the
-          # GitHub App credentials the webhook server uses to resolve
-          # .Branch for issue_comment events on pull requests.
+          # Apply github-webhook-secret in the spawner namespace so the
+          # WebhookGateway (self-development/webhookgateway.yaml) can resolve it:
+          #   - webhook-secret: HMAC secret for github.secretRef (inbound verify)
+          #   - appID/installationID/privateKey: GitHub App credentials for
+          #     github.credentialsRef (PR-file enrichment + status reporting,
+          #     and resolving .Branch for issue_comment events on PRs)
           KEY_FILE=$(mktemp)
           trap 'rm -f "$KEY_FILE"' EXIT
           printf '%s' "$KELOS_GITHUB_APP_PRIVATE_KEY" > "$KEY_FILE"
           kubectl create secret generic github-webhook-secret \
-            --namespace kelos-system \
-            --from-literal=WEBHOOK_SECRET="$KELOS_WEBHOOK_SECRET" \
+            --namespace "${KELOS_NAMESPACE}" \
+            --from-literal=webhook-secret="$KELOS_WEBHOOK_SECRET" \
             --from-literal=appID="$KELOS_GITHUB_APP_ID" \
             --from-literal=installationID="$KELOS_GITHUB_APP_INSTALLATION_ID" \
             --from-file=privateKey="$KEY_FILE" \
@@ -101,12 +102,22 @@ jobs:
           # networking.gke.io/certmap annotation, which the chart's gateway
           # template cannot express. Managing them via helm would fight the
           # out-of-band config, so they stay manual.
+          #
+          # MANUAL out-of-band steps when adopting the gateway server: the
+          # HTTPRoute must route the /webhook/ prefix to the
+          # kelos-webhook-gateway-server Service, and the kelos-dev/kelos repo
+          # webhook URL must point at the gateway's path,
+          # /webhook/<KELOS_NAMESPACE>/kelos (the 'kelos' WebhookGateway's
+          # status.path), instead of /webhook/github.
+          #
+          # gatewayServer runs the gateway-mode webhook server: it routes by
+          # per-gateway path using WebhookGateway resources (the self-development
+          # spawners reference the 'kelos' gateway via gatewayRef) and resolves
+          # each gateway's HMAC secret and API credentials per gateway. It
+          # replaces the legacy per-source github webhook server.
           webhookServer:
-            sources:
-              github:
-                enabled: true
-                secretName: github-webhook-secret
-                githubSecretName: github-webhook-secret
+            gatewayServer:
+              enabled: true
             resources:
               requests:
                 cpu: 100m
@@ -117,10 +128,10 @@ jobs:
           kubectl rollout status deployment/kelos-controller-manager -n kelos-system --timeout=120s
           kubectl rollout restart deployment -l kelos.dev/component=ghproxy -n "${KELOS_NAMESPACE}"
           kubectl rollout restart deployment -l kelos.dev/component=spawner -n "${KELOS_NAMESPACE}"
-          kubectl rollout restart deployment/kelos-webhook-github -n kelos-system
+          kubectl rollout restart deployment/kelos-webhook-gateway-server -n kelos-system
           kubectl rollout status deployment -l kelos.dev/component=ghproxy -n "${KELOS_NAMESPACE}" --timeout=120s
           kubectl rollout status deployment -l kelos.dev/component=spawner -n "${KELOS_NAMESPACE}" --timeout=120s
-          kubectl rollout status deployment/kelos-webhook-github -n kelos-system --timeout=120s
+          kubectl rollout status deployment/kelos-webhook-gateway-server -n kelos-system --timeout=120s
 
       - name: Apply PodMonitoring
         run: |
@@ -182,16 +193,16 @@ jobs:
           apiVersion: monitoring.googleapis.com/v1
           kind: PodMonitoring
           metadata:
-            name: kelos-webhook-github
+            name: kelos-webhook-gateway-server
             namespace: kelos-system
             labels:
               app.kubernetes.io/name: kelos
-              app.kubernetes.io/component: webhook-github
+              app.kubernetes.io/component: webhook-gateway-server
           spec:
             selector:
               matchLabels:
                 app.kubernetes.io/name: kelos
-                app.kubernetes.io/component: webhook-github
+                app.kubernetes.io/component: webhook-gateway-server
             endpoints:
               - port: metrics
                 interval: 30s

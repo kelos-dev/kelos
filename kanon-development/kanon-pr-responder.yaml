@@ -5,6 +5,8 @@ metadata:
 spec:
   when:
     githubWebhook:
+      gatewayRef:
+        name: kanon
       repository: kelos-dev/kanon
       excludeAuthors:
         - kelos-bot[bot]

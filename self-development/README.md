@@ -350,21 +350,47 @@ The token needs these permissions:
 - `repo` (full control of private repositories)
 - `workflow` (if your repo uses GitHub Actions)
 
-### 3. GitHub Webhook Secret and Delivery
+### 3. WebhookGateway, Secret, and Delivery
 
-The issue and pull request TaskSpawners in this directory are webhook-driven.
-Create a secret with the shared webhook secret GitHub will use:
+The issue and pull request TaskSpawners in this directory are webhook-driven and
+routed through a `WebhookGateway` (`webhookgateway.yaml`) that each spawner
+references via `githubWebhook.gatewayRef`. The gateway authenticates inbound
+deliveries against its own secret and resolves outbound GitHub API credentials
+per gateway.
+
+Create the `github-webhook-secret` Secret (in the same namespace as the
+TaskSpawners) and apply the gateway. The gateway reads two things from it: the
+inbound HMAC secret under a `webhook-secret` key, and outbound GitHub API
+credentials for PR-file enrichment and status reporting — a `GITHUB_TOKEN` PAT
+or GitHub App keys; the credential needs `repo` and `checks:write`.
 
 ```bash
 kubectl create secret generic github-webhook-secret \
-  --from-literal=WEBHOOK_SECRET=<your-github-webhook-secret>
+  --from-literal=webhook-secret=<your-github-webhook-secret> \
+  --from-literal=GITHUB_TOKEN=<token-with-repo-and-checks:write>
+# Or use GitHub App credentials instead of GITHUB_TOKEN:
+#   --from-literal=appID=... --from-literal=installationID=... \
+#   --from-file=privateKey=app.private-key.pem
+
+kubectl apply -f webhookgateway.yaml
 ```
 
 Then:
-- Enable the GitHub webhook server in your Kelos deployment (see `examples/helm-values-webhook.yaml` or `examples/webhook-gateway-values.yaml`)
-- Expose `https://<your-domain>/webhook/github` over HTTPS
-- Configure a repository webhook that uses the same secret
-- Subscribe the repository webhook to `issues`, `issue_comment`, and `pull_request_review`
+- Enable the gateway webhook server in your Kelos deployment —
+  `webhookServer.gatewayServer.enabled: true` plus Gateway-API or Ingress routing
+  (see `examples/webhook-gateway-values.yaml`).
+- Find the gateway's inbound path:
+  `kubectl get webhookgateway kelos -o jsonpath='{.status.path}'`
+  (it is `/webhook/<namespace>/kelos`).
+- Expose `https://<your-domain>/webhook/<namespace>/kelos` over HTTPS and
+  configure the repository webhook to POST there using the same secret.
+- Subscribe the repository webhook to `issues`, `issue_comment`, and
+  `pull_request_review`.
+
+> Spawners with a `gatewayRef` are served **only** by the gateway server, not the
+> legacy per-source server. Enable `gatewayServer` (and apply the WebhookGateway)
+> before or together with these spawners, or their webhook deliveries will not be
+> processed.
 
 Webhook TaskSpawners only react to **new** events after deployment. If an issue
 or PR was already in a matching state before the webhook server went live,
@@ -480,8 +506,8 @@ Each run is a discrete webhook event, so no "pause" comment is needed to prevent
 - Check the TaskSpawner status: `kubectl get taskspawner <name> -o yaml`
 - Verify the Workspace exists: `kubectl get workspace`
 - Ensure credentials are correctly configured: `kubectl get secret kelos-credentials`
-- Ensure the GitHub webhook server is enabled and the `github-webhook-secret` exists
-- Check webhook server logs: `kubectl logs -l app.kubernetes.io/component=webhook-github`
+- Ensure the gateway webhook server is enabled (`webhookServer.gatewayServer.enabled`), the `WebhookGateway` is `Authenticated` (`kubectl get webhookgateway kelos`), and the `github-webhook-secret` exists with a `webhook-secret` key
+- Check webhook server logs: `kubectl logs -l app.kubernetes.io/component=webhook-gateway-server`
 - Review the repository webhook's recent deliveries in GitHub
 - If the issue or PR matched before you deployed the webhook server, retrigger it with a new comment or relabel
 

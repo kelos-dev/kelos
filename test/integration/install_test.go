@@ -232,6 +232,46 @@ var _ = Describe("Install/Uninstall", Ordered, func() {
 				Name: "kelos-webhook-rolebinding",
 			}, webhookCRB)).To(Succeed())
 		})
+
+		It("Should support gateway-server installs", func() {
+			valuesPath := filepath.Join(GinkgoT().TempDir(), "values.yaml")
+			values := `webhookServer:
+  gatewayServer:
+    enabled: true
+`
+			Expect(os.WriteFile(valuesPath, []byte(values), 0o644)).To(Succeed())
+
+			root := cli.NewRootCommand()
+			root.SetArgs([]string{
+				"install",
+				"--kubeconfig", kubeconfigPath,
+				"--values", valuesPath,
+			})
+			Expect(root.Execute()).To(Succeed())
+
+			gatewayDep := &appsv1.Deployment{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name:      "kelos-webhook-gateway-server",
+				Namespace: "kelos-system",
+			}, gatewayDep)).To(Succeed())
+			Expect(gatewayDep.Spec.Template.Spec.ServiceAccountName).To(Equal("kelos-webhook"))
+			Expect(gatewayDep.Spec.Template.Spec.Containers[0].Args).To(ContainElement("--gateway-mode"))
+
+			// The webhook ClusterRole must grant access to webhookgateways.
+			webhookRole := &rbacv1.ClusterRole{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name: "kelos-webhook-role",
+			}, webhookRole)).To(Succeed())
+			foundGatewayRule := false
+			for _, rule := range webhookRole.Rules {
+				for _, res := range rule.Resources {
+					if res == "webhookgateways" {
+						foundGatewayRule = true
+					}
+				}
+			}
+			Expect(foundGatewayRule).To(BeTrue(), "kelos-webhook-role should grant webhookgateways access")
+		})
 	})
 
 	Context("kelos uninstall", func() {

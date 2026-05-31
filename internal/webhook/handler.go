@@ -59,6 +59,18 @@ type WebhookHandler struct {
 	secret           []byte
 	deliveryCache    *DeliveryCache
 	githubAPIBaseURL string
+
+	// tokenResolver, when set, overrides the process-wide GitHub token resolver
+	// for this handler. In gateway mode it is built from the serving
+	// WebhookGateway's credentialsRef; in legacy --source mode it is nil and the
+	// process-wide resolver (SetGitHubTokenResolver) is used.
+	tokenResolver func(context.Context) (string, error)
+
+	// gatewayName is the WebhookGateway this handler serves (gateway mode only).
+	// When set, created Tasks are stamped with it so the reporting reconciler can
+	// resolve per-gateway GitHub credentials and API base URL. Empty in legacy
+	// --source mode.
+	gatewayName string
 }
 
 // DeliveryCache tracks processed webhook deliveries for idempotency.
@@ -350,7 +362,7 @@ func (h *WebhookHandler) processWebhook(ctx context.Context, eventType string, p
 	// requests. The GitHub issue_comment payload does not include the PR's
 	// head ref, so we fetch it from the API once per delivery.
 	if parsed.GitHub != nil && needsBranchEnrichment(parsed.GitHub) {
-		enrichGitHubIssueCommentBranch(ctx, log, parsed.GitHub)
+		h.enrichGitHubIssueCommentBranch(ctx, log, parsed.GitHub)
 	}
 
 	tasksCreated := 0
@@ -443,17 +455,20 @@ func (h *WebhookHandler) getMatchingSpawners(ctx context.Context) ([]*v1alpha1.T
 	for i := range spawnerList.Items {
 		spawner := &spawnerList.Items[i]
 
+		// Skip spawners bound to a WebhookGateway: those are served (and
+		// authenticated) by the gateway path, so the legacy per-source server
+		// must not also match them, or the Task would be created twice.
 		switch h.source {
 		case GitHubSource:
-			if spawner.Spec.When.GitHubWebhook != nil {
+			if spawner.Spec.When.GitHubWebhook != nil && spawner.Spec.When.GitHubWebhook.GatewayRef == nil {
 				matching = append(matching, spawner)
 			}
 		case LinearSource:
-			if spawner.Spec.When.LinearWebhook != nil {
+			if spawner.Spec.When.LinearWebhook != nil && spawner.Spec.When.LinearWebhook.GatewayRef == nil {
 				matching = append(matching, spawner)
 			}
 		case GenericSource:
-			if spawner.Spec.When.GenericWebhook != nil {
+			if spawner.Spec.When.GenericWebhook != nil && spawner.Spec.When.GenericWebhook.GatewayRef == nil {
 				matching = append(matching, spawner)
 			}
 		}
@@ -489,8 +504,10 @@ func (h *WebhookHandler) matchesSpawner(spawner *v1alpha1.TaskSpawner, eventType
 		if spawner.Spec.When.GenericWebhook == nil {
 			return false, nil
 		}
-		// Check source name matches the URL path segment
-		if spawner.Spec.When.GenericWebhook.Source != eventType {
+		// In legacy mode the URL path segment selects the source, so it must
+		// match the spawner's declared source. In gateway mode the gatewayRef
+		// already scoped this spawner, so the source-name check is skipped.
+		if h.gatewayName == "" && spawner.Spec.When.GenericWebhook.Source != eventType {
 			return false, nil
 		}
 		// Extract fields for this spawner's fieldMapping
@@ -592,6 +609,11 @@ func (h *WebhookHandler) createTask(ctx context.Context, spawner *v1alpha1.TaskS
 			task.Annotations[reporting.AnnotationSourceNumber] = strconv.Itoa(parsed.GitHub.Number)
 			task.Annotations[reporting.AnnotationSourceOwner] = parsed.GitHub.RepositoryOwner
 			task.Annotations[reporting.AnnotationSourceRepo] = parsed.GitHub.RepositoryName
+			// In gateway mode, record the serving gateway so the reporting
+			// reconciler can resolve its per-instance credentials and API base URL.
+			if h.gatewayName != "" {
+				task.Annotations[reporting.AnnotationWebhookGateway] = h.gatewayName
+			}
 		}
 		if rep.Enabled {
 			task.Annotations[reporting.AnnotationGitHubReporting] = "enabled"
@@ -646,7 +668,9 @@ func (h *WebhookHandler) getGenericSpawners(ctx context.Context) []*v1alpha1.Tas
 
 	var spawners []*v1alpha1.TaskSpawner
 	for i := range spawnerList.Items {
-		if spawnerList.Items[i].Spec.When.GenericWebhook != nil {
+		// Skip gateway-bound spawners; they are served by the gateway path.
+		gw := spawnerList.Items[i].Spec.When.GenericWebhook
+		if gw != nil && gw.GatewayRef == nil {
 			spawners = append(spawners, &spawnerList.Items[i])
 		}
 	}

@@ -1,0 +1,152 @@
+{{- if .Values.crds.install }}
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.0
+    {{- if .Values.crds.keep }}
+    "helm.sh/resource-policy": keep
+    {{- end }}
+  name: webhookgateways.kelos.dev
+spec:
+  group: kelos.dev
+  names:
+    kind: WebhookGateway
+    listKind: WebhookGatewayList
+    plural: webhookgateways
+    singular: webhookgateway
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.path
+      name: Path
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          WebhookGateway is the Schema for the webhookgateways API. It is a per-channel
+          authentication and routing boundary for webhook-driven TaskSpawners: it owns
+          one inbound path (/webhook/<namespace>/<name>) and, for github/linear, the
+          secret used to verify deliveries, then fans out to TaskSpawners in its own
+          namespace that reference it via gatewayRef.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              WebhookGatewaySpec defines the desired state of a WebhookGateway. Exactly one
+              of GitHub, Linear, or Generic must be set; the field that is present selects
+              the webhook source and carries its provider-specific configuration.
+            properties:
+              generic:
+                description: Generic configures a gateway for arbitrary HTTP POST
+                  deliveries.
+                type: object
+              github:
+                description: GitHub configures a gateway for GitHub webhook deliveries.
+                properties:
+                  apiBaseURL:
+                    description: |-
+                      APIBaseURL is the GitHub API base URL used for outbound API calls (pull
+                      request file enrichment and status reporting, and GitHub App token
+                      minting), e.g. "https://ghe.example.com/api/v3" for a GitHub Enterprise
+                      instance. When empty, "https://api.github.com" is used.
+                    type: string
+                  credentialsRef:
+                    description: |-
+                      CredentialsRef references a Secret holding GitHub API credentials used for
+                      outbound API calls: a personal access token under the GITHUB_TOKEN key, or
+                      GitHub App credentials (appID, installationID, privateKey).
+                    properties:
+                      name:
+                        description: Name is the name of the secret.
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  secretRef:
+                    description: |-
+                      SecretRef references a Secret holding the HMAC secret (under a
+                      "webhook-secret" key) used to verify inbound deliveries.
+                    properties:
+                      name:
+                        description: Name is the name of the secret.
+                        type: string
+                    required:
+                    - name
+                    type: object
+                required:
+                - secretRef
+                type: object
+              linear:
+                description: Linear configures a gateway for Linear webhook deliveries.
+                properties:
+                  secretRef:
+                    description: |-
+                      SecretRef references a Secret holding the HMAC secret (under a
+                      "webhook-secret" key) used to verify inbound deliveries.
+                    properties:
+                      name:
+                        description: Name is the name of the secret.
+                        type: string
+                    required:
+                    - name
+                    type: object
+                required:
+                - secretRef
+                type: object
+            type: object
+            x-kubernetes-validations:
+            - message: exactly one of github, linear, or generic must be set
+              rule: (has(self.github)?1:0)+(has(self.linear)?1:0)+(has(self.generic)?1:0)
+                == 1
+          status:
+            description: WebhookGatewayStatus defines the observed state of a WebhookGateway.
+            properties:
+              message:
+                description: Message provides additional information about the current
+                  status.
+                type: string
+              observedGeneration:
+                description: ObservedGeneration is the most recent generation observed
+                  by the controller.
+                format: int64
+                type: integer
+              path:
+                description: |-
+                  Path is the inbound path this gateway listens on, derived as
+                  /webhook/<namespace>/<name>. It is relative to the externally configured
+                  webhook host.
+                type: string
+              phase:
+                description: Phase summarizes the gateway's authentication state.
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+{{- end }}

@@ -14965,6 +14965,19 @@ spec:
                           - event
                           type: object
                         type: array
+                      gatewayRef:
+                        description: |-
+                          GatewayRef binds this source to a WebhookGateway in the same namespace.
+                          When set, deliveries are served (and authenticated) by that gateway, and
+                          the legacy per-source webhook server ignores this spawner. When empty, the
+                          spawner is served by the legacy per-source server.
+                        properties:
+                          name:
+                            description: Name is the name of the WebhookGateway resource.
+                            type: string
+                        required:
+                        - name
+                        type: object
                       reporting:
                         description: Reporting configures status reporting back to
                           the originating GitHub issue or PR.
@@ -15092,6 +15105,19 @@ spec:
                               type: string
                           type: object
                         type: array
+                      gatewayRef:
+                        description: |-
+                          GatewayRef binds this source to a WebhookGateway in the same namespace.
+                          When set, deliveries are served (and authenticated) by that gateway, and
+                          the legacy per-source webhook server ignores this spawner. When empty, the
+                          spawner is served by the legacy per-source server.
+                        properties:
+                          name:
+                            description: Name is the name of the WebhookGateway resource.
+                            type: string
+                        required:
+                        - name
+                        type: object
                       types:
                         description: |-
                           Types is the list of Linear resource types to listen for.
@@ -15162,8 +15188,10 @@ spec:
                     description: |-
                       GenericWebhook triggers task spawning from arbitrary HTTP POST payloads.
                       Any system that can send an HTTP POST with a JSON body can trigger
-                      tasks through this source. The URL path is /webhook/<source> and
-                      the HMAC secret is read from the <SOURCE>_WEBHOOK_SECRET env var.
+                      tasks through this source. On the legacy per-source server the URL path is
+                      /webhook/<source>; deliveries are NOT signature-verified, so restrict
+                      access at the network layer. Set gatewayRef to route through a
+                      WebhookGateway instead.
                     properties:
                       fieldMapping:
                         additionalProperties:
@@ -15209,13 +15237,25 @@ spec:
                             rule: has(self.value) != (has(self.pattern) && size(self.pattern)
                               > 0)
                         type: array
+                      gatewayRef:
+                        description: |-
+                          GatewayRef binds this source to a WebhookGateway in the same namespace.
+                          When set, deliveries are served by that gateway, and the legacy per-source
+                          webhook server ignores this spawner. When empty, the spawner is served by
+                          the legacy per-source server.
+                        properties:
+                          name:
+                            description: Name is the name of the WebhookGateway resource.
+                            type: string
+                        required:
+                        - name
+                        type: object
                       source:
                         description: |-
                           Source is a short identifier for this webhook source (e.g., "notion",
-                          "sentry", "drata"). It determines:
-                            - The URL path: /webhook/<source>
-                            - The env var for HMAC validation: <SOURCE>_WEBHOOK_SECRET
-                          Must be lowercase alphanumeric with optional hyphens.
+                          "sentry", "drata"). On the legacy per-source server it determines the URL
+                          path: /webhook/<source>. Must be lowercase alphanumeric with optional
+                          hyphens. Ignored for routing when gatewayRef is set.
                         pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$
                         type: string
                     required:
@@ -15331,6 +15371,154 @@ spec:
               totalTasksCreated:
                 description: TotalTasksCreated is the total number of Tasks created.
                 type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.0
+  name: webhookgateways.kelos.dev
+spec:
+  group: kelos.dev
+  names:
+    kind: WebhookGateway
+    listKind: WebhookGatewayList
+    plural: webhookgateways
+    singular: webhookgateway
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.path
+      name: Path
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          WebhookGateway is the Schema for the webhookgateways API. It is a per-channel
+          authentication and routing boundary for webhook-driven TaskSpawners: it owns
+          one inbound path (/webhook/<namespace>/<name>) and, for github/linear, the
+          secret used to verify deliveries, then fans out to TaskSpawners in its own
+          namespace that reference it via gatewayRef.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              WebhookGatewaySpec defines the desired state of a WebhookGateway. Exactly one
+              of GitHub, Linear, or Generic must be set; the field that is present selects
+              the webhook source and carries its provider-specific configuration.
+            properties:
+              generic:
+                description: Generic configures a gateway for arbitrary HTTP POST
+                  deliveries.
+                type: object
+              github:
+                description: GitHub configures a gateway for GitHub webhook deliveries.
+                properties:
+                  apiBaseURL:
+                    description: |-
+                      APIBaseURL is the GitHub API base URL used for outbound API calls (pull
+                      request file enrichment and status reporting, and GitHub App token
+                      minting), e.g. "https://ghe.example.com/api/v3" for a GitHub Enterprise
+                      instance. When empty, "https://api.github.com" is used.
+                    type: string
+                  credentialsRef:
+                    description: |-
+                      CredentialsRef references a Secret holding GitHub API credentials used for
+                      outbound API calls: a personal access token under the GITHUB_TOKEN key, or
+                      GitHub App credentials (appID, installationID, privateKey).
+                    properties:
+                      name:
+                        description: Name is the name of the secret.
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  secretRef:
+                    description: |-
+                      SecretRef references a Secret holding the HMAC secret (under a
+                      "webhook-secret" key) used to verify inbound deliveries.
+                    properties:
+                      name:
+                        description: Name is the name of the secret.
+                        type: string
+                    required:
+                    - name
+                    type: object
+                required:
+                - secretRef
+                type: object
+              linear:
+                description: Linear configures a gateway for Linear webhook deliveries.
+                properties:
+                  secretRef:
+                    description: |-
+                      SecretRef references a Secret holding the HMAC secret (under a
+                      "webhook-secret" key) used to verify inbound deliveries.
+                    properties:
+                      name:
+                        description: Name is the name of the secret.
+                        type: string
+                    required:
+                    - name
+                    type: object
+                required:
+                - secretRef
+                type: object
+            type: object
+            x-kubernetes-validations:
+            - message: exactly one of github, linear, or generic must be set
+              rule: (has(self.github)?1:0)+(has(self.linear)?1:0)+(has(self.generic)?1:0)
+                == 1
+          status:
+            description: WebhookGatewayStatus defines the observed state of a WebhookGateway.
+            properties:
+              message:
+                description: Message provides additional information about the current
+                  status.
+                type: string
+              observedGeneration:
+                description: ObservedGeneration is the most recent generation observed
+                  by the controller.
+                format: int64
+                type: integer
+              path:
+                description: |-
+                  Path is the inbound path this gateway listens on, derived as
+                  /webhook/<namespace>/<name>. It is relative to the externally configured
+                  webhook host.
+                type: string
+              phase:
+                description: Phase summarizes the gateway's authentication state.
+                type: string
             type: object
         type: object
     served: true

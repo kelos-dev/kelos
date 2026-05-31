@@ -342,13 +342,25 @@ kubectl create secret generic github-token \
 
 The token needs `repo` (full control) and `workflow` (if your repo uses GitHub Actions).
 
-### 4. GitHub Webhook Secret and Delivery
+### 4. WebhookGateway, Secret, and Delivery
 
-The issue and pull request TaskSpawners are webhook-driven. Reuse the
-`github-webhook-secret` from your existing deployment, then configure a
-repository webhook on `kelos-dev/kanon`:
+The issue and pull request TaskSpawners are webhook-driven and routed through a
+`WebhookGateway` (`webhookgateway.yaml`, named `kanon`) that each spawner
+references via `githubWebhook.gatewayRef`. Apply it in the same namespace as the
+TaskSpawners — it reuses the shared `github-webhook-secret` (the same Secret the
+self-development `kelos` gateway uses), which must hold the HMAC secret under a
+`webhook-secret` key plus the outbound API credentials (a `GITHUB_TOKEN` PAT or
+GitHub App keys):
 
-- Point it at the same `https://<your-domain>/webhook/github` endpoint
+```bash
+kubectl apply -f webhookgateway.yaml
+```
+
+Then configure a repository webhook on `kelos-dev/kanon`:
+
+- Point it at the gateway's path,
+  `https://<your-domain>/webhook/<namespace>/kanon`
+  (`kubectl get webhookgateway kanon -o jsonpath='{.status.path}'`)
 - Use the same shared secret
 - Subscribe to `issues`, `issue_comment`, and `pull_request_review`
 
@@ -384,7 +396,7 @@ for the webhook filter field reference and the full
 - Check the TaskSpawner status: `kubectl get taskspawner <name> -o yaml`
 - Verify the Workspaces exist: `kubectl get workspace kanon-agent kelos-agent`
 - Ensure credentials are configured: `kubectl get secret kelos-credentials`
-- Ensure the GitHub webhook server is enabled and the `github-webhook-secret` exists
+- Ensure the gateway webhook server is enabled (`webhookServer.gatewayServer.enabled`), the `WebhookGateway` is `Authenticated` (`kubectl get webhookgateway kanon`), and the `github-webhook-secret` exists with a `webhook-secret` key
 - Review the `kelos-dev/kanon` repository webhook's recent deliveries in GitHub
 
 **Tasks failing immediately:**

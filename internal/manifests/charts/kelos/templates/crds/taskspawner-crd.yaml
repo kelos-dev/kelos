@@ -7737,6 +7737,19 @@ spec:
                           - event
                           type: object
                         type: array
+                      gatewayRef:
+                        description: |-
+                          GatewayRef binds this source to a WebhookGateway in the same namespace.
+                          When set, deliveries are served (and authenticated) by that gateway, and
+                          the legacy per-source webhook server ignores this spawner. When empty, the
+                          spawner is served by the legacy per-source server.
+                        properties:
+                          name:
+                            description: Name is the name of the WebhookGateway resource.
+                            type: string
+                        required:
+                        - name
+                        type: object
                       reporting:
                         description: Reporting configures status reporting back to
                           the originating GitHub issue or PR.
@@ -7864,6 +7877,19 @@ spec:
                               type: string
                           type: object
                         type: array
+                      gatewayRef:
+                        description: |-
+                          GatewayRef binds this source to a WebhookGateway in the same namespace.
+                          When set, deliveries are served (and authenticated) by that gateway, and
+                          the legacy per-source webhook server ignores this spawner. When empty, the
+                          spawner is served by the legacy per-source server.
+                        properties:
+                          name:
+                            description: Name is the name of the WebhookGateway resource.
+                            type: string
+                        required:
+                        - name
+                        type: object
                       types:
                         description: |-
                           Types is the list of Linear resource types to listen for.
@@ -7934,8 +7960,10 @@ spec:
                     description: |-
                       GenericWebhook triggers task spawning from arbitrary HTTP POST payloads.
                       Any system that can send an HTTP POST with a JSON body can trigger
-                      tasks through this source. The URL path is /webhook/<source> and
-                      the HMAC secret is read from the <SOURCE>_WEBHOOK_SECRET env var.
+                      tasks through this source. On the legacy per-source server the URL path is
+                      /webhook/<source>; deliveries are NOT signature-verified, so restrict
+                      access at the network layer. Set gatewayRef to route through a
+                      WebhookGateway instead.
                     properties:
                       fieldMapping:
                         additionalProperties:
@@ -7981,13 +8009,25 @@ spec:
                             rule: has(self.value) != (has(self.pattern) && size(self.pattern)
                               > 0)
                         type: array
+                      gatewayRef:
+                        description: |-
+                          GatewayRef binds this source to a WebhookGateway in the same namespace.
+                          When set, deliveries are served by that gateway, and the legacy per-source
+                          webhook server ignores this spawner. When empty, the spawner is served by
+                          the legacy per-source server.
+                        properties:
+                          name:
+                            description: Name is the name of the WebhookGateway resource.
+                            type: string
+                        required:
+                        - name
+                        type: object
                       source:
                         description: |-
                           Source is a short identifier for this webhook source (e.g., "notion",
-                          "sentry", "drata"). It determines:
-                            - The URL path: /webhook/<source>
-                            - The env var for HMAC validation: <SOURCE>_WEBHOOK_SECRET
-                          Must be lowercase alphanumeric with optional hyphens.
+                          "sentry", "drata"). On the legacy per-source server it determines the URL
+                          path: /webhook/<source>. Must be lowercase alphanumeric with optional
+                          hyphens. Ignored for routing when gatewayRef is set.
                         pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$
                         type: string
                     required:

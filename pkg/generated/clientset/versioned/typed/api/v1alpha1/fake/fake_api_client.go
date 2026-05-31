@@ -40,6 +40,10 @@ func (c *FakeApiV1alpha1) TaskSpawners(namespace string) v1alpha1.TaskSpawnerInt
 	return newFakeTaskSpawners(c, namespace)
 }
 
+func (c *FakeApiV1alpha1) WebhookGateways(namespace string) v1alpha1.WebhookGatewayInterface {
+	return newFakeWebhookGateways(c, namespace)
+}
+
 func (c *FakeApiV1alpha1) Workspaces(namespace string) v1alpha1.WorkspaceInterface {
 	return newFakeWorkspaces(c, namespace)
 }

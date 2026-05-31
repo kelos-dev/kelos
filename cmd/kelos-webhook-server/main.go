@@ -9,10 +9,12 @@ import (
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -36,6 +38,7 @@ func init() {
 func main() {
 	var (
 		source                  string
+		gatewayMode             bool
 		metricsAddr             string
 		probeAddr               string
 		webhookAddr             string
@@ -48,7 +51,8 @@ func main() {
 		githubTokenFile         string
 	)
 
-	flag.StringVar(&source, "source", "", "Webhook source type (github or linear)")
+	flag.StringVar(&source, "source", "", "Webhook source type (github, linear, or generic). Ignored when --gateway-mode is set.")
+	flag.BoolVar(&gatewayMode, "gateway-mode", false, "Serve per-gateway paths (/webhook/<namespace>/<name>) driven by WebhookGateway resources instead of a single --source.")
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.StringVar(&webhookAddr, "webhook-bind-address", ":8443", "The address the webhook endpoint binds to.")
@@ -87,29 +91,43 @@ func main() {
 		githubAPIBaseURL = os.Getenv("GITHUB_API_BASE_URL")
 	}
 
-	// Validate source parameter
+	// Validate source parameter (legacy mode only; gateway mode routes by path).
 	source = strings.ToLower(strings.TrimSpace(source))
 	var webhookSource webhook.WebhookSource
-	switch source {
-	case "github":
-		webhookSource = webhook.GitHubSource
-	case "linear":
-		webhookSource = webhook.LinearSource
-	case "generic":
-		webhookSource = webhook.GenericSource
-	default:
-		setupLog.Error(fmt.Errorf("invalid source: %s", source),
-			"Source must be 'github', 'linear', or 'generic'")
-		os.Exit(1)
+	if !gatewayMode {
+		switch source {
+		case "github":
+			webhookSource = webhook.GitHubSource
+		case "linear":
+			webhookSource = webhook.LinearSource
+		case "generic":
+			webhookSource = webhook.GenericSource
+		default:
+			setupLog.Error(fmt.Errorf("invalid source: %s", source),
+				"Source must be 'github', 'linear', or 'generic'")
+			os.Exit(1)
+		}
 	}
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	leaderID := source
+	mgrOptions := ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       fmt.Sprintf("kelos-webhook-%s", source),
-	})
+	}
+	if gatewayMode {
+		leaderID = "gateway"
+		// Resolve Secrets with direct Gets instead of a cluster-wide cache so the
+		// webhook server needs only get (not list/watch) on Secrets and does not
+		// cache every Secret in the cluster.
+		mgrOptions.Client = client.Options{
+			Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.Secret{}}},
+		}
+	}
+	mgrOptions.LeaderElectionID = fmt.Sprintf("kelos-webhook-%s", leaderID)
+
+	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), mgrOptions)
 	if err != nil {
 		setupLog.Error(err, "Unable to start manager")
 		os.Exit(1)
@@ -156,25 +174,34 @@ func main() {
 		webhook.SetGitHubTokenResolver(tokenResolver)
 	}
 
-	// Create webhook handler
-	handler, err := webhook.NewWebhookHandler(
-		ctx,
-		mgr.GetClient(),
-		webhookSource,
-		ctrl.Log.WithName("webhook").WithValues("source", source),
-	)
-	if err != nil {
-		setupLog.Error(err, "Unable to create webhook handler")
-		os.Exit(1)
-	}
-
-	// Set up HTTP server for webhooks.
-	// Generic source uses /webhook/<source> paths; others use root.
+	// Set up the HTTP mux. In gateway mode a single handler routes by path
+	// (/webhook/<namespace>/<name>) using WebhookGateway resources. In legacy
+	// mode a source-specific handler is mounted (generic uses /webhook/<source>,
+	// github/linear use root).
 	mux := http.NewServeMux()
-	if webhookSource == webhook.GenericSource {
-		mux.Handle("/webhook/", handler)
+	if gatewayMode {
+		gatewayHandler, err := webhook.NewGatewayHandler(ctx, mgr.GetClient(), ctrl.Log.WithName("gateway"))
+		if err != nil {
+			setupLog.Error(err, "Unable to create gateway handler")
+			os.Exit(1)
+		}
+		mux.Handle("/webhook/", gatewayHandler)
 	} else {
-		mux.Handle("/", handler)
+		handler, err := webhook.NewWebhookHandler(
+			ctx,
+			mgr.GetClient(),
+			webhookSource,
+			ctrl.Log.WithName("webhook").WithValues("source", source),
+		)
+		if err != nil {
+			setupLog.Error(err, "Unable to create webhook handler")
+			os.Exit(1)
+		}
+		if webhookSource == webhook.GenericSource {
+			mux.Handle("/webhook/", handler)
+		} else {
+			mux.Handle("/", handler)
+		}
 	}
 
 	webhookServer := &http.Server{
@@ -188,20 +215,21 @@ func main() {
 
 	// Start webhook server in goroutine
 	go func() {
-		setupLog.Info("Starting webhook server", "addr", webhookAddr, "source", source)
+		setupLog.Info("Starting webhook server", "addr", webhookAddr, "source", source, "gatewayMode", gatewayMode)
 		if err := webhookServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			setupLog.Error(err, "Webhook server failed")
 			os.Exit(1)
 		}
 	}()
 
-	// Start the reporting reconciler whenever the GitHub webhook source has a
-	// token resolver available. Owner and repo come from per-Task annotations
-	// stamped by the webhook handler from the originating event payload, so
-	// one webhook server can report against many repositories. Other sources
-	// (linear, generic) never produce GitHub-reporting tasks, so the
-	// reconciler stays disabled there even when GITHUB_TOKEN is set.
-	if webhookSource == webhook.GitHubSource && tokenResolver != nil {
+	// Start the reporting reconciler in gateway mode (where each Task resolves
+	// its GitHub credentials and API base URL from the stamped WebhookGateway),
+	// or in legacy GitHub mode when a token resolver is available. Owner and repo
+	// come from per-Task annotations stamped by the webhook handler from the
+	// originating event payload, so one server can report against many
+	// repositories. Legacy linear/generic sources never produce GitHub-reporting
+	// tasks, so the reconciler stays disabled there.
+	if gatewayMode || (webhookSource == webhook.GitHubSource && tokenResolver != nil) {
 		reportingReconciler := &reportingReconciler{
 			Client: mgr.GetClient(),
 			config: reportingConfig{

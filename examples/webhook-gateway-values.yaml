@@ -3,12 +3,13 @@
 
 # Enable webhook servers
 webhookServer:
-  sources:
-    # Enable GitHub webhook server
-    github:
-      enabled: true
-      replicas: 2
-      secretName: github-webhook-secret
+  # Gateway-mode webhook server: one deployment that routes by per-gateway path
+  # (/webhook/<namespace>/<name>) using WebhookGateway resources. Each gateway
+  # carries its own HMAC secret and (for github) API base URL and credentials,
+  # so there is no server-level secretName here.
+  gatewayServer:
+    enabled: true
+    replicas: 2
 
   # Configure resources for webhook pods
   resources:

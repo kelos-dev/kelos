@@ -96,6 +96,13 @@ RUN ARCH=$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/') \
 ARG PNPM_VERSION=10.27.0
 RUN npm install -g pnpm@${PNPM_VERSION}
 
+# corepack — enables the repo-pinned yarn shim so repos on yarn (e.g.
+# investor-adib's yarn@4.11.0 in packageManager/mise.toml) have `yarn` on PATH,
+# matching the global pnpm above. corepack ships with node; the shim resolves
+# the exact yarn version from each repo's packageManager on first use. The
+# /usr/local/bin npm/pnpm broker wrappers stay ahead on PATH and are unaffected.
+RUN corepack enable
+
 # uv — Python package + project manager used by ai-api, bank-ingestor, and
 # friends (their Makefiles invoke `uv sync` / `uv run pytest`). Static
 # binary so no apt or pip bootstrap is needed.

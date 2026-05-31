@@ -48,4 +48,5 @@ spec:
       - Prefer webhook-based triggers (`githubWebhook`) over poll-based (`githubPullRequests`) for real-time event-driven tasks
       - The `{{.Branch}}` template variable is empty for issue-only events; use `{{with index . "Branch"}}{{.}}{{else}}main{{end}}` when it may be empty
       - The `issue_comment` webhook event fires for both issues and pull requests; design prompts to detect and handle both contexts
+      - Restrict every trigger that can launch an autonomous run to a trusted author and the intended subject: give `issue_comment` and `pull_request_review` filters an `author` allowlist (e.g. `author: gjkim42`) so an unapproved comment or review cannot start a task and spend tokens, and add `commentOn: PullRequest` to filters whose command is PR-only (e.g. `/kelos review`) so the same command on a plain issue does not start a PR-only task. An unfiltered event trigger is reachable by anyone who can comment
       - Do not include manual PR branch checkout instructions in prompts — Kelos already checks out the PR branch automatically

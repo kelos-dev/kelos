@@ -1515,8 +1515,16 @@ type slackReplyRecord struct {
 }
 
 type fakeSlackReporter struct {
-	postFn   func(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error)
-	updateFn func(ctx context.Context, channel, messageTS string, msg SlackMessage) error
+	postMessageFn func(ctx context.Context, channel string, msg SlackMessage) (string, error)
+	postFn        func(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error)
+	updateFn      func(ctx context.Context, channel, messageTS string, msg SlackMessage) error
+}
+
+func (f *fakeSlackReporter) PostMessage(ctx context.Context, channel string, msg SlackMessage) (string, error) {
+	if f.postMessageFn != nil {
+		return f.postMessageFn(ctx, channel, msg)
+	}
+	return "fake-root-ts", nil
 }
 
 func (f *fakeSlackReporter) PostThreadReply(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error) {
@@ -1587,6 +1595,149 @@ type fakeProgressReader struct {
 
 func (f *fakeProgressReader) ReadProgress(ctx context.Context, namespace, podName, container, agentType string) string {
 	return f.text
+}
+
+func TestSlackTaskReporter_DeferredProgressCreatesRootMessage(t *testing.T) {
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "infra-health-task",
+			Namespace: "default",
+			UID:       "uid-deferred-root",
+			Annotations: map[string]string{
+				AnnotationSlackReporting:   SlackReportingDeferred,
+				AnnotationSlackDestination: "asd",
+			},
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   "claude-code",
+			Prompt: "test",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeOAuth,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+			},
+		},
+		Status: kelosv1alpha1.TaskStatus{
+			Phase:   kelosv1alpha1.TaskPhaseRunning,
+			PodName: "test-pod",
+		},
+	}
+
+	cl := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(task).Build()
+
+	var rootPosts []slackReplyRecord
+	var threadPosts []slackReplyRecord
+	reporter := &fakeSlackReporter{
+		postMessageFn: func(ctx context.Context, channel string, msg SlackMessage) (string, error) {
+			rootPosts = append(rootPosts, slackReplyRecord{method: "post-message", channel: channel, msg: msg})
+			return "1234567890.333333", nil
+		},
+		postFn: func(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error) {
+			threadPosts = append(threadPosts, slackReplyRecord{method: "post", channel: channel, threadTS: threadTS, msg: msg})
+			return "should-not-post-thread", nil
+		},
+	}
+
+	tr := &SlackTaskReporter{
+		Client:         cl,
+		Reporter:       reporter,
+		ProgressReader: &fakeProgressReader{text: "Issue detected: HelmRelease failed in non-prod."},
+		Routes:         map[string]SlackRoute{"asd": {Channel: "C123ABC"}},
+	}
+
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(rootPosts) != 1 {
+		t.Fatalf("expected 1 root post, got %d", len(rootPosts))
+	}
+	if rootPosts[0].channel != "C123ABC" {
+		t.Errorf("channel = %q, want C123ABC", rootPosts[0].channel)
+	}
+	if rootPosts[0].msg.Text != "Issue detected: HelmRelease failed in non-prod." {
+		t.Errorf("text = %q, want progress text", rootPosts[0].msg.Text)
+	}
+	if len(threadPosts) != 0 {
+		t.Fatalf("expected no thread posts, got %d", len(threadPosts))
+	}
+
+	var updated kelosv1alpha1.Task
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
+		t.Fatalf("getting updated task: %v", err)
+	}
+	if updated.Annotations[AnnotationSlackChannel] != "C123ABC" {
+		t.Errorf("channel annotation = %q, want C123ABC", updated.Annotations[AnnotationSlackChannel])
+	}
+	if updated.Annotations[AnnotationSlackThreadTS] != "1234567890.333333" {
+		t.Errorf("thread ts annotation = %q, want root message ts", updated.Annotations[AnnotationSlackThreadTS])
+	}
+	if updated.Annotations[AnnotationSlackMessageTS] != "1234567890.333333" {
+		t.Errorf("message ts annotation = %q, want root message ts", updated.Annotations[AnnotationSlackMessageTS])
+	}
+	if updated.Annotations[AnnotationSlackReportPhase] != "accepted" {
+		t.Errorf("report phase = %q, want accepted", updated.Annotations[AnnotationSlackReportPhase])
+	}
+}
+
+func TestSlackTaskReporter_DeferredNoProgressStaysSilent(t *testing.T) {
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "infra-health-task",
+			Namespace: "default",
+			UID:       "uid-deferred-silent",
+			Annotations: map[string]string{
+				AnnotationSlackReporting:   SlackReportingDeferred,
+				AnnotationSlackDestination: "asd",
+			},
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   "claude-code",
+			Prompt: "test",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeOAuth,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+			},
+		},
+		Status: kelosv1alpha1.TaskStatus{
+			Phase:   kelosv1alpha1.TaskPhaseRunning,
+			PodName: "test-pod",
+		},
+	}
+
+	cl := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(task).Build()
+
+	called := false
+	reporter := &fakeSlackReporter{
+		postMessageFn: func(ctx context.Context, channel string, msg SlackMessage) (string, error) {
+			called = true
+			return "should-not-post", nil
+		},
+	}
+
+	tr := &SlackTaskReporter{
+		Client:         cl,
+		Reporter:       reporter,
+		ProgressReader: &fakeProgressReader{text: ""},
+		Routes:         map[string]SlackRoute{"asd": {Channel: "C123ABC"}},
+	}
+
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if called {
+		t.Fatal("expected no Slack root post when deferred progress is empty")
+	}
+
+	var updated kelosv1alpha1.Task
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
+		t.Fatalf("getting updated task: %v", err)
+	}
+	if updated.Annotations[AnnotationSlackThreadTS] != "" {
+		t.Errorf("thread ts annotation = %q, want empty", updated.Annotations[AnnotationSlackThreadTS])
+	}
+	if updated.Annotations[AnnotationSlackReportPhase] != "" {
+		t.Errorf("report phase = %q, want empty", updated.Annotations[AnnotationSlackReportPhase])
+	}
 }
 
 func TestSlackTaskReporter_PostsProgressReply(t *testing.T) {

@@ -44,6 +44,10 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.slackServer.secretName }}
                   key: SLACK_APP_TOKEN
+            {{- if .Values.slackServer.routeConfigMapName }}
+            - name: SLACK_ROUTE_CONFIG_FILE
+              value: /etc/kelos/slack-routes.yaml
+            {{- end }}
             {{- if .Values.slackServer.joinMessage }}
             - name: SLACK_JOIN_MESSAGE_FILE
               value: /etc/kelos/join-message.txt
@@ -71,11 +75,20 @@ spec:
           resources:
             {{- toYaml .Values.slackServer.resources | nindent 12 }}
           {{- end }}
-          {{- if .Values.slackServer.joinMessage }}
+          {{- if or .Values.slackServer.joinMessage .Values.slackServer.routeConfigMapName }}
           volumeMounts:
-            - name: config
-              mountPath: /etc/kelos
+            {{- if .Values.slackServer.joinMessage }}
+            - name: join-message
+              mountPath: /etc/kelos/join-message.txt
+              subPath: join-message.txt
               readOnly: true
+            {{- end }}
+            {{- if .Values.slackServer.routeConfigMapName }}
+            - name: slack-routes
+              mountPath: /etc/kelos/slack-routes.yaml
+              subPath: {{ .Values.slackServer.routeConfigMapKey }}
+              readOnly: true
+            {{- end }}
           {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
@@ -85,10 +98,17 @@ spec:
             capabilities:
               drop:
                 - "ALL"
-      {{- if .Values.slackServer.joinMessage }}
+      {{- if or .Values.slackServer.joinMessage .Values.slackServer.routeConfigMapName }}
       volumes:
-        - name: config
+        {{- if .Values.slackServer.joinMessage }}
+        - name: join-message
           configMap:
             name: kelos-slack-server-config
+        {{- end }}
+        {{- if .Values.slackServer.routeConfigMapName }}
+        - name: slack-routes
+          configMap:
+            name: {{ .Values.slackServer.routeConfigMapName }}
+        {{- end }}
       {{- end }}
 {{- end }}

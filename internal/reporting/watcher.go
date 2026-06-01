@@ -65,16 +65,26 @@ const (
 	AnnotationGitHubCheckName = "kelos.dev/github-check-name"
 
 	// AnnotationSlackReporting indicates that Slack reporting is enabled
-	// for this Task.
+	// for this Task. Value "enabled" reports immediately into an existing
+	// thread. Value "deferred" waits for the first progress snapshot and then
+	// creates a proactive top-level message.
 	AnnotationSlackReporting = "kelos.dev/slack-reporting"
 
 	// AnnotationSlackChannel records the Slack channel ID where the
 	// originating message was posted.
 	AnnotationSlackChannel = "kelos.dev/slack-channel"
 
+	// AnnotationSlackDestination records a configured Slack destination name.
+	// The slack server resolves this through its route config before posting.
+	AnnotationSlackDestination = "kelos.dev/slack-destination"
+
 	// AnnotationSlackThreadTS records the originating message timestamp,
 	// used as thread_ts for posting replies.
 	AnnotationSlackThreadTS = "kelos.dev/slack-thread-ts"
+
+	// AnnotationSlackMessageTS stores the current message timestamp that
+	// progress/final updates should edit in place.
+	AnnotationSlackMessageTS = "kelos.dev/slack-message-ts"
 
 	// AnnotationSlackUserID records the Slack user ID of the person who
 	// triggered the task.
@@ -84,9 +94,12 @@ const (
 	// reported to Slack, preventing duplicate API calls on re-list.
 	AnnotationSlackReportPhase = "kelos.dev/slack-report-phase"
 
-	// LabelSlackReporting is applied to Tasks created from Slack so that
-	// the reporting and activity loops can list only relevant Tasks.
+	// LabelSlackReporting is applied to Slack-reportable Tasks so that the
+	// reporting and activity loops can list only relevant Tasks.
 	LabelSlackReporting = "kelos.dev/slack-reporting"
+
+	SlackReportingEnabled  = "enabled"
+	SlackReportingDeferred = "deferred"
 )
 
 // TaskReporter watches Tasks and reports status changes to GitHub.
@@ -442,8 +455,14 @@ func (tr *TaskReporter) persistAnnotations(ctx context.Context, task *kelosv1alp
 
 // SlackMessenger is the interface for posting and updating Slack messages.
 type SlackMessenger interface {
+	PostMessage(ctx context.Context, channel string, msg SlackMessage) (string, error)
 	PostThreadReply(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error)
 	UpdateMessage(ctx context.Context, channel, messageTS string, msg SlackMessage) error
+}
+
+// SlackRoute resolves a named Slack destination to a single channel.
+type SlackRoute struct {
+	Channel string
 }
 
 // activityState tracks the target message for activity indicator updates.
@@ -474,6 +493,7 @@ type SlackTaskReporter struct {
 	Reporter       SlackMessenger
 	ProgressReader ProgressReader
 	ActivityReader ActivityReader
+	Routes         map[string]SlackRoute
 
 	mu           sync.Mutex
 	lastProgress map[types.UID]string         // taskUID -> last posted text
@@ -491,16 +511,15 @@ func (tr *SlackTaskReporter) ReportTaskStatus(ctx context.Context, task *kelosv1
 		return nil
 	}
 
-	if annotations[AnnotationSlackReporting] != "enabled" {
+	reportingMode := annotations[AnnotationSlackReporting]
+	if reportingMode != SlackReportingEnabled && reportingMode != SlackReportingDeferred {
 		return nil
 	}
 
-	channel := annotations[AnnotationSlackChannel]
-	threadTS := annotations[AnnotationSlackThreadTS]
-	if channel == "" || threadTS == "" {
+	channel := tr.resolveSlackChannel(task)
+	if channel == "" {
 		return nil
 	}
-
 	var desiredPhase string
 	switch task.Status.Phase {
 	case kelosv1alpha1.TaskPhasePending, kelosv1alpha1.TaskPhaseRunning, kelosv1alpha1.TaskPhaseWaiting:
@@ -510,6 +529,14 @@ func (tr *SlackTaskReporter) ReportTaskStatus(ctx context.Context, task *kelosv1
 	case kelosv1alpha1.TaskPhaseFailed:
 		desiredPhase = "failed"
 	default:
+		return nil
+	}
+
+	threadTS := annotations[AnnotationSlackThreadTS]
+	if threadTS == "" {
+		if reportingMode == SlackReportingDeferred && desiredPhase == "accepted" {
+			return tr.updateDeferredProgress(ctx, task, channel)
+		}
 		return nil
 	}
 
@@ -530,7 +557,7 @@ func (tr *SlackTaskReporter) ReportTaskStatus(ctx context.Context, task *kelosv1
 	// replace the progress message with the first part and post the rest
 	// as new replies.
 	if desiredPhase == "succeeded" || desiredPhase == "failed" {
-		if progressTS := tr.getProgressTS(task.UID); progressTS != "" {
+		if progressTS := tr.getProgressTS(task); progressTS != "" {
 			log.Info("Updating Slack progress message with final result", "task", task.Name, "channel", channel, "phase", desiredPhase)
 			if err := tr.Reporter.UpdateMessage(ctx, channel, progressTS, msgs[0]); err != nil {
 				log.Error(err, "Failed to update progress message with final result, posting new reply", "task", task.Name)
@@ -579,7 +606,28 @@ func (tr *SlackTaskReporter) ReportTaskStatus(ctx context.Context, task *kelosv1
 	return nil
 }
 
+func (tr *SlackTaskReporter) resolveSlackChannel(task *kelosv1alpha1.Task) string {
+	annotations := task.Annotations
+	if annotations == nil {
+		return ""
+	}
+	if channel := annotations[AnnotationSlackChannel]; channel != "" {
+		return channel
+	}
+	destination := annotations[AnnotationSlackDestination]
+	if destination == "" {
+		return ""
+	}
+	return tr.Routes[destination].Channel
+}
+
 func (tr *SlackTaskReporter) persistSlackReportingState(ctx context.Context, task *kelosv1alpha1.Task, desiredPhase string) error {
+	return tr.persistSlackAnnotations(ctx, task, map[string]string{
+		AnnotationSlackReportPhase: desiredPhase,
+	})
+}
+
+func (tr *SlackTaskReporter) persistSlackAnnotations(ctx context.Context, task *kelosv1alpha1.Task, annotations map[string]string) error {
 	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		var current kelosv1alpha1.Task
 		if err := tr.Client.Get(ctx, client.ObjectKeyFromObject(task), &current); err != nil {
@@ -589,7 +637,9 @@ func (tr *SlackTaskReporter) persistSlackReportingState(ctx context.Context, tas
 		if current.Annotations == nil {
 			current.Annotations = make(map[string]string)
 		}
-		current.Annotations[AnnotationSlackReportPhase] = desiredPhase
+		for key, value := range annotations {
+			current.Annotations[key] = value
+		}
 
 		if err := tr.Client.Update(ctx, &current); err != nil {
 			return err
@@ -648,7 +698,7 @@ func (tr *SlackTaskReporter) updateProgress(ctx context.Context, task *kelosv1al
 	msg := FormatProgressMessage(text, task.Name)
 
 	// If we already have a progress message for this task, edit it in-place.
-	if replyTS := tr.getProgressTS(task.UID); replyTS != "" {
+	if replyTS := tr.getProgressTS(task); replyTS != "" {
 		log.V(1).Info("Updating Slack progress message", "task", task.Name)
 		if err := tr.Reporter.UpdateMessage(ctx, channel, replyTS, msg); err != nil {
 			log.Error(err, "Failed to update Slack progress message", "task", task.Name)
@@ -673,6 +723,11 @@ func (tr *SlackTaskReporter) updateProgress(ctx context.Context, task *kelosv1al
 
 	tr.setLastProgress(task.UID, text)
 	tr.setProgressTS(task.UID, replyTS)
+	if err := tr.persistSlackAnnotations(ctx, task, map[string]string{
+		AnnotationSlackMessageTS: replyTS,
+	}); err != nil {
+		log.V(1).Info("Failed to persist Slack progress timestamp", "task", task.Name, "error", err)
+	}
 
 	// Atomically switch the activity target to the new progress message and
 	// reset the old message's indicator so only one message in the thread
@@ -682,6 +737,47 @@ func (tr *SlackTaskReporter) updateProgress(ctx context.Context, task *kelosv1al
 	}
 
 	return nil
+}
+
+// updateDeferredProgress starts proactive Slack reporting only after a running
+// task emits its first meaningful assistant progress snapshot. This keeps
+// scheduled/no-op runs silent while still letting material findings use the
+// same Slack reporter/update path as Slack-triggered debug tasks.
+func (tr *SlackTaskReporter) updateDeferredProgress(ctx context.Context, task *kelosv1alpha1.Task, channel string) error {
+	if tr.ProgressReader == nil || tr.Reporter == nil {
+		return nil
+	}
+	if task.Status.Phase != kelosv1alpha1.TaskPhaseRunning || task.Status.PodName == "" {
+		return nil
+	}
+
+	containerName := task.Spec.Type
+	if containerName == "" {
+		containerName = "claude-code"
+	}
+	text := tr.ProgressReader.ReadProgress(ctx, task.Namespace, task.Status.PodName, containerName, task.Spec.Type)
+	if text == "" || !tr.shouldPostProgress(task.UID, text) {
+		return nil
+	}
+
+	log := ctrl.Log.WithName("slack-reporter")
+	msg := FormatProgressMessage(text, task.Name)
+	log.Info("Posting deferred Slack root message", "task", task.Name, "channel", channel)
+	messageTS, err := tr.Reporter.PostMessage(ctx, channel, msg)
+	if err != nil {
+		return fmt.Errorf("posting deferred Slack message for task %s: %w", task.Name, err)
+	}
+
+	tr.setLastProgress(task.UID, text)
+	tr.setProgressTS(task.UID, messageTS)
+	tr.setActivityTarget(task.UID, messageTS, msg)
+
+	return tr.persistSlackAnnotations(ctx, task, map[string]string{
+		AnnotationSlackChannel:     channel,
+		AnnotationSlackThreadTS:    messageTS,
+		AnnotationSlackMessageTS:   messageTS,
+		AnnotationSlackReportPhase: "accepted",
+	})
 }
 
 // shouldPostProgress returns true if the text differs from the last posted
@@ -707,13 +803,18 @@ func (tr *SlackTaskReporter) setLastProgress(uid types.UID, text string) {
 
 // getProgressTS returns the Slack message timestamp of the progress reply
 // for a task, or empty string if no progress has been posted yet.
-func (tr *SlackTaskReporter) getProgressTS(uid types.UID) string {
+func (tr *SlackTaskReporter) getProgressTS(task *kelosv1alpha1.Task) string {
 	tr.mu.Lock()
 	defer tr.mu.Unlock()
-	if tr.progressTS == nil {
+	if tr.progressTS != nil {
+		if ts := tr.progressTS[task.UID]; ts != "" {
+			return ts
+		}
+	}
+	if task.Annotations == nil {
 		return ""
 	}
-	return tr.progressTS[uid]
+	return task.Annotations[AnnotationSlackMessageTS]
 }
 
 // setProgressTS records the Slack message timestamp for the progress reply.
@@ -774,7 +875,8 @@ func (tr *SlackTaskReporter) UpdateActivityIndicator(ctx context.Context, task *
 	if annotations == nil {
 		return
 	}
-	if annotations[AnnotationSlackReporting] != "enabled" {
+	reportingMode := annotations[AnnotationSlackReporting]
+	if reportingMode != SlackReportingEnabled && reportingMode != SlackReportingDeferred {
 		return
 	}
 	if annotations[AnnotationSlackReportPhase] != "accepted" {
@@ -791,7 +893,7 @@ func (tr *SlackTaskReporter) UpdateActivityIndicator(ctx context.Context, task *
 		return
 	}
 
-	channel := annotations[AnnotationSlackChannel]
+	channel := tr.resolveSlackChannel(task)
 	if channel == "" {
 		return
 	}

@@ -63,6 +63,21 @@ func (r *SlackReporter) PostThreadReply(ctx context.Context, channel, threadTS s
 	return ts, nil
 }
 
+// PostMessage posts a new top-level message and returns its timestamp.
+func (r *SlackReporter) PostMessage(ctx context.Context, channel string, msg SlackMessage) (string, error) {
+	opts := []slack.MsgOption{
+		slack.MsgOptionText(msg.Text, false),
+	}
+	if len(msg.Blocks) > 0 {
+		opts = append(opts, slack.MsgOptionBlocks(msg.Blocks...))
+	}
+	_, ts, err := r.api().PostMessageContext(ctx, channel, opts...)
+	if err != nil {
+		return "", fmt.Errorf("posting Slack message: %w", err)
+	}
+	return ts, nil
+}
+
 // UpdateMessage updates an existing Slack message in place.
 func (r *SlackReporter) UpdateMessage(ctx context.Context, channel, messageTS string, msg SlackMessage) error {
 	opts := []slack.MsgOption{

@@ -552,6 +552,174 @@ func TestContextHandlerReportsDisabledWhenUnconfigured(t *testing.T) {
 	}
 }
 
+func TestDatadogHandlerInjectsServerSideCredentials(t *testing.T) {
+	var gotAPIKey string
+	var gotAppKey string
+	var gotUnderscoreAPIKey string
+	var gotUnderscoreAppKey string
+	var gotAuth string
+	var gotCookie string
+	var gotPath string
+	var gotQuery string
+	var gotBody map[string]any
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAPIKey = r.Header.Get("DD-API-KEY")
+		gotAppKey = r.Header.Get("DD-APPLICATION-KEY")
+		gotUnderscoreAPIKey = r.Header.Get("DD_API_KEY")
+		gotUnderscoreAppKey = r.Header.Get("DD_APPLICATION_KEY")
+		gotAuth = r.Header.Get("Authorization")
+		gotCookie = r.Header.Get("Cookie")
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode upstream body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      gotBody["id"],
+			"result":  map[string]any{"tools": []any{}},
+		})
+	}))
+	defer upstream.Close()
+
+	s := &server{
+		cfg: config{
+			datadogEnabled:     true,
+			datadogUpstreamURL: upstream.URL + "/mcp?toolsets=core,alerting",
+			datadogAPIKey:      "server-api-key",
+			datadogAppKey:      "server-app-key",
+		},
+		httpClient: upstream.Client(),
+		logger:     testLogger(),
+		ready:      true,
+	}
+	req := httptest.NewRequest(http.MethodPost, "/mcp/datadog", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`))
+	req.Header.Set("Authorization", "Bearer client-token")
+	req.Header.Set("Cookie", "session=client")
+	req.Header.Set("DD-API-KEY", "client-api-key")
+	req.Header.Set("DD_APPLICATION_KEY", "client-app-key")
+	rec := httptest.NewRecorder()
+
+	s.handleDatadog(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if gotAPIKey != "server-api-key" || gotUnderscoreAPIKey != "server-api-key" {
+		t.Fatalf("api keys = %q/%q", gotAPIKey, gotUnderscoreAPIKey)
+	}
+	if gotAppKey != "server-app-key" || gotUnderscoreAppKey != "server-app-key" {
+		t.Fatalf("app keys = %q/%q", gotAppKey, gotUnderscoreAppKey)
+	}
+	if gotAuth != "" {
+		t.Fatalf("Authorization forwarded = %q", gotAuth)
+	}
+	if gotCookie != "" {
+		t.Fatalf("Cookie forwarded = %q", gotCookie)
+	}
+	if gotPath != "/mcp" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if gotQuery != "toolsets=core,alerting" {
+		t.Fatalf("query = %q", gotQuery)
+	}
+	if gotBody["method"] != "tools/list" {
+		t.Fatalf("method = %q", gotBody["method"])
+	}
+}
+
+func TestDatadogHandlerRequiresEnabledConfig(t *testing.T) {
+	s := &server{logger: testLogger(), httpClient: http.DefaultClient}
+	req := httptest.NewRequest(http.MethodPost, "/mcp/datadog", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`))
+	rec := httptest.NewRecorder()
+
+	s.handleDatadog(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDatadogHandlerRejectsWriteMethodsOtherThanPost(t *testing.T) {
+	s := &server{
+		cfg: config{
+			datadogEnabled:     true,
+			datadogUpstreamURL: "https://mcp.datadoghq.eu/api/unstable/mcp-server/mcp",
+			datadogAPIKey:      "api-key",
+			datadogAppKey:      "app-key",
+		},
+		logger: testLogger(),
+	}
+	req := httptest.NewRequest(http.MethodGet, "/mcp/datadog", nil)
+	rec := httptest.NewRecorder()
+
+	s.handleDatadog(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if rec.Header().Get("Allow") != http.MethodPost {
+		t.Fatalf("Allow = %q", rec.Header().Get("Allow"))
+	}
+}
+
+func TestValidateDatadogAccessListsTools(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("DD-API-KEY"); got != "api-key" {
+			t.Fatalf("DD-API-KEY = %q", got)
+		}
+		if got := r.Header.Get("DD-APPLICATION-KEY"); got != "app-key" {
+			t.Fatalf("DD-APPLICATION-KEY = %q", got)
+		}
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if method, _ := request["method"].(string); method == "notifications/initialized" {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		id := request["id"]
+		switch request["method"] {
+		case "initialize":
+			w.Header().Set("Mcp-Session-Id", "datadog-session")
+			json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"result": map[string]any{
+					"protocolVersion": "2025-06-18",
+				},
+			})
+		case "tools/list":
+			if got := r.Header.Get("Mcp-Session-Id"); got != "datadog-session" {
+				t.Fatalf("Mcp-Session-Id = %q", got)
+			}
+			json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"result": map[string]any{
+					"tools": []any{map[string]any{"name": "list_monitors"}},
+				},
+			})
+		default:
+			t.Fatalf("unexpected method %q", request["method"])
+		}
+	}))
+	defer upstream.Close()
+
+	err := validateDatadogAccess(context.Background(), upstream.Client(), config{
+		datadogEnabled:     true,
+		datadogUpstreamURL: upstream.URL + "/mcp?toolsets=core",
+		datadogAPIKey:      "api-key",
+		datadogAppKey:      "app-key",
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("validation failed: %v", err)
+	}
+}
+
 func TestAikidoHandlerProxiesReadOnlyRequestsWithServerSideAuth(t *testing.T) {
 	var gotAuth string
 	var gotCookie string

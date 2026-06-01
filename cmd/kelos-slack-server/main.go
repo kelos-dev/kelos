@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -18,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	"sigs.k8s.io/yaml"
 
 	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 	"github.com/kelos-dev/kelos/internal/logging"
@@ -75,6 +77,11 @@ func main() {
 		setupLog.Error(fmt.Errorf("missing tokens"), "SLACK_BOT_TOKEN and SLACK_APP_TOKEN environment variables are required")
 		os.Exit(1)
 	}
+	routes, err := loadSlackRoutes(os.Getenv("SLACK_ROUTE_CONFIG_FILE"))
+	if err != nil {
+		setupLog.Error(err, "Invalid Slack route config")
+		os.Exit(1)
+	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
@@ -127,6 +134,7 @@ func main() {
 		Reporter:       &reporting.SlackReporter{BotToken: botToken},
 		ProgressReader: &reporting.DefaultProgressReader{Clientset: clientset},
 		ActivityReader: &reporting.DefaultActivityReader{Clientset: clientset},
+		Routes:         routes,
 	}
 	turnReporter := &reporting.SlackTurnReporter{
 		Client:   mgr.GetClient(),
@@ -219,6 +227,48 @@ func (r *activityRunnable) Start(ctx context.Context) error {
 }
 
 func (r *activityRunnable) NeedLeaderElection() bool { return true }
+
+type slackRouteConfig struct {
+	Routes map[string]slackRoute `json:"routes"`
+}
+
+type slackRoute struct {
+	Channel string `json:"channel"`
+}
+
+func loadSlackRoutes(path string) (map[string]reporting.SlackRoute, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, nil
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading Slack route config: %w", err)
+	}
+
+	var cfg slackRouteConfig
+	if err := yaml.UnmarshalStrict(content, &cfg); err != nil {
+		return nil, fmt.Errorf("parsing Slack route config: %w", err)
+	}
+	if len(cfg.Routes) == 0 {
+		return nil, fmt.Errorf("Slack route config must define at least one route")
+	}
+
+	routes := make(map[string]reporting.SlackRoute, len(cfg.Routes))
+	for name, route := range cfg.Routes {
+		name = strings.TrimSpace(name)
+		channel := strings.TrimSpace(route.Channel)
+		if name == "" || channel == "" {
+			return nil, fmt.Errorf("Slack routes must include non-empty name and channel")
+		}
+		if strings.ContainsAny(name, " \t\r\n") {
+			return nil, fmt.Errorf("Slack route name %q must not contain whitespace", name)
+		}
+		routes[name] = reporting.SlackRoute{Channel: channel}
+	}
+	return routes, nil
+}
 
 // runReportingLoop periodically reports Slack task status for ALL Slack-annotated
 // Tasks cluster-wide. This replaces the per-TaskSpawner reporting that previously

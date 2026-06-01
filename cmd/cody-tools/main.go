@@ -27,6 +27,7 @@ const (
 	defaultAikidoAPIBaseURL      = "https://app.aikido.dev/api/public/v1"
 	defaultAikidoTokenURL        = "https://app.aikido.dev/api/oauth/token"
 	defaultHindsightAllowedTools = "recall,list_memories,get_memory,list_tags,get_bank"
+	defaultDatadogMCPURL         = "https://mcp.datadoghq.eu/api/unstable/mcp-server/mcp?toolsets=core,alerting,dbm"
 	defaultContextTimeout        = 10 * time.Second
 
 	envAddr                       = "CODY_TOOLS_ADDR"
@@ -48,15 +49,23 @@ const (
 	envGitHubAppInstallationID    = "CODY_TOOLS_GITHUB_APP_INSTALLATION_ID"
 	envGitHubAppPrivateKey        = "CODY_TOOLS_GITHUB_APP_PRIVATE_KEY"
 	envGitHubPackagesToken        = "CODY_TOOLS_GITHUB_PACKAGES_TOKEN"
+	envDatadogEnabled             = "CODY_TOOLS_DATADOG_ENABLED"
+	envDatadogUpstreamURL         = "CODY_TOOLS_DATADOG_UPSTREAM_URL"
+	envDatadogAPIKey              = "CODY_TOOLS_DATADOG_API_KEY"
+	envDatadogApplicationKey      = "CODY_TOOLS_DATADOG_APPLICATION_KEY"
+	envDatadogAllowedToolsets     = "CODY_TOOLS_DATADOG_ALLOWED_TOOLSETS"
+	envDatadogStartupValidate     = "CODY_TOOLS_DATADOG_STARTUP_VALIDATE"
 	aikidoRoute                   = "/aikido"
 	atlassianRoute                = "/mcp/atlassian"
 	contextRoute                  = "/mcp/context"
+	datadogRoute                  = "/mcp/datadog"
 	githubRoute                   = "/github"
 	githubTokenRoute              = githubRoute + "/app/installations/token"
 	githubPackagesTokenRoute      = githubRoute + "/packages/token"
 	githubCredentialRoute         = githubRoute + "/credential"
 	aikidoAuthorizationError      = "aikido credentials are not configured"
 	contextDisabledError          = "cody context is not configured"
+	datadogDisabledError          = "datadog mcp is not configured"
 	githubDisabledError           = "github app credentials are not configured"
 	aikidoDefaultTokenTTL         = 5 * time.Minute
 	aikidoTokenExpirySkew         = 1 * time.Minute
@@ -92,6 +101,12 @@ type config struct {
 	githubInstallation  string
 	githubPrivateKey    string
 	githubPackagesToken string
+	datadogEnabled      bool
+	datadogUpstreamURL  string
+	datadogAPIKey       string
+	datadogAppKey       string
+	datadogToolsets     string
+	datadogValidate     bool
 }
 
 type server struct {
@@ -137,6 +152,11 @@ func main() {
 		logger.Error("atlassian startup validation failed", "error", err)
 		os.Exit(1)
 	}
+	if cfg.datadogEnabled && cfg.datadogValidate {
+		if err := validateDatadogAccess(ctx, client, cfg, logger); err != nil {
+			logger.Warn("datadog startup validation failed; continuing so tasks can use kubernetes fallback", "error", err)
+		}
+	}
 
 	s := &server{
 		cfg: cfg,
@@ -159,10 +179,12 @@ func main() {
 	mux.HandleFunc(aikidoRoute+"/", s.handleAikido)
 	mux.HandleFunc(contextRoute, s.handleContext)
 	mux.HandleFunc(contextRoute+"/", s.handleContext)
+	mux.HandleFunc(datadogRoute, s.handleDatadog)
+	mux.HandleFunc(datadogRoute+"/", s.handleDatadog)
 	mux.HandleFunc(githubRoute, s.handleGitHub)
 	mux.HandleFunc(githubRoute+"/", s.handleGitHub)
 
-	logger.Info("cody-tools listening", "addr", cfg.addr, "routes", []string{atlassianRoute, aikidoRoute, contextRoute, githubRoute})
+	logger.Info("cody-tools listening", "addr", cfg.addr, "routes", []string{atlassianRoute, aikidoRoute, contextRoute, datadogRoute, githubRoute})
 	if err := http.ListenAndServe(cfg.addr, mux); err != nil {
 		logger.Error("server failed", "error", err)
 		os.Exit(1)
@@ -170,6 +192,14 @@ func main() {
 }
 
 func loadConfig() (config, error) {
+	datadogEnabled, err := parseBoolEnv(envDatadogEnabled, false)
+	if err != nil {
+		return config{}, err
+	}
+	datadogValidate, err := parseBoolEnv(envDatadogStartupValidate, false)
+	if err != nil {
+		return config{}, err
+	}
 	cfg := config{
 		addr:                strings.TrimSpace(os.Getenv(envAddr)),
 		upstreamURL:         strings.TrimSpace(os.Getenv(envUpstreamURL)),
@@ -185,6 +215,12 @@ func loadConfig() (config, error) {
 		githubInstallation:  strings.TrimSpace(os.Getenv(envGitHubAppInstallationID)),
 		githubPrivateKey:    strings.TrimSpace(os.Getenv(envGitHubAppPrivateKey)),
 		githubPackagesToken: strings.TrimSpace(os.Getenv(envGitHubPackagesToken)),
+		datadogEnabled:      datadogEnabled,
+		datadogUpstreamURL:  strings.TrimSpace(os.Getenv(envDatadogUpstreamURL)),
+		datadogAPIKey:       strings.TrimSpace(os.Getenv(envDatadogAPIKey)),
+		datadogAppKey:       strings.TrimSpace(os.Getenv(envDatadogApplicationKey)),
+		datadogToolsets:     strings.TrimSpace(os.Getenv(envDatadogAllowedToolsets)),
+		datadogValidate:     datadogValidate,
 	}
 	clientID, clientSecret, err := aikidoClientCredentialsFromEnv(
 		os.Getenv(envAikidoClientCredentials),
@@ -227,6 +263,9 @@ func loadConfig() (config, error) {
 	if cfg.aikidoTokenURL == "" {
 		cfg.aikidoTokenURL = defaultAikidoTokenURL
 	}
+	if cfg.datadogEnabled && cfg.datadogUpstreamURL == "" {
+		cfg.datadogUpstreamURL = defaultDatadogMCPURL
+	}
 	if cfg.authorization == "" {
 		return config{}, fmt.Errorf("%s is required", envAuthorization)
 	}
@@ -240,6 +279,9 @@ func loadConfig() (config, error) {
 		return config{}, err
 	}
 	if err := validateURL(envAikidoTokenURL, cfg.aikidoTokenURL); err != nil {
+		return config{}, err
+	}
+	if err := validateDatadogConfig(cfg); err != nil {
 		return config{}, err
 	}
 	if cfg.hindsightMCPURL != "" {
@@ -281,6 +323,25 @@ func validateGitHubAppConfig(cfg config) error {
 	return fmt.Errorf("github app config is incomplete; missing %s", strings.Join(missing, ", "))
 }
 
+func validateDatadogConfig(cfg config) error {
+	if !cfg.datadogEnabled {
+		if cfg.datadogUpstreamURL != "" {
+			return validateURL(envDatadogUpstreamURL, cfg.datadogUpstreamURL)
+		}
+		return nil
+	}
+	if cfg.datadogAPIKey == "" {
+		return fmt.Errorf("%s is required when %s is true", envDatadogAPIKey, envDatadogEnabled)
+	}
+	if cfg.datadogAppKey == "" {
+		return fmt.Errorf("%s is required when %s is true", envDatadogApplicationKey, envDatadogEnabled)
+	}
+	if cfg.datadogUpstreamURL == "" {
+		return fmt.Errorf("%s is required when %s is true", envDatadogUpstreamURL, envDatadogEnabled)
+	}
+	return validateURL(envDatadogUpstreamURL, cfg.datadogUpstreamURL)
+}
+
 func githubCredentialsFromConfig(cfg config) (*githubapp.Credentials, error) {
 	if cfg.githubAppClientID == "" && cfg.githubInstallation == "" && cfg.githubPrivateKey == "" {
 		return nil, nil
@@ -297,6 +358,21 @@ func validateURL(name, raw string) error {
 		return fmt.Errorf("%s must include scheme and host", name)
 	}
 	return nil
+}
+
+func parseBoolEnv(name string, defaultValue bool) (bool, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return defaultValue, nil
+	}
+	switch strings.ToLower(raw) {
+	case "1", "t", "true", "y", "yes", "on":
+		return true, nil
+	case "0", "f", "false", "n", "no", "off":
+		return false, nil
+	default:
+		return false, fmt.Errorf("%s must be a boolean value", name)
+	}
 }
 
 func aikidoAuthorizationFromEnv(rawAuthorization, rawAPIKey string) string {
@@ -454,6 +530,39 @@ func (s *server) handleContext(w http.ResponseWriter, r *http.Request) {
 	logArgs := []any{
 		"adapter", "context",
 		"route", contextRoute,
+		"method", fields.Method,
+		"tool", fields.Tool,
+		"http_method", r.Method,
+		"status", status,
+		"duration_ms", duration.Milliseconds(),
+	}
+	if err != nil {
+		logArgs = append(logArgs, "error", err)
+		s.logger.Error("mcp_request_failed", logArgs...)
+		return
+	}
+	s.logger.Info("mcp_request", logArgs...)
+}
+
+func (s *server) handleDatadog(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != datadogRoute && r.URL.Path != datadogRoute+"/" {
+		http.NotFound(w, r)
+		return
+	}
+
+	body, err := readBody(r)
+	if err != nil {
+		http.Error(w, "read request body", http.StatusBadRequest)
+		return
+	}
+	fields := parseRPCRequestLogFields(body)
+	start := time.Now()
+
+	status, err := s.forwardDatadog(w, r, body)
+	duration := time.Since(start)
+	logArgs := []any{
+		"adapter", "datadog",
+		"route", datadogRoute,
 		"method", fields.Method,
 		"tool", fields.Tool,
 		"http_method", r.Method,
@@ -669,6 +778,72 @@ func writeJSON(w http.ResponseWriter, value any) {
 	if err := json.NewEncoder(w).Encode(value); err != nil {
 		http.Error(w, "encode response", http.StatusInternalServerError)
 	}
+}
+
+func (s *server) forwardDatadog(w http.ResponseWriter, inbound *http.Request, body []byte) (int, error) {
+	if !s.cfg.datadogEnabled {
+		http.Error(w, datadogDisabledError, http.StatusServiceUnavailable)
+		return http.StatusServiceUnavailable, errors.New(datadogDisabledError)
+	}
+	if inbound.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return http.StatusMethodNotAllowed, fmt.Errorf("method %s is not allowed", inbound.Method)
+	}
+
+	req, err := newDatadogMCPRequest(inbound.Context(), inbound.Method, s.cfg, inbound.Header, body)
+	if err != nil {
+		http.Error(w, "build upstream request", http.StatusInternalServerError)
+		return http.StatusInternalServerError, err
+	}
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		http.Error(w, "upstream request failed", http.StatusBadGateway)
+		return http.StatusBadGateway, err
+	}
+	defer resp.Body.Close()
+
+	copyResponseHeaders(w.Header(), resp.Header)
+	w.WriteHeader(resp.StatusCode)
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		return resp.StatusCode, err
+	}
+	return resp.StatusCode, nil
+}
+
+func newDatadogMCPRequest(ctx context.Context, method string, cfg config, inboundHeaders http.Header, body []byte) (*http.Request, error) {
+	upstreamURL, err := url.Parse(cfg.datadogUpstreamURL)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, method, upstreamURL.String(), bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	copyRequestHeaders(req.Header, inboundHeaders)
+	req.Header.Del("Authorization")
+	req.Header.Del("Cookie")
+	req.Header.Del("DD-API-KEY")
+	req.Header.Del("DD-APPLICATION-KEY")
+	req.Header.Del("DD_API_KEY")
+	req.Header.Del("DD_APPLICATION_KEY")
+	setDatadogHeaders(req.Header, cfg)
+	if req.Header.Get("Accept") == "" {
+		req.Header.Set("Accept", "application/json, text/event-stream")
+	}
+	if len(body) > 0 && req.Header.Get("Content-Type") == "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	return req, nil
+}
+
+func setDatadogHeaders(headers http.Header, cfg config) {
+	// Datadog MCP documents underscore headers; the hyphenated variants match
+	// Datadog REST conventions and keep the proxy tolerant of upstream changes.
+	headers.Set("DD-API-KEY", cfg.datadogAPIKey)
+	headers.Set("DD-APPLICATION-KEY", cfg.datadogAppKey)
+	headers.Set("DD_API_KEY", cfg.datadogAPIKey)
+	headers.Set("DD_APPLICATION_KEY", cfg.datadogAppKey)
 }
 
 func (s *server) forwardAikido(w http.ResponseWriter, inbound *http.Request) (int, error) {
@@ -1184,6 +1359,35 @@ func filterMCPToolsList(body io.Reader, allowed func(string) bool) ([]byte, erro
 	return json.Marshal(message)
 }
 
+func validateDatadogAccess(ctx context.Context, client *http.Client, cfg config, logger *slog.Logger) error {
+	if !cfg.datadogEnabled {
+		return nil
+	}
+	mcp := datadogMCPClient{
+		client:      client,
+		upstreamURL: cfg.datadogUpstreamURL,
+		apiKey:      cfg.datadogAPIKey,
+		appKey:      cfg.datadogAppKey,
+	}
+	logger.Info("datadog startup validation started",
+		"upstream_url", sanitizedURL(cfg.datadogUpstreamURL),
+		"toolsets", cfg.datadogToolsets,
+	)
+	if err := mcp.initialize(ctx); err != nil {
+		return err
+	}
+	if err := mcp.initialized(ctx); err != nil {
+		return err
+	}
+	tools, err := mcp.listTools(ctx)
+	if err != nil {
+		return err
+	}
+	names := toolNames(tools)
+	logger.Info("datadog startup validation passed", "tool_count", len(names))
+	return nil
+}
+
 func validateAtlassianAccess(ctx context.Context, client *http.Client, cfg config, logger *slog.Logger) error {
 	mcp := atlassianMCPClient{
 		client:        client,
@@ -1372,6 +1576,102 @@ type atlassianMCPClient struct {
 	authorization string
 	sessionID     string
 	nextID        int
+}
+
+type datadogMCPClient struct {
+	client      *http.Client
+	upstreamURL string
+	apiKey      string
+	appKey      string
+	sessionID   string
+	nextID      int
+}
+
+func (c *datadogMCPClient) listTools(ctx context.Context) (any, error) {
+	return c.call(ctx, "tools/list", map[string]any{})
+}
+
+func (c *datadogMCPClient) initialize(ctx context.Context) error {
+	result, err := c.call(ctx, "initialize", map[string]any{
+		"protocolVersion": "2025-06-18",
+		"capabilities":    map[string]any{},
+		"clientInfo": map[string]any{
+			"name":    "cody-tools",
+			"version": "0.1.0",
+		},
+	})
+	if err != nil {
+		return err
+	}
+	if result == nil {
+		return errors.New("initialize returned no result")
+	}
+	return nil
+}
+
+func (c *datadogMCPClient) initialized(ctx context.Context) error {
+	_, err := c.post(ctx, map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "notifications/initialized",
+	})
+	return err
+}
+
+func (c *datadogMCPClient) call(ctx context.Context, method string, params any) (any, error) {
+	c.nextID++
+	return c.post(ctx, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      c.nextID,
+		"method":  method,
+		"params":  params,
+	})
+}
+
+func (c *datadogMCPClient) post(ctx context.Context, payload map[string]any) (any, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.upstreamURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	setDatadogHeaders(req.Header, config{
+		datadogAPIKey: c.apiKey,
+		datadogAppKey: c.appKey,
+	})
+	if c.sessionID != "" {
+		req.Header.Set("Mcp-Session-Id", c.sessionID)
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if session := resp.Header.Get("Mcp-Session-Id"); session != "" {
+		c.sessionID = session
+	}
+	if resp.StatusCode == http.StatusAccepted || resp.StatusCode == http.StatusNoContent {
+		return nil, nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		limited, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("datadog MCP HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(limited)))
+	}
+
+	message, err := decodeMCPResponse(resp)
+	if err != nil {
+		return nil, err
+	}
+	if rpcErr, ok := message["error"]; ok && rpcErr != nil {
+		encoded, _ := json.Marshal(rpcErr)
+		return nil, fmt.Errorf("datadog MCP error: %s", encoded)
+	}
+	return message["result"], nil
 }
 
 func (c *atlassianMCPClient) accessibleResources(ctx context.Context) (any, error) {

@@ -27,6 +27,8 @@ TaskSpawner created for non-prod/qa.
 - Stream/update investigation progress below the stable section.
 - Replace the live progress section with a final RCA/fix summary when the Task
   succeeds or fails.
+- Avoid creating duplicate fix PRs when an earlier infra-health run already has
+  a matching open PR for the same environment/symptoms.
 - Avoid changing existing Slack-originated Cody behavior, including replies in
   user-created Slack threads.
 
@@ -171,7 +173,48 @@ Update only the infra-health cron TaskSpawner in `quantum-wealth/skills`:
 
 - add `kelos.dev/slack-layout: infra-health-single-message`;
 - tighten the prompt so the first emitted assistant progress message is a short
-  detected-issues summary, not a generic "working" update.
+  detected-issues summary, not a generic "working" update;
+- add an immediate duplicate-PR guard before Cody creates or materially updates
+  any fix branch.
+
+### Immediate Duplicate-PR Guard
+
+This prompt-only guard does not prevent a scheduled Task from starting, but it
+prevents repeated fix PRs while a previous run's remediation is still open.
+
+Before creating a branch or PR, Cody should:
+
+1. Identify the affected environment, namespace, services, and primary symptoms.
+2. Search likely GitHub repos for open PRs created by Cody or tagged as
+   infra-health work.
+3. Treat a PR as matching when its title, body, branch name, or labels mention:
+   - `infra-health`;
+   - `non-prod/qa` or `qa`;
+   - one or more affected services;
+   - the same material symptom class, such as `CrashLoopBackOff`,
+     `ImagePullBackOff`, rollout failure, missing env/config, or ExternalSecret
+     sync failure.
+4. If a matching open PR exists:
+   - do not create a new branch;
+   - do not create a duplicate PR;
+   - update Slack with the existing PR link and a short current-state summary;
+   - inspect the existing PR only enough to decide whether it still plausibly
+     addresses the active symptoms;
+   - stop unless there is a clearly separate issue outside the existing PR's
+     scope.
+5. If no matching PR exists, create the fix PR with stable searchable metadata.
+
+PRs created by this workflow should use searchable title/body metadata, for
+example:
+
+```text
+Title: fix(ALPM-23769): restore qa service config
+
+Body metadata:
+Cody-Infra-Health: non-prod/qa
+Cody-Infra-Health-Services: portfolio-management, compliance-service, order-service
+Cody-Infra-Health-Symptoms: CrashLoopBackOff, ImagePullBackOff, rollout-failed
+```
 
 Example first progress shape Cody should emit only after finding a material
 issue:
@@ -207,4 +250,3 @@ Add Kelos unit tests covering:
 5. Verify a no-op run remains silent.
 6. Verify a material finding produces one top-level Slack message in `#asd` and
    updates the same message through final RCA.
-

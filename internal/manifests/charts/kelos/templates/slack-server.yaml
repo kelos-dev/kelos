@@ -19,6 +19,8 @@ spec:
       labels:
         app.kubernetes.io/name: kelos
         app.kubernetes.io/component: slack-server
+      annotations:
+        kelos.dev/chart-version: {{ .Chart.Version | quote }}
     spec:
       serviceAccountName: kelos-slack-server
       securityContext:

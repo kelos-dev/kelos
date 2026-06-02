@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -1677,6 +1678,181 @@ func TestSlackTaskReporter_DeferredProgressCreatesRootMessage(t *testing.T) {
 	if updated.Annotations[AnnotationSlackReportPhase] != "accepted" {
 		t.Errorf("report phase = %q, want accepted", updated.Annotations[AnnotationSlackReportPhase])
 	}
+	if updated.Annotations[AnnotationSlackStableSummary] != "" {
+		t.Errorf("stable summary annotation = %q, want empty for normal deferred reporting", updated.Annotations[AnnotationSlackStableSummary])
+	}
+}
+
+func TestSlackTaskReporter_StableSummaryDeferredProgressCreatesRootMessage(t *testing.T) {
+	progressText := "Issue detected in non-prod/qa: compliance-service is CrashLoopBackOff."
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "infra-health-task",
+			Namespace: "default",
+			UID:       "uid-stable-root",
+			Annotations: map[string]string{
+				AnnotationSlackReporting:   SlackReportingDeferred,
+				AnnotationSlackDestination: "asd",
+				AnnotationSlackLayout:      SlackLayoutStableSummaryRoot,
+			},
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   "codex",
+			Prompt: "test",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeOAuth,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+			},
+		},
+		Status: kelosv1alpha1.TaskStatus{
+			Phase:   kelosv1alpha1.TaskPhaseRunning,
+			PodName: "test-pod",
+		},
+	}
+
+	cl := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(task).Build()
+
+	var rootPosts []slackReplyRecord
+	reporter := &fakeSlackReporter{
+		postMessageFn: func(ctx context.Context, channel string, msg SlackMessage) (string, error) {
+			rootPosts = append(rootPosts, slackReplyRecord{method: "post-message", channel: channel, msg: msg})
+			return "1234567890.444444", nil
+		},
+		postFn: func(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error) {
+			t.Fatalf("expected no thread replies for first stable-summary progress")
+			return "", nil
+		},
+	}
+
+	tr := &SlackTaskReporter{
+		Client:         cl,
+		Reporter:       reporter,
+		ProgressReader: &fakeProgressReader{text: progressText},
+		Routes:         map[string]SlackRoute{"asd": {Channel: "C123ABC"}},
+	}
+
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(rootPosts) != 1 {
+		t.Fatalf("expected 1 root post, got %d", len(rootPosts))
+	}
+	if rootPosts[0].channel != "C123ABC" {
+		t.Errorf("channel = %q, want C123ABC", rootPosts[0].channel)
+	}
+	if !strings.Contains(rootPosts[0].msg.Text, progressText) {
+		t.Errorf("root text = %q, want stable progress summary", rootPosts[0].msg.Text)
+	}
+	if len(rootPosts[0].msg.Blocks) == 0 {
+		t.Fatal("expected root message blocks")
+	}
+
+	var updated kelosv1alpha1.Task
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
+		t.Fatalf("getting updated task: %v", err)
+	}
+	if updated.Annotations[AnnotationSlackStableSummary] != progressText {
+		t.Errorf("stable summary = %q, want %q", updated.Annotations[AnnotationSlackStableSummary], progressText)
+	}
+	if updated.Annotations[AnnotationSlackThreadTS] != "1234567890.444444" {
+		t.Errorf("thread ts annotation = %q, want root message ts", updated.Annotations[AnnotationSlackThreadTS])
+	}
+	if updated.Annotations[AnnotationSlackMessageTS] != "1234567890.444444" {
+		t.Errorf("message ts annotation = %q, want root message ts", updated.Annotations[AnnotationSlackMessageTS])
+	}
+}
+
+func TestSlackTaskReporter_StableSummaryProgressUpdatesRootMessage(t *testing.T) {
+	firstProgress := "Issue detected in non-prod/qa: order-service has unavailable replicas."
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "infra-health-task",
+			Namespace: "default",
+			UID:       "uid-stable-progress",
+			Annotations: map[string]string{
+				AnnotationSlackReporting:   SlackReportingDeferred,
+				AnnotationSlackDestination: "asd",
+				AnnotationSlackLayout:      SlackLayoutStableSummaryRoot,
+			},
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   "codex",
+			Prompt: "test",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeOAuth,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+			},
+		},
+		Status: kelosv1alpha1.TaskStatus{
+			Phase:   kelosv1alpha1.TaskPhaseRunning,
+			PodName: "test-pod",
+		},
+	}
+
+	cl := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(task).Build()
+
+	var rootPosts []slackReplyRecord
+	var updates []slackReplyRecord
+	var threadPosts []slackReplyRecord
+	reporter := &fakeSlackReporter{
+		postMessageFn: func(ctx context.Context, channel string, msg SlackMessage) (string, error) {
+			rootPosts = append(rootPosts, slackReplyRecord{method: "post-message", channel: channel, msg: msg})
+			return "1234567890.555555", nil
+		},
+		postFn: func(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error) {
+			threadPosts = append(threadPosts, slackReplyRecord{method: "post", channel: channel, threadTS: threadTS, msg: msg})
+			return "thread-reply", nil
+		},
+		updateFn: func(ctx context.Context, channel, messageTS string, msg SlackMessage) error {
+			updates = append(updates, slackReplyRecord{method: "update", channel: channel, threadTS: messageTS, msg: msg})
+			return nil
+		},
+	}
+
+	progressReader := &fakeProgressReader{text: firstProgress}
+	tr := &SlackTaskReporter{
+		Client:         cl,
+		Reporter:       reporter,
+		ProgressReader: progressReader,
+		Routes:         map[string]SlackRoute{"asd": {Channel: "C123ABC"}},
+	}
+
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("unexpected error posting first progress: %v", err)
+	}
+
+	progressReader.text = "RCA update: Datadog monitor and pod events both point to a missing config key."
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("unexpected error updating progress: %v", err)
+	}
+
+	if len(rootPosts) != 1 {
+		t.Fatalf("expected 1 root post, got %d", len(rootPosts))
+	}
+	if len(threadPosts) != 0 {
+		t.Fatalf("expected no progress thread replies, got %d", len(threadPosts))
+	}
+	if len(updates) != 1 {
+		t.Fatalf("expected 1 root update, got %d", len(updates))
+	}
+	if updates[0].threadTS != "1234567890.555555" {
+		t.Errorf("update message ts = %q, want root ts", updates[0].threadTS)
+	}
+	if !strings.Contains(updates[0].msg.Text, firstProgress) {
+		t.Errorf("updated text = %q, want stable summary", updates[0].msg.Text)
+	}
+	if !strings.Contains(updates[0].msg.Text, "missing config key") {
+		t.Errorf("updated text = %q, want latest progress", updates[0].msg.Text)
+	}
+
+	var updated kelosv1alpha1.Task
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
+		t.Fatalf("getting updated task: %v", err)
+	}
+	if updated.Annotations[AnnotationSlackStableSummary] != firstProgress {
+		t.Errorf("stable summary changed to %q, want %q", updated.Annotations[AnnotationSlackStableSummary], firstProgress)
+	}
 }
 
 func TestSlackTaskReporter_DeferredNoProgressStaysSilent(t *testing.T) {
@@ -2314,6 +2490,163 @@ func TestSlackTaskReporter_EditsProgressMessageOnTerminalPhase(t *testing.T) {
 	}
 	if len(terminalUpdate.msg.Blocks) == 0 {
 		t.Error("expected final update to include blocks")
+	}
+}
+
+func TestSlackTaskReporter_StableSummaryTerminalUpdatesRootAndPostsDetailsThread(t *testing.T) {
+	stableSummary := "Issue detected in non-prod/qa: portfolio-management rollout is failing."
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "infra-health-task",
+			Namespace: "default",
+			UID:       "uid-stable-terminal",
+			Annotations: map[string]string{
+				AnnotationSlackReporting:     SlackReportingDeferred,
+				AnnotationSlackChannel:       "C123ABC",
+				AnnotationSlackThreadTS:      "1234567890.root",
+				AnnotationSlackMessageTS:     "1234567890.root",
+				AnnotationSlackReportPhase:   "accepted",
+				AnnotationSlackLayout:        SlackLayoutStableSummaryRoot,
+				AnnotationSlackStableSummary: stableSummary,
+			},
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   "codex",
+			Prompt: "test",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeOAuth,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+			},
+		},
+		Status: kelosv1alpha1.TaskStatus{
+			Phase:   kelosv1alpha1.TaskPhaseSucceeded,
+			PodName: "test-pod",
+			Results: map[string]string{
+				"response": b64(strings.Repeat("## RCA\nMissing config caused the rollout to fail.\n\n", 60)),
+				"pr":       "https://github.com/quantum-wealth/k8s-apps-gitops/pull/9999",
+			},
+		},
+	}
+
+	cl := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(task).Build()
+
+	var updates []slackReplyRecord
+	var posts []slackReplyRecord
+	reporter := &fakeSlackReporter{
+		updateFn: func(ctx context.Context, channel, messageTS string, msg SlackMessage) error {
+			updates = append(updates, slackReplyRecord{method: "update", channel: channel, threadTS: messageTS, msg: msg})
+			return nil
+		},
+		postFn: func(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error) {
+			posts = append(posts, slackReplyRecord{method: "post", channel: channel, threadTS: threadTS, msg: msg})
+			return fmt.Sprintf("thread-%d", len(posts)+1), nil
+		},
+		postMessageFn: func(ctx context.Context, channel string, msg SlackMessage) (string, error) {
+			t.Fatalf("expected terminal reporting to update existing root, not post a new root")
+			return "", nil
+		},
+	}
+
+	tr := &SlackTaskReporter{Client: cl, Reporter: reporter}
+
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("unexpected error on terminal phase: %v", err)
+	}
+
+	if len(updates) != 1 {
+		t.Fatalf("expected 1 root update, got %d", len(updates))
+	}
+	if updates[0].threadTS != "1234567890.root" {
+		t.Errorf("root update message ts = %q, want root ts", updates[0].threadTS)
+	}
+	if !strings.Contains(updates[0].msg.Text, stableSummary) {
+		t.Errorf("root text = %q, want stable summary", updates[0].msg.Text)
+	}
+	if !strings.Contains(updates[0].msg.Text, "Full details are posted") {
+		t.Errorf("root text = %q, want thread details note", updates[0].msg.Text)
+	}
+	if !strings.Contains(updates[0].msg.Text, "/pull/9999") {
+		t.Errorf("root text = %q, want PR link", updates[0].msg.Text)
+	}
+	if len(updates[0].msg.Blocks) > SlackBlockLimit {
+		t.Errorf("root update blocks = %d, want <= %d", len(updates[0].msg.Blocks), SlackBlockLimit)
+	}
+	if len(posts) < 2 {
+		t.Fatalf("expected long details to be split into thread replies, got %d posts", len(posts))
+	}
+	for i, post := range posts {
+		if post.threadTS != "1234567890.root" {
+			t.Errorf("post %d thread ts = %q, want root ts", i, post.threadTS)
+		}
+	}
+
+	var updated kelosv1alpha1.Task
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
+		t.Fatalf("getting updated task: %v", err)
+	}
+	if updated.Annotations[AnnotationSlackReportPhase] != "succeeded" {
+		t.Errorf("report phase = %q, want succeeded", updated.Annotations[AnnotationSlackReportPhase])
+	}
+}
+
+func TestSlackTaskReporter_StableSummaryTerminalFailureUpdatesRootAndPostsDetailsThread(t *testing.T) {
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "infra-health-task",
+			Namespace: "default",
+			UID:       "uid-stable-terminal-failed",
+			Annotations: map[string]string{
+				AnnotationSlackReporting:     SlackReportingDeferred,
+				AnnotationSlackChannel:       "C123ABC",
+				AnnotationSlackThreadTS:      "1234567890.root",
+				AnnotationSlackMessageTS:     "1234567890.root",
+				AnnotationSlackReportPhase:   "accepted",
+				AnnotationSlackLayout:        SlackLayoutStableSummaryRoot,
+				AnnotationSlackStableSummary: "Issue detected in non-prod/qa: ExternalSecret sync failed.",
+			},
+		},
+		Status: kelosv1alpha1.TaskStatus{
+			Phase:   kelosv1alpha1.TaskPhaseFailed,
+			PodName: "test-pod",
+			Message: "Codex exited before producing an RCA.",
+		},
+	}
+
+	cl := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(task).Build()
+
+	var updates []slackReplyRecord
+	var posts []slackReplyRecord
+	reporter := &fakeSlackReporter{
+		updateFn: func(ctx context.Context, channel, messageTS string, msg SlackMessage) error {
+			updates = append(updates, slackReplyRecord{method: "update", channel: channel, threadTS: messageTS, msg: msg})
+			return nil
+		},
+		postFn: func(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error) {
+			posts = append(posts, slackReplyRecord{method: "post", channel: channel, threadTS: threadTS, msg: msg})
+			return "thread-failure", nil
+		},
+	}
+
+	tr := &SlackTaskReporter{Client: cl, Reporter: reporter}
+
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("unexpected error on failed terminal phase: %v", err)
+	}
+
+	if len(updates) != 1 {
+		t.Fatalf("expected 1 root update, got %d", len(updates))
+	}
+	if !strings.Contains(updates[0].msg.Text, "Infra health investigation failed") {
+		t.Errorf("root text = %q, want failure title", updates[0].msg.Text)
+	}
+	if !strings.Contains(updates[0].msg.Text, "Codex exited") {
+		t.Errorf("root text = %q, want failure message", updates[0].msg.Text)
+	}
+	if len(posts) != 1 {
+		t.Fatalf("expected 1 failure detail thread reply, got %d", len(posts))
+	}
+	if posts[0].threadTS != "1234567890.root" {
+		t.Errorf("detail thread ts = %q, want root ts", posts[0].threadTS)
 	}
 }
 

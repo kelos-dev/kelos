@@ -522,6 +522,58 @@ func TestFormatProgressMessage(t *testing.T) {
 	})
 }
 
+func TestFormatStableSummaryProgressMessage(t *testing.T) {
+	got := FormatStableSummaryProgressMessage(
+		"Issue detected in non-prod/qa: order-service CrashLoopBackOff.",
+		"RCA update: missing config key confirmed from pod events.",
+		"infra-health-task",
+	)
+
+	if !strings.Contains(got.Text, "Issue detected in non-prod/qa") {
+		t.Errorf("text = %q, want stable summary", got.Text)
+	}
+	if !strings.Contains(got.Text, "missing config key") {
+		t.Errorf("text = %q, want current status", got.Text)
+	}
+	if len(got.Blocks) == 0 {
+		t.Fatal("expected blocks")
+	}
+	if len(got.Blocks) > SlackBlockLimit {
+		t.Errorf("blocks = %d, want <= %d", len(got.Blocks), SlackBlockLimit)
+	}
+	assertContextContains(t, got.Blocks[len(got.Blocks)-1], "infra-health-task")
+}
+
+func TestFormatStableSummaryFinalMessage_CompactRootForLongResponse(t *testing.T) {
+	longResponse := strings.Repeat("## RCA\nThe rollout failed because a required config key was missing.\n\n", 80)
+	got := FormatStableSummaryFinalMessage(
+		"Issue detected in non-prod/qa: portfolio-management rollout failed.",
+		"succeeded",
+		"infra-health-task",
+		"",
+		map[string]string{
+			"response": b64(longResponse),
+			"pr":       "https://github.com/quantum-wealth/k8s-apps-gitops/pull/9999",
+		},
+	)
+
+	if !strings.Contains(got.Text, "Full details are posted in this message thread") {
+		t.Errorf("text = %q, want details-in-thread note", got.Text)
+	}
+	if !strings.Contains(got.Text, "/pull/9999") {
+		t.Errorf("text = %q, want PR link", got.Text)
+	}
+	if len(got.Blocks) == 0 {
+		t.Fatal("expected blocks")
+	}
+	if len(got.Blocks) > SlackBlockLimit {
+		t.Errorf("blocks = %d, want <= %d", len(got.Blocks), SlackBlockLimit)
+	}
+	if len([]rune(got.Text)) > slackFallbackTextLimit {
+		t.Errorf("fallback text length %d exceeds limit %d", len([]rune(got.Text)), slackFallbackTextLimit)
+	}
+}
+
 func TestConvertInlineMarkdown(t *testing.T) {
 	tests := []struct {
 		name string

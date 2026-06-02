@@ -10,20 +10,20 @@ Each TaskSpawner references an `AgentConfig` that defines git identity, comment 
 
 ## TaskSpawners
 
-| TaskSpawner | Trigger | Model | Description |
+| TaskSpawner | Trigger | Agent | Description |
 |---|---|---|---|
-| **kelos-workers** | Webhook: issue comment `/kelos pick-up` | Opus | Picks up issues, creates or updates PRs, self-reviews, and ensures CI passes |
-| **kelos-planner** | Webhook: issue comment `/kelos plan` | Opus | Investigates an issue and posts a structured implementation plan — advisory only, no code changes |
-| **kelos-reviewer** | Webhook: PR comment `/kelos review` | Opus | Reviews PRs on demand — analyzes code, checks conventions, and submits structured reviews |
-| **kelos-api-reviewer** | Webhook: issue/PR comment `/kelos api-review` | Opus | Reviews Kubernetes API design on issues or PRs — naming, compatibility, CRD validation |
-| **kelos-pr-responder** | Webhook: PR review/comment on `generated-by-kelos` PRs | Opus | Re-engages on PR review feedback and updates the existing branch incrementally |
-| **kelos-triage** | Webhook: issue opened/labeled/reopened (`needs-actor`) | Opus | Classifies issues by kind/priority, detects duplicates, and recommends an actor |
-| **kelos-fake-user** | Cron (daily 09:00 UTC) | Sonnet | Tests DX as a new user — follows docs, tries CLI workflows, files issues for problems found |
-| **kelos-fake-strategist** | Cron (every 12 hours) | Opus | Explores new use cases, integration opportunities, and CRD/API extensions |
-| **kelos-config-update** | Cron (daily 18:00 UTC) | Opus | Reviews recent PR feedback and updates agent configuration (conventions, prompts, configs) accordingly |
-| **kelos-self-update** | Cron (daily 06:00 UTC) | Opus | Reviews and tunes prompts, configs, and workflow files — the pipeline improves itself |
-| **kelos-image-update** | Cron (daily 03:00 UTC) | Sonnet | Checks for newer agent image versions (Claude Code, Codex, Gemini, etc.) and creates PRs to update them |
-| **kelos-squash-commits** | Webhook: PR comment `/kelos squash-commits` | Sonnet | Rebases and squashes PR branch commits into a single clean commit |
+| **kelos-workers** | Webhook: issue comment `/kelos pick-up` | Codex | Picks up issues, creates or updates PRs, self-reviews, and ensures CI passes |
+| **kelos-planner** | Webhook: issue comment `/kelos plan` | Codex | Investigates an issue and posts a structured implementation plan — advisory only, no code changes |
+| **kelos-reviewer** | Webhook: PR comment `/kelos review` | Codex | Reviews PRs on demand — analyzes code, checks conventions, and submits structured reviews |
+| **kelos-api-reviewer** | Webhook: issue/PR comment `/kelos api-review` | Codex | Reviews Kubernetes API design on issues or PRs — naming, compatibility, CRD validation |
+| **kelos-pr-responder** | Webhook: PR review/comment on `generated-by-kelos` PRs | Codex | Re-engages on PR review feedback and updates the existing branch incrementally |
+| **kelos-triage** | Webhook: issue opened/labeled/reopened (`needs-actor`) | Codex | Classifies issues by kind/priority, detects duplicates, and recommends an actor |
+| **kelos-fake-user** | Cron (daily 09:00 UTC) | Codex | Tests DX as a new user — follows docs, tries CLI workflows, files issues for problems found |
+| **kelos-fake-strategist** | Cron (every 12 hours) | Codex | Explores new use cases, integration opportunities, and CRD/API extensions |
+| **kelos-config-update** | Cron (daily 18:00 UTC) | Codex | Reviews recent PR feedback and updates agent configuration (conventions, prompts, configs) accordingly |
+| **kelos-self-update** | Cron (daily 06:00 UTC) | Codex | Reviews and tunes prompts, configs, and workflow files — the pipeline improves itself |
+| **kelos-image-update** | Cron (daily 03:00 UTC) | Codex | Checks for newer agent image versions (Claude Code, Codex, Gemini, etc.) and creates PRs to update them |
+| **kelos-squash-commits** | Webhook: PR comment `/kelos squash-commits` | Codex | Rebases and squashes PR branch commits into a single clean commit |
 
 ### kelos-workers.yaml
 
@@ -32,7 +32,7 @@ Picks up open GitHub issues when a maintainer posts `/kelos pick-up` and creates
 | | |
 |---|---|
 | **Trigger** | GitHub `issue_comment` webhook with `/kelos pick-up` |
-| **Model** | Opus |
+| **Agent** | Codex |
 | **Concurrency** | 8 |
 
 **Key features:**
@@ -54,7 +54,7 @@ Reacts to `/kelos plan` comments on open issues. Investigates the issue, inspect
 | | |
 |---|---|
 | **Trigger** | GitHub `issue_comment` webhook with `/kelos plan` |
-| **Model** | Opus |
+| **Agent** | Codex |
 | **Concurrency** | 2 |
 
 **Key features:**
@@ -79,7 +79,7 @@ Reviews open pull requests on demand when a maintainer posts `/kelos review`.
 | | |
 |---|---|
 | **Trigger** | GitHub PR comment webhook with `/kelos review` |
-| **Model** | Opus |
+| **Agent** | Codex |
 | **Concurrency** | 3 |
 
 **Key features:**
@@ -106,7 +106,7 @@ Reviews issues and pull requests for Kubernetes API design conventions, compatib
 | | |
 |---|---|
 | **Trigger** | GitHub issue/PR comment webhook with `/kelos api-review` |
-| **Model** | Opus |
+| **Agent** | Codex |
 | **Concurrency** | 3 |
 
 **Key features:**
@@ -135,7 +135,7 @@ Picks up open GitHub pull requests labeled `generated-by-kelos` when a reviewer 
 | | |
 |---|---|
 | **Trigger** | GitHub PR review/comment webhooks on `generated-by-kelos` pull requests |
-| **Model** | Opus |
+| **Agent** | Codex |
 | **Concurrency** | 8 |
 
 **Key features:**
@@ -156,7 +156,7 @@ Picks up open GitHub issues labeled `needs-actor` and performs automated triage.
 | | |
 |---|---|
 | **Trigger** | GitHub issue opened/labeled/reopened webhooks with `needs-actor` |
-| **Model** | Opus |
+| **Agent** | Codex |
 | **Concurrency** | 8 |
 
 **For each issue, the agent:**
@@ -181,7 +181,7 @@ Runs daily to test the developer experience as if you were a new user.
 | | |
 |---|---|
 | **Trigger** | Cron `0 9 * * *` (daily at 09:00 UTC) |
-| **Model** | Sonnet |
+| **Agent** | Codex |
 | **Concurrency** | 1 |
 
 Each run picks one focus area:
@@ -203,7 +203,7 @@ Runs every 12 hours to strategically explore new ways to use and improve Kelos.
 | | |
 |---|---|
 | **Trigger** | Cron `0 */12 * * *` (every 12 hours) |
-| **Model** | Opus |
+| **Agent** | Codex |
 | **Concurrency** | 1 |
 
 Each run picks one focus area:
@@ -225,11 +225,11 @@ Runs daily to update agent configuration based on patterns found in PR reviews.
 | | |
 |---|---|
 | **Trigger** | Cron `0 18 * * *` (daily at 18:00 UTC) |
-| **Model** | Opus |
+| **Agent** | Codex |
 | **Concurrency** | 1 |
 
 Reviews recent PRs and their review comments to identify recurring feedback patterns, then updates agent configuration accordingly:
-- **Project-level changes** — updates `AGENTS.md`, `CLAUDE.md`, or `self-development/agentconfig.yaml` for conventions that apply to all agents
+- **Project-level changes** — updates `AGENTS.md` or `self-development/agentconfig.yaml` for conventions that apply to all agents
 - **Task-specific changes** — updates TaskSpawner prompts in `self-development/*.yaml` or creates/updates AgentConfig for specific agents
 
 Creates PRs with changes for maintainer review. Skips uncertain or contradictory feedback.
@@ -246,7 +246,7 @@ Runs daily to review and update the self-development workflow files themselves.
 | | |
 |---|---|
 | **Trigger** | Cron `0 6 * * *` (daily at 06:00 UTC) |
-| **Model** | Opus |
+| **Agent** | Codex |
 | **Concurrency** | 1 |
 
 Each run picks one focus area:
@@ -269,7 +269,7 @@ Runs daily to check for newer versions of coding agent images and creates PRs to
 | | |
 |---|---|
 | **Trigger** | Cron `0 3 * * *` (daily at 03:00 UTC) |
-| **Model** | Sonnet |
+| **Agent** | Codex |
 | **Concurrency** | 1 |
 
 Checks the following coding agents for updates:
@@ -293,7 +293,7 @@ Rebases and squashes PR branch commits into a single clean commit when a maintai
 | | |
 |---|---|
 | **Trigger** | GitHub PR comment webhook with `/kelos squash-commits` |
-| **Model** | Sonnet |
+| **Agent** | Codex |
 | **Concurrency** | 1 |
 
 **Key features:**
@@ -372,18 +372,19 @@ retrigger it with a fresh comment or relabel after deployment.
 
 ### 4. Agent Credentials Secret
 
-Create a secret with your AI agent credentials:
+Create a secret with your Codex credentials. The checked-in spawners use OAuth:
 
-**For OAuth (Claude Code):**
 ```bash
 kubectl create secret generic kelos-credentials \
-  --from-literal=CLAUDE_CODE_OAUTH_TOKEN=<your-claude-oauth-token>
+  --from-file=CODEX_AUTH_JSON=$HOME/.codex/auth.json
 ```
 
-**For API Key:**
+For API-key auth, change the task template credential type to `api-key` and
+create the secret with:
+
 ```bash
 kubectl create secret generic kelos-credentials \
-  --from-literal=ANTHROPIC_API_KEY=<your-api-key>
+  --from-literal=CODEX_API_KEY=<your-openai-api-key>
 ```
 
 ## Customizing for Your Repository
@@ -455,12 +456,17 @@ To adapt these examples for your own repository:
    - Retrigger an existing issue or PR with a fresh comment or relabel after deployment
    - Duplicate a filter if you need to allow multiple specific GitHub usernames
 
-5. **Choose the right model:**
+5. **Adjust the Codex model:**
    ```yaml
    spec:
      taskTemplate:
-       model: sonnet  # or opus for more complex tasks
+       model: gpt-5.5
    ```
+
+   The checked-in spawners use `gpt-5.5` for the tasks that previously used
+   Opus, and `gpt-5.4-mini` for the tasks that previously used Sonnet.
+   Codex reasoning effort is configured through Codex `config.toml`; Kelos does
+   not currently expose it as a Task or TaskSpawner field.
 
 ## Feedback Loop Pattern
 

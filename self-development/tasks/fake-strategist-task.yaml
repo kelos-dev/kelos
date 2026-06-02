@@ -7,8 +7,8 @@ metadata:
 spec:
   workspaceRef:
     name: kelos-agent
-  model: opus
-  type: claude-code
+  model: gpt-5.5
+  type: codex
   ttlSecondsAfterFinished: 864000
   credentials:
     type: oauth

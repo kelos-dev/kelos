@@ -10,8 +10,8 @@ spec:
   taskTemplate:
     workspaceRef:
       name: kelos-agent
-    model: opus
-    type: claude-code
+    model: gpt-5.5
+    type: codex
     ttlSecondsAfterFinished: 864000
     credentials:
       type: oauth
@@ -42,7 +42,7 @@ spec:
       Your goal is to review recent PRs and their review comments, then update agent configuration to reflect lessons learned.
 
       Agent configuration includes:
-      - `AGENTS.md` / `CLAUDE.md` — project-level conventions and instructions for all agents
+      - `AGENTS.md` — project-level conventions and instructions for all agents
       - `self-development/agentconfig.yaml` — shared AgentConfig (agentsMD, plugins, skills, subagents, commands)
       - `self-development/*.yaml` — TaskSpawner prompt templates that guide each agent's behavior
 
@@ -68,7 +68,7 @@ spec:
          For each actionable pattern, determine the right place to update:
 
          **Project-level changes** (affect all agents):
-         - Update `AGENTS.md` and `CLAUDE.md` if the feedback is about general project conventions
+         - Update `AGENTS.md` if the feedback is about general project conventions
          - Update `self-development/agentconfig.yaml` if the feedback is about shared agent behavior
 
          **Task-specific changes** (affect a specific agent):

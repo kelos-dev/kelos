@@ -7199,6 +7199,11 @@ spec:
               jobName:
                 description: JobName is the name of the Job created for this Task.
                 type: string
+              lastSessionFailure:
+                description: |-
+                  LastSessionFailure records the name of the last session pod that failed
+                  while processing this task.
+                type: string
               message:
                 description: Message provides additional information about the current
                   status.
@@ -7222,6 +7227,18 @@ spec:
                 description: Results contains structured key-value outputs produced
                   by the agent.
                 type: object
+              sessionPodName:
+                description: |-
+                  SessionPodName is the name of the persistent session pod assigned to
+                  execute this Task. Set only for Tasks belonging to a persistent-mode
+                  TaskSpawner.
+                type: string
+              sessionRetryCount:
+                description: |-
+                  SessionRetryCount tracks how many times this Task has been re-queued
+                  due to session pod failures.
+                format: int32
+                type: integer
               startTime:
                 description: StartTime is when the Task started running.
                 format: date-time
@@ -7295,6 +7312,17 @@ spec:
           spec:
             description: TaskSpawnerSpec defines the desired state of TaskSpawner.
             properties:
+              executionMode:
+                default: ephemeral
+                description: |-
+                  ExecutionMode determines how spawned Tasks are executed.
+                  "ephemeral" (default) creates a fresh Kubernetes Job per Task.
+                  "persistent" maintains long-lived session pods that process multiple
+                  Tasks without per-task cold-start overhead.
+                enum:
+                - ephemeral
+                - persistent
+                type: string
               maxConcurrency:
                 description: |-
                   MaxConcurrency limits the number of concurrently running (non-terminal) Tasks.
@@ -7319,6 +7347,83 @@ spec:
                   PollInterval is how often to poll the source for new items (e.g., "5m"). Defaults to "5m".
                   Deprecated: use per-source pollInterval (e.g., spec.when.githubIssues.pollInterval) instead.
                 type: string
+              sessionConfig:
+                description: |-
+                  SessionConfig configures persistent execution mode. Only valid when
+                  executionMode is "persistent".
+                properties:
+                  idleTimeout:
+                    description: |-
+                      IdleTimeout is how long a session pod waits without a task assignment
+                      before exiting. The StatefulSet recreates it on demand. Defaults to 30m.
+                    type: string
+                  maxSessionDuration:
+                    description: |-
+                      MaxSessionDuration is the maximum wall-clock time a session pod runs
+                      before exiting. Defaults to 8h.
+                    type: string
+                  maxSessionRetries:
+                    description: |-
+                      MaxSessionRetries is the maximum number of times a task can be
+                      re-queued due to session pod failures before being marked as Failed.
+                      Defaults to 3. Only used when RetryOnPodFailure is true.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  maxTasksPerSession:
+                    description: |-
+                      MaxTasksPerSession limits the number of tasks a single session pod
+                      processes before exiting and being recreated. Zero means unlimited.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  replicas:
+                    default: 1
+                    description: |-
+                      Replicas is the number of concurrent session pods. Each pod can
+                      process one task at a time. Defaults to 1.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  retryOnPodFailure:
+                    description: |-
+                      RetryOnPodFailure controls whether tasks are re-queued when their
+                      session pod is deleted or crashes. Defaults to true.
+                    type: boolean
+                  storageClassName:
+                    description: |-
+                      StorageClassName specifies the StorageClass for session PVCs. When
+                      empty, the cluster default StorageClass is used.
+                    type: string
+                  storageSize:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: |-
+                      StorageSize is the size of the PersistentVolumeClaim for each session
+                      pod's workspace. Defaults to 10Gi.
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                  workspaceReset:
+                    description: WorkspaceReset controls how the workspace is cleaned
+                      between tasks.
+                    properties:
+                      git:
+                        default: true
+                        description: |-
+                          Git resets the git working tree between tasks by checking out the base
+                          branch and removing untracked files. Defaults to true.
+                        type: boolean
+                      preserveDirectories:
+                        description: |-
+                          PreserveDirectories lists directories (relative to the repo root) that
+                          should be preserved during workspace resets. Useful for caches like
+                          node_modules or .venv that are expensive to recreate.
+                        items:
+                          type: string
+                        type: array
+                    type: object
+                type: object
               suspend:
                 default: false
                 description: |-
@@ -15254,6 +15359,13 @@ spec:
               rule: '!(has(self.when.githubIssues) || has(self.when.githubPullRequests)
                 || has(self.when.githubWebhook) || has(self.when.linearWebhook)) ||
                 has(self.taskTemplate.workspaceRef)'
+            - message: sessionConfig is only allowed when executionMode is persistent
+              rule: '!has(self.sessionConfig) || (has(self.executionMode) && self.executionMode
+                == ''persistent'')'
+            - message: taskTemplate.workspaceRef is required when executionMode is
+                persistent
+              rule: '!has(self.executionMode) || self.executionMode != ''persistent''
+                || has(self.taskTemplate.workspaceRef)'
           status:
             description: TaskSpawnerStatus defines the observed state of TaskSpawner.
             properties:
@@ -15341,6 +15453,11 @@ spec:
                 type: string
               phase:
                 description: Phase represents the current phase of the TaskSpawner.
+                type: string
+              statefulSetName:
+                description: |-
+                  StatefulSetName is the name of the StatefulSet running session pods.
+                  Set when executionMode is "persistent".
                 type: string
               totalDiscovered:
                 description: TotalDiscovered is the total number of work items discovered.

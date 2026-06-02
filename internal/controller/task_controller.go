@@ -91,6 +91,13 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	// Persistent-mode tasks are handled by the SessionReconciler for
+	// assignment. The TaskReconciler only sets the initial Queued phase
+	// and handles dependency/branch checks before queuing.
+	if isPersistentMode(&task) {
+		return r.reconcilePersistentTask(ctx, &task)
+	}
+
 	// Check if Job already exists
 	var job batchv1.Job
 	jobExists := true
@@ -105,6 +112,15 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 	// Create Job if it doesn't exist
 	if !jobExists {
+		// Do not recreate a Job for a task that already reached a terminal phase.
+		// After a Job is garbage-collected (TTL or owner deletion) the controller
+		// would otherwise reset a Failed/Succeeded task back to Pending, causing
+		// an infinite restart loop.
+		if task.Status.Phase == kelosv1alpha1.TaskPhaseFailed || task.Status.Phase == kelosv1alpha1.TaskPhaseSucceeded {
+			logger.V(1).Info("Task already in terminal phase, skipping Job creation", "phase", task.Status.Phase)
+			return ctrl.Result{}, nil
+		}
+
 		if len(task.Spec.DependsOn) > 0 {
 			ready, result, err := r.checkDependencies(ctx, &task)
 			if err != nil || !ready {
@@ -177,6 +193,14 @@ func (r *TaskReconciler) handleDeletion(ctx context.Context, task *kelosv1alpha1
 			r.BranchLocker.Release(branchLockKey(task), task.Name)
 		}
 
+		// Clear session pod assignment if this is a persistent-mode task.
+		if task.Status.SessionPodName != "" {
+			if err := r.clearSessionPodAssignment(ctx, task); err != nil {
+				logger.Error(err, "Failed to clear session pod assignment", "pod", task.Status.SessionPodName)
+				return ctrl.Result{}, err
+			}
+		}
+
 		// Delete the Job if it exists
 		var job batchv1.Job
 		if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: task.Name}, &job); err == nil {
@@ -198,6 +222,28 @@ func (r *TaskReconciler) handleDeletion(ctx context.Context, task *kelosv1alpha1
 	}
 
 	return ctrl.Result{}, nil
+}
+
+func (r *TaskReconciler) clearSessionPodAssignment(ctx context.Context, task *kelosv1alpha1.Task) error {
+	podKey := client.ObjectKey{Namespace: task.Namespace, Name: task.Status.SessionPodName}
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var pod corev1.Pod
+		if err := r.Get(ctx, podKey, &pod); err != nil {
+			if apierrors.IsNotFound(err) {
+				return nil
+			}
+			return err
+		}
+		if pod.Annotations == nil {
+			return nil
+		}
+		if pod.Annotations[AnnotationAssignedTask] != task.Name {
+			return nil
+		}
+		delete(pod.Annotations, AnnotationAssignedTask)
+		delete(pod.Annotations, AnnotationTaskStatus)
+		return r.Update(ctx, &pod)
+	})
 }
 
 // createJob creates a Job for the Task.
@@ -363,7 +409,16 @@ func (r *TaskReconciler) resolveGitHubAppToken(ctx context.Context, task *kelosv
 		return nil, fmt.Errorf("GitHub App secret detected but TokenClient is not configured")
 	}
 
-	logger.Info("Detected GitHub App secret, generating installation token", "secret", workspace.SecretRef.Name)
+	tokenSecretName := truncateResourceName(task.Name + "-github-token")
+
+	// Check if the derived secret already has a valid token.
+	if _, ok := cachedTokenRequeueAfter(ctx, r.Client, task.Namespace, tokenSecretName); ok {
+		resolved := *workspace
+		resolved.SecretRef = &kelosv1alpha1.SecretReference{Name: tokenSecretName}
+		return &resolved, nil
+	}
+
+	logger.Info("Generating installation token", "secret", workspace.SecretRef.Name)
 
 	creds, err := githubapp.ParseCredentials(secret.Data)
 	if err != nil {
@@ -388,38 +443,10 @@ func (r *TaskReconciler) resolveGitHubAppToken(ctx context.Context, task *kelosv
 		return nil, fmt.Errorf("generating installation token: %w", err)
 	}
 
-	// Create a new secret with the generated token, owned by the Task
-	tokenSecretName := task.Name + "-github-token"
-	tokenSecret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      tokenSecretName,
-			Namespace: task.Namespace,
-		},
-		StringData: map[string]string{
-			"GITHUB_TOKEN": tokenResp.Token,
-		},
+	if err := upsertTokenSecret(ctx, r.Client, r.Scheme, task, task.Namespace, tokenSecretName, tokenResp); err != nil {
+		return nil, err
 	}
 
-	if err := controllerutil.SetControllerReference(task, tokenSecret, r.Scheme); err != nil {
-		return nil, fmt.Errorf("setting owner reference on token secret: %w", err)
-	}
-
-	if err := r.Create(ctx, tokenSecret); err != nil {
-		if !apierrors.IsAlreadyExists(err) {
-			return nil, fmt.Errorf("creating token secret: %w", err)
-		}
-		// Update existing secret
-		existing := &corev1.Secret{}
-		if err := r.Get(ctx, client.ObjectKey{Name: tokenSecretName, Namespace: task.Namespace}, existing); err != nil {
-			return nil, fmt.Errorf("fetching existing token secret: %w", err)
-		}
-		existing.StringData = tokenSecret.StringData
-		if err := r.Update(ctx, existing); err != nil {
-			return nil, fmt.Errorf("updating token secret: %w", err)
-		}
-	}
-
-	// Return a modified workspace spec that points to the generated token secret
 	resolved := *workspace
 	resolved.SecretRef = &kelosv1alpha1.SecretReference{
 		Name: tokenSecretName,
@@ -511,9 +538,9 @@ func (r *TaskReconciler) updateStatus(ctx context.Context, task *kelosv1alpha1.T
 	} else if isJobFailed(job) {
 		if task.Status.Phase != kelosv1alpha1.TaskPhaseFailed {
 			newPhase = kelosv1alpha1.TaskPhaseFailed
-			newMessage = "Task failed"
+			newMessage = jobFailureMessage(job)
 			setCompletionTime = true
-			r.recordEvent(task, corev1.EventTypeWarning, "TaskFailed", "Task failed")
+			r.recordEvent(task, corev1.EventTypeWarning, "TaskFailed", newMessage)
 			taskCompletedTotal.WithLabelValues(task.Namespace, task.Spec.Type, string(kelosv1alpha1.TaskPhaseFailed)).Inc()
 		}
 	}
@@ -816,7 +843,7 @@ func (r *TaskReconciler) checkBranchLock(ctx context.Context, task *kelosv1alpha
 			continue
 		}
 		switch t.Status.Phase {
-		case kelosv1alpha1.TaskPhaseRunning, kelosv1alpha1.TaskPhasePending:
+		case kelosv1alpha1.TaskPhaseRunning, kelosv1alpha1.TaskPhasePending, kelosv1alpha1.TaskPhaseQueued:
 			logger.Info("Branch locked by another task", "branch", task.Spec.Branch, "lockedBy", t.Name)
 			r.setWaitingPhase(ctx, task, fmt.Sprintf("Waiting for branch %q (locked by %s)", task.Spec.Branch, t.Name))
 			return true, ctrl.Result{RequeueAfter: 10 * time.Second}, nil
@@ -830,6 +857,90 @@ func (r *TaskReconciler) checkBranchLock(ctx context.Context, task *kelosv1alpha
 	}
 
 	return false, ctrl.Result{}, nil
+}
+
+// isPersistentMode returns true if the task is part of a persistent-mode TaskSpawner.
+func isPersistentMode(task *kelosv1alpha1.Task) bool {
+	return task.Labels[LabelExecutionMode] == string(kelosv1alpha1.ExecutionModePersistent)
+}
+
+// reconcilePersistentTask handles the lifecycle of a Task that belongs to a
+// persistent-mode TaskSpawner. Instead of creating a Job, it transitions the
+// task to the Queued phase after dependency and branch lock checks. The
+// SessionReconciler handles pod assignment and completion monitoring.
+func (r *TaskReconciler) reconcilePersistentTask(ctx context.Context, task *kelosv1alpha1.Task) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	// Terminal tasks: nothing to do (cleanup handled by SessionReconciler).
+	if task.Status.Phase == kelosv1alpha1.TaskPhaseSucceeded || task.Status.Phase == kelosv1alpha1.TaskPhaseFailed {
+		// Release branch lock if held.
+		if task.Spec.Branch != "" {
+			lockKey := branchLockKey(task)
+			r.BranchLocker.Release(lockKey, task.Name)
+		}
+
+		// Check TTL expiration.
+		if expired, requeueAfter := r.ttlExpired(task); expired {
+			logger.Info("Deleting persistent Task due to TTL expiration", "task", task.Name)
+			if err := r.Delete(ctx, task); err != nil && !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{}, nil
+		} else if requeueAfter > 0 {
+			return ctrl.Result{RequeueAfter: requeueAfter}, nil
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// Tasks already assigned to a pod are managed by SessionReconciler.
+	if task.Status.SessionPodName != "" {
+		return ctrl.Result{}, nil
+	}
+
+	// Check dependencies.
+	if len(task.Spec.DependsOn) > 0 {
+		ready, result, err := r.checkDependencies(ctx, task)
+		if err != nil || !ready {
+			return result, err
+		}
+	}
+
+	// Check branch lock.
+	if task.Spec.Branch != "" {
+		if task.Spec.WorkspaceRef == nil {
+			logger.Info("Branch is set without workspaceRef for persistent task", "task", task.Name)
+		}
+		lockKey := branchLockKey(task)
+		acquired, holder := r.BranchLocker.TryAcquire(lockKey, task.Name)
+		if !acquired {
+			logger.Info("Branch locked by another task", "branch", task.Spec.Branch, "lockedBy", holder)
+			r.setWaitingPhase(ctx, task, fmt.Sprintf("Waiting for branch %q (locked by %s)", task.Spec.Branch, holder))
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		}
+		locked, result, err := r.checkBranchLock(ctx, task)
+		if err != nil || locked {
+			r.BranchLocker.Release(lockKey, task.Name)
+			return result, err
+		}
+	}
+
+	// Transition to Queued phase.
+	if task.Status.Phase != kelosv1alpha1.TaskPhaseQueued {
+		logger.Info("Queuing persistent task for session assignment", "task", task.Name)
+		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			if getErr := r.Get(ctx, client.ObjectKeyFromObject(task), task); getErr != nil {
+				return getErr
+			}
+			task.Status.Phase = kelosv1alpha1.TaskPhaseQueued
+			task.Status.Message = "Waiting for session pod assignment"
+			return r.Status().Update(ctx, task)
+		}); err != nil {
+			return ctrl.Result{}, err
+		}
+		r.recordEvent(task, corev1.EventTypeNormal, "TaskQueued", "Task queued for persistent session assignment")
+	}
+
+	return ctrl.Result{}, nil
 }
 
 // setWaitingPhase updates the task phase to Waiting with the given message.
@@ -925,6 +1036,23 @@ func isJobFailed(job *batchv1.Job) bool {
 		}
 	}
 	return false
+}
+
+// jobFailureMessage extracts a human-readable failure message from a Job's
+// Failed condition. Falls back to "Task failed" when no reason is available.
+func jobFailureMessage(job *batchv1.Job) string {
+	for _, c := range job.Status.Conditions {
+		if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue {
+			if c.Reason != "" {
+				if c.Message != "" {
+					return fmt.Sprintf("Task failed: %s: %s", c.Reason, c.Message)
+				}
+				return fmt.Sprintf("Task failed: %s", c.Reason)
+			}
+			break
+		}
+	}
+	return "Task failed"
 }
 
 // SetupWithManager sets up the controller with the Manager.

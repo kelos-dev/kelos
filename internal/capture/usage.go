@@ -338,6 +338,112 @@ func parseLine(line []byte) map[string]any {
 	return m
 }
 
+// findLastByType returns the last JSON object with the given "type" field.
+func findLastByType(lines [][]byte, typ string) map[string]any {
+	var last map[string]any
+	for _, line := range lines {
+		m := parseLine(line)
+		if m == nil {
+			continue
+		}
+		if m["type"] == typ {
+			last = m
+		}
+	}
+	return last
+}
+
+// IsAgentError checks agent output lines for a result line indicating
+// the agent reported an error (is_error=true). Supported agent types are those
+// that emit {"type":"result","is_error":...} JSON lines.
+func IsAgentError(agentType string, lines [][]byte) bool {
+	switch agentType {
+	case "claude-code", "codex", "cursor":
+	default:
+		return false
+	}
+
+	if len(lines) == 0 {
+		return false
+	}
+
+	last := findLastByType(lines, "result")
+	if last == nil {
+		return false
+	}
+
+	isError, _ := last["is_error"].(bool)
+	return isError
+}
+
+// IsAuthFailure checks agent output lines for a result line indicating
+// the agent session ended due to GitHub auth failure. Supported agent types
+// are "claude-code", "codex", and "cursor".
+func IsAuthFailure(agentType string, lines [][]byte, extraPatterns []string) bool {
+	switch agentType {
+	case "claude-code", "codex", "cursor":
+	default:
+		return false
+	}
+
+	if len(lines) == 0 {
+		return false
+	}
+
+	last := findLastByType(lines, "result")
+	if last == nil {
+		return false
+	}
+
+	result, ok := last["result"].(string)
+	if !ok || result == "" {
+		return false
+	}
+
+	// Auth indicators (case-sensitive).
+	authIndicators := []string{
+		"HTTP 401",
+		"credentials expired",
+		"token expired",
+		"Bad credentials",
+		"The token in",
+	}
+	authIndicators = append(authIndicators, extraPatterns...)
+
+	// Standalone match: "Bad credentials (HTTP 401)" without session-ending phrase.
+	if strings.Contains(result, "Bad credentials") && strings.Contains(result, "HTTP 401") {
+		return true
+	}
+
+	// Session-ending indicators (case-insensitive).
+	sessionIndicators := []string{
+		"session failed",
+		"session must end",
+		"cannot continue",
+		"must end",
+	}
+
+	lower := strings.ToLower(result)
+	hasSession := false
+	for _, s := range sessionIndicators {
+		if strings.Contains(lower, s) {
+			hasSession = true
+			break
+		}
+	}
+	if !hasSession {
+		return false
+	}
+
+	for _, a := range authIndicators {
+		if strings.Contains(result, a) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // formatNumber converts a JSON number value to a string, preserving the
 // original format from the JSON source.
 func formatNumber(v any) string {

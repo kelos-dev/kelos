@@ -278,6 +278,65 @@ func TestCaptureOutputsUpstreamRepoNoPRs(t *testing.T) {
 	assertOutputLines(t, expected, outputs)
 }
 
+func TestParseOutputs(t *testing.T) {
+	tests := []struct {
+		name     string
+		logData  string
+		expected []string
+	}{
+		{
+			name:     "no markers",
+			logData:  "some random log data",
+			expected: nil,
+		},
+		{
+			name:     "valid block",
+			logData:  "prefix\n---KELOS_OUTPUTS_START---\nbranch: main\ncommit: abc\n---KELOS_OUTPUTS_END---\nsuffix",
+			expected: []string{"branch: main", "commit: abc"},
+		},
+		{
+			name:     "prior end marker before start marker",
+			logData:  "---KELOS_OUTPUTS_END---\ngarbage\n---KELOS_OUTPUTS_START---\nbranch: feature\n---KELOS_OUTPUTS_END---\n",
+			expected: []string{"branch: feature"},
+		},
+		{
+			name:     "start marker without end marker",
+			logData:  "---KELOS_OUTPUTS_START---\nbranch: main\n",
+			expected: nil,
+		},
+		{
+			name:     "empty block",
+			logData:  "---KELOS_OUTPUTS_START---\n---KELOS_OUTPUTS_END---",
+			expected: nil,
+		},
+		{
+			name:     "whitespace only block",
+			logData:  "---KELOS_OUTPUTS_START---\n   \n  \n---KELOS_OUTPUTS_END---",
+			expected: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseOutputs(tt.logData)
+			if tt.expected == nil {
+				if got != nil {
+					t.Errorf("expected nil, got %v", got)
+				}
+				return
+			}
+			if len(got) != len(tt.expected) {
+				t.Fatalf("length mismatch: want %d, got %d\n  want: %v\n  got:  %v", len(tt.expected), len(got), tt.expected, got)
+			}
+			for i := range tt.expected {
+				if got[i] != tt.expected[i] {
+					t.Errorf("line %d: want %q, got %q", i, tt.expected[i], got[i])
+				}
+			}
+		})
+	}
+}
+
 func TestMain(m *testing.M) {
 	// Ensure env vars don't leak between tests by clearing them.
 	os.Unsetenv("KELOS_BASE_BRANCH")

@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -17,6 +18,85 @@ const (
 	// TaskSpawnerPhaseSuspended means the spawner is paused by the user.
 	TaskSpawnerPhaseSuspended TaskSpawnerPhase = "Suspended"
 )
+
+// ExecutionMode determines how Tasks are executed.
+type ExecutionMode string
+
+const (
+	// ExecutionModeEphemeral creates a fresh Kubernetes Job per Task (default).
+	ExecutionModeEphemeral ExecutionMode = "ephemeral"
+	// ExecutionModePersistent maintains long-lived agent pods via StatefulSet
+	// that process multiple Tasks without per-task cold-start overhead.
+	ExecutionModePersistent ExecutionMode = "persistent"
+)
+
+// WorkspaceResetConfig controls how the workspace is cleaned between tasks
+// in persistent execution mode.
+type WorkspaceResetConfig struct {
+	// Git resets the git working tree between tasks by checking out the base
+	// branch and removing untracked files. Defaults to true.
+	// +kubebuilder:default=true
+	// +optional
+	Git *bool `json:"git,omitempty"`
+
+	// PreserveDirectories lists directories (relative to the repo root) that
+	// should be preserved during workspace resets. Useful for caches like
+	// node_modules or .venv that are expensive to recreate.
+	// +optional
+	PreserveDirectories []string `json:"preserveDirectories,omitempty"`
+}
+
+// SessionConfig configures persistent execution mode sessions.
+type SessionConfig struct {
+	// IdleTimeout is how long a session pod waits without a task assignment
+	// before exiting. The StatefulSet recreates it on demand. Defaults to 30m.
+	// +optional
+	IdleTimeout *metav1.Duration `json:"idleTimeout,omitempty"`
+
+	// MaxTasksPerSession limits the number of tasks a single session pod
+	// processes before exiting and being recreated. Zero means unlimited.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	MaxTasksPerSession *int32 `json:"maxTasksPerSession,omitempty"`
+
+	// MaxSessionDuration is the maximum wall-clock time a session pod runs
+	// before exiting. Defaults to 8h.
+	// +optional
+	MaxSessionDuration *metav1.Duration `json:"maxSessionDuration,omitempty"`
+
+	// Replicas is the number of concurrent session pods. Each pod can
+	// process one task at a time. Defaults to 1.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default=1
+	Replicas *int32 `json:"replicas,omitempty"`
+
+	// StorageSize is the size of the PersistentVolumeClaim for each session
+	// pod's workspace. Defaults to 10Gi.
+	// +optional
+	StorageSize *resource.Quantity `json:"storageSize,omitempty"`
+
+	// StorageClassName specifies the StorageClass for session PVCs. When
+	// empty, the cluster default StorageClass is used.
+	// +optional
+	StorageClassName *string `json:"storageClassName,omitempty"`
+
+	// WorkspaceReset controls how the workspace is cleaned between tasks.
+	// +optional
+	WorkspaceReset *WorkspaceResetConfig `json:"workspaceReset,omitempty"`
+
+	// RetryOnPodFailure controls whether tasks are re-queued when their
+	// session pod is deleted or crashes. Defaults to true.
+	// +optional
+	RetryOnPodFailure *bool `json:"retryOnPodFailure,omitempty"`
+
+	// MaxSessionRetries is the maximum number of times a task can be
+	// re-queued due to session pod failures before being marked as Failed.
+	// Defaults to 3. Only used when RetryOnPodFailure is true.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	MaxSessionRetries *int32 `json:"maxSessionRetries,omitempty"`
+}
 
 // When defines the conditions that trigger task spawning.
 // Exactly one field must be set.
@@ -944,6 +1024,8 @@ type TaskTemplate struct {
 
 // TaskSpawnerSpec defines the desired state of TaskSpawner.
 // +kubebuilder:validation:XValidation:rule="!(has(self.when.githubIssues) || has(self.when.githubPullRequests) || has(self.when.githubWebhook) || has(self.when.linearWebhook)) || has(self.taskTemplate.workspaceRef)",message="taskTemplate.workspaceRef is required when using githubIssues, githubPullRequests, githubWebhook, or linearWebhook source"
+// +kubebuilder:validation:XValidation:rule="!has(self.sessionConfig) || (has(self.executionMode) && self.executionMode == 'persistent')",message="sessionConfig is only allowed when executionMode is persistent"
+// +kubebuilder:validation:XValidation:rule="!has(self.executionMode) || self.executionMode != 'persistent' || has(self.taskTemplate.workspaceRef)",message="taskTemplate.workspaceRef is required when executionMode is persistent"
 type TaskSpawnerSpec struct {
 	// When defines the conditions that trigger task spawning.
 	// +kubebuilder:validation:Required
@@ -982,6 +1064,20 @@ type TaskSpawnerSpec struct {
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	MaxTotalTasks *int32 `json:"maxTotalTasks,omitempty"`
+
+	// ExecutionMode determines how spawned Tasks are executed.
+	// "ephemeral" (default) creates a fresh Kubernetes Job per Task.
+	// "persistent" maintains long-lived session pods that process multiple
+	// Tasks without per-task cold-start overhead.
+	// +kubebuilder:validation:Enum=ephemeral;persistent
+	// +kubebuilder:default=ephemeral
+	// +optional
+	ExecutionMode ExecutionMode `json:"executionMode,omitempty"`
+
+	// SessionConfig configures persistent execution mode. Only valid when
+	// executionMode is "persistent".
+	// +optional
+	SessionConfig *SessionConfig `json:"sessionConfig,omitempty"`
 }
 
 // TaskSpawnerStatus defines the observed state of TaskSpawner.
@@ -999,6 +1095,11 @@ type TaskSpawnerStatus struct {
 	// Set for cron-based sources.
 	// +optional
 	CronJobName string `json:"cronJobName,omitempty"`
+
+	// StatefulSetName is the name of the StatefulSet running session pods.
+	// Set when executionMode is "persistent".
+	// +optional
+	StatefulSetName string `json:"statefulSetName,omitempty"`
 
 	// TotalDiscovered is the total number of work items discovered.
 	// +optional

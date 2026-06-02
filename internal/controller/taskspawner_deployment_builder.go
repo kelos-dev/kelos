@@ -24,6 +24,12 @@ const (
 
 	// SpawnerClusterRole is the ClusterRole referenced by spawner RoleBindings.
 	SpawnerClusterRole = "kelos-spawner-role"
+
+	// SessionRunnerServiceAccount is the service account used by session runner pods.
+	SessionRunnerServiceAccount = "kelos-session-runner"
+
+	// SessionRunnerClusterRole is the ClusterRole referenced by session runner RoleBindings.
+	SessionRunnerClusterRole = "kelos-session-runner-role"
 )
 
 // DeploymentBuilder constructs Kubernetes Deployments for TaskSpawners.

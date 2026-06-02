@@ -205,9 +205,9 @@ func base64URLEncode(data []byte) string {
 	return base64.RawURLEncoding.EncodeToString(data)
 }
 
-// tokenExpiryMargin is the safety margin before token expiry. Tokens are
+// TokenExpiryMargin is the safety margin before token expiry. Tokens are
 // refreshed when less than this duration remains until expiration.
-const tokenExpiryMargin = 5 * time.Minute
+const TokenExpiryMargin = 5 * time.Minute
 
 // TokenProvider generates and caches GitHub App installation tokens.
 // It is safe for concurrent use.
@@ -238,7 +238,7 @@ func (tp *TokenProvider) Token(ctx context.Context) (string, error) {
 	defer tp.mu.Unlock()
 
 	now := time.Now()
-	if tp.token != "" && now.Add(tokenExpiryMargin).Before(tp.expiresAt) {
+	if tp.token != "" && now.Add(TokenExpiryMargin).Before(tp.expiresAt) {
 		return tp.token, nil
 	}
 

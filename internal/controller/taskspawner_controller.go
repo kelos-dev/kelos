@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"reflect"
 	"time"
@@ -31,14 +33,24 @@ import (
 
 const (
 	taskSpawnerFinalizer = "kelos.dev/taskspawner-finalizer"
+
+	// annotationTokenExpiresAt stores the GitHub App installation token expiry
+	// time on derived secrets so the reconciler can skip regeneration when the
+	// cached token is still valid.
+	annotationTokenExpiresAt = "kelos.dev/token-expires-at"
+
+	// maxK8sNameLength is the maximum length for Kubernetes resource names.
+	maxK8sNameLength = 253
 )
 
 // TaskSpawnerReconciler reconciles a TaskSpawner object.
 type TaskSpawnerReconciler struct {
 	client.Client
-	Scheme            *runtime.Scheme
-	DeploymentBuilder *DeploymentBuilder
-	Recorder          record.EventRecorder
+	Scheme                    *runtime.Scheme
+	DeploymentBuilder         *DeploymentBuilder
+	SessionStatefulSetBuilder *SessionStatefulSetBuilder
+	TokenClient               *githubapp.TokenClient
+	Recorder                  record.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=kelos.dev,resources=taskspawners,verbs=get;list;watch;create;update;patch;delete
@@ -47,10 +59,13 @@ type TaskSpawnerReconciler struct {
 // +kubebuilder:rbac:groups=kelos.dev,resources=workspaces,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=batch,resources=cronjobs,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;delete
 
 // isCronBased returns true if the TaskSpawner uses a cron schedule.
 func isCronBased(ts *kelosv1alpha1.TaskSpawner) bool {
@@ -101,17 +116,47 @@ func (r *TaskSpawnerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	isSuspended := ts.Spec.Suspend != nil && *ts.Spec.Suspend
 
+	// Persistent-mode TaskSpawners manage a StatefulSet for session pods
+	// in addition to the normal discovery mechanism (Deployment/CronJob/Webhook).
+	// We always fall through to the discovery path so that task creation
+	// (polling, webhook, cron) continues while session pods are running.
+	var sessionRequeue time.Duration
+	if ts.Spec.ExecutionMode == kelosv1alpha1.ExecutionModePersistent {
+		result, err := r.reconcileSessionStatefulSet(ctx, req, &ts, isSuspended)
+		if err != nil {
+			return result, err
+		}
+		if result.Requeue {
+			return result, nil
+		}
+		sessionRequeue = result.RequeueAfter
+	}
+
 	// Cron-based TaskSpawners use a CronJob instead of a Deployment.
 	if isCronBased(&ts) {
-		return r.reconcileCronJob(ctx, req, &ts, isSuspended)
+		result, err := r.reconcileCronJob(ctx, req, &ts, isSuspended)
+		return r.mergeRequeue(result, sessionRequeue), err
 	}
 
 	// Webhook-based TaskSpawners don't need deployments or cronjobs.
 	if isWebhookBased(&ts) {
-		return r.reconcileWebhook(ctx, req, &ts, isSuspended)
+		result, err := r.reconcileWebhook(ctx, req, &ts, isSuspended)
+		return r.mergeRequeue(result, sessionRequeue), err
 	}
 
-	return r.reconcileDeployment(ctx, req, &ts, isSuspended)
+	result, err := r.reconcileDeployment(ctx, req, &ts, isSuspended)
+	return r.mergeRequeue(result, sessionRequeue), err
+}
+
+// mergeRequeue returns the result with the shorter RequeueAfter between the
+// result's existing value and the session requeue duration.
+func (r *TaskSpawnerReconciler) mergeRequeue(result ctrl.Result, sessionRequeue time.Duration) ctrl.Result {
+	if sessionRequeue > 0 {
+		if result.RequeueAfter == 0 || sessionRequeue < result.RequeueAfter {
+			result.RequeueAfter = sessionRequeue
+		}
+	}
+	return result
 }
 
 // reconcileWebhook handles webhook-based TaskSpawners by cleaning up any stale resources.
@@ -124,6 +169,13 @@ func (r *TaskSpawnerReconciler) reconcileWebhook(ctx context.Context, req ctrl.R
 	}
 	if err := r.deleteStaleResource(ctx, req.NamespacedName, &batchv1.CronJob{}, "CronJob"); err != nil {
 		return ctrl.Result{}, err
+	}
+	// Clean up any stale session StatefulSet and Service from a previous persistent-mode configuration.
+	// Only when NOT in persistent mode — persistent spawners also run the discovery path.
+	if ts.Spec.ExecutionMode != kelosv1alpha1.ExecutionModePersistent {
+		if err := r.deleteStaleSessionResources(ctx, req, ts); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	// Determine the desired phase for webhook TaskSpawners
@@ -194,6 +246,13 @@ func (r *TaskSpawnerReconciler) reconcileDeployment(ctx context.Context, req ctr
 	// Clean up any existing CronJob from a previous cron-based configuration.
 	if err := r.deleteStaleResource(ctx, req.NamespacedName, &batchv1.CronJob{}, "CronJob"); err != nil {
 		return ctrl.Result{}, err
+	}
+	// Clean up any stale session StatefulSet and Service from a previous persistent-mode configuration.
+	// Only when NOT in persistent mode — persistent spawners also run the discovery path.
+	if ts.Spec.ExecutionMode != kelosv1alpha1.ExecutionModePersistent {
+		if err := r.deleteStaleSessionResources(ctx, req, ts); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	// Check if Deployment already exists
@@ -349,6 +408,13 @@ func (r *TaskSpawnerReconciler) reconcileCronJob(ctx context.Context, req ctrl.R
 	if err := r.deleteStaleResource(ctx, req.NamespacedName, &appsv1.Deployment{}, "Deployment"); err != nil {
 		return ctrl.Result{}, err
 	}
+	// Clean up any stale session StatefulSet and Service from a previous persistent-mode configuration.
+	// Only when NOT in persistent mode — persistent spawners also run the discovery path.
+	if ts.Spec.ExecutionMode != kelosv1alpha1.ExecutionModePersistent {
+		if err := r.deleteStaleSessionResources(ctx, req, ts); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 
 	var cronJob batchv1.CronJob
 	cronJobExists := true
@@ -469,6 +535,329 @@ func (r *TaskSpawnerReconciler) reconcileCronJob(ctx context.Context, req ctrl.R
 }
 
 // handleDeletion handles TaskSpawner deletion.
+// reconcileSessionStatefulSet manages the StatefulSet and headless Service for
+// persistent-mode TaskSpawners.
+func (r *TaskSpawnerReconciler) reconcileSessionStatefulSet(ctx context.Context, req ctrl.Request, ts *kelosv1alpha1.TaskSpawner, isSuspended bool) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	// Ensure RBAC for session runner pods.
+	if err := r.ensureSessionRunnerRBAC(ctx, ts.Namespace); err != nil {
+		logger.Error(err, "Unable to ensure session runner RBAC")
+		return ctrl.Result{}, err
+	}
+
+	// Resolve workspace.
+	var workspace *kelosv1alpha1.WorkspaceSpec
+	if ts.Spec.TaskTemplate.WorkspaceRef != nil {
+		var ws kelosv1alpha1.Workspace
+		if err := r.Get(ctx, client.ObjectKey{
+			Namespace: ts.Namespace,
+			Name:      ts.Spec.TaskTemplate.WorkspaceRef.Name,
+		}, &ws); err != nil {
+			if apierrors.IsNotFound(err) {
+				logger.Info("Workspace not found yet for session StatefulSet, requeuing", "workspace", ts.Spec.TaskTemplate.WorkspaceRef.Name)
+				return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+			}
+			return ctrl.Result{}, err
+		}
+		workspace = &ws.Spec
+	}
+
+	// Resolve GitHub App token if the workspace uses a GitHub App secret.
+	var tokenRequeueAfter time.Duration
+	if workspace != nil && workspace.SecretRef != nil {
+		resolvedWorkspace, requeueAfter, err := r.resolveSessionGitHubAppToken(ctx, ts, workspace)
+		if err != nil {
+			logger.Error(err, "Unable to resolve GitHub App token for session")
+			r.recordEvent(ts, corev1.EventTypeWarning, "GitHubTokenFailed", "Failed to resolve GitHub token: %v", err)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+		workspace = resolvedWorkspace
+		tokenRequeueAfter = requeueAfter
+	}
+
+	// Resolve AgentConfig if referenced.
+	var agentConfig *kelosv1alpha1.AgentConfigSpec
+	if ts.Spec.TaskTemplate.AgentConfigRef != nil {
+		var ac kelosv1alpha1.AgentConfig
+		if err := r.Get(ctx, client.ObjectKey{
+			Namespace: ts.Namespace,
+			Name:      ts.Spec.TaskTemplate.AgentConfigRef.Name,
+		}, &ac); err != nil {
+			if apierrors.IsNotFound(err) {
+				logger.Info("AgentConfig not found yet for session StatefulSet, requeuing", "agentConfig", ts.Spec.TaskTemplate.AgentConfigRef.Name)
+				return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+			}
+			return ctrl.Result{}, err
+		}
+		agentConfig = &ac.Spec
+	}
+
+	// Resolve MCP server secrets (HeadersFrom/EnvFrom) before building the
+	// StatefulSet, matching the ephemeral createJob path.
+	if agentConfig != nil && len(agentConfig.MCPServers) > 0 {
+		resolved, err := r.resolveMCPServerSecrets(ctx, ts.Namespace, agentConfig.MCPServers)
+		if err != nil {
+			logger.Error(err, "Unable to resolve MCP server secrets for session StatefulSet")
+			return ctrl.Result{}, err
+		}
+		agentConfig.MCPServers = resolved
+	}
+
+	// Build desired StatefulSet and Service.
+	desiredSts, desiredSvc, err := r.SessionStatefulSetBuilder.Build(SessionStatefulSetInput{
+		TaskSpawner: ts,
+		Workspace:   workspace,
+		AgentConfig: agentConfig,
+	})
+	if err != nil {
+		logger.Error(err, "Unable to build session StatefulSet")
+		return ctrl.Result{}, err
+	}
+
+	// Suspend: scale to 0.
+	if isSuspended {
+		zero := int32(0)
+		desiredSts.Spec.Replicas = &zero
+	}
+
+	// Ensure headless Service.
+	var existingSvc corev1.Service
+	if err := r.Get(ctx, client.ObjectKey{Namespace: desiredSvc.Namespace, Name: desiredSvc.Name}, &existingSvc); err != nil {
+		if apierrors.IsNotFound(err) {
+			if err := controllerutil.SetControllerReference(ts, desiredSvc, r.Scheme); err != nil {
+				return ctrl.Result{}, err
+			}
+			if err := r.Create(ctx, desiredSvc); err != nil {
+				if !apierrors.IsAlreadyExists(err) {
+					logger.Error(err, "Unable to create headless Service for session StatefulSet")
+					return ctrl.Result{}, err
+				}
+			} else {
+				logger.Info("Created headless Service for session StatefulSet", "service", desiredSvc.Name)
+			}
+		} else {
+			return ctrl.Result{}, err
+		}
+	}
+
+	// Ensure StatefulSet.
+	stsName := sessionStatefulSetName(ts.Name)
+	var existingSts appsv1.StatefulSet
+	stsExists := true
+	if err := r.Get(ctx, client.ObjectKey{Namespace: ts.Namespace, Name: stsName}, &existingSts); err != nil {
+		if apierrors.IsNotFound(err) {
+			stsExists = false
+		} else {
+			return ctrl.Result{}, err
+		}
+	}
+
+	if !stsExists {
+		if err := controllerutil.SetControllerReference(ts, desiredSts, r.Scheme); err != nil {
+			return ctrl.Result{}, err
+		}
+		if err := r.Create(ctx, desiredSts); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				return ctrl.Result{Requeue: true}, nil
+			}
+			logger.Error(err, "Unable to create session StatefulSet")
+			return ctrl.Result{}, err
+		}
+		logger.Info("Created session StatefulSet", "statefulset", stsName, "replicas", *desiredSts.Spec.Replicas)
+		r.recordEvent(ts, corev1.EventTypeNormal, "StatefulSetCreated", "Created session StatefulSet %s with %d replicas", stsName, *desiredSts.Spec.Replicas)
+	} else {
+		// Update replicas if changed.
+		needsUpdate := false
+		if existingSts.Spec.Replicas == nil || *existingSts.Spec.Replicas != *desiredSts.Spec.Replicas {
+			existingSts.Spec.Replicas = desiredSts.Spec.Replicas
+			needsUpdate = true
+		}
+		// Update pod template (env vars, images, etc.) but not VolumeClaimTemplates (immutable).
+		// Compare specific fields rather than full container slices to avoid false
+		// positives from Kubernetes-injected defaults (terminationMessagePath, etc.).
+		if sessionContainersChanged(existingSts.Spec.Template.Spec.Containers, desiredSts.Spec.Template.Spec.Containers) ||
+			sessionContainersChanged(existingSts.Spec.Template.Spec.InitContainers, desiredSts.Spec.Template.Spec.InitContainers) {
+			existingSts.Spec.Template = desiredSts.Spec.Template
+			needsUpdate = true
+		}
+		if needsUpdate {
+			if err := r.Update(ctx, &existingSts); err != nil {
+				logger.Error(err, "Unable to update session StatefulSet")
+				return ctrl.Result{}, err
+			}
+			logger.Info("Updated session StatefulSet", "statefulset", stsName)
+		}
+	}
+
+	// Update status with StatefulSet name.
+	if ts.Status.StatefulSetName != stsName {
+		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			if getErr := r.Get(ctx, req.NamespacedName, ts); getErr != nil {
+				return getErr
+			}
+			ts.Status.StatefulSetName = stsName
+			return r.Status().Update(ctx, ts)
+		}); err != nil {
+			logger.Error(err, "Unable to update TaskSpawner status with StatefulSet name")
+			return ctrl.Result{}, err
+		}
+	}
+
+	if tokenRequeueAfter > 0 {
+		return ctrl.Result{RequeueAfter: tokenRequeueAfter}, nil
+	}
+	return ctrl.Result{}, nil
+}
+
+// resolveSessionGitHubAppToken checks if the workspace secret is a GitHub App
+// secret, and if so, generates an installation token and creates/updates a
+// derived secret with the GITHUB_TOKEN key. Returns the (possibly modified)
+// workspace spec and a requeue duration for token refresh. Skips token
+// generation if the derived secret already contains a valid token.
+func (r *TaskSpawnerReconciler) resolveSessionGitHubAppToken(ctx context.Context, ts *kelosv1alpha1.TaskSpawner, workspace *kelosv1alpha1.WorkspaceSpec) (*kelosv1alpha1.WorkspaceSpec, time.Duration, error) {
+	logger := log.FromContext(ctx)
+
+	var secret corev1.Secret
+	if err := r.Get(ctx, client.ObjectKey{
+		Namespace: ts.Namespace,
+		Name:      workspace.SecretRef.Name,
+	}, &secret); err != nil {
+		return nil, 0, fmt.Errorf("fetching workspace secret %q: %w", workspace.SecretRef.Name, err)
+	}
+
+	if !githubapp.IsGitHubApp(secret.Data) {
+		return workspace, 0, nil
+	}
+
+	if r.TokenClient == nil {
+		return nil, 0, fmt.Errorf("GitHub App secret detected but TokenClient is not configured")
+	}
+
+	tokenSecretName := truncateResourceName("session-" + ts.Name + "-github-token")
+
+	// Check if the derived secret already has a valid token.
+	if requeueAfter, ok := cachedTokenRequeueAfter(ctx, r.Client, ts.Namespace, tokenSecretName); ok {
+		resolved := *workspace
+		resolved.SecretRef = &kelosv1alpha1.SecretReference{Name: tokenSecretName}
+		return &resolved, requeueAfter, nil
+	}
+
+	logger.Info("Generating installation token for session", "secret", workspace.SecretRef.Name)
+
+	creds, err := githubapp.ParseCredentials(secret.Data)
+	if err != nil {
+		return nil, 0, fmt.Errorf("parsing GitHub App credentials: %w", err)
+	}
+
+	tc := &githubapp.TokenClient{
+		BaseURL: r.TokenClient.BaseURL,
+		Client:  r.TokenClient.Client,
+	}
+	if workspace.Repo != "" {
+		host, _, _ := parseGitHubRepo(workspace.Repo)
+		if apiBaseURL := gitHubAPIBaseURL(host); apiBaseURL != "" {
+			tc.BaseURL = apiBaseURL
+		}
+	}
+
+	tokenResp, err := tc.GenerateInstallationToken(ctx, creds)
+	if err != nil {
+		return nil, 0, fmt.Errorf("generating installation token: %w", err)
+	}
+
+	if err := upsertTokenSecret(ctx, r.Client, r.Scheme, ts, ts.Namespace, tokenSecretName, tokenResp); err != nil {
+		return nil, 0, err
+	}
+
+	resolved := *workspace
+	resolved.SecretRef = &kelosv1alpha1.SecretReference{
+		Name: tokenSecretName,
+	}
+
+	requeueAfter := time.Until(tokenResp.ExpiresAt) - githubapp.TokenExpiryMargin
+	if requeueAfter < time.Minute {
+		requeueAfter = time.Minute
+	}
+
+	return &resolved, requeueAfter, nil
+}
+
+// truncateResourceName ensures a Kubernetes resource name stays within the
+// 253-character DNS subdomain limit by hashing overlong names.
+func truncateResourceName(name string) string {
+	if len(name) <= maxK8sNameLength {
+		return name
+	}
+	sum := sha256.Sum256([]byte(name))
+	suffix := hex.EncodeToString(sum[:])[:12]
+	return name[:maxK8sNameLength-len(suffix)-1] + "-" + suffix
+}
+
+// cachedTokenRequeueAfter checks if a derived token secret already has a
+// valid (non-expired) token. Returns the requeue duration and true if the
+// token is still valid, or 0 and false if a new token is needed.
+func cachedTokenRequeueAfter(ctx context.Context, cl client.Client, namespace, secretName string) (time.Duration, bool) {
+	var existing corev1.Secret
+	if err := cl.Get(ctx, client.ObjectKey{Namespace: namespace, Name: secretName}, &existing); err != nil {
+		return 0, false
+	}
+	expiresAtStr, ok := existing.Annotations[annotationTokenExpiresAt]
+	if !ok {
+		return 0, false
+	}
+	expiresAt, err := time.Parse(time.RFC3339, expiresAtStr)
+	if err != nil {
+		return 0, false
+	}
+	remaining := time.Until(expiresAt) - githubapp.TokenExpiryMargin
+	if remaining < time.Minute {
+		return 0, false
+	}
+	return remaining, true
+}
+
+// upsertTokenSecret creates or updates a derived secret containing a
+// GITHUB_TOKEN and its expiry annotation.
+func upsertTokenSecret(ctx context.Context, cl client.Client, scheme *runtime.Scheme, owner metav1.Object, namespace, name string, tokenResp *githubapp.TokenResponse) error {
+	tokenSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Annotations: map[string]string{
+				annotationTokenExpiresAt: tokenResp.ExpiresAt.UTC().Format(time.RFC3339),
+			},
+		},
+		StringData: map[string]string{
+			"GITHUB_TOKEN": tokenResp.Token,
+		},
+	}
+
+	if err := controllerutil.SetControllerReference(owner, tokenSecret, scheme); err != nil {
+		return fmt.Errorf("setting owner reference on token secret: %w", err)
+	}
+
+	if err := cl.Create(ctx, tokenSecret); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("creating token secret: %w", err)
+		}
+		existing := &corev1.Secret{}
+		if err := cl.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, existing); err != nil {
+			return fmt.Errorf("fetching existing token secret: %w", err)
+		}
+		existing.StringData = tokenSecret.StringData
+		if existing.Annotations == nil {
+			existing.Annotations = make(map[string]string)
+		}
+		existing.Annotations[annotationTokenExpiresAt] = tokenResp.ExpiresAt.UTC().Format(time.RFC3339)
+		if err := cl.Update(ctx, existing); err != nil {
+			return fmt.Errorf("updating token secret: %w", err)
+		}
+	}
+
+	return nil
+}
+
 func (r *TaskSpawnerReconciler) handleDeletion(ctx context.Context, ts *kelosv1alpha1.TaskSpawner) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
@@ -737,6 +1126,88 @@ func (r *TaskSpawnerReconciler) deleteStaleResource(ctx context.Context, key typ
 	return nil
 }
 
+// deleteStaleSessionResources deletes a session StatefulSet and its headless
+// Service that were created for a previously-persistent TaskSpawner, and clears
+// Status.StatefulSetName. This prevents orphaned session pods from running
+// indefinitely after the user switches ExecutionMode away from persistent.
+func (r *TaskSpawnerReconciler) deleteStaleSessionResources(ctx context.Context, req ctrl.Request, ts *kelosv1alpha1.TaskSpawner) error {
+	stsKey := types.NamespacedName{
+		Namespace: req.NamespacedName.Namespace,
+		Name:      sessionStatefulSetName(req.NamespacedName.Name),
+	}
+
+	if err := r.deleteStaleResource(ctx, stsKey, &appsv1.StatefulSet{}, "StatefulSet"); err != nil {
+		return err
+	}
+	if err := r.deleteStaleResource(ctx, stsKey, &corev1.Service{}, "Service"); err != nil {
+		return err
+	}
+
+	// Clear StatefulSetName from status if it was previously set.
+	if ts.Status.StatefulSetName != "" {
+		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			if getErr := r.Get(ctx, req.NamespacedName, ts); getErr != nil {
+				return getErr
+			}
+			ts.Status.StatefulSetName = ""
+			return r.Status().Update(ctx, ts)
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// resolveMCPServerSecrets merges HeadersFrom/EnvFrom secret values into
+// Headers/Env for each MCP server, matching the ephemeral createJob path in
+// TaskReconciler.
+func (r *TaskSpawnerReconciler) resolveMCPServerSecrets(ctx context.Context, namespace string, servers []kelosv1alpha1.MCPServerSpec) ([]kelosv1alpha1.MCPServerSpec, error) {
+	resolved := make([]kelosv1alpha1.MCPServerSpec, len(servers))
+	for i, server := range servers {
+		resolved[i] = server
+
+		if server.HeadersFrom != nil {
+			var secret corev1.Secret
+			if err := r.Get(ctx, client.ObjectKey{
+				Namespace: namespace,
+				Name:      server.HeadersFrom.SecretRef.Name,
+			}, &secret); err != nil {
+				return nil, fmt.Errorf("fetching headersFrom secret %q for MCP server %q: %w", server.HeadersFrom.SecretRef.Name, server.Name, err)
+			}
+			merged := make(map[string]string, len(server.Headers)+len(secret.Data))
+			for key, value := range server.Headers {
+				merged[key] = value
+			}
+			for key, value := range secret.Data {
+				merged[key] = string(value)
+			}
+			resolved[i].Headers = merged
+			resolved[i].HeadersFrom = nil
+		}
+
+		if server.EnvFrom != nil {
+			var secret corev1.Secret
+			if err := r.Get(ctx, client.ObjectKey{
+				Namespace: namespace,
+				Name:      server.EnvFrom.SecretRef.Name,
+			}, &secret); err != nil {
+				return nil, fmt.Errorf("fetching envFrom secret %q for MCP server %q: %w", server.EnvFrom.SecretRef.Name, server.Name, err)
+			}
+			merged := make(map[string]string, len(server.Env)+len(secret.Data))
+			for key, value := range server.Env {
+				merged[key] = value
+			}
+			for key, value := range secret.Data {
+				merged[key] = string(value)
+			}
+			resolved[i].Env = merged
+			resolved[i].EnvFrom = nil
+		}
+	}
+
+	return resolved, nil
+}
+
 func equalStringSlices(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
@@ -840,6 +1311,67 @@ func (r *TaskSpawnerReconciler) ensureSpawnerRBAC(ctx context.Context, namespace
 	return nil
 }
 
+// ensureSessionRunnerRBAC ensures a ServiceAccount and RoleBinding exist for
+// session runner pods in the given namespace.
+func (r *TaskSpawnerReconciler) ensureSessionRunnerRBAC(ctx context.Context, namespace string) error {
+	logger := log.FromContext(ctx)
+
+	var sa corev1.ServiceAccount
+	if err := r.Get(ctx, types.NamespacedName{Name: SessionRunnerServiceAccount, Namespace: namespace}, &sa); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return err
+		}
+		sa = corev1.ServiceAccount{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      SessionRunnerServiceAccount,
+				Namespace: namespace,
+			},
+		}
+		if err := r.Create(ctx, &sa); err != nil {
+			if !apierrors.IsAlreadyExists(err) {
+				return err
+			}
+		} else {
+			logger.Info("Created session runner ServiceAccount", "namespace", namespace, "name", SessionRunnerServiceAccount)
+		}
+	}
+
+	rbName := SessionRunnerServiceAccount
+	var rb rbacv1.RoleBinding
+	if err := r.Get(ctx, types.NamespacedName{Name: rbName, Namespace: namespace}, &rb); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return err
+		}
+		rb = rbacv1.RoleBinding{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      rbName,
+				Namespace: namespace,
+			},
+			RoleRef: rbacv1.RoleRef{
+				APIGroup: rbacv1.GroupName,
+				Kind:     "ClusterRole",
+				Name:     SessionRunnerClusterRole,
+			},
+			Subjects: []rbacv1.Subject{
+				{
+					Kind:      "ServiceAccount",
+					Name:      SessionRunnerServiceAccount,
+					Namespace: namespace,
+				},
+			},
+		}
+		if err := r.Create(ctx, &rb); err != nil {
+			if !apierrors.IsAlreadyExists(err) {
+				return err
+			}
+		} else {
+			logger.Info("Created session runner RoleBinding", "namespace", namespace, "name", rbName)
+		}
+	}
+
+	return nil
+}
+
 // recordEvent records a Kubernetes Event on the given object if a Recorder is configured.
 func (r *TaskSpawnerReconciler) recordEvent(obj runtime.Object, eventType, reason, messageFmt string, args ...interface{}) {
 	if r.Recorder != nil {
@@ -853,6 +1385,8 @@ func (r *TaskSpawnerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&kelosv1alpha1.TaskSpawner{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&batchv1.CronJob{}).
+		Owns(&appsv1.StatefulSet{}).
+		Owns(&corev1.Service{}).
 		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.findTaskSpawnersForSecret)).
 		Watches(&kelosv1alpha1.Workspace{}, handler.EnqueueRequestsFromMapFunc(r.findTaskSpawnersForWorkspace)).
 		Watches(&kelosv1alpha1.Task{}, handler.EnqueueRequestsFromMapFunc(r.findTaskSpawnersForTask),
@@ -964,6 +1498,29 @@ func (r *TaskSpawnerReconciler) findTaskSpawnersForTask(ctx context.Context, obj
 // resourceRequirementsEqual compares two ResourceRequirements using semantic
 // equality for quantities instead of reflect.DeepEqual, which can report false
 // negatives when the internal representation of equal quantities differs.
+// sessionContainersChanged compares containers by the fields we control (name,
+// image, command, args, env, volumeMounts, workingDir, resources) rather than
+// the full struct, which includes Kubernetes-injected defaults that cause false
+// positives with reflect.DeepEqual.
+func sessionContainersChanged(existing, desired []corev1.Container) bool {
+	if len(existing) != len(desired) {
+		return true
+	}
+	for i := range desired {
+		e := existing[i]
+		d := desired[i]
+		if e.Name != d.Name || e.Image != d.Image || e.WorkingDir != d.WorkingDir ||
+			!equalStringSlices(e.Command, d.Command) ||
+			!equalStringSlices(e.Args, d.Args) ||
+			!equalEnvVars(e.Env, d.Env) ||
+			!reflect.DeepEqual(e.VolumeMounts, d.VolumeMounts) ||
+			!resourceRequirementsEqual(e.Resources, d.Resources) {
+			return true
+		}
+	}
+	return false
+}
+
 func resourceRequirementsEqual(a, b corev1.ResourceRequirements) bool {
 	return reflect.DeepEqual(a.Claims, b.Claims) &&
 		resourceListEqual(a.Requests, b.Requests) &&

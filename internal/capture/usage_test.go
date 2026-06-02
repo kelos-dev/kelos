@@ -283,6 +283,155 @@ func assertForwarded(t *testing.T, in, out string) {
 	}
 }
 
+func TestIsAgentError(t *testing.T) {
+	tests := []struct {
+		name      string
+		agentType string
+		lines     [][]byte
+		want      bool
+	}{
+		{
+			name:      "claude-code is_error true",
+			agentType: "claude-code",
+			lines: [][]byte{
+				[]byte(`{"type":"result","subtype":"error","is_error":true,"result":"something went wrong"}`),
+			},
+			want: true,
+		},
+		{
+			name:      "claude-code is_error false",
+			agentType: "claude-code",
+			lines: [][]byte{
+				[]byte(`{"type":"result","subtype":"success","is_error":false,"result":"done"}`),
+			},
+			want: false,
+		},
+		{
+			name:      "claude-code no is_error field",
+			agentType: "claude-code",
+			lines: [][]byte{
+				[]byte(`{"type":"result","total_cost_usd":0.05}`),
+			},
+			want: false,
+		},
+		{
+			name:      "unsupported agent type",
+			agentType: "gemini",
+			lines: [][]byte{
+				[]byte(`{"type":"result","is_error":true}`),
+			},
+			want: false,
+		},
+		{
+			name:      "empty lines",
+			agentType: "claude-code",
+			lines:     nil,
+			want:      false,
+		},
+		{
+			name:      "uses last result line",
+			agentType: "claude-code",
+			lines: [][]byte{
+				[]byte(`{"type":"result","is_error":false,"result":"first"}`),
+				[]byte(`{"type":"result","is_error":true,"result":"second failed"}`),
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsAgentError(tt.agentType, tt.lines)
+			if got != tt.want {
+				t.Errorf("IsAgentError() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsAuthFailure(t *testing.T) {
+	tests := []struct {
+		name          string
+		agentType     string
+		content       string
+		extraPatterns []string
+		want          bool
+	}{
+		{
+			name:      "token expired in result text",
+			agentType: "claude-code",
+			content:   `{"type":"result","is_error":false,"result":"The babysitter session must end — GitHub credentials expired (HTTP 401)"}` + "\n",
+			want:      true,
+		},
+		{
+			name:      "bad credentials standalone",
+			agentType: "claude-code",
+			content:   `{"type":"result","is_error":false,"result":"Bad credentials (HTTP 401)"}` + "\n",
+			want:      true,
+		},
+		{
+			name:      "normal successful result",
+			agentType: "claude-code",
+			content:   `{"type":"result","is_error":false,"result":"Task completed successfully"}` + "\n",
+			want:      false,
+		},
+		{
+			name:          "session failed with custom extra pattern",
+			agentType:     "claude-code",
+			content:       `{"type":"result","is_error":false,"result":"Session failed — custom auth error XYZ"}` + "\n",
+			extraPatterns: []string{"custom auth error XYZ"},
+			want:          true,
+		},
+		{
+			name:      "unsupported agent type",
+			agentType: "gemini",
+			content:   `{"type":"result","is_error":false,"result":"Session failed — token expired (HTTP 401)"}` + "\n",
+			want:      false,
+		},
+		{
+			name:      "session failed with token expired",
+			agentType: "cursor",
+			content:   `{"type":"result","is_error":false,"result":"Session failed — GitHub token expired (HTTP 401)"}` + "\n",
+			want:      true,
+		},
+		{
+			name:      "auth indicator without session ending phrase",
+			agentType: "claude-code",
+			content:   `{"type":"result","is_error":false,"result":"Got HTTP 401 from API"}` + "\n",
+			want:      false,
+		},
+		{
+			name:      "empty result field",
+			agentType: "claude-code",
+			content:   `{"type":"result","is_error":false}` + "\n",
+			want:      false,
+		},
+		{
+			name:      "auth failure detected even with is_error true",
+			agentType: "claude-code",
+			content:   `{"type":"result","is_error":true,"result":"Session failed — GitHub token expired (HTTP 401)"}` + "\n",
+			want:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var lines [][]byte
+			if tt.content != "" {
+				for _, line := range strings.Split(tt.content, "\n") {
+					if line != "" {
+						lines = append(lines, []byte(line))
+					}
+				}
+			}
+			got := IsAuthFailure(tt.agentType, lines, tt.extraPatterns)
+			if got != tt.want {
+				t.Errorf("IsAuthFailure() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func assertMapEqual(t *testing.T, want, got map[string]string) {
 	t.Helper()
 	if len(want) == 0 && len(got) == 0 {

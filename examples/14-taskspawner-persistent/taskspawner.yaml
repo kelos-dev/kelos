@@ -1,0 +1,38 @@
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
+metadata:
+  name: persistent-agent
+spec:
+  executionMode: persistent
+  sessionConfig:
+    replicas: 2
+    idleTimeout: 1h
+    maxTasksPerSession: 50
+    maxSessionDuration: 8h
+    storageSize: 20Gi
+    workspaceReset:
+      git: true
+      preserveDirectories:
+        - node_modules
+        - .venv
+    retryOnPodFailure: true
+    maxSessionRetries: 3
+  when:
+    githubIssues:
+      labels:
+        - agent
+  taskTemplate:
+    type: claude-code
+    workspaceRef:
+      name: my-workspace
+    credentials:
+      type: api-key
+      secretRef:
+        name: anthropic-api-key
+    promptTemplate: |
+      Resolve the following issue:
+
+      **{{.Title}}** (#{{.Number}})
+
+      {{.Body}}
+    branch: "kelos-task-{{.Number}}"

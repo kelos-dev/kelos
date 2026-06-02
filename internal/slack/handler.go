@@ -336,10 +336,11 @@ func (h *SlackHandler) createTask(ctx context.Context, spawner *v1alpha1.TaskSpa
 		&spawner.Spec.TaskTemplate,
 		templateVars,
 		&taskbuilder.SpawnerRef{
-			Name:       spawner.Name,
-			UID:        string(spawner.UID),
-			APIVersion: gvk.GroupVersion().String(),
-			Kind:       gvk.Kind,
+			Name:          spawner.Name,
+			UID:           string(spawner.UID),
+			APIVersion:    gvk.GroupVersion().String(),
+			Kind:          gvk.Kind,
+			ExecutionMode: spawner.Spec.ExecutionMode,
 		},
 	)
 	if err != nil {

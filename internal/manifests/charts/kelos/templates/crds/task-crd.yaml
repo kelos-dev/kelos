@@ -6975,6 +6975,11 @@ spec:
               jobName:
                 description: JobName is the name of the Job created for this Task.
                 type: string
+              lastSessionFailure:
+                description: |-
+                  LastSessionFailure records the name of the last session pod that failed
+                  while processing this task.
+                type: string
               message:
                 description: Message provides additional information about the current
                   status.
@@ -6998,6 +7003,18 @@ spec:
                 description: Results contains structured key-value outputs produced
                   by the agent.
                 type: object
+              sessionPodName:
+                description: |-
+                  SessionPodName is the name of the persistent session pod assigned to
+                  execute this Task. Set only for Tasks belonging to a persistent-mode
+                  TaskSpawner.
+                type: string
+              sessionRetryCount:
+                description: |-
+                  SessionRetryCount tracks how many times this Task has been re-queued
+                  due to session pod failures.
+                format: int32
+                type: integer
               startTime:
                 description: StartTime is when the Task started running.
                 format: date-time

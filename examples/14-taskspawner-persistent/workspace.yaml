@@ -1,0 +1,9 @@
+apiVersion: kelos.dev/v1alpha1
+kind: Workspace
+metadata:
+  name: my-workspace
+spec:
+  repo: https://github.com/your-org/your-repo.git
+  ref: main
+  secretRef:
+    name: github-token

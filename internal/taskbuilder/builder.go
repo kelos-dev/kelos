@@ -20,10 +20,11 @@ type TaskBuilder struct {
 // SpawnerRef identifies the TaskSpawner that owns a created Task.
 // When set, BuildTask adds the kelos.dev/taskspawner label and an owner reference.
 type SpawnerRef struct {
-	Name       string
-	UID        string
-	APIVersion string
-	Kind       string
+	Name          string
+	UID           string
+	APIVersion    string
+	Kind          string
+	ExecutionMode v1alpha1.ExecutionMode
 }
 
 // NewTaskBuilder creates a new task builder.
@@ -147,6 +148,9 @@ func (tb *TaskBuilder) BuildTask(
 			task.Labels = make(map[string]string)
 		}
 		task.Labels["kelos.dev/taskspawner"] = spawnerRef.Name
+		if spawnerRef.ExecutionMode == v1alpha1.ExecutionModePersistent {
+			task.Labels["kelos.dev/execution-mode"] = string(v1alpha1.ExecutionModePersistent)
+		}
 
 		isController := true
 		task.OwnerReferences = append(task.OwnerReferences, metav1.OwnerReference{

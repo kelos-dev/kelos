@@ -50,6 +50,10 @@ spec:
             {{- if .Values.image.pullPolicy }}
             - --cursor-image-pull-policy={{ .Values.image.pullPolicy }}
             {{- end }}
+            - --session-runner-image={{ .Values.sessionRunnerImage }}{{- if .Values.image.tag }}:{{ .Values.image.tag }}{{- end }}
+            {{- if .Values.image.pullPolicy }}
+            - --session-runner-image-pull-policy={{ .Values.image.pullPolicy }}
+            {{- end }}
             - --spawner-image={{ .Values.spawner.image }}{{- if .Values.image.tag }}:{{ .Values.image.tag }}{{- end }}
             {{- if .Values.image.pullPolicy }}
             - --spawner-image-pull-policy={{ .Values.image.pullPolicy }}

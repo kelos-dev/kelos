@@ -302,6 +302,17 @@ func (f *Framework) WaitForDeploymentAvailable(name string) {
 	}, 2*time.Minute, 10*time.Second).Should(BeTrue())
 }
 
+// WaitForStatefulSetReady waits for a StatefulSet to have all replicas ready.
+func (f *Framework) WaitForStatefulSetReady(name string) {
+	Eventually(func() bool {
+		sts, err := f.Clientset.AppsV1().StatefulSets(f.Namespace).Get(context.TODO(), name, metav1.GetOptions{})
+		if err != nil {
+			return false
+		}
+		return sts.Status.ReadyReplicas == *sts.Spec.Replicas
+	}, 3*time.Minute, 10*time.Second).Should(BeTrue())
+}
+
 // WaitForCronJobCreated waits for a CronJob with the given name to appear.
 func (f *Framework) WaitForCronJobCreated(name string) {
 	Eventually(func() error {
@@ -328,6 +339,17 @@ func (f *Framework) WaitForTaskPhase(name, phase string) {
 		}
 		return string(task.Status.Phase)
 	}, 2*time.Minute, time.Second).Should(Equal(phase), "Task %s did not reach phase %s", name, phase)
+}
+
+// GetTaskSessionPodName returns the session pod name assigned to a Task.
+// It returns an empty string on transient errors so it is safe to call
+// inside an Eventually polling loop without short-circuiting on API blips.
+func (f *Framework) GetTaskSessionPodName(name string) string {
+	task, err := f.KelosClientset.ApiV1alpha1().Tasks(f.Namespace).Get(context.TODO(), name, metav1.GetOptions{})
+	if err != nil {
+		return ""
+	}
+	return task.Status.SessionPodName
 }
 
 // GetTaskOutputs returns the outputs of a Task as a joined string.

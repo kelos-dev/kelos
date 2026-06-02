@@ -58,6 +58,8 @@ func main() {
 	var ghProxyResourceRequests string
 	var ghProxyResourceLimits string
 	var ghProxyCacheTTL time.Duration
+	var sessionRunnerImage string
+	var sessionRunnerImagePullPolicy string
 	var telemetryReport bool
 	var telemetryEndpoint string
 	var telemetryEnvironment string
@@ -87,6 +89,8 @@ func main() {
 	flag.StringVar(&ghProxyResourceRequests, "ghproxy-resource-requests", "", "Resource requests for workspace ghproxy containers as comma-separated name=value pairs (e.g., cpu=50m,memory=64Mi).")
 	flag.StringVar(&ghProxyResourceLimits, "ghproxy-resource-limits", "", "Resource limits for workspace ghproxy containers as comma-separated name=value pairs (e.g., cpu=200m,memory=128Mi).")
 	flag.DurationVar(&ghProxyCacheTTL, "ghproxy-cache-ttl", 0, "Cache TTL for workspace ghproxy instances (e.g., 30s, 1m). When set, passed as --cache-ttl to ghproxy containers. Zero means use the ghproxy default (15s).")
+	flag.StringVar(&sessionRunnerImage, "session-runner-image", controller.DefaultSessionRunnerImage, "The image to use for the session runner init container.")
+	flag.StringVar(&sessionRunnerImagePullPolicy, "session-runner-image-pull-policy", "", "The image pull policy for the session runner init container (e.g., Always, Never, IfNotPresent).")
 	flag.BoolVar(&telemetryReport, "telemetry-report", false, "Run a one-shot telemetry report and exit.")
 	flag.StringVar(&telemetryEndpoint, "telemetry-endpoint", telemetry.DefaultPostHogEndpoint, "The PostHog endpoint for sending telemetry reports.")
 	flag.StringVar(&telemetryEnvironment, "telemetry-environment", "production", "The environment label for telemetry reports (e.g., production, development).")
@@ -232,7 +236,22 @@ func main() {
 		Client:            mgr.GetClient(),
 		Scheme:            mgr.GetScheme(),
 		DeploymentBuilder: deploymentBuilder,
-		Recorder:          mgr.GetEventRecorderFor("kelos-controller"),
+		SessionStatefulSetBuilder: &controller.SessionStatefulSetBuilder{
+			SessionRunnerImage:           sessionRunnerImage,
+			SessionRunnerImagePullPolicy: corev1.PullPolicy(sessionRunnerImagePullPolicy),
+			ClaudeCodeImage:              claudeCodeImage,
+			ClaudeCodeImagePullPolicy:    corev1.PullPolicy(claudeCodeImagePullPolicy),
+			CodexImage:                   codexImage,
+			CodexImagePullPolicy:         corev1.PullPolicy(codexImagePullPolicy),
+			GeminiImage:                  geminiImage,
+			GeminiImagePullPolicy:        corev1.PullPolicy(geminiImagePullPolicy),
+			OpenCodeImage:                openCodeImage,
+			OpenCodeImagePullPolicy:      corev1.PullPolicy(openCodeImagePullPolicy),
+			CursorImage:                  cursorImage,
+			CursorImagePullPolicy:        corev1.PullPolicy(cursorImagePullPolicy),
+		},
+		TokenClient: githubapp.NewTokenClient(),
+		Recorder:    mgr.GetEventRecorderFor("kelos-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "TaskSpawner")
 		os.Exit(1)
@@ -248,6 +267,14 @@ func main() {
 		Builder: refresherBuilder,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "CodexAuthRefresher")
+		os.Exit(1)
+	}
+	if err = (&controller.SessionReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("kelos-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Session")
 		os.Exit(1)
 	}
 

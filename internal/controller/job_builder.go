@@ -395,117 +395,20 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 			MountPath: WorkspaceMountPath,
 		}
 
-		cloneArgs := []string{"clone"}
-		if workspace.Ref != "" {
-			cloneArgs = append(cloneArgs, "--branch", workspace.Ref)
-		}
-		cloneArgs = append(cloneArgs, "--no-single-branch", "--depth", "1", "--", workspace.Repo, WorkspaceMountPath+"/repo")
+		initContainers = append(initContainers, buildGitCloneInitContainer(workspace, workspaceEnvVars))
 
-		initContainer := corev1.Container{
-			Name:         "git-clone",
-			Image:        GitCloneImage,
-			Args:         cloneArgs,
-			Env:          workspaceEnvVars,
-			VolumeMounts: []corev1.VolumeMount{volumeMount},
-			SecurityContext: &corev1.SecurityContext{
-				RunAsUser: &agentUID,
-			},
+		if c := buildRemoteSetupInitContainer(effectiveRemotes); c != nil {
+			initContainers = append(initContainers, *c)
 		}
 
-		if workspace.SecretRef != nil {
-			credentialHelper := `!f() { echo "username=x-access-token"; echo "password=$GITHUB_TOKEN"; }; f`
-			// Clear inherited credential helpers with an empty -c credential.helper=
-			// before setting the workspace helper, then persist the same
-			// configuration into the repo so the agent container is
-			// independent from global/system helpers.
-			initContainer.Command = []string{"sh", "-c",
-				fmt.Sprintf(
-					`git -c credential.helper= -c credential.helper='%s' "$@" && { `+
-						`git -C %s/repo config --unset-all credential.helper 2>/dev/null || true; `+
-						`git -C %s/repo config --add credential.helper '%s'; }`,
-					credentialHelper, WorkspaceMountPath, WorkspaceMountPath, credentialHelper,
-				),
-			}
-			initContainer.Args = append([]string{"--"}, cloneArgs...)
+		if c := buildBranchSetupInitContainer(task.Spec.Branch, workspace, workspaceEnvVars); c != nil {
+			initContainers = append(initContainers, *c)
 		}
 
-		initContainers = append(initContainers, initContainer)
-
-		if len(effectiveRemotes) > 0 {
-			var parts []string
-			parts = append(parts, fmt.Sprintf("cd %s/repo", WorkspaceMountPath))
-			for _, r := range effectiveRemotes {
-				parts = append(parts,
-					fmt.Sprintf(
-						"if git remote get-url %s >/dev/null 2>&1; then git remote set-url %s %s; else git remote add %s %s; fi",
-						shellQuote(r.Name),
-						shellQuote(r.Name),
-						shellQuote(r.URL),
-						shellQuote(r.Name),
-						shellQuote(r.URL),
-					),
-				)
-			}
-			remoteSetupContainer := corev1.Container{
-				Name:         "remote-setup",
-				Image:        GitCloneImage,
-				Command:      []string{"sh", "-c", strings.Join(parts, " && ")},
-				VolumeMounts: []corev1.VolumeMount{volumeMount},
-				SecurityContext: &corev1.SecurityContext{
-					RunAsUser: &agentUID,
-				},
-			}
-			initContainers = append(initContainers, remoteSetupContainer)
-		}
-
-		if task.Spec.Branch != "" {
-			fetchCmd := `git fetch origin "$KELOS_BRANCH":"$KELOS_BRANCH" 2>/dev/null`
-			if workspace.SecretRef != nil {
-				credHelper := `!f() { echo "username=x-access-token"; echo "password=$GITHUB_TOKEN"; }; f`
-				fetchCmd = fmt.Sprintf(`git -c credential.helper= -c credential.helper='%s' fetch origin "$KELOS_BRANCH":"$KELOS_BRANCH" 2>/dev/null`, credHelper)
-			}
-			branchSetupScript := fmt.Sprintf(
-				`cd %s/repo && %s; `+
-					`if git rev-parse --verify refs/heads/"$KELOS_BRANCH" >/dev/null 2>&1; then `+
-					`git checkout "$KELOS_BRANCH"; `+
-					`else git checkout -b "$KELOS_BRANCH"; fi`,
-				WorkspaceMountPath, fetchCmd,
-			)
-			branchEnv := make([]corev1.EnvVar, len(workspaceEnvVars), len(workspaceEnvVars)+1)
-			copy(branchEnv, workspaceEnvVars)
-			branchEnv = append(branchEnv, corev1.EnvVar{
-				Name:  "KELOS_BRANCH",
-				Value: task.Spec.Branch,
-			})
-			branchSetupContainer := corev1.Container{
-				Name:         "branch-setup",
-				Image:        GitCloneImage,
-				Command:      []string{"sh", "-c", branchSetupScript},
-				Env:          branchEnv,
-				VolumeMounts: []corev1.VolumeMount{volumeMount},
-				SecurityContext: &corev1.SecurityContext{
-					RunAsUser: &agentUID,
-				},
-			}
-			initContainers = append(initContainers, branchSetupContainer)
-		}
-
-		if len(workspace.Files) > 0 {
-			injectionScript, err := buildWorkspaceFileInjectionScript(workspace.Files)
-			if err != nil {
-				return nil, err
-			}
-
-			injectionContainer := corev1.Container{
-				Name:         "workspace-files",
-				Image:        GitCloneImage,
-				Command:      []string{"sh", "-c", injectionScript},
-				VolumeMounts: []corev1.VolumeMount{volumeMount},
-				SecurityContext: &corev1.SecurityContext{
-					RunAsUser: &agentUID,
-				},
-			}
-			initContainers = append(initContainers, injectionContainer)
+		if c, err := buildWorkspaceFilesInitContainer(workspace.Files); err != nil {
+			return nil, err
+		} else if c != nil {
+			initContainers = append(initContainers, *c)
 		}
 
 		if len(workspace.SetupCommand) > 0 {
@@ -520,6 +423,7 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 		}
 
 		mainContainer.VolumeMounts = []corev1.VolumeMount{volumeMount}
+
 		mainContainer.WorkingDir = WorkspaceMountPath + "/repo"
 	}
 
@@ -546,38 +450,16 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 			})
 		}
 
-		if len(agentConfig.Plugins) > 0 {
-			script, err := buildPluginSetupScript(agentConfig.Plugins)
-			if err != nil {
-				return nil, fmt.Errorf("invalid plugin configuration: %w", err)
-			}
-			initContainers = append(initContainers, corev1.Container{
-				Name:    "plugin-setup",
-				Image:   GitCloneImage,
-				Command: []string{"sh", "-c", script},
-				VolumeMounts: []corev1.VolumeMount{
-					{Name: PluginVolumeName, MountPath: PluginMountPath},
-				},
-				SecurityContext: &corev1.SecurityContext{RunAsUser: &agentUID},
-			})
+		if c, err := buildPluginSetupInitContainer(agentConfig.Plugins); err != nil {
+			return nil, err
+		} else if c != nil {
+			initContainers = append(initContainers, *c)
 		}
 
-		if len(agentConfig.Skills) > 0 {
-			script, err := buildSkillsInstallScript(agentConfig.Skills, task.Spec.Type)
-			if err != nil {
-				return nil, fmt.Errorf("invalid skills configuration: %w", err)
-			}
-			initContainers = append(initContainers, corev1.Container{
-				Name:    "skills-install",
-				Image:   NodeImage,
-				Command: []string{"sh", "-c", script},
-				Env: []corev1.EnvVar{
-					{Name: "HOME", Value: PluginMountPath},
-				},
-				VolumeMounts: []corev1.VolumeMount{
-					{Name: PluginVolumeName, MountPath: PluginMountPath},
-				},
-			})
+		if c, err := buildSkillsInstallInitContainer(agentConfig.Skills, task.Spec.Type); err != nil {
+			return nil, err
+		} else if c != nil {
+			initContainers = append(initContainers, *c)
 		}
 
 		if len(agentConfig.MCPServers) > 0 {
@@ -597,10 +479,10 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 	var serviceAccountName string
 	var activeDeadlineSeconds *int64
 	var nodeSelector map[string]string
-	var extraLabels map[string]string
 	var tolerations []corev1.Toleration
 	var affinity *corev1.Affinity
 	var imagePullSecrets []corev1.LocalObjectReference
+	var extraLabels map[string]string
 
 	if po := task.Spec.PodOverrides; po != nil {
 		if po.Labels != nil {

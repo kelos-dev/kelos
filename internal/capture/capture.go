@@ -18,6 +18,60 @@ const (
 	commandTimeout = 30 * time.Second
 )
 
+// ParseOutputs extracts output lines from log data between the
+// ---KELOS_OUTPUTS_START--- and ---KELOS_OUTPUTS_END--- markers.
+func ParseOutputs(logData string) []string {
+	startIdx := strings.Index(logData, markerStart)
+	if startIdx == -1 {
+		return nil
+	}
+	searchAfter := startIdx + len(markerStart)
+	relEndIdx := strings.Index(logData[searchAfter:], markerEnd)
+	if relEndIdx == -1 {
+		return nil
+	}
+	endIdx := searchAfter + relEndIdx
+
+	between := logData[startIdx+len(markerStart) : endIdx]
+	between = strings.TrimSpace(between)
+	if between == "" {
+		return nil
+	}
+
+	lines := strings.Split(between, "\n")
+	var result []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			result = append(result, line)
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// ResultsFromOutputs builds a key-value map from output lines in "key: value" format.
+// Lines that do not contain ": " are skipped. If duplicate keys exist, the last value wins.
+func ResultsFromOutputs(outputs []string) map[string]string {
+	if len(outputs) == 0 {
+		return nil
+	}
+	var result map[string]string
+	for _, line := range outputs {
+		key, value, ok := strings.Cut(line, ": ")
+		if !ok || key == "" {
+			continue
+		}
+		if result == nil {
+			result = make(map[string]string)
+		}
+		result[key] = value
+	}
+	return result
+}
+
 // Run streams the agent's JSON output from stdin to stdout, accumulating
 // per-agent token usage in memory, then emits deterministic outputs
 // (branch, commit, PRs, token usage) between markers on stdout. It is

@@ -318,6 +318,17 @@ GitHub Apps are preferred over PATs for production use because they offer fine-g
 | `spec.taskTemplate.contextSources` | External data sources fetched in parallel before task creation; each source's value is exposed as `{{.Context.NAME}}` in `branch`, `promptTemplate`, and `metadata` templates (see [Context Sources](#context-sources) below). Maximum 8 entries; names must be unique | No |
 | `spec.taskTemplate.upstreamRepo` | Upstream repository in `owner/repo` format; injected as `KELOS_UPSTREAM_REPO` into the agent container. Typically auto-derived from `githubIssues.repo`/`githubPullRequests.repo`, but can be set explicitly for fork workflows | No |
 | `spec.pollInterval` | How often to poll the source (default: `5m`). Deprecated: use per-source `pollInterval` instead | No |
+| `spec.executionMode` | How spawned tasks are executed: `ephemeral` (default) creates a Job per Task; `persistent` runs long-lived session pods that process tasks sequentially. Requires `spec.taskTemplate.workspaceRef` when set to `persistent` | No |
+| `spec.sessionConfig.replicas` | Number of concurrent session pods (default: `1`). Only valid when `executionMode: persistent` | No |
+| `spec.sessionConfig.idleTimeout` | How long a session pod waits for new work before exiting (default: `30m`) | No |
+| `spec.sessionConfig.maxTasksPerSession` | Maximum tasks a session pod processes before being recreated; `0` means unlimited (default: `0`) | No |
+| `spec.sessionConfig.maxSessionDuration` | Wall-clock limit for a session pod's lifetime (default: `8h`) | No |
+| `spec.sessionConfig.storageSize` | PVC size for workspace persistence across tasks (default: `10Gi`) | No |
+| `spec.sessionConfig.storageClassName` | StorageClass name for the workspace PVC | No |
+| `spec.sessionConfig.workspaceReset.git` | Reset the git working tree between tasks (default: `true`) | No |
+| `spec.sessionConfig.workspaceReset.preserveDirectories` | Directories to preserve during workspace reset (e.g., `node_modules`, `.venv`) | No |
+| `spec.sessionConfig.retryOnPodFailure` | Re-queue tasks when the session pod fails unexpectedly (default: `true`) | No |
+| `spec.sessionConfig.maxSessionRetries` | Maximum retries before marking a task as Failed (default: `3`) | No |
 | `spec.maxConcurrency` | Limit max concurrent running tasks (important for cost control) | No |
 | `spec.maxTotalTasks` | Lifetime limit on total tasks created by this spawner | No |
 | `spec.suspend` | Pause the spawner without deleting it; resume with `spec.suspend: false` (default: `false`) | No |
@@ -574,6 +585,8 @@ The `kelos` CLI lets you manage the full lifecycle without writing YAML.
 - `--ghproxy-cache-ttl`: Cache TTL for workspace ghproxy instances
 - `--controller-resource-requests`: Resource requests for the controller container as comma-separated `name=value` pairs, for example `cpu=10m,memory=64Mi`
 - `--controller-resource-limits`: Resource limits for the controller container as comma-separated `name=value` pairs, for example `cpu=500m,memory=128Mi`
+- `--session-runner-image`: Override the session runner init container image (default: bundled `kelos-session-runner`)
+- `--session-runner-image-pull-policy`: Set the image pull policy for the session runner init container (e.g., `Always`, `Never`, `IfNotPresent`)
 
 `kelos install` renders the embedded Helm chart but still manages CRDs separately, so `crds.install` must be omitted or set to `false`.
 When the same key is set multiple ways, precedence is: chart defaults, then `--values` files, then compatibility install flags, then explicit `--set`, `--set-string`, and `--set-file` overrides.

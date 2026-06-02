@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -43,7 +44,6 @@ func TestWebhookReporter_ReportWebhooks(t *testing.T) {
 		wantHeaders      map[string]string
 		wantAnnotation   string
 		wantErr          bool
-		wantNoAnnotation bool
 	}{
 		{
 			name: "sends webhook on task succeeded",
@@ -153,7 +153,7 @@ func TestWebhookReporter_ReportWebhooks(t *testing.T) {
 			wantAnnotation: "Succeeded",
 		},
 		{
-			name: "does not persist annotation on delivery failure",
+			name: "persists annotation on delivery failure to prevent duplicates",
 			task: &kelosv1alpha1.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-task-fail-delivery",
@@ -165,10 +165,10 @@ func TestWebhookReporter_ReportWebhooks(t *testing.T) {
 				Spec:   kelosv1alpha1.TaskSpec{Type: "claude-code"},
 				Status: kelosv1alpha1.TaskStatus{Phase: kelosv1alpha1.TaskPhaseSucceeded},
 			},
-			serverStatus:     500,
-			wantRequests:     1,
-			wantErr:          true,
-			wantNoAnnotation: true,
+			serverStatus:   500,
+			wantRequests:   1,
+			wantErr:        true,
+			wantAnnotation: "Succeeded",
 		},
 		{
 			name: "includes auth header from secret",
@@ -318,21 +318,14 @@ func TestWebhookReporter_ReportWebhooks(t *testing.T) {
 				}
 			}
 
-			if tt.wantNoAnnotation {
-				var updated kelosv1alpha1.Task
-				if err := cl.Get(context.Background(), client.ObjectKeyFromObject(tt.task), &updated); err != nil {
-					t.Fatalf("fetching task: %v", err)
-				}
-				if got, exists := updated.Annotations[AnnotationWebhookReportPhase]; exists {
-					t.Errorf("expected no %s annotation, got %q", AnnotationWebhookReportPhase, got)
-				}
-			}
 		})
 	}
 }
 
 func TestReportWebhooks_Idempotency(t *testing.T) {
+	requestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requestCount++
 		w.WriteHeader(200)
 	}))
 	defer server.Close()
@@ -356,14 +349,9 @@ func TestReportWebhooks_Idempotency(t *testing.T) {
 	if err := wr.ReportWebhooks(context.Background(), task); err != nil {
 		t.Fatalf("first call: %v", err)
 	}
-
-	// Second call should be a no-op (annotation already set).
-	requestCount := 0
-	server2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		requestCount++
-		w.WriteHeader(200)
-	}))
-	defer server2.Close()
+	if requestCount != 1 {
+		t.Fatalf("expected 1 request on first call, got %d", requestCount)
+	}
 
 	// Re-read task with updated annotations.
 	var updated kelosv1alpha1.Task
@@ -371,12 +359,13 @@ func TestReportWebhooks_Idempotency(t *testing.T) {
 		t.Fatalf("fetching task: %v", err)
 	}
 
-	wr2 := &WebhookReporter{Client: cl, HTTPClient: server2.Client(), skipURLValidation: true}
-	if err := wr2.ReportWebhooks(context.Background(), &updated); err != nil {
+	// Second call should be a no-op (annotation already set) — same server,
+	// so any duplicate delivery would increment requestCount.
+	if err := wr.ReportWebhooks(context.Background(), &updated); err != nil {
 		t.Fatalf("second call: %v", err)
 	}
-	if requestCount != 0 {
-		t.Errorf("expected 0 requests on second call, got %d", requestCount)
+	if requestCount != 1 {
+		t.Errorf("expected no additional requests on second call, got %d total", requestCount)
 	}
 }
 
@@ -432,25 +421,18 @@ func TestBuildWebhookPayload(t *testing.T) {
 	}
 }
 
-func TestHttpClient_AppliesRedirectGuard(t *testing.T) {
+func TestHttpClient_AppliesSSRFTransport(t *testing.T) {
 	injected := &http.Client{Timeout: 5 * time.Second}
 	wr := &WebhookReporter{HTTPClient: injected}
 	cl := wr.httpClient()
 	if cl.CheckRedirect == nil {
-		t.Fatal("expected CheckRedirect to be set on injected client without one")
+		t.Fatal("expected CheckRedirect to be set on cloned client")
+	}
+	if cl.Transport == nil {
+		t.Fatal("expected Transport to be set on cloned client")
 	}
 	if cl == injected {
 		t.Fatal("expected a clone, not the original client")
-	}
-
-	withRedirect := &http.Client{
-		Timeout:       5 * time.Second,
-		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return nil },
-	}
-	wr2 := &WebhookReporter{HTTPClient: withRedirect}
-	cl2 := wr2.httpClient()
-	if cl2 != withRedirect {
-		t.Fatal("expected original client to be returned when CheckRedirect is already set")
 	}
 }
 
@@ -462,20 +444,38 @@ func TestValidateWebhookURL(t *testing.T) {
 		{"https://hooks.slack.com/services/T00/B00/xxx", false},
 		{"https://example.com/webhook", false},
 		{"http://example.com/webhook", true},
-		{"https://169.254.169.254/latest/meta-data/", true},
-		{"https://10.0.0.1/internal", true},
-		{"https://172.16.0.1/internal", true},
-		{"https://192.168.1.1/internal", true},
-		{"https://127.0.0.1/local", true},
-		{"https://[::1]:8080/exfil", true},
-		{"https://[fe80::1]/link-local", true},
-		{"https://[fd00::1]/unique-local", true},
-		{"https://localhost/ssrf", true},
+		{"https://user:pass@example.com/webhook", true},
+		{"https://token@example.com/webhook", true},
 	}
 	for _, tt := range tests {
 		err := validateWebhookURL(tt.url)
 		if (err != nil) != tt.wantErr {
 			t.Errorf("validateWebhookURL(%q) error = %v, wantErr %v", tt.url, err, tt.wantErr)
+		}
+	}
+}
+
+func TestIsPrivateIP(t *testing.T) {
+	tests := []struct {
+		ip   string
+		want bool
+	}{
+		{"0.0.0.0", true},
+		{"10.0.0.1", true},
+		{"172.16.0.1", true},
+		{"192.168.1.1", true},
+		{"169.254.169.254", true},
+		{"127.0.0.1", true},
+		{"::1", true},
+		{"fe80::1", true},
+		{"fd00::1", true},
+		{"8.8.8.8", false},
+		{"2001:4860:4860::8888", false},
+	}
+	for _, tt := range tests {
+		ip := net.ParseIP(tt.ip)
+		if got := isPrivateIP(ip); got != tt.want {
+			t.Errorf("isPrivateIP(%s) = %v, want %v", tt.ip, got, tt.want)
 		}
 	}
 }

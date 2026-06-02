@@ -51,6 +51,8 @@ type WebhookReporter struct {
 	SecretReader SecretReader
 	// skipURLValidation disables SSRF checks (for testing only).
 	skipURLValidation bool
+	// safeClient is lazily initialized by httpClient().
+	safeClient *http.Client
 }
 
 // SecretReader reads headers from a named Secret in a namespace.
@@ -108,18 +110,14 @@ func (wr *WebhookReporter) ReportWebhooks(ctx context.Context, task *kelosv1alph
 		log.Info("Sent webhook notification", "task", task.Name, "hook", hook.Name, "phase", task.Status.Phase)
 	}
 
-	if dispatched == 0 {
-		// All hooks were filtered out by phase — persist the annotation to
-		// avoid re-evaluating this task on every reporting cycle.
-		return wr.persistWebhookReportPhase(ctx, task, string(task.Status.Phase))
+	// Persist the annotation to prevent re-evaluation on future cycles.
+	// This is done even on partial failure to avoid duplicate deliveries
+	// to hooks that already succeeded.
+	if err := wr.persistWebhookReportPhase(ctx, task, string(task.Status.Phase)); err != nil {
+		return err
 	}
 
-	// Only persist the reported phase if all hooks succeeded.
-	if lastErr != nil {
-		return lastErr
-	}
-
-	return wr.persistWebhookReportPhase(ctx, task, string(task.Status.Phase))
+	return lastErr
 }
 
 func (wr *WebhookReporter) sendWebhook(ctx context.Context, namespace string, hook kelosv1alpha1.NotificationHook, payload WebhookPayload) error {
@@ -166,24 +164,64 @@ func (wr *WebhookReporter) sendWebhook(ctx context.Context, namespace string, ho
 	return nil
 }
 
-// httpClient returns an HTTP client with SSRF-safe redirect policy applied.
-// If no client is configured, a shared default is used. If an injected client
-// lacks a CheckRedirect, a shallow copy with the policy is returned.
+// httpClient returns an HTTP client with SSRF-safe transport and redirect
+// policy. The result is cached after first construction.
 func (wr *WebhookReporter) httpClient() *http.Client {
-	if wr.HTTPClient == nil {
-		return defaultWebhookHTTPClient
-	}
-	if wr.HTTPClient.CheckRedirect != nil {
+	if wr.skipURLValidation && wr.HTTPClient != nil {
 		return wr.HTTPClient
 	}
-	clone := *wr.HTTPClient
-	clone.CheckRedirect = ssrfCheckRedirect
-	return &clone
+	if wr.safeClient != nil {
+		return wr.safeClient
+	}
+	if wr.HTTPClient == nil {
+		wr.safeClient = defaultWebhookHTTPClient
+	} else {
+		clone := *wr.HTTPClient
+		clone.CheckRedirect = ssrfCheckRedirect
+		clone.Transport = ssrfSafeTransport(clone.Transport)
+		wr.safeClient = &clone
+	}
+	return wr.safeClient
 }
 
 var defaultWebhookHTTPClient = &http.Client{
 	Timeout:       10 * time.Second,
+	Transport:     ssrfSafeTransport(nil),
 	CheckRedirect: ssrfCheckRedirect,
+}
+
+func ssrfSafeTransport(base http.RoundTripper) http.RoundTripper {
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	t, ok := base.(*http.Transport)
+	if !ok {
+		t = http.DefaultTransport.(*http.Transport)
+	}
+	clone := t.Clone()
+	clone.DialContext = ssrfDialContext
+	return clone
+}
+
+func ssrfDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("no addresses found for host %q", host)
+	}
+	for _, ip := range ips {
+		if isPrivateIP(ip.IP) {
+			return nil, fmt.Errorf("webhook URL must not target private/internal addresses")
+		}
+	}
+	var dialer net.Dialer
+	return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
 }
 
 func ssrfCheckRedirect(req *http.Request, via []*http.Request) error {
@@ -196,9 +234,9 @@ func ssrfCheckRedirect(req *http.Request, via []*http.Request) error {
 	return nil
 }
 
-// validateWebhookURL rejects URLs that target private, loopback, or
-// link-local addresses to prevent SSRF attacks. Domain names are resolved
-// and all resulting IPs are checked.
+// validateWebhookURL rejects URLs that are not HTTPS or contain embedded
+// credentials (userinfo). IP-level SSRF checks are enforced at dial time
+// via the transport's DialContext.
 func validateWebhookURL(rawURL string) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -207,36 +245,25 @@ func validateWebhookURL(rawURL string) error {
 	if u.Scheme != "https" {
 		return fmt.Errorf("webhook URL must use HTTPS")
 	}
-	host := u.Hostname()
-	if ip := net.ParseIP(host); ip != nil {
-		if isPrivateIP(ip) {
-			return fmt.Errorf("webhook URL must not target private/internal addresses")
-		}
-		return nil
-	}
-	ips, err := net.LookupIP(host)
-	if err != nil {
-		return fmt.Errorf("resolving webhook host %q: %w", host, err)
-	}
-	for _, ip := range ips {
-		if isPrivateIP(ip) {
-			return fmt.Errorf("webhook URL must not target private/internal addresses")
-		}
+	if u.User != nil {
+		return fmt.Errorf("webhook URL must not contain embedded credentials")
 	}
 	return nil
 }
 
+var privateRanges = []net.IPNet{
+	{IP: net.IPv4(0, 0, 0, 0), Mask: net.CIDRMask(8, 32)},
+	{IP: net.IPv4(10, 0, 0, 0), Mask: net.CIDRMask(8, 32)},
+	{IP: net.IPv4(127, 0, 0, 0), Mask: net.CIDRMask(8, 32)},
+	{IP: net.IPv4(169, 254, 0, 0), Mask: net.CIDRMask(16, 32)},
+	{IP: net.IPv4(172, 16, 0, 0), Mask: net.CIDRMask(12, 32)},
+	{IP: net.IPv4(192, 168, 0, 0), Mask: net.CIDRMask(16, 32)},
+	{IP: net.ParseIP("::1"), Mask: net.CIDRMask(128, 128)},
+	{IP: net.ParseIP("fe80::"), Mask: net.CIDRMask(10, 128)},
+	{IP: net.ParseIP("fc00::"), Mask: net.CIDRMask(7, 128)},
+}
+
 func isPrivateIP(ip net.IP) bool {
-	privateRanges := []net.IPNet{
-		{IP: net.IPv4(10, 0, 0, 0), Mask: net.CIDRMask(8, 32)},
-		{IP: net.IPv4(172, 16, 0, 0), Mask: net.CIDRMask(12, 32)},
-		{IP: net.IPv4(192, 168, 0, 0), Mask: net.CIDRMask(16, 32)},
-		{IP: net.IPv4(169, 254, 0, 0), Mask: net.CIDRMask(16, 32)},
-		{IP: net.IPv4(127, 0, 0, 0), Mask: net.CIDRMask(8, 32)},
-		{IP: net.ParseIP("::1"), Mask: net.CIDRMask(128, 128)},
-		{IP: net.ParseIP("fe80::"), Mask: net.CIDRMask(10, 128)},
-		{IP: net.ParseIP("fc00::"), Mask: net.CIDRMask(7, 128)},
-	}
 	for _, r := range privateRanges {
 		if r.Contains(ip) {
 			return true

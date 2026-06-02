@@ -133,7 +133,7 @@ spec:
                                 in the spawned Task's annotations and is visible to anyone with
                                 read access to the Task resource. Do not use URLs with embedded
                                 tokens; use secretRef for authentication.
-                              pattern: ^https://.+
+                              pattern: ^https://[^@/]+(/.*)?$
                               type: string
                           required:
                           - url

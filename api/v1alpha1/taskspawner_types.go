@@ -947,7 +947,7 @@ type WebhookNotification struct {
 	// read access to the Task resource. Do not use URLs with embedded
 	// tokens; use secretRef for authentication.
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Pattern="^https://.+"
+	// +kubebuilder:validation:Pattern="^https://[^@/]+(/.*)?$"
 	URL string `json:"url"`
 
 	// SecretRef optionally references a Secret whose keys are sent as HTTP

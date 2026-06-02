@@ -416,6 +416,15 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 			}
 		}
 
+		// Stamp onCompletion hooks config into task annotation for the
+		// reporting loop to dispatch without looking up the TaskSpawner.
+		if hookJSON := onCompletionAnnotation(&ts); hookJSON != "" {
+			if task.Annotations == nil {
+				task.Annotations = make(map[string]string)
+			}
+			task.Annotations[reporting.AnnotationOnCompletion] = hookJSON
+		}
+
 		// Propagate upstream repo for fork workflows. Explicit template
 		// value takes precedence; otherwise derive from the source repo
 		// override (githubIssues.repo or githubPullRequests.repo).

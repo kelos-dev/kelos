@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"strings"
 	"sync"
 	"unicode/utf8"
 
@@ -12,6 +13,12 @@ import (
 
 // Slack's chat.postMessage text field limit is 40,000 characters.
 const slackFallbackTextLimit = 40000
+
+const (
+	stableSummaryRootLimit   = 1800
+	stableSummaryStatusLimit = 1400
+	stableSummaryFinalLimit  = 1800
+)
 
 // decodeResponse decodes a base64-encoded agent response from task results.
 // Returns the raw string if decoding fails (backward compatibility).
@@ -130,6 +137,74 @@ func FormatProgressMessage(text, taskName string) SlackMessage {
 		Text:   truncateFallbackText(text),
 		Blocks: blocks,
 	}
+}
+
+// FormatStableSummaryProgressMessage returns a compact root message that keeps
+// the first material progress summary pinned while the latest status changes.
+func FormatStableSummaryProgressMessage(stableSummary, currentProgress, taskName string) SlackMessage {
+	stableSummary, _ = compactSlackText(stableSummary, stableSummaryRootLimit)
+	currentProgress = strings.TrimSpace(currentProgress)
+
+	blocks := []slack.Block{
+		headerBlock("Infra health issue detected"),
+		slackSection(fmt.Sprintf("*Detected issue*\n%s", stableSummary)),
+	}
+
+	if currentProgress != "" && currentProgress != stableSummary {
+		currentProgress, _ = compactSlackText(currentProgress, stableSummaryStatusLimit)
+		blocks = append(blocks, slackSection(fmt.Sprintf("*Current status*\n%s", currentProgress)))
+	}
+
+	blocks = append(blocks, contextBlock(taskName))
+
+	text := buildStableSummaryFallback("Infra health issue detected", stableSummary, currentProgress, "", "", taskName)
+	return SlackMessage{Text: text, Blocks: blocks}
+}
+
+// FormatStableSummaryFinalMessage returns a compact final root message. Full
+// terminal details are posted separately with FormatSlackTransitionMessage.
+func FormatStableSummaryFinalMessage(stableSummary, phase, taskName, message string, results map[string]string) SlackMessage {
+	stableSummary, _ = compactSlackText(stableSummary, stableSummaryRootLimit)
+
+	title := "Infra health investigation complete"
+	if phase == "failed" {
+		title = "Infra health investigation failed"
+	}
+
+	resp := decodeResponse(results["response"])
+	outcome := strings.TrimSpace(resp)
+	if outcome == "" && phase == "failed" {
+		outcome = strings.TrimSpace(message)
+	}
+	if outcome == "" {
+		outcome = phaseFallbackText[phase]
+	}
+	outcome, truncated := compactSlackText(outcome, stableSummaryFinalLimit)
+	if truncated || strings.TrimSpace(resp) != "" {
+		outcome = strings.TrimSpace(outcome + "\n\nFull details are posted in this message thread.")
+	}
+
+	pr := strings.TrimSpace(results["pr"])
+	errText := ""
+	if phase == "failed" && strings.TrimSpace(message) != "" && strings.TrimSpace(message) != outcome {
+		errText, _ = compactSlackText(message, stableSummaryStatusLimit)
+	}
+
+	blocks := []slack.Block{
+		headerBlock(title),
+		slackSection(fmt.Sprintf("*Detected issue*\n%s", stableSummary)),
+		slackSection(fmt.Sprintf("*Outcome*\n%s", outcome)),
+	}
+	if pr != "" {
+		blocks = append(blocks, slackSection(fmt.Sprintf(":link: *Pull Request:* <%s>", pr)))
+	}
+	if errText != "" {
+		blocks = append(blocks, slackSection(fmt.Sprintf(":warning: *Error:* %s", errText)))
+	}
+	blocks = append(blocks, contextBlock(taskName))
+
+	text := buildStableSummaryFallback(title, stableSummary, outcome, pr, errText, taskName)
+	return SlackMessage{Text: text, Blocks: blocks}
 }
 
 // FormatSlackTransitionMessage returns one or more rich Slack messages for a
@@ -334,6 +409,39 @@ func truncateFallbackText(s string) string {
 		return s
 	}
 	return string([]rune(s)[:slackFallbackTextLimit-1]) + "…"
+}
+
+func slackSection(text string) *slack.SectionBlock {
+	return slack.NewSectionBlock(
+		slack.NewTextBlockObject(slack.MarkdownType, text, false, false),
+		nil, nil,
+	)
+}
+
+func compactSlackText(s string, limit int) (string, bool) {
+	s = strings.TrimSpace(s)
+	if limit <= 0 || utf8.RuneCountInString(s) <= limit {
+		return s, false
+	}
+	return strings.TrimSpace(string([]rune(s)[:limit-3])) + "...", true
+}
+
+func buildStableSummaryFallback(title, stableSummary, status, pr, errText, taskName string) string {
+	parts := []string{title}
+	if stableSummary != "" {
+		parts = append(parts, stableSummary)
+	}
+	if status != "" {
+		parts = append(parts, status)
+	}
+	if pr != "" {
+		parts = append(parts, "PR: "+pr)
+	}
+	if errText != "" {
+		parts = append(parts, "Error: "+errText)
+	}
+	parts = append(parts, fmt.Sprintf("(Task: %s)", taskName))
+	return truncateFallbackText(strings.Join(parts, "\n"))
 }
 
 // continuationContextBlock returns a context block indicating a multi-part

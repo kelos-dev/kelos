@@ -1,4 +1,4 @@
-# Cody Infra Health Single-Message Slack UX Spec
+# Cody Stable-Summary Slack UX Spec
 
 Status: Draft
 Date: 2026-06-02
@@ -6,27 +6,30 @@ Owner: Cody / Kelos
 
 ## Summary
 
-Improve the proactive infra-health Slack UX so each detected infra issue is
-reported as one top-level Slack message that is updated in place for the full
-investigation lifecycle.
+Improve proactive Slack UX so each detected issue can be reported as one
+top-level Slack message that is updated in place for the full investigation
+lifecycle.
 
 The first material progress snapshot becomes a stable detected-issues section.
-Later progress updates are rendered below it in the same message. When the task
-finishes, Kelos updates the same message with the final RCA, fix status, PR
-links, and any manual follow-up.
+Later progress updates are rendered below it in the same message as a compact
+current-status section. When the task finishes, Kelos updates the same message
+with a short outcome/fix summary and posts the full RCA/details in the message
+thread.
 
-This behavior is opt-in and should only be enabled for the infra-health cron
-TaskSpawner created for non-prod/qa.
+This behavior is opt-in and reusable, but the initial rollout should only enable
+it for the infra-health cron TaskSpawner created for non-prod/qa.
 
 ## Goals
 
 - Keep no-op scheduled runs silent.
 - For material infra-health findings, create exactly one top-level Slack
-  message in the configured destination channel.
+  root message in the configured destination channel.
 - Keep the initial detected-issues section stable for the life of the message.
-- Stream/update investigation progress below the stable section.
-- Replace the live progress section with a final RCA/fix summary when the Task
-  succeeds or fails.
+- Stream/update a short investigation status below the stable section.
+- Replace the live progress section with a short final RCA/fix/PR summary when
+  the Task succeeds or fails.
+- Preserve existing long Slack response formatting by posting full terminal
+  RCA/details as thread replies below the root message.
 - Avoid creating duplicate fix PRs when an earlier infra-health run already has
   a matching open PR for the same environment/symptoms.
 - Avoid changing existing Slack-originated Cody behavior, including replies in
@@ -34,7 +37,7 @@ TaskSpawner created for non-prod/qa.
 
 ## Non-Goals
 
-- Do not add thread replies for infra-health cron tasks.
+- Do not use thread replies for infra-health progress updates.
 - Do not change Slack reporting for normal `kelos.dev/slack-reporting=enabled`
   tasks with an originating Slack thread.
 - Do not add a new CRD field.
@@ -70,13 +73,13 @@ metadata:
   annotations:
     kelos.dev/slack-reporting: deferred
     kelos.dev/slack-destination: asd
-    kelos.dev/slack-layout: infra-health-single-message
+    kelos.dev/slack-layout: stable-summary-root
 ```
 
 Only tasks with both of these conditions use the new layout:
 
 - `kelos.dev/slack-reporting=deferred`
-- `kelos.dev/slack-layout=infra-health-single-message`
+- `kelos.dev/slack-layout=stable-summary-root`
 
 All other Slack reporting paths keep the current behavior.
 
@@ -96,15 +99,15 @@ All other Slack reporting paths keep the current behavior.
 3. **Investigation progress**
    - Later progress snapshots update the same Slack message.
    - The detected issue summary remains unchanged at the top.
-   - Current work/activity appears below it.
+   - A short current-status section appears below it.
+   - Progress updates do not create thread replies.
 
 4. **Final result**
    - On `Succeeded` or `Failed`, Kelos updates the same Slack message.
-   - The final message keeps the stable detected issue section, then shows:
-     - RCA;
-     - fix applied or blocked/manual follow-up;
-     - PR links when present;
-     - failure reason when the task failed.
+   - The root message keeps the stable detected issue section, then shows a
+     short outcome/fix/PR summary.
+   - Kelos posts the full terminal response as thread replies below the root
+     message using the existing long-message formatter/splitting behavior.
 
 ## Reporter Changes
 
@@ -116,18 +119,20 @@ Add internal annotation constants:
 Add a deferred-only branch in `SlackTaskReporter`:
 
 - `updateDeferredProgress`:
-  - if layout is `infra-health-single-message` and no stable summary exists,
+  - if layout is `stable-summary-root` and no stable summary exists,
     treat the first progress text as the stable summary;
   - persist the stable summary annotation;
-  - post a root message using the infra-health formatter;
+  - post a root message using the stable-summary formatter;
   - store the message timestamp exactly as today.
 - `updateProgress`:
-  - if layout is `infra-health-single-message`, update the root message with:
+  - if layout is `stable-summary-root`, update the root message with:
     stable summary + latest progress + context/activity.
 - terminal reporting:
-  - if layout is `infra-health-single-message`, update the root message with:
-    stable summary + final response + PR/failure metadata;
-  - do not post continuation thread replies for this layout.
+  - if layout is `stable-summary-root`, update the root message with:
+    stable summary + compact final summary + PR/failure metadata;
+  - then post the full terminal response into the root message thread with the
+    existing `FormatSlackTransitionMessage` formatter, including its existing
+    multi-message splitting behavior for long responses.
 
 Keep the existing progress timestamp behavior. For this layout, the progress
 timestamp is the root message timestamp.
@@ -136,8 +141,8 @@ timestamp is the root message timestamp.
 
 Add small formatter helpers in `internal/reporting/slack.go`:
 
-- `FormatInfraHealthProgressMessage(stableSummary, currentProgress, taskName)`
-- `FormatInfraHealthFinalMessage(stableSummary, phase, taskName, message, results)`
+- `FormatStableSummaryProgressMessage(stableSummary, currentProgress, taskName)`
+- `FormatStableSummaryFinalMessage(stableSummary, phase, taskName, message, results)`
 
 Suggested Block Kit shape:
 
@@ -151,27 +156,31 @@ Investigation
 Task: ...
 ```
 
-Final shape:
+Root final shape:
 
 ```text
 Infra health investigation complete
 [stable detected issue summary]
 
-RCA / Fix / PRs
-[final Cody response and PR links]
+Outcome
+[short final summary, fix status, PR links]
 
 Task: ...
 ```
 
-The formatter should keep a single Slack message. If the final response is too
-large, truncate the rendered response with an explicit note rather than posting
-thread spillover for this layout.
+The stable-summary formatter is only for the compact root message. It should
+keep the root message short and, when needed, include an explicit note that full
+details are in the thread.
+
+Keep the existing `FormatSlackTransitionMessage` behavior for terminal details:
+long RCA, evidence, validation, and oversized responses continue to be split
+into thread replies below the root message.
 
 ## Skills Change
 
 Update only the infra-health cron TaskSpawner in `quantum-wealth/skills`:
 
-- add `kelos.dev/slack-layout: infra-health-single-message`;
+- add `kelos.dev/slack-layout: stable-summary-root`;
 - tighten the prompt so the first emitted assistant progress message is a short
   detected-issues summary, not a generic "working" update;
 - add an immediate duplicate-PR guard before Cody creates or materially updates
@@ -238,7 +247,8 @@ Add Kelos unit tests covering:
 - terminal failure updates the same message with failure content;
 - normal Slack-thread reporting is unchanged;
 - normal deferred reporting without the new layout is unchanged;
-- oversized final responses are truncated instead of split into thread replies.
+- oversized final responses keep using existing thread splitting for the full
+  details, while the root message remains compact.
 
 ## Rollout
 
@@ -248,5 +258,6 @@ Add Kelos unit tests covering:
 4. Update only the infra-health TaskSpawner in `skills` with the new layout
    annotation.
 5. Verify a no-op run remains silent.
-6. Verify a material finding produces one top-level Slack message in `#asd` and
-   updates the same message through final RCA.
+6. Verify a material finding produces one compact top-level Slack message in
+   `#asd`, updates that same message through final outcome, and posts full RCA
+   details in the root thread.

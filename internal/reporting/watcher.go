@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/slack-go/slack"
@@ -86,6 +87,13 @@ const (
 	// progress/final updates should edit in place.
 	AnnotationSlackMessageTS = "kelos.dev/slack-message-ts"
 
+	// AnnotationSlackLayout selects an alternate Slack rendering layout.
+	AnnotationSlackLayout = "kelos.dev/slack-layout"
+
+	// AnnotationSlackStableSummary stores the first material progress summary
+	// for layouts that keep a stable root-message summary.
+	AnnotationSlackStableSummary = "kelos.dev/slack-stable-summary"
+
 	// AnnotationSlackUserID records the Slack user ID of the person who
 	// triggered the task.
 	AnnotationSlackUserID = "kelos.dev/slack-user-id"
@@ -100,6 +108,8 @@ const (
 
 	SlackReportingEnabled  = "enabled"
 	SlackReportingDeferred = "deferred"
+
+	SlackLayoutStableSummaryRoot = "stable-summary-root"
 )
 
 // TaskReporter watches Tasks and reports status changes to GitHub.
@@ -549,6 +559,10 @@ func (tr *SlackTaskReporter) ReportTaskStatus(ctx context.Context, task *kelosv1
 		return nil
 	}
 
+	if isStableSummarySlackLayout(annotations) && (desiredPhase == "succeeded" || desiredPhase == "failed") {
+		return tr.reportStableSummaryTerminal(ctx, task, channel, threadTS, desiredPhase)
+	}
+
 	msgs := FormatSlackTransitionMessage(desiredPhase, task.Name, task.Status.Message, task.Status.Results)
 
 	// For terminal phases, try to edit the existing progress message
@@ -657,6 +671,67 @@ func (tr *SlackTaskReporter) persistSlackAnnotations(ctx context.Context, task *
 	return nil
 }
 
+func isStableSummarySlackLayout(annotations map[string]string) bool {
+	return annotations[AnnotationSlackReporting] == SlackReportingDeferred &&
+		annotations[AnnotationSlackLayout] == SlackLayoutStableSummaryRoot
+}
+
+func stableSummaryFromAnnotations(annotations map[string]string) string {
+	summary := annotations[AnnotationSlackStableSummary]
+	if summary == "" {
+		return "Issue summary was not captured."
+	}
+	return summary
+}
+
+func compactStableSummary(summary string) string {
+	summary, _ = compactSlackText(summary, stableSummaryRootLimit)
+	return summary
+}
+
+func hasSlackTerminalDetails(phase, message string, results map[string]string) bool {
+	if results["response"] != "" || results["pr"] != "" {
+		return true
+	}
+	return phase == "failed" && strings.TrimSpace(message) != ""
+}
+
+func (tr *SlackTaskReporter) reportStableSummaryTerminal(ctx context.Context, task *kelosv1alpha1.Task, channel, threadTS, desiredPhase string) error {
+	log := ctrl.Log.WithName("slack-reporter")
+
+	messageTS := tr.getProgressTS(task)
+	if messageTS == "" {
+		messageTS = threadTS
+	}
+	if threadTS == "" {
+		threadTS = messageTS
+	}
+	if messageTS == "" || threadTS == "" {
+		return nil
+	}
+
+	stableSummary := stableSummaryFromAnnotations(task.Annotations)
+	rootMsg := FormatStableSummaryFinalMessage(stableSummary, desiredPhase, task.Name, task.Status.Message, task.Status.Results)
+	log.Info("Updating stable-summary Slack root message with final result", "task", task.Name, "channel", channel, "phase", desiredPhase)
+	if err := tr.Reporter.UpdateMessage(ctx, channel, messageTS, rootMsg); err != nil {
+		return fmt.Errorf("updating stable-summary Slack root message for task %s: %w", task.Name, err)
+	}
+
+	if hasSlackTerminalDetails(desiredPhase, task.Status.Message, task.Status.Results) {
+		msgs := FormatSlackTransitionMessage(desiredPhase, task.Name, task.Status.Message, task.Status.Results)
+		for i, msg := range msgs {
+			log.Info("Posting stable-summary Slack terminal details", "task", task.Name, "channel", channel, "phase", desiredPhase, "part", i+1, "total", len(msgs))
+			if _, err := tr.Reporter.PostThreadReply(ctx, channel, threadTS, msg); err != nil {
+				return fmt.Errorf("posting stable-summary Slack terminal details for task %s (part %d/%d): %w", task.Name, i+1, len(msgs), err)
+			}
+		}
+	}
+
+	tr.clearProgressCache(task.UID)
+	tr.clearActivityState(task.UID)
+	return tr.persistSlackReportingState(ctx, task, desiredPhase)
+}
+
 // updateProgress reads the agent's pod logs and updates the progress message
 // in the Slack thread. On the first call for a task, it posts a new reply and
 // records the message timestamp. Subsequent calls edit the same message
@@ -676,10 +751,10 @@ func (tr *SlackTaskReporter) updateProgress(ctx context.Context, task *kelosv1al
 
 	annotations := task.Annotations
 	channel := annotations[AnnotationSlackChannel]
-	threadTS := annotations[AnnotationSlackThreadTS]
-	if channel == "" || threadTS == "" {
+	if channel == "" {
 		return nil
 	}
+	threadTS := annotations[AnnotationSlackThreadTS]
 
 	containerName := task.Spec.Type
 	if containerName == "" {
@@ -692,6 +767,14 @@ func (tr *SlackTaskReporter) updateProgress(ctx context.Context, task *kelosv1al
 	}
 
 	if !tr.shouldPostProgress(task.UID, text) {
+		return nil
+	}
+
+	if isStableSummarySlackLayout(annotations) {
+		return tr.updateStableSummaryProgress(ctx, task, channel, text)
+	}
+
+	if threadTS == "" {
 		return nil
 	}
 
@@ -739,6 +822,45 @@ func (tr *SlackTaskReporter) updateProgress(ctx context.Context, task *kelosv1al
 	return nil
 }
 
+func (tr *SlackTaskReporter) updateStableSummaryProgress(ctx context.Context, task *kelosv1alpha1.Task, channel, text string) error {
+	log := ctrl.Log.WithName("slack-reporter")
+
+	annotations := task.Annotations
+	messageTS := tr.getProgressTS(task)
+	if messageTS == "" {
+		messageTS = annotations[AnnotationSlackThreadTS]
+	}
+	if messageTS == "" {
+		return nil
+	}
+
+	stableSummary := annotations[AnnotationSlackStableSummary]
+	persist := map[string]string{}
+	if stableSummary == "" {
+		stableSummary = compactStableSummary(text)
+		persist[AnnotationSlackStableSummary] = stableSummary
+	}
+
+	msg := FormatStableSummaryProgressMessage(stableSummary, text, task.Name)
+	log.V(1).Info("Updating stable-summary Slack root progress message", "task", task.Name)
+	if err := tr.Reporter.UpdateMessage(ctx, channel, messageTS, msg); err != nil {
+		log.Error(err, "Failed to update stable-summary Slack root progress message", "task", task.Name)
+		return nil
+	}
+
+	tr.setLastProgress(task.UID, text)
+	tr.setProgressTS(task.UID, messageTS)
+	tr.setActivityTarget(task.UID, messageTS, msg)
+
+	if len(persist) > 0 {
+		if err := tr.persistSlackAnnotations(ctx, task, persist); err != nil {
+			log.V(1).Info("Failed to persist stable-summary Slack annotations", "task", task.Name, "error", err)
+		}
+	}
+
+	return nil
+}
+
 // updateDeferredProgress starts proactive Slack reporting only after a running
 // task emits its first meaningful assistant progress snapshot. This keeps
 // scheduled/no-op runs silent while still letting material findings use the
@@ -761,7 +883,17 @@ func (tr *SlackTaskReporter) updateDeferredProgress(ctx context.Context, task *k
 	}
 
 	log := ctrl.Log.WithName("slack-reporter")
+	stableSummary := ""
 	msg := FormatProgressMessage(text, task.Name)
+	persistedAnnotations := map[string]string{
+		AnnotationSlackChannel:     channel,
+		AnnotationSlackReportPhase: "accepted",
+	}
+	if isStableSummarySlackLayout(task.Annotations) {
+		stableSummary = compactStableSummary(text)
+		msg = FormatStableSummaryProgressMessage(stableSummary, "", task.Name)
+		persistedAnnotations[AnnotationSlackStableSummary] = stableSummary
+	}
 	log.Info("Posting deferred Slack root message", "task", task.Name, "channel", channel)
 	messageTS, err := tr.Reporter.PostMessage(ctx, channel, msg)
 	if err != nil {
@@ -772,12 +904,10 @@ func (tr *SlackTaskReporter) updateDeferredProgress(ctx context.Context, task *k
 	tr.setProgressTS(task.UID, messageTS)
 	tr.setActivityTarget(task.UID, messageTS, msg)
 
-	return tr.persistSlackAnnotations(ctx, task, map[string]string{
-		AnnotationSlackChannel:     channel,
-		AnnotationSlackThreadTS:    messageTS,
-		AnnotationSlackMessageTS:   messageTS,
-		AnnotationSlackReportPhase: "accepted",
-	})
+	persistedAnnotations[AnnotationSlackThreadTS] = messageTS
+	persistedAnnotations[AnnotationSlackMessageTS] = messageTS
+
+	return tr.persistSlackAnnotations(ctx, task, persistedAnnotations)
 }
 
 // shouldPostProgress returns true if the text differs from the last posted

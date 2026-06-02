@@ -28,18 +28,18 @@ maintain (`kanon-development/*`) live in *this* repository, so they use the
 
 ## TaskSpawners
 
-| TaskSpawner | Trigger | Model | Description |
+| TaskSpawner | Trigger | Agent | Description |
 |---|---|---|---|
-| **kanon-workers** | Webhook: issue comment `/kelos pick-up` | Opus | Picks up issues, creates or updates PRs, self-reviews, and ensures CI passes |
-| **kanon-planner** | Webhook: issue comment `/kelos plan` | Opus | Investigates an issue and posts a structured implementation plan — advisory only, no code changes |
-| **kanon-reviewer** | Webhook: PR comment `/kelos review` | Opus | Reviews PRs on demand — analyzes code, checks conventions, and submits structured reviews |
-| **kanon-pr-responder** | Webhook: PR review/comment with `/kelos pick-up` | Opus | Re-engages on PR review feedback and updates the existing branch incrementally |
-| **kanon-triage** | Webhook: issue opened/reopened (untriaged) | Opus | Classifies issues by kind/priority, detects duplicates, and recommends an actor |
-| **kanon-fake-user** | Cron (daily 09:00 UTC) | Sonnet | Tests DX as a new user — follows docs, tries CLI workflows, files issues for problems found |
-| **kanon-fake-strategist** | Cron (every 12 hours) | Opus | Explores new use cases, integrations, and managed-settings types |
-| **kanon-config-update** | Cron (daily 18:00 UTC) | Opus | Reviews recent Kanon PR feedback and updates the `kanon-development/` config accordingly |
-| **kanon-self-update** | Cron (daily 06:00 UTC) | Opus | Reviews and tunes the `kanon-development/` prompts, configs, and README — the pipeline improves itself |
-| **kanon-squash-commits** | Webhook: PR comment `/kelos squash-commits` | Sonnet | Rebases and squashes PR branch commits into a single clean commit |
+| **kanon-workers** | Webhook: issue comment `/kelos pick-up` | Codex | Picks up issues, creates or updates PRs, self-reviews, and ensures CI passes |
+| **kanon-planner** | Webhook: issue comment `/kelos plan` | Codex | Investigates an issue and posts a structured implementation plan — advisory only, no code changes |
+| **kanon-reviewer** | Webhook: PR comment `/kelos review` | Codex | Reviews PRs on demand — analyzes code, checks conventions, and submits structured reviews |
+| **kanon-pr-responder** | Webhook: PR review/comment with `/kelos pick-up` | Codex | Re-engages on PR review feedback and updates the existing branch incrementally |
+| **kanon-triage** | Webhook: issue opened/reopened (untriaged) | Codex | Classifies issues by kind/priority, detects duplicates, and recommends an actor |
+| **kanon-fake-user** | Cron (daily 09:00 UTC) | Codex | Tests DX as a new user — follows docs, tries CLI workflows, files issues for problems found |
+| **kanon-fake-strategist** | Cron (every 12 hours) | Codex | Explores new use cases, integrations, and managed-settings types |
+| **kanon-config-update** | Cron (daily 18:00 UTC) | Codex | Reviews recent Kanon PR feedback and updates the `kanon-development/` config accordingly |
+| **kanon-self-update** | Cron (daily 06:00 UTC) | Codex | Reviews and tunes the `kanon-development/` prompts, configs, and README — the pipeline improves itself |
+| **kanon-squash-commits** | Webhook: PR comment `/kelos squash-commits` | Codex | Rebases and squashes PR branch commits into a single clean commit |
 
 > **Not ported from `self-development/`:** `kelos-api-reviewer` (Kanon has no
 > Kubernetes CRDs/API surface to review) and `kelos-image-update` (Kanon has no
@@ -63,7 +63,7 @@ Picks up open GitHub issues when a maintainer posts `/kelos pick-up` and creates
 | | |
 |---|---|
 | **Trigger** | GitHub `issue_comment` webhook with `/kelos pick-up` |
-| **Model** | Opus |
+| **Agent** | Codex |
 | **Concurrency** | 8 |
 
 **Key features:**
@@ -85,7 +85,7 @@ Reacts to `/kelos plan` comments on open issues. Investigates the issue, inspect
 | | |
 |---|---|
 | **Trigger** | GitHub `issue_comment` webhook with `/kelos plan` |
-| **Model** | Opus |
+| **Agent** | Codex |
 | **Concurrency** | 2 |
 
 **Handoff flow:**
@@ -104,7 +104,7 @@ Reviews open pull requests on demand when a maintainer posts `/kelos review`.
 | | |
 |---|---|
 | **Trigger** | GitHub PR comment webhook with `/kelos review` |
-| **Model** | Opus |
+| **Agent** | Codex |
 | **Concurrency** | 3 |
 
 **Key features:**
@@ -131,7 +131,7 @@ Picks up open GitHub pull requests when a reviewer requests changes with `/kelos
 | | |
 |---|---|
 | **Trigger** | GitHub PR comment with `/kelos pick-up`, or a PR review whose body contains `/kelos pick-up` |
-| **Model** | Opus |
+| **Agent** | Codex |
 | **Concurrency** | 8 |
 
 **Key features:**
@@ -151,7 +151,7 @@ Triages newly opened (and certain reopened) GitHub issues.
 | | |
 |---|---|
 | **Trigger** | GitHub issue opened (no `triage-accepted`), or reopened with `needs-actor` |
-| **Model** | Opus |
+| **Agent** | Codex |
 | **Concurrency** | 8 |
 
 **For each issue, the agent:**
@@ -176,7 +176,7 @@ Runs daily to test the developer experience as if you were a new user.
 | | |
 |---|---|
 | **Trigger** | Cron `0 9 * * *` (daily at 09:00 UTC) |
-| **Model** | Sonnet |
+| **Agent** | Codex |
 | **Concurrency** | 1 |
 
 Each run picks one focus area:
@@ -198,7 +198,7 @@ Runs every 12 hours to strategically explore new ways to use and improve Kanon.
 | | |
 |---|---|
 | **Trigger** | Cron `0 */12 * * *` (every 12 hours) |
-| **Model** | Opus |
+| **Agent** | Codex |
 | **Concurrency** | 1 |
 
 Each run picks one focus area:
@@ -220,7 +220,7 @@ Runs daily to update the Kanon agent configuration based on patterns found in Ka
 | | |
 |---|---|
 | **Trigger** | Cron `0 18 * * *` (daily at 18:00 UTC) |
-| **Model** | Opus |
+| **Agent** | Codex |
 | **Workspace** | `kelos-agent` (edits `kanon-development/` in this repo) |
 | **Concurrency** | 1 |
 
@@ -238,7 +238,7 @@ Runs daily to review and improve the `kanon-development/` workflow files themsel
 | | |
 |---|---|
 | **Trigger** | Cron `0 6 * * *` (daily at 06:00 UTC) |
-| **Model** | Opus |
+| **Agent** | Codex |
 | **Workspace** | `kelos-agent` (reasons about `kanon-development/` in this repo) |
 | **Concurrency** | 1 |
 
@@ -256,7 +256,7 @@ Rebases and squashes PR branch commits into a single clean commit when a maintai
 | | |
 |---|---|
 | **Trigger** | GitHub PR comment webhook with `/kelos squash-commits` |
-| **Model** | Sonnet |
+| **Agent** | Codex |
 | **Concurrency** | 1 |
 
 **Key features:**
@@ -359,14 +359,15 @@ matching state.
 ### 5. Agent Credentials Secret
 
 The spawners reuse the `kelos-credentials` secret (the AI agent credentials are
-the same regardless of repository):
+the same regardless of repository). The checked-in spawners use Codex OAuth:
 
 ```bash
 kubectl create secret generic kelos-credentials \
-  --from-literal=CLAUDE_CODE_OAUTH_TOKEN=<your-claude-oauth-token>
+  --from-file=CODEX_AUTH_JSON=$HOME/.codex/auth.json
 ```
 
-(Or `--from-literal=ANTHROPIC_API_KEY=<your-api-key>` for API-key auth.)
+For API-key auth, change the task template credential type to `api-key` and use
+`--from-literal=CODEX_API_KEY=<your-openai-api-key>`.
 
 ## Customizing
 

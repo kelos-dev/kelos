@@ -28,8 +28,8 @@ spec:
   taskTemplate:
     workspaceRef:
       name: kanon-agent
-    model: sonnet
-    type: claude-code
+    model: gpt-5.4-mini
+    type: codex
     ttlSecondsAfterFinished: 864000
     credentials:
       type: oauth

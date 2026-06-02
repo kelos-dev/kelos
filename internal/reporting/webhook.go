@@ -196,6 +196,7 @@ func ssrfSafeTransport(base http.RoundTripper) http.RoundTripper {
 	}
 	t, ok := base.(*http.Transport)
 	if !ok {
+		ctrl.Log.WithName("webhook-reporter").Info("Custom transport is not *http.Transport, using default transport for SSRF protection")
 		t = http.DefaultTransport.(*http.Transport)
 	}
 	clone := t.Clone()

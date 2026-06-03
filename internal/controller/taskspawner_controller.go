@@ -73,6 +73,13 @@ func taskSpawnerSchedule(ts *kelosv1alpha1.TaskSpawner) string {
 	}
 }
 
+func taskSpawnerStartingDeadlineSeconds(ts *kelosv1alpha1.TaskSpawner) *int64 {
+	if ts.Spec.When.Cron == nil {
+		return nil
+	}
+	return ts.Spec.When.Cron.StartingDeadlineSeconds
+}
+
 // isWebhookBased returns true if the TaskSpawner is webhook-driven.
 // Slack uses Socket Mode (outbound WebSocket) handled by the centralized
 // kelos-slack-server, so it follows the same no-deployment pattern.
@@ -661,6 +668,11 @@ func (r *TaskSpawnerReconciler) updateCronJob(ctx context.Context, ts *kelosv1al
 
 	if cronJob.Spec.Schedule != desired.Spec.Schedule {
 		cronJob.Spec.Schedule = desired.Spec.Schedule
+		needsUpdate = true
+	}
+
+	if !reflect.DeepEqual(cronJob.Spec.StartingDeadlineSeconds, desired.Spec.StartingDeadlineSeconds) {
+		cronJob.Spec.StartingDeadlineSeconds = desired.Spec.StartingDeadlineSeconds
 		needsUpdate = true
 	}
 

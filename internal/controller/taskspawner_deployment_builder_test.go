@@ -1544,6 +1544,10 @@ func TestBuildCronJob_BasicSchedule(t *testing.T) {
 		t.Errorf("expected schedule %q, got %q", "0 9 * * 1", cronJob.Spec.Schedule)
 	}
 
+	if cronJob.Spec.StartingDeadlineSeconds != nil {
+		t.Errorf("expected no starting deadline seconds by default, got %v", cronJob.Spec.StartingDeadlineSeconds)
+	}
+
 	// Verify concurrency policy
 	if cronJob.Spec.ConcurrencyPolicy != "Forbid" {
 		t.Errorf("expected concurrency policy %q, got %q", "Forbid", cronJob.Spec.ConcurrencyPolicy)
@@ -1604,6 +1608,34 @@ func TestBuildCronJob_BasicSchedule(t *testing.T) {
 	}
 	if cronJob.Spec.FailedJobsHistoryLimit == nil || *cronJob.Spec.FailedJobsHistoryLimit != 1 {
 		t.Errorf("expected FailedJobsHistoryLimit=1, got %v", cronJob.Spec.FailedJobsHistoryLimit)
+	}
+}
+
+func TestBuildCronJob_StartingDeadlineSeconds(t *testing.T) {
+	builder := NewDeploymentBuilder()
+	deadlineSeconds := int64(60)
+	ts := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "frequent-update",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				Cron: &kelosv1alpha1.Cron{
+					Schedule:                "*/5 * * * *",
+					StartingDeadlineSeconds: &deadlineSeconds,
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+			},
+		},
+	}
+
+	cronJob := builder.BuildCronJob(ts, nil, false)
+
+	if cronJob.Spec.StartingDeadlineSeconds == nil || *cronJob.Spec.StartingDeadlineSeconds != deadlineSeconds {
+		t.Errorf("expected StartingDeadlineSeconds=%d, got %v", deadlineSeconds, cronJob.Spec.StartingDeadlineSeconds)
 	}
 }
 
@@ -1771,6 +1803,59 @@ func TestUpdateCronJob_ScheduleChange(t *testing.T) {
 	// Verify schedule was updated
 	if cronJob.Spec.Schedule != "0 10 * * 1" {
 		t.Errorf("expected schedule %q, got %q", "0 10 * * 1", cronJob.Spec.Schedule)
+	}
+}
+
+func TestUpdateCronJob_StartingDeadlineSecondsChange(t *testing.T) {
+	builder := NewDeploymentBuilder()
+	newDeadlineSeconds := int64(60)
+	ts := &kelosv1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cron-spawner",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				Cron: &kelosv1alpha1.Cron{
+					Schedule:                "*/5 * * * *",
+					StartingDeadlineSeconds: &newDeadlineSeconds,
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "claude-code",
+			},
+		},
+	}
+
+	oldDeadlineSeconds := int64(300)
+	oldTS := ts.DeepCopy()
+	oldTS.Spec.When.Cron.StartingDeadlineSeconds = &oldDeadlineSeconds
+	cronJob := builder.BuildCronJob(oldTS, nil, false)
+
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(appsv1.AddToScheme(scheme))
+	utilruntime.Must(kelosv1alpha1.AddToScheme(scheme))
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(ts, cronJob).
+		WithStatusSubresource(ts).
+		Build()
+
+	r := &TaskSpawnerReconciler{
+		Client:            cl,
+		Scheme:            scheme,
+		DeploymentBuilder: builder,
+	}
+
+	ctx := context.Background()
+	if err := r.updateCronJob(ctx, ts, cronJob, nil, false, false); err != nil {
+		t.Fatalf("updateCronJob error: %v", err)
+	}
+
+	if cronJob.Spec.StartingDeadlineSeconds == nil || *cronJob.Spec.StartingDeadlineSeconds != newDeadlineSeconds {
+		t.Errorf("expected StartingDeadlineSeconds=%d, got %v", newDeadlineSeconds, cronJob.Spec.StartingDeadlineSeconds)
 	}
 }
 

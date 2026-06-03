@@ -12766,6 +12766,13 @@ spec:
                             maxLength: 512
                             type: string
                         type: object
+                      startingDeadlineSeconds:
+                        description: |-
+                          StartingDeadlineSeconds limits how long missed schedules may still start.
+                          When omitted, Kubernetes may start missed schedules according to the CronJob default.
+                        format: int64
+                        minimum: 0
+                        type: integer
                     required:
                     - schedule
                     type: object

@@ -80,13 +80,115 @@ func TestKelosAPIReviewerTriggerableByBot(t *testing.T) {
 	assertReviewerTriggerableByBot(t, "kelos-api-reviewer.yaml", "/kelos api-review")
 }
 
+func TestKanonReviewerAcceptsAPIReviewAlias(t *testing.T) {
+	t.Parallel()
+
+	ts := readDevelopmentTaskSpawner(t, "kanon-development", "kanon-reviewer.yaml")
+	spawner := ts.Spec.When.GitHubWebhook
+	if spawner == nil {
+		t.Fatalf("expected kanon-reviewer.yaml to use githubWebhook")
+	}
+
+	tests := []struct {
+		name      string
+		eventType string
+		payload   string
+		want      bool
+	}{
+		{
+			name:      "issue comment api-review alias",
+			eventType: "issue_comment",
+			payload: `{
+				"action": "created",
+				"sender": {"login": "gjkim42"},
+				"issue": {
+					"number": 1,
+					"state": "open",
+					"pull_request": {"url": "https://api.github.com/repos/kelos-dev/kanon/pulls/1"}
+				},
+				"comment": {"body": "/kelos api-review"},
+				"repository": {"full_name": "kelos-dev/kanon", "owner": {"login": "kelos-dev"}, "name": "kanon"}
+			}`,
+			want: true,
+		},
+		{
+			name:      "issue comment original review command",
+			eventType: "issue_comment",
+			payload: `{
+				"action": "created",
+				"sender": {"login": "gjkim42"},
+				"issue": {
+					"number": 1,
+					"state": "open",
+					"pull_request": {"url": "https://api.github.com/repos/kelos-dev/kanon/pulls/1"}
+				},
+				"comment": {"body": "/kelos review"},
+				"repository": {"full_name": "kelos-dev/kanon", "owner": {"login": "kelos-dev"}, "name": "kanon"}
+			}`,
+			want: true,
+		},
+		{
+			name:      "pull request review api-review alias",
+			eventType: "pull_request_review",
+			payload: `{
+				"action": "submitted",
+				"sender": {"login": "gjkim42"},
+				"pull_request": {
+					"number": 1,
+					"state": "open",
+					"html_url": "https://github.com/kelos-dev/kanon/pull/1",
+					"head": {"ref": "feature-branch"}
+				},
+				"review": {"body": "/kelos api-review"},
+				"repository": {"full_name": "kelos-dev/kanon", "owner": {"login": "kelos-dev"}, "name": "kanon"}
+			}`,
+			want: true,
+		},
+		{
+			name:      "kelos bot remains excluded",
+			eventType: "issue_comment",
+			payload: `{
+				"action": "created",
+				"sender": {"login": "kelos-bot[bot]"},
+				"issue": {
+					"number": 1,
+					"state": "open",
+					"pull_request": {"url": "https://api.github.com/repos/kelos-dev/kanon/pulls/1"}
+				},
+				"comment": {"body": "/kelos api-review"},
+				"repository": {"full_name": "kelos-dev/kanon", "owner": {"login": "kelos-dev"}, "name": "kanon"}
+			}`,
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			eventData, err := webhook.ParseGitHubWebhook(tt.eventType, []byte(tt.payload))
+			if err != nil {
+				t.Fatalf("ParseGitHubWebhook() error = %v", err)
+			}
+			got, err := webhook.MatchesGitHubEvent(spawner, tt.eventType, eventData)
+			if err != nil {
+				t.Fatalf("MatchesGitHubEvent() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("MatchesGitHubEvent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // assertReviewerTriggerableByBot checks that the given reviewer spawner triggers
 // for both the Kelos bot and a maintainer posting bodyPattern on an open PR, but
 // not for an unauthorized user.
 func assertReviewerTriggerableByBot(t *testing.T, file, bodyPattern string) {
 	t.Helper()
 
-	ts := readSelfDevelopmentTaskSpawner(t, file)
+	ts := readDevelopmentTaskSpawner(t, "self-development", file)
 	spawner := ts.Spec.When.GitHubWebhook
 	if spawner == nil {
 		t.Fatalf("expected %s to use githubWebhook", file)
@@ -139,7 +241,13 @@ func assertReviewerTriggerableByBot(t *testing.T, file, bodyPattern string) {
 func readSelfDevelopmentTaskSpawner(t *testing.T, file string) *kelosv1alpha1.TaskSpawner {
 	t.Helper()
 
-	path := filepath.Join("..", "..", "self-development", file)
+	return readDevelopmentTaskSpawner(t, "self-development", file)
+}
+
+func readDevelopmentTaskSpawner(t *testing.T, dir, file string) *kelosv1alpha1.TaskSpawner {
+	t.Helper()
+
+	path := filepath.Join("..", "..", dir, file)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("reading %s: %v", path, err)

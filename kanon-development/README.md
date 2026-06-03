@@ -32,7 +32,7 @@ maintain (`kanon-development/*`) live in *this* repository, so they use the
 |---|---|---|---|
 | **kanon-workers** | Webhook: issue comment `/kelos pick-up` | Codex | Picks up issues, creates or updates PRs, self-reviews, and ensures CI passes |
 | **kanon-planner** | Webhook: issue comment `/kelos plan` | Codex | Investigates an issue and posts a structured implementation plan — advisory only, no code changes |
-| **kanon-reviewer** | Webhook: PR comment `/kelos review` | Codex | Reviews PRs on demand — analyzes code, checks conventions, and submits structured reviews |
+| **kanon-reviewer** | Webhook: PR comment/review with `/kelos review` or `/kelos api-review` | Codex | Reviews PRs on demand — analyzes code, checks conventions, and submits structured reviews |
 | **kanon-pr-responder** | Webhook: PR review/comment with `/kelos pick-up` | Codex | Re-engages on PR review feedback and updates the existing branch incrementally |
 | **kanon-triage** | Webhook: issue opened/reopened (untriaged) | Codex | Classifies issues by kind/priority, detects duplicates, and recommends an actor |
 | **kanon-fake-user** | Cron (daily 09:00 UTC) | Codex | Tests DX as a new user — follows docs, tries CLI workflows, files issues for problems found |
@@ -41,8 +41,13 @@ maintain (`kanon-development/*`) live in *this* repository, so they use the
 | **kanon-self-update** | Cron (daily 06:00 UTC) | Codex | Reviews and tunes the `kanon-development/` prompts, configs, and README — the pipeline improves itself |
 | **kanon-squash-commits** | Webhook: PR comment `/kelos squash-commits` | Codex | Rebases and squashes PR branch commits into a single clean commit |
 
-> **Not ported from `self-development/`:** `kelos-api-reviewer` (Kanon has no
-> Kubernetes CRDs/API surface to review) and `kelos-image-update` (Kanon has no
+> **Not ported from `self-development/`:** `kelos-api-reviewer` — Kanon has no
+> Kubernetes CRDs, so there is no separate API-review spawner. Kanon's
+> user-facing API surface (CLI commands/flags and the `kanon.yaml` schema) is
+> reviewed by `kanon-reviewer` directly (see its "CLI and config surfaces are
+> special" section), and triaged via the `kind/api` label. `/kelos api-review`
+> is accepted as an alias for `/kelos review` on Kanon PRs; both commands run
+> the same reviewer. `kelos-image-update` is also not ported (Kanon has no
 > coding-agent Dockerfiles to bump).
 
 Apply the whole directory at once — this includes `agentconfig.yaml`, which
@@ -99,11 +104,11 @@ kubectl apply -f kanon-development/kanon-planner.yaml
 
 ### kanon-reviewer.yaml
 
-Reviews open pull requests on demand when a maintainer posts `/kelos review`.
+Reviews open pull requests on demand when a maintainer posts `/kelos review` or `/kelos api-review`.
 
 | | |
 |---|---|
-| **Trigger** | GitHub PR comment webhook with `/kelos review` |
+| **Trigger** | GitHub PR comment/review webhook with `/kelos review` or `/kelos api-review` |
 | **Agent** | Codex |
 | **Concurrency** | 3 |
 
@@ -116,8 +121,8 @@ Reviews open pull requests on demand when a maintainer posts `/kelos review`.
 - Read-only agent — does not push code, modify files, or run local validation
 
 **Handoff flow:**
-1. `/kelos review` — requests a code review on the PR
-2. `/kelos review` — maintainer can retrigger review after changes are pushed
+1. `/kelos review` or `/kelos api-review` — requests a code review on the PR
+2. `/kelos review` or `/kelos api-review` — maintainer can retrigger review after changes are pushed
 
 **Deploy:**
 ```bash

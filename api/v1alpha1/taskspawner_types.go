@@ -69,6 +69,12 @@ type Cron struct {
 	// +kubebuilder:validation:Required
 	Schedule string `json:"schedule"`
 
+	// StartingDeadlineSeconds limits how long missed schedules may still start.
+	// When omitted, Kubernetes may start missed schedules according to the CronJob default.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	StartingDeadlineSeconds *int64 `json:"startingDeadlineSeconds,omitempty"`
+
 	// Session configures cron-triggered AgentSession behavior.
 	// +optional
 	Session *CronSession `json:"session,omitempty"`

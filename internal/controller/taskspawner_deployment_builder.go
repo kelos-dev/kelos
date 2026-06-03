@@ -289,6 +289,7 @@ func (b *DeploymentBuilder) BuildCronJob(ts *kelosv1alpha1.TaskSpawner, workspac
 		},
 		Spec: batchv1.CronJobSpec{
 			Schedule:                   taskSpawnerSchedule(ts),
+			StartingDeadlineSeconds:    taskSpawnerStartingDeadlineSeconds(ts),
 			ConcurrencyPolicy:          batchv1.ForbidConcurrent,
 			SuccessfulJobsHistoryLimit: &successfulJobsHistoryLimit,
 			FailedJobsHistoryLimit:     &failedJobsHistoryLimit,

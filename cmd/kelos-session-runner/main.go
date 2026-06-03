@@ -931,6 +931,30 @@ func renderTurnPrompt(session *kelosv1alpha1.AgentSession, turn *kelosv1alpha1.A
 	if prev == "" {
 		prev = "none"
 	}
+	if turn.Spec.Sequence == 1 {
+		return fmt.Sprintf(`You are running Cody through a Kelos Slack AgentSession.
+
+Session:
+- Kelos session: %s/%s
+- Slack thread: %s
+- TaskSpawner route: %s/%s
+- Turn sequence: %d
+
+Route prompt:
+%s
+
+Reply once in the same Slack thread through the Kelos reporter.
+For shell commands that require follow-up stdin, an interactive prompt, or a long-running session you need to write to later, start the command with a TTY. If a previous command reports that stdin is closed, rerun it as an interactive TTY session instead of retrying write_stdin.
+If you need more information, ask for it in your final answer.`,
+			session.Namespace,
+			session.Name,
+			session.Spec.Source.ThreadURL,
+			session.Namespace,
+			session.Spec.TaskSpawnerRef.Name,
+			turn.Spec.Sequence,
+			request,
+		)
+	}
 	return fmt.Sprintf(`You are continuing an existing Cody Slack session.
 
 Session:

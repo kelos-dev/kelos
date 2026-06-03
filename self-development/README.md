@@ -74,11 +74,11 @@ kubectl apply -f self-development/kelos-planner.yaml
 
 ### kelos-reviewer.yaml
 
-Reviews open pull requests on demand when a maintainer posts `/kelos review`.
+Reviews open pull requests on demand when a maintainer posts `/kelos review` or when a Kelos worker posts `/kelos review` after pushing a generated PR and confirming CI passes.
 
 | | |
 |---|---|
-| **Trigger** | GitHub PR comment webhook with `/kelos review` |
+| **Trigger** | GitHub PR comment webhook with `/kelos review` from a maintainer or Kelos worker handoff |
 | **Agent** | Codex |
 | **Concurrency** | 3 |
 
@@ -91,8 +91,9 @@ Reviews open pull requests on demand when a maintainer posts `/kelos review`.
 - Read-only agent — does not push code or modify files
 
 **Handoff flow:**
-1. `/kelos review` — requests a code review on the PR
-2. `/kelos review` — maintainer can retrigger review after changes are pushed
+1. `/kelos review` — maintainer requests a code review on the PR
+2. `/kelos review` — worker hands off a generated PR for review after pushing changes and confirming CI passes
+3. `/kelos review` — maintainer can retrigger review after changes are pushed
 
 **Deploy:**
 ```bash
@@ -101,11 +102,11 @@ kubectl apply -f self-development/kelos-reviewer.yaml
 
 ### kelos-api-reviewer.yaml
 
-Reviews issues and pull requests for Kubernetes API design conventions, compatibility, and best practices when a maintainer posts `/kelos api-review`.
+Reviews issues and pull requests for Kubernetes API design conventions, compatibility, and best practices when a maintainer posts `/kelos api-review` or when a Kelos worker posts `/kelos api-review` after pushing generated API changes and confirming CI passes.
 
 | | |
 |---|---|
-| **Trigger** | GitHub issue/PR comment webhook with `/kelos api-review` |
+| **Trigger** | GitHub issue/PR comment webhook with `/kelos api-review` from a maintainer or Kelos worker handoff |
 | **Agent** | Codex |
 | **Concurrency** | 3 |
 
@@ -120,8 +121,9 @@ Reviews issues and pull requests for Kubernetes API design conventions, compatib
 - Read-only agent — does not push code or modify files
 
 **Handoff flow:**
-1. `/kelos api-review` — requests an API design review on a PR or issue
-2. `/kelos api-review` — maintainer can retrigger review after changes or further discussion
+1. `/kelos api-review` — maintainer requests an API design review on a PR or issue
+2. `/kelos api-review` — worker hands off a generated API PR for review after pushing changes and confirming CI passes
+3. `/kelos api-review` — maintainer can retrigger review after changes or further discussion
 
 **Deploy:**
 ```bash
@@ -480,7 +482,7 @@ The key pattern in these examples is webhook-triggered handoff plus runtime re-v
 4. If the agent needs human input, it posts a plain-English status comment describing what happened
 5. A fresh `/kelos pick-up`, `/kelos plan`, `/kelos review`, `/kelos api-review`, `/kelos squash-commits`, or relabel event retriggers automation later
 
-Each run is a discrete webhook event, so no "pause" comment is needed to prevent re-pickup of stale state — the bot's own replies don't match the trigger substrings and cannot retrigger the spawner.
+Each run is a discrete webhook event, so no "pause" comment is needed to prevent re-pickup of stale state. Bot status and review replies should not include trigger commands accidentally, but explicit worker handoff comments can intentionally retrigger reviewer spawners when those spawners include a matching bot-author filter.
 
 ## Troubleshooting
 

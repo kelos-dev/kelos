@@ -102,6 +102,75 @@ func TestRenderTurnPrompt_IncludesTTYGuidance(t *testing.T) {
 	}
 }
 
+func TestRenderTurnPrompt_FirstTurnUsesRoutePrompt(t *testing.T) {
+	session := &kelosv1alpha1.AgentSession{
+		ObjectMeta: metav1.ObjectMeta{Name: "session", Namespace: "kelos-system"},
+		Spec: kelosv1alpha1.AgentSessionSpec{
+			Source: kelosv1alpha1.AgentSessionSource{
+				ThreadURL: "https://example.slack.com/thread",
+			},
+			TaskSpawnerRef: kelosv1alpha1.TaskSpawnerReference{Name: "cody-debug-slack"},
+		},
+	}
+	turn := &kelosv1alpha1.AgentTurn{
+		Spec: kelosv1alpha1.AgentTurnSpec{
+			Sequence: 1,
+			Input: kelosv1alpha1.AgentTurnInput{
+				Body: "Someone pinged you in Slack.\n\nSlack message:\n  check qa",
+			},
+			Source: kelosv1alpha1.AgentTurnSource{
+				UserID:    "U123",
+				MessageTS: "1.2",
+			},
+		},
+	}
+	got := renderTurnPrompt(session, turn)
+	for _, want := range []string{
+		"You are running Cody through a Kelos Slack AgentSession.",
+		"Route prompt:\nSomeone pinged you in Slack.",
+		"Slack message:\n  check qa",
+		"Reply once in the same Slack thread through the Kelos reporter.",
+		"start the command with a TTY",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("renderTurnPrompt() missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "Current explicit request:") {
+		t.Fatalf("First turn prompt should not use follow-up request wrapper:\n%s", got)
+	}
+}
+
+func TestRenderTurnPrompt_FollowUpKeepsCurrentRequestWrapper(t *testing.T) {
+	session := &kelosv1alpha1.AgentSession{
+		ObjectMeta: metav1.ObjectMeta{Name: "session", Namespace: "kelos-system"},
+		Spec: kelosv1alpha1.AgentSessionSpec{
+			TaskSpawnerRef: kelosv1alpha1.TaskSpawnerReference{Name: "cody-debug-slack"},
+		},
+	}
+	turn := &kelosv1alpha1.AgentTurn{
+		Spec: kelosv1alpha1.AgentTurnSpec{
+			Sequence: 2,
+			Input:    kelosv1alpha1.AgentTurnInput{Body: "check logs too"},
+			Source: kelosv1alpha1.AgentTurnSource{
+				UserID:    "U123",
+				MessageTS: "1.3",
+			},
+		},
+	}
+	got := renderTurnPrompt(session, turn)
+	for _, want := range []string{
+		"You are continuing an existing Cody Slack session.",
+		"Current explicit request:",
+		"check logs too",
+		"Conversation since your last terminal answer:",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("renderTurnPrompt() missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func newTestTurnClient(t *testing.T) (*kelosv1alpha1.AgentTurn, client.Client) {
 	t.Helper()
 	turn := &kelosv1alpha1.AgentTurn{

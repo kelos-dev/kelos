@@ -16,6 +16,7 @@ import (
 
 	"github.com/kelos-dev/kelos/api/v1alpha1"
 	"github.com/kelos-dev/kelos/internal/reporting"
+	"github.com/kelos-dev/kelos/internal/taskbuilder"
 )
 
 const (
@@ -130,6 +131,11 @@ func (h *SlackHandler) activeSessionsForThread(ctx context.Context, channelID, r
 }
 
 func (h *SlackHandler) createSessionAndFirstTurn(ctx context.Context, spawner *v1alpha1.TaskSpawner, msg *SlackMessageData) error {
+	firstTurnPrompt, err := taskbuilder.RenderPromptTemplate(&spawner.Spec.TaskTemplate, ExtractSlackWorkItem(msg))
+	if err != nil {
+		return fmt.Errorf("rendering first turn prompt: %w", err)
+	}
+
 	idleTimeout, maxQueued, contextWindow := effectiveSessionConfig(spawner.Spec.When.Slack)
 	rootTS := rootThreadTS(msg)
 	name := sessionName(spawner.Name, "", msg.ChannelID, rootTS, spawner.Namespace)
@@ -173,10 +179,14 @@ func (h *SlackHandler) createSessionAndFirstTurn(ctx context.Context, spawner *v
 			return fmt.Errorf("fetching existing AgentSession: %w", getErr)
 		}
 	}
-	return h.createTurnForSession(ctx, session, msg)
+	return h.createTurnForSessionWithBody(ctx, session, msg, firstTurnPrompt)
 }
 
 func (h *SlackHandler) createTurnForSession(ctx context.Context, session *v1alpha1.AgentSession, msg *SlackMessageData) error {
+	return h.createTurnForSessionWithBody(ctx, session, msg, "")
+}
+
+func (h *SlackHandler) createTurnForSessionWithBody(ctx context.Context, session *v1alpha1.AgentSession, msg *SlackMessageData, body string) error {
 	exists, err := h.turnExistsForSlackMessage(ctx, session, msg)
 	if err != nil {
 		return err
@@ -206,6 +216,9 @@ func (h *SlackHandler) createTurnForSession(ctx context.Context, session *v1alph
 	contextWindow := session.Spec.ContextWindow
 	if contextWindow == "" {
 		contextWindow = v1alpha1.SlackSessionContextWindowSinceLastAgentMessage
+	}
+	if strings.TrimSpace(body) == "" {
+		body = semanticBody(msg.Text)
 	}
 	turn := &v1alpha1.AgentTurn{
 		ObjectMeta: metav1.ObjectMeta{
@@ -238,7 +251,7 @@ func (h *SlackHandler) createTurnForSession(ctx context.Context, session *v1alph
 			},
 			Input: v1alpha1.AgentTurnInput{
 				Text: msg.Text,
-				Body: semanticBody(msg.Text),
+				Body: body,
 			},
 			Context: v1alpha1.AgentTurnContext{
 				Mode:          contextWindow,
@@ -291,6 +304,9 @@ func (h *SlackHandler) populateTurnTranscript(ctx context.Context, session *v1al
 		fromTS = session.Spec.Source.RootTS
 	}
 	turn.Spec.Context.FromTSExclusive = fromTS
+	if h.api == nil {
+		return nil
+	}
 	replies, err := FetchThreadReplies(ctx, h.api, session.Spec.Source.ChannelID, session.Spec.Source.RootTS)
 	if err != nil {
 		return err

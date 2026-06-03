@@ -42,13 +42,7 @@ func (tb *TaskBuilder) BuildTask(
 	templateVars map[string]interface{},
 	spawnerRef *SpawnerRef,
 ) (*v1alpha1.Task, error) {
-	// Render the prompt template
-	promptTemplate := taskTemplate.PromptTemplate
-	if promptTemplate == "" {
-		promptTemplate = "{{.Title}}" // Default template
-	}
-
-	prompt, err := renderTemplate("prompt", promptTemplate, templateVars)
+	prompt, err := RenderPromptTemplate(taskTemplate, templateVars)
 	if err != nil {
 		return nil, fmt.Errorf("failed to render prompt template: %w", err)
 	}
@@ -156,6 +150,16 @@ func (tb *TaskBuilder) BuildTask(
 	}
 
 	return task, nil
+}
+
+// RenderPromptTemplate renders a TaskTemplate prompt with the same behavior
+// used by BuildTask.
+func RenderPromptTemplate(taskTemplate *v1alpha1.TaskTemplate, templateVars map[string]interface{}) (string, error) {
+	promptTemplate := taskTemplate.PromptTemplate
+	if promptTemplate == "" {
+		promptTemplate = "{{.Title}}" // Default template
+	}
+	return renderTemplate("prompt", promptTemplate, templateVars)
 }
 
 // renderTemplate renders a Go text template with the given variables.

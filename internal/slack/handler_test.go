@@ -3,6 +3,7 @@ package slack
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/go-logr/logr"
@@ -519,6 +520,241 @@ func TestCreateTurnForSessionSkipsDuplicateSlackMessage(t *testing.T) {
 	}
 	if got := turns.Items[0].Name; got != existingTurn.Name {
 		t.Fatalf("Unexpected turn preserved: got %q, want %q", got, existingTurn.Name)
+	}
+}
+
+func TestCreateSessionAndFirstTurnRendersTaskSpawnerPrompt(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(v1alpha1.AddToScheme(scheme))
+
+	spawner := &v1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cody-debug-slack",
+			Namespace: "default",
+			UID:       "spawner-uid",
+		},
+		Spec: v1alpha1.TaskSpawnerSpec{
+			When: v1alpha1.When{
+				Slack: &v1alpha1.Slack{
+					Session: &v1alpha1.SlackSession{Enabled: true},
+				},
+			},
+			TaskTemplate: v1alpha1.TaskTemplate{
+				Type: "codex",
+				Credentials: v1alpha1.Credentials{
+					Type: v1alpha1.CredentialTypeNone,
+				},
+				PromptTemplate: "Slack message:\n{{.Body}}\nSlack thread: {{.URL}}",
+			},
+		},
+	}
+	msg := &SlackMessageData{
+		UserID:    "U123",
+		ChannelID: "C123",
+		Text:      "<@UBOT> can you check qa",
+		Body:      "can you check qa",
+		Timestamp: "1111111111.111111",
+		Permalink: "https://example.slack.com/thread",
+	}
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(spawner.DeepCopy()).
+		Build()
+	h := &SlackHandler{
+		client:    cl,
+		log:       logr.Discard(),
+		botUserID: "UBOT",
+	}
+
+	if err := h.createSessionAndFirstTurn(context.Background(), spawner, msg); err != nil {
+		t.Fatalf("createSessionAndFirstTurn() error = %v", err)
+	}
+
+	var sessions v1alpha1.AgentSessionList
+	if err := cl.List(context.Background(), &sessions, client.InNamespace("default")); err != nil {
+		t.Fatalf("List sessions: %v", err)
+	}
+	if len(sessions.Items) != 1 {
+		t.Fatalf("Expected 1 AgentSession, got %d", len(sessions.Items))
+	}
+
+	var turns v1alpha1.AgentTurnList
+	if err := cl.List(context.Background(), &turns, client.InNamespace("default")); err != nil {
+		t.Fatalf("List turns: %v", err)
+	}
+	if len(turns.Items) != 1 {
+		t.Fatalf("Expected 1 AgentTurn, got %d", len(turns.Items))
+	}
+	got := turns.Items[0].Spec.Input.Body
+	for _, want := range []string{
+		"Slack message:\ncan you check qa",
+		"Slack thread: https://example.slack.com/thread",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("First turn body missing %q:\n%s", want, got)
+		}
+	}
+
+	var tasks v1alpha1.TaskList
+	if err := cl.List(context.Background(), &tasks, client.InNamespace("default")); err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	if len(tasks.Items) != 0 {
+		t.Fatalf("Expected no one-shot Tasks, got %d", len(tasks.Items))
+	}
+}
+
+func TestCreateSessionAndFirstTurnRenderFailureDoesNotCreateSession(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(v1alpha1.AddToScheme(scheme))
+
+	spawner := &v1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cody-debug-slack",
+			Namespace: "default",
+			UID:       "spawner-uid",
+		},
+		Spec: v1alpha1.TaskSpawnerSpec{
+			When: v1alpha1.When{
+				Slack: &v1alpha1.Slack{
+					Session: &v1alpha1.SlackSession{Enabled: true},
+				},
+			},
+			TaskTemplate: v1alpha1.TaskTemplate{
+				Type: "codex",
+				Credentials: v1alpha1.Credentials{
+					Type: v1alpha1.CredentialTypeNone,
+				},
+				PromptTemplate: "{{.Missing}}",
+			},
+		},
+	}
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(spawner.DeepCopy()).
+		Build()
+	h := &SlackHandler{
+		client: cl,
+		log:    logr.Discard(),
+	}
+
+	err := h.createSessionAndFirstTurn(context.Background(), spawner, &SlackMessageData{
+		UserID:    "U123",
+		ChannelID: "C123",
+		Text:      "<@UBOT> can you check qa",
+		Body:      "can you check qa",
+		Timestamp: "1111111111.111111",
+	})
+	if err == nil {
+		t.Fatal("createSessionAndFirstTurn() error = nil, want render error")
+	}
+
+	var sessions v1alpha1.AgentSessionList
+	if err := cl.List(context.Background(), &sessions, client.InNamespace("default")); err != nil {
+		t.Fatalf("List sessions: %v", err)
+	}
+	if len(sessions.Items) != 0 {
+		t.Fatalf("Expected no AgentSessions, got %d", len(sessions.Items))
+	}
+	var turns v1alpha1.AgentTurnList
+	if err := cl.List(context.Background(), &turns, client.InNamespace("default")); err != nil {
+		t.Fatalf("List turns: %v", err)
+	}
+	if len(turns.Items) != 0 {
+		t.Fatalf("Expected no AgentTurns, got %d", len(turns.Items))
+	}
+}
+
+func TestRouteSessionFollowUpConsumesReservedPrefix(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(v1alpha1.AddToScheme(scheme))
+
+	session := &v1alpha1.AgentSession{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cody-debug-slack-sess-test",
+			Namespace: "default",
+			Labels: map[string]string{
+				LabelSource:       "slack",
+				LabelSlackChannel: "C123",
+				LabelSlackRootTS:  "1111111111.111111",
+			},
+		},
+		Spec: v1alpha1.AgentSessionSpec{
+			Source: v1alpha1.AgentSessionSource{
+				Type:      "SlackThread",
+				ChannelID: "C123",
+				RootTS:    "1111111111.111111",
+				ThreadURL: "https://example.slack.com/thread",
+			},
+			TaskSpawnerRef: v1alpha1.TaskSpawnerReference{Name: "cody-debug-slack"},
+			MaxQueuedTurns: 5,
+		},
+	}
+	existingTurn := &v1alpha1.AgentTurn{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cody-debug-slack-sess-test-t-0001",
+			Namespace: "default",
+			Labels: map[string]string{
+				LabelAgentSession: session.Name,
+			},
+		},
+		Spec: v1alpha1.AgentTurnSpec{
+			SessionRef: v1alpha1.AgentSessionReference{Name: session.Name},
+			Sequence:   1,
+			Source: v1alpha1.AgentTurnSource{
+				Type:      "SlackMessage",
+				ChannelID: "C123",
+				RootTS:    "1111111111.111111",
+				MessageTS: "1111111111.111111",
+				UserID:    "U123",
+			},
+		},
+		Status: v1alpha1.AgentTurnStatus{Phase: v1alpha1.AgentTurnPhaseSucceeded},
+	}
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(session.DeepCopy(), existingTurn.DeepCopy()).
+		Build()
+	msg := &SlackMessageData{
+		UserID:    "U123",
+		ChannelID: "C123",
+		Text:      "<@UBOT> !dev make a PR",
+		ThreadTS:  "1111111111.111111",
+		Timestamp: "1111111112.111111",
+		Permalink: "https://example.slack.com/thread?reply=1",
+	}
+	h := &SlackHandler{
+		client:    cl,
+		log:       logr.Discard(),
+		botUserID: "UBOT",
+	}
+
+	if consumed := h.routeSessionFollowUp(context.Background(), msg); !consumed {
+		t.Fatal("routeSessionFollowUp() = false, want true")
+	}
+
+	var turns v1alpha1.AgentTurnList
+	if err := cl.List(context.Background(), &turns, client.InNamespace("default"), client.MatchingLabels{LabelAgentSession: session.Name}); err != nil {
+		t.Fatalf("List turns: %v", err)
+	}
+	if len(turns.Items) != 2 {
+		t.Fatalf("Expected 2 AgentTurns, got %d", len(turns.Items))
+	}
+	var followUp *v1alpha1.AgentTurn
+	for i := range turns.Items {
+		if turns.Items[i].Spec.Sequence == 2 {
+			followUp = &turns.Items[i]
+			break
+		}
+	}
+	if followUp == nil {
+		t.Fatal("Did not find sequence 2 follow-up turn")
+	}
+	if got, want := followUp.Spec.Input.Body, "!dev make a PR"; got != want {
+		t.Fatalf("Follow-up body = %q, want %q", got, want)
 	}
 }
 

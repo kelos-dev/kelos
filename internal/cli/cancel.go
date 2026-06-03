@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
@@ -49,23 +50,25 @@ func newCancelTaskCommand(cfg *ClientConfig) *cobra.Command {
 			ctx := context.Background()
 			taskName := args[0]
 
-			var task kelosv1alpha1.Task
-			if err := cl.Get(ctx, client.ObjectKey{Namespace: ns, Name: taskName}, &task); err != nil {
-				return fmt.Errorf("getting task %s: %w", taskName, err)
-			}
+			if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				var task kelosv1alpha1.Task
+				if err := cl.Get(ctx, client.ObjectKey{Namespace: ns, Name: taskName}, &task); err != nil {
+					return err
+				}
 
-			switch task.Status.Phase {
-			case kelosv1alpha1.TaskPhaseSucceeded, kelosv1alpha1.TaskPhaseFailed, kelosv1alpha1.TaskPhaseCancelled:
-				fmt.Fprintf(os.Stdout, "task/%s is already in terminal phase %s\n", taskName, task.Status.Phase)
-				return nil
-			}
+				switch task.Status.Phase {
+				case kelosv1alpha1.TaskPhaseSucceeded, kelosv1alpha1.TaskPhaseFailed, kelosv1alpha1.TaskPhaseCancelled:
+					fmt.Fprintf(os.Stdout, "task/%s is already in terminal phase %s\n", taskName, task.Status.Phase)
+					return nil
+				}
 
-			now := metav1.Now()
-			task.Status.Phase = kelosv1alpha1.TaskPhaseCancelled
-			task.Status.Message = "Cancelled by user"
-			task.Status.CancelledBy = "user"
-			task.Status.CompletionTime = &now
-			if err := cl.Status().Update(ctx, &task); err != nil {
+				now := metav1.Now()
+				task.Status.Phase = kelosv1alpha1.TaskPhaseCancelled
+				task.Status.Message = "Cancelled by user"
+				task.Status.CancelledBy = "user"
+				task.Status.CompletionTime = &now
+				return cl.Status().Update(ctx, &task)
+			}); err != nil {
 				return fmt.Errorf("cancelling task %s: %w", taskName, err)
 			}
 

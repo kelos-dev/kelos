@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	batchv1 "k8s.io/api/batch/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
@@ -65,8 +66,8 @@ func TestTaskReconciler_CancelledTaskDeletesJob(t *testing.T) {
 	// Verify Job was deleted.
 	var updatedJob batchv1.Job
 	err = fakeClient.Get(context.Background(), types.NamespacedName{Name: "cancel-me", Namespace: "default"}, &updatedJob)
-	if err == nil {
-		t.Error("Expected Job to be deleted after task cancellation")
+	if !apierrors.IsNotFound(err) {
+		t.Errorf("Expected NotFound error for deleted Job, got: %v", err)
 	}
 }
 

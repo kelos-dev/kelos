@@ -201,8 +201,10 @@ func TestSlackTurnReporter_DeferredDestinationCreatesRootMessage(t *testing.T) {
 		WithStatusSubresource(&kelosv1alpha1.AgentTurn{}, &kelosv1alpha1.AgentSession{}).
 		WithObjects(session, turn).
 		Build()
+	postCount := 0
 	reporter := &fakeSlackReporter{
 		postMessageFn: func(ctx context.Context, channel string, msg SlackMessage) (string, error) {
+			postCount++
 			if channel != "C123" {
 				t.Fatalf("channel = %q, want C123", channel)
 			}
@@ -221,16 +223,22 @@ func TestSlackTurnReporter_DeferredDestinationCreatesRootMessage(t *testing.T) {
 	if err := tr.ReportTurnStatus(context.Background(), turn); err != nil {
 		t.Fatalf("ReportTurnStatus() error = %v", err)
 	}
+	if err := tr.ReportTurnStatus(context.Background(), turn); err != nil {
+		t.Fatalf("ReportTurnStatus() second call error = %v", err)
+	}
+	if postCount != 1 {
+		t.Fatalf("postCount = %d, want 1", postCount)
+	}
 
 	var updated kelosv1alpha1.AgentTurn
 	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(turn), &updated); err != nil {
 		t.Fatal(err)
 	}
-	if updated.Annotations[AnnotationSlackChannel] != "C123" {
-		t.Fatalf("slack channel annotation = %q, want C123", updated.Annotations[AnnotationSlackChannel])
+	if updated.Annotations[AnnotationSlackChannel] != "" {
+		t.Fatalf("slack channel annotation = %q, want empty", updated.Annotations[AnnotationSlackChannel])
 	}
-	if updated.Annotations[AnnotationSlackThreadTS] != "root-ts" {
-		t.Fatalf("slack thread annotation = %q, want root-ts", updated.Annotations[AnnotationSlackThreadTS])
+	if updated.Annotations[AnnotationSlackThreadTS] != "" {
+		t.Fatalf("slack thread annotation = %q, want empty", updated.Annotations[AnnotationSlackThreadTS])
 	}
 	if updated.Status.SlackProgressMessageTS != "root-ts" {
 		t.Fatalf("SlackProgressMessageTS = %q, want root-ts", updated.Status.SlackProgressMessageTS)
@@ -238,12 +246,67 @@ func TestSlackTurnReporter_DeferredDestinationCreatesRootMessage(t *testing.T) {
 	if updated.Status.SlackAgentMessageTS != "root-ts" {
 		t.Fatalf("SlackAgentMessageTS = %q, want root-ts", updated.Status.SlackAgentMessageTS)
 	}
+	freshReporter := &SlackTurnReporter{
+		Client:   cl,
+		Reporter: reporter,
+		Routes:   map[string]SlackRoute{"cody-devops": {Channel: "C123"}},
+	}
+	if err := freshReporter.ReportTurnStatus(context.Background(), &updated); err != nil {
+		t.Fatalf("fresh ReportTurnStatus() error = %v", err)
+	}
+	if postCount != 1 {
+		t.Fatalf("postCount after fresh reporter = %d, want 1", postCount)
+	}
 	var updatedSession kelosv1alpha1.AgentSession
 	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(session), &updatedSession); err != nil {
 		t.Fatal(err)
 	}
 	if updatedSession.Status.LastAgentMessageTS != "root-ts" {
 		t.Fatalf("LastAgentMessageTS = %q, want root-ts", updatedSession.Status.LastAgentMessageTS)
+	}
+}
+
+func TestSlackTurnReporter_DeferredDestinationDoesNotRepostWhenStatusPatchFails(t *testing.T) {
+	turn := &kelosv1alpha1.AgentTurn{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cron-session-t-0001",
+			Namespace: "kelos-system",
+			UID:       "turn-uid",
+			Annotations: map[string]string{
+				AnnotationSlackReporting:   SlackReportingDeferred,
+				AnnotationSlackDestination: "cody-devops",
+			},
+		},
+		Status: kelosv1alpha1.AgentTurnStatus{
+			Phase:      kelosv1alpha1.AgentTurnPhaseSucceeded,
+			ResultText: "Found a QA rollout issue and opened a fix PR.",
+		},
+	}
+	cl := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		WithStatusSubresource(&kelosv1alpha1.AgentTurn{}).
+		Build()
+	postCount := 0
+	reporter := &fakeSlackReporter{
+		postMessageFn: func(ctx context.Context, channel string, msg SlackMessage) (string, error) {
+			postCount++
+			return "root-ts", nil
+		},
+	}
+
+	tr := &SlackTurnReporter{
+		Client:   cl,
+		Reporter: reporter,
+		Routes:   map[string]SlackRoute{"cody-devops": {Channel: "C123"}},
+	}
+	if err := tr.ReportTurnStatus(context.Background(), turn); err == nil {
+		t.Fatal("ReportTurnStatus() error = nil, want status persistence error")
+	}
+	if err := tr.ReportTurnStatus(context.Background(), turn); err != nil {
+		t.Fatalf("ReportTurnStatus() second call error = %v", err)
+	}
+	if postCount != 1 {
+		t.Fatalf("postCount = %d, want 1", postCount)
 	}
 }
 

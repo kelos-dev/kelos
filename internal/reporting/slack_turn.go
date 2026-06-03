@@ -25,6 +25,7 @@ type SlackTurnReporter struct {
 
 	mu           sync.Mutex
 	lastActivity map[types.UID]string
+	deferredSent map[types.UID]struct{}
 }
 
 // ReportTurnStatus posts the accepted and terminal Slack messages for an
@@ -51,6 +52,9 @@ func (tr *SlackTurnReporter) ReportTurnStatus(ctx context.Context, turn *kelosv1
 	if desiredPhase == "" {
 		return nil
 	}
+	if terminal && turn.Status.SlackAgentMessageTS != "" {
+		return nil
+	}
 	if threadTS == "" {
 		if reportingMode != SlackReportingDeferred {
 			return nil
@@ -66,10 +70,6 @@ func (tr *SlackTurnReporter) ReportTurnStatus(ctx context.Context, turn *kelosv1
 	if !terminal && turn.Status.SlackProgressMessageTS != "" {
 		return tr.reportRunningActivity(ctx, turn, channel)
 	}
-	if terminal && turn.Status.SlackAgentMessageTS != "" {
-		return nil
-	}
-
 	results := turnSlackResults(turn)
 	msgs := FormatSlackTransitionMessage(desiredPhase, turn.Name, turn.Status.Message, results)
 
@@ -169,6 +169,10 @@ func (tr *SlackTurnReporter) reportRunningActivity(ctx context.Context, turn *ke
 	return nil
 }
 func (tr *SlackTurnReporter) reportDeferredTerminalTurn(ctx context.Context, turn *kelosv1alpha1.AgentTurn, channel, desiredPhase string) error {
+	if tr.hasDeferredTerminalPost(turn.UID) {
+		return nil
+	}
+
 	results := turnSlackResults(turn)
 	msgs := FormatSlackTransitionMessage(desiredPhase, turn.Name, turn.Status.Message, results)
 	if isStableSummarySlackLayout(turn.Annotations) {
@@ -185,23 +189,17 @@ func (tr *SlackTurnReporter) reportDeferredTerminalTurn(ctx context.Context, tur
 	if err != nil {
 		return fmt.Errorf("posting deferred Slack terminal root message for AgentTurn %s: %w", turn.Name, err)
 	}
-	for _, msg := range msgs[1:] {
-		if _, err := tr.Reporter.PostThreadReply(ctx, channel, rootTS, msg); err != nil {
-			log.Error(err, "Failed to post AgentTurn continuation message", "turn", turn.Name)
-		}
-	}
-	if err := tr.patchTurnAnnotations(ctx, turn.Namespace, turn.Name, map[string]string{
-		AnnotationSlackChannel:   channel,
-		AnnotationSlackThreadTS:  rootTS,
-		AnnotationSlackMessageTS: rootTS,
-	}); err != nil {
-		return err
-	}
+	tr.markDeferredTerminalPost(turn.UID)
 	if err := tr.patchTurnStatus(ctx, turn.Namespace, turn.Name, func(t *kelosv1alpha1.AgentTurn) {
 		t.Status.SlackProgressMessageTS = rootTS
 		t.Status.SlackAgentMessageTS = rootTS
 	}); err != nil {
 		return err
+	}
+	for _, msg := range msgs[1:] {
+		if _, err := tr.Reporter.PostThreadReply(ctx, channel, rootTS, msg); err != nil {
+			log.Error(err, "Failed to post AgentTurn continuation message", "turn", turn.Name)
+		}
 	}
 	if turn.Spec.SessionRef.Name != "" {
 		if err := tr.patchSessionStatus(ctx, turn.Namespace, turn.Spec.SessionRef.Name, func(s *kelosv1alpha1.AgentSession) {
@@ -326,6 +324,11 @@ func (tr *SlackTurnReporter) SweepActivityCache(activeUIDs map[types.UID]bool) {
 			delete(tr.lastActivity, uid)
 		}
 	}
+	for uid := range tr.deferredSent {
+		if !activeUIDs[uid] {
+			delete(tr.deferredSent, uid)
+		}
+	}
 }
 
 func (tr *SlackTurnReporter) patchTurnStatus(ctx context.Context, namespace, name string, mutate func(*kelosv1alpha1.AgentTurn)) error {
@@ -336,22 +339,6 @@ func (tr *SlackTurnReporter) patchTurnStatus(ctx context.Context, namespace, nam
 		}
 		mutate(&current)
 		return tr.Client.Status().Update(ctx, &current)
-	})
-}
-
-func (tr *SlackTurnReporter) patchTurnAnnotations(ctx context.Context, namespace, name string, annotations map[string]string) error {
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		var current kelosv1alpha1.AgentTurn
-		if err := tr.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &current); err != nil {
-			return err
-		}
-		if current.Annotations == nil {
-			current.Annotations = make(map[string]string)
-		}
-		for key, value := range annotations {
-			current.Annotations[key] = value
-		}
-		return tr.Client.Update(ctx, &current)
 	})
 }
 
@@ -368,4 +355,26 @@ func (tr *SlackTurnReporter) patchSessionStatus(ctx context.Context, namespace, 
 		return nil
 	}
 	return err
+}
+
+func (tr *SlackTurnReporter) hasDeferredTerminalPost(uid types.UID) bool {
+	if uid == "" {
+		return false
+	}
+	tr.mu.Lock()
+	defer tr.mu.Unlock()
+	_, ok := tr.deferredSent[uid]
+	return ok
+}
+
+func (tr *SlackTurnReporter) markDeferredTerminalPost(uid types.UID) {
+	if uid == "" {
+		return
+	}
+	tr.mu.Lock()
+	defer tr.mu.Unlock()
+	if tr.deferredSent == nil {
+		tr.deferredSent = make(map[types.UID]struct{})
+	}
+	tr.deferredSent[uid] = struct{}{}
 }

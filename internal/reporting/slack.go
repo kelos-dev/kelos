@@ -15,9 +15,11 @@ import (
 const slackFallbackTextLimit = 40000
 
 const (
-	stableSummaryRootLimit   = 1800
-	stableSummaryStatusLimit = 1400
-	stableSummaryFinalLimit  = 1800
+	stableSummaryRootLimit    = 1800
+	stableSummaryStatusLimit  = 1400
+	stableSummaryFinalLimit   = 1800
+	sessionSummaryRootLimit   = 1800
+	sessionSummaryLatestLimit = 1400
 )
 
 // decodeResponse decodes a base64-encoded agent response from task results.
@@ -204,6 +206,35 @@ func FormatStableSummaryFinalMessage(stableSummary, phase, taskName, message str
 	blocks = append(blocks, contextBlock(taskName))
 
 	text := buildStableSummaryFallback(title, stableSummary, outcome, pr, errText, taskName)
+	return SlackMessage{Text: text, Blocks: blocks}
+}
+
+// FormatSessionSummaryRootMessage returns the persistent root message for a
+// proactive AgentSession. It intentionally stays generic: a concise additive
+// summary plus the latest in-flight status. Full turn details are posted in
+// the message thread.
+func FormatSessionSummaryRootMessage(title, summary, latest, taskName string) SlackMessage {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = "Cody session"
+	}
+	summary, _ = compactSlackText(summary, sessionSummaryRootLimit)
+	latest = strings.TrimSpace(latest)
+	if latest == summary {
+		latest = ""
+	}
+	latest, _ = compactSlackText(latest, sessionSummaryLatestLimit)
+
+	blocks := []slack.Block{headerBlock(title)}
+	if summary != "" {
+		blocks = append(blocks, slackSection(fmt.Sprintf("*Summary*\n%s", summary)))
+	}
+	if latest != "" {
+		blocks = append(blocks, slackSection(fmt.Sprintf("*Latest*\n%s", latest)))
+	}
+	blocks = append(blocks, contextBlock(taskName))
+
+	text := buildSessionSummaryFallback(title, summary, latest, taskName)
 	return SlackMessage{Text: text, Blocks: blocks}
 }
 
@@ -442,6 +473,18 @@ func buildStableSummaryFallback(title, stableSummary, status, pr, errText, taskN
 	}
 	parts = append(parts, fmt.Sprintf("(Task: %s)", taskName))
 	return truncateFallbackText(strings.Join(parts, "\n"))
+}
+
+func buildSessionSummaryFallback(title, summary, latest, taskName string) string {
+	parts := []string{title}
+	if summary != "" {
+		parts = append(parts, "Summary\n"+summary)
+	}
+	if latest != "" {
+		parts = append(parts, "Latest\n"+latest)
+	}
+	parts = append(parts, fmt.Sprintf("(Task: %s)", taskName))
+	return truncateFallbackText(strings.Join(parts, "\n\n"))
 }
 
 // continuationContextBlock returns a context block indicating a multi-part

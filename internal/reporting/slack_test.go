@@ -574,6 +574,32 @@ func TestFormatStableSummaryFinalMessage_CompactRootForLongResponse(t *testing.T
 	}
 }
 
+func TestFormatSessionSummaryRootMessage(t *testing.T) {
+	got := FormatSessionSummaryRootMessage(
+		"cody-datadog-health-non-prod-qa",
+		"Session started.\n- Found a rollout issue and opened a fix PR.",
+		"Checking whether Flux has reconciled the fix.",
+		"infra-health-turn",
+	)
+
+	if !strings.Contains(got.Text, "Summary") {
+		t.Errorf("text = %q, want Summary section", got.Text)
+	}
+	if !strings.Contains(got.Text, "Latest") {
+		t.Errorf("text = %q, want Latest section", got.Text)
+	}
+	if strings.Contains(got.Text, "Detected issue") || strings.Contains(got.Text, "Outcome") {
+		t.Errorf("text = %q, should not use infra-specific stable-summary labels", got.Text)
+	}
+	if len(got.Blocks) == 0 {
+		t.Fatal("expected blocks")
+	}
+	if len(got.Blocks) > SlackBlockLimit {
+		t.Errorf("blocks = %d, want <= %d", len(got.Blocks), SlackBlockLimit)
+	}
+	assertContextContains(t, got.Blocks[len(got.Blocks)-1], "infra-health-turn")
+}
+
 func TestConvertInlineMarkdown(t *testing.T) {
 	tests := []struct {
 		name string

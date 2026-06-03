@@ -171,6 +171,46 @@ func TestRenderTurnPrompt_FollowUpKeepsCurrentRequestWrapper(t *testing.T) {
 	}
 }
 
+func TestRenderTurnPrompt_CronTurnUsesCronContext(t *testing.T) {
+	session := &kelosv1alpha1.AgentSession{
+		ObjectMeta: metav1.ObjectMeta{Name: "cron-session", Namespace: "kelos-system"},
+		Spec: kelosv1alpha1.AgentSessionSpec{
+			Source: kelosv1alpha1.AgentSessionSource{
+				Type:        "Cron",
+				Key:         "infra-health/non-prod/qa/2026-06-03",
+				DisplayName: "cron:cody-datadog-health-non-prod-qa",
+				Schedule:    "*/5 * * * *",
+			},
+			TaskSpawnerRef: kelosv1alpha1.TaskSpawnerReference{Name: "cody-datadog-health-non-prod-qa"},
+		},
+	}
+	turn := &kelosv1alpha1.AgentTurn{
+		Spec: kelosv1alpha1.AgentTurnSpec{
+			Sequence: 2,
+			Input:    kelosv1alpha1.AgentTurnInput{Body: "check qa infra health"},
+			Source: kelosv1alpha1.AgentTurnSource{
+				Type:     "CronTick",
+				ID:       "20260603-0830",
+				Time:     "2026-06-03T08:30:00Z",
+				Schedule: "*/5 * * * *",
+			},
+		},
+	}
+	got := renderTurnPrompt(session, turn)
+	for _, want := range []string{
+		"You are continuing Cody through a Kelos cron AgentSession.",
+		"Session scope: infra-health/non-prod/qa/2026-06-03",
+		"Cron tick: 20260603-0830 at 2026-06-03T08:30:00Z",
+		"Cron tick prompt:\ncheck qa infra health",
+		"Use the existing Codex App Server thread context",
+		"start the command with a TTY",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("renderTurnPrompt() missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func newTestTurnClient(t *testing.T) (*kelosv1alpha1.AgentTurn, client.Client) {
 	t.Helper()
 	turn := &kelosv1alpha1.AgentTurn{

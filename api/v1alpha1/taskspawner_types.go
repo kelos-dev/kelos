@@ -68,6 +68,35 @@ type Cron struct {
 	// Schedule is a cron expression (e.g., "0 9 * * 1" for every Monday at 9am).
 	// +kubebuilder:validation:Required
 	Schedule string `json:"schedule"`
+
+	// Session configures cron-triggered AgentSession behavior.
+	// +optional
+	Session *CronSession `json:"session,omitempty"`
+}
+
+// CronSession configures session-backed execution for cron TaskSpawners.
+type CronSession struct {
+	// Enabled switches cron ticks from one-shot Task creation to AgentSession/AgentTurn creation.
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// ScopeTemplate renders a deterministic session scope key.
+	// +optional
+	// +kubebuilder:validation:MaxLength=512
+	ScopeTemplate string `json:"scopeTemplate,omitempty"`
+
+	// MaxAge closes or rolls over a session after this duration.
+	// +optional
+	MaxAge *metav1.Duration `json:"maxAge,omitempty"`
+
+	// IdleTimeout closes an idle session after this duration.
+	// +optional
+	IdleTimeout *metav1.Duration `json:"idleTimeout,omitempty"`
+
+	// MaxQueuedTurns limits queued turns per session.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	MaxQueuedTurns *int32 `json:"maxQueuedTurns,omitempty"`
 }
 
 // Aikido discovers security issue groups from Aikido on a cron schedule.

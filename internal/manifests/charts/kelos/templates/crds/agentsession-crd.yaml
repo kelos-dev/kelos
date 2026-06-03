@@ -68,6 +68,11 @@ spec:
               idleTimeout:
                 description: IdleTimeout closes an idle session after this duration.
                 type: string
+              maxAge:
+                description: |-
+                  MaxAge closes an idle session after this duration regardless of recent
+                  activity. When nil, no age-based rollover is enforced.
+                type: string
               maxQueuedTurns:
                 description: MaxQueuedTurns limits queued turns for this session.
                 format: int32
@@ -94,8 +99,18 @@ spec:
                   channelID:
                     description: ChannelID is the Slack channel ID.
                     type: string
+                  displayName:
+                    description: DisplayName is a human-readable source label for
+                      prompts and status.
+                    type: string
+                  key:
+                    description: Key is the rendered deterministic session scope key.
+                    type: string
                   rootTS:
                     description: RootTS is the Slack root thread timestamp.
+                    type: string
+                  schedule:
+                    description: Schedule is the cron schedule that backs a cron session.
                     type: string
                   teamID:
                     description: TeamID is the Slack workspace/team ID when available.
@@ -105,12 +120,10 @@ spec:
                     type: string
                   type:
                     description: |-
-                      Type identifies the source shape. The first implementation supports
-                      SlackThread.
+                      Type identifies the source shape. Supported values include SlackThread
+                      and Cron.
                     type: string
                 required:
-                - channelID
-                - rootTS
                 - type
                 type: object
               taskSpawnerRef:

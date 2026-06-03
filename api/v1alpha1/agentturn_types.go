@@ -15,22 +15,41 @@ const (
 
 // AgentTurnSource identifies the external message that created a turn.
 type AgentTurnSource struct {
-	// Type identifies the source shape. The first implementation supports
-	// SlackMessage.
+	// Type identifies the source shape. Supported values include SlackMessage
+	// and CronTick.
 	Type string `json:"type"`
+
+	// ID is the source event ID used for de-duplication.
+	// +optional
+	ID string `json:"id,omitempty"`
+
+	// DisplayName is a human-readable source label for prompts and status.
+	// +optional
+	DisplayName string `json:"displayName,omitempty"`
+
+	// Time is the cron tick time in RFC3339 form.
+	// +optional
+	Time string `json:"time,omitempty"`
+
+	// Schedule is the cron schedule that produced this turn.
+	// +optional
+	Schedule string `json:"schedule,omitempty"`
 
 	// TeamID is the Slack workspace/team ID when available.
 	// +optional
 	TeamID string `json:"teamID,omitempty"`
 
 	// ChannelID is the Slack channel ID.
-	ChannelID string `json:"channelID"`
+	// +optional
+	ChannelID string `json:"channelID,omitempty"`
 
 	// RootTS is the Slack root thread timestamp.
-	RootTS string `json:"rootTS"`
+	// +optional
+	RootTS string `json:"rootTS,omitempty"`
 
 	// MessageTS is the Slack timestamp of the explicit mention.
-	MessageTS string `json:"messageTS"`
+	// +optional
+	MessageTS string `json:"messageTS,omitempty"`
 
 	// UserID is the Slack user ID of the message author.
 	// +optional

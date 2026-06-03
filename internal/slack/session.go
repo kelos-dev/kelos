@@ -299,6 +299,9 @@ func (h *SlackHandler) turnExistsForSlackMessage(ctx context.Context, session *v
 }
 
 func (h *SlackHandler) populateTurnTranscript(ctx context.Context, session *v1alpha1.AgentSession, turn *v1alpha1.AgentTurn) error {
+	if session.Spec.Source.Type != "SlackThread" || turn.Spec.Source.Type != "SlackMessage" {
+		return nil
+	}
 	fromTS := session.Status.LastAgentMessageTS
 	if fromTS == "" && turn.Spec.Source.MessageTS != session.Spec.Source.RootTS {
 		fromTS = session.Spec.Source.RootTS

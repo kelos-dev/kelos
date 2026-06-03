@@ -282,12 +282,26 @@ func (r *AgentSessionReconciler) syncAgentSessionRunningState(ctx context.Contex
 	}); err != nil {
 		return ctrl.Result{}, err
 	}
+	var requeueAfter time.Duration
+	if phase == kelosv1alpha1.AgentSessionPhaseIdle && session.Spec.MaxAge != nil && session.Spec.MaxAge.Duration > 0 {
+		age := time.Since(session.CreationTimestamp.Time)
+		if age >= session.Spec.MaxAge.Duration {
+			return r.setAgentSessionPhase(ctx, session, kelosv1alpha1.AgentSessionPhaseClosed, "Session max age reached")
+		}
+		requeueAfter = session.Spec.MaxAge.Duration - age
+	}
 	if phase == kelosv1alpha1.AgentSessionPhaseIdle && session.Spec.IdleTimeout.Duration > 0 && session.Status.LastActivityAt != nil {
 		idleFor := time.Since(session.Status.LastActivityAt.Time)
 		if idleFor >= session.Spec.IdleTimeout.Duration {
 			return r.setAgentSessionPhase(ctx, session, kelosv1alpha1.AgentSessionPhaseClosed, "Session idle timeout reached")
 		}
-		return ctrl.Result{RequeueAfter: session.Spec.IdleTimeout.Duration - idleFor}, nil
+		idleRemaining := session.Spec.IdleTimeout.Duration - idleFor
+		if requeueAfter == 0 || idleRemaining < requeueAfter {
+			requeueAfter = idleRemaining
+		}
+	}
+	if requeueAfter > 0 {
+		return ctrl.Result{RequeueAfter: requeueAfter}, nil
 	}
 	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 }

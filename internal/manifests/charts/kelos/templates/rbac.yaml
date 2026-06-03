@@ -166,6 +166,8 @@ rules:
   - apiGroups:
       - kelos.dev
     resources:
+      - agentsessions
+      - agentturns
       - tasks
     verbs:
       - create

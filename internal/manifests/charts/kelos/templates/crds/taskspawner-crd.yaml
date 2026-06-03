@@ -4130,6 +4130,33 @@ spec:
                         description: Schedule is a cron expression (e.g., "0 9 * *
                           1" for every Monday at 9am).
                         type: string
+                      session:
+                        description: Session configures cron-triggered AgentSession
+                          behavior.
+                        properties:
+                          enabled:
+                            description: Enabled switches cron ticks from one-shot
+                              Task creation to AgentSession/AgentTurn creation.
+                            type: boolean
+                          idleTimeout:
+                            description: IdleTimeout closes an idle session after
+                              this duration.
+                            type: string
+                          maxAge:
+                            description: MaxAge closes or rolls over a session after
+                              this duration.
+                            type: string
+                          maxQueuedTurns:
+                            description: MaxQueuedTurns limits queued turns per session.
+                            format: int32
+                            minimum: 1
+                            type: integer
+                          scopeTemplate:
+                            description: ScopeTemplate renders a deterministic session
+                              scope key.
+                            maxLength: 512
+                            type: string
+                        type: object
                     required:
                     - schedule
                     type: object

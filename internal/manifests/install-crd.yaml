@@ -292,6 +292,11 @@ spec:
               idleTimeout:
                 description: IdleTimeout closes an idle session after this duration.
                 type: string
+              maxAge:
+                description: |-
+                  MaxAge closes an idle session after this duration regardless of recent
+                  activity. When nil, no age-based rollover is enforced.
+                type: string
               maxQueuedTurns:
                 description: MaxQueuedTurns limits queued turns for this session.
                 format: int32
@@ -318,8 +323,18 @@ spec:
                   channelID:
                     description: ChannelID is the Slack channel ID.
                     type: string
+                  displayName:
+                    description: DisplayName is a human-readable source label for
+                      prompts and status.
+                    type: string
+                  key:
+                    description: Key is the rendered deterministic session scope key.
+                    type: string
                   rootTS:
                     description: RootTS is the Slack root thread timestamp.
+                    type: string
+                  schedule:
+                    description: Schedule is the cron schedule that backs a cron session.
                     type: string
                   teamID:
                     description: TeamID is the Slack workspace/team ID when available.
@@ -329,12 +344,10 @@ spec:
                     type: string
                   type:
                     description: |-
-                      Type identifies the source shape. The first implementation supports
-                      SlackThread.
+                      Type identifies the source shape. Supported values include SlackThread
+                      and Cron.
                     type: string
                 required:
-                - channelID
-                - rootTS
                 - type
                 type: object
               taskSpawnerRef:
@@ -4570,6 +4583,13 @@ spec:
                   channelID:
                     description: ChannelID is the Slack channel ID.
                     type: string
+                  displayName:
+                    description: DisplayName is a human-readable source label for
+                      prompts and status.
+                    type: string
+                  id:
+                    description: ID is the source event ID used for de-duplication.
+                    type: string
                   messageTS:
                     description: MessageTS is the Slack timestamp of the explicit
                       mention.
@@ -4580,21 +4600,25 @@ spec:
                   rootTS:
                     description: RootTS is the Slack root thread timestamp.
                     type: string
+                  schedule:
+                    description: Schedule is the cron schedule that produced this
+                      turn.
+                    type: string
                   teamID:
                     description: TeamID is the Slack workspace/team ID when available.
                     type: string
+                  time:
+                    description: Time is the cron tick time in RFC3339 form.
+                    type: string
                   type:
                     description: |-
-                      Type identifies the source shape. The first implementation supports
-                      SlackMessage.
+                      Type identifies the source shape. Supported values include SlackMessage
+                      and CronTick.
                     type: string
                   userID:
                     description: UserID is the Slack user ID of the message author.
                     type: string
                 required:
-                - channelID
-                - messageTS
-                - rootTS
                 - type
                 type: object
             required:
@@ -12715,6 +12739,33 @@ spec:
                         description: Schedule is a cron expression (e.g., "0 9 * *
                           1" for every Monday at 9am).
                         type: string
+                      session:
+                        description: Session configures cron-triggered AgentSession
+                          behavior.
+                        properties:
+                          enabled:
+                            description: Enabled switches cron ticks from one-shot
+                              Task creation to AgentSession/AgentTurn creation.
+                            type: boolean
+                          idleTimeout:
+                            description: IdleTimeout closes an idle session after
+                              this duration.
+                            type: string
+                          maxAge:
+                            description: MaxAge closes or rolls over a session after
+                              this duration.
+                            type: string
+                          maxQueuedTurns:
+                            description: MaxQueuedTurns limits queued turns per session.
+                            format: int32
+                            minimum: 1
+                            type: integer
+                          scopeTemplate:
+                            description: ScopeTemplate renders a deterministic session
+                              scope key.
+                            maxLength: 512
+                            type: string
+                        type: object
                     required:
                     - schedule
                     type: object

@@ -116,6 +116,13 @@ spec:
                   channelID:
                     description: ChannelID is the Slack channel ID.
                     type: string
+                  displayName:
+                    description: DisplayName is a human-readable source label for
+                      prompts and status.
+                    type: string
+                  id:
+                    description: ID is the source event ID used for de-duplication.
+                    type: string
                   messageTS:
                     description: MessageTS is the Slack timestamp of the explicit
                       mention.
@@ -126,21 +133,25 @@ spec:
                   rootTS:
                     description: RootTS is the Slack root thread timestamp.
                     type: string
+                  schedule:
+                    description: Schedule is the cron schedule that produced this
+                      turn.
+                    type: string
                   teamID:
                     description: TeamID is the Slack workspace/team ID when available.
                     type: string
+                  time:
+                    description: Time is the cron tick time in RFC3339 form.
+                    type: string
                   type:
                     description: |-
-                      Type identifies the source shape. The first implementation supports
-                      SlackMessage.
+                      Type identifies the source shape. Supported values include SlackMessage
+                      and CronTick.
                     type: string
                   userID:
                     description: UserID is the Slack user ID of the message author.
                     type: string
                 required:
-                - channelID
-                - messageTS
-                - rootTS
                 - type
                 type: object
             required:

@@ -705,7 +705,23 @@ func createCronSessionTurn(ctx context.Context, cl client.Client, ts *kelosv1alp
 	}
 	if err := cl.Create(ctx, turn); err != nil {
 		if apierrors.IsAlreadyExists(err) {
-			return false, nil
+			var existing kelosv1alpha1.AgentTurn
+			key := client.ObjectKey{Namespace: turn.Namespace, Name: turn.Name}
+			if getErr := cl.Get(ctx, key, &existing); getErr != nil {
+				return false, fmt.Errorf("fetching existing AgentTurn after name collision: %w", getErr)
+			}
+			if existing.Spec.SessionRef.Name == session.Name &&
+				existing.Spec.Source.Type == sourceTypeCronTick &&
+				existing.Spec.Source.ID == item.ID {
+				return false, nil
+			}
+			return false, fmt.Errorf("AgentTurn name collision for %s: existing session=%s tick=%s, desired session=%s tick=%s",
+				turn.Name,
+				existing.Spec.SessionRef.Name,
+				existing.Spec.Source.ID,
+				session.Name,
+				item.ID,
+			)
 		}
 		return false, fmt.Errorf("creating AgentTurn: %w", err)
 	}
@@ -870,13 +886,24 @@ func cronSessionName(spawnerName, scopeHash string, generation int32) string {
 func cronTurnName(sessionName string, sequence int32) string {
 	suffix := fmt.Sprintf("-t-%04d", sequence)
 	prefix := sessionName
-	if len(prefix) > 63-len(suffix) {
+	if len(prefix)+len(suffix) > 63 {
+		hash := shortHexHash(sessionName, 8)
+		suffix = fmt.Sprintf("-%s-t-%04d", hash, sequence)
 		prefix = strings.TrimRight(prefix[:63-len(suffix)], "-.")
 	}
 	if prefix == "" {
 		prefix = "turn"
 	}
 	return prefix + suffix
+}
+
+func shortHexHash(value string, length int) string {
+	sum := sha256.Sum256([]byte(value))
+	encoded := hex.EncodeToString(sum[:])
+	if length > len(encoded) {
+		return encoded
+	}
+	return encoded[:length]
 }
 
 func copyStringMap(in map[string]string) map[string]string {

@@ -3084,3 +3084,111 @@ func TestCreateCronSessionTurnCreatesSessionAndDedupesTick(t *testing.T) {
 		t.Fatalf("slack destination annotation = %q", turn.Annotations[reporting.AnnotationSlackDestination])
 	}
 }
+
+func TestCronTurnNamePreservesGenerationUniquenessWhenTruncated(t *testing.T) {
+	g2 := "cody-datadog-health-non-prod-qa-cron-sess-774208b98876-g2"
+	g7 := "cody-datadog-health-non-prod-qa-cron-sess-774208b98876-g7"
+
+	g2Turn := cronTurnName(g2, 1)
+	g7Turn := cronTurnName(g7, 1)
+
+	if g2Turn == g7Turn {
+		t.Fatalf("cronTurnName collision: %s", g2Turn)
+	}
+	if len(g2Turn) > 63 || len(g7Turn) > 63 {
+		t.Fatalf("turn names must fit Kubernetes limit: %q (%d), %q (%d)", g2Turn, len(g2Turn), g7Turn, len(g7Turn))
+	}
+	if !strings.HasSuffix(g2Turn, "-t-0001") || !strings.HasSuffix(g7Turn, "-t-0001") {
+		t.Fatalf("turn names should preserve sequence suffix: %q, %q", g2Turn, g7Turn)
+	}
+}
+
+func TestCreateCronSessionTurnReportsUnexpectedNameCollision(t *testing.T) {
+	maxQueued := int32(3)
+	ts := &kelosv1alpha1.TaskSpawner{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: kelosv1alpha1.GroupVersion.String(),
+			Kind:       "TaskSpawner",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cody-datadog-health-non-prod-qa",
+			Namespace: "kelos-system",
+			UID:       types.UID("taskspawner-uid"),
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				Cron: &kelosv1alpha1.Cron{
+					Schedule: "*/5 * * * *",
+					Session: &kelosv1alpha1.CronSession{
+						Enabled:        true,
+						ScopeTemplate:  "infra-health/non-prod/qa/{{.Date}}",
+						MaxQueuedTurns: &maxQueued,
+					},
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{Type: "codex"},
+		},
+	}
+
+	scope := "infra-health/non-prod/qa/2026-06-03"
+	sessionName := "cody-datadog-health-non-prod-qa-cron-sess-774208b98876-g7"
+	session := &kelosv1alpha1.AgentSession{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      sessionName,
+			Namespace: ts.Namespace,
+			Labels: map[string]string{
+				labelSource:           "cron",
+				labelTaskSpawner:      ts.Name,
+				labelSessionScopeHash: cronSessionScopeHash(ts.Namespace, ts.Name, scope),
+			},
+		},
+		Spec: kelosv1alpha1.AgentSessionSpec{
+			Source: kelosv1alpha1.AgentSessionSource{
+				Type: sourceTypeCron,
+				Key:  scope,
+			},
+			TaskSpawnerRef: kelosv1alpha1.TaskSpawnerReference{Name: ts.Name},
+			MaxQueuedTurns: maxQueued,
+		},
+	}
+	existing := &kelosv1alpha1.AgentTurn{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      cronTurnName(sessionName, 1),
+			Namespace: ts.Namespace,
+			Labels: map[string]string{
+				labelAgentSession: "different-session",
+			},
+		},
+		Spec: kelosv1alpha1.AgentTurnSpec{
+			SessionRef: kelosv1alpha1.AgentSessionReference{Name: "different-session"},
+			Sequence:   1,
+			Source: kelosv1alpha1.AgentTurnSource{
+				Type: sourceTypeCronTick,
+				ID:   "20260603-1005",
+			},
+		},
+	}
+	cl := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		WithObjects(ts, session, existing).
+		Build()
+
+	item := source.WorkItem{
+		ID:       "20260603-1045",
+		Time:     "2026-06-03T10:45:00Z",
+		Schedule: "*/5 * * * *",
+	}
+	vars := source.WorkItemToTemplateVars(item)
+	enrichCronTemplateVars(vars, ts, item)
+
+	created, err := createCronSessionTurn(context.Background(), cl, ts, item, vars, &kelosv1alpha1.Task{})
+	if err == nil {
+		t.Fatal("createCronSessionTurn() error = nil, want name collision error")
+	}
+	if created {
+		t.Fatal("createCronSessionTurn() created = true, want false")
+	}
+	if !strings.Contains(err.Error(), "AgentTurn name collision") {
+		t.Fatalf("createCronSessionTurn() error = %v, want collision", err)
+	}
+}

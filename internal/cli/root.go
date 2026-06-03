@@ -44,6 +44,7 @@ func NewRootCommand() *cobra.Command {
 		newGetCommand(cfg),
 		newLogsCommand(cfg),
 		newDeleteCommand(cfg),
+		newCancelCommand(cfg),
 		newSuspendCommand(cfg),
 		newResumeCommand(cfg),
 		newInitCommand(cfg),

@@ -192,7 +192,7 @@ func newGetTaskCommand(cfg *ClientConfig, allNamespaces *bool) *cobra.Command {
 
 	cmd.Flags().StringVarP(&output, "output", "o", "", "Output format (yaml or json)")
 	cmd.Flags().BoolVarP(&detail, "detail", "d", false, "Show detailed information for a specific task")
-	cmd.Flags().StringSliceVar(&phases, "phase", nil, "Filter tasks by phase (Pending, Running, Waiting, Succeeded, Failed)")
+	cmd.Flags().StringSliceVar(&phases, "phase", nil, "Filter tasks by phase (Pending, Running, Waiting, Succeeded, Failed, Cancelled)")
 
 	cmd.ValidArgsFunction = completeTaskNames(cfg)
 	_ = cmd.RegisterFlagCompletionFunc("output", cobra.FixedCompletions([]string{"yaml", "json"}, cobra.ShellCompDirectiveNoFileComp))
@@ -288,12 +288,13 @@ var validTaskPhases = map[kelosv1alpha1.TaskPhase]bool{
 	kelosv1alpha1.TaskPhaseWaiting:   true,
 	kelosv1alpha1.TaskPhaseSucceeded: true,
 	kelosv1alpha1.TaskPhaseFailed:    true,
+	kelosv1alpha1.TaskPhaseCancelled: true,
 }
 
 func validatePhases(phases []string) error {
 	for _, p := range phases {
 		if !validTaskPhases[kelosv1alpha1.TaskPhase(p)] {
-			return fmt.Errorf("unknown phase %q: must be one of Pending, Running, Waiting, Succeeded, Failed", p)
+			return fmt.Errorf("unknown phase %q: must be one of Pending, Running, Waiting, Succeeded, Failed, Cancelled", p)
 		}
 	}
 	return nil

@@ -88,8 +88,9 @@ func contextBlock(taskName string) *slack.ContextBlock {
 // phaseHeaderText maps each phase to its leading Block Kit section text.
 // Phases without an entry (e.g. "succeeded") get no header block.
 var phaseHeaderText = map[string]string{
-	"accepted": ":hourglass_flowing_sand: *Working on your request...*",
-	"failed":   ":x: *Something went wrong*",
+	"accepted":  ":hourglass_flowing_sand: *Working on your request...*",
+	"failed":    ":x: *Something went wrong*",
+	"cancelled": ":stop_button: *Task cancelled*",
 }
 
 // phaseFallbackText maps each phase to its default fallback text (before the
@@ -98,6 +99,7 @@ var phaseFallbackText = map[string]string{
 	"accepted":  "Working on your request...",
 	"succeeded": "Done!",
 	"failed":    "Failed.",
+	"cancelled": "Cancelled.",
 }
 
 // FormatProgressMessage returns a Slack message with Block Kit blocks for

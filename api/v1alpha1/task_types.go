@@ -32,6 +32,8 @@ const (
 	TaskPhaseFailed TaskPhase = "Failed"
 	// TaskPhaseWaiting means the Task is waiting for dependencies or branch lock.
 	TaskPhaseWaiting TaskPhase = "Waiting"
+	// TaskPhaseCancelled means the Task was cancelled before completing.
+	TaskPhaseCancelled TaskPhase = "Cancelled"
 )
 
 // SecretReference refers to a Secret containing credentials.
@@ -245,6 +247,11 @@ type TaskStatus struct {
 	// Results contains structured key-value outputs produced by the agent.
 	// +optional
 	Results map[string]string `json:"results,omitempty"`
+
+	// CancelledBy records what initiated cancellation (e.g., "user",
+	// "spawner:my-spawner"). Only set when Phase is Cancelled.
+	// +optional
+	CancelledBy string `json:"cancelledBy,omitempty"`
 }
 
 // +genclient

@@ -215,6 +215,8 @@ func (tr *TaskReporter) reportViaComment(ctx context.Context, task *kelosv1alpha
 		desiredPhase = "succeeded"
 	case kelosv1alpha1.TaskPhaseFailed:
 		desiredPhase = "failed"
+	case kelosv1alpha1.TaskPhaseCancelled:
+		desiredPhase = "cancelled"
 	default:
 		return nil
 	}
@@ -266,6 +268,8 @@ func (tr *TaskReporter) reportViaComment(ctx context.Context, task *kelosv1alpha
 		body = FormatSucceededComment(task.Name)
 	case "failed":
 		body = FormatFailedComment(task.Name)
+	case "cancelled":
+		body = FormatCancelledComment(task.Name)
 	}
 
 	if commentID == 0 {
@@ -336,6 +340,14 @@ func (tr *TaskReporter) reportViaCheckRun(ctx context.Context, task *kelosv1alph
 		output = &checkRunOutput{
 			Title:   checkName + " — Failed",
 			Summary: fmt.Sprintf("Agent task `%s` has failed", task.Name),
+		}
+	case kelosv1alpha1.TaskPhaseCancelled:
+		desiredPhase = "cancelled"
+		status = "completed"
+		conclusion = "cancelled"
+		output = &checkRunOutput{
+			Title:   checkName + " — Cancelled",
+			Summary: fmt.Sprintf("Agent task `%s` has been cancelled", task.Name),
 		}
 	default:
 		return nil
@@ -509,6 +521,8 @@ func (tr *SlackTaskReporter) ReportTaskStatus(ctx context.Context, task *kelosv1
 		desiredPhase = "succeeded"
 	case kelosv1alpha1.TaskPhaseFailed:
 		desiredPhase = "failed"
+	case kelosv1alpha1.TaskPhaseCancelled:
+		desiredPhase = "cancelled"
 	default:
 		return nil
 	}
@@ -529,7 +543,7 @@ func (tr *SlackTaskReporter) ReportTaskStatus(ctx context.Context, task *kelosv1
 	// thread compact. When the response was split into multiple messages,
 	// replace the progress message with the first part and post the rest
 	// as new replies.
-	if desiredPhase == "succeeded" || desiredPhase == "failed" {
+	if desiredPhase == "succeeded" || desiredPhase == "failed" || desiredPhase == "cancelled" {
 		if progressTS := tr.getProgressTS(task.UID); progressTS != "" {
 			log.Info("Updating Slack progress message with final result", "task", task.Name, "channel", channel, "phase", desiredPhase)
 			if err := tr.Reporter.UpdateMessage(ctx, channel, progressTS, msgs[0]); err != nil {
@@ -567,7 +581,7 @@ func (tr *SlackTaskReporter) ReportTaskStatus(ctx context.Context, task *kelosv1
 	}
 
 	// Clean up caches when reporting a terminal phase.
-	if desiredPhase == "succeeded" || desiredPhase == "failed" {
+	if desiredPhase == "succeeded" || desiredPhase == "failed" || desiredPhase == "cancelled" {
 		tr.clearProgressCache(task.UID)
 		tr.clearActivityState(task.UID)
 	}

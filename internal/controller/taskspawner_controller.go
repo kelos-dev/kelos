@@ -179,7 +179,9 @@ func (r *TaskSpawnerReconciler) countActiveTasks(ctx context.Context, taskSpawne
 	for i := range taskList.Items {
 		task := &taskList.Items[i]
 		// Count tasks that are not in terminal phases
-		if task.Status.Phase != kelosv1alpha1.TaskPhaseSucceeded && task.Status.Phase != kelosv1alpha1.TaskPhaseFailed {
+		if task.Status.Phase != kelosv1alpha1.TaskPhaseSucceeded &&
+			task.Status.Phase != kelosv1alpha1.TaskPhaseFailed &&
+			task.Status.Phase != kelosv1alpha1.TaskPhaseCancelled {
 			activeTasks++
 		}
 	}

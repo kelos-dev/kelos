@@ -103,6 +103,42 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		}
 	}
 
+	// Handle externally-cancelled tasks: delete the Job and clean up.
+	if task.Status.Phase == kelosv1alpha1.TaskPhaseCancelled {
+		if jobExists {
+			logger.Info("Task cancelled, deleting Job", "task", task.Name)
+			propagationPolicy := metav1.DeletePropagationBackground
+			if err := r.Delete(ctx, &job, &client.DeleteOptions{
+				PropagationPolicy: &propagationPolicy,
+			}); err != nil && !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, err
+			}
+			taskCompletedTotal.WithLabelValues(task.Namespace, task.Spec.Type, string(kelosv1alpha1.TaskPhaseCancelled)).Inc()
+			r.recordEvent(&task, corev1.EventTypeNormal, "TaskCancelled", "Task was cancelled")
+		} else if task.Status.JobName == "" {
+			// Task was cancelled before a Job was ever created (e.g., while
+			// Waiting on dependencies). Record metric on first reconcile only —
+			// JobName being empty distinguishes this from a post-deletion reconcile.
+			taskCompletedTotal.WithLabelValues(task.Namespace, task.Spec.Type, string(kelosv1alpha1.TaskPhaseCancelled)).Inc()
+			r.recordEvent(&task, corev1.EventTypeNormal, "TaskCancelled", "Task was cancelled")
+		}
+		if task.Spec.Branch != "" {
+			r.BranchLocker.Release(branchLockKey(&task), task.Name)
+		}
+		// Check TTL expiration for cancelled tasks.
+		if expired, requeueAfter := r.ttlExpired(&task); expired {
+			logger.Info("Deleting Task due to TTL expiration", "task", task.Name)
+			r.recordEvent(&task, corev1.EventTypeNormal, "TaskExpired", "Deleting Task due to TTL expiration")
+			if err := r.Delete(ctx, &task); err != nil && !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{}, nil
+		} else if requeueAfter > 0 {
+			return ctrl.Result{RequeueAfter: requeueAfter}, nil
+		}
+		return ctrl.Result{}, nil
+	}
+
 	// Create Job if it doesn't exist
 	if !jobExists {
 		if len(task.Spec.DependsOn) > 0 {
@@ -634,7 +670,9 @@ func (r *TaskReconciler) ttlExpired(task *kelosv1alpha1.Task) (bool, time.Durati
 	if task.Spec.TTLSecondsAfterFinished == nil {
 		return false, 0
 	}
-	if task.Status.Phase != kelosv1alpha1.TaskPhaseSucceeded && task.Status.Phase != kelosv1alpha1.TaskPhaseFailed {
+	if task.Status.Phase != kelosv1alpha1.TaskPhaseSucceeded &&
+		task.Status.Phase != kelosv1alpha1.TaskPhaseFailed &&
+		task.Status.Phase != kelosv1alpha1.TaskPhaseCancelled {
 		return false, 0
 	}
 	if task.Status.CompletionTime == nil {
@@ -726,14 +764,14 @@ func (r *TaskReconciler) checkDependencies(ctx context.Context, task *kelosv1alp
 			return false, ctrl.Result{}, err
 		}
 
-		if depTask.Status.Phase == kelosv1alpha1.TaskPhaseFailed {
-			logger.Info("Dependency failed", "dependency", depName)
+		if depTask.Status.Phase == kelosv1alpha1.TaskPhaseFailed || depTask.Status.Phase == kelosv1alpha1.TaskPhaseCancelled {
+			logger.Info("Dependency failed or cancelled", "dependency", depName, "phase", depTask.Status.Phase)
 			updateErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 				if getErr := r.Get(ctx, client.ObjectKeyFromObject(task), task); getErr != nil {
 					return getErr
 				}
 				task.Status.Phase = kelosv1alpha1.TaskPhaseFailed
-				task.Status.Message = fmt.Sprintf("Dependency %q failed", depName)
+				task.Status.Message = fmt.Sprintf("Dependency %q is %s", depName, string(depTask.Status.Phase))
 				now := metav1.Now()
 				task.Status.CompletionTime = &now
 				return r.Status().Update(ctx, task)
@@ -741,7 +779,7 @@ func (r *TaskReconciler) checkDependencies(ctx context.Context, task *kelosv1alp
 			if updateErr != nil {
 				logger.Error(updateErr, "Unable to update Task status")
 			}
-			r.recordEvent(task, corev1.EventTypeWarning, "DependencyFailed", "Dependency %q failed", depName)
+			r.recordEvent(task, corev1.EventTypeWarning, "DependencyFailed", "Dependency %q is %s", depName, string(depTask.Status.Phase))
 			taskCompletedTotal.WithLabelValues(task.Namespace, task.Spec.Type, string(kelosv1alpha1.TaskPhaseFailed)).Inc()
 			return false, ctrl.Result{}, nil
 		}
@@ -947,7 +985,9 @@ func (r *TaskReconciler) enqueueDependentTasks(ctx context.Context, obj client.O
 	}
 
 	// Only trigger when a task reaches a terminal phase
-	if task.Status.Phase != kelosv1alpha1.TaskPhaseSucceeded && task.Status.Phase != kelosv1alpha1.TaskPhaseFailed {
+	if task.Status.Phase != kelosv1alpha1.TaskPhaseSucceeded &&
+		task.Status.Phase != kelosv1alpha1.TaskPhaseFailed &&
+		task.Status.Phase != kelosv1alpha1.TaskPhaseCancelled {
 		return nil
 	}
 

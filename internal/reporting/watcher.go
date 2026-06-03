@@ -109,7 +109,8 @@ const (
 	SlackReportingEnabled  = "enabled"
 	SlackReportingDeferred = "deferred"
 
-	SlackLayoutStableSummaryRoot = "stable-summary-root"
+	SlackLayoutStableSummaryRoot  = "stable-summary-root"
+	SlackLayoutSessionSummaryRoot = "session-summary-root"
 )
 
 // TaskReporter watches Tasks and reports status changes to GitHub.
@@ -674,6 +675,11 @@ func (tr *SlackTaskReporter) persistSlackAnnotations(ctx context.Context, task *
 func isStableSummarySlackLayout(annotations map[string]string) bool {
 	return annotations[AnnotationSlackReporting] == SlackReportingDeferred &&
 		annotations[AnnotationSlackLayout] == SlackLayoutStableSummaryRoot
+}
+
+func isSessionSummarySlackLayout(annotations map[string]string) bool {
+	return annotations[AnnotationSlackReporting] == SlackReportingDeferred &&
+		annotations[AnnotationSlackLayout] == SlackLayoutSessionSummaryRoot
 }
 
 func stableSummaryFromAnnotations(annotations map[string]string) string {

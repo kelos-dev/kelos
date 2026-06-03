@@ -141,6 +141,11 @@ type AgentSessionStatus struct {
 	// +optional
 	LastAgentMessageTS string `json:"lastAgentMessageTS,omitempty"`
 
+	// Slack records the session-owned Slack surface for sessions that were not
+	// created from an existing Slack thread.
+	// +optional
+	Slack *AgentSessionSlackStatus `json:"slack,omitempty"`
+
 	// LastActivityAt is the last observed session activity time.
 	// +optional
 	LastActivityAt *metav1.Time `json:"lastActivityAt,omitempty"`
@@ -160,6 +165,43 @@ type AgentSessionStatus struct {
 	// +patchMergeKey=type
 	// +patchStrategy=merge
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
+}
+
+// AgentSessionSlackStatus records the Slack message owned by a proactive
+// AgentSession.
+type AgentSessionSlackStatus struct {
+	// ChannelID is the Slack channel ID where the root message was posted.
+	// +optional
+	ChannelID string `json:"channelID,omitempty"`
+
+	// RootTS is the timestamp of the session root message.
+	// +optional
+	RootTS string `json:"rootTS,omitempty"`
+
+	// Destination is the configured Slack destination name when used.
+	// +optional
+	Destination string `json:"destination,omitempty"`
+
+	// Layout is the Slack layout used for the root message.
+	// +optional
+	Layout string `json:"layout,omitempty"`
+
+	// Summary is the concise additive session summary shown in the root
+	// message.
+	// +optional
+	Summary string `json:"summary,omitempty"`
+
+	// Latest is the current in-flight status shown in the root message.
+	// +optional
+	Latest string `json:"latest,omitempty"`
+
+	// LastPostedTurn is the last AgentTurn reflected in the root message.
+	// +optional
+	LastPostedTurn string `json:"lastPostedTurn,omitempty"`
+
+	// LastPostedSequence is incremented when the root message changes.
+	// +optional
+	LastPostedSequence int32 `json:"lastPostedSequence,omitempty"`
 }
 
 // +genclient

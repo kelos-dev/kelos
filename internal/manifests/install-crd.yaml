@@ -4462,6 +4462,44 @@ spec:
               runnerPodName:
                 description: RunnerPodName is the current runner Pod name when known.
                 type: string
+              slack:
+                description: |-
+                  Slack records the session-owned Slack surface for sessions that were not
+                  created from an existing Slack thread.
+                properties:
+                  channelID:
+                    description: ChannelID is the Slack channel ID where the root
+                      message was posted.
+                    type: string
+                  destination:
+                    description: Destination is the configured Slack destination name
+                      when used.
+                    type: string
+                  lastPostedSequence:
+                    description: LastPostedSequence is incremented when the root message
+                      changes.
+                    format: int32
+                    type: integer
+                  lastPostedTurn:
+                    description: LastPostedTurn is the last AgentTurn reflected in
+                      the root message.
+                    type: string
+                  latest:
+                    description: Latest is the current in-flight status shown in the
+                      root message.
+                    type: string
+                  layout:
+                    description: Layout is the Slack layout used for the root message.
+                    type: string
+                  rootTS:
+                    description: RootTS is the timestamp of the session root message.
+                    type: string
+                  summary:
+                    description: |-
+                      Summary is the concise additive session summary shown in the root
+                      message.
+                    type: string
+                type: object
             type: object
         type: object
     served: true

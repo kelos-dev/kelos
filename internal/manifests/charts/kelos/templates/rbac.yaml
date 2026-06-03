@@ -235,7 +235,7 @@ subjects:
   - kind: ServiceAccount
     name: kelos-controller
     namespace: kelos-system
-{{- if or .Values.webhookServer.sources.github.enabled .Values.webhookServer.sources.linear.enabled }}
+{{- if or .Values.webhookServer.sources.github.enabled .Values.webhookServer.sources.linear.enabled .Values.webhookServer.sources.generic.enabled }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole

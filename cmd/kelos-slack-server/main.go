@@ -139,6 +139,7 @@ func main() {
 	turnReporter := &reporting.SlackTurnReporter{
 		Client:   mgr.GetClient(),
 		Reporter: slackReporter.Reporter,
+		Routes:   routes,
 	}
 
 	// Register reporting loop as a leader-elected runnable.

@@ -29,23 +29,37 @@ type AgentSessionReference struct {
 
 // AgentSessionSource identifies the external conversation backing a session.
 type AgentSessionSource struct {
-	// Type identifies the source shape. The first implementation supports
-	// SlackThread.
+	// Type identifies the source shape. Supported values include SlackThread
+	// and Cron.
 	Type string `json:"type"`
+
+	// Key is the rendered deterministic session scope key.
+	// +optional
+	Key string `json:"key,omitempty"`
+
+	// DisplayName is a human-readable source label for prompts and status.
+	// +optional
+	DisplayName string `json:"displayName,omitempty"`
 
 	// TeamID is the Slack workspace/team ID when available.
 	// +optional
 	TeamID string `json:"teamID,omitempty"`
 
 	// ChannelID is the Slack channel ID.
-	ChannelID string `json:"channelID"`
+	// +optional
+	ChannelID string `json:"channelID,omitempty"`
 
 	// RootTS is the Slack root thread timestamp.
-	RootTS string `json:"rootTS"`
+	// +optional
+	RootTS string `json:"rootTS,omitempty"`
 
 	// ThreadURL is a Slack permalink to the thread.
 	// +optional
 	ThreadURL string `json:"threadURL,omitempty"`
+
+	// Schedule is the cron schedule that backs a cron session.
+	// +optional
+	Schedule string `json:"schedule,omitempty"`
 }
 
 // AgentSessionRoute records the Slack route that created the session.
@@ -82,6 +96,11 @@ type AgentSessionSpec struct {
 
 	// IdleTimeout closes an idle session after this duration.
 	IdleTimeout metav1.Duration `json:"idleTimeout"`
+
+	// MaxAge closes an idle session after this duration regardless of recent
+	// activity. When nil, no age-based rollover is enforced.
+	// +optional
+	MaxAge *metav1.Duration `json:"maxAge,omitempty"`
 
 	// ContextWindow controls how much Slack thread context is materialized for
 	// each follow-up turn.

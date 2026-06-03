@@ -2966,3 +2966,121 @@ func TestRunCycleWithSource_ContextSources_RequiredFailure(t *testing.T) {
 		t.Fatalf("Expected 0 tasks (required context source failed), got %d", len(taskList.Items))
 	}
 }
+
+func TestCreateCronSessionTurnCreatesSessionAndDedupesTick(t *testing.T) {
+	maxQueued := int32(3)
+	maxAge := metav1.Duration{Duration: 24 * time.Hour}
+	idleTimeout := metav1.Duration{Duration: 30 * time.Minute}
+	ts := &kelosv1alpha1.TaskSpawner{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: kelosv1alpha1.GroupVersion.String(),
+			Kind:       "TaskSpawner",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cody-datadog-health-non-prod-qa",
+			Namespace: "kelos-system",
+			UID:       types.UID("taskspawner-uid"),
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				Cron: &kelosv1alpha1.Cron{
+					Schedule: "*/5 * * * *",
+					Session: &kelosv1alpha1.CronSession{
+						Enabled:        true,
+						ScopeTemplate:  "infra-health/non-prod/qa/{{.Date}}",
+						MaxAge:         &maxAge,
+						IdleTimeout:    &idleTimeout,
+						MaxQueuedTurns: &maxQueued,
+					},
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{
+				Type: "codex",
+			},
+		},
+	}
+	cl := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		WithObjects(ts).
+		Build()
+
+	item := source.WorkItem{
+		ID:       "20260603-0830",
+		Time:     "2026-06-03T08:30:00Z",
+		Schedule: "*/5 * * * *",
+	}
+	vars := source.WorkItemToTemplateVars(item)
+	enrichCronTemplateVars(vars, ts, item)
+	renderedTask := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: map[string]string{
+				reporting.LabelSlackReporting: "enabled",
+			},
+			Annotations: map[string]string{
+				reporting.AnnotationSlackReporting:   reporting.SlackReportingDeferred,
+				reporting.AnnotationSlackDestination: "cody-devops",
+				reporting.AnnotationSlackLayout:      reporting.SlackLayoutStableSummaryRoot,
+			},
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Prompt: "check qa infra health",
+		},
+	}
+
+	created, err := createCronSessionTurn(context.Background(), cl, ts, item, vars, renderedTask)
+	if err != nil {
+		t.Fatalf("createCronSessionTurn() error = %v", err)
+	}
+	if !created {
+		t.Fatal("createCronSessionTurn() created = false, want true")
+	}
+	created, err = createCronSessionTurn(context.Background(), cl, ts, item, vars, renderedTask)
+	if err != nil {
+		t.Fatalf("second createCronSessionTurn() error = %v", err)
+	}
+	if created {
+		t.Fatal("second createCronSessionTurn() created = true, want deduped false")
+	}
+
+	var sessions kelosv1alpha1.AgentSessionList
+	if err := cl.List(context.Background(), &sessions, client.InNamespace(ts.Namespace)); err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions.Items) != 1 {
+		t.Fatalf("AgentSessions = %d, want 1", len(sessions.Items))
+	}
+	session := sessions.Items[0]
+	if session.Spec.Source.Type != sourceTypeCron {
+		t.Fatalf("session source type = %q, want %q", session.Spec.Source.Type, sourceTypeCron)
+	}
+	if session.Spec.Source.Key != "infra-health/non-prod/qa/2026-06-03" {
+		t.Fatalf("session source key = %q", session.Spec.Source.Key)
+	}
+	if session.Spec.MaxQueuedTurns != maxQueued {
+		t.Fatalf("MaxQueuedTurns = %d, want %d", session.Spec.MaxQueuedTurns, maxQueued)
+	}
+	if session.Spec.MaxAge == nil || session.Spec.MaxAge.Duration != maxAge.Duration {
+		t.Fatalf("MaxAge = %#v, want %s", session.Spec.MaxAge, maxAge.Duration)
+	}
+
+	var turns kelosv1alpha1.AgentTurnList
+	if err := cl.List(context.Background(), &turns, client.InNamespace(ts.Namespace)); err != nil {
+		t.Fatal(err)
+	}
+	if len(turns.Items) != 1 {
+		t.Fatalf("AgentTurns = %d, want 1", len(turns.Items))
+	}
+	turn := turns.Items[0]
+	if turn.Spec.Source.Type != sourceTypeCronTick || turn.Spec.Source.ID != item.ID {
+		t.Fatalf("turn source = %#v", turn.Spec.Source)
+	}
+	if turn.Spec.Input.Body != renderedTask.Spec.Prompt {
+		t.Fatalf("turn body = %q, want rendered prompt", turn.Spec.Input.Body)
+	}
+	if turn.Labels[labelAgentSession] != session.Name {
+		t.Fatalf("agent-session label = %q, want %q", turn.Labels[labelAgentSession], session.Name)
+	}
+	if turn.Annotations[reporting.AnnotationSlackDestination] != "cody-devops" {
+		t.Fatalf("slack destination annotation = %q", turn.Annotations[reporting.AnnotationSlackDestination])
+	}
+}

@@ -1,13 +1,18 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
+	"text/template"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -20,6 +25,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
@@ -33,6 +39,21 @@ import (
 )
 
 var scheme = runtime.NewScheme()
+
+const (
+	labelAgentSession     = "kelos.dev/agent-session"
+	labelTaskSpawner      = "kelos.dev/taskspawner"
+	labelSource           = "kelos.dev/source"
+	labelSessionScopeHash = "kelos.dev/session-scope-hash"
+
+	sourceTypeCron     = "Cron"
+	sourceTypeCronTick = "CronTick"
+
+	defaultCronSessionScopeTemplate = "{{.TaskSpawner}}/{{.Date}}"
+	defaultCronSessionMaxAge        = 24 * time.Hour
+	defaultCronSessionIdleTimeout   = time.Hour
+	defaultCronSessionMaxQueued     = int32(5)
+)
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
@@ -292,52 +313,61 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 	itemsDiscoveredTotal.Add(float64(len(items)))
 	log.Info("discovered items", "count", len(items))
 
-	// Build set of already-created Tasks by listing them from the API.
-	// This is resilient to spawner restarts (status may lag behind actual Tasks).
-	var existingTaskList kelosv1alpha1.TaskList
-	if err := cl.List(ctx, &existingTaskList,
-		client.InNamespace(ts.Namespace),
-		client.MatchingLabels{"kelos.dev/taskspawner": ts.Name},
-	); err != nil {
-		return fmt.Errorf("listing existing Tasks: %w", err)
-	}
-
-	existingTaskMap := make(map[string]*kelosv1alpha1.Task)
+	sessionMode := cronSessionEnabled(&ts)
 	activeTasks := 0
-	for i := range existingTaskList.Items {
-		t := &existingTaskList.Items[i]
-		existingTaskMap[t.Name] = t
-		if t.Status.Phase != kelosv1alpha1.TaskPhaseSucceeded && t.Status.Phase != kelosv1alpha1.TaskPhaseFailed {
-			activeTasks++
+
+	var existingTaskMap map[string]*kelosv1alpha1.Task
+	if !sessionMode {
+		// Build set of already-created Tasks by listing them from the API.
+		// This is resilient to spawner restarts (status may lag behind actual Tasks).
+		var existingTaskList kelosv1alpha1.TaskList
+		if err := cl.List(ctx, &existingTaskList,
+			client.InNamespace(ts.Namespace),
+			client.MatchingLabels{labelTaskSpawner: ts.Name},
+		); err != nil {
+			return fmt.Errorf("listing existing Tasks: %w", err)
+		}
+
+		existingTaskMap = make(map[string]*kelosv1alpha1.Task)
+		for i := range existingTaskList.Items {
+			t := &existingTaskList.Items[i]
+			existingTaskMap[t.Name] = t
+			if t.Status.Phase != kelosv1alpha1.TaskPhaseSucceeded && t.Status.Phase != kelosv1alpha1.TaskPhaseFailed {
+				activeTasks++
+			}
 		}
 	}
 
 	var newItems []source.WorkItem
-	for _, item := range items {
-		taskName := fmt.Sprintf("%s-%s", ts.Name, item.ID)
-		existing, found := existingTaskMap[taskName]
-		if !found {
-			newItems = append(newItems, item)
-			continue
-		}
-
-		// Retrigger: when the source provides a trigger time and the existing
-		// task is completed, check whether a new trigger arrived after the task
-		// finished. If so, delete the completed task so a new one can be created.
-		// Note: if creation is later blocked by maxConcurrency or maxTotalTasks,
-		// the item will be picked up as new on the next cycle since the old task
-		// no longer exists.
-		if !item.TriggerTime.IsZero() &&
-			(existing.Status.Phase == kelosv1alpha1.TaskPhaseSucceeded || existing.Status.Phase == kelosv1alpha1.TaskPhaseFailed) &&
-			existing.Status.CompletionTime != nil &&
-			item.TriggerTime.After(existing.Status.CompletionTime.Time) {
-
-			if err := cl.Delete(ctx, existing); err != nil && !apierrors.IsNotFound(err) {
-				log.Error(err, "Deleting completed task for retrigger", "task", taskName)
+	if sessionMode {
+		newItems = append(newItems, items...)
+	} else {
+		for _, item := range items {
+			taskName := fmt.Sprintf("%s-%s", ts.Name, item.ID)
+			existing, found := existingTaskMap[taskName]
+			if !found {
+				newItems = append(newItems, item)
 				continue
 			}
-			log.Info("Deleted completed task for retrigger", "task", taskName)
-			newItems = append(newItems, item)
+
+			// Retrigger: when the source provides a trigger time and the existing
+			// task is completed, check whether a new trigger arrived after the task
+			// finished. If so, delete the completed task so a new one can be created.
+			// Note: if creation is later blocked by maxConcurrency or maxTotalTasks,
+			// the item will be picked up as new on the next cycle since the old task
+			// no longer exists.
+			if !item.TriggerTime.IsZero() &&
+				(existing.Status.Phase == kelosv1alpha1.TaskPhaseSucceeded || existing.Status.Phase == kelosv1alpha1.TaskPhaseFailed) &&
+				existing.Status.CompletionTime != nil &&
+				item.TriggerTime.After(existing.Status.CompletionTime.Time) {
+
+				if err := cl.Delete(ctx, existing); err != nil && !apierrors.IsNotFound(err) {
+					log.Error(err, "Deleting completed task for retrigger", "task", taskName)
+					continue
+				}
+				log.Info("Deleted completed task for retrigger", "task", taskName)
+				newItems = append(newItems, item)
+			}
 		}
 	}
 
@@ -369,7 +399,7 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 	newTasksCreated := 0
 	for _, item := range newItems {
 		// Enforce max concurrency limit
-		if maxConcurrency > 0 && int32(activeTasks) >= maxConcurrency {
+		if !sessionMode && maxConcurrency > 0 && int32(activeTasks) >= maxConcurrency {
 			log.Info("Max concurrency reached, skipping remaining items", "activeTasks", activeTasks, "maxConcurrency", maxConcurrency)
 			break
 		}
@@ -383,6 +413,7 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 		taskName := fmt.Sprintf("%s-%s", ts.Name, item.ID)
 
 		templateVars := source.WorkItemToTemplateVars(item)
+		enrichCronTemplateVars(templateVars, &ts, item)
 
 		// Enrich with external context sources
 		if contextFetcher != nil {
@@ -414,6 +445,19 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 		)
 		if err != nil {
 			log.Error(err, "building task", "item", item.ID)
+			continue
+		}
+
+		if sessionMode {
+			created, err := createCronSessionTurn(ctx, cl, &ts, item, templateVars, task)
+			if err != nil {
+				log.Error(err, "creating cron AgentTurn", "item", item.ID)
+				continue
+			}
+			if created {
+				log.Info("Created AgentTurn for cron tick", "item", item.ID)
+				newTasksCreated++
+			}
 			continue
 		}
 
@@ -502,6 +546,348 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 	discoveryTotal.Inc()
 
 	return nil
+}
+
+func cronSessionEnabled(ts *kelosv1alpha1.TaskSpawner) bool {
+	return ts != nil &&
+		ts.Spec.When.Cron != nil &&
+		ts.Spec.When.Cron.Session != nil &&
+		ts.Spec.When.Cron.Session.Enabled
+}
+
+type cronSessionConfig struct {
+	scopeTemplate string
+	maxAge        time.Duration
+	idleTimeout   time.Duration
+	maxQueued     int32
+}
+
+func effectiveCronSessionConfig(ts *kelosv1alpha1.TaskSpawner) cronSessionConfig {
+	cfg := cronSessionConfig{
+		scopeTemplate: defaultCronSessionScopeTemplate,
+		maxAge:        defaultCronSessionMaxAge,
+		idleTimeout:   defaultCronSessionIdleTimeout,
+		maxQueued:     defaultCronSessionMaxQueued,
+	}
+	if ts == nil || ts.Spec.When.Cron == nil || ts.Spec.When.Cron.Session == nil {
+		return cfg
+	}
+	session := ts.Spec.When.Cron.Session
+	if strings.TrimSpace(session.ScopeTemplate) != "" {
+		cfg.scopeTemplate = session.ScopeTemplate
+	}
+	if session.MaxAge != nil && session.MaxAge.Duration > 0 {
+		cfg.maxAge = session.MaxAge.Duration
+	}
+	if session.IdleTimeout != nil && session.IdleTimeout.Duration > 0 {
+		cfg.idleTimeout = session.IdleTimeout.Duration
+	}
+	if session.MaxQueuedTurns != nil && *session.MaxQueuedTurns > 0 {
+		cfg.maxQueued = *session.MaxQueuedTurns
+	}
+	return cfg
+}
+
+func enrichCronTemplateVars(vars map[string]interface{}, ts *kelosv1alpha1.TaskSpawner, item source.WorkItem) {
+	if vars == nil || ts == nil || ts.Spec.When.Cron == nil {
+		return
+	}
+	tickTime := cronTickTime(item)
+	vars["TaskSpawner"] = ts.Name
+	vars["Namespace"] = ts.Namespace
+	vars["Schedule"] = ts.Spec.When.Cron.Schedule
+	if item.Schedule != "" {
+		vars["Schedule"] = item.Schedule
+	}
+	vars["Time"] = tickTime.Format(time.RFC3339)
+	vars["ID"] = item.ID
+	vars["Date"] = tickTime.Format("2006-01-02")
+	vars["Hour"] = tickTime.Format("20060102-15")
+}
+
+func cronTickTime(item source.WorkItem) time.Time {
+	if item.Time != "" {
+		if parsed, err := time.Parse(time.RFC3339, item.Time); err == nil {
+			return parsed.UTC()
+		}
+	}
+	if item.ID != "" {
+		if parsed, err := time.Parse("20060102-1504", item.ID); err == nil {
+			return parsed.UTC()
+		}
+	}
+	return time.Now().UTC()
+}
+
+func renderTemplateString(name, templateStr string, vars map[string]interface{}) (string, error) {
+	tmpl, err := template.New(name).Option("missingkey=error").Parse(templateStr)
+	if err != nil {
+		return "", fmt.Errorf("parsing %s template: %w", name, err)
+	}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, vars); err != nil {
+		return "", fmt.Errorf("executing %s template: %w", name, err)
+	}
+	return strings.TrimSpace(buf.String()), nil
+}
+
+func createCronSessionTurn(ctx context.Context, cl client.Client, ts *kelosv1alpha1.TaskSpawner, item source.WorkItem, templateVars map[string]interface{}, renderedTask *kelosv1alpha1.Task) (bool, error) {
+	cfg := effectiveCronSessionConfig(ts)
+	scope, err := renderTemplateString("cronSessionScope", cfg.scopeTemplate, templateVars)
+	if err != nil {
+		return false, err
+	}
+	if scope == "" {
+		return false, fmt.Errorf("cron session scope rendered empty")
+	}
+	session, err := findOrCreateCronSession(ctx, cl, ts, scope, cfg)
+	if err != nil {
+		return false, err
+	}
+	if exists, err := cronTurnExists(ctx, cl, session, item.ID); err != nil {
+		return false, err
+	} else if exists {
+		return false, nil
+	}
+	if session.Spec.MaxQueuedTurns > 0 {
+		count, err := countQueuedOrRunningCronTurns(ctx, cl, session)
+		if err != nil {
+			return false, err
+		}
+		if count >= session.Spec.MaxQueuedTurns {
+			return false, fmt.Errorf("session %s already has %d queued or running turns", session.Name, count)
+		}
+	}
+	sequence, err := nextCronTurnSequence(ctx, cl, session)
+	if err != nil {
+		return false, err
+	}
+
+	turn := &kelosv1alpha1.AgentTurn{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        cronTurnName(session.Name, sequence),
+			Namespace:   session.Namespace,
+			Labels:      copyStringMap(renderedTask.Labels),
+			Annotations: copyStringMap(renderedTask.Annotations),
+		},
+		Spec: kelosv1alpha1.AgentTurnSpec{
+			SessionRef: kelosv1alpha1.AgentSessionReference{Name: session.Name},
+			Sequence:   sequence,
+			Source: kelosv1alpha1.AgentTurnSource{
+				Type:        sourceTypeCronTick,
+				ID:          item.ID,
+				DisplayName: fmt.Sprintf("cron:%s", ts.Name),
+				Time:        cronTickTime(item).Format(time.RFC3339),
+				Schedule:    ts.Spec.When.Cron.Schedule,
+			},
+			Input: kelosv1alpha1.AgentTurnInput{
+				Text: renderedTask.Spec.Prompt,
+				Body: renderedTask.Spec.Prompt,
+			},
+			Context: kelosv1alpha1.AgentTurnContext{
+				Mode:          kelosv1alpha1.SlackSessionContextWindowSinceLastAgentMessage,
+				ToTSInclusive: item.ID,
+			},
+		},
+	}
+	if turn.Labels == nil {
+		turn.Labels = map[string]string{}
+	}
+	turn.Labels[labelSource] = "cron"
+	turn.Labels[labelAgentSession] = session.Name
+	turn.Labels[labelTaskSpawner] = ts.Name
+	if turn.Annotations == nil {
+		turn.Annotations = map[string]string{}
+	}
+
+	if err := controllerutil.SetControllerReference(session, turn, cl.Scheme()); err != nil {
+		return false, fmt.Errorf("setting AgentTurn owner reference: %w", err)
+	}
+	if err := cl.Create(ctx, turn); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("creating AgentTurn: %w", err)
+	}
+	return true, nil
+}
+
+func findOrCreateCronSession(ctx context.Context, cl client.Client, ts *kelosv1alpha1.TaskSpawner, scope string, cfg cronSessionConfig) (*kelosv1alpha1.AgentSession, error) {
+	scopeHash := cronSessionScopeHash(ts.Namespace, ts.Name, scope)
+	var list kelosv1alpha1.AgentSessionList
+	if err := cl.List(ctx, &list,
+		client.InNamespace(ts.Namespace),
+		client.MatchingLabels{
+			labelSource:           "cron",
+			labelTaskSpawner:      ts.Name,
+			labelSessionScopeHash: scopeHash,
+		},
+	); err != nil {
+		return nil, fmt.Errorf("listing AgentSessions: %w", err)
+	}
+
+	if session := newestActiveCronSession(list.Items); session != nil {
+		return session, nil
+	}
+
+	generation := int32(len(list.Items) + 1)
+	name := cronSessionName(ts.Name, scopeHash, generation)
+	maxAge := metav1.Duration{Duration: cfg.maxAge}
+	session := &kelosv1alpha1.AgentSession{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: ts.Namespace,
+			Labels: map[string]string{
+				labelSource:           "cron",
+				labelTaskSpawner:      ts.Name,
+				labelSessionScopeHash: scopeHash,
+			},
+		},
+		Spec: kelosv1alpha1.AgentSessionSpec{
+			Source: kelosv1alpha1.AgentSessionSource{
+				Type:        sourceTypeCron,
+				Key:         scope,
+				DisplayName: fmt.Sprintf("cron:%s", ts.Name),
+				Schedule:    ts.Spec.When.Cron.Schedule,
+			},
+			TaskSpawnerRef:       kelosv1alpha1.TaskSpawnerReference{Name: ts.Name},
+			TaskTemplateSnapshot: ts.Spec.TaskTemplate,
+			IdleTimeout:          metav1.Duration{Duration: cfg.idleTimeout},
+			MaxAge:               &maxAge,
+			MaxQueuedTurns:       cfg.maxQueued,
+		},
+	}
+	if err := controllerutil.SetControllerReference(ts, session, cl.Scheme()); err != nil {
+		return nil, fmt.Errorf("setting AgentSession owner reference: %w", err)
+	}
+	if err := cl.Create(ctx, session); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return nil, fmt.Errorf("creating AgentSession: %w", err)
+		}
+		var existing kelosv1alpha1.AgentSession
+		if getErr := cl.Get(ctx, client.ObjectKey{Namespace: ts.Namespace, Name: name}, &existing); getErr != nil {
+			return nil, fmt.Errorf("fetching existing AgentSession: %w", getErr)
+		}
+		if isTerminalAgentSession(&existing) {
+			return nil, fmt.Errorf("AgentSession %s already exists in terminal phase %s", name, existing.Status.Phase)
+		}
+		return &existing, nil
+	}
+	return session, nil
+}
+
+func newestActiveCronSession(items []kelosv1alpha1.AgentSession) *kelosv1alpha1.AgentSession {
+	active := make([]kelosv1alpha1.AgentSession, 0, len(items))
+	for _, session := range items {
+		if isTerminalAgentSession(&session) {
+			continue
+		}
+		active = append(active, session)
+	}
+	if len(active) == 0 {
+		return nil
+	}
+	sort.Slice(active, func(i, j int) bool {
+		return active[i].CreationTimestamp.After(active[j].CreationTimestamp.Time)
+	})
+	return &active[0]
+}
+
+func isTerminalAgentSession(session *kelosv1alpha1.AgentSession) bool {
+	switch session.Status.Phase {
+	case kelosv1alpha1.AgentSessionPhaseClosed, kelosv1alpha1.AgentSessionPhaseError:
+		return true
+	default:
+		return false
+	}
+}
+
+func cronTurnExists(ctx context.Context, cl client.Client, session *kelosv1alpha1.AgentSession, itemID string) (bool, error) {
+	if itemID == "" {
+		return false, nil
+	}
+	var list kelosv1alpha1.AgentTurnList
+	if err := cl.List(ctx, &list, client.InNamespace(session.Namespace), client.MatchingLabels{labelAgentSession: session.Name}); err != nil {
+		return false, err
+	}
+	for _, turn := range list.Items {
+		if turn.Spec.Source.Type == sourceTypeCronTick && turn.Spec.Source.ID == itemID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func countQueuedOrRunningCronTurns(ctx context.Context, cl client.Client, session *kelosv1alpha1.AgentSession) (int32, error) {
+	var list kelosv1alpha1.AgentTurnList
+	if err := cl.List(ctx, &list, client.InNamespace(session.Namespace), client.MatchingLabels{labelAgentSession: session.Name}); err != nil {
+		return 0, err
+	}
+	var count int32
+	for _, turn := range list.Items {
+		switch turn.Status.Phase {
+		case "", kelosv1alpha1.AgentTurnPhaseQueued, kelosv1alpha1.AgentTurnPhaseRunning:
+			count++
+		}
+	}
+	return count, nil
+}
+
+func nextCronTurnSequence(ctx context.Context, cl client.Client, session *kelosv1alpha1.AgentSession) (int32, error) {
+	var list kelosv1alpha1.AgentTurnList
+	if err := cl.List(ctx, &list, client.InNamespace(session.Namespace), client.MatchingLabels{labelAgentSession: session.Name}); err != nil {
+		return 0, err
+	}
+	var maxSeq int32
+	for _, turn := range list.Items {
+		if turn.Spec.Sequence > maxSeq {
+			maxSeq = turn.Spec.Sequence
+		}
+	}
+	return maxSeq + 1, nil
+}
+
+func cronSessionScopeHash(namespace, spawner, scope string) string {
+	sum := sha256.Sum256([]byte(strings.Join([]string{namespace, spawner, scope}, "\n")))
+	return hex.EncodeToString(sum[:])[:12]
+}
+
+func cronSessionName(spawnerName, scopeHash string, generation int32) string {
+	suffix := "-cron-sess-" + scopeHash
+	if generation > 1 {
+		suffix = fmt.Sprintf("%s-g%d", suffix, generation)
+	}
+	prefix := spawnerName
+	if len(prefix) > 63-len(suffix) {
+		prefix = strings.TrimRight(prefix[:63-len(suffix)], "-.")
+	}
+	if prefix == "" {
+		prefix = "cron"
+	}
+	return prefix + suffix
+}
+
+func cronTurnName(sessionName string, sequence int32) string {
+	suffix := fmt.Sprintf("-t-%04d", sequence)
+	prefix := sessionName
+	if len(prefix) > 63-len(suffix) {
+		prefix = strings.TrimRight(prefix[:63-len(suffix)], "-.")
+	}
+	if prefix == "" {
+		prefix = "turn"
+	}
+	return prefix + suffix
+}
+
+func copyStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }
 
 // sourceAnnotations returns source-owned annotations for a spawned Task.

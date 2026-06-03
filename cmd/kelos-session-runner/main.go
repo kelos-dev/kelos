@@ -919,6 +919,9 @@ func cancelTurn(ctx context.Context, cl client.Client, session *kelosv1alpha1.Ag
 }
 
 func renderTurnPrompt(session *kelosv1alpha1.AgentSession, turn *kelosv1alpha1.AgentTurn) string {
+	if session.Spec.Source.Type == "Cron" || turn.Spec.Source.Type == "CronTick" {
+		return renderCronTurnPrompt(session, turn)
+	}
 	transcript := strings.TrimSpace(turn.Spec.Context.Transcript)
 	if transcript == "" {
 		transcript = "(none)"
@@ -987,6 +990,71 @@ If you need more information, ask for it in your final answer.`,
 		turn.Spec.Source.UserID,
 		turn.Spec.Source.UserID,
 		turn.Spec.Source.MessageTS,
+		request,
+	)
+}
+
+func renderCronTurnPrompt(session *kelosv1alpha1.AgentSession, turn *kelosv1alpha1.AgentTurn) string {
+	request := strings.TrimSpace(turn.Spec.Input.Body)
+	if request == "" {
+		request = strings.TrimSpace(turn.Spec.Input.Text)
+	}
+	sourceName := strings.TrimSpace(session.Spec.Source.DisplayName)
+	if sourceName == "" {
+		sourceName = session.Spec.Source.Type
+	}
+	sourceKey := strings.TrimSpace(session.Spec.Source.Key)
+	if sourceKey == "" {
+		sourceKey = "(none)"
+	}
+	schedule := strings.TrimSpace(turn.Spec.Source.Schedule)
+	if schedule == "" {
+		schedule = session.Spec.Source.Schedule
+	}
+	if schedule == "" {
+		schedule = "(none)"
+	}
+	tickID := strings.TrimSpace(turn.Spec.Source.ID)
+	if tickID == "" {
+		tickID = "(none)"
+	}
+	tickTime := strings.TrimSpace(turn.Spec.Source.Time)
+	if tickTime == "" {
+		tickTime = "(unknown)"
+	}
+	action := "running"
+	if turn.Spec.Sequence > 1 {
+		action = "continuing"
+	}
+	return fmt.Sprintf(`You are %s Cody through a Kelos cron AgentSession.
+
+Session:
+- Kelos session: %s/%s
+- Source: %s
+- Session scope: %s
+- TaskSpawner route: %s/%s
+- Turn sequence: %d
+- Cron schedule: %s
+- Cron tick: %s at %s
+
+Cron tick prompt:
+%s
+
+Use the existing Codex App Server thread context to maintain continuity across cron ticks in this session.
+Reply once through the Kelos reporter.
+For shell commands that require follow-up stdin, an interactive prompt, or a long-running session you need to write to later, start the command with a TTY. If a previous command reports that stdin is closed, rerun it as an interactive TTY session instead of retrying write_stdin.
+If you need more information, ask for it in your final answer.`,
+		action,
+		session.Namespace,
+		session.Name,
+		sourceName,
+		sourceKey,
+		session.Namespace,
+		session.Spec.TaskSpawnerRef.Name,
+		turn.Spec.Sequence,
+		schedule,
+		tickID,
+		tickTime,
 		request,
 	)
 }

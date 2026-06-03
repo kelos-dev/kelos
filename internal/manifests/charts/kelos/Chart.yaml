@@ -2,4 +2,4 @@ apiVersion: v2
 name: kelos-cody
 description: Kelos controller and CRDs
 type: application
-version: 0.33.0-kelos-cody.4
+version: 0.33.0-kelos-cody.5

@@ -50,18 +50,21 @@ func newCancelTaskCommand(cfg *ClientConfig) *cobra.Command {
 			ctx := context.Background()
 			taskName := args[0]
 
+			// Check terminal state before attempting cancellation.
+			var task kelosv1alpha1.Task
+			if err := cl.Get(ctx, client.ObjectKey{Namespace: ns, Name: taskName}, &task); err != nil {
+				return fmt.Errorf("getting task %s: %w", taskName, err)
+			}
+			switch task.Status.Phase {
+			case kelosv1alpha1.TaskPhaseSucceeded, kelosv1alpha1.TaskPhaseFailed, kelosv1alpha1.TaskPhaseCancelled:
+				fmt.Fprintf(os.Stdout, "task/%s is already in terminal phase %s\n", taskName, task.Status.Phase)
+				return nil
+			}
+
 			if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-				var task kelosv1alpha1.Task
 				if err := cl.Get(ctx, client.ObjectKey{Namespace: ns, Name: taskName}, &task); err != nil {
 					return err
 				}
-
-				switch task.Status.Phase {
-				case kelosv1alpha1.TaskPhaseSucceeded, kelosv1alpha1.TaskPhaseFailed, kelosv1alpha1.TaskPhaseCancelled:
-					fmt.Fprintf(os.Stdout, "task/%s is already in terminal phase %s\n", taskName, task.Status.Phase)
-					return nil
-				}
-
 				now := metav1.Now()
 				task.Status.Phase = kelosv1alpha1.TaskPhaseCancelled
 				task.Status.Message = "Cancelled by user"

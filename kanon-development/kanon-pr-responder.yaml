@@ -84,7 +84,7 @@ spec:
       - 4. Read the existing diff (git diff main...HEAD) to understand what has already been done. Do NOT start over or rewrite from scratch.
       - 5. Make only the incremental changes needed to address review feedback or remaining issues. Preserve existing work. If there is nothing actionable to change, exit without code changes or comments.
       - 6. Commit and push your changes to origin on the PR head branch (use `git push origin HEAD`).
-      - 7. /review the PR to verify your changes address the feedback. If changes are needed, make them, run `make verify` and `make test`, commit and push, then /review again. Repeat until the review passes.
+      - 7. Run `/review --base origin/main` locally to verify your changes address the feedback. If issues are found, fix them, run `make verify` and `make test`, commit and push, then run `/review --base origin/main` again. Repeat until the local review passes.
       - 8. Update the PR title and description to reflect the final diff. The PR body MUST contain a standard closing keyword reference on its own line (e.g., `Fixes #123` or `Closes #123`). Do not embed the issue number in natural language. Ensure the PR has the label "generated-by-kelos" (use `gh pr edit {{.Number}} --add-label generated-by-kelos` if missing).
       - 9. After pushing, actively check CI status with `gh pr checks {{.Number}}`. If any checks fail, investigate the failures, fix them, commit and push, then check again. Do not request review until CI passes.
 

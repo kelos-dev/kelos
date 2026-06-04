@@ -10,8 +10,9 @@ telemetry:
   enabled: true
 
 # codexAuthRefresher lets the controller manage one scheduled Codex-image
-# CronJob per Secret labeled kelos.dev/codex-oauth-refresh=true, keeping Codex
-# OAuth credentials valid even when no agent task runs for a while.
+# CronJob in the target namespace per Secret labeled
+# kelos.dev/codex-oauth-refresh=true, keeping Codex OAuth credentials valid even
+# when no agent task runs for a while.
 codexAuthRefresher:
   schedule: "0 */6 * * *"
 

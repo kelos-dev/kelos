@@ -131,7 +131,7 @@ codexAuthRefresher:
 kubectl label secret codex-credentials kelos.dev/codex-oauth-refresh=true
 ```
 
-For each labeled Secret with a non-empty `CODEX_AUTH_JSON` key, the controller manages a dedicated CronJob. The CronJob runs the Codex image under the controller's ServiceAccount, seeds `auth.json` from that one Secret, invokes Codex so the CLI performs its own refresh, and writes the refreshed file back to only the `CODEX_AUTH_JSON` key — other keys are preserved and the token is never logged. Removing the label or deleting the Secret removes its CronJob. Secrets without a `CODEX_AUTH_JSON` bundle, or whose bundle carries no `refresh_token` (e.g. API-key credentials), are skipped. Externally-managed Secrets (ExternalSecrets, Vault, sealed-secrets) will overwrite the refreshed value on their next sync and are not supported.
+For each labeled Secret with a non-empty `CODEX_AUTH_JSON` key, the controller manages a dedicated CronJob in the Secret's namespace with access limited to that Secret. The CronJob seeds `auth.json` from that one Secret, invokes Codex so the CLI performs its own refresh, and writes the refreshed file back to only the `CODEX_AUTH_JSON` key — other keys are preserved and the token is never logged. Removing the label or deleting the Secret removes the managed refresh resources. Secrets without a `CODEX_AUTH_JSON` bundle, or whose bundle carries no `refresh_token` (e.g. API-key credentials), are skipped. Externally-managed Secrets (ExternalSecrets, Vault, sealed-secrets) will overwrite the refreshed value on their next sync and are not supported.
 
 ## Workspace
 

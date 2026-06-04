@@ -42,8 +42,10 @@ rules:
   - serviceaccounts
   verbs:
   - create
+  - delete
   - get
   - list
+  - update
   - watch
 - apiGroups:
   - ""
@@ -124,10 +126,13 @@ rules:
   - rbac.authorization.k8s.io
   resources:
   - rolebindings
+  - roles
   verbs:
   - create
+  - delete
   - get
   - list
+  - update
   - watch
 # END GENERATED: controller-rbac
 ---

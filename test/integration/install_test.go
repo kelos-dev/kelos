@@ -45,6 +45,37 @@ func clearNamespaceFinalizers() {
 // start from a clean slate and cannot satisfy assertions against stale state
 // left by a previous test.
 func deleteControllerResources() {
+	secrets := &corev1.SecretList{}
+	_ = k8sClient.List(ctx, secrets, client.MatchingLabels{codexauth.RefreshLabel: "true"})
+	for i := range secrets.Items {
+		_ = client.IgnoreNotFound(k8sClient.Delete(ctx, &secrets.Items[i]))
+	}
+
+	selector := client.MatchingLabels{
+		"app.kubernetes.io/component": "codex-auth-refresher",
+		"kelos.dev/managed-by":        "kelos-controller",
+	}
+	cronJobs := &batchv1.CronJobList{}
+	_ = k8sClient.List(ctx, cronJobs, selector)
+	for i := range cronJobs.Items {
+		_ = client.IgnoreNotFound(k8sClient.Delete(ctx, &cronJobs.Items[i]))
+	}
+	roleBindings := &rbacv1.RoleBindingList{}
+	_ = k8sClient.List(ctx, roleBindings, selector)
+	for i := range roleBindings.Items {
+		_ = client.IgnoreNotFound(k8sClient.Delete(ctx, &roleBindings.Items[i]))
+	}
+	roles := &rbacv1.RoleList{}
+	_ = k8sClient.List(ctx, roles, selector)
+	for i := range roles.Items {
+		_ = client.IgnoreNotFound(k8sClient.Delete(ctx, &roles.Items[i]))
+	}
+	serviceAccounts := &corev1.ServiceAccountList{}
+	_ = k8sClient.List(ctx, serviceAccounts, selector)
+	for i := range serviceAccounts.Items {
+		_ = client.IgnoreNotFound(k8sClient.Delete(ctx, &serviceAccounts.Items[i]))
+	}
+
 	for _, obj := range []client.Object{
 		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "kelos-controller-rolebinding"}},
 		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "kelos-controller-role"}},
@@ -256,7 +287,7 @@ var _ = Describe("Install/Uninstall", Ordered, func() {
 			cronJob := &batchv1.CronJob{}
 			key := types.NamespacedName{
 				Name:      controller.CodexAuthRefresherCronJobName("default", "codex-oauth"),
-				Namespace: "kelos-system",
+				Namespace: "default",
 			}
 			Eventually(func() error {
 				return k8sClient.Get(ctx, key, cronJob)
@@ -268,12 +299,25 @@ var _ = Describe("Install/Uninstall", Ordered, func() {
 			Expect(*cronJob.Spec.JobTemplate.Spec.ActiveDeadlineSeconds).To(Equal(int64(600)))
 
 			podSpec := cronJob.Spec.JobTemplate.Spec.Template.Spec
-			Expect(podSpec.ServiceAccountName).To(Equal("kelos-controller"))
+			Expect(podSpec.ServiceAccountName).To(Equal(key.Name))
 			serviceAccount := &corev1.ServiceAccount{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{
 				Name:      podSpec.ServiceAccountName,
 				Namespace: cronJob.Namespace,
 			}, serviceAccount)).To(Succeed())
+			role := &rbacv1.Role{}
+			Expect(k8sClient.Get(ctx, key, role)).To(Succeed())
+			Expect(role.Rules).To(HaveLen(1))
+			Expect(role.Rules[0].Resources).To(Equal([]string{"secrets"}))
+			Expect(role.Rules[0].ResourceNames).To(Equal([]string{"codex-oauth"}))
+			Expect(role.Rules[0].Verbs).To(Equal([]string{"get", "update"}))
+			roleBinding := &rbacv1.RoleBinding{}
+			Expect(k8sClient.Get(ctx, key, roleBinding)).To(Succeed())
+			Expect(roleBinding.RoleRef.Kind).To(Equal("Role"))
+			Expect(roleBinding.RoleRef.Name).To(Equal(role.Name))
+			Expect(roleBinding.Subjects).To(HaveLen(1))
+			Expect(roleBinding.Subjects[0].Name).To(Equal(podSpec.ServiceAccountName))
+			Expect(roleBinding.Subjects[0].Namespace).To(Equal(cronJob.Namespace))
 			Expect(podSpec.RestartPolicy).To(Equal(corev1.RestartPolicyOnFailure))
 			Expect(podSpec.SecurityContext).NotTo(BeNil())
 			Expect(podSpec.SecurityContext.RunAsNonRoot).NotTo(BeNil())

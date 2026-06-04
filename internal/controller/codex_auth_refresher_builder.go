@@ -9,6 +9,7 @@ import (
 	"github.com/kelos-dev/kelos/internal/codexauth"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -26,7 +27,6 @@ const (
 var nonDNSNameChars = regexp.MustCompile(`[^a-z0-9-]+`)
 
 type CodexAuthRefresherBuilder struct {
-	Namespace       string
 	Schedule        string
 	CodexImage      string
 	ImagePullPolicy corev1.PullPolicy
@@ -34,7 +34,6 @@ type CodexAuthRefresherBuilder struct {
 
 func NewCodexAuthRefresherBuilder() *CodexAuthRefresherBuilder {
 	return &CodexAuthRefresherBuilder{
-		Namespace:  "kelos-system",
 		Schedule:   DefaultCodexAuthRefreshSchedule,
 		CodexImage: CodexImage,
 	}
@@ -44,10 +43,6 @@ func (b *CodexAuthRefresherBuilder) Build(secret *corev1.Secret) *batchv1.CronJo
 	schedule := b.Schedule
 	if schedule == "" {
 		schedule = DefaultCodexAuthRefreshSchedule
-	}
-	namespace := b.Namespace
-	if namespace == "" {
-		namespace = "kelos-system"
 	}
 	image := b.CodexImage
 	if image == "" {
@@ -61,20 +56,13 @@ func (b *CodexAuthRefresherBuilder) Build(secret *corev1.Secret) *batchv1.CronJo
 	runAsNonRoot := true
 	allowPrivilegeEscalation := false
 
-	labels := map[string]string{
-		"app.kubernetes.io/name":      "kelos",
-		"app.kubernetes.io/component": codexAuthRefresherComponentLabel,
-		"kelos.dev/managed-by":        "kelos-controller",
-	}
-	annotations := map[string]string{
-		codexAuthSecretNamespaceAnnotation: secret.Namespace,
-		codexAuthSecretNameAnnotation:      secret.Name,
-	}
+	labels := codexAuthRefresherLabels()
+	annotations := codexAuthSecretAnnotations(secret)
 
 	return &batchv1.CronJob{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        CodexAuthRefresherCronJobName(secret.Namespace, secret.Name),
-			Namespace:   namespace,
+			Namespace:   secret.Namespace,
 			Labels:      labels,
 			Annotations: annotations,
 		},
@@ -91,7 +79,7 @@ func (b *CodexAuthRefresherBuilder) Build(secret *corev1.Secret) *batchv1.CronJo
 					Template: corev1.PodTemplateSpec{
 						ObjectMeta: metav1.ObjectMeta{Labels: labels},
 						Spec: corev1.PodSpec{
-							ServiceAccountName: "kelos-controller",
+							ServiceAccountName: codexAuthRefresherServiceAccountName(secret.Namespace, secret.Name),
 							SecurityContext: &corev1.PodSecurityContext{
 								RunAsNonRoot: &runAsNonRoot,
 							},
@@ -130,6 +118,56 @@ func (b *CodexAuthRefresherBuilder) Build(secret *corev1.Secret) *batchv1.CronJo
 	}
 }
 
+func (b *CodexAuthRefresherBuilder) BuildServiceAccount(secret *corev1.Secret) *corev1.ServiceAccount {
+	return &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        codexAuthRefresherServiceAccountName(secret.Namespace, secret.Name),
+			Namespace:   secret.Namespace,
+			Labels:      codexAuthRefresherLabels(),
+			Annotations: codexAuthSecretAnnotations(secret),
+		},
+	}
+}
+
+func (b *CodexAuthRefresherBuilder) BuildRole(secret *corev1.Secret) *rbacv1.Role {
+	return &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        CodexAuthRefresherCronJobName(secret.Namespace, secret.Name),
+			Namespace:   secret.Namespace,
+			Labels:      codexAuthRefresherLabels(),
+			Annotations: codexAuthSecretAnnotations(secret),
+		},
+		Rules: []rbacv1.PolicyRule{{
+			APIGroups:     []string{""},
+			Resources:     []string{"secrets"},
+			ResourceNames: []string{secret.Name},
+			Verbs:         []string{"get", "update"},
+		}},
+	}
+}
+
+func (b *CodexAuthRefresherBuilder) BuildRoleBinding(secret *corev1.Secret) *rbacv1.RoleBinding {
+	name := CodexAuthRefresherCronJobName(secret.Namespace, secret.Name)
+	return &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Namespace:   secret.Namespace,
+			Labels:      codexAuthRefresherLabels(),
+			Annotations: codexAuthSecretAnnotations(secret),
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: rbacv1.GroupName,
+			Kind:     "Role",
+			Name:     name,
+		},
+		Subjects: []rbacv1.Subject{{
+			Kind:      "ServiceAccount",
+			Name:      codexAuthRefresherServiceAccountName(secret.Namespace, secret.Name),
+			Namespace: secret.Namespace,
+		}},
+	}
+}
+
 func CodexAuthRefresherCronJobName(namespace, secretName string) string {
 	source := namespace + "-" + secretName
 	hash := sha256.Sum256([]byte(namespace + "/" + secretName))
@@ -145,6 +183,10 @@ func CodexAuthRefresherCronJobName(namespace, secretName string) string {
 	return codexAuthRefresherCronJobNamePrefix + base + "-" + suffix
 }
 
+func codexAuthRefresherServiceAccountName(namespace, secretName string) string {
+	return CodexAuthRefresherCronJobName(namespace, secretName)
+}
+
 func dnsNameFragment(s string) string {
 	s = strings.ToLower(s)
 	s = nonDNSNameChars.ReplaceAllString(s, "-")
@@ -157,4 +199,19 @@ func dnsNameFragment(s string) string {
 
 func IsCodexAuthRefreshable(secret *corev1.Secret) bool {
 	return secret.Labels[codexauth.RefreshLabel] == "true" && len(secret.Data["CODEX_AUTH_JSON"]) > 0
+}
+
+func codexAuthRefresherLabels() map[string]string {
+	return map[string]string{
+		"app.kubernetes.io/name":      "kelos",
+		"app.kubernetes.io/component": codexAuthRefresherComponentLabel,
+		"kelos.dev/managed-by":        "kelos-controller",
+	}
+}
+
+func codexAuthSecretAnnotations(secret *corev1.Secret) map[string]string {
+	return map[string]string{
+		codexAuthSecretNamespaceAnnotation: secret.Namespace,
+		codexAuthSecretNameAnnotation:      secret.Name,
+	}
 }

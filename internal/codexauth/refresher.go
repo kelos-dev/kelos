@@ -180,7 +180,7 @@ func DefaultRunner(ctx context.Context, seeded []byte) ([]byte, error) {
 		"--sandbox", "read-only",
 		"--ask-for-approval", "never",
 		"-C", workdir,
-		"Check authentication and respond exactly: ok",
+		"Reply with the single word OK.",
 	)
 	cmd.Env = append(os.Environ(), "CODEX_HOME="+codexHome, "HOME="+root)
 	cmd.Stdout = os.Stderr

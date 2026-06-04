@@ -238,7 +238,6 @@ func main() {
 		os.Exit(1)
 	}
 	refresherBuilder := controller.NewCodexAuthRefresherBuilder()
-	refresherBuilder.Namespace = controllerNamespace()
 	refresherBuilder.Schedule = codexAuthRefresherSchedule
 	refresherBuilder.CodexImage = codexImage
 	refresherBuilder.ImagePullPolicy = corev1.PullPolicy(codexImagePullPolicy)
@@ -265,11 +264,4 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
-}
-
-func controllerNamespace() string {
-	if namespace := os.Getenv("POD_NAMESPACE"); namespace != "" {
-		return namespace
-	}
-	return "kelos-system"
 }

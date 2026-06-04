@@ -1,0 +1,97 @@
+name: Refresh Codex Auth
+
+# Refreshes the CODEX_AUTH_JSON secret (repository copy and ok-to-test
+# environment copy) that e2e uses: Codex rotates file-backed auth.json and the
+# result is written back with a kelos-secret-manager App installation token.
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+# Refreshing rotates the shared OAuth refresh_token, so concurrent runs would
+# invalidate each other. Never run more than one at a time.
+concurrency:
+  group: refresh-codex-auth
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Codex CLI
+        run: |
+          version=$(grep -oP 'ARG CODEX_VERSION=\K[0-9.]+' codex/Dockerfile)
+          npm install -g @openai/codex@"${version}"
+
+      - name: Mint secret-manager token
+        id: app-token
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547
+        with:
+          app-id: ${{ secrets.KELOS_SECRET_MANAGER_APP_ID }}
+          private-key: ${{ secrets.KELOS_SECRET_MANAGER_PRIVATE_KEY }}
+
+      - name: Verify secret write access
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          probe_secret="CODEX_AUTH_REFRESH_WRITE_PROBE"
+          probe_value="write-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          # Prove both secret targets are writable before Codex rotates the
+          # refresh_token; read/list access is not enough for this workflow.
+          gh secret set "${probe_secret}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --body "${probe_value}"
+          gh secret delete "${probe_secret}" \
+            --repo "${GITHUB_REPOSITORY}"
+          gh secret set "${probe_secret}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --env ok-to-test \
+            --body "${probe_value}"
+          gh secret delete "${probe_secret}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --env ok-to-test
+
+      - name: Refresh Codex auth.json
+        env:
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+        run: |
+          if [ -z "${CODEX_AUTH_JSON}" ]; then
+            echo "::error::CODEX_AUTH_JSON secret is required"
+            exit 1
+          fi
+
+          mkdir -p ~/.codex
+          # Seed last_refresh to the epoch so Codex force-refreshes the token.
+          jq '.last_refresh = "1970-01-01T00:00:00Z"' <<<"${CODEX_AUTH_JSON}" >~/.codex/auth.json
+          printf 'cli_auth_credentials_store = "file"\n' >~/.codex/config.toml
+
+          codex exec --skip-git-repo-check --sandbox read-only \
+            --ask-for-approval never "Reply with the single word OK."
+
+          last_refresh=$(jq -r '.last_refresh' ~/.codex/auth.json)
+          if [ "${last_refresh}" = "1970-01-01T00:00:00Z" ] || [ -z "${last_refresh}" ]; then
+            echo "::error::Codex did not refresh auth.json"
+            exit 1
+          fi
+
+      - name: Update CODEX_AUTH_JSON secrets
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          # Both secrets back the same Codex account; write the one refreshed
+          # bundle to both so neither copy goes stale.
+          gh secret set CODEX_AUTH_JSON \
+            --repo "${GITHUB_REPOSITORY}" \
+            <~/.codex/auth.json
+          gh secret set CODEX_AUTH_JSON \
+            --repo "${GITHUB_REPOSITORY}" \
+            --env ok-to-test \
+            <~/.codex/auth.json

@@ -317,6 +317,8 @@ rules:
       - create
       - get
       - list
+      - update
+      - watch
   - apiGroups:
       - kelos.dev
     resources:

@@ -1,0 +1,27 @@
+# Manually-managed NodePort Service for the GitHub webhook server.
+# Lives alongside the chart-managed ClusterIP Service (kelos-webhook-github).
+# The chart only emits ClusterIP, so node-level access is provided here.
+apiVersion: v1
+kind: Service
+metadata:
+  name: kelos-webhook-github-nodeport
+  namespace: kelos-system
+  labels:
+    app.kubernetes.io/name: kelos
+    app.kubernetes.io/component: webhook-github
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: kelos
+    app.kubernetes.io/component: webhook-github
+  ports:
+    - name: webhook
+      port: 8443
+      targetPort: webhook
+      protocol: TCP
+      nodePort: 31604
+    - name: metrics
+      port: 8080
+      targetPort: metrics
+      protocol: TCP
+      nodePort: 31831

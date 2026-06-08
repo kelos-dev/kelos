@@ -18,27 +18,38 @@ import (
 const (
 	DefaultAikidoProxyURL = "http://cody-tools.kelos-system.svc.cluster.local:8080/aikido"
 
-	aikidoOpenIssueGroupsPerPage = 20
-	aikidoMaxOpenIssueGroupPages = 10
-	aikidoMaxBodyBytes           = 64 * 1024
+	aikidoOpenIssueGroupsPerPage  = 20
+	aikidoMaxOpenIssueGroupPages  = 10
+	aikidoIssueExportPerPage      = 20
+	aikidoMaxIssueExportPages     = 50
+	aikidoCodeRepositoriesPerPage = 20
+	aikidoMaxCodeRepositoryPages  = 50
+	aikidoMaxBodyBytes            = 64 * 1024
 )
 
 const (
-	AikidoMetadataIssueGroupID = "aikido.kelos.dev/issue-group-id"
-	AikidoMetadataSeverity     = "aikido.kelos.dev/severity"
-	AikidoMetadataStatus       = "aikido.kelos.dev/status"
-	AikidoMetadataIssueType    = "aikido.kelos.dev/issue-type"
-	AikidoMetadataRepositories = "aikido.kelos.dev/repositories"
-	AikidoMetadataURL          = "aikido.kelos.dev/url"
+	AikidoMetadataIssueGroupID     = "aikido.kelos.dev/issue-group-id"
+	AikidoMetadataBranch           = "aikido.kelos.dev/branch"
+	AikidoMetadataSeverity         = "aikido.kelos.dev/severity"
+	AikidoMetadataStatus           = "aikido.kelos.dev/status"
+	AikidoMetadataIssueType        = "aikido.kelos.dev/issue-type"
+	AikidoMetadataRepositories     = "aikido.kelos.dev/repositories"
+	AikidoMetadataCodeRepositories = "aikido.kelos.dev/code-repositories"
+	AikidoMetadataAffectedPackages = "aikido.kelos.dev/affected-packages"
+	AikidoMetadataCVEIDs           = "aikido.kelos.dev/cve-ids"
+	AikidoMetadataURL              = "aikido.kelos.dev/url"
 )
 
 // AikidoSource discovers Aikido issue groups through the cody-tools Aikido proxy.
 type AikidoSource struct {
-	ProxyBaseURL string
-	Repositories []string
-	Statuses     []string
-	Severities   []string
-	Client       *http.Client
+	ProxyBaseURL   string
+	Repositories   []string
+	Statuses       []string
+	Severities     []string
+	Branch         string
+	IssueTypes     []string
+	UseIssueExport bool
+	Client         *http.Client
 }
 
 func (s *AikidoSource) httpClient() *http.Client {
@@ -60,6 +71,10 @@ func (s *AikidoSource) Discover(ctx context.Context) ([]WorkItem, error) {
 	baseURL, err := parseAikidoProxyBaseURL(s.proxyBaseURL())
 	if err != nil {
 		return nil, err
+	}
+
+	if s.useIssueExport() {
+		return s.discoverIssueExport(ctx, baseURL)
 	}
 
 	if err := s.validateRepositories(ctx, baseURL); err != nil {
@@ -124,6 +139,241 @@ func (s *AikidoSource) resolvedStatuses() []string {
 		return []string{"open"}
 	}
 	return append([]string(nil), s.Statuses...)
+}
+
+func (s *AikidoSource) useIssueExport() bool {
+	return s.UseIssueExport || strings.TrimSpace(s.Branch) != "" || len(s.IssueTypes) > 0
+}
+
+func (s *AikidoSource) resolvedBranch() string {
+	branch := strings.TrimSpace(s.Branch)
+	if branch == "" {
+		return "main"
+	}
+	return branch
+}
+
+func (s *AikidoSource) resolvedIssueTypes() []string {
+	return cleanUniqueStrings(s.IssueTypes)
+}
+
+func (s *AikidoSource) discoverIssueExport(ctx context.Context, baseURL *url.URL) ([]WorkItem, error) {
+	branch := s.resolvedBranch()
+	repos, err := s.fetchBranchCodeRepositories(ctx, baseURL, branch)
+	if err != nil {
+		return nil, err
+	}
+	if len(repos) == 0 {
+		return nil, nil
+	}
+
+	statuses := s.resolvedStatuses()
+	issueTypes := s.resolvedIssueTypes()
+	if len(issueTypes) == 0 {
+		issueTypes = []string{""}
+	}
+
+	rowsByID := map[string]map[string]any{}
+	groupRows := map[string][]map[string]any{}
+	for _, repo := range repos {
+		repoID := aikidoStringFromAny(firstAikidoValue(repo, "id", "code_repo_id", "codeRepoId"))
+		if repoID == "" {
+			return nil, fmt.Errorf("Aikido code repository response is missing repository ID")
+		}
+		for _, status := range statuses {
+			for _, issueType := range issueTypes {
+				rows, err := s.fetchIssueExportRows(ctx, baseURL, repoID, status, issueType)
+				if err != nil {
+					return nil, err
+				}
+				for _, row := range rows {
+					if !s.matchesIssueExportRow(row, repoID, status, issueType) {
+						continue
+					}
+					rowID := aikidoStringFromAny(firstAikidoValue(row, "id", "issue_id", "issueId"))
+					if rowID == "" {
+						return nil, fmt.Errorf("Aikido issue export row is missing issue ID")
+					}
+					if _, seen := rowsByID[rowID]; seen {
+						continue
+					}
+					rowsByID[rowID] = row
+					groupID := aikidoStringFromAny(firstAikidoValue(row, "group_id", "groupId", "issue_group_id", "issueGroupId"))
+					if groupID == "" {
+						return nil, fmt.Errorf("Aikido issue export row %s is missing issue group ID", rowID)
+					}
+					groupRows[groupID] = append(groupRows[groupID], row)
+				}
+			}
+		}
+	}
+
+	groupIDs := make([]string, 0, len(groupRows))
+	for groupID := range groupRows {
+		groupIDs = append(groupIDs, groupID)
+	}
+	sort.Strings(groupIDs)
+
+	items := make([]WorkItem, 0, len(groupIDs))
+	for _, groupID := range groupIDs {
+		group, err := s.fetchIssueGroup(ctx, baseURL, groupID)
+		if err != nil {
+			return nil, err
+		}
+		item, err := aikidoExportGroupToWorkItem(group, groupID, groupRows[groupID], branch)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+func (s *AikidoSource) fetchBranchCodeRepositories(ctx context.Context, baseURL *url.URL, branch string) ([]map[string]any, error) {
+	names := cleanUniqueStrings(s.Repositories)
+	seen := map[string]struct{}{}
+	var all []map[string]any
+	if len(names) > 0 {
+		for _, name := range names {
+			repos, err := s.fetchCodeRepositories(ctx, baseURL, branch, name)
+			if err != nil {
+				return nil, err
+			}
+			var matched bool
+			for _, repo := range repos {
+				if !aikidoCodeRepositoryMatches(repo, branch, name) {
+					continue
+				}
+				matched = true
+				id := aikidoStringFromAny(firstAikidoValue(repo, "id", "code_repo_id", "codeRepoId"))
+				if id == "" {
+					return nil, fmt.Errorf("Aikido code repository %q response is missing repository ID", name)
+				}
+				if _, ok := seen[id]; ok {
+					continue
+				}
+				seen[id] = struct{}{}
+				all = append(all, repo)
+			}
+			if !matched {
+				return nil, fmt.Errorf("Aikido repository %q was not found as an exact active code repository match for branch %q", name, branch)
+			}
+		}
+		return all, nil
+	}
+
+	repos, err := s.fetchCodeRepositories(ctx, baseURL, branch, "")
+	if err != nil {
+		return nil, err
+	}
+	for _, repo := range repos {
+		if !aikidoCodeRepositoryMatches(repo, branch, "") {
+			continue
+		}
+		id := aikidoStringFromAny(firstAikidoValue(repo, "id", "code_repo_id", "codeRepoId"))
+		if id == "" {
+			return nil, fmt.Errorf("Aikido code repository response is missing repository ID")
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		all = append(all, repo)
+	}
+	return all, nil
+}
+
+func (s *AikidoSource) fetchCodeRepositories(ctx context.Context, baseURL *url.URL, branch, name string) ([]map[string]any, error) {
+	var all []map[string]any
+	for page := 0; page < aikidoMaxCodeRepositoryPages; page++ {
+		params := url.Values{}
+		params.Set("per_page", strconv.Itoa(aikidoCodeRepositoriesPerPage))
+		params.Set("page", strconv.Itoa(page))
+		if strings.TrimSpace(branch) != "" {
+			params.Set("filter_branch", branch)
+		}
+		if strings.TrimSpace(name) != "" {
+			params.Set("filter_name", name)
+		}
+		repos, err := s.getAikidoObjects(ctx, baseURL, "/repositories/code", params)
+		if err != nil {
+			return nil, fmt.Errorf("fetching Aikido code repositories: %w", err)
+		}
+		all = append(all, repos...)
+		if len(repos) < aikidoCodeRepositoriesPerPage {
+			return all, nil
+		}
+	}
+	return nil, fmt.Errorf("Aikido code repository page cap reached with a full page; narrow filters")
+}
+
+func aikidoCodeRepositoryMatches(repo map[string]any, branch, expectedName string) bool {
+	name := aikidoStringFromAny(firstAikidoValue(repo, "name", "repository_name", "repositoryName", "full_name", "fullName"))
+	if expectedName != "" && name != expectedName {
+		return false
+	}
+	repoBranch := aikidoStringFromAny(firstAikidoValue(repo, "branch"))
+	if branch != "" && repoBranch != "" && repoBranch != branch {
+		return false
+	}
+	activeValue := firstAikidoValue(repo, "active", "is_active", "isActive")
+	active, known := aikidoBoolFromAny(activeValue)
+	return !known || active
+}
+
+func (s *AikidoSource) fetchIssueExportRows(ctx context.Context, baseURL *url.URL, repoID, status, issueType string) ([]map[string]any, error) {
+	var all []map[string]any
+	for page := 0; page < aikidoMaxIssueExportPages; page++ {
+		params := url.Values{}
+		params.Set("per_page", strconv.Itoa(aikidoIssueExportPerPage))
+		params.Set("page", strconv.Itoa(page))
+		params.Set("filter_code_repo_id", repoID)
+		if strings.TrimSpace(status) != "" {
+			params.Set("filter_status", status)
+		}
+		if strings.TrimSpace(issueType) != "" {
+			params.Set("filter_issue_type", issueType)
+		}
+		rows, err := s.getAikidoObjects(ctx, baseURL, "/issues/export", params)
+		if err != nil {
+			return nil, fmt.Errorf("fetching Aikido issue export rows for code repo %s: %w", repoID, err)
+		}
+		all = append(all, rows...)
+		if len(rows) < aikidoIssueExportPerPage {
+			return all, nil
+		}
+	}
+	return nil, fmt.Errorf("Aikido issue export page cap reached for code repo %s; narrow filters", repoID)
+}
+
+func (s *AikidoSource) matchesIssueExportRow(row map[string]any, repoID, status, issueType string) bool {
+	if rowRepoID := aikidoStringFromAny(firstAikidoValue(row, "code_repo_id", "codeRepoId")); rowRepoID != "" && rowRepoID != repoID {
+		return false
+	}
+	if status != "" {
+		rowStatus := normalizeAikidoValue(aikidoStringFromAny(firstAikidoValue(row, "status", "state")))
+		if rowStatus != "" && rowStatus != normalizeAikidoValue(status) {
+			return false
+		}
+	}
+	if issueType != "" {
+		rowType := normalizeAikidoValue(aikidoIssueType(row))
+		if rowType != "" && rowType != normalizeAikidoValue(issueType) {
+			return false
+		}
+	}
+	return s.matchesSeverity(row)
+}
+
+func (s *AikidoSource) fetchIssueGroup(ctx context.Context, baseURL *url.URL, groupID string) (map[string]any, error) {
+	groups, err := s.getAikidoObjects(ctx, baseURL, "/issues/groups/"+url.PathEscape(groupID), nil)
+	if err != nil {
+		return nil, fmt.Errorf("fetching Aikido issue group %s: %w", groupID, err)
+	}
+	if len(groups) == 0 {
+		return map[string]any{}, nil
+	}
+	return groups[0], nil
 }
 
 func (s *AikidoSource) validateRepositories(ctx context.Context, baseURL *url.URL) error {
@@ -308,6 +558,70 @@ func aikidoGroupToWorkItem(group map[string]any, id string) (WorkItem, error) {
 	}, nil
 }
 
+func aikidoExportGroupToWorkItem(group map[string]any, id string, rows []map[string]any, branch string) (WorkItem, error) {
+	title := aikidoStringFromAny(firstAikidoValue(group, "title", "name", "summary"))
+	if title == "" && len(rows) > 0 {
+		title = aikidoStringFromAny(firstAikidoValue(rows[0], "title", "name", "summary", "rule"))
+	}
+	if title == "" {
+		title = fmt.Sprintf("Aikido issue group %s", id)
+	}
+	severity := valueOrUnknown(aikidoSeverity(group))
+	if severity == "unknown" && len(rows) > 0 {
+		severity = valueOrUnknown(aikidoSeverity(rows[0]))
+	}
+	status := valueOrUnknown(aikidoStringFromAny(firstAikidoValue(group, "group_status", "groupStatus", "status", "state")))
+	if status == "unknown" && len(rows) > 0 {
+		status = valueOrUnknown(aikidoStringFromAny(firstAikidoValue(rows[0], "status", "state")))
+	}
+	issueType := valueOrUnknown(aikidoIssueType(group))
+	if issueType == "unknown" && len(rows) > 0 {
+		issueType = valueOrUnknown(aikidoIssueType(rows[0]))
+	}
+	repos := aikidoIssueRowValues(rows, "code_repo_name", "codeRepoName")
+	if len(repos) == 0 {
+		repos = aikidoRepositoryNames(group)
+	}
+	packages := aikidoIssueRowValues(rows, "affected_package", "affectedPackage", "package", "package_name", "packageName")
+	cves := aikidoIssueRowValues(rows, "cve_id", "cveId", "cve", "vulnerability_id", "vulnerabilityId")
+	groupURL := aikidoStringFromAny(firstAikidoValue(group, "url", "app_url", "appUrl", "html_url", "htmlUrl", "link"))
+	body := aikidoIssueExportWorkItemBody(group, id, title, severity, status, issueType, branch, repos, packages, cves, groupURL, rows)
+
+	number := 0
+	if n, err := strconv.Atoi(id); err == nil {
+		number = n
+	}
+
+	labels := []string{"aikido", "severity:" + severity, "status:" + status, "type:" + issueType, "branch:" + branch}
+	for _, repo := range repos {
+		labels = append(labels, "repo:"+repo)
+	}
+
+	reposValue := strings.Join(repos, ",")
+	return WorkItem{
+		ID:     aikidoWorkItemID(id),
+		Number: number,
+		Title:  title,
+		URL:    groupURL,
+		Labels: labels,
+		Body:   body,
+		Kind:   "AikidoIssueGroup",
+		Branch: branch,
+		Metadata: map[string]string{
+			AikidoMetadataIssueGroupID:     id,
+			AikidoMetadataBranch:           branch,
+			AikidoMetadataSeverity:         severity,
+			AikidoMetadataStatus:           status,
+			AikidoMetadataIssueType:        issueType,
+			AikidoMetadataRepositories:     reposValue,
+			AikidoMetadataCodeRepositories: reposValue,
+			AikidoMetadataAffectedPackages: strings.Join(packages, ","),
+			AikidoMetadataCVEIDs:           strings.Join(cves, ","),
+			AikidoMetadataURL:              groupURL,
+		},
+	}, nil
+}
+
 func aikidoWorkItemID(id string) string {
 	const prefix = "aikido-group-"
 	safeID := aikidoInvalidIDPattern.ReplaceAllString(strings.ToLower(strings.TrimSpace(id)), "-")
@@ -369,6 +683,99 @@ func aikidoWorkItemBody(group map[string]any, id, title, severity, status, issue
 	return body
 }
 
+func aikidoIssueExportWorkItemBody(group map[string]any, id, title, severity, status, issueType, branch string, repos, packages, cves []string, groupURL string, rows []map[string]any) string {
+	leakedSecret := normalizeAikidoValue(issueType) == "leaked_secret" || strings.Contains(strings.ToLower(title), "secret")
+	description := aikidoStringFromAny(firstAikidoValue(group, "description", "details", "message"))
+	howToFix := aikidoStringFromAny(firstAikidoValue(group, "how_to_fix", "howToFix", "fix", "recommendation"))
+	if leakedSecret {
+		description = redactPotentialSecret(description)
+		howToFix = redactPotentialSecret(howToFix)
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Aikido issue group\n\n")
+	fmt.Fprintf(&b, "Aikido issue group ID: %s\n", id)
+	fmt.Fprintf(&b, "Branch: %s\n", branch)
+	fmt.Fprintf(&b, "Title: %s\n", sanitizeAikidoText(title, leakedSecret))
+	fmt.Fprintf(&b, "Severity: %s\n", severity)
+	fmt.Fprintf(&b, "Status: %s\n", status)
+	fmt.Fprintf(&b, "Issue type: %s\n", issueType)
+	if len(repos) > 0 {
+		fmt.Fprintf(&b, "Code repositories: %s\n", strings.Join(repos, ", "))
+	}
+	if len(packages) > 0 {
+		fmt.Fprintf(&b, "Affected packages: %s\n", strings.Join(packages, ", "))
+	}
+	if len(cves) > 0 {
+		fmt.Fprintf(&b, "CVE IDs: %s\n", strings.Join(cves, ", "))
+	}
+	if groupURL != "" {
+		fmt.Fprintf(&b, "Aikido URL: %s\n", groupURL)
+	}
+	if description != "" {
+		fmt.Fprintf(&b, "\n## Group summary\n\n%s\n", sanitizeAikidoText(description, leakedSecret))
+	}
+	if howToFix != "" {
+		fmt.Fprintf(&b, "\n## Aikido remediation guidance\n\n%s\n", sanitizeAikidoText(howToFix, leakedSecret))
+	}
+
+	b.WriteString("\n## Scoped issue rows\n\n")
+	b.WriteString("These rows are scoped to active Aikido code repositories on the branch above.\n")
+	for _, row := range rows {
+		fmt.Fprintf(&b, "- %s\n", aikidoIssueRowSummary(row, leakedSecret))
+	}
+
+	b.WriteString("\n## Constraints\n\n")
+	b.WriteString("- Work only against latest main unless explicitly instructed otherwise.\n")
+	b.WriteString("- Search for an existing open remediation PR before creating a new one.\n")
+	b.WriteString("- Do not merge PRs.\n")
+	b.WriteString("- If remediation requires shared package or image rebuilds, continue across future turns.\n")
+	b.WriteString("- After the fix is available, verify with Aikido before declaring complete.\n")
+	b.WriteString("\nUse the internal read-only Aikido proxy for deeper context if needed: ")
+	b.WriteString(DefaultAikidoProxyURL)
+	b.WriteString("\n")
+
+	body := b.String()
+	if len(body) > aikidoMaxBodyBytes {
+		body = body[:aikidoMaxBodyBytes] + "\n[truncated]\n"
+	}
+	return body
+}
+
+func aikidoIssueRowSummary(row map[string]any, leakedSecret bool) string {
+	parts := []string{
+		"issue_id=" + aikidoStringFromAny(firstAikidoValue(row, "id", "issue_id", "issueId")),
+		"repo=" + aikidoStringFromAny(firstAikidoValue(row, "code_repo_name", "codeRepoName")),
+		"type=" + aikidoIssueType(row),
+		"severity=" + aikidoSeverity(row),
+	}
+	for _, field := range []struct {
+		label string
+		keys  []string
+	}{
+		{label: "package", keys: []string{"affected_package", "affectedPackage", "package", "package_name", "packageName"}},
+		{label: "installed", keys: []string{"installed_version", "installedVersion", "version", "current_version", "currentVersion"}},
+		{label: "patched", keys: []string{"patched_versions", "patchedVersions", "fixed_version", "fixedVersion"}},
+		{label: "cve", keys: []string{"cve_id", "cveId", "cve", "vulnerability_id", "vulnerabilityId"}},
+		{label: "file", keys: []string{"affected_file", "affectedFile", "file", "file_path", "filePath", "path"}},
+		{label: "rule", keys: []string{"rule", "rule_id", "ruleId"}},
+		{label: "language", keys: []string{"programming_language", "programmingLanguage", "language"}},
+		{label: "exploitability", keys: []string{"exploitability"}},
+		{label: "remediate_by", keys: []string{"sla_remediate_by", "slaRemediateBy"}},
+	} {
+		value := sanitizeAikidoText(aikidoStringFromAny(firstAikidoValue(row, field.keys...)), leakedSecret)
+		if value != "" {
+			parts = append(parts, field.label+"="+value)
+		}
+	}
+	start := aikidoStringFromAny(firstAikidoValue(row, "start_line", "startLine"))
+	end := aikidoStringFromAny(firstAikidoValue(row, "end_line", "endLine"))
+	if start != "" || end != "" {
+		parts = append(parts, "lines="+strings.Trim(start+"-"+end, "-"))
+	}
+	return strings.Join(nonEmptyStrings(parts), ", ")
+}
+
 func aikidoHints(group map[string]any, leakedSecret bool) []string {
 	var hints []string
 	fields := []struct {
@@ -399,6 +806,10 @@ func aikidoSeverity(group map[string]any) string {
 		raw = firstAikidoValue(obj, "name", "label", "level", "value")
 	}
 	return aikidoStringFromAny(raw)
+}
+
+func aikidoIssueType(obj map[string]any) string {
+	return aikidoStringFromAny(firstAikidoValue(obj, "issue_type", "issueType", "type", "category"))
 }
 
 func aikidoRepositoryNames(group map[string]any) []string {
@@ -445,6 +856,24 @@ func aikidoRepositoryNames(group map[string]any) []string {
 	return out
 }
 
+func aikidoIssueRowValues(rows []map[string]any, keys ...string) []string {
+	values := map[string]struct{}{}
+	for _, row := range rows {
+		for _, value := range aikidoNamesFromAny(firstAikidoValue(row, keys...)) {
+			value = strings.TrimSpace(value)
+			if value != "" {
+				values[value] = struct{}{}
+			}
+		}
+	}
+	out := make([]string, 0, len(values))
+	for value := range values {
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func aikidoNamesFromAny(raw any) []string {
 	switch v := raw.(type) {
 	case []any:
@@ -468,6 +897,33 @@ func aikidoNamesFromAny(raw any) []string {
 		}
 		return nil
 	}
+}
+
+func cleanUniqueStrings(values []string) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func nonEmptyStrings(values []string) []string {
+	out := values[:0]
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func firstAikidoValue(obj map[string]any, keys ...string) any {

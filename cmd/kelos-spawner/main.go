@@ -46,13 +46,20 @@ const (
 	labelSource           = "kelos.dev/source"
 	labelSessionScopeHash = "kelos.dev/session-scope-hash"
 
-	sourceTypeCron     = "Cron"
-	sourceTypeCronTick = "CronTick"
+	sourceTypeCron             = "Cron"
+	sourceTypeCronTick         = "CronTick"
+	sourceTypeAikido           = "Aikido"
+	sourceTypeAikidoIssueGroup = "AikidoIssueGroup"
 
 	defaultCronSessionScopeTemplate = "{{.TaskSpawner}}/{{.Date}}"
 	defaultCronSessionMaxAge        = 24 * time.Hour
 	defaultCronSessionIdleTimeout   = time.Hour
 	defaultCronSessionMaxQueued     = int32(5)
+
+	defaultAikidoSessionScopeTemplate = `aikido/{{.Branch}}/{{ index .Metadata "aikido.kelos.dev/issue-group-id" }}`
+	defaultAikidoSessionMaxAge        = 14 * 24 * time.Hour
+	defaultAikidoSessionIdleTimeout   = 25 * time.Hour
+	defaultAikidoSessionMaxQueued     = int32(1)
 )
 
 func init() {
@@ -313,7 +320,7 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 	itemsDiscoveredTotal.Add(float64(len(items)))
 	log.Info("discovered items", "count", len(items))
 
-	sessionMode := cronSessionEnabled(&ts)
+	sessionMode := cronSessionEnabled(&ts) || aikidoSessionEnabled(&ts)
 	activeTasks := 0
 
 	var existingTaskMap map[string]*kelosv1alpha1.Task
@@ -397,6 +404,7 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 	}
 
 	newTasksCreated := 0
+	cycleTime := time.Now().UTC().Truncate(time.Minute)
 	for _, item := range newItems {
 		// Enforce max concurrency limit
 		if !sessionMode && maxConcurrency > 0 && int32(activeTasks) >= maxConcurrency {
@@ -414,6 +422,7 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 
 		templateVars := source.WorkItemToTemplateVars(item)
 		enrichCronTemplateVars(templateVars, &ts, item)
+		enrichAikidoTemplateVars(templateVars, &ts, item, cycleTime)
 
 		// Enrich with external context sources
 		if contextFetcher != nil {
@@ -449,13 +458,26 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 		}
 
 		if sessionMode {
-			created, err := createCronSessionTurn(ctx, cl, &ts, item, templateVars, task)
+			if srcAnnotations := sourceAnnotations(&ts, item); len(srcAnnotations) > 0 {
+				if task.Annotations == nil {
+					task.Annotations = make(map[string]string)
+				}
+				for k, v := range srcAnnotations {
+					task.Annotations[k] = v
+				}
+			}
+			var created bool
+			if cronSessionEnabled(&ts) {
+				created, err = createCronSessionTurn(ctx, cl, &ts, item, templateVars, task)
+			} else {
+				created, err = createAikidoSessionTurn(ctx, cl, &ts, item, templateVars, task, cycleTime)
+			}
 			if err != nil {
-				log.Error(err, "creating cron AgentTurn", "item", item.ID)
+				log.Error(err, "creating session AgentTurn", "item", item.ID)
 				continue
 			}
 			if created {
-				log.Info("Created AgentTurn for cron tick", "item", item.ID)
+				log.Info("Created AgentTurn for session source", "item", item.ID)
 				newTasksCreated++
 			}
 			continue
@@ -555,6 +577,13 @@ func cronSessionEnabled(ts *kelosv1alpha1.TaskSpawner) bool {
 		ts.Spec.When.Cron.Session.Enabled
 }
 
+func aikidoSessionEnabled(ts *kelosv1alpha1.TaskSpawner) bool {
+	return ts != nil &&
+		ts.Spec.When.Aikido != nil &&
+		ts.Spec.When.Aikido.Session != nil &&
+		ts.Spec.When.Aikido.Session.Enabled
+}
+
 type cronSessionConfig struct {
 	scopeTemplate string
 	maxAge        time.Duration
@@ -588,6 +617,39 @@ func effectiveCronSessionConfig(ts *kelosv1alpha1.TaskSpawner) cronSessionConfig
 	return cfg
 }
 
+type aikidoSessionConfig struct {
+	scopeTemplate string
+	maxAge        time.Duration
+	idleTimeout   time.Duration
+	maxQueued     int32
+}
+
+func effectiveAikidoSessionConfig(ts *kelosv1alpha1.TaskSpawner) aikidoSessionConfig {
+	cfg := aikidoSessionConfig{
+		scopeTemplate: defaultAikidoSessionScopeTemplate,
+		maxAge:        defaultAikidoSessionMaxAge,
+		idleTimeout:   defaultAikidoSessionIdleTimeout,
+		maxQueued:     defaultAikidoSessionMaxQueued,
+	}
+	if ts == nil || ts.Spec.When.Aikido == nil || ts.Spec.When.Aikido.Session == nil {
+		return cfg
+	}
+	session := ts.Spec.When.Aikido.Session
+	if strings.TrimSpace(session.ScopeTemplate) != "" {
+		cfg.scopeTemplate = session.ScopeTemplate
+	}
+	if session.MaxAge != nil && session.MaxAge.Duration > 0 {
+		cfg.maxAge = session.MaxAge.Duration
+	}
+	if session.IdleTimeout != nil && session.IdleTimeout.Duration > 0 {
+		cfg.idleTimeout = session.IdleTimeout.Duration
+	}
+	if session.MaxQueuedTurns != nil && *session.MaxQueuedTurns > 0 {
+		cfg.maxQueued = *session.MaxQueuedTurns
+	}
+	return cfg
+}
+
 func enrichCronTemplateVars(vars map[string]interface{}, ts *kelosv1alpha1.TaskSpawner, item source.WorkItem) {
 	if vars == nil || ts == nil || ts.Spec.When.Cron == nil {
 		return
@@ -603,6 +665,31 @@ func enrichCronTemplateVars(vars map[string]interface{}, ts *kelosv1alpha1.TaskS
 	vars["ID"] = item.ID
 	vars["Date"] = tickTime.Format("2006-01-02")
 	vars["Hour"] = tickTime.Format("20060102-15")
+}
+
+func enrichAikidoTemplateVars(vars map[string]interface{}, ts *kelosv1alpha1.TaskSpawner, item source.WorkItem, runTime time.Time) {
+	if vars == nil || ts == nil || ts.Spec.When.Aikido == nil {
+		return
+	}
+	schedule := ts.Spec.When.Aikido.Schedule
+	if item.Schedule != "" {
+		schedule = item.Schedule
+	}
+	branch := strings.TrimSpace(item.Branch)
+	if branch == "" {
+		branch = strings.TrimSpace(ts.Spec.When.Aikido.Branch)
+	}
+	if branch == "" {
+		branch = "main"
+	}
+	vars["TaskSpawner"] = ts.Name
+	vars["Namespace"] = ts.Namespace
+	vars["Schedule"] = schedule
+	vars["Time"] = runTime.Format(time.RFC3339)
+	vars["ID"] = item.ID
+	vars["Branch"] = branch
+	vars["Date"] = runTime.Format("2006-01-02")
+	vars["Hour"] = runTime.Format("20060102-15")
 }
 
 func cronTickTime(item source.WorkItem) time.Time {
@@ -699,6 +786,9 @@ func createCronSessionTurn(ctx context.Context, cl client.Client, ts *kelosv1alp
 	if turn.Annotations == nil {
 		turn.Annotations = map[string]string{}
 	}
+	for k, v := range sourceAnnotations(ts, item) {
+		turn.Annotations[k] = v
+	}
 
 	if err := controllerutil.SetControllerReference(session, turn, cl.Scheme()); err != nil {
 		return false, fmt.Errorf("setting AgentTurn owner reference: %w", err)
@@ -726,6 +816,180 @@ func createCronSessionTurn(ctx context.Context, cl client.Client, ts *kelosv1alp
 		return false, fmt.Errorf("creating AgentTurn: %w", err)
 	}
 	return true, nil
+}
+
+func createAikidoSessionTurn(ctx context.Context, cl client.Client, ts *kelosv1alpha1.TaskSpawner, item source.WorkItem, templateVars map[string]interface{}, renderedTask *kelosv1alpha1.Task, runTime time.Time) (bool, error) {
+	cfg := effectiveAikidoSessionConfig(ts)
+	scope, err := renderTemplateString("aikidoSessionScope", cfg.scopeTemplate, templateVars)
+	if err != nil {
+		return false, err
+	}
+	if scope == "" {
+		return false, fmt.Errorf("Aikido session scope rendered empty")
+	}
+	session, err := findOrCreateAikidoSession(ctx, cl, ts, item, scope, cfg)
+	if err != nil {
+		return false, err
+	}
+	sourceID := aikidoTurnSourceID(item, runTime)
+	if exists, err := aikidoTurnExists(ctx, cl, session, sourceID); err != nil {
+		return false, err
+	} else if exists {
+		return false, nil
+	}
+	if session.Spec.MaxQueuedTurns > 0 {
+		count, err := countQueuedOrRunningCronTurns(ctx, cl, session)
+		if err != nil {
+			return false, err
+		}
+		if count >= session.Spec.MaxQueuedTurns {
+			return false, fmt.Errorf("session %s already has %d queued or running turns", session.Name, count)
+		}
+	}
+	sequence, err := nextCronTurnSequence(ctx, cl, session)
+	if err != nil {
+		return false, err
+	}
+
+	schedule := ""
+	if ts.Spec.When.Aikido != nil {
+		schedule = ts.Spec.When.Aikido.Schedule
+	}
+	if item.Schedule != "" {
+		schedule = item.Schedule
+	}
+	turn := &kelosv1alpha1.AgentTurn{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        cronTurnName(session.Name, sequence),
+			Namespace:   session.Namespace,
+			Labels:      copyStringMap(renderedTask.Labels),
+			Annotations: copyStringMap(renderedTask.Annotations),
+		},
+		Spec: kelosv1alpha1.AgentTurnSpec{
+			SessionRef: kelosv1alpha1.AgentSessionReference{Name: session.Name},
+			Sequence:   sequence,
+			Source: kelosv1alpha1.AgentTurnSource{
+				Type:        sourceTypeAikidoIssueGroup,
+				ID:          sourceID,
+				DisplayName: item.Title,
+				Time:        runTime.Format(time.RFC3339),
+				Schedule:    schedule,
+			},
+			Input: kelosv1alpha1.AgentTurnInput{
+				Text: renderedTask.Spec.Prompt,
+				Body: renderedTask.Spec.Prompt,
+			},
+			Context: kelosv1alpha1.AgentTurnContext{
+				Mode:          kelosv1alpha1.SlackSessionContextWindowSinceLastAgentMessage,
+				ToTSInclusive: sourceID,
+			},
+		},
+	}
+	if turn.Labels == nil {
+		turn.Labels = map[string]string{}
+	}
+	turn.Labels[labelSource] = "aikido"
+	turn.Labels[labelAgentSession] = session.Name
+	turn.Labels[labelTaskSpawner] = ts.Name
+	if turn.Annotations == nil {
+		turn.Annotations = map[string]string{}
+	}
+	for k, v := range sourceAnnotations(ts, item) {
+		turn.Annotations[k] = v
+	}
+
+	if err := controllerutil.SetControllerReference(session, turn, cl.Scheme()); err != nil {
+		return false, fmt.Errorf("setting AgentTurn owner reference: %w", err)
+	}
+	if err := cl.Create(ctx, turn); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			var existing kelosv1alpha1.AgentTurn
+			key := client.ObjectKey{Namespace: turn.Namespace, Name: turn.Name}
+			if getErr := cl.Get(ctx, key, &existing); getErr != nil {
+				return false, fmt.Errorf("fetching existing AgentTurn after name collision: %w", getErr)
+			}
+			if existing.Spec.SessionRef.Name == session.Name &&
+				existing.Spec.Source.Type == sourceTypeAikidoIssueGroup &&
+				existing.Spec.Source.ID == sourceID {
+				return false, nil
+			}
+			return false, fmt.Errorf("AgentTurn name collision for %s: existing session=%s source=%s, desired session=%s source=%s",
+				turn.Name,
+				existing.Spec.SessionRef.Name,
+				existing.Spec.Source.ID,
+				session.Name,
+				sourceID,
+			)
+		}
+		return false, fmt.Errorf("creating AgentTurn: %w", err)
+	}
+	return true, nil
+}
+
+func findOrCreateAikidoSession(ctx context.Context, cl client.Client, ts *kelosv1alpha1.TaskSpawner, item source.WorkItem, scope string, cfg aikidoSessionConfig) (*kelosv1alpha1.AgentSession, error) {
+	scopeHash := cronSessionScopeHash(ts.Namespace, ts.Name, scope)
+	var list kelosv1alpha1.AgentSessionList
+	if err := cl.List(ctx, &list,
+		client.InNamespace(ts.Namespace),
+		client.MatchingLabels{
+			labelSource:           "aikido",
+			labelTaskSpawner:      ts.Name,
+			labelSessionScopeHash: scopeHash,
+		},
+	); err != nil {
+		return nil, fmt.Errorf("listing AgentSessions: %w", err)
+	}
+
+	if session := newestActiveCronSession(list.Items); session != nil {
+		return session, nil
+	}
+
+	generation := int32(len(list.Items) + 1)
+	name := aikidoSessionName(ts.Name, scopeHash, generation)
+	maxAge := metav1.Duration{Duration: cfg.maxAge}
+	annotations := sourceAnnotations(ts, item)
+	session := &kelosv1alpha1.AgentSession{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Namespace:   ts.Namespace,
+			Annotations: annotations,
+			Labels: map[string]string{
+				labelSource:           "aikido",
+				labelTaskSpawner:      ts.Name,
+				labelSessionScopeHash: scopeHash,
+			},
+		},
+		Spec: kelosv1alpha1.AgentSessionSpec{
+			Source: kelosv1alpha1.AgentSessionSource{
+				Type:        sourceTypeAikido,
+				Key:         scope,
+				DisplayName: fmt.Sprintf("aikido:%s", item.Title),
+				Schedule:    ts.Spec.When.Aikido.Schedule,
+			},
+			TaskSpawnerRef:       kelosv1alpha1.TaskSpawnerReference{Name: ts.Name},
+			TaskTemplateSnapshot: ts.Spec.TaskTemplate,
+			IdleTimeout:          metav1.Duration{Duration: cfg.idleTimeout},
+			MaxAge:               &maxAge,
+			MaxQueuedTurns:       cfg.maxQueued,
+		},
+	}
+	if err := controllerutil.SetControllerReference(ts, session, cl.Scheme()); err != nil {
+		return nil, fmt.Errorf("setting AgentSession owner reference: %w", err)
+	}
+	if err := cl.Create(ctx, session); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return nil, fmt.Errorf("creating AgentSession: %w", err)
+		}
+		var existing kelosv1alpha1.AgentSession
+		if getErr := cl.Get(ctx, client.ObjectKey{Namespace: ts.Namespace, Name: name}, &existing); getErr != nil {
+			return nil, fmt.Errorf("fetching existing AgentSession: %w", getErr)
+		}
+		if isTerminalAgentSession(&existing) {
+			return nil, fmt.Errorf("AgentSession %s already exists in terminal phase %s", name, existing.Status.Phase)
+		}
+		return &existing, nil
+	}
+	return session, nil
 }
 
 func findOrCreateCronSession(ctx context.Context, cl client.Client, ts *kelosv1alpha1.TaskSpawner, scope string, cfg cronSessionConfig) (*kelosv1alpha1.AgentSession, error) {
@@ -834,6 +1098,22 @@ func cronTurnExists(ctx context.Context, cl client.Client, session *kelosv1alpha
 	return false, nil
 }
 
+func aikidoTurnExists(ctx context.Context, cl client.Client, session *kelosv1alpha1.AgentSession, sourceID string) (bool, error) {
+	if sourceID == "" {
+		return false, nil
+	}
+	var list kelosv1alpha1.AgentTurnList
+	if err := cl.List(ctx, &list, client.InNamespace(session.Namespace), client.MatchingLabels{labelAgentSession: session.Name}); err != nil {
+		return false, err
+	}
+	for _, turn := range list.Items {
+		if turn.Spec.Source.Type == sourceTypeAikidoIssueGroup && turn.Spec.Source.ID == sourceID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func countQueuedOrRunningCronTurns(ctx context.Context, cl client.Client, session *kelosv1alpha1.AgentSession) (int32, error) {
 	var list kelosv1alpha1.AgentTurnList
 	if err := cl.List(ctx, &list, client.InNamespace(session.Namespace), client.MatchingLabels{labelAgentSession: session.Name}); err != nil {
@@ -881,6 +1161,29 @@ func cronSessionName(spawnerName, scopeHash string, generation int32) string {
 		prefix = "cron"
 	}
 	return prefix + suffix
+}
+
+func aikidoSessionName(spawnerName, scopeHash string, generation int32) string {
+	suffix := "-aikido-sess-" + scopeHash
+	if generation > 1 {
+		suffix = fmt.Sprintf("%s-g%d", suffix, generation)
+	}
+	prefix := spawnerName
+	if len(prefix) > 63-len(suffix) {
+		prefix = strings.TrimRight(prefix[:63-len(suffix)], "-.")
+	}
+	if prefix == "" {
+		prefix = "aikido"
+	}
+	return prefix + suffix
+}
+
+func aikidoTurnSourceID(item source.WorkItem, runTime time.Time) string {
+	sourceID := strings.TrimSpace(item.ID)
+	if sourceID == "" {
+		sourceID = "aikido-group"
+	}
+	return sourceID + "-" + runTime.UTC().Format("20060102-1504")
 }
 
 func cronTurnName(sessionName string, sequence int32) string {
@@ -1153,11 +1456,14 @@ func buildSourceWithProxyAndAikido(ctx context.Context, ts *kelosv1alpha1.TaskSp
 	if ts.Spec.When.Aikido != nil {
 		aikido := ts.Spec.When.Aikido
 		return &source.AikidoSource{
-			ProxyBaseURL: aikidoProxyURL,
-			Repositories: aikido.Repositories,
-			Statuses:     aikido.Statuses,
-			Severities:   aikido.Severities,
-			Client:       httpClient,
+			ProxyBaseURL:   aikidoProxyURL,
+			Repositories:   aikido.Repositories,
+			Statuses:       aikido.Statuses,
+			Severities:     aikido.Severities,
+			Branch:         aikido.Branch,
+			IssueTypes:     aikido.IssueTypes,
+			UseIssueExport: aikidoSessionEnabled(ts),
+			Client:         httpClient,
 		}, nil
 	}
 

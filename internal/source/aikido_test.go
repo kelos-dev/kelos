@@ -97,6 +97,121 @@ func TestAikidoDiscoverBuildsQueriesFiltersSeverityAndMapsMetadata(t *testing.T)
 	}
 }
 
+func TestAikidoDiscoverIssueExportScopesToMainBranchAndBuildsPromptRows(t *testing.T) {
+	var repoQuery urlValues
+	var exportQuery urlValues
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/aikido/repositories/code":
+			repoQuery = urlValues(r.URL.Query())
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"id":     1443254,
+				"name":   "template-nestjs-be",
+				"branch": "main",
+				"active": true,
+			}})
+		case "/aikido/issues/export":
+			exportQuery = urlValues(r.URL.Query())
+			_ = json.NewEncoder(w).Encode([]map[string]any{
+				{
+					"id":                299565698,
+					"group_id":          17997122,
+					"status":            "open",
+					"type":              "open_source",
+					"severity":          "critical",
+					"code_repo_id":      1443254,
+					"code_repo_name":    "template-nestjs-be",
+					"affected_package":  "golang.org/x/crypto",
+					"installed_version": "v0.49.0",
+					"patched_versions":  []string{"0.52.0"},
+					"cve_id":            "AIKIDO-2026-11022",
+					"affected_file":     "go.mod",
+					"start_line":        12,
+					"end_line":          12,
+				},
+				{
+					"id":             299565699,
+					"group_id":       17997123,
+					"status":         "open",
+					"type":           "open_source",
+					"severity":       "low",
+					"code_repo_id":   1443254,
+					"code_repo_name": "template-nestjs-be",
+				},
+			})
+		case "/aikido/issues/groups/17997122":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":           17997122,
+				"title":        "Upgrade golang.org/x/crypto",
+				"description":  "A vulnerable package is installed",
+				"how_to_fix":   "Upgrade to 0.52.0",
+				"severity":     "critical",
+				"group_status": "open",
+				"type":         "open_source",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	s := &AikidoSource{
+		ProxyBaseURL: server.URL + "/aikido",
+		Branch:       "main",
+		Repositories: []string{"template-nestjs-be"},
+		Statuses:     []string{"open"},
+		Severities:   []string{"critical"},
+		IssueTypes:   []string{"open_source"},
+	}
+
+	items, err := s.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+	if repoQuery.Get("filter_branch") != "main" {
+		t.Errorf("filter_branch = %q, want main", repoQuery.Get("filter_branch"))
+	}
+	if repoQuery.Get("filter_name") != "template-nestjs-be" {
+		t.Errorf("filter_name = %q, want template-nestjs-be", repoQuery.Get("filter_name"))
+	}
+	if exportQuery.Get("filter_code_repo_id") != "1443254" {
+		t.Errorf("filter_code_repo_id = %q, want 1443254", exportQuery.Get("filter_code_repo_id"))
+	}
+	if exportQuery.Get("filter_issue_type") != "open_source" {
+		t.Errorf("filter_issue_type = %q, want open_source", exportQuery.Get("filter_issue_type"))
+	}
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(items))
+	}
+	item := items[0]
+	if item.Branch != "main" {
+		t.Errorf("Branch = %q, want main", item.Branch)
+	}
+	if item.Metadata[AikidoMetadataIssueGroupID] != "17997122" {
+		t.Errorf("issue group metadata = %q", item.Metadata[AikidoMetadataIssueGroupID])
+	}
+	if item.Metadata[AikidoMetadataBranch] != "main" {
+		t.Errorf("branch metadata = %q", item.Metadata[AikidoMetadataBranch])
+	}
+	if item.Metadata[AikidoMetadataAffectedPackages] != "golang.org/x/crypto" {
+		t.Errorf("affected packages metadata = %q", item.Metadata[AikidoMetadataAffectedPackages])
+	}
+	if item.Metadata["aikido.kelos.dev/issue-ids"] != "" {
+		t.Fatalf("issue IDs should stay out of annotations, got %q", item.Metadata["aikido.kelos.dev/issue-ids"])
+	}
+	for _, want := range []string{
+		"These rows are scoped to active Aikido code repositories on the branch above.",
+		"issue_id=299565698",
+		"patched=0.52.0",
+		"file=go.mod",
+		"Work only against latest main",
+	} {
+		if !strings.Contains(item.Body, want) {
+			t.Fatalf("Body missing %q:\n%s", want, item.Body)
+		}
+	}
+}
+
 func TestAikidoDiscoverDefaultsStatusToOpen(t *testing.T) {
 	var status string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

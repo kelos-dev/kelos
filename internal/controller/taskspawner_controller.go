@@ -74,10 +74,14 @@ func taskSpawnerSchedule(ts *kelosv1alpha1.TaskSpawner) string {
 }
 
 func taskSpawnerStartingDeadlineSeconds(ts *kelosv1alpha1.TaskSpawner) *int64 {
-	if ts.Spec.When.Cron == nil {
+	switch {
+	case ts.Spec.When.Cron != nil:
+		return ts.Spec.When.Cron.StartingDeadlineSeconds
+	case ts.Spec.When.Aikido != nil:
+		return ts.Spec.When.Aikido.StartingDeadlineSeconds
+	default:
 		return nil
 	}
-	return ts.Spec.When.Cron.StartingDeadlineSeconds
 }
 
 // isWebhookBased returns true if the TaskSpawner is webhook-driven.

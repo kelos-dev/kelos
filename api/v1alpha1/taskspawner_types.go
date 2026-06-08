@@ -111,8 +111,15 @@ type Aikido struct {
 	// +kubebuilder:validation:Required
 	Schedule string `json:"schedule"`
 
+	// Branch filters Aikido code repositories by branch. When omitted, legacy
+	// issue-group discovery is used unless session mode or issueTypes are set;
+	// session-backed discovery defaults this to "main".
+	// +optional
+	// +kubebuilder:validation:MaxLength=128
+	Branch string `json:"branch,omitempty"`
+
 	// Repositories filters by exact Aikido code repository name. When empty,
-	// discovery is account-wide for code-repository issue groups.
+	// discovery includes all active code repositories for the selected branch.
 	// +optional
 	// +kubebuilder:validation:MaxItems=25
 	Repositories []string `json:"repositories,omitempty"`
@@ -128,6 +135,48 @@ type Aikido struct {
 	// +kubebuilder:validation:Items:Enum=critical;high;medium;low
 	// +kubebuilder:validation:MaxItems=4
 	Severities []string `json:"severities,omitempty"`
+
+	// IssueTypes filters by Aikido issue type. Values are passed to Aikido one
+	// at a time because the API does not accept comma-separated issue types.
+	// +optional
+	// +kubebuilder:validation:MaxItems=10
+	IssueTypes []string `json:"issueTypes,omitempty"`
+
+	// StartingDeadlineSeconds limits how long missed schedules may still start.
+	// When omitted, Kubernetes may start missed schedules according to the CronJob default.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	StartingDeadlineSeconds *int64 `json:"startingDeadlineSeconds,omitempty"`
+
+	// Session configures Aikido-triggered AgentSession behavior.
+	// +optional
+	Session *AikidoSession `json:"session,omitempty"`
+}
+
+// AikidoSession configures session-backed execution for Aikido TaskSpawners.
+type AikidoSession struct {
+	// Enabled switches Aikido issue groups from one-shot Task creation to
+	// AgentSession/AgentTurn creation.
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// ScopeTemplate renders a deterministic session scope key.
+	// +optional
+	// +kubebuilder:validation:MaxLength=512
+	ScopeTemplate string `json:"scopeTemplate,omitempty"`
+
+	// MaxAge closes or rolls over a session after this duration.
+	// +optional
+	MaxAge *metav1.Duration `json:"maxAge,omitempty"`
+
+	// IdleTimeout closes an idle session after this duration.
+	// +optional
+	IdleTimeout *metav1.Duration `json:"idleTimeout,omitempty"`
+
+	// MaxQueuedTurns limits queued turns per session.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	MaxQueuedTurns *int32 `json:"maxQueuedTurns,omitempty"`
 }
 
 // GitHubReporting configures status reporting back to GitHub.

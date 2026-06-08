@@ -1668,6 +1668,7 @@ func TestBuildCronJob_BackoffLimit(t *testing.T) {
 
 func TestBuildCronJob_AikidoScheduleAndToolsClientLabel(t *testing.T) {
 	builder := NewDeploymentBuilder()
+	deadline := int64(300)
 	ts := &kelosv1alpha1.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "aikido-spawner",
@@ -1676,7 +1677,8 @@ func TestBuildCronJob_AikidoScheduleAndToolsClientLabel(t *testing.T) {
 		Spec: kelosv1alpha1.TaskSpawnerSpec{
 			When: kelosv1alpha1.When{
 				Aikido: &kelosv1alpha1.Aikido{
-					Schedule: "0 6 * * *",
+					Schedule:                "0 6 * * *",
+					StartingDeadlineSeconds: &deadline,
 				},
 			},
 			TaskTemplate: kelosv1alpha1.TaskTemplate{
@@ -1689,6 +1691,9 @@ func TestBuildCronJob_AikidoScheduleAndToolsClientLabel(t *testing.T) {
 
 	if cronJob.Spec.Schedule != "0 6 * * *" {
 		t.Errorf("expected schedule %q, got %q", "0 6 * * *", cronJob.Spec.Schedule)
+	}
+	if cronJob.Spec.StartingDeadlineSeconds == nil || *cronJob.Spec.StartingDeadlineSeconds != deadline {
+		t.Errorf("expected StartingDeadlineSeconds=%d, got %v", deadline, cronJob.Spec.StartingDeadlineSeconds)
 	}
 	labels := cronJob.Spec.JobTemplate.Spec.Template.Labels
 	if labels["cody.alpheya.com/tools-client"] != "true" {

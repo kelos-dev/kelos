@@ -211,6 +211,50 @@ func TestRenderTurnPrompt_CronTurnUsesCronContext(t *testing.T) {
 	}
 }
 
+func TestRenderTurnPrompt_AikidoTurnUsesSecurityRemediationContext(t *testing.T) {
+	session := &kelosv1alpha1.AgentSession{
+		ObjectMeta: metav1.ObjectMeta{Name: "aikido-session", Namespace: "kelos-system"},
+		Spec: kelosv1alpha1.AgentSessionSpec{
+			Source: kelosv1alpha1.AgentSessionSource{
+				Type:        "Aikido",
+				Key:         "aikido/main/17997122",
+				DisplayName: "aikido:Upgrade golang.org/x/crypto",
+				Schedule:    "0 7 * * *",
+			},
+			TaskSpawnerRef: kelosv1alpha1.TaskSpawnerReference{Name: "cody-aikido-security-main"},
+		},
+	}
+	turn := &kelosv1alpha1.AgentTurn{
+		Spec: kelosv1alpha1.AgentTurnSpec{
+			Sequence: 2,
+			Input: kelosv1alpha1.AgentTurnInput{
+				Body: "Aikido issue group ID: 17997122\nBranch: main\nAffected packages: golang.org/x/crypto",
+			},
+			Source: kelosv1alpha1.AgentTurnSource{
+				Type:     "AikidoIssueGroup",
+				ID:       "aikido-group-17997122-20260608-0300",
+				Time:     "2026-06-08T03:00:00Z",
+				Schedule: "0 7 * * *",
+			},
+		},
+	}
+	got := renderTurnPrompt(session, turn)
+	for _, want := range []string{
+		"You are continuing Cody through a Kelos Aikido security remediation AgentSession.",
+		"Session scope: aikido/main/17997122",
+		"Aikido turn: aikido-group-17997122-20260608-0300 at 2026-06-08T03:00:00Z",
+		"Aikido issue prompt:\nAikido issue group ID: 17997122",
+		"search for existing open remediation PRs",
+		"Create or update fixes only against latest main",
+		"Do not merge PRs.",
+		"start the command with a TTY",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("renderTurnPrompt() missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func newTestTurnClient(t *testing.T) (*kelosv1alpha1.AgentTurn, client.Client) {
 	t.Helper()
 	turn := &kelosv1alpha1.AgentTurn{

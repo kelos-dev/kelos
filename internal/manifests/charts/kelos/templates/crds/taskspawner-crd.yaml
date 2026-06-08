@@ -4095,10 +4095,25 @@ spec:
                     description: Aikido discovers security issue groups from Aikido
                       on a schedule.
                     properties:
+                      branch:
+                        description: |-
+                          Branch filters Aikido code repositories by branch. When omitted, legacy
+                          issue-group discovery is used unless session mode or issueTypes are set;
+                          session-backed discovery defaults this to "main".
+                        maxLength: 128
+                        type: string
+                      issueTypes:
+                        description: |-
+                          IssueTypes filters by Aikido issue type. Values are passed to Aikido one
+                          at a time because the API does not accept comma-separated issue types.
+                        items:
+                          type: string
+                        maxItems: 10
+                        type: array
                       repositories:
                         description: |-
                           Repositories filters by exact Aikido code repository name. When empty,
-                          discovery is account-wide for code-repository issue groups.
+                          discovery includes all active code repositories for the selected branch.
                         items:
                           type: string
                         maxItems: 25
@@ -4106,6 +4121,34 @@ spec:
                       schedule:
                         description: Schedule is a cron expression for Aikido discovery.
                         type: string
+                      session:
+                        description: Session configures Aikido-triggered AgentSession
+                          behavior.
+                        properties:
+                          enabled:
+                            description: |-
+                              Enabled switches Aikido issue groups from one-shot Task creation to
+                              AgentSession/AgentTurn creation.
+                            type: boolean
+                          idleTimeout:
+                            description: IdleTimeout closes an idle session after
+                              this duration.
+                            type: string
+                          maxAge:
+                            description: MaxAge closes or rolls over a session after
+                              this duration.
+                            type: string
+                          maxQueuedTurns:
+                            description: MaxQueuedTurns limits queued turns per session.
+                            format: int32
+                            minimum: 1
+                            type: integer
+                          scopeTemplate:
+                            description: ScopeTemplate renders a deterministic session
+                              scope key.
+                            maxLength: 512
+                            type: string
+                        type: object
                       severities:
                         description: Severities filters by Aikido severity. When empty,
                           all severities match.
@@ -4113,6 +4156,13 @@ spec:
                           type: string
                         maxItems: 4
                         type: array
+                      startingDeadlineSeconds:
+                        description: |-
+                          StartingDeadlineSeconds limits how long missed schedules may still start.
+                          When omitted, Kubernetes may start missed schedules according to the CronJob default.
+                        format: int64
+                        minimum: 0
+                        type: integer
                       statuses:
                         description: Statuses filters by Aikido issue group status.
                           Defaults to ["open"].

@@ -287,9 +287,11 @@ func TestBuildSource_Aikido(t *testing.T) {
 			When: kelosv1alpha1.When{
 				Aikido: &kelosv1alpha1.Aikido{
 					Schedule:     "0 6 * * *",
+					Branch:       "main",
 					Repositories: []string{"notification-service"},
 					Statuses:     []string{"open"},
 					Severities:   []string{"critical", "high"},
+					IssueTypes:   []string{"open_source"},
 				},
 			},
 			TaskTemplate: kelosv1alpha1.TaskTemplate{
@@ -315,6 +317,12 @@ func TestBuildSource_Aikido(t *testing.T) {
 	}
 	if len(aikidoSrc.Severities) != 2 || aikidoSrc.Severities[1] != "high" {
 		t.Errorf("Severities = %v", aikidoSrc.Severities)
+	}
+	if aikidoSrc.Branch != "main" {
+		t.Errorf("Branch = %q, want main", aikidoSrc.Branch)
+	}
+	if len(aikidoSrc.IssueTypes) != 1 || aikidoSrc.IssueTypes[0] != "open_source" {
+		t.Errorf("IssueTypes = %v", aikidoSrc.IssueTypes)
 	}
 }
 
@@ -3100,6 +3108,124 @@ func TestCronTurnNamePreservesGenerationUniquenessWhenTruncated(t *testing.T) {
 	}
 	if !strings.HasSuffix(g2Turn, "-t-0001") || !strings.HasSuffix(g7Turn, "-t-0001") {
 		t.Fatalf("turn names should preserve sequence suffix: %q, %q", g2Turn, g7Turn)
+	}
+}
+
+func TestCreateAikidoSessionTurnCreatesSessionAndDedupesRun(t *testing.T) {
+	maxAge := metav1.Duration{Duration: 14 * 24 * time.Hour}
+	idleTimeout := metav1.Duration{Duration: 25 * time.Hour}
+	maxQueued := int32(2)
+	ts := &kelosv1alpha1.TaskSpawner{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: kelosv1alpha1.GroupVersion.String(),
+			Kind:       "TaskSpawner",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cody-aikido-security-main",
+			Namespace: "kelos-system",
+			UID:       types.UID("taskspawner-uid"),
+		},
+		Spec: kelosv1alpha1.TaskSpawnerSpec{
+			When: kelosv1alpha1.When{
+				Aikido: &kelosv1alpha1.Aikido{
+					Schedule: "0 7 * * *",
+					Branch:   "main",
+					Session: &kelosv1alpha1.AikidoSession{
+						Enabled:        true,
+						MaxAge:         &maxAge,
+						IdleTimeout:    &idleTimeout,
+						MaxQueuedTurns: &maxQueued,
+					},
+				},
+			},
+			TaskTemplate: kelosv1alpha1.TaskTemplate{Type: "codex"},
+		},
+	}
+	cl := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		WithObjects(ts).
+		Build()
+
+	item := source.WorkItem{
+		ID:     "aikido-group-17997122",
+		Title:  "Upgrade golang.org/x/crypto",
+		Kind:   "AikidoIssueGroup",
+		Branch: "main",
+		Metadata: map[string]string{
+			source.AikidoMetadataIssueGroupID: "17997122",
+			source.AikidoMetadataBranch:       "main",
+			source.AikidoMetadataSeverity:     "critical",
+		},
+	}
+	runTime := time.Date(2026, 6, 8, 3, 0, 0, 0, time.UTC)
+	vars := source.WorkItemToTemplateVars(item)
+	enrichAikidoTemplateVars(vars, ts, item, runTime)
+	renderedTask := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{
+				reporting.AnnotationSlackReporting:   reporting.SlackReportingDeferred,
+				reporting.AnnotationSlackDestination: "cody-security",
+				reporting.AnnotationSlackLayout:      reporting.SlackLayoutStableSummaryRoot,
+			},
+		},
+		Spec: kelosv1alpha1.TaskSpec{Prompt: "fix the Aikido issue"},
+	}
+
+	created, err := createAikidoSessionTurn(context.Background(), cl, ts, item, vars, renderedTask, runTime)
+	if err != nil {
+		t.Fatalf("createAikidoSessionTurn() error = %v", err)
+	}
+	if !created {
+		t.Fatal("createAikidoSessionTurn() created = false, want true")
+	}
+	created, err = createAikidoSessionTurn(context.Background(), cl, ts, item, vars, renderedTask, runTime)
+	if err != nil {
+		t.Fatalf("second createAikidoSessionTurn() error = %v", err)
+	}
+	if created {
+		t.Fatal("second createAikidoSessionTurn() created = true, want deduped false")
+	}
+
+	var sessions kelosv1alpha1.AgentSessionList
+	if err := cl.List(context.Background(), &sessions, client.InNamespace(ts.Namespace)); err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions.Items) != 1 {
+		t.Fatalf("AgentSessions = %d, want 1", len(sessions.Items))
+	}
+	session := sessions.Items[0]
+	if session.Spec.Source.Type != sourceTypeAikido {
+		t.Fatalf("session source type = %q, want %q", session.Spec.Source.Type, sourceTypeAikido)
+	}
+	if session.Spec.Source.Key != "aikido/main/17997122" {
+		t.Fatalf("session source key = %q", session.Spec.Source.Key)
+	}
+	if session.Spec.MaxQueuedTurns != maxQueued {
+		t.Fatalf("MaxQueuedTurns = %d, want %d", session.Spec.MaxQueuedTurns, maxQueued)
+	}
+	if session.Annotations[source.AikidoMetadataIssueGroupID] != "17997122" {
+		t.Fatalf("session issue group annotation = %q", session.Annotations[source.AikidoMetadataIssueGroupID])
+	}
+
+	var turns kelosv1alpha1.AgentTurnList
+	if err := cl.List(context.Background(), &turns, client.InNamespace(ts.Namespace)); err != nil {
+		t.Fatal(err)
+	}
+	if len(turns.Items) != 1 {
+		t.Fatalf("AgentTurns = %d, want 1", len(turns.Items))
+	}
+	turn := turns.Items[0]
+	if turn.Spec.Source.Type != sourceTypeAikidoIssueGroup {
+		t.Fatalf("turn source type = %q", turn.Spec.Source.Type)
+	}
+	if turn.Spec.Source.ID != "aikido-group-17997122-20260608-0300" {
+		t.Fatalf("turn source ID = %q", turn.Spec.Source.ID)
+	}
+	if turn.Annotations[source.AikidoMetadataBranch] != "main" {
+		t.Fatalf("turn branch annotation = %q", turn.Annotations[source.AikidoMetadataBranch])
+	}
+	if turn.Annotations[reporting.AnnotationSlackDestination] != "cody-security" {
+		t.Fatalf("slack destination annotation = %q", turn.Annotations[reporting.AnnotationSlackDestination])
 	}
 }
 

@@ -919,6 +919,9 @@ func cancelTurn(ctx context.Context, cl client.Client, session *kelosv1alpha1.Ag
 }
 
 func renderTurnPrompt(session *kelosv1alpha1.AgentSession, turn *kelosv1alpha1.AgentTurn) string {
+	if session.Spec.Source.Type == "Aikido" || turn.Spec.Source.Type == "AikidoIssueGroup" {
+		return renderAikidoTurnPrompt(session, turn)
+	}
 	if session.Spec.Source.Type == "Cron" || turn.Spec.Source.Type == "CronTick" {
 		return renderCronTurnPrompt(session, turn)
 	}
@@ -990,6 +993,75 @@ If you need more information, ask for it in your final answer.`,
 		turn.Spec.Source.UserID,
 		turn.Spec.Source.UserID,
 		turn.Spec.Source.MessageTS,
+		request,
+	)
+}
+
+func renderAikidoTurnPrompt(session *kelosv1alpha1.AgentSession, turn *kelosv1alpha1.AgentTurn) string {
+	request := strings.TrimSpace(turn.Spec.Input.Body)
+	if request == "" {
+		request = strings.TrimSpace(turn.Spec.Input.Text)
+	}
+	sourceName := strings.TrimSpace(session.Spec.Source.DisplayName)
+	if sourceName == "" {
+		sourceName = session.Spec.Source.Type
+	}
+	sourceKey := strings.TrimSpace(session.Spec.Source.Key)
+	if sourceKey == "" {
+		sourceKey = "(none)"
+	}
+	schedule := strings.TrimSpace(turn.Spec.Source.Schedule)
+	if schedule == "" {
+		schedule = session.Spec.Source.Schedule
+	}
+	if schedule == "" {
+		schedule = "(none)"
+	}
+	turnID := strings.TrimSpace(turn.Spec.Source.ID)
+	if turnID == "" {
+		turnID = "(none)"
+	}
+	turnTime := strings.TrimSpace(turn.Spec.Source.Time)
+	if turnTime == "" {
+		turnTime = "(unknown)"
+	}
+	action := "running"
+	if turn.Spec.Sequence > 1 {
+		action = "continuing"
+	}
+	return fmt.Sprintf(`You are %s Cody through a Kelos Aikido security remediation AgentSession.
+
+Session:
+- Kelos session: %s/%s
+- Source: %s
+- Session scope: %s
+- TaskSpawner route: %s/%s
+- Turn sequence: %d
+- Aikido schedule: %s
+- Aikido turn: %s at %s
+
+Aikido issue prompt:
+%s
+
+Use the existing Codex App Server thread context to maintain continuity across Aikido follow-up turns in this session.
+Before creating a PR, search for existing open remediation PRs using the Aikido group ID, issue IDs, CVE IDs, affected package, and repository names.
+Create or update fixes only against latest main unless explicitly instructed otherwise.
+Do not merge PRs.
+If remediation needs shared package, image, or consumer rebuilds, continue babysitting those steps across future turns.
+Reply once through the Kelos reporter.
+For shell commands that require follow-up stdin, an interactive prompt, or a long-running session you need to write to later, start the command with a TTY. If a previous command reports that stdin is closed, rerun it as an interactive TTY session instead of retrying write_stdin.
+If you need more information, ask for it in your final answer.`,
+		action,
+		session.Namespace,
+		session.Name,
+		sourceName,
+		sourceKey,
+		session.Namespace,
+		session.Spec.TaskSpawnerRef.Name,
+		turn.Spec.Sequence,
+		schedule,
+		turnID,
+		turnTime,
 		request,
 	)
 }

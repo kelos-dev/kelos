@@ -60,6 +60,10 @@ const (
 	// PluginMountPath is the mount path for the plugin volume.
 	PluginMountPath = "/kelos/plugin"
 
+	// KanonInstructionsPath is the path inside the generated Kanon home that
+	// contains AgentConfig instructions.
+	KanonInstructionsPath = "instructions/kelos.md"
+
 	// NodeImage is the image used for running Node.js-based init containers
 	// (e.g., installing skills.sh packages).
 	NodeImage = "node:22.14.0-alpine"
@@ -529,6 +533,17 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 			mainContainer.Env = append(mainContainer.Env, corev1.EnvVar{
 				Name:  "KELOS_AGENTS_MD",
 				Value: agentConfig.AgentsMD,
+			})
+		}
+
+		if agentConfig.AgentsMD != "" || len(agentConfig.MCPServers) > 0 {
+			kanonConfig, err := buildKanonConfigJSON(agentConfig)
+			if err != nil {
+				return nil, fmt.Errorf("invalid Kanon configuration: %w", err)
+			}
+			mainContainer.Env = append(mainContainer.Env, corev1.EnvVar{
+				Name:  "KELOS_KANON_CONFIG",
+				Value: kanonConfig,
 			})
 		}
 
@@ -1003,19 +1018,17 @@ type mcpServerJSON struct {
 	Env     map[string]string `json:"env,omitempty"`
 }
 
-// buildMCPServersJSON converts MCPServerSpec entries into a JSON string
-// that matches the .mcp.json format: {"mcpServers":{"name":{...},...}}.
-func buildMCPServersJSON(servers []kelosv1alpha1.MCPServerSpec) (string, error) {
+func buildMCPServerMap(servers []kelosv1alpha1.MCPServerSpec) (map[string]mcpServerJSON, error) {
 	mcpMap := make(map[string]mcpServerJSON, len(servers))
 	for _, s := range servers {
 		if s.Name == "" {
-			return "", fmt.Errorf("MCP server name is empty")
+			return nil, fmt.Errorf("MCP server name is empty")
 		}
 		if err := sanitizeComponentName(s.Name, "MCP server"); err != nil {
-			return "", err
+			return nil, err
 		}
 		if _, exists := mcpMap[s.Name]; exists {
-			return "", fmt.Errorf("duplicate MCP server name %q", s.Name)
+			return nil, fmt.Errorf("duplicate MCP server name %q", s.Name)
 		}
 		entry := mcpServerJSON{
 			Type:    s.Type,
@@ -1027,12 +1040,59 @@ func buildMCPServersJSON(servers []kelosv1alpha1.MCPServerSpec) (string, error) 
 		}
 		mcpMap[s.Name] = entry
 	}
+	return mcpMap, nil
+}
+
+// buildMCPServersJSON converts MCPServerSpec entries into a JSON string
+// that matches the .mcp.json format: {"mcpServers":{"name":{...},...}}.
+func buildMCPServersJSON(servers []kelosv1alpha1.MCPServerSpec) (string, error) {
+	mcpMap, err := buildMCPServerMap(servers)
+	if err != nil {
+		return "", err
+	}
 	wrapper := struct {
 		MCPServers map[string]mcpServerJSON `json:"mcpServers"`
 	}{MCPServers: mcpMap}
 	data, err := json.Marshal(wrapper)
 	if err != nil {
 		return "", fmt.Errorf("marshalling MCP servers: %w", err)
+	}
+	return string(data), nil
+}
+
+// buildKanonConfigJSON converts the AgentConfig fields Kanon supports today
+// into a Kanon source config. Legacy KELOS_* env vars remain populated for
+// plugins and for agents that do not yet have Kanon adapters.
+func buildKanonConfigJSON(agentConfig *kelosv1alpha1.AgentConfigSpec) (string, error) {
+	type kanonInstructionsJSON struct {
+		Files []string `json:"files,omitempty"`
+	}
+	type kanonMCPJSON struct {
+		Servers map[string]mcpServerJSON `json:"servers,omitempty"`
+	}
+	type kanonConfigJSON struct {
+		Version      int                    `json:"version"`
+		Instructions *kanonInstructionsJSON `json:"instructions,omitempty"`
+		MCP          *kanonMCPJSON          `json:"mcp,omitempty"`
+	}
+
+	cfg := kanonConfigJSON{Version: 1}
+	if agentConfig.AgentsMD != "" {
+		cfg.Instructions = &kanonInstructionsJSON{
+			Files: []string{KanonInstructionsPath},
+		}
+	}
+	if len(agentConfig.MCPServers) > 0 {
+		mcpMap, err := buildMCPServerMap(agentConfig.MCPServers)
+		if err != nil {
+			return "", err
+		}
+		cfg.MCP = &kanonMCPJSON{Servers: mcpMap}
+	}
+
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return "", fmt.Errorf("marshalling Kanon config: %w", err)
 	}
 	return string(data), nil
 }

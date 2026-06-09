@@ -3598,6 +3598,115 @@ func TestBuildJob_AgentConfigMCPServers(t *testing.T) {
 	}
 }
 
+func TestBuildJob_AgentConfigKanonConfig(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-kanon-config",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeCodex,
+			Prompt: "Fix issue",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
+		AgentsMD: "Follow TDD",
+		Plugins: []kelosv1alpha1.PluginSpec{
+			{
+				Name: "team-tools",
+				Skills: []kelosv1alpha1.SkillDefinition{
+					{Name: "deploy", Content: "Deploy instructions"},
+				},
+			},
+		},
+		MCPServers: []kelosv1alpha1.MCPServerSpec{
+			{
+				Name:    "local-db",
+				Type:    "stdio",
+				Command: "npx",
+				Args:    []string{"-y", "@bytebase/dbhub"},
+				Env:     map[string]string{"DSN": "postgres://localhost/db"},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, agentConfig, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	envMap := map[string]string{}
+	for _, env := range job.Spec.Template.Spec.Containers[0].Env {
+		if env.Value != "" {
+			envMap[env.Name] = env.Value
+		}
+	}
+
+	if envMap["KELOS_AGENTS_MD"] != "Follow TDD" {
+		t.Errorf("Expected KELOS_AGENTS_MD=%q, got %q", "Follow TDD", envMap["KELOS_AGENTS_MD"])
+	}
+	if envMap["KELOS_PLUGIN_DIR"] != PluginMountPath {
+		t.Errorf("Expected KELOS_PLUGIN_DIR=%q, got %q", PluginMountPath, envMap["KELOS_PLUGIN_DIR"])
+	}
+	if envMap["KELOS_MCP_SERVERS"] == "" {
+		t.Fatal("Expected KELOS_MCP_SERVERS to be set")
+	}
+	if envMap["KELOS_KANON_CONFIG"] == "" {
+		t.Fatal("Expected KELOS_KANON_CONFIG to be set")
+	}
+
+	var parsed struct {
+		Version      int `json:"version"`
+		Instructions struct {
+			Files []string `json:"files"`
+		} `json:"instructions"`
+		MCP struct {
+			Servers map[string]struct {
+				Type    string            `json:"type"`
+				Command string            `json:"command"`
+				Args    []string          `json:"args"`
+				Env     map[string]string `json:"env"`
+			} `json:"servers"`
+		} `json:"mcp"`
+		Skills []any `json:"skills"`
+	}
+	if err := json.Unmarshal([]byte(envMap["KELOS_KANON_CONFIG"]), &parsed); err != nil {
+		t.Fatalf("Failed to parse KELOS_KANON_CONFIG JSON: %v", err)
+	}
+
+	if parsed.Version != 1 {
+		t.Errorf("Expected Kanon version 1, got %d", parsed.Version)
+	}
+	if len(parsed.Instructions.Files) != 1 || parsed.Instructions.Files[0] != KanonInstructionsPath {
+		t.Errorf("Expected Kanon instructions file %q, got %v", KanonInstructionsPath, parsed.Instructions.Files)
+	}
+	localDB, ok := parsed.MCP.Servers["local-db"]
+	if !ok {
+		t.Fatal("Expected local-db MCP server in Kanon config")
+	}
+	if localDB.Type != "stdio" {
+		t.Errorf("Expected local-db type stdio, got %q", localDB.Type)
+	}
+	if localDB.Command != "npx" {
+		t.Errorf("Expected local-db command npx, got %q", localDB.Command)
+	}
+	if len(localDB.Args) != 2 || localDB.Args[0] != "-y" || localDB.Args[1] != "@bytebase/dbhub" {
+		t.Errorf("Expected local-db args [-y @bytebase/dbhub], got %v", localDB.Args)
+	}
+	if localDB.Env["DSN"] != "postgres://localhost/db" {
+		t.Errorf("Expected local-db env DSN, got %v", localDB.Env)
+	}
+	if len(parsed.Skills) != 0 {
+		t.Errorf("Expected Kanon config to omit plugin skills, got %v", parsed.Skills)
+	}
+}
+
 func TestBuildJob_AgentConfigMCPServersWithHTTPHeaders(t *testing.T) {
 	builder := NewJobBuilder()
 	task := &kelosv1alpha1.Task{
@@ -3710,7 +3819,7 @@ func TestBuildJob_AgentConfigMCPServersWithPluginsAndAgentsMD(t *testing.T) {
 		}
 	}
 
-	// All three should be set: KELOS_AGENTS_MD, KELOS_PLUGIN_DIR, KELOS_MCP_SERVERS.
+	// Existing env vars should still be set alongside KELOS_KANON_CONFIG.
 	if envMap["KELOS_AGENTS_MD"] != "Follow TDD" {
 		t.Errorf("Expected KELOS_AGENTS_MD=%q, got %q", "Follow TDD", envMap["KELOS_AGENTS_MD"])
 	}
@@ -3719,6 +3828,9 @@ func TestBuildJob_AgentConfigMCPServersWithPluginsAndAgentsMD(t *testing.T) {
 	}
 	if envMap["KELOS_MCP_SERVERS"] == "" {
 		t.Error("Expected KELOS_MCP_SERVERS to be set")
+	}
+	if envMap["KELOS_KANON_CONFIG"] == "" {
+		t.Error("Expected KELOS_KANON_CONFIG to be set")
 	}
 
 	// Should have plugin volume and init container.

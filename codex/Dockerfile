@@ -27,15 +27,19 @@ RUN ARCH=$(dpkg --print-architecture) \
 
 ENV PATH="/usr/local/go/bin:${PATH}"
 
+ARG KANON_VERSION=3edde4571b0aad2530627d94c8d2624ab44a3952
+RUN GOBIN=/usr/local/bin go install github.com/kelos-dev/kanon@${KANON_VERSION}
+
 ARG CODEX_VERSION=0.137.0
 RUN npm install -g @openai/codex@${CODEX_VERSION}
 
 COPY codex/kelos_entrypoint.sh /kelos_entrypoint.sh
+COPY agent-images/kanon_env.sh /kelos/kanon_env.sh
 
 ARG TARGETARCH
 COPY bin/kelos-capture-linux-${TARGETARCH} /kelos/kelos-capture
 COPY bin/kelos-codex-auth-refresh-linux-${TARGETARCH} /kelos/kelos-codex-auth-refresh
-RUN chmod +x /kelos_entrypoint.sh /kelos/kelos-codex-auth-refresh
+RUN chmod +x /kelos_entrypoint.sh /kelos/kanon_env.sh /kelos/kelos-codex-auth-refresh
 
 RUN useradd -u 61100 -m -s /bin/bash agent
 RUN mkdir -p /home/agent/.codex /home/agent/.local/bin && chown -R agent:agent /home/agent

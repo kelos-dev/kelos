@@ -37,38 +37,27 @@ if [ -n "${KELOS_EFFORT:-}" ]; then
   ARGS+=("--config" "model_reasoning_effort=\"$SAFE_EFFORT\"")
 fi
 
-# Write user-level instructions (global scope read by Codex CLI)
-if [ -n "${KELOS_AGENTS_MD:-}" ]; then
-  mkdir -p ~/.codex
-  printf '%s' "$KELOS_AGENTS_MD" >~/.codex/AGENTS.md
+KANON_CONFIG_APPLIED=""
+if [ -f /kelos/kanon_env.sh ]; then
+  . /kelos/kanon_env.sh
+  if apply_kanon_env_config codex; then
+    KANON_CONFIG_APPLIED="true"
+  fi
 fi
 
-# Install each plugin as a Codex skill directory under ~/.codex/skills
-if [ -n "${KELOS_PLUGIN_DIR:-}" ] && [ -d "${KELOS_PLUGIN_DIR}" ]; then
-  for plugindir in "${KELOS_PLUGIN_DIR}"/*/; do
-    [ -d "$plugindir" ] || continue
-    # Copy skills into ~/.codex/skills/<plugin>/<skill>/SKILL.md
-    if [ -d "${plugindir}skills" ]; then
-      for skilldir in "${plugindir}skills"/*/; do
-        [ -d "$skilldir" ] || continue
-        skillname=$(basename "$skilldir")
-        pluginname=$(basename "$plugindir")
-        targetdir="$HOME/.codex/skills/${pluginname}-${skillname}"
-        mkdir -p "$targetdir"
-        if [ -f "${skilldir}SKILL.md" ]; then
-          cp "${skilldir}SKILL.md" "$targetdir/SKILL.md"
-        fi
-      done
-    fi
-  done
-fi
+if [ "$KANON_CONFIG_APPLIED" != "true" ]; then
+  # Write user-level instructions (global scope read by Codex CLI)
+  if [ -n "${KELOS_AGENTS_MD:-}" ]; then
+    mkdir -p ~/.codex
+    printf '%s' "$KELOS_AGENTS_MD" >~/.codex/AGENTS.md
+  fi
 
-# Write MCP server configuration to project-scoped config.
-# KELOS_MCP_SERVERS contains JSON in .mcp.json format; convert to
-# Codex TOML via a small Node.js helper that is available in the image.
-if [ -n "${KELOS_MCP_SERVERS:-}" ]; then
-  mkdir -p ~/.codex
-  node -e '
+  # Write MCP server configuration to project-scoped config.
+  # KELOS_MCP_SERVERS contains JSON in .mcp.json format; convert to
+  # Codex TOML via a small Node.js helper that is available in the image.
+  if [ -n "${KELOS_MCP_SERVERS:-}" ]; then
+    mkdir -p ~/.codex
+    node -e '
 const cfg = JSON.parse(process.env.KELOS_MCP_SERVERS);
 const servers = cfg.mcpServers || {};
 let toml = "";
@@ -89,6 +78,27 @@ for (const [name, s] of Object.entries(servers)) {
 }
 process.stdout.write(toml);
 ' >>~/.codex/config.toml
+  fi
+fi
+
+# Install each plugin as a Codex skill directory under ~/.codex/skills
+if [ -n "${KELOS_PLUGIN_DIR:-}" ] && [ -d "${KELOS_PLUGIN_DIR}" ]; then
+  for plugindir in "${KELOS_PLUGIN_DIR}"/*/; do
+    [ -d "$plugindir" ] || continue
+    # Copy skills into ~/.codex/skills/<plugin>/<skill>/SKILL.md
+    if [ -d "${plugindir}skills" ]; then
+      for skilldir in "${plugindir}skills"/*/; do
+        [ -d "$skilldir" ] || continue
+        skillname=$(basename "$skilldir")
+        pluginname=$(basename "$plugindir")
+        targetdir="$HOME/.codex/skills/${pluginname}-${skillname}"
+        mkdir -p "$targetdir"
+        if [ -f "${skilldir}SKILL.md" ]; then
+          cp "${skilldir}SKILL.md" "$targetdir/SKILL.md"
+        fi
+      done
+    fi
+  done
 fi
 
 # Run pre-agent setup command if configured. KELOS_SETUP_COMMAND is the

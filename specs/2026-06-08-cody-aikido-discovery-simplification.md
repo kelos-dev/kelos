@@ -1,65 +1,187 @@
 # Cody Aikido Discovery Simplification
 
 Status: draft
-Date: 2026-06-08
+Date: 2026-06-09
 
 ## Context
 
-The Aikido security workflow should create one long-running Cody session per selected Aikido issue group. Each session then babysits remediation across PRs, builds, consumer bumps, heartbeats, and final Aikido verification.
+The Aikido security workflow should create Cody sessions for individual Aikido
+issue groups on latest `main`. Each session babysits remediation across PRs,
+builds, package/image propagation, and follow-up work during a bounded daily
+window.
 
-The current discovery path does more than it needs to:
+The current discovery path does too much before creating any work:
 
 - It resolves Aikido code repositories for a branch.
-- It fetches `/issues/export` rows for each repository/status/issue type combination.
+- It fetches `/issues/export` rows for each repository/status/issue type
+  combination.
 - It groups export rows by issue group ID.
-- It then fetches `/issues/groups/{groupID}` for every discovered issue group before returning work items.
+- It fetches `/issues/groups/{groupID}` for every discovered issue group.
+- Only after all of that does it create work.
 
-That last enrichment step is expensive and was part of the path that hit Aikido's 20 calls/minute limit. It also mixes two concerns:
+The latest manual run proved the failure mode. `cody-tools` showed:
 
-- deterministic discovery: decide which issue groups need sessions
-- investigation/remediation: understand and fix a specific issue group
+- 1 successful `/repositories/code` request.
+- 16 successful `/issues/export` requests.
+- 3 successful `/issues/groups/{id}` requests.
+- the 4th `/issues/groups/{id}` request hit Aikido `429`.
 
-Discovery should be a cheap queue-builder. The agent session should do the deeper Aikido reads.
+That means discovery made 20 successful Aikido API calls in roughly 5 seconds,
+then failed on the 21st call before creating a session for the current run.
 
 ## Goals
 
-- Make Aikido discovery deterministic, cheap, and bounded.
-- Use `/issues/export` rows as the primary discovery input.
-- Remove mandatory per-group detail calls from discovery.
-- Spawn or heartbeat one AgentSession per selected issue group.
-- Let the session agent fetch detailed Aikido issue/group data during its own turns.
-- Keep enough metadata in the WorkItem for prompt rendering, dedupe, Slack naming, and session scoping.
+- Make the Aikido controller a patient sequential worker.
+- Create each issue-group session as soon as enough context for that group is
+  available.
+- Respect Aikido `Retry-After` and continue the run instead of failing at the
+  first throttle.
+- Keep `cody-tools` synchronous; do not turn it into an async queue.
+- Remove Aikido API access from agent sessions for v1.
+- Start a new bounded session for the same issue group on each daily controller
+  run, similar to the DevOps babysitter sessions.
+- Keep duplicate-PR avoidance as a prompt-level guardrail only.
 
 ## Non-Goals
 
-- Do not change the Aikido session lifecycle.
-- Do not change Slack session behavior.
-- Do not add Aikido write APIs.
-- Do not build deep RCA or fix planning into discovery.
+- Do not add deterministic PR locks, PR registries, or controller-owned PR
+  dedupe beyond the existing session scope.
+- Do not add Aikido write APIs to agent sessions.
+- Do not make `cody-tools` responsible for queueing, session creation, or
+  orchestration.
+- Do not persist discovery progress across CronJob runs in v1.
 - Do not require an Aikido CRD redesign for v1.
 
-## Desired Shape
+## Architecture Decision
 
-Discovery should only answer:
+Use this split:
+
+- `cody-tools`: synchronous Aikido gateway.
+- Aikido controller/spawner: long-running sequential worker.
+- Cody agent session: remediation worker with GitHub/repo/build access, but no
+  Aikido API access.
+
+`cody-tools` should enforce the shared Aikido limit and surface upstream
+`Retry-After`. The Aikido controller should own long waits, ordering, and when
+to create sessions. Making `cody-tools` async would create a second
+orchestrator with queueing, correlation, and dedupe responsibilities that
+belong in the controller.
+
+## Desired Runtime
+
+### Daily Discovery Run
+
+1. A daily Aikido controller CronJob starts.
+2. It fetches candidate issue rows from Aikido through `cody-tools`.
+3. It groups candidates by issue group ID.
+4. It sorts groups deterministically.
+5. It processes issue groups one at a time.
+6. For each issue group:
+   - fetch or assemble just enough Aikido context for that group;
+   - create the daily AgentSession and first AgentTurn immediately;
+   - move to the next issue group.
+7. If Aikido returns `429` with `Retry-After`:
+   - wait for the requested time when the remaining run budget allows;
+   - retry the same request;
+   - continue down the issue group list.
+8. Stop early only when the controller is approaching its own hard run
+   deadline.
+
+The normal behavior is not "fail and let the next cron continue". The normal
+behavior is to patiently drain the issue list in the same daily run.
+
+### Per-Issue Daily Sessions
+
+Each daily run creates a new session scope per issue group:
 
 ```text
-Which Aikido issue groups should Cody start or continue sessions for?
+aikido/<branch>/<run-date>/<issue-group-id>
 ```
 
-It should not answer:
+Example:
 
 ```text
-What is the root cause?
-Which repos need PRs?
-Which package bumps are required?
-Is the fix verified?
+aikido/main/2026-06-09/24589148
 ```
 
-Those questions belong to the live Cody session because they may require multiple turns, GitHub checks, image rebuilds, consumer bumps, and Aikido re-scans.
+This gives:
 
-## Proposed Discovery Flow
+- one Slack root per issue group per daily run;
+- no cross-day session reuse;
+- sessions bounded to roughly 24 hours;
+- behavior aligned with the DevOps babysitter pattern.
 
-### 1. Resolve the configured branch and repositories
+Recommended session bounds:
+
+```yaml
+session:
+  enabled: true
+  scopeTemplate: 'aikido/{{.Branch}}/{{.RunDate}}/{{ index .Metadata "aikido.kelos.dev/issue-group-id" }}'
+  maxAge: 25h
+  idleTimeout: 25h
+  maxQueuedTurns: 1
+```
+
+Recommended task runtime bound:
+
+```yaml
+podOverrides:
+  activeDeadlineSeconds: 90000 # 25h
+```
+
+### In-Day Heartbeats
+
+A daily Aikido discovery run alone would create only one turn. To babysit
+remediation during the 24-hour window, add a cheap non-Aikido heartbeat source
+for active Aikido sessions from the current run date.
+
+Heartbeat behavior:
+
+- run every 15-30 minutes;
+- list active Aikido sessions for today;
+- if a session has no queued/running turn, create a follow-up AgentTurn;
+- do not call Aikido;
+- prompt the agent to continue remediation using GitHub, repository, CI,
+  package, and build state.
+
+The next daily Aikido controller run is the verification pass. If the issue
+still appears in Aikido, that next run starts a new daily session. If the issue
+is gone, the controller starts nothing for that issue group.
+
+## Aikido Snapshot Contract
+
+Agent sessions should not call Aikido in v1. The controller gives the agent a
+rich snapshot in the first turn.
+
+Minimum snapshot fields:
+
+```text
+issue group ID
+Aikido URL
+branch
+run date
+status
+severity
+issue type
+affected repositories
+affected packages/images/files
+CVE IDs
+vulnerable/current/fixed versions when present
+bounded evidence rows
+discovery timestamp
+```
+
+The first prompt should state:
+
+```text
+This Aikido snapshot was captured by the controller. Do not call Aikido from
+the agent session. Use GitHub/repository/build evidence for remediation. The
+next daily Aikido controller run will verify whether the issue still exists.
+```
+
+## Sequential Processing Details
+
+### 1. Candidate Selection
 
 Use the existing TaskSpawner fields:
 
@@ -68,8 +190,7 @@ when:
   aikido:
     branch: main
     repositories:
-      - platform-services
-      - portfolio-service
+      - template-nestjs-be
     statuses:
       - open
     severities:
@@ -77,214 +198,160 @@ when:
       - high
     issueTypes:
       - open_source
+      - docker_container
+      - sast
 ```
 
-Behavior:
+Candidate selection may still fetch `/repositories/code` and `/issues/export`
+pages. Those calls should also go through the rate-limited `cody-tools` gateway
+and should be sequential, not concurrent.
 
-- `branch` defaults to `main` when issue export is used.
-- `repositories` is an allowlist of exact Aikido code repository names.
-- `statuses` defaults to `open`.
-- `severities` filters rows locally after export.
-- `issueTypes` is passed to Aikido export calls when configured.
+### 2. Grouping
 
-### 2. Fetch export rows only
-
-For each selected code repository/status/issue type, call `/issues/export`.
-
-Discovery should parse and retain:
-
-- issue group ID
-- issue ID
-- title or summary
-- severity
-- status
-- issue type
-- affected package, if present
-- CVE IDs, if present
-- repository/code repository names
-- Aikido URL, if present
-- branch
-
-No `/issues/groups/{groupID}` calls should be required for the normal path.
-
-### 3. Group rows by issue group ID
-
-Group export rows by `issueGroupId`.
+Group export rows by issue group ID.
 
 For each group:
 
-- choose a stable title from the first non-empty title/summary
-- choose highest severity from grouped rows
-- aggregate affected packages
-- aggregate CVE IDs
-- aggregate repositories
-- preserve a small bounded sample of row-level evidence for the first prompt
+- choose a stable title from the first non-empty title/summary;
+- choose the highest severity from grouped rows;
+- aggregate affected packages/images/files;
+- aggregate CVE IDs;
+- aggregate repositories;
+- preserve a bounded evidence sample.
 
-The WorkItem body should explicitly say that discovery used export data and that the agent should fetch detailed group data before making fixes.
+### 3. Per-Group Snapshot And Session Creation
 
-### 4. Apply deterministic caps
+Process sorted group IDs one by one.
 
-Discovery should have caps so one daily run cannot exhaust Aikido or create too many sessions.
+For each group:
 
-Recommended v1 defaults:
+1. Build a snapshot from export rows.
+2. If required snapshot fields are missing, make a bounded detail request for
+   that one group.
+3. If that detail request receives `429`, wait according to `Retry-After`,
+   retry, then continue.
+4. Create the AgentSession/AgentTurn for that group immediately after the
+   snapshot is ready.
+5. Move to the next group.
 
-```text
-CODY_AIKIDO_DISCOVERY_MAX_API_CALLS=15
-CODY_AIKIDO_DISCOVERY_MAX_GROUPS=10
-CODY_AIKIDO_DISCOVERY_MAX_ROWS_PER_GROUP=10
-CODY_AIKIDO_DISCOVERY_TIMEOUT=3m
-```
+This ensures progress is not lost if a later group hits rate limits or the run
+deadline.
 
-Behavior:
-
-- Stop optional paging when `MAX_API_CALLS` is reached.
-- Sort selected issue groups deterministically before applying `MAX_GROUPS`.
-- Prefer higher severity first, then older/newer issue ordering if available, then numeric group ID.
-- Keep only a bounded evidence sample in the prompt body.
-
-### 5. Deduplicate by AgentSession scope
-
-Use the existing Aikido session scope template:
-
-```text
-aikido/{{.Branch}}/{{ index .Metadata "aikido.kelos.dev/issue-group-id" }}
-```
-
-Spawner behavior remains:
-
-- If no active session exists for the scope, create an AgentSession and first AgentTurn.
-- If an active session exists, enqueue a heartbeat turn, respecting `maxQueuedTurns`.
-- If the session is completed/expired and the issue group is still open, create or roll into the next session according to existing session lifecycle rules.
-
-Discovery itself should not attempt deeper dedupe by PR title, package name, or repository. The session agent owns remediation state.
-
-## WorkItem Contract
-
-Discovery should return enough information for a useful first turn without requiring group-detail enrichment.
-
-Minimum WorkItem fields:
-
-```text
-ID: issue group ID
-Kind: aikido
-Title: concise issue group title from export row
-URL: Aikido group URL when available
-Branch: configured branch
-Metadata:
-  aikido.kelos.dev/issue-group-id
-  aikido.kelos.dev/branch
-  aikido.kelos.dev/severity
-  aikido.kelos.dev/status
-  aikido.kelos.dev/issue-type
-  aikido.kelos.dev/repositories
-  aikido.kelos.dev/code-repositories
-  aikido.kelos.dev/affected-packages
-  aikido.kelos.dev/cve-ids
-```
-
-Body should contain:
-
-```text
-Aikido issue group ID: <id>
-Branch: <branch>
-Severity: <severity>
-Status: <status>
-Issue type: <issue type>
-Affected packages: <bounded list>
-Repositories: <bounded list>
-Discovery source: Aikido issue export
-
-Discovery only selected this issue group for remediation. Before opening fixes,
-fetch the latest Aikido group/details through the Cody Aikido proxy and confirm
-that the issue is still open on the target branch.
-```
-
-## Agent Responsibilities
-
-The session agent should:
-
-- Fetch current Aikido group/detail data at the start of a turn.
-- Confirm the issue still exists for the target branch before modifying repos.
-- Determine which repos need fixes.
-- Check existing Cody/security PRs before opening new ones.
-- Open PRs and track checks/builds.
-- Wait for package/image/build propagation when required.
-- Bump consumers when needed.
-- Re-trigger or request an Aikido scan when supported.
-- Verify closure through Aikido before marking the session done.
-
-This keeps the complex reasoning and long-running state inside the AgentSession, where heartbeats already exist.
-
-## Rate Limiting Interaction
+## Rate Limit And Deadline Behavior
 
 This spec complements `2026-06-08-cody-aikido-rate-limiting.md`.
 
-Expected impact:
+Responsibilities:
 
-- Discovery uses fewer API calls because it no longer fetches every issue group detail.
-- The shared `cody-tools` limiter still protects all Aikido calls.
-- If discovery receives local/upstream `429`, it can return partial groups from already fetched export rows.
-- Live agents still respect `429` and defer deeper checks to a future heartbeat when needed.
+- `cody-tools` performs short bounded waits and returns `Retry-After`.
+- the Aikido controller performs long waits and keeps processing the issue list.
+- the controller stops only when remaining run time is too small to wait safely.
 
-The rate limiter is still required because live sessions and discovery share the same Aikido account quota.
+Recommended controller bounds:
+
+```text
+Aikido discovery CronJob activeDeadlineSeconds: 7200   # 2 hours
+Aikido per-request max wait from controller: Retry-After + jitter, capped by remaining run budget
+CronJob concurrencyPolicy: Forbid
+```
+
+If the run deadline is reached:
+
+- log which issue group was being processed;
+- record that the run was truncated by deadline;
+- do not create partial or low-confidence sessions for unprocessed groups.
+
+## Duplicate PR Guardrail
+
+Do not add controller-level deterministic PR controls in v1.
+
+The prompt should instruct the agent to manage duplicates the same way the
+DevOps agent does:
+
+- search GitHub for existing open Cody/security PRs before opening a new one;
+- include the Aikido issue group ID in PR titles/bodies/branches where useful;
+- continue or update existing matching PRs when appropriate;
+- avoid opening duplicate PRs for the same issue group and target branch.
+
+This remains a prompt-level guardrail only. The controller should not own PR
+dedupe logic.
 
 ## Implementation Plan
 
 ### Kelos
 
-1. Change `internal/source/aikido.go` so `discoverIssueExport` builds WorkItems directly from grouped export rows.
-2. Remove mandatory `fetchIssueGroup` calls from the issue-export discovery path.
-3. Keep legacy `/issues/groups` discovery path only for configurations that do not use branch/issue export.
-4. Add deterministic sorting and `MAX_GROUPS` cap for issue-export discovery.
-5. Add bounded row samples per group to the prompt body.
-6. Add tests proving issue-export discovery succeeds without `/issues/groups/{id}`.
-7. Add tests for grouping multiple rows into one WorkItem.
-8. Add tests for severity filtering, repository aggregation, package/CVE aggregation, and deterministic ordering.
-9. Add tests for group caps and bounded row samples.
+1. Keep `cody-tools` synchronous.
+2. Add/consume `Retry-After` behavior from the rate-limit spec.
+3. Change Aikido discovery to process issue groups sequentially.
+4. Create the AgentSession/AgentTurn immediately after each group's snapshot is
+   ready.
+5. Add `RunDate` to Aikido template variables.
+6. Change the default Aikido session scope to include run date.
+7. Remove Aikido proxy environment variables from Aikido agent session pods.
+8. Add or configure an in-day non-Aikido heartbeat source for active Aikido
+   sessions.
+9. Add structured logs:
+   - candidate rows fetched;
+   - group count;
+   - current group ID;
+   - Retry-After waits;
+   - session/turn created;
+   - deadline truncation.
 
 ### Skills
 
-1. Update the Aikido security prompt to treat discovery metadata as a starting point only.
-2. Instruct the agent to fetch current Aikido details before edits.
-3. Instruct the agent not to retry Aikido aggressively on `429`; let heartbeat continue.
+1. Update the Aikido security prompt to treat controller snapshot data as the
+   only Aikido source of truth for that turn.
+2. Tell the agent not to call Aikido.
+3. Add the prompt-level duplicate PR guardrail.
+4. Keep remediation focused on latest `main`, GitHub, repository changes, CI,
+   package/image propagation, and consumer bumps.
 
 ### GitOps
 
-No GitOps change is required for the simplification itself unless new caps are configured as environment variables.
-
-If caps are environment variables, add them to the Kelos deployment values alongside the rate-limit settings.
+1. Update the Aikido TaskSpawner session scope to include run date.
+2. Set 25-hour session/runtime bounds.
+3. Remove Aikido proxy env wiring from Aikido agent pods.
+4. Add the in-day heartbeat configuration if implemented as a TaskSpawner.
+5. Keep the daily Aikido discovery schedule.
 
 ## Tests
 
 ### Unit Tests
 
-- Issue-export discovery does not call `/issues/groups/{id}`.
-- Multiple export rows for the same group produce one WorkItem.
-- The WorkItem has stable metadata for session scope rendering.
-- Severity filters still apply.
-- Repository filters still apply.
-- Issue type filters still apply.
-- Groups are sorted deterministically before capping.
-- Prompt body includes a bounded evidence sample.
-- Missing optional export fields do not fail discovery when the group ID is present.
-- Missing group ID still fails that row or discovery with a clear error, depending on chosen strictness.
+- Candidate selection uses sequential Aikido proxy calls.
+- Export rows are grouped by issue group ID.
+- A session/turn is created immediately after a group's snapshot is ready.
+- Later `429` does not discard already-created sessions.
+- Controller waits on `Retry-After` and retries the same group.
+- Controller stops when the run deadline cannot safely accommodate the wait.
+- Aikido session scope includes branch, run date, and issue group ID.
+- Aikido agent pod config does not include Aikido proxy access.
+- Agent prompt includes the duplicate PR guardrail.
 
 ### Manual Test
 
-1. Run the Aikido TaskSpawner against a fake Aikido proxy that serves export rows but fails `/issues/groups/{id}`.
-2. Confirm discovery still creates AgentSessions.
-3. Confirm first agent turns fetch current Aikido detail themselves.
-4. Trigger with a low Aikido proxy rate limit and confirm discovery no longer burns the whole quota on enrichment.
+1. Configure a fake Aikido server to allow 2 calls/minute and return
+   `Retry-After`.
+2. Trigger the Aikido controller manually.
+3. Confirm it creates session 1, waits, creates session 2, waits, and continues.
+4. Confirm agent session pods do not receive Aikido proxy env vars.
+5. Confirm the next daily run creates a new session scope for the same issue
+   group instead of heartbeating yesterday's session.
 
 ## Migration Notes
 
-- Existing active sessions keep their current scope because the scope remains based on branch and issue group ID.
-- Newly created sessions may have slightly less detailed first-turn prompts, but the agent will fetch fresh details at turn start.
-- This change should reduce spawner failures and make daily discovery more predictable.
+- Existing active Aikido sessions can expire naturally.
+- New sessions use the run-date scope and produce new daily Slack roots.
+- The first rollout may leave old one-shot Task status in TaskSpawner status
+  until a successful new generation updates status.
 
 ## Open Questions
 
-- Should `MAX_GROUPS` be an environment variable or a TaskSpawner CRD field?
-- Should discovery skip rows missing group ID, or fail the run so we notice unexpected Aikido response shape changes?
-- Should we keep an optional debug flag to re-enable group-detail enrichment during development?
-- Should issue-export grouping prefer newest issue rows, oldest issue rows, or highest severity rows in the bounded prompt sample?
+- Should the in-day heartbeat be implemented as a generic AgentSession
+  heartbeat controller or as an Aikido-specific TaskSpawner source first?
+- What is the right daily run deadline: 1 hour, 2 hours, or longer?
+- Which Aikido snapshot fields are sufficient for each issue type without
+  giving the agent direct Aikido access?
+- Should the controller ever request an Aikido re-scan, or should verification
+  rely only on the next scheduled Aikido state?

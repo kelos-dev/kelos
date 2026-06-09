@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"net/http"
@@ -56,8 +57,8 @@ const (
 	defaultCronSessionIdleTimeout   = time.Hour
 	defaultCronSessionMaxQueued     = int32(5)
 
-	defaultAikidoSessionScopeTemplate = `aikido/{{.Branch}}/{{ index .Metadata "aikido.kelos.dev/issue-group-id" }}`
-	defaultAikidoSessionMaxAge        = 14 * 24 * time.Hour
+	defaultAikidoSessionScopeTemplate = `aikido/{{.Branch}}/{{.RunDate}}/{{ index .Metadata "aikido.kelos.dev/issue-group-id" }}`
+	defaultAikidoSessionMaxAge        = 25 * time.Hour
 	defaultAikidoSessionIdleTimeout   = 25 * time.Hour
 	defaultAikidoSessionMaxQueued     = int32(1)
 )
@@ -312,6 +313,14 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 		return nil
 	}
 
+	sessionMode := cronSessionEnabled(&ts) || aikidoSessionEnabled(&ts)
+	cycleTime := time.Now().UTC().Truncate(time.Minute)
+	if aikidoSessionEnabled(&ts) && len(priorityLabelsForTaskSpawner(&ts)) == 0 {
+		if streaming, ok := src.(source.StreamingSource); ok {
+			return runAikidoStreamingSessionCycle(ctx, cl, key, &ts, streaming, cycleTime)
+		}
+	}
+
 	items, err := src.Discover(ctx)
 	if err != nil {
 		return fmt.Errorf("discovering items: %w", err)
@@ -320,7 +329,6 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 	itemsDiscoveredTotal.Add(float64(len(items)))
 	log.Info("discovered items", "count", len(items))
 
-	sessionMode := cronSessionEnabled(&ts) || aikidoSessionEnabled(&ts)
 	activeTasks := 0
 
 	var existingTaskMap map[string]*kelosv1alpha1.Task
@@ -404,7 +412,6 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 	}
 
 	newTasksCreated := 0
-	cycleTime := time.Now().UTC().Truncate(time.Minute)
 	for _, item := range newItems {
 		// Enforce max concurrency limit
 		if !sessionMode && maxConcurrency > 0 && int32(activeTasks) >= maxConcurrency {
@@ -570,6 +577,153 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 	return nil
 }
 
+var errStopStreamingDiscovery = errors.New("stop streaming discovery")
+
+func runAikidoStreamingSessionCycle(ctx context.Context, cl client.Client, key types.NamespacedName, ts *kelosv1alpha1.TaskSpawner, streaming source.StreamingSource, cycleTime time.Time) error {
+	log := ctrl.Log.WithName("spawner")
+
+	maxTotalTasks := 0
+	if ts.Spec.MaxTotalTasks != nil {
+		maxTotalTasks = int(*ts.Spec.MaxTotalTasks)
+	}
+
+	var contextFetcher *contextfetch.Fetcher
+	if len(ts.Spec.TaskTemplate.ContextSources) > 0 {
+		contextFetcher = &contextfetch.Fetcher{
+			Client:     cl,
+			HTTPClient: http.DefaultClient,
+			Namespace:  ts.Namespace,
+			Logger:     log,
+		}
+	}
+
+	discovered := 0
+	newTasksCreated := 0
+	emitted, discoverErr := streaming.DiscoverEach(ctx, func(item source.WorkItem) error {
+		discovered++
+		if maxTotalTasks > 0 && ts.Status.TotalTasksCreated+newTasksCreated >= maxTotalTasks {
+			log.Info("Task budget exhausted, stopping streaming discovery", "totalCreated", ts.Status.TotalTasksCreated+newTasksCreated, "maxTotalTasks", maxTotalTasks)
+			return errStopStreamingDiscovery
+		}
+
+		created, err := createAikidoStreamingSessionTurn(ctx, cl, ts, item, cycleTime, contextFetcher)
+		if err != nil {
+			log.Error(err, "creating streaming Aikido session AgentTurn", "item", item.ID)
+			return nil
+		}
+		if created {
+			log.Info("Created AgentTurn for streaming Aikido session source", "item", item.ID)
+			newTasksCreated++
+		}
+		return nil
+	})
+	if emitted > discovered {
+		discovered = emitted
+	}
+	if errors.Is(discoverErr, errStopStreamingDiscovery) {
+		discoverErr = nil
+	}
+
+	itemsDiscoveredTotal.Add(float64(discovered))
+	tasksCreatedTotal.Add(float64(newTasksCreated))
+	log.Info("streaming Aikido discovery completed", "count", discovered, "created", newTasksCreated)
+
+	if err := cl.Get(ctx, key, ts); err != nil {
+		return fmt.Errorf("re-fetching TaskSpawner for status update: %w", err)
+	}
+
+	now := metav1.Now()
+	ts.Status.Phase = kelosv1alpha1.TaskSpawnerPhaseRunning
+	ts.Status.LastDiscoveryTime = &now
+	ts.Status.TotalDiscovered = discovered
+	ts.Status.TotalTasksCreated += newTasksCreated
+	ts.Status.ActiveTasks = 0
+	ts.Status.Message = fmt.Sprintf("Discovered %d Aikido issue groups, created %d tasks total", ts.Status.TotalDiscovered, ts.Status.TotalTasksCreated)
+
+	meta.SetStatusCondition(&ts.Status.Conditions, metav1.Condition{
+		Type:               "Suspended",
+		Status:             metav1.ConditionFalse,
+		Reason:             "Running",
+		Message:            "TaskSpawner is running",
+		ObservedGeneration: ts.Generation,
+	})
+
+	if maxTotalTasks > 0 && ts.Status.TotalTasksCreated >= maxTotalTasks {
+		meta.SetStatusCondition(&ts.Status.Conditions, metav1.Condition{
+			Type:               "TaskBudgetExhausted",
+			Status:             metav1.ConditionTrue,
+			Reason:             "BudgetReached",
+			Message:            fmt.Sprintf("Total tasks created (%d) has reached maxTotalTasks (%d)", ts.Status.TotalTasksCreated, maxTotalTasks),
+			ObservedGeneration: ts.Generation,
+		})
+	} else {
+		meta.SetStatusCondition(&ts.Status.Conditions, metav1.Condition{
+			Type:               "TaskBudgetExhausted",
+			Status:             metav1.ConditionFalse,
+			Reason:             "BudgetAvailable",
+			Message:            "Task budget has not been exhausted",
+			ObservedGeneration: ts.Generation,
+		})
+	}
+
+	if err := cl.Status().Update(ctx, ts); err != nil {
+		return fmt.Errorf("updating TaskSpawner status: %w", err)
+	}
+
+	if discoverErr != nil {
+		return fmt.Errorf("streaming Aikido discovery: %w", discoverErr)
+	}
+
+	discoveryTotal.Inc()
+	return nil
+}
+
+func createAikidoStreamingSessionTurn(ctx context.Context, cl client.Client, ts *kelosv1alpha1.TaskSpawner, item source.WorkItem, cycleTime time.Time, contextFetcher *contextfetch.Fetcher) (bool, error) {
+	taskName := fmt.Sprintf("%s-%s", ts.Name, item.ID)
+	templateVars := source.WorkItemToTemplateVars(item)
+	enrichAikidoTemplateVars(templateVars, ts, item, cycleTime)
+
+	if contextFetcher != nil {
+		contextData, err := contextFetcher.FetchAll(ctx, ts.Spec.TaskTemplate.ContextSources, templateVars)
+		if err != nil {
+			return false, fmt.Errorf("fetching context sources: %w", err)
+		}
+		templateVars["Context"] = contextData
+	}
+
+	tb, err := taskbuilder.NewTaskBuilder(cl)
+	if err != nil {
+		return false, fmt.Errorf("creating task builder: %w", err)
+	}
+
+	task, err := tb.BuildTask(
+		taskName,
+		ts.Namespace,
+		&ts.Spec.TaskTemplate,
+		templateVars,
+		&taskbuilder.SpawnerRef{
+			Name:       ts.Name,
+			UID:        string(ts.UID),
+			APIVersion: kelosv1alpha1.GroupVersion.String(),
+			Kind:       "TaskSpawner",
+		},
+	)
+	if err != nil {
+		return false, fmt.Errorf("building task: %w", err)
+	}
+
+	if srcAnnotations := sourceAnnotations(ts, item); len(srcAnnotations) > 0 {
+		if task.Annotations == nil {
+			task.Annotations = make(map[string]string)
+		}
+		for k, v := range srcAnnotations {
+			task.Annotations[k] = v
+		}
+	}
+
+	return createAikidoSessionTurn(ctx, cl, ts, item, templateVars, task, cycleTime)
+}
+
 func cronSessionEnabled(ts *kelosv1alpha1.TaskSpawner) bool {
 	return ts != nil &&
 		ts.Spec.When.Cron != nil &&
@@ -689,6 +843,7 @@ func enrichAikidoTemplateVars(vars map[string]interface{}, ts *kelosv1alpha1.Tas
 	vars["ID"] = item.ID
 	vars["Branch"] = branch
 	vars["Date"] = runTime.Format("2006-01-02")
+	vars["RunDate"] = runTime.Format("2006-01-02")
 	vars["Hour"] = runTime.Format("20060102-15")
 }
 

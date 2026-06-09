@@ -148,6 +148,12 @@ The next daily Aikido controller run is the verification pass. If the issue
 still appears in Aikido, that next run starts a new daily session. If the issue
 is gone, the controller starts nothing for that issue group.
 
+V1 implementation note: this PR does not add the heartbeat source because the
+current TaskSpawner API has one source schedule per spawner. Adding in-day
+heartbeats cleanly needs either a new source type or a second scheduling surface.
+The implemented fallback is a bounded daily session/turn per issue group, with
+verification and renewal owned by the next daily Aikido discovery run.
+
 ## Aikido Snapshot Contract
 
 Agent sessions should not call Aikido in v1. The controller gives the agent a
@@ -226,16 +232,19 @@ Process sorted group IDs one by one.
 For each group:
 
 1. Build a snapshot from export rows.
-2. If required snapshot fields are missing, make a bounded detail request for
-   that one group.
-3. If that detail request receives `429`, wait according to `Retry-After`,
-   retry, then continue.
-4. Create the AgentSession/AgentTurn for that group immediately after the
+2. Create the AgentSession/AgentTurn for that group immediately after the
    snapshot is ready.
-5. Move to the next group.
+3. Move to the next group.
 
 This ensures progress is not lost if a later group hits rate limits or the run
 deadline.
+
+V1 implementation note: export-based discovery intentionally does not fan out
+to `/issues/groups/{groupID}` for every group. The export rows are treated as
+the bounded controller-owned snapshot. This reduces Aikido API calls and avoids
+blocking all session creation on detail enrichment. If future Aikido exports
+prove insufficient, add a narrowly-scoped detail fallback with the same
+sequential `Retry-After` behavior.
 
 ## Rate Limit And Deadline Behavior
 
@@ -288,15 +297,13 @@ dedupe logic.
 5. Add `RunDate` to Aikido template variables.
 6. Change the default Aikido session scope to include run date.
 7. Remove Aikido proxy environment variables from Aikido agent session pods.
-8. Add or configure an in-day non-Aikido heartbeat source for active Aikido
-   sessions.
-9. Add structured logs:
+8. Defer the in-day non-Aikido heartbeat source to a follow-up CRD/source
+   design.
+9. Add focused logs:
    - candidate rows fetched;
    - group count;
-   - current group ID;
-   - Retry-After waits;
    - session/turn created;
-   - deadline truncation.
+   - discovery counts and created-turn counts.
 
 ### Skills
 
@@ -312,8 +319,7 @@ dedupe logic.
 1. Update the Aikido TaskSpawner session scope to include run date.
 2. Set 25-hour session/runtime bounds.
 3. Remove Aikido proxy env wiring from Aikido agent pods.
-4. Add the in-day heartbeat configuration if implemented as a TaskSpawner.
-5. Keep the daily Aikido discovery schedule.
+4. Keep the daily Aikido discovery schedule.
 
 ## Tests
 
@@ -324,7 +330,6 @@ dedupe logic.
 - A session/turn is created immediately after a group's snapshot is ready.
 - Later `429` does not discard already-created sessions.
 - Controller waits on `Retry-After` and retries the same group.
-- Controller stops when the run deadline cannot safely accommodate the wait.
 - Aikido session scope includes branch, run date, and issue group ID.
 - Aikido agent pod config does not include Aikido proxy access.
 - Agent prompt includes the duplicate PR guardrail.

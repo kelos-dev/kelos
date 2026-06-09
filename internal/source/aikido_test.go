@@ -107,6 +107,9 @@ func TestAikidoDiscoverIssueExportScopesToMainBranchAndBuildsPromptRows(t *testi
 		if got := r.Header.Get(aikidoHeaderTaskSpawner); got != "cody-aikido-security-main" {
 			t.Errorf("TaskSpawner header = %q", got)
 		}
+		if got := r.Header.Get(aikidoHeaderRunDate); got == "" {
+			t.Error("Run date header should be set")
+		}
 		switch r.URL.Path {
 		case "/aikido/repositories/code":
 			repoQuery = urlValues(r.URL.Query())
@@ -132,6 +135,7 @@ func TestAikidoDiscoverIssueExportScopesToMainBranchAndBuildsPromptRows(t *testi
 					"patched_versions":  []string{"0.52.0"},
 					"cve_id":            "AIKIDO-2026-11022",
 					"affected_file":     "go.mod",
+					"rule":              "Upgrade golang.org/x/crypto",
 					"start_line":        12,
 					"end_line":          12,
 				},
@@ -146,15 +150,8 @@ func TestAikidoDiscoverIssueExportScopesToMainBranchAndBuildsPromptRows(t *testi
 				},
 			})
 		case "/aikido/issues/groups/17997122":
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"id":           17997122,
-				"title":        "Upgrade golang.org/x/crypto",
-				"description":  "A vulnerable package is installed",
-				"how_to_fix":   "Upgrade to 0.52.0",
-				"severity":     "critical",
-				"group_status": "open",
-				"type":         "open_source",
-			})
+			t.Error("issue export discovery should build the issue-group snapshot from export rows without group detail fan-out")
+			http.NotFound(w, r)
 		default:
 			http.NotFound(w, r)
 		}

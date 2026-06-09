@@ -567,6 +567,35 @@ The `token` and `githubApp` fields are mutually exclusive. If both `name` and `r
 | `namespace` | Default Kubernetes namespace |
 | `agentConfig` | Default AgentConfig resource name |
 
+### Environment Variables
+
+The `env` field defines additional environment variables injected into task pods via `Task.spec.podOverrides.env`. CLI `--env` flags take precedence over config values on name collision.
+
+| Field | Description |
+|-------|-------------|
+| `env[].name` | Variable name (must match `[A-Za-z_][A-Za-z0-9_]*`) |
+| `env[].value` | Plain-text value (mutually exclusive with `valueFrom`) |
+| `env[].valueFrom.secretKeyRef` | Reference a Kubernetes Secret (`name` and `key` required). Resolves in the Task pod's namespace. |
+| `env[].valueFrom.configMapKeyRef` | Reference a Kubernetes ConfigMap (`name` and `key` required). Resolves in the Task pod's namespace. |
+
+```yaml
+env:
+  - name: CLAUDE_CODE_USE_BEDROCK
+    value: "1"
+  - name: AWS_REGION
+    value: us-west-2
+  - name: MY_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: my-k8s-secret
+        key: token
+  - name: APP_CONFIG
+    valueFrom:
+      configMapKeyRef:
+        name: my-configmap
+        key: app.conf
+```
+
 ## CLI Reference
 
 The `kelos` CLI lets you manage the full lifecycle without writing YAML.

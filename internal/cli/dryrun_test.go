@@ -999,6 +999,131 @@ func TestRunCommand_DryRun_NoneCredentialType_ConfigFile(t *testing.T) {
 	}
 }
 
+func TestRunCommand_DryRun_EnvFromConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	cfg := `secret: my-secret
+env:
+  - name: CLAUDE_CODE_USE_BEDROCK
+    value: "1"
+  - name: AWS_REGION
+    value: us-west-2
+`
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{
+		"run",
+		"--config", cfgPath,
+		"--dry-run",
+		"--prompt", "hello",
+		"--name", "env-cfg-task",
+		"--namespace", "test-ns",
+	})
+
+	output := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "CLAUDE_CODE_USE_BEDROCK") {
+		t.Errorf("expected CLAUDE_CODE_USE_BEDROCK in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "AWS_REGION") {
+		t.Errorf("expected AWS_REGION in output, got:\n%s", output)
+	}
+}
+
+func TestRunCommand_DryRun_EnvFlagOverridesConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	cfg := `secret: my-secret
+env:
+  - name: AWS_REGION
+    value: us-west-2
+  - name: OTHER_VAR
+    value: keep-me
+`
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{
+		"run",
+		"--config", cfgPath,
+		"--dry-run",
+		"--prompt", "hello",
+		"--name", "env-override-task",
+		"--namespace", "test-ns",
+		"--env", "AWS_REGION=us-east-1",
+	})
+
+	output := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "us-east-1") {
+		t.Errorf("expected overridden AWS_REGION=us-east-1 in output, got:\n%s", output)
+	}
+	if strings.Contains(output, "us-west-2") {
+		t.Errorf("expected config AWS_REGION=us-west-2 to be overridden, got:\n%s", output)
+	}
+	// The override should appear after OTHER_VAR (last position wins).
+	otherIdx := strings.Index(output, "OTHER_VAR")
+	regionIdx := strings.Index(output, "AWS_REGION")
+	if otherIdx >= 0 && regionIdx >= 0 && regionIdx < otherIdx {
+		t.Errorf("expected overridden AWS_REGION to appear after OTHER_VAR (last position wins), got:\n%s", output)
+	}
+	if !strings.Contains(output, "OTHER_VAR") {
+		t.Errorf("expected OTHER_VAR from config to be preserved, got:\n%s", output)
+	}
+}
+
+func TestRunCommand_DryRun_EnvValueFromConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	cfg := `secret: my-secret
+env:
+  - name: MY_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: my-k8s-secret
+        key: token
+`
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{
+		"run",
+		"--config", cfgPath,
+		"--dry-run",
+		"--prompt", "hello",
+		"--name", "env-vf-task",
+		"--namespace", "test-ns",
+	})
+
+	output := captureStdout(t, func() {
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "MY_SECRET") {
+		t.Errorf("expected MY_SECRET env var in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "my-k8s-secret") {
+		t.Errorf("expected secretKeyRef name in output, got:\n%s", output)
+	}
+}
+
 func TestRunCommand_DryRun_PromptFile(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")

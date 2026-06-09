@@ -287,20 +287,52 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 				}
 				po.ActiveDeadlineSeconds = &secs
 			}
-			if len(envFlags) > 0 {
-				if po == nil {
-					po = &kelos.PodOverrides{}
+			// Merge env vars: start with config file env, then --env flags override.
+			var envVars []corev1.EnvVar
+			if c := cfg.Config; c != nil && len(c.Env) > 0 {
+				for _, e := range c.Env {
+					ev := corev1.EnvVar{
+						Name:      e.Name,
+						ValueFrom: e.ValueFrom.ToCorev1EnvVarSource(),
+					}
+					if e.Value != nil {
+						ev.Value = *e.Value
+					}
+					envVars = append(envVars, ev)
 				}
+			}
+			if len(envFlags) > 0 {
 				for _, e := range envFlags {
 					parts := strings.SplitN(e, "=", 2)
 					if len(parts) != 2 || parts[0] == "" {
 						return fmt.Errorf("invalid --env value %q: must be NAME=VALUE", e)
 					}
-					po.Env = append(po.Env, corev1.EnvVar{
+					envVars = append(envVars, corev1.EnvVar{
 						Name:  parts[0],
 						Value: parts[1],
 					})
 				}
+			}
+			// Deduplicate: last occurrence wins (--env overrides config).
+			// Iterate in reverse so the last occurrence keeps its position.
+			if len(envVars) > 0 {
+				seen := make(map[string]struct{})
+				deduped := make([]corev1.EnvVar, 0, len(envVars))
+				for i := len(envVars) - 1; i >= 0; i-- {
+					if _, ok := seen[envVars[i].Name]; ok {
+						continue
+					}
+					seen[envVars[i].Name] = struct{}{}
+					deduped = append(deduped, envVars[i])
+				}
+				// Reverse to restore original relative order.
+				for i, j := 0, len(deduped)-1; i < j; i, j = i+1, j-1 {
+					deduped[i], deduped[j] = deduped[j], deduped[i]
+				}
+				if po == nil {
+					po = &kelos.PodOverrides{}
+				}
+				po.Env = deduped
 			}
 			if po != nil {
 				task.Spec.PodOverrides = po

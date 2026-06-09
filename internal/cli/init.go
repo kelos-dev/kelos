@@ -63,6 +63,17 @@ oauthToken: ""
 # Default AgentConfig resource (optional)
 # agentConfig: my-agent-config
 
+# Additional environment variables injected into task pods (optional)
+# secretKeyRef/configMapKeyRef resolve in the Task pod's namespace.
+# env:
+#   - name: CLAUDE_CODE_USE_BEDROCK
+#     value: "1"
+#   - name: MY_SECRET
+#     valueFrom:
+#       secretKeyRef:
+#         name: my-k8s-secret
+#         key: token
+
 # Advanced: provide your own Kubernetes secret directly
 # secret: ""
 # credentialType: oauth

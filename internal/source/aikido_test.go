@@ -101,6 +101,12 @@ func TestAikidoDiscoverIssueExportScopesToMainBranchAndBuildsPromptRows(t *testi
 	var repoQuery urlValues
 	var exportQuery urlValues
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get(aikidoHeaderClient); got != aikidoClientDiscovery {
+			t.Errorf("Aikido client header = %q, want %q", got, aikidoClientDiscovery)
+		}
+		if got := r.Header.Get(aikidoHeaderTaskSpawner); got != "cody-aikido-security-main" {
+			t.Errorf("TaskSpawner header = %q", got)
+		}
 		switch r.URL.Path {
 		case "/aikido/repositories/code":
 			repoQuery = urlValues(r.URL.Query())
@@ -156,12 +162,13 @@ func TestAikidoDiscoverIssueExportScopesToMainBranchAndBuildsPromptRows(t *testi
 	defer server.Close()
 
 	s := &AikidoSource{
-		ProxyBaseURL: server.URL + "/aikido",
-		Branch:       "main",
-		Repositories: []string{"template-nestjs-be"},
-		Statuses:     []string{"open"},
-		Severities:   []string{"critical"},
-		IssueTypes:   []string{"open_source"},
+		ProxyBaseURL:    server.URL + "/aikido",
+		Branch:          "main",
+		Repositories:    []string{"template-nestjs-be"},
+		Statuses:        []string{"open"},
+		Severities:      []string{"critical"},
+		IssueTypes:      []string{"open_source"},
+		TaskSpawnerName: "cody-aikido-security-main",
 	}
 
 	items, err := s.Discover(context.Background())
@@ -209,6 +216,42 @@ func TestAikidoDiscoverIssueExportScopesToMainBranchAndBuildsPromptRows(t *testi
 		if !strings.Contains(item.Body, want) {
 			t.Fatalf("Body missing %q:\n%s", want, item.Body)
 		}
+	}
+}
+
+func TestAikidoDiscoverRetriesProxyRetryAfter(t *testing.T) {
+	var attempts int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/open-issue-groups" {
+			http.NotFound(w, r)
+			return
+		}
+		attempts++
+		if attempts == 1 {
+			w.Header().Set("Retry-After", "0")
+			http.Error(w, "limited", http.StatusTooManyRequests)
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{{
+			"id":         "24589148",
+			"title":      "Upgrade vulnerable package",
+			"severity":   "high",
+			"status":     "open",
+			"issue_type": "open_source",
+		}})
+	}))
+	defer server.Close()
+
+	s := &AikidoSource{ProxyBaseURL: server.URL}
+	items, err := s.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+	if len(items) != 1 || items[0].ID != "aikido-group-24589148" {
+		t.Fatalf("items = %#v", items)
 	}
 }
 

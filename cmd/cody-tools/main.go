@@ -13,11 +13,13 @@ import (
 	"net/url"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/kelos-dev/kelos/internal/githubapp"
+	"golang.org/x/time/rate"
 )
 
 const (
@@ -29,6 +31,11 @@ const (
 	defaultHindsightAllowedTools = "recall,list_memories,get_memory,list_tags,get_bank"
 	defaultDatadogMCPURL         = "https://mcp.datadoghq.eu/api/unstable/mcp-server/mcp?toolsets=core,alerting,dbm"
 	defaultContextTimeout        = 10 * time.Second
+	defaultAikidoRatePerMinute   = 18
+	defaultAikidoRateBurst       = 1
+	defaultAikidoMaxWait         = 20 * time.Second
+	defaultAikidoUpstreamTimeout = 30 * time.Second
+	defaultAikidoRetryAfterCap   = 90 * time.Second
 
 	envAddr                       = "CODY_TOOLS_ADDR"
 	envUpstreamURL                = "CODY_TOOLS_ATLASSIAN_UPSTREAM_URL"
@@ -41,6 +48,11 @@ const (
 	envAikidoClientCredentials    = "CODY_TOOLS_AIKIDO_CLIENT_CREDENTIALS"
 	envAikidoClientID             = "CODY_TOOLS_AIKIDO_CLIENT_ID"
 	envAikidoClientSecret         = "CODY_TOOLS_AIKIDO_CLIENT_SECRET"
+	envAikidoRateLimitPerMinute   = "CODY_TOOLS_AIKIDO_RATE_LIMIT_PER_MINUTE"
+	envAikidoRateLimitBurst       = "CODY_TOOLS_AIKIDO_RATE_LIMIT_BURST"
+	envAikidoMaxWait              = "CODY_TOOLS_AIKIDO_MAX_WAIT"
+	envAikidoUpstreamTimeout      = "CODY_TOOLS_AIKIDO_UPSTREAM_TIMEOUT"
+	envAikidoRetryAfterCap        = "CODY_TOOLS_AIKIDO_RETRY_AFTER_CAP"
 	envHindsightMCPURL            = "HINDSIGHT_MCP_URL"
 	envHindsightAuthorization     = "HINDSIGHT_AUTHORIZATION"
 	envHindsightAllowedTools      = "HINDSIGHT_ALLOWED_TOOLS"
@@ -83,6 +95,15 @@ var hopByHopHeaders = map[string]struct{}{
 	"Upgrade":             {},
 }
 
+const (
+	headerAikidoClient        = "X-Cody-Aikido-Client"
+	headerAikidoBudgetSeconds = "X-Cody-Aikido-Budget-Seconds"
+	headerCodyTaskSpawner     = "X-Cody-TaskSpawner"
+	headerAikidoRunDate       = "X-Cody-Aikido-Run-Date"
+)
+
+var errAikidoRateLimited = errors.New("cody Aikido rate limit reached")
+
 type config struct {
 	addr                string
 	upstreamURL         string
@@ -93,6 +114,11 @@ type config struct {
 	aikidoAuthorization string
 	aikidoClientID      string
 	aikidoClientSecret  string
+	aikidoRatePerMinute int
+	aikidoRateBurst     int
+	aikidoMaxWait       time.Duration
+	aikidoUpstreamTO    time.Duration
+	aikidoRetryAfterCap time.Duration
 	hindsightMCPURL     string
 	hindsightAuth       string
 	hindsightTools      map[string]struct{}
@@ -113,6 +139,7 @@ type server struct {
 	cfg               config
 	httpClient        *http.Client
 	aikidoOAuth       *aikidoOAuthClientCredentials
+	aikidoLimiter     *aikidoRateLimiter
 	githubTokenClient *githubapp.TokenClient
 	githubCredentials *githubapp.Credentials
 	logger            *slog.Logger
@@ -129,6 +156,18 @@ type mcpRequestInfo struct {
 	Method          string
 	Tool            string
 	HasBankOverride bool
+}
+
+type aikidoProxyResult struct {
+	Status              int
+	ClientClass         string
+	TaskSpawner         string
+	RunDate             string
+	Wait                time.Duration
+	RetryAfter          time.Duration
+	CooldownUntil       time.Time
+	LocalRateLimited    bool
+	UpstreamRateLimited bool
 }
 
 func main() {
@@ -163,6 +202,7 @@ func main() {
 		httpClient: &http.Client{
 			Timeout: 0,
 		},
+		aikidoLimiter:     newAikidoRateLimiter(cfg),
 		githubTokenClient: githubapp.NewTokenClient(),
 		githubCredentials: githubCredentials,
 		logger:            logger,
@@ -200,6 +240,26 @@ func loadConfig() (config, error) {
 	if err != nil {
 		return config{}, err
 	}
+	aikidoRatePerMinute, err := parseIntEnv(envAikidoRateLimitPerMinute, defaultAikidoRatePerMinute)
+	if err != nil {
+		return config{}, err
+	}
+	aikidoRateBurst, err := parseIntEnv(envAikidoRateLimitBurst, defaultAikidoRateBurst)
+	if err != nil {
+		return config{}, err
+	}
+	aikidoMaxWait, err := parseDurationEnv(envAikidoMaxWait, defaultAikidoMaxWait)
+	if err != nil {
+		return config{}, err
+	}
+	aikidoUpstreamTimeout, err := parseDurationEnv(envAikidoUpstreamTimeout, defaultAikidoUpstreamTimeout)
+	if err != nil {
+		return config{}, err
+	}
+	aikidoRetryAfterCap, err := parseDurationEnv(envAikidoRetryAfterCap, defaultAikidoRetryAfterCap)
+	if err != nil {
+		return config{}, err
+	}
 	cfg := config{
 		addr:                strings.TrimSpace(os.Getenv(envAddr)),
 		upstreamURL:         strings.TrimSpace(os.Getenv(envUpstreamURL)),
@@ -208,6 +268,11 @@ func loadConfig() (config, error) {
 		aikidoAPIBaseURL:    strings.TrimSpace(os.Getenv(envAikidoAPIBaseURL)),
 		aikidoTokenURL:      strings.TrimSpace(os.Getenv(envAikidoTokenURL)),
 		aikidoAuthorization: aikidoAuthorizationFromEnv(os.Getenv(envAikidoAuthorization), os.Getenv(envAikidoAPIKey)),
+		aikidoRatePerMinute: aikidoRatePerMinute,
+		aikidoRateBurst:     aikidoRateBurst,
+		aikidoMaxWait:       aikidoMaxWait,
+		aikidoUpstreamTO:    aikidoUpstreamTimeout,
+		aikidoRetryAfterCap: aikidoRetryAfterCap,
 		hindsightMCPURL:     strings.TrimSpace(os.Getenv(envHindsightMCPURL)),
 		hindsightAuth:       strings.TrimSpace(os.Getenv(envHindsightAuthorization)),
 		contextTimeout:      defaultContextTimeout,
@@ -280,6 +345,21 @@ func loadConfig() (config, error) {
 	}
 	if err := validateURL(envAikidoTokenURL, cfg.aikidoTokenURL); err != nil {
 		return config{}, err
+	}
+	if cfg.aikidoRatePerMinute <= 0 {
+		return config{}, fmt.Errorf("%s must be greater than zero", envAikidoRateLimitPerMinute)
+	}
+	if cfg.aikidoRateBurst <= 0 {
+		return config{}, fmt.Errorf("%s must be greater than zero", envAikidoRateLimitBurst)
+	}
+	if cfg.aikidoMaxWait <= 0 {
+		return config{}, fmt.Errorf("%s must be greater than zero", envAikidoMaxWait)
+	}
+	if cfg.aikidoUpstreamTO <= 0 {
+		return config{}, fmt.Errorf("%s must be greater than zero", envAikidoUpstreamTimeout)
+	}
+	if cfg.aikidoRetryAfterCap <= 0 {
+		return config{}, fmt.Errorf("%s must be greater than zero", envAikidoRetryAfterCap)
 	}
 	if err := validateDatadogConfig(cfg); err != nil {
 		return config{}, err
@@ -373,6 +453,30 @@ func parseBoolEnv(name string, defaultValue bool) (bool, error) {
 	default:
 		return false, fmt.Errorf("%s must be a boolean value", name)
 	}
+}
+
+func parseIntEnv(name string, defaultValue int) (int, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return defaultValue, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("%s is invalid: %w", name, err)
+	}
+	return value, nil
+}
+
+func parseDurationEnv(name string, defaultValue time.Duration) (time.Duration, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return defaultValue, nil
+	}
+	value, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("%s is invalid: %w", name, err)
+	}
+	return value, nil
 }
 
 func aikidoAuthorizationFromEnv(rawAuthorization, rawAPIKey string) string {
@@ -493,15 +597,25 @@ func (s *server) handleAikido(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
-	status, err := s.forwardAikido(w, r)
+	result, err := s.forwardAikido(w, r)
 	duration := time.Since(start)
 	logArgs := []any{
 		"adapter", "aikido",
 		"route", aikidoRoute,
 		"path", strings.TrimPrefix(r.URL.Path, aikidoRoute),
+		"client_class", result.ClientClass,
+		"taskspawner", result.TaskSpawner,
+		"run_date", result.RunDate,
 		"http_method", r.Method,
-		"status", status,
+		"status", result.Status,
 		"duration_ms", duration.Milliseconds(),
+		"rate_limit_wait_ms", result.Wait.Milliseconds(),
+		"retry_after_seconds", int64(result.RetryAfter.Seconds()),
+		"local_rate_limited", result.LocalRateLimited,
+		"upstream_rate_limited", result.UpstreamRateLimited,
+	}
+	if !result.CooldownUntil.IsZero() {
+		logArgs = append(logArgs, "cooldown_until", result.CooldownUntil.Format(time.RFC3339))
 	}
 	if err != nil {
 		logArgs = append(logArgs, "error", err)
@@ -616,6 +730,164 @@ type githubPackagesTokenResponse struct {
 	Token     string     `json:"token"`
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	Source    string     `json:"source"`
+}
+
+type aikidoRateLimiter struct {
+	limiter       *rate.Limiter
+	maxWait       time.Duration
+	retryAfterCap time.Duration
+	now           func() time.Time
+
+	mu            sync.Mutex
+	cooldownUntil time.Time
+}
+
+type aikidoRateLimitWait struct {
+	Wait          time.Duration
+	RetryAfter    time.Duration
+	CooldownUntil time.Time
+}
+
+func newAikidoRateLimiter(cfg config) *aikidoRateLimiter {
+	if cfg.aikidoRatePerMinute <= 0 || cfg.aikidoRateBurst <= 0 {
+		return nil
+	}
+	interval := time.Minute / time.Duration(cfg.aikidoRatePerMinute)
+	if interval <= 0 {
+		interval = time.Nanosecond
+	}
+	return &aikidoRateLimiter{
+		limiter:       rate.NewLimiter(rate.Every(interval), cfg.aikidoRateBurst),
+		maxWait:       cfg.aikidoMaxWait,
+		retryAfterCap: cfg.aikidoRetryAfterCap,
+		now:           time.Now,
+	}
+}
+
+func (l *aikidoRateLimiter) wait(ctx context.Context, maxWait time.Duration) (aikidoRateLimitWait, error) {
+	var info aikidoRateLimitWait
+	if l == nil {
+		return info, nil
+	}
+	if maxWait <= 0 {
+		maxWait = l.maxWait
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, maxWait)
+	defer cancel()
+
+	for {
+		cooldown := l.cooldownRemaining()
+		if cooldown > 0 {
+			info.CooldownUntil = l.cooldownUntilValue()
+			if !durationFitsDeadline(waitCtx, cooldown) {
+				info.RetryAfter = cooldown
+				return info, errAikidoRateLimited
+			}
+			start := l.now()
+			if err := waitDuration(waitCtx, cooldown); err != nil {
+				info.Wait += l.now().Sub(start)
+				info.RetryAfter = cooldown
+				return info, err
+			}
+			info.Wait += l.now().Sub(start)
+			continue
+		}
+
+		reservation := l.limiter.Reserve()
+		if !reservation.OK() {
+			return info, errAikidoRateLimited
+		}
+		delay := reservation.Delay()
+		if delay > 0 && !durationFitsDeadline(waitCtx, delay) {
+			reservation.Cancel()
+			info.RetryAfter = delay
+			return info, errAikidoRateLimited
+		}
+		start := l.now()
+		if err := waitDuration(waitCtx, delay); err != nil {
+			reservation.Cancel()
+			info.Wait += l.now().Sub(start)
+			info.RetryAfter = delay
+			return info, err
+		}
+		info.Wait += l.now().Sub(start)
+		return info, nil
+	}
+}
+
+func (l *aikidoRateLimiter) noteUpstreamRateLimit(retryAfter time.Duration) aikidoRateLimitWait {
+	var info aikidoRateLimitWait
+	if l == nil {
+		info.RetryAfter = retryAfter
+		return info
+	}
+	if retryAfter <= 0 {
+		retryAfter = time.Minute
+	}
+	if l.retryAfterCap > 0 && retryAfter > l.retryAfterCap {
+		retryAfter = l.retryAfterCap
+	}
+	cooldownUntil := l.now().Add(retryAfter)
+	l.mu.Lock()
+	if cooldownUntil.After(l.cooldownUntil) {
+		l.cooldownUntil = cooldownUntil
+	}
+	info.CooldownUntil = l.cooldownUntil
+	l.mu.Unlock()
+	info.RetryAfter = retryAfter
+	return info
+}
+
+func (l *aikidoRateLimiter) cooldownRemaining() time.Duration {
+	if l == nil {
+		return 0
+	}
+	now := l.now()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !l.cooldownUntil.After(now) {
+		return 0
+	}
+	return l.cooldownUntil.Sub(now)
+}
+
+func (l *aikidoRateLimiter) cooldownUntilValue() time.Time {
+	if l == nil {
+		return time.Time{}
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.cooldownUntil
+}
+
+func durationFitsDeadline(ctx context.Context, d time.Duration) bool {
+	if d <= 0 {
+		return true
+	}
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return true
+	}
+	return time.Now().Add(d).Before(deadline)
+}
+
+func waitDuration(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			return nil
+		}
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 type githubCredentialRequest struct {
@@ -846,54 +1118,90 @@ func setDatadogHeaders(headers http.Header, cfg config) {
 	headers.Set("DD_APPLICATION_KEY", cfg.datadogAppKey)
 }
 
-func (s *server) forwardAikido(w http.ResponseWriter, inbound *http.Request) (int, error) {
+func (s *server) forwardAikido(w http.ResponseWriter, inbound *http.Request) (aikidoProxyResult, error) {
+	result := aikidoProxyResultFromRequest(inbound)
 	if inbound.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return http.StatusMethodNotAllowed, fmt.Errorf("method %s is not allowed", inbound.Method)
+		result.Status = http.StatusMethodNotAllowed
+		return result, fmt.Errorf("method %s is not allowed", inbound.Method)
 	}
 	upstreamURL, expectedHost, err := buildAikidoUpstreamURL(s.cfg.aikidoAPIBaseURL, inbound.URL)
 	if err != nil {
 		http.Error(w, "invalid upstream", http.StatusInternalServerError)
-		return http.StatusInternalServerError, err
+		result.Status = http.StatusInternalServerError
+		return result, err
 	}
 
 	authorization, err := s.aikidoAuthorization(inbound.Context())
 	if err != nil {
 		http.Error(w, aikidoAuthorizationError, http.StatusServiceUnavailable)
-		return http.StatusServiceUnavailable, err
+		result.Status = http.StatusServiceUnavailable
+		return result, err
 	}
 
-	req, err := newAikidoUpstreamRequest(inbound, upstreamURL, authorization)
-	if err != nil {
-		http.Error(w, "build upstream request", http.StatusInternalServerError)
-		return http.StatusInternalServerError, err
-	}
-
-	resp, err := s.doAikido(req, expectedHost, authorization)
+	maxWait := aikidoRequestMaxWait(s.cfg.aikidoMaxWait, inbound.Header)
+	resp, err := s.doAikidoRateLimited(inbound, upstreamURL, expectedHost, authorization, maxWait, &result)
 	if err == nil && resp.StatusCode == http.StatusUnauthorized && s.aikidoOAuth != nil {
 		resp.Body.Close()
 		s.aikidoOAuth.invalidate()
 		authorization, err = s.aikidoAuthorization(inbound.Context())
 		if err == nil {
-			req, err = newAikidoUpstreamRequest(inbound, upstreamURL, authorization)
-		}
-		if err == nil {
-			resp, err = s.doAikido(req, expectedHost, authorization)
+			resp, err = s.doAikidoRateLimited(inbound, upstreamURL, expectedHost, authorization, maxWait, &result)
 		}
 	}
 	if err != nil {
+		if errors.Is(err, errAikidoRateLimited) {
+			writeAikidoRateLimited(w, result.RetryAfter)
+			result.Status = http.StatusTooManyRequests
+			result.LocalRateLimited = true
+			return result, nil
+		}
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
-		return http.StatusBadGateway, err
+		result.Status = http.StatusBadGateway
+		return result, err
+	}
+
+	if resp.StatusCode == http.StatusTooManyRequests {
+		rateInfo := s.aikidoLimiter.noteUpstreamRateLimit(parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()))
+		mergeAikidoRateLimitInfo(&result, rateInfo)
+		result.UpstreamRateLimited = true
+
+		remainingWait := maxWait - result.Wait
+		if remainingWait > 0 && rateInfo.RetryAfter > 0 && rateInfo.RetryAfter <= remainingWait {
+			resp.Body.Close()
+			resp, err = s.doAikidoRateLimited(inbound, upstreamURL, expectedHost, authorization, remainingWait, &result)
+			if err != nil {
+				if errors.Is(err, errAikidoRateLimited) {
+					writeAikidoRateLimited(w, result.RetryAfter)
+					result.Status = http.StatusTooManyRequests
+					result.LocalRateLimited = true
+					return result, nil
+				}
+				http.Error(w, "upstream request failed", http.StatusBadGateway)
+				result.Status = http.StatusBadGateway
+				return result, err
+			}
+			if resp.StatusCode == http.StatusTooManyRequests {
+				rateInfo = s.aikidoLimiter.noteUpstreamRateLimit(parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()))
+				mergeAikidoRateLimitInfo(&result, rateInfo)
+				result.UpstreamRateLimited = true
+			}
+		}
+		if resp.StatusCode == http.StatusTooManyRequests && resp.Header.Get("Retry-After") == "" && result.RetryAfter > 0 {
+			resp.Header.Set("Retry-After", strconv.Itoa(retryAfterSeconds(result.RetryAfter)))
+		}
 	}
 	defer resp.Body.Close()
 
 	copyResponseHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 	if _, err := io.Copy(w, resp.Body); err != nil {
-		return resp.StatusCode, err
+		result.Status = resp.StatusCode
+		return result, err
 	}
-	return resp.StatusCode, nil
+	result.Status = resp.StatusCode
+	return result, nil
 }
 
 func (s *server) forwardContext(w http.ResponseWriter, inbound *http.Request, body []byte) (int, error) {
@@ -1011,14 +1319,124 @@ func (s *server) aikidoAuthorization(ctx context.Context) (string, error) {
 	return "", errors.New(aikidoAuthorizationError)
 }
 
-func newAikidoUpstreamRequest(inbound *http.Request, upstreamURL *url.URL, authorization string) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(inbound.Context(), http.MethodGet, upstreamURL.String(), nil)
+func (s *server) doAikidoRateLimited(inbound *http.Request, upstreamURL *url.URL, expectedHost, authorization string, maxWait time.Duration, result *aikidoProxyResult) (*http.Response, error) {
+	waitInfo, err := s.aikidoLimiter.wait(inbound.Context(), maxWait)
+	mergeAikidoRateLimitInfo(result, waitInfo)
+	if err != nil {
+		if errors.Is(err, context.Canceled) && inbound.Context().Err() != nil {
+			return nil, err
+		}
+		return nil, errAikidoRateLimited
+	}
+
+	reqCtx := inbound.Context()
+	if s.cfg.aikidoUpstreamTO > 0 {
+		var cancel context.CancelFunc
+		reqCtx, cancel = context.WithTimeout(reqCtx, s.cfg.aikidoUpstreamTO)
+		defer cancel()
+	}
+	req, err := newAikidoUpstreamRequest(reqCtx, inbound, upstreamURL, authorization)
+	if err != nil {
+		return nil, err
+	}
+	return s.doAikido(req, expectedHost, authorization)
+}
+
+func aikidoProxyResultFromRequest(inbound *http.Request) aikidoProxyResult {
+	result := aikidoProxyResult{
+		ClientClass: strings.TrimSpace(inbound.Header.Get(headerAikidoClient)),
+		TaskSpawner: strings.TrimSpace(inbound.Header.Get(headerCodyTaskSpawner)),
+		RunDate:     strings.TrimSpace(inbound.Header.Get(headerAikidoRunDate)),
+	}
+	if result.ClientClass == "" {
+		result.ClientClass = "unknown"
+	}
+	return result
+}
+
+func aikidoRequestMaxWait(defaultWait time.Duration, headers http.Header) time.Duration {
+	if defaultWait <= 0 {
+		defaultWait = defaultAikidoMaxWait
+	}
+	raw := strings.TrimSpace(headers.Get(headerAikidoBudgetSeconds))
+	if raw == "" {
+		return defaultWait
+	}
+	seconds, err := strconv.ParseFloat(raw, 64)
+	if err != nil || seconds <= 0 {
+		return defaultWait
+	}
+	wait := time.Duration(seconds * float64(time.Second))
+	if wait <= 0 || wait > defaultWait {
+		return defaultWait
+	}
+	return wait
+}
+
+func mergeAikidoRateLimitInfo(result *aikidoProxyResult, info aikidoRateLimitWait) {
+	if result == nil {
+		return
+	}
+	result.Wait += info.Wait
+	if info.RetryAfter > result.RetryAfter {
+		result.RetryAfter = info.RetryAfter
+	}
+	if info.CooldownUntil.After(result.CooldownUntil) {
+		result.CooldownUntil = info.CooldownUntil
+	}
+}
+
+func parseRetryAfter(raw string, now time.Time) time.Duration {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	if seconds, err := strconv.ParseFloat(raw, 64); err == nil {
+		if seconds <= 0 {
+			return 0
+		}
+		return time.Duration(seconds * float64(time.Second))
+	}
+	when, err := http.ParseTime(raw)
+	if err != nil || !when.After(now) {
+		return 0
+	}
+	return when.Sub(now)
+}
+
+func writeAikidoRateLimited(w http.ResponseWriter, retryAfter time.Duration) {
+	seconds := retryAfterSeconds(retryAfter)
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", strconv.Itoa(seconds))
+	w.WriteHeader(http.StatusTooManyRequests)
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"error":             "cody Aikido rate limit reached",
+		"message":           "Cody Aikido proxy rate limit reached; retry after the supplied delay.",
+		"retryAfterSeconds": seconds,
+	}); err != nil {
+		http.Error(w, "encode response", http.StatusInternalServerError)
+	}
+}
+
+func retryAfterSeconds(d time.Duration) int {
+	if d <= 0 {
+		return 1
+	}
+	return int((d + time.Second - 1) / time.Second)
+}
+
+func newAikidoUpstreamRequest(ctx context.Context, inbound *http.Request, upstreamURL *url.URL, authorization string) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstreamURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
 	copyRequestHeaders(req.Header, inbound.Header)
 	req.Header.Del("Authorization")
 	req.Header.Del("Cookie")
+	req.Header.Del(headerAikidoClient)
+	req.Header.Del(headerAikidoBudgetSeconds)
+	req.Header.Del(headerCodyTaskSpawner)
+	req.Header.Del(headerAikidoRunDate)
 	req.Header.Set("Authorization", authorization)
 	if req.Header.Get("Accept") == "" {
 		req.Header.Set("Accept", "application/json")

@@ -725,11 +725,13 @@ func TestAikidoHandlerProxiesReadOnlyRequestsWithServerSideAuth(t *testing.T) {
 	var gotCookie string
 	var gotPath string
 	var gotQuery string
+	var gotCodyClient string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
 		gotCookie = r.Header.Get("Cookie")
 		gotPath = r.URL.Path
 		gotQuery = r.URL.RawQuery
+		gotCodyClient = r.Header.Get(headerAikidoClient)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"items":[]}`))
@@ -748,6 +750,7 @@ func TestAikidoHandlerProxiesReadOnlyRequestsWithServerSideAuth(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/aikido/open-issue-groups?filter_code_repo_name=payments-api&page=0", nil)
 	req.Header.Set("Authorization", "Bearer client-secret")
 	req.Header.Set("Cookie", "session=client")
+	req.Header.Set(headerAikidoClient, "discovery")
 	rec := httptest.NewRecorder()
 
 	s.handleAikido(rec, req)
@@ -761,11 +764,106 @@ func TestAikidoHandlerProxiesReadOnlyRequestsWithServerSideAuth(t *testing.T) {
 	if gotCookie != "" {
 		t.Fatalf("Cookie forwarded = %q", gotCookie)
 	}
+	if gotCodyClient != "" {
+		t.Fatalf("Cody Aikido client header forwarded = %q", gotCodyClient)
+	}
 	if gotPath != "/api/public/v1/open-issue-groups" {
 		t.Fatalf("path = %q", gotPath)
 	}
 	if gotQuery != "filter_code_repo_name=payments-api&page=0" {
 		t.Fatalf("query = %q", gotQuery)
+	}
+}
+
+func TestAikidoHandlerReturnsLocalRateLimitWhenBudgetExpires(t *testing.T) {
+	var upstreamCalls int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls++
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"items":[]}`))
+	}))
+	defer upstream.Close()
+
+	cfg := config{
+		aikidoAPIBaseURL:    upstream.URL + "/api/public/v1",
+		aikidoAuthorization: "Bearer server-secret",
+		aikidoRatePerMinute: 1,
+		aikidoRateBurst:     1,
+		aikidoMaxWait:       time.Millisecond,
+		aikidoRetryAfterCap: time.Minute,
+	}
+	s := &server{
+		cfg:           cfg,
+		httpClient:    upstream.Client(),
+		aikidoLimiter: newAikidoRateLimiter(cfg),
+		logger:        testLogger(),
+	}
+
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/aikido/open-issue-groups", nil)
+		req.Header.Set(headerAikidoClient, "discovery")
+		rec := httptest.NewRecorder()
+
+		s.handleAikido(rec, req)
+
+		if i == 0 && rec.Code != http.StatusOK {
+			t.Fatalf("first status = %d", rec.Code)
+		}
+		if i == 1 {
+			if rec.Code != http.StatusTooManyRequests {
+				t.Fatalf("second status = %d, body = %s", rec.Code, rec.Body.String())
+			}
+			if rec.Header().Get("Retry-After") == "" {
+				t.Fatal("Retry-After header missing")
+			}
+		}
+	}
+	if upstreamCalls != 1 {
+		t.Fatalf("upstreamCalls = %d, want 1", upstreamCalls)
+	}
+}
+
+func TestAikidoHandlerAppliesUpstreamRateLimitCooldown(t *testing.T) {
+	var upstreamCalls int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls++
+		http.Error(w, "limited", http.StatusTooManyRequests)
+	}))
+	defer upstream.Close()
+
+	cfg := config{
+		aikidoAPIBaseURL:    upstream.URL + "/api/public/v1",
+		aikidoAuthorization: "Bearer server-secret",
+		aikidoRatePerMinute: 60000,
+		aikidoRateBurst:     100,
+		aikidoMaxWait:       time.Millisecond,
+		aikidoRetryAfterCap: time.Minute,
+	}
+	s := &server{
+		cfg:           cfg,
+		httpClient:    upstream.Client(),
+		aikidoLimiter: newAikidoRateLimiter(cfg),
+		logger:        testLogger(),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/aikido/open-issue-groups", nil)
+	rec := httptest.NewRecorder()
+	s.handleAikido(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("first status = %d", rec.Code)
+	}
+	if rec.Header().Get("Retry-After") == "" {
+		t.Fatal("first Retry-After header missing")
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/aikido/open-issue-groups", nil)
+	rec = httptest.NewRecorder()
+	s.handleAikido(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("second status = %d", rec.Code)
+	}
+	if upstreamCalls != 1 {
+		t.Fatalf("upstreamCalls = %d, want 1", upstreamCalls)
 	}
 }
 

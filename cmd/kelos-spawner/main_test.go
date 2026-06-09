@@ -324,6 +324,9 @@ func TestBuildSource_Aikido(t *testing.T) {
 	if len(aikidoSrc.IssueTypes) != 1 || aikidoSrc.IssueTypes[0] != "open_source" {
 		t.Errorf("IssueTypes = %v", aikidoSrc.IssueTypes)
 	}
+	if aikidoSrc.TaskSpawnerName != "spawner" {
+		t.Errorf("TaskSpawnerName = %q, want spawner", aikidoSrc.TaskSpawnerName)
+	}
 }
 
 func TestRunCycleWithSource_NoMaxConcurrency(t *testing.T) {

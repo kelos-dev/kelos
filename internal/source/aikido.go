@@ -13,18 +13,29 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
 	DefaultAikidoProxyURL = "http://cody-tools.kelos-system.svc.cluster.local:8080/aikido"
 
-	aikidoOpenIssueGroupsPerPage  = 20
-	aikidoMaxOpenIssueGroupPages  = 10
-	aikidoIssueExportPerPage      = 20
-	aikidoMaxIssueExportPages     = 50
-	aikidoCodeRepositoriesPerPage = 20
-	aikidoMaxCodeRepositoryPages  = 50
-	aikidoMaxBodyBytes            = 64 * 1024
+	aikidoOpenIssueGroupsPerPage   = 20
+	aikidoMaxOpenIssueGroupPages   = 10
+	aikidoIssueExportPerPage       = 20
+	aikidoMaxIssueExportPages      = 50
+	aikidoCodeRepositoriesPerPage  = 20
+	aikidoMaxCodeRepositoryPages   = 50
+	aikidoMaxRateLimitRetries      = 120
+	aikidoDefaultRetryAfterMaxWait = 2 * time.Hour
+	aikidoMaxBodyBytes             = 64 * 1024
+)
+
+const (
+	aikidoHeaderClient        = "X-Cody-Aikido-Client"
+	aikidoHeaderBudgetSeconds = "X-Cody-Aikido-Budget-Seconds"
+	aikidoHeaderTaskSpawner   = "X-Cody-TaskSpawner"
+	aikidoClientDiscovery     = "discovery"
+	aikidoProxyRequestBudget  = 20 * time.Second
 )
 
 const (
@@ -42,14 +53,16 @@ const (
 
 // AikidoSource discovers Aikido issue groups through the cody-tools Aikido proxy.
 type AikidoSource struct {
-	ProxyBaseURL   string
-	Repositories   []string
-	Statuses       []string
-	Severities     []string
-	Branch         string
-	IssueTypes     []string
-	UseIssueExport bool
-	Client         *http.Client
+	ProxyBaseURL      string
+	Repositories      []string
+	Statuses          []string
+	Severities        []string
+	Branch            string
+	IssueTypes        []string
+	UseIssueExport    bool
+	TaskSpawnerName   string
+	RetryAfterMaxWait time.Duration
+	Client            *http.Client
 }
 
 func (s *AikidoSource) httpClient() *http.Client {
@@ -64,6 +77,13 @@ func (s *AikidoSource) proxyBaseURL() string {
 		return strings.TrimSpace(s.ProxyBaseURL)
 	}
 	return DefaultAikidoProxyURL
+}
+
+func (s *AikidoSource) retryAfterMaxWait() time.Duration {
+	if s.RetryAfterMaxWait > 0 {
+		return s.RetryAfterMaxWait
+	}
+	return aikidoDefaultRetryAfterMaxWait
 }
 
 // Discover fetches matching Aikido issue groups and returns them as WorkItems.
@@ -443,33 +463,119 @@ func (s *AikidoSource) getAikidoObjects(ctx context.Context, baseURL *url.URL, p
 	u.Path = strings.TrimRight(baseURL.Path, "/") + "/" + strings.TrimLeft(path, "/")
 	u.RawQuery = params.Encode()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	var waited time.Duration
+	for attempt := 0; attempt <= aikidoMaxRateLimitRetries; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+		if err != nil {
+			return nil, fmt.Errorf("creating Aikido request: %w", err)
+		}
+		s.setAikidoRequestHeaders(req.Header)
+
+		resp, err := s.httpClient().Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("calling Aikido proxy: %w", err)
+		}
+
+		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+			statusErr := newAikidoProxyStatusError(resp)
+			resp.Body.Close()
+			if statusErr.StatusCode == http.StatusTooManyRequests && statusErr.HasRetryAfter {
+				if waited+statusErr.RetryAfter <= s.retryAfterMaxWait() {
+					if err := waitAikidoRetryAfter(ctx, statusErr.RetryAfter); err != nil {
+						return nil, fmt.Errorf("waiting for Aikido Retry-After: %w", err)
+					}
+					waited += statusErr.RetryAfter
+					continue
+				}
+			}
+			return nil, statusErr
+		}
+
+		var payload any
+		err = json.NewDecoder(resp.Body).Decode(&payload)
+		resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("decoding Aikido response: %w", err)
+		}
+
+		objects, err := aikidoObjectsFromPayload(payload)
+		if err != nil {
+			return nil, err
+		}
+		return objects, nil
+	}
+	return nil, fmt.Errorf("Aikido proxy returned repeated rate limits after %d retries", aikidoMaxRateLimitRetries)
+}
+
+func (s *AikidoSource) setAikidoRequestHeaders(headers http.Header) {
+	headers.Set("Accept", "application/json")
+	headers.Set(aikidoHeaderClient, aikidoClientDiscovery)
+	headers.Set(aikidoHeaderBudgetSeconds, strconv.Itoa(int(aikidoProxyRequestBudget/time.Second)))
+	if name := strings.TrimSpace(s.TaskSpawnerName); name != "" {
+		headers.Set(aikidoHeaderTaskSpawner, name)
+	}
+}
+
+type aikidoProxyStatusError struct {
+	StatusCode    int
+	Body          string
+	RetryAfter    time.Duration
+	HasRetryAfter bool
+}
+
+func (e *aikidoProxyStatusError) Error() string {
+	return fmt.Sprintf("Aikido proxy returned status %d: %s", e.StatusCode, e.Body)
+}
+
+func newAikidoProxyStatusError(resp *http.Response) *aikidoProxyStatusError {
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	retryAfter, hasRetryAfter := parseAikidoRetryAfter(resp.Header.Get("Retry-After"), time.Now())
+	return &aikidoProxyStatusError{
+		StatusCode:    resp.StatusCode,
+		Body:          string(body),
+		RetryAfter:    retryAfter,
+		HasRetryAfter: hasRetryAfter,
+	}
+}
+
+func parseAikidoRetryAfter(raw string, now time.Time) (time.Duration, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false
+	}
+	if seconds, err := strconv.ParseFloat(raw, 64); err == nil {
+		if seconds < 0 {
+			return 0, false
+		}
+		return time.Duration(seconds * float64(time.Second)), true
+	}
+	when, err := http.ParseTime(raw)
 	if err != nil {
-		return nil, fmt.Errorf("creating Aikido request: %w", err)
+		return 0, false
 	}
-	req.Header.Set("Accept", "application/json")
+	if !when.After(now) {
+		return 0, true
+	}
+	return when.Sub(now), true
+}
 
-	resp, err := s.httpClient().Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("calling Aikido proxy: %w", err)
+func waitAikidoRetryAfter(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			return nil
+		}
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return nil, fmt.Errorf("Aikido proxy returned status %d: %s", resp.StatusCode, string(body))
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
-
-	var payload any
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, fmt.Errorf("decoding Aikido response: %w", err)
-	}
-
-	objects, err := aikidoObjectsFromPayload(payload)
-	if err != nil {
-		return nil, err
-	}
-	return objects, nil
 }
 
 func aikidoObjectsFromPayload(payload any) ([]map[string]any, error) {
@@ -672,9 +778,7 @@ func aikidoWorkItemBody(group map[string]any, id, title, severity, status, issue
 		}
 	}
 
-	b.WriteString("\nUse the internal read-only Aikido proxy for deeper context if needed: ")
-	b.WriteString(DefaultAikidoProxyURL)
-	b.WriteString("\n")
+	b.WriteString("\nUse only the controller-provided Aikido snapshot. Do not call Aikido from the agent session; the next controller run will verify whether the issue still exists.\n")
 
 	body := b.String()
 	if len(body) > aikidoMaxBodyBytes {
@@ -730,10 +834,7 @@ func aikidoIssueExportWorkItemBody(group map[string]any, id, title, severity, st
 	b.WriteString("- Search for an existing open remediation PR before creating a new one.\n")
 	b.WriteString("- Do not merge PRs.\n")
 	b.WriteString("- If remediation requires shared package or image rebuilds, continue across future turns.\n")
-	b.WriteString("- After the fix is available, verify with Aikido before declaring complete.\n")
-	b.WriteString("\nUse the internal read-only Aikido proxy for deeper context if needed: ")
-	b.WriteString(DefaultAikidoProxyURL)
-	b.WriteString("\n")
+	b.WriteString("- Do not call Aikido from the agent session; the next controller run will verify whether the issue still exists.\n")
 
 	body := b.String()
 	if len(body) > aikidoMaxBodyBytes {

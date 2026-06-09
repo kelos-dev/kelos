@@ -1456,14 +1456,15 @@ func buildSourceWithProxyAndAikido(ctx context.Context, ts *kelosv1alpha1.TaskSp
 	if ts.Spec.When.Aikido != nil {
 		aikido := ts.Spec.When.Aikido
 		return &source.AikidoSource{
-			ProxyBaseURL:   aikidoProxyURL,
-			Repositories:   aikido.Repositories,
-			Statuses:       aikido.Statuses,
-			Severities:     aikido.Severities,
-			Branch:         aikido.Branch,
-			IssueTypes:     aikido.IssueTypes,
-			UseIssueExport: aikidoSessionEnabled(ts),
-			Client:         httpClient,
+			ProxyBaseURL:    aikidoProxyURL,
+			Repositories:    aikido.Repositories,
+			Statuses:        aikido.Statuses,
+			Severities:      aikido.Severities,
+			Branch:          aikido.Branch,
+			IssueTypes:      aikido.IssueTypes,
+			UseIssueExport:  aikidoSessionEnabled(ts),
+			TaskSpawnerName: ts.Name,
+			Client:          httpClient,
 		}, nil
 	}
 

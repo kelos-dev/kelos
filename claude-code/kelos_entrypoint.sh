@@ -27,24 +27,26 @@ if [ -n "${KELOS_EFFORT:-}" ]; then
   ARGS+=("--effort" "$KELOS_EFFORT")
 fi
 
-# Write user-level instructions (additive, no conflict with repo)
-if [ -n "${KELOS_AGENTS_MD:-}" ]; then
-  mkdir -p ~/.claude
-  printf '%s' "$KELOS_AGENTS_MD" >~/.claude/CLAUDE.md
+KANON_CONFIG_APPLIED=""
+if [ -f /kelos/kanon_env.sh ]; then
+  . /kelos/kanon_env.sh
+  if apply_kanon_env_config claude; then
+    KANON_CONFIG_APPLIED="true"
+  fi
 fi
 
-# Pass each plugin directory via --plugin-dir
-if [ -n "${KELOS_PLUGIN_DIR:-}" ] && [ -d "${KELOS_PLUGIN_DIR}" ]; then
-  for dir in "${KELOS_PLUGIN_DIR}"/*/; do
-    [ -d "$dir" ] && ARGS+=("--plugin-dir" "$dir")
-  done
-fi
+if [ "$KANON_CONFIG_APPLIED" != "true" ]; then
+  # Write user-level instructions (additive, no conflict with repo)
+  if [ -n "${KELOS_AGENTS_MD:-}" ]; then
+    mkdir -p ~/.claude
+    printf '%s' "$KELOS_AGENTS_MD" >~/.claude/CLAUDE.md
+  fi
 
-# Write MCP server configuration to user-scoped ~/.claude.json.
-# This avoids overwriting the repository's own .mcp.json while
-# still making the servers available to Claude Code.
-if [ -n "${KELOS_MCP_SERVERS:-}" ]; then
-  node -e '
+  # Write MCP server configuration to user-scoped ~/.claude.json.
+  # This avoids overwriting the repository's own .mcp.json while
+  # still making the servers available to Claude Code.
+  if [ -n "${KELOS_MCP_SERVERS:-}" ]; then
+    node -e '
 const fs = require("fs");
 const cfgPath = require("os").homedir() + "/.claude.json";
 let existing = {};
@@ -53,6 +55,14 @@ const mcp = JSON.parse(process.env.KELOS_MCP_SERVERS);
 existing.mcpServers = Object.assign(existing.mcpServers || {}, mcp.mcpServers || {});
 fs.writeFileSync(cfgPath, JSON.stringify(existing, null, 2));
 '
+  fi
+fi
+
+# Pass each plugin directory via --plugin-dir
+if [ -n "${KELOS_PLUGIN_DIR:-}" ] && [ -d "${KELOS_PLUGIN_DIR}" ]; then
+  for dir in "${KELOS_PLUGIN_DIR}"/*/; do
+    [ -d "$dir" ] && ARGS+=("--plugin-dir" "$dir")
+  done
 fi
 
 # Run pre-agent setup command if configured. KELOS_SETUP_COMMAND is the

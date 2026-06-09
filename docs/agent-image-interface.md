@@ -44,7 +44,9 @@ Kelos sets the following reserved environment variables on agent containers:
 | `KELOS_AGENT_TYPE` | The agent type (`claude-code`, `codex`, `gemini`, `opencode`, `cursor`) | Always |
 | `KELOS_BASE_BRANCH` | The base branch (workspace `ref`) for the task | When workspace has a non-empty `ref` |
 | `KELOS_AGENTS_MD` | User-level instructions from AgentConfig | When `agentConfigRef` is set and `agentsMD` is non-empty |
-| `KELOS_PLUGIN_DIR` | Path to plugin directory containing skills and agents | When `agentConfigRef` is set and `plugins` is non-empty |
+| `KELOS_PLUGIN_DIR` | Path to plugin directory containing skills and agents | When `agentConfigRef` is set and `plugins` or `skills` is non-empty |
+| `KELOS_MCP_SERVERS` | JSON MCP server config from AgentConfig | When `agentConfigRef` is set and `mcpServers` is non-empty |
+| `KELOS_KANON_CONFIG` | Kanon source config generated from AgentConfig instructions and MCP servers | When `agentConfigRef` is set and `agentsMD` or `mcpServers` is non-empty |
 | `KELOS_SETUP_COMMAND` | JSON-encoded exec-form array from `Workspace.spec.setupCommand`, executed by the entrypoint before the agent starts | When the workspace defines `setupCommand` |
 
 > The names listed in this table are reserved for Kelos behavior. When Kelos
@@ -61,6 +63,14 @@ The bundled agent images handle `KELOS_EFFORT` as follows:
 - `gemini`: writes a temporary model alias with `thinkingConfig` when the model family supports it, otherwise adds effort guidance to user-level instructions.
 - `opencode`: writes agent model options including `reasoningEffort` and provider variants where available.
 - `cursor`: adds effort guidance to user-level instructions because Cursor CLI does not expose a documented effort flag.
+
+The bundled agent images include the `kanon` binary. The `codex` and
+`claude-code` entrypoints use `KELOS_KANON_CONFIG` to apply AgentConfig
+instructions and MCP servers through Kanon, then keep the existing
+`KELOS_PLUGIN_DIR` handling for plugins. The `gemini`, `opencode`, and
+`cursor` entrypoints continue to use the legacy `KELOS_AGENTS_MD`,
+`KELOS_MCP_SERVERS`, and `KELOS_PLUGIN_DIR` paths until Kanon provides matching
+adapters for those agents.
 
 ### 4. User ID
 

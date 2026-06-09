@@ -27,11 +27,15 @@ RUN ARCH=$(dpkg --print-architecture) \
 
 ENV PATH="/usr/local/go/bin:${PATH}"
 
+ARG KANON_VERSION=3edde4571b0aad2530627d94c8d2624ab44a3952
+RUN GOBIN=/usr/local/bin go install github.com/kelos-dev/kanon@${KANON_VERSION}
+
 ARG GEMINI_CLI_VERSION=0.45.1
 RUN npm install -g @google/gemini-cli@${GEMINI_CLI_VERSION}
 
 COPY gemini/kelos_entrypoint.sh /kelos_entrypoint.sh
-RUN chmod +x /kelos_entrypoint.sh
+COPY agent-images/kanon_env.sh /kelos/kanon_env.sh
+RUN chmod +x /kelos_entrypoint.sh /kelos/kanon_env.sh
 
 ARG TARGETARCH
 COPY bin/kelos-capture-linux-${TARGETARCH} /kelos/kelos-capture

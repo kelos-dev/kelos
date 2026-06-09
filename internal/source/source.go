@@ -43,6 +43,14 @@ type Source interface {
 	Discover(ctx context.Context) ([]WorkItem, error)
 }
 
+// StreamingSource can emit discovered work items incrementally. Sources that
+// perform expensive per-item enrichment can use this to let the spawner create
+// work as soon as each item is ready instead of waiting for all discovery to
+// complete.
+type StreamingSource interface {
+	DiscoverEach(ctx context.Context, emit func(WorkItem) error) (int, error)
+}
+
 // SortByLabelPriority sorts items in place by the first matching label in
 // priorityLabels. Items whose labels match an earlier index are sorted first.
 // Items with no matching label are placed last. The sort is stable so items

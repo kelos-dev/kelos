@@ -13,18 +13,30 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
 	DefaultAikidoProxyURL = "http://cody-tools.kelos-system.svc.cluster.local:8080/aikido"
 
-	aikidoOpenIssueGroupsPerPage  = 20
-	aikidoMaxOpenIssueGroupPages  = 10
-	aikidoIssueExportPerPage      = 20
-	aikidoMaxIssueExportPages     = 50
-	aikidoCodeRepositoriesPerPage = 20
-	aikidoMaxCodeRepositoryPages  = 50
-	aikidoMaxBodyBytes            = 64 * 1024
+	aikidoOpenIssueGroupsPerPage   = 20
+	aikidoMaxOpenIssueGroupPages   = 10
+	aikidoIssueExportPerPage       = 20
+	aikidoMaxIssueExportPages      = 50
+	aikidoCodeRepositoriesPerPage  = 20
+	aikidoMaxCodeRepositoryPages   = 50
+	aikidoMaxRateLimitRetries      = 120
+	aikidoDefaultRetryAfterMaxWait = 2 * time.Hour
+	aikidoMaxBodyBytes             = 64 * 1024
+)
+
+const (
+	aikidoHeaderClient        = "X-Cody-Aikido-Client"
+	aikidoHeaderBudgetSeconds = "X-Cody-Aikido-Budget-Seconds"
+	aikidoHeaderTaskSpawner   = "X-Cody-TaskSpawner"
+	aikidoHeaderRunDate       = "X-Cody-Aikido-Run-Date"
+	aikidoClientDiscovery     = "discovery"
+	aikidoProxyRequestBudget  = 20 * time.Second
 )
 
 const (
@@ -42,14 +54,16 @@ const (
 
 // AikidoSource discovers Aikido issue groups through the cody-tools Aikido proxy.
 type AikidoSource struct {
-	ProxyBaseURL   string
-	Repositories   []string
-	Statuses       []string
-	Severities     []string
-	Branch         string
-	IssueTypes     []string
-	UseIssueExport bool
-	Client         *http.Client
+	ProxyBaseURL      string
+	Repositories      []string
+	Statuses          []string
+	Severities        []string
+	Branch            string
+	IssueTypes        []string
+	UseIssueExport    bool
+	TaskSpawnerName   string
+	RetryAfterMaxWait time.Duration
+	Client            *http.Client
 }
 
 func (s *AikidoSource) httpClient() *http.Client {
@@ -66,6 +80,13 @@ func (s *AikidoSource) proxyBaseURL() string {
 	return DefaultAikidoProxyURL
 }
 
+func (s *AikidoSource) retryAfterMaxWait() time.Duration {
+	if s.RetryAfterMaxWait > 0 {
+		return s.RetryAfterMaxWait
+	}
+	return aikidoDefaultRetryAfterMaxWait
+}
+
 // Discover fetches matching Aikido issue groups and returns them as WorkItems.
 func (s *AikidoSource) Discover(ctx context.Context) ([]WorkItem, error) {
 	baseURL, err := parseAikidoProxyBaseURL(s.proxyBaseURL())
@@ -77,6 +98,34 @@ func (s *AikidoSource) Discover(ctx context.Context) ([]WorkItem, error) {
 		return s.discoverIssueExport(ctx, baseURL)
 	}
 
+	return s.discoverOpenIssueGroups(ctx, baseURL)
+}
+
+// DiscoverEach fetches matching Aikido issue groups and emits each WorkItem as
+// soon as that group's controller-owned snapshot is ready.
+func (s *AikidoSource) DiscoverEach(ctx context.Context, emit func(WorkItem) error) (int, error) {
+	baseURL, err := parseAikidoProxyBaseURL(s.proxyBaseURL())
+	if err != nil {
+		return 0, err
+	}
+
+	if s.useIssueExport() {
+		return s.discoverIssueExportEach(ctx, baseURL, emit)
+	}
+
+	items, err := s.discoverOpenIssueGroups(ctx, baseURL)
+	if err != nil {
+		return 0, err
+	}
+	for i, item := range items {
+		if err := emit(item); err != nil {
+			return i, err
+		}
+	}
+	return len(items), nil
+}
+
+func (s *AikidoSource) discoverOpenIssueGroups(ctx context.Context, baseURL *url.URL) ([]WorkItem, error) {
 	if err := s.validateRepositories(ctx, baseURL); err != nil {
 		return nil, err
 	}
@@ -158,13 +207,25 @@ func (s *AikidoSource) resolvedIssueTypes() []string {
 }
 
 func (s *AikidoSource) discoverIssueExport(ctx context.Context, baseURL *url.URL) ([]WorkItem, error) {
-	branch := s.resolvedBranch()
-	repos, err := s.fetchBranchCodeRepositories(ctx, baseURL, branch)
+	var items []WorkItem
+	_, err := s.discoverIssueExportEach(ctx, baseURL, func(item WorkItem) error {
+		items = append(items, item)
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
+	return items, nil
+}
+
+func (s *AikidoSource) discoverIssueExportEach(ctx context.Context, baseURL *url.URL, emit func(WorkItem) error) (int, error) {
+	branch := s.resolvedBranch()
+	repos, err := s.fetchBranchCodeRepositories(ctx, baseURL, branch)
+	if err != nil {
+		return 0, err
+	}
 	if len(repos) == 0 {
-		return nil, nil
+		return 0, nil
 	}
 
 	statuses := s.resolvedStatuses()
@@ -178,13 +239,13 @@ func (s *AikidoSource) discoverIssueExport(ctx context.Context, baseURL *url.URL
 	for _, repo := range repos {
 		repoID := aikidoStringFromAny(firstAikidoValue(repo, "id", "code_repo_id", "codeRepoId"))
 		if repoID == "" {
-			return nil, fmt.Errorf("Aikido code repository response is missing repository ID")
+			return 0, fmt.Errorf("Aikido code repository response is missing repository ID")
 		}
 		for _, status := range statuses {
 			for _, issueType := range issueTypes {
 				rows, err := s.fetchIssueExportRows(ctx, baseURL, repoID, status, issueType)
 				if err != nil {
-					return nil, err
+					return 0, err
 				}
 				for _, row := range rows {
 					if !s.matchesIssueExportRow(row, repoID, status, issueType) {
@@ -192,7 +253,7 @@ func (s *AikidoSource) discoverIssueExport(ctx context.Context, baseURL *url.URL
 					}
 					rowID := aikidoStringFromAny(firstAikidoValue(row, "id", "issue_id", "issueId"))
 					if rowID == "" {
-						return nil, fmt.Errorf("Aikido issue export row is missing issue ID")
+						return 0, fmt.Errorf("Aikido issue export row is missing issue ID")
 					}
 					if _, seen := rowsByID[rowID]; seen {
 						continue
@@ -200,7 +261,7 @@ func (s *AikidoSource) discoverIssueExport(ctx context.Context, baseURL *url.URL
 					rowsByID[rowID] = row
 					groupID := aikidoStringFromAny(firstAikidoValue(row, "group_id", "groupId", "issue_group_id", "issueGroupId"))
 					if groupID == "" {
-						return nil, fmt.Errorf("Aikido issue export row %s is missing issue group ID", rowID)
+						return 0, fmt.Errorf("Aikido issue export row %s is missing issue group ID", rowID)
 					}
 					groupRows[groupID] = append(groupRows[groupID], row)
 				}
@@ -214,19 +275,19 @@ func (s *AikidoSource) discoverIssueExport(ctx context.Context, baseURL *url.URL
 	}
 	sort.Strings(groupIDs)
 
-	items := make([]WorkItem, 0, len(groupIDs))
+	emitted := 0
 	for _, groupID := range groupIDs {
-		group, err := s.fetchIssueGroup(ctx, baseURL, groupID)
-		if err != nil {
-			return nil, err
-		}
+		group := map[string]any{}
 		item, err := aikidoExportGroupToWorkItem(group, groupID, groupRows[groupID], branch)
 		if err != nil {
-			return nil, err
+			return emitted, err
 		}
-		items = append(items, item)
+		if err := emit(item); err != nil {
+			return emitted, err
+		}
+		emitted++
 	}
-	return items, nil
+	return emitted, nil
 }
 
 func (s *AikidoSource) fetchBranchCodeRepositories(ctx context.Context, baseURL *url.URL, branch string) ([]map[string]any, error) {
@@ -443,33 +504,120 @@ func (s *AikidoSource) getAikidoObjects(ctx context.Context, baseURL *url.URL, p
 	u.Path = strings.TrimRight(baseURL.Path, "/") + "/" + strings.TrimLeft(path, "/")
 	u.RawQuery = params.Encode()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	var waited time.Duration
+	for attempt := 0; attempt <= aikidoMaxRateLimitRetries; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+		if err != nil {
+			return nil, fmt.Errorf("creating Aikido request: %w", err)
+		}
+		s.setAikidoRequestHeaders(req.Header)
+
+		resp, err := s.httpClient().Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("calling Aikido proxy: %w", err)
+		}
+
+		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+			statusErr := newAikidoProxyStatusError(resp)
+			resp.Body.Close()
+			if statusErr.StatusCode == http.StatusTooManyRequests && statusErr.HasRetryAfter {
+				if waited+statusErr.RetryAfter <= s.retryAfterMaxWait() {
+					if err := waitAikidoRetryAfter(ctx, statusErr.RetryAfter); err != nil {
+						return nil, fmt.Errorf("waiting for Aikido Retry-After: %w", err)
+					}
+					waited += statusErr.RetryAfter
+					continue
+				}
+			}
+			return nil, statusErr
+		}
+
+		var payload any
+		err = json.NewDecoder(resp.Body).Decode(&payload)
+		resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("decoding Aikido response: %w", err)
+		}
+
+		objects, err := aikidoObjectsFromPayload(payload)
+		if err != nil {
+			return nil, err
+		}
+		return objects, nil
+	}
+	return nil, fmt.Errorf("Aikido proxy returned repeated rate limits after %d retries", aikidoMaxRateLimitRetries)
+}
+
+func (s *AikidoSource) setAikidoRequestHeaders(headers http.Header) {
+	headers.Set("Accept", "application/json")
+	headers.Set(aikidoHeaderClient, aikidoClientDiscovery)
+	headers.Set(aikidoHeaderBudgetSeconds, strconv.Itoa(int(aikidoProxyRequestBudget/time.Second)))
+	if name := strings.TrimSpace(s.TaskSpawnerName); name != "" {
+		headers.Set(aikidoHeaderTaskSpawner, name)
+	}
+	headers.Set(aikidoHeaderRunDate, time.Now().UTC().Format("2006-01-02"))
+}
+
+type aikidoProxyStatusError struct {
+	StatusCode    int
+	Body          string
+	RetryAfter    time.Duration
+	HasRetryAfter bool
+}
+
+func (e *aikidoProxyStatusError) Error() string {
+	return fmt.Sprintf("Aikido proxy returned status %d: %s", e.StatusCode, e.Body)
+}
+
+func newAikidoProxyStatusError(resp *http.Response) *aikidoProxyStatusError {
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	retryAfter, hasRetryAfter := parseAikidoRetryAfter(resp.Header.Get("Retry-After"), time.Now())
+	return &aikidoProxyStatusError{
+		StatusCode:    resp.StatusCode,
+		Body:          string(body),
+		RetryAfter:    retryAfter,
+		HasRetryAfter: hasRetryAfter,
+	}
+}
+
+func parseAikidoRetryAfter(raw string, now time.Time) (time.Duration, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false
+	}
+	if seconds, err := strconv.ParseFloat(raw, 64); err == nil {
+		if seconds < 0 {
+			return 0, false
+		}
+		return time.Duration(seconds * float64(time.Second)), true
+	}
+	when, err := http.ParseTime(raw)
 	if err != nil {
-		return nil, fmt.Errorf("creating Aikido request: %w", err)
+		return 0, false
 	}
-	req.Header.Set("Accept", "application/json")
+	if !when.After(now) {
+		return 0, true
+	}
+	return when.Sub(now), true
+}
 
-	resp, err := s.httpClient().Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("calling Aikido proxy: %w", err)
+func waitAikidoRetryAfter(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			return nil
+		}
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return nil, fmt.Errorf("Aikido proxy returned status %d: %s", resp.StatusCode, string(body))
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
-
-	var payload any
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, fmt.Errorf("decoding Aikido response: %w", err)
-	}
-
-	objects, err := aikidoObjectsFromPayload(payload)
-	if err != nil {
-		return nil, err
-	}
-	return objects, nil
 }
 
 func aikidoObjectsFromPayload(payload any) ([]map[string]any, error) {
@@ -561,14 +709,14 @@ func aikidoGroupToWorkItem(group map[string]any, id string) (WorkItem, error) {
 func aikidoExportGroupToWorkItem(group map[string]any, id string, rows []map[string]any, branch string) (WorkItem, error) {
 	title := aikidoStringFromAny(firstAikidoValue(group, "title", "name", "summary"))
 	if title == "" && len(rows) > 0 {
-		title = aikidoStringFromAny(firstAikidoValue(rows[0], "title", "name", "summary", "rule"))
+		title = firstAikidoIssueRowString(rows, "title", "name", "summary", "rule")
 	}
 	if title == "" {
 		title = fmt.Sprintf("Aikido issue group %s", id)
 	}
 	severity := valueOrUnknown(aikidoSeverity(group))
-	if severity == "unknown" && len(rows) > 0 {
-		severity = valueOrUnknown(aikidoSeverity(rows[0]))
+	if len(rows) > 0 {
+		severity = highestAikidoIssueRowSeverity(severity, rows)
 	}
 	status := valueOrUnknown(aikidoStringFromAny(firstAikidoValue(group, "group_status", "groupStatus", "status", "state")))
 	if status == "unknown" && len(rows) > 0 {
@@ -585,6 +733,9 @@ func aikidoExportGroupToWorkItem(group map[string]any, id string, rows []map[str
 	packages := aikidoIssueRowValues(rows, "affected_package", "affectedPackage", "package", "package_name", "packageName")
 	cves := aikidoIssueRowValues(rows, "cve_id", "cveId", "cve", "vulnerability_id", "vulnerabilityId")
 	groupURL := aikidoStringFromAny(firstAikidoValue(group, "url", "app_url", "appUrl", "html_url", "htmlUrl", "link"))
+	if groupURL == "" && len(rows) > 0 {
+		groupURL = firstAikidoIssueRowString(rows, "url", "app_url", "appUrl", "html_url", "htmlUrl", "link")
+	}
 	body := aikidoIssueExportWorkItemBody(group, id, title, severity, status, issueType, branch, repos, packages, cves, groupURL, rows)
 
 	number := 0
@@ -620,6 +771,41 @@ func aikidoExportGroupToWorkItem(group map[string]any, id string, rows []map[str
 			AikidoMetadataURL:              groupURL,
 		},
 	}, nil
+}
+
+func firstAikidoIssueRowString(rows []map[string]any, keys ...string) string {
+	for _, row := range rows {
+		if value := aikidoStringFromAny(firstAikidoValue(row, keys...)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func highestAikidoIssueRowSeverity(current string, rows []map[string]any) string {
+	best := valueOrUnknown(current)
+	for _, row := range rows {
+		severity := valueOrUnknown(aikidoSeverity(row))
+		if aikidoSeverityRank(severity) > aikidoSeverityRank(best) {
+			best = severity
+		}
+	}
+	return best
+}
+
+func aikidoSeverityRank(severity string) int {
+	switch normalizeAikidoValue(severity) {
+	case "critical":
+		return 4
+	case "high":
+		return 3
+	case "medium":
+		return 2
+	case "low":
+		return 1
+	default:
+		return 0
+	}
 }
 
 func aikidoWorkItemID(id string) string {
@@ -672,9 +858,7 @@ func aikidoWorkItemBody(group map[string]any, id, title, severity, status, issue
 		}
 	}
 
-	b.WriteString("\nUse the internal read-only Aikido proxy for deeper context if needed: ")
-	b.WriteString(DefaultAikidoProxyURL)
-	b.WriteString("\n")
+	b.WriteString("\nUse only the controller-provided Aikido snapshot. Do not call Aikido from the agent session; the next controller run will verify whether the issue still exists.\n")
 
 	body := b.String()
 	if len(body) > aikidoMaxBodyBytes {
@@ -730,10 +914,7 @@ func aikidoIssueExportWorkItemBody(group map[string]any, id, title, severity, st
 	b.WriteString("- Search for an existing open remediation PR before creating a new one.\n")
 	b.WriteString("- Do not merge PRs.\n")
 	b.WriteString("- If remediation requires shared package or image rebuilds, continue across future turns.\n")
-	b.WriteString("- After the fix is available, verify with Aikido before declaring complete.\n")
-	b.WriteString("\nUse the internal read-only Aikido proxy for deeper context if needed: ")
-	b.WriteString(DefaultAikidoProxyURL)
-	b.WriteString("\n")
+	b.WriteString("- Do not call Aikido from the agent session; the next controller run will verify whether the issue still exists.\n")
 
 	body := b.String()
 	if len(body) > aikidoMaxBodyBytes {

@@ -42,6 +42,33 @@ func (f *fakeSource) Discover(_ context.Context) ([]source.WorkItem, error) {
 	return f.items, nil
 }
 
+type fakeStreamingSource struct {
+	items    []source.WorkItem
+	errAfter int
+	err      error
+}
+
+func (f *fakeStreamingSource) Discover(_ context.Context) ([]source.WorkItem, error) {
+	return f.items, nil
+}
+
+func (f *fakeStreamingSource) DiscoverEach(_ context.Context, emit func(source.WorkItem) error) (int, error) {
+	emitted := 0
+	for _, item := range f.items {
+		if f.err != nil && f.errAfter >= 0 && emitted >= f.errAfter {
+			return emitted, f.err
+		}
+		if err := emit(item); err != nil {
+			return emitted, err
+		}
+		emitted++
+	}
+	if f.err != nil && f.errAfter >= len(f.items) {
+		return emitted, f.err
+	}
+	return emitted, nil
+}
+
 func newTestScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(s))
@@ -323,6 +350,9 @@ func TestBuildSource_Aikido(t *testing.T) {
 	}
 	if len(aikidoSrc.IssueTypes) != 1 || aikidoSrc.IssueTypes[0] != "open_source" {
 		t.Errorf("IssueTypes = %v", aikidoSrc.IssueTypes)
+	}
+	if aikidoSrc.TaskSpawnerName != "spawner" {
+		t.Errorf("TaskSpawnerName = %q, want spawner", aikidoSrc.TaskSpawnerName)
 	}
 }
 
@@ -3111,6 +3141,78 @@ func TestCronTurnNamePreservesGenerationUniquenessWhenTruncated(t *testing.T) {
 	}
 }
 
+func TestRunCycleWithSource_StreamingAikidoCreatesTurnBeforeDiscoveryCompletes(t *testing.T) {
+	ts := newTaskSpawner("cody-aikido-security-main", "kelos-system", nil)
+	ts.Spec.When = kelosv1alpha1.When{
+		Aikido: &kelosv1alpha1.Aikido{
+			Schedule: "0 7 * * *",
+			Branch:   "main",
+			Session: &kelosv1alpha1.AikidoSession{
+				Enabled: true,
+			},
+		},
+	}
+	ts.Spec.TaskTemplate.Type = "codex"
+	ts.Spec.TaskTemplate.WorkspaceRef = nil
+	ts.Spec.TaskTemplate.PromptTemplate = "fix {{.Title}} on {{.Branch}} for {{.RunDate}}"
+	cl, key := setupTest(t, ts)
+
+	src := &fakeStreamingSource{
+		items: []source.WorkItem{
+			{
+				ID:     "aikido-group-17997122",
+				Title:  "Upgrade golang.org/x/crypto",
+				Kind:   "AikidoIssueGroup",
+				Branch: "main",
+				Metadata: map[string]string{
+					source.AikidoMetadataIssueGroupID: "17997122",
+					source.AikidoMetadataBranch:       "main",
+					source.AikidoMetadataSeverity:     "critical",
+				},
+			},
+			{
+				ID:     "aikido-group-24589148",
+				Title:  "Later issue",
+				Kind:   "AikidoIssueGroup",
+				Branch: "main",
+				Metadata: map[string]string{
+					source.AikidoMetadataIssueGroupID: "24589148",
+					source.AikidoMetadataBranch:       "main",
+				},
+			},
+		},
+		errAfter: 1,
+		err:      errors.New("later group failed"),
+	}
+
+	err := runCycleWithSource(context.Background(), cl, key, src)
+	if err == nil || !strings.Contains(err.Error(), "later group failed") {
+		t.Fatalf("runCycleWithSource() error = %v, want later group failure", err)
+	}
+
+	var sessions kelosv1alpha1.AgentSessionList
+	if err := cl.List(context.Background(), &sessions, client.InNamespace(ts.Namespace)); err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions.Items) != 1 {
+		t.Fatalf("AgentSessions = %d, want 1", len(sessions.Items))
+	}
+	if got := sessions.Items[0].Spec.Source.Key; !strings.HasPrefix(got, "aikido/main/") || !strings.HasSuffix(got, "/17997122") {
+		t.Fatalf("session source key = %q, want dated scope for first issue group", got)
+	}
+
+	var turns kelosv1alpha1.AgentTurnList
+	if err := cl.List(context.Background(), &turns, client.InNamespace(ts.Namespace)); err != nil {
+		t.Fatal(err)
+	}
+	if len(turns.Items) != 1 {
+		t.Fatalf("AgentTurns = %d, want 1", len(turns.Items))
+	}
+	if !strings.Contains(turns.Items[0].Spec.Input.Body, "fix Upgrade golang.org/x/crypto") {
+		t.Fatalf("turn prompt = %q", turns.Items[0].Spec.Input.Body)
+	}
+}
+
 func TestCreateAikidoSessionTurnCreatesSessionAndDedupesRun(t *testing.T) {
 	maxAge := metav1.Duration{Duration: 14 * 24 * time.Hour}
 	idleTimeout := metav1.Duration{Duration: 25 * time.Hour}
@@ -3197,7 +3299,7 @@ func TestCreateAikidoSessionTurnCreatesSessionAndDedupesRun(t *testing.T) {
 	if session.Spec.Source.Type != sourceTypeAikido {
 		t.Fatalf("session source type = %q, want %q", session.Spec.Source.Type, sourceTypeAikido)
 	}
-	if session.Spec.Source.Key != "aikido/main/17997122" {
+	if session.Spec.Source.Key != "aikido/main/2026-06-08/17997122" {
 		t.Fatalf("session source key = %q", session.Spec.Source.Key)
 	}
 	if session.Spec.MaxQueuedTurns != maxQueued {

@@ -252,6 +252,10 @@ spec:
       name: Branch
       priority: 1
       type: string
+    - jsonPath: .spec.parentRef.name
+      name: Parent
+      priority: 1
+      type: string
     - jsonPath: .spec.dependsOn
       name: Depends On
       priority: 1
@@ -366,6 +370,19 @@ spec:
               model:
                 description: Model optionally overrides the default model.
                 type: string
+              parentRef:
+                description: |-
+                  ParentRef identifies the parent Task that spawned this child Task.
+                  When set, the parent Task's status.childTasks is updated with this
+                  Task's name and phase. ParentRef is immutable after creation.
+                properties:
+                  name:
+                    description: Name is the name of the referenced Task.
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
               podOverrides:
                 description: PodOverrides allows customizing the agent pod configuration.
                 properties:
@@ -7192,6 +7209,28 @@ spec:
           status:
             description: TaskStatus defines the observed state of Task.
             properties:
+              childTasks:
+                description: |-
+                  ChildTasks lists child Tasks spawned by this Task's agent and their
+                  current phases. Updated by the controller when child Tasks with a
+                  matching parentRef are created or change phase.
+                items:
+                  description: ChildTaskStatus records the name and current phase
+                    of a child Task.
+                  properties:
+                    name:
+                      description: Name is the child Task's name.
+                      type: string
+                    phase:
+                      description: Phase is the child Task's current phase.
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
               completionTime:
                 description: CompletionTime is when the Task completed.
                 format: date-time

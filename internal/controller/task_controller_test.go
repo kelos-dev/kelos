@@ -693,3 +693,318 @@ func TestUpdateStatusClearsStalePodNameWhenNoLivePodsRemain(t *testing.T) {
 		t.Fatalf("task.Status.PodName = %q, want empty", updated.Status.PodName)
 	}
 }
+
+func TestUpdateParentChildStatus(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelosv1alpha1.AddToScheme(scheme))
+
+	parent := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "parent-task",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   "claude-code",
+			Prompt: "Do something",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "secret"},
+			},
+		},
+	}
+
+	child := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "parent-task-child-api",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   "claude-code",
+			Prompt: "Sub task",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "secret"},
+			},
+			ParentRef: &kelosv1alpha1.TaskReference{Name: "parent-task"},
+		},
+		Status: kelosv1alpha1.TaskStatus{
+			Phase: kelosv1alpha1.TaskPhaseRunning,
+		},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(parent, child).
+		WithStatusSubresource(parent, child).
+		Build()
+
+	r := &TaskReconciler{
+		Client: cl,
+		Scheme: scheme,
+	}
+
+	ctx := context.Background()
+
+	// Test: child task updates parent's childTasks status
+	if err := r.updateParentChildStatus(ctx, child); err != nil {
+		t.Fatalf("updateParentChildStatus() error: %v", err)
+	}
+
+	updatedParent := &kelosv1alpha1.Task{}
+	if err := cl.Get(ctx, client.ObjectKeyFromObject(parent), updatedParent); err != nil {
+		t.Fatalf("getting updated parent: %v", err)
+	}
+
+	if len(updatedParent.Status.ChildTasks) != 1 {
+		t.Fatalf("expected 1 child task entry, got %d", len(updatedParent.Status.ChildTasks))
+	}
+	if updatedParent.Status.ChildTasks[0].Name != "parent-task-child-api" {
+		t.Errorf("child task name: expected %q, got %q", "parent-task-child-api", updatedParent.Status.ChildTasks[0].Name)
+	}
+	if updatedParent.Status.ChildTasks[0].Phase != kelosv1alpha1.TaskPhaseRunning {
+		t.Errorf("child task phase: expected %q, got %q", kelosv1alpha1.TaskPhaseRunning, updatedParent.Status.ChildTasks[0].Phase)
+	}
+
+	// Test: phase update propagates
+	child.Status.Phase = kelosv1alpha1.TaskPhaseSucceeded
+	if err := cl.Status().Update(ctx, child); err != nil {
+		t.Fatalf("updating child status: %v", err)
+	}
+
+	if err := r.updateParentChildStatus(ctx, child); err != nil {
+		t.Fatalf("updateParentChildStatus() on phase change error: %v", err)
+	}
+
+	if err := cl.Get(ctx, client.ObjectKeyFromObject(parent), updatedParent); err != nil {
+		t.Fatalf("getting updated parent after phase change: %v", err)
+	}
+
+	if len(updatedParent.Status.ChildTasks) != 1 {
+		t.Fatalf("expected 1 child task entry after update, got %d", len(updatedParent.Status.ChildTasks))
+	}
+	if updatedParent.Status.ChildTasks[0].Phase != kelosv1alpha1.TaskPhaseSucceeded {
+		t.Errorf("child task phase after update: expected %q, got %q", kelosv1alpha1.TaskPhaseSucceeded, updatedParent.Status.ChildTasks[0].Phase)
+	}
+}
+
+func TestUpdateParentChildStatus_ParentNotFound(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelosv1alpha1.AddToScheme(scheme))
+
+	child := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "orphan-child",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   "claude-code",
+			Prompt: "Sub task",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "secret"},
+			},
+			ParentRef: &kelosv1alpha1.TaskReference{Name: "nonexistent-parent"},
+		},
+		Status: kelosv1alpha1.TaskStatus{
+			Phase: kelosv1alpha1.TaskPhaseRunning,
+		},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(child).
+		WithStatusSubresource(child).
+		Build()
+
+	r := &TaskReconciler{
+		Client: cl,
+		Scheme: scheme,
+	}
+
+	// Should not return an error when parent doesn't exist
+	if err := r.updateParentChildStatus(context.Background(), child); err != nil {
+		t.Fatalf("updateParentChildStatus() with missing parent returned error: %v", err)
+	}
+}
+
+func TestRemoveParentChildStatus(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelosv1alpha1.AddToScheme(scheme))
+
+	parent := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "parent-task",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   "claude-code",
+			Prompt: "Do something",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "secret"},
+			},
+		},
+		Status: kelosv1alpha1.TaskStatus{
+			ChildTasks: []kelosv1alpha1.ChildTaskStatus{
+				{Name: "child-1", Phase: kelosv1alpha1.TaskPhaseSucceeded},
+				{Name: "child-2", Phase: kelosv1alpha1.TaskPhaseRunning},
+				{Name: "child-3", Phase: kelosv1alpha1.TaskPhaseFailed},
+			},
+		},
+	}
+
+	child := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "child-2",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   "claude-code",
+			Prompt: "Sub task",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "secret"},
+			},
+			ParentRef: &kelosv1alpha1.TaskReference{Name: "parent-task"},
+		},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(parent, child).
+		WithStatusSubresource(parent, child).
+		Build()
+
+	r := &TaskReconciler{
+		Client: cl,
+		Scheme: scheme,
+	}
+
+	ctx := context.Background()
+
+	if err := r.removeParentChildStatus(ctx, child); err != nil {
+		t.Fatalf("removeParentChildStatus() error: %v", err)
+	}
+
+	updatedParent := &kelosv1alpha1.Task{}
+	if err := cl.Get(ctx, client.ObjectKeyFromObject(parent), updatedParent); err != nil {
+		t.Fatalf("getting updated parent: %v", err)
+	}
+
+	if len(updatedParent.Status.ChildTasks) != 2 {
+		t.Fatalf("expected 2 child task entries after removal, got %d", len(updatedParent.Status.ChildTasks))
+	}
+	for _, child := range updatedParent.Status.ChildTasks {
+		if child.Name == "child-2" {
+			t.Errorf("child-2 should have been removed from parent status")
+		}
+	}
+}
+
+func TestRemoveParentChildStatus_ParentNotFound(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelosv1alpha1.AddToScheme(scheme))
+
+	child := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "orphan-child",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   "claude-code",
+			Prompt: "Sub task",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "secret"},
+			},
+			ParentRef: &kelosv1alpha1.TaskReference{Name: "nonexistent-parent"},
+		},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(child).
+		WithStatusSubresource(child).
+		Build()
+
+	r := &TaskReconciler{
+		Client: cl,
+		Scheme: scheme,
+	}
+
+	if err := r.removeParentChildStatus(context.Background(), child); err != nil {
+		t.Fatalf("removeParentChildStatus() with missing parent returned error: %v", err)
+	}
+}
+
+func TestRemoveParentChildStatus_ChildNotInList(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelosv1alpha1.AddToScheme(scheme))
+
+	parent := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "parent-task",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   "claude-code",
+			Prompt: "Do something",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "secret"},
+			},
+		},
+		Status: kelosv1alpha1.TaskStatus{
+			ChildTasks: []kelosv1alpha1.ChildTaskStatus{
+				{Name: "child-1", Phase: kelosv1alpha1.TaskPhaseSucceeded},
+			},
+		},
+	}
+
+	child := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "child-not-tracked",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   "claude-code",
+			Prompt: "Sub task",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "secret"},
+			},
+			ParentRef: &kelosv1alpha1.TaskReference{Name: "parent-task"},
+		},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(parent, child).
+		WithStatusSubresource(parent, child).
+		Build()
+
+	r := &TaskReconciler{
+		Client: cl,
+		Scheme: scheme,
+	}
+
+	ctx := context.Background()
+
+	if err := r.removeParentChildStatus(ctx, child); err != nil {
+		t.Fatalf("removeParentChildStatus() error: %v", err)
+	}
+
+	updatedParent := &kelosv1alpha1.Task{}
+	if err := cl.Get(ctx, client.ObjectKeyFromObject(parent), updatedParent); err != nil {
+		t.Fatalf("getting updated parent: %v", err)
+	}
+
+	if len(updatedParent.Status.ChildTasks) != 1 {
+		t.Fatalf("expected 1 child task entry (unchanged), got %d", len(updatedParent.Status.ChildTasks))
+	}
+}

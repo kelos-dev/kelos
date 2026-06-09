@@ -145,6 +145,14 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return result, err
 	}
 
+	// Update parent task's childTasks status if this is a child task
+	if task.Spec.ParentRef != nil {
+		if err := r.updateParentChildStatus(ctx, &task); err != nil {
+			logger.Error(err, "Unable to update parent child status", "parent", task.Spec.ParentRef.Name)
+			return ctrl.Result{}, err
+		}
+	}
+
 	// Check TTL expiration for finished Tasks
 	if expired, requeueAfter := r.ttlExpired(&task); expired {
 		logger.Info("Deleting Task due to TTL expiration", "task", task.Name)
@@ -175,6 +183,14 @@ func (r *TaskReconciler) handleDeletion(ctx context.Context, task *kelosv1alpha1
 		// Release branch lock if held.
 		if task.Spec.Branch != "" {
 			r.BranchLocker.Release(branchLockKey(task), task.Name)
+		}
+
+		// Remove this child from the parent's status.childTasks
+		if task.Spec.ParentRef != nil {
+			if err := r.removeParentChildStatus(ctx, task); err != nil {
+				logger.Error(err, "Unable to remove child from parent status", "parent", task.Spec.ParentRef.Name)
+				return ctrl.Result{}, err
+			}
 		}
 
 		// Delete the Job if it exists
@@ -983,4 +999,75 @@ func (r *TaskReconciler) enqueueDependentTasks(ctx context.Context, obj client.O
 		}
 	}
 	return requests
+}
+
+// updateParentChildStatus updates the parent Task's status.childTasks with
+// this child task's current phase.
+func (r *TaskReconciler) updateParentChildStatus(ctx context.Context, task *kelosv1alpha1.Task) error {
+	logger := log.FromContext(ctx)
+	parentName := task.Spec.ParentRef.Name
+
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var parent kelosv1alpha1.Task
+		if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: parentName}, &parent); err != nil {
+			if apierrors.IsNotFound(err) {
+				logger.Info("Parent task not found, skipping child status update", "parent", parentName)
+				return nil
+			}
+			return err
+		}
+
+		// Find or create entry for this child task
+		found := false
+		for i, child := range parent.Status.ChildTasks {
+			if child.Name == task.Name {
+				if child.Phase == task.Status.Phase {
+					// No change needed
+					return nil
+				}
+				parent.Status.ChildTasks[i].Phase = task.Status.Phase
+				found = true
+				break
+			}
+		}
+		if !found {
+			parent.Status.ChildTasks = append(parent.Status.ChildTasks, kelosv1alpha1.ChildTaskStatus{
+				Name:  task.Name,
+				Phase: task.Status.Phase,
+			})
+		}
+
+		return r.Status().Update(ctx, &parent)
+	})
+}
+
+// removeParentChildStatus removes a deleted child task from the parent's
+// status.childTasks list.
+func (r *TaskReconciler) removeParentChildStatus(ctx context.Context, task *kelosv1alpha1.Task) error {
+	logger := log.FromContext(ctx)
+	parentName := task.Spec.ParentRef.Name
+
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var parent kelosv1alpha1.Task
+		if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: parentName}, &parent); err != nil {
+			if apierrors.IsNotFound(err) {
+				logger.Info("Parent task not found, skipping child status removal", "parent", parentName)
+				return nil
+			}
+			return err
+		}
+
+		filtered := make([]kelosv1alpha1.ChildTaskStatus, 0, len(parent.Status.ChildTasks))
+		for _, child := range parent.Status.ChildTasks {
+			if child.Name != task.Name {
+				filtered = append(filtered, child)
+			}
+		}
+		if len(filtered) == len(parent.Status.ChildTasks) {
+			return nil
+		}
+		parent.Status.ChildTasks = filtered
+
+		return r.Status().Update(ctx, &parent)
+	})
 }

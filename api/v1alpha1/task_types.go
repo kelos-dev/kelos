@@ -276,6 +276,27 @@ type TaskSpec struct {
 	// PodOverrides allows customizing the agent pod configuration.
 	// +optional
 	PodOverrides *PodOverrides `json:"podOverrides,omitempty"`
+
+	// ParentRef identifies the parent Task that spawned this child Task.
+	// When set, the parent Task's status.childTasks is updated with this
+	// Task's name and phase. ParentRef is immutable after creation.
+	// +optional
+	ParentRef *TaskReference `json:"parentRef,omitempty"`
+}
+
+// TaskReference refers to a Task resource by name within the same namespace.
+type TaskReference struct {
+	// Name is the name of the referenced Task.
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+}
+
+// ChildTaskStatus records the name and current phase of a child Task.
+type ChildTaskStatus struct {
+	// Name is the child Task's name.
+	Name string `json:"name"`
+	// Phase is the child Task's current phase.
+	Phase TaskPhase `json:"phase,omitempty"`
 }
 
 // TaskStatus defines the observed state of Task.
@@ -312,6 +333,14 @@ type TaskStatus struct {
 	// Results contains structured key-value outputs produced by the agent.
 	// +optional
 	Results map[string]string `json:"results,omitempty"`
+
+	// ChildTasks lists child Tasks spawned by this Task's agent and their
+	// current phases. Updated by the controller when child Tasks with a
+	// matching parentRef are created or change phase.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	ChildTasks []ChildTaskStatus `json:"childTasks,omitempty"`
 }
 
 // +genclient
@@ -320,6 +349,7 @@ type TaskStatus struct {
 // +kubebuilder:printcolumn:name="Type",type=string,JSONPath=`.spec.type`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Branch",type=string,JSONPath=`.spec.branch`,priority=1
+// +kubebuilder:printcolumn:name="Parent",type=string,JSONPath=`.spec.parentRef.name`,priority=1
 // +kubebuilder:printcolumn:name="Depends On",type=string,JSONPath=`.spec.dependsOn`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 

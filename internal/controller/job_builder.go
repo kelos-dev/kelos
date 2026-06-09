@@ -302,6 +302,16 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 		Value: task.Spec.Type,
 	})
 
+	envVars = append(envVars, corev1.EnvVar{
+		Name:  "KELOS_TASK_NAME",
+		Value: task.Name,
+	})
+
+	envVars = append(envVars, corev1.EnvVar{
+		Name:  "KELOS_TASK_NAMESPACE",
+		Value: task.Namespace,
+	})
+
 	if spawner := task.Labels["kelos.dev/taskspawner"]; spawner != "" {
 		envVars = append(envVars, corev1.EnvVar{
 			Name:  "KELOS_TASKSPAWNER",

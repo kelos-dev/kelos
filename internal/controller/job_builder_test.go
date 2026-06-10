@@ -3,6 +3,7 @@ package controller
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -2697,16 +2698,25 @@ func TestBuildJob_AgentConfigSkills(t *testing.T) {
 		t.Error("Expected no SecurityContext on skills-install init container (runs as root)")
 	}
 
-	// Verify script installs git, contains npx commands, and chowns output.
+	// Verify script installs git, contains npx commands, relocates the
+	// installed skills into the plugin layout, and chowns output.
 	script := initContainer.Command[2]
 	if !strings.Contains(script, "apk add --no-cache git") {
 		t.Errorf("Expected script to install git, got: %s", script)
 	}
-	if !strings.Contains(script, "npx -y skills add 'vercel-labs/agent-skills' -a 'claude-code' -y -g -s 'deploy'") {
+	if !strings.Contains(script, "npx -y skills add 'vercel-labs/agent-skills' -a universal -y -g -s 'deploy'") {
 		t.Errorf("Expected script to contain skills add with skill flag, got: %s", script)
 	}
-	if !strings.Contains(script, "npx -y skills add 'anthropics/skills' -a 'claude-code' -y -g") {
+	if !strings.Contains(script, "npx -y skills add 'anthropics/skills' -a universal -y -g") {
 		t.Errorf("Expected script to contain skills add without skill flag, got: %s", script)
+	}
+	installDir := PluginMountPath + "/.agents/skills"
+	pluginSkillsDir := PluginMountPath + "/" + SkillsShPluginName + "/skills"
+	if !strings.Contains(script, fmt.Sprintf("mv '%s'/* '%s'/", installDir, pluginSkillsDir)) {
+		t.Errorf("Expected script to move installed skills into the plugin layout, got: %s", script)
+	}
+	if !strings.Contains(script, fmt.Sprintf("[ -d '%s' ] ||", installDir)) {
+		t.Errorf("Expected script to fail when no skills were installed, got: %s", script)
 	}
 	if !strings.Contains(script, "chown -R 61100:61100") {
 		t.Errorf("Expected script to chown output files to AgentUID, got: %s", script)
@@ -2823,6 +2833,46 @@ func TestBuildJob_AgentConfigSkillsEmptySource(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "source is empty") {
 		t.Errorf("Expected error about empty source, got: %v", err)
+	}
+}
+
+func TestBuildJob_AgentConfigSkillsReservedPluginName(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-skills-reserved",
+			Namespace: "default",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	agentConfig := &kelosv1alpha1.AgentConfigSpec{
+		Plugins: []kelosv1alpha1.PluginSpec{
+			{
+				Name: SkillsShPluginName,
+				Skills: []kelosv1alpha1.SkillDefinition{
+					{Name: "hello", Content: "say hello"},
+				},
+			},
+		},
+		Skills: []kelosv1alpha1.SkillsShSpec{
+			{Source: "anthropics/skills"},
+		},
+	}
+
+	_, err := builder.Build(task, nil, agentConfig, task.Spec.Prompt)
+	if err == nil {
+		t.Fatal("Expected error for reserved plugin name, got nil")
+	}
+	if !strings.Contains(err.Error(), "reserved for skills.sh") {
+		t.Errorf("Expected error about reserved plugin name, got: %v", err)
 	}
 }
 

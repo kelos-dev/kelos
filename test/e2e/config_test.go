@@ -133,7 +133,7 @@ var _ = Describe("Config with namespace", func() {
 			"-p", "Print 'hello' to stdout",
 			"--secret", "claude-credentials",
 			"--credential-type", "oauth",
-			"--model", testModel,
+			"--model", claudeCodeModel,
 			"--name", "ns-config-task",
 		)
 

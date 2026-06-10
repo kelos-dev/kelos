@@ -171,7 +171,7 @@ var _ = Describe("Cron TaskSpawner", func() {
 				},
 				TaskTemplate: kelosv1alpha1.TaskTemplate{
 					Type:  "claude-code",
-					Model: testModel,
+					Model: claudeCodeModel,
 					Credentials: kelosv1alpha1.Credentials{
 						Type:      kelosv1alpha1.CredentialTypeOAuth,
 						SecretRef: &kelosv1alpha1.SecretReference{Name: "claude-credentials"},

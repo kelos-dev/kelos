@@ -47,7 +47,7 @@ var _ = Describe("Workspace setupCommand", func() {
 			},
 			Spec: kelosv1alpha1.TaskSpec{
 				Type:   "claude-code",
-				Model:  testModel,
+				Model:  claudeCodeModel,
 				Prompt: "Print the contents of .kelos-setup-sentinel verbatim, then print 'done'",
 				Credentials: kelosv1alpha1.Credentials{
 					Type:      kelosv1alpha1.CredentialTypeOAuth,
@@ -110,7 +110,7 @@ chmod +x "$HOME/.local/bin/kelos-setup-probe"`,
 			},
 			Spec: kelosv1alpha1.TaskSpec{
 				Type:   "claude-code",
-				Model:  testModel,
+				Model:  claudeCodeModel,
 				Prompt: "Run the command 'kelos-setup-probe' and print its output verbatim.",
 				Credentials: kelosv1alpha1.Credentials{
 					Type:      kelosv1alpha1.CredentialTypeOAuth,
@@ -162,7 +162,7 @@ chmod +x "$HOME/.local/bin/kelos-setup-probe"`,
 			},
 			Spec: kelosv1alpha1.TaskSpec{
 				Type:   "claude-code",
-				Model:  testModel,
+				Model:  claudeCodeModel,
 				Prompt: "Print 'agent should never run'",
 				Credentials: kelosv1alpha1.Credentials{
 					Type:      kelosv1alpha1.CredentialTypeOAuth,

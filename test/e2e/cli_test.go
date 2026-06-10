@@ -26,7 +26,7 @@ var _ = Describe("CLI", func() {
 			"-p", "Print 'Hello from Kelos CLI e2e test' to stdout",
 			"--secret", "claude-credentials",
 			"--credential-type", "oauth",
-			"--model", testModel,
+			"--model", claudeCodeModel,
 			"--effort", "high",
 			"--name", "cli-task",
 		)
@@ -114,7 +114,7 @@ var _ = Describe("CLI", func() {
 			"-p", "Run 'git log --oneline -1' and print the output",
 			"--secret", "claude-credentials",
 			"--credential-type", "oauth",
-			"--model", testModel,
+			"--model", claudeCodeModel,
 			"--workspace", "e2e-cli-workspace",
 			"--name", "cli-ws-task",
 		)
@@ -294,7 +294,7 @@ var _ = Describe("CLI with namespace flag", func() {
 			"-p", "Print 'hello' to stdout",
 			"--secret", "claude-credentials",
 			"--credential-type", "oauth",
-			"--model", testModel,
+			"--model", claudeCodeModel,
 			"--name", "ns-task",
 		)
 

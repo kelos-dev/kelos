@@ -461,6 +461,194 @@ func TestSlackTurnReporter_SessionSummaryTerminalUpdatesRootAndPostsDetailsThrea
 	}
 }
 
+func TestSlackTurnReporter_SessionSummaryNoSlackFinalUpdatesExistingRoot(t *testing.T) {
+	session := &kelosv1alpha1.AgentSession{
+		ObjectMeta: metav1.ObjectMeta{Name: "aikido-session", Namespace: "kelos-system"},
+		Spec: kelosv1alpha1.AgentSessionSpec{
+			Source: kelosv1alpha1.AgentSessionSource{
+				Type:        "Aikido",
+				DisplayName: "aikido:Aikido issue group 23991044",
+			},
+			TaskSpawnerRef: kelosv1alpha1.TaskSpawnerReference{Name: "cody-aikido-security-main"},
+		},
+		Status: kelosv1alpha1.AgentSessionStatus{
+			Slack: &kelosv1alpha1.AgentSessionSlackStatus{
+				ChannelID: "C123",
+				RootTS:    "root-ts",
+				Layout:    SlackLayoutSessionSummaryRoot,
+				Summary:   "Session started.",
+			},
+		},
+	}
+	turn := &kelosv1alpha1.AgentTurn{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "aikido-session-t-0001",
+			Namespace: "kelos-system",
+			UID:       "turn-uid",
+			Annotations: map[string]string{
+				AnnotationSlackReporting: SlackReportingDeferred,
+				AnnotationSlackLayout:    SlackLayoutSessionSummaryRoot,
+			},
+		},
+		Spec: kelosv1alpha1.AgentTurnSpec{
+			SessionRef: kelosv1alpha1.AgentSessionReference{Name: "aikido-session"},
+		},
+		Status: kelosv1alpha1.AgentTurnStatus{
+			Phase:      kelosv1alpha1.AgentTurnPhaseSucceeded,
+			ResultText: "NO_SLACK: issue already remediated on latest main; no PR was created",
+		},
+	}
+	cl := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		WithStatusSubresource(&kelosv1alpha1.AgentTurn{}, &kelosv1alpha1.AgentSession{}).
+		WithObjects(session, turn).
+		Build()
+	postCount := 0
+	updateCount := 0
+	replyCount := 0
+	reporter := &fakeSlackReporter{
+		postMessageFn: func(ctx context.Context, channel string, msg SlackMessage) (string, error) {
+			postCount++
+			return "new-root-ts", nil
+		},
+		updateFn: func(ctx context.Context, channel, messageTS string, msg SlackMessage) error {
+			updateCount++
+			if channel != "C123" || messageTS != "root-ts" {
+				t.Fatalf("unexpected Slack update target channel=%s messageTS=%s", channel, messageTS)
+			}
+			if !strings.Contains(msg.Text, "issue already remediated") {
+				t.Fatalf("message text = %q, want stripped NO_SLACK text", msg.Text)
+			}
+			if strings.Contains(msg.Text, "NO_SLACK:") {
+				t.Fatalf("message text = %q, should not expose NO_SLACK prefix", msg.Text)
+			}
+			return nil
+		},
+		postFn: func(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error) {
+			replyCount++
+			return "details-ts", nil
+		},
+	}
+
+	tr := &SlackTurnReporter{Client: cl, Reporter: reporter}
+	if err := tr.ReportTurnStatus(context.Background(), turn); err != nil {
+		t.Fatalf("ReportTurnStatus() error = %v", err)
+	}
+	var updatedTurn kelosv1alpha1.AgentTurn
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(turn), &updatedTurn); err != nil {
+		t.Fatal(err)
+	}
+	if err := tr.ReportTurnStatus(context.Background(), &updatedTurn); err != nil {
+		t.Fatalf("ReportTurnStatus() second call error = %v", err)
+	}
+	if postCount != 0 {
+		t.Fatalf("postCount = %d, want 0", postCount)
+	}
+	if updateCount != 1 {
+		t.Fatalf("updateCount = %d, want 1", updateCount)
+	}
+	if replyCount != 0 {
+		t.Fatalf("replyCount = %d, want 0", replyCount)
+	}
+	if updatedTurn.Status.SlackProgressMessageTS != "root-ts" {
+		t.Fatalf("SlackProgressMessageTS = %q, want root-ts", updatedTurn.Status.SlackProgressMessageTS)
+	}
+	if updatedTurn.Status.SlackAgentMessageTS != "root-ts" {
+		t.Fatalf("SlackAgentMessageTS = %q, want root-ts", updatedTurn.Status.SlackAgentMessageTS)
+	}
+	var updatedSession kelosv1alpha1.AgentSession
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(session), &updatedSession); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(updatedSession.Status.Slack.Summary, "issue already remediated") {
+		t.Fatalf("summary = %q, want stripped NO_SLACK result", updatedSession.Status.Slack.Summary)
+	}
+	if strings.Contains(updatedSession.Status.Slack.Summary, "NO_SLACK:") {
+		t.Fatalf("summary = %q, should not expose NO_SLACK prefix", updatedSession.Status.Slack.Summary)
+	}
+	if !strings.Contains(updatedSession.Status.Slack.Latest, "issue already remediated") {
+		t.Fatalf("latest = %q, want stripped NO_SLACK result", updatedSession.Status.Slack.Latest)
+	}
+}
+
+func TestSlackTurnReporter_SessionSummaryNoSlackFinalWithoutRootStaysSilent(t *testing.T) {
+	session := &kelosv1alpha1.AgentSession{
+		ObjectMeta: metav1.ObjectMeta{Name: "aikido-session", Namespace: "kelos-system"},
+		Spec: kelosv1alpha1.AgentSessionSpec{
+			Source: kelosv1alpha1.AgentSessionSource{
+				Type:        "Aikido",
+				DisplayName: "aikido:Aikido issue group 23991044",
+				ChannelID:   "C123",
+			},
+			TaskSpawnerRef: kelosv1alpha1.TaskSpawnerReference{Name: "cody-aikido-security-main"},
+		},
+	}
+	turn := &kelosv1alpha1.AgentTurn{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "aikido-session-t-0001",
+			Namespace: "kelos-system",
+			UID:       "turn-uid",
+			Annotations: map[string]string{
+				AnnotationSlackReporting: SlackReportingDeferred,
+				AnnotationSlackLayout:    SlackLayoutSessionSummaryRoot,
+			},
+		},
+		Spec: kelosv1alpha1.AgentTurnSpec{
+			SessionRef: kelosv1alpha1.AgentSessionReference{Name: "aikido-session"},
+		},
+		Status: kelosv1alpha1.AgentTurnStatus{
+			Phase:      kelosv1alpha1.AgentTurnPhaseSucceeded,
+			ResultText: "NO_SLACK: no material issue found",
+		},
+	}
+	cl := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		WithStatusSubresource(&kelosv1alpha1.AgentTurn{}, &kelosv1alpha1.AgentSession{}).
+		WithObjects(session, turn).
+		Build()
+	postCount := 0
+	updateCount := 0
+	replyCount := 0
+	reporter := &fakeSlackReporter{
+		postMessageFn: func(ctx context.Context, channel string, msg SlackMessage) (string, error) {
+			postCount++
+			return "root-ts", nil
+		},
+		updateFn: func(ctx context.Context, channel, messageTS string, msg SlackMessage) error {
+			updateCount++
+			return nil
+		},
+		postFn: func(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error) {
+			replyCount++
+			return "details-ts", nil
+		},
+	}
+
+	tr := &SlackTurnReporter{Client: cl, Reporter: reporter}
+	if err := tr.ReportTurnStatus(context.Background(), turn); err != nil {
+		t.Fatalf("ReportTurnStatus() error = %v", err)
+	}
+	if postCount != 0 {
+		t.Fatalf("postCount = %d, want 0", postCount)
+	}
+	if updateCount != 0 {
+		t.Fatalf("updateCount = %d, want 0", updateCount)
+	}
+	if replyCount != 0 {
+		t.Fatalf("replyCount = %d, want 0", replyCount)
+	}
+	var updatedTurn kelosv1alpha1.AgentTurn
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(turn), &updatedTurn); err != nil {
+		t.Fatal(err)
+	}
+	if updatedTurn.Status.SlackProgressMessageTS != "" {
+		t.Fatalf("SlackProgressMessageTS = %q, want empty", updatedTurn.Status.SlackProgressMessageTS)
+	}
+	if updatedTurn.Status.SlackAgentMessageTS != "" {
+		t.Fatalf("SlackAgentMessageTS = %q, want empty", updatedTurn.Status.SlackAgentMessageTS)
+	}
+}
+
 func TestSlackTurnReporter_DeferredDestinationDoesNotRepostWhenStatusPatchFails(t *testing.T) {
 	turn := &kelosv1alpha1.AgentTurn{
 		ObjectMeta: metav1.ObjectMeta{

@@ -112,6 +112,18 @@ func suppressDeferredSlackTurn(turn *kelosv1alpha1.AgentTurn) bool {
 	return strings.HasPrefix(strings.TrimSpace(turn.Status.ResultText), "NO_SLACK:")
 }
 
+func noSlackResultText(turn *kelosv1alpha1.AgentTurn) (string, bool) {
+	text := strings.TrimSpace(turn.Status.ResultText)
+	if !strings.HasPrefix(text, "NO_SLACK:") {
+		return "", false
+	}
+	text = strings.TrimSpace(strings.TrimPrefix(text, "NO_SLACK:"))
+	if text == "" {
+		text = "Turn finished without a reportable Slack update."
+	}
+	return text, true
+}
+
 func turnSlackPhase(phase kelosv1alpha1.AgentTurnPhase) (string, bool) {
 	switch phase {
 	case "", kelosv1alpha1.AgentTurnPhaseQueued, kelosv1alpha1.AgentTurnPhaseRunning:
@@ -222,9 +234,7 @@ func (tr *SlackTurnReporter) reportSessionSummaryProgressTurn(ctx context.Contex
 }
 
 func (tr *SlackTurnReporter) reportSessionSummaryTerminalTurn(ctx context.Context, turn *kelosv1alpha1.AgentTurn, desiredPhase string) error {
-	if suppressDeferredSlackTurn(turn) {
-		return nil
-	}
+	noSlackText, noSlack := noSlackResultText(turn)
 	if tr.hasDeferredTerminalPost(turn.UID) {
 		return nil
 	}
@@ -233,13 +243,29 @@ func (tr *SlackTurnReporter) reportSessionSummaryTerminalTurn(ctx context.Contex
 	if err != nil {
 		return err
 	}
-	results := turnSlackResults(turn)
-	details := hasSlackTerminalDetails(desiredPhase, turn.Status.Message, results)
-	summary := appendSessionSummary(sessionSlackSummary(session), terminalSessionSummary(turn, desiredPhase))
+	if noSlack && (session.Status.Slack == nil || session.Status.Slack.RootTS == "") {
+		return nil
+	}
+
+	var (
+		results         map[string]string
+		details         bool
+		summaryAddition string
+		latest          string
+	)
+	if noSlack {
+		summaryAddition = noSlackText
+		latest = compactSessionLine(noSlackText, 700)
+	} else {
+		results = turnSlackResults(turn)
+		details = hasSlackTerminalDetails(desiredPhase, turn.Status.Message, results)
+		summaryAddition = terminalSessionSummary(turn, desiredPhase)
+		latest = terminalSessionLatest(turn, desiredPhase, details)
+	}
+	summary := appendSessionSummary(sessionSlackSummary(session), summaryAddition)
 	if summary == "" {
 		summary = initialSessionSummary(session)
 	}
-	latest := terminalSessionLatest(turn, desiredPhase, details)
 	channel, rootTS, err := tr.upsertSessionSummaryRoot(ctx, session, turn, summary, latest)
 	if err != nil {
 		return err

@@ -10,7 +10,10 @@ import (
 	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 )
 
-const testModel = "haiku"
+const (
+	claudeCodeModel = "haiku"
+	codexModel      = "gpt-5.3-codex-spark"
+)
 
 var (
 	oauthToken    string
@@ -37,7 +40,7 @@ var agentConfigs = []agentTestConfig{
 		SecretName:       "claude-credentials",
 		SecretKey:        "CLAUDE_CODE_OAUTH_TOKEN",
 		SecretValue:      &oauthToken,
-		Model:            testModel,
+		Model:            claudeCodeModel,
 		EnvVar:           "CLAUDE_CODE_OAUTH_TOKEN",
 		SupportsResponse: true,
 		SupportsCost:     true,
@@ -48,7 +51,7 @@ var agentConfigs = []agentTestConfig{
 		SecretName:       "codex-credentials",
 		SecretKey:        "CODEX_AUTH_JSON",
 		SecretValue:      &codexAuthJSON,
-		Model:            "gpt-5.4-mini",
+		Model:            codexModel,
 		EnvVar:           "CODEX_AUTH_JSON",
 		SupportsResponse: true,
 	},

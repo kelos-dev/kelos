@@ -341,7 +341,7 @@ var _ = Describe("Task with make available", func() {
 			},
 			Spec: kelosv1alpha1.TaskSpec{
 				Type:   "claude-code",
-				Model:  testModel,
+				Model:  claudeCodeModel,
 				Prompt: "Run 'make --version' and print the output",
 				Credentials: kelosv1alpha1.Credentials{
 					Type:      kelosv1alpha1.CredentialTypeOAuth,
@@ -405,7 +405,7 @@ var _ = Describe("Task with workspace and secretRef", func() {
 			},
 			Spec: kelosv1alpha1.TaskSpec{
 				Type:   "claude-code",
-				Model:  testModel,
+				Model:  claudeCodeModel,
 				Prompt: "Run 'gh auth status' and print the output",
 				Credentials: kelosv1alpha1.Credentials{
 					Type:      kelosv1alpha1.CredentialTypeOAuth,

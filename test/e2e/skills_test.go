@@ -78,7 +78,7 @@ var _ = Describe("Task with skills.sh AgentConfig", func() {
 			},
 			Spec: kelosv1alpha1.TaskSpec{
 				Type:   "claude-code",
-				Model:  testModel,
+				Model:  claudeCodeModel,
 				Prompt: "Print 'Hello from skills.sh e2e test' to stdout",
 				Credentials: kelosv1alpha1.Credentials{
 					Type:      kelosv1alpha1.CredentialTypeOAuth,

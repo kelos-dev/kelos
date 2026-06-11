@@ -27,7 +27,7 @@ RUN ARCH=$(dpkg --print-architecture) \
 
 ENV PATH="/usr/local/go/bin:${PATH}"
 
-ARG OPENCODE_VERSION=1.15.13
+ARG OPENCODE_VERSION=1.16.2
 RUN npm install -g opencode-ai@${OPENCODE_VERSION}
 
 COPY opencode/kelos_entrypoint.sh /kelos_entrypoint.sh

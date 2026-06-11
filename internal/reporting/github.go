@@ -144,3 +144,8 @@ func FormatSucceededComment(taskName string) string {
 func FormatFailedComment(taskName string) string {
 	return fmt.Sprintf("🤖 **Kelos Task Status**\n\nTask `%s` has **failed**. ❌", taskName)
 }
+
+// FormatCancelledComment returns the comment body for a cancelled task.
+func FormatCancelledComment(taskName string) string {
+	return fmt.Sprintf("🤖 **Kelos Task Status**\n\nTask `%s` has been **cancelled**. 🚫", taskName)
+}

@@ -294,7 +294,9 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 	for i := range existingTaskList.Items {
 		t := &existingTaskList.Items[i]
 		existingTaskMap[t.Name] = t
-		if t.Status.Phase != kelosv1alpha1.TaskPhaseSucceeded && t.Status.Phase != kelosv1alpha1.TaskPhaseFailed {
+		if t.Status.Phase != kelosv1alpha1.TaskPhaseSucceeded &&
+			t.Status.Phase != kelosv1alpha1.TaskPhaseFailed &&
+			t.Status.Phase != kelosv1alpha1.TaskPhaseCancelled {
 			activeTasks++
 		}
 	}
@@ -315,7 +317,9 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 		// the item will be picked up as new on the next cycle since the old task
 		// no longer exists.
 		if !item.TriggerTime.IsZero() &&
-			(existing.Status.Phase == kelosv1alpha1.TaskPhaseSucceeded || existing.Status.Phase == kelosv1alpha1.TaskPhaseFailed) &&
+			(existing.Status.Phase == kelosv1alpha1.TaskPhaseSucceeded ||
+				existing.Status.Phase == kelosv1alpha1.TaskPhaseFailed ||
+				existing.Status.Phase == kelosv1alpha1.TaskPhaseCancelled) &&
 			existing.Status.CompletionTime != nil &&
 			item.TriggerTime.After(existing.Status.CompletionTime.Time) {
 

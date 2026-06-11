@@ -6968,6 +6968,11 @@ spec:
           status:
             description: TaskStatus defines the observed state of Task.
             properties:
+              cancelledBy:
+                description: |-
+                  CancelledBy records what initiated cancellation (e.g., "user",
+                  "spawner:my-spawner"). Only set when Phase is Cancelled.
+                type: string
               completionTime:
                 description: CompletionTime is when the Task completed.
                 format: date-time

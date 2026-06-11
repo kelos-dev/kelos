@@ -156,7 +156,7 @@ func resolveTaskPodName(ctx context.Context, cl client.Client, namespace string,
 }
 
 func isTerminalTaskPhase(phase kelosv1alpha1.TaskPhase) bool {
-	return phase == kelosv1alpha1.TaskPhaseSucceeded || phase == kelosv1alpha1.TaskPhaseFailed
+	return phase == kelosv1alpha1.TaskPhaseSucceeded || phase == kelosv1alpha1.TaskPhaseFailed || phase == kelosv1alpha1.TaskPhaseCancelled
 }
 
 func streamLogs(ctx context.Context, cs *kubernetes.Clientset, namespace, podName, container string, follow bool) error {

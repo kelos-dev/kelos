@@ -50,6 +50,10 @@ type GitHubEventData struct {
 	// yet — the {{.ChangedFiles}} template variable is deferred to a follow-up
 	// to resolve API design questions (slice vs pre-joined string, fetch gating).
 	ChangedFiles []string
+	// Tag is the tag name for create (ref_type=tag) and release events.
+	Tag string
+	// RefType is the ref type for create events ("branch", "tag", or "repository").
+	RefType string
 	// HeadSHA is the commit SHA of the pull request head for PR-related events.
 	// Used by checks reporting to associate Check Runs with the correct commit.
 	HeadSHA string
@@ -110,6 +114,18 @@ func ParseGitHubWebhook(eventType string, payload []byte) (*GitHubEventData, err
 				data.RepositoryOwner = owner.GetLogin()
 			}
 			data.RepositoryName = pushRepo.GetName()
+		}
+	case *github.CreateEvent:
+		if repo := e.GetRepo(); repo != nil {
+			data.Repository = repo.GetFullName()
+			data.RepositoryOwner = repo.GetOwner().GetLogin()
+			data.RepositoryName = repo.GetName()
+		}
+	case *github.ReleaseEvent:
+		if repo := e.GetRepo(); repo != nil {
+			data.Repository = repo.GetFullName()
+			data.RepositoryOwner = repo.GetOwner().GetLogin()
+			data.RepositoryName = repo.GetName()
 		}
 	}
 
@@ -214,6 +230,30 @@ func ParseGitHubWebhook(eventType string, payload []byte) (*GitHubEventData, err
 		data.Title = fmt.Sprintf("Push to %s", data.Branch)
 		data.ChangedFiles = extractPushEventFiles(e)
 
+	case *github.CreateEvent:
+		data.Sender = e.GetSender().GetLogin()
+		data.Ref = e.GetRef()
+		data.RefType = e.GetRefType()
+		if data.RefType == "tag" {
+			data.Tag = e.GetRef()
+			data.Title = fmt.Sprintf("Tag created: %s", data.Tag)
+		} else if data.RefType == "branch" {
+			data.Branch = e.GetRef()
+			data.Title = fmt.Sprintf("Branch created: %s", data.Branch)
+		}
+		data.ID = e.GetRef()
+
+	case *github.ReleaseEvent:
+		data.Action = e.GetAction()
+		data.Sender = e.GetSender().GetLogin()
+		if release := e.GetRelease(); release != nil {
+			data.Tag = release.GetTagName()
+			data.Title = release.GetName()
+			data.Body = release.GetBody()
+			data.URL = release.GetHTMLURL()
+			data.ID = fmt.Sprintf("%d", release.GetID())
+		}
+
 	default:
 		// For other event types, try to extract sender from raw JSON
 		var raw map[string]interface{}
@@ -296,12 +336,31 @@ func matchesFilter(filter v1alpha1.GitHubWebhookFilter, eventData *GitHubEventDa
 		}
 	}
 
-	// Branch filter (for push events)
+	// Branch filter (for push and create events)
 	if filter.Branch != "" {
 		if eventData.Branch == "" {
 			return false
 		}
-		matched, _ := filepath.Match(filter.Branch, eventData.Branch)
+		matched, err := filepath.Match(filter.Branch, eventData.Branch)
+		if err != nil {
+			filterLog.Error(err, "Invalid branch glob pattern, rejecting event", "pattern", filter.Branch)
+			return false
+		}
+		if !matched {
+			return false
+		}
+	}
+
+	// Tag filter (for create and release events)
+	if filter.Tag != "" {
+		if eventData.Tag == "" {
+			return false
+		}
+		matched, err := filepath.Match(filter.Tag, eventData.Tag)
+		if err != nil {
+			filterLog.Error(err, "Invalid tag glob pattern, rejecting event", "pattern", filter.Tag)
+			return false
+		}
 		if !matched {
 			return false
 		}
@@ -623,6 +682,12 @@ func ExtractGitHubWorkItem(eventData *GitHubEventData) map[string]interface{} {
 	}
 	if eventData.CommentURL != "" {
 		vars["CommentURL"] = eventData.CommentURL
+	}
+	if eventData.Tag != "" {
+		vars["Tag"] = eventData.Tag
+	}
+	if eventData.RefType != "" {
+		vars["RefType"] = eventData.RefType
 	}
 
 	return vars

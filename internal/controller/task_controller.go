@@ -933,7 +933,33 @@ func (r *TaskReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&kelosv1alpha1.Task{}).
 		Owns(&batchv1.Job{}).
 		Watches(&kelosv1alpha1.Task{}, handler.EnqueueRequestsFromMapFunc(r.enqueueDependentTasks)).
+		Watches(&kelosv1alpha1.Workspace{}, handler.EnqueueRequestsFromMapFunc(r.enqueueTasksForWorkspace)).
 		Complete(r)
+}
+
+// enqueueTasksForWorkspace returns reconcile requests for Tasks that reference
+// the given Workspace. This ensures Tasks waiting for a Workspace are
+// reconciled immediately when it appears.
+func (r *TaskReconciler) enqueueTasksForWorkspace(ctx context.Context, obj client.Object) []reconcile.Request {
+	ws, ok := obj.(*kelosv1alpha1.Workspace)
+	if !ok {
+		return nil
+	}
+
+	var taskList kelosv1alpha1.TaskList
+	if err := r.List(ctx, &taskList, client.InNamespace(ws.Namespace)); err != nil {
+		return nil
+	}
+
+	var requests []reconcile.Request
+	for _, t := range taskList.Items {
+		if t.Spec.WorkspaceRef != nil && t.Spec.WorkspaceRef.Name == ws.Name {
+			requests = append(requests, reconcile.Request{
+				NamespacedName: client.ObjectKeyFromObject(&t),
+			})
+		}
+	}
+	return requests
 }
 
 // enqueueDependentTasks returns reconcile requests for tasks that depend on the

@@ -2216,3 +2216,452 @@ func TestNeedsBranchEnrichment(t *testing.T) {
 		})
 	}
 }
+
+func TestParseGitHubWebhook_CreateEvent_Tag(t *testing.T) {
+	payload := `{
+		"ref": "v1.2.3",
+		"ref_type": "tag",
+		"sender": {"login": "releaser"},
+		"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}}
+	}`
+
+	eventData, err := ParseGitHubWebhook("create", []byte(payload))
+	if err != nil {
+		t.Fatalf("ParseGitHubWebhook() error = %v", err)
+	}
+
+	if eventData.Event != "create" {
+		t.Errorf("Event = %v, want create", eventData.Event)
+	}
+	if eventData.Ref != "v1.2.3" {
+		t.Errorf("Ref = %v, want v1.2.3", eventData.Ref)
+	}
+	if eventData.RefType != "tag" {
+		t.Errorf("RefType = %v, want tag", eventData.RefType)
+	}
+	if eventData.Tag != "v1.2.3" {
+		t.Errorf("Tag = %v, want v1.2.3", eventData.Tag)
+	}
+	if eventData.Branch != "" {
+		t.Errorf("Branch = %v, want empty for tag creation", eventData.Branch)
+	}
+	if eventData.Sender != "releaser" {
+		t.Errorf("Sender = %v, want releaser", eventData.Sender)
+	}
+	if eventData.Title != "Tag created: v1.2.3" {
+		t.Errorf("Title = %v, want 'Tag created: v1.2.3'", eventData.Title)
+	}
+	if eventData.ID != "v1.2.3" {
+		t.Errorf("ID = %v, want v1.2.3", eventData.ID)
+	}
+	if eventData.Repository != "org/repo" {
+		t.Errorf("Repository = %v, want org/repo", eventData.Repository)
+	}
+}
+
+func TestParseGitHubWebhook_CreateEvent_Branch(t *testing.T) {
+	payload := `{
+		"ref": "feature/new-thing",
+		"ref_type": "branch",
+		"sender": {"login": "developer"},
+		"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}}
+	}`
+
+	eventData, err := ParseGitHubWebhook("create", []byte(payload))
+	if err != nil {
+		t.Fatalf("ParseGitHubWebhook() error = %v", err)
+	}
+
+	if eventData.RefType != "branch" {
+		t.Errorf("RefType = %v, want branch", eventData.RefType)
+	}
+	if eventData.Branch != "feature/new-thing" {
+		t.Errorf("Branch = %v, want feature/new-thing", eventData.Branch)
+	}
+	if eventData.Tag != "" {
+		t.Errorf("Tag = %v, want empty for branch creation", eventData.Tag)
+	}
+	if eventData.Title != "Branch created: feature/new-thing" {
+		t.Errorf("Title = %v, want 'Branch created: feature/new-thing'", eventData.Title)
+	}
+}
+
+func TestParseGitHubWebhook_ReleaseEvent(t *testing.T) {
+	payload := `{
+		"action": "published",
+		"sender": {"login": "releaser"},
+		"release": {
+			"id": 12345,
+			"tag_name": "v2.0.0",
+			"name": "Release v2.0.0",
+			"body": "## What's Changed\n- Feature A\n- Feature B",
+			"html_url": "https://github.com/org/repo/releases/tag/v2.0.0",
+			"draft": false,
+			"prerelease": false
+		},
+		"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}}
+	}`
+
+	eventData, err := ParseGitHubWebhook("release", []byte(payload))
+	if err != nil {
+		t.Fatalf("ParseGitHubWebhook() error = %v", err)
+	}
+
+	if eventData.Event != "release" {
+		t.Errorf("Event = %v, want release", eventData.Event)
+	}
+	if eventData.Action != "published" {
+		t.Errorf("Action = %v, want published", eventData.Action)
+	}
+	if eventData.Tag != "v2.0.0" {
+		t.Errorf("Tag = %v, want v2.0.0", eventData.Tag)
+	}
+	if eventData.Title != "Release v2.0.0" {
+		t.Errorf("Title = %v, want 'Release v2.0.0'", eventData.Title)
+	}
+	if eventData.Body != "## What's Changed\n- Feature A\n- Feature B" {
+		t.Errorf("Body = %v, want release body", eventData.Body)
+	}
+	if eventData.URL != "https://github.com/org/repo/releases/tag/v2.0.0" {
+		t.Errorf("URL = %v, want release HTML URL", eventData.URL)
+	}
+	if eventData.ID != "12345" {
+		t.Errorf("ID = %v, want 12345", eventData.ID)
+	}
+	if eventData.Sender != "releaser" {
+		t.Errorf("Sender = %v, want releaser", eventData.Sender)
+	}
+	if eventData.Repository != "org/repo" {
+		t.Errorf("Repository = %v, want org/repo", eventData.Repository)
+	}
+}
+
+func TestMatchesGitHubEvent_CreateTagEvent(t *testing.T) {
+	spawner := &v1alpha1.GitHubWebhook{
+		Events: []string{"create"},
+		Filters: []v1alpha1.GitHubWebhookFilter{
+			{
+				Event: "create",
+				Tag:   "v*",
+			},
+		},
+	}
+
+	tests := []struct {
+		name    string
+		payload string
+		want    bool
+	}{
+		{
+			name: "matching tag pattern",
+			payload: `{
+				"ref": "v1.0.0",
+				"ref_type": "tag",
+				"sender": {"login": "user"},
+				"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}}
+			}`,
+			want: true,
+		},
+		{
+			name: "non-matching tag pattern",
+			payload: `{
+				"ref": "release-1.0",
+				"ref_type": "tag",
+				"sender": {"login": "user"},
+				"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}}
+			}`,
+			want: false,
+		},
+		{
+			name: "branch creation does not match tag filter",
+			payload: `{
+				"ref": "v1-branch",
+				"ref_type": "branch",
+				"sender": {"login": "user"},
+				"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}}
+			}`,
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseAndMatch(t, spawner, "create", []byte(tt.payload))
+			if err != nil {
+				t.Errorf("MatchesGitHubEvent() error = %v", err)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("MatchesGitHubEvent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMatchesGitHubEvent_CreateBranchEvent(t *testing.T) {
+	spawner := &v1alpha1.GitHubWebhook{
+		Events: []string{"create"},
+		Filters: []v1alpha1.GitHubWebhookFilter{
+			{
+				Event:  "create",
+				Branch: "feature/*",
+			},
+		},
+	}
+
+	tests := []struct {
+		name    string
+		payload string
+		want    bool
+	}{
+		{
+			name: "matching branch pattern",
+			payload: `{
+				"ref": "feature/new-thing",
+				"ref_type": "branch",
+				"sender": {"login": "user"},
+				"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}}
+			}`,
+			want: true,
+		},
+		{
+			name: "non-matching branch pattern",
+			payload: `{
+				"ref": "bugfix/thing",
+				"ref_type": "branch",
+				"sender": {"login": "user"},
+				"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}}
+			}`,
+			want: false,
+		},
+		{
+			name: "tag creation does not match branch filter",
+			payload: `{
+				"ref": "feature/v1",
+				"ref_type": "tag",
+				"sender": {"login": "user"},
+				"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}}
+			}`,
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseAndMatch(t, spawner, "create", []byte(tt.payload))
+			if err != nil {
+				t.Errorf("MatchesGitHubEvent() error = %v", err)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("MatchesGitHubEvent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMatchesGitHubEvent_MalformedGlobPattern(t *testing.T) {
+	tests := []struct {
+		name    string
+		spawner *v1alpha1.GitHubWebhook
+		event   string
+		payload string
+	}{
+		{
+			name: "malformed tag pattern rejects event",
+			spawner: &v1alpha1.GitHubWebhook{
+				Events: []string{"create"},
+				Filters: []v1alpha1.GitHubWebhookFilter{
+					{
+						Event: "create",
+						Tag:   "[invalid",
+					},
+				},
+			},
+			event: "create",
+			payload: `{
+				"ref": "v1.0.0",
+				"ref_type": "tag",
+				"sender": {"login": "user"},
+				"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}}
+			}`,
+		},
+		{
+			name: "malformed branch pattern rejects event",
+			spawner: &v1alpha1.GitHubWebhook{
+				Events: []string{"push"},
+				Filters: []v1alpha1.GitHubWebhookFilter{
+					{
+						Event:  "push",
+						Branch: "[invalid",
+					},
+				},
+			},
+			event: "push",
+			payload: `{
+				"ref": "refs/heads/main",
+				"sender": {"login": "user"},
+				"head_commit": {"id": "abc123"}
+			}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseAndMatch(t, tt.spawner, tt.event, []byte(tt.payload))
+			if err != nil {
+				t.Errorf("MatchesGitHubEvent() error = %v", err)
+				return
+			}
+			if got {
+				t.Errorf("MatchesGitHubEvent() = true, want false for malformed glob pattern")
+			}
+		})
+	}
+}
+
+func TestMatchesGitHubEvent_ReleaseEvent(t *testing.T) {
+	spawner := &v1alpha1.GitHubWebhook{
+		Events: []string{"release"},
+		Filters: []v1alpha1.GitHubWebhookFilter{
+			{
+				Event:  "release",
+				Action: "published",
+				Tag:    "v*",
+			},
+		},
+	}
+
+	tests := []struct {
+		name    string
+		payload string
+		want    bool
+	}{
+		{
+			name: "published release with matching tag",
+			payload: `{
+				"action": "published",
+				"sender": {"login": "user"},
+				"release": {"id": 1, "tag_name": "v1.0.0", "name": "v1.0.0", "html_url": "https://github.com/org/repo/releases/tag/v1.0.0"},
+				"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}}
+			}`,
+			want: true,
+		},
+		{
+			name: "created release does not match published filter",
+			payload: `{
+				"action": "created",
+				"sender": {"login": "user"},
+				"release": {"id": 2, "tag_name": "v2.0.0", "name": "v2.0.0", "html_url": "https://github.com/org/repo/releases/tag/v2.0.0"},
+				"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}}
+			}`,
+			want: false,
+		},
+		{
+			name: "published release with non-matching tag",
+			payload: `{
+				"action": "published",
+				"sender": {"login": "user"},
+				"release": {"id": 3, "tag_name": "release-1.0", "name": "release-1.0", "html_url": "https://github.com/org/repo/releases/tag/release-1.0"},
+				"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}}
+			}`,
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseAndMatch(t, spawner, "release", []byte(tt.payload))
+			if err != nil {
+				t.Errorf("MatchesGitHubEvent() error = %v", err)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("MatchesGitHubEvent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMatchesGitHubEvent_ReleaseNoFilter(t *testing.T) {
+	// When no filters are set, all release events should match
+	spawner := &v1alpha1.GitHubWebhook{
+		Events: []string{"release"},
+	}
+
+	payload := `{
+		"action": "published",
+		"sender": {"login": "user"},
+		"release": {"id": 1, "tag_name": "v1.0.0", "name": "v1.0.0", "html_url": "https://github.com/org/repo/releases/tag/v1.0.0"},
+		"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}}
+	}`
+
+	got, err := parseAndMatch(t, spawner, "release", []byte(payload))
+	if err != nil {
+		t.Fatalf("MatchesGitHubEvent() error = %v", err)
+	}
+	if !got {
+		t.Error("Expected release event to match when no filters are set")
+	}
+}
+
+func TestExtractGitHubWorkItem_CreateTagEvent(t *testing.T) {
+	eventData := &GitHubEventData{
+		Event:           "create",
+		Sender:          "releaser",
+		Ref:             "v1.0.0",
+		RefType:         "tag",
+		Tag:             "v1.0.0",
+		ID:              "v1.0.0",
+		Title:           "Tag created: v1.0.0",
+		Repository:      "org/repo",
+		RepositoryOwner: "org",
+		RepositoryName:  "repo",
+	}
+
+	vars := ExtractGitHubWorkItem(eventData)
+
+	if vars["Tag"] != "v1.0.0" {
+		t.Errorf("Tag = %v, want v1.0.0", vars["Tag"])
+	}
+	if vars["RefType"] != "tag" {
+		t.Errorf("RefType = %v, want tag", vars["RefType"])
+	}
+	if vars["Ref"] != "v1.0.0" {
+		t.Errorf("Ref = %v, want v1.0.0", vars["Ref"])
+	}
+	if vars["Event"] != "create" {
+		t.Errorf("Event = %v, want create", vars["Event"])
+	}
+}
+
+func TestExtractGitHubWorkItem_ReleaseEvent(t *testing.T) {
+	eventData := &GitHubEventData{
+		Event:           "release",
+		Action:          "published",
+		Sender:          "releaser",
+		Tag:             "v2.0.0",
+		ID:              "12345",
+		Title:           "Release v2.0.0",
+		Body:            "Release notes here",
+		URL:             "https://github.com/org/repo/releases/tag/v2.0.0",
+		Repository:      "org/repo",
+		RepositoryOwner: "org",
+		RepositoryName:  "repo",
+	}
+
+	vars := ExtractGitHubWorkItem(eventData)
+
+	if vars["Tag"] != "v2.0.0" {
+		t.Errorf("Tag = %v, want v2.0.0", vars["Tag"])
+	}
+	if vars["Action"] != "published" {
+		t.Errorf("Action = %v, want published", vars["Action"])
+	}
+	if vars["Body"] != "Release notes here" {
+		t.Errorf("Body = %v, want 'Release notes here'", vars["Body"])
+	}
+	if vars["URL"] != "https://github.com/org/repo/releases/tag/v2.0.0" {
+		t.Errorf("URL = %v, want release URL", vars["URL"])
+	}
+}

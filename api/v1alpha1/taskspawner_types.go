@@ -468,9 +468,13 @@ type GitHubWebhookFilter struct {
 	// +optional
 	State string `json:"state,omitempty"`
 
-	// Branch filters push events by branch name (exact match or glob).
+	// Branch filters push and create (ref_type=branch) events by branch name (exact match or glob).
 	// +optional
 	Branch string `json:"branch,omitempty"`
+
+	// Tag filters create (ref_type=tag) and release events by tag name (exact match or glob).
+	// +optional
+	Tag string `json:"tag,omitempty"`
 
 	// Draft filters PRs by draft status. nil = don't filter.
 	// +optional

@@ -278,7 +278,8 @@ GitHub Apps are preferred over PATs for production use because they offer fine-g
 | `spec.when.githubWebhook.filters[].labels` | Require the issue/PR to have all of these labels | No |
 | `spec.when.githubWebhook.filters[].excludeLabels` | Exclude issues/PRs with any of these labels | No |
 | `spec.when.githubWebhook.filters[].state` | Filter by issue/PR state (`"open"`, `"closed"`) | No |
-| `spec.when.githubWebhook.filters[].branch` | Filter push events by branch name (exact match or glob) | No |
+| `spec.when.githubWebhook.filters[].branch` | Filter push and create (ref_type=branch) events by branch name (exact match or glob) | No |
+| `spec.when.githubWebhook.filters[].tag` | Filter create (ref_type=tag) and release events by tag name (exact match or glob) | No |
 | `spec.when.githubWebhook.filters[].draft` | Filter PRs by draft status | No |
 | `spec.when.githubWebhook.filters[].author` | Filter by the event sender's username | No |
 | `spec.when.githubWebhook.filters[].excludeAuthors` | Exclude events sent by any of these usernames | No |
@@ -346,7 +347,9 @@ The `promptTemplate` field uses Go `text/template` syntax. Available variables d
 | `{{.Action}}` | Webhook action | Empty | Empty | Action (e.g., `"opened"`, `"created"`, `"submitted"`) | Empty | Action (e.g., `"create"`, `"update"`, `"remove"`) | Empty | Empty |
 | `{{.Sender}}` | Event sender username | Empty | Empty | Username of person who triggered the event | Empty | Empty | Empty | Empty |
 | `{{.Branch}}` | Git branch to update | Empty | PR head branch (e.g., `"kelos-task-42"`) | PR source branch or push branch | Empty | Empty | Empty | Empty |
-| `{{.Ref}}` | Git ref | Empty | Empty | Git ref for push events (e.g., `"refs/heads/main"`) | Empty | Empty | Empty | Empty |
+| `{{.Ref}}` | Git ref | Empty | Empty | Git ref for push events (e.g., `"refs/heads/main"`) or create events (ref name) | Empty | Empty | Empty | Empty |
+| `{{.Tag}}` | Tag name | Empty | Empty | Tag name for `create` (ref_type=tag) and `release` events | Empty | Empty | Empty | Empty |
+| `{{.RefType}}` | Ref type for create events | Empty | Empty | `"branch"`, `"tag"`, or `"repository"` (create events only) | Empty | Empty | Empty | Empty |
 | `{{.Repository}}` | Full repository name | Empty | Empty | Repository in `owner/repo` format | Empty | Empty | Empty | Empty |
 | `{{.RepositoryOwner}}` | Repository owner | Empty | Empty | Repository owner login | Empty | Empty | Empty | Empty |
 | `{{.RepositoryName}}` | Repository name | Empty | Empty | Repository name only | Empty | Empty | Empty | Empty |

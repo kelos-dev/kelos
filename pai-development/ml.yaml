@@ -446,6 +446,11 @@ spec:
             secretKeyRef:
               name: pai-nclavis
               key: PAI_NCLAVIS_USER_TOKEN
+        - name: CODEX_AUTH_JSON
+          valueFrom:
+            secretKeyRef:
+              name: codex-credentials
+              key: CODEX_AUTH_JSON
     promptTemplate: |
       You are a code review agent. Your only task is to review a PR and post
       inline review comments on problematic code.
@@ -473,8 +478,29 @@ spec:
          - For each unresolved bot thread, check if the issue has been fixed in the current code
          - Resolve fixed threads using the `resolveReviewThread` GraphQL mutation
 
-      5. Review the changes following the priority labeling guidelines in the AgentConfig,
-         then post inline review comments using `gh api` for each issue found:
+      5. Set up the Codex CLI so the review-all skill can run its Codex leg:
+         ```
+         npm install -g --prefix ~/.local @openai/codex
+         export PATH="$HOME/.local/bin:$PATH"
+         mkdir -p ~/.codex
+         printf '%s' "$CODEX_AUTH_JSON" | tr -d '\n\r' > ~/.codex/auth.json
+         printf 'cli_auth_credentials_store = "file"\n' >> ~/.codex/config.toml
+         ```
+
+      6. Invoke the "review-all" skill against the
+         PR base branch:
+         ```
+         base=$(gh pr view {{.Number}} --json baseRefName --jq .baseRefName)
+         git fetch --unshallow || true
+         git fetch origin "$base"
+         ```
+         Run `review-all origin/$base`. Keep the skill review-only: its two
+         internal review agents must not post to GitHub or modify any files.
+
+      7. Map the merged findings to the priority labeling guidelines in the
+         AgentConfig (P0→[p0], P1→[p1], P2→[p2], P3→[p3]; pure style or naming
+         nits→[p4]), then post inline review comments using `gh api` for each
+         finding:
          ```
          gh api repos/{owner}/{repo}/pulls/{{.Number}}/comments \
            -f body="<comment>" \
@@ -484,7 +510,7 @@ spec:
            -f side="RIGHT"
          ```
 
-      6. Post a PR comment with `/kelos needs-input` followed by a brief summary
+      8. Post a PR comment with `/kelos needs-input` followed by a brief summary
          of findings (or "No issues found").
 
       ## Rules

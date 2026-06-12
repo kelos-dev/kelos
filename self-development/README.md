@@ -414,7 +414,7 @@ To adapt these examples for your own repository:
          filters:
            - event: issue_comment
              action: created
-             bodyPattern: /kelos pick-up
+             bodyPattern: '^\s*/kelos pick-up\s*$'
              commentOn: Issue          # or PullRequest, depending on spawner
              author: your-maintainer   # maintainer-approval gate
              labels: [your-label]

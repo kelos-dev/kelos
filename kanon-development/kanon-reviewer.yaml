@@ -45,13 +45,13 @@ spec:
       filters:
         - event: issue_comment
           action: created
-          bodyPattern: /kelos review
+          bodyPattern: '^\s*/kelos review\s*$'
           commentOn: PullRequest
           state: open
           author: gjkim42
         - event: pull_request_review
           action: submitted
-          bodyPattern: /kelos review
+          bodyPattern: '^\s*/kelos review\s*$'
           state: open
           author: gjkim42
       reporting:

@@ -3,10 +3,12 @@ package examples
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
@@ -57,6 +59,88 @@ func TestSelfDevelopmentGitHubSpawnersUseWebhooks(t *testing.T) {
 			}
 			if len(ts.Spec.When.GitHubWebhook.Filters) == 0 {
 				t.Fatalf("expected %s to define webhook filters", tt.file)
+			}
+		})
+	}
+}
+
+func TestDevelopmentCommandPatternsRequireExactCommandBodies(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		dir     string
+		file    string
+		command string
+	}{
+		{dir: "self-development", file: "kelos-workers.yaml", command: "/kelos pick-up"},
+		{dir: "self-development", file: "kelos-planner.yaml", command: "/kelos plan"},
+		{dir: "self-development", file: "kelos-reviewer.yaml", command: "/kelos review"},
+		{dir: "self-development", file: "kelos-api-reviewer.yaml", command: "/kelos api-review"},
+		{dir: "self-development", file: "kelos-pr-responder.yaml", command: "/kelos pick-up"},
+		{dir: "self-development", file: "kelos-squash-commits.yaml", command: "/kelos squash-commits"},
+		{dir: "kanon-development", file: "kanon-workers.yaml", command: "/kelos pick-up"},
+		{dir: "kanon-development", file: "kanon-planner.yaml", command: "/kelos plan"},
+		{dir: "kanon-development", file: "kanon-reviewer.yaml", command: "/kelos review"},
+		{dir: "kanon-development", file: "kanon-pr-responder.yaml", command: "/kelos pick-up"},
+		{dir: "kanon-development", file: "kanon-squash-commits.yaml", command: "/kelos squash-commits"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.dir+"/"+tt.file, func(t *testing.T) {
+			t.Parallel()
+
+			ts := readTaskSpawnerFromDir(t, tt.dir, tt.file)
+			spawner := ts.Spec.When.GitHubWebhook
+			if spawner == nil {
+				t.Fatalf("expected %s/%s to use githubWebhook", tt.dir, tt.file)
+			}
+
+			foundBodyPattern := false
+			for _, filter := range spawner.Filters {
+				filter := filter
+				if filter.BodyPattern == "" {
+					continue
+				}
+				foundBodyPattern = true
+
+				t.Run(filter.Event+"/"+filter.Author, func(t *testing.T) {
+					bodyTests := []struct {
+						name string
+						body string
+						want bool
+					}{
+						{name: "exact command", body: tt.command, want: true},
+						{name: "surrounding whitespace", body: "\n\t " + tt.command + " \n", want: true},
+						{name: "embedded in sentence", body: "Please run " + tt.command, want: false},
+						{name: "trailing text", body: tt.command + " after CI passes", want: false},
+						{name: "quoted markdown", body: "> " + tt.command, want: false},
+						{name: "inline code", body: "`" + tt.command + "`", want: false},
+						{name: "command line with prose", body: "Please run:\n" + tt.command, want: false},
+					}
+
+					for _, bodyTest := range bodyTests {
+						bodyTest := bodyTest
+						t.Run(bodyTest.name, func(t *testing.T) {
+							payload := developmentWebhookPayload(t, spawner.Repository, filter, bodyTest.body)
+							eventData, err := webhook.ParseGitHubWebhook(filter.Event, payload)
+							if err != nil {
+								t.Fatalf("ParseGitHubWebhook() error = %v", err)
+							}
+
+							got, err := webhook.MatchesGitHubEvent(spawner, filter.Event, eventData)
+							if err != nil {
+								t.Fatalf("MatchesGitHubEvent() error = %v", err)
+							}
+							if got != bodyTest.want {
+								t.Fatalf("MatchesGitHubEvent() = %v, want %v", got, bodyTest.want)
+							}
+						})
+					}
+				})
+			}
+			if !foundBodyPattern {
+				t.Fatalf("expected %s/%s to define a bodyPattern filter", tt.dir, tt.file)
 			}
 		})
 	}
@@ -230,4 +314,85 @@ func readTaskSpawnerFromDir(t *testing.T, dir, file string) *kelosv1alpha1.TaskS
 
 	t.Fatalf("no TaskSpawner found in %s", path)
 	return nil
+}
+
+func developmentWebhookPayload(t *testing.T, repository string, filter kelosv1alpha1.GitHubWebhookFilter, body string) []byte {
+	t.Helper()
+
+	owner, name, ok := strings.Cut(repository, "/")
+	if !ok {
+		t.Fatalf("repository %q is not owner/name", repository)
+	}
+
+	author := filter.Author
+	if author == "" {
+		author = "gjkim42"
+	}
+	action := filter.Action
+	if action == "" {
+		action = "created"
+	}
+	state := filter.State
+	if state == "" {
+		state = "open"
+	}
+
+	repositoryPayload := map[string]any{
+		"full_name": repository,
+		"name":      name,
+		"owner": map[string]any{
+			"login": owner,
+		},
+	}
+
+	var payload map[string]any
+	switch filter.Event {
+	case "issue_comment":
+		issueURL := "https://github.com/" + repository + "/issues/1"
+		issue := map[string]any{
+			"number":   1,
+			"title":    "Test issue",
+			"state":    state,
+			"html_url": issueURL,
+		}
+		if filter.CommentOn == kelosv1alpha1.CommentOnPullRequest {
+			issue["html_url"] = "https://github.com/" + repository + "/pull/1"
+			issue["pull_request"] = map[string]any{
+				"url":      "https://api.github.com/repos/" + repository + "/pulls/1",
+				"html_url": "https://github.com/" + repository + "/pull/1",
+			}
+		}
+
+		payload = map[string]any{
+			"action":     action,
+			"sender":     map[string]any{"login": author},
+			"repository": repositoryPayload,
+			"issue":      issue,
+			"comment":    map[string]any{"body": body},
+		}
+	case "pull_request_review":
+		payload = map[string]any{
+			"action":     action,
+			"sender":     map[string]any{"login": author},
+			"repository": repositoryPayload,
+			"pull_request": map[string]any{
+				"number":   1,
+				"title":    "Test PR",
+				"body":     "Test PR body",
+				"html_url": "https://github.com/" + repository + "/pull/1",
+				"state":    state,
+				"draft":    false,
+				"head":     map[string]any{"ref": "feature-branch"},
+			},
+			"review": map[string]any{"body": body},
+		}
+	default:
+		t.Fatalf("unsupported event %q", filter.Event)
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	return data
 }

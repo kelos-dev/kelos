@@ -414,12 +414,15 @@ spec:
       filters:
         - event: "issue_comment"
           action: "created"
+          author: gunju-kim
           bodyContains: "/kelos review"
         - event: "pull_request_review"
           action: "submitted"
+          author: gunju-kim
           bodyContains: "/kelos review"
         - event: "pull_request_review_comment"
           action: "created"
+          author: gunju-kim
           bodyContains: "/kelos review"
       reporting:
         enabled: true

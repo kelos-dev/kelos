@@ -5556,3 +5556,44 @@ func TestBuildJob_CrossListNameCollisionRejected(t *testing.T) {
 		t.Errorf("Build() error = %v, want error mentioning both lists", err)
 	}
 }
+
+func TestBuildJob_TaskNameAndNamespaceEnvVars(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelosv1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-task",
+			Namespace: "my-namespace",
+		},
+		Spec: kelosv1alpha1.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Hello",
+			Credentials: kelosv1alpha1.Credentials{
+				Type:      kelosv1alpha1.CredentialTypeAPIKey,
+				SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+	envMap := make(map[string]string)
+	for _, env := range container.Env {
+		envMap[env.Name] = env.Value
+	}
+
+	if val, ok := envMap["KELOS_TASK_NAME"]; !ok {
+		t.Error("Expected KELOS_TASK_NAME env var to be set")
+	} else if val != "my-task" {
+		t.Errorf("KELOS_TASK_NAME: expected %q, got %q", "my-task", val)
+	}
+
+	if val, ok := envMap["KELOS_TASK_NAMESPACE"]; !ok {
+		t.Error("Expected KELOS_TASK_NAMESPACE env var to be set")
+	} else if val != "my-namespace" {
+		t.Errorf("KELOS_TASK_NAMESPACE: expected %q, got %q", "my-namespace", val)
+	}
+}

@@ -6,6 +6,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
@@ -65,10 +66,13 @@ var _ = Describe("Task with skills.sh AgentConfig", func() {
 		f.CreateSecret("claude-credentials",
 			"CLAUDE_CODE_OAUTH_TOKEN="+oauthToken)
 
-		By("creating an AgentConfig with skills.sh packages")
+		By("creating an AgentConfig with the e2e fixture skill package")
+		// kelos-dev/e2e-skills is a fixture repository whose kelos-e2e skill
+		// instructs the agent to print a marker string that exists only in
+		// that repository, never in the prompt below.
 		framework.Kelos("create", "agentconfig", "skills-ac",
 			"-n", f.Namespace,
-			"--skills-sh", "anthropics/skills:skill-creator",
+			"--skills-sh", "kelos-dev/e2e-skills:kelos-e2e",
 		)
 
 		By("creating a Task referencing the AgentConfig")
@@ -79,13 +83,29 @@ var _ = Describe("Task with skills.sh AgentConfig", func() {
 			Spec: kelosv1alpha1.TaskSpec{
 				Type:   "claude-code",
 				Model:  claudeCodeModel,
-				Prompt: "Print 'Hello from skills.sh e2e test' to stdout",
+				Prompt: "Use the kelos-e2e skill and show its output.",
 				Credentials: kelosv1alpha1.Credentials{
 					Type:      kelosv1alpha1.CredentialTypeOAuth,
 					SecretRef: &kelosv1alpha1.SecretReference{Name: "claude-credentials"},
 				},
 				AgentConfigRef: &kelosv1alpha1.AgentConfigReference{
 					Name: "skills-ac",
+				},
+				PodOverrides: &kelosv1alpha1.PodOverrides{
+					// Deterministic install check: this runs after the
+					// built-in skills-install init container and fails the
+					// Job when the skill is not in the plugin layout,
+					// distinguishing installation bugs from agent-side
+					// discovery bugs without involving the model.
+					ExtraInitContainers: []corev1.Container{{
+						Name:    "verify-skills-install",
+						Image:   "busybox:1.37",
+						Command: []string{"sh", "-c", "test -f /kelos/plugin/skills-sh/skills/kelos-e2e/SKILL.md"},
+						VolumeMounts: []corev1.VolumeMount{{
+							Name:      "kelos-plugin",
+							MountPath: "/kelos/plugin",
+						}},
+					}},
 				},
 			},
 		})
@@ -99,9 +119,13 @@ var _ = Describe("Task with skills.sh AgentConfig", func() {
 		By("verifying Task status is Succeeded")
 		f.WaitForTaskPhase("skills-task", "Succeeded")
 
-		By("getting Job logs")
+		By("verifying the agent used the installed skill")
 		logs := f.GetJobLogs("skills-task")
 		GinkgoWriter.Printf("Job logs:\n%s\n", logs)
+		// The marker exists only in the kelos-dev/e2e-skills repository and
+		// not in the task prompt, so it can appear in the logs only when the
+		// installed skill's content actually reached the agent.
+		Expect(logs).To(ContainSubstring("KELOS_E2E_SKILL_MARKER_x7k2p9"))
 	})
 })
 

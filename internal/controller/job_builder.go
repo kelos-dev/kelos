@@ -60,6 +60,11 @@ const (
 	// PluginMountPath is the mount path for the plugin volume.
 	PluginMountPath = "/kelos/plugin"
 
+	// SkillsShPluginName is the plugin directory name under PluginMountPath
+	// that skills.sh packages are installed into, so agent entrypoints
+	// discover them the same way as inline plugins.
+	SkillsShPluginName = "skills-sh"
+
 	// NodeImage is the image used for running Node.js-based init containers
 	// (e.g., installing skills.sh packages).
 	NodeImage = "node:22.14.0-alpine"
@@ -563,7 +568,12 @@ func (b *JobBuilder) buildAgentJob(task *kelosv1alpha1.Task, workspace *kelosv1a
 		}
 
 		if len(agentConfig.Skills) > 0 {
-			script, err := buildSkillsInstallScript(agentConfig.Skills, task.Spec.Type)
+			for _, p := range agentConfig.Plugins {
+				if p.Name == SkillsShPluginName {
+					return nil, fmt.Errorf("invalid plugin configuration: plugin name %q is reserved for skills.sh packages when spec.skills is set", SkillsShPluginName)
+				}
+			}
+			script, err := buildSkillsInstallScript(agentConfig.Skills)
 			if err != nil {
 				return nil, fmt.Errorf("invalid skills configuration: %w", err)
 			}
@@ -968,8 +978,10 @@ func buildPluginSetupScript(plugins []kelosv1alpha1.PluginSpec) (string, error) 
 // buildSkillsInstallScript generates a shell script that installs skills.sh
 // packages into the plugin volume using "npx skills add".
 // The script installs git (required by the skills CLI to clone repositories),
-// runs npx as the agent user, and ensures all output files are owned by AgentUID.
-func buildSkillsInstallScript(skills []kelosv1alpha1.SkillsShSpec, agentType string) (string, error) {
+// then relocates the installed skills into the <plugin>/skills/<skill>
+// layout that agent entrypoints discover, and ensures all output files are
+// owned by AgentUID.
+func buildSkillsInstallScript(skills []kelosv1alpha1.SkillsShSpec) (string, error) {
 	lines := []string{
 		"set -eu",
 		"apk add --no-cache git >/dev/null 2>&1",
@@ -979,14 +991,30 @@ func buildSkillsInstallScript(skills []kelosv1alpha1.SkillsShSpec, agentType str
 		if s.Source == "" {
 			return "", fmt.Errorf("skills.sh source is empty")
 		}
-		args := fmt.Sprintf("npx -y skills add %s -a %s -y -g", shellQuote(s.Source), shellQuote(agentType))
+		// The "universal" agent target installs the canonical skill format
+		// into the fixed $HOME/.agents/skills directory regardless of the
+		// task's agent type. Kelos agent type names are not valid skills.sh
+		// agent names (e.g. "gemini" vs "gemini-cli"), and per-agent targets
+		// scatter output across different hidden directories.
+		args := fmt.Sprintf("npx -y skills add %s -a universal -y -g", shellQuote(s.Source))
 		if s.Skill != "" {
 			args += fmt.Sprintf(" -s %s", shellQuote(s.Skill))
 		}
 		lines = append(lines, args)
 	}
 
-	lines = append(lines, fmt.Sprintf("chown -R %d:%d %s", AgentUID, AgentUID, shellQuote(PluginMountPath)))
+	// "skills add -g" writes into hidden directories under $HOME (set to
+	// PluginMountPath) that entrypoints never scan, so move the result into
+	// the plugin layout and drop the installer's leftover state.
+	installDir := path.Join(PluginMountPath, ".agents", "skills")
+	pluginSkillsDir := path.Join(PluginMountPath, SkillsShPluginName, "skills")
+	lines = append(lines,
+		fmt.Sprintf("[ -d %s ] || { echo 'No skills.sh skills were installed' >&2; exit 1; }", shellQuote(installDir)),
+		fmt.Sprintf("mkdir -p %s", shellQuote(pluginSkillsDir)),
+		fmt.Sprintf("mv %s/* %s/", shellQuote(installDir), shellQuote(pluginSkillsDir)),
+		fmt.Sprintf("rm -rf %s %s", shellQuote(path.Join(PluginMountPath, ".agents")), shellQuote(path.Join(PluginMountPath, ".npm"))),
+		fmt.Sprintf("chown -R %d:%d %s", AgentUID, AgentUID, shellQuote(PluginMountPath)),
+	)
 
 	return strings.Join(lines, "\n"), nil
 }

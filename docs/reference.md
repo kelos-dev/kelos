@@ -218,7 +218,7 @@ GitHub Apps are preferred over PATs for production use because they offer fine-g
 | `spec.plugins[].skills[].content` | Skill content (markdown with frontmatter) | Yes (per skill) |
 | `spec.plugins[].agents[].name` | Agent name (becomes `agents/<name>.md`) | Yes (per agent) |
 | `spec.plugins[].agents[].content` | Agent content (markdown with frontmatter) | Yes (per agent) |
-| `spec.skills[].source` | skills.sh package in `owner/repo` format (e.g., `vercel-labs/agent-skills`) | Yes (per skill) |
+| `spec.skills[].source` | skills.sh package in `owner/repo` format (e.g., `vercel-labs/agent-skills`). Installed skills are exposed to the agent as a plugin named `skills-sh`; when `AgentConfig.spec.skills` is set, that name is reserved and must not be used in `AgentConfig.spec.plugins[].name` | Yes (per skill) |
 | `spec.skills[].skill` | Specific skill name from the package (installs all if omitted) | No |
 | `spec.mcpServers[].name` | MCP server name (used as key in agent config) | Yes (per server) |
 | `spec.mcpServers[].type` | Transport type: `stdio`, `http`, or `sse` | Yes (per server) |

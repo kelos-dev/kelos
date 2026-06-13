@@ -65,8 +65,9 @@ var _ = Describe("CLI", func() {
 		framework.Kelos("delete", "task", "cli-task", "-n", f.Namespace)
 
 		By("verifying task is no longer listed")
-		output = framework.KelosOutput("get", "tasks", "-n", f.Namespace)
-		Expect(output).NotTo(ContainSubstring("cli-task"))
+		Eventually(func() string {
+			return framework.KelosOutput("get", "tasks", "-n", f.Namespace)
+		}, 30*time.Second, time.Second).ShouldNot(ContainSubstring("cli-task"))
 	})
 
 	It("should follow logs from task creation with -f", func() {
@@ -135,8 +136,9 @@ var _ = Describe("CLI", func() {
 		framework.Kelos("delete", "task", "cli-ws-task", "-n", f.Namespace)
 
 		By("verifying task is no longer listed")
-		output = framework.KelosOutput("get", "tasks", "-n", f.Namespace)
-		Expect(output).NotTo(ContainSubstring("cli-ws-task"))
+		Eventually(func() string {
+			return framework.KelosOutput("get", "tasks", "-n", f.Namespace)
+		}, 30*time.Second, time.Second).ShouldNot(ContainSubstring("cli-ws-task"))
 	})
 })
 

@@ -320,7 +320,7 @@ Before deploying these examples, you need to create the following resources:
 Create a Workspace that points to your repository:
 
 ```yaml
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: Workspace
 metadata:
   name: kelos-agent

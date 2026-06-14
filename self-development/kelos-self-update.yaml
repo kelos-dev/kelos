@@ -1,4 +1,4 @@
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: AgentConfig
 metadata:
   name: kelos-self-update-agent
@@ -30,7 +30,7 @@ spec:
     - Logging conventions: start log messages with capital letters and do not end with punctuation
     - Commit messages: do not include PR links in commit messages
 ---
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: kelos-self-update
@@ -58,8 +58,8 @@ spec:
           ephemeral-storage: "2Gi"
         limits:
           ephemeral-storage: "2Gi"
-    agentConfigRef:
-      name: kelos-self-update-agent
+    agentConfigRefs:
+      - name: kelos-self-update-agent
     promptTemplate: |
       You are a self-improvement agent for the Kelos framework — a Kubernetes-native controller that runs autonomous AI coding agents.
       Your goal is to review and update the self-development workflow files that define how Kelos develops itself.

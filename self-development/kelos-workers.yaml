@@ -1,4 +1,4 @@
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: AgentConfig
 metadata:
   name: kelos-workers-agent
@@ -49,7 +49,7 @@ spec:
       - The `issue_comment` webhook event fires for both issues and pull requests; design prompts to detect and handle both contexts
       - Do not include manual PR branch checkout instructions in prompts — Kelos already checks out the PR branch automatically
 ---
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: kelos-workers
@@ -100,8 +100,8 @@ spec:
         - name: GIT_COMMITTER_EMAIL
           value: "gjkim042@gmail.com"
     branch: "kelos-task-{{.Number}}"
-    agentConfigRef:
-      name: kelos-workers-agent
+    agentConfigRefs:
+      - name: kelos-workers-agent
     promptTemplate: |
       You are a coding agent. You either
       - create a PR to fix the issue

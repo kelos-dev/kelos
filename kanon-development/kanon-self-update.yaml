@@ -1,4 +1,4 @@
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: kanon-self-update
@@ -29,8 +29,8 @@ spec:
           ephemeral-storage: "2Gi"
         limits:
           ephemeral-storage: "2Gi"
-    agentConfigRef:
-      name: kelos-dev-agent
+    agentConfigRefs:
+      - name: kelos-dev-agent
     promptTemplate: |
       You are a self-improvement agent for the Kanon development workflow.
       Your goal is to review and propose improvements to the workflow files that

@@ -1,4 +1,4 @@
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: kanon-triage
@@ -43,8 +43,8 @@ spec:
           ephemeral-storage: "2Gi"
         limits:
           ephemeral-storage: "2Gi"
-    agentConfigRef:
-      name: kanon-dev-agent
+    agentConfigRefs:
+      - name: kanon-dev-agent
     promptTemplate: |
       You are a triage agent for the Kanon project (github.com/kelos-dev/kanon),
       a Go CLI that manages coding-agent settings (instructions, skills, MCP servers,

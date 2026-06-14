@@ -1,4 +1,4 @@
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: AgentConfig
 metadata:
   name: kanon-planner-agent
@@ -20,7 +20,7 @@ spec:
     - Keep changes minimal and focused
     - You are a read-only agent: do NOT open PRs, push code, or modify any files
 ---
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: kanon-planner
@@ -60,8 +60,8 @@ spec:
           ephemeral-storage: "2Gi"
         limits:
           ephemeral-storage: "2Gi"
-    agentConfigRef:
-      name: kanon-planner-agent
+    agentConfigRefs:
+      - name: kanon-planner-agent
     promptTemplate: |
       You are an implementation planner for the Kanon project (github.com/kelos-dev/kanon),
       a Go CLI that manages coding-agent settings (instructions, skills, MCP servers,

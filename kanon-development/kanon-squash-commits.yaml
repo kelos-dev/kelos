@@ -1,4 +1,4 @@
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: kanon-squash-commits
@@ -54,8 +54,8 @@ spec:
         - name: GIT_COMMITTER_EMAIL
           value: "gjkim042@gmail.com"
     branch: '{{with index . "Branch"}}{{.}}{{else}}main{{end}}'
-    agentConfigRef:
-      name: kanon-dev-agent
+    agentConfigRefs:
+      - name: kanon-dev-agent
     promptTemplate: |
       You are a coding agent. Your only task is to rebase and squash commits on a PR branch.
 

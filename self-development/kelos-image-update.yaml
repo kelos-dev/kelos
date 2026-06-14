@@ -1,4 +1,4 @@
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: AgentConfig
 metadata:
   name: kelos-image-update-agent
@@ -19,7 +19,7 @@ spec:
     - Do not create duplicate PRs — check existing PRs first with `gh pr list`
     - Keep changes minimal and focused
 ---
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: kelos-image-update
@@ -56,8 +56,8 @@ spec:
           value: "Gunju Kim"
         - name: GIT_COMMITTER_EMAIL
           value: "gjkim042@gmail.com"
-    agentConfigRef:
-      name: kelos-image-update-agent
+    agentConfigRefs:
+      - name: kelos-image-update-agent
     promptTemplate: |
       You are an image update agent for the Kelos framework — a Kubernetes-native controller that runs autonomous AI coding agents.
       Your goal is to check whether any coding agent images have newer versions available and create PRs to update them.

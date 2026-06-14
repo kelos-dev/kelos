@@ -1,4 +1,4 @@
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: kelos-pr-responder
@@ -57,8 +57,8 @@ spec:
         - name: GIT_COMMITTER_EMAIL
           value: "gjkim042@gmail.com"
     branch: "{{.Branch}}"
-    agentConfigRef:
-      name: kelos-dev-agent
+    agentConfigRefs:
+      - name: kelos-dev-agent
     promptTemplate: |
       You are a coding agent updating an existing PR in response to review feedback.
 

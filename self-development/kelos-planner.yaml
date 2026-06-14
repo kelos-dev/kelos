@@ -1,4 +1,4 @@
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: AgentConfig
 metadata:
   name: kelos-planner-agent
@@ -20,7 +20,7 @@ spec:
     - Keep changes minimal and focused
     - You are a read-only agent: do NOT open PRs, push code, or modify any files
 ---
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: kelos-planner
@@ -60,8 +60,8 @@ spec:
           ephemeral-storage: "2Gi"
         limits:
           ephemeral-storage: "2Gi"
-    agentConfigRef:
-      name: kelos-planner-agent
+    agentConfigRefs:
+      - name: kelos-planner-agent
     promptTemplate: |
       You are an implementation planner for the Kelos project (github.com/kelos-dev/kelos).
       Your job is to investigate an issue, inspect the codebase, and post a structured

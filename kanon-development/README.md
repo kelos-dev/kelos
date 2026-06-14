@@ -283,7 +283,7 @@ Two Workspaces are referenced:
 - **`kanon-agent`** — points at the Kanon repository (used by all spawners except the two meta-maintenance ones):
 
   ```yaml
-  apiVersion: kelos.dev/v1alpha1
+  apiVersion: kelos.dev/v1alpha2
   kind: Workspace
   metadata:
     name: kanon-agent

@@ -1,4 +1,4 @@
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: AgentConfig
 metadata:
   name: kelos-fake-strategist-agent
@@ -30,7 +30,7 @@ spec:
     - Logging conventions: start log messages with capital letters and do not end with punctuation
     - Commit messages: do not include PR links in commit messages
 ---
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: kelos-fake-strategist
@@ -58,8 +58,8 @@ spec:
           ephemeral-storage: "2Gi"
         limits:
           ephemeral-storage: "2Gi"
-    agentConfigRef:
-      name: kelos-fake-strategist-agent
+    agentConfigRefs:
+      - name: kelos-fake-strategist-agent
     promptTemplate: |
       You are a strategic product thinker for the Kelos framework — a Kubernetes-native controller that runs autonomous AI coding agents.
       Your goal is to find new and better ways to use Kelos — expanding its reach, improving its workflows, and identifying opportunities for growth.

@@ -1,4 +1,4 @@
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: Task
 metadata:
   generateName: kelos-fake-strategist-manual-
@@ -15,8 +15,8 @@ spec:
     type: oauth
     secretRef:
       name: kelos-credentials
-  agentConfigRef:
-    name: kelos-fake-strategist-agent
+  agentConfigRefs:
+    - name: kelos-fake-strategist-agent
   podOverrides:
     resources:
       requests:

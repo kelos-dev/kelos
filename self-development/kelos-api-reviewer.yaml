@@ -1,4 +1,4 @@
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: AgentConfig
 metadata:
   name: kelos-api-reviewer-agent
@@ -33,7 +33,7 @@ spec:
     - Logging conventions: start log messages with capital letters and do not end with punctuation
     - Commit messages: do not include PR links in commit messages
 ---
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: kelos-api-reviewer
@@ -86,8 +86,8 @@ spec:
         limits:
           ephemeral-storage: "4Gi"
     branch: '{{with index . "Branch"}}{{.}}{{else}}main{{end}}'
-    agentConfigRef:
-      name: kelos-api-reviewer-agent
+    agentConfigRefs:
+      - name: kelos-api-reviewer-agent
     promptTemplate: |
       You are a Kubernetes API design reviewer for the Kelos project (github.com/kelos-dev/kelos).
       Your job is to review API design, compatibility, and adherence to Kubernetes API

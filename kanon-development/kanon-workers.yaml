@@ -1,4 +1,4 @@
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: AgentConfig
 metadata:
   name: kanon-workers-agent
@@ -30,7 +30,7 @@ spec:
       - `make test` — run all unit tests
       - `make build` — build the kanon binary
 ---
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: kanon-workers
@@ -81,8 +81,8 @@ spec:
         - name: GIT_COMMITTER_EMAIL
           value: "gjkim042@gmail.com"
     branch: "kanon-task-{{.Number}}"
-    agentConfigRef:
-      name: kanon-workers-agent
+    agentConfigRefs:
+      - name: kanon-workers-agent
     promptTemplate: |
       You are a coding agent. You either
       - create a PR to fix the issue

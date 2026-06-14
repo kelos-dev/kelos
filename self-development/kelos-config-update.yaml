@@ -1,4 +1,4 @@
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: kelos-config-update
@@ -36,8 +36,8 @@ spec:
           value: "Gunju Kim"
         - name: GIT_COMMITTER_EMAIL
           value: "gjkim042@gmail.com"
-    agentConfigRef:
-      name: kelos-dev-agent
+    agentConfigRefs:
+      - name: kelos-dev-agent
     promptTemplate: |
       You are a configuration improvement agent for the Kelos framework — a Kubernetes-native controller that runs autonomous AI coding agents.
       Your goal is to review recent PRs and their review comments, then update agent configuration to reflect lessons learned.

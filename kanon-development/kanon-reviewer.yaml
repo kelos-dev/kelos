@@ -1,4 +1,4 @@
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: AgentConfig
 metadata:
   name: kanon-reviewer-agent
@@ -29,7 +29,7 @@ spec:
       - `make test` — run all unit tests
       - `make build` — build the kanon binary
 ---
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: kanon-reviewer
@@ -78,8 +78,8 @@ spec:
         limits:
           ephemeral-storage: "4Gi"
     branch: '{{with index . "Branch"}}{{.}}{{else}}main{{end}}'
-    agentConfigRef:
-      name: kanon-reviewer-agent
+    agentConfigRefs:
+      - name: kanon-reviewer-agent
     promptTemplate: |
       You are a code review agent for the Kanon project (github.com/kelos-dev/kanon),
       a Go CLI that manages coding-agent settings (instructions, skills, MCP servers,

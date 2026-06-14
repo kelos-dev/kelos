@@ -64,7 +64,7 @@ func TestSelfDevelopmentGitHubSpawnersUseWebhooks(t *testing.T) {
 	}
 }
 
-func TestDevelopmentCommandPatternsRequireExactCommandBodies(t *testing.T) {
+func TestDevelopmentCommandPatternsMatchExpectedCommandLines(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -103,6 +103,7 @@ func TestDevelopmentCommandPatternsRequireExactCommandBodies(t *testing.T) {
 					continue
 				}
 				foundBodyPattern = true
+				allowsCommandLine := tt.dir == "self-development" && tt.command == "/kelos pick-up"
 
 				t.Run(filter.Event+"/"+filter.Author, func(t *testing.T) {
 					bodyTests := []struct {
@@ -114,9 +115,10 @@ func TestDevelopmentCommandPatternsRequireExactCommandBodies(t *testing.T) {
 						{name: "surrounding whitespace", body: "\n\t " + tt.command + " \n", want: true},
 						{name: "embedded in sentence", body: "Please run " + tt.command, want: false},
 						{name: "trailing text", body: tt.command + " after CI passes", want: false},
+						{name: "following line prose", body: tt.command + "\nRebase on origin/main", want: allowsCommandLine},
 						{name: "quoted markdown", body: "> " + tt.command, want: false},
 						{name: "inline code", body: "`" + tt.command + "`", want: false},
-						{name: "command line with prose", body: "Please run:\n" + tt.command, want: false},
+						{name: "command line after prose", body: "Please run:\n" + tt.command, want: allowsCommandLine},
 					}
 
 					for _, bodyTest := range bodyTests {

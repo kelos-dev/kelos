@@ -14,13 +14,13 @@ spec:
       filters:
         - event: issue_comment
           action: created
-          bodyPattern: '^\s*/kelos pick-up\s*$'
+          bodyPattern: '(?m)^[ \t]*/kelos pick-up[ \t]*$'
           commentOn: PullRequest
           state: open
           author: gjkim42
         - event: pull_request_review
           action: submitted
-          bodyPattern: '^\s*/kelos pick-up\s*$'
+          bodyPattern: '(?m)^[ \t]*/kelos pick-up[ \t]*$'
           state: open
           draft: false
           author: gjkim42

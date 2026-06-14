@@ -11,7 +11,7 @@ import (
 
 	"github.com/PaesslerAG/jsonpath"
 
-	"github.com/kelos-dev/kelos/api/v1alpha1"
+	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 )
 
 // regexpCache caches compiled regular expressions keyed by pattern string.
@@ -77,7 +77,7 @@ func (e *GenericEventData) ExtractFields(fieldMapping map[string]string) error {
 }
 
 // MatchesGenericFilters checks if the payload matches all filters (AND semantics).
-func MatchesGenericFilters(filters []v1alpha1.GenericWebhookFilter, payload interface{}) (bool, error) {
+func MatchesGenericFilters(filters []kelos.GenericWebhookFilter, payload interface{}) (bool, error) {
 	for _, filter := range filters {
 		val, err := jsonpath.Get(filter.Field, payload)
 		if err != nil {
@@ -148,7 +148,7 @@ func ExtractGenericWorkItem(eventData *GenericEventData) map[string]interface{} 
 // ensures retries of the same logical event deduplicate even when the raw
 // JSON encoding differs between deliveries. Falls back to a SHA-256 hash
 // of the body when no spawner maps an id for this source.
-func extractGenericDeliveryID(sourceName string, body []byte, spawners []*v1alpha1.TaskSpawner) string {
+func extractGenericDeliveryID(sourceName string, body []byte, spawners []*kelos.TaskSpawner) string {
 	for _, sp := range spawners {
 		wh := sp.Spec.When.GenericWebhook
 		if wh == nil || wh.Source != sourceName {

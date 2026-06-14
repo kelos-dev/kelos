@@ -21,6 +21,7 @@ limitations under the License.
 package v1alpha2
 
 import (
+	batchv1 "k8s.io/api/batch/v1"
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
@@ -1172,6 +1173,11 @@ func (in *TaskSpec) DeepCopyInto(out *TaskSpec) {
 		*out = new(int32)
 		**out = **in
 	}
+	if in.PodFailurePolicy != nil {
+		in, out := &in.PodFailurePolicy, &out.PodFailurePolicy
+		*out = new(batchv1.PodFailurePolicy)
+		(*in).DeepCopyInto(*out)
+	}
 	if in.PodOverrides != nil {
 		in, out := &in.PodOverrides, &out.PodOverrides
 		*out = new(PodOverrides)
@@ -1251,6 +1257,11 @@ func (in *TaskTemplate) DeepCopyInto(out *TaskTemplate) {
 	if in.PodOverrides != nil {
 		in, out := &in.PodOverrides, &out.PodOverrides
 		*out = new(PodOverrides)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.PodFailurePolicy != nil {
+		in, out := &in.PodFailurePolicy, &out.PodFailurePolicy
+		*out = new(batchv1.PodFailurePolicy)
 		(*in).DeepCopyInto(*out)
 	}
 	if in.Metadata != nil {

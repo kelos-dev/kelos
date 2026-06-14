@@ -1,6 +1,7 @@
 package v1alpha2
 
 import (
+	batchv1 "k8s.io/api/batch/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -884,6 +885,13 @@ type TaskTemplate struct {
 	// PodOverrides allows customizing the agent pod configuration for spawned Tasks.
 	// +optional
 	PodOverrides *PodOverrides `json:"podOverrides,omitempty"`
+
+	// PodFailurePolicy specifies how failed pods affect spawned Tasks' backing
+	// Job retry accounting. If unset, spawned Tasks leave
+	// Job.spec.podFailurePolicy unset and Kubernetes default Job handling applies.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="self.rules.all(r, r.action != 'FailIndex')",message="podFailurePolicy.rules[].action FailIndex is not supported for Task Jobs"
+	PodFailurePolicy *batchv1.PodFailurePolicy `json:"podFailurePolicy,omitempty"`
 
 	// Metadata holds optional labels and annotations for spawned Tasks.
 	// +optional

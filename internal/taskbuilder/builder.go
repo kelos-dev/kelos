@@ -9,7 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/kelos-dev/kelos/api/v1alpha1"
+	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 )
 
 // TaskBuilder creates Tasks from templates and work item data.
@@ -38,10 +38,10 @@ func NewTaskBuilder(client client.Client) (*TaskBuilder, error) {
 // owner reference are set on the resulting Task.
 func (tb *TaskBuilder) BuildTask(
 	name, namespace string,
-	taskTemplate *v1alpha1.TaskTemplate,
+	taskTemplate *kelos.TaskTemplate,
 	templateVars map[string]interface{},
 	spawnerRef *SpawnerRef,
-) (*v1alpha1.Task, error) {
+) (*kelos.Task, error) {
 	// Render the prompt template
 	promptTemplate := taskTemplate.PromptTemplate
 	if promptTemplate == "" {
@@ -63,12 +63,12 @@ func (tb *TaskBuilder) BuildTask(
 	}
 
 	// Create the Task
-	task := &v1alpha1.Task{
+	task := &kelos.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
 		},
-		Spec: v1alpha1.TaskSpec{
+		Spec: kelos.TaskSpec{
 			Type:        taskTemplate.Type,
 			Credentials: taskTemplate.Credentials,
 			Prompt:      prompt,
@@ -88,9 +88,6 @@ func (tb *TaskBuilder) BuildTask(
 	if taskTemplate.WorkspaceRef != nil {
 		task.Spec.WorkspaceRef = taskTemplate.WorkspaceRef
 	}
-	if taskTemplate.AgentConfigRef != nil {
-		task.Spec.AgentConfigRef = taskTemplate.AgentConfigRef
-	}
 	if len(taskTemplate.AgentConfigRefs) > 0 {
 		task.Spec.AgentConfigRefs = taskTemplate.AgentConfigRefs
 	}
@@ -105,6 +102,9 @@ func (tb *TaskBuilder) BuildTask(
 	}
 	if taskTemplate.PodOverrides != nil {
 		task.Spec.PodOverrides = taskTemplate.PodOverrides
+	}
+	if taskTemplate.PodFailurePolicy != nil {
+		task.Spec.PodFailurePolicy = taskTemplate.PodFailurePolicy
 	}
 	if taskTemplate.UpstreamRepo != "" {
 		task.Spec.UpstreamRepo = taskTemplate.UpstreamRepo

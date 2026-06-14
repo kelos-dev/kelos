@@ -10,7 +10,7 @@ import (
 	"github.com/google/go-github/v66/github"
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	"github.com/kelos-dev/kelos/api/v1alpha1"
+	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/source"
 )
 
@@ -274,7 +274,7 @@ func ParseGitHubWebhook(eventType string, payload []byte) (*GitHubEventData, err
 
 // MatchesGitHubEvent evaluates whether a GitHub webhook event matches the spawner's filters.
 // It accepts pre-parsed event data to avoid redundant parsing.
-func MatchesGitHubEvent(spawner *v1alpha1.GitHubWebhook, eventType string, eventData *GitHubEventData) (bool, error) {
+func MatchesGitHubEvent(spawner *kelos.GitHubWebhook, eventType string, eventData *GitHubEventData) (bool, error) {
 	// Check if event type is in the allowed list
 	eventAllowed := false
 	for _, allowedEvent := range spawner.Events {
@@ -316,7 +316,7 @@ func MatchesGitHubEvent(spawner *v1alpha1.GitHubWebhook, eventType string, event
 }
 
 // matchesFilter checks if event data matches a specific filter.
-func matchesFilter(filter v1alpha1.GitHubWebhookFilter, eventData *GitHubEventData) bool {
+func matchesFilter(filter kelos.GitHubWebhookFilter, eventData *GitHubEventData) bool {
 	// Action filter
 	if filter.Action != "" && filter.Action != eventData.Action {
 		return false
@@ -390,11 +390,11 @@ func matchesFilter(filter v1alpha1.GitHubWebhookFilter, eventData *GitHubEventDa
 			if _, ok := e.(*github.IssueCommentEvent); ok && issue != nil {
 				isPR := issue.IsPullRequest()
 				switch filter.CommentOn {
-				case v1alpha1.CommentOnIssue:
+				case kelos.CommentOnIssue:
 					if isPR {
 						return false
 					}
-				case v1alpha1.CommentOnPullRequest:
+				case kelos.CommentOnPullRequest:
 					if !isPR {
 						return false
 					}
@@ -712,7 +712,7 @@ func extractPushEventFiles(e *github.PushEvent) []string {
 
 // matchesWebhookFilePatterns checks whether the given changed files match the
 // filter's FilePatterns using the shared source.MatchesFilePaths logic.
-func matchesWebhookFilePatterns(files []string, patterns *v1alpha1.FilePatterns) bool {
+func matchesWebhookFilePatterns(files []string, patterns *kelos.FilePatterns) bool {
 	if patterns == nil {
 		return true
 	}

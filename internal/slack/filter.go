@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/kelos-dev/kelos/api/v1alpha1"
+	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 )
 
 // SlackMessageData holds the parsed fields from a Slack message or slash
@@ -69,7 +69,7 @@ func getOrCompileRegexp(pattern string) (*regexp.Regexp, error) {
 // MatchesSpawner checks whether a Slack message matches the given TaskSpawner's
 // Slack configuration (channels, bot mention, trigger patterns, exclude
 // patterns, and bot message policy).
-func MatchesSpawner(slackCfg *v1alpha1.Slack, msg *SlackMessageData, botUserID string) bool {
+func MatchesSpawner(slackCfg *kelos.Slack, msg *SlackMessageData, botUserID string) bool {
 	if slackCfg == nil {
 		return false
 	}
@@ -83,9 +83,9 @@ func MatchesSpawner(slackCfg *v1alpha1.Slack, msg *SlackMessageData, botUserID s
 	// Apply bot message policy.
 	if msg.IsBotMessage {
 		switch slackCfg.BotMessagePolicy {
-		case v1alpha1.BotMessagePolicyAll:
+		case kelos.BotMessagePolicyAll:
 			// Allow all bot messages including self.
-		case v1alpha1.BotMessagePolicyOthersOnly:
+		case kelos.BotMessagePolicyOthersOnly:
 			if msg.IsSelfMessage {
 				return false
 			}
@@ -198,7 +198,7 @@ func matchesExcludePatterns(text string, patterns []string) bool {
 // semantics. Leading @-mentions are stripped before pattern matching so
 // patterns target semantic content. Each trigger requires a bot mention
 // (checked against the original text) unless MentionOptional is true.
-func matchesTriggers(text string, triggers []v1alpha1.SlackTrigger, botUserID string) bool {
+func matchesTriggers(text string, triggers []kelos.SlackTrigger, botUserID string) bool {
 	mentioned := hasBotMention(text, botUserID)
 	stripped := stripLeadingMentions(text)
 	for _, t := range triggers {

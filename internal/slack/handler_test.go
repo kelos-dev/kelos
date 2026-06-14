@@ -13,7 +13,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	"github.com/kelos-dev/kelos/api/v1alpha1"
+	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/reporting"
 	"github.com/kelos-dev/kelos/internal/taskbuilder"
 )
@@ -24,22 +24,22 @@ import (
 func TestRouteMessageThreadContextBody(t *testing.T) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(v1alpha1.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
 
-	spawner := &v1alpha1.TaskSpawner{
+	spawner := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-spawner",
 			Namespace: "default",
 			UID:       "spawner-uid",
 		},
-		Spec: v1alpha1.TaskSpawnerSpec{
-			When: v1alpha1.When{
-				Slack: &v1alpha1.Slack{},
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				Slack: &kelos.Slack{},
 			},
-			TaskTemplate: v1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: v1alpha1.Credentials{
-					Type: v1alpha1.CredentialTypeNone,
+				Credentials: kelos.Credentials{
+					Type: kelos.CredentialTypeNone,
 				},
 				PromptTemplate: "{{.Body}}",
 			},
@@ -111,7 +111,7 @@ func TestRouteMessageThreadContextBody(t *testing.T) {
 			h.routeMessage(context.Background(), tt.msg)
 
 			// Verify a task was created with the expected body
-			var tasks v1alpha1.TaskList
+			var tasks kelos.TaskList
 			if err := cl.List(context.Background(), &tasks); err != nil {
 				t.Fatalf("List tasks: %v", err)
 			}
@@ -189,21 +189,21 @@ func TestMessageEventAttachmentsOnRegularMessage(t *testing.T) {
 func TestCreateTaskLongSpawnerName(t *testing.T) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(v1alpha1.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
 
 	longName := "this-is-a-very-long-spawner-name-that-exceeds-forty-four-characters"
 
-	spawner := &v1alpha1.TaskSpawner{
+	spawner := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      longName,
 			Namespace: "default",
 			UID:       "spawner-uid",
 		},
-		Spec: v1alpha1.TaskSpawnerSpec{
-			TaskTemplate: v1alpha1.TaskTemplate{
+		Spec: kelos.TaskSpawnerSpec{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: v1alpha1.Credentials{
-					Type: v1alpha1.CredentialTypeNone,
+				Credentials: kelos.Credentials{
+					Type: kelos.CredentialTypeNone,
 				},
 				PromptTemplate: "{{.Body}}",
 			},
@@ -248,7 +248,7 @@ func TestCreateTaskLongSpawnerName(t *testing.T) {
 		t.Fatalf("Second createTask() error: %v", err)
 	}
 
-	var tasks v1alpha1.TaskList
+	var tasks kelos.TaskList
 	if err := cl.List(context.Background(), &tasks); err != nil {
 		t.Fatalf("List tasks: %v", err)
 	}
@@ -265,19 +265,19 @@ func TestCreateTaskLongSpawnerName(t *testing.T) {
 func TestCreateTaskAlreadyExists(t *testing.T) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(v1alpha1.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
 
-	spawner := &v1alpha1.TaskSpawner{
+	spawner := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-spawner",
 			Namespace: "default",
 			UID:       "spawner-uid",
 		},
-		Spec: v1alpha1.TaskSpawnerSpec{
-			TaskTemplate: v1alpha1.TaskTemplate{
+		Spec: kelos.TaskSpawnerSpec{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: v1alpha1.Credentials{
-					Type: v1alpha1.CredentialTypeNone,
+				Credentials: kelos.Credentials{
+					Type: kelos.CredentialTypeNone,
 				},
 				PromptTemplate: "{{.Body}}",
 			},
@@ -313,7 +313,7 @@ func TestCreateTaskAlreadyExists(t *testing.T) {
 	}
 
 	// Verify Slack user ID annotation is set
-	taskList := &v1alpha1.TaskList{}
+	taskList := &kelos.TaskList{}
 	if err := cl.List(context.Background(), taskList); err != nil {
 		t.Fatalf("List tasks: %v", err)
 	}
@@ -355,27 +355,27 @@ func TestHandleMemberJoinedChannelIgnoresOtherUsers(t *testing.T) {
 func TestHandleMessageEventBotIDSelfDetection(t *testing.T) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(v1alpha1.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
 
-	spawner := &v1alpha1.TaskSpawner{
+	spawner := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "bot-listener",
 			Namespace: "default",
 			UID:       "spawner-uid",
 		},
-		Spec: v1alpha1.TaskSpawnerSpec{
-			When: v1alpha1.When{
-				Slack: &v1alpha1.Slack{
-					BotMessagePolicy: v1alpha1.BotMessagePolicyOthersOnly,
-					Triggers: []v1alpha1.SlackTrigger{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				Slack: &kelos.Slack{
+					BotMessagePolicy: kelos.BotMessagePolicyOthersOnly,
+					Triggers: []kelos.SlackTrigger{
 						{Pattern: ".*", MentionOptional: boolPtr(true)},
 					},
 				},
 			},
-			TaskTemplate: v1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: v1alpha1.Credentials{
-					Type: v1alpha1.CredentialTypeNone,
+				Credentials: kelos.Credentials{
+					Type: kelos.CredentialTypeNone,
 				},
 				PromptTemplate: "{{.Body}}",
 			},
@@ -472,7 +472,7 @@ func TestHandleMessageEventBotIDSelfDetection(t *testing.T) {
 
 			h.routeMessage(context.Background(), msg)
 
-			var tasks v1alpha1.TaskList
+			var tasks kelos.TaskList
 			if err := cl.List(context.Background(), &tasks); err != nil {
 				t.Fatalf("List tasks: %v", err)
 			}

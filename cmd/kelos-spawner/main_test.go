@@ -6,12 +6,14 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	dto "github.com/prometheus/client_model/go"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -26,10 +28,9 @@ import (
 
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/reporting"
 	"github.com/kelos-dev/kelos/internal/source"
-	"strings"
 )
 
 var noToken = func(context.Context) (string, error) { return "", nil }
@@ -45,14 +46,14 @@ func (f *fakeSource) Discover(_ context.Context) ([]source.WorkItem, error) {
 func newTestScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(s))
-	utilruntime.Must(kelosv1alpha1.AddToScheme(s))
+	utilruntime.Must(kelos.AddToScheme(s))
 	return s
 }
 
 func int32Ptr(v int32) *int32 { return &v }
 func boolPtr(v bool) *bool    { return &v }
 
-func setupTest(t *testing.T, ts *kelosv1alpha1.TaskSpawner, existingTasks ...kelosv1alpha1.Task) (client.Client, types.NamespacedName) {
+func setupTest(t *testing.T, ts *kelos.TaskSpawner, existingTasks ...kelos.Task) (client.Client, types.NamespacedName) {
 	t.Helper()
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 
@@ -92,32 +93,32 @@ func histogramSampleCount(t *testing.T, collector prometheus.Collector) uint64 {
 	return 0
 }
 
-func newTaskSpawner(name, namespace string, maxConcurrency *int32) *kelosv1alpha1.TaskSpawner {
-	return &kelosv1alpha1.TaskSpawner{
+func newTaskSpawner(name, namespace string, maxConcurrency *int32) *kelos.TaskSpawner {
+	return &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
 			UID:       types.UID(name + "-uid"),
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubIssues: &kelos.GitHubIssues{},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
-					Type:      kelosv1alpha1.CredentialTypeOAuth,
-					SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+				Credentials: kelos.Credentials{
+					Type:      kelos.CredentialTypeOAuth,
+					SecretRef: &kelos.SecretReference{Name: "creds"},
 				},
-				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "test-ws"},
+				WorkspaceRef: &kelos.WorkspaceReference{Name: "test-ws"},
 			},
 			MaxConcurrency: maxConcurrency,
 		},
 	}
 }
 
-func newTask(name, namespace, spawnerName string, phase kelosv1alpha1.TaskPhase) kelosv1alpha1.Task {
-	return kelosv1alpha1.Task{
+func newTask(name, namespace, spawnerName string, phase kelos.TaskPhase) kelos.Task {
+	return kelos.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
@@ -125,15 +126,15 @@ func newTask(name, namespace, spawnerName string, phase kelosv1alpha1.TaskPhase)
 				"kelos.dev/taskspawner": spawnerName,
 			},
 		},
-		Spec: kelosv1alpha1.TaskSpec{
+		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelosv1alpha1.Credentials{
-				Type:      kelosv1alpha1.CredentialTypeOAuth,
-				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+			Credentials: kelos.Credentials{
+				Type:      kelos.CredentialTypeOAuth,
+				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},
 		},
-		Status: kelosv1alpha1.TaskStatus{
+		Status: kelos.TaskStatus{
 			Phase: phase,
 		},
 	}
@@ -181,13 +182,15 @@ func TestBuildSource_GitHubIssuesDefaultBaseURL(t *testing.T) {
 
 func TestBuildSource_GitHubPullRequests(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
-	ts.Spec.When = kelosv1alpha1.When{
-		GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
-			State:           "open",
-			ReviewState:     "changes_requested",
-			TriggerComment:  "/kelos pick-up",
-			ExcludeComments: []string{"/kelos needs-input"},
-			Draft:           boolPtr(false),
+	ts.Spec.When = kelos.When{
+		GitHubPullRequests: &kelos.GitHubPullRequests{
+			State:       "open",
+			ReviewState: "changes_requested",
+			CommentPolicy: &kelos.GitHubCommentPolicy{
+				TriggerComment:  "/kelos pick-up",
+				ExcludeComments: []string{"/kelos needs-input"},
+			},
+			Draft: boolPtr(false),
 		},
 	}
 
@@ -224,25 +227,25 @@ func TestBuildSource_GitHubPullRequests(t *testing.T) {
 }
 
 func TestBuildSource_Jira(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
+	ts := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "spawner",
 			Namespace: "default",
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				Jira: &kelosv1alpha1.Jira{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				Jira: &kelos.Jira{
 					BaseURL:   "https://mycompany.atlassian.net",
 					Project:   "PROJ",
 					JQL:       "status = Open",
-					SecretRef: kelosv1alpha1.SecretReference{Name: "jira-creds"},
+					SecretRef: kelos.SecretReference{Name: "jira-creds"},
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
-					Type:      kelosv1alpha1.CredentialTypeOAuth,
-					SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+				Credentials: kelos.Credentials{
+					Type:      kelos.CredentialTypeOAuth,
+					SecretRef: &kelos.SecretReference{Name: "creds"},
 				},
 			},
 		},
@@ -294,7 +297,7 @@ func TestRunCycleWithSource_NoMaxConcurrency(t *testing.T) {
 	}
 
 	// All 3 tasks should be created
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -317,7 +320,7 @@ func TestRunCycleWithSource_OwnerReferenceSet(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -330,8 +333,8 @@ func TestRunCycleWithSource_OwnerReferenceSet(t *testing.T) {
 		t.Fatalf("Expected 1 owner reference, got %d", len(task.OwnerReferences))
 	}
 	ref := task.OwnerReferences[0]
-	if ref.APIVersion != kelosv1alpha1.GroupVersion.String() {
-		t.Errorf("Expected APIVersion %s, got %s", kelosv1alpha1.GroupVersion.String(), ref.APIVersion)
+	if ref.APIVersion != kelos.GroupVersion.String() {
+		t.Errorf("Expected APIVersion %s, got %s", kelos.GroupVersion.String(), ref.APIVersion)
 	}
 	if ref.Kind != "TaskSpawner" {
 		t.Errorf("Expected Kind TaskSpawner, got %s", ref.Kind)
@@ -368,7 +371,7 @@ func TestRunCycleWithSource_MaxConcurrencyLimitsCreation(t *testing.T) {
 	}
 
 	// Only 2 tasks should be created (maxConcurrency=2)
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -379,9 +382,9 @@ func TestRunCycleWithSource_MaxConcurrencyLimitsCreation(t *testing.T) {
 
 func TestRunCycleWithSource_MaxConcurrencyWithExistingActiveTasks(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", int32Ptr(3))
-	existingTasks := []kelosv1alpha1.Task{
-		newTask("spawner-existing1", "default", "spawner", kelosv1alpha1.TaskPhaseRunning),
-		newTask("spawner-existing2", "default", "spawner", kelosv1alpha1.TaskPhasePending),
+	existingTasks := []kelos.Task{
+		newTask("spawner-existing1", "default", "spawner", kelos.TaskPhaseRunning),
+		newTask("spawner-existing2", "default", "spawner", kelos.TaskPhasePending),
 	}
 	cl, key := setupTest(t, ts, existingTasks...)
 
@@ -400,7 +403,7 @@ func TestRunCycleWithSource_MaxConcurrencyWithExistingActiveTasks(t *testing.T) 
 	}
 
 	// 2 active + 1 new = 3 (maxConcurrency), so only 1 new task should be created
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -411,9 +414,9 @@ func TestRunCycleWithSource_MaxConcurrencyWithExistingActiveTasks(t *testing.T) 
 
 func TestRunCycleWithSource_CompletedTasksDontCountTowardsLimit(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", int32Ptr(2))
-	existingTasks := []kelosv1alpha1.Task{
-		newTask("spawner-done1", "default", "spawner", kelosv1alpha1.TaskPhaseSucceeded),
-		newTask("spawner-done2", "default", "spawner", kelosv1alpha1.TaskPhaseFailed),
+	existingTasks := []kelos.Task{
+		newTask("spawner-done1", "default", "spawner", kelos.TaskPhaseSucceeded),
+		newTask("spawner-done2", "default", "spawner", kelos.TaskPhaseFailed),
 	}
 	cl, key := setupTest(t, ts, existingTasks...)
 
@@ -432,7 +435,7 @@ func TestRunCycleWithSource_CompletedTasksDontCountTowardsLimit(t *testing.T) {
 	}
 
 	// 2 completed tasks don't count, so 2 new can be created (maxConcurrency=2)
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -457,7 +460,7 @@ func TestRunCycleWithSource_MaxConcurrencyZeroMeansNoLimit(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -468,9 +471,9 @@ func TestRunCycleWithSource_MaxConcurrencyZeroMeansNoLimit(t *testing.T) {
 
 func TestRunCycleWithSource_MaxConcurrencyAlreadyAtLimit(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", int32Ptr(2))
-	existingTasks := []kelosv1alpha1.Task{
-		newTask("spawner-active1", "default", "spawner", kelosv1alpha1.TaskPhaseRunning),
-		newTask("spawner-active2", "default", "spawner", kelosv1alpha1.TaskPhasePending),
+	existingTasks := []kelos.Task{
+		newTask("spawner-active1", "default", "spawner", kelos.TaskPhaseRunning),
+		newTask("spawner-active2", "default", "spawner", kelos.TaskPhasePending),
 	}
 	cl, key := setupTest(t, ts, existingTasks...)
 
@@ -487,7 +490,7 @@ func TestRunCycleWithSource_MaxConcurrencyAlreadyAtLimit(t *testing.T) {
 	}
 
 	// Already at limit (2 active), so no new tasks should be created
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -498,9 +501,9 @@ func TestRunCycleWithSource_MaxConcurrencyAlreadyAtLimit(t *testing.T) {
 
 func TestRunCycleWithSource_ActiveTasksStatusUpdated(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", int32Ptr(5))
-	existingTasks := []kelosv1alpha1.Task{
-		newTask("spawner-running", "default", "spawner", kelosv1alpha1.TaskPhaseRunning),
-		newTask("spawner-done", "default", "spawner", kelosv1alpha1.TaskPhaseSucceeded),
+	existingTasks := []kelos.Task{
+		newTask("spawner-running", "default", "spawner", kelos.TaskPhaseRunning),
+		newTask("spawner-done", "default", "spawner", kelos.TaskPhaseSucceeded),
 	}
 	cl, key := setupTest(t, ts, existingTasks...)
 
@@ -517,7 +520,7 @@ func TestRunCycleWithSource_ActiveTasksStatusUpdated(t *testing.T) {
 	}
 
 	// Check status was updated with activeTasks
-	var updatedTS kelosv1alpha1.TaskSpawner
+	var updatedTS kelos.TaskSpawner
 	if err := cl.Get(context.Background(), key, &updatedTS); err != nil {
 		t.Fatalf("Getting TaskSpawner: %v", err)
 	}
@@ -543,7 +546,7 @@ func TestRunCycleWithSource_StatusUpdateFailureCountsDiscoveryError(t *testing.T
 		WithInterceptorFuncs(interceptor.Funcs{
 			SubResourceUpdate: func(_ context.Context, _ client.Client, subResourceName string, obj client.Object, _ ...client.SubResourceUpdateOption) error {
 				if subResourceName == "status" {
-					if _, ok := obj.(*kelosv1alpha1.TaskSpawner); ok {
+					if _, ok := obj.(*kelos.TaskSpawner); ok {
 						return updateErr
 					}
 				}
@@ -575,10 +578,7 @@ func TestRunCycleWithSource_StatusUpdateFailureCountsDiscoveryError(t *testing.T
 
 func TestRunCycle_BuildSourceFailureCountsDiscoveryErrorAndDuration(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
-	ts.Spec.When.GitHubIssues.TriggerComment = "/kelos pick-up"
-	ts.Spec.When.GitHubIssues.CommentPolicy = &kelosv1alpha1.GitHubCommentPolicy{
-		AllowedUsers: []string{"alice"},
-	}
+	ts.Spec.When = kelos.When{}
 
 	cl, key := setupTest(t, ts)
 
@@ -604,43 +604,9 @@ func TestRunCycle_BuildSourceFailureCountsDiscoveryErrorAndDuration(t *testing.T
 
 func int64Ptr(v int64) *int64 { return &v }
 
-func TestRunCycleWithSource_AgentConfigRefForwarded(t *testing.T) {
-	ts := newTaskSpawner("spawner", "default", nil)
-	ts.Spec.TaskTemplate.AgentConfigRef = &kelosv1alpha1.AgentConfigReference{
-		Name: "my-config",
-	}
-	cl, key := setupTest(t, ts)
-
-	src := &fakeSource{
-		items: []source.WorkItem{
-			{ID: "1", Title: "Item 1"},
-		},
-	}
-
-	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
-
-	var taskList kelosv1alpha1.TaskList
-	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
-		t.Fatalf("Listing tasks: %v", err)
-	}
-	if len(taskList.Items) != 1 {
-		t.Fatalf("Expected 1 task, got %d", len(taskList.Items))
-	}
-
-	task := taskList.Items[0]
-	if task.Spec.AgentConfigRef == nil {
-		t.Fatal("Expected AgentConfigRef to be forwarded to spawned Task")
-	}
-	if task.Spec.AgentConfigRef.Name != "my-config" {
-		t.Errorf("Expected AgentConfigRef.Name %q, got %q", "my-config", task.Spec.AgentConfigRef.Name)
-	}
-}
-
 func TestRunCycleWithSource_AgentConfigRefsForwarded(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
-	ts.Spec.TaskTemplate.AgentConfigRefs = []kelosv1alpha1.AgentConfigReference{
+	ts.Spec.TaskTemplate.AgentConfigRefs = []kelos.AgentConfigReference{
 		{Name: "base-config"},
 		{Name: "role-config"},
 	}
@@ -656,7 +622,7 @@ func TestRunCycleWithSource_AgentConfigRefsForwarded(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -665,9 +631,6 @@ func TestRunCycleWithSource_AgentConfigRefsForwarded(t *testing.T) {
 	}
 
 	task := taskList.Items[0]
-	if task.Spec.AgentConfigRef != nil {
-		t.Error("Expected AgentConfigRef to be nil when AgentConfigRefs is used")
-	}
 	if len(task.Spec.AgentConfigRefs) != 2 {
 		t.Fatalf("Expected 2 AgentConfigRefs, got %d", len(task.Spec.AgentConfigRefs))
 	}
@@ -681,7 +644,7 @@ func TestRunCycleWithSource_AgentConfigRefsForwarded(t *testing.T) {
 
 func TestRunCycleWithSource_PodOverridesForwarded(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
-	ts.Spec.TaskTemplate.PodOverrides = &kelosv1alpha1.PodOverrides{
+	ts.Spec.TaskTemplate.PodOverrides = &kelos.PodOverrides{
 		ActiveDeadlineSeconds: int64Ptr(1800),
 		Env: []corev1.EnvVar{
 			{Name: "HTTP_PROXY", Value: "http://proxy:8080"},
@@ -703,7 +666,7 @@ func TestRunCycleWithSource_PodOverridesForwarded(t *testing.T) {
 	}
 
 	// Verify the created Task has PodOverrides forwarded from the TaskTemplate.
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -726,6 +689,53 @@ func TestRunCycleWithSource_PodOverridesForwarded(t *testing.T) {
 	}
 }
 
+func TestRunCycleWithSource_PodFailurePolicyForwarded(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	ts.Spec.TaskTemplate.PodFailurePolicy = &batchv1.PodFailurePolicy{
+		Rules: []batchv1.PodFailurePolicyRule{{
+			Action: batchv1.PodFailurePolicyActionIgnore,
+			OnPodConditions: []batchv1.PodFailurePolicyOnPodConditionsPattern{{
+				Type:   corev1.DisruptionTarget,
+				Status: corev1.ConditionTrue,
+			}},
+		}},
+	}
+	cl, key := setupTest(t, ts)
+
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{ID: "1", Title: "Item 1"},
+		},
+	}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var taskList kelos.TaskList
+	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatalf("Listing tasks: %v", err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task, got %d", len(taskList.Items))
+	}
+
+	task := taskList.Items[0]
+	if task.Spec.PodFailurePolicy == nil {
+		t.Fatal("Expected PodFailurePolicy to be forwarded to spawned Task")
+	}
+	if len(task.Spec.PodFailurePolicy.Rules) != 1 {
+		t.Fatalf("Expected 1 PodFailurePolicy rule, got %d", len(task.Spec.PodFailurePolicy.Rules))
+	}
+	rule := task.Spec.PodFailurePolicy.Rules[0]
+	if rule.Action != batchv1.PodFailurePolicyActionIgnore {
+		t.Errorf("Expected PodFailurePolicy action %q, got %q", batchv1.PodFailurePolicyActionIgnore, rule.Action)
+	}
+	if len(rule.OnPodConditions) != 1 || rule.OnPodConditions[0].Type != corev1.DisruptionTarget {
+		t.Errorf("Expected DisruptionTarget pod condition, got %v", rule.OnPodConditions)
+	}
+}
+
 func TestRunCycleWithSource_Suspended(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 	ts.Spec.Suspend = boolPtr(true)
@@ -743,7 +753,7 @@ func TestRunCycleWithSource_Suspended(t *testing.T) {
 	}
 
 	// No tasks should be created when suspended
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -752,12 +762,12 @@ func TestRunCycleWithSource_Suspended(t *testing.T) {
 	}
 
 	// Status should be Suspended
-	var updatedTS kelosv1alpha1.TaskSpawner
+	var updatedTS kelos.TaskSpawner
 	if err := cl.Get(context.Background(), key, &updatedTS); err != nil {
 		t.Fatalf("Getting TaskSpawner: %v", err)
 	}
-	if updatedTS.Status.Phase != kelosv1alpha1.TaskSpawnerPhaseSuspended {
-		t.Errorf("Expected phase %q, got %q", kelosv1alpha1.TaskSpawnerPhaseSuspended, updatedTS.Status.Phase)
+	if updatedTS.Status.Phase != kelos.TaskSpawnerPhaseSuspended {
+		t.Errorf("Expected phase %q, got %q", kelos.TaskSpawnerPhaseSuspended, updatedTS.Status.Phase)
 	}
 	if updatedTS.Status.Message != "Suspended by user" {
 		t.Errorf("Expected message %q, got %q", "Suspended by user", updatedTS.Status.Message)
@@ -781,7 +791,7 @@ func TestRunCycleWithSource_SuspendFalseRunsNormally(t *testing.T) {
 	}
 
 	// Tasks should be created normally when suspend=false
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -794,7 +804,7 @@ func TestRunCycleWithSource_SuspendedIdempotent(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 	ts.Spec.Suspend = boolPtr(true)
 	// Pre-set the status to Suspended to test idempotency
-	ts.Status.Phase = kelosv1alpha1.TaskSpawnerPhaseSuspended
+	ts.Status.Phase = kelos.TaskSpawnerPhaseSuspended
 	ts.Status.Message = "Suspended by user"
 	cl, key := setupTest(t, ts)
 
@@ -813,7 +823,7 @@ func TestRunCycleWithSource_SuspendedIdempotent(t *testing.T) {
 	}
 
 	// Still no tasks created
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -841,7 +851,7 @@ func TestRunCycleWithSource_MaxTotalTasksLimitsCreation(t *testing.T) {
 	}
 
 	// Only 2 tasks should be created (maxTotalTasks=2)
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -850,7 +860,7 @@ func TestRunCycleWithSource_MaxTotalTasksLimitsCreation(t *testing.T) {
 	}
 
 	// Check TaskBudgetExhausted condition
-	var updatedTS kelosv1alpha1.TaskSpawner
+	var updatedTS kelos.TaskSpawner
 	if err := cl.Get(context.Background(), key, &updatedTS); err != nil {
 		t.Fatalf("Getting TaskSpawner: %v", err)
 	}
@@ -870,9 +880,9 @@ func TestRunCycleWithSource_MaxTotalTasksWithExistingTasks(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 	ts.Spec.MaxTotalTasks = int32Ptr(3)
 	ts.Status.TotalTasksCreated = 2 // Already created 2 tasks before
-	existingTasks := []kelosv1alpha1.Task{
-		newTask("spawner-existing1", "default", "spawner", kelosv1alpha1.TaskPhaseSucceeded),
-		newTask("spawner-existing2", "default", "spawner", kelosv1alpha1.TaskPhaseRunning),
+	existingTasks := []kelos.Task{
+		newTask("spawner-existing1", "default", "spawner", kelos.TaskPhaseSucceeded),
+		newTask("spawner-existing2", "default", "spawner", kelos.TaskPhaseRunning),
 	}
 	cl, key := setupTest(t, ts, existingTasks...)
 
@@ -891,7 +901,7 @@ func TestRunCycleWithSource_MaxTotalTasksWithExistingTasks(t *testing.T) {
 	}
 
 	// Only 1 new task should be created (totalCreated=2, max=3, budget left=1)
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -918,7 +928,7 @@ func TestRunCycleWithSource_MaxTotalTasksBudgetAlreadyExhausted(t *testing.T) {
 	}
 
 	// No new tasks should be created
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -944,7 +954,7 @@ func TestRunCycleWithSource_MaxTotalTasksZeroMeansNoLimit(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -972,7 +982,7 @@ func TestRunCycleWithSource_MaxTotalTasksAndMaxConcurrencyCombined(t *testing.T)
 	}
 
 	// maxTotalTasks=2 is more restrictive than maxConcurrency=10
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -996,7 +1006,7 @@ func TestRunCycleWithSource_SuspendedConditionSet(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	var updatedTS kelosv1alpha1.TaskSpawner
+	var updatedTS kelos.TaskSpawner
 	if err := cl.Get(context.Background(), key, &updatedTS); err != nil {
 		t.Fatalf("Getting TaskSpawner: %v", err)
 	}
@@ -1029,7 +1039,7 @@ func TestRunCycleWithSource_BranchTemplateRendered(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -1064,7 +1074,7 @@ func TestRunCycleWithSource_BranchStaticPassedThrough(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -1091,7 +1101,7 @@ func TestRunCycleWithSource_NotSuspendedConditionCleared(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	var updatedTS kelosv1alpha1.TaskSpawner
+	var updatedTS kelos.TaskSpawner
 	if err := cl.Get(context.Background(), key, &updatedTS); err != nil {
 		t.Fatalf("Getting TaskSpawner: %v", err)
 	}
@@ -1126,7 +1136,7 @@ func TestRunCycleWithSource_PriorityLabelsOrderCreation(t *testing.T) {
 	}
 
 	// With maxConcurrency=2, only 2 tasks should be created
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -1167,7 +1177,7 @@ func TestRunCycleWithSource_PriorityLabelsNotConfigured(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -1217,9 +1227,11 @@ func TestBuildSource_PriorityLabelsPassedToSource(t *testing.T) {
 
 func TestRunCycleWithSource_CommentFieldsPassedToSource(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
-	ts.Spec.When.GitHubIssues = &kelosv1alpha1.GitHubIssues{
-		TriggerComment:  "/kelos pick-up",
-		ExcludeComments: []string{"/kelos needs-input"},
+	ts.Spec.When.GitHubIssues = &kelos.GitHubIssues{
+		CommentPolicy: &kelos.GitHubCommentPolicy{
+			TriggerComment:  "/kelos pick-up",
+			ExcludeComments: []string{"/kelos needs-input"},
+		},
 	}
 
 	src, err := buildSource(context.Background(), ts, "owner", "repo", "", noToken, "", "", "", nil)
@@ -1241,12 +1253,12 @@ func TestRunCycleWithSource_CommentFieldsPassedToSource(t *testing.T) {
 
 func TestBuildSource_CommentPolicyPassedToIssueSource(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
-	ts.Spec.When.GitHubIssues = &kelosv1alpha1.GitHubIssues{
-		CommentPolicy: &kelosv1alpha1.GitHubCommentPolicy{
+	ts.Spec.When.GitHubIssues = &kelos.GitHubIssues{
+		CommentPolicy: &kelos.GitHubCommentPolicy{
 			TriggerComment:    "/kelos pick-up",
 			ExcludeComments:   []string{"/kelos needs-input"},
 			AllowedUsers:      []string{"alice"},
-			AllowedTeams:      []kelosv1alpha1.GitHubTeamRef{"my-org/platform"},
+			AllowedTeams:      []kelos.GitHubTeamRef{"my-org/platform"},
 			MinimumPermission: "write",
 		},
 	}
@@ -1279,13 +1291,13 @@ func TestBuildSource_CommentPolicyPassedToIssueSource(t *testing.T) {
 
 func TestBuildSource_CommentPolicyPassedToPullRequestSource(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
-	ts.Spec.When = kelosv1alpha1.When{
-		GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
-			CommentPolicy: &kelosv1alpha1.GitHubCommentPolicy{
+	ts.Spec.When = kelos.When{
+		GitHubPullRequests: &kelos.GitHubPullRequests{
+			CommentPolicy: &kelos.GitHubCommentPolicy{
 				TriggerComment:    "/kelos pick-up",
 				ExcludeComments:   []string{"/kelos needs-input"},
 				AllowedUsers:      []string{"alice"},
-				AllowedTeams:      []kelosv1alpha1.GitHubTeamRef{"my-org/platform"},
+				AllowedTeams:      []kelos.GitHubTeamRef{"my-org/platform"},
 				MinimumPermission: "maintain",
 			},
 		},
@@ -1317,56 +1329,9 @@ func TestBuildSource_CommentPolicyPassedToPullRequestSource(t *testing.T) {
 	}
 }
 
-func TestBuildSource_CommentPolicyRejectsMixedConfig(t *testing.T) {
-	tests := []struct {
-		name string
-		ts   *kelosv1alpha1.TaskSpawner
-	}{
-		{
-			name: "issues",
-			ts: &kelosv1alpha1.TaskSpawner{
-				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: kelosv1alpha1.When{
-						GitHubIssues: &kelosv1alpha1.GitHubIssues{
-							TriggerComment: "/kelos pick-up",
-							CommentPolicy: &kelosv1alpha1.GitHubCommentPolicy{
-								AllowedUsers: []string{"alice"},
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			name: "pull requests",
-			ts: &kelosv1alpha1.TaskSpawner{
-				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: kelosv1alpha1.When{
-						GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
-							ExcludeComments: []string{"/kelos needs-input"},
-							CommentPolicy: &kelosv1alpha1.GitHubCommentPolicy{
-								AllowedUsers: []string{"alice"},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := buildSource(context.Background(), tt.ts, "owner", "repo", "", noToken, "", "", "", nil)
-			if err == nil {
-				t.Fatal("Expected error for mixed legacy and commentPolicy config")
-			}
-		})
-	}
-}
-
-func newCompletedTask(name, namespace, spawnerName string, phase kelosv1alpha1.TaskPhase, completionTime time.Time) kelosv1alpha1.Task {
+func newCompletedTask(name, namespace, spawnerName string, phase kelos.TaskPhase, completionTime time.Time) kelos.Task {
 	ct := metav1.NewTime(completionTime)
-	return kelosv1alpha1.Task{
+	return kelos.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
@@ -1374,15 +1339,15 @@ func newCompletedTask(name, namespace, spawnerName string, phase kelosv1alpha1.T
 				"kelos.dev/taskspawner": spawnerName,
 			},
 		},
-		Spec: kelosv1alpha1.TaskSpec{
+		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelosv1alpha1.Credentials{
-				Type:      kelosv1alpha1.CredentialTypeOAuth,
-				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+			Credentials: kelos.Credentials{
+				Type:      kelos.CredentialTypeOAuth,
+				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},
 		},
-		Status: kelosv1alpha1.TaskStatus{
+		Status: kelos.TaskStatus{
 			Phase:          phase,
 			CompletionTime: &ct,
 		},
@@ -1391,13 +1356,12 @@ func newCompletedTask(name, namespace, spawnerName string, phase kelosv1alpha1.T
 
 func TestRunCycleWithSource_RetriggerCompletedTask(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
-	ts.Spec.When.GitHubIssues.TriggerComment = "/kelos pick-up"
 
 	completionTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	triggerTime := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC) // after completion
 
-	existingTasks := []kelosv1alpha1.Task{
-		newCompletedTask("spawner-1", "default", "spawner", kelosv1alpha1.TaskPhaseSucceeded, completionTime),
+	existingTasks := []kelos.Task{
+		newCompletedTask("spawner-1", "default", "spawner", kelos.TaskPhaseSucceeded, completionTime),
 	}
 	cl, key := setupTest(t, ts, existingTasks...)
 
@@ -1412,7 +1376,7 @@ func TestRunCycleWithSource_RetriggerCompletedTask(t *testing.T) {
 	}
 
 	// The old completed task should be deleted and a new one created
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -1427,13 +1391,12 @@ func TestRunCycleWithSource_RetriggerCompletedTask(t *testing.T) {
 
 func TestRunCycleWithSource_RetriggerSkippedWhenTriggerBeforeCompletion(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
-	ts.Spec.When.GitHubIssues.TriggerComment = "/kelos pick-up"
 
 	completionTime := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
 	triggerTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC) // before completion
 
-	existingTasks := []kelosv1alpha1.Task{
-		newCompletedTask("spawner-1", "default", "spawner", kelosv1alpha1.TaskPhaseSucceeded, completionTime),
+	existingTasks := []kelos.Task{
+		newCompletedTask("spawner-1", "default", "spawner", kelos.TaskPhaseSucceeded, completionTime),
 	}
 	cl, key := setupTest(t, ts, existingTasks...)
 
@@ -1448,7 +1411,7 @@ func TestRunCycleWithSource_RetriggerSkippedWhenTriggerBeforeCompletion(t *testi
 	}
 
 	// The completed task should remain and no new task should be created
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -1462,13 +1425,12 @@ func TestRunCycleWithSource_RetriggerSkippedWhenTriggerBeforeCompletion(t *testi
 
 func TestRunCycleWithSource_RetriggerFailedTask(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
-	ts.Spec.When.GitHubIssues.TriggerComment = "/kelos pick-up"
 
 	completionTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	triggerTime := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC) // after completion
 
-	existingTasks := []kelosv1alpha1.Task{
-		newCompletedTask("spawner-1", "default", "spawner", kelosv1alpha1.TaskPhaseFailed, completionTime),
+	existingTasks := []kelos.Task{
+		newCompletedTask("spawner-1", "default", "spawner", kelos.TaskPhaseFailed, completionTime),
 	}
 	cl, key := setupTest(t, ts, existingTasks...)
 
@@ -1483,7 +1445,7 @@ func TestRunCycleWithSource_RetriggerFailedTask(t *testing.T) {
 	}
 
 	// The failed task should be deleted and a new one created
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -1501,8 +1463,8 @@ func TestRunCycleWithSource_RetriggerFromSourceTriggerTime(t *testing.T) {
 	completionTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	triggerTime := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
 
-	existingTasks := []kelosv1alpha1.Task{
-		newCompletedTask("spawner-1", "default", "spawner", kelosv1alpha1.TaskPhaseSucceeded, completionTime),
+	existingTasks := []kelos.Task{
+		newCompletedTask("spawner-1", "default", "spawner", kelos.TaskPhaseSucceeded, completionTime),
 	}
 	cl, key := setupTest(t, ts, existingTasks...)
 
@@ -1517,7 +1479,7 @@ func TestRunCycleWithSource_RetriggerFromSourceTriggerTime(t *testing.T) {
 	}
 
 	// The old completed task should be deleted and a new one created.
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -1532,10 +1494,9 @@ func TestRunCycleWithSource_RetriggerFromSourceTriggerTime(t *testing.T) {
 func TestRunCycleWithSource_RetriggerSkippedForRunningTask(t *testing.T) {
 	// Active (running) tasks should never be retriggered
 	ts := newTaskSpawner("spawner", "default", nil)
-	ts.Spec.When.GitHubIssues.TriggerComment = "/kelos pick-up"
 
-	existingTasks := []kelosv1alpha1.Task{
-		newTask("spawner-1", "default", "spawner", kelosv1alpha1.TaskPhaseRunning),
+	existingTasks := []kelos.Task{
+		newTask("spawner-1", "default", "spawner", kelos.TaskPhaseRunning),
 	}
 	cl, key := setupTest(t, ts, existingTasks...)
 
@@ -1550,7 +1511,7 @@ func TestRunCycleWithSource_RetriggerSkippedForRunningTask(t *testing.T) {
 	}
 
 	// Running task should remain and no new task should be created
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -1561,15 +1522,14 @@ func TestRunCycleWithSource_RetriggerSkippedForRunningTask(t *testing.T) {
 
 func TestRunCycleWithSource_RetriggerRespectsMaxConcurrency(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", int32Ptr(1))
-	ts.Spec.When.GitHubIssues.TriggerComment = "/kelos pick-up"
 
 	completionTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	triggerTime := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
 
 	// One running task already at the concurrency limit, plus one completed task to retrigger
-	existingTasks := []kelosv1alpha1.Task{
-		newTask("spawner-running", "default", "spawner", kelosv1alpha1.TaskPhaseRunning),
-		newCompletedTask("spawner-1", "default", "spawner", kelosv1alpha1.TaskPhaseSucceeded, completionTime),
+	existingTasks := []kelos.Task{
+		newTask("spawner-running", "default", "spawner", kelos.TaskPhaseRunning),
+		newCompletedTask("spawner-1", "default", "spawner", kelos.TaskPhaseSucceeded, completionTime),
 	}
 	cl, key := setupTest(t, ts, existingTasks...)
 
@@ -1587,7 +1547,7 @@ func TestRunCycleWithSource_RetriggerRespectsMaxConcurrency(t *testing.T) {
 	// The completed task should be deleted (retrigger), but the new task
 	// should not be created because maxConcurrency=1 is already reached
 	// by the running task.
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -1606,15 +1566,15 @@ func TestRunCycleWithSource_RetriggerRespectsMaxConcurrency(t *testing.T) {
 func TestDeriveUpstreamRepo(t *testing.T) {
 	tests := []struct {
 		name string
-		ts   *kelosv1alpha1.TaskSpawner
+		ts   *kelos.TaskSpawner
 		want string
 	}{
 		{
 			name: "GitHubIssues with shorthand",
-			ts: &kelosv1alpha1.TaskSpawner{
-				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: kelosv1alpha1.When{
-						GitHubIssues: &kelosv1alpha1.GitHubIssues{
+			ts: &kelos.TaskSpawner{
+				Spec: kelos.TaskSpawnerSpec{
+					When: kelos.When{
+						GitHubIssues: &kelos.GitHubIssues{
 							Repo: "upstream-org/upstream-repo",
 						},
 					},
@@ -1624,10 +1584,10 @@ func TestDeriveUpstreamRepo(t *testing.T) {
 		},
 		{
 			name: "GitHubIssues with full URL",
-			ts: &kelosv1alpha1.TaskSpawner{
-				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: kelosv1alpha1.When{
-						GitHubIssues: &kelosv1alpha1.GitHubIssues{
+			ts: &kelos.TaskSpawner{
+				Spec: kelos.TaskSpawnerSpec{
+					When: kelos.When{
+						GitHubIssues: &kelos.GitHubIssues{
 							Repo: "https://github.com/upstream-org/upstream-repo.git",
 						},
 					},
@@ -1637,10 +1597,10 @@ func TestDeriveUpstreamRepo(t *testing.T) {
 		},
 		{
 			name: "GitHubPullRequests with shorthand",
-			ts: &kelosv1alpha1.TaskSpawner{
-				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: kelosv1alpha1.When{
-						GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
+			ts: &kelos.TaskSpawner{
+				Spec: kelos.TaskSpawnerSpec{
+					When: kelos.When{
+						GitHubPullRequests: &kelos.GitHubPullRequests{
 							Repo: "upstream-org/upstream-repo",
 						},
 					},
@@ -1650,10 +1610,10 @@ func TestDeriveUpstreamRepo(t *testing.T) {
 		},
 		{
 			name: "GitHubPullRequests with GHES URL",
-			ts: &kelosv1alpha1.TaskSpawner{
-				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: kelosv1alpha1.When{
-						GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
+			ts: &kelos.TaskSpawner{
+				Spec: kelos.TaskSpawnerSpec{
+					When: kelos.When{
+						GitHubPullRequests: &kelos.GitHubPullRequests{
 							Repo: "https://github.example.com/upstream-org/upstream-repo.git",
 						},
 					},
@@ -1663,10 +1623,10 @@ func TestDeriveUpstreamRepo(t *testing.T) {
 		},
 		{
 			name: "GitHubIssues with SSH URL",
-			ts: &kelosv1alpha1.TaskSpawner{
-				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: kelosv1alpha1.When{
-						GitHubIssues: &kelosv1alpha1.GitHubIssues{
+			ts: &kelos.TaskSpawner{
+				Spec: kelos.TaskSpawnerSpec{
+					When: kelos.When{
+						GitHubIssues: &kelos.GitHubIssues{
 							Repo: "git@github.com:upstream-org/upstream-repo.git",
 						},
 					},
@@ -1676,10 +1636,10 @@ func TestDeriveUpstreamRepo(t *testing.T) {
 		},
 		{
 			name: "No repo override",
-			ts: &kelosv1alpha1.TaskSpawner{
-				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: kelosv1alpha1.When{
-						GitHubIssues: &kelosv1alpha1.GitHubIssues{},
+			ts: &kelos.TaskSpawner{
+				Spec: kelos.TaskSpawnerSpec{
+					When: kelos.When{
+						GitHubIssues: &kelos.GitHubIssues{},
 					},
 				},
 			},
@@ -1698,22 +1658,22 @@ func TestDeriveUpstreamRepo(t *testing.T) {
 }
 
 func TestRunCycleWithSource_PropagatesUpstreamRepo(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
+	ts := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "spawner",
 			Namespace: "default",
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubIssues: &kelosv1alpha1.GitHubIssues{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubIssues: &kelos.GitHubIssues{
 					Repo: "https://github.com/upstream-org/upstream-repo.git",
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
-					Type:      kelosv1alpha1.CredentialTypeAPIKey,
-					SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+				Credentials: kelos.Credentials{
+					Type:      kelos.CredentialTypeAPIKey,
+					SecretRef: &kelos.SecretReference{Name: "my-secret"},
 				},
 			},
 		},
@@ -1730,7 +1690,7 @@ func TestRunCycleWithSource_PropagatesUpstreamRepo(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	var task kelosv1alpha1.Task
+	var task kelos.Task
 	if err := cl.Get(context.Background(), types.NamespacedName{Name: "spawner-1", Namespace: "default"}, &task); err != nil {
 		t.Fatalf("Failed to get created task: %v", err)
 	}
@@ -1741,22 +1701,22 @@ func TestRunCycleWithSource_PropagatesUpstreamRepo(t *testing.T) {
 }
 
 func TestRunCycleWithSource_ExplicitUpstreamRepoTakesPrecedence(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
+	ts := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "spawner",
 			Namespace: "default",
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubIssues: &kelosv1alpha1.GitHubIssues{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubIssues: &kelos.GitHubIssues{
 					Repo: "https://github.com/upstream-org/upstream-repo.git",
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
-					Type:      kelosv1alpha1.CredentialTypeAPIKey,
-					SecretRef: &kelosv1alpha1.SecretReference{Name: "my-secret"},
+				Credentials: kelos.Credentials{
+					Type:      kelos.CredentialTypeAPIKey,
+					SecretRef: &kelos.SecretReference{Name: "my-secret"},
 				},
 				UpstreamRepo: "explicit-org/explicit-repo",
 			},
@@ -1774,7 +1734,7 @@ func TestRunCycleWithSource_ExplicitUpstreamRepoTakesPrecedence(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	var task kelosv1alpha1.Task
+	var task kelos.Task
 	if err := cl.Get(context.Background(), types.NamespacedName{Name: "spawner-1", Namespace: "default"}, &task); err != nil {
 		t.Fatalf("Failed to get created task: %v", err)
 	}
@@ -1785,10 +1745,10 @@ func TestRunCycleWithSource_ExplicitUpstreamRepoTakesPrecedence(t *testing.T) {
 }
 
 func TestSourceAnnotations_GitHubIssues(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubIssues: &kelos.GitHubIssues{},
 			},
 		},
 	}
@@ -1815,10 +1775,10 @@ func TestSourceAnnotations_GitHubIssues(t *testing.T) {
 }
 
 func TestSourceAnnotations_GitHubPR(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{},
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubPullRequests: &kelos.GitHubPullRequests{},
 			},
 		},
 	}
@@ -1842,11 +1802,11 @@ func TestSourceAnnotations_GitHubPR(t *testing.T) {
 }
 
 func TestSourceAnnotations_ReportingEnabled(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubIssues: &kelosv1alpha1.GitHubIssues{
-					Reporting: &kelosv1alpha1.GitHubReporting{
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubIssues: &kelos.GitHubIssues{
+					Reporting: &kelos.GitHubReporting{
 						Enabled: true,
 					},
 				},
@@ -1867,11 +1827,11 @@ func TestSourceAnnotations_ReportingEnabled(t *testing.T) {
 }
 
 func TestSourceAnnotations_ReportingEnabledPR(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
-					Reporting: &kelosv1alpha1.GitHubReporting{
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubPullRequests: &kelos.GitHubPullRequests{
+					Reporting: &kelos.GitHubReporting{
 						Enabled: true,
 					},
 				},
@@ -1892,10 +1852,10 @@ func TestSourceAnnotations_ReportingEnabledPR(t *testing.T) {
 }
 
 func TestSourceAnnotations_NonGitHub(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				Jira: &kelosv1alpha1.Jira{},
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				Jira: &kelos.Jira{},
 			},
 		},
 	}
@@ -1913,7 +1873,7 @@ func TestSourceAnnotations_NonGitHub(t *testing.T) {
 
 func TestRunCycleWithSource_AnnotationsStamped(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
-	ts.Spec.When.GitHubIssues.Reporting = &kelosv1alpha1.GitHubReporting{Enabled: true}
+	ts.Spec.When.GitHubIssues.Reporting = &kelos.GitHubReporting{Enabled: true}
 	cl, key := setupTest(t, ts)
 
 	src := &fakeSource{
@@ -1926,7 +1886,7 @@ func TestRunCycleWithSource_AnnotationsStamped(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	var task kelosv1alpha1.Task
+	var task kelos.Task
 	if err := cl.Get(context.Background(), types.NamespacedName{Name: "spawner-42", Namespace: "default"}, &task); err != nil {
 		t.Fatalf("Failed to get created task: %v", err)
 	}
@@ -1944,7 +1904,7 @@ func TestRunCycleWithSource_AnnotationsStamped(t *testing.T) {
 
 func TestRunCycleWithSource_TaskTemplateMetadataLabelsAndAnnotations(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
-	ts.Spec.TaskTemplate.Metadata = &kelosv1alpha1.TaskTemplateMetadata{
+	ts.Spec.TaskTemplate.Metadata = &kelos.TaskTemplateMetadata{
 		Labels: map[string]string{
 			"app": "issue-{{.Number}}",
 		},
@@ -1964,7 +1924,7 @@ func TestRunCycleWithSource_TaskTemplateMetadataLabelsAndAnnotations(t *testing.
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	var task kelosv1alpha1.Task
+	var task kelos.Task
 	if err := cl.Get(context.Background(), types.NamespacedName{Name: "spawner-42", Namespace: "default"}, &task); err != nil {
 		t.Fatalf("Failed to get created task: %v", err)
 	}
@@ -1985,7 +1945,7 @@ func TestRunCycleWithSource_TaskTemplateMetadataLabelsAndAnnotations(t *testing.
 
 func TestRunCycleWithSource_TaskTemplateMetadataReservedAnnotationsPrecedence(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
-	ts.Spec.TaskTemplate.Metadata = &kelosv1alpha1.TaskTemplateMetadata{
+	ts.Spec.TaskTemplate.Metadata = &kelos.TaskTemplateMetadata{
 		Annotations: map[string]string{
 			reporting.AnnotationSourceKind:      "wrong",
 			reporting.AnnotationSourceNumber:    "999",
@@ -1993,7 +1953,7 @@ func TestRunCycleWithSource_TaskTemplateMetadataReservedAnnotationsPrecedence(t 
 			"kelos.dev/preserved-custom":        "from-template",
 		},
 	}
-	ts.Spec.When.GitHubIssues.Reporting = &kelosv1alpha1.GitHubReporting{Enabled: true}
+	ts.Spec.When.GitHubIssues.Reporting = &kelos.GitHubReporting{Enabled: true}
 	cl, key := setupTest(t, ts)
 
 	src := &fakeSource{
@@ -2006,7 +1966,7 @@ func TestRunCycleWithSource_TaskTemplateMetadataReservedAnnotationsPrecedence(t 
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	var task kelosv1alpha1.Task
+	var task kelos.Task
 	if err := cl.Get(context.Background(), types.NamespacedName{Name: "spawner-42", Namespace: "default"}, &task); err != nil {
 		t.Fatalf("Failed to get created task: %v", err)
 	}
@@ -2027,7 +1987,7 @@ func TestRunCycleWithSource_TaskTemplateMetadataReservedAnnotationsPrecedence(t 
 
 func TestRunCycleWithSource_TaskTemplateMetadataTaskSpawnerLabelWins(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
-	ts.Spec.TaskTemplate.Metadata = &kelosv1alpha1.TaskTemplateMetadata{
+	ts.Spec.TaskTemplate.Metadata = &kelos.TaskTemplateMetadata{
 		Labels: map[string]string{
 			"kelos.dev/taskspawner": "wrong",
 		},
@@ -2044,7 +2004,7 @@ func TestRunCycleWithSource_TaskTemplateMetadataTaskSpawnerLabelWins(t *testing.
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	var task kelosv1alpha1.Task
+	var task kelos.Task
 	if err := cl.Get(context.Background(), types.NamespacedName{Name: "spawner-1", Namespace: "default"}, &task); err != nil {
 		t.Fatalf("Failed to get created task: %v", err)
 	}
@@ -2055,11 +2015,11 @@ func TestRunCycleWithSource_TaskTemplateMetadataTaskSpawnerLabelWins(t *testing.
 }
 
 func TestReportingEnabled_IssuesEnabled(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubIssues: &kelosv1alpha1.GitHubIssues{
-					Reporting: &kelosv1alpha1.GitHubReporting{Enabled: true},
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubIssues: &kelos.GitHubIssues{
+					Reporting: &kelos.GitHubReporting{Enabled: true},
 				},
 			},
 		},
@@ -2070,11 +2030,11 @@ func TestReportingEnabled_IssuesEnabled(t *testing.T) {
 }
 
 func TestReportingEnabled_IssuesDisabled(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubIssues: &kelosv1alpha1.GitHubIssues{
-					Reporting: &kelosv1alpha1.GitHubReporting{Enabled: false},
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubIssues: &kelos.GitHubIssues{
+					Reporting: &kelos.GitHubReporting{Enabled: false},
 				},
 			},
 		},
@@ -2085,10 +2045,10 @@ func TestReportingEnabled_IssuesDisabled(t *testing.T) {
 }
 
 func TestReportingEnabled_NoReportingField(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubIssues: &kelos.GitHubIssues{},
 			},
 		},
 	}
@@ -2098,11 +2058,11 @@ func TestReportingEnabled_NoReportingField(t *testing.T) {
 }
 
 func TestReportingEnabled_PREnabled(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
-					Reporting: &kelosv1alpha1.GitHubReporting{Enabled: true},
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubPullRequests: &kelos.GitHubPullRequests{
+					Reporting: &kelos.GitHubReporting{Enabled: true},
 				},
 			},
 		},
@@ -2113,10 +2073,10 @@ func TestReportingEnabled_PREnabled(t *testing.T) {
 }
 
 func TestReportingEnabled_Jira(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				Jira: &kelosv1alpha1.Jira{},
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				Jira: &kelos.Jira{},
 			},
 		},
 	}
@@ -2126,11 +2086,11 @@ func TestReportingEnabled_Jira(t *testing.T) {
 }
 
 func TestChecksReportingEnabled_PREnabled(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
-					Reporting: &kelosv1alpha1.GitHubReporting{Checks: &kelosv1alpha1.GitHubChecksReporting{}},
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubPullRequests: &kelos.GitHubPullRequests{
+					Reporting: &kelos.GitHubReporting{Checks: &kelos.GitHubChecksReporting{}},
 				},
 			},
 		},
@@ -2141,11 +2101,11 @@ func TestChecksReportingEnabled_PREnabled(t *testing.T) {
 }
 
 func TestChecksReportingEnabled_PRDisabled(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
-					Reporting: &kelosv1alpha1.GitHubReporting{Enabled: true},
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubPullRequests: &kelos.GitHubPullRequests{
+					Reporting: &kelos.GitHubReporting{Enabled: true},
 				},
 			},
 		},
@@ -2156,11 +2116,11 @@ func TestChecksReportingEnabled_PRDisabled(t *testing.T) {
 }
 
 func TestChecksReportingEnabled_Issues(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubIssues: &kelosv1alpha1.GitHubIssues{
-					Reporting: &kelosv1alpha1.GitHubReporting{Enabled: true},
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubIssues: &kelos.GitHubIssues{
+					Reporting: &kelos.GitHubReporting{Enabled: true},
 				},
 			},
 		},
@@ -2171,10 +2131,10 @@ func TestChecksReportingEnabled_Issues(t *testing.T) {
 }
 
 func TestChecksReportingEnabled_NoReportingField(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{},
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubPullRequests: &kelos.GitHubPullRequests{},
 			},
 		},
 	}
@@ -2184,12 +2144,12 @@ func TestChecksReportingEnabled_NoReportingField(t *testing.T) {
 }
 
 func TestSourceAnnotations_ChecksEnabled(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
-					Reporting: &kelosv1alpha1.GitHubReporting{
-						Checks: &kelosv1alpha1.GitHubChecksReporting{Name: "My Custom Check"},
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubPullRequests: &kelos.GitHubPullRequests{
+					Reporting: &kelos.GitHubReporting{
+						Checks: &kelos.GitHubChecksReporting{Name: "My Custom Check"},
 					},
 				},
 			},
@@ -2216,13 +2176,13 @@ func TestSourceAnnotations_ChecksEnabled(t *testing.T) {
 }
 
 func TestSourceAnnotations_ChecksAndCommentsEnabled(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
-					Reporting: &kelosv1alpha1.GitHubReporting{
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubPullRequests: &kelos.GitHubPullRequests{
+					Reporting: &kelos.GitHubReporting{
 						Enabled: true,
-						Checks:  &kelosv1alpha1.GitHubChecksReporting{},
+						Checks:  &kelos.GitHubChecksReporting{},
 					},
 				},
 			},
@@ -2246,11 +2206,11 @@ func TestSourceAnnotations_ChecksAndCommentsEnabled(t *testing.T) {
 }
 
 func TestSourceAnnotations_ChecksNoSHA(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
-					Reporting: &kelosv1alpha1.GitHubReporting{Checks: &kelosv1alpha1.GitHubChecksReporting{}},
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubPullRequests: &kelos.GitHubPullRequests{
+					Reporting: &kelos.GitHubReporting{Checks: &kelos.GitHubChecksReporting{}},
 				},
 			},
 		},
@@ -2273,11 +2233,11 @@ func TestSourceAnnotations_ChecksNoSHA(t *testing.T) {
 }
 
 func TestSourceAnnotations_ChecksNoCustomName(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
-					Reporting: &kelosv1alpha1.GitHubReporting{Checks: &kelosv1alpha1.GitHubChecksReporting{}},
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubPullRequests: &kelos.GitHubPullRequests{
+					Reporting: &kelos.GitHubReporting{Checks: &kelos.GitHubChecksReporting{}},
 				},
 			},
 		},
@@ -2298,10 +2258,10 @@ func TestSourceAnnotations_ChecksNoCustomName(t *testing.T) {
 
 func TestRunReportingCycle_ReportsForAnnotatedTasks(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
-	ts.Spec.When.GitHubIssues.Reporting = &kelosv1alpha1.GitHubReporting{Enabled: true}
+	ts.Spec.When.GitHubIssues.Reporting = &kelos.GitHubReporting{Enabled: true}
 
 	// Create a task with reporting annotations and a Pending phase
-	task := kelosv1alpha1.Task{
+	task := kelos.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "spawner-1",
 			Namespace: "default",
@@ -2314,16 +2274,16 @@ func TestRunReportingCycle_ReportsForAnnotatedTasks(t *testing.T) {
 				reporting.AnnotationSourceKind:      "issue",
 			},
 		},
-		Spec: kelosv1alpha1.TaskSpec{
+		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelosv1alpha1.Credentials{
-				Type:      kelosv1alpha1.CredentialTypeOAuth,
-				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+			Credentials: kelos.Credentials{
+				Type:      kelos.CredentialTypeOAuth,
+				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},
 		},
-		Status: kelosv1alpha1.TaskStatus{
-			Phase: kelosv1alpha1.TaskPhasePending,
+		Status: kelos.TaskStatus{
+			Phase: kelos.TaskPhasePending,
 		},
 	}
 
@@ -2351,7 +2311,7 @@ func TestRunReportingCycle_ReportsForAnnotatedTasks(t *testing.T) {
 	}
 
 	// Verify annotations were updated
-	var updated kelosv1alpha1.Task
+	var updated kelos.Task
 	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(&task), &updated); err != nil {
 		t.Fatalf("Getting updated task: %v", err)
 	}
@@ -2367,7 +2327,7 @@ func TestRunReportingCycle_SkipsTasksWithoutReporting(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 
 	// Task without reporting annotations
-	task := kelosv1alpha1.Task{
+	task := kelos.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "spawner-1",
 			Namespace: "default",
@@ -2375,16 +2335,16 @@ func TestRunReportingCycle_SkipsTasksWithoutReporting(t *testing.T) {
 				"kelos.dev/taskspawner": "spawner",
 			},
 		},
-		Spec: kelosv1alpha1.TaskSpec{
+		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelosv1alpha1.Credentials{
-				Type:      kelosv1alpha1.CredentialTypeOAuth,
-				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+			Credentials: kelos.Credentials{
+				Type:      kelos.CredentialTypeOAuth,
+				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},
 		},
-		Status: kelosv1alpha1.TaskStatus{
-			Phase: kelosv1alpha1.TaskPhasePending,
+		Status: kelos.TaskStatus{
+			Phase: kelos.TaskPhasePending,
 		},
 	}
 
@@ -2415,7 +2375,7 @@ func TestRunReportingCycle_SkipsTasksWithoutReporting(t *testing.T) {
 func TestRunOnce_ReturnsPollIntervalForSuspendedTaskSpawner(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 	ts.Spec.Suspend = boolPtr(true)
-	ts.Spec.PollInterval = "30s"
+	ts.Spec.When.GitHubIssues.PollInterval = "30s"
 
 	cl, key := setupTest(t, ts)
 
@@ -2427,21 +2387,21 @@ func TestRunOnce_ReturnsPollIntervalForSuspendedTaskSpawner(t *testing.T) {
 		t.Fatalf("Interval = %v, want %v", interval, 30*time.Second)
 	}
 
-	var updated kelosv1alpha1.TaskSpawner
+	var updated kelos.TaskSpawner
 	if err := cl.Get(context.Background(), key, &updated); err != nil {
 		t.Fatalf("Getting updated TaskSpawner: %v", err)
 	}
-	if updated.Status.Phase != kelosv1alpha1.TaskSpawnerPhaseSuspended {
-		t.Fatalf("Phase = %q, want %q", updated.Status.Phase, kelosv1alpha1.TaskSpawnerPhaseSuspended)
+	if updated.Status.Phase != kelos.TaskSpawnerPhaseSuspended {
+		t.Fatalf("Phase = %q, want %q", updated.Status.Phase, kelos.TaskSpawnerPhaseSuspended)
 	}
 }
 
 func TestRunOnce_UsesTokenResolverForReporting(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 	ts.Spec.Suspend = boolPtr(true)
-	ts.Spec.When.GitHubIssues.Reporting = &kelosv1alpha1.GitHubReporting{Enabled: true}
+	ts.Spec.When.GitHubIssues.Reporting = &kelos.GitHubReporting{Enabled: true}
 
-	task := newTask("spawner-1", "default", "spawner", kelosv1alpha1.TaskPhasePending)
+	task := newTask("spawner-1", "default", "spawner", kelos.TaskPhasePending)
 	task.Annotations = map[string]string{
 		reporting.AnnotationGitHubReporting: "enabled",
 		reporting.AnnotationSourceNumber:    "42",
@@ -2476,7 +2436,7 @@ func TestRunOnce_UsesTokenResolverForReporting(t *testing.T) {
 func TestRunOnce_ErrorsWhenReportingEnabledWithoutTokenResolver(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 	ts.Spec.Suspend = boolPtr(true)
-	ts.Spec.When.GitHubIssues.Reporting = &kelosv1alpha1.GitHubReporting{Enabled: true}
+	ts.Spec.When.GitHubIssues.Reporting = &kelos.GitHubReporting{Enabled: true}
 
 	cl, key := setupTest(t, ts)
 
@@ -2491,7 +2451,7 @@ func TestSpawnerReconcilerTaskSpawnerPredicate(t *testing.T) {
 	r := &spawnerReconciler{Key: key}
 	p := r.taskSpawnerPredicate()
 
-	target := &kelosv1alpha1.TaskSpawner{
+	target := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       key.Name,
 			Namespace:  key.Namespace,
@@ -2515,7 +2475,7 @@ func TestSpawnerReconcilerTaskSpawnerPredicate(t *testing.T) {
 	}
 
 	statusOnly := updated.DeepCopy()
-	statusOnly.Status.Phase = kelosv1alpha1.TaskSpawnerPhaseRunning
+	statusOnly.Status.Phase = kelos.TaskSpawnerPhaseRunning
 	if p.Update(event.UpdateEvent{ObjectOld: updated, ObjectNew: statusOnly}) {
 		t.Fatal("Expected status-only update to be ignored")
 	}
@@ -2526,10 +2486,10 @@ func TestSpawnerReconcilerTaskPredicate(t *testing.T) {
 	r := &spawnerReconciler{Key: key}
 	p := r.taskPredicate()
 
-	base := newTask("spawner-1", "default", "spawner", kelosv1alpha1.TaskPhasePending)
+	base := newTask("spawner-1", "default", "spawner", kelos.TaskPhasePending)
 	oldTask := base.DeepCopy()
 	phaseChanged := base.DeepCopy()
-	phaseChanged.Status.Phase = kelosv1alpha1.TaskPhaseSucceeded
+	phaseChanged.Status.Phase = kelos.TaskPhaseSucceeded
 
 	if !p.Update(event.UpdateEvent{ObjectOld: oldTask, ObjectNew: phaseChanged}) {
 		t.Fatal("Expected phase change to pass predicate")
@@ -2548,7 +2508,7 @@ func TestSpawnerReconcilerTaskPredicate(t *testing.T) {
 		t.Fatal("Expected matching task delete event to pass predicate")
 	}
 
-	otherSpawnerTask := newTask("other-1", "default", "other", kelosv1alpha1.TaskPhasePending)
+	otherSpawnerTask := newTask("other-1", "default", "other", kelos.TaskPhasePending)
 	if p.Delete(event.DeleteEvent{Object: otherSpawnerTask.DeepCopy()}) {
 		t.Fatal("Expected other spawner task delete event to be ignored")
 	}
@@ -2558,7 +2518,7 @@ func TestSpawnerReconcilerRequestsForTask(t *testing.T) {
 	key := types.NamespacedName{Name: "spawner", Namespace: "default"}
 	r := &spawnerReconciler{Key: key}
 
-	task := newTask("spawner-1", "default", "spawner", kelosv1alpha1.TaskPhasePending)
+	task := newTask("spawner-1", "default", "spawner", kelos.TaskPhasePending)
 	requests := r.requestsForTask(context.Background(), task.DeepCopy())
 	if len(requests) != 1 {
 		t.Fatalf("Expected 1 request, got %d", len(requests))
@@ -2567,7 +2527,7 @@ func TestSpawnerReconcilerRequestsForTask(t *testing.T) {
 		t.Fatalf("Request key = %v, want %v", requests[0].NamespacedName, key)
 	}
 
-	other := newTask("other-1", "default", "other", kelosv1alpha1.TaskPhasePending)
+	other := newTask("other-1", "default", "other", kelos.TaskPhasePending)
 	requests = r.requestsForTask(context.Background(), other.DeepCopy())
 	if len(requests) != 0 {
 		t.Fatalf("Expected no requests for non-matching task, got %d", len(requests))
@@ -2575,14 +2535,13 @@ func TestSpawnerReconcilerRequestsForTask(t *testing.T) {
 }
 
 func TestResolvedPollInterval_SourceOverridesRoot(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubIssues: &kelosv1alpha1.GitHubIssues{
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubIssues: &kelos.GitHubIssues{
 					PollInterval: "10s",
 				},
 			},
-			PollInterval: "5m",
 		},
 	}
 	got := resolvedPollInterval(ts)
@@ -2591,26 +2550,25 @@ func TestResolvedPollInterval_SourceOverridesRoot(t *testing.T) {
 	}
 }
 
-func TestResolvedPollInterval_FallsBackToRoot(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
+func TestResolvedPollInterval_FallsBackToDefault(t *testing.T) {
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubIssues: &kelos.GitHubIssues{},
 			},
-			PollInterval: "2m",
 		},
 	}
 	got := resolvedPollInterval(ts)
-	if got != 2*time.Minute {
-		t.Fatalf("resolvedPollInterval = %v, want %v", got, 2*time.Minute)
+	if got != 5*time.Minute {
+		t.Fatalf("resolvedPollInterval = %v, want %v", got, 5*time.Minute)
 	}
 }
 
 func TestResolvedPollInterval_BothEmptyDefaultsFiveMinutes(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubIssues: &kelos.GitHubIssues{},
 			},
 		},
 	}
@@ -2621,14 +2579,13 @@ func TestResolvedPollInterval_BothEmptyDefaultsFiveMinutes(t *testing.T) {
 }
 
 func TestResolvedPollInterval_PullRequestsSourceOverride(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubPullRequests: &kelosv1alpha1.GitHubPullRequests{
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubPullRequests: &kelos.GitHubPullRequests{
 					PollInterval: "45s",
 				},
 			},
-			PollInterval: "5m",
 		},
 	}
 	got := resolvedPollInterval(ts)
@@ -2638,17 +2595,16 @@ func TestResolvedPollInterval_PullRequestsSourceOverride(t *testing.T) {
 }
 
 func TestResolvedPollInterval_JiraSourceOverride(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				Jira: &kelosv1alpha1.Jira{
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				Jira: &kelos.Jira{
 					BaseURL:      "https://example.atlassian.net",
 					Project:      "TEST",
-					SecretRef:    kelosv1alpha1.SecretReference{Name: "jira-creds"},
+					SecretRef:    kelos.SecretReference{Name: "jira-creds"},
 					PollInterval: "1m",
 				},
 			},
-			PollInterval: "10m",
 		},
 	}
 	got := resolvedPollInterval(ts)
@@ -2657,27 +2613,25 @@ func TestResolvedPollInterval_JiraSourceOverride(t *testing.T) {
 	}
 }
 
-func TestResolvedPollInterval_CronUsesRootLevel(t *testing.T) {
-	ts := &kelosv1alpha1.TaskSpawner{
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				Cron: &kelosv1alpha1.Cron{
+func TestResolvedPollInterval_CronUsesDefault(t *testing.T) {
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				Cron: &kelos.Cron{
 					Schedule: "0 * * * *",
 				},
 			},
-			PollInterval: "3m",
 		},
 	}
 	got := resolvedPollInterval(ts)
-	if got != 3*time.Minute {
-		t.Fatalf("resolvedPollInterval = %v, want %v", got, 3*time.Minute)
+	if got != 5*time.Minute {
+		t.Fatalf("resolvedPollInterval = %v, want %v", got, 5*time.Minute)
 	}
 }
 
 func TestRunOnce_ReturnsSourcePollInterval(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 	ts.Spec.Suspend = boolPtr(true)
-	ts.Spec.PollInterval = "5m"
 	ts.Spec.When.GitHubIssues.PollInterval = "15s"
 
 	cl, key := setupTest(t, ts)
@@ -2698,31 +2652,31 @@ func TestRunCycleWithSource_ContextSources(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	ts := &kelosv1alpha1.TaskSpawner{
+	ts := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ctx-spawner",
 			Namespace: "default",
 			UID:       "ctx-spawner-uid",
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubIssues: &kelos.GitHubIssues{},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
-					Type:      kelosv1alpha1.CredentialTypeOAuth,
-					SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+				Credentials: kelos.Credentials{
+					Type:      kelos.CredentialTypeOAuth,
+					SecretRef: &kelos.SecretReference{Name: "creds"},
 				},
-				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{Name: "test-ws"},
+				WorkspaceRef: &kelos.WorkspaceReference{Name: "test-ws"},
 				PromptTemplate: `Fix bug #{{.Number}}: {{.Title}}
 {{- if .Context.errorInfo}}
 
 Error context: {{.Context.errorInfo}}
 {{- end}}`,
-				ContextSources: []kelosv1alpha1.ContextSource{{
+				ContextSources: []kelos.ContextSource{{
 					Name: "errorInfo",
-					HTTP: &kelosv1alpha1.HTTPContextSource{
+					HTTP: &kelos.HTTPContextSource{
 						URL:           srv.URL + "/errors/{{.Number}}",
 						AllowInsecure: true,
 					},
@@ -2742,7 +2696,7 @@ Error context: {{.Context.errorInfo}}
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -2766,31 +2720,31 @@ func TestRunCycleWithSource_ContextSources_OptionalFailure(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	ts := &kelosv1alpha1.TaskSpawner{
+	ts := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ctx-opt-spawner",
 			Namespace: "default",
 			UID:       "ctx-opt-spawner-uid",
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubIssues: &kelos.GitHubIssues{},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
-					Type:      kelosv1alpha1.CredentialTypeOAuth,
-					SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+				Credentials: kelos.Credentials{
+					Type:      kelos.CredentialTypeOAuth,
+					SecretRef: &kelos.SecretReference{Name: "creds"},
 				},
-				WorkspaceRef:   &kelosv1alpha1.WorkspaceReference{Name: "test-ws"},
+				WorkspaceRef:   &kelos.WorkspaceReference{Name: "test-ws"},
 				PromptTemplate: `Fix #{{.Number}}`,
-				ContextSources: []kelosv1alpha1.ContextSource{{
+				ContextSources: []kelos.ContextSource{{
 					Name: "optional",
-					HTTP: &kelosv1alpha1.HTTPContextSource{
+					HTTP: &kelos.HTTPContextSource{
 						URL:           srv.URL,
 						AllowInsecure: true,
 					},
-					FailurePolicy: kelosv1alpha1.ContextSourceFailurePolicyIgnore,
+					FailurePolicy: kelos.ContextSourceFailurePolicyIgnore,
 				}},
 			},
 		},
@@ -2808,7 +2762,7 @@ func TestRunCycleWithSource_ContextSources_OptionalFailure(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}
@@ -2824,31 +2778,31 @@ func TestRunCycleWithSource_ContextSources_RequiredFailure(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	ts := &kelosv1alpha1.TaskSpawner{
+	ts := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "ctx-req-spawner",
 			Namespace: "default",
 			UID:       "ctx-req-spawner-uid",
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubIssues: &kelosv1alpha1.GitHubIssues{},
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubIssues: &kelos.GitHubIssues{},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
-					Type:      kelosv1alpha1.CredentialTypeOAuth,
-					SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+				Credentials: kelos.Credentials{
+					Type:      kelos.CredentialTypeOAuth,
+					SecretRef: &kelos.SecretReference{Name: "creds"},
 				},
-				WorkspaceRef:   &kelosv1alpha1.WorkspaceReference{Name: "test-ws"},
+				WorkspaceRef:   &kelos.WorkspaceReference{Name: "test-ws"},
 				PromptTemplate: `Fix #{{.Number}}`,
-				ContextSources: []kelosv1alpha1.ContextSource{{
+				ContextSources: []kelos.ContextSource{{
 					Name: "required",
-					HTTP: &kelosv1alpha1.HTTPContextSource{
+					HTTP: &kelos.HTTPContextSource{
 						URL:           srv.URL,
 						AllowInsecure: true,
 					},
-					FailurePolicy: kelosv1alpha1.ContextSourceFailurePolicyFail,
+					FailurePolicy: kelos.ContextSourceFailurePolicyFail,
 				}},
 			},
 		},
@@ -2866,7 +2820,7 @@ func TestRunCycleWithSource_ContextSources_RequiredFailure(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
 		t.Fatalf("Listing tasks: %v", err)
 	}

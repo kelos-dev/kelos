@@ -19,7 +19,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	v1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 )
 
 const (
@@ -41,7 +41,7 @@ type Fetcher struct {
 // suitable for injection as templateVars["Context"]. The templateVars
 // parameter provides work item variables for rendering URL and header
 // templates.
-func (f *Fetcher) FetchAll(ctx context.Context, sources []v1alpha1.ContextSource, templateVars map[string]interface{}) (map[string]interface{}, error) {
+func (f *Fetcher) FetchAll(ctx context.Context, sources []kelos.ContextSource, templateVars map[string]interface{}) (map[string]interface{}, error) {
 	var mu sync.Mutex
 	result := make(map[string]interface{}, len(sources))
 
@@ -50,7 +50,7 @@ func (f *Fetcher) FetchAll(ctx context.Context, sources []v1alpha1.ContextSource
 		g.Go(func() error {
 			val, err := f.fetchOne(gctx, src, templateVars)
 			if err != nil {
-				if src.FailurePolicy != v1alpha1.ContextSourceFailurePolicyIgnore {
+				if src.FailurePolicy != kelos.ContextSourceFailurePolicyIgnore {
 					return fmt.Errorf("context source %q: %w", src.Name, err)
 				}
 				if gctx.Err() != nil {
@@ -80,7 +80,7 @@ func (f *Fetcher) FetchAll(ctx context.Context, sources []v1alpha1.ContextSource
 	return result, nil
 }
 
-func (f *Fetcher) fetchOne(ctx context.Context, src v1alpha1.ContextSource, templateVars map[string]interface{}) (string, error) {
+func (f *Fetcher) fetchOne(ctx context.Context, src kelos.ContextSource, templateVars map[string]interface{}) (string, error) {
 	if src.HTTP == nil {
 		return "", fmt.Errorf("no source kind configured (http is required)")
 	}
@@ -168,7 +168,7 @@ func (f *Fetcher) fetchOne(ctx context.Context, src v1alpha1.ContextSource, temp
 	return string(body), nil
 }
 
-func (f *Fetcher) resolveHeaders(ctx context.Context, httpSrc *v1alpha1.HTTPContextSource, templateVars map[string]interface{}) (map[string]string, error) {
+func (f *Fetcher) resolveHeaders(ctx context.Context, httpSrc *kelos.HTTPContextSource, templateVars map[string]interface{}) (map[string]string, error) {
 	headers := make(map[string]string, len(httpSrc.Headers)+len(httpSrc.HeadersFrom))
 
 	// Render static headers (support template variables)

@@ -1,6 +1,7 @@
 package v1alpha2
 
 import (
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -273,6 +274,13 @@ type TaskSpec struct {
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty"`
+
+	// PodFailurePolicy specifies how failed pods affect the backing Job's
+	// retry accounting. If unset, Kelos leaves Job.spec.podFailurePolicy unset
+	// and Kubernetes default Job handling applies.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="self.rules.all(r, r.action != 'FailIndex')",message="podFailurePolicy.rules[].action FailIndex is not supported for Task Jobs"
+	PodFailurePolicy *batchv1.PodFailurePolicy `json:"podFailurePolicy,omitempty"`
 
 	// PodOverrides allows customizing the agent pod configuration.
 	// +optional

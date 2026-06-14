@@ -3,7 +3,7 @@ package slack
 import (
 	"testing"
 
-	"github.com/kelos-dev/kelos/api/v1alpha1"
+	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 )
 
 func boolPtr(b bool) *bool { return &b }
@@ -11,7 +11,7 @@ func boolPtr(b bool) *bool { return &b }
 func TestMatchesSpawner(t *testing.T) {
 	tests := []struct {
 		name      string
-		slackCfg  *v1alpha1.Slack
+		slackCfg  *kelos.Slack
 		msg       *SlackMessageData
 		botUserID string
 		want      bool
@@ -25,21 +25,21 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name:      "empty config with bot mention matches",
-			slackCfg:  &v1alpha1.Slack{},
+			slackCfg:  &kelos.Slack{},
 			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "hey <@UBOT1> help"},
 			botUserID: "UBOT1",
 			want:      true,
 		},
 		{
 			name:      "empty config without bot mention rejects",
-			slackCfg:  &v1alpha1.Slack{},
+			slackCfg:  &kelos.Slack{},
 			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "hey help"},
 			botUserID: "UBOT1",
 			want:      false,
 		},
 		{
 			name: "channel filter matches",
-			slackCfg: &v1alpha1.Slack{
+			slackCfg: &kelos.Slack{
 				Channels: []string{"C1", "C2"},
 			},
 			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> hi"},
@@ -48,7 +48,7 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name: "channel filter rejects",
-			slackCfg: &v1alpha1.Slack{
+			slackCfg: &kelos.Slack{
 				Channels: []string{"C2", "C3"},
 			},
 			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> hi"},
@@ -57,8 +57,8 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name: "trigger with pattern and mention matches",
-			slackCfg: &v1alpha1.Slack{
-				Triggers: []v1alpha1.SlackTrigger{
+			slackCfg: &kelos.Slack{
+				Triggers: []kelos.SlackTrigger{
 					{Pattern: "fix.*bug"},
 				},
 			},
@@ -68,8 +68,8 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name: "trigger with pattern match but no mention rejects",
-			slackCfg: &v1alpha1.Slack{
-				Triggers: []v1alpha1.SlackTrigger{
+			slackCfg: &kelos.Slack{
+				Triggers: []kelos.SlackTrigger{
 					{Pattern: "fix.*bug"},
 				},
 			},
@@ -79,8 +79,8 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name: "trigger with mention but pattern does not match rejects",
-			slackCfg: &v1alpha1.Slack{
-				Triggers: []v1alpha1.SlackTrigger{
+			slackCfg: &kelos.Slack{
+				Triggers: []kelos.SlackTrigger{
 					{Pattern: "deploy"},
 				},
 			},
@@ -90,8 +90,8 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name: "trigger with mentionOptional fires on pattern alone",
-			slackCfg: &v1alpha1.Slack{
-				Triggers: []v1alpha1.SlackTrigger{
+			slackCfg: &kelos.Slack{
+				Triggers: []kelos.SlackTrigger{
 					{Pattern: "fix.*bug", MentionOptional: boolPtr(true)},
 				},
 			},
@@ -101,8 +101,8 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name: "trigger with mentionOptional=false requires mention",
-			slackCfg: &v1alpha1.Slack{
-				Triggers: []v1alpha1.SlackTrigger{
+			slackCfg: &kelos.Slack{
+				Triggers: []kelos.SlackTrigger{
 					{Pattern: "fix.*bug", MentionOptional: boolPtr(false)},
 				},
 			},
@@ -112,8 +112,8 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name: "multiple triggers OR semantics first misses second hits",
-			slackCfg: &v1alpha1.Slack{
-				Triggers: []v1alpha1.SlackTrigger{
+			slackCfg: &kelos.Slack{
+				Triggers: []kelos.SlackTrigger{
 					{Pattern: "deploy"},
 					{Pattern: "fix"},
 				},
@@ -124,8 +124,8 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name: "multiple triggers none match",
-			slackCfg: &v1alpha1.Slack{
-				Triggers: []v1alpha1.SlackTrigger{
+			slackCfg: &kelos.Slack{
+				Triggers: []kelos.SlackTrigger{
 					{Pattern: "deploy"},
 					{Pattern: "rollback"},
 				},
@@ -136,8 +136,8 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name: "slash command bypasses mention and triggers",
-			slackCfg: &v1alpha1.Slack{
-				Triggers: []v1alpha1.SlackTrigger{
+			slackCfg: &kelos.Slack{
+				Triggers: []kelos.SlackTrigger{
 					{Pattern: "deploy"},
 				},
 			},
@@ -147,21 +147,21 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name:      "thread reply with bot mention matches",
-			slackCfg:  &v1alpha1.Slack{},
+			slackCfg:  &kelos.Slack{},
 			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> follow up", ThreadTS: "1234567890.123456"},
 			botUserID: "UBOT1",
 			want:      true,
 		},
 		{
 			name:      "thread reply without bot mention rejects",
-			slackCfg:  &v1alpha1.Slack{},
+			slackCfg:  &kelos.Slack{},
 			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "follow up", ThreadTS: "1234567890.123456"},
 			botUserID: "UBOT1",
 			want:      false,
 		},
 		{
 			name: "channel filter passes but no mention rejects",
-			slackCfg: &v1alpha1.Slack{
+			slackCfg: &kelos.Slack{
 				Channels: []string{"C1"},
 			},
 			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "hello"},
@@ -170,8 +170,8 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name: "invalid trigger regex is skipped",
-			slackCfg: &v1alpha1.Slack{
-				Triggers: []v1alpha1.SlackTrigger{
+			slackCfg: &kelos.Slack{
+				Triggers: []kelos.SlackTrigger{
 					{Pattern: "[invalid"},
 					{Pattern: "fix"},
 				},
@@ -182,7 +182,7 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name: "excludePatterns rejects matching message",
-			slackCfg: &v1alpha1.Slack{
+			slackCfg: &kelos.Slack{
 				ExcludePatterns: []string{"/solve"},
 			},
 			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> /solve fix this"},
@@ -191,7 +191,7 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name: "excludePatterns allows non-matching message",
-			slackCfg: &v1alpha1.Slack{
+			slackCfg: &kelos.Slack{
 				ExcludePatterns: []string{"/solve"},
 			},
 			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> this is broken"},
@@ -200,7 +200,7 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name: "excludePatterns multiple patterns OR semantics",
-			slackCfg: &v1alpha1.Slack{
+			slackCfg: &kelos.Slack{
 				ExcludePatterns: []string{"/solve", "/deploy"},
 			},
 			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> /deploy now"},
@@ -209,7 +209,7 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name: "excludePatterns not applied to slash commands",
-			slackCfg: &v1alpha1.Slack{
+			slackCfg: &kelos.Slack{
 				ExcludePatterns: []string{"/solve"},
 			},
 			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "/solve fix this", IsSlashCommand: true},
@@ -218,7 +218,7 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name: "excludePatterns applied to thread replies",
-			slackCfg: &v1alpha1.Slack{
+			slackCfg: &kelos.Slack{
 				ExcludePatterns: []string{"/solve"},
 			},
 			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> /solve go", ThreadTS: "1234567890.123456"},
@@ -227,7 +227,7 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name: "excludePatterns allows non-matching thread reply",
-			slackCfg: &v1alpha1.Slack{
+			slackCfg: &kelos.Slack{
 				ExcludePatterns: []string{"/solve"},
 			},
 			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> more context", ThreadTS: "1234567890.123456"},
@@ -236,7 +236,7 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name: "excludePatterns invalid regex skipped",
-			slackCfg: &v1alpha1.Slack{
+			slackCfg: &kelos.Slack{
 				ExcludePatterns: []string{"[invalid", "/solve"},
 			},
 			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> /solve fix"},
@@ -245,7 +245,7 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name: "excludePatterns empty list has no effect",
-			slackCfg: &v1alpha1.Slack{
+			slackCfg: &kelos.Slack{
 				ExcludePatterns: []string{},
 			},
 			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> anything"},
@@ -254,8 +254,8 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name: "excludePatterns with triggers both must pass",
-			slackCfg: &v1alpha1.Slack{
-				Triggers:        []v1alpha1.SlackTrigger{{Pattern: "fix"}},
+			slackCfg: &kelos.Slack{
+				Triggers:        []kelos.SlackTrigger{{Pattern: "fix"}},
 				ExcludePatterns: []string{"/solve"},
 			},
 			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> fix the /solve issue"},
@@ -264,8 +264,8 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name: "excludePatterns with triggers exclude does not match",
-			slackCfg: &v1alpha1.Slack{
-				Triggers:        []v1alpha1.SlackTrigger{{Pattern: "fix"}},
+			slackCfg: &kelos.Slack{
+				Triggers:        []kelos.SlackTrigger{{Pattern: "fix"}},
 				ExcludePatterns: []string{"/solve"},
 			},
 			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> fix the login page"},
@@ -274,15 +274,15 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name:      "bot message rejected by default (empty policy)",
-			slackCfg:  &v1alpha1.Slack{},
+			slackCfg:  &kelos.Slack{},
 			msg:       &SlackMessageData{UserID: "UOTHER", ChannelID: "C1", Text: "<@UBOT1> hello", IsBotMessage: true},
 			botUserID: "UBOT1",
 			want:      false,
 		},
 		{
 			name: "bot message rejected when policy is None",
-			slackCfg: &v1alpha1.Slack{
-				BotMessagePolicy: v1alpha1.BotMessagePolicyNone,
+			slackCfg: &kelos.Slack{
+				BotMessagePolicy: kelos.BotMessagePolicyNone,
 			},
 			msg:       &SlackMessageData{UserID: "UOTHER", ChannelID: "C1", Text: "<@UBOT1> hello", IsBotMessage: true},
 			botUserID: "UBOT1",
@@ -290,8 +290,8 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name: "other bot message allowed when policy is All",
-			slackCfg: &v1alpha1.Slack{
-				BotMessagePolicy: v1alpha1.BotMessagePolicyAll,
+			slackCfg: &kelos.Slack{
+				BotMessagePolicy: kelos.BotMessagePolicyAll,
 			},
 			msg:       &SlackMessageData{UserID: "UOTHER", ChannelID: "C1", Text: "<@UBOT1> hello", IsBotMessage: true},
 			botUserID: "UBOT1",
@@ -299,8 +299,8 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name: "self message allowed when policy is All",
-			slackCfg: &v1alpha1.Slack{
-				BotMessagePolicy: v1alpha1.BotMessagePolicyAll,
+			slackCfg: &kelos.Slack{
+				BotMessagePolicy: kelos.BotMessagePolicyAll,
 			},
 			msg:       &SlackMessageData{UserID: "UBOT1", ChannelID: "C1", Text: "<@UBOT1> self-trigger", IsBotMessage: true, IsSelfMessage: true},
 			botUserID: "UBOT1",
@@ -308,8 +308,8 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name: "other bot allowed when policy is OthersOnly",
-			slackCfg: &v1alpha1.Slack{
-				BotMessagePolicy: v1alpha1.BotMessagePolicyOthersOnly,
+			slackCfg: &kelos.Slack{
+				BotMessagePolicy: kelos.BotMessagePolicyOthersOnly,
 			},
 			msg:       &SlackMessageData{UserID: "UOTHER", ChannelID: "C1", Text: "<@UBOT1> hello", IsBotMessage: true},
 			botUserID: "UBOT1",
@@ -317,8 +317,8 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name: "self message rejected when policy is OthersOnly",
-			slackCfg: &v1alpha1.Slack{
-				BotMessagePolicy: v1alpha1.BotMessagePolicyOthersOnly,
+			slackCfg: &kelos.Slack{
+				BotMessagePolicy: kelos.BotMessagePolicyOthersOnly,
 			},
 			msg:       &SlackMessageData{UserID: "UBOT1", ChannelID: "C1", Text: "<@UBOT1> self-trigger", IsBotMessage: true, IsSelfMessage: true},
 			botUserID: "UBOT1",
@@ -326,9 +326,9 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name: "bot message with triggers and policy All",
-			slackCfg: &v1alpha1.Slack{
-				BotMessagePolicy: v1alpha1.BotMessagePolicyAll,
-				Triggers:         []v1alpha1.SlackTrigger{{Pattern: "deploy"}},
+			slackCfg: &kelos.Slack{
+				BotMessagePolicy: kelos.BotMessagePolicyAll,
+				Triggers:         []kelos.SlackTrigger{{Pattern: "deploy"}},
 			},
 			msg:       &SlackMessageData{UserID: "UOTHER", ChannelID: "C1", Text: "<@UBOT1> deploy now", IsBotMessage: true},
 			botUserID: "UBOT1",
@@ -336,9 +336,9 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name: "bot message with triggers but pattern does not match",
-			slackCfg: &v1alpha1.Slack{
-				BotMessagePolicy: v1alpha1.BotMessagePolicyAll,
-				Triggers:         []v1alpha1.SlackTrigger{{Pattern: "deploy"}},
+			slackCfg: &kelos.Slack{
+				BotMessagePolicy: kelos.BotMessagePolicyAll,
+				Triggers:         []kelos.SlackTrigger{{Pattern: "deploy"}},
 			},
 			msg:       &SlackMessageData{UserID: "UOTHER", ChannelID: "C1", Text: "<@UBOT1> fix bug", IsBotMessage: true},
 			botUserID: "UBOT1",
@@ -346,8 +346,8 @@ func TestMatchesSpawner(t *testing.T) {
 		},
 		{
 			name: "bot slash command bypasses bot policy",
-			slackCfg: &v1alpha1.Slack{
-				BotMessagePolicy: v1alpha1.BotMessagePolicyNone,
+			slackCfg: &kelos.Slack{
+				BotMessagePolicy: kelos.BotMessagePolicyNone,
 			},
 			msg:       &SlackMessageData{UserID: "UBOT1", ChannelID: "C1", Text: "do stuff", IsSlashCommand: true, IsBotMessage: true, IsSelfMessage: true},
 			botUserID: "UBOT1",
@@ -531,42 +531,42 @@ func TestMatchesTriggers(t *testing.T) {
 	tests := []struct {
 		name      string
 		text      string
-		triggers  []v1alpha1.SlackTrigger
+		triggers  []kelos.SlackTrigger
 		botUserID string
 		want      bool
 	}{
 		{
 			name:      "pattern matches with mention",
 			text:      "<@UBOT1> deploy prod",
-			triggers:  []v1alpha1.SlackTrigger{{Pattern: "deploy"}},
+			triggers:  []kelos.SlackTrigger{{Pattern: "deploy"}},
 			botUserID: "UBOT1",
 			want:      true,
 		},
 		{
 			name:      "pattern matches without mention requires mention",
 			text:      "deploy prod",
-			triggers:  []v1alpha1.SlackTrigger{{Pattern: "deploy"}},
+			triggers:  []kelos.SlackTrigger{{Pattern: "deploy"}},
 			botUserID: "UBOT1",
 			want:      false,
 		},
 		{
 			name:      "mentionOptional allows pattern only",
 			text:      "deploy prod",
-			triggers:  []v1alpha1.SlackTrigger{{Pattern: "deploy", MentionOptional: boolPtr(true)}},
+			triggers:  []kelos.SlackTrigger{{Pattern: "deploy", MentionOptional: boolPtr(true)}},
 			botUserID: "UBOT1",
 			want:      true,
 		},
 		{
 			name:      "pattern does not match",
 			text:      "<@UBOT1> rollback",
-			triggers:  []v1alpha1.SlackTrigger{{Pattern: "deploy"}},
+			triggers:  []kelos.SlackTrigger{{Pattern: "deploy"}},
 			botUserID: "UBOT1",
 			want:      false,
 		},
 		{
 			name: "OR semantics across triggers",
 			text: "<@UBOT1> rollback",
-			triggers: []v1alpha1.SlackTrigger{
+			triggers: []kelos.SlackTrigger{
 				{Pattern: "deploy"},
 				{Pattern: "rollback"},
 			},
@@ -576,28 +576,28 @@ func TestMatchesTriggers(t *testing.T) {
 		{
 			name:      "invalid regex skipped",
 			text:      "<@UBOT1> fix it",
-			triggers:  []v1alpha1.SlackTrigger{{Pattern: "[invalid"}, {Pattern: "fix"}},
+			triggers:  []kelos.SlackTrigger{{Pattern: "[invalid"}, {Pattern: "fix"}},
 			botUserID: "UBOT1",
 			want:      true,
 		},
 		{
 			name:      "anchored pattern matches after mention stripping",
 			text:      "<@UBOT1> deploy prod",
-			triggers:  []v1alpha1.SlackTrigger{{Pattern: "^deploy"}},
+			triggers:  []kelos.SlackTrigger{{Pattern: "^deploy"}},
 			botUserID: "UBOT1",
 			want:      true,
 		},
 		{
 			name:      "anchored pattern with display-name mention",
 			text:      "<@UBOT1|kelos-bot> deploy prod",
-			triggers:  []v1alpha1.SlackTrigger{{Pattern: "^deploy"}},
+			triggers:  []kelos.SlackTrigger{{Pattern: "^deploy"}},
 			botUserID: "UBOT1",
 			want:      true,
 		},
 		{
 			name:      "multiple leading mentions stripped for triggers",
 			text:      "<@UBOT1> <@U999> deploy prod",
-			triggers:  []v1alpha1.SlackTrigger{{Pattern: "^deploy", MentionOptional: boolPtr(true)}},
+			triggers:  []kelos.SlackTrigger{{Pattern: "^deploy", MentionOptional: boolPtr(true)}},
 			botUserID: "UBOT1",
 			want:      true,
 		},

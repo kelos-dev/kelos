@@ -17,7 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/reporting"
 )
 
@@ -59,9 +59,9 @@ func (r *spawnerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("taskspawner-loop").
 		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
-		For(&kelosv1alpha1.TaskSpawner{}, builder.WithPredicates(r.taskSpawnerPredicate())).
+		For(&kelos.TaskSpawner{}, builder.WithPredicates(r.taskSpawnerPredicate())).
 		Watches(
-			&kelosv1alpha1.Task{},
+			&kelos.Task{},
 			handler.EnqueueRequestsFromMapFunc(r.requestsForTask),
 			builder.WithPredicates(r.taskPredicate()),
 		).
@@ -73,7 +73,7 @@ func runOnce(ctx context.Context, cl client.Client, key types.NamespacedName, cf
 		return 0, err
 	}
 
-	var ts kelosv1alpha1.TaskSpawner
+	var ts kelos.TaskSpawner
 	if err := cl.Get(ctx, key, &ts); err != nil {
 		return 0, fmt.Errorf("fetching TaskSpawner after cycle: %w", err)
 	}
@@ -120,9 +120,8 @@ func runOnce(ctx context.Context, cl client.Client, key types.NamespacedName, cf
 }
 
 // resolvedPollInterval returns the effective poll interval for the TaskSpawner.
-// It checks the active source's PollInterval first, falling back to
-// spec.pollInterval.
-func resolvedPollInterval(ts *kelosv1alpha1.TaskSpawner) time.Duration {
+// It checks the active source's PollInterval first, falling back to the default.
+func resolvedPollInterval(ts *kelos.TaskSpawner) time.Duration {
 	var sourceInterval string
 	switch {
 	case ts.Spec.When.GitHubIssues != nil:
@@ -135,7 +134,7 @@ func resolvedPollInterval(ts *kelosv1alpha1.TaskSpawner) time.Duration {
 	if sourceInterval != "" {
 		return parsePollInterval(sourceInterval)
 	}
-	return parsePollInterval(ts.Spec.PollInterval)
+	return parsePollInterval("")
 }
 
 func (r *spawnerReconciler) requestsForTask(_ context.Context, obj client.Object) []reconcile.Request {
@@ -171,8 +170,8 @@ func (r *spawnerReconciler) taskPredicate() predicate.Predicate {
 			return false
 		},
 		UpdateFunc: func(e event.UpdateEvent) bool {
-			oldTask, okOld := e.ObjectOld.(*kelosv1alpha1.Task)
-			newTask, okNew := e.ObjectNew.(*kelosv1alpha1.Task)
+			oldTask, okOld := e.ObjectOld.(*kelos.Task)
+			newTask, okNew := e.ObjectNew.(*kelos.Task)
 			if !okOld || !okNew || !matchesSpawnerTask(newTask, r.Key) {
 				return false
 			}

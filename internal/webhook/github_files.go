@@ -12,7 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/kelos-dev/kelos/api/v1alpha1"
+	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 )
 
 const (
@@ -28,7 +28,7 @@ type githubFile struct {
 // fetchPRChangedFiles fetches the list of changed files for a pull request
 // from the GitHub API. It resolves the GitHub token from the workspace's
 // secretRef.
-func fetchPRChangedFiles(ctx context.Context, cl client.Client, spawner *v1alpha1.TaskSpawner, apiBaseURL, owner, repo string, number int) ([]string, error) {
+func fetchPRChangedFiles(ctx context.Context, cl client.Client, spawner *kelos.TaskSpawner, apiBaseURL, owner, repo string, number int) ([]string, error) {
 	token, err := resolveGitHubTokenFromWorkspace(ctx, cl, spawner)
 	if err != nil {
 		return nil, fmt.Errorf("resolving GitHub token for PR files: %w", err)
@@ -69,13 +69,13 @@ func fetchPRChangedFiles(ctx context.Context, cl client.Client, spawner *v1alpha
 // resolveGitHubTokenFromWorkspace reads the GITHUB_TOKEN from the workspace's
 // secretRef. Returns an empty string (no auth) if no workspace or secret is
 // configured.
-func resolveGitHubTokenFromWorkspace(ctx context.Context, cl client.Client, spawner *v1alpha1.TaskSpawner) (string, error) {
+func resolveGitHubTokenFromWorkspace(ctx context.Context, cl client.Client, spawner *kelos.TaskSpawner) (string, error) {
 	wsRef := spawner.Spec.TaskTemplate.WorkspaceRef
 	if wsRef == nil {
 		return "", nil
 	}
 
-	var ws v1alpha1.Workspace
+	var ws kelos.Workspace
 	if err := cl.Get(ctx, types.NamespacedName{
 		Name:      wsRef.Name,
 		Namespace: spawner.Namespace,

@@ -16,6 +16,7 @@
 | `spec.dependsOn` | Task names that must succeed before this Task starts (creates `Waiting` phase) | No |
 | `spec.branch` | Git branch to work on; only one Task with the same branch runs at a time (mutex) | No |
 | `spec.ttlSecondsAfterFinished` | Auto-delete task after N seconds (0 for immediate) | No |
+| `spec.podFailurePolicy` | Kubernetes Job pod failure policy copied to `Job.spec.podFailurePolicy`. If omitted, Kelos leaves it unset and Kubernetes default Job failure handling applies | No |
 | `spec.podOverrides.labels` | Additional labels to apply to the Job and its Pod. Merged with built-in labels; built-in labels take precedence on conflict | No |
 | `spec.podOverrides.resources` | CPU/memory requests and limits for the agent container | No |
 | `spec.podOverrides.activeDeadlineSeconds` | Maximum duration in seconds before the agent pod is terminated | No |
@@ -37,6 +38,26 @@
 `Task.spec.podOverrides.volumes` and `TaskSpawner.spec.taskTemplate.podOverrides.volumes` are for user-managed volumes. User-supplied volume names must not be `workspace` or start with `kelos-`; Kelos reserves those names for controller-managed pod wiring.
 
 If an existing manifest uses a user volume name such as `kelos-cache`, rename that volume and every matching `Task.spec.podOverrides.volumeMounts`, `Task.spec.podOverrides.extraContainers[].volumeMounts`, or `Task.spec.podOverrides.extraInitContainers[].volumeMounts` reference to a non-reserved name such as `cache`. Apply the same rename under `TaskSpawner.spec.taskTemplate.podOverrides` for spawned task templates.
+
+### Task Pod Failure Policy
+
+`spec.podFailurePolicy` accepts Kubernetes Job `podFailurePolicy` rules except `FailIndex`, which only applies to indexed Jobs and is rejected for Kelos Task Jobs. Kelos copies the field as a complete policy; it does not merge in default rules. Rule order matters because Kubernetes stops evaluating after the first match.
+
+When the field is omitted, Kelos leaves `Job.spec.podFailurePolicy` unset. To ignore infrastructure disruptions while still failing the Job on non-zero container exits, set the policy explicitly:
+
+```yaml
+spec:
+  podFailurePolicy:
+    rules:
+      - action: Ignore
+        onPodConditions:
+          - type: DisruptionTarget
+            status: "True"
+      - action: FailJob
+        onExitCodes:
+          operator: NotIn
+          values: [0]
+```
 
 <a id="task-extra-containers"></a>
 
@@ -324,6 +345,7 @@ GitHub Apps are preferred over PATs for production use because they offer fine-g
 | `spec.taskTemplate.dependsOn` | Task names that spawned Tasks depend on | No |
 | `spec.taskTemplate.branch` | Git branch template for spawned Tasks (supports Go template variables, e.g., `kelos-task-{{.Number}}`) | No |
 | `spec.taskTemplate.ttlSecondsAfterFinished` | Auto-delete spawned tasks after N seconds | No |
+| `spec.taskTemplate.podFailurePolicy` | Kubernetes Job pod failure policy copied to spawned Tasks as `Task.spec.podFailurePolicy` | No |
 | `spec.taskTemplate.podOverrides` | Pod customization for spawned Tasks (labels, resources, activeDeadlineSeconds, env, nodeSelector, tolerations, affinity, imagePullSecrets, serviceAccountName, volumes, volumeMounts, podSecurityContext, containerSecurityContext, extraContainers, extraInitContainers). Same fields and constraints as `Task.spec.podOverrides` | No |
 | `spec.taskTemplate.metadata.labels` | Labels merged into spawned Tasks; values support the same Go template variables as `branch`/`promptTemplate`; the `kelos.dev/taskspawner` label is always set to the TaskSpawner name and overrides any user value for that key | No |
 | `spec.taskTemplate.metadata.annotations` | Annotations merged into spawned Tasks; values support the same Go template variables as `branch`/`promptTemplate`; source annotations (e.g. `kelos.dev/source-kind`) are applied after rendering and override conflicting user values | No |

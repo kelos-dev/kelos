@@ -17,13 +17,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	v1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 )
 
 func newTestScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(s))
-	utilruntime.Must(v1alpha1.AddToScheme(s))
+	utilruntime.Must(kelos.AddToScheme(s))
 	return s
 }
 
@@ -51,9 +51,9 @@ func TestFetchAll_BasicGET(t *testing.T) {
 	defer srv.Close()
 
 	f := newFetcher(func(f *Fetcher) { f.HTTPClient = srv.Client() })
-	sources := []v1alpha1.ContextSource{{
+	sources := []kelos.ContextSource{{
 		Name: "test",
-		HTTP: &v1alpha1.HTTPContextSource{
+		HTTP: &kelos.HTTPContextSource{
 			URL:           srv.URL,
 			AllowInsecure: true,
 		},
@@ -79,9 +79,9 @@ func TestFetchAll_POSTWithBody(t *testing.T) {
 	defer srv.Close()
 
 	f := newFetcher(func(f *Fetcher) { f.HTTPClient = srv.Client() })
-	sources := []v1alpha1.ContextSource{{
+	sources := []kelos.ContextSource{{
 		Name: "post",
-		HTTP: &v1alpha1.HTTPContextSource{
+		HTTP: &kelos.HTTPContextSource{
 			URL:           srv.URL,
 			Method:        "POST",
 			Body:          `{"id":{{.Number}}}`,
@@ -108,9 +108,9 @@ func TestFetchAll_URLTemplateRendering(t *testing.T) {
 	defer srv.Close()
 
 	f := newFetcher(func(f *Fetcher) { f.HTTPClient = srv.Client() })
-	sources := []v1alpha1.ContextSource{{
+	sources := []kelos.ContextSource{{
 		Name: "url",
-		HTTP: &v1alpha1.HTTPContextSource{
+		HTTP: &kelos.HTTPContextSource{
 			URL:           srv.URL + "/items/{{.Number}}",
 			AllowInsecure: true,
 		},
@@ -137,12 +137,12 @@ func TestFetchAll_ResponseFilter(t *testing.T) {
 	defer srv.Close()
 
 	f := newFetcher(func(f *Fetcher) { f.HTTPClient = srv.Client() })
-	sources := []v1alpha1.ContextSource{{
+	sources := []kelos.ContextSource{{
 		Name: "filtered",
-		HTTP: &v1alpha1.HTTPContextSource{
+		HTTP: &kelos.HTTPContextSource{
 			URL: srv.URL,
-			ResponseFilter: &v1alpha1.ResponseFilter{
-				Type:       v1alpha1.ResponseFilterTypeJSONPath,
+			ResponseFilter: &kelos.ResponseFilter{
+				Type:       kelos.ResponseFilterTypeJSONPath,
 				Expression: "$.data.value",
 			},
 			AllowInsecure: true,
@@ -168,12 +168,12 @@ func TestFetchAll_ResponseFilter_ComplexValue(t *testing.T) {
 	defer srv.Close()
 
 	f := newFetcher(func(f *Fetcher) { f.HTTPClient = srv.Client() })
-	sources := []v1alpha1.ContextSource{{
+	sources := []kelos.ContextSource{{
 		Name: "arr",
-		HTTP: &v1alpha1.HTTPContextSource{
+		HTTP: &kelos.HTTPContextSource{
 			URL: srv.URL,
-			ResponseFilter: &v1alpha1.ResponseFilter{
-				Type:       v1alpha1.ResponseFilterTypeJSONPath,
+			ResponseFilter: &kelos.ResponseFilter{
+				Type:       kelos.ResponseFilterTypeJSONPath,
 				Expression: "$.items",
 			},
 			AllowInsecure: true,
@@ -207,11 +207,11 @@ func TestFetchAll_HeadersFromSecret(t *testing.T) {
 		f.HTTPClient = srv.Client()
 		f.Client = cl
 	})
-	sources := []v1alpha1.ContextSource{{
+	sources := []kelos.ContextSource{{
 		Name: "auth",
-		HTTP: &v1alpha1.HTTPContextSource{
+		HTTP: &kelos.HTTPContextSource{
 			URL: srv.URL,
-			HeadersFrom: []v1alpha1.HTTPHeaderSource{{
+			HeadersFrom: []kelos.HTTPHeaderSource{{
 				Header:     "Authorization",
 				SecretName: "my-secret",
 				SecretKey:  "token",
@@ -238,9 +238,9 @@ func TestFetchAll_StaticHeaders(t *testing.T) {
 	defer srv.Close()
 
 	f := newFetcher(func(f *Fetcher) { f.HTTPClient = srv.Client() })
-	sources := []v1alpha1.ContextSource{{
+	sources := []kelos.ContextSource{{
 		Name: "hdrs",
-		HTTP: &v1alpha1.HTTPContextSource{
+		HTTP: &kelos.HTTPContextSource{
 			URL:           srv.URL,
 			Headers:       map[string]string{"Accept": "application/json"},
 			AllowInsecure: true,
@@ -258,9 +258,9 @@ func TestFetchAll_StaticHeaders(t *testing.T) {
 
 func TestFetchAll_HTTPSRequired(t *testing.T) {
 	f := newFetcher()
-	sources := []v1alpha1.ContextSource{{
+	sources := []kelos.ContextSource{{
 		Name: "insecure",
-		HTTP: &v1alpha1.HTTPContextSource{
+		HTTP: &kelos.HTTPContextSource{
 			URL: "http://example.com/data",
 		},
 	}}
@@ -281,13 +281,13 @@ func TestFetchAll_HTTPAllowInsecure(t *testing.T) {
 	defer srv.Close()
 
 	f := newFetcher()
-	sources := []v1alpha1.ContextSource{{
+	sources := []kelos.ContextSource{{
 		Name: "insecure",
-		HTTP: &v1alpha1.HTTPContextSource{
+		HTTP: &kelos.HTTPContextSource{
 			URL:           srv.URL,
 			AllowInsecure: true,
 		},
-		FailurePolicy: v1alpha1.ContextSourceFailurePolicyIgnore,
+		FailurePolicy: kelos.ContextSourceFailurePolicyIgnore,
 	}}
 
 	result, err := f.FetchAll(context.Background(), sources, map[string]interface{}{})
@@ -306,13 +306,13 @@ func TestFetchAll_FailurePolicyFail(t *testing.T) {
 	defer srv.Close()
 
 	f := newFetcher(func(f *Fetcher) { f.HTTPClient = srv.Client() })
-	sources := []v1alpha1.ContextSource{{
+	sources := []kelos.ContextSource{{
 		Name: "req",
-		HTTP: &v1alpha1.HTTPContextSource{
+		HTTP: &kelos.HTTPContextSource{
 			URL:           srv.URL,
 			AllowInsecure: true,
 		},
-		FailurePolicy: v1alpha1.ContextSourceFailurePolicyFail,
+		FailurePolicy: kelos.ContextSourceFailurePolicyFail,
 	}}
 
 	_, err := f.FetchAll(context.Background(), sources, map[string]interface{}{})
@@ -331,13 +331,13 @@ func TestFetchAll_FailurePolicyIgnore(t *testing.T) {
 	defer srv.Close()
 
 	f := newFetcher(func(f *Fetcher) { f.HTTPClient = srv.Client() })
-	sources := []v1alpha1.ContextSource{{
+	sources := []kelos.ContextSource{{
 		Name: "opt",
-		HTTP: &v1alpha1.HTTPContextSource{
+		HTTP: &kelos.HTTPContextSource{
 			URL:           srv.URL,
 			AllowInsecure: true,
 		},
-		FailurePolicy: v1alpha1.ContextSourceFailurePolicyIgnore,
+		FailurePolicy: kelos.ContextSourceFailurePolicyIgnore,
 	}}
 
 	result, err := f.FetchAll(context.Background(), sources, map[string]interface{}{})
@@ -369,23 +369,23 @@ func TestFetchAll_IgnoredSourceCancelledByFailing(t *testing.T) {
 	logger := zap.New(zap.WriteTo(&logBuf), zap.UseDevMode(true))
 
 	f := newFetcher(func(f *Fetcher) { f.Logger = logger })
-	sources := []v1alpha1.ContextSource{
+	sources := []kelos.ContextSource{
 		{
 			Name: "ignored-slow",
-			HTTP: &v1alpha1.HTTPContextSource{
+			HTTP: &kelos.HTTPContextSource{
 				URL:            slowSrv.URL,
 				AllowInsecure:  true,
 				TimeoutSeconds: int32Ptr(5),
 			},
-			FailurePolicy: v1alpha1.ContextSourceFailurePolicyIgnore,
+			FailurePolicy: kelos.ContextSourceFailurePolicyIgnore,
 		},
 		{
 			Name: "fail-fast",
-			HTTP: &v1alpha1.HTTPContextSource{
+			HTTP: &kelos.HTTPContextSource{
 				URL:           failSrv.URL,
 				AllowInsecure: true,
 			},
-			FailurePolicy: v1alpha1.ContextSourceFailurePolicyFail,
+			FailurePolicy: kelos.ContextSourceFailurePolicyFail,
 		},
 	}
 
@@ -406,14 +406,14 @@ func TestFetchAll_Timeout(t *testing.T) {
 	defer srv.Close()
 
 	f := newFetcher(func(f *Fetcher) { f.HTTPClient = srv.Client() })
-	sources := []v1alpha1.ContextSource{{
+	sources := []kelos.ContextSource{{
 		Name: "slow",
-		HTTP: &v1alpha1.HTTPContextSource{
+		HTTP: &kelos.HTTPContextSource{
 			URL:            srv.URL,
 			TimeoutSeconds: int32Ptr(1),
 			AllowInsecure:  true,
 		},
-		FailurePolicy: v1alpha1.ContextSourceFailurePolicyFail,
+		FailurePolicy: kelos.ContextSourceFailurePolicyFail,
 	}}
 
 	_, err := f.FetchAll(context.Background(), sources, map[string]interface{}{})
@@ -430,14 +430,14 @@ func TestFetchAll_ResponseSizeLimit(t *testing.T) {
 	defer srv.Close()
 
 	f := newFetcher(func(f *Fetcher) { f.HTTPClient = srv.Client() })
-	sources := []v1alpha1.ContextSource{{
+	sources := []kelos.ContextSource{{
 		Name: "big",
-		HTTP: &v1alpha1.HTTPContextSource{
+		HTTP: &kelos.HTTPContextSource{
 			URL:              srv.URL,
 			MaxResponseBytes: int32Ptr(64),
 			AllowInsecure:    true,
 		},
-		FailurePolicy: v1alpha1.ContextSourceFailurePolicyFail,
+		FailurePolicy: kelos.ContextSourceFailurePolicyFail,
 	}}
 
 	_, err := f.FetchAll(context.Background(), sources, map[string]interface{}{})
@@ -461,17 +461,17 @@ func TestFetchAll_MultipleSources(t *testing.T) {
 	defer plainSrv2.Close()
 
 	f := newFetcher()
-	sources := []v1alpha1.ContextSource{
+	sources := []kelos.ContextSource{
 		{
 			Name: "src1",
-			HTTP: &v1alpha1.HTTPContextSource{
+			HTTP: &kelos.HTTPContextSource{
 				URL:           plainSrv1.URL,
 				AllowInsecure: true,
 			},
 		},
 		{
 			Name: "src2",
-			HTTP: &v1alpha1.HTTPContextSource{
+			HTTP: &kelos.HTTPContextSource{
 				URL:           plainSrv2.URL,
 				AllowInsecure: true,
 			},
@@ -494,17 +494,17 @@ func TestFetchAll_SecretNotFound(t *testing.T) {
 	cl := fake.NewClientBuilder().WithScheme(newTestScheme()).Build()
 
 	f := newFetcher(func(f *Fetcher) { f.Client = cl })
-	sources := []v1alpha1.ContextSource{{
+	sources := []kelos.ContextSource{{
 		Name: "missing",
-		HTTP: &v1alpha1.HTTPContextSource{
+		HTTP: &kelos.HTTPContextSource{
 			URL: "https://example.com",
-			HeadersFrom: []v1alpha1.HTTPHeaderSource{{
+			HeadersFrom: []kelos.HTTPHeaderSource{{
 				Header:     "Authorization",
 				SecretName: "nonexistent",
 				SecretKey:  "token",
 			}},
 		},
-		FailurePolicy: v1alpha1.ContextSourceFailurePolicyFail,
+		FailurePolicy: kelos.ContextSourceFailurePolicyFail,
 	}}
 
 	_, err := f.FetchAll(context.Background(), sources, map[string]interface{}{})
@@ -524,17 +524,17 @@ func TestFetchAll_SecretKeyNotFound(t *testing.T) {
 	cl := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(secret).Build()
 
 	f := newFetcher(func(f *Fetcher) { f.Client = cl })
-	sources := []v1alpha1.ContextSource{{
+	sources := []kelos.ContextSource{{
 		Name: "badkey",
-		HTTP: &v1alpha1.HTTPContextSource{
+		HTTP: &kelos.HTTPContextSource{
 			URL: "https://example.com",
-			HeadersFrom: []v1alpha1.HTTPHeaderSource{{
+			HeadersFrom: []kelos.HTTPHeaderSource{{
 				Header:     "Authorization",
 				SecretName: "my-secret",
 				SecretKey:  "token",
 			}},
 		},
-		FailurePolicy: v1alpha1.ContextSourceFailurePolicyFail,
+		FailurePolicy: kelos.ContextSourceFailurePolicyFail,
 	}}
 
 	_, err := f.FetchAll(context.Background(), sources, map[string]interface{}{})
@@ -548,13 +548,13 @@ func TestFetchAll_SecretKeyNotFound(t *testing.T) {
 
 func TestFetchAll_MissingTemplateVariable(t *testing.T) {
 	f := newFetcher()
-	sources := []v1alpha1.ContextSource{{
+	sources := []kelos.ContextSource{{
 		Name: "bad",
-		HTTP: &v1alpha1.HTTPContextSource{
+		HTTP: &kelos.HTTPContextSource{
 			URL:           "https://api.example.com/items/{{.MissingVar}}",
 			AllowInsecure: true,
 		},
-		FailurePolicy: v1alpha1.ContextSourceFailurePolicyFail,
+		FailurePolicy: kelos.ContextSourceFailurePolicyFail,
 	}}
 	vars := map[string]interface{}{"Number": 42}
 
@@ -569,7 +569,7 @@ func TestFetchAll_MissingTemplateVariable(t *testing.T) {
 
 func TestFetchAll_NilHTTP(t *testing.T) {
 	f := newFetcher()
-	sources := []v1alpha1.ContextSource{{
+	sources := []kelos.ContextSource{{
 		Name: "nohttp",
 	}}
 

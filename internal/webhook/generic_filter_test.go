@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/kelos-dev/kelos/api/v1alpha1"
+	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 )
 
 func TestParseGenericWebhook(t *testing.T) {
@@ -214,11 +214,11 @@ func TestExtractFields_MalformedJSONPath(t *testing.T) {
 }
 
 func TestExtractGenericDeliveryID(t *testing.T) {
-	spawner := func(source, idExpr string) *v1alpha1.TaskSpawner {
-		return &v1alpha1.TaskSpawner{
-			Spec: v1alpha1.TaskSpawnerSpec{
-				When: v1alpha1.When{
-					GenericWebhook: &v1alpha1.GenericWebhook{
+	spawner := func(source, idExpr string) *kelos.TaskSpawner {
+		return &kelos.TaskSpawner{
+			Spec: kelos.TaskSpawnerSpec{
+				When: kelos.When{
+					GenericWebhook: &kelos.GenericWebhook{
 						Source:       source,
 						FieldMapping: map[string]string{"id": idExpr},
 					},
@@ -230,13 +230,13 @@ func TestExtractGenericDeliveryID(t *testing.T) {
 	body := []byte(`{"data":{"id":"evt-123"}}`)
 
 	t.Run("uses mapped id from matching spawner", func(t *testing.T) {
-		spawners := []*v1alpha1.TaskSpawner{spawner("notion", "$.data.id")}
+		spawners := []*kelos.TaskSpawner{spawner("notion", "$.data.id")}
 		got := extractGenericDeliveryID("notion", body, spawners)
 		assert.Equal(t, "generic-notion-evt-123", got)
 	})
 
 	t.Run("same id deduplicates across different JSON encodings", func(t *testing.T) {
-		spawners := []*v1alpha1.TaskSpawner{spawner("notion", "$.data.id")}
+		spawners := []*kelos.TaskSpawner{spawner("notion", "$.data.id")}
 		body1 := []byte(`{"data":{"id":"evt-123"}}`)
 		body2 := []byte(`{ "data" : { "id" : "evt-123" , "extra": true } }`)
 		id1 := extractGenericDeliveryID("notion", body1, spawners)
@@ -245,30 +245,30 @@ func TestExtractGenericDeliveryID(t *testing.T) {
 	})
 
 	t.Run("falls back to body hash when no spawner matches source", func(t *testing.T) {
-		spawners := []*v1alpha1.TaskSpawner{spawner("sentry", "$.data.id")}
+		spawners := []*kelos.TaskSpawner{spawner("sentry", "$.data.id")}
 		got := extractGenericDeliveryID("notion", body, spawners)
 		assert.Contains(t, got, "generic-notion-")
 		assert.NotContains(t, got, "evt-123")
 	})
 
 	t.Run("falls back to body hash when no id mapping", func(t *testing.T) {
-		sp := &v1alpha1.TaskSpawner{
-			Spec: v1alpha1.TaskSpawnerSpec{
-				When: v1alpha1.When{
-					GenericWebhook: &v1alpha1.GenericWebhook{
+		sp := &kelos.TaskSpawner{
+			Spec: kelos.TaskSpawnerSpec{
+				When: kelos.When{
+					GenericWebhook: &kelos.GenericWebhook{
 						Source:       "notion",
 						FieldMapping: map[string]string{"title": "$.data.title"},
 					},
 				},
 			},
 		}
-		got := extractGenericDeliveryID("notion", body, []*v1alpha1.TaskSpawner{sp})
+		got := extractGenericDeliveryID("notion", body, []*kelos.TaskSpawner{sp})
 		assert.Contains(t, got, "generic-notion-")
 		assert.NotContains(t, got, "evt-123")
 	})
 
 	t.Run("falls back to body hash when id path resolves to missing field", func(t *testing.T) {
-		spawners := []*v1alpha1.TaskSpawner{spawner("notion", "$.data.missing")}
+		spawners := []*kelos.TaskSpawner{spawner("notion", "$.data.missing")}
 		got := extractGenericDeliveryID("notion", body, spawners)
 		assert.Contains(t, got, "generic-notion-")
 		assert.NotContains(t, got, "evt-123")
@@ -302,26 +302,26 @@ func TestMatchesGenericFilters_ExactMatch(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		filters []v1alpha1.GenericWebhookFilter
+		filters []kelos.GenericWebhookFilter
 		want    bool
 	}{
 		{
 			name: "matches exact value",
-			filters: []v1alpha1.GenericWebhookFilter{
+			filters: []kelos.GenericWebhookFilter{
 				{Field: "$.action", Value: strPtr("created")},
 			},
 			want: true,
 		},
 		{
 			name: "does not match different value",
-			filters: []v1alpha1.GenericWebhookFilter{
+			filters: []kelos.GenericWebhookFilter{
 				{Field: "$.action", Value: strPtr("updated")},
 			},
 			want: false,
 		},
 		{
 			name: "AND semantics - all must match",
-			filters: []v1alpha1.GenericWebhookFilter{
+			filters: []kelos.GenericWebhookFilter{
 				{Field: "$.action", Value: strPtr("created")},
 				{Field: "$.level", Value: strPtr("error")},
 			},
@@ -329,7 +329,7 @@ func TestMatchesGenericFilters_ExactMatch(t *testing.T) {
 		},
 		{
 			name: "AND semantics - one fails",
-			filters: []v1alpha1.GenericWebhookFilter{
+			filters: []kelos.GenericWebhookFilter{
 				{Field: "$.action", Value: strPtr("created")},
 				{Field: "$.level", Value: strPtr("warning")},
 			},
@@ -337,7 +337,7 @@ func TestMatchesGenericFilters_ExactMatch(t *testing.T) {
 		},
 		{
 			name: "missing field fails filter",
-			filters: []v1alpha1.GenericWebhookFilter{
+			filters: []kelos.GenericWebhookFilter{
 				{Field: "$.nonexistent", Value: strPtr("anything")},
 			},
 			want: false,
@@ -360,27 +360,27 @@ func TestMatchesGenericFilters_RegexMatch(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		filters []v1alpha1.GenericWebhookFilter
+		filters []kelos.GenericWebhookFilter
 		want    bool
 		wantErr bool
 	}{
 		{
 			name: "matches regex pattern",
-			filters: []v1alpha1.GenericWebhookFilter{
+			filters: []kelos.GenericWebhookFilter{
 				{Field: "$.platform", Pattern: "python|go|node"},
 			},
 			want: true,
 		},
 		{
 			name: "does not match regex pattern",
-			filters: []v1alpha1.GenericWebhookFilter{
+			filters: []kelos.GenericWebhookFilter{
 				{Field: "$.platform", Pattern: "^ruby"},
 			},
 			want: false,
 		},
 		{
 			name: "invalid regex returns error",
-			filters: []v1alpha1.GenericWebhookFilter{
+			filters: []kelos.GenericWebhookFilter{
 				{Field: "$.platform", Pattern: "[invalid"},
 			},
 			want:    false,
@@ -388,7 +388,7 @@ func TestMatchesGenericFilters_RegexMatch(t *testing.T) {
 		},
 		{
 			name: "mixed exact and regex filters",
-			filters: []v1alpha1.GenericWebhookFilter{
+			filters: []kelos.GenericWebhookFilter{
 				{Field: "$.level", Value: strPtr("error")},
 				{Field: "$.platform", Pattern: "python"},
 			},
@@ -422,7 +422,7 @@ func TestMatchesGenericFilters_NestedFields(t *testing.T) {
 	eventData, err := ParseGenericWebhook([]byte(payload))
 	require.NoError(t, err)
 
-	filters := []v1alpha1.GenericWebhookFilter{
+	filters := []kelos.GenericWebhookFilter{
 		{Field: "$.data.event.level", Value: strPtr("error")},
 		{Field: "$.data.event.platform", Pattern: "go|python"},
 	}
@@ -438,7 +438,7 @@ func TestMatchesGenericFilters_NumericValues(t *testing.T) {
 	require.NoError(t, err)
 
 	// Numeric values are converted to strings via fmt.Sprintf("%v")
-	filters := []v1alpha1.GenericWebhookFilter{
+	filters := []kelos.GenericWebhookFilter{
 		{Field: "$.status_code", Value: strPtr("500")},
 	}
 
@@ -452,7 +452,7 @@ func TestMatchesGenericFilters_BooleanValues(t *testing.T) {
 	eventData, err := ParseGenericWebhook([]byte(payload))
 	require.NoError(t, err)
 
-	filters := []v1alpha1.GenericWebhookFilter{
+	filters := []kelos.GenericWebhookFilter{
 		{Field: "$.critical", Value: strPtr("true")},
 	}
 

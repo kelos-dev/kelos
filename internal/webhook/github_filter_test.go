@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kelos-dev/kelos/api/v1alpha1"
+	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 )
 
 // parseAndMatch is a test helper that parses a payload and calls MatchesGitHubEvent.
-func parseAndMatch(t *testing.T, spawner *v1alpha1.GitHubWebhook, eventType string, payload []byte) (bool, error) {
+func parseAndMatch(t *testing.T, spawner *kelos.GitHubWebhook, eventType string, payload []byte) (bool, error) {
 	t.Helper()
 	eventData, err := ParseGitHubWebhook(eventType, payload)
 	if err != nil {
@@ -21,7 +21,7 @@ func parseAndMatch(t *testing.T, spawner *v1alpha1.GitHubWebhook, eventType stri
 }
 
 func TestMatchesGitHubEvent_EventTypeFilter(t *testing.T) {
-	spawner := &v1alpha1.GitHubWebhook{
+	spawner := &kelos.GitHubWebhook{
 		Events: []string{"issues", "pull_request"},
 	}
 
@@ -64,9 +64,9 @@ func TestMatchesGitHubEvent_EventTypeFilter(t *testing.T) {
 }
 
 func TestMatchesGitHubEvent_ActionFilter(t *testing.T) {
-	spawner := &v1alpha1.GitHubWebhook{
+	spawner := &kelos.GitHubWebhook{
 		Events: []string{"issues"},
-		Filters: []v1alpha1.GitHubWebhookFilter{
+		Filters: []kelos.GitHubWebhookFilter{
 			{
 				Event:  "issues",
 				Action: "opened",
@@ -106,9 +106,9 @@ func TestMatchesGitHubEvent_ActionFilter(t *testing.T) {
 }
 
 func TestMatchesGitHubEvent_AuthorFilter(t *testing.T) {
-	spawner := &v1alpha1.GitHubWebhook{
+	spawner := &kelos.GitHubWebhook{
 		Events: []string{"issues"},
-		Filters: []v1alpha1.GitHubWebhookFilter{
+		Filters: []kelos.GitHubWebhookFilter{
 			{
 				Event:  "issues",
 				Author: "specific-user",
@@ -148,7 +148,7 @@ func TestMatchesGitHubEvent_AuthorFilter(t *testing.T) {
 }
 
 func TestMatchesGitHubEvent_ExcludeAuthorsTopLevel(t *testing.T) {
-	spawner := &v1alpha1.GitHubWebhook{
+	spawner := &kelos.GitHubWebhook{
 		Events:         []string{"issues"},
 		ExcludeAuthors: []string{"bot-user", "dependabot[bot]"},
 	}
@@ -190,9 +190,9 @@ func TestMatchesGitHubEvent_ExcludeAuthorsTopLevel(t *testing.T) {
 }
 
 func TestMatchesGitHubEvent_ExcludeAuthorsPerFilter(t *testing.T) {
-	spawner := &v1alpha1.GitHubWebhook{
+	spawner := &kelos.GitHubWebhook{
 		Events: []string{"issues"},
-		Filters: []v1alpha1.GitHubWebhookFilter{
+		Filters: []kelos.GitHubWebhookFilter{
 			{
 				Event:          "issues",
 				Action:         "opened",
@@ -234,10 +234,10 @@ func TestMatchesGitHubEvent_ExcludeAuthorsPerFilter(t *testing.T) {
 
 func TestMatchesGitHubEvent_ExcludeAuthorsTopLevelOverridesFilter(t *testing.T) {
 	// Top-level ExcludeAuthors should reject even if a filter's Author field matches
-	spawner := &v1alpha1.GitHubWebhook{
+	spawner := &kelos.GitHubWebhook{
 		Events:         []string{"issues"},
 		ExcludeAuthors: []string{"bot-user"},
-		Filters: []v1alpha1.GitHubWebhookFilter{
+		Filters: []kelos.GitHubWebhookFilter{
 			{
 				Event:  "issues",
 				Author: "bot-user",
@@ -255,9 +255,9 @@ func TestMatchesGitHubEvent_ExcludeAuthorsTopLevelOverridesFilter(t *testing.T) 
 }
 
 func TestMatchesGitHubEvent_LabelsFilter(t *testing.T) {
-	spawner := &v1alpha1.GitHubWebhook{
+	spawner := &kelos.GitHubWebhook{
 		Events: []string{"issues"},
-		Filters: []v1alpha1.GitHubWebhookFilter{
+		Filters: []kelos.GitHubWebhookFilter{
 			{
 				Event:  "issues",
 				Labels: []string{"bug", "priority:high"},
@@ -345,16 +345,16 @@ func TestMatchesGitHubEvent_ExcludeLabelsFilter(t *testing.T) {
 	tests := []struct {
 		name      string
 		eventType string
-		spawner   *v1alpha1.GitHubWebhook
+		spawner   *kelos.GitHubWebhook
 		payload   string
 		want      bool
 	}{
 		{
 			name:      "issue - no excluded labels",
 			eventType: "issues",
-			spawner: &v1alpha1.GitHubWebhook{
+			spawner: &kelos.GitHubWebhook{
 				Events: []string{"issues"},
-				Filters: []v1alpha1.GitHubWebhookFilter{
+				Filters: []kelos.GitHubWebhookFilter{
 					{
 						Event:         "issues",
 						ExcludeLabels: []string{"wontfix", "duplicate"},
@@ -377,9 +377,9 @@ func TestMatchesGitHubEvent_ExcludeLabelsFilter(t *testing.T) {
 		{
 			name:      "issue - has excluded label",
 			eventType: "issues",
-			spawner: &v1alpha1.GitHubWebhook{
+			spawner: &kelos.GitHubWebhook{
 				Events: []string{"issues"},
-				Filters: []v1alpha1.GitHubWebhookFilter{
+				Filters: []kelos.GitHubWebhookFilter{
 					{
 						Event:         "issues",
 						ExcludeLabels: []string{"wontfix", "duplicate"},
@@ -402,9 +402,9 @@ func TestMatchesGitHubEvent_ExcludeLabelsFilter(t *testing.T) {
 		{
 			name:      "PR - no excluded labels",
 			eventType: "pull_request",
-			spawner: &v1alpha1.GitHubWebhook{
+			spawner: &kelos.GitHubWebhook{
 				Events: []string{"pull_request"},
-				Filters: []v1alpha1.GitHubWebhookFilter{
+				Filters: []kelos.GitHubWebhookFilter{
 					{
 						Event:         "pull_request",
 						ExcludeLabels: []string{"do-not-merge", "draft"},
@@ -427,9 +427,9 @@ func TestMatchesGitHubEvent_ExcludeLabelsFilter(t *testing.T) {
 		{
 			name:      "PR - has excluded label",
 			eventType: "pull_request",
-			spawner: &v1alpha1.GitHubWebhook{
+			spawner: &kelos.GitHubWebhook{
 				Events: []string{"pull_request"},
-				Filters: []v1alpha1.GitHubWebhookFilter{
+				Filters: []kelos.GitHubWebhookFilter{
 					{
 						Event:         "pull_request",
 						ExcludeLabels: []string{"do-not-merge", "draft"},
@@ -452,9 +452,9 @@ func TestMatchesGitHubEvent_ExcludeLabelsFilter(t *testing.T) {
 		{
 			name:      "empty labels - should match",
 			eventType: "issues",
-			spawner: &v1alpha1.GitHubWebhook{
+			spawner: &kelos.GitHubWebhook{
 				Events: []string{"issues"},
-				Filters: []v1alpha1.GitHubWebhookFilter{
+				Filters: []kelos.GitHubWebhookFilter{
 					{
 						Event:         "issues",
 						ExcludeLabels: []string{"wontfix"},
@@ -488,9 +488,9 @@ func TestMatchesGitHubEvent_ExcludeLabelsFilter(t *testing.T) {
 }
 
 func TestMatchesGitHubEvent_PullRequestDraftFilter(t *testing.T) {
-	spawner := &v1alpha1.GitHubWebhook{
+	spawner := &kelos.GitHubWebhook{
 		Events: []string{"pull_request"},
-		Filters: []v1alpha1.GitHubWebhookFilter{
+		Filters: []kelos.GitHubWebhookFilter{
 			{
 				Event: "pull_request",
 				Draft: func() *bool { b := false; return &b }(), // Only ready PRs
@@ -589,25 +589,25 @@ func TestMatchesGitHubEvent_IssueCommentCommentOnFilter(t *testing.T) {
 	}{
 		{
 			name:      "Issue scope matches plain issue comment",
-			commentOn: v1alpha1.CommentOnIssue,
+			commentOn: kelos.CommentOnIssue,
 			payload:   issueCommentPayload,
 			want:      true,
 		},
 		{
 			name:      "Issue scope rejects PR comment",
-			commentOn: v1alpha1.CommentOnIssue,
+			commentOn: kelos.CommentOnIssue,
 			payload:   prCommentPayload,
 			want:      false,
 		},
 		{
 			name:      "PullRequest scope matches PR comment",
-			commentOn: v1alpha1.CommentOnPullRequest,
+			commentOn: kelos.CommentOnPullRequest,
 			payload:   prCommentPayload,
 			want:      true,
 		},
 		{
 			name:      "PullRequest scope rejects plain issue comment",
-			commentOn: v1alpha1.CommentOnPullRequest,
+			commentOn: kelos.CommentOnPullRequest,
 			payload:   issueCommentPayload,
 			want:      false,
 		},
@@ -627,9 +627,9 @@ func TestMatchesGitHubEvent_IssueCommentCommentOnFilter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			spawner := &v1alpha1.GitHubWebhook{
+			spawner := &kelos.GitHubWebhook{
 				Events: []string{"issue_comment"},
-				Filters: []v1alpha1.GitHubWebhookFilter{
+				Filters: []kelos.GitHubWebhookFilter{
 					{
 						Event:     "issue_comment",
 						CommentOn: tt.commentOn,
@@ -652,12 +652,12 @@ func TestMatchesGitHubEvent_IssueCommentCommentOnFilter(t *testing.T) {
 // filter is meaningful only for issue_comment, which is ambiguous between
 // issues and PRs; other events are already unambiguous.
 func TestMatchesGitHubEvent_CommentOnIgnoredOnIssuesEvent(t *testing.T) {
-	spawner := &v1alpha1.GitHubWebhook{
+	spawner := &kelos.GitHubWebhook{
 		Events: []string{"issues"},
-		Filters: []v1alpha1.GitHubWebhookFilter{
+		Filters: []kelos.GitHubWebhookFilter{
 			{
 				Event:     "issues",
-				CommentOn: v1alpha1.CommentOnPullRequest,
+				CommentOn: kelos.CommentOnPullRequest,
 			},
 		},
 	}
@@ -681,9 +681,9 @@ func TestMatchesGitHubEvent_CommentOnIgnoredOnIssuesEvent(t *testing.T) {
 }
 
 func TestMatchesGitHubEvent_BodyContainsPullRequest(t *testing.T) {
-	spawner := &v1alpha1.GitHubWebhook{
+	spawner := &kelos.GitHubWebhook{
 		Events: []string{"pull_request"},
-		Filters: []v1alpha1.GitHubWebhookFilter{
+		Filters: []kelos.GitHubWebhookFilter{
 			{
 				Event:        "pull_request",
 				BodyContains: "/deploy",
@@ -745,9 +745,9 @@ func TestMatchesGitHubEvent_BodyContainsPullRequest(t *testing.T) {
 }
 
 func TestMatchesGitHubEvent_ExcludeBodyPatternsIssueComment(t *testing.T) {
-	spawner := &v1alpha1.GitHubWebhook{
+	spawner := &kelos.GitHubWebhook{
 		Events: []string{"issue_comment"},
-		Filters: []v1alpha1.GitHubWebhookFilter{
+		Filters: []kelos.GitHubWebhookFilter{
 			{
 				Event:               "issue_comment",
 				Action:              "created",
@@ -798,9 +798,9 @@ func TestMatchesGitHubEvent_ExcludeBodyPatternsIssueComment(t *testing.T) {
 }
 
 func TestMatchesGitHubEvent_ExcludeBodyPatternsPullRequest(t *testing.T) {
-	spawner := &v1alpha1.GitHubWebhook{
+	spawner := &kelos.GitHubWebhook{
 		Events: []string{"pull_request"},
-		Filters: []v1alpha1.GitHubWebhookFilter{
+		Filters: []kelos.GitHubWebhookFilter{
 			{
 				Event:               "pull_request",
 				ExcludeBodyPatterns: []string{`DO\s+NOT\s+MERGE`},
@@ -862,9 +862,9 @@ func TestMatchesGitHubEvent_ExcludeBodyPatternsPullRequest(t *testing.T) {
 }
 
 func TestMatchesGitHubEvent_ExcludeBodyPatternsPullRequestReview(t *testing.T) {
-	spawner := &v1alpha1.GitHubWebhook{
+	spawner := &kelos.GitHubWebhook{
 		Events: []string{"pull_request_review"},
-		Filters: []v1alpha1.GitHubWebhookFilter{
+		Filters: []kelos.GitHubWebhookFilter{
 			{
 				Event:               "pull_request_review",
 				Action:              "submitted",
@@ -929,9 +929,9 @@ func TestMatchesGitHubEvent_ExcludeBodyPatternsPullRequestReview(t *testing.T) {
 }
 
 func TestMatchesGitHubEvent_ExcludeBodyPatternsPullRequestReviewComment(t *testing.T) {
-	spawner := &v1alpha1.GitHubWebhook{
+	spawner := &kelos.GitHubWebhook{
 		Events: []string{"pull_request_review_comment"},
-		Filters: []v1alpha1.GitHubWebhookFilter{
+		Filters: []kelos.GitHubWebhookFilter{
 			{
 				Event:               "pull_request_review_comment",
 				Action:              "created",
@@ -996,9 +996,9 @@ func TestMatchesGitHubEvent_ExcludeBodyPatternsPullRequestReviewComment(t *testi
 }
 
 func TestMatchesGitHubEvent_BodyPatternAndExcludeBodyPatternsCombined(t *testing.T) {
-	spawner := &v1alpha1.GitHubWebhook{
+	spawner := &kelos.GitHubWebhook{
 		Events: []string{"issue_comment"},
-		Filters: []v1alpha1.GitHubWebhookFilter{
+		Filters: []kelos.GitHubWebhookFilter{
 			{
 				Event:               "issue_comment",
 				Action:              "created",
@@ -1060,9 +1060,9 @@ func TestMatchesGitHubEvent_BodyPatternAndExcludeBodyPatternsCombined(t *testing
 }
 
 func TestMatchesGitHubEvent_ExcludeBodyPatternsMultiple(t *testing.T) {
-	spawner := &v1alpha1.GitHubWebhook{
+	spawner := &kelos.GitHubWebhook{
 		Events: []string{"issue_comment"},
-		Filters: []v1alpha1.GitHubWebhookFilter{
+		Filters: []kelos.GitHubWebhookFilter{
 			{
 				Event:               "issue_comment",
 				Action:              "created",
@@ -1133,9 +1133,9 @@ func TestMatchesGitHubEvent_ExcludeBodyPatternsMultiple(t *testing.T) {
 }
 
 func TestMatchesGitHubEvent_ExcludeBodyPatternsIssue(t *testing.T) {
-	spawner := &v1alpha1.GitHubWebhook{
+	spawner := &kelos.GitHubWebhook{
 		Events: []string{"issues"},
-		Filters: []v1alpha1.GitHubWebhookFilter{
+		Filters: []kelos.GitHubWebhookFilter{
 			{
 				Event:               "issues",
 				Action:              "opened",
@@ -1196,9 +1196,9 @@ func TestMatchesGitHubEvent_ExcludeBodyPatternsIssue(t *testing.T) {
 }
 
 func TestMatchesGitHubEvent_BodyPatternRegex(t *testing.T) {
-	spawner := &v1alpha1.GitHubWebhook{
+	spawner := &kelos.GitHubWebhook{
 		Events: []string{"issue_comment"},
-		Filters: []v1alpha1.GitHubWebhookFilter{
+		Filters: []kelos.GitHubWebhookFilter{
 			{
 				Event:       "issue_comment",
 				Action:      "created",
@@ -1269,9 +1269,9 @@ func TestMatchesGitHubEvent_BodyPatternRegex(t *testing.T) {
 }
 
 func TestMatchesGitHubEvent_BranchFilter(t *testing.T) {
-	spawner := &v1alpha1.GitHubWebhook{
+	spawner := &kelos.GitHubWebhook{
 		Events: []string{"push"},
-		Filters: []v1alpha1.GitHubWebhookFilter{
+		Filters: []kelos.GitHubWebhookFilter{
 			{
 				Event:  "push",
 				Branch: "main",
@@ -1320,9 +1320,9 @@ func TestMatchesGitHubEvent_BranchFilter(t *testing.T) {
 
 func TestMatchesGitHubEvent_ORSemantics(t *testing.T) {
 	// Multiple filters for the same event type should use OR semantics
-	spawner := &v1alpha1.GitHubWebhook{
+	spawner := &kelos.GitHubWebhook{
 		Events: []string{"issues"},
-		Filters: []v1alpha1.GitHubWebhookFilter{
+		Filters: []kelos.GitHubWebhookFilter{
 			{
 				Event:  "issues",
 				Action: "opened",
@@ -1607,18 +1607,18 @@ func TestMatchesGitHubEvent_RepositoryFiltering(t *testing.T) {
 		"issue":{"number":1,"title":"Issue in B","state":"open"}
 	}`
 
-	spawnerRepoA := &v1alpha1.GitHubWebhook{
+	spawnerRepoA := &kelos.GitHubWebhook{
 		Events:     []string{"issues"},
 		Repository: "org/repo-a",
 	}
 
-	spawnerNoRepo := &v1alpha1.GitHubWebhook{
+	spawnerNoRepo := &kelos.GitHubWebhook{
 		Events: []string{"issues"},
 	}
 
 	tests := []struct {
 		name    string
-		spawner *v1alpha1.GitHubWebhook
+		spawner *kelos.GitHubWebhook
 		payload string
 		want    bool
 	}{
@@ -1763,17 +1763,17 @@ func TestMatchesGitHubEvent_FilePatterns(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		spawner *v1alpha1.GitHubWebhook
+		spawner *kelos.GitHubWebhook
 		want    bool
 	}{
 		{
 			name: "include matches go file",
-			spawner: &v1alpha1.GitHubWebhook{
+			spawner: &kelos.GitHubWebhook{
 				Events: []string{"push"},
-				Filters: []v1alpha1.GitHubWebhookFilter{
+				Filters: []kelos.GitHubWebhookFilter{
 					{
 						Event: "push",
-						FilePatterns: &v1alpha1.FilePatterns{
+						FilePatterns: &kelos.FilePatterns{
 							Include: []string{"internal/**"},
 						},
 					},
@@ -1783,12 +1783,12 @@ func TestMatchesGitHubEvent_FilePatterns(t *testing.T) {
 		},
 		{
 			name: "include does not match",
-			spawner: &v1alpha1.GitHubWebhook{
+			spawner: &kelos.GitHubWebhook{
 				Events: []string{"push"},
-				Filters: []v1alpha1.GitHubWebhookFilter{
+				Filters: []kelos.GitHubWebhookFilter{
 					{
 						Event: "push",
-						FilePatterns: &v1alpha1.FilePatterns{
+						FilePatterns: &kelos.FilePatterns{
 							Include: []string{"cmd/**"},
 						},
 					},
@@ -1798,12 +1798,12 @@ func TestMatchesGitHubEvent_FilePatterns(t *testing.T) {
 		},
 		{
 			name: "exclude removes docs then internal file remains",
-			spawner: &v1alpha1.GitHubWebhook{
+			spawner: &kelos.GitHubWebhook{
 				Events: []string{"push"},
-				Filters: []v1alpha1.GitHubWebhookFilter{
+				Filters: []kelos.GitHubWebhookFilter{
 					{
 						Event: "push",
-						FilePatterns: &v1alpha1.FilePatterns{
+						FilePatterns: &kelos.FilePatterns{
 							Exclude: []string{"docs/**"},
 						},
 					},
@@ -1813,9 +1813,9 @@ func TestMatchesGitHubEvent_FilePatterns(t *testing.T) {
 		},
 		{
 			name: "no filePatterns matches all",
-			spawner: &v1alpha1.GitHubWebhook{
+			spawner: &kelos.GitHubWebhook{
 				Events: []string{"push"},
-				Filters: []v1alpha1.GitHubWebhookFilter{
+				Filters: []kelos.GitHubWebhookFilter{
 					{Event: "push"},
 				},
 			},
@@ -1851,7 +1851,7 @@ func TestMatchesWebhookFilePatterns(t *testing.T) {
 	tests := []struct {
 		name     string
 		files    []string
-		patterns *v1alpha1.FilePatterns
+		patterns *kelos.FilePatterns
 		want     bool
 	}{
 		{
@@ -1863,7 +1863,7 @@ func TestMatchesWebhookFilePatterns(t *testing.T) {
 		{
 			name:  "exclude removes all files rejects",
 			files: []string{"docs/guide.md", "README.md"},
-			patterns: &v1alpha1.FilePatterns{
+			patterns: &kelos.FilePatterns{
 				Exclude: []string{"docs/**", "*.md"},
 			},
 			want: false,
@@ -1871,7 +1871,7 @@ func TestMatchesWebhookFilePatterns(t *testing.T) {
 		{
 			name:  "exclude does not remove all passes",
 			files: []string{"docs/guide.md", "main.go"},
-			patterns: &v1alpha1.FilePatterns{
+			patterns: &kelos.FilePatterns{
 				Exclude: []string{"docs/**"},
 			},
 			want: true,
@@ -1879,7 +1879,7 @@ func TestMatchesWebhookFilePatterns(t *testing.T) {
 		{
 			name:  "include with exclude - vendor excluded then include matches",
 			files: []string{"vendor/x.go", "main.go"},
-			patterns: &v1alpha1.FilePatterns{
+			patterns: &kelos.FilePatterns{
 				Include: []string{"**/*.go"},
 				Exclude: []string{"vendor/**"},
 			},
@@ -2337,9 +2337,9 @@ func TestParseGitHubWebhook_ReleaseEvent(t *testing.T) {
 }
 
 func TestMatchesGitHubEvent_CreateTagEvent(t *testing.T) {
-	spawner := &v1alpha1.GitHubWebhook{
+	spawner := &kelos.GitHubWebhook{
 		Events: []string{"create"},
-		Filters: []v1alpha1.GitHubWebhookFilter{
+		Filters: []kelos.GitHubWebhookFilter{
 			{
 				Event: "create",
 				Tag:   "v*",
@@ -2399,9 +2399,9 @@ func TestMatchesGitHubEvent_CreateTagEvent(t *testing.T) {
 }
 
 func TestMatchesGitHubEvent_CreateBranchEvent(t *testing.T) {
-	spawner := &v1alpha1.GitHubWebhook{
+	spawner := &kelos.GitHubWebhook{
 		Events: []string{"create"},
-		Filters: []v1alpha1.GitHubWebhookFilter{
+		Filters: []kelos.GitHubWebhookFilter{
 			{
 				Event:  "create",
 				Branch: "feature/*",
@@ -2463,15 +2463,15 @@ func TestMatchesGitHubEvent_CreateBranchEvent(t *testing.T) {
 func TestMatchesGitHubEvent_MalformedGlobPattern(t *testing.T) {
 	tests := []struct {
 		name    string
-		spawner *v1alpha1.GitHubWebhook
+		spawner *kelos.GitHubWebhook
 		event   string
 		payload string
 	}{
 		{
 			name: "malformed tag pattern rejects event",
-			spawner: &v1alpha1.GitHubWebhook{
+			spawner: &kelos.GitHubWebhook{
 				Events: []string{"create"},
-				Filters: []v1alpha1.GitHubWebhookFilter{
+				Filters: []kelos.GitHubWebhookFilter{
 					{
 						Event: "create",
 						Tag:   "[invalid",
@@ -2488,9 +2488,9 @@ func TestMatchesGitHubEvent_MalformedGlobPattern(t *testing.T) {
 		},
 		{
 			name: "malformed branch pattern rejects event",
-			spawner: &v1alpha1.GitHubWebhook{
+			spawner: &kelos.GitHubWebhook{
 				Events: []string{"push"},
-				Filters: []v1alpha1.GitHubWebhookFilter{
+				Filters: []kelos.GitHubWebhookFilter{
 					{
 						Event:  "push",
 						Branch: "[invalid",
@@ -2521,9 +2521,9 @@ func TestMatchesGitHubEvent_MalformedGlobPattern(t *testing.T) {
 }
 
 func TestMatchesGitHubEvent_ReleaseEvent(t *testing.T) {
-	spawner := &v1alpha1.GitHubWebhook{
+	spawner := &kelos.GitHubWebhook{
 		Events: []string{"release"},
-		Filters: []v1alpha1.GitHubWebhookFilter{
+		Filters: []kelos.GitHubWebhookFilter{
 			{
 				Event:  "release",
 				Action: "published",
@@ -2585,7 +2585,7 @@ func TestMatchesGitHubEvent_ReleaseEvent(t *testing.T) {
 
 func TestMatchesGitHubEvent_ReleaseNoFilter(t *testing.T) {
 	// When no filters are set, all release events should match
-	spawner := &v1alpha1.GitHubWebhook{
+	spawner := &kelos.GitHubWebhook{
 		Events: []string{"release"},
 	}
 

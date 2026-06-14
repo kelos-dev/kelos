@@ -10,11 +10,11 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/kelos-dev/kelos/api/v1alpha1"
+	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 )
 
 func TestMatchesLinearEvent_TypeFilter(t *testing.T) {
-	spawner := &v1alpha1.LinearWebhook{
+	spawner := &kelos.LinearWebhook{
 		Types: []string{"Issue", "Comment"},
 	}
 
@@ -61,9 +61,9 @@ func TestMatchesLinearEvent_TypeFilter(t *testing.T) {
 }
 
 func TestMatchesLinearEvent_ActionFilter(t *testing.T) {
-	spawner := &v1alpha1.LinearWebhook{
+	spawner := &kelos.LinearWebhook{
 		Types: []string{"Issue"},
-		Filters: []v1alpha1.LinearWebhookFilter{
+		Filters: []kelos.LinearWebhookFilter{
 			{
 				Action: "create",
 			},
@@ -106,9 +106,9 @@ func TestMatchesLinearEvent_ActionFilter(t *testing.T) {
 }
 
 func TestMatchesLinearEvent_StateFilter(t *testing.T) {
-	spawner := &v1alpha1.LinearWebhook{
+	spawner := &kelos.LinearWebhook{
 		Types: []string{"Issue"},
-		Filters: []v1alpha1.LinearWebhookFilter{
+		Filters: []kelos.LinearWebhookFilter{
 			{
 				States: []string{"Todo", "In Progress"},
 			},
@@ -192,9 +192,9 @@ func TestMatchesLinearEvent_StateFilter(t *testing.T) {
 }
 
 func TestMatchesLinearEvent_LabelsFilter(t *testing.T) {
-	spawner := &v1alpha1.LinearWebhook{
+	spawner := &kelos.LinearWebhook{
 		Types: []string{"Issue"},
-		Filters: []v1alpha1.LinearWebhookFilter{
+		Filters: []kelos.LinearWebhookFilter{
 			{
 				Labels: []string{"bug", "priority:high"},
 			},
@@ -285,9 +285,9 @@ func TestMatchesLinearEvent_LabelsFilter(t *testing.T) {
 }
 
 func TestMatchesLinearEvent_LabelsCaseInsensitive(t *testing.T) {
-	spawner := &v1alpha1.LinearWebhook{
+	spawner := &kelos.LinearWebhook{
 		Types: []string{"Issue"},
-		Filters: []v1alpha1.LinearWebhookFilter{
+		Filters: []kelos.LinearWebhookFilter{
 			{
 				Labels: []string{"Bug", "Priority:High"},
 			},
@@ -369,9 +369,9 @@ func TestMatchesLinearEvent_LabelsCaseInsensitive(t *testing.T) {
 }
 
 func TestMatchesLinearEvent_ExcludeLabelsCaseInsensitive(t *testing.T) {
-	spawner := &v1alpha1.LinearWebhook{
+	spawner := &kelos.LinearWebhook{
 		Types: []string{"Issue"},
-		Filters: []v1alpha1.LinearWebhookFilter{
+		Filters: []kelos.LinearWebhookFilter{
 			{
 				ExcludeLabels: []string{"WontFix"},
 			},
@@ -451,9 +451,9 @@ func TestMatchesLinearEvent_ExcludeLabelsCaseInsensitive(t *testing.T) {
 }
 
 func TestMatchesLinearEvent_ExcludeLabelsFilter(t *testing.T) {
-	spawner := &v1alpha1.LinearWebhook{
+	spawner := &kelos.LinearWebhook{
 		Types: []string{"Issue"},
-		Filters: []v1alpha1.LinearWebhookFilter{
+		Filters: []kelos.LinearWebhookFilter{
 			{
 				ExcludeLabels: []string{"wontfix", "duplicate"},
 			},
@@ -560,9 +560,9 @@ func TestMatchesLinearEvent_ExcludeLabelsFilter(t *testing.T) {
 
 func TestMatchesLinearEvent_ORSemantics(t *testing.T) {
 	// Multiple filters for the same event type should use OR semantics
-	spawner := &v1alpha1.LinearWebhook{
+	spawner := &kelos.LinearWebhook{
 		Types: []string{"Issue"},
-		Filters: []v1alpha1.LinearWebhookFilter{
+		Filters: []kelos.LinearWebhookFilter{
 			{
 				Action: "create",
 			},
@@ -613,7 +613,7 @@ func TestMatchesLinearEvent_ORSemantics(t *testing.T) {
 }
 
 func TestMatchesLinearEvent_NoFilters(t *testing.T) {
-	spawner := &v1alpha1.LinearWebhook{
+	spawner := &kelos.LinearWebhook{
 		Types: []string{"Issue", "Comment"},
 		// No filters - should match all allowed types
 	}
@@ -659,9 +659,9 @@ func TestMatchesLinearEvent_NoFilters(t *testing.T) {
 }
 
 func TestMatchesLinearEvent_CommentLabelsFilter(t *testing.T) {
-	spawner := &v1alpha1.LinearWebhook{
+	spawner := &kelos.LinearWebhook{
 		Types: []string{"Comment"},
-		Filters: []v1alpha1.LinearWebhookFilter{
+		Filters: []kelos.LinearWebhookFilter{
 			{
 				Labels: []string{"bug", "priority:high"},
 			},
@@ -780,9 +780,9 @@ func TestMatchesLinearEvent_CommentLabelsFilter(t *testing.T) {
 }
 
 func TestMatchesLinearEvent_CommentExcludeLabelsFilter(t *testing.T) {
-	spawner := &v1alpha1.LinearWebhook{
+	spawner := &kelos.LinearWebhook{
 		Types: []string{"Comment"},
-		Filters: []v1alpha1.LinearWebhookFilter{
+		Filters: []kelos.LinearWebhookFilter{
 			{
 				ExcludeLabels: []string{"wontfix", "duplicate"},
 			},
@@ -909,9 +909,9 @@ func TestMatchesLinearEvent_CommentExcludeLabelsFilter(t *testing.T) {
 
 func TestMatchesLinearEvent_IssueLabelsRegression(t *testing.T) {
 	// Regression test: ensure Issue events still use data.labels (not data.issue.labels)
-	spawner := &v1alpha1.LinearWebhook{
+	spawner := &kelos.LinearWebhook{
 		Types: []string{"Issue"},
-		Filters: []v1alpha1.LinearWebhookFilter{
+		Filters: []kelos.LinearWebhookFilter{
 			{
 				Labels: []string{"bug"},
 			},
@@ -1148,14 +1148,14 @@ func TestParseLinearWebhook(t *testing.T) {
 func TestMatchesLinearEvent(t *testing.T) {
 	tests := []struct {
 		name     string
-		config   *v1alpha1.LinearWebhook
+		config   *kelos.LinearWebhook
 		payload  string
 		expected bool
 		wantErr  bool
 	}{
 		{
 			name: "matches allowed type with no filters",
-			config: &v1alpha1.LinearWebhook{
+			config: &kelos.LinearWebhook{
 				Types: []string{"Issue"},
 			},
 			payload: `{
@@ -1168,7 +1168,7 @@ func TestMatchesLinearEvent(t *testing.T) {
 		},
 		{
 			name: "does not match disallowed type",
-			config: &v1alpha1.LinearWebhook{
+			config: &kelos.LinearWebhook{
 				Types: []string{"Comment"},
 			},
 			payload: `{
@@ -1181,9 +1181,9 @@ func TestMatchesLinearEvent(t *testing.T) {
 		},
 		{
 			name: "matches with action filter",
-			config: &v1alpha1.LinearWebhook{
+			config: &kelos.LinearWebhook{
 				Types: []string{"Issue"},
-				Filters: []v1alpha1.LinearWebhookFilter{
+				Filters: []kelos.LinearWebhookFilter{
 					{
 						Action: "create",
 					},
@@ -1199,9 +1199,9 @@ func TestMatchesLinearEvent(t *testing.T) {
 		},
 		{
 			name: "does not match wrong action",
-			config: &v1alpha1.LinearWebhook{
+			config: &kelos.LinearWebhook{
 				Types: []string{"Issue"},
-				Filters: []v1alpha1.LinearWebhookFilter{
+				Filters: []kelos.LinearWebhookFilter{
 					{
 						Action: "update",
 					},
@@ -1217,9 +1217,9 @@ func TestMatchesLinearEvent(t *testing.T) {
 		},
 		{
 			name: "matches with state filter",
-			config: &v1alpha1.LinearWebhook{
+			config: &kelos.LinearWebhook{
 				Types: []string{"Issue"},
-				Filters: []v1alpha1.LinearWebhookFilter{
+				Filters: []kelos.LinearWebhookFilter{
 					{
 						States: []string{"Todo", "In Progress"},
 					},
@@ -1239,9 +1239,9 @@ func TestMatchesLinearEvent(t *testing.T) {
 		},
 		{
 			name: "does not match wrong state",
-			config: &v1alpha1.LinearWebhook{
+			config: &kelos.LinearWebhook{
 				Types: []string{"Issue"},
-				Filters: []v1alpha1.LinearWebhookFilter{
+				Filters: []kelos.LinearWebhookFilter{
 					{
 						States: []string{"Done"},
 					},
@@ -1261,9 +1261,9 @@ func TestMatchesLinearEvent(t *testing.T) {
 		},
 		{
 			name: "matches with required labels",
-			config: &v1alpha1.LinearWebhook{
+			config: &kelos.LinearWebhook{
 				Types: []string{"Issue"},
-				Filters: []v1alpha1.LinearWebhookFilter{
+				Filters: []kelos.LinearWebhookFilter{
 					{
 						Labels: []string{"bug"},
 					},
@@ -1283,9 +1283,9 @@ func TestMatchesLinearEvent(t *testing.T) {
 		},
 		{
 			name: "does not match missing required label",
-			config: &v1alpha1.LinearWebhook{
+			config: &kelos.LinearWebhook{
 				Types: []string{"Issue"},
-				Filters: []v1alpha1.LinearWebhookFilter{
+				Filters: []kelos.LinearWebhookFilter{
 					{
 						Labels: []string{"feature"},
 					},
@@ -1305,9 +1305,9 @@ func TestMatchesLinearEvent(t *testing.T) {
 		},
 		{
 			name: "excludes based on exclude labels",
-			config: &v1alpha1.LinearWebhook{
+			config: &kelos.LinearWebhook{
 				Types: []string{"Issue"},
-				Filters: []v1alpha1.LinearWebhookFilter{
+				Filters: []kelos.LinearWebhookFilter{
 					{
 						ExcludeLabels: []string{"wontfix"},
 					},
@@ -1327,7 +1327,7 @@ func TestMatchesLinearEvent(t *testing.T) {
 		},
 		{
 			name:     "invalid JSON payload",
-			config:   &v1alpha1.LinearWebhook{Types: []string{"Issue"}},
+			config:   &kelos.LinearWebhook{Types: []string{"Issue"}},
 			payload:  `invalid json`,
 			expected: false,
 			wantErr:  true,
@@ -1383,18 +1383,18 @@ func TestExtractLinearWorkItem(t *testing.T) {
 func TestSpawnerNeedsLinearLabels(t *testing.T) {
 	tests := []struct {
 		name    string
-		spawner *v1alpha1.TaskSpawner
+		spawner *kelos.TaskSpawner
 		payload string
 		want    bool
 	}{
 		{
 			name: "comment event with typed label filter and no labels in payload",
-			spawner: &v1alpha1.TaskSpawner{
-				Spec: v1alpha1.TaskSpawnerSpec{
-					When: v1alpha1.When{
-						LinearWebhook: &v1alpha1.LinearWebhook{
+			spawner: &kelos.TaskSpawner{
+				Spec: kelos.TaskSpawnerSpec{
+					When: kelos.When{
+						LinearWebhook: &kelos.LinearWebhook{
 							Types: []string{"Comment"},
-							Filters: []v1alpha1.LinearWebhookFilter{
+							Filters: []kelos.LinearWebhookFilter{
 								{Type: "Comment", Labels: []string{"bug"}},
 							},
 						},
@@ -1406,12 +1406,12 @@ func TestSpawnerNeedsLinearLabels(t *testing.T) {
 		},
 		{
 			name: "comment event with unscoped label filter and no labels in payload",
-			spawner: &v1alpha1.TaskSpawner{
-				Spec: v1alpha1.TaskSpawnerSpec{
-					When: v1alpha1.When{
-						LinearWebhook: &v1alpha1.LinearWebhook{
+			spawner: &kelos.TaskSpawner{
+				Spec: kelos.TaskSpawnerSpec{
+					When: kelos.When{
+						LinearWebhook: &kelos.LinearWebhook{
 							Types: []string{"Comment"},
-							Filters: []v1alpha1.LinearWebhookFilter{
+							Filters: []kelos.LinearWebhookFilter{
 								{Labels: []string{"bug"}},
 							},
 						},
@@ -1423,12 +1423,12 @@ func TestSpawnerNeedsLinearLabels(t *testing.T) {
 		},
 		{
 			name: "comment event with excludeLabels filter and no labels in payload",
-			spawner: &v1alpha1.TaskSpawner{
-				Spec: v1alpha1.TaskSpawnerSpec{
-					When: v1alpha1.When{
-						LinearWebhook: &v1alpha1.LinearWebhook{
+			spawner: &kelos.TaskSpawner{
+				Spec: kelos.TaskSpawnerSpec{
+					When: kelos.When{
+						LinearWebhook: &kelos.LinearWebhook{
 							Types: []string{"Comment"},
-							Filters: []v1alpha1.LinearWebhookFilter{
+							Filters: []kelos.LinearWebhookFilter{
 								{Type: "Comment", ExcludeLabels: []string{"wontfix"}},
 							},
 						},
@@ -1440,12 +1440,12 @@ func TestSpawnerNeedsLinearLabels(t *testing.T) {
 		},
 		{
 			name: "comment event with labels already in payload",
-			spawner: &v1alpha1.TaskSpawner{
-				Spec: v1alpha1.TaskSpawnerSpec{
-					When: v1alpha1.When{
-						LinearWebhook: &v1alpha1.LinearWebhook{
+			spawner: &kelos.TaskSpawner{
+				Spec: kelos.TaskSpawnerSpec{
+					When: kelos.When{
+						LinearWebhook: &kelos.LinearWebhook{
 							Types: []string{"Comment"},
-							Filters: []v1alpha1.LinearWebhookFilter{
+							Filters: []kelos.LinearWebhookFilter{
 								{Type: "Comment", Labels: []string{"bug"}},
 							},
 						},
@@ -1457,12 +1457,12 @@ func TestSpawnerNeedsLinearLabels(t *testing.T) {
 		},
 		{
 			name: "comment event with no label filter",
-			spawner: &v1alpha1.TaskSpawner{
-				Spec: v1alpha1.TaskSpawnerSpec{
-					When: v1alpha1.When{
-						LinearWebhook: &v1alpha1.LinearWebhook{
+			spawner: &kelos.TaskSpawner{
+				Spec: kelos.TaskSpawnerSpec{
+					When: kelos.When{
+						LinearWebhook: &kelos.LinearWebhook{
 							Types: []string{"Comment"},
-							Filters: []v1alpha1.LinearWebhookFilter{
+							Filters: []kelos.LinearWebhookFilter{
 								{Type: "Comment", Action: "create"},
 							},
 						},
@@ -1474,12 +1474,12 @@ func TestSpawnerNeedsLinearLabels(t *testing.T) {
 		},
 		{
 			name: "issue event is not enriched",
-			spawner: &v1alpha1.TaskSpawner{
-				Spec: v1alpha1.TaskSpawnerSpec{
-					When: v1alpha1.When{
-						LinearWebhook: &v1alpha1.LinearWebhook{
+			spawner: &kelos.TaskSpawner{
+				Spec: kelos.TaskSpawnerSpec{
+					When: kelos.When{
+						LinearWebhook: &kelos.LinearWebhook{
 							Types: []string{"Issue"},
-							Filters: []v1alpha1.LinearWebhookFilter{
+							Filters: []kelos.LinearWebhookFilter{
 								{Type: "Issue", Labels: []string{"bug"}},
 							},
 						},
@@ -1491,12 +1491,12 @@ func TestSpawnerNeedsLinearLabels(t *testing.T) {
 		},
 		{
 			name: "issue-scoped label filter does not trigger enrichment for Comment",
-			spawner: &v1alpha1.TaskSpawner{
-				Spec: v1alpha1.TaskSpawnerSpec{
-					When: v1alpha1.When{
-						LinearWebhook: &v1alpha1.LinearWebhook{
+			spawner: &kelos.TaskSpawner{
+				Spec: kelos.TaskSpawnerSpec{
+					When: kelos.When{
+						LinearWebhook: &kelos.LinearWebhook{
 							Types: []string{"Issue", "Comment"},
-							Filters: []v1alpha1.LinearWebhookFilter{
+							Filters: []kelos.LinearWebhookFilter{
 								{Type: "Issue", Labels: []string{"bug"}},
 								{Type: "Comment", Action: "create"},
 							},
@@ -1509,12 +1509,12 @@ func TestSpawnerNeedsLinearLabels(t *testing.T) {
 		},
 		{
 			name: "unscoped label filter triggers enrichment for Comment",
-			spawner: &v1alpha1.TaskSpawner{
-				Spec: v1alpha1.TaskSpawnerSpec{
-					When: v1alpha1.When{
-						LinearWebhook: &v1alpha1.LinearWebhook{
+			spawner: &kelos.TaskSpawner{
+				Spec: kelos.TaskSpawnerSpec{
+					When: kelos.When{
+						LinearWebhook: &kelos.LinearWebhook{
 							Types: []string{"Issue", "Comment"},
-							Filters: []v1alpha1.LinearWebhookFilter{
+							Filters: []kelos.LinearWebhookFilter{
 								{Labels: []string{"bug"}},
 							},
 						},
@@ -1639,9 +1639,9 @@ func TestEnrichLinearCommentLabels_MatchesFilterAfterEnrichment(t *testing.T) {
 	}
 	defer func() { linearLabelFetcher = origFetcher }()
 
-	config := &v1alpha1.LinearWebhook{
+	config := &kelos.LinearWebhook{
 		Types: []string{"Comment"},
-		Filters: []v1alpha1.LinearWebhookFilter{
+		Filters: []kelos.LinearWebhookFilter{
 			{Type: "Comment", Labels: []string{"bug"}},
 		},
 	}

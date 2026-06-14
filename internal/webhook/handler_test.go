@@ -17,7 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/reporting"
 	"github.com/kelos-dev/kelos/internal/taskbuilder"
 )
@@ -26,14 +26,14 @@ import (
 func newGenericTestHandler(t *testing.T, objs ...client.Object) *WebhookHandler {
 	t.Helper()
 	scheme := runtime.NewScheme()
-	if err := kelosv1alpha1.AddToScheme(scheme); err != nil {
+	if err := kelos.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(objs...).
-		WithStatusSubresource(&kelosv1alpha1.TaskSpawner{}).
+		WithStatusSubresource(&kelos.TaskSpawner{}).
 		Build()
 
 	tb, err := taskbuilder.NewTaskBuilder(fakeClient)
@@ -64,14 +64,14 @@ func signPayload(payload, secret []byte) string {
 func newTestHandler(t *testing.T, objs ...client.Object) *WebhookHandler {
 	t.Helper()
 	scheme := runtime.NewScheme()
-	if err := kelosv1alpha1.AddToScheme(scheme); err != nil {
+	if err := kelos.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(objs...).
-		WithStatusSubresource(&kelosv1alpha1.TaskSpawner{}).
+		WithStatusSubresource(&kelos.TaskSpawner{}).
 		Build()
 
 	tb, err := taskbuilder.NewTaskBuilder(fakeClient)
@@ -154,24 +154,24 @@ func TestServeHTTP_AcceptsValidSignature(t *testing.T) {
 }
 
 func TestServeHTTP_DuplicateDeliveryIsIdempotent(t *testing.T) {
-	spawner := &kelosv1alpha1.TaskSpawner{
+	spawner := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "dedup-gh-spawner",
 			Namespace: "default",
 			UID:       "dedup-gh-uid",
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubWebhook: &kelos.GitHubWebhook{
 					Events: []string{"issues"},
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
+				Credentials: kelos.Credentials{
 					Type: "api-key",
 				},
-				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
+				WorkspaceRef: &kelos.WorkspaceReference{
 					Name: "test-workspace",
 				},
 				PromptTemplate: "{{.Title}}",
@@ -197,7 +197,7 @@ func TestServeHTTP_DuplicateDeliveryIsIdempotent(t *testing.T) {
 		t.Fatalf("First request: expected %d, got %d", http.StatusOK, rr.Code)
 	}
 
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := handler.client.List(context.Background(), &taskList); err != nil {
 		t.Fatal(err)
 	}
@@ -226,17 +226,17 @@ func TestServeHTTP_DuplicateDeliveryIsIdempotent(t *testing.T) {
 }
 
 func TestServeHTTP_CreatesTaskForMatchingSpawner(t *testing.T) {
-	spawner := &kelosv1alpha1.TaskSpawner{
+	spawner := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-spawner",
 			Namespace: "default",
 			UID:       "test-uid-123",
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubWebhook: &kelos.GitHubWebhook{
 					Events: []string{"issues"},
-					Filters: []kelosv1alpha1.GitHubWebhookFilter{
+					Filters: []kelos.GitHubWebhookFilter{
 						{
 							Event:  "issues",
 							Action: "opened",
@@ -244,12 +244,12 @@ func TestServeHTTP_CreatesTaskForMatchingSpawner(t *testing.T) {
 					},
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
+				Credentials: kelos.Credentials{
 					Type: "api-key",
 				},
-				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
+				WorkspaceRef: &kelos.WorkspaceReference{
 					Name: "test-workspace",
 				},
 				PromptTemplate: "{{.Title}}",
@@ -274,7 +274,7 @@ func TestServeHTTP_CreatesTaskForMatchingSpawner(t *testing.T) {
 	}
 
 	// Verify the task was created
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := handler.client.List(context.Background(), &taskList); err != nil {
 		t.Fatal(err)
 	}
@@ -306,27 +306,27 @@ func TestServeHTTP_CreatesTaskForMatchingSpawner(t *testing.T) {
 }
 
 func TestServeHTTP_StampsReportingAnnotationsWhenEnabled(t *testing.T) {
-	spawner := &kelosv1alpha1.TaskSpawner{
+	spawner := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "reporting-spawner",
 			Namespace: "default",
 			UID:       "reporting-uid",
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubWebhook: &kelos.GitHubWebhook{
 					Events: []string{"issues"},
-					Reporting: &kelosv1alpha1.GitHubReporting{
+					Reporting: &kelos.GitHubReporting{
 						Enabled: true,
 					},
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
+				Credentials: kelos.Credentials{
 					Type: "api-key",
 				},
-				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
+				WorkspaceRef: &kelos.WorkspaceReference{
 					Name: "test-workspace",
 				},
 				PromptTemplate: "{{.Title}}",
@@ -350,7 +350,7 @@ func TestServeHTTP_StampsReportingAnnotationsWhenEnabled(t *testing.T) {
 		t.Fatalf("Expected %d, got %d", http.StatusOK, rr.Code)
 	}
 
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := handler.client.List(context.Background(), &taskList); err != nil {
 		t.Fatal(err)
 	}
@@ -378,24 +378,24 @@ func TestServeHTTP_StampsReportingAnnotationsWhenEnabled(t *testing.T) {
 }
 
 func TestServeHTTP_NoReportingAnnotationsWhenDisabled(t *testing.T) {
-	spawner := &kelosv1alpha1.TaskSpawner{
+	spawner := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "no-reporting-spawner",
 			Namespace: "default",
 			UID:       "no-reporting-uid",
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubWebhook: &kelos.GitHubWebhook{
 					Events: []string{"issues"},
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
+				Credentials: kelos.Credentials{
 					Type: "api-key",
 				},
-				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
+				WorkspaceRef: &kelos.WorkspaceReference{
 					Name: "test-workspace",
 				},
 				PromptTemplate: "{{.Title}}",
@@ -419,7 +419,7 @@ func TestServeHTTP_NoReportingAnnotationsWhenDisabled(t *testing.T) {
 		t.Fatalf("Expected %d, got %d", http.StatusOK, rr.Code)
 	}
 
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := handler.client.List(context.Background(), &taskList); err != nil {
 		t.Fatal(err)
 	}
@@ -435,27 +435,27 @@ func TestServeHTTP_NoReportingAnnotationsWhenDisabled(t *testing.T) {
 }
 
 func TestServeHTTP_ReportingAnnotationsPullRequest(t *testing.T) {
-	spawner := &kelosv1alpha1.TaskSpawner{
+	spawner := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "pr-reporting-spawner",
 			Namespace: "default",
 			UID:       "pr-reporting-uid",
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubWebhook: &kelos.GitHubWebhook{
 					Events: []string{"pull_request"},
-					Reporting: &kelosv1alpha1.GitHubReporting{
+					Reporting: &kelos.GitHubReporting{
 						Enabled: true,
 					},
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
+				Credentials: kelos.Credentials{
 					Type: "api-key",
 				},
-				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
+				WorkspaceRef: &kelos.WorkspaceReference{
 					Name: "test-workspace",
 				},
 				PromptTemplate: "{{.Title}}",
@@ -491,7 +491,7 @@ func TestServeHTTP_ReportingAnnotationsPullRequest(t *testing.T) {
 		t.Fatalf("Expected %d, got %d", http.StatusOK, rr.Code)
 	}
 
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := handler.client.List(context.Background(), &taskList); err != nil {
 		t.Fatal(err)
 	}
@@ -575,24 +575,24 @@ func TestWebhookSourceKind(t *testing.T) {
 
 func TestServeHTTP_SkipsNonMatchingSpawner(t *testing.T) {
 	// Spawner only listens for pull_request events, not issues
-	spawner := &kelosv1alpha1.TaskSpawner{
+	spawner := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "pr-only-spawner",
 			Namespace: "default",
 			UID:       "test-uid-456",
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubWebhook: &kelos.GitHubWebhook{
 					Events: []string{"pull_request"},
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
+				Credentials: kelos.Credentials{
 					Type: "api-key",
 				},
-				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
+				WorkspaceRef: &kelos.WorkspaceReference{
 					Name: "test-workspace",
 				},
 			},
@@ -616,7 +616,7 @@ func TestServeHTTP_SkipsNonMatchingSpawner(t *testing.T) {
 	}
 
 	// Verify no task was created
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := handler.client.List(context.Background(), &taskList); err != nil {
 		t.Fatal(err)
 	}
@@ -628,25 +628,25 @@ func TestServeHTTP_SkipsNonMatchingSpawner(t *testing.T) {
 
 func TestServeHTTP_SkipsSuspendedSpawner(t *testing.T) {
 	suspended := true
-	spawner := &kelosv1alpha1.TaskSpawner{
+	spawner := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "suspended-spawner",
 			Namespace: "default",
 			UID:       "test-uid-789",
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
+		Spec: kelos.TaskSpawnerSpec{
 			Suspend: &suspended,
-			When: kelosv1alpha1.When{
-				GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
+			When: kelos.When{
+				GitHubWebhook: &kelos.GitHubWebhook{
 					Events: []string{"issues"},
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
+				Credentials: kelos.Credentials{
 					Type: "api-key",
 				},
-				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
+				WorkspaceRef: &kelos.WorkspaceReference{
 					Name: "test-workspace",
 				},
 			},
@@ -670,7 +670,7 @@ func TestServeHTTP_SkipsSuspendedSpawner(t *testing.T) {
 	}
 
 	// Verify no task was created
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := handler.client.List(context.Background(), &taskList); err != nil {
 		t.Fatal(err)
 	}
@@ -682,31 +682,31 @@ func TestServeHTTP_SkipsSuspendedSpawner(t *testing.T) {
 
 func TestServeHTTP_MaxConcurrencyDropsEvent(t *testing.T) {
 	maxConcurrency := int32(1)
-	spawner := &kelosv1alpha1.TaskSpawner{
+	spawner := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "limited-spawner",
 			Namespace: "default",
 			UID:       "test-uid-max",
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
+		Spec: kelos.TaskSpawnerSpec{
 			MaxConcurrency: &maxConcurrency,
-			When: kelosv1alpha1.When{
-				GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
+			When: kelos.When{
+				GitHubWebhook: &kelos.GitHubWebhook{
 					Events: []string{"issues"},
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
+				Credentials: kelos.Credentials{
 					Type: "api-key",
 				},
-				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
+				WorkspaceRef: &kelos.WorkspaceReference{
 					Name: "test-workspace",
 				},
 				PromptTemplate: "{{.Title}}",
 			},
 		},
-		Status: kelosv1alpha1.TaskSpawnerStatus{
+		Status: kelos.TaskSpawnerStatus{
 			ActiveTasks: 1, // Already at max
 		},
 	}
@@ -728,7 +728,7 @@ func TestServeHTTP_MaxConcurrencyDropsEvent(t *testing.T) {
 	}
 
 	// Verify no task was created
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := handler.client.List(context.Background(), &taskList); err != nil {
 		t.Fatal(err)
 	}
@@ -739,25 +739,25 @@ func TestServeHTTP_MaxConcurrencyDropsEvent(t *testing.T) {
 }
 
 func TestServeHTTP_RepositoryFilterRejectsWrongRepo(t *testing.T) {
-	spawner := &kelosv1alpha1.TaskSpawner{
+	spawner := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "repo-filtered-spawner",
 			Namespace: "default",
 			UID:       "test-uid-repo",
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubWebhook: &kelos.GitHubWebhook{
 					Events:     []string{"issues"},
 					Repository: "other-org/other-repo",
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
+				Credentials: kelos.Credentials{
 					Type: "api-key",
 				},
-				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
+				WorkspaceRef: &kelos.WorkspaceReference{
 					Name: "test-workspace",
 				},
 				PromptTemplate: "{{.Title}}",
@@ -783,7 +783,7 @@ func TestServeHTTP_RepositoryFilterRejectsWrongRepo(t *testing.T) {
 	}
 
 	// Verify no task was created
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := handler.client.List(context.Background(), &taskList); err != nil {
 		t.Fatal(err)
 	}
@@ -801,24 +801,24 @@ func TestServeHTTP_IssueCommentOnPR_EnrichesBranch(t *testing.T) {
 		return githubPRHeadInfo{Branch: "feature-branch", SHA: "enriched-sha-456"}, nil
 	}
 
-	spawner := &kelosv1alpha1.TaskSpawner{
+	spawner := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "pr-comment-spawner",
 			Namespace: "default",
 			UID:       "test-uid-branch",
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubWebhook: &kelos.GitHubWebhook{
 					Events: []string{"issue_comment"},
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
+				Credentials: kelos.Credentials{
 					Type: "api-key",
 				},
-				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
+				WorkspaceRef: &kelos.WorkspaceReference{
 					Name: "test-workspace",
 				},
 				PromptTemplate: "Review PR on branch {{.Branch}}",
@@ -858,7 +858,7 @@ func TestServeHTTP_IssueCommentOnPR_EnrichesBranch(t *testing.T) {
 		t.Fatalf("Expected %d, got %d", http.StatusOK, rr.Code)
 	}
 
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := handler.client.List(context.Background(), &taskList); err != nil {
 		t.Fatal(err)
 	}
@@ -876,41 +876,41 @@ func TestServeHTTP_IssueCommentOnPR_EnrichesBranch(t *testing.T) {
 func TestSpawnerNeedsChangedFiles(t *testing.T) {
 	tests := []struct {
 		name    string
-		spawner *kelosv1alpha1.TaskSpawner
+		spawner *kelos.TaskSpawner
 		want    bool
 	}{
 		{
 			name: "filePatterns in filter",
-			spawner: &kelosv1alpha1.TaskSpawner{
-				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: kelosv1alpha1.When{
-						GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
+			spawner: &kelos.TaskSpawner{
+				Spec: kelos.TaskSpawnerSpec{
+					When: kelos.When{
+						GitHubWebhook: &kelos.GitHubWebhook{
 							Events: []string{"push"},
-							Filters: []kelosv1alpha1.GitHubWebhookFilter{
+							Filters: []kelos.GitHubWebhookFilter{
 								{
 									Event: "push",
-									FilePatterns: &kelosv1alpha1.FilePatterns{
+									FilePatterns: &kelos.FilePatterns{
 										Include: []string{"*.go"},
 									},
 								},
 							},
 						},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{},
+					TaskTemplate: kelos.TaskTemplate{},
 				},
 			},
 			want: true,
 		},
 		{
 			name: "no filePatterns in filters",
-			spawner: &kelosv1alpha1.TaskSpawner{
-				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When: kelosv1alpha1.When{
-						GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
+			spawner: &kelos.TaskSpawner{
+				Spec: kelos.TaskSpawnerSpec{
+					When: kelos.When{
+						GitHubWebhook: &kelos.GitHubWebhook{
 							Events: []string{"push"},
 						},
 					},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{
+					TaskTemplate: kelos.TaskTemplate{
 						PromptTemplate: "{{.Title}}",
 					},
 				},
@@ -919,10 +919,10 @@ func TestSpawnerNeedsChangedFiles(t *testing.T) {
 		},
 		{
 			name: "nil GitHubWebhook",
-			spawner: &kelosv1alpha1.TaskSpawner{
-				Spec: kelosv1alpha1.TaskSpawnerSpec{
-					When:         kelosv1alpha1.When{},
-					TaskTemplate: kelosv1alpha1.TaskTemplate{},
+			spawner: &kelos.TaskSpawner{
+				Spec: kelos.TaskSpawnerSpec{
+					When:         kelos.When{},
+					TaskTemplate: kelos.TaskTemplate{},
 				},
 			},
 			want: false,
@@ -945,14 +945,14 @@ func TestSpawnerNeedsChangedFiles(t *testing.T) {
 func newLinearTestHandler(t *testing.T, objs ...client.Object) *WebhookHandler {
 	t.Helper()
 	scheme := runtime.NewScheme()
-	if err := kelosv1alpha1.AddToScheme(scheme); err != nil {
+	if err := kelos.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
 
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithObjects(objs...).
-		WithStatusSubresource(&kelosv1alpha1.TaskSpawner{}).
+		WithStatusSubresource(&kelos.TaskSpawner{}).
 		Build()
 
 	tb, err := taskbuilder.NewTaskBuilder(fakeClient)
@@ -1014,24 +1014,24 @@ func TestLinearServeHTTP_AcceptsValidSignature(t *testing.T) {
 }
 
 func TestLinearServeHTTP_CreatesTaskForMatchingSpawner(t *testing.T) {
-	spawner := &kelosv1alpha1.TaskSpawner{
+	spawner := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "linear-spawner",
 			Namespace: "default",
 			UID:       "linear-uid-123",
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				LinearWebhook: &kelosv1alpha1.LinearWebhook{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				LinearWebhook: &kelos.LinearWebhook{
 					Types: []string{"Issue"},
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
+				Credentials: kelos.Credentials{
 					Type: "api-key",
 				},
-				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
+				WorkspaceRef: &kelos.WorkspaceReference{
 					Name: "test-workspace",
 				},
 				PromptTemplate: "{{.Title}}",
@@ -1054,7 +1054,7 @@ func TestLinearServeHTTP_CreatesTaskForMatchingSpawner(t *testing.T) {
 	}
 
 	// Verify the task was created
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := handler.client.List(context.Background(), &taskList); err != nil {
 		t.Fatal(err)
 	}
@@ -1077,24 +1077,24 @@ func TestLinearServeHTTP_CreatesTaskForMatchingSpawner(t *testing.T) {
 }
 
 func TestLinearServeHTTP_DuplicateBodyIsIdempotent(t *testing.T) {
-	spawner := &kelosv1alpha1.TaskSpawner{
+	spawner := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "dedup-spawner",
 			Namespace: "default",
 			UID:       "dedup-uid",
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				LinearWebhook: &kelosv1alpha1.LinearWebhook{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				LinearWebhook: &kelos.LinearWebhook{
 					Types: []string{"Issue"},
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
+				Credentials: kelos.Credentials{
 					Type: "api-key",
 				},
-				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
+				WorkspaceRef: &kelos.WorkspaceReference{
 					Name: "test-workspace",
 				},
 				PromptTemplate: "{{.Title}}",
@@ -1117,7 +1117,7 @@ func TestLinearServeHTTP_DuplicateBodyIsIdempotent(t *testing.T) {
 		t.Fatalf("First request: expected %d, got %d", http.StatusOK, rr.Code)
 	}
 
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := handler.client.List(context.Background(), &taskList); err != nil {
 		t.Fatal(err)
 	}
@@ -1186,21 +1186,21 @@ func TestGenericServeHTTP_AcceptsUnknownSource(t *testing.T) {
 }
 
 func TestGenericServeHTTP_CreatesTaskForMatchingSpawner(t *testing.T) {
-	spawner := &kelosv1alpha1.TaskSpawner{
+	spawner := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "notion-handler",
 			Namespace: "default",
 			UID:       "notion-uid-123",
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GenericWebhook: &kelosv1alpha1.GenericWebhook{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GenericWebhook: &kelos.GenericWebhook{
 					Source: "notion",
 					FieldMapping: map[string]string{
 						"id":    "$.data.id",
 						"title": "$.data.properties.Name.title[0].plain_text",
 					},
-					Filters: []kelosv1alpha1.GenericWebhookFilter{
+					Filters: []kelos.GenericWebhookFilter{
 						{
 							Field: "$.type",
 							Value: strPtr("page.updated"),
@@ -1212,9 +1212,9 @@ func TestGenericServeHTTP_CreatesTaskForMatchingSpawner(t *testing.T) {
 					},
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
+				Credentials: kelos.Credentials{
 					Type: "api-key",
 				},
 				PromptTemplate: "{{.title}}",
@@ -1234,7 +1234,7 @@ func TestGenericServeHTTP_CreatesTaskForMatchingSpawner(t *testing.T) {
 		t.Fatalf("Expected %d, got %d", http.StatusOK, rr.Code)
 	}
 
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := handler.client.List(context.Background(), &taskList); err != nil {
 		t.Fatal(err)
 	}
@@ -1253,20 +1253,20 @@ func TestGenericServeHTTP_CreatesTaskForMatchingSpawner(t *testing.T) {
 }
 
 func TestGenericServeHTTP_SkipsNonMatchingFilters(t *testing.T) {
-	spawner := &kelosv1alpha1.TaskSpawner{
+	spawner := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "notion-handler",
 			Namespace: "default",
 			UID:       "notion-uid-456",
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GenericWebhook: &kelosv1alpha1.GenericWebhook{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GenericWebhook: &kelos.GenericWebhook{
 					Source: "notion",
 					FieldMapping: map[string]string{
 						"id": "$.data.id",
 					},
-					Filters: []kelosv1alpha1.GenericWebhookFilter{
+					Filters: []kelos.GenericWebhookFilter{
 						{
 							Field: "$.type",
 							Value: strPtr("page.deleted"), // Won't match
@@ -1274,9 +1274,9 @@ func TestGenericServeHTTP_SkipsNonMatchingFilters(t *testing.T) {
 					},
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
+				Credentials: kelos.Credentials{
 					Type: "api-key",
 				},
 			},
@@ -1295,7 +1295,7 @@ func TestGenericServeHTTP_SkipsNonMatchingFilters(t *testing.T) {
 		t.Fatalf("Expected %d, got %d", http.StatusOK, rr.Code)
 	}
 
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := handler.client.List(context.Background(), &taskList); err != nil {
 		t.Fatal(err)
 	}
@@ -1307,24 +1307,24 @@ func TestGenericServeHTTP_SkipsNonMatchingFilters(t *testing.T) {
 
 func TestGenericServeHTTP_SkipsWrongSourceName(t *testing.T) {
 	// Spawner listens for "notion" but webhook comes to /webhook/sentry
-	spawner := &kelosv1alpha1.TaskSpawner{
+	spawner := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "notion-handler",
 			Namespace: "default",
 			UID:       "notion-uid-789",
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GenericWebhook: &kelosv1alpha1.GenericWebhook{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GenericWebhook: &kelos.GenericWebhook{
 					Source: "notion",
 					FieldMapping: map[string]string{
 						"id": "$.data.id",
 					},
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
+				Credentials: kelos.Credentials{
 					Type: "api-key",
 				},
 			},
@@ -1343,7 +1343,7 @@ func TestGenericServeHTTP_SkipsWrongSourceName(t *testing.T) {
 		t.Fatalf("Expected %d, got %d", http.StatusOK, rr.Code)
 	}
 
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := handler.client.List(context.Background(), &taskList); err != nil {
 		t.Fatal(err)
 	}
@@ -1354,24 +1354,24 @@ func TestGenericServeHTTP_SkipsWrongSourceName(t *testing.T) {
 }
 
 func TestGenericServeHTTP_DuplicateBodyIsIdempotent(t *testing.T) {
-	spawner := &kelosv1alpha1.TaskSpawner{
+	spawner := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "dedup-generic",
 			Namespace: "default",
 			UID:       "dedup-generic-uid",
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GenericWebhook: &kelosv1alpha1.GenericWebhook{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GenericWebhook: &kelos.GenericWebhook{
 					Source: "notion",
 					FieldMapping: map[string]string{
 						"id": "$.data.id",
 					},
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
+				Credentials: kelos.Credentials{
 					Type: "api-key",
 				},
 				PromptTemplate: "test",
@@ -1392,7 +1392,7 @@ func TestGenericServeHTTP_DuplicateBodyIsIdempotent(t *testing.T) {
 		t.Fatalf("First request: expected %d, got %d", http.StatusOK, rr.Code)
 	}
 
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := handler.client.List(context.Background(), &taskList); err != nil {
 		t.Fatal(err)
 	}
@@ -1420,24 +1420,24 @@ func TestGenericServeHTTP_DuplicateBodyIsIdempotent(t *testing.T) {
 func TestGenericServeHTTP_DuplicateIDDifferentBodyIsIdempotent(t *testing.T) {
 	// Same logical event (same mapped id) but different JSON encoding should
 	// still deduplicate via the id-based delivery ID, not the body hash.
-	spawner := &kelosv1alpha1.TaskSpawner{
+	spawner := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "dedup-id-generic",
 			Namespace: "default",
 			UID:       "dedup-id-generic-uid",
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GenericWebhook: &kelosv1alpha1.GenericWebhook{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GenericWebhook: &kelos.GenericWebhook{
 					Source: "notion",
 					FieldMapping: map[string]string{
 						"id": "$.data.id",
 					},
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
+				Credentials: kelos.Credentials{
 					Type: "api-key",
 				},
 				PromptTemplate: "test",
@@ -1457,7 +1457,7 @@ func TestGenericServeHTTP_DuplicateIDDifferentBodyIsIdempotent(t *testing.T) {
 		t.Fatalf("First request: expected %d, got %d", http.StatusOK, rr.Code)
 	}
 
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := handler.client.List(context.Background(), &taskList); err != nil {
 		t.Fatal(err)
 	}
@@ -1487,29 +1487,29 @@ func TestGenericServeHTTP_MultipleSpawnersNoFieldLeak(t *testing.T) {
 	// Spawner A maps "severity" from the payload; Spawner B does not.
 	// Before the fix, Fields were never reset between spawner iterations,
 	// so Spawner B's task template would see Spawner A's "severity" field.
-	spawnerA := &kelosv1alpha1.TaskSpawner{
+	spawnerA := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "notion-a",
 			Namespace: "default",
 			UID:       "notion-a-uid",
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GenericWebhook: &kelosv1alpha1.GenericWebhook{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GenericWebhook: &kelos.GenericWebhook{
 					Source: "notion",
 					FieldMapping: map[string]string{
 						"id":       "$.data.id",
 						"title":    "$.data.properties.Name.title[0].plain_text",
 						"severity": "$.data.properties.Status.select.name",
 					},
-					Filters: []kelosv1alpha1.GenericWebhookFilter{
+					Filters: []kelos.GenericWebhookFilter{
 						{Field: "$.type", Value: strPtr("page.updated")},
 					},
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
+				Credentials: kelos.Credentials{
 					Type: "api-key",
 				},
 				PromptTemplate: "A:{{.title}}",
@@ -1517,28 +1517,28 @@ func TestGenericServeHTTP_MultipleSpawnersNoFieldLeak(t *testing.T) {
 		},
 	}
 
-	spawnerB := &kelosv1alpha1.TaskSpawner{
+	spawnerB := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "notion-b",
 			Namespace: "default",
 			UID:       "notion-b-uid",
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GenericWebhook: &kelosv1alpha1.GenericWebhook{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GenericWebhook: &kelos.GenericWebhook{
 					Source: "notion",
 					FieldMapping: map[string]string{
 						"id":    "$.data.id",
 						"title": "$.data.properties.Name.title[0].plain_text",
 					},
-					Filters: []kelosv1alpha1.GenericWebhookFilter{
+					Filters: []kelos.GenericWebhookFilter{
 						{Field: "$.type", Value: strPtr("page.updated")},
 					},
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
+				Credentials: kelos.Credentials{
 					Type: "api-key",
 				},
 				PromptTemplate: "B:{{.title}}",
@@ -1557,7 +1557,7 @@ func TestGenericServeHTTP_MultipleSpawnersNoFieldLeak(t *testing.T) {
 		t.Fatalf("Expected %d, got %d", http.StatusOK, rr.Code)
 	}
 
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := handler.client.List(context.Background(), &taskList); err != nil {
 		t.Fatal(err)
 	}
@@ -1585,24 +1585,24 @@ func TestGenericServeHTTP_MultipleSpawnersNoFieldLeak(t *testing.T) {
 }
 
 func TestGenericServeHTTP_HyphenatedSourceName(t *testing.T) {
-	spawner := &kelosv1alpha1.TaskSpawner{
+	spawner := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "my-tool-handler",
 			Namespace: "default",
 			UID:       "my-tool-uid",
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GenericWebhook: &kelosv1alpha1.GenericWebhook{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GenericWebhook: &kelos.GenericWebhook{
 					Source: "my-tool",
 					FieldMapping: map[string]string{
 						"id": "$.id",
 					},
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
+				Credentials: kelos.Credentials{
 					Type: "api-key",
 				},
 				PromptTemplate: "test",
@@ -1622,7 +1622,7 @@ func TestGenericServeHTTP_HyphenatedSourceName(t *testing.T) {
 		t.Fatalf("Expected %d, got %d", http.StatusOK, rr.Code)
 	}
 
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := handler.client.List(context.Background(), &taskList); err != nil {
 		t.Fatal(err)
 	}
@@ -1632,28 +1632,28 @@ func TestGenericServeHTTP_HyphenatedSourceName(t *testing.T) {
 }
 
 func TestServeHTTP_ChecksAnnotationsForPRWebhook(t *testing.T) {
-	spawner := &kelosv1alpha1.TaskSpawner{
+	spawner := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "checks-spawner",
 			Namespace: "default",
 			UID:       "checks-uid",
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubWebhook: &kelos.GitHubWebhook{
 					Events: []string{"pull_request"},
-					Reporting: &kelosv1alpha1.GitHubReporting{
+					Reporting: &kelos.GitHubReporting{
 						Enabled: true,
-						Checks:  &kelosv1alpha1.GitHubChecksReporting{Name: "My Check"},
+						Checks:  &kelos.GitHubChecksReporting{Name: "My Check"},
 					},
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
+				Credentials: kelos.Credentials{
 					Type: "api-key",
 				},
-				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
+				WorkspaceRef: &kelos.WorkspaceReference{
 					Name: "test-workspace",
 				},
 				PromptTemplate: "{{.Title}}",
@@ -1689,7 +1689,7 @@ func TestServeHTTP_ChecksAnnotationsForPRWebhook(t *testing.T) {
 		t.Fatalf("Expected %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
 	}
 
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := handler.client.List(context.Background(), &taskList); err != nil {
 		t.Fatal(err)
 	}
@@ -1716,28 +1716,28 @@ func TestServeHTTP_ChecksAnnotationsForPRWebhook(t *testing.T) {
 }
 
 func TestServeHTTP_ChecksAnnotationsSkippedForNonPRWebhook(t *testing.T) {
-	spawner := &kelosv1alpha1.TaskSpawner{
+	spawner := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "checks-issue-spawner",
 			Namespace: "default",
 			UID:       "checks-issue-uid",
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubWebhook: &kelos.GitHubWebhook{
 					Events: []string{"issues", "pull_request"},
-					Reporting: &kelosv1alpha1.GitHubReporting{
+					Reporting: &kelos.GitHubReporting{
 						Enabled: true,
-						Checks:  &kelosv1alpha1.GitHubChecksReporting{},
+						Checks:  &kelos.GitHubChecksReporting{},
 					},
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
+				Credentials: kelos.Credentials{
 					Type: "api-key",
 				},
-				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
+				WorkspaceRef: &kelos.WorkspaceReference{
 					Name: "test-workspace",
 				},
 				PromptTemplate: "{{.Title}}",
@@ -1761,7 +1761,7 @@ func TestServeHTTP_ChecksAnnotationsSkippedForNonPRWebhook(t *testing.T) {
 		t.Fatalf("Expected %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
 	}
 
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := handler.client.List(context.Background(), &taskList); err != nil {
 		t.Fatal(err)
 	}
@@ -1784,27 +1784,27 @@ func TestServeHTTP_ChecksAnnotationsSkippedForNonPRWebhook(t *testing.T) {
 }
 
 func TestServeHTTP_ChecksOnlyWithoutCommentReporting(t *testing.T) {
-	spawner := &kelosv1alpha1.TaskSpawner{
+	spawner := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "checks-only-spawner",
 			Namespace: "default",
 			UID:       "checks-only-uid",
 		},
-		Spec: kelosv1alpha1.TaskSpawnerSpec{
-			When: kelosv1alpha1.When{
-				GitHubWebhook: &kelosv1alpha1.GitHubWebhook{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubWebhook: &kelos.GitHubWebhook{
 					Events: []string{"pull_request"},
-					Reporting: &kelosv1alpha1.GitHubReporting{
-						Checks: &kelosv1alpha1.GitHubChecksReporting{},
+					Reporting: &kelos.GitHubReporting{
+						Checks: &kelos.GitHubChecksReporting{},
 					},
 				},
 			},
-			TaskTemplate: kelosv1alpha1.TaskTemplate{
+			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelosv1alpha1.Credentials{
+				Credentials: kelos.Credentials{
 					Type: "api-key",
 				},
-				WorkspaceRef: &kelosv1alpha1.WorkspaceReference{
+				WorkspaceRef: &kelos.WorkspaceReference{
 					Name: "test-workspace",
 				},
 				PromptTemplate: "{{.Title}}",
@@ -1840,7 +1840,7 @@ func TestServeHTTP_ChecksOnlyWithoutCommentReporting(t *testing.T) {
 		t.Fatalf("Expected %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
 	}
 
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := handler.client.List(context.Background(), &taskList); err != nil {
 		t.Fatal(err)
 	}

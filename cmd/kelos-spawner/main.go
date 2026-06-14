@@ -23,7 +23,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/contextfetch"
 	"github.com/kelos-dev/kelos/internal/githubapp"
@@ -37,7 +36,6 @@ var scheme = runtime.NewScheme()
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(kelosv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(kelos.AddToScheme(scheme))
 }
 
@@ -179,7 +177,7 @@ func main() {
 // in the same goroutine as the discovery loop avoids races between Task
 // creation/deletion and annotation patching.
 func runReportingCycle(ctx context.Context, cl client.Client, key types.NamespacedName, reporter *reporting.TaskReporter) error {
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(ctx, &taskList,
 		client.InNamespace(key.Namespace),
 		client.MatchingLabels{"kelos.dev/taskspawner": key.Name},
@@ -211,7 +209,7 @@ func runCycleWithProxy(ctx context.Context, cl client.Client, key types.Namespac
 }
 
 func runCycleCore(ctx context.Context, cl client.Client, key types.NamespacedName, githubOwner, githubRepo, ghProxyURL, githubAPIBaseURL string, tokenResolver func(context.Context) (string, error), jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) error {
-	var ts kelosv1alpha1.TaskSpawner
+	var ts kelos.TaskSpawner
 	if err := cl.Get(ctx, key, &ts); err != nil {
 		return fmt.Errorf("fetching TaskSpawner: %w", err)
 	}
@@ -237,7 +235,7 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.NamespacedName, src source.Source) error {
 	log := ctrl.Log.WithName("spawner")
 
-	var ts kelosv1alpha1.TaskSpawner
+	var ts kelos.TaskSpawner
 	if err := cl.Get(ctx, key, &ts); err != nil {
 		return fmt.Errorf("fetching TaskSpawner: %w", err)
 	}
@@ -245,7 +243,7 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 	// Check if suspended
 	if ts.Spec.Suspend != nil && *ts.Spec.Suspend {
 		log.Info("TaskSpawner is suspended, skipping cycle")
-		if ts.Status.Phase != kelosv1alpha1.TaskSpawnerPhaseSuspended {
+		if ts.Status.Phase != kelos.TaskSpawnerPhaseSuspended {
 			// Re-fetch to get the latest resource version before status update
 			if err := cl.Get(ctx, key, &ts); err != nil {
 				return fmt.Errorf("re-fetching TaskSpawner for suspend status: %w", err)
@@ -254,10 +252,10 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 			if ts.Spec.Suspend == nil || !*ts.Spec.Suspend {
 				return nil
 			}
-			if ts.Status.Phase == kelosv1alpha1.TaskSpawnerPhaseSuspended {
+			if ts.Status.Phase == kelos.TaskSpawnerPhaseSuspended {
 				return nil
 			}
-			ts.Status.Phase = kelosv1alpha1.TaskSpawnerPhaseSuspended
+			ts.Status.Phase = kelos.TaskSpawnerPhaseSuspended
 			ts.Status.Message = "Suspended by user"
 			meta.SetStatusCondition(&ts.Status.Conditions, metav1.Condition{
 				Type:               "Suspended",
@@ -283,7 +281,7 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 
 	// Build set of already-created Tasks by listing them from the API.
 	// This is resilient to spawner restarts (status may lag behind actual Tasks).
-	var existingTaskList kelosv1alpha1.TaskList
+	var existingTaskList kelos.TaskList
 	if err := cl.List(ctx, &existingTaskList,
 		client.InNamespace(ts.Namespace),
 		client.MatchingLabels{"kelos.dev/taskspawner": ts.Name},
@@ -291,12 +289,12 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 		return fmt.Errorf("listing existing Tasks: %w", err)
 	}
 
-	existingTaskMap := make(map[string]*kelosv1alpha1.Task)
+	existingTaskMap := make(map[string]*kelos.Task)
 	activeTasks := 0
 	for i := range existingTaskList.Items {
 		t := &existingTaskList.Items[i]
 		existingTaskMap[t.Name] = t
-		if t.Status.Phase != kelosv1alpha1.TaskPhaseSucceeded && t.Status.Phase != kelosv1alpha1.TaskPhaseFailed {
+		if t.Status.Phase != kelos.TaskPhaseSucceeded && t.Status.Phase != kelos.TaskPhaseFailed {
 			activeTasks++
 		}
 	}
@@ -317,7 +315,7 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 		// the item will be picked up as new on the next cycle since the old task
 		// no longer exists.
 		if !item.TriggerTime.IsZero() &&
-			(existing.Status.Phase == kelosv1alpha1.TaskPhaseSucceeded || existing.Status.Phase == kelosv1alpha1.TaskPhaseFailed) &&
+			(existing.Status.Phase == kelos.TaskPhaseSucceeded || existing.Status.Phase == kelos.TaskPhaseFailed) &&
 			existing.Status.CompletionTime != nil &&
 			item.TriggerTime.After(existing.Status.CompletionTime.Time) {
 
@@ -397,7 +395,7 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 			&taskbuilder.SpawnerRef{
 				Name:       ts.Name,
 				UID:        string(ts.UID),
-				APIVersion: kelosv1alpha1.GroupVersion.String(),
+				APIVersion: kelos.GroupVersion.String(),
 				Kind:       "TaskSpawner",
 			},
 		)
@@ -448,7 +446,7 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 	}
 
 	now := metav1.Now()
-	ts.Status.Phase = kelosv1alpha1.TaskSpawnerPhaseRunning
+	ts.Status.Phase = kelos.TaskSpawnerPhaseRunning
 	ts.Status.LastDiscoveryTime = &now
 	ts.Status.TotalDiscovered = len(items)
 	ts.Status.TotalTasksCreated += newTasksCreated
@@ -496,7 +494,7 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 // sourceAnnotations returns annotations that stamp GitHub source metadata
 // onto a spawned Task. These annotations enable downstream consumers (such
 // as the reporting watcher) to identify the originating issue or PR.
-func sourceAnnotations(ts *kelosv1alpha1.TaskSpawner, item source.WorkItem) map[string]string {
+func sourceAnnotations(ts *kelos.TaskSpawner, item source.WorkItem) map[string]string {
 	if ts.Spec.When.GitHubIssues == nil && ts.Spec.When.GitHubPullRequests == nil {
 		return nil
 	}
@@ -532,7 +530,7 @@ func sourceAnnotations(ts *kelosv1alpha1.TaskSpawner, item source.WorkItem) map[
 // and enabled on the TaskSpawner. This only covers polling-based sources
 // (Issues, PRs); webhook-based reporting is handled by the webhook server
 // and its handler.
-func reportingEnabled(ts *kelosv1alpha1.TaskSpawner) bool {
+func reportingEnabled(ts *kelos.TaskSpawner) bool {
 	if ts.Spec.When.GitHubIssues != nil && ts.Spec.When.GitHubIssues.Reporting != nil {
 		return ts.Spec.When.GitHubIssues.Reporting.Enabled
 	}
@@ -544,7 +542,7 @@ func reportingEnabled(ts *kelosv1alpha1.TaskSpawner) bool {
 
 // checksReportingEnabled returns true when GitHub Checks API reporting is
 // configured and enabled on the TaskSpawner.
-func checksReportingEnabled(ts *kelosv1alpha1.TaskSpawner) bool {
+func checksReportingEnabled(ts *kelos.TaskSpawner) bool {
 	if ts.Spec.When.GitHubPullRequests != nil && ts.Spec.When.GitHubPullRequests.Reporting != nil && ts.Spec.When.GitHubPullRequests.Reporting.Checks != nil {
 		return true
 	}
@@ -553,7 +551,7 @@ func checksReportingEnabled(ts *kelosv1alpha1.TaskSpawner) bool {
 
 // resolvedCheckName returns the configured check name, or empty string for
 // the default.
-func resolvedCheckName(ts *kelosv1alpha1.TaskSpawner) string {
+func resolvedCheckName(ts *kelos.TaskSpawner) string {
 	if ts.Spec.When.GitHubPullRequests != nil && ts.Spec.When.GitHubPullRequests.Reporting != nil && ts.Spec.When.GitHubPullRequests.Reporting.Checks != nil {
 		return ts.Spec.When.GitHubPullRequests.Reporting.Checks.Name
 	}
@@ -568,7 +566,7 @@ type resolvedGitHubCommentPolicy struct {
 	MinimumPermission string
 }
 
-func githubTeamRefsToStrings(teams []kelosv1alpha1.GitHubTeamRef) []string {
+func githubTeamRefsToStrings(teams []kelos.GitHubTeamRef) []string {
 	if len(teams) == 0 {
 		return nil
 	}
@@ -580,48 +578,38 @@ func githubTeamRefsToStrings(teams []kelosv1alpha1.GitHubTeamRef) []string {
 	return out
 }
 
-func resolveGitHubCommentPolicy(policy *kelosv1alpha1.GitHubCommentPolicy, legacyTrigger string, legacyExclude []string) (resolvedGitHubCommentPolicy, error) {
-	legacyConfigured := strings.TrimSpace(legacyTrigger) != "" || len(legacyExclude) > 0
-	if policy != nil {
-		if legacyConfigured {
-			return resolvedGitHubCommentPolicy{}, fmt.Errorf("commentPolicy cannot be used with triggerComment or excludeComments")
-		}
-
-		return resolvedGitHubCommentPolicy{
-			TriggerComment:    policy.TriggerComment,
-			ExcludeComments:   append([]string(nil), policy.ExcludeComments...),
-			AllowedUsers:      append([]string(nil), policy.AllowedUsers...),
-			AllowedTeams:      githubTeamRefsToStrings(policy.AllowedTeams),
-			MinimumPermission: policy.MinimumPermission,
-		}, nil
+func resolveGitHubCommentPolicy(policy *kelos.GitHubCommentPolicy) resolvedGitHubCommentPolicy {
+	if policy == nil {
+		return resolvedGitHubCommentPolicy{}
 	}
 
 	return resolvedGitHubCommentPolicy{
-		TriggerComment:  legacyTrigger,
-		ExcludeComments: append([]string(nil), legacyExclude...),
-	}, nil
+		TriggerComment:    policy.TriggerComment,
+		ExcludeComments:   append([]string(nil), policy.ExcludeComments...),
+		AllowedUsers:      append([]string(nil), policy.AllowedUsers...),
+		AllowedTeams:      githubTeamRefsToStrings(policy.AllowedTeams),
+		MinimumPermission: policy.MinimumPermission,
+	}
 }
 
-func buildSource(ctx context.Context, ts *kelosv1alpha1.TaskSpawner, owner, repo, apiBaseURL string, tokenResolver func(context.Context) (string, error), jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) (source.Source, error) {
+func buildSource(ctx context.Context, ts *kelos.TaskSpawner, owner, repo, apiBaseURL string, tokenResolver func(context.Context) (string, error), jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) (source.Source, error) {
 	return buildSourceWithProxy(ctx, ts, owner, repo, "", apiBaseURL, tokenResolver, jiraBaseURL, jiraProject, jiraJQL, httpClient)
 }
 
-func buildSourceWithProxy(ctx context.Context, ts *kelosv1alpha1.TaskSpawner, owner, repo, ghProxyURL, apiBaseURL string, tokenResolver func(context.Context) (string, error), jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) (source.Source, error) {
+func buildSourceWithProxy(ctx context.Context, ts *kelos.TaskSpawner, owner, repo, ghProxyURL, apiBaseURL string, tokenResolver func(context.Context) (string, error), jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) (source.Source, error) {
 	if ts.Spec.When.GitHubIssues != nil {
 		gh := ts.Spec.When.GitHubIssues
-		commentPolicy, err := resolveGitHubCommentPolicy(gh.CommentPolicy, gh.TriggerComment, gh.ExcludeComments)
-		if err != nil {
-			return nil, err
-		}
+		commentPolicy := resolveGitHubCommentPolicy(gh.CommentPolicy)
 		baseURL := apiBaseURL
 		token := ""
 		if ghProxyURL != "" {
 			baseURL = ghProxyURL
 		} else if tokenResolver != nil {
-			token, err = tokenResolver(ctx)
+			resolvedToken, err := tokenResolver(ctx)
 			if err != nil {
 				return nil, err
 			}
+			token = resolvedToken
 		}
 		return &source.GitHubSource{
 			Owner:             owner,
@@ -647,19 +635,17 @@ func buildSourceWithProxy(ctx context.Context, ts *kelosv1alpha1.TaskSpawner, ow
 
 	if ts.Spec.When.GitHubPullRequests != nil {
 		gh := ts.Spec.When.GitHubPullRequests
-		commentPolicy, err := resolveGitHubCommentPolicy(gh.CommentPolicy, gh.TriggerComment, gh.ExcludeComments)
-		if err != nil {
-			return nil, err
-		}
+		commentPolicy := resolveGitHubCommentPolicy(gh.CommentPolicy)
 		baseURL := apiBaseURL
 		token := ""
 		if ghProxyURL != "" {
 			baseURL = ghProxyURL
 		} else if tokenResolver != nil {
-			token, err = tokenResolver(ctx)
+			resolvedToken, err := tokenResolver(ctx)
 			if err != nil {
 				return nil, err
 			}
+			token = resolvedToken
 		}
 
 		src := &source.GitHubPullRequestSource{
@@ -745,7 +731,7 @@ func newGitHubTokenResolver(token, appID, installID, privateKey, apiBaseURL stri
 	return githubapp.NewTokenProvider(tc, creds).Token
 }
 
-func priorityLabelsForTaskSpawner(ts *kelosv1alpha1.TaskSpawner) []string {
+func priorityLabelsForTaskSpawner(ts *kelos.TaskSpawner) []string {
 	if ts.Spec.When.GitHubIssues != nil {
 		return ts.Spec.When.GitHubIssues.PriorityLabels
 	}
@@ -758,7 +744,7 @@ func priorityLabelsForTaskSpawner(ts *kelosv1alpha1.TaskSpawner) []string {
 // deriveUpstreamRepo extracts the owner/repo from the githubIssues.repo or
 // githubPullRequests.repo override, returning it in "owner/repo" format.
 // Returns an empty string when no override is configured.
-func deriveUpstreamRepo(ts *kelosv1alpha1.TaskSpawner) string {
+func deriveUpstreamRepo(ts *kelos.TaskSpawner) string {
 	var repoOverride string
 	if ts.Spec.When.GitHubIssues != nil && ts.Spec.When.GitHubIssues.Repo != "" {
 		repoOverride = ts.Spec.When.GitHubIssues.Repo

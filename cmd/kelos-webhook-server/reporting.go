@@ -10,7 +10,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
-	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/reporting"
 )
 
@@ -39,7 +39,7 @@ type reportingReconciler struct {
 func (r *reportingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := ctrl.Log.WithName("reporting")
 
-	var task kelosv1alpha1.Task
+	var task kelos.Task
 	if err := r.Get(ctx, req.NamespacedName, &task); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -101,7 +101,7 @@ func (r *reportingReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("webhook-reporting").
 		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
-		For(&kelosv1alpha1.Task{}, builder.WithPredicates(
+		For(&kelos.Task{}, builder.WithPredicates(
 			reportingAnnotationPredicate{},
 		)).
 		Complete(r)
@@ -123,8 +123,8 @@ func (reportingAnnotationPredicate) Update(e event.UpdateEvent) bool {
 	if !reportingEnabled(e.ObjectNew) {
 		return false
 	}
-	oldTask, ok1 := e.ObjectOld.(*kelosv1alpha1.Task)
-	newTask, ok2 := e.ObjectNew.(*kelosv1alpha1.Task)
+	oldTask, ok1 := e.ObjectOld.(*kelos.Task)
+	newTask, ok2 := e.ObjectNew.(*kelos.Task)
 	if !ok1 || !ok2 {
 		return true
 	}

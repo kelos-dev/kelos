@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/go-logr/logr"
-	"github.com/kelos-dev/kelos/api/v1alpha1"
+	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 )
 
 // LinearEventData represents parsed Linear webhook data.
@@ -79,7 +79,7 @@ func ParseLinearWebhook(payload []byte) (*LinearEventData, error) {
 }
 
 // MatchesLinearEvent checks if a Linear webhook event matches the given configuration.
-func MatchesLinearEvent(config *v1alpha1.LinearWebhook, eventData *LinearEventData) (bool, error) {
+func MatchesLinearEvent(config *kelos.LinearWebhook, eventData *LinearEventData) (bool, error) {
 	// Check if event type is in the allowed list
 	typeMatched := false
 	for _, allowedType := range config.Types {
@@ -132,7 +132,7 @@ func extractLabels(dataObj map[string]interface{}) []interface{} {
 
 // matchesLinearFilter checks if event data matches a specific filter.
 // Type filtering is already handled by MatchesLinearEvent before this is called.
-func matchesLinearFilter(filter *v1alpha1.LinearWebhookFilter, eventData *LinearEventData) bool {
+func matchesLinearFilter(filter *kelos.LinearWebhookFilter, eventData *LinearEventData) bool {
 	// Check action filter
 	if filter.Action != "" && !strings.EqualFold(filter.Action, eventData.Action) {
 		return false
@@ -197,7 +197,7 @@ func matchesLinearFilter(filter *v1alpha1.LinearWebhookFilter, eventData *Linear
 // uses Labels or ExcludeLabels and the parsed event is a Comment whose issue
 // labels are missing from the payload (the common case for Linear Comment
 // webhooks).
-func spawnerNeedsLinearLabels(spawner *v1alpha1.TaskSpawner, eventData *LinearEventData) bool {
+func spawnerNeedsLinearLabels(spawner *kelos.TaskSpawner, eventData *LinearEventData) bool {
 	if eventData.Type != "Comment" {
 		return false
 	}

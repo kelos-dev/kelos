@@ -725,28 +725,8 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 		}
 	}
 
-	// PodFailurePolicy ensures only pod disruptions (e.g. node scale-down,
-	// preemption) consume the backoff budget while application crashes fail the
-	// Job immediately.
-	podFailurePolicy := &batchv1.PodFailurePolicy{
-		Rules: []batchv1.PodFailurePolicyRule{
-			{
-				Action: batchv1.PodFailurePolicyActionCount,
-				OnPodConditions: []batchv1.PodFailurePolicyOnPodConditionsPattern{
-					{
-						Type:   corev1.DisruptionTarget,
-						Status: corev1.ConditionTrue,
-					},
-				},
-			},
-			{
-				Action: batchv1.PodFailurePolicyActionFailJob,
-				OnExitCodes: &batchv1.PodFailurePolicyOnExitCodesRequirement{
-					Operator: batchv1.PodFailurePolicyOnExitCodesOpNotIn,
-					Values:   []int32{0},
-				},
-			},
-		},
+	if err := validatePodFailurePolicy(task.Spec.PodFailurePolicy); err != nil {
+		return nil, err
 	}
 
 	builtinLabels := map[string]string{
@@ -774,7 +754,7 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 		},
 		Spec: batchv1.JobSpec{
 			BackoffLimit:          &backoffLimit,
-			PodFailurePolicy:      podFailurePolicy,
+			PodFailurePolicy:      task.Spec.PodFailurePolicy,
 			ActiveDeadlineSeconds: activeDeadlineSeconds,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
@@ -845,6 +825,18 @@ func sanitizeWorkspaceFilePath(filePath string) (string, error) {
 
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
+}
+
+func validatePodFailurePolicy(policy *batchv1.PodFailurePolicy) error {
+	if policy == nil {
+		return nil
+	}
+	for i, rule := range policy.Rules {
+		if rule.Action == batchv1.PodFailurePolicyActionFailIndex {
+			return fmt.Errorf("podFailurePolicy.rules[%d].action: FailIndex is not supported for Task Jobs", i)
+		}
+	}
+	return nil
 }
 
 // reservedVolumeNames is the set of non-prefixed volume names that Kelos

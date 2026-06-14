@@ -17,7 +17,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/kelos-dev/kelos/api/v1alpha1"
+	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/reporting"
 	"github.com/kelos-dev/kelos/internal/taskbuilder"
 )
@@ -287,13 +287,13 @@ func (h *SlackHandler) routeMessage(ctx context.Context, msg *SlackMessageData) 
 }
 
 // getMatchingSpawners returns all TaskSpawners that have a Slack source configured.
-func (h *SlackHandler) getMatchingSpawners(ctx context.Context) ([]*v1alpha1.TaskSpawner, error) {
-	var spawnerList v1alpha1.TaskSpawnerList
+func (h *SlackHandler) getMatchingSpawners(ctx context.Context) ([]*kelos.TaskSpawner, error) {
+	var spawnerList kelos.TaskSpawnerList
 	if err := h.client.List(ctx, &spawnerList, &client.ListOptions{}); err != nil {
 		return nil, err
 	}
 
-	var matching []*v1alpha1.TaskSpawner
+	var matching []*kelos.TaskSpawner
 	for i := range spawnerList.Items {
 		spawner := &spawnerList.Items[i]
 		if spawner.Spec.When.Slack != nil {
@@ -305,7 +305,7 @@ func (h *SlackHandler) getMatchingSpawners(ctx context.Context) ([]*v1alpha1.Tas
 }
 
 // createTask creates a Task for the given TaskSpawner from a Slack message.
-func (h *SlackHandler) createTask(ctx context.Context, spawner *v1alpha1.TaskSpawner, msg *SlackMessageData) error {
+func (h *SlackHandler) createTask(ctx context.Context, spawner *kelos.TaskSpawner, msg *SlackMessageData) error {
 	templateVars := ExtractSlackWorkItem(msg)
 
 	// Build unique task name using a hash of the message identifier

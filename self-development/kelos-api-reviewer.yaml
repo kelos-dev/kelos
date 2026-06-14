@@ -73,6 +73,16 @@ spec:
     effort: xhigh
     type: codex
     ttlSecondsAfterFinished: 864000
+    podFailurePolicy:
+      rules:
+        - action: Ignore
+          onPodConditions:
+            - type: DisruptionTarget
+              status: "True"
+        - action: FailJob
+          onExitCodes:
+            operator: NotIn
+            values: [0]
     credentials:
       type: oauth
       secretRef:

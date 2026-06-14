@@ -11,10 +11,12 @@ import (
 	"strings"
 	"testing"
 
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
 	sigyaml "sigs.k8s.io/yaml"
 
-	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/webhook"
 )
 
@@ -64,7 +66,49 @@ func TestSelfDevelopmentGitHubSpawnersUseWebhooks(t *testing.T) {
 	}
 }
 
-func TestDevelopmentCommandPatternsMatchExpectedCommandLines(t *testing.T) {
+func TestDevelopmentTaskSpawnersIgnoreDisruptions(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		dir  string
+		file string
+	}{
+		{dir: "self-development", file: "kelos-api-reviewer.yaml"},
+		{dir: "self-development", file: "kelos-config-update.yaml"},
+		{dir: "self-development", file: "kelos-fake-strategist.yaml"},
+		{dir: "self-development", file: "kelos-fake-user.yaml"},
+		{dir: "self-development", file: "kelos-image-update.yaml"},
+		{dir: "self-development", file: "kelos-planner.yaml"},
+		{dir: "self-development", file: "kelos-pr-responder.yaml"},
+		{dir: "self-development", file: "kelos-reviewer.yaml"},
+		{dir: "self-development", file: "kelos-self-update.yaml"},
+		{dir: "self-development", file: "kelos-squash-commits.yaml"},
+		{dir: "self-development", file: "kelos-triage.yaml"},
+		{dir: "self-development", file: "kelos-workers.yaml"},
+		{dir: "kanon-development", file: "kanon-config-update.yaml"},
+		{dir: "kanon-development", file: "kanon-fake-strategist.yaml"},
+		{dir: "kanon-development", file: "kanon-fake-user.yaml"},
+		{dir: "kanon-development", file: "kanon-planner.yaml"},
+		{dir: "kanon-development", file: "kanon-pr-responder.yaml"},
+		{dir: "kanon-development", file: "kanon-reviewer.yaml"},
+		{dir: "kanon-development", file: "kanon-self-update.yaml"},
+		{dir: "kanon-development", file: "kanon-squash-commits.yaml"},
+		{dir: "kanon-development", file: "kanon-triage.yaml"},
+		{dir: "kanon-development", file: "kanon-workers.yaml"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.dir+"/"+tt.file, func(t *testing.T) {
+			t.Parallel()
+
+			ts := readTaskSpawnerFromDir(t, tt.dir, tt.file)
+			assertIgnoresDisruptions(t, tt.dir+"/"+tt.file, ts.Spec.TaskTemplate.PodFailurePolicy)
+		})
+	}
+}
+
+func TestDevelopmentCommandPatternsRequireExactCommandBodies(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -145,6 +189,44 @@ func TestDevelopmentCommandPatternsMatchExpectedCommandLines(t *testing.T) {
 				t.Fatalf("expected %s/%s to define a bodyPattern filter", tt.dir, tt.file)
 			}
 		})
+	}
+}
+
+func assertIgnoresDisruptions(t *testing.T, name string, policy *batchv1.PodFailurePolicy) {
+	t.Helper()
+
+	if policy == nil {
+		t.Fatalf("%s taskTemplate.podFailurePolicy is nil", name)
+	}
+	if len(policy.Rules) != 2 {
+		t.Fatalf("%s podFailurePolicy rules length = %d, want 2", name, len(policy.Rules))
+	}
+	disruptionRule := policy.Rules[0]
+	if disruptionRule.Action != batchv1.PodFailurePolicyActionIgnore {
+		t.Fatalf("%s first podFailurePolicy action = %q, want %q", name, disruptionRule.Action, batchv1.PodFailurePolicyActionIgnore)
+	}
+	if len(disruptionRule.OnPodConditions) != 1 {
+		t.Fatalf("%s first podFailurePolicy onPodConditions length = %d, want 1", name, len(disruptionRule.OnPodConditions))
+	}
+	if got := disruptionRule.OnPodConditions[0].Type; got != corev1.DisruptionTarget {
+		t.Fatalf("%s first podFailurePolicy condition type = %q, want %q", name, got, corev1.DisruptionTarget)
+	}
+	if got := disruptionRule.OnPodConditions[0].Status; got != corev1.ConditionTrue {
+		t.Fatalf("%s first podFailurePolicy condition status = %q, want %q", name, got, corev1.ConditionTrue)
+	}
+
+	failRule := policy.Rules[1]
+	if failRule.Action != batchv1.PodFailurePolicyActionFailJob {
+		t.Fatalf("%s second podFailurePolicy action = %q, want %q", name, failRule.Action, batchv1.PodFailurePolicyActionFailJob)
+	}
+	if failRule.OnExitCodes == nil {
+		t.Fatalf("%s second podFailurePolicy onExitCodes is nil", name)
+	}
+	if got := failRule.OnExitCodes.Operator; got != batchv1.PodFailurePolicyOnExitCodesOpNotIn {
+		t.Fatalf("%s second podFailurePolicy onExitCodes operator = %q, want %q", name, got, batchv1.PodFailurePolicyOnExitCodesOpNotIn)
+	}
+	if !reflect.DeepEqual(failRule.OnExitCodes.Values, []int32{0}) {
+		t.Fatalf("%s second podFailurePolicy onExitCodes values = %v, want [0]", name, failRule.OnExitCodes.Values)
 	}
 }
 
@@ -267,13 +349,13 @@ func assertReviewerTriggerableByBot(t *testing.T, file, bodyPattern string) {
 	}
 }
 
-func readSelfDevelopmentTaskSpawner(t *testing.T, file string) *kelosv1alpha1.TaskSpawner {
+func readSelfDevelopmentTaskSpawner(t *testing.T, file string) *kelos.TaskSpawner {
 	t.Helper()
 
 	return readTaskSpawnerFromDir(t, "self-development", file)
 }
 
-func readTaskSpawnerFromDir(t *testing.T, dir, file string) *kelosv1alpha1.TaskSpawner {
+func readTaskSpawnerFromDir(t *testing.T, dir, file string) *kelos.TaskSpawner {
 	t.Helper()
 
 	path := filepath.Join("..", "..", dir, file)
@@ -307,7 +389,7 @@ func readTaskSpawnerFromDir(t *testing.T, dir, file string) *kelosv1alpha1.TaskS
 			continue
 		}
 
-		var ts kelosv1alpha1.TaskSpawner
+		var ts kelos.TaskSpawner
 		if err := sigyaml.Unmarshal(doc, &ts); err != nil {
 			t.Fatalf("decoding TaskSpawner from %s: %v", path, err)
 		}
@@ -318,7 +400,7 @@ func readTaskSpawnerFromDir(t *testing.T, dir, file string) *kelosv1alpha1.TaskS
 	return nil
 }
 
-func developmentWebhookPayload(t *testing.T, repository string, filter kelosv1alpha1.GitHubWebhookFilter, body string) []byte {
+func developmentWebhookPayload(t *testing.T, repository string, filter kelos.GitHubWebhookFilter, body string) []byte {
 	t.Helper()
 
 	owner, name, ok := strings.Cut(repository, "/")
@@ -357,7 +439,7 @@ func developmentWebhookPayload(t *testing.T, repository string, filter kelosv1al
 			"state":    state,
 			"html_url": issueURL,
 		}
-		if filter.CommentOn == kelosv1alpha1.CommentOnPullRequest {
+		if filter.CommentOn == kelos.CommentOnPullRequest {
 			issue["html_url"] = "https://github.com/" + repository + "/pull/1"
 			issue["pull_request"] = map[string]any{
 				"url":      "https://api.github.com/repos/" + repository + "/pulls/1",

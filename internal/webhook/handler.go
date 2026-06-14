@@ -16,7 +16,7 @@ import (
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/kelos-dev/kelos/api/v1alpha1"
+	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/contextfetch"
 	"github.com/kelos-dev/kelos/internal/reporting"
 	"github.com/kelos-dev/kelos/internal/taskbuilder"
@@ -175,7 +175,7 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Extract headers and validate signature
 	var eventType, signature, deliveryID string
-	var genericSpawners []*v1alpha1.TaskSpawner
+	var genericSpawners []*kelos.TaskSpawner
 
 	switch h.source {
 	case GitHubSource:
@@ -271,7 +271,7 @@ func linearDeliveryID(body []byte) string {
 // processWebhook processes a validated webhook payload. When prefetchedSpawners
 // is non-nil (generic source), it is used directly instead of listing spawners
 // again, avoiding a redundant API call.
-func (h *WebhookHandler) processWebhook(ctx context.Context, eventType string, payload []byte, deliveryID string, prefetchedSpawners []*v1alpha1.TaskSpawner) (bool, error) {
+func (h *WebhookHandler) processWebhook(ctx context.Context, eventType string, payload []byte, deliveryID string, prefetchedSpawners []*kelos.TaskSpawner) (bool, error) {
 	log := h.log.WithValues("eventType", eventType, "deliveryID", deliveryID)
 
 	// Parse the webhook payload once up front and reuse across matching and task creation.
@@ -327,7 +327,7 @@ func (h *WebhookHandler) processWebhook(ctx context.Context, eventType string, p
 	log.Info("Processing webhook event", "resourceID", parsed.ID, "title", parsed.Title)
 
 	// Use pre-fetched spawners when available (generic source), otherwise list.
-	var spawners []*v1alpha1.TaskSpawner
+	var spawners []*kelos.TaskSpawner
 	if prefetchedSpawners != nil {
 		spawners = prefetchedSpawners
 	} else {
@@ -432,13 +432,13 @@ func (h *WebhookHandler) processWebhook(ctx context.Context, eventType string, p
 }
 
 // getMatchingSpawners returns TaskSpawners that match the webhook source.
-func (h *WebhookHandler) getMatchingSpawners(ctx context.Context) ([]*v1alpha1.TaskSpawner, error) {
-	var spawnerList v1alpha1.TaskSpawnerList
+func (h *WebhookHandler) getMatchingSpawners(ctx context.Context) ([]*kelos.TaskSpawner, error) {
+	var spawnerList kelos.TaskSpawnerList
 	if err := h.client.List(ctx, &spawnerList, &client.ListOptions{}); err != nil {
 		return nil, err
 	}
 
-	var matching []*v1alpha1.TaskSpawner
+	var matching []*kelos.TaskSpawner
 	for i := range spawnerList.Items {
 		spawner := &spawnerList.Items[i]
 
@@ -462,7 +462,7 @@ func (h *WebhookHandler) getMatchingSpawners(ctx context.Context) ([]*v1alpha1.T
 }
 
 // matchesSpawner checks if the webhook matches the spawner's configuration.
-func (h *WebhookHandler) matchesSpawner(spawner *v1alpha1.TaskSpawner, eventType string, parsed *ParsedWebhook) (bool, error) {
+func (h *WebhookHandler) matchesSpawner(spawner *kelos.TaskSpawner, eventType string, parsed *ParsedWebhook) (bool, error) {
 	switch h.source {
 	case GitHubSource:
 		if spawner.Spec.When.GitHubWebhook == nil {
@@ -506,7 +506,7 @@ func (h *WebhookHandler) matchesSpawner(spawner *v1alpha1.TaskSpawner, eventType
 }
 
 // createTask creates a new Task from the webhook event.
-func (h *WebhookHandler) createTask(ctx context.Context, spawner *v1alpha1.TaskSpawner, eventType string, parsed *ParsedWebhook, deliveryID string) error {
+func (h *WebhookHandler) createTask(ctx context.Context, spawner *kelos.TaskSpawner, eventType string, parsed *ParsedWebhook, deliveryID string) error {
 	log := h.log.WithValues("spawner", spawner.Name, "namespace", spawner.Namespace, "eventType", eventType, "deliveryID", deliveryID)
 
 	// Extract template variables based on source
@@ -613,7 +613,7 @@ func (h *WebhookHandler) createTask(ctx context.Context, spawner *v1alpha1.TaskS
 
 // spawnerNeedsChangedFiles returns true if any webhook filter uses filePatterns,
 // meaning changed file data must be fetched for PR events.
-func spawnerNeedsChangedFiles(spawner *v1alpha1.TaskSpawner) bool {
+func spawnerNeedsChangedFiles(spawner *kelos.TaskSpawner) bool {
 	ghw := spawner.Spec.When.GitHubWebhook
 	if ghw == nil {
 		return false
@@ -628,7 +628,7 @@ func spawnerNeedsChangedFiles(spawner *v1alpha1.TaskSpawner) bool {
 
 // enrichPRChangedFiles fetches changed files for PR-related webhook events
 // from the GitHub API. Returns nil for non-PR events.
-func (h *WebhookHandler) enrichPRChangedFiles(ctx context.Context, spawner *v1alpha1.TaskSpawner, eventData *GitHubEventData) ([]string, error) {
+func (h *WebhookHandler) enrichPRChangedFiles(ctx context.Context, spawner *kelos.TaskSpawner, eventData *GitHubEventData) ([]string, error) {
 	if eventData.Number == 0 || eventData.Repository == "" {
 		return nil, nil
 	}
@@ -637,13 +637,13 @@ func (h *WebhookHandler) enrichPRChangedFiles(ctx context.Context, spawner *v1al
 
 // getGenericSpawners returns all TaskSpawners that have a generic webhook
 // spec. This avoids a redundant second List call during processWebhook.
-func (h *WebhookHandler) getGenericSpawners(ctx context.Context) []*v1alpha1.TaskSpawner {
-	var spawnerList v1alpha1.TaskSpawnerList
+func (h *WebhookHandler) getGenericSpawners(ctx context.Context) []*kelos.TaskSpawner {
+	var spawnerList kelos.TaskSpawnerList
 	if err := h.client.List(ctx, &spawnerList, &client.ListOptions{}); err != nil {
 		return nil
 	}
 
-	var spawners []*v1alpha1.TaskSpawner
+	var spawners []*kelos.TaskSpawner
 	for i := range spawnerList.Items {
 		if spawnerList.Items[i].Spec.When.GenericWebhook != nil {
 			spawners = append(spawners, &spawnerList.Items[i])

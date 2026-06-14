@@ -19,7 +19,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/logging"
 	"github.com/kelos-dev/kelos/internal/reporting"
@@ -33,7 +32,6 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(kelosv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(kelos.AddToScheme(scheme))
 }
 
@@ -241,7 +239,7 @@ func runReportingLoop(ctx context.Context, cl client.Client, slackReporter *repo
 // reports their status. Unlike the spawner version, this is not scoped to
 // a single TaskSpawner.
 func runSlackReportingCycle(ctx context.Context, cl client.Client, reporter *reporting.SlackTaskReporter, log logr.Logger) error {
-	var taskList kelosv1alpha1.TaskList
+	var taskList kelos.TaskList
 	if err := cl.List(ctx, &taskList, client.MatchingLabels{reporting.LabelSlackReporting: "enabled"}); err != nil {
 		return fmt.Errorf("Listing tasks for Slack reporting: %w", err)
 	}
@@ -274,7 +272,7 @@ func runActivityLoop(ctx context.Context, cl client.Client, reporter *reporting.
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			var taskList kelosv1alpha1.TaskList
+			var taskList kelos.TaskList
 			if err := cl.List(ctx, &taskList, client.MatchingLabels{reporting.LabelSlackReporting: "enabled"}); err != nil {
 				log.Error(err, "Listing tasks for activity update")
 				continue

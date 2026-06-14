@@ -6,7 +6,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
-	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/reporting"
 )
 
@@ -27,7 +27,7 @@ func TestReportingAnnotationPredicate_Create(t *testing.T) {
 	pred := reportingAnnotationPredicate{}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			task := &kelosv1alpha1.Task{ObjectMeta: metav1.ObjectMeta{Annotations: tt.annotations}}
+			task := &kelos.Task{ObjectMeta: metav1.ObjectMeta{Annotations: tt.annotations}}
 			if got := pred.Create(event.CreateEvent{Object: task}); got != tt.want {
 				t.Errorf("Create(%v) = %v, want %v", tt.annotations, got, tt.want)
 			}
@@ -39,36 +39,36 @@ func TestReportingAnnotationPredicate_Update(t *testing.T) {
 	tests := []struct {
 		name        string
 		annotations map[string]string
-		oldPhase    kelosv1alpha1.TaskPhase
-		newPhase    kelosv1alpha1.TaskPhase
+		oldPhase    kelos.TaskPhase
+		newPhase    kelos.TaskPhase
 		want        bool
 	}{
 		{
 			name:        "enabled, phase changed",
 			annotations: map[string]string{reporting.AnnotationGitHubReporting: "enabled"},
-			oldPhase:    kelosv1alpha1.TaskPhasePending,
-			newPhase:    kelosv1alpha1.TaskPhaseRunning,
+			oldPhase:    kelos.TaskPhasePending,
+			newPhase:    kelos.TaskPhaseRunning,
 			want:        true,
 		},
 		{
 			name:        "enabled, phase unchanged",
 			annotations: map[string]string{reporting.AnnotationGitHubReporting: "enabled"},
-			oldPhase:    kelosv1alpha1.TaskPhaseRunning,
-			newPhase:    kelosv1alpha1.TaskPhaseRunning,
+			oldPhase:    kelos.TaskPhaseRunning,
+			newPhase:    kelos.TaskPhaseRunning,
 			want:        false,
 		},
 		{
 			name:        "checks only, phase changed",
 			annotations: map[string]string{reporting.AnnotationGitHubChecks: "enabled"},
-			oldPhase:    kelosv1alpha1.TaskPhasePending,
-			newPhase:    kelosv1alpha1.TaskPhaseRunning,
+			oldPhase:    kelos.TaskPhasePending,
+			newPhase:    kelos.TaskPhaseRunning,
 			want:        true,
 		},
 		{
 			name:        "missing annotation, phase changed",
 			annotations: nil,
-			oldPhase:    kelosv1alpha1.TaskPhasePending,
-			newPhase:    kelosv1alpha1.TaskPhaseSucceeded,
+			oldPhase:    kelos.TaskPhasePending,
+			newPhase:    kelos.TaskPhaseSucceeded,
 			want:        false,
 		},
 	}
@@ -76,13 +76,13 @@ func TestReportingAnnotationPredicate_Update(t *testing.T) {
 	pred := reportingAnnotationPredicate{}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldTask := &kelosv1alpha1.Task{
+			oldTask := &kelos.Task{
 				ObjectMeta: metav1.ObjectMeta{Annotations: tt.annotations},
-				Status:     kelosv1alpha1.TaskStatus{Phase: tt.oldPhase},
+				Status:     kelos.TaskStatus{Phase: tt.oldPhase},
 			}
-			newTask := &kelosv1alpha1.Task{
+			newTask := &kelos.Task{
 				ObjectMeta: metav1.ObjectMeta{Annotations: tt.annotations},
-				Status:     kelosv1alpha1.TaskStatus{Phase: tt.newPhase},
+				Status:     kelos.TaskStatus{Phase: tt.newPhase},
 			}
 			if got := pred.Update(event.UpdateEvent{ObjectOld: oldTask, ObjectNew: newTask}); got != tt.want {
 				t.Errorf("Update() = %v, want %v", got, tt.want)

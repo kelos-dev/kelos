@@ -23,13 +23,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 )
 
 func newTestScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(s))
-	utilruntime.Must(kelosv1alpha1.AddToScheme(s))
+	utilruntime.Must(kelos.AddToScheme(s))
 	return s
 }
 
@@ -121,22 +121,22 @@ func newTestServer(t *testing.T) (*httptest.Server, *[]commentRecord) {
 	return server, &records
 }
 
-func newTaskWithAnnotations(name, namespace string, phase kelosv1alpha1.TaskPhase, annotations map[string]string) *kelosv1alpha1.Task {
-	return &kelosv1alpha1.Task{
+func newTaskWithAnnotations(name, namespace string, phase kelos.TaskPhase, annotations map[string]string) *kelos.Task {
+	return &kelos.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        name,
 			Namespace:   namespace,
 			Annotations: annotations,
 		},
-		Spec: kelosv1alpha1.TaskSpec{
+		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelosv1alpha1.Credentials{
-				Type:      kelosv1alpha1.CredentialTypeOAuth,
-				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+			Credentials: kelos.Credentials{
+				Type:      kelos.CredentialTypeOAuth,
+				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},
 		},
-		Status: kelosv1alpha1.TaskStatus{
+		Status: kelos.TaskStatus{
 			Phase: phase,
 		},
 	}
@@ -146,7 +146,7 @@ func TestReportTaskStatus_CreatesCommentOnPending(t *testing.T) {
 	server, records := newTestServer(t)
 	defer server.Close()
 
-	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, map[string]string{
+	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
 		AnnotationGitHubReporting: "enabled",
 		AnnotationSourceNumber:    "42",
 		AnnotationSourceKind:      "issue",
@@ -181,7 +181,7 @@ func TestReportTaskStatus_CreatesCommentOnPending(t *testing.T) {
 	}
 
 	// Verify annotations were persisted
-	var updated kelosv1alpha1.Task
+	var updated kelos.Task
 	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
 		t.Fatalf("Getting updated task: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestReportTaskStatus_UpdatesCommentOnSucceeded(t *testing.T) {
 	server, records := newTestServer(t)
 	defer server.Close()
 
-	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhaseSucceeded, map[string]string{
+	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhaseSucceeded, map[string]string{
 		AnnotationGitHubReporting:   "enabled",
 		AnnotationSourceNumber:      "42",
 		AnnotationSourceKind:        "issue",
@@ -233,7 +233,7 @@ func TestReportTaskStatus_UpdatesCommentOnSucceeded(t *testing.T) {
 		t.Errorf("Expected update, got %s", (*records)[0].method)
 	}
 
-	var updated kelosv1alpha1.Task
+	var updated kelos.Task
 	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
 		t.Fatalf("Getting updated task: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestReportTaskStatus_UpdatesCommentOnFailed(t *testing.T) {
 	server, records := newTestServer(t)
 	defer server.Close()
 
-	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhaseFailed, map[string]string{
+	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhaseFailed, map[string]string{
 		AnnotationGitHubReporting:   "enabled",
 		AnnotationSourceNumber:      "42",
 		AnnotationSourceKind:        "issue",
@@ -279,7 +279,7 @@ func TestReportTaskStatus_UpdatesCommentOnFailed(t *testing.T) {
 		t.Fatalf("Expected 1 API call, got %d", len(*records))
 	}
 
-	var updated kelosv1alpha1.Task
+	var updated kelos.Task
 	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
 		t.Fatalf("Getting updated task: %v", err)
 	}
@@ -292,7 +292,7 @@ func TestReportTaskStatus_SkipsDuplicateReport(t *testing.T) {
 	server, records := newTestServer(t)
 	defer server.Close()
 
-	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, map[string]string{
+	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
 		AnnotationGitHubReporting:   "enabled",
 		AnnotationSourceNumber:      "42",
 		AnnotationSourceKind:        "issue",
@@ -331,7 +331,7 @@ func TestReportTaskStatus_SkipsWithoutReportingAnnotation(t *testing.T) {
 	server, records := newTestServer(t)
 	defer server.Close()
 
-	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, map[string]string{
+	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
 		AnnotationSourceNumber: "42",
 		AnnotationSourceKind:   "issue",
 		// No AnnotationGitHubReporting
@@ -403,7 +403,7 @@ func TestReportTaskStatus_RunningMapsToAccepted(t *testing.T) {
 	server, records := newTestServer(t)
 	defer server.Close()
 
-	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhaseRunning, map[string]string{
+	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhaseRunning, map[string]string{
 		AnnotationGitHubReporting: "enabled",
 		AnnotationSourceNumber:    "42",
 		AnnotationSourceKind:      "issue",
@@ -434,7 +434,7 @@ func TestReportTaskStatus_RunningMapsToAccepted(t *testing.T) {
 		t.Fatalf("Expected 1 API call, got %d", len(*records))
 	}
 
-	var updated kelosv1alpha1.Task
+	var updated kelos.Task
 	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
 		t.Fatalf("Getting updated task: %v", err)
 	}
@@ -448,7 +448,7 @@ func TestReportTaskStatus_CreatesNewCommentWhenNoCommentID(t *testing.T) {
 	defer server.Close()
 
 	// Task with succeeded phase but no comment ID (e.g. short-lived task)
-	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhaseSucceeded, map[string]string{
+	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhaseSucceeded, map[string]string{
 		AnnotationGitHubReporting: "enabled",
 		AnnotationSourceNumber:    "42",
 		AnnotationSourceKind:      "issue",
@@ -483,7 +483,7 @@ func TestReportTaskStatus_CreatesNewCommentWhenNoCommentID(t *testing.T) {
 		t.Errorf("Expected create for task with no comment ID, got %s", (*records)[0].method)
 	}
 
-	var updated kelosv1alpha1.Task
+	var updated kelos.Task
 	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
 		t.Fatalf("Getting updated task: %v", err)
 	}
@@ -497,7 +497,7 @@ func TestReportTaskStatus_RetriesAnnotationPersistenceOnConflict(t *testing.T) {
 	server, records := newTestServer(t)
 	defer server.Close()
 
-	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, map[string]string{
+	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
 		AnnotationGitHubReporting: "enabled",
 		AnnotationSourceNumber:    "42",
 		AnnotationSourceKind:      "issue",
@@ -536,7 +536,7 @@ func TestReportTaskStatus_RetriesAnnotationPersistenceOnConflict(t *testing.T) {
 		t.Fatalf("Expected create, got %s", (*records)[0].method)
 	}
 
-	var updated kelosv1alpha1.Task
+	var updated kelos.Task
 	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
 		t.Fatalf("Getting updated task: %v", err)
 	}
@@ -549,7 +549,7 @@ func TestReportTaskStatus_RetriesAnnotationPersistenceOnConflict(t *testing.T) {
 }
 
 func TestReportTaskStatus_CorruptedCommentIDReturnsError(t *testing.T) {
-	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, map[string]string{
+	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
 		AnnotationGitHubReporting: "enabled",
 		AnnotationSourceNumber:    "42",
 		AnnotationSourceKind:      "issue",
@@ -574,7 +574,7 @@ func TestReportTaskStatus_CachePopulatedAfterCreate(t *testing.T) {
 	server, _ := newTestServer(t)
 	defer server.Close()
 
-	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, map[string]string{
+	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
 		AnnotationGitHubReporting: "enabled",
 		AnnotationSourceNumber:    "42",
 		AnnotationSourceKind:      "issue",
@@ -615,7 +615,7 @@ func TestReportTaskStatus_CacheFallbackUpdatesExistingComment(t *testing.T) {
 	server, records := newTestServer(t)
 	defer server.Close()
 
-	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhaseSucceeded, map[string]string{
+	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhaseSucceeded, map[string]string{
 		AnnotationGitHubReporting: "enabled",
 		AnnotationSourceNumber:    "42",
 		AnnotationSourceKind:      "issue",
@@ -663,7 +663,7 @@ func TestReportTaskStatus_CacheShortCircuitsDuplicateReport(t *testing.T) {
 		AnnotationSourceKind:      "issue",
 	}
 
-	first := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, annotations)
+	first := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, annotations)
 	first.UID = types.UID("uid-shortcircuit")
 	first.ResourceVersion = ""
 
@@ -683,7 +683,7 @@ func TestReportTaskStatus_CacheShortCircuitsDuplicateReport(t *testing.T) {
 
 	// Simulate a stale cached read: a second copy of the Task that has not yet
 	// observed the annotation Update from the first reconcile.
-	stale := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, map[string]string{
+	stale := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
 		AnnotationGitHubReporting: "enabled",
 		AnnotationSourceNumber:    "42",
 		AnnotationSourceKind:      "issue",
@@ -710,7 +710,7 @@ func TestReportTaskStatus_SkipsRepeatedNoOpPersist(t *testing.T) {
 	server, records := newTestServer(t)
 	defer server.Close()
 
-	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, map[string]string{
+	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
 		AnnotationGitHubReporting:   "enabled",
 		AnnotationSourceNumber:      "42",
 		AnnotationSourceKind:        "issue",
@@ -748,7 +748,7 @@ func TestReportTaskStatus_NilCache(t *testing.T) {
 	server, records := newTestServer(t)
 	defer server.Close()
 
-	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, map[string]string{
+	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
 		AnnotationGitHubReporting: "enabled",
 		AnnotationSourceNumber:    "42",
 		AnnotationSourceKind:      "issue",
@@ -832,7 +832,7 @@ func TestReportTaskStatus_CreatesCheckRunOnPending(t *testing.T) {
 	server, records := newTestChecksServer(t)
 	defer server.Close()
 
-	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, map[string]string{
+	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
 		AnnotationGitHubChecks:    "enabled",
 		AnnotationSourceSHA:       "abc123def",
 		AnnotationGitHubCheckName: "Kelos: my-spawner",
@@ -877,7 +877,7 @@ func TestReportTaskStatus_CreatesCheckRunOnPending(t *testing.T) {
 		t.Errorf("Expected status %q, got %q", "in_progress", (*records)[0].status)
 	}
 
-	var updated kelosv1alpha1.Task
+	var updated kelos.Task
 	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
 		t.Fatalf("Getting updated task: %v", err)
 	}
@@ -893,7 +893,7 @@ func TestReportTaskStatus_UpdatesCheckRunOnSucceeded(t *testing.T) {
 	server, records := newTestChecksServer(t)
 	defer server.Close()
 
-	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhaseSucceeded, map[string]string{
+	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhaseSucceeded, map[string]string{
 		AnnotationGitHubChecks:           "enabled",
 		AnnotationSourceSHA:              "abc123def",
 		AnnotationGitHubCheckName:        "Kelos: my-spawner",
@@ -937,7 +937,7 @@ func TestReportTaskStatus_UpdatesCheckRunOnSucceeded(t *testing.T) {
 		t.Errorf("Expected conclusion 'success', got %q", (*records)[0].conclusion)
 	}
 
-	var updated kelosv1alpha1.Task
+	var updated kelos.Task
 	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
 		t.Fatalf("Getting updated task: %v", err)
 	}
@@ -950,7 +950,7 @@ func TestReportTaskStatus_UpdatesCheckRunOnFailed(t *testing.T) {
 	server, records := newTestChecksServer(t)
 	defer server.Close()
 
-	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhaseFailed, map[string]string{
+	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhaseFailed, map[string]string{
 		AnnotationGitHubChecks:           "enabled",
 		AnnotationSourceSHA:              "abc123def",
 		AnnotationGitHubCheckName:        "Kelos: my-spawner",
@@ -988,7 +988,7 @@ func TestReportTaskStatus_UpdatesCheckRunOnFailed(t *testing.T) {
 		t.Errorf("Expected conclusion 'failure', got %q", (*records)[0].conclusion)
 	}
 
-	var updated kelosv1alpha1.Task
+	var updated kelos.Task
 	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
 		t.Fatalf("Getting updated task: %v", err)
 	}
@@ -1001,7 +1001,7 @@ func TestReportTaskStatus_SkipsDuplicateCheckReport(t *testing.T) {
 	server, records := newTestChecksServer(t)
 	defer server.Close()
 
-	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, map[string]string{
+	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
 		AnnotationGitHubChecks:           "enabled",
 		AnnotationSourceSHA:              "abc123def",
 		AnnotationGitHubCheckRunID:       "5001",
@@ -1039,7 +1039,7 @@ func TestReportTaskStatus_ChecksSkipsWithoutSHA(t *testing.T) {
 	server, records := newTestChecksServer(t)
 	defer server.Close()
 
-	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, map[string]string{
+	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
 		AnnotationGitHubChecks: "enabled",
 		// No AnnotationSourceSHA
 	})
@@ -1078,7 +1078,7 @@ func TestReportTaskStatus_BothCommentAndChecks(t *testing.T) {
 	checksServer, checksRecords := newTestChecksServer(t)
 	defer checksServer.Close()
 
-	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, map[string]string{
+	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
 		AnnotationGitHubReporting: "enabled",
 		AnnotationGitHubChecks:    "enabled",
 		AnnotationSourceNumber:    "42",
@@ -1125,7 +1125,7 @@ func TestReportTaskStatus_ChecksFallbackName(t *testing.T) {
 	server, records := newTestChecksServer(t)
 	defer server.Close()
 
-	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, map[string]string{
+	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
 		AnnotationGitHubChecks: "enabled",
 		AnnotationSourceSHA:    "abc123def",
 		// No AnnotationGitHubCheckName — should fall back to label
@@ -1159,7 +1159,7 @@ func TestReportTaskStatus_CheckRunCachePopulatedAfterCreate(t *testing.T) {
 	server, _ := newTestChecksServer(t)
 	defer server.Close()
 
-	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, map[string]string{
+	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
 		AnnotationGitHubChecks:    "enabled",
 		AnnotationSourceSHA:       "abc123def",
 		AnnotationGitHubCheckName: "Kelos: my-spawner",
@@ -1198,7 +1198,7 @@ func TestReportTaskStatus_CheckRunCacheFallbackUpdatesExisting(t *testing.T) {
 	server, records := newTestChecksServer(t)
 	defer server.Close()
 
-	task := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhaseSucceeded, map[string]string{
+	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhaseSucceeded, map[string]string{
 		AnnotationGitHubChecks:    "enabled",
 		AnnotationSourceSHA:       "abc123def",
 		AnnotationGitHubCheckName: "Kelos: my-spawner",
@@ -1241,7 +1241,7 @@ func TestReportTaskStatus_CheckRunCacheShortCircuitsDuplicate(t *testing.T) {
 		AnnotationGitHubCheckName: "Kelos: my-spawner",
 	}
 
-	first := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, annotations)
+	first := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, annotations)
 	first.UID = types.UID("uid-check-shortcircuit")
 	first.ResourceVersion = ""
 
@@ -1260,7 +1260,7 @@ func TestReportTaskStatus_CheckRunCacheShortCircuitsDuplicate(t *testing.T) {
 
 	// Simulate a stale cached read: a second copy of the Task that has not yet
 	// observed the annotation Update from the first reconcile.
-	stale := newTaskWithAnnotations("test-task", "default", kelosv1alpha1.TaskPhasePending, map[string]string{
+	stale := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
 		AnnotationGitHubChecks:    "enabled",
 		AnnotationSourceSHA:       "abc123def",
 		AnnotationGitHubCheckName: "Kelos: my-spawner",
@@ -1280,21 +1280,21 @@ func TestReportTaskStatus_CheckRunCacheShortCircuitsDuplicate(t *testing.T) {
 }
 
 func TestReportTaskStatus_NilAnnotations(t *testing.T) {
-	task := &kelosv1alpha1.Task{
+	task := &kelos.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-task",
 			Namespace: "default",
 		},
-		Spec: kelosv1alpha1.TaskSpec{
+		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelosv1alpha1.Credentials{
-				Type:      kelosv1alpha1.CredentialTypeOAuth,
-				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+			Credentials: kelos.Credentials{
+				Type:      kelos.CredentialTypeOAuth,
+				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},
 		},
-		Status: kelosv1alpha1.TaskStatus{
-			Phase: kelosv1alpha1.TaskPhasePending,
+		Status: kelos.TaskStatus{
+			Phase: kelos.TaskPhasePending,
 		},
 	}
 
@@ -1313,7 +1313,7 @@ func TestReportTaskStatus_NilAnnotations(t *testing.T) {
 }
 
 func TestSlackTaskReporter_PostsThreadReply(t *testing.T) {
-	task := &kelosv1alpha1.Task{
+	task := &kelos.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-task",
 			Namespace: "default",
@@ -1323,16 +1323,16 @@ func TestSlackTaskReporter_PostsThreadReply(t *testing.T) {
 				AnnotationSlackThreadTS:  "1234567890.123456",
 			},
 		},
-		Spec: kelosv1alpha1.TaskSpec{
+		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelosv1alpha1.Credentials{
-				Type:      kelosv1alpha1.CredentialTypeOAuth,
-				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+			Credentials: kelos.Credentials{
+				Type:      kelos.CredentialTypeOAuth,
+				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},
 		},
-		Status: kelosv1alpha1.TaskStatus{
-			Phase: kelosv1alpha1.TaskPhasePending,
+		Status: kelos.TaskStatus{
+			Phase: kelos.TaskPhasePending,
 		},
 	}
 
@@ -1363,7 +1363,7 @@ func TestSlackTaskReporter_PostsThreadReply(t *testing.T) {
 	}
 
 	// Verify annotations were persisted
-	var updated kelosv1alpha1.Task
+	var updated kelos.Task
 	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
 		t.Fatalf("getting updated task: %v", err)
 	}
@@ -1373,7 +1373,7 @@ func TestSlackTaskReporter_PostsThreadReply(t *testing.T) {
 }
 
 func TestSlackTaskReporter_PostsNewReplyOnPhaseChange(t *testing.T) {
-	task := &kelosv1alpha1.Task{
+	task := &kelos.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-task",
 			Namespace: "default",
@@ -1385,16 +1385,16 @@ func TestSlackTaskReporter_PostsNewReplyOnPhaseChange(t *testing.T) {
 				AnnotationSlackReportPhase: "accepted",
 			},
 		},
-		Spec: kelosv1alpha1.TaskSpec{
+		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelosv1alpha1.Credentials{
-				Type:      kelosv1alpha1.CredentialTypeOAuth,
-				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+			Credentials: kelos.Credentials{
+				Type:      kelos.CredentialTypeOAuth,
+				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},
 		},
-		Status: kelosv1alpha1.TaskStatus{
-			Phase:   kelosv1alpha1.TaskPhaseSucceeded,
+		Status: kelos.TaskStatus{
+			Phase:   kelos.TaskPhaseSucceeded,
 			Results: map[string]string{"pr": "https://github.com/org/repo/pull/42"},
 		},
 	}
@@ -1430,7 +1430,7 @@ func TestSlackTaskReporter_PostsNewReplyOnPhaseChange(t *testing.T) {
 }
 
 func TestSlackTaskReporter_SkipPaths(t *testing.T) {
-	baseTask := &kelosv1alpha1.Task{
+	baseTask := &kelos.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-task",
 			Namespace: "default",
@@ -1440,42 +1440,42 @@ func TestSlackTaskReporter_SkipPaths(t *testing.T) {
 				AnnotationSlackThreadTS:  "1234567890.123456",
 			},
 		},
-		Status: kelosv1alpha1.TaskStatus{
-			Phase: kelosv1alpha1.TaskPhasePending,
+		Status: kelos.TaskStatus{
+			Phase: kelos.TaskPhasePending,
 		},
 	}
 
 	tests := []struct {
 		name   string
-		mutate func(t *kelosv1alpha1.Task)
+		mutate func(t *kelos.Task)
 	}{
 		{
 			name: "no reporting annotation",
-			mutate: func(t *kelosv1alpha1.Task) {
+			mutate: func(t *kelos.Task) {
 				delete(t.Annotations, AnnotationSlackReporting)
 			},
 		},
 		{
 			name: "already reported same phase",
-			mutate: func(t *kelosv1alpha1.Task) {
+			mutate: func(t *kelos.Task) {
 				t.Annotations[AnnotationSlackReportPhase] = "accepted"
 			},
 		},
 		{
 			name: "nil annotations",
-			mutate: func(t *kelosv1alpha1.Task) {
+			mutate: func(t *kelos.Task) {
 				t.Annotations = nil
 			},
 		},
 		{
 			name: "missing channel",
-			mutate: func(t *kelosv1alpha1.Task) {
+			mutate: func(t *kelos.Task) {
 				delete(t.Annotations, AnnotationSlackChannel)
 			},
 		},
 		{
 			name: "empty phase",
-			mutate: func(t *kelosv1alpha1.Task) {
+			mutate: func(t *kelos.Task) {
 				t.Status.Phase = ""
 			},
 		},
@@ -1536,21 +1536,21 @@ func (f *fakeSlackReporter) UpdateMessage(ctx context.Context, channel, messageT
 func TestSlackTaskReporter_PhaseMapping(t *testing.T) {
 	tests := []struct {
 		name          string
-		phase         kelosv1alpha1.TaskPhase
+		phase         kelos.TaskPhase
 		wantDesired   string
 		shouldProcess bool
 	}{
-		{"pending", kelosv1alpha1.TaskPhasePending, "accepted", true},
-		{"running", kelosv1alpha1.TaskPhaseRunning, "accepted", true},
-		{"waiting", kelosv1alpha1.TaskPhaseWaiting, "accepted", true},
-		{"succeeded", kelosv1alpha1.TaskPhaseSucceeded, "succeeded", true},
-		{"failed", kelosv1alpha1.TaskPhaseFailed, "failed", true},
+		{"pending", kelos.TaskPhasePending, "accepted", true},
+		{"running", kelos.TaskPhaseRunning, "accepted", true},
+		{"waiting", kelos.TaskPhaseWaiting, "accepted", true},
+		{"succeeded", kelos.TaskPhaseSucceeded, "succeeded", true},
+		{"failed", kelos.TaskPhaseFailed, "failed", true},
 		{"empty", "", "", false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			task := &kelosv1alpha1.Task{
+			task := &kelos.Task{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-task",
 					Namespace: "default",
@@ -1560,7 +1560,7 @@ func TestSlackTaskReporter_PhaseMapping(t *testing.T) {
 						AnnotationSlackThreadTS:  "1234.5678",
 					},
 				},
-				Status: kelosv1alpha1.TaskStatus{
+				Status: kelos.TaskStatus{
 					Phase: tt.phase,
 				},
 			}
@@ -1590,7 +1590,7 @@ func (f *fakeProgressReader) ReadProgress(ctx context.Context, namespace, podNam
 }
 
 func TestSlackTaskReporter_PostsProgressReply(t *testing.T) {
-	task := &kelosv1alpha1.Task{
+	task := &kelos.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-task",
 			Namespace: "default",
@@ -1603,16 +1603,16 @@ func TestSlackTaskReporter_PostsProgressReply(t *testing.T) {
 				AnnotationSlackReportPhase: "accepted",
 			},
 		},
-		Spec: kelosv1alpha1.TaskSpec{
+		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelosv1alpha1.Credentials{
-				Type:      kelosv1alpha1.CredentialTypeOAuth,
-				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+			Credentials: kelos.Credentials{
+				Type:      kelos.CredentialTypeOAuth,
+				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},
 		},
-		Status: kelosv1alpha1.TaskStatus{
-			Phase:   kelosv1alpha1.TaskPhaseRunning,
+		Status: kelos.TaskStatus{
+			Phase:   kelos.TaskPhaseRunning,
 			PodName: "test-pod",
 		},
 	}
@@ -1657,7 +1657,7 @@ func TestSlackTaskReporter_PostsProgressReply(t *testing.T) {
 }
 
 func TestSlackTaskReporter_SkipsProgressWhenNoReader(t *testing.T) {
-	task := &kelosv1alpha1.Task{
+	task := &kelos.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-task",
 			Namespace: "default",
@@ -1668,8 +1668,8 @@ func TestSlackTaskReporter_SkipsProgressWhenNoReader(t *testing.T) {
 				AnnotationSlackReportPhase: "accepted",
 			},
 		},
-		Status: kelosv1alpha1.TaskStatus{
-			Phase:   kelosv1alpha1.TaskPhaseRunning,
+		Status: kelos.TaskStatus{
+			Phase:   kelos.TaskPhaseRunning,
 			PodName: "test-pod",
 		},
 	}
@@ -1696,7 +1696,7 @@ func TestSlackTaskReporter_SkipsProgressWhenNoReader(t *testing.T) {
 }
 
 func TestSlackTaskReporter_SkipsProgressWhenNoPod(t *testing.T) {
-	task := &kelosv1alpha1.Task{
+	task := &kelos.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-task",
 			Namespace: "default",
@@ -1707,8 +1707,8 @@ func TestSlackTaskReporter_SkipsProgressWhenNoPod(t *testing.T) {
 				AnnotationSlackReportPhase: "accepted",
 			},
 		},
-		Status: kelosv1alpha1.TaskStatus{
-			Phase:   kelosv1alpha1.TaskPhasePending,
+		Status: kelos.TaskStatus{
+			Phase:   kelos.TaskPhasePending,
 			PodName: "", // No pod yet
 		},
 	}
@@ -1738,7 +1738,7 @@ func TestSlackTaskReporter_SkipsProgressWhenNoPod(t *testing.T) {
 }
 
 func TestSlackTaskReporter_SkipsProgressWhenEmpty(t *testing.T) {
-	task := &kelosv1alpha1.Task{
+	task := &kelos.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-task",
 			Namespace: "default",
@@ -1749,8 +1749,8 @@ func TestSlackTaskReporter_SkipsProgressWhenEmpty(t *testing.T) {
 				AnnotationSlackReportPhase: "accepted",
 			},
 		},
-		Status: kelosv1alpha1.TaskStatus{
-			Phase:   kelosv1alpha1.TaskPhaseRunning,
+		Status: kelos.TaskStatus{
+			Phase:   kelos.TaskPhaseRunning,
 			PodName: "test-pod",
 		},
 	}
@@ -1780,7 +1780,7 @@ func TestSlackTaskReporter_SkipsProgressWhenEmpty(t *testing.T) {
 }
 
 func TestSlackTaskReporter_DeduplicatesProgress(t *testing.T) {
-	task := &kelosv1alpha1.Task{
+	task := &kelos.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-task",
 			Namespace: "default",
@@ -1793,16 +1793,16 @@ func TestSlackTaskReporter_DeduplicatesProgress(t *testing.T) {
 				AnnotationSlackReportPhase: "accepted",
 			},
 		},
-		Spec: kelosv1alpha1.TaskSpec{
+		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelosv1alpha1.Credentials{
-				Type:      kelosv1alpha1.CredentialTypeOAuth,
-				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+			Credentials: kelos.Credentials{
+				Type:      kelos.CredentialTypeOAuth,
+				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},
 		},
-		Status: kelosv1alpha1.TaskStatus{
-			Phase:   kelosv1alpha1.TaskPhaseRunning,
+		Status: kelos.TaskStatus{
+			Phase:   kelos.TaskPhaseRunning,
 			PodName: "test-pod",
 		},
 	}
@@ -1841,7 +1841,7 @@ func TestSlackTaskReporter_DeduplicatesProgress(t *testing.T) {
 }
 
 func TestSlackTaskReporter_EditsProgressOnNewText(t *testing.T) {
-	task := &kelosv1alpha1.Task{
+	task := &kelos.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-task",
 			Namespace: "default",
@@ -1854,16 +1854,16 @@ func TestSlackTaskReporter_EditsProgressOnNewText(t *testing.T) {
 				AnnotationSlackReportPhase: "accepted",
 			},
 		},
-		Spec: kelosv1alpha1.TaskSpec{
+		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelosv1alpha1.Credentials{
-				Type:      kelosv1alpha1.CredentialTypeOAuth,
-				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+			Credentials: kelos.Credentials{
+				Type:      kelos.CredentialTypeOAuth,
+				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},
 		},
-		Status: kelosv1alpha1.TaskStatus{
-			Phase:   kelosv1alpha1.TaskPhaseRunning,
+		Status: kelos.TaskStatus{
+			Phase:   kelos.TaskPhaseRunning,
 			PodName: "test-pod",
 		},
 	}
@@ -1937,7 +1937,7 @@ func TestSlackTaskReporter_EditsProgressOnNewText(t *testing.T) {
 }
 
 func TestSlackTaskReporter_ClearsProgressTSOnUpdateFailure(t *testing.T) {
-	task := &kelosv1alpha1.Task{
+	task := &kelos.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-task",
 			Namespace: "default",
@@ -1949,16 +1949,16 @@ func TestSlackTaskReporter_ClearsProgressTSOnUpdateFailure(t *testing.T) {
 				AnnotationSlackReportPhase: "accepted",
 			},
 		},
-		Spec: kelosv1alpha1.TaskSpec{
+		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelosv1alpha1.Credentials{
-				Type:      kelosv1alpha1.CredentialTypeOAuth,
-				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+			Credentials: kelos.Credentials{
+				Type:      kelos.CredentialTypeOAuth,
+				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},
 		},
-		Status: kelosv1alpha1.TaskStatus{
-			Phase:   kelosv1alpha1.TaskPhaseRunning,
+		Status: kelos.TaskStatus{
+			Phase:   kelos.TaskPhaseRunning,
 			PodName: "test-pod",
 		},
 	}
@@ -2012,7 +2012,7 @@ func TestSlackTaskReporter_ClearsProgressTSOnUpdateFailure(t *testing.T) {
 
 func TestSlackTaskReporter_ClearsProgressCacheOnTerminal(t *testing.T) {
 	// First, seed the progress cache via a running task
-	runningTask := &kelosv1alpha1.Task{
+	runningTask := &kelos.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-task",
 			Namespace: "default",
@@ -2025,16 +2025,16 @@ func TestSlackTaskReporter_ClearsProgressCacheOnTerminal(t *testing.T) {
 				AnnotationSlackReportPhase: "accepted",
 			},
 		},
-		Spec: kelosv1alpha1.TaskSpec{
+		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelosv1alpha1.Credentials{
-				Type:      kelosv1alpha1.CredentialTypeOAuth,
-				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+			Credentials: kelos.Credentials{
+				Type:      kelos.CredentialTypeOAuth,
+				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},
 		},
-		Status: kelosv1alpha1.TaskStatus{
-			Phase:   kelosv1alpha1.TaskPhaseRunning,
+		Status: kelos.TaskStatus{
+			Phase:   kelos.TaskPhaseRunning,
 			PodName: "test-pod",
 		},
 	}
@@ -2071,7 +2071,7 @@ func TestSlackTaskReporter_ClearsProgressCacheOnTerminal(t *testing.T) {
 	// Simulate task completing by creating a new task object with succeeded phase.
 	// We rebuild the fake client with the succeeded task to allow annotation persistence.
 	succeededTask := runningTask.DeepCopy()
-	succeededTask.Status.Phase = kelosv1alpha1.TaskPhaseSucceeded
+	succeededTask.Status.Phase = kelos.TaskPhaseSucceeded
 	succeededTask.Status.Results = map[string]string{"response": "done"}
 
 	cl2 := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(succeededTask).Build()
@@ -2134,7 +2134,7 @@ func TestSlackTaskReporter_EditsProgressMessageOnTerminalPhase(t *testing.T) {
 
 	// Transition to succeeded.
 	succeededTask := task.DeepCopy()
-	succeededTask.Status.Phase = kelosv1alpha1.TaskPhaseSucceeded
+	succeededTask.Status.Phase = kelos.TaskPhaseSucceeded
 	succeededTask.Status.Message = "Here is the final answer."
 	succeededTask.Status.Results = map[string]string{"response": "done"}
 
@@ -2202,7 +2202,7 @@ func TestSlackTaskReporter_FallsBackToPostOnUpdateFailure(t *testing.T) {
 
 	// Transition to succeeded — update will fail, should fall back to post.
 	succeededTask := task.DeepCopy()
-	succeededTask.Status.Phase = kelosv1alpha1.TaskPhaseSucceeded
+	succeededTask.Status.Phase = kelos.TaskPhaseSucceeded
 	succeededTask.Status.Results = map[string]string{"response": "done"}
 
 	cl2 := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(succeededTask).Build()
@@ -2268,24 +2268,24 @@ func (f *fakeActivityReader) ReadActivity(ctx context.Context, namespace, podNam
 	return f.text
 }
 
-func newRunningTaskWithAnnotations(name string, uid types.UID, annotations map[string]string) *kelosv1alpha1.Task {
-	return &kelosv1alpha1.Task{
+func newRunningTaskWithAnnotations(name string, uid types.UID, annotations map[string]string) *kelos.Task {
+	return &kelos.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        name,
 			Namespace:   "default",
 			UID:         uid,
 			Annotations: annotations,
 		},
-		Spec: kelosv1alpha1.TaskSpec{
+		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelosv1alpha1.Credentials{
-				Type:      kelosv1alpha1.CredentialTypeOAuth,
-				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+			Credentials: kelos.Credentials{
+				Type:      kelos.CredentialTypeOAuth,
+				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},
 		},
-		Status: kelosv1alpha1.TaskStatus{
-			Phase:   kelosv1alpha1.TaskPhaseRunning,
+		Status: kelos.TaskStatus{
+			Phase:   kelos.TaskPhaseRunning,
 			PodName: "test-pod",
 		},
 	}
@@ -2438,7 +2438,7 @@ func TestSlackTaskReporter_SkipsActivityWhenNoTarget(t *testing.T) {
 func TestSlackTaskReporter_ActivitySkipPaths(t *testing.T) {
 	tests := []struct {
 		name   string
-		task   *kelosv1alpha1.Task
+		task   *kelos.Task
 		reader ActivityReader
 	}{
 		{
@@ -2471,7 +2471,7 @@ func TestSlackTaskReporter_ActivitySkipPaths(t *testing.T) {
 		},
 		{
 			name: "no pod name",
-			task: func() *kelosv1alpha1.Task {
+			task: func() *kelos.Task {
 				t := newRunningTaskWithAnnotations("t", "uid-4", map[string]string{
 					AnnotationSlackReporting:   "enabled",
 					AnnotationSlackChannel:     "C123",
@@ -2495,14 +2495,14 @@ func TestSlackTaskReporter_ActivitySkipPaths(t *testing.T) {
 		},
 		{
 			name: "task not running",
-			task: func() *kelosv1alpha1.Task {
+			task: func() *kelos.Task {
 				t := newRunningTaskWithAnnotations("t", "uid-6", map[string]string{
 					AnnotationSlackReporting:   "enabled",
 					AnnotationSlackChannel:     "C123",
 					AnnotationSlackThreadTS:    "1234.5678",
 					AnnotationSlackReportPhase: "accepted",
 				})
-				t.Status.Phase = kelosv1alpha1.TaskPhasePending
+				t.Status.Phase = kelos.TaskPhasePending
 				return t
 			}(),
 			reader: &fakeActivityReader{text: "something"},
@@ -2538,7 +2538,7 @@ func TestSlackTaskReporter_ActivitySkipPaths(t *testing.T) {
 }
 
 func TestSlackTaskReporter_AcceptedPostSetsActivityTarget(t *testing.T) {
-	task := &kelosv1alpha1.Task{
+	task := &kelos.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-task",
 			Namespace: "default",
@@ -2549,16 +2549,16 @@ func TestSlackTaskReporter_AcceptedPostSetsActivityTarget(t *testing.T) {
 				AnnotationSlackThreadTS:  "1234567890.123456",
 			},
 		},
-		Spec: kelosv1alpha1.TaskSpec{
+		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelosv1alpha1.Credentials{
-				Type:      kelosv1alpha1.CredentialTypeOAuth,
-				SecretRef: &kelosv1alpha1.SecretReference{Name: "creds"},
+			Credentials: kelos.Credentials{
+				Type:      kelos.CredentialTypeOAuth,
+				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},
 		},
-		Status: kelosv1alpha1.TaskStatus{
-			Phase: kelosv1alpha1.TaskPhasePending,
+		Status: kelos.TaskStatus{
+			Phase: kelos.TaskPhasePending,
 		},
 	}
 

@@ -13,7 +13,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
+	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 )
 
 const (
@@ -163,7 +163,7 @@ func (c *ReportStateCache) storeCheckRun(uid types.UID, checkRunID int64, checkP
 // ReportTaskStatus checks a Task's current phase against its last reported
 // phase and creates or updates the GitHub status comment and/or Check Run as
 // needed.
-func (tr *TaskReporter) ReportTaskStatus(ctx context.Context, task *kelosv1alpha1.Task) error {
+func (tr *TaskReporter) ReportTaskStatus(ctx context.Context, task *kelos.Task) error {
 	annotations := task.Annotations
 	if annotations == nil {
 		return nil
@@ -194,7 +194,7 @@ func (tr *TaskReporter) ReportTaskStatus(ctx context.Context, task *kelosv1alpha
 }
 
 // reportViaComment creates or updates a GitHub issue/PR comment.
-func (tr *TaskReporter) reportViaComment(ctx context.Context, task *kelosv1alpha1.Task) error {
+func (tr *TaskReporter) reportViaComment(ctx context.Context, task *kelos.Task) error {
 	log := ctrl.Log.WithName("reporter")
 
 	annotations := task.Annotations
@@ -209,11 +209,11 @@ func (tr *TaskReporter) reportViaComment(ctx context.Context, task *kelosv1alpha
 
 	var desiredPhase string
 	switch task.Status.Phase {
-	case kelosv1alpha1.TaskPhasePending, kelosv1alpha1.TaskPhaseRunning, kelosv1alpha1.TaskPhaseWaiting:
+	case kelos.TaskPhasePending, kelos.TaskPhaseRunning, kelos.TaskPhaseWaiting:
 		desiredPhase = "accepted"
-	case kelosv1alpha1.TaskPhaseSucceeded:
+	case kelos.TaskPhaseSucceeded:
 		desiredPhase = "succeeded"
-	case kelosv1alpha1.TaskPhaseFailed:
+	case kelos.TaskPhaseFailed:
 		desiredPhase = "failed"
 	default:
 		return nil
@@ -291,7 +291,7 @@ func (tr *TaskReporter) reportViaComment(ctx context.Context, task *kelosv1alpha
 }
 
 // reportViaCheckRun creates or updates a GitHub Check Run.
-func (tr *TaskReporter) reportViaCheckRun(ctx context.Context, task *kelosv1alpha1.Task) error {
+func (tr *TaskReporter) reportViaCheckRun(ctx context.Context, task *kelos.Task) error {
 	log := ctrl.Log.WithName("reporter")
 
 	annotations := task.Annotations
@@ -314,14 +314,14 @@ func (tr *TaskReporter) reportViaCheckRun(ctx context.Context, task *kelosv1alph
 	var status, conclusion string
 	var output *checkRunOutput
 	switch task.Status.Phase {
-	case kelosv1alpha1.TaskPhasePending, kelosv1alpha1.TaskPhaseRunning, kelosv1alpha1.TaskPhaseWaiting:
+	case kelos.TaskPhasePending, kelos.TaskPhaseRunning, kelos.TaskPhaseWaiting:
 		desiredPhase = "in_progress"
 		status = "in_progress"
 		output = &checkRunOutput{
 			Title:   checkName + " — In Progress",
 			Summary: fmt.Sprintf("Agent task `%s` is in progress", task.Name),
 		}
-	case kelosv1alpha1.TaskPhaseSucceeded:
+	case kelos.TaskPhaseSucceeded:
 		desiredPhase = "succeeded"
 		status = "completed"
 		conclusion = "success"
@@ -329,7 +329,7 @@ func (tr *TaskReporter) reportViaCheckRun(ctx context.Context, task *kelosv1alph
 			Title:   checkName + " — Succeeded",
 			Summary: fmt.Sprintf("Agent task `%s` has succeeded", task.Name),
 		}
-	case kelosv1alpha1.TaskPhaseFailed:
+	case kelos.TaskPhaseFailed:
 		desiredPhase = "failed"
 		status = "completed"
 		conclusion = "failure"
@@ -396,23 +396,23 @@ func (tr *TaskReporter) reportViaCheckRun(ctx context.Context, task *kelosv1alph
 	return tr.persistCheckRunState(ctx, task, checkRunID, desiredPhase)
 }
 
-func (tr *TaskReporter) persistReportingState(ctx context.Context, task *kelosv1alpha1.Task, commentID int64, desiredPhase string) error {
+func (tr *TaskReporter) persistReportingState(ctx context.Context, task *kelos.Task, commentID int64, desiredPhase string) error {
 	return tr.persistAnnotations(ctx, task, map[string]string{
 		AnnotationGitHubCommentID:   strconv.FormatInt(commentID, 10),
 		AnnotationGitHubReportPhase: desiredPhase,
 	})
 }
 
-func (tr *TaskReporter) persistCheckRunState(ctx context.Context, task *kelosv1alpha1.Task, checkRunID int64, desiredPhase string) error {
+func (tr *TaskReporter) persistCheckRunState(ctx context.Context, task *kelos.Task, checkRunID int64, desiredPhase string) error {
 	return tr.persistAnnotations(ctx, task, map[string]string{
 		AnnotationGitHubCheckRunID:       strconv.FormatInt(checkRunID, 10),
 		AnnotationGitHubCheckReportPhase: desiredPhase,
 	})
 }
 
-func (tr *TaskReporter) persistAnnotations(ctx context.Context, task *kelosv1alpha1.Task, annotations map[string]string) error {
+func (tr *TaskReporter) persistAnnotations(ctx context.Context, task *kelos.Task, annotations map[string]string) error {
 	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		var current kelosv1alpha1.Task
+		var current kelos.Task
 		if err := tr.Client.Get(ctx, client.ObjectKeyFromObject(task), &current); err != nil {
 			return err
 		}
@@ -483,7 +483,7 @@ type SlackTaskReporter struct {
 
 // ReportTaskStatus checks a Task's current phase against its last reported
 // phase and creates or updates the Slack thread reply as needed.
-func (tr *SlackTaskReporter) ReportTaskStatus(ctx context.Context, task *kelosv1alpha1.Task) error {
+func (tr *SlackTaskReporter) ReportTaskStatus(ctx context.Context, task *kelos.Task) error {
 	log := ctrl.Log.WithName("slack-reporter")
 
 	annotations := task.Annotations
@@ -503,11 +503,11 @@ func (tr *SlackTaskReporter) ReportTaskStatus(ctx context.Context, task *kelosv1
 
 	var desiredPhase string
 	switch task.Status.Phase {
-	case kelosv1alpha1.TaskPhasePending, kelosv1alpha1.TaskPhaseRunning, kelosv1alpha1.TaskPhaseWaiting:
+	case kelos.TaskPhasePending, kelos.TaskPhaseRunning, kelos.TaskPhaseWaiting:
 		desiredPhase = "accepted"
-	case kelosv1alpha1.TaskPhaseSucceeded:
+	case kelos.TaskPhaseSucceeded:
 		desiredPhase = "succeeded"
-	case kelosv1alpha1.TaskPhaseFailed:
+	case kelos.TaskPhaseFailed:
 		desiredPhase = "failed"
 	default:
 		return nil
@@ -579,9 +579,9 @@ func (tr *SlackTaskReporter) ReportTaskStatus(ctx context.Context, task *kelosv1
 	return nil
 }
 
-func (tr *SlackTaskReporter) persistSlackReportingState(ctx context.Context, task *kelosv1alpha1.Task, desiredPhase string) error {
+func (tr *SlackTaskReporter) persistSlackReportingState(ctx context.Context, task *kelos.Task, desiredPhase string) error {
 	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		var current kelosv1alpha1.Task
+		var current kelos.Task
 		if err := tr.Client.Get(ctx, client.ObjectKeyFromObject(task), &current); err != nil {
 			return err
 		}
@@ -612,7 +612,7 @@ func (tr *SlackTaskReporter) persistSlackReportingState(ctx context.Context, tas
 // records the message timestamp. Subsequent calls edit the same message
 // in-place so the thread stays clean. All errors are non-fatal — progress
 // updates are best-effort.
-func (tr *SlackTaskReporter) updateProgress(ctx context.Context, task *kelosv1alpha1.Task) error {
+func (tr *SlackTaskReporter) updateProgress(ctx context.Context, task *kelos.Task) error {
 	if tr.ProgressReader == nil {
 		return nil
 	}
@@ -631,7 +631,7 @@ func (tr *SlackTaskReporter) updateProgress(ctx context.Context, task *kelosv1al
 		return nil
 	}
 
-	containerName := kelosv1alpha1.AgentContainerName
+	containerName := kelos.AgentContainerName
 
 	text := tr.ProgressReader.ReadProgress(ctx, task.Namespace, podName, containerName, task.Spec.Type)
 	if text == "" {
@@ -760,7 +760,7 @@ func (tr *SlackTaskReporter) SweepProgressCache(activeUIDs map[types.UID]bool) {
 // updates the context block of the latest thread message (accepted or progress
 // snapshot) to include a short activity line. This is called on a faster
 // cadence (e.g. 5s) than the progress snapshot loop. All errors are non-fatal.
-func (tr *SlackTaskReporter) UpdateActivityIndicator(ctx context.Context, task *kelosv1alpha1.Task) {
+func (tr *SlackTaskReporter) UpdateActivityIndicator(ctx context.Context, task *kelos.Task) {
 	if tr.ActivityReader == nil {
 		return
 	}
@@ -779,7 +779,7 @@ func (tr *SlackTaskReporter) UpdateActivityIndicator(ctx context.Context, task *
 	}
 
 	// Only update activity for running tasks.
-	if task.Status.Phase != kelosv1alpha1.TaskPhaseRunning {
+	if task.Status.Phase != kelos.TaskPhaseRunning {
 		return
 	}
 
@@ -793,7 +793,7 @@ func (tr *SlackTaskReporter) UpdateActivityIndicator(ctx context.Context, task *
 		return
 	}
 
-	containerName := kelosv1alpha1.AgentContainerName
+	containerName := kelos.AgentContainerName
 
 	text := tr.ActivityReader.ReadActivity(ctx, task.Namespace, podName, containerName, task.Spec.Type)
 

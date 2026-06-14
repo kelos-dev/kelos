@@ -4521,7 +4521,7 @@ func TestBuildJob_NoTaskSpawnerLabelNoEnv(t *testing.T) {
 	}
 }
 
-func TestBuildJob_PodFailurePolicy(t *testing.T) {
+func TestBuildJob_PodFailurePolicyUnsetByDefault(t *testing.T) {
 	builder := NewJobBuilder()
 	task := &kelos.Task{
 		ObjectMeta: metav1.ObjectMeta{
@@ -4547,6 +4547,54 @@ func TestBuildJob_PodFailurePolicy(t *testing.T) {
 		t.Errorf("Expected BackoffLimit 1, got %d", *job.Spec.BackoffLimit)
 	}
 
+	if job.Spec.PodFailurePolicy != nil {
+		t.Fatalf("Expected PodFailurePolicy to be unset, got %#v", job.Spec.PodFailurePolicy)
+	}
+}
+
+func TestBuildJob_PodFailurePolicyOverride(t *testing.T) {
+	builder := NewJobBuilder()
+	policy := &batchv1.PodFailurePolicy{
+		Rules: []batchv1.PodFailurePolicyRule{
+			{
+				Action: batchv1.PodFailurePolicyActionIgnore,
+				OnPodConditions: []batchv1.PodFailurePolicyOnPodConditionsPattern{
+					{
+						Type:   corev1.DisruptionTarget,
+						Status: corev1.ConditionTrue,
+					},
+				},
+			},
+			{
+				Action: batchv1.PodFailurePolicyActionFailJob,
+				OnExitCodes: &batchv1.PodFailurePolicyOnExitCodesRequirement{
+					Operator: batchv1.PodFailurePolicyOnExitCodesOpNotIn,
+					Values:   []int32{0},
+				},
+			},
+		},
+	}
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod-failure-policy",
+			Namespace: "default",
+		},
+		Spec: kelos.TaskSpec{
+			Type:             AgentTypeClaudeCode,
+			Prompt:           "Hello",
+			PodFailurePolicy: policy,
+			Credentials: kelos.Credentials{
+				Type:      kelos.CredentialTypeAPIKey,
+				SecretRef: &kelos.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
 	if job.Spec.PodFailurePolicy == nil {
 		t.Fatal("Expected PodFailurePolicy to be set")
 	}
@@ -4556,9 +4604,9 @@ func TestBuildJob_PodFailurePolicy(t *testing.T) {
 		t.Fatalf("Expected 2 PodFailurePolicy rules, got %d", len(rules))
 	}
 
-	// Rule 1: DisruptionTarget → Count (retry on node scale-down)
-	if rules[0].Action != batchv1.PodFailurePolicyActionCount {
-		t.Errorf("Expected first rule action Count, got %s", rules[0].Action)
+	// Rule 1: DisruptionTarget -> Ignore (do not consume the backoff budget)
+	if rules[0].Action != batchv1.PodFailurePolicyActionIgnore {
+		t.Errorf("Expected first rule action Ignore, got %s", rules[0].Action)
 	}
 	if len(rules[0].OnPodConditions) != 1 {
 		t.Fatalf("Expected 1 pod condition pattern in first rule, got %d", len(rules[0].OnPodConditions))
@@ -4570,7 +4618,7 @@ func TestBuildJob_PodFailurePolicy(t *testing.T) {
 		t.Errorf("Expected first rule condition status True, got %s", rules[0].OnPodConditions[0].Status)
 	}
 
-	// Rule 2: non-zero exit codes → FailJob (no retry on app crash)
+	// Rule 2: non-zero exit codes -> FailJob (no retry on app crash)
 	if rules[1].Action != batchv1.PodFailurePolicyActionFailJob {
 		t.Errorf("Expected second rule action FailJob, got %s", rules[1].Action)
 	}
@@ -4582,6 +4630,39 @@ func TestBuildJob_PodFailurePolicy(t *testing.T) {
 	}
 	if len(rules[1].OnExitCodes.Values) != 1 || rules[1].OnExitCodes.Values[0] != 0 {
 		t.Errorf("Expected exit codes values [0], got %v", rules[1].OnExitCodes.Values)
+	}
+}
+
+func TestBuildJob_PodFailurePolicyFailIndexRejected(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod-failure-policy-fail-index",
+			Namespace: "default",
+		},
+		Spec: kelos.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Hello",
+			PodFailurePolicy: &batchv1.PodFailurePolicy{
+				Rules: []batchv1.PodFailurePolicyRule{
+					{
+						Action: batchv1.PodFailurePolicyActionFailIndex,
+					},
+				},
+			},
+			Credentials: kelos.Credentials{
+				Type:      kelos.CredentialTypeAPIKey,
+				SecretRef: &kelos.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	_, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err == nil {
+		t.Fatal("Expected Build() to reject FailIndex pod failure policy")
+	}
+	if !strings.Contains(err.Error(), "podFailurePolicy.rules[0].action") {
+		t.Fatalf("Expected error to name podFailurePolicy rule action, got %v", err)
 	}
 }
 

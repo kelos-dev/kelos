@@ -1,4 +1,4 @@
-package integration
+package install
 
 import (
 	"context"
@@ -13,8 +13,11 @@ import (
 	. "github.com/onsi/gomega"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -31,22 +34,27 @@ var (
 	testEnv          *envtest.Environment
 	ctx              context.Context
 	cancel           context.CancelFunc
+	managerDone      chan error
 	mockGitHubServer *httptest.Server
 )
 
-func TestIntegration(t *testing.T) {
+func TestInstallIntegration(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Integration Suite")
+	RunSpecs(t, "Install Integration Suite")
 }
 
 var _ = BeforeSuite(func() {
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
+})
 
+var _ = BeforeEach(func() {
+	// Uninstall deletes CRDs, so these specs get a fresh envtest manager
+	// instead of restoring CRDs under an already-running manager.
 	ctx, cancel = context.WithCancel(context.Background())
 
-	By("bootstrapping test environment")
+	By("bootstrapping install test environment")
 	testEnv = &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "internal", "manifests")},
+		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "..", "internal", "manifests")},
 		ErrorIfCRDPathMissing: true,
 	}
 
@@ -62,7 +70,6 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
 
-	// Set up mock GitHub token endpoint for integration tests
 	mockGitHubServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -71,12 +78,15 @@ var _ = BeforeSuite(func() {
 		})
 	}))
 
-	// Start controller manager
+	// Controller names remain registered in process-wide metrics after each
+	// manager stops, while this suite starts a new manager for every spec.
+	skipNameValidation := true
 	// Integration packages run concurrently, so disable the metrics listener
 	// to avoid multiple test managers contending for the default :8080 port.
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
-		Scheme:  scheme.Scheme,
-		Metrics: metricsserver.Options{BindAddress: "0"},
+		Scheme:     scheme.Scheme,
+		Metrics:    metricsserver.Options{BindAddress: "0"},
+		Controller: config.Controller{SkipNameValidation: &skipNameValidation},
 	})
 	Expect(err).NotTo(HaveOccurred())
 
@@ -109,16 +119,14 @@ var _ = BeforeSuite(func() {
 	}).SetupWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 
+	managerDone = make(chan error, 1)
 	go func() {
 		defer GinkgoRecover()
-		err = mgr.Start(ctx)
-		Expect(err).NotTo(HaveOccurred())
+		managerDone <- mgr.Start(ctx)
 	}()
 
-	// Wait for the manager cache to sync before running any tests
 	Expect(mgr.GetCache().WaitForCacheSync(ctx)).To(BeTrue())
 
-	// Verify all CRDs are fully established by attempting to list each custom resource type
 	Eventually(func() error {
 		return k8sClient.List(ctx, &kelosv1alpha1.TaskList{})
 	}, 30*time.Second, 100*time.Millisecond).Should(Succeed())
@@ -130,12 +138,43 @@ var _ = BeforeSuite(func() {
 	}, 30*time.Second, 100*time.Millisecond).Should(Succeed())
 })
 
-var _ = AfterSuite(func() {
-	cancel()
+var _ = AfterEach(func() {
+	if cancel != nil {
+		cancel()
+		cancel = nil
+	}
+	if managerDone != nil {
+		Eventually(managerDone, 10*time.Second).Should(Receive(Succeed()))
+		managerDone = nil
+	}
 	if mockGitHubServer != nil {
 		mockGitHubServer.Close()
+		mockGitHubServer = nil
 	}
-	By("tearing down the test environment")
-	err := testEnv.Stop()
-	Expect(err).NotTo(HaveOccurred())
+	if testEnv != nil {
+		By("tearing down install test environment")
+		Expect(testEnv.Stop()).To(Succeed())
+		testEnv = nil
+	}
 })
+
+func writeEnvtestKubeconfig() string {
+	kubeconfig := clientcmdapi.NewConfig()
+	kubeconfig.Clusters["envtest"] = &clientcmdapi.Cluster{
+		Server:                   cfg.Host,
+		CertificateAuthorityData: cfg.CAData,
+	}
+	kubeconfig.AuthInfos["envtest"] = &clientcmdapi.AuthInfo{
+		ClientCertificateData: cfg.CertData,
+		ClientKeyData:         cfg.KeyData,
+	}
+	kubeconfig.Contexts["envtest"] = &clientcmdapi.Context{
+		Cluster:  "envtest",
+		AuthInfo: "envtest",
+	}
+	kubeconfig.CurrentContext = "envtest"
+
+	tmpFile := filepath.Join(GinkgoT().TempDir(), "kubeconfig")
+	Expect(clientcmd.WriteToFile(*kubeconfig, tmpFile)).To(Succeed())
+	return tmpFile
+}

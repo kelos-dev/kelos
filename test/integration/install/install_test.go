@@ -1,4 +1,4 @@
-package integration
+package install
 
 import (
 	"os"
@@ -13,8 +13,6 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -23,123 +21,6 @@ import (
 	"github.com/kelos-dev/kelos/internal/codexauth"
 	"github.com/kelos-dev/kelos/internal/controller"
 )
-
-// clearNamespaceFinalizers removes finalizers from the kelos-system namespace
-// so it can be deleted in envtest (which has no namespace controller).
-func clearNamespaceFinalizers() {
-	ns := &corev1.Namespace{}
-	err := k8sClient.Get(ctx, types.NamespacedName{Name: "kelos-system"}, ns)
-	if apierrors.IsNotFound(err) {
-		return
-	}
-	Expect(err).NotTo(HaveOccurred())
-	if len(ns.Spec.Finalizers) > 0 {
-		ns.Spec.Finalizers = nil
-		Expect(k8sClient.SubResource("finalize").Update(ctx, ns)).To(Succeed())
-	}
-}
-
-// deleteControllerResources removes the non-CRD resources created by install
-// without touching the CRDs, keeping the envtest environment intact. Includes
-// optional cluster-scoped webhook RBAC so tests that enable webhook sources
-// start from a clean slate and cannot satisfy assertions against stale state
-// left by a previous test.
-func deleteControllerResources() {
-	secrets := &corev1.SecretList{}
-	_ = k8sClient.List(ctx, secrets, client.MatchingLabels{codexauth.RefreshLabel: "true"})
-	for i := range secrets.Items {
-		_ = client.IgnoreNotFound(k8sClient.Delete(ctx, &secrets.Items[i]))
-	}
-
-	selector := client.MatchingLabels{
-		"app.kubernetes.io/component": "codex-auth-refresher",
-		"kelos.dev/managed-by":        "kelos-controller",
-	}
-	cronJobs := &batchv1.CronJobList{}
-	_ = k8sClient.List(ctx, cronJobs, selector)
-	for i := range cronJobs.Items {
-		_ = client.IgnoreNotFound(k8sClient.Delete(ctx, &cronJobs.Items[i]))
-	}
-	roleBindings := &rbacv1.RoleBindingList{}
-	_ = k8sClient.List(ctx, roleBindings, selector)
-	for i := range roleBindings.Items {
-		_ = client.IgnoreNotFound(k8sClient.Delete(ctx, &roleBindings.Items[i]))
-	}
-	roles := &rbacv1.RoleList{}
-	_ = k8sClient.List(ctx, roles, selector)
-	for i := range roles.Items {
-		_ = client.IgnoreNotFound(k8sClient.Delete(ctx, &roles.Items[i]))
-	}
-	serviceAccounts := &corev1.ServiceAccountList{}
-	_ = k8sClient.List(ctx, serviceAccounts, selector)
-	for i := range serviceAccounts.Items {
-		_ = client.IgnoreNotFound(k8sClient.Delete(ctx, &serviceAccounts.Items[i]))
-	}
-
-	for _, obj := range []client.Object{
-		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "kelos-controller-rolebinding"}},
-		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "kelos-controller-role"}},
-		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "kelos-spawner-role"}},
-		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "kelos-webhook-rolebinding"}},
-		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "kelos-webhook-role"}},
-	} {
-		_ = client.IgnoreNotFound(k8sClient.Delete(ctx, obj))
-	}
-
-	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "kelos-system"}}
-	_ = client.IgnoreNotFound(k8sClient.Delete(ctx, ns))
-
-	// Clear finalizers so the namespace can be deleted in envtest.
-	clearNamespaceFinalizers()
-
-	Eventually(func() bool {
-		err := k8sClient.Get(ctx, types.NamespacedName{Name: "kelos-system"}, &corev1.Namespace{})
-		return apierrors.IsNotFound(err)
-	}, 30*time.Second, 100*time.Millisecond).Should(BeTrue())
-}
-
-// restoreCRDs re-applies CRDs by running install followed by cleanup of
-// non-CRD resources. This restores the envtest environment after uninstall
-// removes CRDs that were originally loaded by the BeforeSuite.
-func restoreCRDs(kubeconfigPath string) {
-	// Wait for namespace termination to complete before re-installing.
-	clearNamespaceFinalizers()
-	Eventually(func() bool {
-		err := k8sClient.Get(ctx, types.NamespacedName{Name: "kelos-system"}, &corev1.Namespace{})
-		return apierrors.IsNotFound(err)
-	}, 30*time.Second, 100*time.Millisecond).Should(BeTrue())
-
-	// Wait for all CRDs to be fully deleted before reinstalling. If install's
-	// server-side apply patches a CRD that still has a deletionTimestamp, the
-	// patch succeeds but the CRD is still deleted, leaving the API unavailable.
-	crdGVK := schema.GroupVersionKind{Group: "apiextensions.k8s.io", Version: "v1", Kind: "CustomResourceDefinition"}
-	for _, name := range []string{"tasks.kelos.dev", "taskspawners.kelos.dev", "workspaces.kelos.dev"} {
-		Eventually(func() bool {
-			crd := &unstructured.Unstructured{}
-			crd.SetGroupVersionKind(crdGVK)
-			err := k8sClient.Get(ctx, types.NamespacedName{Name: name}, crd)
-			return apierrors.IsNotFound(err)
-		}, 30*time.Second, 100*time.Millisecond).Should(BeTrue())
-	}
-
-	reinstall := cli.NewRootCommand()
-	reinstall.SetArgs([]string{"install", "--kubeconfig", kubeconfigPath})
-	Expect(reinstall.Execute()).To(Succeed())
-
-	// Wait for all CRDs to be fully established before subsequent tests
-	// can create custom resources. We verify by attempting to list each type.
-	Eventually(func() error {
-		return k8sClient.List(ctx, &kelosv1alpha1.TaskList{})
-	}, 30*time.Second, 100*time.Millisecond).Should(Succeed())
-	Eventually(func() error {
-		return k8sClient.List(ctx, &kelosv1alpha1.TaskSpawnerList{})
-	}, 30*time.Second, 100*time.Millisecond).Should(Succeed())
-	Eventually(func() error {
-		return k8sClient.List(ctx, &kelosv1alpha1.WorkspaceList{})
-	}, 30*time.Second, 100*time.Millisecond).Should(Succeed())
-
-	deleteControllerResources()
-}
 
 func clusterRoleHasVerbs(clusterRole *rbacv1.ClusterRole, apiGroup, resource string, verbs ...string) bool {
 	for _, rule := range clusterRole.Rules {
@@ -177,10 +58,6 @@ var _ = Describe("Install/Uninstall", Ordered, func() {
 	})
 
 	Context("kelos install", func() {
-		AfterEach(func() {
-			deleteControllerResources()
-		})
-
 		It("Should create kelos-system namespace and controller resources", func() {
 			root := cli.NewRootCommand()
 			root.SetArgs([]string{"install", "--kubeconfig", kubeconfigPath})
@@ -439,10 +316,6 @@ var _ = Describe("Install/Uninstall", Ordered, func() {
 	})
 
 	Context("kelos uninstall", func() {
-		AfterEach(func() {
-			restoreCRDs(kubeconfigPath)
-		})
-
 		It("Should remove controller resources", func() {
 			By("Installing first")
 			root := cli.NewRootCommand()

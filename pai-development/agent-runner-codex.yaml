@@ -1,4 +1,4 @@
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: agent-runner-workers-codex
@@ -26,8 +26,8 @@ spec:
       secretRef:
         name: codex-credentials
     branch: "gjkim-codex-task-{{.Number}}"
-    agentConfigRef:
-      name: kelos-codex-dev-agent
+    agentConfigRefs:
+      - name: kelos-codex-dev-agent
     podOverrides:
       env:
         - name: CLEANUP_AFTER_TEST
@@ -87,7 +87,7 @@ spec:
 
 ---
 
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: agent-runner-pr-responder-codex
@@ -124,8 +124,8 @@ spec:
       secretRef:
         name: codex-credentials
     branch: "{{.Branch}}"
-    agentConfigRef:
-      name: kelos-codex-dev-agent
+    agentConfigRefs:
+      - name: kelos-codex-dev-agent
     podOverrides:
       env:
         - name: CLEANUP_AFTER_TEST
@@ -171,7 +171,7 @@ spec:
 
 ---
 
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: agent-runner-reviewer-codex
@@ -207,8 +207,8 @@ spec:
       secretRef:
         name: codex-credentials
     branch: "{{.Branch}}"
-    agentConfigRef:
-      name: pai-codex-reviewer-agent
+    agentConfigRefs:
+      - name: pai-codex-reviewer-agent
     podOverrides:
       env:
         - name: CLEANUP_AFTER_TEST
@@ -260,3 +260,305 @@ spec:
       - Do NOT change labels or assignees
       - Post inline comments only on lines that have actual issues
       - The final PR comment MUST start with `/kelos needs-input`
+
+---
+
+apiVersion: kelos.dev/v1alpha2
+kind: TaskSpawner
+metadata:
+  name: agent-runner-planner-codex
+spec:
+  when:
+    githubWebhook:
+      repository: pai/agent-runner
+      events:
+        - "issue_comment"
+        - "pull_request_review"
+        - "pull_request_review_comment"
+      filters:
+        - event: "issue_comment"
+          action: "created"
+          bodyContains: "/kelos codex plan"
+        - event: "pull_request_review"
+          action: "submitted"
+          bodyContains: "/kelos codex plan"
+        - event: "pull_request_review_comment"
+          action: "created"
+          bodyContains: "/kelos codex plan"
+      reporting:
+        enabled: true
+        checks: {}
+  taskTemplate:
+    workspaceRef:
+      name: agent-runner-workspace
+    model: gpt-5.5
+    type: codex
+    ttlSecondsAfterFinished: 86400
+    credentials:
+      type: oauth
+      secretRef:
+        name: codex-credentials
+    agentConfigRefs:
+      - name: pai-planner-agent
+    podOverrides:
+      env:
+        - name: CLEANUP_AFTER_TEST
+          value: "true"
+        - name: PAI_NCLAVIS_USER_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: pai-nclavis
+              key: PAI_NCLAVIS_USER_TOKEN
+    promptTemplate: |
+      You are an implementation planner (Codex). Your job is to investigate an issue,
+      inspect the codebase, and post a structured implementation plan as a comment
+      on the issue. You do NOT write code, create PRs, or change labels.
+
+      ---
+      Issue #{{.Number}}: {{.Title}}
+      {{.Body}}
+      ---
+
+      ## Your tasks
+
+      ### 1. Refresh issue context
+      Re-read the latest issue state and all comments:
+        `gh issue view {{.Number}} --comments`
+
+      ### 2. Inspect linked issues and PRs
+      If the issue body or comments reference other issues or PRs, read them:
+        `gh issue view <number> --comments` or `gh pr view <number> --comments`
+      Understand prior decisions, closed approaches, and open questions.
+
+      ### 3. Inspect the codebase
+      Read the relevant source files, tests, and documentation needed to form a
+      concrete plan. Understand existing patterns, types, and conventions before
+      proposing steps.
+
+      ### 4. Assess the current plan
+      Determine whether the issue already contains a solid implementation plan:
+        - If YES: normalize it into a concise canonical step list. Do not invent
+          a different plan. State explicitly that the existing plan is solid.
+        - If NO or the plan is weak/ambiguous: create a new implementation plan.
+
+      ### 5. Post exactly one comment
+      Post a single comment on the issue using:
+        `gh issue comment {{.Number}} --body "..."`
+
+      Format the comment as:
+
+      ```
+      ## Plan Assessment
+
+      <Brief assessment of the issue definition and any gaps>
+
+      ## Implementation Steps
+
+      1. <Step 1 — concrete, actionable, with file paths where relevant>
+      2. <Step 2>
+      ...
+
+      ## Acceptance Criteria
+
+      - [ ] <Criterion 1>
+      - [ ] <Criterion 2>
+      ...
+
+      ## Open Questions & Risks
+
+      - <Question or risk, if any — or "None identified">
+
+      /kelos needs-input
+      ```
+
+      ## Rules
+
+      - Do NOT open PRs, push code, or modify any files
+      - Do NOT change labels or assignees
+      - Do NOT trigger other automation (except the `/kelos needs-input` line above)
+      - Post exactly one comment per run
+      - The comment MUST end with a standalone `/kelos needs-input` line
+
+---
+
+apiVersion: kelos.dev/v1alpha2
+kind: TaskSpawner
+metadata:
+  name: agent-runner-rebase-codex
+spec:
+  when:
+    githubWebhook:
+      repository: pai/agent-runner
+      events:
+        - "issue_comment"
+        - "pull_request_review"
+        - "pull_request_review_comment"
+      filters:
+        - event: "issue_comment"
+          action: "created"
+          bodyContains: "/kelos codex approve"
+        - event: "pull_request_review"
+          action: "submitted"
+          bodyContains: "/kelos codex approve"
+        - event: "pull_request_review_comment"
+          action: "created"
+          bodyContains: "/kelos codex approve"
+      reporting:
+        enabled: true
+        checks: {}
+  taskTemplate:
+    workspaceRef:
+      name: agent-runner-workspace
+    model: gpt-5.5
+    type: codex
+    ttlSecondsAfterFinished: 86400
+    credentials:
+      type: oauth
+      secretRef:
+        name: codex-credentials
+    branch: "{{.Branch}}"
+    agentConfigRefs:
+      - name: kelos-codex-dev-agent
+    podOverrides:
+      env:
+        - name: CLEANUP_AFTER_TEST
+          value: "true"
+        - name: PAI_NCLAVIS_USER_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: pai-nclavis
+              key: PAI_NCLAVIS_USER_TOKEN
+    promptTemplate: |
+      You are a rebase agent (Codex). Your only task is to keep a PR branch rebased on its base branch.
+
+      Pull request #{{.Number}}: {{.Title}}
+
+      Steps:
+      1. Kelos has already checked out the PR head branch. Determine the base branch:
+         ```
+         BASE=$(gh pr view {{.Number}} --json baseRefName --jq .baseRefName)
+         ```
+
+      2. Fetch the base branch:
+         ```
+         git fetch origin "$BASE" --depth=30
+         ```
+
+      3. Check if a rebase is needed:
+         ```
+         MERGE_BASE=$(git merge-base "origin/$BASE" HEAD)
+         ORIGIN_BASE=$(git rev-parse "origin/$BASE")
+         ```
+         If MERGE_BASE equals ORIGIN_BASE, the branch is already up to date. Exit without making any changes.
+
+      4. Rebase the branch onto origin/$BASE:
+         ```
+         git rebase "origin/$BASE"
+         ```
+
+      5. If the rebase has conflicts:
+         - Abort the rebase: `git rebase --abort`
+         - Post a comment on the PR whose first line is `/kelos needs-input` followed by a description of which files have conflicts
+         - Exit
+
+      6. Force push the rebased branch:
+         ```
+         git push --force-with-lease origin HEAD
+         ```
+
+      Important:
+      - Do NOT modify any source code
+      - Do NOT start any development work
+      - Only rebase and push
+
+---
+
+apiVersion: kelos.dev/v1alpha2
+kind: TaskSpawner
+metadata:
+  name: agent-runner-squash-commits-codex
+spec:
+  when:
+    githubWebhook:
+      repository: pai/agent-runner
+      events:
+        - "issue_comment"
+        - "pull_request_review"
+      filters:
+        - event: "issue_comment"
+          action: "created"
+          bodyContains: "/kelos codex squash-commits"
+          commentOn: "PullRequest"
+        - event: "pull_request_review"
+          action: "submitted"
+          bodyContains: "/kelos codex squash-commits"
+      reporting:
+        enabled: true
+        checks: {}
+  taskTemplate:
+    workspaceRef:
+      name: agent-runner-workspace
+    model: gpt-5.5
+    type: codex
+    ttlSecondsAfterFinished: 86400
+    credentials:
+      type: oauth
+      secretRef:
+        name: codex-credentials
+    branch: "{{.Branch}}"
+    agentConfigRefs:
+      - name: kelos-codex-dev-agent
+    podOverrides:
+      env:
+        - name: CLEANUP_AFTER_TEST
+          value: "true"
+        - name: PAI_NCLAVIS_USER_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: pai-nclavis
+              key: PAI_NCLAVIS_USER_TOKEN
+    promptTemplate: |
+      You are a coding agent (Codex). Your only task is to rebase and squash commits on a PR branch.
+
+      Pull request #{{.Number}}: {{.Title}}
+      URL: {{.URL}}
+
+      Steps:
+      1. Kelos has already checked out the PR head branch. Fetch full history:
+         ```
+         git fetch --unshallow || true
+         git fetch origin main
+         ```
+
+      2. Rebase the branch on origin/main:
+         ```
+         git rebase origin/main
+         ```
+
+      3. Squash all commits after origin/main into a single commit:
+         - Find the merge base: `git merge-base origin/main HEAD`
+         - Count commits after the merge base
+         - If there is only 1 commit, skip squashing
+         - Otherwise, use `git reset --soft <merge-base>` then create a single commit with the first commit's message
+
+      4. Update the commit message if needed:
+         - Extract the linked issue number from the PR body: `gh pr view {{.Number}} --json body --jq .body`
+         - Read the linked issue to understand what was done
+         - Read the PR description
+         - If the current commit message does not accurately describe the changes, amend it with a better message
+         - Keep the commit message concise (one line, under 72 characters)
+
+      5. Force push the result:
+         ```
+         git push --force-with-lease origin HEAD
+         ```
+
+      6. Update the PR description if needed:
+         - If the PR description does not accurately describe the changes, update it using `gh pr edit`
+
+      7. Post a `/kelos needs-input` comment on PR #{{.Number}} with "Squash complete." to signal completion.
+
+      Important:
+      - Do NOT start any new development work
+      - Do NOT modify any source code
+      - Only rebase, squash commits, and update descriptions as needed

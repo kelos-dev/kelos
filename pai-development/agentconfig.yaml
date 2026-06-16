@@ -1,4 +1,4 @@
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: AgentConfig
 metadata:
   name: kelos-dev-agent
@@ -35,10 +35,14 @@ spec:
         - "3.12"
         - "mcp-atlassian"
       env:
-        CONFLUENCE_URL: "https://wiki.navercorp.com"
-        CONFLUENCE_SPACES_FILTER: "PAIP,PLACEAIREQ"
-        JIRA_URL: "https://jira.navercorp.com"
-        JIRA_PROJECTS_FILTER: "PLACEAI,PLACEAIREQ"
+        - name: CONFLUENCE_URL
+          value: "https://wiki.navercorp.com"
+        - name: CONFLUENCE_SPACES_FILTER
+          value: "PAIP,PLACEAIREQ"
+        - name: JIRA_URL
+          value: "https://jira.navercorp.com"
+        - name: JIRA_PROJECTS_FILTER
+          value: "PLACEAI,PLACEAIREQ"
       envFrom:
         secretRef:
           name: pai-mcp-secrets
@@ -49,8 +53,10 @@ spec:
         - "mcp-server-apache-airflow"
         - "--read-only"
       env:
-        AIRFLOW_HOST: "https://paip-stg-airflow-web.io.naver.com"
-        AIRFLOW_USERNAME: "admin"
+        - name: AIRFLOW_HOST
+          value: "https://paip-stg-airflow-web.io.naver.com"
+        - name: AIRFLOW_USERNAME
+          value: "admin"
       envFrom:
         secretRef:
           name: pai-mcp-secrets
@@ -80,13 +86,13 @@ spec:
             name: pull-request
             description: ALWAYS use this skill for ANY pull request creation or update. This skill MUST be followed whenever the user wants to create, open or update a PR.
             ---
-            
+
             # Create or Update Pull Request
-            
+
             ## Instructions
-            
+
             PR description은 항상 한글로 작성합니다.
-            
+
             1. Check if `.github/PULL_REQUEST_TEMPLATE.md` exists
             2. If it exists, read the file and follow its format exactly when creating the PR body
             3. If a JIRA issue handle (e.g., `GHEREQ-238`, `PAIP-123`) can be extracted from the commit message, branch name, or conversation context, prefix the PR title with `[$JIRA_ISSUE_HANDLE] `
@@ -95,7 +101,7 @@ spec:
 
 ---
 
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: AgentConfig
 metadata:
   name: kelos-codex-dev-agent
@@ -133,10 +139,14 @@ spec:
         - "3.12"
         - "mcp-atlassian"
       env:
-        CONFLUENCE_URL: "https://wiki.navercorp.com"
-        CONFLUENCE_SPACES_FILTER: "PAIP,PLACEAIREQ"
-        JIRA_URL: "https://jira.navercorp.com"
-        JIRA_PROJECTS_FILTER: "PLACEAI,PLACEAIREQ"
+        - name: CONFLUENCE_URL
+          value: "https://wiki.navercorp.com"
+        - name: CONFLUENCE_SPACES_FILTER
+          value: "PAIP,PLACEAIREQ"
+        - name: JIRA_URL
+          value: "https://jira.navercorp.com"
+        - name: JIRA_PROJECTS_FILTER
+          value: "PLACEAI,PLACEAIREQ"
       envFrom:
         secretRef:
           name: pai-mcp-secrets
@@ -147,8 +157,10 @@ spec:
         - "mcp-server-apache-airflow"
         - "--read-only"
       env:
-        AIRFLOW_HOST: "https://paip-stg-airflow-web.io.naver.com"
-        AIRFLOW_USERNAME: "admin"
+        - name: AIRFLOW_HOST
+          value: "https://paip-stg-airflow-web.io.naver.com"
+        - name: AIRFLOW_USERNAME
+          value: "admin"
       envFrom:
         secretRef:
           name: pai-mcp-secrets

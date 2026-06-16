@@ -1,4 +1,4 @@
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: Workspace
 metadata:
   name: agent-runner-workspace
@@ -16,7 +16,7 @@ spec:
 
 ---
 
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: agent-runner-workers
@@ -44,8 +44,8 @@ spec:
       secretRef:
         name: kelos-credentials
     branch: "gjkim-kelos-task-{{.Number}}"
-    agentConfigRef:
-      name: kelos-dev-agent
+    agentConfigRefs:
+      - name: kelos-dev-agent
     podOverrides:
       env:
         - name: CLEANUP_AFTER_TEST
@@ -105,7 +105,7 @@ spec:
 
 ---
 
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: agent-runner-pr-responder
@@ -142,8 +142,8 @@ spec:
       secretRef:
         name: kelos-credentials
     branch: "{{.Branch}}"
-    agentConfigRef:
-      name: kelos-dev-agent
+    agentConfigRefs:
+      - name: kelos-dev-agent
     podOverrides:
       env:
         - name: CLEANUP_AFTER_TEST
@@ -189,7 +189,7 @@ spec:
 
 ---
 
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: agent-runner-planner
@@ -224,8 +224,8 @@ spec:
       type: oauth
       secretRef:
         name: kelos-credentials
-    agentConfigRef:
-      name: pai-planner-agent
+    agentConfigRefs:
+      - name: pai-planner-agent
     podOverrides:
       env:
         - name: CLEANUP_AFTER_TEST
@@ -307,7 +307,7 @@ spec:
 
 ---
 
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: agent-runner-rebase
@@ -343,8 +343,8 @@ spec:
       secretRef:
         name: kelos-credentials
     branch: "{{.Branch}}"
-    agentConfigRef:
-      name: kelos-dev-agent
+    agentConfigRefs:
+      - name: kelos-dev-agent
     podOverrides:
       env:
         - name: CLEANUP_AFTER_TEST
@@ -399,7 +399,7 @@ spec:
 
 ---
 
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: agent-runner-reviewer
@@ -438,8 +438,8 @@ spec:
       secretRef:
         name: kelos-credentials
     branch: "{{.Branch}}"
-    agentConfigRef:
-      name: pai-reviewer-agent
+    agentConfigRefs:
+      - name: pai-reviewer-agent
     podOverrides:
       env:
         - name: CLEANUP_AFTER_TEST
@@ -520,7 +520,7 @@ spec:
 
 ---
 
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: agent-runner-squash-commits
@@ -553,8 +553,8 @@ spec:
       secretRef:
         name: kelos-credentials
     branch: "{{.Branch}}"
-    agentConfigRef:
-      name: kelos-dev-agent
+    agentConfigRefs:
+      - name: kelos-dev-agent
     podOverrides:
       env:
         - name: CLEANUP_AFTER_TEST

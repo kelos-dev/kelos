@@ -1,4 +1,4 @@
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: agents-test-health
@@ -17,8 +17,8 @@ spec:
       type: oauth
       secretRef:
         name: kelos-credentials
-    agentConfigRef:
-      name: kelos-dev-agent
+    agentConfigRefs:
+      - name: kelos-dev-agent
     branch: kelos/agents-test-health
     podOverrides:
       env:
@@ -86,7 +86,7 @@ spec:
         the gap, then exit.
 
 ---
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: agents-io-contract-sync
@@ -105,8 +105,8 @@ spec:
       type: oauth
       secretRef:
         name: kelos-credentials
-    agentConfigRef:
-      name: kelos-dev-agent
+    agentConfigRefs:
+      - name: kelos-dev-agent
     branch: kelos/agents-io-contract-sync
     podOverrides:
       env:
@@ -177,7 +177,7 @@ spec:
         exclude it from this PR.
 
 ---
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: agents-simplify
@@ -196,8 +196,8 @@ spec:
       type: oauth
       secretRef:
         name: kelos-credentials
-    agentConfigRef:
-      name: kelos-dev-agent
+    agentConfigRefs:
+      - name: kelos-dev-agent
     branch: kelos/agents-simplify
     podOverrides:
       env:
@@ -262,7 +262,7 @@ spec:
       - Only touch files under service/agents. When in doubt, do nothing and exit.
 
 ---
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: agents-bug-scout
@@ -281,8 +281,8 @@ spec:
       type: oauth
       secretRef:
         name: kelos-credentials
-    agentConfigRef:
-      name: kelos-dev-agent
+    agentConfigRefs:
+      - name: kelos-dev-agent
     podOverrides:
       env:
         - name: CLAUDE_CODE_EFFORT_LEVEL
@@ -344,7 +344,7 @@ spec:
       - Only investigate service/agents.
 
 ---
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: agents-improvement-scout
@@ -363,8 +363,8 @@ spec:
       type: oauth
       secretRef:
         name: kelos-credentials
-    agentConfigRef:
-      name: kelos-dev-agent
+    agentConfigRefs:
+      - name: kelos-dev-agent
     podOverrides:
       env:
         - name: CLAUDE_CODE_EFFORT_LEVEL
@@ -422,7 +422,7 @@ spec:
       - Only investigate service/agents. Favor a few high-value proposals over many small ones.
 
 ---
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: agents-performance-scout
@@ -441,8 +441,8 @@ spec:
       type: oauth
       secretRef:
         name: kelos-credentials
-    agentConfigRef:
-      name: kelos-dev-agent
+    agentConfigRefs:
+      - name: kelos-dev-agent
     podOverrides:
       env:
         - name: CLAUDE_CODE_EFFORT_LEVEL

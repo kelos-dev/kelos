@@ -1,4 +1,4 @@
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: test-dashboard-improvement-scout
@@ -17,8 +17,8 @@ spec:
       type: oauth
       secretRef:
         name: kelos-credentials
-    agentConfigRef:
-      name: kelos-dev-agent
+    agentConfigRefs:
+      - name: kelos-dev-agent
     podOverrides:
       env:
         - name: CLAUDE_CODE_EFFORT_LEVEL
@@ -83,7 +83,7 @@ spec:
       - Only investigate service/test-dashboard. Favor a few high-value proposals over many small ones.
 
 ---
-apiVersion: kelos.dev/v1alpha1
+apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
   name: test-dashboard-ui-scout
@@ -102,8 +102,8 @@ spec:
       type: oauth
       secretRef:
         name: kelos-credentials
-    agentConfigRef:
-      name: kelos-dev-agent
+    agentConfigRefs:
+      - name: kelos-dev-agent
     podOverrides:
       env:
         - name: CLAUDE_CODE_EFFORT_LEVEL

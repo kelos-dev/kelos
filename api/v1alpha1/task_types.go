@@ -131,7 +131,8 @@ type PodOverrides struct {
 
 	// Volumes is a list of additional volumes to attach to the agent pod.
 	// User-supplied volume names must not collide with Kelos-reserved
-	// names: "workspace" and any name using the "kelos-" prefix.
+	// names: "workspace" and any name using the "kelos-" prefix
+	// (including "kelos-plugin" and "kelos-github-token").
 	// +optional
 	// +kubebuilder:validation:XValidation:rule="self.all(v, v.name != 'workspace' && !v.name.startsWith('kelos-'))",message="volumes[].name must not be 'workspace' or use the reserved 'kelos-' prefix"
 	Volumes []corev1.Volume `json:"volumes,omitempty"`
@@ -139,7 +140,7 @@ type PodOverrides struct {
 	// VolumeMounts is a list of additional volume mounts to add to the
 	// agent container. Names must reference either a user-supplied volume
 	// from Volumes or a Kelos-managed volume ("workspace" or a "kelos-"
-	// volume such as "kelos-plugin").
+	// volume such as "kelos-plugin" or "kelos-github-token").
 	// Applies only to the agent container; configure additional containers
 	// directly via ExtraContainers or ExtraInitContainers.
 	// +optional
@@ -188,7 +189,8 @@ type PodOverrides struct {
 	// one-shot init tasks.
 	// Containers can mount user-supplied volumes from the Volumes field
 	// as well as Kelos-managed volumes (workspace or a "kelos-" volume
-	// such as "kelos-plugin"). Note that the workspace volume uses
+	// such as "kelos-plugin" or "kelos-github-token"). Note that the
+	// workspace volume uses
 	// FSGroup-based permissions; containers running as a UID outside the
 	// pod's FSGroup will not have write access to the workspace.
 	// Container names must not use the Kelos-reserved "kelos-" prefix or

@@ -27,11 +27,11 @@
 | `spec.podOverrides.imagePullSecrets` | Secrets used to pull container images from private registries. Required when the agent image or any init container image is in a private registry | No |
 | `spec.podOverrides.serviceAccountName` | Service account name for the agent pod; use with workload identity systems (IRSA, GKE Workload Identity, Azure) | No |
 | `spec.podOverrides.volumes` | Additional volumes to attach to the agent pod. Names must not be `workspace` or use the Kelos-reserved `kelos-` prefix | No |
-| `spec.podOverrides.volumeMounts` | Additional volume mounts on the agent container; names must reference either a user-supplied volume from `volumes` or a Kelos-managed volume (`workspace` or a `kelos-` volume such as `kelos-plugin`) | No |
+| `spec.podOverrides.volumeMounts` | Additional volume mounts on the agent container; names must reference either a user-supplied volume from `volumes` or a Kelos-managed volume (`workspace` or a `kelos-` volume such as `kelos-plugin` or `kelos-github-token`) | No |
 | `spec.podOverrides.podSecurityContext` | Pod-level security context applied to the agent pod. Fields set here override Kelos defaults; `fsGroup` retains the Kelos default when unset so the agent user keeps workspace access | No |
 | `spec.podOverrides.containerSecurityContext` | Security context applied to the agent container. Use to declare `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]`, `readOnlyRootFilesystem: true`, etc., for PSS-restricted namespaces | No |
 | `spec.podOverrides.extraContainers` | Additional containers to run alongside the agent container in the same pod (max 8). They share the pod's network namespace (reachable via `localhost`) and can mount user-supplied volumes from `volumes`. Use for sidecars such as a database for integration tests or a proxy. Names must not use the Kelos-reserved `kelos-` prefix, collide with a built-in init container name (`git-clone`, `remote-setup`, `branch-setup`, `workspace-files`, `plugin-setup`, `skills-install`), duplicate another entry, or appear in `extraInitContainers` (see [Extra Containers](#task-extra-containers) below) | No |
-| `spec.podOverrides.extraInitContainers` | Additional init containers (max 8), appended after all Kelos built-in init containers so the workspace is ready before they run. Set `restartPolicy: Always` for sidecar semantics (long-running services, K8s 1.29+) or leave it unset for one-shot pre-agent setup. They can mount user-supplied volumes from `volumes` as well as Kelos-managed volumes (`workspace` or a `kelos-` volume such as `kelos-plugin`); workspace write access requires running as a UID in the pod's `fsGroup`. Same name constraints as `extraContainers` (see [Extra Containers](#task-extra-containers) below) | No |
+| `spec.podOverrides.extraInitContainers` | Additional init containers (max 8), appended after all Kelos built-in init containers so the workspace is ready before they run. Set `restartPolicy: Always` for sidecar semantics (long-running services, K8s 1.29+) or leave it unset for one-shot pre-agent setup. They can mount user-supplied volumes from `volumes` as well as Kelos-managed volumes (`workspace` or a `kelos-` volume such as `kelos-plugin` or `kelos-github-token`); workspace write access requires running as a UID in the pod's `fsGroup`. Same name constraints as `extraContainers` (see [Extra Containers](#task-extra-containers) below) | No |
 
 ### Pod Override Volumes
 
@@ -234,6 +234,8 @@ kubectl create secret generic github-app-creds \
 ```
 
 GitHub Apps are preferred over PATs for production use because they offer fine-grained permissions, higher rate limits, no dependency on a specific user account, and automatically expiring tokens.
+
+The installation token is minted to a per-task Secret (`<task-name>-github-token`) at admission and is mounted into the agent pod as a file at `/kelos/github-token/GITHUB_TOKEN`. While the task is running, the controller re-mints the token before it expires and updates the Secret in place. The kubelet syncs the file contents automatically, and the agent image's git credential helper and `gh` wrapper read the file on each invocation, so tasks that run longer than the ~1h installation-token TTL keep working without a pod restart.
 
 ## AgentConfig
 

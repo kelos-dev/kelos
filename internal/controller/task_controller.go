@@ -38,6 +38,29 @@ const (
 
 	// outputRetryInterval is the delay between output capture retries.
 	outputRetryInterval = 5 * time.Second
+
+	// tokenRefreshMargin is the safety margin before token expiry. The
+	// controller re-mints and updates the per-task token Secret when less
+	// than this duration remains until expiration. Mirrors the semantics
+	// of githubapp.tokenExpiryMargin used by long-lived processes.
+	tokenRefreshMargin = 5 * time.Minute
+
+	// tokenRefreshRetryInterval is the maximum delay before retrying a
+	// failed token refresh. It must stay shorter than tokenRefreshMargin so
+	// a transient failure still leaves time for another refresh attempt
+	// before the current installation token expires.
+	tokenRefreshRetryInterval = 30 * time.Second
+
+	// tokenExpiresAtAnnotation stores the expiration time of the
+	// installation token currently held in a per-task token Secret,
+	// formatted as RFC3339. Used by the controller to decide when to
+	// re-mint without re-deriving expiry from secret data.
+	tokenExpiresAtAnnotation = "kelos.dev/token-expires-at"
+
+	// githubAppSecretAnnotation stores the name of the source GitHub
+	// App credential Secret on the per-task token Secret. Its presence
+	// marks the Secret as App-derived (i.e. refreshable).
+	githubAppSecretAnnotation = "kelos.dev/github-app-secret"
 )
 
 // TaskReconciler reconciles a Task object.
@@ -144,6 +167,28 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	result, err := r.updateStatus(ctx, &task, &job)
 	if err != nil {
 		return result, err
+	}
+
+	// Refresh the per-task GitHub App installation token when the job
+	// is still running, so long-running agent pods keep working past
+	// the 1h installation-token TTL. Errors are logged but do not
+	// fail the reconcile — the cached token may still be valid and
+	// the next reconcile retries.
+	if job.Status.Active > 0 {
+		if next, refreshErr := r.refreshGitHubAppTokenIfNeeded(ctx, &task); refreshErr != nil {
+			logger.Error(refreshErr, "Unable to refresh GitHub App installation token")
+			r.recordEvent(&task, corev1.EventTypeWarning, "GitHubTokenRefreshFailed", "Failed to refresh GitHub App installation token: %v", refreshErr)
+			if next == 0 {
+				next = tokenRefreshRetryInterval
+			}
+			if result.RequeueAfter == 0 || next < result.RequeueAfter {
+				result.RequeueAfter = next
+			}
+		} else if next > 0 {
+			if result.RequeueAfter == 0 || next < result.RequeueAfter {
+				result.RequeueAfter = next
+			}
+		}
 	}
 
 	// Check TTL expiration for finished Tasks
@@ -391,10 +436,15 @@ func (r *TaskReconciler) resolveGitHubAppToken(ctx context.Context, task *kelos.
 
 	// Create a new secret with the generated token, owned by the Task
 	tokenSecretName := task.Name + "-github-token"
+	tokenAnnotations := map[string]string{
+		githubAppSecretAnnotation: workspace.SecretRef.Name,
+		tokenExpiresAtAnnotation:  tokenResp.ExpiresAt.UTC().Format(time.RFC3339),
+	}
 	tokenSecret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      tokenSecretName,
-			Namespace: task.Namespace,
+			Name:        tokenSecretName,
+			Namespace:   task.Namespace,
+			Annotations: tokenAnnotations,
 		},
 		StringData: map[string]string{
 			"GITHUB_TOKEN": tokenResp.Token,
@@ -415,6 +465,12 @@ func (r *TaskReconciler) resolveGitHubAppToken(ctx context.Context, task *kelos.
 			return nil, fmt.Errorf("fetching existing token secret: %w", err)
 		}
 		existing.StringData = tokenSecret.StringData
+		if existing.Annotations == nil {
+			existing.Annotations = map[string]string{}
+		}
+		for k, v := range tokenAnnotations {
+			existing.Annotations[k] = v
+		}
 		if err := r.Update(ctx, existing); err != nil {
 			return nil, fmt.Errorf("updating token secret: %w", err)
 		}
@@ -426,6 +482,121 @@ func (r *TaskReconciler) resolveGitHubAppToken(ctx context.Context, task *kelos.
 		Name: tokenSecretName,
 	}
 	return &resolved, nil
+}
+
+// refreshGitHubAppTokenIfNeeded re-mints the per-task GitHub App installation
+// token when it is close to expiry, so long-running agent pods keep working
+// past the 1h installation-token TTL. The function is a no-op for tasks whose
+// workspace does not use GitHub App credentials. It returns the duration
+// until the next refresh should run, or 0 when no refresh is applicable.
+func (r *TaskReconciler) refreshGitHubAppTokenIfNeeded(ctx context.Context, task *kelos.Task) (time.Duration, error) {
+	logger := log.FromContext(ctx)
+
+	tokenSecretName := task.Name + "-github-token"
+	var tokenSecret corev1.Secret
+	if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: tokenSecretName}, &tokenSecret); err != nil {
+		if apierrors.IsNotFound(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("fetching token secret %q: %w", tokenSecretName, err)
+	}
+
+	appSecretName := tokenSecret.Annotations[githubAppSecretAnnotation]
+	if appSecretName == "" {
+		return 0, nil
+	}
+
+	retryAfter := tokenRefreshRetryInterval
+	expiresAtStr := tokenSecret.Annotations[tokenExpiresAtAnnotation]
+	if expiresAtStr != "" {
+		expiresAt, err := time.Parse(time.RFC3339, expiresAtStr)
+		if err == nil {
+			retryAfter = tokenRefreshFailureRetryAfter(expiresAt)
+			refreshAt := expiresAt.Add(-tokenRefreshMargin)
+			if time.Now().Before(refreshAt) {
+				return time.Until(refreshAt), nil
+			}
+		}
+	}
+
+	if r.TokenClient == nil {
+		return retryAfter, fmt.Errorf("GitHub App token refresh requested but TokenClient is not configured")
+	}
+
+	var appSecret corev1.Secret
+	if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: appSecretName}, &appSecret); err != nil {
+		return retryAfter, fmt.Errorf("fetching GitHub App secret %q: %w", appSecretName, err)
+	}
+	if !githubapp.IsGitHubApp(appSecret.Data) {
+		return 0, nil
+	}
+
+	creds, err := githubapp.ParseCredentials(appSecret.Data)
+	if err != nil {
+		return retryAfter, fmt.Errorf("parsing GitHub App credentials: %w", err)
+	}
+
+	tc := &githubapp.TokenClient{
+		BaseURL: r.TokenClient.BaseURL,
+		Client:  r.TokenClient.Client,
+	}
+	if task.Spec.WorkspaceRef != nil {
+		var ws kelos.Workspace
+		if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: task.Spec.WorkspaceRef.Name}, &ws); err != nil {
+			// Fall back to the controller-wide BaseURL. Log at V(1) so
+			// operators can correlate a later 401 against the wrong
+			// API host with the lookup that failed here.
+			logger.V(1).Info("Unable to fetch workspace for token refresh, using default API base URL", "workspace", task.Spec.WorkspaceRef.Name, "error", err)
+		} else if ws.Spec.Repo != "" {
+			host, _, _ := parseGitHubRepo(ws.Spec.Repo)
+			if apiBaseURL := gitHubAPIBaseURL(host); apiBaseURL != "" {
+				tc.BaseURL = apiBaseURL
+			}
+		}
+	}
+
+	tokenResp, err := tc.GenerateInstallationToken(ctx, creds)
+	if err != nil {
+		return retryAfter, fmt.Errorf("generating refreshed installation token: %w", err)
+	}
+
+	// StringData wins over Data on the apiserver, so writing through
+	// StringData is the idiomatic way to update a Secret in place and
+	// matches resolveGitHubAppToken on the initial-mint path.
+	tokenSecret.StringData = map[string]string{
+		"GITHUB_TOKEN": tokenResp.Token,
+	}
+	if tokenSecret.Annotations == nil {
+		tokenSecret.Annotations = map[string]string{}
+	}
+	tokenSecret.Annotations[tokenExpiresAtAnnotation] = tokenResp.ExpiresAt.UTC().Format(time.RFC3339)
+	if err := r.Update(ctx, &tokenSecret); err != nil {
+		return retryAfter, fmt.Errorf("updating token secret with refreshed token: %w", err)
+	}
+
+	logger.Info("Refreshed GitHub App installation token", "task", task.Name, "expiresAt", tokenResp.ExpiresAt)
+	r.recordEvent(task, corev1.EventTypeNormal, "GitHubTokenRefreshed", "Refreshed GitHub App installation token (expires at %s)", tokenResp.ExpiresAt.UTC().Format(time.RFC3339))
+
+	next := time.Until(tokenResp.ExpiresAt.Add(-tokenRefreshMargin))
+	if next < 0 {
+		next = 0
+	}
+	return next, nil
+}
+
+func tokenRefreshFailureRetryAfter(expiresAt time.Time) time.Duration {
+	remaining := time.Until(expiresAt)
+	if remaining <= 0 {
+		return tokenRefreshRetryInterval
+	}
+	retryAfter := remaining / 2
+	if retryAfter > tokenRefreshRetryInterval {
+		return tokenRefreshRetryInterval
+	}
+	if retryAfter < time.Second {
+		return time.Second
+	}
+	return retryAfter
 }
 
 func (r *TaskReconciler) resolveMCPServerSecrets(ctx context.Context, namespace string, servers []kelos.MCPServerSpec) ([]kelos.MCPServerSpec, error) {

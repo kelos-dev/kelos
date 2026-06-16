@@ -133,13 +133,14 @@ type PodOverrides struct {
 
 	// Volumes is a list of additional volumes to attach to the agent pod.
 	// User-supplied volume names must not collide with Kelos-reserved
-	// names ("workspace", "kelos-plugin").
+	// names ("workspace", "kelos-plugin", "kelos-github-token").
 	// +optional
 	Volumes []corev1.Volume `json:"volumes,omitempty"`
 
 	// VolumeMounts is a list of additional volume mounts to add to the
 	// agent container. Names must reference either a user-supplied volume
-	// from Volumes or a Kelos-managed volume ("workspace", "kelos-plugin").
+	// from Volumes or a Kelos-managed volume ("workspace", "kelos-plugin",
+	// "kelos-github-token").
 	// Applies only to the agent container; configure additional containers
 	// directly via ExtraContainers or ExtraInitContainers.
 	// +optional
@@ -187,10 +188,10 @@ type PodOverrides struct {
 	// (long-running services like databases) or leave it unset for
 	// one-shot init tasks.
 	// Containers can mount user-supplied volumes from the Volumes field
-	// as well as Kelos-managed volumes (workspace, kelos-plugin). Note
-	// that the workspace volume uses FSGroup-based permissions; containers
-	// running as a UID outside the pod's FSGroup will not have write
-	// access to the workspace.
+	// as well as Kelos-managed volumes (workspace, kelos-plugin,
+	// kelos-github-token). Note that the workspace volume uses FSGroup-based
+	// permissions; containers running as a UID outside the pod's FSGroup
+	// will not have write access to the workspace.
 	// Container names must not use the Kelos-reserved "kelos-" prefix or
 	// collide with a built-in init container name: git-clone, remote-setup,
 	// branch-setup, workspace-files, plugin-setup, skills-install.

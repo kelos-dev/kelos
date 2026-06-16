@@ -30,6 +30,9 @@ ENV PATH="/usr/local/go/bin:${PATH}"
 COPY cursor/kelos_entrypoint.sh /kelos_entrypoint.sh
 RUN chmod +x /kelos_entrypoint.sh
 
+COPY hack/agent-gh-wrapper.sh /usr/local/bin/gh
+RUN chmod +x /usr/local/bin/gh
+
 ARG TARGETARCH
 COPY bin/kelos-capture-linux-${TARGETARCH} /kelos/kelos-capture
 

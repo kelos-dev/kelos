@@ -75,6 +75,23 @@ const (
 	// image's home directory.
 	GHConfigDir = WorkspaceMountPath + "/.gh-config"
 
+	// GitHubTokenVolumeName is the name of the volume that mounts the
+	// workspace token Secret into the agent and init containers. The
+	// kubelet auto-syncs Secret volume contents when the underlying
+	// Secret is updated, which lets the controller refresh the token
+	// in-place without restarting the pod.
+	GitHubTokenVolumeName = "kelos-github-token"
+
+	// GitHubTokenMountPath is the directory where the workspace token
+	// Secret is mounted. The token is read from the file named
+	// GitHubTokenSecretKey under this directory.
+	GitHubTokenMountPath = "/kelos/github-token"
+
+	// GitHubTokenSecretKey is the Secret key under which the GitHub
+	// token is stored. Mounted as a file at
+	// GitHubTokenMountPath + "/" + GitHubTokenSecretKey.
+	GitHubTokenSecretKey = "GITHUB_TOKEN"
+
 	// AgentUID is the UID shared between the git-clone init
 	// container and the agent container. Custom agent images must run
 	// as this UID so that both containers can read and write the
@@ -336,7 +353,7 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 			LocalObjectReference: corev1.LocalObjectReference{
 				Name: workspace.SecretRef.Name,
 			},
-			Key: "GITHUB_TOKEN",
+			Key: GitHubTokenSecretKey,
 		}
 		githubTokenEnv := corev1.EnvVar{
 			Name:      "GITHUB_TOKEN",
@@ -364,6 +381,17 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 			Name:  "GH_CONFIG_DIR",
 			Value: GHConfigDir,
 		})
+
+		// Expose the mounted token file path so the git credential
+		// helper and the gh wrapper script can re-read the token on
+		// every invocation, picking up controller-side refreshes
+		// without a pod restart.
+		tokenFileEnv := corev1.EnvVar{
+			Name:  "KELOS_GITHUB_TOKEN_FILE",
+			Value: GitHubTokenMountPath + "/" + GitHubTokenSecretKey,
+		}
+		envVars = append(envVars, tokenFileEnv)
+		workspaceEnvVars = append(workspaceEnvVars, tokenFileEnv)
 	}
 
 	backoffLimit := int32(1)
@@ -400,6 +428,30 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 			MountPath: WorkspaceMountPath,
 		}
 
+		// Workspace volume mounts shared by every container that needs
+		// the cloned repo plus, when a token Secret is configured, the
+		// auto-syncing token file.
+		workspaceVolumeMounts := []corev1.VolumeMount{volumeMount}
+		if workspace.SecretRef != nil {
+			volumes = append(volumes, corev1.Volume{
+				Name: GitHubTokenVolumeName,
+				VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{
+						SecretName: workspace.SecretRef.Name,
+						Items: []corev1.KeyToPath{
+							{Key: GitHubTokenSecretKey, Path: GitHubTokenSecretKey},
+						},
+						Optional: ptr(true),
+					},
+				},
+			})
+			workspaceVolumeMounts = append(workspaceVolumeMounts, corev1.VolumeMount{
+				Name:      GitHubTokenVolumeName,
+				MountPath: GitHubTokenMountPath,
+				ReadOnly:  true,
+			})
+		}
+
 		cloneArgs := []string{"clone"}
 		if workspace.Ref != "" {
 			cloneArgs = append(cloneArgs, "--branch", workspace.Ref)
@@ -411,14 +463,14 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 			Image:        GitCloneImage,
 			Args:         cloneArgs,
 			Env:          workspaceEnvVars,
-			VolumeMounts: []corev1.VolumeMount{volumeMount},
+			VolumeMounts: append([]corev1.VolumeMount(nil), workspaceVolumeMounts...),
 			SecurityContext: &corev1.SecurityContext{
 				RunAsUser: &agentUID,
 			},
 		}
 
 		if workspace.SecretRef != nil {
-			credentialHelper := `!f() { echo "username=x-access-token"; echo "password=$GITHUB_TOKEN"; }; f`
+			credentialHelper := gitCredentialHelper()
 			// Clear inherited credential helpers with an empty -c credential.helper=
 			// before setting the workspace helper, then persist the same
 			// configuration into the repo so the agent container is
@@ -466,7 +518,7 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 		if task.Spec.Branch != "" {
 			fetchCmd := `git fetch origin "$KELOS_BRANCH":"$KELOS_BRANCH" 2>/dev/null`
 			if workspace.SecretRef != nil {
-				credHelper := `!f() { echo "username=x-access-token"; echo "password=$GITHUB_TOKEN"; }; f`
+				credHelper := gitCredentialHelper()
 				fetchCmd = fmt.Sprintf(`git -c credential.helper= -c credential.helper='%s' fetch origin "$KELOS_BRANCH":"$KELOS_BRANCH" 2>/dev/null`, credHelper)
 			}
 			branchSetupScript := fmt.Sprintf(
@@ -487,7 +539,7 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 				Image:        GitCloneImage,
 				Command:      []string{"sh", "-c", branchSetupScript},
 				Env:          branchEnv,
-				VolumeMounts: []corev1.VolumeMount{volumeMount},
+				VolumeMounts: append([]corev1.VolumeMount(nil), workspaceVolumeMounts...),
 				SecurityContext: &corev1.SecurityContext{
 					RunAsUser: &agentUID,
 				},
@@ -524,7 +576,7 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 			})
 		}
 
-		mainContainer.VolumeMounts = []corev1.VolumeMount{volumeMount}
+		mainContainer.VolumeMounts = append([]corev1.VolumeMount(nil), workspaceVolumeMounts...)
 		mainContainer.WorkingDir = WorkspaceMountPath + "/repo"
 	}
 
@@ -837,6 +889,20 @@ func validatePodFailurePolicy(policy *batchv1.PodFailurePolicy) error {
 		}
 	}
 	return nil
+}
+
+// gitCredentialHelper returns the inline git credential helper that resolves
+// the GitHub token by reading the mounted token file on each invocation,
+// falling back to the inherited $GITHUB_TOKEN env var when the file is not
+// present. Reading the file each time lets git pick up controller-side
+// token refreshes (e.g. for GitHub App installation tokens that expire
+// in ~1h) without restarting the pod.
+func gitCredentialHelper() string {
+	tokenFile := GitHubTokenMountPath + "/" + GitHubTokenSecretKey
+	return fmt.Sprintf(
+		`!f() { echo "username=x-access-token"; if [ -r %q ]; then echo "password=$(cat %q)"; else echo "password=$GITHUB_TOKEN"; fi; }; f`,
+		tokenFile, tokenFile,
+	)
 }
 
 // reservedVolumeNames is the set of non-prefixed volume names that Kelos

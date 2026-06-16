@@ -37,10 +37,11 @@ Kelos sets the following reserved environment variables on agent containers:
 | `OPENCODE_API_KEY` | API key for OpenCode (`opencode` agent, api-key or oauth credential type) | When agent type is `opencode` |
 | `CURSOR_API_KEY` | API key for Cursor CLI (`cursor` agent, api-key or oauth credential type) | When agent type is `cursor` |
 | `CLAUDE_CODE_OAUTH_TOKEN` | OAuth token (`claude-code` agent, oauth credential type) | When credential type is `oauth` and agent type is `claude-code` |
-| `GITHUB_TOKEN` | GitHub token for workspace access | When workspace has a `secretRef` |
-| `GH_TOKEN` | GitHub token for `gh` CLI (github.com) | When workspace has a `secretRef` and repo is on github.com |
-| `GH_ENTERPRISE_TOKEN` | GitHub token for `gh` CLI (GitHub Enterprise) | When workspace has a `secretRef` and repo is on a GitHub Enterprise host |
+| `GITHUB_TOKEN` | GitHub token for workspace access. **Captured at pod start and not refreshed in-process — custom images should read `KELOS_GITHUB_TOKEN_FILE` instead (see [GitHub token freshness](#github-token-freshness)).** | When workspace has a `secretRef` |
+| `GH_TOKEN` | GitHub token for `gh` CLI (github.com). Same freshness caveat as `GITHUB_TOKEN`; the bundled `gh` wrapper in reference images overrides it from the token file on each call. | When workspace has a `secretRef` and repo is on github.com |
+| `GH_ENTERPRISE_TOKEN` | GitHub token for `gh` CLI (GitHub Enterprise). Same freshness caveat as `GH_TOKEN`. | When workspace has a `secretRef` and repo is on a GitHub Enterprise host |
 | `GH_HOST` | Hostname for GitHub Enterprise | When repo is on a GitHub Enterprise host |
+| `KELOS_GITHUB_TOKEN_FILE` | Path to a file containing the current GitHub token. The file is kubelet-synced from the underlying Secret, so re-reading it on each GitHub call picks up refreshed installation tokens without a pod restart. **Recommended source of truth for custom agent images.** | When workspace has a `secretRef` |
 | `KELOS_AGENT_TYPE` | The agent type (`claude-code`, `codex`, `gemini`, `opencode`, `cursor`) | Always |
 | `KELOS_BASE_BRANCH` | The base branch (workspace `ref`) for the task | When workspace has a non-empty `ref` |
 | `KELOS_AGENTS_MD` | User-level instructions from AgentConfig | When `agentConfigRefs` is set and `agentsMD` is non-empty |
@@ -119,6 +120,33 @@ The reference entrypoints emit `---KELOS_SETUP_COMMAND_START---`,
 `---KELOS_SETUP_COMMAND_DONE---`, and `---KELOS_SETUP_COMMAND_FAILED---`
 banners on stderr so users can distinguish setup failures from agent
 failures when tailing pod logs.
+
+### 8. GitHub token freshness
+
+For GitHub App-backed workspaces, the installation token has a ~1h TTL but
+the controller re-mints it in place while the Job is running. The
+`GITHUB_TOKEN`, `GH_TOKEN`, and `GH_ENTERPRISE_TOKEN` env vars are still
+set for compatibility, but their values are frozen at pod start and will
+expire mid-run for long-running tasks.
+
+**Custom agent images should read `$KELOS_GITHUB_TOKEN_FILE` on each
+GitHub call** instead of capturing the env var once. The file is mounted
+from the per-task token Secret; the kubelet auto-syncs its contents
+(~60s latency) so each read returns the current token.
+
+Two concrete recommendations:
+
+- **In-process GitHub clients.** Re-read `$KELOS_GITHUB_TOKEN_FILE`
+  before each request rather than caching the env var at startup.
+- **`gh` CLI.** Ship a wrapper ahead of `/usr/bin/gh` in `PATH` that
+  exports `GH_TOKEN` / `GH_ENTERPRISE_TOKEN` from the file on each
+  invocation. The reference images install
+  [`hack/agent-gh-wrapper.sh`](../hack/agent-gh-wrapper.sh) at
+  `/usr/local/bin/gh` — custom images can copy or adapt it.
+
+`git` is handled automatically: the credential helper Kelos injects
+already reads the file on each invocation, with the `$GITHUB_TOKEN` env
+var as a fallback for images that have not adopted the file.
 
 ## Output Capture
 

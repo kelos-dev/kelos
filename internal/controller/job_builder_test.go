@@ -584,8 +584,8 @@ func TestBuildClaudeCodeJob_CustomImageWithWorkspace(t *testing.T) {
 	if container.WorkingDir != WorkspaceMountPath+"/repo" {
 		t.Errorf("Expected workingDir %q, got %q", WorkspaceMountPath+"/repo", container.WorkingDir)
 	}
-	if len(container.VolumeMounts) != 1 {
-		t.Fatalf("Expected 1 volume mount, got %d", len(container.VolumeMounts))
+	if len(container.VolumeMounts) != 2 {
+		t.Fatalf("Expected 2 volume mounts (workspace + github token), got %d", len(container.VolumeMounts))
 	}
 
 	// Verify FSGroup.
@@ -673,6 +673,210 @@ func TestBuildClaudeCodeJob_WorkspaceWithSecretRefPersistsCredentialHelper(t *te
 	}
 	if !strings.Contains(script, "--add credential.helper") {
 		t.Error("Expected init container script to --add credential helper in repo config")
+	}
+}
+
+func containsVolumeMount(mounts []corev1.VolumeMount, name, path string) bool {
+	for _, m := range mounts {
+		if m.Name == name && m.MountPath == path {
+			return true
+		}
+	}
+	return false
+}
+
+func TestBuildClaudeCodeJob_WorkspaceWithSecretRefMountsTokenVolume(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-token-volume",
+			Namespace: "default",
+		},
+		Spec: kelos.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix the code",
+			Credentials: kelos.Credentials{
+				Type:      kelos.CredentialTypeAPIKey,
+				SecretRef: &kelos.SecretReference{Name: "my-secret"},
+			},
+			Branch: "feature-x",
+		},
+	}
+
+	workspace := &kelos.WorkspaceSpec{
+		Repo: "https://github.com/example/repo.git",
+		Ref:  "main",
+		SecretRef: &kelos.SecretReference{
+			Name: "github-token",
+		},
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	// Pod must declare the token Secret volume.
+	var tokenVolume *corev1.Volume
+	for i := range job.Spec.Template.Spec.Volumes {
+		if job.Spec.Template.Spec.Volumes[i].Name == GitHubTokenVolumeName {
+			tokenVolume = &job.Spec.Template.Spec.Volumes[i]
+			break
+		}
+	}
+	if tokenVolume == nil {
+		t.Fatalf("Expected pod to mount %q volume", GitHubTokenVolumeName)
+	}
+	if tokenVolume.Secret == nil {
+		t.Fatalf("Expected %q volume to be a Secret volume", GitHubTokenVolumeName)
+	}
+	if tokenVolume.Secret.SecretName != "github-token" {
+		t.Errorf("Token volume secretName: got %q, want %q", tokenVolume.Secret.SecretName, "github-token")
+	}
+	if len(tokenVolume.Secret.Items) != 1 || tokenVolume.Secret.Items[0].Key != GitHubTokenSecretKey || tokenVolume.Secret.Items[0].Path != GitHubTokenSecretKey {
+		t.Errorf("Expected token volume to project only %q -> %q, got %+v", GitHubTokenSecretKey, GitHubTokenSecretKey, tokenVolume.Secret.Items)
+	}
+	if tokenVolume.Secret.Optional == nil || !*tokenVolume.Secret.Optional {
+		t.Error("Expected token volume to be Optional so PAT secrets without GITHUB_TOKEN do not block pod start")
+	}
+
+	// Verify the token volume is mounted into the main container.
+	mainContainer := job.Spec.Template.Spec.Containers[0]
+	if !containsVolumeMount(mainContainer.VolumeMounts, GitHubTokenVolumeName, GitHubTokenMountPath) {
+		t.Errorf("Main container missing %q mount at %q; mounts: %+v", GitHubTokenVolumeName, GitHubTokenMountPath, mainContainer.VolumeMounts)
+	}
+
+	// Verify KELOS_GITHUB_TOKEN_FILE points at the mounted file.
+	wantTokenFile := GitHubTokenMountPath + "/" + GitHubTokenSecretKey
+	var sawTokenFileEnv bool
+	for _, env := range mainContainer.Env {
+		if env.Name == "KELOS_GITHUB_TOKEN_FILE" {
+			sawTokenFileEnv = true
+			if env.Value != wantTokenFile {
+				t.Errorf("KELOS_GITHUB_TOKEN_FILE: got %q, want %q", env.Value, wantTokenFile)
+			}
+		}
+	}
+	if !sawTokenFileEnv {
+		t.Error("Expected KELOS_GITHUB_TOKEN_FILE env var on main container")
+	}
+
+	// Verify init containers that need the token also have it mounted.
+	wantInitMounts := map[string]bool{"git-clone": false, "branch-setup": false}
+	for _, ic := range job.Spec.Template.Spec.InitContainers {
+		if _, expected := wantInitMounts[ic.Name]; !expected {
+			continue
+		}
+		if !containsVolumeMount(ic.VolumeMounts, GitHubTokenVolumeName, GitHubTokenMountPath) {
+			t.Errorf("Init container %q missing %q mount at %q; mounts: %+v", ic.Name, GitHubTokenVolumeName, GitHubTokenMountPath, ic.VolumeMounts)
+		}
+		var sawTokenFileEnv bool
+		for _, env := range ic.Env {
+			if env.Name == "KELOS_GITHUB_TOKEN_FILE" && env.Value == wantTokenFile {
+				sawTokenFileEnv = true
+			}
+		}
+		if !sawTokenFileEnv {
+			t.Errorf("Init container %q missing KELOS_GITHUB_TOKEN_FILE=%q", ic.Name, wantTokenFile)
+		}
+		wantInitMounts[ic.Name] = true
+	}
+	for name, found := range wantInitMounts {
+		if !found {
+			t.Errorf("Expected init container %q to exist", name)
+		}
+	}
+}
+
+func TestBuildClaudeCodeJob_WorkspaceWithoutSecretRefDoesNotMountTokenVolume(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-no-token-volume",
+			Namespace: "default",
+		},
+		Spec: kelos.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Hello",
+			Credentials: kelos.Credentials{
+				Type:      kelos.CredentialTypeAPIKey,
+				SecretRef: &kelos.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &kelos.WorkspaceSpec{
+		Repo: "https://github.com/example/repo.git",
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	for _, v := range job.Spec.Template.Spec.Volumes {
+		if v.Name == GitHubTokenVolumeName {
+			t.Errorf("Token volume %q should not be mounted when workspace has no SecretRef", GitHubTokenVolumeName)
+		}
+	}
+	for _, env := range job.Spec.Template.Spec.Containers[0].Env {
+		if env.Name == "KELOS_GITHUB_TOKEN_FILE" {
+			t.Errorf("KELOS_GITHUB_TOKEN_FILE should not be set when workspace has no SecretRef (got %q)", env.Value)
+		}
+	}
+}
+
+func TestBuildClaudeCodeJob_CredentialHelperReadsFromTokenFile(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-cred-helper-file",
+			Namespace: "default",
+		},
+		Spec: kelos.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix the code",
+			Credentials: kelos.Credentials{
+				Type:      kelos.CredentialTypeAPIKey,
+				SecretRef: &kelos.SecretReference{Name: "my-secret"},
+			},
+			Branch: "feature-x",
+		},
+	}
+
+	workspace := &kelos.WorkspaceSpec{
+		Repo: "https://github.com/example/repo.git",
+		SecretRef: &kelos.SecretReference{
+			Name: "github-token",
+		},
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	tokenFile := GitHubTokenMountPath + "/" + GitHubTokenSecretKey
+
+	for _, ic := range job.Spec.Template.Spec.InitContainers {
+		if ic.Name != "git-clone" && ic.Name != "branch-setup" {
+			continue
+		}
+		if len(ic.Command) < 3 {
+			t.Fatalf("%s: expected command [sh -c ...], got %v", ic.Name, ic.Command)
+		}
+		script := ic.Command[2]
+		// Credential helper must source the token from the mounted file,
+		// not from the (potentially stale) $GITHUB_TOKEN env var.
+		wantCat := fmt.Sprintf("cat %q", tokenFile)
+		if !strings.Contains(script, wantCat) {
+			t.Errorf("%s: expected credential helper to %s; script: %s", ic.Name, wantCat, script)
+		}
+		// Ensure the helper still has a fallback to the env var when the
+		// file is unreadable (e.g. PAT secrets without the mount key).
+		if !strings.Contains(script, "$GITHUB_TOKEN") {
+			t.Errorf("%s: expected credential helper to keep $GITHUB_TOKEN fallback; script: %s", ic.Name, script)
+		}
 	}
 }
 
@@ -965,8 +1169,8 @@ func TestBuildCodexJob_WithWorkspace(t *testing.T) {
 	if container.WorkingDir != WorkspaceMountPath+"/repo" {
 		t.Errorf("Expected workingDir %q, got %q", WorkspaceMountPath+"/repo", container.WorkingDir)
 	}
-	if len(container.VolumeMounts) != 1 {
-		t.Fatalf("Expected 1 volume mount, got %d", len(container.VolumeMounts))
+	if len(container.VolumeMounts) != 2 {
+		t.Fatalf("Expected 2 volume mounts (workspace + github token), got %d", len(container.VolumeMounts))
 	}
 
 	// Should have CODEX_API_KEY (not ANTHROPIC_API_KEY), KELOS_MODEL, GITHUB_TOKEN, GH_TOKEN, GH_CONFIG_DIR.
@@ -1215,8 +1419,8 @@ func TestBuildGeminiJob_WithWorkspace(t *testing.T) {
 	if container.WorkingDir != WorkspaceMountPath+"/repo" {
 		t.Errorf("Expected workingDir %q, got %q", WorkspaceMountPath+"/repo", container.WorkingDir)
 	}
-	if len(container.VolumeMounts) != 1 {
-		t.Fatalf("Expected 1 volume mount, got %d", len(container.VolumeMounts))
+	if len(container.VolumeMounts) != 2 {
+		t.Fatalf("Expected 2 volume mounts (workspace + github token), got %d", len(container.VolumeMounts))
 	}
 
 	// Should have GEMINI_API_KEY (not ANTHROPIC_API_KEY), KELOS_MODEL, GITHUB_TOKEN, GH_TOKEN, GH_CONFIG_DIR.
@@ -1471,8 +1675,8 @@ func TestBuildOpenCodeJob_WithWorkspace(t *testing.T) {
 	if container.WorkingDir != WorkspaceMountPath+"/repo" {
 		t.Errorf("Expected workingDir %q, got %q", WorkspaceMountPath+"/repo", container.WorkingDir)
 	}
-	if len(container.VolumeMounts) != 1 {
-		t.Fatalf("Expected 1 volume mount, got %d", len(container.VolumeMounts))
+	if len(container.VolumeMounts) != 2 {
+		t.Fatalf("Expected 2 volume mounts (workspace + github token), got %d", len(container.VolumeMounts))
 	}
 
 	// Should have OPENCODE_API_KEY (not ANTHROPIC_API_KEY), KELOS_MODEL, GITHUB_TOKEN, GH_TOKEN, GH_CONFIG_DIR.
@@ -5078,6 +5282,10 @@ func TestBuildJob_PodOverridesVolumes_ReservedNameRejected(t *testing.T) {
 		},
 		{
 			name:      PluginVolumeName,
+			wantError: "reserved \"kelos-\" volume name prefix",
+		},
+		{
+			name:      GitHubTokenVolumeName,
 			wantError: "reserved \"kelos-\" volume name prefix",
 		},
 		{

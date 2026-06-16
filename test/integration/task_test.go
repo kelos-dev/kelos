@@ -1228,8 +1228,8 @@ var _ = Describe("Task Controller", func() {
 			Expect(mainContainer.Command).To(Equal([]string{"/kelos_entrypoint.sh"}))
 			Expect(mainContainer.Args).To(Equal([]string{"Create a PR"}))
 
-			By("Verifying the main container has KELOS_AGENT_TYPE, ANTHROPIC_API_KEY, KELOS_BASE_BRANCH, GITHUB_TOKEN, GH_TOKEN, and GH_CONFIG_DIR env vars")
-			Expect(mainContainer.Env).To(HaveLen(6))
+			By("Verifying the main container has KELOS_AGENT_TYPE, ANTHROPIC_API_KEY, KELOS_BASE_BRANCH, GITHUB_TOKEN, GH_TOKEN, GH_CONFIG_DIR, and KELOS_GITHUB_TOKEN_FILE env vars")
+			Expect(mainContainer.Env).To(HaveLen(7))
 			mainEnv := map[string]corev1.EnvVar{}
 			for _, envVar := range mainContainer.Env {
 				mainEnv[envVar.Name] = envVar
@@ -1248,17 +1248,55 @@ var _ = Describe("Task Controller", func() {
 			Expect(mainEnv["GH_TOKEN"].ValueFrom.SecretKeyRef.Key).To(Equal("GITHUB_TOKEN"))
 			Expect(mainEnv).To(HaveKey("GH_CONFIG_DIR"))
 			Expect(mainEnv["GH_CONFIG_DIR"].Value).To(Equal(controller.GHConfigDir))
+			Expect(mainEnv).To(HaveKey("KELOS_GITHUB_TOKEN_FILE"))
+			Expect(mainEnv["KELOS_GITHUB_TOKEN_FILE"].Value).To(Equal(controller.GitHubTokenMountPath + "/" + controller.GitHubTokenSecretKey))
 
-			By("Verifying the init container has GITHUB_TOKEN, GH_TOKEN env vars and credential helper")
+			By("Verifying the token Secret is mounted as a refreshable volume on the main container")
+			var tokenVolume *corev1.Volume
+			for i := range createdJob.Spec.Template.Spec.Volumes {
+				if createdJob.Spec.Template.Spec.Volumes[i].Name == controller.GitHubTokenVolumeName {
+					tokenVolume = &createdJob.Spec.Template.Spec.Volumes[i]
+					break
+				}
+			}
+			Expect(tokenVolume).NotTo(BeNil(), "Job pod should declare the kelos-github-token volume")
+			Expect(tokenVolume.Secret).NotTo(BeNil())
+			Expect(tokenVolume.Secret.SecretName).To(Equal("github-token"))
+			var mainTokenMount *corev1.VolumeMount
+			for i := range mainContainer.VolumeMounts {
+				if mainContainer.VolumeMounts[i].Name == controller.GitHubTokenVolumeName {
+					mainTokenMount = &mainContainer.VolumeMounts[i]
+					break
+				}
+			}
+			Expect(mainTokenMount).NotTo(BeNil(), "Main container should mount the kelos-github-token volume")
+			Expect(mainTokenMount.MountPath).To(Equal(controller.GitHubTokenMountPath))
+
+			By("Verifying the init container has GITHUB_TOKEN, GH_TOKEN, KELOS_GITHUB_TOKEN_FILE env vars and credential helper")
 			Expect(createdJob.Spec.Template.Spec.InitContainers).To(HaveLen(1))
 			initContainer := createdJob.Spec.Template.Spec.InitContainers[0]
-			Expect(initContainer.Env).To(HaveLen(2))
-			Expect(initContainer.Env[0].Name).To(Equal("GITHUB_TOKEN"))
-			Expect(initContainer.Env[0].ValueFrom.SecretKeyRef.Name).To(Equal("github-token"))
-			Expect(initContainer.Env[0].ValueFrom.SecretKeyRef.Key).To(Equal("GITHUB_TOKEN"))
-			Expect(initContainer.Env[1].Name).To(Equal("GH_TOKEN"))
-			Expect(initContainer.Env[1].ValueFrom.SecretKeyRef.Name).To(Equal("github-token"))
-			Expect(initContainer.Env[1].ValueFrom.SecretKeyRef.Key).To(Equal("GITHUB_TOKEN"))
+			Expect(initContainer.Env).To(HaveLen(3))
+			initEnv := map[string]corev1.EnvVar{}
+			for _, envVar := range initContainer.Env {
+				initEnv[envVar.Name] = envVar
+			}
+			Expect(initEnv).To(HaveKey("GITHUB_TOKEN"))
+			Expect(initEnv["GITHUB_TOKEN"].ValueFrom.SecretKeyRef.Name).To(Equal("github-token"))
+			Expect(initEnv["GITHUB_TOKEN"].ValueFrom.SecretKeyRef.Key).To(Equal("GITHUB_TOKEN"))
+			Expect(initEnv).To(HaveKey("GH_TOKEN"))
+			Expect(initEnv["GH_TOKEN"].ValueFrom.SecretKeyRef.Name).To(Equal("github-token"))
+			Expect(initEnv["GH_TOKEN"].ValueFrom.SecretKeyRef.Key).To(Equal("GITHUB_TOKEN"))
+			Expect(initEnv).To(HaveKey("KELOS_GITHUB_TOKEN_FILE"))
+			Expect(initEnv["KELOS_GITHUB_TOKEN_FILE"].Value).To(Equal(controller.GitHubTokenMountPath + "/" + controller.GitHubTokenSecretKey))
+			var initTokenMount *corev1.VolumeMount
+			for i := range initContainer.VolumeMounts {
+				if initContainer.VolumeMounts[i].Name == controller.GitHubTokenVolumeName {
+					initTokenMount = &initContainer.VolumeMounts[i]
+					break
+				}
+			}
+			Expect(initTokenMount).NotTo(BeNil(), "Init container should mount the kelos-github-token volume so the credential helper can read it")
+			Expect(initTokenMount.MountPath).To(Equal(controller.GitHubTokenMountPath))
 
 			By("Verifying the init container uses credential helper for git auth")
 			Expect(initContainer.Command).To(HaveLen(3))

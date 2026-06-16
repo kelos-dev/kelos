@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -289,6 +290,348 @@ func TestResolveGitHubAppToken_EnterpriseURL(t *testing.T) {
 				t.Errorf("API path = %q, want %q", receivedPath, tt.wantAPIPath)
 			}
 		})
+	}
+}
+
+func TestResolveGitHubAppToken_AnnotatesExpiryAndSource(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generating test key: %v", err)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(key),
+	})
+
+	expires := time.Now().Add(1 * time.Hour).UTC().Truncate(time.Second)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"token":      "ghs_initial",
+			"expires_at": expires.Format(time.RFC3339),
+		})
+	}))
+	defer server.Close()
+
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "github-app-creds",
+			Namespace: "default",
+		},
+		Data: map[string][]byte{
+			"appID":          []byte("12345"),
+			"installationID": []byte("67890"),
+			"privateKey":     keyPEM,
+		},
+	}
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret).Build()
+	r := &TaskReconciler{
+		Client: cl,
+		Scheme: scheme,
+		TokenClient: &githubapp.TokenClient{
+			BaseURL: server.URL,
+			Client:  server.Client(),
+		},
+	}
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-task", Namespace: "default"},
+	}
+	workspace := &kelos.WorkspaceSpec{
+		Repo:      "https://github.com/kelos-dev/kelos.git",
+		SecretRef: &kelos.SecretReference{Name: "github-app-creds"},
+	}
+
+	if _, err := r.resolveGitHubAppToken(context.Background(), task, workspace); err != nil {
+		t.Fatalf("resolveGitHubAppToken() error: %v", err)
+	}
+
+	var got corev1.Secret
+	if err := cl.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "test-task-github-token"}, &got); err != nil {
+		t.Fatalf("getting token secret: %v", err)
+	}
+	if src := got.Annotations[githubAppSecretAnnotation]; src != "github-app-creds" {
+		t.Errorf("annotation %q = %q, want %q", githubAppSecretAnnotation, src, "github-app-creds")
+	}
+	gotExpiresStr := got.Annotations[tokenExpiresAtAnnotation]
+	if gotExpiresStr == "" {
+		t.Fatalf("missing %q annotation", tokenExpiresAtAnnotation)
+	}
+	gotExpires, err := time.Parse(time.RFC3339, gotExpiresStr)
+	if err != nil {
+		t.Fatalf("parsing %q annotation: %v", tokenExpiresAtAnnotation, err)
+	}
+	if !gotExpires.Equal(expires) {
+		t.Errorf("annotation expiry = %v, want %v", gotExpires, expires)
+	}
+}
+
+func TestRefreshGitHubAppTokenIfNeeded_NoTokenSecret(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
+
+	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+	r := &TaskReconciler{Client: cl, Scheme: scheme}
+
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-task", Namespace: "default"},
+	}
+	next, err := r.refreshGitHubAppTokenIfNeeded(context.Background(), task)
+	if err != nil {
+		t.Fatalf("refreshGitHubAppTokenIfNeeded() error: %v", err)
+	}
+	if next != 0 {
+		t.Errorf("next = %v, want 0 when there is no token secret", next)
+	}
+}
+
+func TestRefreshGitHubAppTokenIfNeeded_SkipsWhenNotApp(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
+
+	// Token secret without the App annotation (PAT-derived).
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-task-github-token",
+			Namespace: "default",
+		},
+		Data: map[string][]byte{"GITHUB_TOKEN": []byte("ghp_test")},
+	}
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret).Build()
+	r := &TaskReconciler{Client: cl, Scheme: scheme}
+
+	task := &kelos.Task{ObjectMeta: metav1.ObjectMeta{Name: "test-task", Namespace: "default"}}
+	next, err := r.refreshGitHubAppTokenIfNeeded(context.Background(), task)
+	if err != nil {
+		t.Fatalf("refreshGitHubAppTokenIfNeeded() error: %v", err)
+	}
+	if next != 0 {
+		t.Errorf("next = %v, want 0 when secret is not App-derived", next)
+	}
+}
+
+func TestRefreshGitHubAppTokenIfNeeded_SkipsWhenStillFresh(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
+
+	expires := time.Now().Add(45 * time.Minute).UTC()
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-task-github-token",
+			Namespace: "default",
+			Annotations: map[string]string{
+				githubAppSecretAnnotation: "github-app-creds",
+				tokenExpiresAtAnnotation:  expires.Format(time.RFC3339),
+			},
+		},
+		Data: map[string][]byte{"GITHUB_TOKEN": []byte("ghs_existing")},
+	}
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret).Build()
+	r := &TaskReconciler{Client: cl, Scheme: scheme}
+
+	task := &kelos.Task{ObjectMeta: metav1.ObjectMeta{Name: "test-task", Namespace: "default"}}
+	next, err := r.refreshGitHubAppTokenIfNeeded(context.Background(), task)
+	if err != nil {
+		t.Fatalf("refreshGitHubAppTokenIfNeeded() error: %v", err)
+	}
+	if next <= 0 {
+		t.Errorf("next = %v, want >0 when token is still fresh", next)
+	}
+
+	// Secret data must not have been touched.
+	var after corev1.Secret
+	if err := cl.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "test-task-github-token"}, &after); err != nil {
+		t.Fatalf("getting secret: %v", err)
+	}
+	if string(after.Data["GITHUB_TOKEN"]) != "ghs_existing" {
+		t.Errorf("token mutated unexpectedly: got %q, want %q", after.Data["GITHUB_TOKEN"], "ghs_existing")
+	}
+}
+
+func TestReconcile_RequeuesSoonAfterTokenRefreshFailure(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
+
+	expires := time.Now().Add(20 * time.Second).UTC()
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "test-task",
+			Namespace:  "default",
+			Finalizers: []string{taskFinalizer},
+		},
+		Spec: kelos.TaskSpec{
+			Type:   AgentTypeCodex,
+			Prompt: "test",
+		},
+	}
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-task",
+			Namespace: "default",
+		},
+		Status: batchv1.JobStatus{Active: 1},
+	}
+	tokenSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-task-github-token",
+			Namespace: "default",
+			Annotations: map[string]string{
+				githubAppSecretAnnotation: "github-app-creds",
+				tokenExpiresAtAnnotation:  expires.Format(time.RFC3339),
+			},
+		},
+		Data: map[string][]byte{"GITHUB_TOKEN": []byte("ghs_old")},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(task).
+		WithObjects(task, job, tokenSecret).
+		Build()
+
+	r := &TaskReconciler{
+		Client: cl,
+		Scheme: scheme,
+	}
+
+	result, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: client.ObjectKeyFromObject(task),
+	})
+	if err != nil {
+		t.Fatalf("Reconcile() error: %v", err)
+	}
+	if result.RequeueAfter <= 0 {
+		t.Fatalf("RequeueAfter = %v, want positive refresh retry", result.RequeueAfter)
+	}
+	if result.RequeueAfter >= tokenRefreshRetryInterval {
+		t.Errorf("RequeueAfter = %v, want less than retry interval %v for near-expiry token", result.RequeueAfter, tokenRefreshRetryInterval)
+	}
+	if result.RequeueAfter >= tokenRefreshMargin {
+		t.Errorf("RequeueAfter = %v, want less than refresh margin %v", result.RequeueAfter, tokenRefreshMargin)
+	}
+	if result.RequeueAfter >= time.Until(expires) {
+		t.Errorf("RequeueAfter = %v, want retry before token expiry %v", result.RequeueAfter, expires)
+	}
+}
+
+func TestRefreshGitHubAppTokenIfNeeded_RemintsExpiringToken(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generating test key: %v", err)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(key),
+	})
+
+	newExpiry := time.Now().Add(1 * time.Hour).UTC().Truncate(time.Second)
+	var calls int
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"token":      "ghs_refreshed",
+			"expires_at": newExpiry.Format(time.RFC3339),
+		})
+	}))
+	defer server.Close()
+
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
+
+	// Token expires in 1 minute, which is inside the 5-minute refresh margin.
+	expires := time.Now().Add(1 * time.Minute).UTC()
+	tokenSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-task-github-token",
+			Namespace: "default",
+			Annotations: map[string]string{
+				githubAppSecretAnnotation: "github-app-creds",
+				tokenExpiresAtAnnotation:  expires.Format(time.RFC3339),
+			},
+		},
+		Data: map[string][]byte{"GITHUB_TOKEN": []byte("ghs_old")},
+	}
+	appSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "github-app-creds",
+			Namespace: "default",
+		},
+		Data: map[string][]byte{
+			"appID":          []byte("12345"),
+			"installationID": []byte("67890"),
+			"privateKey":     keyPEM,
+		},
+	}
+	workspace := &kelos.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "ws", Namespace: "default"},
+		Spec: kelos.WorkspaceSpec{
+			Repo:      "https://github.com/kelos-dev/kelos.git",
+			SecretRef: &kelos.SecretReference{Name: "github-app-creds"},
+		},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(tokenSecret, appSecret, workspace).
+		Build()
+
+	r := &TaskReconciler{
+		Client: cl,
+		Scheme: scheme,
+		TokenClient: &githubapp.TokenClient{
+			BaseURL: server.URL,
+			Client:  server.Client(),
+		},
+	}
+
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-task", Namespace: "default"},
+		Spec: kelos.TaskSpec{
+			WorkspaceRef: &kelos.WorkspaceReference{Name: "ws"},
+		},
+	}
+
+	next, err := r.refreshGitHubAppTokenIfNeeded(context.Background(), task)
+	if err != nil {
+		t.Fatalf("refreshGitHubAppTokenIfNeeded() error: %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("token endpoint calls = %d, want 1", calls)
+	}
+	if next <= 0 {
+		t.Errorf("next = %v, want positive after refresh", next)
+	}
+
+	var after corev1.Secret
+	if err := cl.Get(context.Background(), client.ObjectKey{Namespace: "default", Name: "test-task-github-token"}, &after); err != nil {
+		t.Fatalf("getting refreshed secret: %v", err)
+	}
+	// Refresh writes via StringData (the apiserver merges into Data on
+	// persistence). Check either field so the test does not depend on
+	// fake-client merge behavior.
+	gotToken := after.StringData["GITHUB_TOKEN"]
+	if gotToken == "" {
+		gotToken = string(after.Data["GITHUB_TOKEN"])
+	}
+	if gotToken != "ghs_refreshed" {
+		t.Errorf("refreshed token = %q, want %q", gotToken, "ghs_refreshed")
+	}
+	gotExpiresStr := after.Annotations[tokenExpiresAtAnnotation]
+	gotExpires, err := time.Parse(time.RFC3339, gotExpiresStr)
+	if err != nil {
+		t.Fatalf("parsing refreshed expiry: %v", err)
+	}
+	if !gotExpires.Equal(newExpiry) {
+		t.Errorf("refreshed expiry = %v, want %v", gotExpires, newExpiry)
 	}
 }
 

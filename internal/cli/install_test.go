@@ -915,15 +915,28 @@ func TestInstallReadinessPredicates(t *testing.T) {
 		t.Fatal("expected deployment to be available")
 	}
 
-	endpoints := &unstructured.Unstructured{Object: map[string]interface{}{}}
-	_ = unstructured.SetNestedSlice(endpoints.Object, []interface{}{
+	endpointSlice := &unstructured.Unstructured{Object: map[string]interface{}{}}
+	_ = unstructured.SetNestedSlice(endpointSlice.Object, []interface{}{
+		map[string]interface{}{"port": int64(9443)},
+	}, "ports")
+	_ = unstructured.SetNestedSlice(endpointSlice.Object, []interface{}{
 		map[string]interface{}{
-			"addresses": []interface{}{map[string]interface{}{"ip": "127.0.0.1"}},
-			"ports":     []interface{}{map[string]interface{}{"port": int64(9443)}},
+			"addresses":  []interface{}{"127.0.0.1"},
+			"conditions": map[string]interface{}{"ready": true},
 		},
-	}, "subsets")
-	if !endpointsReady(endpoints) {
-		t.Fatal("expected endpoints to be ready")
+	}, "endpoints")
+	if !endpointSlicesReady(&unstructured.UnstructuredList{Items: []unstructured.Unstructured{*endpointSlice}}) {
+		t.Fatal("expected endpoint slices to be ready")
+	}
+	unreadyEndpointSlice := endpointSlice.DeepCopy()
+	_ = unstructured.SetNestedSlice(unreadyEndpointSlice.Object, []interface{}{
+		map[string]interface{}{
+			"addresses":  []interface{}{"127.0.0.1"},
+			"conditions": map[string]interface{}{"ready": false},
+		},
+	}, "endpoints")
+	if endpointSlicesReady(&unstructured.UnstructuredList{Items: []unstructured.Unstructured{*unreadyEndpointSlice}}) {
+		t.Fatal("expected endpoint slices without ready endpoints to be rejected")
 	}
 
 	crd := &unstructured.Unstructured{Object: map[string]interface{}{}}

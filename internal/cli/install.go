@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 	"helm.sh/helm/v3/pkg/chartutil"
 	"helm.sh/helm/v3/pkg/strvals"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -45,9 +46,9 @@ var kelosCRDNames = []string{
 }
 
 var (
-	crdGVR       = schema.GroupVersionResource{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}
-	endpointsGVR = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "endpoints"}
-	secretGVR    = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
+	crdGVR            = schema.GroupVersionResource{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}
+	endpointSlicesGVR = discoveryv1.SchemeGroupVersion.WithResource("endpointslices")
+	secretGVR         = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
 )
 
 type helmValuesOptions struct {
@@ -569,14 +570,16 @@ func waitForKelosWebhookCertificate(ctx context.Context, dyn dynamic.Interface) 
 
 func waitForKelosWebhookReady(ctx context.Context, dyn dynamic.Interface) error {
 	if err := wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, installWaitTimeout, true, func(ctx context.Context) (bool, error) {
-		endpoints, err := dyn.Resource(endpointsGVR).Namespace("kelos-system").Get(ctx, "kelos-webhook", metav1.GetOptions{})
+		endpointSlices, err := dyn.Resource(endpointSlicesGVR).Namespace("kelos-system").List(ctx, metav1.ListOptions{
+			LabelSelector: discoveryv1.LabelServiceName + "=kelos-webhook",
+		})
 		if err != nil {
 			if errors.IsNotFound(err) {
 				return false, nil
 			}
-			return false, fmt.Errorf("checking kelos webhook endpoints: %w", err)
+			return false, fmt.Errorf("checking kelos webhook endpoint slices: %w", err)
 		}
-		return endpointsReady(endpoints), nil
+		return endpointSlicesReady(endpointSlices), nil
 	}); err != nil {
 		return fmt.Errorf("waiting for kelos conversion webhook: %w", err)
 	}
@@ -642,22 +645,42 @@ func deploymentAvailable(deploy *unstructured.Unstructured) bool {
 	return false
 }
 
-func endpointsReady(endpoints *unstructured.Unstructured) bool {
-	subsets, ok, err := unstructured.NestedSlice(endpoints.Object, "subsets")
+func endpointSlicesReady(endpointSlices *unstructured.UnstructuredList) bool {
+	for i := range endpointSlices.Items {
+		if endpointSliceReady(&endpointSlices.Items[i]) {
+			return true
+		}
+	}
+	return false
+}
+
+func endpointSliceReady(endpointSlice *unstructured.Unstructured) bool {
+	ports, ok, err := unstructured.NestedSlice(endpointSlice.Object, "ports")
 	if err != nil || !ok {
 		return false
 	}
-	for _, item := range subsets {
-		subset, ok := item.(map[string]interface{})
+	if len(ports) == 0 {
+		return false
+	}
+	endpoints, ok, err := unstructured.NestedSlice(endpointSlice.Object, "endpoints")
+	if err != nil || !ok {
+		return false
+	}
+	for _, item := range endpoints {
+		endpoint, ok := item.(map[string]interface{})
 		if !ok {
 			continue
 		}
-		addresses, ok, err := unstructured.NestedSlice(subset, "addresses")
+		addresses, ok, err := unstructured.NestedSlice(endpoint, "addresses")
 		if err != nil || !ok || len(addresses) == 0 {
 			continue
 		}
-		ports, ok, err := unstructured.NestedSlice(subset, "ports")
-		if err != nil || !ok || len(ports) == 0 {
+		ready, ok, err := unstructured.NestedBool(endpoint, "conditions", "ready")
+		if err != nil || (ok && !ready) {
+			continue
+		}
+		terminating, ok, err := unstructured.NestedBool(endpoint, "conditions", "terminating")
+		if err != nil || (ok && terminating) {
 			continue
 		}
 		return true

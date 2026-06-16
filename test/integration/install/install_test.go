@@ -14,12 +14,14 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
@@ -206,7 +208,7 @@ func ensureKelosSystemNamespaceFixture() {
 func ensureKelosWebhookFixtureState() {
 	ensureKelosWebhookCertificateSecret()
 	ensureKelosControllerDeploymentAvailable()
-	ensureKelosWebhookEndpoints()
+	ensureKelosWebhookEndpointSlices()
 	injectKelosCRDConversionCABundles()
 }
 
@@ -265,33 +267,41 @@ func ensureKelosControllerDeploymentAvailable() {
 	_ = k8sClient.Status().Update(ctx, deploy)
 }
 
-func ensureKelosWebhookEndpoints() {
+func ensureKelosWebhookEndpointSlices() {
 	err := k8sClient.Get(ctx, types.NamespacedName{Name: "kelos-system"}, &corev1.Namespace{})
 	if err != nil {
 		return
 	}
-	endpoints := &corev1.Endpoints{
+	endpointSlice := &discoveryv1.EndpointSlice{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "kelos-webhook",
+			Name:      "kelos-webhook-fixture",
 			Namespace: "kelos-system",
-		},
-		Subsets: []corev1.EndpointSubset{
-			{
-				Addresses: []corev1.EndpointAddress{{IP: "10.0.0.1"}},
-				Ports: []corev1.EndpointPort{
-					{Name: "webhook", Port: 9443, Protocol: corev1.ProtocolTCP},
-				},
+			Labels: map[string]string{
+				discoveryv1.LabelServiceName: "kelos-webhook",
 			},
 		},
+		AddressType: discoveryv1.AddressTypeIPv4,
+		Endpoints: []discoveryv1.Endpoint{
+			{
+				Addresses:  []string{"10.0.0.1"},
+				Conditions: discoveryv1.EndpointConditions{Ready: ptr.To(true)},
+			},
+		},
+		Ports: []discoveryv1.EndpointPort{
+			{Name: ptr.To("webhook"), Port: ptr.To[int32](9443), Protocol: ptr.To(corev1.ProtocolTCP)},
+		},
 	}
-	if err := k8sClient.Create(ctx, endpoints); err == nil || !apierrors.IsAlreadyExists(err) {
+	if err := k8sClient.Create(ctx, endpointSlice); err == nil || !apierrors.IsAlreadyExists(err) {
 		return
 	}
-	current := &corev1.Endpoints{}
-	if err := k8sClient.Get(ctx, types.NamespacedName{Name: "kelos-webhook", Namespace: "kelos-system"}, current); err != nil {
+	current := &discoveryv1.EndpointSlice{}
+	if err := k8sClient.Get(ctx, types.NamespacedName{Name: "kelos-webhook-fixture", Namespace: "kelos-system"}, current); err != nil {
 		return
 	}
-	current.Subsets = endpoints.Subsets
+	current.Labels = endpointSlice.Labels
+	current.AddressType = endpointSlice.AddressType
+	current.Endpoints = endpointSlice.Endpoints
+	current.Ports = endpointSlice.Ports
 	_ = k8sClient.Update(ctx, current)
 }
 

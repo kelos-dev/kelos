@@ -1163,7 +1163,9 @@ func TestPrintAgentConfigTable(t *testing.T) {
 				Name:              "config-two",
 				CreationTimestamp: metav1.NewTime(time.Now().Add(-24 * time.Hour)),
 			},
-			Spec: kelos.AgentConfigSpec{},
+			Spec: kelos.AgentConfigSpec{
+				Kanon: &kelos.KanonSourceSpec{Repo: "https://github.com/example/kanon-config.git"},
+			},
 		},
 	}
 
@@ -1171,7 +1173,7 @@ func TestPrintAgentConfigTable(t *testing.T) {
 	printAgentConfigTable(&buf, configs, false)
 	output := buf.String()
 
-	for _, header := range []string{"NAME", "PLUGINS", "MCP SERVERS", "AGE"} {
+	for _, header := range []string{"NAME", "KANON", "PLUGINS", "MCP SERVERS", "AGE"} {
 		if !strings.Contains(output, header) {
 			t.Errorf("expected header %s in output, got %q", header, output)
 		}
@@ -1184,6 +1186,9 @@ func TestPrintAgentConfigTable(t *testing.T) {
 	}
 	if !strings.Contains(output, "config-two") {
 		t.Errorf("expected config-two in output, got %q", output)
+	}
+	if !strings.Contains(output, "yes") {
+		t.Errorf("expected Kanon-backed config to show yes, got %q", output)
 	}
 }
 
@@ -1319,6 +1324,39 @@ func TestPrintAgentConfigDetailMinimal(t *testing.T) {
 	} {
 		if strings.Contains(output, absent) {
 			t.Errorf("expected no %s field for minimal config, got %q", absent, output)
+		}
+	}
+}
+
+func TestPrintAgentConfigDetailKanon(t *testing.T) {
+	ac := &kelos.AgentConfig{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "kanon-config",
+			Namespace: "default",
+		},
+		Spec: kelos.AgentConfigSpec{
+			Kanon: &kelos.KanonSourceSpec{
+				Repo: "https://github.com/example/kanon-config.git",
+				Ref:  "abc123",
+				SecretRef: &kelos.SecretReference{
+					Name: "kanon-token",
+				},
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	printAgentConfigDetail(&buf, ac)
+	output := buf.String()
+
+	for _, expected := range []string{
+		"Kanon:",
+		"https://github.com/example/kanon-config.git",
+		"ref=abc123",
+		"secret=kanon-token",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Errorf("expected %q in output, got %q", expected, output)
 		}
 	}
 }

@@ -27,6 +27,9 @@ RUN ARCH=$(dpkg --print-architecture) \
 
 ENV PATH="/usr/local/go/bin:${PATH}"
 
+ARG KANON_VERSION=3f2ad4b8171d46aaf7541e9efa61aef009c233e2
+RUN GOBIN=/usr/local/bin go install github.com/kelos-dev/kanon@${KANON_VERSION}
+
 ARG CLAUDE_CODE_VERSION=2.1.177
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 

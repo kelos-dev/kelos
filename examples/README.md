@@ -24,6 +24,7 @@ Ready-to-use patterns and YAML manifests for orchestrating AI agents with Kelos.
 | [11-taskspawner-linear-webhook](11-taskspawner-linear-webhook/) | Respond to Linear webhook events (issues, comments) in real time |
 | [12-taskspawner-file-patterns](12-taskspawner-file-patterns/) | Filter GitHub PR / push webhooks by changed-file glob patterns |
 | [13-taskspawner-generic-webhook](13-taskspawner-generic-webhook/) | Respond to arbitrary HTTP POST events (Sentry, Notion, Slack, etc.) using JSONPath field mapping and filters |
+| [14-agentconfig-kanon](14-agentconfig-kanon/) | Source agent settings from a Kanon repository |
 
 ## Additional Guides
 

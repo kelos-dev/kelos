@@ -1,0 +1,9 @@
+apiVersion: kelos.dev/v1alpha2
+kind: AgentConfig
+metadata:
+  name: kanon-config
+spec:
+  # The repository must contain kanon.yaml at its root.
+  kanon:
+    repo: https://github.com/example/kanon-config.git
+    ref: main

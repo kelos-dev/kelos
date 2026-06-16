@@ -1,0 +1,13 @@
+apiVersion: kelos.dev/v1alpha2
+kind: Task
+metadata:
+  name: kanon-configured-task
+spec:
+  type: codex
+  prompt: "Inspect the configured project guidance and summarize the expected workflow."
+  credentials:
+    type: api-key
+    secretRef:
+      name: codex-api-key
+  agentConfigRefs:
+    - name: kanon-config

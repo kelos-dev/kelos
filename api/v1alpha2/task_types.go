@@ -170,22 +170,23 @@ type PodOverrides struct {
 	// ContainerSecurityContext fields.
 	// Container names must not use the Kelos-reserved "kelos-" prefix or
 	// collide with a built-in init container name: git-clone, remote-setup,
-	// branch-setup, workspace-files, plugin-setup, skills-install.
+	// branch-setup, workspace-files, plugin-setup, skills-install,
+	// kanon-source.
 	// +optional
 	// +kubebuilder:validation:MaxItems=8
 	// +listType=map
 	// +listMapKey=name
 	// +kubebuilder:validation:XValidation:rule="self.all(c, c.name != '')",message="extraContainers[].name must not be empty"
-	// +kubebuilder:validation:XValidation:rule="self.all(c, !c.name.startsWith('kelos-') && !(c.name in ['git-clone', 'remote-setup', 'branch-setup', 'workspace-files', 'plugin-setup', 'skills-install']))",message="extraContainers[].name must not use the reserved 'kelos-' prefix or a built-in init container name"
+	// +kubebuilder:validation:XValidation:rule="self.all(c, !c.name.startsWith('kelos-') && !(c.name in ['git-clone', 'remote-setup', 'branch-setup', 'workspace-files', 'plugin-setup', 'skills-install', 'kanon-source']))",message="extraContainers[].name must not use the reserved 'kelos-' prefix or a built-in init container name"
 	ExtraContainers []corev1.Container `json:"extraContainers,omitempty"`
 
 	// ExtraInitContainers is a list of additional init containers to run
 	// in the agent pod. They are placed after all Kelos built-in init
 	// containers (git-clone, remote-setup, branch-setup, workspace-files,
-	// plugin-setup, skills-install), ensuring the workspace is ready
-	// before they start. Set restartPolicy: Always for sidecar semantics
-	// (long-running services like databases) or leave it unset for
-	// one-shot init tasks.
+	// plugin-setup, skills-install, kanon-source), ensuring the workspace
+	// and AgentConfig sources are ready before they start. Set
+	// restartPolicy: Always for sidecar semantics (long-running services
+	// like databases) or leave it unset for one-shot init tasks.
 	// Containers can mount user-supplied volumes from the Volumes field
 	// as well as Kelos-managed volumes (workspace, kelos-plugin). Note
 	// that the workspace volume uses FSGroup-based permissions; containers
@@ -193,13 +194,14 @@ type PodOverrides struct {
 	// access to the workspace.
 	// Container names must not use the Kelos-reserved "kelos-" prefix or
 	// collide with a built-in init container name: git-clone, remote-setup,
-	// branch-setup, workspace-files, plugin-setup, skills-install.
+	// branch-setup, workspace-files, plugin-setup, skills-install,
+	// kanon-source.
 	// +optional
 	// +kubebuilder:validation:MaxItems=8
 	// +listType=map
 	// +listMapKey=name
 	// +kubebuilder:validation:XValidation:rule="self.all(c, c.name != '')",message="extraInitContainers[].name must not be empty"
-	// +kubebuilder:validation:XValidation:rule="self.all(c, !c.name.startsWith('kelos-') && !(c.name in ['git-clone', 'remote-setup', 'branch-setup', 'workspace-files', 'plugin-setup', 'skills-install']))",message="extraInitContainers[].name must not use the reserved 'kelos-' prefix or a built-in init container name"
+	// +kubebuilder:validation:XValidation:rule="self.all(c, !c.name.startsWith('kelos-') && !(c.name in ['git-clone', 'remote-setup', 'branch-setup', 'workspace-files', 'plugin-setup', 'skills-install', 'kanon-source']))",message="extraInitContainers[].name must not use the reserved 'kelos-' prefix or a built-in init container name"
 	ExtraInitContainers []corev1.Container `json:"extraInitContainers,omitempty"`
 }
 
@@ -241,7 +243,9 @@ type TaskSpec struct {
 	// AgentConfigRefs references an ordered list of AgentConfig resources.
 	// Configs are merged in order: agentsMD is concatenated, plugins/skills
 	// are appended, mcpServers are appended with later entries winning on
-	// name collision.
+	// name collision. At most one referenced AgentConfig may set spec.kanon,
+	// and Kanon-backed configs cannot be combined with inline AgentConfig
+	// fields from the same or another referenced config.
 	// +optional
 	// +kubebuilder:validation:MinItems=1
 	AgentConfigRefs []AgentConfigReference `json:"agentConfigRefs,omitempty"`

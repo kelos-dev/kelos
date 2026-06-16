@@ -18,6 +18,9 @@ func newCreateAgentConfigCommand(cfg *ClientConfig) *cobra.Command {
 		agentFlags    []string
 		mcpFlags      []string
 		skillsShFlags []string
+		kanonRepo     string
+		kanonRef      string
+		kanonSecret   string
 		dryRun        bool
 	)
 
@@ -32,6 +35,12 @@ func newCreateAgentConfigCommand(cfg *ClientConfig) *cobra.Command {
 			if len(args) > 1 {
 				return fmt.Errorf("too many arguments: expected 1 agentconfig name, got %d\nUsage: %s", len(args), cmd.Use)
 			}
+			if kanonRepo == "" && (kanonRef != "" || kanonSecret != "") {
+				return fmt.Errorf("--kanon-repo is required when --kanon-ref or --kanon-secret is set")
+			}
+			if kanonRepo != "" && (agentsMD != "" || len(skillFlags) > 0 || len(agentFlags) > 0 || len(mcpFlags) > 0 || len(skillsShFlags) > 0) {
+				return fmt.Errorf("--kanon-repo cannot be combined with --agents-md, --skill, --agent, --mcp, or --skills-sh")
+			}
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -43,6 +52,16 @@ func newCreateAgentConfigCommand(cfg *ClientConfig) *cobra.Command {
 			}
 
 			acSpec := kelos.AgentConfigSpec{}
+
+			if kanonRepo != "" {
+				acSpec.Kanon = &kelos.KanonSourceSpec{
+					Repo: kanonRepo,
+					Ref:  kanonRef,
+				}
+				if kanonSecret != "" {
+					acSpec.Kanon.SecretRef = &kelos.SecretReference{Name: kanonSecret}
+				}
+			}
 
 			resolvedMD, err := resolveContent(agentsMD)
 			if err != nil {
@@ -130,6 +149,9 @@ func newCreateAgentConfigCommand(cfg *ClientConfig) *cobra.Command {
 	cmd.Flags().StringArrayVar(&agentFlags, "agent", nil, "agent definition as name=content or name=@file")
 	cmd.Flags().StringArrayVar(&mcpFlags, "mcp", nil, "MCP server as name=JSON or name=@file (e.g. github='{\"type\":\"http\",\"url\":\"https://api.githubcopilot.com/mcp/\"}')")
 	cmd.Flags().StringArrayVar(&skillsShFlags, "skills-sh", nil, "skills.sh package as source or source:skill (e.g. vercel-labs/agent-skills:deploy)")
+	cmd.Flags().StringVar(&kanonRepo, "kanon-repo", "", "Kanon source repository URL containing kanon.yaml at the repository root")
+	cmd.Flags().StringVar(&kanonRef, "kanon-ref", "", "branch, tag, or commit to check out from --kanon-repo")
+	cmd.Flags().StringVar(&kanonSecret, "kanon-secret", "", "secret containing GITHUB_TOKEN for cloning a private Kanon source repository")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print the resource that would be created without submitting it")
 
 	return cmd

@@ -60,6 +60,22 @@ const (
 	// PluginMountPath is the mount path for the plugin volume.
 	PluginMountPath = "/kelos/plugin"
 
+	// KanonSourceContainerName is the init container that clones a Kanon
+	// source repository for Kanon-backed AgentConfigs.
+	KanonSourceContainerName = "kanon-source"
+
+	// KanonVolumeName is the name of the Kanon source volume.
+	KanonVolumeName = "kanon-source"
+
+	// KanonMountPath is the mount path for the Kanon source volume.
+	KanonMountPath = "/kelos/kanon"
+
+	// KanonHomePath is the path passed to kanon as --home.
+	KanonHomePath = KanonMountPath + "/repo"
+
+	// KanonHomeEnvName is the environment variable read by agent entrypoints.
+	KanonHomeEnvName = "KELOS_KANON_HOME"
+
 	// SkillsShPluginName is the plugin directory name under PluginMountPath
 	// that skills.sh packages are installed into, so agent entrypoints
 	// discover them the same way as inline plugins.
@@ -92,6 +108,7 @@ const (
 // inside the agent container before the user-supplied agent process runs.
 var reservedEnvNames = map[string]struct{}{
 	"KELOS_SETUP_COMMAND": {},
+	KanonHomeEnvName:      {},
 }
 
 // JobBuilder constructs Kubernetes Jobs for Tasks.
@@ -227,6 +244,10 @@ func credentialEnvVars(creds kelos.Credentials, agentType string) []corev1.EnvVa
 // ptr returns a pointer to the given value.
 func ptr[T any](v T) *T {
 	return &v
+}
+
+func supportsKanonAgentType(agentType string) bool {
+	return agentType == AgentTypeCodex || agentType == AgentTypeClaudeCode
 }
 
 func effectiveWorkspaceRemotes(workspace *kelos.WorkspaceSpec) []kelos.GitRemote {
@@ -530,6 +551,31 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 
 	// Inject AgentConfig: agentsMD env var and plugin volume/init container.
 	if agentConfig != nil {
+		if agentConfig.Kanon != nil && supportsKanonAgentType(task.Spec.Type) {
+			volumes = append(volumes, corev1.Volume{
+				Name:         KanonVolumeName,
+				VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+			})
+			kanonVolumeMount := corev1.VolumeMount{Name: KanonVolumeName, MountPath: KanonMountPath}
+			mainContainer.VolumeMounts = append(mainContainer.VolumeMounts, kanonVolumeMount)
+			mainContainer.Env = append(mainContainer.Env, corev1.EnvVar{
+				Name:  KanonHomeEnvName,
+				Value: KanonHomePath,
+			})
+			initContainer, err := buildKanonSourceInitContainer(agentConfig.Kanon, agentUID, kanonVolumeMount)
+			if err != nil {
+				return nil, err
+			}
+			initContainers = append(initContainers, initContainer)
+			if podSecurityContext == nil {
+				podSecurityContext = &corev1.PodSecurityContext{FSGroup: &agentUID}
+			} else if podSecurityContext.FSGroup == nil {
+				merged := podSecurityContext.DeepCopy()
+				merged.FSGroup = &agentUID
+				podSecurityContext = merged
+			}
+		}
+
 		if agentConfig.AgentsMD != "" {
 			mainContainer.Env = append(mainContainer.Env, corev1.EnvVar{
 				Name:  "KELOS_AGENTS_MD",
@@ -801,6 +847,59 @@ func buildWorkspaceFileInjectionScript(files []kelos.WorkspaceFile) (string, err
 	return strings.Join(lines, "\n"), nil
 }
 
+func buildKanonSourceInitContainer(kanon *kelos.KanonSourceSpec, agentUID int64, volumeMount corev1.VolumeMount) (corev1.Container, error) {
+	if kanon == nil {
+		return corev1.Container{}, fmt.Errorf("kanon source is nil")
+	}
+	if strings.TrimSpace(kanon.Repo) == "" {
+		return corev1.Container{}, fmt.Errorf("kanon.repo must not be empty")
+	}
+
+	gitCommand := "git"
+	env := []corev1.EnvVar(nil)
+	if kanon.SecretRef != nil {
+		env = append(env, corev1.EnvVar{
+			Name: "GITHUB_TOKEN",
+			ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: kanon.SecretRef.Name},
+				Key:                  "GITHUB_TOKEN",
+			}},
+		})
+		credentialHelper := `!f() { echo "username=x-access-token"; echo "password=$GITHUB_TOKEN"; }; f`
+		gitCommand = fmt.Sprintf("git -c credential.helper= -c credential.helper=%s", shellQuote(credentialHelper))
+	}
+
+	var script string
+	if kanon.Ref == "" {
+		script = fmt.Sprintf(
+			"set -eu\n%s clone --depth 1 -- %s %s",
+			gitCommand,
+			shellQuote(kanon.Repo),
+			shellQuote(KanonHomePath),
+		)
+	} else {
+		script = fmt.Sprintf(
+			"set -eu\n%s clone --no-checkout -- %s %s\ngit -C %s checkout --detach %s",
+			gitCommand,
+			shellQuote(kanon.Repo),
+			shellQuote(KanonHomePath),
+			shellQuote(KanonHomePath),
+			shellQuote(kanon.Ref),
+		)
+	}
+
+	return corev1.Container{
+		Name:         KanonSourceContainerName,
+		Image:        GitCloneImage,
+		Command:      []string{"sh", "-c", script},
+		Env:          env,
+		VolumeMounts: []corev1.VolumeMount{volumeMount},
+		SecurityContext: &corev1.SecurityContext{
+			RunAsUser: &agentUID,
+		},
+	}, nil
+}
+
 func sanitizeWorkspaceFilePath(filePath string) (string, error) {
 	if strings.TrimSpace(filePath) == "" {
 		return "", fmt.Errorf("path is empty")
@@ -844,6 +943,7 @@ func validatePodFailurePolicy(policy *batchv1.PodFailurePolicy) error {
 // or the Kelos-reserved volume prefix.
 var reservedVolumeNames = map[string]struct{}{
 	WorkspaceVolumeName: {},
+	KanonVolumeName:     {},
 }
 
 // validateUserVolumes ensures no user-supplied volume name collides with
@@ -872,12 +972,13 @@ func validateUserVolumes(volumes []corev1.Volume) error {
 // here, so agent-type literals (claude-code, codex, gemini, opencode,
 // cursor) are free for user-supplied containers.
 var reservedContainerNames = map[string]struct{}{
-	"git-clone":       {},
-	"remote-setup":    {},
-	"branch-setup":    {},
-	"workspace-files": {},
-	"plugin-setup":    {},
-	"skills-install":  {},
+	"git-clone":              {},
+	"remote-setup":           {},
+	"branch-setup":           {},
+	"workspace-files":        {},
+	"plugin-setup":           {},
+	"skills-install":         {},
+	KanonSourceContainerName: {},
 }
 
 // validateExtraContainers ensures no user-supplied container name carries the

@@ -45,14 +45,15 @@ Kelos sets the following reserved environment variables on agent containers:
 | `KELOS_BASE_BRANCH` | The base branch (workspace `ref`) for the task | When workspace has a non-empty `ref` |
 | `KELOS_AGENTS_MD` | User-level instructions from AgentConfig | When `agentConfigRefs` is set and `agentsMD` is non-empty |
 | `KELOS_PLUGIN_DIR` | Path to plugin directory containing skills and agents. Each subdirectory is one plugin in the `<plugin>/skills/<skill>/SKILL.md` layout; skills.sh packages from `spec.skills` appear under the `skills-sh` plugin | When `agentConfigRefs` is set and `plugins` or `skills` is non-empty |
+| `KELOS_KANON_HOME` | Path to a cloned Kanon source repository. Codex and Claude Code entrypoints run `kanon apply --yes --home "$KELOS_KANON_HOME" --agent <agent>` before starting the agent | When `agentConfigRefs` resolves to `spec.kanon` and the agent type is `codex` or `claude-code` |
 | `KELOS_SETUP_COMMAND` | JSON-encoded exec-form array from `Workspace.spec.setupCommand`, executed by the entrypoint before the agent starts | When the workspace defines `setupCommand` |
 
 > The names listed in this table are reserved for Kelos behavior. When Kelos
 > sets one on a Task, `PodOverrides.Env` entries that reuse the same name are
 > dropped so the built-in value wins; do not set them manually.
-> `KELOS_SETUP_COMMAND` is additionally dropped from `PodOverrides.Env` even
-> when the workspace does not define `setupCommand`, because it drives
-> entrypoint command execution.
+> `KELOS_SETUP_COMMAND` and `KELOS_KANON_HOME` are additionally dropped from
+> `PodOverrides.Env` even when Kelos does not define them, because they drive
+> entrypoint behavior.
 
 The bundled agent images handle `KELOS_EFFORT` as follows:
 
@@ -61,6 +62,11 @@ The bundled agent images handle `KELOS_EFFORT` as follows:
 - `gemini`: writes a temporary model alias with `thinkingConfig` when the model family supports it, otherwise adds effort guidance to user-level instructions.
 - `opencode`: writes agent model options including `reasoningEffort` and provider variants where available.
 - `cursor`: adds effort guidance to user-level instructions because Cursor CLI does not expose a documented effort flag.
+
+The bundled Codex and Claude Code images include the Kanon CLI and apply
+Kanon-backed AgentConfigs before running the agent. Custom images for those
+agent types must include `kanon` on `PATH` and handle `KELOS_KANON_HOME` the
+same way if they need to support `AgentConfig.spec.kanon`.
 
 ### 4. User ID
 

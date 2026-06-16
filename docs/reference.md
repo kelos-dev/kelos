@@ -30,7 +30,7 @@
 | `spec.podOverrides.volumeMounts` | Additional volume mounts on the agent container; names must reference either a user-supplied volume from `volumes` or a Kelos-managed volume (`workspace` or a `kelos-` volume such as `kelos-plugin`) | No |
 | `spec.podOverrides.podSecurityContext` | Pod-level security context applied to the agent pod. Fields set here override Kelos defaults; `fsGroup` retains the Kelos default when unset so the agent user keeps workspace access | No |
 | `spec.podOverrides.containerSecurityContext` | Security context applied to the agent container. Use to declare `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]`, `readOnlyRootFilesystem: true`, etc., for PSS-restricted namespaces | No |
-| `spec.podOverrides.extraContainers` | Additional containers to run alongside the agent container in the same pod (max 8). They share the pod's network namespace (reachable via `localhost`) and can mount user-supplied volumes from `volumes`. Use for sidecars such as a database for integration tests or a proxy. Names must not use the Kelos-reserved `kelos-` prefix, collide with a built-in init container name (`git-clone`, `remote-setup`, `branch-setup`, `workspace-files`, `plugin-setup`, `skills-install`), duplicate another entry, or appear in `extraInitContainers` (see [Extra Containers](#task-extra-containers) below) | No |
+| `spec.podOverrides.extraContainers` | Additional containers to run alongside the agent container in the same pod (max 8). They share the pod's network namespace (reachable via `localhost`) and can mount user-supplied volumes from `volumes`. Use for sidecars such as a database for integration tests or a proxy. Names must not use the Kelos-reserved `kelos-` prefix, collide with a built-in init container name (`git-clone`, `remote-setup`, `branch-setup`, `workspace-files`, `plugin-setup`, `skills-install`, `kanon-source`), duplicate another entry, or appear in `extraInitContainers` (see [Extra Containers](#task-extra-containers) below) | No |
 | `spec.podOverrides.extraInitContainers` | Additional init containers (max 8), appended after all Kelos built-in init containers so the workspace is ready before they run. Set `restartPolicy: Always` for sidecar semantics (long-running services, K8s 1.29+) or leave it unset for one-shot pre-agent setup. They can mount user-supplied volumes from `volumes` as well as Kelos-managed volumes (`workspace` or a `kelos-` volume such as `kelos-plugin`); workspace write access requires running as a UID in the pod's `fsGroup`. Same name constraints as `extraContainers` (see [Extra Containers](#task-extra-containers) below) | No |
 
 ### Pod Override Volumes
@@ -66,7 +66,7 @@ spec:
 `spec.podOverrides.extraContainers` and `spec.podOverrides.extraInitContainers` let a Task run user-defined containers alongside the agent. Both lists accept a standard Kubernetes [Container](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.30/#container-v1-core) and are subject to these constraints (validated by the API server and the controller):
 
 - Maximum 8 entries per list.
-- Container names must not use the Kelos-reserved `kelos-` prefix, and must not collide with built-in init container names: `git-clone`, `remote-setup`, `branch-setup`, `workspace-files`, `plugin-setup`, `skills-install`.
+- Container names must not use the Kelos-reserved `kelos-` prefix, and must not collide with built-in init container names: `git-clone`, `remote-setup`, `branch-setup`, `workspace-files`, `plugin-setup`, `skills-install`, `kanon-source`.
 - A name must not be duplicated within a list, and must not appear in both `extraContainers` and `extraInitContainers` (Kubernetes requires container names to be unique within a pod).
 - `extraInitContainers` run after every Kelos built-in init container, so the cloned workspace and installed plugins are already in place. Write access to the `workspace` volume requires running as a UID in the pod's `fsGroup` (the agent UID `61100` by default).
 
@@ -240,6 +240,9 @@ GitHub Apps are preferred over PATs for production use because they offer fine-g
 | Field | Description | Required |
 |-------|-------------|----------|
 | `spec.agentsMD` | Agent instructions written to the agent's user-level instructions file, additive with repo files. The destination depends on the agent type: `~/.claude/CLAUDE.md` (Claude Code), `~/.gemini/GEMINI.md` (Gemini), `~/.codex/AGENTS.md` (Codex), `~/.config/opencode/AGENTS.md` (OpenCode), `~/.cursor/AGENTS.md` (Cursor) | No |
+| `spec.kanon.repo` | Git repository URL for a Kanon source repository containing `kanon.yaml` at the repository root. Mutually exclusive with `agentsMD`, `plugins`, `skills`, and `mcpServers`. Applied to Codex and Claude Code user-level settings before the agent starts; ignored with a Warning event for other agent types | Yes (when `kanon` is set) |
+| `spec.kanon.ref` | Branch, tag, or commit to check out from the Kanon source repository | No |
+| `spec.kanon.secretRef.name` | Secret containing `GITHUB_TOKEN` for cloning a private Kanon source repository | No |
 | `spec.plugins[].name` | Plugin name (used as directory name and namespace) | Yes (per plugin) |
 | `spec.plugins[].skills[].name` | Skill name (becomes `skills/<name>/SKILL.md`) | Yes (per skill) |
 | `spec.plugins[].skills[].content` | Skill content (markdown with frontmatter) | Yes (per skill) |

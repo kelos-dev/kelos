@@ -247,6 +247,7 @@ func (r *TaskReconciler) createJob(ctx context.Context, task *kelos.Task) (ctrl.
 	var agentConfig *kelos.AgentConfigSpec
 	if refs := ResolveAgentConfigRefs(&task.Spec); len(refs) > 0 {
 		var specs []kelos.AgentConfigSpec
+		var namedSpecs []namedAgentConfigSpec
 		for _, ref := range refs {
 			ac, err := r.getAgentConfig(ctx, client.ObjectKey{
 				Namespace: task.Namespace,
@@ -261,9 +262,33 @@ func (r *TaskReconciler) createJob(ctx context.Context, task *kelos.Task) (ctrl.
 				return ctrl.Result{}, err
 			}
 			specs = append(specs, ac.Spec)
+			namedSpecs = append(namedSpecs, namedAgentConfigSpec{Name: ref.Name, Spec: ac.Spec})
+		}
+
+		if err := validateAgentConfigSpecs(namedSpecs); err != nil {
+			logger.Error(err, "Invalid AgentConfig combination")
+			r.recordEvent(task, corev1.EventTypeWarning, "AgentConfigInvalid", "Invalid AgentConfig: %v", err)
+			updateErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				if getErr := r.Get(ctx, client.ObjectKeyFromObject(task), task); getErr != nil {
+					return getErr
+				}
+				task.Status.Phase = kelos.TaskPhaseFailed
+				task.Status.Message = fmt.Sprintf("Invalid AgentConfig: %v", err)
+				return r.Status().Update(ctx, task)
+			})
+			if updateErr != nil {
+				logger.Error(updateErr, "Unable to update Task status")
+			}
+			return ctrl.Result{}, nil
 		}
 
 		agentConfig = MergeAgentConfigs(specs)
+
+		if agentConfig.Kanon != nil && !supportsKanonAgentType(task.Spec.Type) {
+			err := fmt.Errorf("Kanon does not support agent type %q", task.Spec.Type)
+			logger.Error(err, "Kanon config ignored", "agentType", task.Spec.Type)
+			r.recordEvent(task, corev1.EventTypeWarning, "KanonConfigIgnored", "Kanon config ignored for unsupported agent type %s", task.Spec.Type)
+		}
 
 		if len(agentConfig.MCPServers) > 0 {
 			resolved, err := r.resolveMCPServerSecrets(ctx, task.Namespace, agentConfig.MCPServers)

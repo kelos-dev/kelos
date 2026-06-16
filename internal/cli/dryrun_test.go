@@ -545,6 +545,83 @@ func TestCreateAgentConfigCommand_DryRun_FileReference(t *testing.T) {
 	}
 }
 
+func TestCreateAgentConfigCommand_DryRun_Kanon(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewRootCommand()
+	cmd.SetArgs([]string{
+		"create", "agentconfig", "kanon-ac",
+		"--config", cfgPath,
+		"--dry-run",
+		"--kanon-repo", "https://github.com/example/kanon-config.git",
+		"--kanon-ref", "abc123",
+		"--kanon-secret", "kanon-token",
+		"--namespace", "test-ns",
+	})
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	if err := cmd.Execute(); err != nil {
+		w.Close()
+		os.Stdout = old
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	w.Close()
+	os.Stdout = old
+	var out bytes.Buffer
+	out.ReadFrom(r)
+	output := out.String()
+
+	for _, expected := range []string{
+		"kind: AgentConfig",
+		"name: kanon-ac",
+		"namespace: test-ns",
+		"kanon:",
+		"repo: https://github.com/example/kanon-config.git",
+		"ref: abc123",
+		"secretRef:",
+		"name: kanon-token",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Errorf("expected %q in output, got:\n%s", expected, output)
+		}
+	}
+}
+
+func TestCreateAgentConfigCommand_DryRun_KanonRejectsInlineConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewRootCommand()
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{
+		"create", "agentconfig", "kanon-ac",
+		"--config", cfgPath,
+		"--dry-run",
+		"--kanon-repo", "https://github.com/example/kanon-config.git",
+		"--agents-md", "inline",
+		"--namespace", "test-ns",
+	})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for mixed Kanon and inline config, got nil")
+	}
+	if !strings.Contains(err.Error(), "--kanon-repo cannot be combined") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestCreateAgentConfigCommand_DryRun_SkillsSh(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")

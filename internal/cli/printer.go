@@ -327,19 +327,23 @@ func printWorkspaceDetail(w io.Writer, ws *kelos.Workspace) {
 func printAgentConfigTable(w io.Writer, configs []kelos.AgentConfig, allNamespaces bool) {
 	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
 	if allNamespaces {
-		fmt.Fprintln(tw, "NAMESPACE\tNAME\tPLUGINS\tSKILLS\tMCP SERVERS\tAGE")
+		fmt.Fprintln(tw, "NAMESPACE\tNAME\tKANON\tPLUGINS\tSKILLS\tMCP SERVERS\tAGE")
 	} else {
-		fmt.Fprintln(tw, "NAME\tPLUGINS\tSKILLS\tMCP SERVERS\tAGE")
+		fmt.Fprintln(tw, "NAME\tKANON\tPLUGINS\tSKILLS\tMCP SERVERS\tAGE")
 	}
 	for _, ac := range configs {
 		age := duration.HumanDuration(time.Since(ac.CreationTimestamp.Time))
+		kanon := "no"
+		if ac.Spec.Kanon != nil {
+			kanon = "yes"
+		}
 		plugins := fmt.Sprintf("%d", len(ac.Spec.Plugins))
 		skills := fmt.Sprintf("%d", len(ac.Spec.Skills))
 		mcpServers := fmt.Sprintf("%d", len(ac.Spec.MCPServers))
 		if allNamespaces {
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", ac.Namespace, ac.Name, plugins, skills, mcpServers, age)
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", ac.Namespace, ac.Name, kanon, plugins, skills, mcpServers, age)
 		} else {
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", ac.Name, plugins, skills, mcpServers, age)
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", ac.Name, kanon, plugins, skills, mcpServers, age)
 		}
 	}
 	tw.Flush()
@@ -355,6 +359,16 @@ func printAgentConfigDetail(w io.Writer, ac *kelos.AgentConfig) {
 			md = md[:80] + "..."
 		}
 		printField(w, "Agents MD", md)
+	}
+	if ac.Spec.Kanon != nil {
+		detail := ac.Spec.Kanon.Repo
+		if ac.Spec.Kanon.Ref != "" {
+			detail += " (ref=" + ac.Spec.Kanon.Ref + ")"
+		}
+		if ac.Spec.Kanon.SecretRef != nil {
+			detail += " (secret=" + ac.Spec.Kanon.SecretRef.Name + ")"
+		}
+		printField(w, "Kanon", detail)
 	}
 	if len(ac.Spec.Plugins) > 0 {
 		for i, p := range ac.Spec.Plugins {

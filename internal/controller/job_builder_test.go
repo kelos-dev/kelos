@@ -536,6 +536,40 @@ func TestBuildAgentJob_SetupCommandPodOverrideIsDroppedWhenWorkspaceUnset(t *tes
 	}
 }
 
+func TestBuildAgentJob_KanonHomePodOverrideIsDropped(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-kanon-env-override",
+			Namespace: "default",
+		},
+		Spec: kelos.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Hello",
+			Credentials: kelos.Credentials{
+				Type:      kelos.CredentialTypeAPIKey,
+				SecretRef: &kelos.SecretReference{Name: "my-secret"},
+			},
+			PodOverrides: &kelos.PodOverrides{
+				Env: []corev1.EnvVar{
+					{Name: KanonHomeEnvName, Value: "/tmp/attacker"},
+				},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	for _, env := range job.Spec.Template.Spec.Containers[0].Env {
+		if env.Name == KanonHomeEnvName {
+			t.Fatalf("%s must be dropped from PodOverrides.Env when spec.kanon is unset (got %q)", KanonHomeEnvName, env.Value)
+		}
+	}
+}
+
 func TestBuildClaudeCodeJob_CustomImageWithWorkspace(t *testing.T) {
 	builder := NewJobBuilder()
 	task := &kelos.Task{
@@ -2987,6 +3021,124 @@ func TestBuildJob_AgentConfigWithoutWorkspace(t *testing.T) {
 	}
 }
 
+func TestBuildJob_AgentConfigKanonCodex(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-kanon-codex",
+			Namespace: "default",
+		},
+		Spec: kelos.TaskSpec{
+			Type:   AgentTypeCodex,
+			Prompt: "Fix issue",
+			Credentials: kelos.Credentials{
+				Type:      kelos.CredentialTypeAPIKey,
+				SecretRef: &kelos.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	agentConfig := &kelos.AgentConfigSpec{
+		Kanon: &kelos.KanonSourceSpec{
+			Repo: "https://github.com/example/kanon.git",
+			Ref:  "abc123",
+			SecretRef: &kelos.SecretReference{
+				Name: "kanon-token",
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, agentConfig, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	if len(job.Spec.Template.Spec.Volumes) != 1 {
+		t.Fatalf("Expected 1 Kanon volume, got %d", len(job.Spec.Template.Spec.Volumes))
+	}
+	if job.Spec.Template.Spec.Volumes[0].Name != KanonVolumeName {
+		t.Fatalf("Volume name = %q, want %q", job.Spec.Template.Spec.Volumes[0].Name, KanonVolumeName)
+	}
+	if job.Spec.Template.Spec.SecurityContext == nil || job.Spec.Template.Spec.SecurityContext.FSGroup == nil {
+		t.Fatal("Expected pod SecurityContext.FSGroup for Kanon source volume")
+	}
+	if *job.Spec.Template.Spec.SecurityContext.FSGroup != AgentUID {
+		t.Fatalf("FSGroup = %d, want %d", *job.Spec.Template.Spec.SecurityContext.FSGroup, AgentUID)
+	}
+
+	if len(job.Spec.Template.Spec.InitContainers) != 1 {
+		t.Fatalf("Expected 1 Kanon init container, got %d", len(job.Spec.Template.Spec.InitContainers))
+	}
+	initContainer := job.Spec.Template.Spec.InitContainers[0]
+	if initContainer.Name != KanonSourceContainerName {
+		t.Fatalf("Init container name = %q, want %q", initContainer.Name, KanonSourceContainerName)
+	}
+	if !strings.Contains(initContainer.Command[2], "git -C '/kelos/kanon/repo' checkout --detach 'abc123'") {
+		t.Errorf("Expected Kanon ref checkout in init script, got: %s", initContainer.Command[2])
+	}
+	if len(initContainer.Env) != 1 || initContainer.Env[0].Name != "GITHUB_TOKEN" || initContainer.Env[0].ValueFrom.SecretKeyRef.Name != "kanon-token" {
+		t.Errorf("Expected GITHUB_TOKEN from kanon-token, got %#v", initContainer.Env)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+	foundMount := false
+	for _, mount := range container.VolumeMounts {
+		if mount.Name == KanonVolumeName && mount.MountPath == KanonMountPath {
+			foundMount = true
+		}
+	}
+	if !foundMount {
+		t.Fatalf("Expected Kanon volume mount on main container, got %#v", container.VolumeMounts)
+	}
+	envMap := map[string]string{}
+	for _, env := range container.Env {
+		if env.Value != "" {
+			envMap[env.Name] = env.Value
+		}
+	}
+	if envMap[KanonHomeEnvName] != KanonHomePath {
+		t.Fatalf("%s = %q, want %q", KanonHomeEnvName, envMap[KanonHomeEnvName], KanonHomePath)
+	}
+}
+
+func TestBuildJob_AgentConfigKanonUnsupportedAgentIgnored(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-kanon-gemini",
+			Namespace: "default",
+		},
+		Spec: kelos.TaskSpec{
+			Type:   AgentTypeGemini,
+			Prompt: "Fix issue",
+			Credentials: kelos.Credentials{
+				Type:      kelos.CredentialTypeAPIKey,
+				SecretRef: &kelos.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+	agentConfig := &kelos.AgentConfigSpec{
+		Kanon: &kelos.KanonSourceSpec{Repo: "https://github.com/example/kanon.git"},
+	}
+
+	job, err := builder.Build(task, nil, agentConfig, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	if len(job.Spec.Template.Spec.InitContainers) != 0 {
+		t.Fatalf("Expected no Kanon init container for unsupported agent, got %#v", job.Spec.Template.Spec.InitContainers)
+	}
+	if len(job.Spec.Template.Spec.Volumes) != 0 {
+		t.Fatalf("Expected no Kanon volume for unsupported agent, got %#v", job.Spec.Template.Spec.Volumes)
+	}
+	for _, env := range job.Spec.Template.Spec.Containers[0].Env {
+		if env.Name == KanonHomeEnvName {
+			t.Fatalf("%s should not be set for unsupported agent", KanonHomeEnvName)
+		}
+	}
+}
+
 func TestBuildJob_AgentConfigCodex(t *testing.T) {
 	builder := NewJobBuilder()
 	task := &kelos.Task{
@@ -5077,6 +5229,10 @@ func TestBuildJob_PodOverridesVolumes_ReservedNameRejected(t *testing.T) {
 			wantError: "Kelos-reserved volume name",
 		},
 		{
+			name:      KanonVolumeName,
+			wantError: "Kelos-reserved volume name",
+		},
+		{
 			name:      PluginVolumeName,
 			wantError: "reserved \"kelos-\" volume name prefix",
 		},
@@ -5338,7 +5494,7 @@ func TestBuildJob_PodOverridesContainerSecurityContext(t *testing.T) {
 
 func TestBuildJob_ExtraContainers_ReservedNameRejected(t *testing.T) {
 	builder := NewJobBuilder()
-	for _, name := range []string{"kelos-agent", "kelos-foo", "git-clone", "remote-setup", "branch-setup", "workspace-files", "plugin-setup", "skills-install"} {
+	for _, name := range []string{"kelos-agent", "kelos-foo", "git-clone", "remote-setup", "branch-setup", "workspace-files", "plugin-setup", "skills-install", "kanon-source"} {
 		t.Run(name, func(t *testing.T) {
 			task := &kelos.Task{
 				ObjectMeta: metav1.ObjectMeta{
@@ -5535,7 +5691,7 @@ func TestBuildJob_ExtraInitContainers_AppendedAfterBuiltins(t *testing.T) {
 
 func TestBuildJob_ExtraInitContainers_ReservedNameRejected(t *testing.T) {
 	builder := NewJobBuilder()
-	for _, name := range []string{"kelos-agent", "kelos-bar", "git-clone", "plugin-setup", "skills-install"} {
+	for _, name := range []string{"kelos-agent", "kelos-bar", "git-clone", "plugin-setup", "skills-install", "kanon-source"} {
 		t.Run(name, func(t *testing.T) {
 			task := &kelos.Task{
 				ObjectMeta: metav1.ObjectMeta{

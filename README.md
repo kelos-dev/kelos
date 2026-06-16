@@ -462,6 +462,22 @@ kelos run -p "Fix the bug" --agent-config my-config
 - `plugins` are mounted as plugin directories and passed via `--plugin-dir`.
 - `mcpServers` are written to the agent's native MCP configuration. Supports `stdio`, `http`, and `sse` transport types.
 
+To source agent settings from a Kanon repository instead, set `spec.kanon`.
+The referenced repository must contain `kanon.yaml` at its root. This mode is
+mutually exclusive with inline `agentsMD`, `plugins`, `skills`, and
+`mcpServers` fields.
+
+```yaml
+apiVersion: kelos.dev/v1alpha2
+kind: AgentConfig
+metadata:
+  name: kanon-config
+spec:
+  kanon:
+    repo: https://github.com/example/kanon-config.git
+    ref: main
+```
+
 See the [full AgentConfig spec](docs/reference.md#agentconfig) for plugins, skills, and agents configuration.
 
 > Browse all ready-to-apply YAML manifests in the [`examples/`](examples/) directory.

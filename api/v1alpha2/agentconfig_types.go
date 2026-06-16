@@ -6,12 +6,21 @@ import (
 )
 
 // AgentConfigSpec defines the desired state of AgentConfig.
+//
+// +kubebuilder:validation:XValidation:rule="!has(self.kanon) || ((!has(self.agentsMD) || size(self.agentsMD) == 0) && (!has(self.plugins) || size(self.plugins) == 0) && (!has(self.skills) || size(self.skills) == 0) && (!has(self.mcpServers) || size(self.mcpServers) == 0))",message="kanon is mutually exclusive with agentsMD, plugins, skills, and mcpServers"
 type AgentConfigSpec struct {
 	// AgentsMD is written to the agent's instruction file
 	// (e.g., ~/.claude/CLAUDE.md for Claude Code).
 	// This is additive and does not overwrite the repo's own instruction files.
 	// +optional
 	AgentsMD string `json:"agentsMD,omitempty"`
+
+	// Kanon references a Kanon source repository. When set, the Task pod
+	// clones the repository and applies its root kanon.yaml to the agent's
+	// user-level configuration before the agent starts.
+	// Mutually exclusive with AgentsMD, Plugins, Skills, and MCPServers.
+	// +optional
+	Kanon *KanonSourceSpec `json:"kanon,omitempty"`
 
 	// Plugins defines plugin bundles containing skills and agents.
 	// Each plugin is mounted as a directory and installed using the
@@ -31,6 +40,23 @@ type AgentConfigSpec struct {
 	// MCP configuration (e.g., ~/.claude.json for Claude Code).
 	// +optional
 	MCPServers []MCPServerSpec `json:"mcpServers,omitempty"`
+}
+
+// KanonSourceSpec references a Kanon source repository.
+type KanonSourceSpec struct {
+	// Repo is the Git repository URL containing kanon.yaml at its root.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Repo string `json:"repo"`
+
+	// Ref is an optional branch, tag, or commit to check out.
+	// +optional
+	Ref string `json:"ref,omitempty"`
+
+	// SecretRef references a Secret containing GITHUB_TOKEN for cloning
+	// private Kanon source repositories.
+	// +optional
+	SecretRef *SecretReference `json:"secretRef,omitempty"`
 }
 
 // PluginSpec defines a plugin bundle containing skills and agents.

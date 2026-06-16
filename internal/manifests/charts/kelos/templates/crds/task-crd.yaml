@@ -7073,7 +7073,9 @@ spec:
                   AgentConfigRefs references an ordered list of AgentConfig resources.
                   Configs are merged in order: agentsMD is concatenated, plugins/skills
                   are appended, mcpServers are appended with later entries winning on
-                  name collision.
+                  name collision. At most one referenced AgentConfig may set spec.kanon,
+                  and Kanon-backed configs cannot be combined with inline AgentConfig
+                  fields from the same or another referenced config.
                 items:
                   description: AgentConfigReference refers to an AgentConfig resource
                     by name.
@@ -8561,7 +8563,8 @@ spec:
                       ContainerSecurityContext fields.
                       Container names must not use the Kelos-reserved "kelos-" prefix or
                       collide with a built-in init container name: git-clone, remote-setup,
-                      branch-setup, workspace-files, plugin-setup, skills-install.
+                      branch-setup, workspace-files, plugin-setup, skills-install,
+                      kanon-source.
                     items:
                       description: A single application container that you want to
                         run within a pod.
@@ -10103,16 +10106,16 @@ spec:
                         prefix or a built-in init container name
                       rule: self.all(c, !c.name.startsWith('kelos-') && !(c.name in
                         ['git-clone', 'remote-setup', 'branch-setup', 'workspace-files',
-                        'plugin-setup', 'skills-install']))
+                        'plugin-setup', 'skills-install', 'kanon-source']))
                   extraInitContainers:
                     description: |-
                       ExtraInitContainers is a list of additional init containers to run
                       in the agent pod. They are placed after all Kelos built-in init
                       containers (git-clone, remote-setup, branch-setup, workspace-files,
-                      plugin-setup, skills-install), ensuring the workspace is ready
-                      before they start. Set restartPolicy: Always for sidecar semantics
-                      (long-running services like databases) or leave it unset for
-                      one-shot init tasks.
+                      plugin-setup, skills-install, kanon-source), ensuring the workspace
+                      and AgentConfig sources are ready before they start. Set
+                      restartPolicy: Always for sidecar semantics (long-running services
+                      like databases) or leave it unset for one-shot init tasks.
                       Containers can mount user-supplied volumes from the Volumes field
                       as well as Kelos-managed volumes (workspace, kelos-plugin). Note
                       that the workspace volume uses FSGroup-based permissions; containers
@@ -10120,7 +10123,8 @@ spec:
                       access to the workspace.
                       Container names must not use the Kelos-reserved "kelos-" prefix or
                       collide with a built-in init container name: git-clone, remote-setup,
-                      branch-setup, workspace-files, plugin-setup, skills-install.
+                      branch-setup, workspace-files, plugin-setup, skills-install,
+                      kanon-source.
                     items:
                       description: A single application container that you want to
                         run within a pod.
@@ -11662,7 +11666,7 @@ spec:
                         'kelos-' prefix or a built-in init container name
                       rule: self.all(c, !c.name.startsWith('kelos-') && !(c.name in
                         ['git-clone', 'remote-setup', 'branch-setup', 'workspace-files',
-                        'plugin-setup', 'skills-install']))
+                        'plugin-setup', 'skills-install', 'kanon-source']))
                   imagePullSecrets:
                     description: |-
                       ImagePullSecrets specifies secrets used to pull container images

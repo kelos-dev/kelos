@@ -838,7 +838,9 @@ type TaskTemplate struct {
 	// AgentConfigRefs references an ordered list of AgentConfig resources.
 	// Configs are merged in order: agentsMD is concatenated, plugins/skills
 	// are appended, mcpServers are appended with later entries winning on
-	// name collision.
+	// name collision. At most one referenced AgentConfig may set spec.kanon,
+	// and Kanon-backed configs cannot be combined with inline AgentConfig
+	// fields from the same or another referenced config.
 	// When set, spawned Tasks inherit this agent config reference list.
 	// +optional
 	// +kubebuilder:validation:MinItems=1

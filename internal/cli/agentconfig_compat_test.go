@@ -139,6 +139,28 @@ func TestCreateAgentConfigRejectsValueFromWithoutV1alpha2(t *testing.T) {
 	}
 }
 
+func TestCreateAgentConfigRejectsKanonWithoutV1alpha2(t *testing.T) {
+	ctx := context.Background()
+	cl := agentConfigV1alpha1OnlyClient()
+	ac := &kelos.AgentConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: "kanon", Namespace: "default"},
+		Spec: kelos.AgentConfigSpec{
+			Kanon: &kelos.KanonSourceSpec{Repo: "https://github.com/example/kanon-config.git"},
+		},
+	}
+
+	err := createAgentConfig(ctx, cl, ac)
+	if err == nil {
+		t.Fatal("createAgentConfig returned nil, want v1alpha2 requirement error")
+	}
+	if !strings.Contains(err.Error(), "requires kelos.dev/v1alpha2 CRDs") {
+		t.Errorf("error = %v, want v1alpha2 requirement", err)
+	}
+	if !strings.Contains(err.Error(), "kanon") {
+		t.Errorf("error = %v, want AgentConfig name", err)
+	}
+}
+
 func TestDeleteAgentConfigFallsBackToV1alpha1(t *testing.T) {
 	ctx := context.Background()
 	cl := agentConfigV1alpha1OnlyClient(

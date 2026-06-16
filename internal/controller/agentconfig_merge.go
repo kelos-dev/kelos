@@ -1,10 +1,16 @@
 package controller
 
 import (
+	"fmt"
 	"strings"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 )
+
+type namedAgentConfigSpec struct {
+	Name string
+	Spec kelos.AgentConfigSpec
+}
 
 // MergeAgentConfigs merges multiple AgentConfigSpecs in order.
 // agentsMD values are concatenated with "\n\n", plugins and skills are
@@ -22,6 +28,13 @@ func MergeAgentConfigs(configs []kelos.AgentConfigSpec) *kelos.AgentConfigSpec {
 	merged := kelos.AgentConfigSpec{}
 
 	var mdParts []string
+	for _, c := range configs {
+		if c.Kanon != nil {
+			kanon := *c.Kanon
+			merged.Kanon = &kanon
+		}
+	}
+
 	for _, c := range configs {
 		if c.AgentsMD != "" {
 			mdParts = append(mdParts, c.AgentsMD)
@@ -50,6 +63,38 @@ func MergeAgentConfigs(configs []kelos.AgentConfigSpec) *kelos.AgentConfigSpec {
 	}
 
 	return &merged
+}
+
+func validateAgentConfigSpecs(configs []namedAgentConfigSpec) error {
+	var kanonNames []string
+	var inlineNames []string
+	for _, c := range configs {
+		hasKanon := c.Spec.Kanon != nil
+		hasInline := hasInlineAgentConfig(c.Spec)
+		if hasKanon {
+			kanonNames = append(kanonNames, c.Name)
+		}
+		if hasInline {
+			inlineNames = append(inlineNames, c.Name)
+		}
+		if hasKanon && hasInline {
+			return fmt.Errorf("agentConfig %q: spec.kanon is mutually exclusive with agentsMD, plugins, skills, and mcpServers", c.Name)
+		}
+	}
+	if len(kanonNames) > 1 {
+		return fmt.Errorf("multiple Kanon AgentConfigs are not supported: %s", strings.Join(kanonNames, ", "))
+	}
+	if len(kanonNames) == 1 && len(inlineNames) > 0 {
+		return fmt.Errorf("Kanon AgentConfig %q cannot be combined with inline AgentConfigs: %s", kanonNames[0], strings.Join(inlineNames, ", "))
+	}
+	return nil
+}
+
+func hasInlineAgentConfig(spec kelos.AgentConfigSpec) bool {
+	return spec.AgentsMD != "" ||
+		len(spec.Plugins) > 0 ||
+		len(spec.Skills) > 0 ||
+		len(spec.MCPServers) > 0
 }
 
 // ResolveAgentConfigRefs returns the effective list of AgentConfigReference

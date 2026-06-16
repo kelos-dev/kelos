@@ -152,6 +152,90 @@ func TestMergeAgentConfigs_MCPServersOrderPreserved(t *testing.T) {
 	}
 }
 
+func TestMergeAgentConfigs_Kanon(t *testing.T) {
+	configs := []kelos.AgentConfigSpec{
+		{Kanon: &kelos.KanonSourceSpec{Repo: "https://github.com/example/kanon.git", Ref: "main"}},
+	}
+	got := MergeAgentConfigs(configs)
+	if got == nil || got.Kanon == nil {
+		t.Fatal("Expected merged Kanon source")
+	}
+	if got.Kanon.Repo != "https://github.com/example/kanon.git" || got.Kanon.Ref != "main" {
+		t.Errorf("Kanon = %+v, want repo/ref preserved", got.Kanon)
+	}
+}
+
+func TestValidateAgentConfigSpecs_KanonOnly(t *testing.T) {
+	configs := []namedAgentConfigSpec{
+		{
+			Name: "kanon",
+			Spec: kelos.AgentConfigSpec{Kanon: &kelos.KanonSourceSpec{Repo: "https://github.com/example/kanon.git"}},
+		},
+	}
+	if err := validateAgentConfigSpecs(configs); err != nil {
+		t.Fatalf("validateAgentConfigSpecs() error = %v", err)
+	}
+}
+
+func TestValidateAgentConfigSpecs_KanonWithInlineSameConfig(t *testing.T) {
+	configs := []namedAgentConfigSpec{
+		{
+			Name: "mixed",
+			Spec: kelos.AgentConfigSpec{
+				Kanon:    &kelos.KanonSourceSpec{Repo: "https://github.com/example/kanon.git"},
+				AgentsMD: "inline",
+			},
+		},
+	}
+	err := validateAgentConfigSpecs(configs)
+	if err == nil {
+		t.Fatal("validateAgentConfigSpecs() error = nil, want non-nil")
+	}
+	if err.Error() != `agentConfig "mixed": spec.kanon is mutually exclusive with agentsMD, plugins, skills, and mcpServers` {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestValidateAgentConfigSpecs_KanonWithInlineOtherConfig(t *testing.T) {
+	configs := []namedAgentConfigSpec{
+		{
+			Name: "kanon",
+			Spec: kelos.AgentConfigSpec{Kanon: &kelos.KanonSourceSpec{Repo: "https://github.com/example/kanon.git"}},
+		},
+		{
+			Name: "inline",
+			Spec: kelos.AgentConfigSpec{AgentsMD: "inline"},
+		},
+	}
+	err := validateAgentConfigSpecs(configs)
+	if err == nil {
+		t.Fatal("validateAgentConfigSpecs() error = nil, want non-nil")
+	}
+	if err.Error() != `Kanon AgentConfig "kanon" cannot be combined with inline AgentConfigs: inline` {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestValidateAgentConfigSpecs_MultipleKanon(t *testing.T) {
+	configs := []namedAgentConfigSpec{
+		{
+			Name: "first",
+			Spec: kelos.AgentConfigSpec{Kanon: &kelos.KanonSourceSpec{Repo: "https://github.com/example/kanon-a.git"}},
+		},
+		{
+			Name: "second",
+			Spec: kelos.AgentConfigSpec{Kanon: &kelos.KanonSourceSpec{Repo: "https://github.com/example/kanon-b.git"}},
+		},
+	}
+	err := validateAgentConfigSpecs(configs)
+	if err == nil {
+		t.Fatal("validateAgentConfigSpecs() error = nil, want non-nil")
+	}
+	if err.Error() != "multiple Kanon AgentConfigs are not supported: first, second" {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestMergeAgentConfigs_ThreeConfigs(t *testing.T) {
 	configs := []kelos.AgentConfigSpec{
 		{

@@ -55,6 +55,17 @@ fs.writeFileSync(cfgPath, JSON.stringify(existing, null, 2));
 '
 fi
 
+if [ -n "${KELOS_KANON_HOME:-}" ]; then
+  printf '\n---KELOS_KANON_APPLY_START---\n' >&2
+  kanon apply --yes --home "$KELOS_KANON_HOME" --agent claude
+  KANON_EXIT_CODE=$?
+  if [ "$KANON_EXIT_CODE" -ne 0 ]; then
+    printf '\n---KELOS_KANON_APPLY_FAILED--- exit=%s\n' "$KANON_EXIT_CODE" >&2
+    exit "$KANON_EXIT_CODE"
+  fi
+  printf '\n---KELOS_KANON_APPLY_DONE---\n' >&2
+fi
+
 # Run pre-agent setup command if configured. KELOS_SETUP_COMMAND is the
 # JSON-encoded exec-form array from Workspace.spec.setupCommand. A non-zero
 # exit aborts the task before the agent starts.

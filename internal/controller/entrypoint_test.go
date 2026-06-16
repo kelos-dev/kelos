@@ -17,6 +17,8 @@ func TestAgentEntrypointsHandleKelosEffort(t *testing.T) {
 			parts: []string{
 				"KELOS_EFFORT",
 				"model_reasoning_effort",
+				"KELOS_KANON_HOME",
+				"kanon apply --yes --home \"$KELOS_KANON_HOME\" --agent codex",
 			},
 		},
 		{
@@ -24,6 +26,8 @@ func TestAgentEntrypointsHandleKelosEffort(t *testing.T) {
 			parts: []string{
 				"KELOS_EFFORT",
 				"--effort",
+				"KELOS_KANON_HOME",
+				"kanon apply --yes --home \"$KELOS_KANON_HOME\" --agent claude",
 			},
 		},
 		{

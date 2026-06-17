@@ -29,6 +29,27 @@ spec:
       - `make update` — run formatters and update module metadata
       - `make test` — run all unit tests
       - `make build` — build the kanon binary
+
+    ## Testing
+    - Always add or improve tests when you change behavior.
+    - Test the happy path / primary action, not only early-return or no-op
+      guards. When a guard has two outcomes (e.g. a file becomes a conflict
+      unless `--adopt`), assert both directions.
+    - When you narrow behavior by a flag or scope (e.g. `--agent`/`--project`),
+      cover that scope directly, not only indirectly through another path.
+    - When you remove or disable behavior, add a negative assertion that the
+      output no longer contains the removed keys/fields, so a regression that
+      re-introduces it is caught.
+
+    ## Pull Requests
+    - Always follow `.github/PULL_REQUEST_TEMPLATE.md` when creating or updating PRs.
+    - Choose exactly one `/kind` line from: `bug`, `cleanup`, `docs`, `feature`.
+    - Fill the ` ```release-note ` block: a meaningful note for user-facing
+      changes (new/changed CLI command, flag, `kanon.yaml` field, or behavior),
+      or `NONE` otherwise.
+    - Omitting the `/kind` line or the release-note block leaves the blocking
+      `needs-kind` / `needs-release-note` labels on the PR, which fails the
+      `check-pr-labels` CI job.
 ---
 apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner

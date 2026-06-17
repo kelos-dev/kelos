@@ -77,12 +77,12 @@ var _ = Describe("TaskSpawner", func() {
 		By("waiting for TaskSpawner phase to become Running")
 		Eventually(func() string {
 			return f.GetTaskSpawnerPhase("spawner")
-		}, 3*time.Minute, 10*time.Second).Should(Equal("Running"))
+		}, 3*time.Minute, 2*time.Second).Should(Equal("Running"))
 
 		By("verifying at least one Task was created")
 		Eventually(func() []string {
 			return f.ListTaskNames("kelos.dev/taskspawner=spawner")
-		}, 3*time.Minute, 10*time.Second).ShouldNot(BeEmpty())
+		}, 3*time.Minute, 2*time.Second).ShouldNot(BeEmpty())
 	})
 
 	It("should be accessible via CLI", func() {
@@ -188,12 +188,12 @@ var _ = Describe("Cron TaskSpawner", func() {
 		By("waiting for TaskSpawner phase to become Running")
 		Eventually(func() string {
 			return f.GetTaskSpawnerPhase("cron-spawner")
-		}, 3*time.Minute, 10*time.Second).Should(Equal("Running"))
+		}, 3*time.Minute, 2*time.Second).Should(Equal("Running"))
 
 		By("verifying at least one Task was created")
 		Eventually(func() []string {
 			return f.ListTaskNames("kelos.dev/taskspawner=cron-spawner")
-		}, 3*time.Minute, 10*time.Second).ShouldNot(BeEmpty())
+		}, 3*time.Minute, 2*time.Second).ShouldNot(BeEmpty())
 	})
 
 	It("should be accessible via CLI with cron source info", func() {

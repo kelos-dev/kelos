@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/validation"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -301,7 +302,7 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 
 	var newItems []source.WorkItem
 	for _, item := range items {
-		taskName := fmt.Sprintf("%s-%s", ts.Name, item.ID)
+		taskName := buildTaskName(ts.Name, item.ID)
 		existing, found := existingTaskMap[taskName]
 		if !found {
 			newItems = append(newItems, item)
@@ -367,7 +368,7 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 			break
 		}
 
-		taskName := fmt.Sprintf("%s-%s", ts.Name, item.ID)
+		taskName := buildTaskName(ts.Name, item.ID)
 
 		templateVars := source.WorkItemToTemplateVars(item)
 
@@ -806,4 +807,22 @@ func parsePollInterval(s string) time.Duration {
 		return 5 * time.Minute
 	}
 	return d
+}
+
+// buildTaskName combines a spawner name and work item ID into a valid RFC 1123
+// DNS subdomain for use as a Task object name. It normalizes IDs that are not
+// name-safe on their own, such as Jira issue keys (e.g. "PROJECT-1234"), whose
+// uppercase letters would otherwise be rejected by Kubernetes. IDs that are
+// already name-safe are returned unchanged.
+func buildTaskName(spawnerName, itemID string) string {
+	combined := spawnerName + "-" + itemID
+
+	if len(validation.IsDNS1123Subdomain(combined)) == 0 {
+		return combined
+	}
+
+	segments := strings.FieldsFunc(strings.ToLower(combined), func(r rune) bool {
+		return !('a' <= r && r <= 'z' || '0' <= r && r <= '9')
+	})
+	return strings.Join(segments, "-")
 }

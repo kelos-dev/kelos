@@ -37,13 +37,18 @@ kubectl get tasks -w
 ## Customizing
 
 The skill content in `agentconfig.yaml` is a condensed version. For the full
-skill with complete reference YAML patterns, see `skills/kelos/SKILL.md` and
-`skills/kelos/references/` in the repository root.
+packaged skill with complete reference YAML patterns, see `skills/kelos/` in
+the repository root.
 
-To use the full skill content, replace the inline `content` with the contents
-of `skills/kelos/SKILL.md`, or use the CLI:
+To use the full package from an AgentConfig, use the skills.sh package instead
+of copying only `SKILL.md`; the package includes the reference files that the
+skill loads on demand:
 
 ```bash
 kelos create agentconfig kelos-skill-agent \
-  --skill kelos=@skills/kelos/SKILL.md
+  --skills-sh kelos-dev/kelos
 ```
+
+If you need a single-file inline skill, keep the condensed `content` in this
+example or write a self-contained skill body that does not refer to
+`skills/kelos/references/`.

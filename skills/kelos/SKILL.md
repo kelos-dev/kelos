@@ -1,256 +1,100 @@
 ---
 name: kelos
-description: Author, debug, and operate Kelos resources (Task, Workspace, AgentConfig, TaskSpawner) on Kubernetes. Use when working with Kelos CRDs or the kelos CLI.
-compatibility: Requires kubectl and access to a Kubernetes cluster
+description: >-
+  Use only for Kelos Kubernetes resource work: authoring/debugging Task,
+  Workspace, AgentConfig, or TaskSpawner manifests/CRDs, examples, generated
+  CRDs, self-development manifests, or live kelos/kubectl operations. Do not use
+  for ordinary Kelos repo code edits, tests, reviews, build/CI, or git tasks
+  unless they involve those resources.
+compatibility: Requires kubectl and cluster access only for live operations
 ---
 
 # Kelos Skill
 
-Use this skill when you need to author, debug, or operate Kelos resources
-(Task, Workspace, AgentConfig, TaskSpawner) on a Kubernetes cluster.
+Use this skill as a compact guide for Kelos resource work. Keep context small:
+use the quick summary first, and read only the reference file that matches the
+user's request.
 
-## Installing Kelos
+## When To Use
 
-Install the controller and CRDs into a Kubernetes cluster:
+Use this skill for:
 
-```bash
-kelos install
-```
+- Authoring or editing Kelos manifests for `Task`, `Workspace`, `AgentConfig`, or `TaskSpawner`.
+- Debugging live Kelos resources on Kubernetes with `kelos` or `kubectl`.
+- Operating Kelos installs, task runs, logs, suspension, deletion, or cluster resources.
+- Editing Kelos CRD/API examples, generated CRDs, self-development manifests, or docs that describe resource fields.
 
-Uninstall:
+Do not use this skill for ordinary Kelos repository code edits, tests, reviews,
+CI fixes, or git work unless the request specifically involves Kelos resources,
+CRDs, resource YAML, examples, self-development manifests, or cluster operations.
 
-```bash
-kelos uninstall
-```
+## Loading Rule
 
-Initialize a local config file at `~/.kelos/config.yaml`:
+- For a simple CLI operation, use the quick commands below and do not open references.
+- For one resource kind, open only that resource's reference file.
+- For multi-resource manifests, open only the involved resource references.
+- For live debugging, start with the operational workflow below, then open
+  `references/troubleshooting.md` only if the symptom matches.
+- For API or CRD source changes, verify current Go types and generated CRDs in
+  the repo before trusting examples. Examples are patterns, not the source of truth.
 
-```bash
-kelos init
-```
+## Resource Summary
 
-## Core Resources
+Kelos resources use `apiVersion: kelos.dev/v1alpha2`.
 
-Kelos defines four custom resources:
+| Resource | Purpose | Key fields |
+| --- | --- | --- |
+| `Task` | Single agent run | `spec.type`, `spec.prompt`, `spec.credentials`, `spec.workspaceRef`, `spec.agentConfigRefs[]`, `spec.branch`, `spec.dependsOn`, `spec.model`, `spec.effort`, `spec.podOverrides`, `spec.ttlSecondsAfterFinished` |
+| `Workspace` | Git repository for the agent | `spec.repo`, `spec.ref`, `spec.secretRef`, `spec.remotes`, `spec.files` |
+| `AgentConfig` | Reusable instructions and tools | `spec.agentsMD`, `spec.plugins`, `spec.skills`, `spec.mcpServers` |
+| `TaskSpawner` | Creates Tasks from external sources | `spec.when.githubIssues`, `spec.when.githubPullRequests`, `spec.when.cron`, `spec.when.jira`, per-source `pollInterval`, `spec.taskTemplate`, `spec.maxConcurrency`, `spec.maxTotalTasks`, `spec.suspend` |
 
-| Resource | Purpose |
-|----------|---------|
-| **Task** | A single agent run — prompt, credentials, optional workspace and config |
-| **Workspace** | A git repository to clone for the agent |
-| **AgentConfig** | Reusable instructions, skills, agents, MCP servers |
-| **TaskSpawner** | Automatically creates Tasks from GitHub issues, Jira tickets, or cron |
-
-### Task
-
-A Task runs an AI agent with a prompt. Key fields:
-
-- `spec.type` (required): `claude-code`, `codex`, `gemini`, `opencode`, or `cursor`
-- `spec.prompt` (required): The task prompt
-- `spec.credentials` (required): `type` (`api-key` or `oauth`) and `secretRef.name`
-- `spec.workspaceRef.name`: Reference to a Workspace
-- `spec.agentConfigRefs[].name`: Reference to an AgentConfig
-- `spec.branch`: Git branch mutex — only one Task with the same branch runs at a time
-- `spec.dependsOn`: Task names that must succeed first
-- `spec.ttlSecondsAfterFinished`: Auto-delete after completion (seconds)
-- `spec.model`: Model override
-- `spec.effort`: Agent reasoning effort
-- `spec.podOverrides`: Resource limits, timeout, env vars, node selector
-
-Task status phases: `Pending` -> `Running` -> `Succeeded` or `Failed`.
-Tasks with unmet dependencies enter `Waiting`.
-
-### Workspace
-
-A Workspace defines a git repository for the agent:
-
-- `spec.repo` (required): Git URL (HTTPS, git://, or SSH)
-- `spec.ref`: Branch, tag, or commit to checkout
-- `spec.secretRef.name`: Secret with `GITHUB_TOKEN` (PAT) or GitHub App credentials (`appID`, `installationID`, `privateKey`)
-- `spec.remotes`: Additional git remotes (name must not be `origin`)
-- `spec.files`: Files to inject into the repo before the agent starts (e.g., `CLAUDE.md`, skills)
-
-### AgentConfig
-
-An AgentConfig injects reusable instructions and tools into Tasks:
-
-- `spec.agentsMD`: Instructions written to the agent's config (e.g., `~/.claude/CLAUDE.md`). Additive — does not overwrite repo files
-- `spec.plugins`: Plugin bundles with skills and sub-agents
-  - `plugins[].name`: Plugin name (directory namespace)
-  - `plugins[].skills[].name` / `.content`: Skill definitions (become `SKILL.md`)
-  - `plugins[].agents[].name` / `.content`: Agent definitions (become `<name>.md`)
-- `spec.skills`: skills.sh ecosystem packages
-  - `skills[].source`: Package in `owner/repo` format
-  - `skills[].skill`: Optional specific skill name
-- `spec.mcpServers`: MCP server configurations
-  - Supports `stdio`, `http`, and `sse` transport types
-  - Use `headersFrom` / `envFrom` with a `secretRef` for sensitive values
-
-### TaskSpawner
-
-A TaskSpawner auto-creates Tasks from external sources:
-
-- `spec.when.githubIssues`: Discover from GitHub issues (labels, state, assignee, author, commentPolicy, priority labels)
-- `spec.when.githubPullRequests`: Discover from GitHub PRs (labels, state, reviewState, author, draft, commentPolicy, priority labels)
-- `spec.when.cron`: Trigger on a cron schedule
-- `spec.when.jira`: Discover from Jira (project, JQL filter, secret with `JIRA_TOKEN`)
-- `spec.when.githubIssues.commentPolicy` / `spec.when.githubPullRequests.commentPolicy`: Comment-based workflow control with authorization
-  - `triggerComment`: Command that must appear for the item to be included (e.g., "/kelos pick-up")
-  - `excludeComments`: Commands that exclude items; when combined with triggerComment, the most recent authorized command wins
-  - `allowedUsers`: Restrict comment control to specific GitHub usernames
-  - `allowedTeams`: Restrict to GitHub teams in `org/team-slug` format
-  - `minimumPermission`: Require at least this repo permission (`read`, `triage`, `write`, `maintain`, `admin`)
-- `spec.taskTemplate`: Template for spawned Tasks (same fields as Task spec)
-  - `promptTemplate` and `branch` support Go `text/template` variables: `{{.ID}}`, `{{.Number}}`, `{{.Title}}`, `{{.Body}}`, `{{.URL}}`, `{{.Labels}}`, `{{.Comments}}`, `{{.Kind}}`, `{{.Time}}`, `{{.Schedule}}`
-- `spec.when.githubIssues.pollInterval` / `spec.when.githubPullRequests.pollInterval` / `spec.when.jira.pollInterval`: Per-source polling frequency (default `5m`)
-- `spec.maxConcurrency`: Limit concurrent running Tasks
-- `spec.maxTotalTasks`: Lifetime task creation limit
-- `spec.suspend`: Pause/resume without deleting
-
-## CLI Quick Reference
-
-### Running Tasks
-
-```bash
-# Simple task
-kelos run -p "Fix the login bug" --type claude-code
-
-# With workspace and agent config
-kelos run -p "Add tests" --workspace my-ws --agent-config my-ac
-
-# With model override and branch
-kelos run -p "Refactor auth" --model opus --effort high --branch feature/auth
-
-# Watch task progress
-kelos run -p "Fix bug" -w
-```
-
-### Creating Resources
-
-```bash
-# Create a workspace
-kelos create workspace my-ws \
-  --repo https://github.com/org/repo.git \
-  --ref main \
-  --secret github-token
-
-# Create an agent config with inline skill
-kelos create agentconfig my-ac \
-  --skill review="Review the PR for correctness and security" \
-  --agents-md @instructions.md
-
-# Create an agent config with skills.sh package
-kelos create agentconfig my-ac \
-  --skills-sh anthropics/skills:skill-creator
-
-# Create an agent config with MCP server
-kelos create agentconfig my-ac \
-  --mcp github='{"type":"http","url":"https://api.githubcopilot.com/mcp/"}'
-
-# Dry-run to preview YAML
-kelos create agentconfig my-ac --skill review=@review.md --dry-run
-```
-
-### Managing Resources
-
-```bash
-# List resources
-kelos get tasks
-kelos get taskspawners
-kelos get workspaces
-
-# View details
-kelos get task my-task -d
-kelos get task my-task -o yaml
-
-# Stream logs
-kelos logs my-task -f
-
-# Suspend / resume a spawner
-kelos suspend taskspawner my-spawner
-kelos resume taskspawner my-spawner
-
-# Delete
-kelos delete task my-task
-```
-
-### Configuration
-
-Config file at `~/.kelos/config.yaml`:
-
-```yaml
-oauthToken: <token>       # or apiKey: <key>
-model: sonnet                   # or a versioned ID like 'claude-sonnet-4-6' — value is passed to the agent as KELOS_MODEL
-effort: high
-namespace: default
-workspace:
-  repo: https://github.com/org/repo.git
-  ref: main
-  token: <github-token>
-```
-
-CLI flags always override config file values.
-
-## Dependency Chains
-
-Tasks can depend on other Tasks using `dependsOn`. Dependent tasks access
-upstream results via Go template syntax in the prompt:
-
-```yaml
-dependsOn: [scaffold]
-prompt: |
-  Code is on branch {{index .Deps "scaffold" "Results" "branch"}}.
-  PR: {{index .Deps "scaffold" "Results" "pr"}}
-```
-
-Available result keys: `branch`, `commit`, `base-branch`, `pr`, `input-tokens`, `output-tokens`, `cost-usd`.
-
-## Troubleshooting
-
-### Task stuck in Pending
-- Check if the credentials secret exists: `kubectl get secret <name>`
-- Check controller logs: `kubectl logs deployment/kelos-controller-manager -n kelos-system`
-
-### Task stuck in Waiting
-- Check if a dependency in `dependsOn` has not yet succeeded
-- Check if another Task holds the branch lock (same `spec.branch`)
-
-### Task fails immediately
-- Verify agent credentials are valid
-- Check the workspace repository is accessible
-- Review pod logs: `kelos logs <task-name>` or `kubectl logs -l job-name=<job-name>`
-
-### TaskSpawner not creating Tasks
-- Check spawner status: `kubectl get taskspawner <name> -o yaml`
-- Verify the Workspace exists: `kubectl get workspace`
-- Check if `maxConcurrency` is reached (active tasks at limit)
-- Check if `maxTotalTasks` limit is reached
-- Check if `suspend: true` is set
-
-### AgentConfig not taking effect
-- Verify the Task references it: `spec.agentConfigRefs[].name` must match
-- Check plugin structure: skills become `<plugin>/skills/<skill>/SKILL.md`
-- For skills.sh: ensure the package source is valid `owner/repo` format
-
-### Agent cannot push or create PRs
-- Ensure the workspace secret has a valid `GITHUB_TOKEN`
-- Verify the token has `repo` (and `workflow` if needed) permissions
-- For GitHub Apps, check that `appID`, `installationID`, and `privateKey` are correct
-
-## Supported Agent Types
-
-| Type | CLI | Credential Env Var |
-|------|-----|--------------------|
-| `claude-code` | `claude` | `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` |
-| `codex` | `codex` | `CODEX_API_KEY` or `CODEX_AUTH_JSON` |
-| `gemini` | `gemini` | `GEMINI_API_KEY` |
-| `opencode` | `opencode` | `OPENCODE_API_KEY` |
-| `cursor` | `agent` (Cursor) | `CURSOR_API_KEY` |
+Task phases are `Pending`, `Waiting`, `Running`, `Succeeded`, and `Failed`.
 
 ## References
 
-See the `references/` directory next to this file for complete YAML examples:
+| Need | Read |
+| --- | --- |
+| Task examples, credentials, dependencies, branch locks, pod overrides, TTL | `references/task.yaml` |
+| Workspace examples, repository auth, remotes, injected files | `references/workspace.yaml` |
+| AgentConfig examples, plugins, skills, agents, MCP servers | `references/agentconfig.yaml` |
+| TaskSpawner examples, GitHub/Jira/cron sources, comment policy, concurrency | `references/taskspawner.yaml` |
+| CLI flags, config file, supported agent types, install/uninstall | `references/cli.md` |
+| Pending/Waiting/Failed tasks, spawner issues, AgentConfig issues, push failures | `references/troubleshooting.md` |
 
-- `task.yaml` — Task patterns
-- `workspace.yaml` — Workspace patterns
-- `agentconfig.yaml` — AgentConfig patterns
-- `taskspawner.yaml` — TaskSpawner patterns
+## CLI Quick Commands
+
+```bash
+kelos install
+kelos uninstall
+kelos init
+
+kelos run -p "Fix the login bug" --type claude-code
+kelos run -p "Add tests" --workspace my-ws --agent-config my-ac
+kelos run -p "Refactor auth" --model opus --effort high --branch feature/auth
+kelos run -p "Fix bug" -w
+
+kelos create workspace my-ws --repo https://github.com/org/repo.git --ref main --secret github-token
+kelos create agentconfig my-ac --skill review=@review.md --dry-run
+
+kelos get tasks
+kelos get task my-task -d
+kelos get task my-task -o yaml
+kelos logs my-task -f
+
+kelos suspend taskspawner my-spawner
+kelos resume taskspawner my-spawner
+kelos delete task my-task
+```
+
+## Operational Workflow
+
+1. Identify the resource kind, name, and namespace before running broad queries.
+2. Prefer scoped reads such as `kelos get task NAME -d`,
+   `kelos logs NAME -f`, or `kubectl get task NAME -o yaml`.
+3. Check whether referenced resources and Secrets exist before assuming a
+   controller bug. Do not print Secret values.
+4. Use full YAML or JSON when comparing resource state. Avoid relying only on
+   table output for debugging.
+5. If editing manifests in the Kelos repository, keep changes narrow and run
+   the project's Makefile targets requested by the repo instructions.

@@ -45,19 +45,35 @@ fi
 # Skills are placed into .cursor/skills/ relative to the working directory
 # so the CLI discovers them at runtime. Agents are installed as Cursor
 # rules under .cursor/rules/ in the working directory.
+installed_skill_targets=""
 if [ -n "${KELOS_PLUGIN_DIR:-}" ] && [ -d "${KELOS_PLUGIN_DIR}" ]; then
   for plugindir in "${KELOS_PLUGIN_DIR}"/*/; do
     [ -d "$plugindir" ] || continue
     pluginname=$(basename "$plugindir")
-    # Copy skills into .cursor/skills/<plugin>-<skill>/SKILL.md
+    # Copy skills into .cursor/skills/<plugin>:<skill>/
     if [ -d "${plugindir}skills" ]; then
       for skilldir in "${plugindir}skills"/*/; do
         [ -d "$skilldir" ] || continue
         skillname=$(basename "$skilldir")
-        targetdir=".cursor/skills/${pluginname}-${skillname}"
-        mkdir -p "$targetdir"
+        targetdir=".cursor/skills/${pluginname}:${skillname}"
         if [ -f "${skilldir}SKILL.md" ]; then
-          cp "${skilldir}SKILL.md" "$targetdir/SKILL.md"
+          sourceid="${pluginname}/${skillname}"
+          existing_source=""
+          while IFS=$'\t' read -r seen_target seen_source; do
+            [ -n "$seen_target" ] || continue
+            if [ "$seen_target" = "$targetdir" ]; then
+              existing_source="$seen_source"
+              break
+            fi
+          done <<<"$installed_skill_targets"
+          if [ -n "$existing_source" ] && [ "$existing_source" != "$sourceid" ]; then
+            printf 'Error: Skill target conflict: %s and %s both install to %s\n' "$existing_source" "$sourceid" "$targetdir" >&2
+            exit 1
+          fi
+          installed_skill_targets="${installed_skill_targets}${targetdir}"$'\t'"${sourceid}"$'\n'
+          rm -rf "$targetdir"
+          mkdir -p "$targetdir"
+          cp -R "${skilldir}." "$targetdir/"
         fi
       done
     fi

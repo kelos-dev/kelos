@@ -14,6 +14,46 @@ spec:
       set -eu
       curl -LsSf https://astral.sh/uv/0.10.4/install.sh | sh
 
+      install_kelos_skills() {
+        agent_home="$HOME"
+        install_home="$agent_home/.kelos-skills-install"
+        install_dir="$install_home/.agents/skills"
+
+        case "${KELOS_AGENT_TYPE:-}" in
+          codex)
+            target_root="$agent_home/.codex/skills"
+            ;;
+          claude-code)
+            target_root="$agent_home/.claude/skills"
+            ;;
+          *)
+            target_root="$agent_home/.agents/skills"
+            ;;
+        esac
+
+        rm -rf "$install_home"
+        mkdir -p "$install_home" "$target_root"
+
+        HOME="$install_home" git config --global credential.https://oss.navercorp.com.helper '!f() { echo "username=x-access-token"; if [ -r "/kelos/github-token/GITHUB_TOKEN" ]; then printf "password=%s\n" "$(cat "/kelos/github-token/GITHUB_TOKEN")"; elif [ -n "${GITHUB_TOKEN:-}" ]; then printf "password=%s\n" "$GITHUB_TOKEN"; fi; }; f'
+
+        HOME="$install_home" npx -y skills add https://oss.navercorp.com/gunju-kim/agent-plugins.git -a universal -y -g
+        HOME="$install_home" npx -y skills add https://github.com/gjkim42/kanon-repo.git -a universal -y -g
+
+        [ -d "$install_dir" ] || { echo "No skills were installed" >&2; exit 1; }
+        for skilldir in "$install_dir"/*; do
+          [ -d "$skilldir" ] || continue
+          skillname="$(basename "$skilldir")"
+          target="$target_root/skills-sh:$skillname"
+          rm -rf "$target"
+          mkdir -p "$target"
+          cp -R "$skilldir/." "$target/"
+        done
+
+        rm -rf "$install_home"
+      }
+
+      install_kelos_skills
+
 ---
 
 apiVersion: kelos.dev/v1alpha2

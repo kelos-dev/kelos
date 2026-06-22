@@ -133,9 +133,6 @@ spec:
       envFrom:
         secretRef:
           name: pai-mcp-secrets
-  skills:
-    - source: gjkim42/kanon-repo
-      skill: review-all
 
 ---
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -39,6 +40,30 @@ func TestBuildTaskName(t *testing.T) {
 				t.Errorf("buildTaskName(%q, %q) = %q is not a valid RFC 1123 name: %v", tc.spawner, tc.id, got, errs)
 			}
 		})
+	}
+}
+
+func TestBuildTaskNameLength(t *testing.T) {
+	// A valid but over-length name (lowercase alphanumerics) must still be
+	// capped: this exercises both the length guard on the fast path and the
+	// truncation branch.
+	got := buildTaskName("spawner", strings.Repeat("a", 100))
+	if len(got) > taskNameMaxLength {
+		t.Errorf("name length = %d, want <= %d (%q)", len(got), taskNameMaxLength, got)
+	}
+	if errs := validation.IsDNS1123Subdomain(got); len(errs) != 0 {
+		t.Errorf("name %q is not a valid RFC 1123 name: %v", got, errs)
+	}
+
+	// Distinct over-length inputs that share a truncated prefix must not collide,
+	// otherwise dedup would silently skip one of them.
+	a := buildTaskName("spawner", strings.Repeat("a", 80)+"-one")
+	b := buildTaskName("spawner", strings.Repeat("a", 80)+"-two")
+	if a == b {
+		t.Errorf("distinct long inputs collided: both produced %q", a)
+	}
+	if len(a) > taskNameMaxLength || len(b) > taskNameMaxLength {
+		t.Errorf("truncated names exceed %d: %q (%d), %q (%d)", taskNameMaxLength, a, len(a), b, len(b))
 	}
 }
 

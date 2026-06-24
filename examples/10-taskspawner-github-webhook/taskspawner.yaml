@@ -43,7 +43,7 @@ spec:
           labels: ["bug"]
           excludeLabels: ["wontfix", "duplicate"]
 
-        # Respond to issue comments containing "/kelos"
+        # Respond to issue comments matching "/kelos"
         - event: "issue_comment"
           action: "created"
           bodyPattern: "/kelos"

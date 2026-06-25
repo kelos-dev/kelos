@@ -75,15 +75,18 @@ spec:
       - Only touch files under service/agents.
       - If a failure is purely environmental (missing internal CA bundle, no network, missing secret)
         and NOT a code bug, do not hack around it: post `/kelos needs-input` on the PR — or, if no PR
-        exists, first enforce the `[service/agents]` open issue cap:
-          MAX_OPEN_AUTO_ISSUES=10
-          open_count=$(gh issue list --label gjkim/auto-generated --state open \
-            --search '"[service/agents]" in:title' --json number --jq 'length')
-          remaining_budget=$((MAX_OPEN_AUTO_ISSUES - open_count))
-        If remaining_budget is 0 or less, report "service/agents auto-generated issue backlog is at cap"
-        and exit without filing. Otherwise create one issue with title
-        `[service/agents] <concise environment gap title>` and label `gjkim/auto-generated`, describing
-        the gap, then exit.
+        exists, manage the single open issue owned by this TaskSpawner:
+          MANAGED_TITLE_PREFIX='[service/agents] [agents-test-health]'
+          gh issue list --label gjkim/auto-generated --state open \
+            --search "\"${MANAGED_TITLE_PREFIX}\" in:title" --json number,title,url
+          gh issue list --label gjkim/auto-generated --state all \
+            --search '"[service/agents]" in:title' --limit 200
+        If another issue already covers the environment gap, do not file or replace anything. Otherwise,
+        create the managed issue if it is missing, or replace it with `gh issue edit` only when the new
+        gap is clearly more actionable than the current one. Every managed issue title MUST start with
+        `[service/agents] [agents-test-health]`; use `--body-file` for create/edit and include
+        "Managed by TaskSpawner: agents-test-health" in the body. Do not create a second open issue for
+        this TaskSpawner.
 
 ---
 apiVersion: kelos.dev/v1alpha2
@@ -165,16 +168,19 @@ spec:
 
       ## Rules
       - Docs-only changes (IO.md, api.md, docs). Only touch files under service/agents.
-      - If you find the CODE is actually wrong (a real bug, not a doc gap), do NOT fix it here — open
-        an issue only if the `[service/agents]` open issue cap allows it:
-          MAX_OPEN_AUTO_ISSUES=10
-          open_count=$(gh issue list --label gjkim/auto-generated --state open \
-            --search '"[service/agents]" in:title' --json number --jq 'length')
-          remaining_budget=$((MAX_OPEN_AUTO_ISSUES - open_count))
-        If remaining_budget is 0 or less, report "service/agents auto-generated issue backlog is at cap"
-        and exit without filing. Otherwise create one issue with title
-        `[service/agents] <concise correctness bug title>` and label `gjkim/auto-generated`, then
-        exclude it from this PR.
+      - If you find the CODE is actually wrong (a real bug, not a doc gap), do NOT fix it here. Manage
+        the single open issue owned by this TaskSpawner:
+          MANAGED_TITLE_PREFIX='[service/agents] [agents-io-contract-sync]'
+          gh issue list --label gjkim/auto-generated --state open \
+            --search "\"${MANAGED_TITLE_PREFIX}\" in:title" --json number,title,url
+          gh issue list --label gjkim/auto-generated --state all \
+            --search '"[service/agents]" in:title' --limit 200
+        If another issue already covers the bug, do not file or replace anything. Otherwise, create the
+        managed issue if it is missing, or replace it with `gh issue edit` only when the new bug is
+        clearly more severe/actionable than the current one. Every managed issue title MUST start with
+        `[service/agents] [agents-io-contract-sync]`; use `--body-file` for create/edit and include
+        "Managed by TaskSpawner: agents-io-contract-sync" in the body. Exclude the bug from this PR and
+        do not create a second open issue for this TaskSpawner.
 
 ---
 apiVersion: kelos.dev/v1alpha2
@@ -297,10 +303,10 @@ spec:
     promptTemplate: |
       Daily bug-scout for the Planner Agent service (service/agents) in the pai/ml monorepo.
 
-      Hunt for LATENT, high-confidence correctness bugs and file them as GitHub issues for human
-      triage. You do NOT change code, open PRs, or change any label other than the one below. If you
-      find nothing genuinely worth filing, exit cleanly WITHOUT creating an issue — a no-op day is a
-      good outcome. Precision over recall: do not file speculative noise.
+      Hunt for LATENT, high-confidence correctness bugs and maintain this TaskSpawner's single managed
+      GitHub issue for human triage. You do NOT change code, open PRs, or change any label other than
+      the one below. If you find nothing genuinely worth filing, exit cleanly WITHOUT creating an issue
+      — a no-op day is a good outcome. Precision over recall: do not file speculative noise.
 
       ## Setup
       git fetch origin develop
@@ -317,27 +323,29 @@ spec:
       - dependency-injection violations (os.getenv fallbacks inside __init__, module-level env reads)
       Back every finding with a concrete file:line and a plausible failure scenario.
 
-      ## Step 2 — Deduplicate and enforce open-backlog cap (REQUIRED)
-      List already-filed issues so you never refile:
-        MAX_OPEN_AUTO_ISSUES=10
-        open_count=$(gh issue list --label gjkim/auto-generated --state open \
-          --search '"[service/agents]" in:title' --json number --jq 'length')
-        remaining_budget=$((MAX_OPEN_AUTO_ISSUES - open_count))
+      ## Step 2 — Deduplicate and find this spawner's managed issue (REQUIRED)
+      Run:
+        MANAGED_TITLE_PREFIX='[service/agents] [agents-bug-scout]'
+        gh issue list --label gjkim/auto-generated --state open \
+          --search "\"${MANAGED_TITLE_PREFIX}\" in:title" --json number,title,url
         gh issue list --label gjkim/auto-generated --state all \
           --search '"[service/agents]" in:title' --limit 200
-      Drop any finding already covered by an open or recently-closed issue.
-      If remaining_budget is 0 or less, report "service/agents auto-generated issue backlog is at cap"
-      and EXIT without filing.
+      Drop any finding already covered by an open or recently-closed issue. Then rank the remaining
+      findings by severity × confidence and keep only the best one.
 
-      ## Step 3 — File the top findings (capped)
-      - Rank remaining findings by severity × confidence. File AT MOST min(3, remaining_budget) this
-        run (highest value).
-      - For each, create one issue. Every issue title MUST start with "[service/agents]":
-        gh issue create --assignee gunju-kim --label gjkim/auto-generated \
-          --title "[service/agents] <concise bug title>" \
-          --body "<what's wrong, why it's a bug, file:line refs, a failure scenario, and a suggested
-                   direction. End with: 'Comment /kelos plan to plan a fix, or /kelos pick-up to fix.'>"
+      ## Step 3 — Create or replace the managed issue
       - If nothing meets the bar, report "no high-confidence bugs found" and EXIT without filing.
+      - If no open managed issue exists, create exactly one issue assigned to gunju-kim with label
+        gjkim/auto-generated. Its title MUST start with
+        `[service/agents] [agents-bug-scout]`.
+      - If an open managed issue exists, compare it to the best current finding. Replace it with
+        `gh issue edit <number> --title ... --body-file ...` only when the current finding is clearly
+        more severe/actionable or makes the existing issue obsolete. Otherwise leave the issue unchanged.
+      - The issue body MUST include "Managed by TaskSpawner: agents-bug-scout", what is wrong, why it is
+        a bug, file:line refs, a failure scenario, and a suggested direction. End with: "Comment /kelos
+        plan to plan a fix, or /kelos pick-up to fix."
+      - Do not create a second open issue for this TaskSpawner. If multiple managed issues already
+        exist, keep the best one and close the extras as superseded.
 
       ## Rules
       - Read-only on code: do NOT modify files, open PRs, or change other labels/assignees.
@@ -379,9 +387,10 @@ spec:
     promptTemplate: |
       Daily improvement-scout for the Planner Agent service (service/agents) in the pai/ml monorepo.
 
-      Surface high-value POTENTIAL IMPROVEMENTS (not bugs) and file them as GitHub issues for human
-      triage. You do NOT change code or open PRs. If nothing is clearly worth proposing, exit without
-      filing. The mandatory dedup step + a per-run cap keep this from becoming noise.
+      Surface high-value POTENTIAL IMPROVEMENTS (not bugs) and maintain this TaskSpawner's single
+      managed GitHub issue for human triage. You do NOT change code or open PRs. If nothing is clearly
+      worth proposing, exit without filing. The mandatory dedup step and single-issue ownership keep
+      this from becoming noise.
 
       ## Setup
       git fetch origin develop
@@ -396,26 +405,30 @@ spec:
       - observability gaps (missing structured logs / metrics / traces on key events)
       - doc gaps (under-documented contracts or flows in IO.md / api.md / README)
 
-      ## Step 2 — Deduplicate and enforce open-backlog cap (REQUIRED)
-        MAX_OPEN_AUTO_ISSUES=10
-        open_count=$(gh issue list --label gjkim/auto-generated --state open \
-          --search '"[service/agents]" in:title' --json number --jq 'length')
-        remaining_budget=$((MAX_OPEN_AUTO_ISSUES - open_count))
+      ## Step 2 — Deduplicate and find this spawner's managed issue (REQUIRED)
+      Run:
+        MANAGED_TITLE_PREFIX='[service/agents] [agents-improvement-scout]'
+        gh issue list --label gjkim/auto-generated --state open \
+          --search "\"${MANAGED_TITLE_PREFIX}\" in:title" --json number,title,url
         gh issue list --label gjkim/auto-generated --state all \
           --search '"[service/agents]" in:title' --limit 200
-      Drop anything already covered by an open or recently-closed issue.
-      If remaining_budget is 0 or less, report "service/agents auto-generated issue backlog is at cap"
-      and EXIT without filing.
+      Drop anything already covered by an open or recently-closed issue. Rank remaining proposals by
+      impact ÷ effort and keep only the best one.
 
-      ## Step 3 — File the top proposals (capped)
-      - Rank by impact ÷ effort (favor high-impact, low-effort). File AT MOST min(2, remaining_budget)
-        this run.
-      - For each:
-        gh issue create --assignee gunju-kim --label gjkim/auto-generated \
-          --title "[service/agents] <concise improvement title>" \
-          --body "<the opportunity, why it matters, affected files, a concrete suggested approach, and
-                   rough effort. End with: 'Comment /kelos plan to plan it, or /kelos pick-up to do it.'>"
+      ## Step 3 — Create or replace the managed issue
       - If nothing clears the bar, report "no high-value improvements found" and EXIT without filing.
+      - If no open managed issue exists, create exactly one issue assigned to gunju-kim with label
+        gjkim/auto-generated. Its title MUST start with
+        `[service/agents] [agents-improvement-scout]`.
+      - If an open managed issue exists, compare it to the best current proposal. Replace it with
+        `gh issue edit <number> --title ... --body-file ...` only when the current proposal is clearly
+        more valuable/actionable or makes the existing issue obsolete. Otherwise leave the issue
+        unchanged.
+      - The issue body MUST include "Managed by TaskSpawner: agents-improvement-scout", the opportunity,
+        why it matters, affected files, a concrete suggested approach, and rough effort. End with:
+        "Comment /kelos plan to plan it, or /kelos pick-up to do it."
+      - Do not create a second open issue for this TaskSpawner. If multiple managed issues already
+        exist, keep the best one and close the extras as superseded.
 
       ## Rules
       - Read-only on code: do NOT modify files, open PRs, or change other labels/assignees.
@@ -458,10 +471,11 @@ spec:
       Daily performance-scout for the Planner Agent service (service/agents) in the pai/ml monorepo.
 
       Surface high-confidence PERFORMANCE opportunities (latency, throughput, token/cost) on the
-      request-handling path and file them as GitHub issues for human triage. You do NOT change code or
-      open PRs. If nothing is clearly worth proposing, exit WITHOUT filing — a no-op day is a good
-      outcome. The mandatory dedup step + a per-run cap keep this from becoming noise. Precision over
-      recall: do not file speculative micro-optimizations with no measurable impact.
+      request-handling path and maintain this TaskSpawner's single managed GitHub issue for human
+      triage. You do NOT change code or open PRs. If nothing is clearly worth proposing, exit WITHOUT
+      filing — a no-op day is a good outcome. The mandatory dedup step and single-issue ownership keep
+      this from becoming noise.
+      Precision over recall: do not file speculative micro-optimizations with no measurable impact.
 
       ## Setup
       git fetch origin develop
@@ -484,26 +498,31 @@ spec:
       Back every finding with a concrete file:line, why it is slow (the mechanism), and a rough estimate
       of the impact (per-request latency, fan-out, or token cost).
 
-      ## Step 2 — Deduplicate and enforce open-backlog cap (REQUIRED)
-        MAX_OPEN_AUTO_ISSUES=10
-        open_count=$(gh issue list --label gjkim/auto-generated --state open \
-          --search '"[service/agents]" in:title' --json number --jq 'length')
-        remaining_budget=$((MAX_OPEN_AUTO_ISSUES - open_count))
+      ## Step 2 — Deduplicate and find this spawner's managed issue (REQUIRED)
+      Run:
+        MANAGED_TITLE_PREFIX='[service/agents] [agents-performance-scout]'
+        gh issue list --label gjkim/auto-generated --state open \
+          --search "\"${MANAGED_TITLE_PREFIX}\" in:title" --json number,title,url
         gh issue list --label gjkim/auto-generated --state all \
           --search '"[service/agents]" in:title' --limit 200
-      Drop anything already covered by an open or recently-closed issue.
-      If remaining_budget is 0 or less, report "service/agents auto-generated issue backlog is at cap"
-      and EXIT without filing.
+      Drop anything already covered by an open or recently-closed issue. Rank remaining findings by
+      impact × confidence and keep only the best one.
 
-      ## Step 3 — File the top findings (capped)
-      - Rank by impact × confidence. File AT MOST min(2, remaining_budget) this run, assigned to
-        gunju-kim. Every issue title MUST start with "[service/agents]":
-        gh issue create --assignee gunju-kim --label gjkim/auto-generated \
-          --title "[service/agents] [perf] <concise performance opportunity title>" \
-          --body "<what is slow and why (the mechanism), file:line refs, estimated impact, a concrete
-                   suggested direction, and how the win could be measured. Note any behavior or
-                   ordering risk. End with: 'Comment /kelos plan to plan it, or /kelos pick-up to do it.'>"
+      ## Step 3 — Create or replace the managed issue
       - If nothing meets the bar, report "no high-confidence performance opportunities found" and EXIT.
+      - If no open managed issue exists, create exactly one issue assigned to gunju-kim with label
+        gjkim/auto-generated. Its title MUST start with
+        `[service/agents] [agents-performance-scout]`.
+      - If an open managed issue exists, compare it to the best current finding. Replace it with
+        `gh issue edit <number> --title ... --body-file ...` only when the current finding is clearly
+        higher impact/actionability or makes the existing issue obsolete. Otherwise leave the issue
+        unchanged.
+      - The issue body MUST include "Managed by TaskSpawner: agents-performance-scout", what is slow and
+        why, file:line refs, estimated impact, a concrete suggested direction, how the win could be
+        measured, and any behavior or ordering risk. End with: "Comment /kelos plan to plan it, or
+        /kelos pick-up to do it."
+      - Do not create a second open issue for this TaskSpawner. If multiple managed issues already
+        exist, keep the best one and close the extras as superseded.
 
       ## Rules
       - Read-only on code: do NOT modify files, open PRs, or change other labels/assignees.

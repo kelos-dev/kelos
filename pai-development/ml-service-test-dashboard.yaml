@@ -36,9 +36,9 @@ spec:
 
       This spawner runs indefinitely. Do NOT rely on any assumed list of current gaps — investigate the
       service as it exists today and judge what matters now. Surface high-value POTENTIAL IMPROVEMENTS and
-      file them as GitHub issues for human triage. You do NOT change code or open PRs. If nothing is
-      clearly worth proposing, exit WITHOUT filing. The mandatory dedup step + a per-run cap keep this
-      from becoming noise.
+      maintain this TaskSpawner's single managed GitHub issue for human triage. You do NOT change code
+      or open PRs. If nothing is clearly worth proposing, exit WITHOUT filing. The mandatory dedup step
+      and single-issue ownership keep this from becoming noise.
 
       ## Setup
       git fetch origin develop
@@ -57,26 +57,30 @@ spec:
       Honor the monorepo conventions (root CLAUDE.md / AGENTS.md / CONTRIBUTING.md). Leave UI and
       report-schema ideas to the separate test-dashboard-ui-scout.
 
-      ## Step 2 — Deduplicate and enforce open-backlog cap (REQUIRED)
+      ## Step 2 — Deduplicate and find this spawner's managed issue (REQUIRED)
       Run:
-        MAX_OPEN_AUTO_ISSUES=10
-        open_count=$(gh issue list --label gjkim/auto-generated --state open \
-          --search '"[test-dashboard]" in:title' --json number --jq 'length')
-        remaining_budget=$((MAX_OPEN_AUTO_ISSUES - open_count))
+        MANAGED_TITLE_PREFIX='[test-dashboard] [test-dashboard-improvement-scout]'
+        gh issue list --label gjkim/auto-generated --state open \
+          --search "\"${MANAGED_TITLE_PREFIX}\" in:title" --json number,title,url
         gh issue list --label gjkim/auto-generated --state all \
           --search '"[test-dashboard]" in:title' --limit 200
-      Drop anything already covered by an open or recently-closed issue.
-      If remaining_budget is 0 or less, report "test-dashboard auto-generated issue backlog is at cap"
-      and EXIT without filing.
+      Drop anything already covered by an open or recently-closed issue. Rank remaining proposals by
+      impact ÷ effort and keep only the best one.
 
-      ## Step 3 — File the top proposals (capped)
-      - Rank by impact ÷ effort. File AT MOST min(2, remaining_budget) this run, assigned to
-        gunju-kim. Every issue title MUST start with "[test-dashboard]":
-        gh issue create --assignee gunju-kim --label gjkim/auto-generated \
-          --title "[test-dashboard] <concise improvement title>" \
-          --body "<the opportunity, why it matters, the affected area, a concrete suggested approach, and
-                   rough effort. End with: 'Comment /kelos plan to plan it, or /kelos pick-up to do it.'>"
+      ## Step 3 — Create or replace the managed issue
       - If nothing clears the bar, report "no high-value improvements found" and EXIT without filing.
+      - If no open managed issue exists, create exactly one issue assigned to gunju-kim with label
+        gjkim/auto-generated. Its title MUST start with
+        `[test-dashboard] [test-dashboard-improvement-scout]`.
+      - If an open managed issue exists, compare it to the best current proposal. Replace it with
+        `gh issue edit <number> --title ... --body-file ...` only when the current proposal is clearly
+        more valuable/actionable or makes the existing issue obsolete. Otherwise leave the issue
+        unchanged.
+      - The issue body MUST include "Managed by TaskSpawner: test-dashboard-improvement-scout", the
+        opportunity, why it matters, the affected area, a concrete suggested approach, and rough effort.
+        End with: "Comment /kelos plan to plan it, or /kelos pick-up to do it."
+      - Do not create a second open issue for this TaskSpawner. If multiple managed issues already
+        exist, keep the best one and close the extras as superseded.
 
       ## Rules
       - Read-only on code: do NOT modify files, open PRs, or change other labels/assignees.
@@ -121,9 +125,10 @@ spec:
 
       This spawner runs indefinitely. Do NOT rely on a fixed list of current issues — read the UI and
       rendering code as they exist today and judge what matters now. Surface high-value improvements to
-      (a) the dashboard UI/UX and (b) the test-report schema it consumes, and file them as GitHub issues.
-      You do NOT change code or open PRs. If nothing is clearly worth proposing, exit WITHOUT filing.
-      Dedup + a per-run cap keep this from becoming noise.
+      (a) the dashboard UI/UX and (b) the test-report schema it consumes, and maintain this
+      TaskSpawner's single managed GitHub issue. You do NOT change code or open PRs. If nothing is
+      clearly worth proposing, exit WITHOUT filing. Dedup and single-issue ownership keep this from
+      becoming noise.
 
       ## Setup
       git fetch origin develop
@@ -141,28 +146,31 @@ spec:
       - a richer, clearer schema (more useful fields, versioning, links back to source runs), noting
         producer/consumer impact
 
-      ## Step 2 — Deduplicate and enforce open-backlog cap (REQUIRED)
+      ## Step 2 — Deduplicate and find this spawner's managed issue (REQUIRED)
       Run:
-        MAX_OPEN_AUTO_ISSUES=10
-        open_count=$(gh issue list --label gjkim/auto-generated --state open \
-          --search '"[test-dashboard]" in:title' --json number --jq 'length')
-        remaining_budget=$((MAX_OPEN_AUTO_ISSUES - open_count))
+        MANAGED_TITLE_PREFIX='[test-dashboard] [test-dashboard-ui-scout]'
+        gh issue list --label gjkim/auto-generated --state open \
+          --search "\"${MANAGED_TITLE_PREFIX}\" in:title" --json number,title,url
         gh issue list --label gjkim/auto-generated --state all \
           --search '"[test-dashboard]" in:title' --limit 200
       Drop anything already covered by an open or recently-closed issue. Keep this scout focused on UI and
-      report schema; general code/test/observability items belong to the other scout.
-      If remaining_budget is 0 or less, report "test-dashboard auto-generated issue backlog is at cap"
-      and EXIT without filing.
+      report schema; general code/test/observability items belong to the other scout. Rank remaining
+      proposals by impact ÷ effort and keep only the best one.
 
-      ## Step 3 — File the top proposals (capped)
-      - File AT MOST min(2, remaining_budget) this run, assigned to gunju-kim. Every issue title MUST
-        start with "[test-dashboard]":
-        gh issue create --assignee gunju-kim --label gjkim/auto-generated \
-          --title "[test-dashboard] <concise UI/schema improvement title>" \
-          --body "<the opportunity, why it matters, the affected area, a concrete suggested approach (a
-                   small markup/mockup sketch for UI changes), and rough effort. End with: 'Comment
-                   /kelos plan to plan it, or /kelos pick-up to do it.'>"
+      ## Step 3 — Create or replace the managed issue
       - If nothing clears the bar, report "no high-value UI/schema improvements found" and EXIT.
+      - If no open managed issue exists, create exactly one issue assigned to gunju-kim with label
+        gjkim/auto-generated. Its title MUST start with `[test-dashboard] [test-dashboard-ui-scout]`.
+      - If an open managed issue exists, compare it to the best current proposal. Replace it with
+        `gh issue edit <number> --title ... --body-file ...` only when the current proposal is clearly
+        more valuable/actionable or makes the existing issue obsolete. Otherwise leave the issue
+        unchanged.
+      - The issue body MUST include "Managed by TaskSpawner: test-dashboard-ui-scout", the opportunity,
+        why it matters, the affected area, a concrete suggested approach (a small markup/mockup sketch
+        for UI changes), and rough effort. End with: "Comment /kelos plan to plan it, or /kelos pick-up
+        to do it."
+      - Do not create a second open issue for this TaskSpawner. If multiple managed issues already
+        exist, keep the best one and close the extras as superseded.
 
       ## Rules
       - Read-only on code: do NOT modify files, open PRs, or change other labels/assignees.

@@ -100,5 +100,8 @@ spec:
 
       Post-checklist:
       - If the PR is ready for human review, you need more information, or you cannot make progress, post a plain-English PR comment explaining the current state. Maintainers can resume the PR later with `/kelos pick-up`. When all review feedback was already addressed in previous commits and no new comments require action, keep the explanation brief (e.g. "All review feedback was addressed in previous commits. Ready for re-review.") instead of repeating a full status breakdown. Never post duplicate or near-identical status messages.
-      - If you find anything worth considering (e.g. bugs, improvements, follow-up work), create a new issue:
-        - gh issue create --title "<title>" --body "<description>" --label generated-by-kelos
+      - If you find follow-up work outside the current PR scope, you may create
+        a separate GitHub issue:
+        - First check existing issues with `gh issue list` to avoid duplicates.
+        - Keep the follow-up narrowly scoped and label it `generated-by-kelos`.
+        - Follow-up issues are exempt from the per-TaskSpawner issue slot cap.

@@ -146,5 +146,8 @@ spec:
         - The PR is ready for review.
         - You commented on the issue or the PR for more information.
         - You cannot make any progress on the issue, explain why.
-      - If you find anything worth considering (e.g. bugs, improvements, follow-up work), create a new issue:
-        - gh issue create --title "<title>" --body "<description>" --label generated-by-kelos
+      - If you find follow-up work outside the current issue scope, you may
+        create a separate GitHub issue:
+        - First check existing issues with `gh issue list` to avoid duplicates.
+        - Keep the follow-up narrowly scoped and label it `generated-by-kelos`.
+        - Follow-up issues are exempt from the per-TaskSpawner issue slot cap.

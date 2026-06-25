@@ -109,7 +109,11 @@ spec:
       - Keep changes minimal and focused — one PR per run, touching only what the evidence supports
       - Do not create duplicate changes — check the current content of the config files before modifying
       - Before creating a PR, check for an existing open PR from this agent:
-        `gh pr list --state open --search "head:kanon-config-update" --json number,title,headRefName`
-        If one exists, update that existing PR branch and push your changes there instead of creating a new one
+        `gh pr list --state open --search "head:kanon-config-update" --json number,title,headRefName,assignees`
+        If one exists and has assignees, treat it as ongoing: do not update
+        the PR, do not force-push its branch, and exit cleanly. If one exists
+        and has no assignees, update that existing PR branch and push your
+        changes there instead of creating a new one.
       - Do not create a PR if no actionable changes are found — exit cleanly instead
+      - Do not create duplicate issues — check existing issues first with `gh issue list`
       - Back every change with a specific reference to the Kanon PR review that motivated it

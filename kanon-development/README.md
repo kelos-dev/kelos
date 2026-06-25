@@ -18,6 +18,15 @@ squash-commits) share the base `agentconfig.yaml` (`kanon-dev-agent`), while
 others (workers, planner, reviewer, fake-user, fake-strategist) define their own
 `AgentConfig` inline.
 
+Autonomous discovery agents that publish GitHub issues maintain at most one
+open `generated-by-kelos` issue slot per TaskSpawner. The issue body includes a
+`kelos-taskspawner=<name>` marker so later runs can find it. A run may update
+the unassigned slot when it finds a clearly more impactful or important
+candidate, but it exits without changes when the slot has assignees. Assigned
+issues and PRs are treated as ongoing human or agent work and are not updated by
+autonomous discovery jobs. This cap does not apply to follow-up issues created
+while a worker or PR responder is handling an explicitly requested issue or PR.
+
 Eight spawners operate directly on the Kanon repository through the
 `kanon-agent` Workspace. The two meta-maintenance spawners
 (`kanon-config-update`, `kanon-self-update`) are different: the files they
@@ -35,10 +44,10 @@ maintain (`kanon-development/*`) live in *this* repository, so they use the
 | **kanon-reviewer** | Webhook: PR comment `/kelos review` | Codex | Reviews PRs on demand — analyzes code, checks conventions, and submits structured reviews |
 | **kanon-pr-responder** | Webhook: PR review/comment with `/kelos pick-up` | Codex | Re-engages on PR review feedback and updates the existing branch incrementally |
 | **kanon-triage** | Webhook: issue opened/reopened (untriaged) | Codex | Classifies issues by kind/priority, detects duplicates, and recommends an actor |
-| **kanon-fake-user** | Cron (daily 09:00 UTC) | Codex | Tests DX as a new user — follows docs, tries CLI workflows, files issues for problems found |
-| **kanon-fake-strategist** | Cron (every 12 hours) | Codex | Explores new use cases, integrations, and managed-settings types |
-| **kanon-config-update** | Cron (daily 18:00 UTC) | Codex | Reviews recent Kanon PR feedback and updates the `kanon-development/` config accordingly |
-| **kanon-self-update** | Cron (daily 06:00 UTC) | Codex | Reviews and tunes the `kanon-development/` prompts, configs, and README — the pipeline improves itself |
+| **kanon-fake-user** | Cron (daily 09:00 UTC) | Codex | Tests DX as a new user and maintains one unassigned issue slot for the highest-impact problem found |
+| **kanon-fake-strategist** | Cron (every 12 hours) | Codex | Explores new use cases, integrations, and managed-settings types while maintaining one unassigned strategic issue slot |
+| **kanon-config-update** | Cron (daily 18:00 UTC) | Codex | Reviews recent Kanon PR feedback and creates or updates unassigned configuration PRs accordingly |
+| **kanon-self-update** | Cron (daily 06:00 UTC) | Codex | Reviews and tunes the `kanon-development/` prompts, configs, and README while maintaining one unassigned improvement issue slot |
 | **kanon-squash-commits** | Webhook: PR comment `/kelos squash-commits` | Codex | Rebases and squashes PR branch commits into a single clean commit |
 
 > **Not ported from `self-development/`:** `kelos-api-reviewer` (Kanon has no
@@ -72,6 +81,8 @@ Picks up open GitHub issues when a maintainer posts `/kelos pick-up` and creates
 - Ensures CI passes before completion
 - Requires a `/kelos pick-up` comment to pick up an issue (maintainer approval gate)
 - Hands off PR review feedback to `kanon-pr-responder`
+- May create separate follow-up issues for out-of-scope discoveries; those
+  follow-ups are exempt from the per-TaskSpawner issue slot cap
 
 **Deploy:**
 ```bash
@@ -138,6 +149,9 @@ Picks up open GitHub pull requests when a reviewer requests changes with `/kelos
 - Reuses the existing PR branch instead of starting over
 - Reads review comments and PR conversation before making incremental changes
 - Lets the maintainer stay on the PR page for the common review-feedback loop
+- Requires a `/kelos pick-up` PR comment or review body to be picked up
+- May create separate follow-up issues for out-of-scope discoveries; those
+  follow-ups are exempt from the per-TaskSpawner issue slot cap
 
 **Deploy:**
 ```bash
@@ -184,7 +198,9 @@ Each run picks one focus area:
 - **Developer Experience** — build, exercise init/validate/diff/apply/import, review error messages
 - **Examples & Use Cases** — verify example config, identify missing examples
 
-Creates GitHub issues for any problems found.
+Creates or updates the single unassigned `kanon-fake-user` issue slot for the
+highest-impact problem found. If that issue is assigned, the run treats it as
+ongoing and exits without editing it or creating another issue.
 
 **Deploy:**
 ```bash
@@ -206,7 +222,9 @@ Each run picks one focus area:
 - **Integration Opportunities** — identify agents, tools, and toolchains Kanon could integrate with
 - **New Managed-Settings Types & CLI Extensions** — propose new render targets, settings types, or `kanon.yaml` schema extensions
 
-Creates GitHub issues for actionable insights.
+Creates or updates the single unassigned `kanon-fake-strategist` issue slot for
+the highest-impact actionable insight. If that issue is assigned, the run treats
+it as ongoing and exits without editing it or creating another issue.
 
 **Deploy:**
 ```bash
@@ -225,6 +243,8 @@ Runs daily to update the Kanon agent configuration based on patterns found in Ka
 | **Concurrency** | 1 |
 
 Reviews recent `kelos-dev/kanon` PRs and their review comments to identify recurring feedback patterns, then updates the configuration under `kanon-development/` (the shared `agentconfig.yaml` or a specific TaskSpawner prompt). Opens a PR against this repository using `/kind cleanup` and `release-note: NONE`, since it only touches `kanon-development/`.
+Skips uncertain or contradictory feedback, and skips an existing configuration
+PR when it has assignees.
 
 **Deploy:**
 ```bash
@@ -242,7 +262,11 @@ Runs daily to review and improve the `kanon-development/` workflow files themsel
 | **Workspace** | `kelos-agent` (reasons about `kanon-development/` in this repo) |
 | **Concurrency** | 1 |
 
-Each run picks one focus area: **Prompt Tuning**, **Configuration Alignment**, or **Workflow Completeness**. Creates GitHub issues for actionable improvements found.
+Each run picks one focus area: **Prompt Tuning**, **Configuration Alignment**, or **Workflow Completeness**.
+
+Creates or updates the single unassigned `kanon-self-update` issue slot for the
+highest-impact actionable improvement. If that issue is assigned, the run treats
+it as ongoing and exits without editing it or creating another issue.
 
 **Deploy:**
 ```bash

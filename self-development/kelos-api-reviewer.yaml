@@ -47,19 +47,19 @@ spec:
       filters:
         - event: issue_comment
           action: created
-          bodyPattern: '^\s*/kelos api-review\s*$'
+          bodyPattern: '(?m)^/kelos api-review[ \t]*\r?$'
           state: open
           author: gjkim42
         # Allow the Kelos bot to request an API review on the PRs it opens, e.g.
         # when a worker posts `/kelos api-review` after pushing API changes.
         - event: issue_comment
           action: created
-          bodyPattern: '^\s*/kelos api-review\s*$'
+          bodyPattern: '(?m)^/kelos api-review[ \t]*\r?$'
           state: open
           author: kelos-bot[bot]
         - event: pull_request_review
           action: submitted
-          bodyPattern: '^\s*/kelos api-review\s*$'
+          bodyPattern: '(?m)^/kelos api-review[ \t]*\r?$'
           state: open
           author: gjkim42
       reporting:

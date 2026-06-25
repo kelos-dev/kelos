@@ -35,7 +35,7 @@ spec:
       filters:
         - event: issue_comment
           action: created
-          bodyPattern: '^\s*/kelos plan\s*$'
+          bodyPattern: '(?m)^/kelos plan[ \t]*\r?$'
           state: open
           author: gjkim42
       reporting:

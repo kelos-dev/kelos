@@ -12,13 +12,13 @@ spec:
       filters:
         - event: issue_comment
           action: created
-          bodyPattern: '^\s*/kelos squash-commits\s*$'
+          bodyPattern: '(?m)^/kelos squash-commits[ \t]*\r?$'
           commentOn: PullRequest
           state: open
           author: gjkim42
         - event: pull_request_review
           action: submitted
-          bodyPattern: '^\s*/kelos squash-commits\s*$'
+          bodyPattern: '(?m)^/kelos squash-commits[ \t]*\r?$'
           state: open
           author: gjkim42
       reporting:

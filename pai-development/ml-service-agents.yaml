@@ -78,7 +78,7 @@ spec:
         exists, manage the single open issue owned by this TaskSpawner:
           MANAGED_TITLE_PREFIX='[service/agents] [agents-test-health]'
           gh issue list --label gjkim/auto-generated --state open \
-            --search "\"${MANAGED_TITLE_PREFIX}\" in:title" --json number,title,url
+            --search "\"${MANAGED_TITLE_PREFIX}\" in:title -label:\"gjkim/triage-accepted\"" --json number,title,url
           gh issue list --label gjkim/auto-generated --state all \
             --search '"[service/agents]" in:title' --limit 200
         If another issue already covers the environment gap, do not file or replace anything. Otherwise,
@@ -86,7 +86,9 @@ spec:
         gap is clearly more actionable than the current one. Every managed issue title MUST start with
         `[service/agents] [agents-test-health]`; use `--body-file` for create/edit and include
         "Managed by TaskSpawner: agents-test-health" in the body. Do not create a second open issue for
-        this TaskSpawner.
+        this TaskSpawner. An issue labeled `gjkim/triage-accepted` is human-owned: never edit, retitle,
+        or close it (the open-issue search above excludes it), so treat the slot as empty and only file a
+        fresh issue for a gap the accepted issue does not already cover.
 
 ---
 apiVersion: kelos.dev/v1alpha2
@@ -172,7 +174,7 @@ spec:
         the single open issue owned by this TaskSpawner:
           MANAGED_TITLE_PREFIX='[service/agents] [agents-io-contract-sync]'
           gh issue list --label gjkim/auto-generated --state open \
-            --search "\"${MANAGED_TITLE_PREFIX}\" in:title" --json number,title,url
+            --search "\"${MANAGED_TITLE_PREFIX}\" in:title -label:\"gjkim/triage-accepted\"" --json number,title,url
           gh issue list --label gjkim/auto-generated --state all \
             --search '"[service/agents]" in:title' --limit 200
         If another issue already covers the bug, do not file or replace anything. Otherwise, create the
@@ -180,7 +182,9 @@ spec:
         clearly more severe/actionable than the current one. Every managed issue title MUST start with
         `[service/agents] [agents-io-contract-sync]`; use `--body-file` for create/edit and include
         "Managed by TaskSpawner: agents-io-contract-sync" in the body. Exclude the bug from this PR and
-        do not create a second open issue for this TaskSpawner.
+        do not create a second open issue for this TaskSpawner. An issue labeled `gjkim/triage-accepted`
+        is human-owned: never edit, retitle, or close it (the open-issue search above excludes it), so
+        treat the slot as empty and only file a fresh issue for a bug the accepted issue does not cover.
 
 ---
 apiVersion: kelos.dev/v1alpha2
@@ -327,7 +331,7 @@ spec:
       Run:
         MANAGED_TITLE_PREFIX='[service/agents] [agents-bug-scout]'
         gh issue list --label gjkim/auto-generated --state open \
-          --search "\"${MANAGED_TITLE_PREFIX}\" in:title" --json number,title,url
+          --search "\"${MANAGED_TITLE_PREFIX}\" in:title -label:\"gjkim/triage-accepted\"" --json number,title,url
         gh issue list --label gjkim/auto-generated --state all \
           --search '"[service/agents]" in:title' --limit 200
       Drop any finding already covered by an open or recently-closed issue. Then rank the remaining
@@ -346,6 +350,10 @@ spec:
         plan to plan a fix, or /kelos pick-up to fix."
       - Do not create a second open issue for this TaskSpawner. If multiple managed issues already
         exist, keep the best one and close the extras as superseded.
+      - An issue labeled `gjkim/triage-accepted` is human-owned: never edit, retitle, or close it. The
+        open-issue search above already excludes it, so when only an accepted issue exists, treat this
+        spawner's slot as empty — file a fresh issue only for a genuinely different finding the accepted
+        issue does not already cover.
 
       ## Rules
       - Read-only on code: do NOT modify files, open PRs, or change other labels/assignees.
@@ -409,7 +417,7 @@ spec:
       Run:
         MANAGED_TITLE_PREFIX='[service/agents] [agents-improvement-scout]'
         gh issue list --label gjkim/auto-generated --state open \
-          --search "\"${MANAGED_TITLE_PREFIX}\" in:title" --json number,title,url
+          --search "\"${MANAGED_TITLE_PREFIX}\" in:title -label:\"gjkim/triage-accepted\"" --json number,title,url
         gh issue list --label gjkim/auto-generated --state all \
           --search '"[service/agents]" in:title' --limit 200
       Drop anything already covered by an open or recently-closed issue. Rank remaining proposals by
@@ -429,6 +437,10 @@ spec:
         "Comment /kelos plan to plan it, or /kelos pick-up to do it."
       - Do not create a second open issue for this TaskSpawner. If multiple managed issues already
         exist, keep the best one and close the extras as superseded.
+      - An issue labeled `gjkim/triage-accepted` is human-owned: never edit, retitle, or close it. The
+        open-issue search above already excludes it, so when only an accepted issue exists, treat this
+        spawner's slot as empty — file a fresh issue only for a genuinely different finding the accepted
+        issue does not already cover.
 
       ## Rules
       - Read-only on code: do NOT modify files, open PRs, or change other labels/assignees.
@@ -502,7 +514,7 @@ spec:
       Run:
         MANAGED_TITLE_PREFIX='[service/agents] [agents-performance-scout]'
         gh issue list --label gjkim/auto-generated --state open \
-          --search "\"${MANAGED_TITLE_PREFIX}\" in:title" --json number,title,url
+          --search "\"${MANAGED_TITLE_PREFIX}\" in:title -label:\"gjkim/triage-accepted\"" --json number,title,url
         gh issue list --label gjkim/auto-generated --state all \
           --search '"[service/agents]" in:title' --limit 200
       Drop anything already covered by an open or recently-closed issue. Rank remaining findings by
@@ -523,6 +535,10 @@ spec:
         /kelos pick-up to do it."
       - Do not create a second open issue for this TaskSpawner. If multiple managed issues already
         exist, keep the best one and close the extras as superseded.
+      - An issue labeled `gjkim/triage-accepted` is human-owned: never edit, retitle, or close it. The
+        open-issue search above already excludes it, so when only an accepted issue exists, treat this
+        spawner's slot as empty — file a fresh issue only for a genuinely different finding the accepted
+        issue does not already cover.
 
       ## Rules
       - Read-only on code: do NOT modify files, open PRs, or change other labels/assignees.
@@ -631,7 +647,7 @@ spec:
       Run:
         MANAGED_TITLE_PREFIX='[service/agents] [agents-nelo-scout]'
         gh issue list --label gjkim/auto-generated --state open \
-          --search "\"${MANAGED_TITLE_PREFIX}\" in:title" --json number,title,url
+          --search "\"${MANAGED_TITLE_PREFIX}\" in:title -label:\"gjkim/triage-accepted\"" --json number,title,url
         gh issue list --label gjkim/auto-generated --state all \
           --search '"[service/agents]" in:title' --limit 200
       Drop anything already covered by an open or recently-closed issue. Rank remaining findings by
@@ -653,6 +669,10 @@ spec:
         /kelos pick-up to fix."
       - Do not create a second open issue for this TaskSpawner. If multiple managed issues already
         exist, keep the best one and close the extras as superseded.
+      - An issue labeled `gjkim/triage-accepted` is human-owned: never edit, retitle, or close it. The
+        open-issue search above already excludes it, so when only an accepted issue exists, treat this
+        spawner's slot as empty — file a fresh issue only for a genuinely different finding the accepted
+        issue does not already cover.
 
       ## Rules
       - Read-only on code and logs: do NOT modify files, open PRs, or change other labels/assignees.

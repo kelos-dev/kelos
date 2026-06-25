@@ -61,7 +61,7 @@ spec:
       Run:
         MANAGED_TITLE_PREFIX='[test-dashboard] [test-dashboard-improvement-scout]'
         gh issue list --label gjkim/auto-generated --state open \
-          --search "\"${MANAGED_TITLE_PREFIX}\" in:title" --json number,title,url
+          --search "\"${MANAGED_TITLE_PREFIX}\" in:title -label:\"gjkim/triage-accepted\"" --json number,title,url
         gh issue list --label gjkim/auto-generated --state all \
           --search '"[test-dashboard]" in:title' --limit 200
       Drop anything already covered by an open or recently-closed issue. Rank remaining proposals by
@@ -81,6 +81,10 @@ spec:
         End with: "Comment /kelos plan to plan it, or /kelos pick-up to do it."
       - Do not create a second open issue for this TaskSpawner. If multiple managed issues already
         exist, keep the best one and close the extras as superseded.
+      - An issue labeled `gjkim/triage-accepted` is human-owned: never edit, retitle, or close it. The
+        open-issue search above already excludes it, so when only an accepted issue exists, treat this
+        spawner's slot as empty — file a fresh issue only for a genuinely different finding the accepted
+        issue does not already cover.
 
       ## Rules
       - Read-only on code: do NOT modify files, open PRs, or change other labels/assignees.
@@ -150,7 +154,7 @@ spec:
       Run:
         MANAGED_TITLE_PREFIX='[test-dashboard] [test-dashboard-ui-scout]'
         gh issue list --label gjkim/auto-generated --state open \
-          --search "\"${MANAGED_TITLE_PREFIX}\" in:title" --json number,title,url
+          --search "\"${MANAGED_TITLE_PREFIX}\" in:title -label:\"gjkim/triage-accepted\"" --json number,title,url
         gh issue list --label gjkim/auto-generated --state all \
           --search '"[test-dashboard]" in:title' --limit 200
       Drop anything already covered by an open or recently-closed issue. Keep this scout focused on UI and
@@ -171,6 +175,10 @@ spec:
         to do it."
       - Do not create a second open issue for this TaskSpawner. If multiple managed issues already
         exist, keep the best one and close the extras as superseded.
+      - An issue labeled `gjkim/triage-accepted` is human-owned: never edit, retitle, or close it. The
+        open-issue search above already excludes it, so when only an accepted issue exists, treat this
+        spawner's slot as empty — file a fresh issue only for a genuinely different finding the accepted
+        issue does not already cover.
 
       ## Rules
       - Read-only on code: do NOT modify files, open PRs, or change other labels/assignees.

@@ -104,13 +104,15 @@ spec:
       Then for each agent that has a newer version available:
       1. First check if an open PR already exists for updating that agent:
          ```
-         gh pr list --state open --label generated-by-kelos --search "update <agent-name> image" --json number,title,headRefName
+         gh pr list --state open --label generated-by-kelos --search "update <agent-name> image" --json number,title,headRefName,assignees
          ```
       2. If an open PR already exists:
-         a. Extract the version from the existing PR title (the version after "to ")
-         b. Compare it with the latest available version
-         c. If the existing PR already targets the latest version, skip it — no update needed
-         d. If the existing PR targets an older version, update it:
+         a. If the PR has assignees, treat it as ongoing: do not update the
+            PR, do not force-push its branch, and skip that agent for this run.
+         b. Extract the version from the existing PR title (the version after "to ")
+         c. Compare it with the latest available version
+         d. If the existing PR already targets the latest version, skip it — no update needed
+         e. If the existing PR targets an older version, update it:
             i. Check out the existing PR branch, resetting it to origin/main:
                ```
                git checkout -B <existing-branch> origin/main

@@ -8,6 +8,15 @@ This directory contains real-world orchestration patterns used by the Kelos proj
 
 Each TaskSpawner references an `AgentConfig` that defines git identity, comment signatures, and standard constraints. Some agents (triage, pr-responder, squash-commits, config-update) share the base `agentconfig.yaml` (`kelos-dev-agent`), while others (workers, planner, fake-user, fake-strategist, self-update, image-update) define their own `AgentConfig` inline.
 
+Autonomous discovery agents that publish GitHub issues maintain at most one
+open `generated-by-kelos` issue slot per TaskSpawner. The issue body includes a
+`kelos-taskspawner=<name>` marker so later runs can find it. A run may update
+the unassigned slot when it finds a clearly more impactful or important
+candidate, but it exits without changes when the slot has assignees. Assigned
+issues and PRs are treated as ongoing human or agent work and are not updated by
+autonomous discovery jobs. This cap does not apply to follow-up issues created
+while a worker or PR responder is handling an explicitly requested issue or PR.
+
 ## TaskSpawners
 
 | TaskSpawner | Trigger | Agent | Description |
@@ -18,11 +27,11 @@ Each TaskSpawner references an `AgentConfig` that defines git identity, comment 
 | **kelos-api-reviewer** | Webhook: issue/PR comment `/kelos api-review` | Codex | Reviews Kubernetes API design on issues or PRs — naming, compatibility, CRD validation |
 | **kelos-pr-responder** | Webhook: PR review/comment on `generated-by-kelos` PRs | Codex | Re-engages on PR review feedback and updates the existing branch incrementally |
 | **kelos-triage** | Webhook: issue opened/labeled/reopened (`needs-actor`) | Codex | Classifies issues by kind/priority, detects duplicates, and recommends an actor |
-| **kelos-fake-user** | Cron (daily 09:00 UTC) | Codex | Tests DX as a new user — follows docs, tries CLI workflows, files issues for problems found |
-| **kelos-fake-strategist** | Cron (every 12 hours) | Codex | Explores new use cases, integration opportunities, and CRD/API extensions |
-| **kelos-config-update** | Cron (daily 18:00 UTC) | Codex | Reviews recent PR feedback and updates agent configuration (conventions, prompts, configs) accordingly |
-| **kelos-self-update** | Cron (daily 06:00 UTC) | Codex | Reviews and tunes prompts, configs, and workflow files — the pipeline improves itself |
-| **kelos-image-update** | Cron (daily 03:00 UTC) | Codex | Checks for newer agent image versions (Claude Code, Codex, Gemini, etc.) and creates PRs to update them |
+| **kelos-fake-user** | Cron (daily 09:00 UTC) | Codex | Tests DX as a new user and maintains one unassigned issue slot for the highest-impact problem found |
+| **kelos-fake-strategist** | Cron (every 12 hours) | Codex | Explores new use cases, integrations, and API ideas while maintaining one unassigned strategic issue slot |
+| **kelos-config-update** | Cron (daily 18:00 UTC) | Codex | Reviews recent PR feedback and creates or updates unassigned configuration PRs accordingly |
+| **kelos-self-update** | Cron (daily 06:00 UTC) | Codex | Reviews prompts, configs, and workflow files while maintaining one unassigned improvement issue slot |
+| **kelos-image-update** | Cron (daily 03:00 UTC) | Codex | Checks for newer agent image versions and creates or updates unassigned PRs for them |
 | **kelos-squash-commits** | Webhook: PR comment `/kelos squash-commits` | Codex | Rebases and squashes PR branch commits into a single clean commit |
 
 ### kelos-workers.yaml
@@ -41,6 +50,8 @@ Picks up open GitHub issues when a maintainer posts `/kelos pick-up` and creates
 - Ensures CI passes before completion
 - Requires a `/kelos pick-up` comment to pick up an issue (maintainer approval gate)
 - Hands off PR review feedback to `kelos-pr-responder`
+- May create separate follow-up issues for out-of-scope discoveries; those
+  follow-ups are exempt from the per-TaskSpawner issue slot cap
 
 **Deploy:**
 ```bash
@@ -145,6 +156,8 @@ Picks up open GitHub pull requests labeled `generated-by-kelos` when a reviewer 
 - Reads review comments and PR conversation before making incremental changes
 - Lets the maintainer stay on the PR page for the common review-feedback loop
 - Requires `/kelos pick-up` PR comment or review body to be picked up
+- May create separate follow-up issues for out-of-scope discoveries; those
+  follow-ups are exempt from the per-TaskSpawner issue slot cap
 
 **Deploy:**
 ```bash
@@ -191,7 +204,9 @@ Each run picks one focus area:
 - **Developer Experience** — review error messages, test common workflows
 - **Examples & Use Cases** — verify manifests, identify missing examples
 
-Creates GitHub issues for any problems found.
+Creates or updates the single unassigned `kelos-fake-user` issue slot for the
+highest-impact problem found. If that issue is assigned, the run treats it as
+ongoing and exits without editing it or creating another issue.
 
 **Deploy:**
 ```bash
@@ -213,7 +228,9 @@ Each run picks one focus area:
 - **Integration Opportunities** — identify tools/platforms Kelos could integrate with
 - **New CRDs & API Extensions** — propose new CRDs or extensions to existing ones
 
-Creates GitHub issues for actionable insights.
+Creates or updates the single unassigned `kelos-fake-strategist` issue slot for
+the highest-impact actionable insight. If that issue is assigned, the run treats
+it as ongoing and exits without editing it or creating another issue.
 
 **Deploy:**
 ```bash
@@ -234,7 +251,8 @@ Reviews recent PRs and their review comments to identify recurring feedback patt
 - **Project-level changes** — updates `AGENTS.md` or `self-development/agentconfig.yaml` for conventions that apply to all agents
 - **Task-specific changes** — updates TaskSpawner prompts in `self-development/*.yaml` or creates/updates AgentConfig for specific agents
 
-Creates PRs with changes for maintainer review. Skips uncertain or contradictory feedback.
+Creates PRs with changes for maintainer review. Skips uncertain or contradictory
+feedback, and skips an existing configuration PR when it has assignees.
 
 **Deploy:**
 ```bash
@@ -257,7 +275,9 @@ Each run picks one focus area:
 - **Workflow Completeness** — check that agent prompts reflect current project conventions and Makefile targets
 - **Task Template Maintenance** — keep one-off task definitions in sync with their TaskSpawner counterparts
 
-Creates GitHub issues for actionable improvements found.
+Creates or updates the single unassigned `kelos-self-update` issue slot for the
+highest-impact actionable improvement. If that issue is assigned, the run treats
+it as ongoing and exits without editing it or creating another issue.
 
 **Deploy:**
 ```bash
@@ -281,7 +301,8 @@ Checks the following coding agents for updates:
 - **opencode** — `opencode-ai` npm package
 - **cursor** — binary download, version discovered from `https://cursor.com/install`
 
-Creates at most one PR per agent. Skips agents that are already up to date or already have an open update PR.
+Creates at most one PR per agent. Skips agents that are already up to date or
+already have an assigned open update PR.
 
 **Deploy:**
 ```bash

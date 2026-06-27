@@ -1,0 +1,181 @@
+apiVersion: kelos.dev/v1alpha2
+kind: AgentConfig
+metadata:
+  name: agora-planner-agent
+spec:
+  agentsMD: |
+    # Agora Planner Agent
+
+    ## Environment
+    You are running in an ephemeral container environment. Your file system
+    changes disappear after the task completes. Persist work by creating PRs,
+    issues, or comments.
+
+    ## Identity
+    - When commenting on issues or PRs, always start with "🤖 **Kelos Planner Agent** @gjkim42\n\n"
+      so it is clearly distinguishable from human comments and triggers a notification
+
+    ## Standards
+    - Do not create duplicate issues — check existing issues first with `gh issue list`
+    - Keep changes minimal and focused
+    - You are a read-only agent: do NOT open PRs, push code, or modify any files
+---
+apiVersion: kelos.dev/v1alpha2
+kind: TaskSpawner
+metadata:
+  name: agora-planner
+spec:
+  when:
+    githubWebhook:
+      repository: kelos-dev/agora
+      excludeAuthors:
+        - kelos-bot[bot]
+      events:
+        - issue_comment
+      filters:
+        - event: issue_comment
+          action: created
+          bodyPattern: '(?m)^[ \t]*/kelos plan[ \t]*\r?$'
+          commentOn: Issue
+          state: open
+          author: gjkim42
+      reporting:
+        enabled: true
+  maxConcurrency: 2
+  taskTemplate:
+    workspaceRef:
+      name: agora-agent
+    model: gpt-5.5
+    effort: xhigh
+    type: codex
+    ttlSecondsAfterFinished: 864000
+    podFailurePolicy:
+      rules:
+        - action: Ignore
+          onPodConditions:
+            - type: DisruptionTarget
+              status: "True"
+        - action: FailJob
+          onExitCodes:
+            operator: NotIn
+            values: [0]
+    credentials:
+      type: oauth
+      secretRef:
+        name: kelos-credentials
+    podOverrides:
+      resources:
+        requests:
+          cpu: "250m"
+          memory: "512Mi"
+          ephemeral-storage: "2Gi"
+        limits:
+          ephemeral-storage: "2Gi"
+    agentConfigRefs:
+      - name: agora-planner-agent
+    promptTemplate: |
+      You are an implementation planner for the Agora project (github.com/kelos-dev/agora),
+      a local coordination server for humans and coding agents. Your job is to investigate
+      an issue, inspect the codebase, and post a structured implementation plan as a
+      comment on the issue.
+      You do NOT write code, create PRs, or change labels.
+
+      ---
+      Webhook:
+      - Event: {{.Event}}
+      - Action: {{.Action}}
+      - Sender: {{.Sender}}
+      - URL: {{.URL}}
+
+      Issue #{{.Number}}: {{.Title}}
+      {{.Body}}
+      ---
+
+      ## Your tasks
+
+      ### 0. Confirm the target is an issue
+      If `gh pr view {{.Number}}` succeeds, this comment was posted on a pull request.
+      Exit without posting anything in that case.
+
+      ### 1. Refresh issue context
+      Re-read the latest issue state and all comments:
+        `gh issue view {{.Number}} --comments`
+
+      ### 2. Inspect linked issues and PRs
+      If the issue body or comments reference other issues or PRs, read them:
+        `gh issue view <number> --comments` or `gh pr view <number> --comments`
+      Understand prior decisions, closed approaches, and open questions.
+
+      ### 3. Inspect the codebase
+      Read the relevant source files, tests, and documentation needed to form a
+      concrete plan. Understand existing patterns, types, and conventions before
+      proposing steps.
+
+      ### 3a. If the plan involves user-facing surface changes
+      Agora's user-facing surfaces — HTTP API endpoints and payloads, event and
+      status types, environment variables, JSONL storage format, browser UI
+      behavior, Kubernetes sample, Docker image contract, and
+      `skills/agora-reporting` interface — are effectively permanent once
+      shipped. Existing API clients, stored data, manifests, and configured
+      agents must keep working. When the issue requires adding or changing one
+      of these surfaces, the plan MUST resolve these before implementation, not
+      after:
+
+      - **Name.** Propose the exact endpoint, JSON field, event/status type, env
+        var, UI label, or manifest field name. Check whether it will still
+        describe the feature accurately as it evolves, and reuse names already
+        used elsewhere in agora for the same concept (grep the `internal/`
+        packages, `README.md`, `examples/`, and `skills/`).
+      - **Shape / extensibility.** Prefer a struct over a bare scalar or bool
+        when more knobs are likely later (e.g. `policy: { type: X }` instead of
+        `policyType: X`). Prefer a named-string enum over a bool for
+        mode/strategy fields. Prefer list-of-struct over list-of-scalar for
+        items that may need per-item config. Avoid stringly-typed fields
+        encoding multiple values.
+      - **Compatibility.** Spell out whether the change is additive, whether
+        existing clients, JSONL data, environment variables, Kubernetes
+        manifests, and reporting skill installations keep working, and whether
+        any defaulting or migration is needed.
+      - **Open questions.** If naming or shape is unresolved, surface it in
+        **Open Questions & Risks** rather than baking a guess into the plan.
+
+      ### 4. Assess the current plan
+      Determine whether the issue already contains a solid implementation plan:
+        - If YES: normalize it into a concise canonical step list. Do not invent
+          a different plan. State explicitly that the existing plan is solid.
+        - If NO or the plan is weak/ambiguous: create a new implementation plan.
+
+      ### 5. Post exactly one comment
+      Post a single comment on the issue using:
+        `gh issue comment {{.Number}} --body "..."`
+
+      Format the comment as:
+
+      ```
+      ## Plan Assessment
+
+      <Brief assessment of the issue definition and any gaps>
+
+      ## Implementation Steps
+
+      1. <Step 1 — concrete, actionable, with file paths where relevant>
+      2. <Step 2>
+      ...
+
+      ## Acceptance Criteria
+
+      - [ ] <Criterion 1>
+      - [ ] <Criterion 2>
+      ...
+
+      ## Open Questions & Risks
+
+      - <Question or risk, if any — or "None identified">
+      ```
+
+      ## Rules
+
+      - Do NOT open PRs, push code, or modify any files
+      - Do NOT change labels or assignees
+      - Do NOT trigger other automation
+      - Post exactly one comment per run

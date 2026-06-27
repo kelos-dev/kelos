@@ -2,6 +2,13 @@
 
 This directory contains real-world orchestration patterns used by the Kelos project itself for autonomous development.
 
+The nested [`agora/`](agora/README.md) directory applies the same orchestration
+pattern to the sibling [`kelos-dev/agora`](https://github.com/kelos-dev/agora)
+repository while keeping the configuration in this repo.
+
+The nested [`kanon/`](kanon/README.md) directory does the same for the sibling
+[`kelos-dev/kanon`](https://github.com/kelos-dev/kanon) repository.
+
 ## How It Works
 
 <img width="2694" height="1966" alt="kelos-self-development" src="https://github.com/user-attachments/assets/10719599-426e-4c3d-87a0-cde43e1b3113" />

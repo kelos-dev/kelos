@@ -5,7 +5,7 @@ development of [`kelos-dev/kanon`](https://github.com/kelos-dev/kanon) — a Go
 CLI that manages coding-agent settings (instructions, skills, MCP servers,
 hooks, permissions) across multiple machines.
 
-It mirrors [`self-development/`](../self-development), which does the same for
+It mirrors [`self-development/`](../), which does the same for
 this repository (`kelos-dev/kelos`). The configs live here, in the kelos
 repository, but the webhook filters and Workspaces target `kelos-dev/kanon`, so
 the agents they spawn operate on the Kanon repository.
@@ -30,7 +30,7 @@ while a worker or PR responder is handling an explicitly requested issue or PR.
 Eight spawners operate directly on the Kanon repository through the
 `kanon-agent` Workspace. The two meta-maintenance spawners
 (`kanon-config-update`, `kanon-self-update`) are different: the files they
-maintain (`kanon-development/*`) live in *this* repository, so they use the
+maintain (`self-development/kanon/*`) live in *this* repository, so they use the
 `kelos-agent` Workspace and the `kelos-dev-agent` AgentConfig from
 `self-development/`, and they read Kanon's activity cross-repo with
 `gh ... --repo kelos-dev/kanon`.
@@ -47,7 +47,7 @@ maintain (`kanon-development/*`) live in *this* repository, so they use the
 | **kanon-fake-user** | Cron (daily 09:00 UTC) | Codex | Tests DX as a new user and maintains one unassigned issue slot for the highest-impact problem found |
 | **kanon-fake-strategist** | Cron (every 12 hours) | Codex | Explores new use cases, integrations, and managed-settings types while maintaining one unassigned strategic issue slot |
 | **kanon-config-update** | Cron (daily 18:00 UTC) | Codex | Reviews recent Kanon PR feedback and creates or updates unassigned configuration PRs accordingly |
-| **kanon-self-update** | Cron (daily 06:00 UTC) | Codex | Reviews and tunes the `kanon-development/` prompts, configs, and README while maintaining one unassigned improvement issue slot |
+| **kanon-self-update** | Cron (daily 06:00 UTC) | Codex | Reviews and tunes the `self-development/kanon/` prompts, configs, and README while maintaining one unassigned improvement issue slot |
 | **kanon-squash-commits** | Webhook: PR comment `/kelos squash-commits` | Codex | Rebases and squashes PR branch commits into a single clean commit |
 
 > **Not ported from `self-development/`:** `kelos-api-reviewer` (Kanon has no
@@ -59,7 +59,7 @@ defines the shared `kanon-dev-agent` referenced by the pr-responder, triage, and
 squash-commits spawners:
 
 ```bash
-kubectl apply -f kanon-development/
+kubectl apply -f self-development/kanon/
 ```
 
 The per-spawner `kubectl apply` commands below are for deploying or updating an
@@ -86,7 +86,7 @@ Picks up open GitHub issues when a maintainer posts `/kelos pick-up` and creates
 
 **Deploy:**
 ```bash
-kubectl apply -f kanon-development/kanon-workers.yaml
+kubectl apply -f self-development/kanon/kanon-workers.yaml
 ```
 
 ### kanon-planner.yaml
@@ -105,7 +105,7 @@ Reacts to `/kelos plan` comments on open issues. Investigates the issue, inspect
 
 **Deploy:**
 ```bash
-kubectl apply -f kanon-development/kanon-planner.yaml
+kubectl apply -f self-development/kanon/kanon-planner.yaml
 ```
 
 ### kanon-reviewer.yaml
@@ -132,7 +132,7 @@ Reviews open pull requests on demand when a maintainer posts `/kelos review`.
 
 **Deploy:**
 ```bash
-kubectl apply -f kanon-development/kanon-reviewer.yaml
+kubectl apply -f self-development/kanon/kanon-reviewer.yaml
 ```
 
 ### kanon-pr-responder.yaml
@@ -155,7 +155,7 @@ Picks up open GitHub pull requests when a reviewer requests changes with `/kelos
 
 **Deploy:**
 ```bash
-kubectl apply -f kanon-development/kanon-pr-responder.yaml
+kubectl apply -f self-development/kanon/kanon-pr-responder.yaml
 ```
 
 ### kanon-triage.yaml
@@ -180,7 +180,7 @@ Posts a single triage comment and adds `triage-accepted` to prevent re-triage.
 
 **Deploy:**
 ```bash
-kubectl apply -f kanon-development/kanon-triage.yaml
+kubectl apply -f self-development/kanon/kanon-triage.yaml
 ```
 
 ### kanon-fake-user.yaml
@@ -204,7 +204,7 @@ ongoing and exits without editing it or creating another issue.
 
 **Deploy:**
 ```bash
-kubectl apply -f kanon-development/kanon-fake-user.yaml
+kubectl apply -f self-development/kanon/kanon-fake-user.yaml
 ```
 
 ### kanon-fake-strategist.yaml
@@ -228,7 +228,7 @@ it as ongoing and exits without editing it or creating another issue.
 
 **Deploy:**
 ```bash
-kubectl apply -f kanon-development/kanon-fake-strategist.yaml
+kubectl apply -f self-development/kanon/kanon-fake-strategist.yaml
 ```
 
 ### kanon-config-update.yaml
@@ -239,27 +239,27 @@ Runs daily to update the Kanon agent configuration based on patterns found in Ka
 |---|---|
 | **Trigger** | Cron `0 18 * * *` (daily at 18:00 UTC) |
 | **Agent** | Codex |
-| **Workspace** | `kelos-agent` (edits `kanon-development/` in this repo) |
+| **Workspace** | `kelos-agent` (edits `self-development/kanon/` in this repo) |
 | **Concurrency** | 1 |
 
-Reviews recent `kelos-dev/kanon` PRs and their review comments to identify recurring feedback patterns, then updates the configuration under `kanon-development/` (the shared `agentconfig.yaml` or a specific TaskSpawner prompt). Opens a PR against this repository using `/kind cleanup` and `release-note: NONE`, since it only touches `kanon-development/`.
+Reviews recent `kelos-dev/kanon` PRs and their review comments to identify recurring feedback patterns, then updates the configuration under `self-development/kanon/` (the shared `agentconfig.yaml` or a specific TaskSpawner prompt). Opens a PR against this repository using `/kind cleanup` and `release-note: NONE`, since it only touches `self-development/kanon/`.
 Skips uncertain or contradictory feedback, and skips an existing configuration
 PR when it has assignees.
 
 **Deploy:**
 ```bash
-kubectl apply -f kanon-development/kanon-config-update.yaml
+kubectl apply -f self-development/kanon/kanon-config-update.yaml
 ```
 
 ### kanon-self-update.yaml
 
-Runs daily to review and improve the `kanon-development/` workflow files themselves.
+Runs daily to review and improve the `self-development/kanon/` workflow files themselves.
 
 | | |
 |---|---|
 | **Trigger** | Cron `0 6 * * *` (daily at 06:00 UTC) |
 | **Agent** | Codex |
-| **Workspace** | `kelos-agent` (reasons about `kanon-development/` in this repo) |
+| **Workspace** | `kelos-agent` (reasons about `self-development/kanon/` in this repo) |
 | **Concurrency** | 1 |
 
 Each run picks one focus area: **Prompt Tuning**, **Configuration Alignment**, or **Workflow Completeness**.
@@ -270,7 +270,7 @@ it as ongoing and exits without editing it or creating another issue.
 
 **Deploy:**
 ```bash
-kubectl apply -f kanon-development/kanon-self-update.yaml
+kubectl apply -f self-development/kanon/kanon-self-update.yaml
 ```
 
 ### kanon-squash-commits.yaml
@@ -292,7 +292,7 @@ Rebases and squashes PR branch commits into a single clean commit when a maintai
 
 **Deploy:**
 ```bash
-kubectl apply -f kanon-development/kanon-squash-commits.yaml
+kubectl apply -f self-development/kanon/kanon-squash-commits.yaml
 ```
 
 ## Prerequisites
@@ -320,7 +320,7 @@ Two Workspaces are referenced:
 
 - **`kelos-agent`** — points at this repository (`kelos-dev/kelos`). Used by
   `kanon-config-update` and `kanon-self-update`, which edit the
-  `kanon-development/` files that live here. This is the same Workspace
+  `self-development/kanon/` files that live here. This is the same Workspace
   `self-development/` already uses, so if you deployed those examples it
   already exists.
 
@@ -397,10 +397,10 @@ For API-key auth, change the task template credential type to `api-key` and use
 
 The `TaskSpawner.spec.when.githubWebhook` filters and template variables work
 exactly as in `self-development/`. See
-[`self-development/README.md`](../self-development/README.md#customizing-for-your-repository)
+[`self-development/README.md`](../README.md#customizing-for-your-repository)
 for the webhook filter field reference and the full
-[template variable table](../self-development/README.md), and
-[docs/reference.md](../docs/reference.md#taskspawner) for the authoritative
+[template variable table](../README.md), and
+[docs/reference.md](../../docs/reference.md#taskspawner) for the authoritative
 `TaskSpawner` field reference.
 
 ## Troubleshooting
@@ -422,6 +422,6 @@ for the webhook filter field reference and the full
 
 ## Next Steps
 
-- Read the [main README](../README.md) for more details on Tasks and Workspaces
-- See [`self-development/`](../self-development) for the equivalent setup that develops this repository
+- Read the [main README](../../README.md) for more details on Tasks and Workspaces
+- See [`self-development/`](../) for the equivalent setup that develops this repository
 - Monitor task execution: `kelos get tasks` or `kubectl get tasks`

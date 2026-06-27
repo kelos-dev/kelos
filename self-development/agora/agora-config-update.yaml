@@ -1,16 +1,16 @@
 apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner
 metadata:
-  name: kanon-config-update
+  name: agora-config-update
 spec:
   when:
     cron:
       schedule: "0 18 * * *"
   maxConcurrency: 1
   taskTemplate:
-    # kanon-development/ lives in the kelos-dev/kelos repository, so this agent
+    # self-development/agora/ lives in the kelos-dev/kelos repository, so this agent
     # operates on the kelos repo (kelos-agent) to edit the config files, while
-    # learning from the kelos-dev/kanon repository's recent activity.
+    # learning from the kelos-dev/agora repository's recent activity.
     workspaceRef:
       name: kelos-agent
     model: gpt-5.5
@@ -31,7 +31,7 @@ spec:
       type: oauth
       secretRef:
         name: kelos-credentials
-    branch: "kanon-config-update-latest"
+    branch: "agora-config-update-latest"
     podOverrides:
       resources:
         requests:
@@ -52,68 +52,68 @@ spec:
     agentConfigRefs:
       - name: kelos-dev-agent
     promptTemplate: |
-      You are a configuration improvement agent for the Kanon coding agents.
-      Your goal is to review recent pull requests on the Kanon repository
-      (github.com/kelos-dev/kanon) and their review comments, then update the
-      Kanon agent configuration to reflect lessons learned.
+      You are a configuration improvement agent for the Agora coding agents.
+      Your goal is to review recent pull requests on the Agora repository
+      (github.com/kelos-dev/agora) and their review comments, then update the
+      Agora agent configuration to reflect lessons learned.
 
-      The Kanon agent configuration lives in this repository (github.com/kelos-dev/kelos),
-      under `kanon-development/`:
-      - `kanon-development/agentconfig.yaml` — shared AgentConfig (`kanon-dev-agent`)
-      - `kanon-development/*.yaml` — TaskSpawner prompt templates and per-agent AgentConfigs
+      The Agora agent configuration lives in this repository (github.com/kelos-dev/kelos),
+      under `self-development/agora/`:
+      - `self-development/agora/agentconfig.yaml` — shared AgentConfig (`agora-dev-agent`)
+      - `self-development/agora/*.yaml` — TaskSpawner prompt templates and per-agent AgentConfigs
 
-      You are checked out on the kelos repository. Read Kanon's activity with
-      `gh ... --repo kelos-dev/kanon`, but commit your changes here and open the
+      You are checked out on the kelos repository. Read Agora's activity with
+      `gh ... --repo kelos-dev/agora`, but commit your changes here and open the
       PR against this repository (origin).
 
       Task:
-      1. **Gather recent Kanon PR data**
-         - List recent merged PRs: `gh pr list --repo kelos-dev/kanon --state merged --limit 20 --json number,title,labels,mergedAt`
-         - List recent PRs with review comments: `gh pr list --repo kelos-dev/kanon --state all --limit 20 --json number,title,labels`
+      1. **Gather recent Agora PR data**
+         - List recent merged PRs: `gh pr list --repo kelos-dev/agora --state merged --limit 20 --json number,title,labels,mergedAt`
+         - List recent PRs with review comments: `gh pr list --repo kelos-dev/agora --state all --limit 20 --json number,title,labels`
          - For each relevant PR (especially those labeled `generated-by-kelos`), read:
-           - The PR diff: `gh pr diff <number> --repo kelos-dev/kanon`
-           - Review comments: `gh api repos/kelos-dev/kanon/pulls/<number>/reviews` and `gh api repos/kelos-dev/kanon/pulls/<number>/comments`
-           - PR conversation: `gh pr view <number> --repo kelos-dev/kanon --comments`
+           - The PR diff: `gh pr diff <number> --repo kelos-dev/agora`
+           - Review comments: `gh api repos/kelos-dev/agora/pulls/<number>/reviews` and `gh api repos/kelos-dev/agora/pulls/<number>/comments`
+           - PR conversation: `gh pr view <number> --repo kelos-dev/agora --comments`
          - Focus on PRs from the last 7 days
 
       2. **Identify actionable patterns**
          Look for recurring themes in review feedback:
          - Repeated corrections to agent behavior (e.g., "don't do X", "always do Y")
          - Missing conventions that reviewers keep pointing out
-         - Common mistakes the Kanon agents make that could be prevented with better instructions
+         - Common mistakes the Agora agents make that could be prevented with better instructions
          - New project patterns or conventions the agents should follow
          - Feedback about code quality, testing, commit messages, or PR descriptions
 
       3. **Classify and apply changes**
-         For each actionable pattern, determine the right place to update under `kanon-development/`:
+         For each actionable pattern, determine the right place to update under `self-development/agora/`:
 
-         **Shared changes** (affect all Kanon agents):
-         - Update `kanon-development/agentconfig.yaml` if the feedback is about shared agent behavior or project conventions
+         **Shared changes** (affect all Agora agents):
+         - Update `self-development/agora/agentconfig.yaml` if the feedback is about shared agent behavior or project conventions
 
          **Task-specific changes** (affect a specific agent):
-         - Update the relevant TaskSpawner prompt in `kanon-development/*.yaml`
+         - Update the relevant TaskSpawner prompt in `self-development/agora/*.yaml`
          - If a specific agent needs its own configuration, create or update its inline AgentConfig
 
       4. **Create a PR with the changes**
-         - Create the branch `kanon-config-update-latest` and commit your changes
+         - Create the branch `agora-config-update-latest` and commit your changes
          - Push to origin and open a PR against this repository following `.github/PULL_REQUEST_TEMPLATE.md`
-         - Because the PR only touches files under `kanon-development/`, use `/kind cleanup` and write `NONE` in the release-note block
+         - Because the PR only touches files under `self-development/agora/`, use `/kind cleanup` and write `NONE` in the release-note block
          - The PR description should:
-           - List the Kanon PRs and review comments that motivated each change
+           - List the Agora PRs and review comments that motivated each change
            - Explain what was changed and why
 
       Constraints:
-      - Only edit files under `kanon-development/` — do not touch `self-development/` or other parts of this repository
-      - Only make changes backed by clear evidence from Kanon PR reviews — do not speculate or add unnecessary rules
+      - Only edit files under `self-development/agora/` — do not touch sibling directories under `self-development/` or other parts of this repository
+      - Only make changes backed by clear evidence from Agora PR reviews — do not speculate or add unnecessary rules
       - If review feedback is uncertain, contradictory, or appears to be a one-off, ignore it
       - Keep changes minimal and focused — one PR per run, touching only what the evidence supports
       - Do not create duplicate changes — check the current content of the config files before modifying
       - Before creating a PR, check for an existing open PR from this agent:
-        `gh pr list --state open --search "head:kanon-config-update" --json number,title,headRefName,assignees`
+        `gh pr list --state open --search "head:agora-config-update" --json number,title,headRefName,assignees`
         If one exists and has assignees, treat it as ongoing: do not update
         the PR, do not force-push its branch, and exit cleanly. If one exists
         and has no assignees, update that existing PR branch and push your
         changes there instead of creating a new one.
       - Do not create a PR if no actionable changes are found — exit cleanly instead
       - Do not create duplicate issues — check existing issues first with `gh issue list`
-      - Back every change with a specific reference to the Kanon PR review that motivated it
+      - Back every change with a specific reference to the Agora PR review that motivated it

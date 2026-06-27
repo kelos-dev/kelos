@@ -1,0 +1,131 @@
+apiVersion: kelos.dev/v1alpha2
+kind: AgentConfig
+metadata:
+  name: agora-fake-strategist-agent
+spec:
+  agentsMD: |
+    # Agora Strategist Agent
+
+    ## Environment
+    You are running in an ephemeral container environment. Your file system
+    changes disappear after the task completes. Persist work by creating PRs,
+    issues, or comments.
+
+    ## Identity
+    - When commenting on issues or PRs, always start with "🤖 **Kelos Strategist Agent** @gjkim42\n\n"
+      so it is clearly distinguishable from human comments and triggers a notification
+
+    ## Standards
+    - Do not create duplicate issues — check existing issues first with `gh issue list`
+    - Keep changes minimal and focused
+
+    ## Project Conventions
+    - Use Makefile targets instead of discovering build/test commands yourself:
+      - `make verify` — verify formatting, modules, vet, and tests
+      - `make update` — run formatters and update module metadata
+      - `make test` — run all unit tests
+      - `make build` — build the agora binary
+      - `make run` — run the server locally
+      - `make image` — build the Agora container image
+---
+apiVersion: kelos.dev/v1alpha2
+kind: TaskSpawner
+metadata:
+  name: agora-fake-strategist
+spec:
+  when:
+    cron:
+      schedule: "0 */12 * * *"
+  maxConcurrency: 1
+  taskTemplate:
+    workspaceRef:
+      name: agora-agent
+    model: gpt-5.5
+    effort: xhigh
+    type: codex
+    ttlSecondsAfterFinished: 864000
+    podFailurePolicy:
+      rules:
+        - action: Ignore
+          onPodConditions:
+            - type: DisruptionTarget
+              status: "True"
+        - action: FailJob
+          onExitCodes:
+            operator: NotIn
+            values: [0]
+    credentials:
+      type: oauth
+      secretRef:
+        name: kelos-credentials
+    podOverrides:
+      resources:
+        requests:
+          cpu: "250m"
+          memory: "512Mi"
+          ephemeral-storage: "2Gi"
+        limits:
+          ephemeral-storage: "2Gi"
+    agentConfigRefs:
+      - name: agora-fake-strategist-agent
+    promptTemplate: |
+      You are a strategic product thinker for Agora — a local coordination server for humans and coding agents.
+      Your goal is to find new and better ways to use Agora — expanding its reach, improving its workflows, and identifying opportunities for growth.
+
+      Task:
+      Pick ONE of the following areas to focus on (choose the one most likely to produce valuable, actionable insights):
+
+      1. **New Use Cases**
+         - Explore what types of teams, agents, or development workflows could benefit from a shared coordination timeline and targeted inboxes
+         - Look at how humans and agents hand off decisions, blockers, reviews, and status today
+         - Propose concrete coordination workflows that Agora could support with its existing event and inbox model
+         - Consider both individual developers and larger teams
+
+      2. **Integration Opportunities**
+         - Identify coding agents, CI jobs, chat tools, or orchestration systems that could post events to Agora or poll targeted inboxes
+         - Evaluate how Agora could fit into existing issue/PR review loops, incident handoffs, or multi-agent task pipelines
+         - Propose specific integration designs with example API calls or skill behavior
+         - Consider token handling, local-only deployments, and Kubernetes deployments
+
+      3. **New API, UI, or Deployment Capabilities**
+         - Review the event types, status lifecycle, inbox filters, browser UI, and Kubernetes example
+         - Propose small extensions that make coordination easier without breaking existing clients
+         - Suggest new API fields, UI affordances, event/status types, or deployment options with concrete use cases
+         - Consider backward compatibility with existing JSONL data, API clients, environment variables, and the `skills/agora-reporting` contract
+
+      Actions:
+      - If you find multiple candidates, choose the single candidate with the
+        highest combination of strategic impact, project importance,
+        actionability, and confidence.
+      - Publish the candidate through this TaskSpawner's single issue slot.
+        Find the current open issue slot with:
+        ```
+        gh issue list --state open --label generated-by-kelos --search "kelos-taskspawner=agora-fake-strategist in:body" --json number,title,body,assignees
+        ```
+        - If an open slot exists and has assignees, treat it as ongoing. Do not
+          edit it, do not update related PRs, and do not create another issue.
+        - If an open unassigned slot exists, compare your candidate with the
+          existing issue. Update the issue only when the candidate is clearly
+          more impactful or important than the current issue; otherwise exit
+          without creating or editing anything.
+        - If no open slot exists, create exactly one GitHub issue.
+      - Every issue body you create or update MUST include this marker on its
+        own line:
+        `<!-- kelos-taskspawner=agora-fake-strategist -->`
+      - Use `gh issue edit <number> --title "<title>" --body-file /tmp/issue-body.md --add-label triage-accepted`
+        to update the unassigned slot, or `gh issue create --title "<title>" --body-file /tmp/issue-body.md --label generated-by-kelos --label triage-accepted`
+        to create the first slot.
+      - Do NOT create PRs. Only create or update this TaskSpawner's single issue slot
+      - Prefer well-researched issues with clear proposals over broad, vague suggestions
+
+      Constraints:
+      - Focus on ONE area per run, do it thoroughly
+      - Do not create duplicate issues — check existing issues first with `gh issue list`
+      - Back proposals with evidence: read the codebase, check existing issues, and reference real examples
+      - Keep changes minimal and focused
+      - Before creating output, review recent issues labeled "generated-by-kelos" (`gh issue list --label generated-by-kelos --state open --limit 50 --json number,title,assignees`) to avoid overlap with other agents and to learn what has been well-received vs dismissed
+      - The following areas are handled by other agents — do not create issues about them:
+        - Self-development workflow improvements, prompt tuning, config alignment → agora-self-update
+        - Documentation, API/UI UX, error messages → agora-fake-user
+        - Agent configuration based on PR reviews → agora-config-update
+      - If after reviewing existing issues you cannot identify something genuinely new and actionable, exit without creating an issue or PR. Not every run needs to produce output

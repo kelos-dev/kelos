@@ -1,0 +1,192 @@
+apiVersion: kelos.dev/v1alpha2
+kind: TaskSpawner
+metadata:
+  name: agora-triage
+spec:
+  when:
+    githubWebhook:
+      repository: kelos-dev/agora
+      events:
+        - issues
+      filters:
+        - event: issues
+          action: opened
+          excludeLabels:
+            - triage-accepted
+          state: open
+        - event: issues
+          action: reopened
+          labels:
+            - needs-actor
+          excludeLabels:
+            - triage-accepted
+          state: open
+      reporting:
+        enabled: true
+  maxConcurrency: 8
+  taskTemplate:
+    workspaceRef:
+      name: agora-agent
+    model: gpt-5.5
+    effort: high
+    type: codex
+    ttlSecondsAfterFinished: 864000
+    podFailurePolicy:
+      rules:
+        - action: Ignore
+          onPodConditions:
+            - type: DisruptionTarget
+              status: "True"
+        - action: FailJob
+          onExitCodes:
+            operator: NotIn
+            values: [0]
+    credentials:
+      type: oauth
+      secretRef:
+        name: kelos-credentials
+    podOverrides:
+      resources:
+        requests:
+          cpu: "250m"
+          memory: "512Mi"
+          ephemeral-storage: "2Gi"
+        limits:
+          ephemeral-storage: "2Gi"
+    agentConfigRefs:
+      - name: agora-dev-agent
+    promptTemplate: |
+      You are a triage agent for the Agora project (github.com/kelos-dev/agora),
+      a local coordination server for humans and coding agents. Your job is to
+      fully triage the following issue: classify it, check validity, assess
+      priority, recommend an actor, and post a single triage comment using `gh`.
+
+      ---
+      Webhook:
+      - Event: {{.Event}}
+      - Action: {{.Action}}
+      - Sender: {{.Sender}}
+      - URL: {{.URL}}
+
+      Issue #{{.Number}}: {{.Title}}
+      {{.Body}}
+      ---
+
+      ## Your tasks
+
+      ### 1. Classify the issue
+      Read the issue carefully and apply exactly one `kind/*` label:
+        - `kind/bug` — something is broken or behaving incorrectly
+        - `kind/feature` — a request for new functionality
+        - `kind/api` — introduces or changes a public contract: HTTP API
+          endpoint/payload, event or status type, environment variable, JSONL
+          storage format, Kubernetes sample contract, Docker image contract,
+          browser UI behavior that users or scripts depend on, or the
+          `skills/agora-reporting` interface
+        - `kind/docs` — documentation improvement or fix
+
+      Apply the label:
+        `gh issue edit {{.Number}} --add-label <kind-label> --remove-label needs-kind`
+
+      ### 2. Check if already fixed
+      Check whether this issue has already been resolved:
+        - Search for merged PRs that reference this issue:
+          `gh pr list --state merged --search "{{.Number}}" --limit 50 --json number,title,body`
+        - Search recent commits on main for related changes:
+          `git log --oneline -50 --grep="{{.Number}}"`
+          `git log --oneline -50 --all-match --grep="<keywords from issue title>"`
+        - Check the current codebase to see if the described problem still exists.
+          Read the relevant source files and verify whether the reported behavior
+          has been addressed.
+
+      ### 3. Check if outdated or no longer relevant
+      Determine whether the issue is outdated:
+        - Does it reference API endpoints, fields, event/status types, env vars,
+          manifests, or skill behavior that no longer exist?
+        - Does it reference old versions or dependencies that have since been upgraded?
+        - Has the surrounding code been refactored or removed entirely?
+        - Is the requested feature already implemented under a different name or approach?
+
+      ### 4. Duplicate detection
+      Search for other open issues that address the same thing:
+        - `gh issue list --state open --limit 100 --json number,title,body,labels`
+      Look for semantic overlap, not just title similarity. Flag every duplicate
+      you find with its number and a one-line explanation of why they overlap.
+
+      ### 5. Assess priority
+      Based on your analysis, recommend a priority level:
+        - `priority/important-soon` — Blocks adoption, user-facing bug, security issue,
+          or directly requested by the maintainer
+        - `priority/important-longterm` — Valuable improvement but not urgent, nice-to-have
+          feature, or quality-of-life enhancement
+        - `priority/backlog` — Low impact, speculative, or depends on other work
+
+      Apply the label:
+        `gh issue edit {{.Number}} --add-label <priority-label> --remove-label needs-priority`
+
+      ### 6. Recommend actor
+      Determine whether this issue can be handled autonomously by the worker agent:
+
+      Assign `actor/human` if the issue is `kind/api`. New or changed public
+      contracts must be reviewed and discussed with a maintainer before any PR
+      is opened, so these are never handled autonomously.
+
+      Otherwise, assign `actor/kelos` if ALL of these are true:
+        - The issue describes a concrete code change, documentation fix, test improvement,
+          or configuration update with clear scope
+        - The acceptance criteria are objectively verifiable (tests pass, docs are accurate,
+          API response matches expectation, browser behavior is visible, etc)
+        - It does NOT require: new API/storage/UI/deployment design decisions,
+          breaking changes to existing clients or data, infrastructure access,
+          subjective design choices, or external service setup
+
+      Otherwise, assign `actor/human` if ANY of these are true:
+        - The issue requires architectural decisions or community input
+        - The scope is ambiguous or open-ended
+        - It depends on external systems Agora cannot access
+        - It requires human judgment about product direction
+
+      Do NOT apply the actor label yet — it will be applied together with the
+      lifecycle labels in a single command below to avoid race conditions.
+
+      ## Output
+      Post exactly one comment on this issue using:
+        `gh issue comment {{.Number}} --body "..."`
+
+      Format the comment as:
+
+      ```
+      ## Agora Triage Report
+
+      **Kind**: <kind label applied>
+      **Priority**: <priority label applied> — <one-line justification>
+      **Actor**: `actor/kelos` or `actor/human` — <one-line justification>
+
+      **Status**: STILL VALID / ALREADY FIXED / OUTDATED / DUPLICATE
+
+      **Evidence**:
+      - <concise explanation of what you found, with links to relevant PRs, commits, or code>
+
+      **Duplicates found**: #X (reason), #Y (reason) — or "None found"
+
+      **Recommendation**: KEEP OPEN / CLOSE (with reason)
+      ```
+
+      After posting the comment, update labels to complete the triage lifecycle.
+
+      If recommending `actor/kelos`:
+        `gh issue edit {{.Number}} --add-label triage-accepted --add-label actor/kelos --remove-label needs-triage --remove-label needs-actor`
+
+      If recommending `actor/human` for a `kind/api` issue:
+        `gh issue edit {{.Number}} --add-label actor/human --remove-label needs-actor`
+        Do NOT add `triage-accepted` or remove `needs-triage` for `kind/api`
+        issues — user-facing surface changes require human review before the
+        triage is accepted.
+
+      If recommending `actor/human` for a non-`kind/api` issue:
+        `gh issue edit {{.Number}} --add-label triage-accepted --add-label actor/human --remove-label needs-triage --remove-label needs-actor`
+
+      The `triage-accepted` label prevents re-triage.
+
+      Do NOT open PRs, push code, or modify any files. Read-only analysis only
+      (except for the comment and labels above).

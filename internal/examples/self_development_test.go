@@ -85,16 +85,16 @@ func TestDevelopmentTaskSpawnersIgnoreDisruptions(t *testing.T) {
 		{dir: "self-development", file: "kelos-squash-commits.yaml"},
 		{dir: "self-development", file: "kelos-triage.yaml"},
 		{dir: "self-development", file: "kelos-workers.yaml"},
-		{dir: "kanon-development", file: "kanon-config-update.yaml"},
-		{dir: "kanon-development", file: "kanon-fake-strategist.yaml"},
-		{dir: "kanon-development", file: "kanon-fake-user.yaml"},
-		{dir: "kanon-development", file: "kanon-planner.yaml"},
-		{dir: "kanon-development", file: "kanon-pr-responder.yaml"},
-		{dir: "kanon-development", file: "kanon-reviewer.yaml"},
-		{dir: "kanon-development", file: "kanon-self-update.yaml"},
-		{dir: "kanon-development", file: "kanon-squash-commits.yaml"},
-		{dir: "kanon-development", file: "kanon-triage.yaml"},
-		{dir: "kanon-development", file: "kanon-workers.yaml"},
+		{dir: "self-development/kanon", file: "kanon-config-update.yaml"},
+		{dir: "self-development/kanon", file: "kanon-fake-strategist.yaml"},
+		{dir: "self-development/kanon", file: "kanon-fake-user.yaml"},
+		{dir: "self-development/kanon", file: "kanon-planner.yaml"},
+		{dir: "self-development/kanon", file: "kanon-pr-responder.yaml"},
+		{dir: "self-development/kanon", file: "kanon-reviewer.yaml"},
+		{dir: "self-development/kanon", file: "kanon-self-update.yaml"},
+		{dir: "self-development/kanon", file: "kanon-squash-commits.yaml"},
+		{dir: "self-development/kanon", file: "kanon-triage.yaml"},
+		{dir: "self-development/kanon", file: "kanon-workers.yaml"},
 	}
 
 	for _, tt := range tests {
@@ -122,11 +122,11 @@ func TestDevelopmentCommandPatternsMatchCommandLines(t *testing.T) {
 		{dir: "self-development", file: "kelos-api-reviewer.yaml", command: "/kelos api-review"},
 		{dir: "self-development", file: "kelos-pr-responder.yaml", command: "/kelos pick-up"},
 		{dir: "self-development", file: "kelos-squash-commits.yaml", command: "/kelos squash-commits"},
-		{dir: "kanon-development", file: "kanon-workers.yaml", command: "/kelos pick-up"},
-		{dir: "kanon-development", file: "kanon-planner.yaml", command: "/kelos plan"},
-		{dir: "kanon-development", file: "kanon-reviewer.yaml", command: "/kelos review"},
-		{dir: "kanon-development", file: "kanon-pr-responder.yaml", command: "/kelos pick-up"},
-		{dir: "kanon-development", file: "kanon-squash-commits.yaml", command: "/kelos squash-commits"},
+		{dir: "self-development/kanon", file: "kanon-workers.yaml", command: "/kelos pick-up"},
+		{dir: "self-development/kanon", file: "kanon-planner.yaml", command: "/kelos plan"},
+		{dir: "self-development/kanon", file: "kanon-reviewer.yaml", command: "/kelos review"},
+		{dir: "self-development/kanon", file: "kanon-pr-responder.yaml", command: "/kelos pick-up"},
+		{dir: "self-development/kanon", file: "kanon-squash-commits.yaml", command: "/kelos squash-commits"},
 	}
 
 	for _, tt := range tests {
@@ -236,7 +236,7 @@ func assertIgnoresDisruptions(t *testing.T, name string, policy *batchv1.PodFail
 // reviewer must not exclude `kelos-bot[bot]`.
 func TestKelosReviewerTriggerableByBot(t *testing.T) {
 	t.Parallel()
-	assertReviewerTriggerableByBot(t, "kelos-reviewer.yaml", "/kelos review")
+	assertReviewerTriggerableByBot(t, "self-development", "kelos-reviewer.yaml", "kelos-dev/kelos", "/kelos review")
 }
 
 // TestKelosAPIReviewerTriggerableByBot verifies the kelos-api-reviewer spawner
@@ -245,7 +245,84 @@ func TestKelosReviewerTriggerableByBot(t *testing.T) {
 // changes, so the reviewer must not exclude `kelos-bot[bot]`.
 func TestKelosAPIReviewerTriggerableByBot(t *testing.T) {
 	t.Parallel()
-	assertReviewerTriggerableByBot(t, "kelos-api-reviewer.yaml", "/kelos api-review")
+	assertReviewerTriggerableByBot(t, "self-development", "kelos-api-reviewer.yaml", "kelos-dev/kelos", "/kelos api-review")
+}
+
+func TestAgoraReviewerTriggerableByBot(t *testing.T) {
+	t.Parallel()
+	assertReviewerTriggerableByBot(t, "self-development/agora", "agora-reviewer.yaml", "kelos-dev/agora", "/kelos review")
+}
+
+func TestAgoraIssueCreatorsUseTriageAcceptedLabel(t *testing.T) {
+	t.Parallel()
+
+	tests := []string{
+		"agora-fake-strategist.yaml",
+		"agora-fake-user.yaml",
+		"agora-pr-responder.yaml",
+		"agora-self-update.yaml",
+		"agora-workers.yaml",
+	}
+
+	for _, file := range tests {
+		file := file
+		t.Run(file, func(t *testing.T) {
+			t.Parallel()
+
+			ts := readTaskSpawnerFromDir(t, "self-development/agora", file)
+			prompt := ts.Spec.TaskTemplate.PromptTemplate
+			if !strings.Contains(prompt, "triage-accepted") {
+				t.Fatalf("%s prompt does not mention triage-accepted", file)
+			}
+		})
+	}
+}
+
+func TestAgoraPlannerOnlyTriggersForIssues(t *testing.T) {
+	t.Parallel()
+
+	ts := readTaskSpawnerFromDir(t, "self-development/agora", "agora-planner.yaml")
+	spawner := ts.Spec.When.GitHubWebhook
+	if spawner == nil {
+		t.Fatal("expected agora-planner.yaml to use githubWebhook")
+	}
+	if len(spawner.Filters) != 1 {
+		t.Fatalf("agora-planner filters length = %d, want 1", len(spawner.Filters))
+	}
+
+	filter := spawner.Filters[0]
+	issuePayload := developmentWebhookPayload(t, spawner.Repository, filter, "/kelos plan")
+	issueEvent, err := webhook.ParseGitHubWebhook("issue_comment", issuePayload)
+	if err != nil {
+		t.Fatalf("ParseGitHubWebhook(issue) error = %v", err)
+	}
+	if got, err := webhook.MatchesGitHubEvent(spawner, "issue_comment", issueEvent); err != nil || !got {
+		t.Fatalf("MatchesGitHubEvent(issue) = %v, %v, want true, nil", got, err)
+	}
+
+	prPayload := []byte(`{
+		"action": "created",
+		"sender": {"login": "gjkim42"},
+		"issue": {
+			"number": 1,
+			"title": "Test PR",
+			"state": "open",
+			"html_url": "https://github.com/kelos-dev/agora/pull/1",
+			"pull_request": {
+				"url": "https://api.github.com/repos/kelos-dev/agora/pulls/1",
+				"html_url": "https://github.com/kelos-dev/agora/pull/1"
+			}
+		},
+		"comment": {"body": "/kelos plan"},
+		"repository": {"full_name": "kelos-dev/agora", "owner": {"login": "kelos-dev"}, "name": "agora"}
+	}`)
+	prEvent, err := webhook.ParseGitHubWebhook("issue_comment", prPayload)
+	if err != nil {
+		t.Fatalf("ParseGitHubWebhook(pr) error = %v", err)
+	}
+	if got, err := webhook.MatchesGitHubEvent(spawner, "issue_comment", prEvent); err != nil || got {
+		t.Fatalf("MatchesGitHubEvent(pr) = %v, %v, want false, nil", got, err)
+	}
 }
 
 func TestDevelopmentTaskSpawnersSetExpectedEffort(t *testing.T) {
@@ -268,16 +345,16 @@ func TestDevelopmentTaskSpawnersSetExpectedEffort(t *testing.T) {
 		{dir: "self-development", file: "kelos-image-update.yaml", effort: "medium"},
 		{dir: "self-development", file: "kelos-fake-user.yaml", effort: "medium"},
 		{dir: "self-development", file: "kelos-squash-commits.yaml", effort: "medium"},
-		{dir: "kanon-development", file: "kanon-workers.yaml", effort: "xhigh"},
-		{dir: "kanon-development", file: "kanon-planner.yaml", effort: "xhigh"},
-		{dir: "kanon-development", file: "kanon-reviewer.yaml", effort: "xhigh"},
-		{dir: "kanon-development", file: "kanon-self-update.yaml", effort: "xhigh"},
-		{dir: "kanon-development", file: "kanon-fake-strategist.yaml", effort: "xhigh"},
-		{dir: "kanon-development", file: "kanon-triage.yaml", effort: "high"},
-		{dir: "kanon-development", file: "kanon-pr-responder.yaml", effort: "xhigh"},
-		{dir: "kanon-development", file: "kanon-config-update.yaml", effort: "xhigh"},
-		{dir: "kanon-development", file: "kanon-fake-user.yaml", effort: "medium"},
-		{dir: "kanon-development", file: "kanon-squash-commits.yaml", effort: "medium"},
+		{dir: "self-development/kanon", file: "kanon-workers.yaml", effort: "xhigh"},
+		{dir: "self-development/kanon", file: "kanon-planner.yaml", effort: "xhigh"},
+		{dir: "self-development/kanon", file: "kanon-reviewer.yaml", effort: "xhigh"},
+		{dir: "self-development/kanon", file: "kanon-self-update.yaml", effort: "xhigh"},
+		{dir: "self-development/kanon", file: "kanon-fake-strategist.yaml", effort: "xhigh"},
+		{dir: "self-development/kanon", file: "kanon-triage.yaml", effort: "high"},
+		{dir: "self-development/kanon", file: "kanon-pr-responder.yaml", effort: "xhigh"},
+		{dir: "self-development/kanon", file: "kanon-config-update.yaml", effort: "xhigh"},
+		{dir: "self-development/kanon", file: "kanon-fake-user.yaml", effort: "medium"},
+		{dir: "self-development/kanon", file: "kanon-squash-commits.yaml", effort: "medium"},
 	}
 
 	for _, tt := range tests {
@@ -296,10 +373,10 @@ func TestDevelopmentTaskSpawnersSetExpectedEffort(t *testing.T) {
 // assertReviewerTriggerableByBot checks that the given reviewer spawner triggers
 // for both the Kelos bot and a maintainer posting bodyPattern on an open PR, but
 // not for an unauthorized user.
-func assertReviewerTriggerableByBot(t *testing.T, file, bodyPattern string) {
+func assertReviewerTriggerableByBot(t *testing.T, dir, file, repository, bodyPattern string) {
 	t.Helper()
 
-	ts := readSelfDevelopmentTaskSpawner(t, file)
+	ts := readTaskSpawnerFromDir(t, dir, file)
 	spawner := ts.Spec.When.GitHubWebhook
 	if spawner == nil {
 		t.Fatalf("expected %s to use githubWebhook", file)
@@ -312,10 +389,10 @@ func assertReviewerTriggerableByBot(t *testing.T, file, bodyPattern string) {
 			"issue": {
 				"number": 1,
 				"state": "open",
-				"pull_request": {"url": "https://api.github.com/repos/kelos-dev/kelos/pulls/1"}
+				"pull_request": {"url": "https://api.github.com/repos/` + repository + `/pulls/1"}
 			},
 			"comment": {"body": "` + bodyPattern + `"},
-			"repository": {"full_name": "kelos-dev/kelos", "owner": {"login": "kelos-dev"}, "name": "kelos"}
+			"repository": {"full_name": "` + repository + `", "owner": {"login": "kelos-dev"}, "name": "` + strings.TrimPrefix(repository, "kelos-dev/") + `"}
 		}`)
 	}
 

@@ -1,0 +1,37 @@
+apiVersion: kelos.dev/v1alpha2
+kind: AgentConfig
+metadata:
+  name: agora-dev-agent
+spec:
+  agentsMD: |
+    # Agora Development Agent
+
+    Agora (github.com/kelos-dev/agora) is a local coordination server for
+    humans and coding agents. It serves a browser UI and JSON API for timeline
+    events, targeted inboxes, instructions, decisions, and status updates.
+
+    ## Environment
+    You are running in an ephemeral container environment. Your file system
+    changes disappear after the task completes. Persist work by creating PRs,
+    issues, or comments.
+
+    ## Identity
+    - When commenting on issues or PRs, always start with "🤖 **Kelos Agent** @gjkim42\n\n"
+      so it is clearly distinguishable from human comments and triggers a notification
+
+    ## Standards
+    - Do not create duplicate issues — check existing issues first with `gh issue list`
+    - Keep changes minimal and focused
+
+    ## Project Conventions
+    - Use Makefile targets instead of discovering build/test commands yourself:
+      - `make verify` — verify formatting, modules, vet, and tests
+      - `make update` — run formatters and update module metadata
+      - `make test` — run all unit tests
+      - `make build` — build the agora binary
+      - `make run` — run the server locally
+      - `make image` — build the Agora container image
+    - Preserve compatibility for existing API clients, event/status types,
+      environment variables, Kubernetes manifests, and the installable
+      `skills/agora-reporting` contract unless an issue explicitly scopes a
+      breaking change.

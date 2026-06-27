@@ -1,0 +1,107 @@
+apiVersion: kelos.dev/v1alpha2
+kind: TaskSpawner
+metadata:
+  name: agora-pr-responder
+spec:
+  when:
+    githubWebhook:
+      repository: kelos-dev/agora
+      excludeAuthors:
+        - kelos-bot[bot]
+      events:
+        - issue_comment
+        - pull_request_review
+      filters:
+        - event: issue_comment
+          action: created
+          bodyPattern: '(?m)^[ \t]*/kelos pick-up[ \t]*\r?$'
+          commentOn: PullRequest
+          state: open
+          author: gjkim42
+        - event: pull_request_review
+          action: submitted
+          bodyPattern: '(?m)^[ \t]*/kelos pick-up[ \t]*\r?$'
+          state: open
+          draft: false
+          author: gjkim42
+      reporting:
+        enabled: true
+        checks: {}
+  maxConcurrency: 8
+  taskTemplate:
+    workspaceRef:
+      name: agora-agent
+    model: gpt-5.5
+    effort: xhigh
+    type: codex
+    ttlSecondsAfterFinished: 864000
+    podFailurePolicy:
+      rules:
+        - action: Ignore
+          onPodConditions:
+            - type: DisruptionTarget
+              status: "True"
+        - action: FailJob
+          onExitCodes:
+            operator: NotIn
+            values: [0]
+    credentials:
+      type: oauth
+      secretRef:
+        name: kelos-credentials
+    podOverrides:
+      resources:
+        requests:
+          cpu: "250m"
+          memory: "512Mi"
+          ephemeral-storage: "4Gi"
+        limits:
+          ephemeral-storage: "4Gi"
+      env:
+        - name: GIT_AUTHOR_NAME
+          value: "Gunju Kim"
+        - name: GIT_AUTHOR_EMAIL
+          value: "gjkim042@gmail.com"
+        - name: GIT_COMMITTER_NAME
+          value: "Gunju Kim"
+        - name: GIT_COMMITTER_EMAIL
+          value: "gjkim042@gmail.com"
+    branch: "{{.Branch}}"
+    agentConfigRefs:
+      - name: agora-dev-agent
+    promptTemplate: |
+      You are a coding agent updating an existing PR in response to review feedback.
+
+      Webhook:
+      - Event: {{.Event}}
+      - Action: {{.Action}}
+      - Sender: {{.Sender}}
+      - URL: {{.URL}}
+
+      Pull request:
+      - PR #{{.Number}}: {{.Title}}
+      - URL: {{.URL}}
+
+      Task:
+      - 1. Kelos has already checked out the PR head branch. Rebase onto main before making changes:
+        ```
+        git fetch --unshallow || true
+        git fetch origin main
+        git rebase origin/main
+        ```
+      - 2. Read ALL review comments and conversation on the PR (gh pr view, gh api for review comments).
+      - 3. Read ALL comments on the linked issue referenced by the PR body. First determine the linked issue number from the PR body, then run `gh issue view <linked-issue-number> --comments`.
+      - 4. Read the existing diff (git diff main...HEAD) to understand what has already been done. Do NOT start over or rewrite from scratch.
+      - 5. Make only the incremental changes needed to address review feedback or remaining issues. Preserve existing work. If there is nothing actionable to change, exit without code changes or comments.
+      - 6. Commit and push your changes to origin on the PR head branch (use `git push origin HEAD`).
+      - 7. Run a local review of the PR diff against `origin/main` using the review tool available in the current environment. If no dedicated review tool is available, manually inspect the diff for correctness. If issues are found, fix them, run `make verify` and `make test`, commit and push, then repeat the local review. Continue until the local review passes.
+      - 8. Update the PR title and description to reflect the final diff. The PR body MUST contain a standard closing keyword reference on its own line (e.g., `Fixes #123` or `Closes #123`). Do not embed the issue number in natural language. Ensure the PR has the label "generated-by-kelos" (use `gh pr edit {{.Number}} --add-label generated-by-kelos` if missing).
+      - 9. After pushing, actively check CI status with `gh pr checks {{.Number}}`. If any checks fail, investigate the failures, fix them, commit and push, then check again. Do not request review until CI passes.
+
+      Post-checklist:
+      - If the PR is ready for human review, you need more information, or you cannot make progress, post a plain-English PR comment explaining the current state. Maintainers can resume the PR later with `/kelos pick-up`. When all review feedback was already addressed in previous commits and no new comments require action, keep the explanation brief (e.g. "All review feedback was addressed in previous commits. Ready for re-review.") instead of repeating a full status breakdown. Never post duplicate or near-identical status messages.
+      - If you find follow-up work outside the current PR scope, you may create
+        a separate GitHub issue:
+        - First check existing issues with `gh issue list` to avoid duplicates.
+        - Keep the follow-up narrowly scoped and label it `generated-by-kelos` and `triage-accepted`.
+        - Follow-up issues are exempt from the per-TaskSpawner issue slot cap.

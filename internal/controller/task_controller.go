@@ -83,7 +83,7 @@ type TaskReconciler struct {
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods/log,verbs=get
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update
-// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 // Reconcile handles Task reconciliation.
@@ -351,6 +351,36 @@ func (r *TaskReconciler) createJob(ctx context.Context, task *kelos.Task) (ctrl.
 		return ctrl.Result{}, err
 	}
 
+	// Plugin content is delivered via a per-task ConfigMap that the Job's
+	// plugin-setup init container mounts, so it must exist before the Job.
+	if agentConfig != nil && len(agentConfig.Plugins) > 0 {
+		configMap, err := buildPluginConfigMap(task, agentConfig.Plugins)
+		if err != nil {
+			// Deterministic (invalid component names, payload over budget) —
+			// retrying can't succeed, so fail the Task like JobBuildFailed.
+			logger.Error(err, "unable to build plugin ConfigMap")
+			r.recordEvent(task, corev1.EventTypeWarning, "PluginConfigMapFailed", "Failed to build plugin ConfigMap: %v", err)
+			updateErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				if getErr := r.Get(ctx, client.ObjectKeyFromObject(task), task); getErr != nil {
+					return getErr
+				}
+				task.Status.Phase = kelos.TaskPhaseFailed
+				task.Status.Message = fmt.Sprintf("Failed to build plugin ConfigMap: %v", err)
+				return r.Status().Update(ctx, task)
+			})
+			if updateErr != nil {
+				logger.Error(updateErr, "Unable to update Task status")
+			}
+			return ctrl.Result{}, err
+		}
+		if err := r.ensurePluginConfigMap(ctx, task, configMap); err != nil {
+			// API-level failures are transient — requeue without failing the Task.
+			logger.Error(err, "unable to ensure plugin ConfigMap")
+			r.recordEvent(task, corev1.EventTypeWarning, "PluginConfigMapFailed", "Failed to ensure plugin ConfigMap: %v", err)
+			return ctrl.Result{}, err
+		}
+	}
+
 	// Set owner reference
 	if err := controllerutil.SetControllerReference(task, job, r.Scheme); err != nil {
 		logger.Error(err, "unable to set owner reference")
@@ -534,6 +564,55 @@ func (r *TaskReconciler) resolveGitHubAppToken(ctx context.Context, task *kelos.
 		Name: tokenSecretName,
 	}
 	return &resolved, nil
+}
+
+// ensurePluginConfigMap creates or updates the per-task ConfigMap that
+// carries plugin skill/agent content. The Job mounts this ConfigMap into
+// the plugin-setup init container instead of inlining base64 content into
+// the init script, which would exceed Linux's 128KiB MAX_ARG_STRLEN limit
+// for a single execve argument once plugin content grows large. The
+// ConfigMap is owned by the Task, so garbage collection removes it
+// together with the Task. Building the ConfigMap (validation, size budget)
+// happens in the caller so deterministic failures can fail the Task;
+// errors returned here are API-level and treated as transient.
+func (r *TaskReconciler) ensurePluginConfigMap(ctx context.Context, task *kelos.Task, configMap *corev1.ConfigMap) error {
+	if err := controllerutil.SetControllerReference(task, configMap, r.Scheme); err != nil {
+		return fmt.Errorf("setting owner reference on plugin ConfigMap: %w", err)
+	}
+
+	if err := r.Create(ctx, configMap); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("creating plugin ConfigMap: %w", err)
+		}
+		// Update existing ConfigMap so reconciles pick up content changes.
+		// Only adopt a ConfigMap this Task already controls: a pre-existing
+		// ConfigMap that happens to share the generated name but is unowned
+		// or owned by something else must not be overwritten and later
+		// garbage-collected with the Task. Re-assert the controller
+		// reference too, since an existing ConfigMap with a stripped
+		// ownerRef would otherwise outlive its Task. Concurrent reconciles
+		// can race here, so retry on conflict like the other update paths in
+		// this controller.
+		updateErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			existing := &corev1.ConfigMap{}
+			if err := r.Get(ctx, client.ObjectKey{Name: configMap.Name, Namespace: configMap.Namespace}, existing); err != nil {
+				return err
+			}
+			if !metav1.IsControlledBy(existing, task) {
+				return fmt.Errorf("plugin ConfigMap %q already exists and is not controlled by this Task", configMap.Name)
+			}
+			existing.Data = configMap.Data
+			if err := controllerutil.SetControllerReference(task, existing, r.Scheme); err != nil {
+				return err
+			}
+			return r.Update(ctx, existing)
+		})
+		if updateErr != nil {
+			return fmt.Errorf("updating plugin ConfigMap: %w", updateErr)
+		}
+	}
+
+	return nil
 }
 
 // refreshGitHubAppTokenIfNeeded re-mints the per-task GitHub App installation

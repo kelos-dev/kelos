@@ -259,6 +259,75 @@ func TestBuildClaudeCodeJob_WorkspaceWithRef(t *testing.T) {
 	}
 }
 
+func TestBuildClaudeCodeJob_WorkspaceWithCommitRefFetchesDetached(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-workspace-commit",
+			Namespace: "default",
+		},
+		Spec: kelos.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix the code",
+			Credentials: kelos.Credentials{
+				Type:      kelos.CredentialTypeAPIKey,
+				SecretRef: &kelos.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	sha := "c44211cb54d861d9445de16a0e8ce96d7f29637d"
+	workspace := &kelos.WorkspaceSpec{
+		Repo: "https://github.com/example/repo.git",
+		Ref:  sha,
+		SecretRef: &kelos.SecretReference{
+			Name: "github-token",
+		},
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	initContainer := job.Spec.Template.Spec.InitContainers[0]
+	for _, arg := range initContainer.Args {
+		if arg == "--branch" {
+			t.Fatalf("Commit refs must not be cloned with --branch: %v", initContainer.Args)
+		}
+	}
+
+	expectedArgs := []string{
+		"--", "https://github.com/example/repo.git", WorkspaceMountPath + "/repo", sha,
+	}
+	if len(initContainer.Args) != len(expectedArgs) {
+		t.Fatalf("Expected %d clone args, got %d: %v", len(expectedArgs), len(initContainer.Args), initContainer.Args)
+	}
+	for i, arg := range expectedArgs {
+		if initContainer.Args[i] != arg {
+			t.Errorf("Clone args[%d]: expected %q, got %q", i, arg, initContainer.Args[i])
+		}
+	}
+
+	if len(initContainer.Command) != 3 || initContainer.Command[0] != "sh" || initContainer.Command[1] != "-c" {
+		t.Fatalf("Expected command [sh -c ...], got %v", initContainer.Command)
+	}
+
+	script := initContainer.Command[2]
+	for _, want := range []string{
+		`git init "$target"`,
+		`git -C "$target" remote add origin "$repo"`,
+		`fetch --depth 1 origin "$ref"`,
+		`checkout --detach FETCH_HEAD`,
+		"-c credential.helper= -c credential.helper=",
+		"--add credential.helper",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("Expected commit checkout script to contain %q, got %q", want, script)
+		}
+	}
+}
+
 func TestBuildClaudeCodeJob_WorkspaceWithInjectedFiles(t *testing.T) {
 	builder := NewJobBuilder()
 	task := &kelos.Task{
@@ -2717,6 +2786,34 @@ func TestBuildJob_AgentConfigPlugins(t *testing.T) {
 		t.Error("Expected plugin volume to be created")
 	}
 
+	// Should have a staging volume sourcing the per-task plugin ConfigMap,
+	// with items projecting each key to its nested plugin path.
+	var stagingVolume *corev1.Volume
+	for i := range job.Spec.Template.Spec.Volumes {
+		if job.Spec.Template.Spec.Volumes[i].Name == PluginStagingVolumeName {
+			stagingVolume = &job.Spec.Template.Spec.Volumes[i]
+		}
+	}
+	if stagingVolume == nil {
+		t.Fatal("Expected plugin staging volume to be created")
+	}
+	if stagingVolume.VolumeSource.ConfigMap == nil {
+		t.Fatal("Expected ConfigMap volume source for plugin staging volume")
+	}
+	if got, want := stagingVolume.VolumeSource.ConfigMap.Name, PluginConfigMapName(task.Name); got != want {
+		t.Errorf("Expected staging volume ConfigMap name %q, got %q", want, got)
+	}
+	itemPaths := map[string]string{}
+	for _, item := range stagingVolume.VolumeSource.ConfigMap.Items {
+		itemPaths[item.Key] = item.Path
+	}
+	if itemPaths["p0-s0"] != "team-tools/skills/deploy/SKILL.md" {
+		t.Errorf("Expected item p0-s0 to map to skill path, got %q", itemPaths["p0-s0"])
+	}
+	if itemPaths["p0-a0"] != "team-tools/agents/reviewer.md" {
+		t.Errorf("Expected item p0-a0 to map to agent path, got %q", itemPaths["p0-a0"])
+	}
+
 	// Should have plugin-setup init container.
 	if len(job.Spec.Template.Spec.InitContainers) != 1 {
 		t.Fatalf("Expected 1 init container, got %d", len(job.Spec.Template.Spec.InitContainers))
@@ -2729,23 +2826,33 @@ func TestBuildJob_AgentConfigPlugins(t *testing.T) {
 		t.Errorf("Expected init container image %q, got %q", GitCloneImage, initContainer.Image)
 	}
 
-	// Verify script contains expected paths.
-	script := initContainer.Command[2]
-	if !strings.Contains(script, PluginMountPath+"/team-tools/skills/deploy/SKILL.md") {
-		t.Errorf("Expected script to target skill path, got: %s", script)
+	// The init script must be the constant copy script: plugin content is
+	// staged via the ConfigMap volume, never inlined into the sh -c
+	// argument (Linux caps a single execve argument at 128KiB).
+	if got := initContainer.Command[2]; got != pluginSetupScript {
+		t.Errorf("Expected constant plugin setup script %q, got %q", pluginSetupScript, got)
 	}
-	if !strings.Contains(script, PluginMountPath+"/team-tools/agents/reviewer.md") {
-		t.Errorf("Expected script to target agent path, got: %s", script)
+	if strings.Contains(initContainer.Command[2], "base64") {
+		t.Error("Expected plugin setup script to not inline base64 content")
 	}
 
-	// Verify base64-encoded content in script.
-	skillBase64 := base64.StdEncoding.EncodeToString([]byte("Deploy instructions here"))
-	if !strings.Contains(script, skillBase64) {
-		t.Error("Expected script to include base64-encoded skill content")
+	// Init container should mount the staging volume read-only and the
+	// writable plugin volume.
+	stagingMounted := false
+	pluginMounted := false
+	for _, vm := range initContainer.VolumeMounts {
+		if vm.Name == PluginStagingVolumeName && vm.MountPath == PluginStagingMountPath && vm.ReadOnly {
+			stagingMounted = true
+		}
+		if vm.Name == PluginVolumeName && vm.MountPath == PluginMountPath {
+			pluginMounted = true
+		}
 	}
-	agentBase64 := base64.StdEncoding.EncodeToString([]byte("You are a code reviewer"))
-	if !strings.Contains(script, agentBase64) {
-		t.Error("Expected script to include base64-encoded agent content")
+	if !stagingMounted {
+		t.Error("Expected read-only staging volume mount on plugin-setup init container")
+	}
+	if !pluginMounted {
+		t.Error("Expected plugin volume mount on plugin-setup init container")
 	}
 
 	// Main container should have plugin volume mount.
@@ -2769,6 +2876,141 @@ func TestBuildJob_AgentConfigPlugins(t *testing.T) {
 	}
 	if envMap["KELOS_PLUGIN_DIR"] != PluginMountPath {
 		t.Errorf("Expected KELOS_PLUGIN_DIR=%q, got %q", PluginMountPath, envMap["KELOS_PLUGIN_DIR"])
+	}
+}
+
+func TestBuildPluginConfigMap(t *testing.T) {
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-plugins",
+			Namespace: "default",
+		},
+	}
+
+	plugins := []kelos.PluginSpec{
+		{
+			Name: "team-tools",
+			Skills: []kelos.SkillDefinition{
+				{Name: "deploy", Content: "Deploy instructions here"},
+				{Name: "release", Content: "Release instructions here"},
+			},
+			Agents: []kelos.AgentDefinition{
+				{Name: "reviewer", Content: "You are a code reviewer"},
+			},
+		},
+		{
+			Name: "extra",
+			Agents: []kelos.AgentDefinition{
+				{Name: "linter", Content: "You are a linter"},
+			},
+		},
+	}
+
+	configMap, err := buildPluginConfigMap(task, plugins)
+	if err != nil {
+		t.Fatalf("buildPluginConfigMap() returned error: %v", err)
+	}
+
+	if configMap.Name != "test-plugins-plugins" {
+		t.Errorf("Expected ConfigMap name %q, got %q", "test-plugins-plugins", configMap.Name)
+	}
+	if configMap.Namespace != "default" {
+		t.Errorf("Expected ConfigMap namespace %q, got %q", "default", configMap.Namespace)
+	}
+
+	wantData := map[string]string{
+		"p0-s0": "Deploy instructions here",
+		"p0-s1": "Release instructions here",
+		"p0-a0": "You are a code reviewer",
+		"p1-a0": "You are a linter",
+	}
+	if len(configMap.Data) != len(wantData) {
+		t.Fatalf("Expected %d data keys, got %d: %v", len(wantData), len(configMap.Data), configMap.Data)
+	}
+	for key, want := range wantData {
+		if got := configMap.Data[key]; got != want {
+			t.Errorf("Expected data[%q]=%q, got %q", key, want, got)
+		}
+	}
+
+	// The volume items must map each flat key to its nested plugin path.
+	_, items, err := buildPluginConfigMapData(plugins)
+	if err != nil {
+		t.Fatalf("buildPluginConfigMapData() returned error: %v", err)
+	}
+	wantPaths := map[string]string{
+		"p0-s0": "team-tools/skills/deploy/SKILL.md",
+		"p0-s1": "team-tools/skills/release/SKILL.md",
+		"p0-a0": "team-tools/agents/reviewer.md",
+		"p1-a0": "extra/agents/linter.md",
+	}
+	if len(items) != len(wantPaths) {
+		t.Fatalf("Expected %d volume items, got %d: %v", len(wantPaths), len(items), items)
+	}
+	for _, item := range items {
+		if want := wantPaths[item.Key]; item.Path != want {
+			t.Errorf("Expected item %q path %q, got %q", item.Key, want, item.Path)
+		}
+	}
+}
+
+func TestBuildPluginConfigMap_InvalidNames(t *testing.T) {
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-plugins", Namespace: "default"},
+	}
+
+	_, err := buildPluginConfigMap(task, []kelos.PluginSpec{
+		{Name: "../etc", Skills: []kelos.SkillDefinition{{Name: "s", Content: "c"}}},
+	})
+	if err == nil {
+		t.Fatal("Expected error for plugin name with path separators, got nil")
+	}
+	if !strings.Contains(err.Error(), "path separators") {
+		t.Errorf("Expected error about path separators, got: %v", err)
+	}
+}
+
+func TestBuildPluginConfigMap_TooLarge(t *testing.T) {
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-plugins", Namespace: "default"},
+	}
+
+	plugins := []kelos.PluginSpec{
+		{
+			Name: "huge",
+			Skills: []kelos.SkillDefinition{
+				{Name: "big", Content: strings.Repeat("x", pluginConfigMapMaxBytes+1)},
+			},
+		},
+	}
+
+	_, err := buildPluginConfigMap(task, plugins)
+	if err == nil {
+		t.Fatal("Expected error for oversized plugin content, got nil")
+	}
+	if !strings.Contains(err.Error(), "ConfigMap budget") {
+		t.Errorf("Expected error about ConfigMap budget, got: %v", err)
+	}
+
+	// Build must reject the same payload instead of silently truncating.
+	builder := NewJobBuilder()
+	buildTask := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-plugins", Namespace: "default"},
+		Spec: kelos.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: kelos.Credentials{
+				Type:      kelos.CredentialTypeAPIKey,
+				SecretRef: &kelos.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+	_, err = builder.Build(buildTask, nil, &kelos.AgentConfigSpec{Plugins: plugins}, "Fix issue")
+	if err == nil {
+		t.Fatal("Expected Build() to fail for oversized plugin content, got nil")
+	}
+	if !strings.Contains(err.Error(), "ConfigMap budget") {
+		t.Errorf("Expected Build() error about ConfigMap budget, got: %v", err)
 	}
 }
 
@@ -2822,9 +3064,9 @@ func TestBuildJob_AgentConfigFull(t *testing.T) {
 		t.Errorf("Expected KELOS_PLUGIN_DIR=%q, got %q", PluginMountPath, envMap["KELOS_PLUGIN_DIR"])
 	}
 
-	// Should have plugin volume and init container.
-	if len(job.Spec.Template.Spec.Volumes) != 1 {
-		t.Errorf("Expected 1 volume, got %d", len(job.Spec.Template.Spec.Volumes))
+	// Should have plugin + ConfigMap staging volumes and init container.
+	if len(job.Spec.Template.Spec.Volumes) != 2 {
+		t.Errorf("Expected 2 volumes (plugin + staging), got %d", len(job.Spec.Template.Spec.Volumes))
 	}
 	if len(job.Spec.Template.Spec.InitContainers) != 1 {
 		t.Errorf("Expected 1 init container, got %d", len(job.Spec.Template.Spec.InitContainers))
@@ -3208,9 +3450,9 @@ func TestBuildJob_AgentConfigWithWorkspace(t *testing.T) {
 		t.Fatalf("Build() returned error: %v", err)
 	}
 
-	// Should have both workspace and plugin volumes.
-	if len(job.Spec.Template.Spec.Volumes) != 2 {
-		t.Errorf("Expected 2 volumes (workspace + plugin), got %d", len(job.Spec.Template.Spec.Volumes))
+	// Should have workspace, plugin, and plugin staging volumes.
+	if len(job.Spec.Template.Spec.Volumes) != 3 {
+		t.Errorf("Expected 3 volumes (workspace + plugin + staging), got %d", len(job.Spec.Template.Spec.Volumes))
 	}
 
 	// Should have git-clone + plugin-setup init containers.
@@ -3335,9 +3577,9 @@ func TestBuildJob_AgentConfigCodex(t *testing.T) {
 		t.Errorf("Expected KELOS_PLUGIN_DIR=%q, got %q", PluginMountPath, envMap["KELOS_PLUGIN_DIR"])
 	}
 
-	// Should have plugin volume and init container.
-	if len(job.Spec.Template.Spec.Volumes) != 1 {
-		t.Errorf("Expected 1 volume, got %d", len(job.Spec.Template.Spec.Volumes))
+	// Should have plugin + ConfigMap staging volumes and init container.
+	if len(job.Spec.Template.Spec.Volumes) != 2 {
+		t.Errorf("Expected 2 volumes (plugin + staging), got %d", len(job.Spec.Template.Spec.Volumes))
 	}
 	if len(job.Spec.Template.Spec.InitContainers) != 1 {
 		t.Errorf("Expected 1 init container, got %d", len(job.Spec.Template.Spec.InitContainers))
@@ -3401,9 +3643,9 @@ func TestBuildJob_AgentConfigGemini(t *testing.T) {
 		t.Errorf("Expected KELOS_PLUGIN_DIR=%q, got %q", PluginMountPath, envMap["KELOS_PLUGIN_DIR"])
 	}
 
-	// Should have plugin volume and init container.
-	if len(job.Spec.Template.Spec.Volumes) != 1 {
-		t.Errorf("Expected 1 volume, got %d", len(job.Spec.Template.Spec.Volumes))
+	// Should have plugin + ConfigMap staging volumes and init container.
+	if len(job.Spec.Template.Spec.Volumes) != 2 {
+		t.Errorf("Expected 2 volumes (plugin + staging), got %d", len(job.Spec.Template.Spec.Volumes))
 	}
 	if len(job.Spec.Template.Spec.InitContainers) != 1 {
 		t.Errorf("Expected 1 init container, got %d", len(job.Spec.Template.Spec.InitContainers))
@@ -3470,9 +3712,9 @@ func TestBuildJob_AgentConfigOpenCode(t *testing.T) {
 		t.Errorf("Expected KELOS_PLUGIN_DIR=%q, got %q", PluginMountPath, envMap["KELOS_PLUGIN_DIR"])
 	}
 
-	// Should have plugin volume and init container.
-	if len(job.Spec.Template.Spec.Volumes) != 1 {
-		t.Errorf("Expected 1 volume, got %d", len(job.Spec.Template.Spec.Volumes))
+	// Should have plugin + ConfigMap staging volumes and init container.
+	if len(job.Spec.Template.Spec.Volumes) != 2 {
+		t.Errorf("Expected 2 volumes (plugin + staging), got %d", len(job.Spec.Template.Spec.Volumes))
 	}
 	if len(job.Spec.Template.Spec.InitContainers) != 1 {
 		t.Errorf("Expected 1 init container, got %d", len(job.Spec.Template.Spec.InitContainers))
@@ -4067,8 +4309,8 @@ func TestBuildJob_AgentConfigMCPServersWithPluginsAndAgentsMD(t *testing.T) {
 	}
 
 	// Should have plugin volume and init container.
-	if len(job.Spec.Template.Spec.Volumes) != 1 {
-		t.Errorf("Expected 1 volume (plugin only), got %d", len(job.Spec.Template.Spec.Volumes))
+	if len(job.Spec.Template.Spec.Volumes) != 2 {
+		t.Errorf("Expected 2 volumes (plugin + staging), got %d", len(job.Spec.Template.Spec.Volumes))
 	}
 	if len(job.Spec.Template.Spec.InitContainers) != 1 {
 		t.Errorf("Expected 1 init container (plugin-setup), got %d", len(job.Spec.Template.Spec.InitContainers))
@@ -5371,6 +5613,10 @@ func TestBuildJob_PodOverridesVolumes_ReservedNameRejected(t *testing.T) {
 		},
 		{
 			name:      PluginVolumeName,
+			wantError: "reserved \"kelos-\" volume name prefix",
+		},
+		{
+			name:      PluginStagingVolumeName,
 			wantError: "reserved \"kelos-\" volume name prefix",
 		},
 		{

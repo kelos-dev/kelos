@@ -944,6 +944,56 @@ type TaskTemplate struct {
 	UpstreamRepo string `json:"upstreamRepo,omitempty"`
 }
 
+// TerminalTaskPhase is a TaskPhase restricted to terminal values.
+// +kubebuilder:validation:Enum=Succeeded;Failed
+type TerminalTaskPhase string
+
+// NotificationHook defines an outbound notification destination triggered
+// when a spawned Task reaches a terminal phase.
+type NotificationHook struct {
+	// Name identifies this hook for logging and status reporting.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// Phases specifies which terminal phases trigger this hook.
+	// Defaults to both Succeeded and Failed.
+	// +optional
+	Phases []TerminalTaskPhase `json:"phases,omitempty"`
+
+	// Webhook sends an HTTP POST with task details to the given URL.
+	// +kubebuilder:validation:Required
+	Webhook WebhookNotification `json:"webhook"`
+}
+
+// WebhookNotification configures an HTTP webhook notification.
+// Note: The URL is stored in a Task annotation for dispatch. Do not embed
+// secrets in the URL path; use SecretRef for authentication instead.
+type WebhookNotification struct {
+	// URL is the webhook endpoint. Must use HTTPS. This value is stored
+	// in the spawned Task's annotations and is visible to anyone with
+	// read access to the Task resource. Do not use URLs with embedded
+	// tokens; use secretRef for authentication.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern="^https://[^@/]+(/.*)?$"
+	URL string `json:"url"`
+
+	// SecretRef optionally references a Secret whose keys are sent as HTTP
+	// headers. For example, a Secret with keys "Authorization" and "X-Api-Key"
+	// will set both as request headers with their respective values.
+	// +optional
+	SecretRef *SecretReference `json:"secretRef,omitempty"`
+}
+
+// OnCompletion configures outbound notifications when spawned Tasks
+// reach terminal phases.
+type OnCompletion struct {
+	// Hooks is a list of notification destinations.
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=8
+	Hooks []NotificationHook `json:"hooks"`
+}
+
 // TaskSpawnerSpec defines the desired state of TaskSpawner.
 // +kubebuilder:validation:XValidation:rule="!(has(self.when.githubIssues) || has(self.when.githubPullRequests) || has(self.when.githubWebhook) || has(self.when.linearWebhook)) || has(self.taskTemplate.workspaceRef)",message="taskTemplate.workspaceRef is required when using githubIssues, githubPullRequests, githubWebhook, or linearWebhook source"
 type TaskSpawnerSpec struct {
@@ -984,6 +1034,11 @@ type TaskSpawnerSpec struct {
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	MaxTotalTasks *int32 `json:"maxTotalTasks,omitempty"`
+
+	// OnCompletion configures outbound notifications when spawned Tasks
+	// reach terminal phases (Succeeded or Failed).
+	// +optional
+	OnCompletion *OnCompletion `json:"onCompletion,omitempty"`
 }
 
 // TaskSpawnerStatus defines the observed state of TaskSpawner.

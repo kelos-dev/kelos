@@ -69,6 +69,12 @@ func (r *spawnerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 func runOnce(ctx context.Context, cl client.Client, key types.NamespacedName, cfg spawnerRuntimeConfig) (time.Duration, error) {
+	// Run webhook reporting first — it operates on already-terminal tasks
+	// and must not be blocked by source-polling or GitHub reporting failures.
+	if err := runWebhookReportingCycle(ctx, cl, key, cfg.HTTPClient); err != nil {
+		ctrl.Log.WithName("spawner").Error(err, "Webhook reporting cycle failed")
+	}
+
 	if err := runCycleWithProxy(ctx, cl, key, cfg.GitHubOwner, cfg.GitHubRepo, cfg.GHProxyURL, cfg.GitHubAPIBaseURL, cfg.TokenResolver, cfg.JiraBaseURL, cfg.JiraProject, cfg.JiraJQL, cfg.HTTPClient); err != nil {
 		return 0, err
 	}

@@ -96,6 +96,72 @@ spec:
                 format: int32
                 minimum: 0
                 type: integer
+              onCompletion:
+                description: |-
+                  OnCompletion configures outbound notifications when spawned Tasks
+                  reach terminal phases (Succeeded or Failed).
+                properties:
+                  hooks:
+                    description: Hooks is a list of notification destinations.
+                    items:
+                      description: |-
+                        NotificationHook defines an outbound notification destination triggered
+                        when a spawned Task reaches a terminal phase.
+                      properties:
+                        name:
+                          description: Name identifies this hook for logging and status
+                            reporting.
+                          minLength: 1
+                          type: string
+                        phases:
+                          description: |-
+                            Phases specifies which terminal phases trigger this hook.
+                            Defaults to both Succeeded and Failed.
+                          items:
+                            description: TerminalTaskPhase is a TaskPhase restricted
+                              to terminal values.
+                            enum:
+                            - Succeeded
+                            - Failed
+                            type: string
+                          type: array
+                        webhook:
+                          description: Webhook sends an HTTP POST with task details
+                            to the given URL.
+                          properties:
+                            secretRef:
+                              description: |-
+                                SecretRef optionally references a Secret whose keys are sent as HTTP
+                                headers. For example, a Secret with keys "Authorization" and "X-Api-Key"
+                                will set both as request headers with their respective values.
+                              properties:
+                                name:
+                                  description: Name is the name of the secret.
+                                  type: string
+                              required:
+                              - name
+                              type: object
+                            url:
+                              description: |-
+                                URL is the webhook endpoint. Must use HTTPS. This value is stored
+                                in the spawned Task's annotations and is visible to anyone with
+                                read access to the Task resource. Do not use URLs with embedded
+                                tokens; use secretRef for authentication.
+                              pattern: ^https://[^@/]+(/.*)?$
+                              type: string
+                          required:
+                          - url
+                          type: object
+                      required:
+                      - name
+                      - webhook
+                      type: object
+                    maxItems: 8
+                    minItems: 1
+                    type: array
+                required:
+                - hooks
+                type: object
               pollInterval:
                 default: 5m
                 description: |-

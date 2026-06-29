@@ -60,6 +60,15 @@ const (
 	// PluginMountPath is the mount path for the plugin volume.
 	PluginMountPath = "/kelos/plugin"
 
+	// PluginStagingVolumeName is the name of the read-only volume that
+	// stages plugin content from the per-task plugin ConfigMap into the
+	// plugin-setup init container.
+	PluginStagingVolumeName = "kelos-plugin-src"
+
+	// PluginStagingMountPath is the mount path for the plugin staging
+	// volume inside the plugin-setup init container.
+	PluginStagingMountPath = "/kelos-plugin-src"
+
 	// SkillsShPluginName is the plugin directory name under PluginMountPath
 	// that skills.sh packages are installed into, so agent entrypoints
 	// discover them the same way as inline plugins.
@@ -428,6 +437,9 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 			MountPath: WorkspaceMountPath,
 		}
 
+		targetPath := WorkspaceMountPath + "/repo"
+		commitRef := isFullGitCommitSHA(workspace.Ref)
+
 		// Workspace volume mounts shared by every container that needs
 		// the cloned repo plus, when a token Secret is configured, the
 		// auto-syncing token file.
@@ -453,10 +465,10 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 		}
 
 		cloneArgs := []string{"clone"}
-		if workspace.Ref != "" {
+		if workspace.Ref != "" && !commitRef {
 			cloneArgs = append(cloneArgs, "--branch", workspace.Ref)
 		}
-		cloneArgs = append(cloneArgs, "--no-single-branch", "--depth", "1", "--", workspace.Repo, WorkspaceMountPath+"/repo")
+		cloneArgs = append(cloneArgs, "--no-single-branch", "--depth", "1", "--", workspace.Repo, targetPath)
 
 		initContainer := corev1.Container{
 			Name:         "git-clone",
@@ -469,7 +481,14 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 			},
 		}
 
-		if workspace.SecretRef != nil {
+		if commitRef {
+			credentialHelper := ""
+			if workspace.SecretRef != nil {
+				credentialHelper = gitCredentialHelper()
+			}
+			initContainer.Command = []string{"sh", "-c", buildCommitRefCheckoutScript(credentialHelper)}
+			initContainer.Args = []string{"--", workspace.Repo, targetPath, workspace.Ref}
+		} else if workspace.SecretRef != nil {
 			credentialHelper := gitCredentialHelper()
 			// Clear inherited credential helpers with an empty -c credential.helper=
 			// before setting the workspace helper, then persist the same
@@ -604,16 +623,34 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 		}
 
 		if len(agentConfig.Plugins) > 0 {
-			script, err := buildPluginSetupScript(agentConfig.Plugins)
+			// Plugin content is delivered through a per-task ConfigMap
+			// (created by the Task reconciler) and staged into the
+			// plugin-setup init container as a read-only volume. Inlining
+			// the content into the init script would hit Linux's 128KiB
+			// MAX_ARG_STRLEN limit on a single execve argument for large
+			// plugin sets.
+			_, items, err := buildPluginConfigMapData(agentConfig.Plugins)
 			if err != nil {
 				return nil, fmt.Errorf("invalid plugin configuration: %w", err)
 			}
+			volumes = append(volumes, corev1.Volume{
+				Name: PluginStagingVolumeName,
+				VolumeSource: corev1.VolumeSource{
+					ConfigMap: &corev1.ConfigMapVolumeSource{
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: PluginConfigMapName(task.Name),
+						},
+						Items: items,
+					},
+				},
+			})
 			initContainers = append(initContainers, corev1.Container{
 				Name:    "plugin-setup",
 				Image:   GitCloneImage,
-				Command: []string{"sh", "-c", script},
+				Command: []string{"sh", "-c", pluginSetupScript},
 				VolumeMounts: []corev1.VolumeMount{
 					{Name: PluginVolumeName, MountPath: PluginMountPath},
+					{Name: PluginStagingVolumeName, MountPath: PluginStagingMountPath, ReadOnly: true},
 				},
 				SecurityContext: &corev1.SecurityContext{RunAsUser: &agentUID},
 			})
@@ -892,6 +929,45 @@ func validatePodFailurePolicy(policy *batchv1.PodFailurePolicy) error {
 	return nil
 }
 
+func isFullGitCommitSHA(ref string) bool {
+	if len(ref) != 40 {
+		return false
+	}
+	for _, c := range ref {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
+			return false
+		}
+	}
+	return true
+}
+
+func buildCommitRefCheckoutScript(credentialHelper string) string {
+	fetchCmd := `git -C "$target" fetch --depth 1 origin "$ref"`
+	if credentialHelper != "" {
+		fetchCmd = fmt.Sprintf(`git -C "$target" -c credential.helper= -c credential.helper='%s' fetch --depth 1 origin "$ref"`, credentialHelper)
+	}
+
+	lines := []string{
+		"set -eu",
+		"repo=$1",
+		"target=$2",
+		"ref=$3",
+		`git init "$target"`,
+		`git -C "$target" remote add origin "$repo"`,
+		fetchCmd,
+		`git -C "$target" checkout --detach FETCH_HEAD`,
+	}
+
+	if credentialHelper != "" {
+		lines = append(lines,
+			`git -C "$target" config --unset-all credential.helper 2>/dev/null || true`,
+			fmt.Sprintf(`git -C "$target" config --add credential.helper '%s'`, credentialHelper),
+		)
+	}
+
+	return strings.Join(lines, "\n")
+}
+
 // gitCredentialHelper returns the inline git credential helper that resolves
 // the GitHub token by reading the mounted token file on each invocation,
 // falling back to the inherited $GITHUB_TOKEN env var when the file is not
@@ -999,42 +1075,101 @@ func sanitizeComponentName(name, kind string) error {
 	return nil
 }
 
-func buildPluginSetupScript(plugins []kelos.PluginSpec) (string, error) {
-	lines := []string{"set -eu"}
+// pluginConfigMapMaxBytes caps the total plugin content placed in the
+// per-task plugin ConfigMap. Kubernetes rejects objects whose total size
+// exceeds 1MiB (the etcd request limit), so we stop a bit short of that to
+// leave headroom for keys, metadata, and the API server's JSON envelope.
+const pluginConfigMapMaxBytes = 900 * 1024
 
-	for _, plugin := range plugins {
+// pluginSetupScript copies the staged plugin tree from the read-only
+// ConfigMap mount into the writable plugin emptyDir volume. The kubelet's
+// atomic writer materializes ConfigMap items as symlinks into hidden
+// "..data"/"..<timestamp>" directories, so the copy dereferences symlinks
+// (-L) and skips the kubelet-internal "..*" entries. The script is a small
+// constant: plugin content never appears in the sh -c argument, keeping it
+// far below Linux's 128KiB MAX_ARG_STRLEN execve limit. ConfigMap-mounted
+// files are world-readable, so a plain copy running as AgentUID produces
+// files owned by (and readable as) the agent user.
+const pluginSetupScript = "set -eu\n" +
+	"find " + PluginStagingMountPath + " -mindepth 1 -maxdepth 1 ! -name '..*' " +
+	"-exec cp -RL {} " + PluginMountPath + "/ ';'"
+
+// PluginConfigMapName returns the name of the per-task ConfigMap that
+// carries plugin skill and agent content for the given task.
+func PluginConfigMapName(taskName string) string {
+	return taskName + "-plugins"
+}
+
+// buildPluginConfigMapData validates plugin, skill, and agent names and
+// produces the plugin ConfigMap payload: a flat map of safe keys
+// ("p<i>-s<j>" for skills, "p<i>-a<j>" for agents; ConfigMap keys must
+// match [-._a-zA-Z0-9]+) to content blobs, plus the volume projection
+// items mapping each key to its nested path under the plugin directory
+// ("<plugin>/skills/<skill>/SKILL.md", "<plugin>/agents/<agent>.md").
+func buildPluginConfigMapData(plugins []kelos.PluginSpec) (map[string]string, []corev1.KeyToPath, error) {
+	data := map[string]string{}
+	var items []corev1.KeyToPath
+	totalBytes := 0
+
+	for i, plugin := range plugins {
 		if err := sanitizeComponentName(plugin.Name, "plugin"); err != nil {
-			return "", err
+			return nil, nil, err
 		}
 
-		for _, skill := range plugin.Skills {
+		for j, skill := range plugin.Skills {
 			if err := sanitizeComponentName(skill.Name, "skill"); err != nil {
-				return "", err
+				return nil, nil, err
 			}
-			dir := path.Join(PluginMountPath, plugin.Name, "skills", skill.Name)
-			target := path.Join(dir, "SKILL.md")
-			contentBase64 := base64.StdEncoding.EncodeToString([]byte(skill.Content))
-			lines = append(lines,
-				fmt.Sprintf("mkdir -p %s", shellQuote(dir)),
-				fmt.Sprintf("printf '%%s' %s | base64 -d > %s", shellQuote(contentBase64), shellQuote(target)),
-			)
+			key := fmt.Sprintf("p%d-s%d", i, j)
+			data[key] = skill.Content
+			totalBytes += len(skill.Content)
+			items = append(items, corev1.KeyToPath{
+				Key:  key,
+				Path: path.Join(plugin.Name, "skills", skill.Name, "SKILL.md"),
+			})
 		}
 
-		for _, agent := range plugin.Agents {
+		for j, agent := range plugin.Agents {
 			if err := sanitizeComponentName(agent.Name, "agent"); err != nil {
-				return "", err
+				return nil, nil, err
 			}
-			dir := path.Join(PluginMountPath, plugin.Name, "agents")
-			target := path.Join(dir, agent.Name+".md")
-			contentBase64 := base64.StdEncoding.EncodeToString([]byte(agent.Content))
-			lines = append(lines,
-				fmt.Sprintf("mkdir -p %s", shellQuote(dir)),
-				fmt.Sprintf("printf '%%s' %s | base64 -d > %s", shellQuote(contentBase64), shellQuote(target)),
-			)
+			key := fmt.Sprintf("p%d-a%d", i, j)
+			data[key] = agent.Content
+			totalBytes += len(agent.Content)
+			items = append(items, corev1.KeyToPath{
+				Key:  key,
+				Path: path.Join(plugin.Name, "agents", agent.Name+".md"),
+			})
 		}
 	}
 
-	return strings.Join(lines, "\n"), nil
+	if totalBytes > pluginConfigMapMaxBytes {
+		return nil, nil, fmt.Errorf(
+			"plugin content totals %d bytes, exceeding the %d byte ConfigMap budget; reduce skill/agent content size",
+			totalBytes, pluginConfigMapMaxBytes,
+		)
+	}
+
+	return data, items, nil
+}
+
+// buildPluginConfigMap produces the per-task ConfigMap that delivers plugin
+// skill and agent content to the plugin-setup init container. The Job built
+// by JobBuilder.Build mounts this ConfigMap by name, so it must be created
+// before the Job.
+func buildPluginConfigMap(task *kelos.Task, plugins []kelos.PluginSpec) (*corev1.ConfigMap, error) {
+	data, _, err := buildPluginConfigMapData(plugins)
+	if err != nil {
+		return nil, fmt.Errorf("invalid plugin configuration: %w", err)
+	}
+
+	return &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      PluginConfigMapName(task.Name),
+			Namespace: task.Namespace,
+		},
+		Data: data,
+	}, nil
 }
 
 type skillsAuthEnv struct {

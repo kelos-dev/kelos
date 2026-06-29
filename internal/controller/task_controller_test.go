@@ -1663,3 +1663,147 @@ func TestUpdateStatusClearsStalePodNameWhenNoLivePodsRemain(t *testing.T) {
 		t.Fatalf("task.Status.PodName = %q, want empty", updated.Status.PodName)
 	}
 }
+
+func TestEnsurePluginConfigMap_CreateAndUpdate(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
+
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-task",
+			Namespace: "default",
+			UID:       "test-uid",
+		},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(task).
+		Build()
+
+	r := &TaskReconciler{Client: cl, Scheme: scheme}
+
+	plugins := []kelos.PluginSpec{
+		{
+			Name: "team-tools",
+			Skills: []kelos.SkillDefinition{
+				{Name: "deploy", Content: "Deploy instructions here"},
+			},
+		},
+	}
+
+	built, err := buildPluginConfigMap(task, plugins)
+	if err != nil {
+		t.Fatalf("buildPluginConfigMap() error: %v", err)
+	}
+	if err := r.ensurePluginConfigMap(context.Background(), task, built); err != nil {
+		t.Fatalf("ensurePluginConfigMap() error: %v", err)
+	}
+
+	configMap := &corev1.ConfigMap{}
+	key := client.ObjectKey{Name: "test-task-plugins", Namespace: "default"}
+	if err := cl.Get(context.Background(), key, configMap); err != nil {
+		t.Fatalf("getting plugin ConfigMap: %v", err)
+	}
+	if got := configMap.Data["p0-s0"]; got != "Deploy instructions here" {
+		t.Errorf("data[p0-s0] = %q, want %q", got, "Deploy instructions here")
+	}
+
+	// The Task must own the ConfigMap so garbage collection removes it.
+	if len(configMap.OwnerReferences) != 1 {
+		t.Fatalf("expected 1 owner reference, got %d", len(configMap.OwnerReferences))
+	}
+	owner := configMap.OwnerReferences[0]
+	if owner.Kind != "Task" || owner.Name != "test-task" || owner.UID != "test-uid" {
+		t.Errorf("owner reference = %+v, want Task/test-task", owner)
+	}
+	if owner.Controller == nil || !*owner.Controller {
+		t.Error("expected owner reference to be a controller reference")
+	}
+
+	// A second reconcile with changed content must update in place.
+	plugins[0].Skills[0].Content = "Updated deploy instructions"
+	rebuilt, err := buildPluginConfigMap(task, plugins)
+	if err != nil {
+		t.Fatalf("buildPluginConfigMap() on update error: %v", err)
+	}
+	if err := r.ensurePluginConfigMap(context.Background(), task, rebuilt); err != nil {
+		t.Fatalf("ensurePluginConfigMap() on existing ConfigMap error: %v", err)
+	}
+	if err := cl.Get(context.Background(), key, configMap); err != nil {
+		t.Fatalf("getting updated plugin ConfigMap: %v", err)
+	}
+	if got := configMap.Data["p0-s0"]; got != "Updated deploy instructions" {
+		t.Errorf("data[p0-s0] after update = %q, want %q", got, "Updated deploy instructions")
+	}
+}
+
+// TestEnsurePluginConfigMap_NotAdoptedWhenUnowned verifies that a pre-existing
+// ConfigMap sharing the generated name but not controlled by the Task is left
+// untouched and a name-collision error is returned, so a user-created
+// ConfigMap can never be overwritten or garbage-collected with the Task.
+func TestEnsurePluginConfigMap_NotAdoptedWhenUnowned(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
+
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-task",
+			Namespace: "default",
+			UID:       "test-uid",
+		},
+	}
+
+	// A user-owned ConfigMap that happens to share the generated name and
+	// carries unrelated content the controller must not clobber.
+	existing := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-task-plugins",
+			Namespace: "default",
+		},
+		Data: map[string]string{"user-key": "user-value"},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(task, existing).
+		Build()
+
+	r := &TaskReconciler{Client: cl, Scheme: scheme}
+
+	plugins := []kelos.PluginSpec{
+		{
+			Name: "team-tools",
+			Skills: []kelos.SkillDefinition{
+				{Name: "deploy", Content: "Deploy instructions here"},
+			},
+		},
+	}
+
+	built, err := buildPluginConfigMap(task, plugins)
+	if err != nil {
+		t.Fatalf("buildPluginConfigMap() error: %v", err)
+	}
+	if err := r.ensurePluginConfigMap(context.Background(), task, built); err == nil {
+		t.Fatal("ensurePluginConfigMap() succeeded, want name-collision error")
+	}
+
+	// The pre-existing ConfigMap must be untouched: data preserved and no
+	// owner reference pointing at the Task.
+	got := &corev1.ConfigMap{}
+	key := client.ObjectKey{Name: "test-task-plugins", Namespace: "default"}
+	if err := cl.Get(context.Background(), key, got); err != nil {
+		t.Fatalf("getting plugin ConfigMap: %v", err)
+	}
+	if got.Data["user-key"] != "user-value" {
+		t.Errorf("data[user-key] = %q, want %q (must not be overwritten)", got.Data["user-key"], "user-value")
+	}
+	if _, ok := got.Data["p0-s0"]; ok {
+		t.Error("plugin content was written into an unowned ConfigMap")
+	}
+	if len(got.OwnerReferences) != 0 {
+		t.Errorf("expected no owner references on unowned ConfigMap, got %d", len(got.OwnerReferences))
+	}
+}

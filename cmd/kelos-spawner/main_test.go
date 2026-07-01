@@ -106,7 +106,7 @@ func newTaskSpawner(name, namespace string, maxConcurrency *int32) *kelos.TaskSp
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type:      kelos.CredentialTypeOAuth,
 					SecretRef: &kelos.SecretReference{Name: "creds"},
 				},
@@ -129,7 +129,7 @@ func newTask(name, namespace, spawnerName string, phase kelos.TaskPhase) kelos.T
 		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeOAuth,
 				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},
@@ -243,7 +243,7 @@ func TestBuildSource_Jira(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type:      kelos.CredentialTypeOAuth,
 					SecretRef: &kelos.SecretReference{Name: "creds"},
 				},
@@ -1342,7 +1342,7 @@ func newCompletedTask(name, namespace, spawnerName string, phase kelos.TaskPhase
 		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeOAuth,
 				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},
@@ -1671,7 +1671,7 @@ func TestRunCycleWithSource_PropagatesUpstreamRepo(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type:      kelos.CredentialTypeAPIKey,
 					SecretRef: &kelos.SecretReference{Name: "my-secret"},
 				},
@@ -1714,7 +1714,7 @@ func TestRunCycleWithSource_ExplicitUpstreamRepoTakesPrecedence(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type:      kelos.CredentialTypeAPIKey,
 					SecretRef: &kelos.SecretReference{Name: "my-secret"},
 				},
@@ -2277,7 +2277,7 @@ func TestRunReportingCycle_ReportsForAnnotatedTasks(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeOAuth,
 				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},
@@ -2338,7 +2338,7 @@ func TestRunReportingCycle_SkipsTasksWithoutReporting(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeOAuth,
 				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},
@@ -2664,7 +2664,7 @@ func TestRunCycleWithSource_ContextSources(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type:      kelos.CredentialTypeOAuth,
 					SecretRef: &kelos.SecretReference{Name: "creds"},
 				},
@@ -2732,7 +2732,7 @@ func TestRunCycleWithSource_ContextSources_OptionalFailure(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type:      kelos.CredentialTypeOAuth,
 					SecretRef: &kelos.SecretReference{Name: "creds"},
 				},
@@ -2790,7 +2790,7 @@ func TestRunCycleWithSource_ContextSources_RequiredFailure(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type:      kelos.CredentialTypeOAuth,
 					SecretRef: &kelos.SecretReference{Name: "creds"},
 				},

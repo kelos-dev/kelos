@@ -168,7 +168,7 @@ func TestServeHTTP_DuplicateDeliveryIsIdempotent(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type: "api-key",
 				},
 				WorkspaceRef: &kelos.WorkspaceReference{
@@ -246,7 +246,7 @@ func TestServeHTTP_CreatesTaskForMatchingSpawner(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type: "api-key",
 				},
 				WorkspaceRef: &kelos.WorkspaceReference{
@@ -323,7 +323,7 @@ func TestServeHTTP_StampsReportingAnnotationsWhenEnabled(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type: "api-key",
 				},
 				WorkspaceRef: &kelos.WorkspaceReference{
@@ -392,7 +392,7 @@ func TestServeHTTP_NoReportingAnnotationsWhenDisabled(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type: "api-key",
 				},
 				WorkspaceRef: &kelos.WorkspaceReference{
@@ -452,7 +452,7 @@ func TestServeHTTP_ReportingAnnotationsPullRequest(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type: "api-key",
 				},
 				WorkspaceRef: &kelos.WorkspaceReference{
@@ -589,7 +589,7 @@ func TestServeHTTP_SkipsNonMatchingSpawner(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type: "api-key",
 				},
 				WorkspaceRef: &kelos.WorkspaceReference{
@@ -643,7 +643,7 @@ func TestServeHTTP_SkipsSuspendedSpawner(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type: "api-key",
 				},
 				WorkspaceRef: &kelos.WorkspaceReference{
@@ -697,7 +697,7 @@ func TestServeHTTP_MaxConcurrencyDropsEvent(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type: "api-key",
 				},
 				WorkspaceRef: &kelos.WorkspaceReference{
@@ -754,7 +754,7 @@ func TestServeHTTP_RepositoryFilterRejectsWrongRepo(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type: "api-key",
 				},
 				WorkspaceRef: &kelos.WorkspaceReference{
@@ -815,7 +815,7 @@ func TestServeHTTP_IssueCommentOnPR_EnrichesBranch(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type: "api-key",
 				},
 				WorkspaceRef: &kelos.WorkspaceReference{
@@ -1028,7 +1028,7 @@ func TestLinearServeHTTP_CreatesTaskForMatchingSpawner(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type: "api-key",
 				},
 				WorkspaceRef: &kelos.WorkspaceReference{
@@ -1091,7 +1091,7 @@ func TestLinearServeHTTP_DuplicateBodyIsIdempotent(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type: "api-key",
 				},
 				WorkspaceRef: &kelos.WorkspaceReference{
@@ -1214,7 +1214,7 @@ func TestGenericServeHTTP_CreatesTaskForMatchingSpawner(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type: "api-key",
 				},
 				PromptTemplate: "{{.title}}",
@@ -1276,7 +1276,7 @@ func TestGenericServeHTTP_SkipsNonMatchingFilters(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type: "api-key",
 				},
 			},
@@ -1324,7 +1324,7 @@ func TestGenericServeHTTP_SkipsWrongSourceName(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type: "api-key",
 				},
 			},
@@ -1371,7 +1371,7 @@ func TestGenericServeHTTP_DuplicateBodyIsIdempotent(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type: "api-key",
 				},
 				PromptTemplate: "test",
@@ -1437,7 +1437,7 @@ func TestGenericServeHTTP_DuplicateIDDifferentBodyIsIdempotent(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type: "api-key",
 				},
 				PromptTemplate: "test",
@@ -1509,7 +1509,7 @@ func TestGenericServeHTTP_MultipleSpawnersNoFieldLeak(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type: "api-key",
 				},
 				PromptTemplate: "A:{{.title}}",
@@ -1538,7 +1538,7 @@ func TestGenericServeHTTP_MultipleSpawnersNoFieldLeak(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type: "api-key",
 				},
 				PromptTemplate: "B:{{.title}}",
@@ -1602,7 +1602,7 @@ func TestGenericServeHTTP_HyphenatedSourceName(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type: "api-key",
 				},
 				PromptTemplate: "test",
@@ -1650,7 +1650,7 @@ func TestServeHTTP_ChecksAnnotationsForPRWebhook(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type: "api-key",
 				},
 				WorkspaceRef: &kelos.WorkspaceReference{
@@ -1734,7 +1734,7 @@ func TestServeHTTP_ChecksAnnotationsSkippedForNonPRWebhook(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type: "api-key",
 				},
 				WorkspaceRef: &kelos.WorkspaceReference{
@@ -1801,7 +1801,7 @@ func TestServeHTTP_ChecksOnlyWithoutCommentReporting(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type: "api-key",
 				},
 				WorkspaceRef: &kelos.WorkspaceReference{

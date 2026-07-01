@@ -804,29 +804,64 @@ type TaskTemplateMetadata struct {
 }
 
 // TaskTemplate defines the template for spawned Tasks.
+//
+// Execution source (exactly one required):
+//   - worker (inline): creates a Job using worker.type and worker.credentials.
+//   - workerPoolRef: dispatches to a pre-warmed pool.
+//   - type + credentials (legacy): equivalent to inline worker, kept for backward compatibility.
+//
+// +kubebuilder:validation:XValidation:rule="has(self.workerPoolRef) || (has(self.worker) && has(self.worker.type) && size(self.worker.type) > 0) || (has(self.type) && size(self.type) > 0 && has(self.credentials) && size(self.credentials.type) > 0)",message="either workerPoolRef, worker with type, or type with credentials is required"
+// +kubebuilder:validation:XValidation:rule="has(self.workerPoolRef) || !has(self.worker) || has(self.worker.credentials)",message="worker.credentials is required for inline execution"
+// +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || (!has(self.type) && !has(self.credentials))",message="workerPoolRef is mutually exclusive with inline type/credentials"
+// +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.worker)",message="workerPoolRef is mutually exclusive with inline worker (per-task overrides not yet supported)"
+// +kubebuilder:validation:XValidation:rule="!has(self.worker) || (!has(self.type) && !has(self.credentials))",message="worker is mutually exclusive with legacy type/credentials fields"
+// +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.dependsOn) || size(self.dependsOn) == 0",message="dependsOn is not supported with workerPoolRef"
+// +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.branch) || size(self.branch) == 0",message="branch is not supported with workerPoolRef"
+// +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.ttlSecondsAfterFinished)",message="ttlSecondsAfterFinished is not supported with workerPoolRef"
 type TaskTemplate struct {
+	// Worker defines the execution environment for spawned Tasks.
+	// Mutually exclusive with workerPoolRef.
+	// +optional
+	Worker *WorkerSpec `json:"worker,omitempty"`
+
+	// WorkerPoolRef references a WorkerPool for persistent execution.
+	// When set, spawned Tasks execute on pre-warmed workers instead of
+	// creating per-task Jobs. Mutually exclusive with inline type/credentials.
+	// +optional
+	WorkerPoolRef *WorkerPoolReference `json:"workerPoolRef,omitempty"`
+
 	// Type specifies the agent type (e.g., claude-code).
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=claude-code;codex;gemini;opencode;cursor
-	Type string `json:"type"`
+	//
+	// Deprecated: use taskTemplate.worker.type instead.
+	// +optional
+	// +kubebuilder:validation:Enum=claude-code;codex;gemini;opencode;cursor;""
+	Type string `json:"type,omitempty"`
 
 	// Credentials specifies how to authenticate with the agent.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:XValidation:rule="self.type == 'none' || has(self.secretRef)",message="secretRef is required for api-key and oauth credential types"
-	Credentials Credentials `json:"credentials"`
+	//
+	// Deprecated: use taskTemplate.worker.credentials instead.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="size(self.type) == 0 || self.type == 'none' || has(self.secretRef)",message="secretRef is required for api-key and oauth credential types"
+	Credentials *Credentials `json:"credentials,omitempty"`
 
 	// Model optionally overrides the default model.
+	//
+	// Deprecated: use taskTemplate.worker.model instead.
 	// +optional
 	Model string `json:"model,omitempty"`
 
 	// Effort optionally controls how much reasoning effort spawned agents should use.
 	// Values are agent-specific and passed through without validation.
+	//
+	// Deprecated: use taskTemplate.worker.effort instead.
 	// +optional
 	Effort string `json:"effort,omitempty"`
 
 	// Image optionally overrides the default agent container image.
 	// Custom images must implement the agent image interface
 	// (see docs/agent-image-interface.md).
+	//
+	// Deprecated: use taskTemplate.worker.image instead.
 	// +optional
 	Image string `json:"image,omitempty"`
 
@@ -834,6 +869,8 @@ type TaskTemplate struct {
 	// Required when using githubIssues or githubPullRequests source; optional
 	// for other sources.
 	// When set, spawned Tasks inherit this workspace reference.
+	//
+	// Deprecated: use taskTemplate.worker.workspaceRef instead.
 	// +optional
 	WorkspaceRef *WorkspaceReference `json:"workspaceRef,omitempty"`
 
@@ -842,6 +879,8 @@ type TaskTemplate struct {
 	// are appended, mcpServers are appended with later entries winning on
 	// name collision.
 	// When set, spawned Tasks inherit this agent config reference list.
+	//
+	// Deprecated: use taskTemplate.worker.agentConfigRefs instead.
 	// +optional
 	// +kubebuilder:validation:MinItems=1
 	AgentConfigRefs []AgentConfigReference `json:"agentConfigRefs,omitempty"`
@@ -885,6 +924,8 @@ type TaskTemplate struct {
 	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty"`
 
 	// PodOverrides allows customizing the agent pod configuration for spawned Tasks.
+	//
+	// Deprecated: use taskTemplate.worker.podOverrides instead.
 	// +optional
 	PodOverrides *PodOverrides `json:"podOverrides,omitempty"`
 
@@ -918,7 +959,7 @@ type TaskTemplate struct {
 }
 
 // TaskSpawnerSpec defines the desired state of TaskSpawner.
-// +kubebuilder:validation:XValidation:rule="!(has(self.when.githubIssues) || has(self.when.githubPullRequests) || has(self.when.githubWebhook) || has(self.when.linearWebhook)) || has(self.taskTemplate.workspaceRef)",message="taskTemplate.workspaceRef is required when using githubIssues, githubPullRequests, githubWebhook, or linearWebhook source"
+// +kubebuilder:validation:XValidation:rule="!(has(self.when.githubIssues) || has(self.when.githubPullRequests) || has(self.when.githubWebhook) || has(self.when.linearWebhook)) || has(self.taskTemplate.workspaceRef) || (has(self.taskTemplate.worker) && has(self.taskTemplate.worker.workspaceRef)) || has(self.taskTemplate.workerPoolRef)",message="a workspace source is required when using githubIssues, githubPullRequests, githubWebhook, or linearWebhook source (set taskTemplate.workspaceRef, taskTemplate.worker.workspaceRef, or taskTemplate.workerPoolRef — a pool satisfies this because it carries its own workspace)"
 type TaskSpawnerSpec struct {
 	// When defines the conditions that trigger task spawning.
 	// +kubebuilder:validation:Required

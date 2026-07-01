@@ -7,15 +7,18 @@ const (
 	outputEndMarker   = "---KELOS_OUTPUTS_END---"
 )
 
-// ParseOutputs extracts output lines from log data between the
-// ---KELOS_OUTPUTS_START--- and ---KELOS_OUTPUTS_END--- markers.
+// ParseOutputs extracts output lines from the last complete
+// ---KELOS_OUTPUTS_START--- / ---KELOS_OUTPUTS_END--- marker pair in logData.
+// Using the last pair ensures that sequential tasks on a persistent worker pod
+// do not inherit stale outputs from a previous task.
 func ParseOutputs(logData string) []string {
-	startIdx := strings.Index(logData, outputStartMarker)
-	if startIdx == -1 {
+	endIdx := strings.LastIndex(logData, outputEndMarker)
+	if endIdx == -1 {
 		return nil
 	}
-	endIdx := strings.Index(logData, outputEndMarker)
-	if endIdx == -1 || endIdx <= startIdx {
+	// Search for the start marker before the end marker.
+	startIdx := strings.LastIndex(logData[:endIdx], outputStartMarker)
+	if startIdx == -1 {
 		return nil
 	}
 

@@ -30,6 +30,8 @@ type Interface interface {
 	Tasks() TaskInformer
 	// TaskSpawners returns a TaskSpawnerInformer.
 	TaskSpawners() TaskSpawnerInformer
+	// WorkerPools returns a WorkerPoolInformer.
+	WorkerPools() WorkerPoolInformer
 	// Workspaces returns a WorkspaceInformer.
 	Workspaces() WorkspaceInformer
 }
@@ -58,6 +60,11 @@ func (v *version) Tasks() TaskInformer {
 // TaskSpawners returns a TaskSpawnerInformer.
 func (v *version) TaskSpawners() TaskSpawnerInformer {
 	return &taskSpawnerInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
+// WorkerPools returns a WorkerPoolInformer.
+func (v *version) WorkerPools() WorkerPoolInformer {
+	return &workerPoolInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }
 
 // Workspaces returns a WorkspaceInformer.

@@ -66,7 +66,7 @@ var _ = Describe("Completion", func() {
 					Spec: kelos.TaskSpec{
 						Type:   "claude-code",
 						Prompt: "test",
-						Credentials: kelos.Credentials{
+						Credentials: &kelos.Credentials{
 							Type: kelos.CredentialTypeAPIKey,
 							SecretRef: &kelos.SecretReference{
 								Name: "test-secret",
@@ -104,7 +104,7 @@ var _ = Describe("Completion", func() {
 				Spec: kelos.TaskSpawnerSpec{
 					TaskTemplate: kelos.TaskTemplate{
 						Type: "claude-code",
-						Credentials: kelos.Credentials{
+						Credentials: &kelos.Credentials{
 							Type: kelos.CredentialTypeAPIKey,
 							SecretRef: &kelos.SecretReference{
 								Name: "test-secret",
@@ -141,7 +141,7 @@ var _ = Describe("Completion", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "test",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type: kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{
 							Name: "test-secret",

@@ -35,7 +35,7 @@ func describeAgentTests(cfg agentTestConfig) {
 					Type:   cfg.AgentType,
 					Model:  cfg.Model,
 					Prompt: "Print 'Hello from Kelos e2e test' to stdout",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      cfg.CredentialType,
 						SecretRef: &kelos.SecretReference{Name: cfg.SecretName},
 					},
@@ -90,7 +90,7 @@ func describeAgentTests(cfg agentTestConfig) {
 					Type:   cfg.AgentType,
 					Model:  cfg.Model,
 					Prompt: "Create a file called 'test.txt' with the content 'hello' in the current directory and print 'done'",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      cfg.CredentialType,
 						SecretRef: &kelos.SecretReference{Name: cfg.SecretName},
 					},
@@ -151,7 +151,7 @@ func describeAgentTests(cfg agentTestConfig) {
 					Type:   cfg.AgentType,
 					Model:  cfg.Model,
 					Prompt: "Print 'hello' to stdout",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      cfg.CredentialType,
 						SecretRef: &kelos.SecretReference{Name: cfg.SecretName},
 					},
@@ -234,7 +234,7 @@ func describeAgentTests(cfg agentTestConfig) {
 					Type:   cfg.AgentType,
 					Model:  cfg.Model,
 					Prompt: "Print 'Task A done' to stdout",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      cfg.CredentialType,
 						SecretRef: &kelos.SecretReference{Name: cfg.SecretName},
 					},
@@ -251,7 +251,7 @@ func describeAgentTests(cfg agentTestConfig) {
 					Model:     cfg.Model,
 					Prompt:    "Print 'Task B done' to stdout",
 					DependsOn: []string{"dep-chain-a"},
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      cfg.CredentialType,
 						SecretRef: &kelos.SecretReference{Name: cfg.SecretName},
 					},
@@ -295,7 +295,7 @@ func describeAgentTests(cfg agentTestConfig) {
 					Type:   cfg.AgentType,
 					Model:  cfg.Model,
 					Prompt: "Print 'Hello' to stdout",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      cfg.CredentialType,
 						SecretRef: &kelos.SecretReference{Name: cfg.SecretName},
 					},
@@ -343,7 +343,7 @@ var _ = Describe("Task with make available", func() {
 				Type:   "claude-code",
 				Model:  claudeCodeModel,
 				Prompt: "Run 'make --version' and print the output",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type:      kelos.CredentialTypeOAuth,
 					SecretRef: &kelos.SecretReference{Name: "claude-credentials"},
 				},
@@ -407,7 +407,7 @@ var _ = Describe("Task with workspace and secretRef", func() {
 				Type:   "claude-code",
 				Model:  claudeCodeModel,
 				Prompt: "Run 'gh auth status' and print the output",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type:      kelos.CredentialTypeOAuth,
 					SecretRef: &kelos.SecretReference{Name: "claude-credentials"},
 				},

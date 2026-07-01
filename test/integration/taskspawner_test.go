@@ -67,7 +67,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					},
 					TaskTemplate: kelos.TaskTemplate{
 						Type: "claude-code",
-						Credentials: kelos.Credentials{
+						Credentials: &kelos.Credentials{
 							Type: kelos.CredentialTypeOAuth,
 							SecretRef: &kelos.SecretReference{
 								Name: "claude-credentials",
@@ -202,7 +202,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					},
 					TaskTemplate: kelos.TaskTemplate{
 						Type: "claude-code",
-						Credentials: kelos.Credentials{
+						Credentials: &kelos.Credentials{
 							Type: kelos.CredentialTypeOAuth,
 							SecretRef: &kelos.SecretReference{
 								Name: "claude-credentials",
@@ -268,7 +268,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					},
 					TaskTemplate: kelos.TaskTemplate{
 						Type: "claude-code",
-						Credentials: kelos.Credentials{
+						Credentials: &kelos.Credentials{
 							Type: kelos.CredentialTypeOAuth,
 							SecretRef: &kelos.SecretReference{
 								Name: "claude-credentials",
@@ -338,7 +338,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					},
 					TaskTemplate: kelos.TaskTemplate{
 						Type: "claude-code",
-						Credentials: kelos.Credentials{
+						Credentials: &kelos.Credentials{
 							Type: kelos.CredentialTypeOAuth,
 							SecretRef: &kelos.SecretReference{
 								Name: "claude-credentials",
@@ -431,7 +431,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					},
 					TaskTemplate: kelos.TaskTemplate{
 						Type: "claude-code",
-						Credentials: kelos.Credentials{
+						Credentials: &kelos.Credentials{
 							Type: kelos.CredentialTypeOAuth,
 							SecretRef: &kelos.SecretReference{
 								Name: "claude-credentials",
@@ -487,7 +487,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					},
 					TaskTemplate: kelos.TaskTemplate{
 						Type: "claude-code",
-						Credentials: kelos.Credentials{
+						Credentials: &kelos.Credentials{
 							Type: kelos.CredentialTypeOAuth,
 							SecretRef: &kelos.SecretReference{
 								Name: "claude-credentials",
@@ -580,7 +580,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					},
 					TaskTemplate: kelos.TaskTemplate{
 						Type: "claude-code",
-						Credentials: kelos.Credentials{
+						Credentials: &kelos.Credentials{
 							Type: kelos.CredentialTypeOAuth,
 							SecretRef: &kelos.SecretReference{
 								Name: "claude-credentials",
@@ -659,7 +659,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					},
 					TaskTemplate: kelos.TaskTemplate{
 						Type: "claude-code",
-						Credentials: kelos.Credentials{
+						Credentials: &kelos.Credentials{
 							Type: kelos.CredentialTypeOAuth,
 							SecretRef: &kelos.SecretReference{
 								Name: "claude-credentials",
@@ -802,7 +802,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					},
 					TaskTemplate: kelos.TaskTemplate{
 						Type: "claude-code",
-						Credentials: kelos.Credentials{
+						Credentials: &kelos.Credentials{
 							Type: kelos.CredentialTypeOAuth,
 							SecretRef: &kelos.SecretReference{
 								Name: "claude-credentials",
@@ -898,7 +898,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					},
 					TaskTemplate: kelos.TaskTemplate{
 						Type: "claude-code",
-						Credentials: kelos.Credentials{
+						Credentials: &kelos.Credentials{
 							Type: kelos.CredentialTypeOAuth,
 							SecretRef: &kelos.SecretReference{
 								Name: "claude-credentials",
@@ -978,7 +978,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					},
 					TaskTemplate: kelos.TaskTemplate{
 						Type: "claude-code",
-						Credentials: kelos.Credentials{
+						Credentials: &kelos.Credentials{
 							Type: kelos.CredentialTypeOAuth,
 							SecretRef: &kelos.SecretReference{
 								Name: "claude-credentials",
@@ -1087,7 +1087,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					},
 					TaskTemplate: kelos.TaskTemplate{
 						Type: "claude-code",
-						Credentials: kelos.Credentials{
+						Credentials: &kelos.Credentials{
 							Type: kelos.CredentialTypeOAuth,
 							SecretRef: &kelos.SecretReference{
 								Name: "claude-credentials",
@@ -1159,7 +1159,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					},
 					TaskTemplate: kelos.TaskTemplate{
 						Type: "claude-code",
-						Credentials: kelos.Credentials{
+						Credentials: &kelos.Credentials{
 							Type: kelos.CredentialTypeOAuth,
 							SecretRef: &kelos.SecretReference{
 								Name: "claude-credentials",
@@ -1279,7 +1279,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					},
 					TaskTemplate: kelos.TaskTemplate{
 						Type: "claude-code",
-						Credentials: kelos.Credentials{
+						Credentials: &kelos.Credentials{
 							Type: kelos.CredentialTypeOAuth,
 							SecretRef: &kelos.SecretReference{
 								Name: "claude-credentials",
@@ -1357,7 +1357,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					},
 					TaskTemplate: kelos.TaskTemplate{
 						Type: "claude-code",
-						Credentials: kelos.Credentials{
+						Credentials: &kelos.Credentials{
 							Type: kelos.CredentialTypeOAuth,
 							SecretRef: &kelos.SecretReference{
 								Name: "claude-credentials",
@@ -1433,7 +1433,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					},
 					TaskTemplate: kelos.TaskTemplate{
 						Type: "claude-code",
-						Credentials: kelos.Credentials{
+						Credentials: &kelos.Credentials{
 							Type: kelos.CredentialTypeOAuth,
 							SecretRef: &kelos.SecretReference{
 								Name: "claude-credentials",
@@ -1516,7 +1516,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					},
 					TaskTemplate: kelos.TaskTemplate{
 						Type: "claude-code",
-						Credentials: kelos.Credentials{
+						Credentials: &kelos.Credentials{
 							Type: kelos.CredentialTypeOAuth,
 							SecretRef: &kelos.SecretReference{
 								Name: "claude-credentials",
@@ -1665,7 +1665,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					},
 					TaskTemplate: kelos.TaskTemplate{
 						Type: "claude-code",
-						Credentials: kelos.Credentials{
+						Credentials: &kelos.Credentials{
 							Type: kelos.CredentialTypeOAuth,
 							SecretRef: &kelos.SecretReference{
 								Name: "claude-credentials",
@@ -1820,7 +1820,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					},
 					TaskTemplate: kelos.TaskTemplate{
 						Type: "claude-code",
-						Credentials: kelos.Credentials{
+						Credentials: &kelos.Credentials{
 							Type: kelos.CredentialTypeOAuth,
 							SecretRef: &kelos.SecretReference{
 								Name: "claude-credentials",
@@ -1917,7 +1917,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					},
 					TaskTemplate: kelos.TaskTemplate{
 						Type: "claude-code",
-						Credentials: kelos.Credentials{
+						Credentials: &kelos.Credentials{
 							Type: kelos.CredentialTypeOAuth,
 							SecretRef: &kelos.SecretReference{
 								Name: "claude-credentials",
@@ -1994,7 +1994,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					},
 					TaskTemplate: kelos.TaskTemplate{
 						Type: "claude-code",
-						Credentials: kelos.Credentials{
+						Credentials: &kelos.Credentials{
 							Type: kelos.CredentialTypeOAuth,
 							SecretRef: &kelos.SecretReference{
 								Name: "claude-credentials",
@@ -2067,7 +2067,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					},
 					TaskTemplate: kelos.TaskTemplate{
 						Type: "claude-code",
-						Credentials: kelos.Credentials{
+						Credentials: &kelos.Credentials{
 							Type: kelos.CredentialTypeOAuth,
 							SecretRef: &kelos.SecretReference{
 								Name: "claude-credentials",
@@ -2144,7 +2144,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					},
 					TaskTemplate: kelos.TaskTemplate{
 						Type: "claude-code",
-						Credentials: kelos.Credentials{
+						Credentials: &kelos.Credentials{
 							Type: kelos.CredentialTypeOAuth,
 							SecretRef: &kelos.SecretReference{
 								Name: "claude-credentials",
@@ -2220,7 +2220,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					},
 					TaskTemplate: kelos.TaskTemplate{
 						Type: "claude-code",
-						Credentials: kelos.Credentials{
+						Credentials: &kelos.Credentials{
 							Type: kelos.CredentialTypeOAuth,
 							SecretRef: &kelos.SecretReference{
 								Name: "claude-credentials",
@@ -2283,7 +2283,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					},
 					TaskTemplate: kelos.TaskTemplate{
 						Type: "claude-code",
-						Credentials: kelos.Credentials{
+						Credentials: &kelos.Credentials{
 							Type: kelos.CredentialTypeOAuth,
 							SecretRef: &kelos.SecretReference{
 								Name: "claude-credentials",
@@ -2360,7 +2360,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					},
 					TaskTemplate: kelos.TaskTemplate{
 						Type: "claude-code",
-						Credentials: kelos.Credentials{
+						Credentials: &kelos.Credentials{
 							Type: kelos.CredentialTypeOAuth,
 							SecretRef: &kelos.SecretReference{
 								Name: "claude-credentials",
@@ -2382,6 +2382,43 @@ var _ = Describe("TaskSpawner Controller", func() {
 				return err == nil
 			}, timeout, interval).Should(BeTrue())
 			Expect(createdTS.Spec.When.GitHubIssues.PollInterval).To(Equal("30s"))
+		})
+	})
+
+	Context("When creating a TaskSpawner with workerPoolRef and ttlSecondsAfterFinished", func() {
+		It("Should reject the TaskSpawner", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-taskspawner-pool-ttl-exclusive",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a TaskSpawner with both workerPoolRef and ttlSecondsAfterFinished")
+			ttl := int32(300)
+			ts := &kelos.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-spawner-pool-ttl-exclusive",
+					Namespace: ns.Name,
+				},
+				Spec: kelos.TaskSpawnerSpec{
+					When: kelos.When{
+						GitHubIssues: &kelos.GitHubIssues{
+							State: "open",
+						},
+					},
+					TaskTemplate: kelos.TaskTemplate{
+						WorkerPoolRef: &kelos.WorkerPoolReference{
+							Name: "my-pool",
+						},
+						TTLSecondsAfterFinished: &ttl,
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, ts)
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsInvalid(err)).To(BeTrue())
 		})
 	})
 })

@@ -1080,7 +1080,7 @@ func TestPrintTaskDetail(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "Fix the bug",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -1332,7 +1332,7 @@ func TestPrintTaskDetailMinimal(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "Do something",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "secret"},
 			},

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/util/duration"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/yaml"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
@@ -68,10 +69,12 @@ func printTaskDetail(w io.Writer, t *kelos.Task) {
 	printField(w, "Type", t.Spec.Type)
 	printField(w, "Phase", string(t.Status.Phase))
 	printField(w, "Prompt", t.Spec.Prompt)
-	if t.Spec.Credentials.SecretRef != nil {
-		printField(w, "Secret", t.Spec.Credentials.SecretRef.Name)
+	if t.Spec.Credentials != nil {
+		if t.Spec.Credentials.SecretRef != nil {
+			printField(w, "Secret", t.Spec.Credentials.SecretRef.Name)
+		}
+		printField(w, "Credential Type", string(t.Spec.Credentials.Type))
 	}
-	printField(w, "Credential Type", string(t.Spec.Credentials.Type))
 	if t.Spec.Model != "" {
 		printField(w, "Model", t.Spec.Model)
 	}
@@ -86,6 +89,9 @@ func printTaskDetail(w io.Writer, t *kelos.Task) {
 	}
 	if t.Spec.WorkspaceRef != nil {
 		printField(w, "Workspace", t.Spec.WorkspaceRef.Name)
+	}
+	if t.Spec.WorkerPoolRef != nil {
+		printField(w, "Worker Pool", t.Spec.WorkerPoolRef.Name)
 	}
 	if len(t.Spec.AgentConfigRefs) > 0 {
 		names := make([]string, len(t.Spec.AgentConfigRefs))
@@ -291,6 +297,44 @@ func printTaskSpawnerDetail(w io.Writer, ts *kelos.TaskSpawner) {
 	}
 	if ts.Status.Message != "" {
 		printField(w, "Message", ts.Status.Message)
+	}
+}
+
+func printWorkerPoolTable(w io.Writer, pools []kelos.WorkerPool, allNamespaces bool) {
+	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
+	if allNamespaces {
+		fmt.Fprintln(tw, "NAMESPACE\tNAME\tTYPE\tREPLICAS\tREADY\tPHASE\tAGE")
+	} else {
+		fmt.Fprintln(tw, "NAME\tTYPE\tREPLICAS\tREADY\tPHASE\tAGE")
+	}
+	for _, wp := range pools {
+		age := duration.HumanDuration(time.Since(wp.CreationTimestamp.Time))
+		if allNamespaces {
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%s\t%s\n",
+				wp.Namespace, wp.Name, wp.Spec.Worker.Type, ptr.Deref(wp.Spec.Replicas, 1), wp.Status.ReadyReplicas, wp.Status.Phase, age)
+		} else {
+			fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%s\t%s\n",
+				wp.Name, wp.Spec.Worker.Type, ptr.Deref(wp.Spec.Replicas, 1), wp.Status.ReadyReplicas, wp.Status.Phase, age)
+		}
+	}
+	tw.Flush()
+}
+
+func printWorkerPoolDetail(w io.Writer, wp *kelos.WorkerPool) {
+	printField(w, "Name", wp.Name)
+	printField(w, "Namespace", wp.Namespace)
+	printField(w, "Type", wp.Spec.Worker.Type)
+	printField(w, "Phase", string(wp.Status.Phase))
+	printField(w, "Replicas", fmt.Sprintf("%d", ptr.Deref(wp.Spec.Replicas, 1)))
+	printField(w, "Ready Replicas", fmt.Sprintf("%d", wp.Status.ReadyReplicas))
+	if wp.Status.StatefulSetName != "" {
+		printField(w, "StatefulSet", wp.Status.StatefulSetName)
+	}
+	if wp.Status.ServiceName != "" {
+		printField(w, "Service", wp.Status.ServiceName)
+	}
+	if wp.Status.Message != "" {
+		printField(w, "Message", wp.Status.Message)
 	}
 }
 

@@ -24,4 +24,6 @@ type TaskExpansion interface{}
 
 type TaskSpawnerExpansion interface{}
 
+type WorkerPoolExpansion interface{}
+
 type WorkspaceExpansion interface{}

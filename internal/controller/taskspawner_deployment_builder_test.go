@@ -1520,7 +1520,7 @@ func TestBuildCronJob_BasicSchedule(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type:      kelos.CredentialTypeAPIKey,
 					SecretRef: &kelos.SecretReference{Name: "creds"},
 				},
@@ -1648,7 +1648,7 @@ func TestIsCronBased(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type:      kelos.CredentialTypeAPIKey,
 					SecretRef: &kelos.SecretReference{Name: "creds"},
 				},

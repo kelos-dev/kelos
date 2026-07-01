@@ -62,7 +62,7 @@ var _ = Describe("TaskSpawner", func() {
 					WorkspaceRef: &kelos.WorkspaceReference{
 						Name: "e2e-spawner-workspace",
 					},
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeOAuth,
 						SecretRef: &kelos.SecretReference{Name: "claude-credentials"},
 					},
@@ -112,7 +112,7 @@ var _ = Describe("TaskSpawner", func() {
 					WorkspaceRef: &kelos.WorkspaceReference{
 						Name: "e2e-spawner-workspace",
 					},
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeOAuth,
 						SecretRef: &kelos.SecretReference{Name: "claude-credentials"},
 					},
@@ -173,7 +173,7 @@ var _ = Describe("Cron TaskSpawner", func() {
 				TaskTemplate: kelos.TaskTemplate{
 					Type:  "claude-code",
 					Model: claudeCodeModel,
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeOAuth,
 						SecretRef: &kelos.SecretReference{Name: "claude-credentials"},
 					},
@@ -210,7 +210,7 @@ var _ = Describe("Cron TaskSpawner", func() {
 				},
 				TaskTemplate: kelos.TaskTemplate{
 					Type: "claude-code",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeOAuth,
 						SecretRef: &kelos.SecretReference{Name: "claude-credentials"},
 					},

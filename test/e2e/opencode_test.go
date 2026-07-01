@@ -28,7 +28,7 @@ var _ = Describe("OpenCode Task", func() {
 				Type:   "opencode",
 				Model:  openCodeTestModel,
 				Prompt: "Print 'Hello from OpenCode e2e test' to stdout",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type:      kelos.CredentialTypeAPIKey,
 					SecretRef: &kelos.SecretReference{Name: "opencode-credentials"},
 				},

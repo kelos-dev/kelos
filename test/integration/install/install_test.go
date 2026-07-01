@@ -767,7 +767,7 @@ var _ = Describe("Install/Uninstall", Ordered, func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "test prompt",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "fake-secret"},
 					},

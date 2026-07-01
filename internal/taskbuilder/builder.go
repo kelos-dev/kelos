@@ -109,6 +109,12 @@ func (tb *TaskBuilder) BuildTask(
 	if taskTemplate.UpstreamRepo != "" {
 		task.Spec.UpstreamRepo = taskTemplate.UpstreamRepo
 	}
+	if taskTemplate.WorkerPoolRef != nil {
+		task.Spec.WorkerPoolRef = taskTemplate.WorkerPoolRef
+	}
+	if taskTemplate.Worker != nil {
+		task.Spec.Worker = taskTemplate.Worker
+	}
 
 	// Apply template metadata
 	if taskTemplate.Metadata != nil {

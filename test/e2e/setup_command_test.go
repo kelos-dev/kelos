@@ -49,7 +49,7 @@ var _ = Describe("Workspace setupCommand", func() {
 				Type:   "claude-code",
 				Model:  claudeCodeModel,
 				Prompt: "Print the contents of .kelos-setup-sentinel verbatim, then print 'done'",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type:      kelos.CredentialTypeOAuth,
 					SecretRef: &kelos.SecretReference{Name: "claude-credentials"},
 				},
@@ -112,7 +112,7 @@ chmod +x "$HOME/.local/bin/kelos-setup-probe"`,
 				Type:   "claude-code",
 				Model:  claudeCodeModel,
 				Prompt: "Run the command 'kelos-setup-probe' and print its output verbatim.",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type:      kelos.CredentialTypeOAuth,
 					SecretRef: &kelos.SecretReference{Name: "claude-credentials"},
 				},
@@ -164,7 +164,7 @@ chmod +x "$HOME/.local/bin/kelos-setup-probe"`,
 				Type:   "claude-code",
 				Model:  claudeCodeModel,
 				Prompt: "Print 'agent should never run'",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type:      kelos.CredentialTypeOAuth,
 					SecretRef: &kelos.SecretReference{Name: "claude-credentials"},
 				},

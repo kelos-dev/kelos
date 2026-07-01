@@ -42,7 +42,7 @@ func TestRouteMessageThreadContextBody(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type: kelos.CredentialTypeNone,
 				},
 				PromptTemplate: "{{.Body}}",
@@ -206,7 +206,7 @@ func TestCreateTaskLongSpawnerName(t *testing.T) {
 		Spec: kelos.TaskSpawnerSpec{
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type: kelos.CredentialTypeNone,
 				},
 				PromptTemplate: "{{.Body}}",
@@ -280,7 +280,7 @@ func TestCreateTaskAlreadyExists(t *testing.T) {
 		Spec: kelos.TaskSpawnerSpec{
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type: kelos.CredentialTypeNone,
 				},
 				PromptTemplate: "{{.Body}}",
@@ -378,7 +378,7 @@ func TestHandleMessageEventBotIDSelfDetection(t *testing.T) {
 			},
 			TaskTemplate: kelos.TaskTemplate{
 				Type: "claude-code",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type: kelos.CredentialTypeNone,
 				},
 				PromptTemplate: "{{.Body}}",

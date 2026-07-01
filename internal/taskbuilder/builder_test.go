@@ -13,7 +13,7 @@ func TestBuildTask_ForwardsEffort(t *testing.T) {
 	tb := &TaskBuilder{}
 	template := &kelos.TaskTemplate{
 		Type: "codex",
-		Credentials: kelos.Credentials{
+		Credentials: &kelos.Credentials{
 			Type: kelos.CredentialTypeAPIKey,
 			SecretRef: &kelos.SecretReference{
 				Name: "credentials",
@@ -42,7 +42,7 @@ func TestBuildTask_ForwardsPodFailurePolicy(t *testing.T) {
 	tb := &TaskBuilder{}
 	template := &kelos.TaskTemplate{
 		Type: "codex",
-		Credentials: kelos.Credentials{
+		Credentials: &kelos.Credentials{
 			Type: kelos.CredentialTypeAPIKey,
 			SecretRef: &kelos.SecretReference{
 				Name: "credentials",

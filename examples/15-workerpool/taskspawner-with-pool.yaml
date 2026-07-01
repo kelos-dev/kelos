@@ -1,0 +1,17 @@
+apiVersion: kelos.dev/v1alpha2
+kind: TaskSpawner
+metadata:
+  name: pool-spawner
+spec:
+  when:
+    githubIssues:
+      labels:
+        - kelos
+  taskTemplate:
+    workerPoolRef:
+      name: my-pool
+    # workspaceRef here is used by the TaskSpawner's GitHub issue/PR discovery
+    # loop to determine which repository to poll — it does not affect task
+    # execution. The WorkerPool's own workspace is used for running tasks.
+    workspaceRef:
+      name: my-repo

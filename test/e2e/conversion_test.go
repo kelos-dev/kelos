@@ -186,7 +186,7 @@ var _ = Describe("API conversion", func() {
 				},
 				TaskTemplate: kelos.TaskTemplate{
 					Type:            "claude-code",
-					Credentials:     kelos.Credentials{Type: kelos.CredentialTypeNone},
+					Credentials:     &kelos.Credentials{Type: kelos.CredentialTypeNone},
 					WorkspaceRef:    &kelos.WorkspaceReference{Name: "missing-workspace"},
 					PromptTemplate:  "Review {{.Title}}",
 					AgentConfigRefs: []kelos.AgentConfigReference{{Name: "current-config"}},

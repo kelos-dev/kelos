@@ -154,6 +154,13 @@ var _ = BeforeSuite(func() {
 	}).SetupWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 
+	err = (&controller.WorkerPoolReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("kelos-controller"),
+	}).SetupWithManager(mgr)
+	Expect(err).NotTo(HaveOccurred())
+
 	go func() {
 		defer GinkgoRecover()
 		err = mgr.Start(ctx)
@@ -183,6 +190,9 @@ var _ = BeforeSuite(func() {
 	}, 30*time.Second, 100*time.Millisecond).Should(Succeed())
 	Eventually(func() error {
 		return k8sClient.List(ctx, &kelos.WorkspaceList{})
+	}, 30*time.Second, 100*time.Millisecond).Should(Succeed())
+	Eventually(func() error {
+		return k8sClient.List(ctx, &kelos.WorkerPoolList{})
 	}, 30*time.Second, 100*time.Millisecond).Should(Succeed())
 	// AgentConfig requires the conversion webhook to be reachable.
 	Eventually(func() error {

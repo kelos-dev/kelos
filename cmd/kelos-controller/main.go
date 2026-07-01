@@ -65,6 +65,8 @@ func main() {
 	var telemetryEndpoint string
 	var telemetryEnvironment string
 	var codexAuthRefresherSchedule string
+	var workerRunnerImage string
+	var workerRunnerImagePullPolicy string
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -94,6 +96,8 @@ func main() {
 	flag.StringVar(&telemetryEndpoint, "telemetry-endpoint", telemetry.DefaultPostHogEndpoint, "The PostHog endpoint for sending telemetry reports.")
 	flag.StringVar(&telemetryEnvironment, "telemetry-environment", "production", "The environment label for telemetry reports (e.g., production, development).")
 	flag.StringVar(&codexAuthRefresherSchedule, "codex-auth-refresher-schedule", controller.DefaultCodexAuthRefreshSchedule, "Cron schedule for managed Codex OAuth refresher CronJobs.")
+	flag.StringVar(&workerRunnerImage, "worker-runner-image", controller.DefaultWorkerRunnerImage, "The image to use for worker-runner containers in WorkerPool StatefulSets.")
+	flag.StringVar(&workerRunnerImagePullPolicy, "worker-runner-image-pull-policy", "", "The image pull policy for worker-runner containers (e.g., Always, Never, IfNotPresent).")
 
 	opts, applyVerbosity := logging.SetupZapOptions(flag.CommandLine)
 	flag.Parse()
@@ -250,6 +254,27 @@ func main() {
 		Builder: refresherBuilder,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "CodexAuthRefresher")
+		os.Exit(1)
+	}
+	if err = (&controller.WorkerPoolReconciler{
+		Client:                      mgr.GetClient(),
+		Scheme:                      mgr.GetScheme(),
+		Recorder:                    mgr.GetEventRecorderFor("kelos-controller"),
+		Clientset:                   clientset,
+		WorkerRunnerImage:           workerRunnerImage,
+		WorkerRunnerImagePullPolicy: corev1.PullPolicy(workerRunnerImagePullPolicy),
+		ClaudeCodeImage:             claudeCodeImage,
+		ClaudeCodeImagePullPolicy:   corev1.PullPolicy(claudeCodeImagePullPolicy),
+		CodexImage:                  codexImage,
+		CodexImagePullPolicy:        corev1.PullPolicy(codexImagePullPolicy),
+		GeminiImage:                 geminiImage,
+		GeminiImagePullPolicy:       corev1.PullPolicy(geminiImagePullPolicy),
+		OpenCodeImage:               openCodeImage,
+		OpenCodeImagePullPolicy:     corev1.PullPolicy(openCodeImagePullPolicy),
+		CursorImage:                 cursorImage,
+		CursorImagePullPolicy:       corev1.PullPolicy(cursorImagePullPolicy),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "WorkerPool")
 		os.Exit(1)
 	}
 

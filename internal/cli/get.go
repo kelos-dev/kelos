@@ -29,6 +29,7 @@ func newGetCommand(cfg *ClientConfig) *cobra.Command {
 	cmd.AddCommand(newGetTaskSpawnerCommand(cfg, &allNamespaces))
 	cmd.AddCommand(newGetWorkspaceCommand(cfg, &allNamespaces))
 	cmd.AddCommand(newGetAgentConfigCommand(cfg, &allNamespaces))
+	cmd.AddCommand(newGetWorkerPoolCommand(cfg, &allNamespaces))
 
 	return cmd
 }

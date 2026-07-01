@@ -1,0 +1,20 @@
+apiVersion: kelos.dev/v1alpha2
+kind: WorkerPool
+metadata:
+  name: my-pool
+spec:
+  worker:
+    type: claude-code
+    credentials:
+      type: api-key
+      secretRef:
+        name: anthropic-api-key
+    workspaceRef:
+      name: my-repo
+  replicas: 2
+  volumeClaimTemplate:
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 20Gi

@@ -243,7 +243,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 				Spec: kelos.TaskSpec{
 					Type:        agentType,
 					Prompt:      prompt,
-					Credentials: creds,
+					Credentials: &creds,
 					Model:       model,
 					Effort:      effort,
 					Image:       image,

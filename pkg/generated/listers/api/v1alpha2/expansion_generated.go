@@ -42,6 +42,14 @@ type TaskSpawnerListerExpansion interface{}
 // TaskSpawnerNamespaceLister.
 type TaskSpawnerNamespaceListerExpansion interface{}
 
+// WorkerPoolListerExpansion allows custom methods to be added to
+// WorkerPoolLister.
+type WorkerPoolListerExpansion interface{}
+
+// WorkerPoolNamespaceListerExpansion allows custom methods to be added to
+// WorkerPoolNamespaceLister.
+type WorkerPoolNamespaceListerExpansion interface{}
+
 // WorkspaceListerExpansion allows custom methods to be added to
 // WorkspaceLister.
 type WorkspaceListerExpansion interface{}

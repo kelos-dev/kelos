@@ -228,7 +228,7 @@ func TestResolveAgentConfigRefs_NeitherSet(t *testing.T) {
 	}
 }
 
-func TestResolveAgentConfigRefs_PluralSet(t *testing.T) {
+func TestResolveAgentConfigRefs_LegacyField(t *testing.T) {
 	spec := &kelos.TaskSpec{
 		AgentConfigRefs: []kelos.AgentConfigReference{
 			{Name: "first"},
@@ -238,5 +238,49 @@ func TestResolveAgentConfigRefs_PluralSet(t *testing.T) {
 	got := ResolveAgentConfigRefs(spec)
 	if len(got) != 2 || got[0].Name != "first" || got[1].Name != "second" {
 		t.Errorf("Expected [first, second], got %+v", got)
+	}
+}
+
+func TestResolveAgentConfigRefs_WorkerFieldPreferred(t *testing.T) {
+	spec := &kelos.TaskSpec{
+		Worker: &kelos.WorkerSpec{
+			AgentConfigRefs: []kelos.AgentConfigReference{
+				{Name: "worker-config"},
+			},
+		},
+		AgentConfigRefs: []kelos.AgentConfigReference{
+			{Name: "legacy-config"},
+		},
+	}
+	got := ResolveAgentConfigRefs(spec)
+	if len(got) != 1 || got[0].Name != "worker-config" {
+		t.Errorf("Expected [worker-config], got %+v", got)
+	}
+}
+
+func TestResolveAgentConfigRefs_WorkerFieldOnly(t *testing.T) {
+	spec := &kelos.TaskSpec{
+		Worker: &kelos.WorkerSpec{
+			AgentConfigRefs: []kelos.AgentConfigReference{
+				{Name: "only-worker"},
+			},
+		},
+	}
+	got := ResolveAgentConfigRefs(spec)
+	if len(got) != 1 || got[0].Name != "only-worker" {
+		t.Errorf("Expected [only-worker], got %+v", got)
+	}
+}
+
+func TestResolveAgentConfigRefs_WorkerNilFallsBackToLegacy(t *testing.T) {
+	spec := &kelos.TaskSpec{
+		Worker: &kelos.WorkerSpec{},
+		AgentConfigRefs: []kelos.AgentConfigReference{
+			{Name: "legacy-fallback"},
+		},
+	}
+	got := ResolveAgentConfigRefs(spec)
+	if len(got) != 1 || got[0].Name != "legacy-fallback" {
+		t.Errorf("Expected [legacy-fallback], got %+v", got)
 	}
 }

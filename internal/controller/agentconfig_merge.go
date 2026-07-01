@@ -53,8 +53,12 @@ func MergeAgentConfigs(configs []kelos.AgentConfigSpec) *kelos.AgentConfigSpec {
 }
 
 // ResolveAgentConfigRefs returns the effective list of AgentConfigReference
-// values from a TaskSpec.
+// values from a TaskSpec, preferring spec.worker.agentConfigRefs over the
+// legacy spec.agentConfigRefs field.
 func ResolveAgentConfigRefs(spec *kelos.TaskSpec) []kelos.AgentConfigReference {
+	if spec.Worker != nil && len(spec.Worker.AgentConfigRefs) > 0 {
+		return spec.Worker.AgentConfigRefs
+	}
 	if len(spec.AgentConfigRefs) > 0 {
 		return spec.AgentConfigRefs
 	}

@@ -115,6 +115,12 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	// Tasks with workerPoolRef are handled by the WorkerPoolReconciler
+	// after the finalizer is in place.
+	if task.Spec.WorkerPoolRef != nil {
+		return ctrl.Result{}, nil
+	}
+
 	// Check if Job already exists
 	var job batchv1.Job
 	jobExists := true
@@ -141,7 +147,7 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		}
 
 		if task.Spec.Branch != "" {
-			if task.Spec.WorkspaceRef == nil {
+			if resolveTaskWorkspaceRef(&task) == nil {
 				logger.Info("Branch is set without workspaceRef, branch checkout will not happen", "task", task.Name, "branch", task.Spec.Branch)
 				r.recordEvent(&task, corev1.EventTypeWarning, "BranchWithoutWorkspace", "Branch %q is set but workspaceRef is not configured, branch checkout will be skipped", task.Spec.Branch)
 			}
@@ -231,15 +237,25 @@ func (r *TaskReconciler) handleDeletion(ctx context.Context, task *kelos.Task) (
 			r.BranchLocker.Release(branchLockKey(task), task.Name)
 		}
 
-		// Delete the Job if it exists
-		var job batchv1.Job
-		if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: task.Name}, &job); err == nil {
-			propagationPolicy := metav1.DeletePropagationBackground
-			if err := r.Delete(ctx, &job, &client.DeleteOptions{
-				PropagationPolicy: &propagationPolicy,
-			}); err != nil && !apierrors.IsNotFound(err) {
-				logger.Error(err, "unable to delete Job")
-				return ctrl.Result{}, err
+		if task.Spec.WorkerPoolRef != nil {
+			// Clear the worker pod assignment so the worker becomes available.
+			if task.Status.PodName != "" {
+				var pod corev1.Pod
+				if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: task.Status.PodName}, &pod); err == nil {
+					r.clearWorkerPodAssignment(ctx, &pod)
+				}
+			}
+		} else {
+			// Delete the Job if it exists
+			var job batchv1.Job
+			if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: task.Name}, &job); err == nil {
+				propagationPolicy := metav1.DeletePropagationBackground
+				if err := r.Delete(ctx, &job, &client.DeleteOptions{
+					PropagationPolicy: &propagationPolicy,
+				}); err != nil && !apierrors.IsNotFound(err) {
+					logger.Error(err, "unable to delete Job")
+					return ctrl.Result{}, err
+				}
 			}
 		}
 
@@ -254,22 +270,43 @@ func (r *TaskReconciler) handleDeletion(ctx context.Context, task *kelos.Task) (
 	return ctrl.Result{}, nil
 }
 
+// clearWorkerPodAssignment removes task assignment annotations from a worker pod.
+func (r *TaskReconciler) clearWorkerPodAssignment(ctx context.Context, pod *corev1.Pod) {
+	logger := log.FromContext(ctx)
+	podPatch := client.MergeFrom(pod.DeepCopy())
+
+	completed := 0
+	if v, ok := pod.Annotations[kelos.AnnotationWorkerTasksCompleted]; ok {
+		completed, _ = strconv.Atoi(v)
+	}
+	completed++
+
+	delete(pod.Annotations, kelos.AnnotationWorkerAssignedTask)
+	delete(pod.Annotations, kelos.AnnotationWorkerTaskStatus)
+	delete(pod.Annotations, kelos.AnnotationWorkerTaskFailReason)
+	pod.Annotations[kelos.AnnotationWorkerTasksCompleted] = strconv.Itoa(completed)
+
+	if err := r.Patch(ctx, pod, podPatch); err != nil {
+		logger.Error(err, "Failed to clear worker pod assignment on task deletion", "pod", pod.Name)
+	}
+}
+
 // createJob creates a Job for the Task.
 func (r *TaskReconciler) createJob(ctx context.Context, task *kelos.Task) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	var workspace *kelos.WorkspaceSpec
-	if task.Spec.WorkspaceRef != nil {
+	if resolveTaskWorkspaceRef(task) != nil {
 		var ws kelos.Workspace
 		if err := r.Get(ctx, client.ObjectKey{
 			Namespace: task.Namespace,
-			Name:      task.Spec.WorkspaceRef.Name,
+			Name:      resolveTaskWorkspaceRef(task).Name,
 		}, &ws); err != nil {
 			if apierrors.IsNotFound(err) {
-				logger.Info("Workspace not found yet, requeuing", "workspace", task.Spec.WorkspaceRef.Name)
+				logger.Info("Workspace not found yet, requeuing", "workspace", resolveTaskWorkspaceRef(task).Name)
 				return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 			}
-			logger.Error(err, "Unable to fetch Workspace", "workspace", task.Spec.WorkspaceRef.Name)
+			logger.Error(err, "Unable to fetch Workspace", "workspace", resolveTaskWorkspaceRef(task).Name)
 			return ctrl.Result{}, err
 		}
 		workspace = &ws.Spec
@@ -397,7 +434,7 @@ func (r *TaskReconciler) createJob(ctx context.Context, task *kelos.Task) (ctrl.
 
 	logger.Info("created Job", "job", job.Name)
 	r.recordEvent(task, corev1.EventTypeNormal, "TaskCreated", "Created Job %s for task", job.Name)
-	taskCreatedTotal.WithLabelValues(task.Namespace, task.Spec.Type).Inc()
+	taskCreatedTotal.WithLabelValues(task.Namespace, resolveTaskType(task)).Inc()
 
 	// Update status
 	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
@@ -671,13 +708,13 @@ func (r *TaskReconciler) refreshGitHubAppTokenIfNeeded(ctx context.Context, task
 		BaseURL: r.TokenClient.BaseURL,
 		Client:  r.TokenClient.Client,
 	}
-	if task.Spec.WorkspaceRef != nil {
+	if resolveTaskWorkspaceRef(task) != nil {
 		var ws kelos.Workspace
-		if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: task.Spec.WorkspaceRef.Name}, &ws); err != nil {
+		if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: resolveTaskWorkspaceRef(task).Name}, &ws); err != nil {
 			// Fall back to the controller-wide BaseURL. Log at V(1) so
 			// operators can correlate a later 401 against the wrong
 			// API host with the lookup that failed here.
-			logger.V(1).Info("Unable to fetch workspace for token refresh, using default API base URL", "workspace", task.Spec.WorkspaceRef.Name, "error", err)
+			logger.V(1).Info("Unable to fetch workspace for token refresh, using default API base URL", "workspace", resolveTaskWorkspaceRef(task).Name, "error", err)
 		} else if ws.Spec.Repo != "" {
 			host, _, _ := parseGitHubRepo(ws.Spec.Repo)
 			if apiBaseURL := gitHubAPIBaseURL(host); apiBaseURL != "" {
@@ -731,38 +768,7 @@ func tokenRefreshFailureRetryAfter(expiresAt time.Time) time.Duration {
 }
 
 func (r *TaskReconciler) resolveMCPServerSecrets(ctx context.Context, namespace string, servers []kelos.MCPServerSpec) ([]kelos.MCPServerSpec, error) {
-	resolved := make([]kelos.MCPServerSpec, len(servers))
-	for i, server := range servers {
-		resolved[i] = server
-
-		if server.HeadersFrom != nil {
-			var secret corev1.Secret
-			if err := r.Get(ctx, client.ObjectKey{
-				Namespace: namespace,
-				Name:      server.HeadersFrom.SecretRef.Name,
-			}, &secret); err != nil {
-				return nil, fmt.Errorf("fetching headersFrom secret %q for MCP server %q: %w", server.HeadersFrom.SecretRef.Name, server.Name, err)
-			}
-			merged := make(map[string]string, len(server.Headers)+len(secret.Data))
-			for key, value := range server.Headers {
-				merged[key] = value
-			}
-			for key, value := range secret.Data {
-				merged[key] = string(value)
-			}
-			resolved[i].Headers = merged
-			resolved[i].HeadersFrom = nil
-		}
-
-		resolvedEnv, err := r.resolveMCPServerEnv(ctx, namespace, server)
-		if err != nil {
-			return nil, err
-		}
-		resolved[i].Env = resolvedEnv
-		resolved[i].EnvFrom = nil
-	}
-
-	return resolved, nil
+	return resolveMCPServerSecrets(ctx, r.Client, namespace, servers)
 }
 
 // resolveMCPServerEnv resolves the Env entries of a single MCP server to a
@@ -770,7 +776,7 @@ func (r *TaskReconciler) resolveMCPServerSecrets(ctx context.Context, namespace 
 // fetching the referenced Secret key or ConfigMap key. EnvFrom (whole-secret)
 // is then merged on top so its keys take precedence on collision, matching
 // the existing behaviour.
-func (r *TaskReconciler) resolveMCPServerEnv(ctx context.Context, namespace string, server kelos.MCPServerSpec) ([]corev1.EnvVar, error) {
+func resolveMCPServerEnv(ctx context.Context, reader client.Reader, namespace string, server kelos.MCPServerSpec) ([]corev1.EnvVar, error) {
 	// Resolve inline Env entries into a map keyed by name so EnvFrom can
 	// override and so the final list has no duplicate names.
 	values := make(map[string]string, len(server.Env))
@@ -780,7 +786,7 @@ func (r *TaskReconciler) resolveMCPServerEnv(ctx context.Context, namespace stri
 			return nil, fmt.Errorf("MCP server %q has an env entry with an empty name", server.Name)
 		}
 
-		value, ok, err := r.resolveEnvVarValue(ctx, namespace, server.Name, entry)
+		value, ok, err := resolveEnvVarValue(ctx, reader, namespace, server.Name, entry)
 		if err != nil {
 			return nil, err
 		}
@@ -797,7 +803,7 @@ func (r *TaskReconciler) resolveMCPServerEnv(ctx context.Context, namespace stri
 
 	if server.EnvFrom != nil {
 		var secret corev1.Secret
-		if err := r.Get(ctx, client.ObjectKey{
+		if err := reader.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
 			Name:      server.EnvFrom.SecretRef.Name,
 		}, &secret); err != nil {
@@ -841,7 +847,7 @@ func (r *TaskReconciler) resolveMCPServerEnv(ctx context.Context, namespace stri
 // The returned ok is false when an optional ValueFrom resolves to nothing
 // (Secret/ConfigMap or key missing); the caller omits the variable entirely,
 // matching kubelet semantics for pod env.
-func (r *TaskReconciler) resolveEnvVarValue(ctx context.Context, namespace, serverName string, entry corev1.EnvVar) (string, bool, error) {
+func resolveEnvVarValue(ctx context.Context, reader client.Reader, namespace, serverName string, entry corev1.EnvVar) (string, bool, error) {
 	if entry.ValueFrom == nil {
 		return entry.Value, true, nil
 	}
@@ -861,7 +867,7 @@ func (r *TaskReconciler) resolveEnvVarValue(ctx context.Context, namespace, serv
 	case src.SecretKeyRef != nil:
 		ref := src.SecretKeyRef
 		var secret corev1.Secret
-		if err := r.Get(ctx, client.ObjectKey{
+		if err := reader.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
 			Name:      ref.Name,
 		}, &secret); err != nil {
@@ -881,7 +887,7 @@ func (r *TaskReconciler) resolveEnvVarValue(ctx context.Context, namespace, serv
 	case src.ConfigMapKeyRef != nil:
 		ref := src.ConfigMapKeyRef
 		var cm corev1.ConfigMap
-		if err := r.Get(ctx, client.ObjectKey{
+		if err := reader.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
 			Name:      ref.Name,
 		}, &cm); err != nil {
@@ -903,6 +909,43 @@ func (r *TaskReconciler) resolveEnvVarValue(ctx context.Context, namespace, serv
 	default:
 		return "", false, fmt.Errorf("MCP server %q env %q: valueFrom must set secretKeyRef or configMapKeyRef", serverName, entry.Name)
 	}
+}
+
+// resolveMCPServerSecrets resolves all secret-backed references (headersFrom,
+// envFrom, env[].valueFrom) in a slice of MCP server specs into literal values.
+func resolveMCPServerSecrets(ctx context.Context, reader client.Reader, namespace string, servers []kelos.MCPServerSpec) ([]kelos.MCPServerSpec, error) {
+	resolved := make([]kelos.MCPServerSpec, len(servers))
+	for i, server := range servers {
+		resolved[i] = server
+
+		if server.HeadersFrom != nil {
+			var secret corev1.Secret
+			if err := reader.Get(ctx, client.ObjectKey{
+				Namespace: namespace,
+				Name:      server.HeadersFrom.SecretRef.Name,
+			}, &secret); err != nil {
+				return nil, fmt.Errorf("fetching headersFrom secret %q for MCP server %q: %w", server.HeadersFrom.SecretRef.Name, server.Name, err)
+			}
+			merged := make(map[string]string, len(server.Headers)+len(secret.Data))
+			for key, value := range server.Headers {
+				merged[key] = value
+			}
+			for key, value := range secret.Data {
+				merged[key] = string(value)
+			}
+			resolved[i].Headers = merged
+			resolved[i].HeadersFrom = nil
+		}
+
+		resolvedEnv, err := resolveMCPServerEnv(ctx, reader, namespace, server)
+		if err != nil {
+			return nil, err
+		}
+		resolved[i].Env = resolvedEnv
+		resolved[i].EnvFrom = nil
+	}
+
+	return resolved, nil
 }
 
 // updateStatus updates Task status based on Job status.
@@ -937,7 +980,7 @@ func (r *TaskReconciler) updateStatus(ctx context.Context, task *kelos.Task, job
 			newMessage = "Task completed successfully"
 			setCompletionTime = true
 			r.recordEvent(task, corev1.EventTypeNormal, "TaskSucceeded", "Task completed successfully")
-			taskCompletedTotal.WithLabelValues(task.Namespace, task.Spec.Type, string(kelos.TaskPhaseSucceeded)).Inc()
+			taskCompletedTotal.WithLabelValues(task.Namespace, resolveTaskType(task), string(kelos.TaskPhaseSucceeded)).Inc()
 		}
 	} else if isJobFailed(job) {
 		if task.Status.Phase != kelos.TaskPhaseFailed {
@@ -945,7 +988,7 @@ func (r *TaskReconciler) updateStatus(ctx context.Context, task *kelos.Task, job
 			newMessage = "Task failed"
 			setCompletionTime = true
 			r.recordEvent(task, corev1.EventTypeWarning, "TaskFailed", "Task failed")
-			taskCompletedTotal.WithLabelValues(task.Namespace, task.Spec.Type, string(kelos.TaskPhaseFailed)).Inc()
+			taskCompletedTotal.WithLabelValues(task.Namespace, resolveTaskType(task), string(kelos.TaskPhaseFailed)).Inc()
 		}
 	}
 
@@ -1020,7 +1063,7 @@ func (r *TaskReconciler) updateStatus(ctx context.Context, task *kelos.Task, job
 	// Record task duration when completion time is set and we have a start time
 	if setCompletionTime && task.Status.StartTime != nil {
 		duration := task.Status.CompletionTime.Time.Sub(task.Status.StartTime.Time).Seconds()
-		taskDurationSeconds.WithLabelValues(task.Namespace, task.Spec.Type, string(newPhase)).Observe(duration)
+		taskDurationSeconds.WithLabelValues(task.Namespace, resolveTaskType(task), string(newPhase)).Observe(duration)
 	}
 
 	// Record cost and token metrics when results are available
@@ -1069,7 +1112,9 @@ func (r *TaskReconciler) ttlExpired(task *kelos.Task) (bool, time.Duration) {
 		return false, 0
 	}
 	if task.Status.CompletionTime == nil {
-		return false, 0
+		// TTL is configured but CompletionTime hasn't been set yet; requeue
+		// to avoid stopping all reconciles for a dangling terminal task.
+		return false, 5 * time.Second
 	}
 
 	ttl := time.Duration(*task.Spec.TTLSecondsAfterFinished) * time.Second
@@ -1177,7 +1222,7 @@ func (r *TaskReconciler) checkDependencies(ctx context.Context, task *kelos.Task
 				logger.Error(updateErr, "Unable to update Task status")
 			}
 			r.recordEvent(task, corev1.EventTypeWarning, "DependencyFailed", "Dependency %q failed", depName)
-			taskCompletedTotal.WithLabelValues(task.Namespace, task.Spec.Type, string(kelos.TaskPhaseFailed)).Inc()
+			taskCompletedTotal.WithLabelValues(task.Namespace, resolveTaskType(task), string(kelos.TaskPhaseFailed)).Inc()
 			return false, ctrl.Result{}, nil
 		}
 
@@ -1224,8 +1269,8 @@ func (r *TaskReconciler) walkDeps(ctx context.Context, namespace, name string, v
 // branch name do not block each other.
 func branchLockKey(task *kelos.Task) string {
 	ws := ""
-	if task.Spec.WorkspaceRef != nil {
-		ws = task.Spec.WorkspaceRef.Name
+	if resolveTaskWorkspaceRef(task) != nil {
+		ws = resolveTaskWorkspaceRef(task).Name
 	}
 	return ws + ":" + task.Spec.Branch
 }
@@ -1329,8 +1374,8 @@ func (r *TaskReconciler) resolvePromptTemplate(ctx context.Context, task *kelos.
 // extracted from Task results.
 func RecordCostTokenMetrics(task *kelos.Task, results map[string]string) {
 	spawner := task.Labels["kelos.dev/taskspawner"]
-	model := task.Spec.Model
-	labels := []string{task.Namespace, task.Spec.Type, spawner, model}
+	model := resolveTaskModel(task)
+	labels := []string{task.Namespace, resolveTaskType(task), spawner, model}
 
 	if costStr, ok := results["cost-usd"]; ok {
 		if cost, err := strconv.ParseFloat(costStr, 64); err == nil && cost > 0 {

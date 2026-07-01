@@ -77,7 +77,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Create a hello world program",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type: kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{
 							Name: "anthropic-api-key",
@@ -232,7 +232,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Create a hello world program",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type: kelos.CredentialTypeOAuth,
 						SecretRef: &kelos.SecretReference{
 							Name: "claude-oauth",
@@ -337,7 +337,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Resolve MCP headersFrom",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
 					},
@@ -443,7 +443,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Resolve MCP envFrom",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
 					},
@@ -532,7 +532,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Fail on missing MCP secret",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
 					},
@@ -618,7 +618,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Install private skills",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
 					},
@@ -707,7 +707,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Fail on missing skills auth key",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
 					},
@@ -803,7 +803,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Prefer MCP secret values",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
 					},
@@ -928,7 +928,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Resolve MCP env valueFrom",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
 					},
@@ -1019,7 +1019,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Fail on unsupported MCP env valueFrom",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
 					},
@@ -1168,7 +1168,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Resolve MCP env optional valueFrom",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
 					},
@@ -1251,7 +1251,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Fix the bug",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type: kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{
 							Name: "anthropic-api-key",
@@ -1374,7 +1374,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Create a PR",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type: kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{
 							Name: "anthropic-api-key",
@@ -1531,7 +1531,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Review the code",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type: kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{
 							Name: "anthropic-api-key",
@@ -1608,7 +1608,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Create a hello world program",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type: kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{
 							Name: "anthropic-api-key",
@@ -1690,7 +1690,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Create a hello world program",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type: kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{
 							Name: "anthropic-api-key",
@@ -1761,7 +1761,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Create a hello world program",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type: kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{
 							Name: "anthropic-api-key",
@@ -1852,7 +1852,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Fix the bug",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type: kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{
 							Name: "anthropic-api-key",
@@ -1964,7 +1964,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Fix the bug",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type: kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{
 							Name: "anthropic-api-key",
@@ -2059,7 +2059,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "codex",
 					Prompt: "Fix the bug",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type: kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{
 							Name: "codex-api-key",
@@ -2168,7 +2168,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "codex",
 					Prompt: "Refactor the module",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type: kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{
 							Name: "codex-api-key",
@@ -2252,7 +2252,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "codex",
 					Prompt: "Review the code",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type: kelos.CredentialTypeOAuth,
 						SecretRef: &kelos.SecretReference{
 							Name: "codex-oauth-secret",
@@ -2317,7 +2317,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "opencode",
 					Prompt: "Fix the bug",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type: kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{
 							Name: "opencode-api-key",
@@ -2413,7 +2413,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Fix the bug",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type: kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{
 							Name: "anthropic-api-key",
@@ -2536,7 +2536,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Fix the bug",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type: kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{
 							Name: "anthropic-api-key",
@@ -2626,7 +2626,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Test events",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type: kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{
 							Name: "anthropic-api-key",
@@ -2742,7 +2742,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Test failure event",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type: kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{
 							Name: "anthropic-api-key",
@@ -2826,7 +2826,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Do something",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
 					},
@@ -2844,7 +2844,7 @@ var _ = Describe("Task Controller", func() {
 					Type:      "claude-code",
 					Prompt:    "Continue work",
 					DependsOn: []string{"task-a"},
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
 					},
@@ -2942,7 +2942,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Do something",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
 					},
@@ -2960,7 +2960,7 @@ var _ = Describe("Task Controller", func() {
 					Type:      "claude-code",
 					Prompt:    "Continue work",
 					DependsOn: []string{"dep-task-a"},
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
 					},
@@ -3045,7 +3045,7 @@ var _ = Describe("Task Controller", func() {
 					Type:   "claude-code",
 					Prompt: "Task A",
 					Branch: "feature-1",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
 					},
@@ -3088,7 +3088,7 @@ var _ = Describe("Task Controller", func() {
 					Type:   "claude-code",
 					Prompt: "Task B",
 					Branch: "feature-1",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
 					},
@@ -3175,7 +3175,7 @@ var _ = Describe("Task Controller", func() {
 					Type:   "claude-code",
 					Prompt: "Work on branch",
 					Branch: "feature-x",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
 					},
@@ -3292,7 +3292,7 @@ var _ = Describe("Task Controller", func() {
 					Type:   "claude-code",
 					Prompt: "Task A",
 					Branch: "feature-1",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
 					},
@@ -3336,7 +3336,7 @@ var _ = Describe("Task Controller", func() {
 					Type:   "claude-code",
 					Prompt: "Task B",
 					Branch: "feature-1",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
 					},
@@ -3386,7 +3386,7 @@ var _ = Describe("Task Controller", func() {
 					Type:      "claude-code",
 					Prompt:    "Task A",
 					DependsOn: []string{"cycle-task-b"},
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
 					},
@@ -3404,7 +3404,7 @@ var _ = Describe("Task Controller", func() {
 					Type:      "claude-code",
 					Prompt:    "Task B",
 					DependsOn: []string{"cycle-task-a"},
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
 					},
@@ -3456,7 +3456,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Generate outputs",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
 					},
@@ -3507,7 +3507,7 @@ var _ = Describe("Task Controller", func() {
 					Type:      "claude-code",
 					Prompt:    `Review outputs: {{ index .Deps "tmpl-task-a" "Outputs" }}`,
 					DependsOn: []string{"tmpl-task-a"},
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
 					},
@@ -3558,7 +3558,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Generate results",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
 					},
@@ -3613,7 +3613,7 @@ var _ = Describe("Task Controller", func() {
 					Type:      "claude-code",
 					Prompt:    `Review branch {{ index .Deps "results-task-a" "Results" "branch" }}`,
 					DependsOn: []string{"results-task-a"},
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
 					},
@@ -3681,7 +3681,7 @@ var _ = Describe("Task Controller", func() {
 					Type:   "claude-code",
 					Prompt: "Issue #42: Fix login bug",
 					Branch: "kelos-task-42",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
 					},
@@ -3703,7 +3703,7 @@ var _ = Describe("Task Controller", func() {
 					Type:   "claude-code",
 					Prompt: "Issue #99: Add feature",
 					Branch: "kelos-task-99",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
 					},
@@ -3830,7 +3830,7 @@ var _ = Describe("Task Controller", func() {
 					Type:   "claude-code",
 					Prompt: "First attempt at issue #42",
 					Branch: "kelos-task-42",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
 					},
@@ -3876,7 +3876,7 @@ var _ = Describe("Task Controller", func() {
 					Type:   "claude-code",
 					Prompt: "Second attempt at issue #42",
 					Branch: "kelos-task-42",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
 					},
@@ -3950,7 +3950,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Original prompt",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type: kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{
 							Name: "anthropic-api-key",
@@ -4032,7 +4032,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Work on feature",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type: kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{
 							Name: "anthropic-api-key",
@@ -4145,7 +4145,7 @@ var _ = Describe("Task Controller", func() {
 				Spec: kelos.TaskSpec{
 					Type:   "claude-code",
 					Prompt: "Test multi agentconfig merge",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
 					},

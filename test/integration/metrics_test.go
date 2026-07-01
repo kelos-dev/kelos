@@ -89,7 +89,7 @@ func createAndCompleteTask(nsName, taskName, spawner, model string) *kelos.Task 
 		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: fmt.Sprintf("Test task %s", taskName),
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type: kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{
 					Name: "anthropic-api-key",

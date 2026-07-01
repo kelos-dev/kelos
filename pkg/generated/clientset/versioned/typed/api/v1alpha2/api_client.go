@@ -31,6 +31,7 @@ type ApiV1alpha2Interface interface {
 	AgentConfigsGetter
 	TasksGetter
 	TaskSpawnersGetter
+	WorkerPoolsGetter
 	WorkspacesGetter
 }
 
@@ -49,6 +50,10 @@ func (c *ApiV1alpha2Client) Tasks(namespace string) TaskInterface {
 
 func (c *ApiV1alpha2Client) TaskSpawners(namespace string) TaskSpawnerInterface {
 	return newTaskSpawners(c, namespace)
+}
+
+func (c *ApiV1alpha2Client) WorkerPools(namespace string) WorkerPoolInterface {
+	return newWorkerPools(c, namespace)
 }
 
 func (c *ApiV1alpha2Client) Workspaces(namespace string) WorkspaceInterface {

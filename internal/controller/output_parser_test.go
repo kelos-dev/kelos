@@ -91,6 +91,26 @@ func TestParseOutputs(t *testing.T) {
 			logData:  "---KELOS_OUTPUTS_END---\n---KELOS_OUTPUTS_START---\nbranch: wrong-order\n",
 			expected: nil,
 		},
+		{
+			name: "multiple marker pairs uses latest",
+			logData: "---KELOS_OUTPUTS_START---\nbranch: old-task\n" +
+				"pr: https://github.com/org/repo/pull/1\n---KELOS_OUTPUTS_END---\n" +
+				"Starting new task...\n" +
+				"---KELOS_OUTPUTS_START---\nbranch: new-task\n" +
+				"pr: https://github.com/org/repo/pull/2\n---KELOS_OUTPUTS_END---\n",
+			expected: []string{
+				"branch: new-task",
+				"pr: https://github.com/org/repo/pull/2",
+			},
+		},
+		{
+			name: "multiple marker pairs with trailing logs uses latest",
+			logData: "---KELOS_OUTPUTS_START---\nbranch: task-a\n---KELOS_OUTPUTS_END---\n" +
+				"---KELOS_OUTPUTS_START---\nbranch: task-b\n---KELOS_OUTPUTS_END---\n" +
+				"---KELOS_OUTPUTS_START---\nbranch: task-c\n---KELOS_OUTPUTS_END---\n" +
+				"Exiting\n",
+			expected: []string{"branch: task-c"},
+		},
 	}
 
 	for _, tt := range tests {

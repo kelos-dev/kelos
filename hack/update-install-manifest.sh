@@ -212,9 +212,9 @@ write_chart_crd_template() {
 }
 
 # inject_kelos_conversion adds the conversion webhook config and the
-# cert-manager CA-injection annotation to every kelos.dev CRD in place. Each
-# kelos CRD serves two versions (v1alpha1 and v1alpha2) with different schemas,
-# so it needs a webhook conversion strategy. controller-gen does not emit
+# cert-manager CA-injection annotation to kelos.dev CRDs that serve multiple
+# versions. CRDs with a single version (e.g. WorkerPool, v1alpha2-only) are
+# left as-is since no conversion is needed. controller-gen does not emit
 # spec.conversion, so it is injected here, before the chart templates are
 # derived from this file.
 inject_kelos_conversion() {
@@ -222,17 +222,19 @@ inject_kelos_conversion() {
   local tmp="${file}.conv.tmp"
 
   awk '
-function flush(  i, isAC) {
-  isAC = 0
+function flush(  i, isKelos, versionCount) {
+  isKelos = 0
+  versionCount = 0
   for (i = 1; i <= n; i++) {
-    if (buf[i] ~ /^  name: [a-z]+\.kelos\.dev[[:space:]]*$/) { isAC = 1; break }
+    if (buf[i] ~ /^  name: [a-z]+\.kelos\.dev[[:space:]]*$/) { isKelos = 1 }
+    if (buf[i] ~ /^  (  |- )name: v1alpha/) { versionCount++ }
   }
   for (i = 1; i <= n; i++) {
     print buf[i]
-    if (isAC && buf[i] ~ /^  annotations:[[:space:]]*$/) {
+    if (isKelos && versionCount > 1 && buf[i] ~ /^  annotations:[[:space:]]*$/) {
       print "    cert-manager.io/inject-ca-from: kelos-system/kelos-serving-cert"
     }
-    if (isAC && buf[i] ~ /^  scope: /) {
+    if (isKelos && versionCount > 1 && buf[i] ~ /^  scope: /) {
       print "  conversion:"
       print "    strategy: Webhook"
       print "    webhook:"
@@ -256,17 +258,24 @@ END { flush() }
 }
 
 # verify_kelos_conversion fails fast if inject_kelos_conversion did not wire
-# every kelos CRD. The CA annotation is injected into an existing annotations:
+# multi-version kelos CRDs. Single-version CRDs (like WorkerPool) correctly
+# skip conversion. The CA annotation is injected into an existing annotations:
 # block, so a change in controller-gen output shape could silently drop it;
 # this guard catches that instead of shipping CRDs that fail conversion.
 verify_kelos_conversion() {
   local file="$1"
-  local want anno conv
-  want="$(grep -cE '^  name: [a-z]+\.kelos\.dev[[:space:]]*$' "${file}")"
+  local multi_version anno conv
+  # Count CRDs that serve both v1alpha1 and v1alpha2 (need conversion).
+  multi_version="$(awk '
+    /^  name: [a-z]+\.kelos\.dev/ { v=0 }
+    /^  (  |- )name: v1alpha/ { v++ }
+    /^---/ { if (v > 1) count++; v=0 }
+    END { if (v > 1) count++; print count+0 }
+  ' "${file}")"
   anno="$(grep -cF 'cert-manager.io/inject-ca-from: kelos-system/kelos-serving-cert' "${file}")"
   conv="$(grep -cE '^    strategy: Webhook[[:space:]]*$' "${file}")"
-  if [[ "${want}" -lt 1 || "${anno}" -ne "${want}" || "${conv}" -ne "${want}" ]]; then
-    echo "ERROR: kelos CRD conversion wiring incomplete in ${file}: crds=${want} ca-annotations=${anno} conversion-blocks=${conv}" >&2
+  if [[ "${multi_version}" -lt 1 || "${anno}" -ne "${multi_version}" || "${conv}" -ne "${multi_version}" ]]; then
+    echo "ERROR: kelos CRD conversion wiring incomplete in ${file}: multi_version=${multi_version} ca-annotations=${anno} conversion-blocks=${conv}" >&2
     exit 1
   fi
 }
@@ -279,6 +288,7 @@ generate_chart_crd_templates() {
   write_chart_crd_template "${source}" "CustomResourceDefinition" "agentconfigs.kelos.dev" "${CHART_CRD_DIR}/agentconfig-crd.yaml"
   write_chart_crd_template "${source}" "CustomResourceDefinition" "tasks.kelos.dev" "${CHART_CRD_DIR}/task-crd.yaml"
   write_chart_crd_template "${source}" "CustomResourceDefinition" "taskspawners.kelos.dev" "${CHART_CRD_DIR}/taskspawner-crd.yaml"
+  write_chart_crd_template "${source}" "CustomResourceDefinition" "workerpools.kelos.dev" "${CHART_CRD_DIR}/workerpool-crd.yaml"
   write_chart_crd_template "${source}" "CustomResourceDefinition" "workspaces.kelos.dev" "${CHART_CRD_DIR}/workspace-crd.yaml"
 }
 

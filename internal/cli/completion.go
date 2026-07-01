@@ -117,3 +117,30 @@ func completeWorkspaceNames(cfg *ClientConfig) cobra.CompletionFunc {
 		return names, cobra.ShellCompDirectiveNoFileComp
 	}
 }
+
+func completeWorkerPoolNames(cfg *ClientConfig) cobra.CompletionFunc {
+	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) > 0 {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		cl, ns, err := cfg.NewClient()
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+
+		wpList := &kelos.WorkerPoolList{}
+		if err := cl.List(ctx, wpList, client.InNamespace(ns)); err != nil {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+
+		var names []string
+		for _, wp := range wpList.Items {
+			names = append(names, wp.Name)
+		}
+		return names, cobra.ShellCompDirectiveNoFileComp
+	}
+}

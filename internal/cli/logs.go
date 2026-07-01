@@ -88,7 +88,8 @@ func newLogsCommand(cfg *ClientConfig) *cobra.Command {
 			if follow {
 				fmt.Fprintf(os.Stderr, "Streaming container (%s) logs...\n", containerName)
 			}
-			return streamAgentLogs(ctx, cs, ns, podName, containerName, task.Spec.Type, follow)
+			agentType := resolveAgentType(ctx, cl, ns, task)
+			return streamAgentLogs(ctx, cs, ns, podName, containerName, agentType, follow)
 		},
 	}
 
@@ -129,13 +130,14 @@ func waitForPod(ctx context.Context, cl client.Client, name, namespace string) (
 }
 
 func resolveTaskPodName(ctx context.Context, cl client.Client, namespace string, task *kelos.Task) (string, error) {
+	if task.Spec.WorkerPoolRef != nil && task.Status.PodName != "" {
+		return task.Status.PodName, nil
+	}
+
 	var pods corev1.PodList
 	if err := cl.List(ctx, &pods, client.InNamespace(namespace), client.MatchingLabels{
 		"kelos.dev/task": task.Name,
 	}); err != nil {
-		if task.Status.PodName != "" {
-			return task.Status.PodName, nil
-		}
 		return "", fmt.Errorf("listing task pods: %w", err)
 	}
 
@@ -216,4 +218,22 @@ func streamAgentLogs(ctx context.Context, cs *kubernetes.Clientset, namespace, p
 func isContainerNotReady(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "is waiting to start") || strings.Contains(msg, "PodInitializing")
+}
+
+// resolveAgentType determines the effective agent type for log parsing,
+// checking spec.worker.type, legacy spec.type, and the referenced WorkerPool.
+func resolveAgentType(ctx context.Context, cl client.Client, namespace string, task *kelos.Task) string {
+	if task.Spec.Worker != nil && task.Spec.Worker.Type != "" {
+		return task.Spec.Worker.Type
+	}
+	if task.Spec.Type != "" {
+		return task.Spec.Type
+	}
+	if task.Spec.WorkerPoolRef != nil {
+		var pool kelos.WorkerPool
+		if err := cl.Get(ctx, client.ObjectKey{Name: task.Spec.WorkerPoolRef.Name, Namespace: namespace}, &pool); err == nil {
+			return pool.Spec.Worker.Type
+		}
+	}
+	return ""
 }

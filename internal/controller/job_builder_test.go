@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 )
 
 func TestBuildClaudeCodeJob_DefaultImage(t *testing.T) {
@@ -24,7 +25,7 @@ func TestBuildClaudeCodeJob_DefaultImage(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Hello world",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -79,7 +80,7 @@ func TestBuildClaudeCodeJob_CustomImage(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the bug",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -135,7 +136,7 @@ func TestBuildClaudeCodeJob_NoModel(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Hello",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -167,7 +168,7 @@ func TestBuildAgentJob_WithEffort(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeCodex,
 			Prompt: "Hello",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -202,7 +203,7 @@ func TestBuildClaudeCodeJob_WorkspaceWithRef(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the code",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -269,7 +270,7 @@ func TestBuildClaudeCodeJob_WorkspaceWithCommitRefFetchesDetached(t *testing.T) 
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the code",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -338,7 +339,7 @@ func TestBuildClaudeCodeJob_WorkspaceWithInjectedFiles(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Inject plugin files",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -410,7 +411,7 @@ func TestBuildClaudeCodeJob_WorkspaceWithInjectedFilesInvalidPath(t *testing.T) 
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Inject plugin files",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -446,7 +447,7 @@ func TestBuildClaudeCodeJob_WorkspaceWithSetupCommand(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Hello",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -495,7 +496,7 @@ func TestBuildClaudeCodeJob_WorkspaceWithoutSetupCommand(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Hello",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -529,7 +530,7 @@ func TestBuildAgentJob_SetupCommandPodOverrideIsDropped(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Hello",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -576,7 +577,7 @@ func TestBuildAgentJob_SetupCommandPodOverrideIsDroppedWhenWorkspaceUnset(t *tes
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Hello",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -615,7 +616,7 @@ func TestBuildClaudeCodeJob_CustomImageWithWorkspace(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the bug",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -697,7 +698,7 @@ func TestBuildClaudeCodeJob_WorkspaceWithSecretRefPersistsCredentialHelper(t *te
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the code",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -764,7 +765,7 @@ func TestBuildClaudeCodeJob_WorkspaceWithSecretRefMountsTokenVolume(t *testing.T
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the code",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -867,7 +868,7 @@ func TestBuildClaudeCodeJob_WorkspaceWithoutSecretRefDoesNotMountTokenVolume(t *
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Hello",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -905,7 +906,7 @@ func TestBuildClaudeCodeJob_CredentialHelperReadsFromTokenFile(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the code",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -959,7 +960,7 @@ func TestBuildClaudeCodeJob_EnterpriseWorkspaceSetsGHHostAndEnterpriseToken(t *t
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the bug",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -1038,7 +1039,7 @@ func TestBuildClaudeCodeJob_GithubComWorkspaceUsesGHToken(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the bug",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -1091,7 +1092,7 @@ func TestBuildCodexJob_DefaultImage(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeCodex,
 			Prompt: "Fix the bug",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "openai-secret"},
 			},
@@ -1175,7 +1176,7 @@ func TestBuildCodexJob_CustomImage(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeCodex,
 			Prompt: "Refactor the module",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "openai-secret"},
 			},
@@ -1211,7 +1212,7 @@ func TestBuildCodexJob_WithWorkspace(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeCodex,
 			Prompt: "Fix the code",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "openai-secret"},
 			},
@@ -1286,7 +1287,7 @@ func TestBuildCodexJob_OAuthCredentials(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeCodex,
 			Prompt: "Review the code",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeOAuth,
 				SecretRef: &kelos.SecretReference{Name: "codex-oauth"},
 			},
@@ -1338,7 +1339,7 @@ func TestBuildGeminiJob_DefaultImage(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeGemini,
 			Prompt: "Fix the bug",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "gemini-secret"},
 			},
@@ -1425,7 +1426,7 @@ func TestBuildGeminiJob_CustomImage(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeGemini,
 			Prompt: "Refactor the module",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "gemini-secret"},
 			},
@@ -1461,7 +1462,7 @@ func TestBuildGeminiJob_WithWorkspace(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeGemini,
 			Prompt: "Fix the code",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "gemini-secret"},
 			},
@@ -1539,7 +1540,7 @@ func TestBuildGeminiJob_OAuthCredentials(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeGemini,
 			Prompt: "Review the code",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeOAuth,
 				SecretRef: &kelos.SecretReference{Name: "gemini-oauth"},
 			},
@@ -1591,7 +1592,7 @@ func TestBuildOpenCodeJob_DefaultImage(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeOpenCode,
 			Prompt: "Fix the bug",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "opencode-secret"},
 			},
@@ -1681,7 +1682,7 @@ func TestBuildOpenCodeJob_CustomImage(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeOpenCode,
 			Prompt: "Refactor the module",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "opencode-secret"},
 			},
@@ -1717,7 +1718,7 @@ func TestBuildOpenCodeJob_WithWorkspace(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeOpenCode,
 			Prompt: "Fix the code",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "opencode-secret"},
 			},
@@ -1798,7 +1799,7 @@ func TestBuildOpenCodeJob_OAuthCredentials(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeOpenCode,
 			Prompt: "Review the code",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeOAuth,
 				SecretRef: &kelos.SecretReference{Name: "opencode-oauth"},
 			},
@@ -1853,7 +1854,7 @@ func TestBuildCursorJob_DefaultImage(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeCursor,
 			Prompt: "Fix the bug",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "cursor-secret"},
 			},
@@ -1938,7 +1939,7 @@ func TestBuildCursorJob_CustomImage(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeCursor,
 			Prompt: "Refactor the module",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "cursor-secret"},
 			},
@@ -1972,7 +1973,7 @@ func TestBuildCursorJob_OAuthCredentials(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeCursor,
 			Prompt: "Review the code",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeOAuth,
 				SecretRef: &kelos.SecretReference{Name: "cursor-oauth"},
 			},
@@ -2032,7 +2033,7 @@ func TestBuildClaudeCodeJob_UnsupportedType(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   "unsupported-agent",
 			Prompt: "Hello",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -2057,7 +2058,7 @@ func TestBuildJob_PodOverridesResources(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -2111,7 +2112,7 @@ func TestBuildJob_PodOverridesActiveDeadlineSeconds(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -2144,7 +2145,7 @@ func TestBuildJob_PodOverridesEnv(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -2195,7 +2196,7 @@ func TestBuildJob_PodOverridesEnvBuiltinPrecedence(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -2242,7 +2243,7 @@ func TestBuildJob_PodOverridesNodeSelector(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -2295,7 +2296,7 @@ func TestBuildJob_PodOverridesTolerations(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -2349,7 +2350,7 @@ func TestBuildJob_PodOverridesAffinity(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -2395,7 +2396,7 @@ func TestBuildJob_PodOverridesImagePullSecrets(t *testing.T) {
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
 			Image:  "registry.corp.internal/agents/claude-code:v1",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -2435,7 +2436,7 @@ func TestBuildJob_PodOverridesAllFields(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeCodex,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "openai-secret"},
 			},
@@ -2558,7 +2559,7 @@ func TestBuildJob_PodOverridesLabels(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -2601,7 +2602,7 @@ func TestBuildJob_PodOverridesLabelsBuiltinPrecedence(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -2640,7 +2641,7 @@ func TestBuildJob_NoPodOverrides(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -2695,7 +2696,7 @@ func TestBuildJob_AgentConfigAgentsMD(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -2746,7 +2747,7 @@ func TestBuildJob_AgentConfigPlugins(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -2999,7 +3000,7 @@ func TestBuildPluginConfigMap_TooLarge(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -3024,7 +3025,7 @@ func TestBuildJob_AgentConfigFull(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -3083,7 +3084,7 @@ func TestBuildJob_AgentConfigSkills(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -3201,7 +3202,7 @@ func TestBuildJob_AgentConfigSkillsWithSecretRef(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -3290,7 +3291,7 @@ func TestBuildJob_AgentConfigSkillsWithPlugins(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -3349,7 +3350,7 @@ func TestBuildJob_AgentConfigSkillsEmptySource(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -3381,7 +3382,7 @@ func TestBuildJob_AgentConfigSkillsReservedPluginName(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -3421,7 +3422,7 @@ func TestBuildJob_AgentConfigWithWorkspace(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -3482,7 +3483,7 @@ func TestBuildJob_AgentConfigWithoutWorkspace(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -3532,7 +3533,7 @@ func TestBuildJob_AgentConfigCodex(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeCodex,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -3601,7 +3602,7 @@ func TestBuildJob_AgentConfigGemini(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeGemini,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -3667,7 +3668,7 @@ func TestBuildJob_AgentConfigOpenCode(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeOpenCode,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -3736,7 +3737,7 @@ func TestBuildJob_AgentConfigPluginNamePathTraversal(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -3810,7 +3811,7 @@ func TestBuildJob_BranchSetupInitContainer(t *testing.T) {
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Work on feature",
 			Branch: "feature-x",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -3893,7 +3894,7 @@ func TestBuildJob_BranchSetupWithSecretRefUsesCredentialHelper(t *testing.T) {
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Work on feature",
 			Branch: "feature-y",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -3952,7 +3953,7 @@ func TestBuildJob_BranchWithoutWorkspaceNoInitContainer(t *testing.T) {
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Work on feature",
 			Branch: "feature-z",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -3993,7 +3994,7 @@ func TestBuildJob_BranchEnvDoesNotMutateWorkspaceEnvVars(t *testing.T) {
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Work on feature",
 			Branch: "feature-w",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -4047,7 +4048,7 @@ func TestBuildJob_KelosAgentTypeAlwaysSet(t *testing.T) {
 				Spec: kelos.TaskSpec{
 					Type:   tt.agentType,
 					Prompt: "Hello",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "my-secret"},
 					},
@@ -4086,7 +4087,7 @@ func TestBuildJob_AgentConfigMCPServers(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -4195,7 +4196,7 @@ func TestBuildJob_AgentConfigMCPServersWithHTTPHeaders(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -4258,7 +4259,7 @@ func TestBuildJob_AgentConfigMCPServersWithPluginsAndAgentsMD(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -4327,7 +4328,7 @@ func TestBuildJob_AgentConfigMCPServersCodex(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeCodex,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "openai-secret"},
 			},
@@ -4371,7 +4372,7 @@ func TestBuildJob_AgentConfigMCPServersGemini(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeGemini,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "gemini-secret"},
 			},
@@ -4415,7 +4416,7 @@ func TestBuildJob_AgentConfigMCPServersEmptyName(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -4451,7 +4452,7 @@ func TestBuildJob_AgentConfigMCPServersDuplicateName(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix issue",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -4496,7 +4497,7 @@ func TestBuildJob_AgentConfigMCPServerNamePathTraversal(t *testing.T) {
 				Spec: kelos.TaskSpec{
 					Type:   AgentTypeClaudeCode,
 					Prompt: "Fix issue",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "my-secret"},
 					},
@@ -4528,7 +4529,7 @@ func TestBuildJob_KelosBaseBranchSetWhenWorkspaceRefPresent(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the code",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -4570,7 +4571,7 @@ func TestBuildJob_KelosBaseBranchAbsentWhenRefEmpty(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the code",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -4604,7 +4605,7 @@ func TestBuildJob_KelosBaseBranchAbsentWithoutWorkspace(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the code",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -4634,7 +4635,7 @@ func TestBuildJob_WorkspaceWithOneRemote(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Work on feature",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -4685,7 +4686,7 @@ func TestBuildJob_WorkspaceWithMultipleRemotes(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Work on feature",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -4736,7 +4737,7 @@ func TestBuildJob_WorkspaceWithNoRemotesNoRemoteSetupContainer(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the code",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -4771,7 +4772,7 @@ func TestBuildJob_RemoteSetupOrderingWithBranchSetup(t *testing.T) {
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Work on feature",
 			Branch: "feature-x",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -4827,7 +4828,7 @@ func TestBuildJob_RemoteSetupQuotesShellMetacharacters(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Do work",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -4874,7 +4875,7 @@ func TestBuildJob_WorkspaceWithUpstreamRemoteInjectsEnv(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the code",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -4920,7 +4921,7 @@ func TestBuildJob_WorkspaceWithNonUpstreamRemoteNoEnv(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the code",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -4958,7 +4959,7 @@ func TestBuildJob_WorkspaceWithInvalidUpstreamRemoteNoEnv(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the code",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -4999,7 +5000,7 @@ func TestBuildJob_TaskSpawnerLabelInjectsEnv(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Hello",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -5036,7 +5037,7 @@ func TestBuildJob_NoTaskSpawnerLabelNoEnv(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Hello",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -5066,7 +5067,7 @@ func TestBuildJob_PodFailurePolicyUnsetByDefault(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Hello",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -5118,7 +5119,7 @@ func TestBuildJob_PodFailurePolicyOverride(t *testing.T) {
 			Type:             AgentTypeClaudeCode,
 			Prompt:           "Hello",
 			PodFailurePolicy: policy,
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -5185,7 +5186,7 @@ func TestBuildJob_PodFailurePolicyFailIndexRejected(t *testing.T) {
 					},
 				},
 			},
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -5211,7 +5212,7 @@ func TestBuildJob_GHConfigDirNotSetWithoutSecretRef(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the bug",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -5245,7 +5246,7 @@ func TestBuildJob_CustomImageGetsGHConfigDir(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the bug",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -5294,7 +5295,7 @@ func TestBuildJob_CredentialHelperClearsInheritedHelpers(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the bug",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -5346,7 +5347,7 @@ func TestBuildJob_UpstreamRepoSpecOverridesRemote(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the code",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -5393,7 +5394,7 @@ func TestBuildJob_UpstreamRepoSpecWithoutRemote(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the code",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -5437,7 +5438,7 @@ func TestBuildJob_NoneCredentials(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the bug",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type: kelos.CredentialTypeNone,
 			},
 			PodOverrides: &kelos.PodOverrides{
@@ -5494,7 +5495,7 @@ func TestBuildJob_NoneCredentials_ServiceAccountName(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Fix the bug",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type: kelos.CredentialTypeNone,
 			},
 			PodOverrides: &kelos.PodOverrides{
@@ -5547,7 +5548,7 @@ func TestBuildJob_PodOverridesVolumes(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Mount a CA bundle",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -5639,7 +5640,7 @@ func TestBuildJob_PodOverridesVolumes_ReservedNameRejected(t *testing.T) {
 				Spec: kelos.TaskSpec{
 					Type:   AgentTypeClaudeCode,
 					Prompt: "Try to shadow a Kelos volume",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "my-secret"},
 					},
@@ -5675,7 +5676,7 @@ func TestBuildJob_PodOverridesVolumes_DuplicateNameRejected(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Try to declare two volumes with the same name",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -5707,7 +5708,7 @@ func TestBuildJob_PodOverridesVolumeMounts_AppendToWorkspace(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Mount an extra volume alongside the workspace",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -5761,13 +5762,13 @@ func TestBuildJob_PodOverridesPodSecurityContext_PreservesFSGroup(t *testing.T) 
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Restrict pod with seccomp",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
 			PodOverrides: &kelos.PodOverrides{
 				PodSecurityContext: &corev1.PodSecurityContext{
-					RunAsNonRoot:   ptr(true),
+					RunAsNonRoot:   ptr.To(true),
 					SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 				},
 			},
@@ -5806,7 +5807,7 @@ func TestBuildJob_PodOverridesPodSecurityContext_UserFSGroupOverrides(t *testing
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Override fsGroup",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -5843,14 +5844,14 @@ func TestBuildJob_PodOverridesContainerSecurityContext(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Restrict the agent container",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
 			PodOverrides: &kelos.PodOverrides{
 				ContainerSecurityContext: &corev1.SecurityContext{
-					AllowPrivilegeEscalation: ptr(false),
-					ReadOnlyRootFilesystem:   ptr(true),
+					AllowPrivilegeEscalation: ptr.To(false),
+					ReadOnlyRootFilesystem:   ptr.To(true),
 					Capabilities: &corev1.Capabilities{
 						Drop: []corev1.Capability{"ALL"},
 					},
@@ -5891,7 +5892,7 @@ func TestBuildJob_ExtraContainers_ReservedNameRejected(t *testing.T) {
 				Spec: kelos.TaskSpec{
 					Type:   AgentTypeClaudeCode,
 					Prompt: "Extra container with reserved name",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "my-secret"},
 					},
@@ -5924,7 +5925,7 @@ func TestBuildJob_ExtraContainers_DuplicateNameRejected(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Extra containers with duplicate names",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -5961,7 +5962,7 @@ func TestBuildJob_ExtraContainers_AgentTypeNamesAllowed(t *testing.T) {
 				Spec: kelos.TaskSpec{
 					Type:   AgentTypeClaudeCode,
 					Prompt: "Extra container with former agent-type name",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "my-secret"},
 					},
@@ -5990,7 +5991,7 @@ func TestBuildJob_ExtraContainers_AddedToContainers(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Task with an extra container",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -6031,7 +6032,7 @@ func TestBuildJob_ExtraInitContainers_AppendedAfterBuiltins(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Task with user init containers",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -6088,7 +6089,7 @@ func TestBuildJob_ExtraInitContainers_ReservedNameRejected(t *testing.T) {
 				Spec: kelos.TaskSpec{
 					Type:   AgentTypeClaudeCode,
 					Prompt: "Init container with reserved name",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      kelos.CredentialTypeAPIKey,
 						SecretRef: &kelos.SecretReference{Name: "my-secret"},
 					},
@@ -6123,7 +6124,7 @@ func TestBuildJob_ExtraInitContainers_RestartPolicyPreserved(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Task with init containers",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -6177,7 +6178,7 @@ func TestBuildJob_CrossListNameCollisionRejected(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   AgentTypeClaudeCode,
 			Prompt: "Colliding names across extra and init",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{Name: "my-secret"},
 			},
@@ -6198,5 +6199,113 @@ func TestBuildJob_CrossListNameCollisionRejected(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "both extraContainers and extraInitContainers") {
 		t.Errorf("Build() error = %v, want error mentioning both lists", err)
+	}
+}
+
+func TestBuildJob_WorkerSpecOverridesLegacy(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-worker-spec",
+			Namespace: "default",
+		},
+		Spec: kelos.TaskSpec{
+			Prompt: "Do something",
+			Worker: &kelos.WorkerSpec{
+				Type: AgentTypeCodex,
+				Credentials: &kelos.Credentials{
+					Type:      kelos.CredentialTypeAPIKey,
+					SecretRef: &kelos.SecretReference{Name: "worker-secret"},
+				},
+				Model:  "o3",
+				Effort: "high",
+				Image:  "custom-codex:v2",
+				PodOverrides: &kelos.PodOverrides{
+					Resources: &corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceMemory: resource.MustParse("2Gi"),
+						},
+					},
+				},
+			},
+			// Legacy fields — should all be ignored when Worker is set.
+			Type: AgentTypeClaudeCode,
+			Credentials: &kelos.Credentials{
+				Type:      kelos.CredentialTypeAPIKey,
+				SecretRef: &kelos.SecretReference{Name: "legacy-secret"},
+			},
+			Model:  "claude-sonnet-4-20250514",
+			Effort: "low",
+			Image:  "legacy-image:v1",
+			PodOverrides: &kelos.PodOverrides{
+				Resources: &corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceMemory: resource.MustParse("512Mi"),
+					},
+				},
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+
+	// Worker image should win over legacy.
+	if container.Image != "custom-codex:v2" {
+		t.Errorf("Image: expected %q, got %q", "custom-codex:v2", container.Image)
+	}
+
+	// Worker resource requests should win over legacy.
+	mem := container.Resources.Requests[corev1.ResourceMemory]
+	if !mem.Equal(resource.MustParse("2Gi")) {
+		t.Errorf("Resources.Requests.Memory: expected 2Gi, got %s", mem.String())
+	}
+
+	envMap := map[string]string{}
+	for _, env := range container.Env {
+		if env.Value != "" {
+			envMap[env.Name] = env.Value
+		}
+	}
+
+	// Worker model should win.
+	if envMap["KELOS_MODEL"] != "o3" {
+		t.Errorf("KELOS_MODEL: expected %q, got %q", "o3", envMap["KELOS_MODEL"])
+	}
+
+	// Worker effort should win.
+	if envMap["KELOS_EFFORT"] != "high" {
+		t.Errorf("KELOS_EFFORT: expected %q, got %q", "high", envMap["KELOS_EFFORT"])
+	}
+
+	// Agent type should be codex (from worker), so CODEX_API_KEY is used.
+	if envMap["KELOS_AGENT_TYPE"] != AgentTypeCodex {
+		t.Errorf("KELOS_AGENT_TYPE: expected %q, got %q", AgentTypeCodex, envMap["KELOS_AGENT_TYPE"])
+	}
+	if _, ok := envMap["CODEX_API_KEY"]; ok {
+		t.Error("CODEX_API_KEY should be set via secretKeyRef, not a literal value")
+	}
+
+	// Verify the secret reference comes from the worker credentials.
+	var apiKeyEnv *corev1.EnvVar
+	for i := range container.Env {
+		if container.Env[i].Name == "CODEX_API_KEY" {
+			apiKeyEnv = &container.Env[i]
+			break
+		}
+	}
+	if apiKeyEnv == nil {
+		t.Fatal("Expected CODEX_API_KEY env var to be set")
+	}
+	if apiKeyEnv.ValueFrom == nil || apiKeyEnv.ValueFrom.SecretKeyRef == nil {
+		t.Fatal("Expected CODEX_API_KEY to reference a secret")
+	}
+	if apiKeyEnv.ValueFrom.SecretKeyRef.LocalObjectReference.Name != "worker-secret" {
+		t.Errorf("CODEX_API_KEY secret name: expected %q, got %q",
+			"worker-secret", apiKeyEnv.ValueFrom.SecretKeyRef.LocalObjectReference.Name)
 	}
 }

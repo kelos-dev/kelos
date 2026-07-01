@@ -204,38 +204,118 @@ type PodOverrides struct {
 	ExtraInitContainers []corev1.Container `json:"extraInitContainers,omitempty"`
 }
 
-// TaskSpec defines the desired state of Task.
-type TaskSpec struct {
+// WorkerSpec groups execution environment fields shared by Task,
+// TaskTemplate, and WorkerPool. When workerPoolRef is set on a Task or
+// TaskTemplate, these fields are optional and default to the pool's
+// configuration.
+//
+// +kubebuilder:validation:XValidation:rule="!has(self.credentials) || self.credentials.type == 'none' || has(self.credentials.secretRef)",message="credentials.secretRef is required for api-key and oauth credential types"
+type WorkerSpec struct {
 	// Type specifies the agent type (e.g., claude-code).
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=claude-code;codex;gemini;opencode;cursor
-	Type string `json:"type"`
-
-	// Prompt is the task prompt to send to the agent.
-	// +kubebuilder:validation:Required
-	Prompt string `json:"prompt"`
+	// +optional
+	// +kubebuilder:validation:Enum=claude-code;codex;gemini;opencode;cursor;""
+	Type string `json:"type,omitempty"`
 
 	// Credentials specifies how to authenticate with the agent.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:XValidation:rule="self.type == 'none' || has(self.secretRef)",message="secretRef is required for api-key and oauth credential types"
-	Credentials Credentials `json:"credentials"`
+	// +optional
+	Credentials *Credentials `json:"credentials,omitempty"`
 
 	// Model optionally overrides the default model.
 	// +optional
 	Model string `json:"model,omitempty"`
 
 	// Effort optionally controls how much reasoning effort the agent should use.
+	// +optional
+	Effort string `json:"effort,omitempty"`
+
+	// Image optionally overrides the default agent container image.
+	// +optional
+	Image string `json:"image,omitempty"`
+
+	// WorkspaceRef references a Workspace resource for the agent to work in.
+	// +optional
+	WorkspaceRef *WorkspaceReference `json:"workspaceRef,omitempty"`
+
+	// AgentConfigRefs references an ordered list of AgentConfig resources.
+	// +optional
+	// +kubebuilder:validation:MinItems=1
+	AgentConfigRefs []AgentConfigReference `json:"agentConfigRefs,omitempty"`
+
+	// PodOverrides allows customizing the agent pod configuration.
+	// +optional
+	PodOverrides *PodOverrides `json:"podOverrides,omitempty"`
+}
+
+// TaskSpec defines the desired state of Task.
+//
+// Execution source (exactly one required):
+//   - worker (inline): creates a Job using worker.type and worker.credentials.
+//   - workerPoolRef: dispatches to a pre-warmed pool.
+//   - type + credentials (legacy): equivalent to inline worker, kept for backward compatibility.
+//
+// +kubebuilder:validation:XValidation:rule="has(self.workerPoolRef) || (has(self.worker) && has(self.worker.type) && size(self.worker.type) > 0) || (has(self.type) && size(self.type) > 0 && has(self.credentials) && size(self.credentials.type) > 0)",message="either workerPoolRef, worker with type, or type with credentials is required"
+// +kubebuilder:validation:XValidation:rule="has(self.workerPoolRef) || !has(self.worker) || has(self.worker.credentials)",message="worker.credentials is required for inline execution"
+// +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || (!has(self.type) && !has(self.credentials))",message="workerPoolRef is mutually exclusive with inline type/credentials"
+// +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.worker)",message="workerPoolRef is mutually exclusive with inline worker (per-task overrides not yet supported)"
+// +kubebuilder:validation:XValidation:rule="!has(self.worker) || (!has(self.type) && !has(self.credentials))",message="worker is mutually exclusive with legacy type/credentials fields"
+// +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.dependsOn) || size(self.dependsOn) == 0",message="dependsOn is not supported with workerPoolRef"
+// +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.branch) || size(self.branch) == 0",message="branch is not supported with workerPoolRef"
+// +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.ttlSecondsAfterFinished)",message="ttlSecondsAfterFinished is not supported with workerPoolRef"
+type TaskSpec struct {
+	// Worker defines the execution environment for this Task.
+	// Mutually exclusive with workerPoolRef.
+	// +optional
+	Worker *WorkerSpec `json:"worker,omitempty"`
+
+	// WorkerPoolRef references a WorkerPool resource for persistent execution.
+	// When set, the Task is dispatched to a pre-warmed worker pod instead of
+	// creating a one-shot Job. Mutually exclusive with worker, type/credentials,
+	// branch, dependsOn, and ttlSecondsAfterFinished.
+	// +optional
+	WorkerPoolRef *WorkerPoolReference `json:"workerPoolRef,omitempty"`
+
+	// Type specifies the agent type (e.g., claude-code).
+	//
+	// Deprecated: use spec.worker.type instead.
+	// +optional
+	// +kubebuilder:validation:Enum=claude-code;codex;gemini;opencode;cursor;""
+	Type string `json:"type,omitempty"`
+
+	// Prompt is the task prompt to send to the agent.
+	// +kubebuilder:validation:Required
+	Prompt string `json:"prompt"`
+
+	// Credentials specifies how to authenticate with the agent.
+	//
+	// Deprecated: use spec.worker.credentials instead.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="size(self.type) == 0 || self.type == 'none' || has(self.secretRef)",message="secretRef is required for api-key and oauth credential types"
+	Credentials *Credentials `json:"credentials,omitempty"`
+
+	// Model optionally overrides the default model.
+	//
+	// Deprecated: use spec.worker.model instead.
+	// +optional
+	Model string `json:"model,omitempty"`
+
+	// Effort optionally controls how much reasoning effort the agent should use.
 	// Values are agent-specific and passed through without validation.
+	//
+	// Deprecated: use spec.worker.effort instead.
 	// +optional
 	Effort string `json:"effort,omitempty"`
 
 	// Image optionally overrides the default agent container image.
 	// Custom images must implement the agent image interface
 	// (see docs/agent-image-interface.md).
+	//
+	// Deprecated: use spec.worker.image instead.
 	// +optional
 	Image string `json:"image,omitempty"`
 
 	// WorkspaceRef optionally references a Workspace resource for the agent to work in.
+	//
+	// Deprecated: use spec.worker.workspaceRef instead.
 	// +optional
 	WorkspaceRef *WorkspaceReference `json:"workspaceRef,omitempty"`
 
@@ -243,6 +323,8 @@ type TaskSpec struct {
 	// Configs are merged in order: agentsMD is concatenated, plugins/skills
 	// are appended, mcpServers are appended with later entries winning on
 	// name collision.
+	//
+	// Deprecated: use spec.worker.agentConfigRefs instead.
 	// +optional
 	// +kubebuilder:validation:MinItems=1
 	AgentConfigRefs []AgentConfigReference `json:"agentConfigRefs,omitempty"`
@@ -284,6 +366,8 @@ type TaskSpec struct {
 	PodFailurePolicy *batchv1.PodFailurePolicy `json:"podFailurePolicy,omitempty"`
 
 	// PodOverrides allows customizing the agent pod configuration.
+	//
+	// Deprecated: use spec.worker.podOverrides instead.
 	// +optional
 	PodOverrides *PodOverrides `json:"podOverrides,omitempty"`
 }
@@ -330,6 +414,8 @@ type TaskStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Type",type=string,JSONPath=`.spec.type`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Worker Type",type=string,JSONPath=`.spec.worker.type`,priority=1
+// +kubebuilder:printcolumn:name="Pool",type=string,JSONPath=`.spec.workerPoolRef.name`,priority=1
 // +kubebuilder:printcolumn:name="Branch",type=string,JSONPath=`.spec.branch`,priority=1
 // +kubebuilder:printcolumn:name="Depends On",type=string,JSONPath=`.spec.dependsOn`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`

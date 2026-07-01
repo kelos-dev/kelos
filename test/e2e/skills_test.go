@@ -97,7 +97,7 @@ var _ = Describe("Task with skills.sh AgentConfig", func() {
 				Type:   "claude-code",
 				Model:  claudeCodeModel,
 				Prompt: "Use the kelos-e2e skill and show its output.",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type:      kelos.CredentialTypeOAuth,
 					SecretRef: &kelos.SecretReference{Name: "claude-credentials"},
 				},
@@ -187,7 +187,7 @@ var _ = Describe("Task with skills.sh AgentConfig", func() {
 				Type:   "claude-code",
 				Model:  claudeCodeModel,
 				Prompt: "Use the kelos-e2e-private skill and show its output.",
-				Credentials: kelos.Credentials{
+				Credentials: &kelos.Credentials{
 					Type:      kelos.CredentialTypeOAuth,
 					SecretRef: &kelos.SecretReference{Name: "claude-credentials"},
 				},
@@ -292,7 +292,7 @@ func describePluginTaskTests(cfg agentTestConfig) {
 					Type:   cfg.AgentType,
 					Model:  cfg.Model,
 					Prompt: "Print 'Hello from plugin e2e test' to stdout",
-					Credentials: kelos.Credentials{
+					Credentials: &kelos.Credentials{
 						Type:      cfg.CredentialType,
 						SecretRef: &kelos.SecretReference{Name: cfg.SecretName},
 					},

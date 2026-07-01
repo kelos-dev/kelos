@@ -72,7 +72,7 @@ func TestTTLExpired(t *testing.T) {
 			wantZeroRequeue: true,
 		},
 		{
-			name: "CompletionTime not set",
+			name: "CompletionTime not set requeues to wait for status to settle",
 			task: &kelos.Task{
 				Spec: kelos.TaskSpec{
 					TTLSecondsAfterFinished: int32Ptr(60),
@@ -82,8 +82,9 @@ func TestTTLExpired(t *testing.T) {
 					CompletionTime: nil,
 				},
 			},
-			wantExpired:     false,
-			wantZeroRequeue: true,
+			wantExpired:    false,
+			wantRequeueMin: 4 * time.Second,
+			wantRequeueMax: 6 * time.Second,
 		},
 		{
 			name: "TTL=0 and completed",
@@ -633,6 +634,52 @@ func TestReconcile_RequeuesTerminalTaskWithoutJobUntilTTLExpires(t *testing.T) {
 	}
 }
 
+func TestReconcile_RequeuesTerminalTaskWithTTLButNoCompletionTime(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
+
+	ttlSeconds := int32(60)
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "test-task",
+			Namespace:  "default",
+			Finalizers: []string{taskFinalizer},
+		},
+		Spec: kelos.TaskSpec{
+			Type:                    AgentTypeCodex,
+			Prompt:                  "test",
+			TTLSecondsAfterFinished: &ttlSeconds,
+		},
+		Status: kelos.TaskStatus{
+			Phase:   kelos.TaskPhaseFailed,
+			Message: "Something went wrong",
+			// CompletionTime intentionally nil
+		},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(task).
+		WithObjects(task).
+		Build()
+
+	r := &TaskReconciler{
+		Client: cl,
+		Scheme: scheme,
+	}
+
+	result, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: client.ObjectKeyFromObject(task),
+	})
+	if err != nil {
+		t.Fatalf("Reconcile() error: %v", err)
+	}
+	if result.RequeueAfter == 0 {
+		t.Fatal("RequeueAfter = 0, want non-zero requeue for terminal task with TTL but no CompletionTime")
+	}
+}
+
 func TestRefreshGitHubAppTokenIfNeeded_RemintsExpiringToken(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -951,6 +998,89 @@ func TestFailTaskBeforeJobReleasesBranchLock(t *testing.T) {
 	}
 	if updated.Status.CompletionTime == nil {
 		t.Fatal("task completionTime is nil, want set")
+	}
+}
+
+func TestReconcile_PoolBackedTaskDeletionClearsPodAssignment(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
+
+	now := metav1.Now()
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "pool-task-1",
+			Namespace:         "default",
+			DeletionTimestamp: &now,
+			Finalizers:        []string{taskFinalizer},
+		},
+		Spec: kelos.TaskSpec{
+			Prompt:        "test",
+			WorkerPoolRef: &kelos.WorkerPoolReference{Name: "my-pool"},
+		},
+		Status: kelos.TaskStatus{
+			Phase:   kelos.TaskPhaseRunning,
+			PodName: "my-pool-0",
+		},
+	}
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-pool-0",
+			Namespace: "default",
+			Annotations: map[string]string{
+				kelos.AnnotationWorkerAssignedTask:   "pool-task-1",
+				kelos.AnnotationWorkerTaskStatus:     "running",
+				kelos.AnnotationWorkerTasksCompleted: "2",
+			},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(task).
+		WithObjects(task, pod).
+		Build()
+
+	r := &TaskReconciler{
+		Client:       cl,
+		Scheme:       scheme,
+		BranchLocker: NewBranchLocker(),
+	}
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: client.ObjectKeyFromObject(task),
+	})
+	if err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+
+	// Verify pod assignment was cleared
+	updatedPod := &corev1.Pod{}
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(pod), updatedPod); err != nil {
+		t.Fatalf("getting updated pod: %v", err)
+	}
+	if _, hasTask := updatedPod.Annotations[kelos.AnnotationWorkerAssignedTask]; hasTask {
+		t.Error("expected assigned-task annotation to be removed")
+	}
+	if _, hasStatus := updatedPod.Annotations[kelos.AnnotationWorkerTaskStatus]; hasStatus {
+		t.Error("expected task-status annotation to be removed")
+	}
+	if v := updatedPod.Annotations[kelos.AnnotationWorkerTasksCompleted]; v != "3" {
+		t.Errorf("tasks-completed = %q, want %q", v, "3")
+	}
+
+	// Verify finalizer was removed (fake client deletes the object when the
+	// last finalizer is removed on an object with DeletionTimestamp).
+	updatedTask := &kelos.Task{}
+	err = cl.Get(context.Background(), client.ObjectKeyFromObject(task), updatedTask)
+	if err == nil {
+		for _, f := range updatedTask.Finalizers {
+			if f == taskFinalizer {
+				t.Error("expected finalizer to be removed")
+			}
+		}
 	}
 }
 
@@ -1574,7 +1704,7 @@ func TestUpdateStatusRefreshesPodName(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   "codex",
 			Prompt: "test",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type: kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{
 					Name: "creds",
@@ -1631,7 +1761,7 @@ func TestUpdateStatusClearsStalePodNameWhenNoLivePodsRemain(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   "codex",
 			Prompt: "test",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type: kelos.CredentialTypeAPIKey,
 				SecretRef: &kelos.SecretReference{
 					Name: "creds",

@@ -475,3 +475,48 @@ func KelosCommand(args ...string) *exec.Cmd {
 	cmd.Stderr = GinkgoWriter
 	return cmd
 }
+
+// CreateWorkerPool creates a WorkerPool in the test namespace.
+func (f *Framework) CreateWorkerPool(pool *kelos.WorkerPool) {
+	if pool.Namespace == "" {
+		pool.Namespace = f.Namespace
+	}
+	_, err := f.KelosClientset.ApiV1alpha2().WorkerPools(pool.Namespace).Create(context.TODO(), pool, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "Failed to create workerpool %s", pool.Name)
+}
+
+// WaitForWorkerPoolReady waits for a WorkerPool to reach the Ready phase.
+func (f *Framework) WaitForWorkerPoolReady(name string) {
+	Eventually(func() string {
+		pool, err := f.KelosClientset.ApiV1alpha2().WorkerPools(f.Namespace).Get(context.TODO(), name, metav1.GetOptions{})
+		if err != nil {
+			return ""
+		}
+		return string(pool.Status.Phase)
+	}, 3*time.Minute, 5*time.Second).Should(Equal("Ready"), "WorkerPool %s did not reach Ready phase", name)
+}
+
+// WaitForStatefulSetReady waits for a StatefulSet to have all replicas ready.
+func (f *Framework) WaitForStatefulSetReady(name string, replicas int32) {
+	Eventually(func() int32 {
+		sts, err := f.Clientset.AppsV1().StatefulSets(f.Namespace).Get(context.TODO(), name, metav1.GetOptions{})
+		if err != nil {
+			return 0
+		}
+		return sts.Status.ReadyReplicas
+	}, 3*time.Minute, 5*time.Second).Should(Equal(replicas), "StatefulSet %s did not reach %d ready replicas", name, replicas)
+}
+
+// WaitForTaskWorkerPodName waits for a Task's status.podName to be set when using a WorkerPool.
+func (f *Framework) WaitForTaskWorkerPodName(name string) string {
+	var podName string
+	Eventually(func() string {
+		task, err := f.KelosClientset.ApiV1alpha2().Tasks(f.Namespace).Get(context.TODO(), name, metav1.GetOptions{})
+		if err != nil {
+			return ""
+		}
+		podName = task.Status.PodName
+		return podName
+	}, 30*time.Second, time.Second).ShouldNot(BeEmpty(), "Task %s did not get assigned a worker pod", name)
+	return podName
+}

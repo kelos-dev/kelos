@@ -131,7 +131,7 @@ func newTaskWithAnnotations(name, namespace string, phase kelos.TaskPhase, annot
 		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeOAuth,
 				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},
@@ -1288,7 +1288,7 @@ func TestReportTaskStatus_NilAnnotations(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeOAuth,
 				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},
@@ -1326,7 +1326,7 @@ func TestSlackTaskReporter_PostsThreadReply(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeOAuth,
 				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},
@@ -1388,7 +1388,7 @@ func TestSlackTaskReporter_PostsNewReplyOnPhaseChange(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeOAuth,
 				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},
@@ -1606,7 +1606,7 @@ func TestSlackTaskReporter_PostsProgressReply(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeOAuth,
 				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},
@@ -1796,7 +1796,7 @@ func TestSlackTaskReporter_DeduplicatesProgress(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeOAuth,
 				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},
@@ -1857,7 +1857,7 @@ func TestSlackTaskReporter_EditsProgressOnNewText(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeOAuth,
 				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},
@@ -1952,7 +1952,7 @@ func TestSlackTaskReporter_ClearsProgressTSOnUpdateFailure(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeOAuth,
 				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},
@@ -2028,7 +2028,7 @@ func TestSlackTaskReporter_ClearsProgressCacheOnTerminal(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeOAuth,
 				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},
@@ -2279,7 +2279,7 @@ func newRunningTaskWithAnnotations(name string, uid types.UID, annotations map[s
 		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeOAuth,
 				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},
@@ -2552,7 +2552,7 @@ func TestSlackTaskReporter_AcceptedPostSetsActivityTarget(t *testing.T) {
 		Spec: kelos.TaskSpec{
 			Type:   "claude-code",
 			Prompt: "test",
-			Credentials: kelos.Credentials{
+			Credentials: &kelos.Credentials{
 				Type:      kelos.CredentialTypeOAuth,
 				SecretRef: &kelos.SecretReference{Name: "creds"},
 			},

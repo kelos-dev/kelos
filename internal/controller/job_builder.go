@@ -10,6 +10,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 )
@@ -145,10 +146,74 @@ func NewJobBuilder() *JobBuilder {
 	}
 }
 
+// resolveTaskType returns the effective agent type for a Task, preferring
+// spec.worker.type over the legacy spec.type field.
+func resolveTaskType(task *kelos.Task) string {
+	if task.Spec.Worker != nil && task.Spec.Worker.Type != "" {
+		return task.Spec.Worker.Type
+	}
+	return task.Spec.Type
+}
+
+// resolveTaskWorkspaceRef returns the effective workspace reference for a Task,
+// preferring spec.worker.workspaceRef over the legacy spec.workspaceRef field.
+func resolveTaskWorkspaceRef(task *kelos.Task) *kelos.WorkspaceReference {
+	if task.Spec.Worker != nil && task.Spec.Worker.WorkspaceRef != nil {
+		return task.Spec.Worker.WorkspaceRef
+	}
+	return task.Spec.WorkspaceRef
+}
+
+// resolveTaskPodOverrides returns the effective pod overrides for a Task,
+// preferring spec.worker.podOverrides over the legacy spec.podOverrides field.
+func resolveTaskPodOverrides(task *kelos.Task) *kelos.PodOverrides {
+	if task.Spec.Worker != nil && task.Spec.Worker.PodOverrides != nil {
+		return task.Spec.Worker.PodOverrides
+	}
+	return task.Spec.PodOverrides
+}
+
+// resolveTaskCredentials returns the effective credentials for a Task,
+// preferring spec.worker.credentials over the legacy spec.credentials field.
+func resolveTaskCredentials(task *kelos.Task) *kelos.Credentials {
+	if task.Spec.Worker != nil && task.Spec.Worker.Credentials != nil {
+		return task.Spec.Worker.Credentials
+	}
+	return task.Spec.Credentials
+}
+
+// resolveTaskModel returns the effective model for a Task,
+// preferring spec.worker.model over the legacy spec.model field.
+func resolveTaskModel(task *kelos.Task) string {
+	if task.Spec.Worker != nil && task.Spec.Worker.Model != "" {
+		return task.Spec.Worker.Model
+	}
+	return task.Spec.Model
+}
+
+// resolveTaskEffort returns the effective effort for a Task,
+// preferring spec.worker.effort over the legacy spec.effort field.
+func resolveTaskEffort(task *kelos.Task) string {
+	if task.Spec.Worker != nil && task.Spec.Worker.Effort != "" {
+		return task.Spec.Worker.Effort
+	}
+	return task.Spec.Effort
+}
+
+// resolveTaskImage returns the effective image override for a Task,
+// preferring spec.worker.image over the legacy spec.image field.
+func resolveTaskImage(task *kelos.Task) string {
+	if task.Spec.Worker != nil && task.Spec.Worker.Image != "" {
+		return task.Spec.Worker.Image
+	}
+	return task.Spec.Image
+}
+
 // Build creates a Job for the given Task. The prompt parameter is the
 // resolved prompt text (which may have been expanded from a template).
 func (b *JobBuilder) Build(task *kelos.Task, workspace *kelos.WorkspaceSpec, agentConfig *kelos.AgentConfigSpec, prompt string) (*batchv1.Job, error) {
-	switch task.Spec.Type {
+	agentType := resolveTaskType(task)
+	switch agentType {
 	case AgentTypeClaudeCode:
 		return b.buildAgentJob(task, workspace, agentConfig, b.ClaudeCodeImage, b.ClaudeCodeImagePullPolicy, prompt)
 	case AgentTypeCodex:
@@ -160,7 +225,7 @@ func (b *JobBuilder) Build(task *kelos.Task, workspace *kelos.WorkspaceSpec, age
 	case AgentTypeCursor:
 		return b.buildAgentJob(task, workspace, agentConfig, b.CursorImage, b.CursorImagePullPolicy, prompt)
 	default:
-		return nil, fmt.Errorf("unsupported agent type: %s", task.Spec.Type)
+		return nil, fmt.Errorf("unsupported agent type: %s", agentType)
 	}
 }
 
@@ -223,7 +288,7 @@ func credentialEnvVars(creds kelos.Credentials, agentType string) []corev1.EnvVa
 			Key:                  key,
 		}
 		if optional {
-			sel.Optional = ptr(true)
+			sel.Optional = ptr.To(true)
 		}
 		return corev1.EnvVar{
 			Name:      key,
@@ -250,11 +315,6 @@ func credentialEnvVars(creds kelos.Credentials, agentType string) []corev1.EnvVa
 	}
 }
 
-// ptr returns a pointer to the given value.
-func ptr[T any](v T) *T {
-	return &v
-}
-
 func effectiveWorkspaceRemotes(workspace *kelos.WorkspaceSpec) []kelos.GitRemote {
 	if workspace == nil {
 		return nil
@@ -278,24 +338,24 @@ func upstreamRepoEnvValue(remotes []kelos.GitRemote) string {
 // buildAgentJob creates a Job for the given agent type.
 func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceSpec, agentConfig *kelos.AgentConfigSpec, defaultImage string, pullPolicy corev1.PullPolicy, prompt string) (*batchv1.Job, error) {
 	image := defaultImage
-	if task.Spec.Image != "" {
-		image = task.Spec.Image
+	if img := resolveTaskImage(task); img != "" {
+		image = img
 	}
 
+	agentType := resolveTaskType(task)
 	var envVars []corev1.EnvVar
 
-	// Set KELOS_MODEL for all agent containers.
-	if task.Spec.Model != "" {
+	if model := resolveTaskModel(task); model != "" {
 		envVars = append(envVars, corev1.EnvVar{
 			Name:  "KELOS_MODEL",
-			Value: task.Spec.Model,
+			Value: model,
 		})
 	}
 
-	if task.Spec.Effort != "" {
+	if effort := resolveTaskEffort(task); effort != "" {
 		envVars = append(envVars, corev1.EnvVar{
 			Name:  "KELOS_EFFORT",
-			Value: task.Spec.Effort,
+			Value: effort,
 		})
 	}
 
@@ -308,7 +368,7 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 
 	envVars = append(envVars, corev1.EnvVar{
 		Name:  "KELOS_AGENT_TYPE",
-		Value: task.Spec.Type,
+		Value: agentType,
 	})
 
 	if spawner := task.Labels["kelos.dev/taskspawner"]; spawner != "" {
@@ -318,8 +378,10 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 		})
 	}
 
-	credEnvVars := credentialEnvVars(task.Spec.Credentials, task.Spec.Type)
-	envVars = append(envVars, credEnvVars...)
+	if creds := resolveTaskCredentials(task); creds != nil {
+		credEnvVars := credentialEnvVars(*creds, agentType)
+		envVars = append(envVars, credEnvVars...)
+	}
 
 	var workspaceEnvVars []corev1.EnvVar
 	var isEnterprise bool
@@ -453,7 +515,7 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 						Items: []corev1.KeyToPath{
 							{Key: GitHubTokenSecretKey, Path: GitHubTokenSecretKey},
 						},
-						Optional: ptr(true),
+						Optional: ptr.To(true),
 					},
 				},
 			})
@@ -702,7 +764,7 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 	var affinity *corev1.Affinity
 	var imagePullSecrets []corev1.LocalObjectReference
 
-	if po := task.Spec.PodOverrides; po != nil {
+	if po := resolveTaskPodOverrides(task); po != nil {
 		if po.Labels != nil {
 			extraLabels = po.Labels
 		}
@@ -787,7 +849,7 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 	// Build the final containers list: agent container plus any extra containers.
 	containers := []corev1.Container{mainContainer}
 
-	if po := task.Spec.PodOverrides; po != nil {
+	if po := resolveTaskPodOverrides(task); po != nil {
 		if len(po.ExtraContainers) > 0 {
 			if err := validateExtraContainers(po.ExtraContainers); err != nil {
 				return nil, err

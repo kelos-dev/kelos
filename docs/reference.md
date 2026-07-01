@@ -2,21 +2,26 @@
 
 ## Task
 
+Exactly one execution source is required: `spec.worker` (preferred), `spec.workerPoolRef`, or legacy flat fields (`spec.type` + `spec.credentials`).
+
 | Field | Description | Required |
 |-------|-------------|----------|
-| `spec.type` | Agent type (`claude-code`, `codex`, `gemini`, `opencode`, or `cursor`) | Yes |
+| `spec.worker` | Execution environment (see [WorkerSpec](#workerspec) below). Creates a Job. Mutually exclusive with `workerPoolRef` | One of worker, workerPoolRef, or type+credentials |
+| `spec.workerPoolRef.name` | Name of a WorkerPool resource. Task is dispatched to a pre-warmed worker pod instead of creating a Job | One of worker, workerPoolRef, or type+credentials |
 | `spec.prompt` | Task prompt for the agent | Yes |
-| `spec.credentials.type` | `api-key`, `oauth`, or `none`. Use `none` to skip built-in credential injection (e.g., for Bedrock, Vertex AI, or Azure OpenAI credentials provided via `podOverrides.env`) | Yes |
-| `spec.credentials.secretRef.name` | Secret name with credentials (see [secret format](#task-credential-secret-format) below; not required when `type` is `none`) | Conditional |
-| `spec.model` | Model override. The value is passed through to the agent container as `KELOS_MODEL` without validation, so either an agent-native shorthand accepted by the CLI (e.g., `sonnet`, `opus` for Claude Code) or a versioned ID (e.g., `claude-sonnet-4-6`) is valid | No |
-| `spec.effort` | Agent reasoning effort. The value is passed through as `KELOS_EFFORT` without validation. Bundled agents translate common values (`minimal`, `low`, `medium`, `high`, `xhigh`, `max`) to their native controls where supported | No |
-| `spec.image` | Custom agent image override (see [Agent Image Interface](agent-image-interface.md)) | No |
-| `spec.workspaceRef.name` | Name of a Workspace resource to use | No |
-| `spec.agentConfigRefs[].name` | Ordered AgentConfig resources to use. Configs are merged in order | No |
-| `spec.dependsOn` | Task names that must succeed before this Task starts (creates `Waiting` phase) | No |
-| `spec.branch` | Git branch to work on; only one Task with the same branch runs at a time (mutex) | No |
+| `spec.type` | **(Deprecated)** Agent type — use `spec.worker.type` instead | Legacy |
+| `spec.credentials.type` | **(Deprecated)** Credential type — use `spec.worker.credentials` instead | Legacy |
+| `spec.credentials.secretRef.name` | **(Deprecated)** Secret name — use `spec.worker.credentials.secretRef` instead | Legacy |
+| `spec.model` | **(Deprecated)** Model override — use `spec.worker.model` instead | Legacy |
+| `spec.effort` | **(Deprecated)** Reasoning effort — use `spec.worker.effort` instead | Legacy |
+| `spec.image` | **(Deprecated)** Custom agent image — use `spec.worker.image` instead | Legacy |
+| `spec.workspaceRef.name` | **(Deprecated)** Workspace reference — use `spec.worker.workspaceRef` instead | Legacy |
+| `spec.agentConfigRefs[].name` | **(Deprecated)** AgentConfig references — use `spec.worker.agentConfigRefs` instead | Legacy |
+| `spec.dependsOn` | Task names that must succeed before this Task starts (creates `Waiting` phase). Not supported with `workerPoolRef` | No |
+| `spec.branch` | Git branch to work on; only one Task with the same branch runs at a time (mutex). Not supported with `workerPoolRef` | No |
 | `spec.ttlSecondsAfterFinished` | Auto-delete task after N seconds (0 for immediate) | No |
 | `spec.podFailurePolicy` | Kubernetes Job pod failure policy copied to `Job.spec.podFailurePolicy`. If omitted, Kelos leaves it unset and Kubernetes default Job failure handling applies | No |
+| `spec.podOverrides` | **(Deprecated)** Pod customization — use `spec.worker.podOverrides` instead | Legacy |
 | `spec.podOverrides.labels` | Additional labels to apply to the Job and its Pod. Merged with built-in labels; built-in labels take precedence on conflict | No |
 | `spec.podOverrides.resources` | CPU/memory requests and limits for the agent container | No |
 | `spec.podOverrides.activeDeadlineSeconds` | Maximum duration in seconds before the agent pod is terminated | No |
@@ -163,6 +168,41 @@ kubectl label secret codex-credentials kelos.dev/codex-oauth-refresh=true
 ```
 
 For each labeled Secret with a non-empty `CODEX_AUTH_JSON` key, the controller manages a dedicated CronJob in the Secret's namespace with access limited to that Secret. The CronJob seeds `auth.json` from that one Secret, invokes Codex so the CLI performs its own refresh, and writes the refreshed file back to only the `CODEX_AUTH_JSON` key — other keys are preserved and the token is never logged. Removing the label or deleting the Secret removes the managed refresh resources. Secrets without a `CODEX_AUTH_JSON` bundle, or whose bundle carries no `refresh_token` (e.g. API-key credentials), are skipped. Externally-managed Secrets (ExternalSecrets, Vault, sealed-secrets) will overwrite the refreshed value on their next sync and are not supported.
+
+<a id="workerspec"></a>
+
+### WorkerSpec
+
+`spec.worker` on a Task (or `spec.taskTemplate.worker` on a TaskSpawner) is the preferred way to define execution environment. Mutually exclusive with `workerPoolRef`.
+
+| Field | Description | Required |
+|-------|-------------|----------|
+| `worker.type` | Agent type (`claude-code`, `codex`, `gemini`, `opencode`, or `cursor`) | Yes for inline Task execution (CEL-enforced) |
+| `worker.credentials.type` | `api-key`, `oauth`, or `none` | Yes for inline Task execution (CEL-enforced) |
+| `worker.credentials.secretRef.name` | Secret name (not required when `type` is `none`) | Conditional |
+| `worker.model` | Model override passed as `KELOS_MODEL` | No |
+| `worker.effort` | Reasoning effort passed as `KELOS_EFFORT` | No |
+| `worker.image` | Custom agent image override | No |
+| `worker.workspaceRef.name` | Name of a Workspace resource | No |
+| `worker.agentConfigRefs[].name` | Ordered AgentConfig resources. Configs are merged in order | No |
+| `worker.podOverrides` | Pod customization (same fields as the legacy `spec.podOverrides`) | No |
+
+## WorkerPool
+
+A WorkerPool manages a fleet of persistent worker pods backed by a StatefulSet. Tasks reference a WorkerPool via `spec.workerPoolRef` to execute on pre-warmed infrastructure instead of creating per-task Jobs.
+
+| Field | Description | Required |
+|-------|-------------|----------|
+| `spec.worker.type` | Agent type | Yes |
+| `spec.worker.credentials` | Credentials for the workers | Yes |
+| `spec.worker.workspaceRef.name` | Workspace reference | Yes |
+| `spec.worker.model` | Default model for workers | No |
+| `spec.worker.effort` | Default effort for workers | No |
+| `spec.worker.image` | Custom agent image | No |
+| `spec.worker.agentConfigRefs[].name` | AgentConfig references | No |
+| `spec.worker.podOverrides` | Pod customization for worker pods | No |
+| `spec.replicas` | Number of persistent worker pods (defaults to 1) | No |
+| `spec.volumeClaimTemplate` | PersistentVolumeClaimSpec for each worker pod's storage | Yes |
 
 ## Workspace
 
@@ -338,18 +378,21 @@ The installation token is minted to a per-task Secret (`<task-name>-github-token
 | `spec.when.webhook.filters[].pattern` | Require a regex match against the extracted field value (mutually exclusive with `value`) | Conditional |
 | `spec.when.jira.pollInterval` | Per-source poll interval (e.g., `"30s"`, `"5m"`). Defaults to `5m` when omitted | No |
 | `spec.when.cron.schedule` | Cron schedule expression (e.g., `"0 * * * *"`) | Yes (when using cron) |
-| `spec.taskTemplate.type` | Agent type (`claude-code`, `codex`, `gemini`, `opencode`, or `cursor`) | Yes |
-| `spec.taskTemplate.credentials` | Credentials for the agent (same as Task) | Yes |
-| `spec.taskTemplate.model` | Model override for spawned Tasks. Same pass-through behavior as `Task.spec.model`: either an agent-native shorthand (e.g., `sonnet`, `opus` for Claude Code) or a versioned ID (e.g., `claude-sonnet-4-6`) is valid | No |
-| `spec.taskTemplate.effort` | Reasoning effort for spawned Tasks. Same pass-through behavior as `Task.spec.effort` | No |
-| `spec.taskTemplate.image` | Custom agent image override (see [Agent Image Interface](agent-image-interface.md)) | No |
-| `spec.taskTemplate.agentConfigRefs[].name` | Ordered AgentConfig resources for spawned Tasks. Configs are merged in order | No |
+| `spec.taskTemplate.worker` | Execution environment for spawned Tasks (see [WorkerSpec](#workerspec)). When used alone, spawned Tasks create Jobs. When used with `workerPoolRef`, overrides pool defaults | One of worker, workerPoolRef, or type+credentials |
+| `spec.taskTemplate.workerPoolRef.name` | WorkerPool for persistent execution | One of worker, workerPoolRef, or type+credentials |
+| `spec.taskTemplate.type` | **(Deprecated)** Agent type — use `taskTemplate.worker.type` instead | Legacy |
+| `spec.taskTemplate.credentials` | **(Deprecated)** Credentials — use `taskTemplate.worker.credentials` instead | Legacy |
+| `spec.taskTemplate.model` | **(Deprecated)** Model override — use `taskTemplate.worker.model` instead | Legacy |
+| `spec.taskTemplate.effort` | **(Deprecated)** Reasoning effort — use `taskTemplate.worker.effort` instead | Legacy |
+| `spec.taskTemplate.image` | **(Deprecated)** Custom agent image — use `taskTemplate.worker.image` instead | Legacy |
+| `spec.taskTemplate.workspaceRef.name` | **(Deprecated)** Workspace reference — use `taskTemplate.worker.workspaceRef` instead | Legacy |
+| `spec.taskTemplate.agentConfigRefs[].name` | **(Deprecated)** AgentConfig references — use `taskTemplate.worker.agentConfigRefs` instead | Legacy |
 | `spec.taskTemplate.promptTemplate` | Go text/template for prompt (see [template variables](#prompttemplate-variables) below) | No |
-| `spec.taskTemplate.dependsOn` | Task names that spawned Tasks depend on | No |
-| `spec.taskTemplate.branch` | Git branch template for spawned Tasks (supports Go template variables, e.g., `kelos-task-{{.Number}}`) | No |
+| `spec.taskTemplate.dependsOn` | Task names that spawned Tasks depend on. Not supported with `workerPoolRef` | No |
+| `spec.taskTemplate.branch` | Git branch template for spawned Tasks (supports Go template variables, e.g., `kelos-task-{{.Number}}`). Not supported with `workerPoolRef` | No |
 | `spec.taskTemplate.ttlSecondsAfterFinished` | Auto-delete spawned tasks after N seconds | No |
 | `spec.taskTemplate.podFailurePolicy` | Kubernetes Job pod failure policy copied to spawned Tasks as `Task.spec.podFailurePolicy` | No |
-| `spec.taskTemplate.podOverrides` | Pod customization for spawned Tasks (labels, resources, activeDeadlineSeconds, env, nodeSelector, tolerations, affinity, imagePullSecrets, serviceAccountName, volumes, volumeMounts, podSecurityContext, containerSecurityContext, extraContainers, extraInitContainers). Same fields and constraints as `Task.spec.podOverrides` | No |
+| `spec.taskTemplate.podOverrides` | **(Deprecated)** Pod customization — use `taskTemplate.worker.podOverrides` instead | Legacy |
 | `spec.taskTemplate.metadata.labels` | Labels merged into spawned Tasks; values support the same Go template variables as `branch`/`promptTemplate`; the `kelos.dev/taskspawner` label is always set to the TaskSpawner name and overrides any user value for that key | No |
 | `spec.taskTemplate.metadata.annotations` | Annotations merged into spawned Tasks; values support the same Go template variables as `branch`/`promptTemplate`; source annotations (e.g. `kelos.dev/source-kind`) are applied after rendering and override conflicting user values | No |
 | `spec.taskTemplate.contextSources` | External data sources fetched in parallel before task creation; each source's value is exposed as `{{.Context.NAME}}` in `branch`, `promptTemplate`, and `metadata` templates (see [Context Sources](#context-sources) below). Maximum 8 entries; names must be unique | No |

@@ -858,22 +858,6 @@ func TestRunCycleWithSource_MaxTotalTasksLimitsCreation(t *testing.T) {
 	if len(taskList.Items) != 2 {
 		t.Errorf("Expected 2 tasks (maxTotalTasks=2), got %d", len(taskList.Items))
 	}
-
-	// Check TaskBudgetExhausted condition
-	var updatedTS kelos.TaskSpawner
-	if err := cl.Get(context.Background(), key, &updatedTS); err != nil {
-		t.Fatalf("Getting TaskSpawner: %v", err)
-	}
-	foundCondition := false
-	for _, c := range updatedTS.Status.Conditions {
-		if c.Type == "TaskBudgetExhausted" && c.Status == metav1.ConditionTrue {
-			foundCondition = true
-			break
-		}
-	}
-	if !foundCondition {
-		t.Error("Expected TaskBudgetExhausted condition to be True")
-	}
 }
 
 func TestRunCycleWithSource_MaxTotalTasksWithExistingTasks(t *testing.T) {

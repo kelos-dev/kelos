@@ -30,6 +30,8 @@ type ApiV1alpha2Interface interface {
 	RESTClient() rest.Interface
 	AgentConfigsGetter
 	TasksGetter
+	TaskBudgetsGetter
+	TaskRecordsGetter
 	TaskSpawnersGetter
 	WorkerPoolsGetter
 	WorkspacesGetter
@@ -46,6 +48,14 @@ func (c *ApiV1alpha2Client) AgentConfigs(namespace string) AgentConfigInterface 
 
 func (c *ApiV1alpha2Client) Tasks(namespace string) TaskInterface {
 	return newTasks(c, namespace)
+}
+
+func (c *ApiV1alpha2Client) TaskBudgets(namespace string) TaskBudgetInterface {
+	return newTaskBudgets(c, namespace)
+}
+
+func (c *ApiV1alpha2Client) TaskRecords(namespace string) TaskRecordInterface {
+	return newTaskRecords(c, namespace)
 }
 
 func (c *ApiV1alpha2Client) TaskSpawners(namespace string) TaskSpawnerInterface {

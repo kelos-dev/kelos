@@ -1,0 +1,13 @@
+apiVersion: kelos.dev/v1alpha2
+kind: TaskBudget
+metadata:
+  name: daily-cost-cap
+  namespace: default
+spec:
+  taskSelector:
+    matchLabels:
+      team: platform
+  period:
+    type: Daily
+    timezone: UTC
+  maxCostUSD: "50"

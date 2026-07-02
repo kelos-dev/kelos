@@ -36,6 +36,14 @@ func (c *FakeApiV1alpha2) Tasks(namespace string) v1alpha2.TaskInterface {
 	return newFakeTasks(c, namespace)
 }
 
+func (c *FakeApiV1alpha2) TaskBudgets(namespace string) v1alpha2.TaskBudgetInterface {
+	return newFakeTaskBudgets(c, namespace)
+}
+
+func (c *FakeApiV1alpha2) TaskRecords(namespace string) v1alpha2.TaskRecordInterface {
+	return newFakeTaskRecords(c, namespace)
+}
+
 func (c *FakeApiV1alpha2) TaskSpawners(namespace string) v1alpha2.TaskSpawnerInterface {
 	return newFakeTaskSpawners(c, namespace)
 }

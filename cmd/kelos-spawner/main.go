@@ -363,7 +363,7 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 
 		// Enforce max total tasks limit
 		if maxTotalTasks > 0 && ts.Status.TotalTasksCreated+newTasksCreated >= maxTotalTasks {
-			log.Info("Task budget exhausted, skipping remaining items", "totalCreated", ts.Status.TotalTasksCreated+newTasksCreated, "maxTotalTasks", maxTotalTasks)
+			log.Info("Max total tasks reached, skipping remaining items", "totalCreated", ts.Status.TotalTasksCreated+newTasksCreated, "maxTotalTasks", maxTotalTasks)
 			break
 		}
 
@@ -461,25 +461,6 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 		Message:            "TaskSpawner is running",
 		ObservedGeneration: ts.Generation,
 	})
-
-	// Set TaskBudgetExhausted condition
-	if maxTotalTasks > 0 && ts.Status.TotalTasksCreated >= maxTotalTasks {
-		meta.SetStatusCondition(&ts.Status.Conditions, metav1.Condition{
-			Type:               "TaskBudgetExhausted",
-			Status:             metav1.ConditionTrue,
-			Reason:             "BudgetReached",
-			Message:            fmt.Sprintf("Total tasks created (%d) has reached maxTotalTasks (%d)", ts.Status.TotalTasksCreated, maxTotalTasks),
-			ObservedGeneration: ts.Generation,
-		})
-	} else {
-		meta.SetStatusCondition(&ts.Status.Conditions, metav1.Condition{
-			Type:               "TaskBudgetExhausted",
-			Status:             metav1.ConditionFalse,
-			Reason:             "BudgetAvailable",
-			Message:            "Task budget has not been exhausted",
-			ObservedGeneration: ts.Generation,
-		})
-	}
 
 	if err := cl.Status().Update(ctx, &ts); err != nil {
 		return fmt.Errorf("updating TaskSpawner status: %w", err)

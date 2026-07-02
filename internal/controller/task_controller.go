@@ -13,6 +13,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -72,13 +73,21 @@ type TaskReconciler struct {
 	TokenClient  *githubapp.TokenClient
 	Recorder     record.EventRecorder
 	BranchLocker *BranchLocker
+
+	// NowFunc returns the current time. Defaults to time.Now.
+	// Overridable in tests for deterministic behavior.
+	NowFunc func() time.Time
 }
 
 // +kubebuilder:rbac:groups=kelos.dev,resources=tasks,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=kelos.dev,resources=tasks/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=kelos.dev,resources=tasks/finalizers,verbs=update
+// +kubebuilder:rbac:groups=kelos.dev,resources=taskspawners,verbs=get;list;watch
 // +kubebuilder:rbac:groups=kelos.dev,resources=workspaces,verbs=get;list;watch
 // +kubebuilder:rbac:groups=kelos.dev,resources=agentconfigs,verbs=get;list;watch
+// +kubebuilder:rbac:groups=kelos.dev,resources=taskrecords,verbs=get;list;watch;create;delete
+// +kubebuilder:rbac:groups=kelos.dev,resources=taskbudgets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=kelos.dev,resources=taskbudgets/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods/log,verbs=get
@@ -134,7 +143,12 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	}
 
 	if !jobExists && isTerminalTaskPhase(task.Status.Phase) {
-		return r.applyTaskTTL(ctx, &task, ctrl.Result{})
+		gcRequeue := r.gcExpiredTaskRecords(ctx, task.Namespace)
+		result := ctrl.Result{}
+		if gcRequeue > 0 {
+			result.RequeueAfter = gcRequeue
+		}
+		return r.applyTaskTTL(ctx, &task, result)
 	}
 
 	// Create Job if it doesn't exist
@@ -168,6 +182,14 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 				r.BranchLocker.Release(lockKey, task.Name)
 				return result, err
 			}
+		}
+
+		admitted, result, err := r.checkBudgetAdmission(ctx, &task)
+		if err != nil || !admitted {
+			if task.Spec.Branch != "" {
+				r.BranchLocker.Release(branchLockKey(&task), task.Name)
+			}
+			return result, err
 		}
 
 		return r.createJob(ctx, &task)
@@ -1037,11 +1059,13 @@ func (r *TaskReconciler) updateStatus(ctx context.Context, task *kelos.Task, job
 				task.Status.CompletionTime = &now
 				task.Status.Outputs = outputs
 				task.Status.Results = results
+				task.Status.Usage = usageFromResults(results)
 			}
 		}
 		if retryOutputs && (outputs != nil || results != nil) {
 			task.Status.Outputs = outputs
 			task.Status.Results = results
+			task.Status.Usage = usageFromResults(results)
 		}
 		return r.Status().Update(ctx, task)
 	}); err != nil {
@@ -1066,6 +1090,16 @@ func (r *TaskReconciler) updateStatus(ctx context.Context, task *kelos.Task, job
 		RecordCostTokenMetrics(task, results)
 	}
 
+	// Create a TaskRecord for budget accounting when task completes with usage data,
+	// including the retry-output path where usage is populated after the initial transition.
+	var gcRequeue time.Duration
+	if (setCompletionTime || retryOutputs) && task.Status.Usage != nil {
+		if err := r.createTaskRecord(ctx, task); err != nil {
+			return ctrl.Result{}, err
+		}
+		gcRequeue = r.gcExpiredTaskRecords(ctx, task.Namespace)
+	}
+
 	if setCompletionTime && (outputs != nil || results != nil) {
 		r.recordEvent(task, corev1.EventTypeNormal, "OutputsCaptured", "Captured %d outputs and %d results from agent", len(outputs), len(results))
 	}
@@ -1073,6 +1107,11 @@ func (r *TaskReconciler) updateStatus(ctx context.Context, task *kelos.Task, job
 	// Requeue to retry output capture when the initial attempt got nothing
 	if setCompletionTime && outputs == nil && results == nil {
 		return ctrl.Result{RequeueAfter: outputRetryInterval}, nil
+	}
+
+	// Requeue to clean up TaskRecords with pending TTL expiry
+	if gcRequeue > 0 {
+		return ctrl.Result{RequeueAfter: gcRequeue}, nil
 	}
 
 	return ctrl.Result{}, nil
@@ -1389,6 +1428,126 @@ func RecordCostTokenMetrics(task *kelos.Task, results map[string]string) {
 	}
 }
 
+// usageFromResults parses cost-usd, input-tokens, output-tokens from the
+// string results map and returns a TaskUsage struct. Returns nil if no
+// usage data is present.
+func usageFromResults(results map[string]string) *kelos.TaskUsage {
+	if len(results) == 0 {
+		return nil
+	}
+
+	var usage kelos.TaskUsage
+	hasData := false
+
+	if costStr, ok := results["cost-usd"]; ok && costStr != "" {
+		q, err := resource.ParseQuantity(costStr)
+		if err == nil && !q.IsZero() && q.Cmp(resource.Quantity{}) >= 0 {
+			usage.CostUSD = &q
+			hasData = true
+		}
+	}
+	if inputStr, ok := results["input-tokens"]; ok && inputStr != "" {
+		tokens, err := strconv.ParseInt(inputStr, 10, 64)
+		if err == nil && tokens > 0 {
+			usage.InputTokens = &tokens
+			hasData = true
+		}
+	}
+	if outputStr, ok := results["output-tokens"]; ok && outputStr != "" {
+		tokens, err := strconv.ParseInt(outputStr, 10, 64)
+		if err == nil && tokens > 0 {
+			usage.OutputTokens = &tokens
+			hasData = true
+		}
+	}
+
+	if !hasData {
+		return nil
+	}
+	return &usage
+}
+
+const (
+	// defaultTaskRecordTTL is the default retention period for TaskRecords
+	// (30 days). Records older than this are garbage-collected.
+	defaultTaskRecordTTL int32 = 30 * 24 * 60 * 60
+)
+
+// createTaskRecord creates an immutable TaskRecord for a completed Task.
+// Non-AlreadyExists errors are returned to trigger a requeue.
+func (r *TaskReconciler) createTaskRecord(ctx context.Context, task *kelos.Task) error {
+	logger := log.FromContext(ctx)
+
+	if task.Status.Usage == nil {
+		return nil
+	}
+
+	ttl := defaultTaskRecordTTL
+	record := &kelos.TaskRecord{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      string(task.UID),
+			Namespace: task.Namespace,
+			Labels:    task.Labels,
+		},
+		Spec: kelos.TaskRecordSpec{
+			TaskRef: kelos.TaskReference{
+				Name: task.Name,
+				UID:  task.UID,
+			},
+			Type:                      task.Spec.Type,
+			Model:                     task.Spec.Model,
+			Phase:                     task.Status.Phase,
+			StartTime:                 task.Status.StartTime,
+			CompletionTime:            task.Status.CompletionTime,
+			Usage:                     task.Status.Usage.DeepCopy(),
+			TTLSecondsAfterCompletion: &ttl,
+		},
+	}
+
+	if err := r.Create(ctx, record); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return nil
+		}
+		logger.Error(err, "Unable to create TaskRecord", "task", task.Name)
+		return err
+	}
+	return nil
+}
+
+// gcExpiredTaskRecords deletes TaskRecords whose TTL has expired and returns
+// the duration until the next record expires (zero if none are pending).
+// Best-effort: errors are logged but do not fail the reconcile.
+func (r *TaskReconciler) gcExpiredTaskRecords(ctx context.Context, namespace string) time.Duration {
+	logger := log.FromContext(ctx)
+
+	var records kelos.TaskRecordList
+	if err := r.List(ctx, &records, client.InNamespace(namespace)); err != nil {
+		logger.Error(err, "Listing TaskRecords for GC")
+		return 0
+	}
+
+	now := r.now()
+	var nextExpiry time.Duration
+	for i := range records.Items {
+		rec := &records.Items[i]
+		if rec.Spec.TTLSecondsAfterCompletion == nil || rec.Spec.CompletionTime == nil {
+			continue
+		}
+		expiry := rec.Spec.CompletionTime.Add(time.Duration(*rec.Spec.TTLSecondsAfterCompletion) * time.Second)
+		if now.After(expiry) {
+			if err := r.Delete(ctx, rec); err != nil && !apierrors.IsNotFound(err) {
+				logger.Error(err, "Deleting expired TaskRecord", "record", rec.Name)
+			}
+		} else {
+			remaining := expiry.Sub(now)
+			if nextExpiry == 0 || remaining < nextExpiry {
+				nextExpiry = remaining
+			}
+		}
+	}
+	return nextExpiry
+}
+
 // isJobFailed checks whether the Job has permanently failed by looking for a
 // JobFailed condition with status True. Unlike checking job.Status.Failed > 0,
 // this correctly handles Jobs with backoffLimit > 0 where intermediate pod
@@ -1409,7 +1568,39 @@ func (r *TaskReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&batchv1.Job{}).
 		Watches(&kelos.Task{}, handler.EnqueueRequestsFromMapFunc(r.enqueueDependentTasks)).
 		Watches(&kelos.Workspace{}, handler.EnqueueRequestsFromMapFunc(r.enqueueTasksForWorkspace)).
+		Watches(&kelos.TaskBudget{}, handler.EnqueueRequestsFromMapFunc(r.enqueueTasksBlockedByBudget)).
 		Complete(r)
+}
+
+// enqueueTasksBlockedByBudget returns reconcile requests for Tasks in Waiting
+// phase that have a BudgetBlocked condition. This allows budget-blocked tasks
+// to be re-evaluated when a TaskBudget changes (e.g. period rolls over).
+func (r *TaskReconciler) enqueueTasksBlockedByBudget(ctx context.Context, obj client.Object) []reconcile.Request {
+	budget, ok := obj.(*kelos.TaskBudget)
+	if !ok {
+		return nil
+	}
+
+	var taskList kelos.TaskList
+	if err := r.List(ctx, &taskList, client.InNamespace(budget.Namespace)); err != nil {
+		return nil
+	}
+
+	var requests []reconcile.Request
+	for _, t := range taskList.Items {
+		if t.Status.Phase != kelos.TaskPhaseWaiting {
+			continue
+		}
+		for _, c := range t.Status.Conditions {
+			if c.Type == "BudgetBlocked" && c.Status == metav1.ConditionTrue {
+				requests = append(requests, reconcile.Request{
+					NamespacedName: client.ObjectKeyFromObject(&t),
+				})
+				break
+			}
+		}
+	}
+	return requests
 }
 
 // enqueueTasksForWorkspace returns reconcile requests for Tasks that reference

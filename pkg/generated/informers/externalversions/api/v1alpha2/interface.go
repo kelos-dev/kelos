@@ -28,6 +28,10 @@ type Interface interface {
 	AgentConfigs() AgentConfigInformer
 	// Tasks returns a TaskInformer.
 	Tasks() TaskInformer
+	// TaskBudgets returns a TaskBudgetInformer.
+	TaskBudgets() TaskBudgetInformer
+	// TaskRecords returns a TaskRecordInformer.
+	TaskRecords() TaskRecordInformer
 	// TaskSpawners returns a TaskSpawnerInformer.
 	TaskSpawners() TaskSpawnerInformer
 	// WorkerPools returns a WorkerPoolInformer.
@@ -55,6 +59,16 @@ func (v *version) AgentConfigs() AgentConfigInformer {
 // Tasks returns a TaskInformer.
 func (v *version) Tasks() TaskInformer {
 	return &taskInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
+// TaskBudgets returns a TaskBudgetInformer.
+func (v *version) TaskBudgets() TaskBudgetInformer {
+	return &taskBudgetInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
+// TaskRecords returns a TaskRecordInformer.
+func (v *version) TaskRecords() TaskRecordInformer {
+	return &taskRecordInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }
 
 // TaskSpawners returns a TaskSpawnerInformer.

@@ -92,8 +92,30 @@ rules:
   - kelos.dev
   resources:
   - agentconfigs
+  - taskbudgets
   - workspaces
   verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - kelos.dev
+  resources:
+  - taskbudgets/status
+  - tasks/status
+  - taskspawners/status
+  - workerpools/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - kelos.dev
+  resources:
+  - taskrecords
+  verbs:
+  - create
+  - delete
   - get
   - list
   - watch
@@ -116,16 +138,6 @@ rules:
   - tasks/finalizers
   - taskspawners/finalizers
   verbs:
-  - update
-- apiGroups:
-  - kelos.dev
-  resources:
-  - tasks/status
-  - taskspawners/status
-  - workerpools/status
-  verbs:
-  - get
-  - patch
   - update
 - apiGroups:
   - kelos.dev

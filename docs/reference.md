@@ -400,7 +400,6 @@ The installation token is minted to a per-task Secret (`<task-name>-github-token
 | `spec.maxConcurrency` | Limit max concurrent running tasks (important for cost control) | No |
 | `spec.maxTotalTasks` | Lifetime limit on total tasks created by this spawner | No |
 | `spec.suspend` | Pause the spawner without deleting it; resume with `spec.suspend: false` (default: `false`) | No |
-
 <a id="prompttemplate-variables"></a>
 
 ### promptTemplate Variables
@@ -518,6 +517,63 @@ spec:
 | `status.message` | Additional information about the current status |
 | `status.outputs` | Automatically captured outputs: `branch`, `commit`, `base-branch`, `pr`, `cost-usd`, `input-tokens`, `output-tokens` |
 | `status.results` | Parsed key-value map from outputs (e.g., `results.branch`, `results.commit`, `results.pr`, `results.input-tokens`) |
+| `status.usage.costUSD` | Reported agent cost in USD (non-negative `resource.Quantity`). Parsed from `results["cost-usd"]` |
+| `status.usage.inputTokens` | Number of input tokens consumed (non-negative integer). Parsed from `results["input-tokens"]` |
+| `status.usage.outputTokens` | Number of output tokens produced (non-negative integer). Parsed from `results["output-tokens"]` |
+| `status.conditions` | Standard Kubernetes conditions. Includes `BudgetBlocked` when a matching TaskBudget has been exceeded |
+
+## TaskBudget
+
+TaskBudget defines observed-spend admission limits for Tasks. When a Task's labels match a TaskBudget's `taskSelector` and the accumulated spend in the current period meets or exceeds a limit, the Task stays in `Waiting` phase with a `BudgetBlocked` condition until the period resets.
+
+| Field | Description | Required |
+|-------|-------------|----------|
+| `spec.taskSelector` | Label selector matching Tasks and TaskRecords in the same namespace. An empty selector (`{}`) selects all Tasks | Yes |
+| `spec.period.type` | Period boundary for budget accounting. Currently only `Daily` is supported | Yes |
+| `spec.period.timezone` | IANA timezone for period boundaries (default: `UTC`) | No |
+| `spec.maxCostUSD` | Maximum observed cost in USD admitted per period (non-negative `resource.Quantity`) | At least one limit required |
+| `spec.maxInputTokens` | Maximum input tokens admitted per period (non-negative integer) | At least one limit required |
+| `spec.maxOutputTokens` | Maximum output tokens admitted per period (non-negative integer) | At least one limit required |
+
+### TaskBudget Status
+
+| Field | Description |
+|-------|-------------|
+| `status.observedGeneration` | Most recent generation observed by the controller |
+| `status.currentPeriodStart` | Inclusive start of the current accounting period |
+| `status.currentPeriodEnd` | Exclusive end of the current accounting period |
+| `status.used.costUSD` | Summed cost from matching TaskRecords in the current period |
+| `status.used.inputTokens` | Summed input tokens from matching TaskRecords in the current period |
+| `status.used.outputTokens` | Summed output tokens from matching TaskRecords in the current period |
+| `status.conditions` | Includes `Degraded` when the budget has a configuration or operational error (invalid selector, invalid timezone, list error) |
+
+### Budget Admission Behavior
+
+- A Task is checked against all TaskBudgets in its namespace before job creation.
+- A budget matches if its `taskSelector` selects the Task's labels.
+- If any matching budget's limit is met or exceeded (using `>=` comparison), the Task is blocked.
+- Invalid selectors block admission (fail closed) and set a `Degraded` condition on the budget.
+- Invalid timezones or list errors block admission and set a `Degraded` condition.
+- The `Degraded` condition is cleared automatically after a successful evaluation.
+- A zero limit (e.g., `maxOutputTokens: 0`) blocks all matching Tasks immediately.
+
+## TaskRecord
+
+TaskRecord is an immutable terminal record for a completed Task that reported usage data. It preserves accounting data after the Task itself is deleted by TTL. Tasks that complete without usage (e.g., nil or missing usage output) do not generate a TaskRecord. The record name is derived from the Task UID to guarantee uniqueness. No `ownerReference` is set so garbage collection does not remove it.
+
+| Field | Description | Required |
+|-------|-------------|----------|
+| `spec.taskRef.name` | Name of the source Task | Yes |
+| `spec.taskRef.uid` | UID of the source Task | Yes |
+| `spec.type` | Agent type from `Task.spec.type` | No |
+| `spec.model` | Model from `Task.spec.model` | No |
+| `spec.phase` | Terminal Task phase (`Succeeded` or `Failed`) | Yes |
+| `spec.startTime` | When the Task started running | No |
+| `spec.completionTime` | When the Task completed | No |
+| `spec.usage.costUSD` | Reported cost in USD | No |
+| `spec.usage.inputTokens` | Input tokens consumed | No |
+| `spec.usage.outputTokens` | Output tokens produced | No |
+| `spec.ttlSecondsAfterCompletion` | Seconds after `completionTime` before automatic deletion (default: 30 days). The controller garbage-collects expired records and requeues for future expirations | No |
 
 ## TaskSpawner Status
 
@@ -766,6 +822,34 @@ In addition to subcommands and flags, the following arguments complete dynamical
 | `kelos resume taskspawner <TAB>` | taskspawner names |
 
 Enum-valued flags — `kelos run --type`, `kelos run --credential-type`, `kelos get --output`, and `kelos get task --phase` — complete from their fixed value set without contacting the cluster.
+
+## Prometheus Metrics
+
+The Kelos controller and spawner pods expose Prometheus metrics on their `/metrics` endpoint.
+
+### Controller Metrics
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `kelos_task_created_total` | Counter | namespace, type | Total Tasks for which a Job was created |
+| `kelos_task_completed_total` | Counter | namespace, type, phase | Total Tasks that reached a terminal phase |
+| `kelos_task_duration_seconds` | Histogram | namespace, type, phase | Duration of Task execution from start to completion |
+| `kelos_task_cost_usd_total` | Counter | namespace, type, spawner, model | Cumulative cost in USD of completed Tasks |
+| `kelos_task_input_tokens_total` | Counter | namespace, type, spawner, model | Cumulative input tokens consumed by completed Tasks |
+| `kelos_task_output_tokens_total` | Counter | namespace, type, spawner, model | Cumulative output tokens consumed by completed Tasks |
+| `kelos_reconcile_errors_total` | Counter | controller | Reconciliation errors |
+
+### Spawner Metrics
+
+Each spawner pod emits metrics scoped to its own TaskSpawner:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `kelos_spawner_discovery_total` | Counter | Completed discovery cycles |
+| `kelos_spawner_discovery_errors_total` | Counter | Failed discovery cycles |
+| `kelos_spawner_items_discovered_total` | Counter | Work items discovered |
+| `kelos_spawner_tasks_created_total` | Counter | Tasks created by this spawner |
+| `kelos_spawner_discovery_duration_seconds` | Histogram | Duration of discovery cycles |
 
 ## Telemetry
 

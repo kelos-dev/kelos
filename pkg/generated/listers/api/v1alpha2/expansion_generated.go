@@ -34,6 +34,22 @@ type TaskListerExpansion interface{}
 // TaskNamespaceLister.
 type TaskNamespaceListerExpansion interface{}
 
+// TaskBudgetListerExpansion allows custom methods to be added to
+// TaskBudgetLister.
+type TaskBudgetListerExpansion interface{}
+
+// TaskBudgetNamespaceListerExpansion allows custom methods to be added to
+// TaskBudgetNamespaceLister.
+type TaskBudgetNamespaceListerExpansion interface{}
+
+// TaskRecordListerExpansion allows custom methods to be added to
+// TaskRecordLister.
+type TaskRecordListerExpansion interface{}
+
+// TaskRecordNamespaceListerExpansion allows custom methods to be added to
+// TaskRecordNamespaceLister.
+type TaskRecordNamespaceListerExpansion interface{}
+
 // TaskSpawnerListerExpansion allows custom methods to be added to
 // TaskSpawnerLister.
 type TaskSpawnerListerExpansion interface{}

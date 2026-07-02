@@ -15,6 +15,7 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -1937,5 +1938,167 @@ func TestEnsurePluginConfigMap_NotAdoptedWhenUnowned(t *testing.T) {
 	}
 	if len(got.OwnerReferences) != 0 {
 		t.Errorf("expected no owner references on unowned ConfigMap, got %d", len(got.OwnerReferences))
+	}
+}
+
+func TestCreateTaskRecord(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
+
+	int64Ptr := func(v int64) *int64 { return &v }
+	timePtr := func(t time.Time) *metav1.Time {
+		mt := metav1.NewTime(t)
+		return &mt
+	}
+
+	costUSD := resource.MustParse("2.50")
+	startTime := time.Date(2024, 6, 15, 10, 0, 0, 0, time.UTC)
+	completionTime := time.Date(2024, 6, 15, 10, 5, 0, 0, time.UTC)
+
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-task",
+			Namespace: "default",
+			UID:       "abc-123-def",
+			Labels: map[string]string{
+				"team": "platform",
+			},
+		},
+		Spec: kelos.TaskSpec{
+			Type:   "claude-code",
+			Model:  "opus",
+			Prompt: "test prompt",
+			Credentials: &kelos.Credentials{
+				Type: kelos.CredentialTypeAPIKey,
+				SecretRef: &kelos.SecretReference{
+					Name: "creds",
+				},
+			},
+		},
+		Status: kelos.TaskStatus{
+			Phase:          kelos.TaskPhaseSucceeded,
+			StartTime:      timePtr(startTime),
+			CompletionTime: timePtr(completionTime),
+			Usage: &kelos.TaskUsage{
+				CostUSD:      &costUSD,
+				InputTokens:  int64Ptr(5000),
+				OutputTokens: int64Ptr(2000),
+			},
+		},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(task).
+		Build()
+
+	r := &TaskReconciler{Client: cl, Scheme: scheme}
+
+	// First call should create the TaskRecord
+	if err := r.createTaskRecord(context.Background(), task); err != nil {
+		t.Fatalf("createTaskRecord: %v", err)
+	}
+
+	var record kelos.TaskRecord
+	if err := cl.Get(context.Background(), client.ObjectKey{
+		Namespace: "default",
+		Name:      "abc-123-def",
+	}, &record); err != nil {
+		t.Fatalf("getting TaskRecord: %v", err)
+	}
+
+	// Verify TaskRecord fields
+	if record.Spec.TaskRef.Name != "test-task" {
+		t.Errorf("TaskRef.Name = %q, want %q", record.Spec.TaskRef.Name, "test-task")
+	}
+	if record.Spec.TaskRef.UID != "abc-123-def" {
+		t.Errorf("TaskRef.UID = %q, want %q", record.Spec.TaskRef.UID, "abc-123-def")
+	}
+	if record.Spec.Type != "claude-code" {
+		t.Errorf("Type = %q, want %q", record.Spec.Type, "claude-code")
+	}
+	if record.Spec.Model != "opus" {
+		t.Errorf("Model = %q, want %q", record.Spec.Model, "opus")
+	}
+	if record.Spec.Phase != kelos.TaskPhaseSucceeded {
+		t.Errorf("Phase = %q, want %q", record.Spec.Phase, kelos.TaskPhaseSucceeded)
+	}
+	if record.Spec.Usage == nil {
+		t.Fatal("Usage = nil, want non-nil")
+	}
+	if record.Spec.Usage.CostUSD == nil || record.Spec.Usage.CostUSD.Cmp(costUSD) != 0 {
+		t.Errorf("Usage.CostUSD = %v, want %s", record.Spec.Usage.CostUSD, costUSD.String())
+	}
+	if record.Spec.Usage.InputTokens == nil || *record.Spec.Usage.InputTokens != 5000 {
+		t.Errorf("Usage.InputTokens = %v, want 5000", record.Spec.Usage.InputTokens)
+	}
+	if record.Spec.Usage.OutputTokens == nil || *record.Spec.Usage.OutputTokens != 2000 {
+		t.Errorf("Usage.OutputTokens = %v, want 2000", record.Spec.Usage.OutputTokens)
+	}
+	if record.Labels["team"] != "platform" {
+		t.Errorf("Labels[team] = %q, want %q", record.Labels["team"], "platform")
+	}
+
+	// Second call (idempotency) should not error
+	if err := r.createTaskRecord(context.Background(), task); err != nil {
+		t.Fatalf("createTaskRecord (idempotent): %v", err)
+	}
+
+	// Verify still only one record exists
+	var recordList kelos.TaskRecordList
+	if err := cl.List(context.Background(), &recordList, client.InNamespace("default")); err != nil {
+		t.Fatalf("listing TaskRecords: %v", err)
+	}
+	if len(recordList.Items) != 1 {
+		t.Errorf("TaskRecord count = %d, want 1", len(recordList.Items))
+	}
+}
+
+func TestCreateTaskRecord_NilUsageSkips(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
+
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "no-usage-task",
+			Namespace: "default",
+			UID:       "uid-no-usage",
+		},
+		Spec: kelos.TaskSpec{
+			Type:   "claude-code",
+			Prompt: "test",
+			Credentials: &kelos.Credentials{
+				Type: kelos.CredentialTypeAPIKey,
+				SecretRef: &kelos.SecretReference{
+					Name: "creds",
+				},
+			},
+		},
+		Status: kelos.TaskStatus{
+			Phase: kelos.TaskPhaseSucceeded,
+			Usage: nil,
+		},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(task).
+		Build()
+
+	r := &TaskReconciler{Client: cl, Scheme: scheme}
+
+	// Should not create a record when Usage is nil
+	if err := r.createTaskRecord(context.Background(), task); err != nil {
+		t.Fatalf("createTaskRecord: %v", err)
+	}
+
+	var recordList kelos.TaskRecordList
+	if err := cl.List(context.Background(), &recordList, client.InNamespace("default")); err != nil {
+		t.Fatalf("listing TaskRecords: %v", err)
+	}
+	if len(recordList.Items) != 0 {
+		t.Errorf("TaskRecord count = %d, want 0 (no record should be created for nil usage)", len(recordList.Items))
 	}
 }

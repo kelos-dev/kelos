@@ -192,6 +192,56 @@ func TestDevelopmentCommandPatternsMatchCommandLines(t *testing.T) {
 	}
 }
 
+func TestRootReviewersUseStickyPRComments(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		file   string
+		marker string
+	}{
+		{file: "kelos-reviewer.yaml", marker: "<!-- kelos-reviewer:sticky-review -->"},
+		{file: "kelos-api-reviewer.yaml", marker: "<!-- kelos-api-reviewer:sticky-review -->"},
+	}
+
+	required := []string{
+		`repos/kelos-dev/kelos/issues/{{.Number}}/comments?per_page=100`,
+		`--paginate`,
+		`--slurp`,
+		`--method PATCH`,
+		`repos/kelos-dev/kelos/issues/comments/$comment_id`,
+		`repos/kelos-dev/kelos/issues/{{.Number}}/comments`,
+	}
+	forbidden := []string{
+		`gh pr review`,
+		`/pulls/{{.Number}}/reviews`,
+		`comments=[`,
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.file, func(t *testing.T) {
+			t.Parallel()
+
+			ts := readSelfDevelopmentTaskSpawner(t, tt.file)
+			prompt := ts.Spec.TaskTemplate.PromptTemplate
+
+			if !strings.Contains(prompt, tt.marker) {
+				t.Fatalf("%s prompt does not contain sticky marker %q", tt.file, tt.marker)
+			}
+			for _, want := range required {
+				if !strings.Contains(prompt, want) {
+					t.Fatalf("%s prompt does not contain sticky comment flow fragment %q", tt.file, want)
+				}
+			}
+			for _, notWant := range forbidden {
+				if strings.Contains(prompt, notWant) {
+					t.Fatalf("%s prompt contains forbidden review submission fragment %q", tt.file, notWant)
+				}
+			}
+		})
+	}
+}
+
 func assertIgnoresDisruptions(t *testing.T, name string, policy *batchv1.PodFailurePolicy) {
 	t.Helper()
 

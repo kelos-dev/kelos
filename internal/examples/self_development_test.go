@@ -208,7 +208,7 @@ func TestRootReviewersUseStickyPRComments(t *testing.T) {
 		{
 			file:           "kelos-api-reviewer.yaml",
 			marker:         "<!-- kelos-api-reviewer:sticky-review -->",
-			templatePrefix: "Format the PR review body as:",
+			templatePrefix: "Format the PR comment body as:",
 		},
 	}
 
@@ -224,6 +224,7 @@ func TestRootReviewersUseStickyPRComments(t *testing.T) {
 		`gh pr review`,
 		`/pulls/{{.Number}}/reviews`,
 		`comments=[`,
+		`.user.login == "kelos-bot[bot]"`,
 	}
 
 	for _, tt := range tests {

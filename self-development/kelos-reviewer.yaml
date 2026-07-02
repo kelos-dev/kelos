@@ -339,7 +339,7 @@ spec:
       comment_id=$(gh api "repos/kelos-dev/kelos/issues/{{.Number}}/comments?per_page=100" \
         --paginate \
         --slurp \
-        --jq 'flatten | map(select(.user.login == "kelos-bot[bot]" and (.body | contains("<!-- kelos-reviewer:sticky-review -->")))) | last | .id // empty')
+        --jq 'flatten | map(select(.body | contains("<!-- kelos-reviewer:sticky-review -->"))) | last | .id // empty')
 
       if [ -n "$comment_id" ]; then
         gh api --method PATCH "repos/kelos-dev/kelos/issues/comments/$comment_id" \

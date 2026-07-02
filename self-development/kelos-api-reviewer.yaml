@@ -268,18 +268,12 @@ spec:
 
       **For issues**, post a comment using `gh issue comment {{.Number}} --body-file <file>`.
 
-      For PR comments, include this marker immediately after the identity line:
-
-      ```
-      <!-- kelos-api-reviewer:sticky-review -->
-      ```
-
-      Omit the marker for issue comments.
-
-      Format the review body as:
+      Format the PR review body as:
 
       ```
       🤖 **Kelos API Reviewer Agent** @gjkim42
+
+      <!-- kelos-api-reviewer:sticky-review -->
 
       ## API Design Review
 
@@ -298,6 +292,8 @@ spec:
 
       /kelos needs-input
       ```
+
+      Format the issue review body the same way, but omit the sticky marker.
 
       ## Rules
 

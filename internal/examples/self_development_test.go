@@ -196,11 +196,20 @@ func TestRootReviewersUseStickyPRComments(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		file   string
-		marker string
+		file           string
+		marker         string
+		templatePrefix string
 	}{
-		{file: "kelos-reviewer.yaml", marker: "<!-- kelos-reviewer:sticky-review -->"},
-		{file: "kelos-api-reviewer.yaml", marker: "<!-- kelos-api-reviewer:sticky-review -->"},
+		{
+			file:           "kelos-reviewer.yaml",
+			marker:         "<!-- kelos-reviewer:sticky-review -->",
+			templatePrefix: "Format the PR comment body as:",
+		},
+		{
+			file:           "kelos-api-reviewer.yaml",
+			marker:         "<!-- kelos-api-reviewer:sticky-review -->",
+			templatePrefix: "Format the PR review body as:",
+		},
 	}
 
 	required := []string{
@@ -227,6 +236,14 @@ func TestRootReviewersUseStickyPRComments(t *testing.T) {
 
 			if !strings.Contains(prompt, tt.marker) {
 				t.Fatalf("%s prompt does not contain sticky marker %q", tt.file, tt.marker)
+			}
+			templateStart := strings.Index(prompt, tt.templatePrefix)
+			if templateStart == -1 {
+				t.Fatalf("%s prompt does not contain PR body template heading %q", tt.file, tt.templatePrefix)
+			}
+			markerStart := strings.Index(prompt[templateStart:], tt.marker)
+			if markerStart == -1 {
+				t.Fatalf("%s PR body template does not contain sticky marker %q", tt.file, tt.marker)
 			}
 			for _, want := range required {
 				if !strings.Contains(prompt, want) {

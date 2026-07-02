@@ -192,6 +192,74 @@ func TestDevelopmentCommandPatternsMatchCommandLines(t *testing.T) {
 	}
 }
 
+func TestRootReviewersUseStickyPRComments(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		file           string
+		marker         string
+		templatePrefix string
+	}{
+		{
+			file:           "kelos-reviewer.yaml",
+			marker:         "<!-- kelos-reviewer:sticky-review -->",
+			templatePrefix: "Format the PR comment body as:",
+		},
+		{
+			file:           "kelos-api-reviewer.yaml",
+			marker:         "<!-- kelos-api-reviewer:sticky-review -->",
+			templatePrefix: "Format the PR comment body as:",
+		},
+	}
+
+	required := []string{
+		`repos/kelos-dev/kelos/issues/{{.Number}}/comments?per_page=100`,
+		`--paginate`,
+		`--slurp`,
+		`--method PATCH`,
+		`repos/kelos-dev/kelos/issues/comments/$comment_id`,
+		`repos/kelos-dev/kelos/issues/{{.Number}}/comments`,
+	}
+	forbidden := []string{
+		`gh pr review`,
+		`/pulls/{{.Number}}/reviews`,
+		`comments=[`,
+		`.user.login == "kelos-bot[bot]"`,
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.file, func(t *testing.T) {
+			t.Parallel()
+
+			ts := readSelfDevelopmentTaskSpawner(t, tt.file)
+			prompt := ts.Spec.TaskTemplate.PromptTemplate
+
+			if !strings.Contains(prompt, tt.marker) {
+				t.Fatalf("%s prompt does not contain sticky marker %q", tt.file, tt.marker)
+			}
+			templateStart := strings.Index(prompt, tt.templatePrefix)
+			if templateStart == -1 {
+				t.Fatalf("%s prompt does not contain PR body template heading %q", tt.file, tt.templatePrefix)
+			}
+			markerStart := strings.Index(prompt[templateStart:], tt.marker)
+			if markerStart == -1 {
+				t.Fatalf("%s PR body template does not contain sticky marker %q", tt.file, tt.marker)
+			}
+			for _, want := range required {
+				if !strings.Contains(prompt, want) {
+					t.Fatalf("%s prompt does not contain sticky comment flow fragment %q", tt.file, want)
+				}
+			}
+			for _, notWant := range forbidden {
+				if strings.Contains(prompt, notWant) {
+					t.Fatalf("%s prompt contains forbidden review submission fragment %q", tt.file, notWant)
+				}
+			}
+		})
+	}
+}
+
 func assertIgnoresDisruptions(t *testing.T, name string, policy *batchv1.PodFailurePolicy) {
 	t.Helper()
 

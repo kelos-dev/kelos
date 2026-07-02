@@ -269,6 +269,16 @@ func (tr *TaskReporter) reportViaComment(ctx context.Context, task *kelos.Task) 
 	}
 
 	if commentID == 0 {
+		foundID, found, err := tr.Reporter.FindTaskStatusComment(ctx, number, task.Name)
+		if err != nil {
+			return fmt.Errorf("finding GitHub status comment for task %s: %w", task.Name, err)
+		}
+		if found {
+			commentID = foundID
+		}
+	}
+
+	if commentID == 0 {
 		log.Info("Creating GitHub status comment", "task", task.Name, "number", number, "phase", desiredPhase)
 		newID, err := tr.Reporter.CreateComment(ctx, number, body)
 		if err != nil {

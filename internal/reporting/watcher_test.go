@@ -97,6 +97,9 @@ func newTestServer(t *testing.T) (*httptest.Server, *[]commentRecord) {
 		json.NewDecoder(r.Body).Decode(&body)
 
 		switch r.Method {
+		case http.MethodGet:
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode([]commentResponse{})
 		case http.MethodPost:
 			nextID++
 			records = append(records, commentRecord{
@@ -443,11 +446,10 @@ func TestReportTaskStatus_RunningMapsToAccepted(t *testing.T) {
 	}
 }
 
-func TestReportTaskStatus_CreatesNewCommentWhenNoCommentID(t *testing.T) {
+func TestReportTaskStatus_CreatesCommentWhenNoExistingStatusComment(t *testing.T) {
 	server, records := newTestServer(t)
 	defer server.Close()
 
-	// Task with succeeded phase but no comment ID (e.g. short-lived task)
 	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhaseSucceeded, map[string]string{
 		AnnotationGitHubReporting: "enabled",
 		AnnotationSourceNumber:    "42",
@@ -478,9 +480,8 @@ func TestReportTaskStatus_CreatesNewCommentWhenNoCommentID(t *testing.T) {
 	if len(*records) != 1 {
 		t.Fatalf("Expected 1 API call, got %d", len(*records))
 	}
-	// Should create, not update, since no comment ID exists
 	if (*records)[0].method != "create" {
-		t.Errorf("Expected create for task with no comment ID, got %s", (*records)[0].method)
+		t.Errorf("Expected create for task with no existing status comment, got %s", (*records)[0].method)
 	}
 
 	var updated kelos.Task
@@ -490,6 +491,97 @@ func TestReportTaskStatus_CreatesNewCommentWhenNoCommentID(t *testing.T) {
 	commentID, err := strconv.ParseInt(updated.Annotations[AnnotationGitHubCommentID], 10, 64)
 	if err != nil || commentID == 0 {
 		t.Errorf("Expected valid comment ID, got %q", updated.Annotations[AnnotationGitHubCommentID])
+	}
+}
+
+func TestReportTaskStatus_UpdatesExistingStatusCommentWhenCommentIDMissing(t *testing.T) {
+	var (
+		mu      sync.Mutex
+		records []commentRecord
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		switch r.Method {
+		case http.MethodGet:
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode([]commentResponse{
+				{ID: 1111, Body: "Unrelated comment"},
+				{ID: 2222, Body: FormatAcceptedComment("test-task")},
+			})
+		case http.MethodPatch:
+			var body createCommentRequest
+			json.NewDecoder(r.Body).Decode(&body)
+			id, _ := strconv.ParseInt(path.Base(r.URL.Path), 10, 64)
+			records = append(records, commentRecord{
+				method: "update",
+				id:     id,
+				body:   body.Body,
+			})
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(commentResponse{ID: id})
+		case http.MethodPost:
+			var body createCommentRequest
+			json.NewDecoder(r.Body).Decode(&body)
+			records = append(records, commentRecord{
+				method: "create",
+				body:   body.Body,
+			})
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(commentResponse{ID: 3333})
+		}
+	}))
+	defer server.Close()
+
+	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhaseSucceeded, map[string]string{
+		AnnotationGitHubReporting: "enabled",
+		AnnotationSourceNumber:    "42",
+		AnnotationSourceKind:      "issue",
+	})
+
+	cl := fake.NewClientBuilder().
+		WithScheme(newTestScheme()).
+		WithObjects(task).
+		Build()
+
+	tr := &TaskReporter{
+		Client: cl,
+		Reporter: &GitHubReporter{
+			Owner:   "owner",
+			Repo:    "repo",
+			Token:   "token",
+			BaseURL: server.URL,
+		},
+	}
+
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if len(records) != 1 {
+		t.Fatalf("Expected 1 API call, got %d", len(records))
+	}
+	if records[0].method != "update" {
+		t.Errorf("Expected update, got %s", records[0].method)
+	}
+	if records[0].id != 2222 {
+		t.Errorf("Expected comment ID 2222, got %d", records[0].id)
+	}
+	if records[0].body != FormatSucceededComment("test-task") {
+		t.Errorf("Expected succeeded comment body, got %q", records[0].body)
+	}
+
+	var updated kelos.Task
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
+		t.Fatalf("Getting updated task: %v", err)
+	}
+	if updated.Annotations[AnnotationGitHubCommentID] != "2222" {
+		t.Errorf("Expected persisted comment ID 2222, got %q", updated.Annotations[AnnotationGitHubCommentID])
+	}
+	if updated.Annotations[AnnotationGitHubReportPhase] != "succeeded" {
+		t.Errorf("Expected report phase 'succeeded', got %q", updated.Annotations[AnnotationGitHubReportPhase])
 	}
 }
 

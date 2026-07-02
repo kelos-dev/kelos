@@ -2291,8 +2291,14 @@ func TestRunReportingCycle_ReportsForAnnotatedTasks(t *testing.T) {
 
 	// Set up a fake GitHub server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]int64{"id": 999})
+		switch r.Method {
+		case http.MethodGet:
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode([]map[string]string{})
+		case http.MethodPost:
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(map[string]int64{"id": 999})
+		}
 	}))
 	defer server.Close()
 
@@ -2413,8 +2419,14 @@ func TestRunOnce_UsesTokenResolverForReporting(t *testing.T) {
 	var gotAuth string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]int64{"id": 999})
+		switch r.Method {
+		case http.MethodGet:
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode([]map[string]string{})
+		case http.MethodPost:
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(map[string]int64{"id": 999})
+		}
 	}))
 	defer server.Close()
 

@@ -146,17 +146,13 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	if !jobExists && isTerminalTaskPhase(task.Status.Phase) {
 		// The Job may have been deleted before its TaskRecord was created (e.g. a
 		// transient create failure). Retry here so budget usage is not undercounted.
+		// TaskRecord TTL GC is handled by the dedicated TaskRecordReconciler.
 		if task.Status.Usage != nil {
 			if err := r.createTaskRecord(ctx, &task); err != nil {
 				return ctrl.Result{}, err
 			}
 		}
-		gcRequeue := r.gcExpiredTaskRecords(ctx, task.Namespace)
-		result := ctrl.Result{}
-		if gcRequeue > 0 {
-			result.RequeueAfter = gcRequeue
-		}
-		return r.applyTaskTTL(ctx, &task, result)
+		return r.applyTaskTTL(ctx, &task, ctrl.Result{})
 	}
 
 	// Create Job if it doesn't exist
@@ -468,6 +464,9 @@ func (r *TaskReconciler) createJob(ctx context.Context, task *kelos.Task) (ctrl.
 		}
 		task.Status.Phase = kelos.TaskPhasePending
 		task.Status.JobName = job.Name
+		// Clear any stale message from a prior Waiting state (e.g. a budget-blocked
+		// or branch-lock wait) now that the Job has been created.
+		task.Status.Message = ""
 		return r.Status().Update(ctx, task)
 	}); err != nil {
 		logger.Error(err, "Unable to update Task status")
@@ -1103,12 +1102,11 @@ func (r *TaskReconciler) updateStatus(ctx context.Context, task *kelos.Task, job
 	// or retry-output path) ensures a transient create failure is retried on a
 	// later reconcile instead of permanently undercounting budget usage.
 	// createTaskRecord is idempotent, so repeated calls are safe.
-	var gcRequeue time.Duration
+	// TaskRecord TTL GC is handled by the dedicated TaskRecordReconciler.
 	if isTerminalTaskPhase(task.Status.Phase) && task.Status.Usage != nil {
 		if err := r.createTaskRecord(ctx, task); err != nil {
 			return ctrl.Result{}, err
 		}
-		gcRequeue = r.gcExpiredTaskRecords(ctx, task.Namespace)
 	}
 
 	if setCompletionTime && (outputs != nil || results != nil) {
@@ -1118,11 +1116,6 @@ func (r *TaskReconciler) updateStatus(ctx context.Context, task *kelos.Task, job
 	// Requeue to retry output capture when the initial attempt got nothing
 	if setCompletionTime && outputs == nil && results == nil {
 		return ctrl.Result{RequeueAfter: outputRetryInterval}, nil
-	}
-
-	// Requeue to clean up TaskRecords with pending TTL expiry
-	if gcRequeue > 0 {
-		return ctrl.Result{RequeueAfter: gcRequeue}, nil
 	}
 
 	return ctrl.Result{}, nil
@@ -1505,12 +1498,6 @@ func (r *TaskReconciler) checkBudgetAdmission(ctx context.Context, task *kelos.T
 // createTaskRecord creates an immutable TaskRecord for a completed Task.
 func (r *TaskReconciler) createTaskRecord(ctx context.Context, task *kelos.Task) error {
 	return r.budget().createTaskRecord(ctx, task)
-}
-
-// gcExpiredTaskRecords deletes TaskRecords whose TTL has expired and returns
-// the duration until the next record expires (zero if none are pending).
-func (r *TaskReconciler) gcExpiredTaskRecords(ctx context.Context, namespace string) time.Duration {
-	return r.budget().gcExpiredTaskRecords(ctx, namespace)
 }
 
 // sumPeriodUsage sums usage from TaskRecords matching the selector within the period.

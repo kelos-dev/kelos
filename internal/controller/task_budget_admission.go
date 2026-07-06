@@ -456,36 +456,3 @@ func (e *budgetEnforcer) createTaskRecord(ctx context.Context, task *kelos.Task)
 	return nil
 }
 
-// gcExpiredTaskRecords deletes TaskRecords whose TTL has expired and returns
-// the duration until the next record expires (zero if none are pending).
-// Best-effort: errors are logged but do not fail the reconcile.
-func (e *budgetEnforcer) gcExpiredTaskRecords(ctx context.Context, namespace string) time.Duration {
-	logger := log.FromContext(ctx)
-
-	var records kelos.TaskRecordList
-	if err := e.List(ctx, &records, client.InNamespace(namespace)); err != nil {
-		logger.Error(err, "Listing TaskRecords for GC")
-		return 0
-	}
-
-	now := e.now()
-	var nextExpiry time.Duration
-	for i := range records.Items {
-		rec := &records.Items[i]
-		if rec.Spec.TTLSecondsAfterCompletion == nil || rec.Spec.CompletionTime == nil {
-			continue
-		}
-		expiry := rec.Spec.CompletionTime.Add(time.Duration(*rec.Spec.TTLSecondsAfterCompletion) * time.Second)
-		if now.After(expiry) {
-			if err := e.Delete(ctx, rec); err != nil && !apierrors.IsNotFound(err) {
-				logger.Error(err, "Deleting expired TaskRecord", "record", rec.Name)
-			}
-		} else {
-			remaining := expiry.Sub(now)
-			if nextExpiry == 0 || remaining < nextExpiry {
-				nextExpiry = remaining
-			}
-		}
-	}
-	return nextExpiry
-}

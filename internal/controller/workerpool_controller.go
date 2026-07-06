@@ -975,6 +975,16 @@ func (r *WorkerPoolReconciler) reconcileTask(ctx context.Context, task *kelos.Ta
 
 	switch task.Status.Phase {
 	case kelos.TaskPhaseSucceeded, kelos.TaskPhaseFailed:
+		// completeTask writes the terminal phase before creating the TaskRecord, so
+		// a transient createTaskRecord failure leaves the task terminal with no
+		// record. Retry here — the only place a terminal worker-pool Task is
+		// re-reconciled — so budget usage is not undercounted, mirroring the
+		// Job-backed path. createTaskRecord is idempotent.
+		if task.Status.Usage != nil {
+			if err := r.budget().createTaskRecord(ctx, task); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
 		return ctrl.Result{}, nil
 	case kelos.TaskPhaseRunning, kelos.TaskPhasePending:
 		if task.Status.PodName != "" {

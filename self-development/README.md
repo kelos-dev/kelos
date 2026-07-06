@@ -427,7 +427,7 @@ kubectl create secret generic kelos-credentials \
 To adapt these examples for your own repository:
 
 1. **Update the Workspace reference:**
-   - Change `spec.taskTemplate.workspaceRef.name` to match your Workspace resource
+   - Change `spec.taskTemplate.worker.workspaceRef.name` to match your Workspace resource
    - Or update the Workspace to point to your repository
 
 2. **Update the webhook repository and filters:**
@@ -495,8 +495,9 @@ To adapt these examples for your own repository:
    ```yaml
    spec:
      taskTemplate:
-       model: gpt-5.5
-       effort: xhigh
+       worker:
+         model: gpt-5.5
+         effort: xhigh
    ```
 
    The checked-in spawners use `gpt-5.5` for the tasks that previously used

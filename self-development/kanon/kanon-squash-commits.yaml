@@ -26,11 +26,35 @@ spec:
         checks: {}
   maxConcurrency: 1
   taskTemplate:
-    workspaceRef:
-      name: kanon-agent
-    model: gpt-5.4-mini
-    effort: medium
-    type: codex
+    worker:
+      workspaceRef:
+        name: kanon-agent
+      model: gpt-5.4-mini
+      effort: medium
+      type: codex
+      credentials:
+        type: oauth
+        secretRef:
+          name: kelos-credentials
+      podOverrides:
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+            ephemeral-storage: "4Gi"
+          limits:
+            ephemeral-storage: "4Gi"
+        env:
+          - name: GIT_AUTHOR_NAME
+            value: "Gunju Kim"
+          - name: GIT_AUTHOR_EMAIL
+            value: "gjkim042@gmail.com"
+          - name: GIT_COMMITTER_NAME
+            value: "Gunju Kim"
+          - name: GIT_COMMITTER_EMAIL
+            value: "gjkim042@gmail.com"
+      agentConfigRefs:
+        - name: kanon-dev-agent
     ttlSecondsAfterFinished: 864000
     podFailurePolicy:
       rules:
@@ -42,30 +66,7 @@ spec:
           onExitCodes:
             operator: NotIn
             values: [0]
-    credentials:
-      type: oauth
-      secretRef:
-        name: kelos-credentials
-    podOverrides:
-      resources:
-        requests:
-          cpu: "250m"
-          memory: "512Mi"
-          ephemeral-storage: "4Gi"
-        limits:
-          ephemeral-storage: "4Gi"
-      env:
-        - name: GIT_AUTHOR_NAME
-          value: "Gunju Kim"
-        - name: GIT_AUTHOR_EMAIL
-          value: "gjkim042@gmail.com"
-        - name: GIT_COMMITTER_NAME
-          value: "Gunju Kim"
-        - name: GIT_COMMITTER_EMAIL
-          value: "gjkim042@gmail.com"
     branch: '{{with index . "Branch"}}{{.}}{{else}}main{{end}}'
-    agentConfigRefs:
-      - name: kanon-dev-agent
     promptTemplate: |
       You are a coding agent. Your only task is to rebase and squash commits on a PR branch.
 

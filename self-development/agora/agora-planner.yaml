@@ -43,11 +43,26 @@ spec:
         enabled: true
   maxConcurrency: 2
   taskTemplate:
-    workspaceRef:
-      name: agora-agent
-    model: gpt-5.5
-    effort: xhigh
-    type: codex
+    worker:
+      workspaceRef:
+        name: agora-agent
+      model: gpt-5.5
+      effort: xhigh
+      type: codex
+      credentials:
+        type: oauth
+        secretRef:
+          name: kelos-credentials
+      podOverrides:
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+            ephemeral-storage: "2Gi"
+          limits:
+            ephemeral-storage: "2Gi"
+      agentConfigRefs:
+        - name: agora-planner-agent
     ttlSecondsAfterFinished: 864000
     podFailurePolicy:
       rules:
@@ -59,20 +74,6 @@ spec:
           onExitCodes:
             operator: NotIn
             values: [0]
-    credentials:
-      type: oauth
-      secretRef:
-        name: kelos-credentials
-    podOverrides:
-      resources:
-        requests:
-          cpu: "250m"
-          memory: "512Mi"
-          ephemeral-storage: "2Gi"
-        limits:
-          ephemeral-storage: "2Gi"
-    agentConfigRefs:
-      - name: agora-planner-agent
     promptTemplate: |
       You are an implementation planner for the Agora project (github.com/kelos-dev/agora),
       a local coordination server for humans and coding agents. Your job is to investigate

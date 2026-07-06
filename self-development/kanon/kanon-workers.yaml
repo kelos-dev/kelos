@@ -53,11 +53,35 @@ spec:
         enabled: true
   maxConcurrency: 8
   taskTemplate:
-    workspaceRef:
-      name: kanon-agent
-    model: gpt-5.5
-    effort: xhigh
-    type: codex
+    worker:
+      workspaceRef:
+        name: kanon-agent
+      model: gpt-5.5
+      effort: xhigh
+      type: codex
+      credentials:
+        type: oauth
+        secretRef:
+          name: kelos-credentials
+      podOverrides:
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+            ephemeral-storage: "4Gi"
+          limits:
+            ephemeral-storage: "4Gi"
+        env:
+          - name: GIT_AUTHOR_NAME
+            value: "Gunju Kim"
+          - name: GIT_AUTHOR_EMAIL
+            value: "gjkim042@gmail.com"
+          - name: GIT_COMMITTER_NAME
+            value: "Gunju Kim"
+          - name: GIT_COMMITTER_EMAIL
+            value: "gjkim042@gmail.com"
+      agentConfigRefs:
+        - name: kanon-workers-agent
     ttlSecondsAfterFinished: 864000
     podFailurePolicy:
       rules:
@@ -69,30 +93,7 @@ spec:
           onExitCodes:
             operator: NotIn
             values: [0]
-    credentials:
-      type: oauth
-      secretRef:
-        name: kelos-credentials
-    podOverrides:
-      resources:
-        requests:
-          cpu: "250m"
-          memory: "512Mi"
-          ephemeral-storage: "4Gi"
-        limits:
-          ephemeral-storage: "4Gi"
-      env:
-        - name: GIT_AUTHOR_NAME
-          value: "Gunju Kim"
-        - name: GIT_AUTHOR_EMAIL
-          value: "gjkim042@gmail.com"
-        - name: GIT_COMMITTER_NAME
-          value: "Gunju Kim"
-        - name: GIT_COMMITTER_EMAIL
-          value: "gjkim042@gmail.com"
     branch: "kanon-task-{{.Number}}"
-    agentConfigRefs:
-      - name: kanon-workers-agent
     promptTemplate: |
       You are a coding agent. You either
       - create a PR to fix the issue

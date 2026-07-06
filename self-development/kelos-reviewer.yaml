@@ -68,11 +68,26 @@ spec:
         checks: {}
   maxConcurrency: 3
   taskTemplate:
-    workspaceRef:
-      name: kelos-agent
-    model: gpt-5.5
-    effort: xhigh
-    type: codex
+    worker:
+      workspaceRef:
+        name: kelos-agent
+      model: gpt-5.5
+      effort: xhigh
+      type: codex
+      credentials:
+        type: oauth
+        secretRef:
+          name: kelos-credentials
+      podOverrides:
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+            ephemeral-storage: "4Gi"
+          limits:
+            ephemeral-storage: "4Gi"
+      agentConfigRefs:
+        - name: kelos-reviewer-agent
     ttlSecondsAfterFinished: 864000
     podFailurePolicy:
       rules:
@@ -84,21 +99,7 @@ spec:
           onExitCodes:
             operator: NotIn
             values: [0]
-    credentials:
-      type: oauth
-      secretRef:
-        name: kelos-credentials
-    podOverrides:
-      resources:
-        requests:
-          cpu: "250m"
-          memory: "512Mi"
-          ephemeral-storage: "4Gi"
-        limits:
-          ephemeral-storage: "4Gi"
     branch: '{{with index . "Branch"}}{{.}}{{else}}main{{end}}'
-    agentConfigRefs:
-      - name: kelos-reviewer-agent
     promptTemplate: |
       You are a code review agent for the Kelos project (github.com/kelos-dev/kelos).
       Your job is to thoroughly review a pull request and submit a structured review

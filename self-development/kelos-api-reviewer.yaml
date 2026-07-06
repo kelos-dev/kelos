@@ -67,11 +67,26 @@ spec:
         checks: {}
   maxConcurrency: 3
   taskTemplate:
-    workspaceRef:
-      name: kelos-agent
-    model: gpt-5.5
-    effort: xhigh
-    type: codex
+    worker:
+      workspaceRef:
+        name: kelos-agent
+      model: gpt-5.5
+      effort: xhigh
+      type: codex
+      credentials:
+        type: oauth
+        secretRef:
+          name: kelos-credentials
+      podOverrides:
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+            ephemeral-storage: "4Gi"
+          limits:
+            ephemeral-storage: "4Gi"
+      agentConfigRefs:
+        - name: kelos-api-reviewer-agent
     ttlSecondsAfterFinished: 864000
     podFailurePolicy:
       rules:
@@ -83,21 +98,7 @@ spec:
           onExitCodes:
             operator: NotIn
             values: [0]
-    credentials:
-      type: oauth
-      secretRef:
-        name: kelos-credentials
-    podOverrides:
-      resources:
-        requests:
-          cpu: "250m"
-          memory: "512Mi"
-          ephemeral-storage: "4Gi"
-        limits:
-          ephemeral-storage: "4Gi"
     branch: '{{with index . "Branch"}}{{.}}{{else}}main{{end}}'
-    agentConfigRefs:
-      - name: kelos-api-reviewer-agent
     promptTemplate: |
       You are a Kubernetes API design reviewer for the Kelos project (github.com/kelos-dev/kelos).
       Your job is to review API design, compatibility, and adherence to Kubernetes API

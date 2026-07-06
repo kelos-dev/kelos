@@ -8,11 +8,35 @@ spec:
       schedule: "0 18 * * *"
   maxConcurrency: 1
   taskTemplate:
-    workspaceRef:
-      name: kelos-agent
-    model: gpt-5.5
-    effort: xhigh
-    type: codex
+    worker:
+      workspaceRef:
+        name: kelos-agent
+      model: gpt-5.5
+      effort: xhigh
+      type: codex
+      credentials:
+        type: oauth
+        secretRef:
+          name: kelos-credentials
+      podOverrides:
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+            ephemeral-storage: "2Gi"
+          limits:
+            ephemeral-storage: "2Gi"
+        env:
+          - name: GIT_AUTHOR_NAME
+            value: "Gunju Kim"
+          - name: GIT_AUTHOR_EMAIL
+            value: "gjkim042@gmail.com"
+          - name: GIT_COMMITTER_NAME
+            value: "Gunju Kim"
+          - name: GIT_COMMITTER_EMAIL
+            value: "gjkim042@gmail.com"
+      agentConfigRefs:
+        - name: kelos-dev-agent
     ttlSecondsAfterFinished: 864000
     podFailurePolicy:
       rules:
@@ -24,30 +48,7 @@ spec:
           onExitCodes:
             operator: NotIn
             values: [0]
-    credentials:
-      type: oauth
-      secretRef:
-        name: kelos-credentials
     branch: "kelos-config-update-latest"
-    podOverrides:
-      resources:
-        requests:
-          cpu: "250m"
-          memory: "512Mi"
-          ephemeral-storage: "2Gi"
-        limits:
-          ephemeral-storage: "2Gi"
-      env:
-        - name: GIT_AUTHOR_NAME
-          value: "Gunju Kim"
-        - name: GIT_AUTHOR_EMAIL
-          value: "gjkim042@gmail.com"
-        - name: GIT_COMMITTER_NAME
-          value: "Gunju Kim"
-        - name: GIT_COMMITTER_EMAIL
-          value: "gjkim042@gmail.com"
-    agentConfigRefs:
-      - name: kelos-dev-agent
     promptTemplate: |
       You are a configuration improvement agent for the Kelos framework — a Kubernetes-native controller that runs autonomous AI coding agents.
       Your goal is to review recent PRs and their review comments, then update agent configuration to reflect lessons learned.

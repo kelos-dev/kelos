@@ -8,14 +8,29 @@ spec:
       schedule: "0 6 * * *"
   maxConcurrency: 1
   taskTemplate:
-    # self-development/kanon/ lives in the kelos-dev/kelos repository, so this agent
-    # operates on the kelos repo (kelos-agent) to review and reason about the
-    # config files, while learning from the kelos-dev/kanon repository's activity.
-    workspaceRef:
-      name: kelos-agent
-    model: gpt-5.5
-    effort: xhigh
-    type: codex
+    worker:
+      # self-development/kanon/ lives in the kelos-dev/kelos repository, so this agent
+      # operates on the kelos repo (kelos-agent) to review and reason about the
+      # config files, while learning from the kelos-dev/kanon repository's activity.
+      workspaceRef:
+        name: kelos-agent
+      model: gpt-5.5
+      effort: xhigh
+      type: codex
+      credentials:
+        type: oauth
+        secretRef:
+          name: kelos-credentials
+      podOverrides:
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+            ephemeral-storage: "2Gi"
+          limits:
+            ephemeral-storage: "2Gi"
+      agentConfigRefs:
+        - name: kelos-dev-agent
     ttlSecondsAfterFinished: 864000
     podFailurePolicy:
       rules:
@@ -27,20 +42,6 @@ spec:
           onExitCodes:
             operator: NotIn
             values: [0]
-    credentials:
-      type: oauth
-      secretRef:
-        name: kelos-credentials
-    podOverrides:
-      resources:
-        requests:
-          cpu: "250m"
-          memory: "512Mi"
-          ephemeral-storage: "2Gi"
-        limits:
-          ephemeral-storage: "2Gi"
-    agentConfigRefs:
-      - name: kelos-dev-agent
     promptTemplate: |
       You are a self-improvement agent for the Kanon development workflow.
       Your goal is to review and propose improvements to the workflow files that

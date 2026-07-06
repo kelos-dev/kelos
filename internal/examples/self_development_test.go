@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -404,10 +405,38 @@ func TestDevelopmentTaskSpawnersSetExpectedEffort(t *testing.T) {
 			t.Parallel()
 
 			ts := readTaskSpawnerFromDir(t, tt.dir, tt.file)
-			if ts.Spec.TaskTemplate.Effort != tt.effort {
-				t.Fatalf("TaskTemplate.Effort = %q, want %q", ts.Spec.TaskTemplate.Effort, tt.effort)
+			if ts.Spec.TaskTemplate.Worker == nil {
+				t.Fatal("TaskTemplate.Worker is nil")
+			}
+			if ts.Spec.TaskTemplate.Worker.Effort != tt.effort {
+				t.Fatalf("TaskTemplate.Worker.Effort = %q, want %q", ts.Spec.TaskTemplate.Worker.Effort, tt.effort)
 			}
 		})
+	}
+}
+
+func TestSelfDevelopmentUsesWorkerSpec(t *testing.T) {
+	t.Parallel()
+
+	root := filepath.Join("..", "..", "self-development")
+	if err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || filepath.Ext(path) != ".yaml" {
+			return nil
+		}
+
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		t.Run(rel, func(t *testing.T) {
+			assertSelfDevelopmentYAMLUsesWorkerSpec(t, path)
+		})
+		return nil
+	}); err != nil {
+		t.Fatalf("walking self-development YAML files: %v", err)
 	}
 }
 
@@ -471,6 +500,168 @@ func readSelfDevelopmentTaskSpawner(t *testing.T, file string) *kelos.TaskSpawne
 	t.Helper()
 
 	return readTaskSpawnerFromDir(t, "self-development", file)
+}
+
+func assertSelfDevelopmentYAMLUsesWorkerSpec(t *testing.T, path string) {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading %s: %v", path, err)
+	}
+
+	reader := yamlutil.NewYAMLReader(bufio.NewReader(bytes.NewReader(data)))
+	for {
+		doc, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("reading YAML document from %s: %v", path, err)
+		}
+
+		doc = bytes.TrimSpace(doc)
+		if len(doc) == 0 {
+			continue
+		}
+
+		var meta struct {
+			APIVersion string `yaml:"apiVersion"`
+			Kind       string `yaml:"kind"`
+		}
+		if err := sigyaml.Unmarshal(doc, &meta); err != nil {
+			t.Fatalf("decoding document metadata from %s: %v", path, err)
+		}
+		if strings.HasPrefix(meta.APIVersion, "kelos.dev/") && meta.APIVersion != "kelos.dev/v1alpha2" {
+			t.Fatalf("%s uses %s, want kelos.dev/v1alpha2", meta.Kind, meta.APIVersion)
+		}
+
+		var raw map[string]any
+		if err := sigyaml.Unmarshal(doc, &raw); err != nil {
+			t.Fatalf("decoding raw YAML document from %s: %v", path, err)
+		}
+
+		switch meta.Kind {
+		case "TaskSpawner":
+			var ts kelos.TaskSpawner
+			if err := sigyaml.Unmarshal(doc, &ts); err != nil {
+				t.Fatalf("decoding TaskSpawner from %s: %v", path, err)
+			}
+			assertNoLegacyAgentConfigRef(t, path, raw, "spec", "taskTemplate")
+			assertTaskTemplateUsesWorkerSpec(t, path, ts.Spec.TaskTemplate)
+		case "Task":
+			var task kelos.Task
+			if err := sigyaml.Unmarshal(doc, &task); err != nil {
+				t.Fatalf("decoding Task from %s: %v", path, err)
+			}
+			assertNoLegacyAgentConfigRef(t, path, raw, "spec")
+			assertTaskUsesWorkerSpec(t, path, task.Spec)
+		}
+	}
+}
+
+func assertNoLegacyAgentConfigRef(t *testing.T, path string, raw map[string]any, keys ...string) {
+	t.Helper()
+
+	current := any(raw)
+	for _, key := range keys {
+		mapping, ok := current.(map[string]any)
+		if !ok {
+			return
+		}
+		current, ok = mapping[key]
+		if !ok {
+			return
+		}
+	}
+	mapping, ok := current.(map[string]any)
+	if !ok {
+		return
+	}
+	if _, ok := mapping["agentConfigRef"]; ok {
+		t.Fatalf("%s %s.agentConfigRef is deprecated; use %s.worker.agentConfigRefs", path, strings.Join(keys, "."), strings.Join(keys, "."))
+	}
+}
+
+func assertTaskTemplateUsesWorkerSpec(t *testing.T, path string, template kelos.TaskTemplate) {
+	t.Helper()
+
+	if template.Worker == nil && template.WorkerPoolRef == nil {
+		t.Fatalf("%s taskTemplate must set worker or workerPoolRef", path)
+	}
+	if template.Worker != nil {
+		assertWorkerSpecComplete(t, path, *template.Worker)
+	}
+	if template.Type != "" {
+		t.Fatalf("%s taskTemplate.type is deprecated; use taskTemplate.worker.type", path)
+	}
+	if template.Credentials != nil {
+		t.Fatalf("%s taskTemplate.credentials is deprecated; use taskTemplate.worker.credentials", path)
+	}
+	if template.Model != "" {
+		t.Fatalf("%s taskTemplate.model is deprecated; use taskTemplate.worker.model", path)
+	}
+	if template.Effort != "" {
+		t.Fatalf("%s taskTemplate.effort is deprecated; use taskTemplate.worker.effort", path)
+	}
+	if template.Image != "" {
+		t.Fatalf("%s taskTemplate.image is deprecated; use taskTemplate.worker.image", path)
+	}
+	if template.WorkspaceRef != nil {
+		t.Fatalf("%s taskTemplate.workspaceRef is deprecated; use taskTemplate.worker.workspaceRef", path)
+	}
+	if len(template.AgentConfigRefs) != 0 {
+		t.Fatalf("%s taskTemplate.agentConfigRefs is deprecated; use taskTemplate.worker.agentConfigRefs", path)
+	}
+	if template.PodOverrides != nil {
+		t.Fatalf("%s taskTemplate.podOverrides is deprecated; use taskTemplate.worker.podOverrides", path)
+	}
+}
+
+func assertTaskUsesWorkerSpec(t *testing.T, path string, spec kelos.TaskSpec) {
+	t.Helper()
+
+	if spec.Worker == nil && spec.WorkerPoolRef == nil {
+		t.Fatalf("%s spec must set worker or workerPoolRef", path)
+	}
+	if spec.Worker != nil {
+		assertWorkerSpecComplete(t, path, *spec.Worker)
+	}
+	if spec.Type != "" {
+		t.Fatalf("%s spec.type is deprecated; use spec.worker.type", path)
+	}
+	if spec.Credentials != nil {
+		t.Fatalf("%s spec.credentials is deprecated; use spec.worker.credentials", path)
+	}
+	if spec.Model != "" {
+		t.Fatalf("%s spec.model is deprecated; use spec.worker.model", path)
+	}
+	if spec.Effort != "" {
+		t.Fatalf("%s spec.effort is deprecated; use spec.worker.effort", path)
+	}
+	if spec.Image != "" {
+		t.Fatalf("%s spec.image is deprecated; use spec.worker.image", path)
+	}
+	if spec.WorkspaceRef != nil {
+		t.Fatalf("%s spec.workspaceRef is deprecated; use spec.worker.workspaceRef", path)
+	}
+	if len(spec.AgentConfigRefs) != 0 {
+		t.Fatalf("%s spec.agentConfigRefs is deprecated; use spec.worker.agentConfigRefs", path)
+	}
+	if spec.PodOverrides != nil {
+		t.Fatalf("%s spec.podOverrides is deprecated; use spec.worker.podOverrides", path)
+	}
+}
+
+func assertWorkerSpecComplete(t *testing.T, path string, worker kelos.WorkerSpec) {
+	t.Helper()
+
+	if worker.Type == "" {
+		t.Fatalf("%s worker.type is empty", path)
+	}
+	if worker.Credentials == nil {
+		t.Fatalf("%s worker.credentials is nil", path)
+	}
 }
 
 func readTaskSpawnerFromDir(t *testing.T, dir, file string) *kelos.TaskSpawner {

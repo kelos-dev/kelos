@@ -433,7 +433,7 @@ type TaskStatus struct {
 type TaskUsage struct {
 	// CostUSD is the reported agent cost in USD.
 	// +optional
-	// +kubebuilder:validation:XValidation:rule="!self.isLessThan(quantity('0'))",message="costUSD must be non-negative"
+	// +kubebuilder:validation:XValidation:rule="!quantity(self).isLessThan(quantity('0'))",message="costUSD must be non-negative"
 	CostUSD *resource.Quantity `json:"costUSD,omitempty"`
 
 	// InputTokens is the number of input tokens consumed.

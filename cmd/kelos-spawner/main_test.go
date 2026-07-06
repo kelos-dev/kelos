@@ -860,6 +860,74 @@ func TestRunCycleWithSource_MaxTotalTasksLimitsCreation(t *testing.T) {
 	}
 }
 
+func TestRunCycleWithSource_MaxTotalTasksReachedCondition(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	ts.Spec.MaxTotalTasks = int32Ptr(2)
+	cl, key := setupTest(t, ts)
+
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{ID: "1", Title: "Item 1"},
+			{ID: "2", Title: "Item 2"},
+			{ID: "3", Title: "Item 3"},
+		},
+	}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var updatedTS kelos.TaskSpawner
+	if err := cl.Get(context.Background(), key, &updatedTS); err != nil {
+		t.Fatalf("Getting TaskSpawner: %v", err)
+	}
+	cond := findSpawnerCondition(updatedTS.Status.Conditions, "MaxTotalTasksReached")
+	if cond == nil {
+		t.Fatalf("Expected MaxTotalTasksReached condition to be set")
+	}
+	if cond.Status != metav1.ConditionTrue {
+		t.Errorf("Expected MaxTotalTasksReached=True after reaching limit, got %q", cond.Status)
+	}
+}
+
+// findSpawnerCondition returns the condition of the given type, or nil.
+func findSpawnerCondition(conditions []metav1.Condition, condType string) *metav1.Condition {
+	for i := range conditions {
+		if conditions[i].Type == condType {
+			return &conditions[i]
+		}
+	}
+	return nil
+}
+
+func TestRunCycleWithSource_MaxTotalTasksNotReachedCondition(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	ts.Spec.MaxTotalTasks = int32Ptr(10)
+	cl, key := setupTest(t, ts)
+
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{ID: "1", Title: "Item 1"},
+		},
+	}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var updatedTS kelos.TaskSpawner
+	if err := cl.Get(context.Background(), key, &updatedTS); err != nil {
+		t.Fatalf("Getting TaskSpawner: %v", err)
+	}
+	cond := findSpawnerCondition(updatedTS.Status.Conditions, "MaxTotalTasksReached")
+	if cond == nil {
+		t.Fatalf("Expected MaxTotalTasksReached condition to be set")
+	}
+	if cond.Status != metav1.ConditionFalse {
+		t.Errorf("Expected MaxTotalTasksReached=False below limit, got %q", cond.Status)
+	}
+}
+
 func TestRunCycleWithSource_MaxTotalTasksWithExistingTasks(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 	ts.Spec.MaxTotalTasks = int32Ptr(3)

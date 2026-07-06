@@ -88,6 +88,25 @@ type WorkerPoolReconciler struct {
 	OpenCodeImagePullPolicy     corev1.PullPolicy
 	CursorImage                 string
 	CursorImagePullPolicy       corev1.PullPolicy
+
+	// NowFunc returns the current time. Defaults to time.Now.
+	// Overridable in tests for deterministic behavior.
+	NowFunc func() time.Time
+}
+
+// now returns the current time, using NowFunc if set for testability.
+func (r *WorkerPoolReconciler) now() time.Time {
+	if r.NowFunc != nil {
+		return r.NowFunc()
+	}
+	return time.Now()
+}
+
+// budget returns a budgetEnforcer bound to this reconciler's client and clock,
+// so worker-pool Tasks share the same budget admission and accounting logic as
+// Job-backed Tasks.
+func (r *WorkerPoolReconciler) budget() *budgetEnforcer {
+	return &budgetEnforcer{Client: r.Client, now: r.now}
 }
 
 // +kubebuilder:rbac:groups=kelos.dev,resources=workerpools,verbs=get;list;watch;update;patch
@@ -972,6 +991,14 @@ func (r *WorkerPoolReconciler) reconcileTask(ctx context.Context, task *kelos.Ta
 func (r *WorkerPoolReconciler) assignTask(ctx context.Context, task *kelos.Task, poolName string) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
+	// Enforce TaskBudgets before claiming a worker pod, so worker-pool Tasks are
+	// gated by the same admission policy as Job-backed Tasks. A blocked Task is
+	// left in Waiting phase and requeued for re-evaluation when the period rolls.
+	admitted, result, err := r.budget().checkBudgetAdmission(ctx, task)
+	if err != nil || !admitted {
+		return result, err
+	}
+
 	// Find available worker pods
 	var podList corev1.PodList
 	if err := r.List(ctx, &podList,
@@ -1103,7 +1130,7 @@ func (r *WorkerPoolReconciler) monitorTaskCompletion(ctx context.Context, task *
 
 func (r *WorkerPoolReconciler) completeTask(ctx context.Context, task *kelos.Task, phase kelos.TaskPhase, message string) error {
 	outputs, results := r.readPodOutputs(ctx, task.Namespace, task.Status.PodName, task.Name)
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		if err := r.Get(ctx, client.ObjectKeyFromObject(task), task); err != nil {
 			return err
 		}
@@ -1116,9 +1143,24 @@ func (r *WorkerPoolReconciler) completeTask(ctx context.Context, task *kelos.Tas
 		}
 		if results != nil {
 			task.Status.Results = results
+			task.Status.Usage = usageFromResults(results)
 		}
 		return r.Status().Update(ctx, task)
-	})
+	}); err != nil {
+		return err
+	}
+
+	// Mirror the Job-backed completion path: emit cost/token metrics and create
+	// an immutable TaskRecord so worker-pool usage contributes to budget checks.
+	if results != nil {
+		RecordCostTokenMetrics(task, results)
+	}
+	if task.Status.Usage != nil {
+		if err := r.budget().createTaskRecord(ctx, task); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *WorkerPoolReconciler) readPodOutputs(ctx context.Context, namespace, podName, taskName string) ([]string, map[string]string) {
@@ -1357,6 +1399,7 @@ func (r *WorkerPoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				}
 				return task.Spec.WorkerPoolRef != nil
 			}))).
+		Watches(&kelos.TaskBudget{}, handler.EnqueueRequestsFromMapFunc(r.findWorkerPoolTasksForBudget)).
 		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(r.findPoolForPod),
 			builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
 				labels := obj.GetLabels()
@@ -1387,6 +1430,33 @@ func (r *WorkerPoolReconciler) findTasksForWorkerPool(ctx context.Context, obj c
 		},
 	})
 
+	return requests
+}
+
+// findWorkerPoolTasksForBudget enqueues worker-pool Tasks that are Waiting on a
+// budget block in the TaskBudget's namespace, so they are re-evaluated promptly
+// when a budget is created, updated, or deleted (e.g. the period rolls over).
+func (r *WorkerPoolReconciler) findWorkerPoolTasksForBudget(ctx context.Context, obj client.Object) []reconcile.Request {
+	budget, ok := obj.(*kelos.TaskBudget)
+	if !ok {
+		return nil
+	}
+
+	var taskList kelos.TaskList
+	if err := r.List(ctx, &taskList, client.InNamespace(budget.Namespace)); err != nil {
+		return nil
+	}
+
+	var requests []reconcile.Request
+	for i := range taskList.Items {
+		t := &taskList.Items[i]
+		if t.Spec.WorkerPoolRef == nil || t.Status.Phase != kelos.TaskPhaseWaiting {
+			continue
+		}
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: t.Name, Namespace: t.Namespace},
+		})
+	}
 	return requests
 }
 

@@ -21,12 +21,14 @@ type TaskRecordSpec struct {
 	// +kubebuilder:validation:Required
 	TaskRef TaskReference `json:"taskRef"`
 
-	// Type is the Task.spec.type value.
+	// Type is the effective agent type of the Task, resolved from
+	// Task.spec.worker.type with a fallback to the legacy Task.spec.type.
 	// +optional
 	// +kubebuilder:validation:Enum=claude-code;codex;gemini;opencode;cursor
 	Type string `json:"type,omitempty"`
 
-	// Model is the Task.spec.model value, if set.
+	// Model is the effective model of the Task, resolved from
+	// Task.spec.worker.model with a fallback to the legacy Task.spec.model, if set.
 	// +optional
 	Model string `json:"model,omitempty"`
 

@@ -530,7 +530,7 @@ TaskBudget defines observed-spend admission limits for Tasks. When a Task's labe
 |-------|-------------|----------|
 | `spec.taskSelector` | Label selector matching Tasks and TaskRecords in the same namespace. An empty selector (`{}`) selects all Tasks | Yes |
 | `spec.period.type` | Period boundary for budget accounting. Currently only `Daily` is supported | Yes |
-| `spec.period.timezone` | IANA timezone for period boundaries (default: `UTC`) | No |
+| `spec.period.timezone` | IANA timezone for period boundaries (default: `UTC`). Rejected at create/update if not a loadable IANA zone | No |
 | `spec.maxCostUSD` | Maximum observed cost in USD admitted per period (non-negative `resource.Quantity`) | At least one limit required |
 | `spec.maxInputTokens` | Maximum input tokens admitted per period (non-negative integer) | At least one limit required |
 | `spec.maxOutputTokens` | Maximum output tokens admitted per period (non-negative integer) | At least one limit required |
@@ -545,17 +545,18 @@ TaskBudget defines observed-spend admission limits for Tasks. When a Task's labe
 | `status.used.costUSD` | Summed cost from matching TaskRecords in the current period |
 | `status.used.inputTokens` | Summed input tokens from matching TaskRecords in the current period |
 | `status.used.outputTokens` | Summed output tokens from matching TaskRecords in the current period |
-| `status.conditions` | Includes `Degraded` when the budget has a configuration or operational error (invalid selector, invalid timezone, list error) |
+| `status.conditions` | Includes `Degraded` when the budget hits an operational error (e.g. a list error while summing usage) |
 
 ### Budget Admission Behavior
 
-- A Task is checked against all TaskBudgets in its namespace before job creation.
+- A Task is checked against all TaskBudgets in its namespace before it starts — before Job creation for Job-backed Tasks, and before worker-pod assignment for Tasks using `spec.workerPoolRef`.
 - A budget matches if its `taskSelector` selects the Task's labels.
 - If any matching budget's limit is met or exceeded (using `>=` comparison), the Task is blocked.
-- Invalid selectors block admission (fail closed) and set a `Degraded` condition on the budget.
-- Invalid timezones or list errors block admission and set a `Degraded` condition.
+- `spec.taskSelector` operator/value combinations that the controller cannot compile, and timezones that are not loadable IANA zones, are rejected at create/update time — so a malformed selector or timezone cannot be admitted.
+- List errors when summing usage block admission (fail closed) and set a `Degraded` condition on the budget.
 - The `Degraded` condition is cleared automatically after a successful evaluation.
 - A zero limit (e.g., `maxOutputTokens: 0`) blocks all matching Tasks immediately.
+- `status.used` is refreshed both during admission and by a dedicated controller when matching TaskRecords change, and it resets when the accounting period rolls over.
 
 ## TaskRecord
 
@@ -565,15 +566,15 @@ TaskRecord is an immutable terminal record for a completed Task that reported us
 |-------|-------------|----------|
 | `spec.taskRef.name` | Name of the source Task | Yes |
 | `spec.taskRef.uid` | UID of the source Task | Yes |
-| `spec.type` | Agent type from `Task.spec.type` | No |
-| `spec.model` | Model from `Task.spec.model` | No |
+| `spec.type` | Effective agent type of the Task (`Task.spec.worker.type`, falling back to `Task.spec.type`) | No |
+| `spec.model` | Effective model of the Task (`Task.spec.worker.model`, falling back to `Task.spec.model`) | No |
 | `spec.phase` | Terminal Task phase (`Succeeded` or `Failed`) | Yes |
 | `spec.startTime` | When the Task started running | No |
 | `spec.completionTime` | When the Task completed | No |
 | `spec.usage.costUSD` | Reported cost in USD | No |
 | `spec.usage.inputTokens` | Input tokens consumed | No |
 | `spec.usage.outputTokens` | Output tokens produced | No |
-| `spec.ttlSecondsAfterCompletion` | Seconds after `completionTime` before automatic deletion (default: 30 days). The controller garbage-collects expired records and requeues for future expirations | No |
+| `spec.ttlSecondsAfterCompletion` | Seconds after `completionTime` before automatic deletion (default: 30 days). A dedicated controller garbage-collects expired records independently of the source Task's lifecycle and requeues for future expirations | No |
 
 ## TaskSpawner Status
 

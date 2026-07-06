@@ -462,6 +462,27 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 		ObservedGeneration: ts.Generation,
 	})
 
+	// Surface whether the spawner's maxTotalTasks limit has been reached, so
+	// clients and tests can observe that task creation has stopped for that
+	// reason while the limit itself is still enforced above.
+	if maxTotalTasks > 0 && ts.Status.TotalTasksCreated >= maxTotalTasks {
+		meta.SetStatusCondition(&ts.Status.Conditions, metav1.Condition{
+			Type:               "MaxTotalTasksReached",
+			Status:             metav1.ConditionTrue,
+			Reason:             "LimitReached",
+			Message:            fmt.Sprintf("Total tasks created (%d) has reached maxTotalTasks (%d)", ts.Status.TotalTasksCreated, maxTotalTasks),
+			ObservedGeneration: ts.Generation,
+		})
+	} else {
+		meta.SetStatusCondition(&ts.Status.Conditions, metav1.Condition{
+			Type:               "MaxTotalTasksReached",
+			Status:             metav1.ConditionFalse,
+			Reason:             "LimitAvailable",
+			Message:            "maxTotalTasks limit has not been reached",
+			ObservedGeneration: ts.Generation,
+		})
+	}
+
 	if err := cl.Status().Update(ctx, &ts); err != nil {
 		return fmt.Errorf("updating TaskSpawner status: %w", err)
 	}

@@ -61,8 +61,10 @@ spec:
           metadata:
             type: object
           spec:
-            description: TaskBudgetSpec defines observed-spend admission limits for
-              Tasks.
+            description: |-
+              Spec is required. A spec-less TaskBudget would decode to an empty selector
+              (matching all Tasks) and an empty period, which fails closed and blocks
+              Task admission for the whole namespace.
             properties:
               maxCostUSD:
                 anyOf:
@@ -74,7 +76,7 @@ spec:
                 x-kubernetes-int-or-string: true
                 x-kubernetes-validations:
                 - message: maxCostUSD must be non-negative
-                  rule: '!self.isLessThan(quantity(''0''))'
+                  rule: '!quantity(self).isLessThan(quantity(''0''))'
               maxInputTokens:
                 description: MaxInputTokens is the maximum observed input tokens admitted
                   in the period.
@@ -94,10 +96,15 @@ spec:
                     default: UTC
                     description: |-
                       Timezone is the IANA timezone used to compute period boundaries.
-                      Defaults to UTC.
+                      Defaults to UTC. The XValidation rule rejects names that the controller
+                      cannot load (getHours errors on an unknown IANA zone), so an invalid
+                      timezone cannot be stored and fail closed at admission.
                     maxLength: 64
                     pattern: ^[A-Za-z0-9/_+-]+$
                     type: string
+                    x-kubernetes-validations:
+                    - message: timezone must be a valid IANA time zone
+                      rule: timestamp('2000-01-01T00:00:00Z').getHours(self) >= 0
                   type:
                     description: Type is the period boundary used for budget accounting.
                     enum:
@@ -162,6 +169,13 @@ spec:
             - message: at least one of maxCostUSD, maxInputTokens, or maxOutputTokens
                 must be set
               rule: has(self.maxCostUSD) || has(self.maxInputTokens) || has(self.maxOutputTokens)
+            - message: 'taskSelector matchExpressions: operator must be In, NotIn,
+                Exists, or DoesNotExist; In/NotIn require values and Exists/DoesNotExist
+                forbid values'
+              rule: '!has(self.taskSelector.matchExpressions) || self.taskSelector.matchExpressions.all(e,
+                e.operator in [''In'', ''NotIn'', ''Exists'', ''DoesNotExist''] &&
+                ((e.operator == ''In'' || e.operator == ''NotIn'') ? (has(e.values)
+                && size(e.values) > 0) : (!has(e.values) || size(e.values) == 0)))'
           status:
             description: TaskBudgetStatus tracks the current accounting period and
               usage.
@@ -254,7 +268,7 @@ spec:
                     x-kubernetes-int-or-string: true
                     x-kubernetes-validations:
                     - message: costUSD must be non-negative
-                      rule: '!self.isLessThan(quantity(''0''))'
+                      rule: '!quantity(self).isLessThan(quantity(''0''))'
                   inputTokens:
                     description: InputTokens is the number of input tokens consumed.
                     format: int64
@@ -267,6 +281,8 @@ spec:
                     type: integer
                 type: object
             type: object
+        required:
+        - spec
         type: object
     served: true
     storage: true

@@ -15,6 +15,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
@@ -143,6 +144,13 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	}
 
 	if !jobExists && isTerminalTaskPhase(task.Status.Phase) {
+		// The Job may have been deleted before its TaskRecord was created (e.g. a
+		// transient create failure). Retry here so budget usage is not undercounted.
+		if task.Status.Usage != nil {
+			if err := r.createTaskRecord(ctx, &task); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
 		gcRequeue := r.gcExpiredTaskRecords(ctx, task.Namespace)
 		result := ctrl.Result{}
 		if gcRequeue > 0 {
@@ -1090,10 +1098,13 @@ func (r *TaskReconciler) updateStatus(ctx context.Context, task *kelos.Task, job
 		RecordCostTokenMetrics(task, results)
 	}
 
-	// Create a TaskRecord for budget accounting when task completes with usage data,
-	// including the retry-output path where usage is populated after the initial transition.
+	// Create a TaskRecord for budget accounting whenever a terminal Task has
+	// usage data. Keying on the terminal state (rather than only the transition
+	// or retry-output path) ensures a transient create failure is retried on a
+	// later reconcile instead of permanently undercounting budget usage.
+	// createTaskRecord is idempotent, so repeated calls are safe.
 	var gcRequeue time.Duration
-	if (setCompletionTime || retryOutputs) && task.Status.Usage != nil {
+	if isTerminalTaskPhase(task.Status.Phase) && task.Status.Usage != nil {
 		if err := r.createTaskRecord(ctx, task); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -1473,79 +1484,38 @@ const (
 	defaultTaskRecordTTL int32 = 30 * 24 * 60 * 60
 )
 
+// now returns the current time, using NowFunc if set for testability.
+func (r *TaskReconciler) now() time.Time {
+	if r.NowFunc != nil {
+		return r.NowFunc()
+	}
+	return time.Now()
+}
+
+// budget returns a budgetEnforcer bound to this reconciler's client and clock.
+func (r *TaskReconciler) budget() *budgetEnforcer {
+	return &budgetEnforcer{Client: r.Client, now: r.now}
+}
+
+// checkBudgetAdmission checks all matching TaskBudgets before job creation.
+func (r *TaskReconciler) checkBudgetAdmission(ctx context.Context, task *kelos.Task) (bool, ctrl.Result, error) {
+	return r.budget().checkBudgetAdmission(ctx, task)
+}
+
 // createTaskRecord creates an immutable TaskRecord for a completed Task.
-// Non-AlreadyExists errors are returned to trigger a requeue.
 func (r *TaskReconciler) createTaskRecord(ctx context.Context, task *kelos.Task) error {
-	logger := log.FromContext(ctx)
-
-	if task.Status.Usage == nil {
-		return nil
-	}
-
-	ttl := defaultTaskRecordTTL
-	record := &kelos.TaskRecord{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      string(task.UID),
-			Namespace: task.Namespace,
-			Labels:    task.Labels,
-		},
-		Spec: kelos.TaskRecordSpec{
-			TaskRef: kelos.TaskReference{
-				Name: task.Name,
-				UID:  task.UID,
-			},
-			Type:                      task.Spec.Type,
-			Model:                     task.Spec.Model,
-			Phase:                     task.Status.Phase,
-			StartTime:                 task.Status.StartTime,
-			CompletionTime:            task.Status.CompletionTime,
-			Usage:                     task.Status.Usage.DeepCopy(),
-			TTLSecondsAfterCompletion: &ttl,
-		},
-	}
-
-	if err := r.Create(ctx, record); err != nil {
-		if apierrors.IsAlreadyExists(err) {
-			return nil
-		}
-		logger.Error(err, "Unable to create TaskRecord", "task", task.Name)
-		return err
-	}
-	return nil
+	return r.budget().createTaskRecord(ctx, task)
 }
 
 // gcExpiredTaskRecords deletes TaskRecords whose TTL has expired and returns
 // the duration until the next record expires (zero if none are pending).
-// Best-effort: errors are logged but do not fail the reconcile.
 func (r *TaskReconciler) gcExpiredTaskRecords(ctx context.Context, namespace string) time.Duration {
-	logger := log.FromContext(ctx)
+	return r.budget().gcExpiredTaskRecords(ctx, namespace)
+}
 
-	var records kelos.TaskRecordList
-	if err := r.List(ctx, &records, client.InNamespace(namespace)); err != nil {
-		logger.Error(err, "Listing TaskRecords for GC")
-		return 0
-	}
-
-	now := r.now()
-	var nextExpiry time.Duration
-	for i := range records.Items {
-		rec := &records.Items[i]
-		if rec.Spec.TTLSecondsAfterCompletion == nil || rec.Spec.CompletionTime == nil {
-			continue
-		}
-		expiry := rec.Spec.CompletionTime.Add(time.Duration(*rec.Spec.TTLSecondsAfterCompletion) * time.Second)
-		if now.After(expiry) {
-			if err := r.Delete(ctx, rec); err != nil && !apierrors.IsNotFound(err) {
-				logger.Error(err, "Deleting expired TaskRecord", "record", rec.Name)
-			}
-		} else {
-			remaining := expiry.Sub(now)
-			if nextExpiry == 0 || remaining < nextExpiry {
-				nextExpiry = remaining
-			}
-		}
-	}
-	return nextExpiry
+// sumPeriodUsage sums usage from TaskRecords matching the selector within the period.
+func (r *TaskReconciler) sumPeriodUsage(ctx context.Context, namespace string, selector labels.Selector, periodStart, periodEnd time.Time) (*kelos.TaskUsage, error) {
+	return r.budget().sumPeriodUsage(ctx, namespace, selector, periodStart, periodEnd)
 }
 
 // isJobFailed checks whether the Job has permanently failed by looking for a

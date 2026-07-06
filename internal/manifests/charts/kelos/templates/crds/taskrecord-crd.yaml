@@ -73,7 +73,9 @@ spec:
                 format: date-time
                 type: string
               model:
-                description: Model is the Task.spec.model value, if set.
+                description: |-
+                  Model is the effective model of the Task, resolved from
+                  Task.spec.worker.model with a fallback to the legacy Task.spec.model, if set.
                 type: string
               phase:
                 description: Phase is the terminal Task phase.
@@ -109,7 +111,9 @@ spec:
                 minimum: 0
                 type: integer
               type:
-                description: Type is the Task.spec.type value.
+                description: |-
+                  Type is the effective agent type of the Task, resolved from
+                  Task.spec.worker.type with a fallback to the legacy Task.spec.type.
                 enum:
                 - claude-code
                 - codex
@@ -130,7 +134,7 @@ spec:
                     x-kubernetes-int-or-string: true
                     x-kubernetes-validations:
                     - message: costUSD must be non-negative
-                      rule: '!self.isLessThan(quantity(''0''))'
+                      rule: '!quantity(self).isLessThan(quantity(''0''))'
                   inputTokens:
                     description: InputTokens is the number of input tokens consumed.
                     format: int64

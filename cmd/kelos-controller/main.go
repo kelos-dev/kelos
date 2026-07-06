@@ -256,6 +256,20 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "CodexAuthRefresher")
 		os.Exit(1)
 	}
+	if err = (&controller.TaskBudgetReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "TaskBudget")
+		os.Exit(1)
+	}
+	if err = (&controller.TaskRecordReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "TaskRecord")
+		os.Exit(1)
+	}
 	if err = (&controller.WorkerPoolReconciler{
 		Client:                      mgr.GetClient(),
 		Scheme:                      mgr.GetScheme(),

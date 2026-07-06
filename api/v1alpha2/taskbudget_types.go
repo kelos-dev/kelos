@@ -21,17 +21,25 @@ type BudgetPeriod struct {
 	Type BudgetPeriodType `json:"type"`
 
 	// Timezone is the IANA timezone used to compute period boundaries.
-	// Defaults to UTC.
+	// Defaults to UTC. The XValidation rule rejects names that the controller
+	// cannot load (getHours errors on an unknown IANA zone), so an invalid
+	// timezone cannot be stored and fail closed at admission.
 	// +optional
 	// +kubebuilder:default="UTC"
 	// +kubebuilder:validation:MaxLength=64
 	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9/_+-]+$`
+	// +kubebuilder:validation:XValidation:rule="timestamp('2000-01-01T00:00:00Z').getHours(self) >= 0",message="timezone must be a valid IANA time zone"
 	Timezone string `json:"timezone,omitempty"`
 }
 
 // TaskBudgetSpec defines observed-spend admission limits for Tasks.
 //
+// The taskSelector.matchExpressions rule rejects selectors that the controller
+// would fail to compile (via metav1.LabelSelectorAsSelector), because such a
+// budget would otherwise fail closed and block Task admission in the namespace.
+//
 // +kubebuilder:validation:XValidation:rule="has(self.maxCostUSD) || has(self.maxInputTokens) || has(self.maxOutputTokens)",message="at least one of maxCostUSD, maxInputTokens, or maxOutputTokens must be set"
+// +kubebuilder:validation:XValidation:rule="!has(self.taskSelector.matchExpressions) || self.taskSelector.matchExpressions.all(e, e.operator in ['In', 'NotIn', 'Exists', 'DoesNotExist'] && ((e.operator == 'In' || e.operator == 'NotIn') ? (has(e.values) && size(e.values) > 0) : (!has(e.values) || size(e.values) == 0)))",message="taskSelector matchExpressions: operator must be In, NotIn, Exists, or DoesNotExist; In/NotIn require values and Exists/DoesNotExist forbid values"
 type TaskBudgetSpec struct {
 	// TaskSelector selects Tasks and TaskRecords in the same namespace.
 	// An empty selector ({}) selects all Tasks in the namespace.
@@ -44,7 +52,7 @@ type TaskBudgetSpec struct {
 
 	// MaxCostUSD is the maximum observed completed-task cost admitted in the period.
 	// +optional
-	// +kubebuilder:validation:XValidation:rule="!self.isLessThan(quantity('0'))",message="maxCostUSD must be non-negative"
+	// +kubebuilder:validation:XValidation:rule="!quantity(self).isLessThan(quantity('0'))",message="maxCostUSD must be non-negative"
 	MaxCostUSD *resource.Quantity `json:"maxCostUSD,omitempty"`
 
 	// MaxInputTokens is the maximum observed input tokens admitted in the period.
@@ -103,7 +111,11 @@ type TaskBudget struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   TaskBudgetSpec   `json:"spec,omitempty"`
+	// Spec is required. A spec-less TaskBudget would decode to an empty selector
+	// (matching all Tasks) and an empty period, which fails closed and blocks
+	// Task admission for the whole namespace.
+	// +kubebuilder:validation:Required
+	Spec   TaskBudgetSpec   `json:"spec"`
 	Status TaskBudgetStatus `json:"status,omitempty"`
 }
 

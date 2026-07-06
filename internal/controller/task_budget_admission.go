@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,29 +18,33 @@ import (
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 )
 
-// budgetDegradedRequeue is the requeue delay when a matching budget has a
-// configuration or operational error that prevents evaluation.
-const budgetDegradedRequeue = 30 * time.Second
+// budgetBlockedMaxRequeue is the maximum requeue delay for budget-blocked tasks.
+const budgetBlockedMaxRequeue = 5 * time.Minute
 
-const (
-	// budgetBlockedMaxRequeue is the maximum requeue delay for budget-blocked tasks.
-	budgetBlockedMaxRequeue = 5 * time.Minute
-)
+// budgetEnforcer evaluates TaskBudgets and maintains TaskRecords. It is shared
+// by the TaskReconciler (Job-backed tasks) and the WorkerPoolReconciler
+// (worker-pool tasks) so budget admission and accounting apply uniformly
+// regardless of how a Task executes.
+type budgetEnforcer struct {
+	client.Client
+	// now returns the current time; overridable for deterministic tests.
+	now func() time.Time
+}
 
 // checkBudgetAdmission checks all matching TaskBudgets before job creation.
 // Returns (true, _, nil) if admitted, (false, result, nil) if blocked,
 // or (false, _, err) on error.
-func (r *TaskReconciler) checkBudgetAdmission(ctx context.Context, task *kelos.Task) (bool, ctrl.Result, error) {
+func (e *budgetEnforcer) checkBudgetAdmission(ctx context.Context, task *kelos.Task) (bool, ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	var budgetList kelos.TaskBudgetList
-	if err := r.List(ctx, &budgetList, client.InNamespace(task.Namespace)); err != nil {
+	if err := e.List(ctx, &budgetList, client.InNamespace(task.Namespace)); err != nil {
 		return false, ctrl.Result{}, err
 	}
 
 	if len(budgetList.Items) == 0 {
 		// No budgets in namespace — clear any stale BudgetBlocked condition
-		r.clearBudgetBlockedCondition(ctx, task)
+		e.clearBudgetBlockedCondition(ctx, task)
 		return true, ctrl.Result{}, nil
 	}
 
@@ -48,10 +53,10 @@ func (r *TaskReconciler) checkBudgetAdmission(ctx context.Context, task *kelos.T
 
 		selector, err := metav1.LabelSelectorAsSelector(&budget.Spec.TaskSelector)
 		if err != nil {
-			logger.Error(err, "Matching budget has invalid selector, blocking task", "budget", budget.Name)
-			r.setBudgetDegradedCondition(ctx, budget, "InvalidSelector", err.Error())
-			r.setBudgetBlockedPhase(ctx, task, budget.Name, fmt.Sprintf("invalid selector: %v", err))
-			return false, ctrl.Result{RequeueAfter: budgetDegradedRequeue}, nil
+			// Selectors are validated at the API boundary, so this is unreachable
+			// for admitted budgets. Skip defensively rather than block scheduling.
+			logger.Error(err, "Skipping TaskBudget with invalid selector", "budget", budget.Name)
+			continue
 		}
 
 		if !selector.Matches(labels.Set(task.Labels)) {
@@ -61,25 +66,25 @@ func (r *TaskReconciler) checkBudgetAdmission(ctx context.Context, task *kelos.T
 		// Budget matches this task — from here on, any operational error must
 		// block admission (fail closed).
 
-		// Compute current period boundaries
-		periodStart, periodEnd, err := computePeriodBoundaries(budget.Spec.Period, r.now())
+		// Compute current period boundaries. The period type (enum) and timezone
+		// (IANA-validated by CEL) are checked at the API boundary, so an error
+		// here is unreachable for stored budgets. Skip defensively.
+		periodStart, periodEnd, err := computePeriodBoundaries(budget.Spec.Period, e.now())
 		if err != nil {
-			logger.Error(err, "Matching budget has invalid configuration, blocking task", "budget", budget.Name)
-			r.setBudgetDegradedCondition(ctx, budget, "InvalidTimezone", err.Error())
-			r.setBudgetBlockedPhase(ctx, task, budget.Name, fmt.Sprintf("budget configuration error: %v", err))
-			return false, ctrl.Result{RequeueAfter: budgetDegradedRequeue}, nil
+			logger.Error(err, "Skipping TaskBudget with invalid period configuration", "budget", budget.Name)
+			continue
 		}
 
 		// List TaskRecords matching this budget's selector within the current period
-		used, err := r.sumPeriodUsage(ctx, task.Namespace, selector, periodStart, periodEnd)
+		used, err := e.sumPeriodUsage(ctx, task.Namespace, selector, periodStart, periodEnd)
 		if err != nil {
 			logger.Error(err, "Unable to sum period usage, blocking task", "budget", budget.Name)
-			r.setBudgetDegradedCondition(ctx, budget, "ListError", err.Error())
+			e.setBudgetDegradedCondition(ctx, budget, "ListError", err.Error())
 			return false, ctrl.Result{}, fmt.Errorf("summing period usage for budget %s: %w", budget.Name, err)
 		}
 
 		// Budget evaluated successfully — clear any stale Degraded condition
-		r.clearBudgetDegradedCondition(ctx, budget)
+		e.clearBudgetDegradedCondition(ctx, budget)
 
 		// Check limits
 		exceeded, reason := checkLimitsExceeded(budget, used)
@@ -87,13 +92,13 @@ func (r *TaskReconciler) checkBudgetAdmission(ctx context.Context, task *kelos.T
 			logger.Info("Budget exceeded, blocking task", "budget", budget.Name, "task", task.Name, "reason", reason)
 
 			// Set Waiting phase with BudgetBlocked condition
-			r.setBudgetBlockedPhase(ctx, task, budget.Name, reason)
+			e.setBudgetBlockedPhase(ctx, task, budget.Name, reason)
 
 			// Best-effort update TaskBudget status
-			r.updateBudgetStatus(ctx, budget, periodStart, periodEnd, used)
+			e.updateBudgetStatus(ctx, budget, periodStart, periodEnd, used)
 
 			// Requeue after min(5 minutes, time until period end)
-			requeueAfter := periodEnd.Sub(r.now())
+			requeueAfter := periodEnd.Sub(e.now())
 			if requeueAfter > budgetBlockedMaxRequeue {
 				requeueAfter = budgetBlockedMaxRequeue
 			}
@@ -105,11 +110,11 @@ func (r *TaskReconciler) checkBudgetAdmission(ctx context.Context, task *kelos.T
 		}
 
 		// Best-effort update TaskBudget status even when not exceeded
-		r.updateBudgetStatus(ctx, budget, periodStart, periodEnd, used)
+		e.updateBudgetStatus(ctx, budget, periodStart, periodEnd, used)
 	}
 
 	// All matching budgets are within limits — clear any stale BudgetBlocked condition
-	r.clearBudgetBlockedCondition(ctx, task)
+	e.clearBudgetBlockedCondition(ctx, task)
 	return true, ctrl.Result{}, nil
 }
 
@@ -141,9 +146,9 @@ func computePeriodBoundaries(period kelos.BudgetPeriod, now time.Time) (time.Tim
 // sumPeriodUsage lists TaskRecords in the namespace matching the selector and
 // sums usage from records whose CompletionTime falls within [periodStart, periodEnd).
 // The label selector is passed server-side so the API server pre-filters records.
-func (r *TaskReconciler) sumPeriodUsage(ctx context.Context, namespace string, selector labels.Selector, periodStart, periodEnd time.Time) (*kelos.TaskUsage, error) {
+func (e *budgetEnforcer) sumPeriodUsage(ctx context.Context, namespace string, selector labels.Selector, periodStart, periodEnd time.Time) (*kelos.TaskUsage, error) {
 	var recordList kelos.TaskRecordList
-	if err := r.List(ctx, &recordList,
+	if err := e.List(ctx, &recordList,
 		client.InNamespace(namespace),
 		client.MatchingLabelsSelector{Selector: selector},
 	); err != nil {
@@ -225,31 +230,52 @@ func checkLimitsExceeded(budget *kelos.TaskBudget, used *kelos.TaskUsage) (bool,
 }
 
 // setBudgetBlockedPhase sets the task to Waiting phase with a BudgetBlocked condition.
-func (r *TaskReconciler) setBudgetBlockedPhase(ctx context.Context, task *kelos.Task, budgetName, reason string) {
+// It skips the status write when the task is already in the desired blocked state,
+// so that watch-triggered reconciles do not churn on a stable budget block.
+func (e *budgetEnforcer) setBudgetBlockedPhase(ctx context.Context, task *kelos.Task, budgetName, reason string) {
 	logger := log.FromContext(ctx)
+	wantMessage := fmt.Sprintf("Budget %q exceeded: %s", budgetName, reason)
+	wantCondMessage := fmt.Sprintf("Blocked by TaskBudget %q: %s", budgetName, reason)
 	updateErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		if getErr := r.Get(ctx, client.ObjectKeyFromObject(task), task); getErr != nil {
+		if getErr := e.Get(ctx, client.ObjectKeyFromObject(task), task); getErr != nil {
 			return getErr
 		}
+		if budgetBlockUnchanged(task, wantMessage, wantCondMessage) {
+			return nil
+		}
 		task.Status.Phase = kelos.TaskPhaseWaiting
-		task.Status.Message = fmt.Sprintf("Budget %q exceeded: %s", budgetName, reason)
+		task.Status.Message = wantMessage
 		meta.SetStatusCondition(&task.Status.Conditions, metav1.Condition{
 			Type:               "BudgetBlocked",
 			Status:             metav1.ConditionTrue,
 			Reason:             "BudgetExceeded",
-			Message:            fmt.Sprintf("Blocked by TaskBudget %q: %s", budgetName, reason),
+			Message:            wantCondMessage,
 			ObservedGeneration: task.Generation,
 			LastTransitionTime: metav1.Now(),
 		})
-		return r.Status().Update(ctx, task)
+		return e.Status().Update(ctx, task)
 	})
 	if updateErr != nil {
 		logger.Error(updateErr, "Unable to update Task status to budget-blocked")
 	}
 }
 
+// budgetBlockUnchanged reports whether the task is already in the desired
+// budget-blocked state, so the status write can be skipped.
+func budgetBlockUnchanged(task *kelos.Task, wantMessage, wantCondMessage string) bool {
+	if task.Status.Phase != kelos.TaskPhaseWaiting || task.Status.Message != wantMessage {
+		return false
+	}
+	cond := meta.FindStatusCondition(task.Status.Conditions, "BudgetBlocked")
+	return cond != nil &&
+		cond.Status == metav1.ConditionTrue &&
+		cond.Reason == "BudgetExceeded" &&
+		cond.Message == wantCondMessage &&
+		cond.ObservedGeneration == task.Generation
+}
+
 // clearBudgetBlockedCondition removes the BudgetBlocked condition if present.
-func (r *TaskReconciler) clearBudgetBlockedCondition(ctx context.Context, task *kelos.Task) {
+func (e *budgetEnforcer) clearBudgetBlockedCondition(ctx context.Context, task *kelos.Task) {
 	hasCond := false
 	for _, c := range task.Status.Conditions {
 		if c.Type == "BudgetBlocked" && c.Status == metav1.ConditionTrue {
@@ -263,11 +289,11 @@ func (r *TaskReconciler) clearBudgetBlockedCondition(ctx context.Context, task *
 
 	logger := log.FromContext(ctx)
 	updateErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		if getErr := r.Get(ctx, client.ObjectKeyFromObject(task), task); getErr != nil {
+		if getErr := e.Get(ctx, client.ObjectKeyFromObject(task), task); getErr != nil {
 			return getErr
 		}
 		meta.RemoveStatusCondition(&task.Status.Conditions, "BudgetBlocked")
-		return r.Status().Update(ctx, task)
+		return e.Status().Update(ctx, task)
 	})
 	if updateErr != nil {
 		logger.Error(updateErr, "Unable to clear BudgetBlocked condition")
@@ -275,12 +301,16 @@ func (r *TaskReconciler) clearBudgetBlockedCondition(ctx context.Context, task *
 }
 
 // updateBudgetStatus best-effort updates the TaskBudget status with current
-// period boundaries and accumulated usage.
-func (r *TaskReconciler) updateBudgetStatus(ctx context.Context, budget *kelos.TaskBudget, periodStart, periodEnd time.Time, used *kelos.TaskUsage) {
+// period boundaries and accumulated usage. It skips the write when the status is
+// already current, so watch-driven reconciles do not churn on stable state.
+func (e *budgetEnforcer) updateBudgetStatus(ctx context.Context, budget *kelos.TaskBudget, periodStart, periodEnd time.Time, used *kelos.TaskUsage) {
 	logger := log.FromContext(ctx)
 	updateErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		if getErr := r.Get(ctx, client.ObjectKeyFromObject(budget), budget); getErr != nil {
+		if getErr := e.Get(ctx, client.ObjectKeyFromObject(budget), budget); getErr != nil {
 			return getErr
+		}
+		if budgetStatusCurrent(budget, periodStart, periodEnd, used) {
+			return nil
 		}
 		budget.Status.ObservedGeneration = budget.Generation
 		start := metav1.NewTime(periodStart)
@@ -288,19 +318,57 @@ func (r *TaskReconciler) updateBudgetStatus(ctx context.Context, budget *kelos.T
 		budget.Status.CurrentPeriodStart = &start
 		budget.Status.CurrentPeriodEnd = &end
 		budget.Status.Used = used
-		return r.Status().Update(ctx, budget)
+		return e.Status().Update(ctx, budget)
 	})
 	if updateErr != nil {
 		logger.V(1).Info("Unable to update TaskBudget status", "budget", budget.Name, "error", updateErr)
 	}
 }
 
+// budgetStatusCurrent reports whether the budget status already reflects the
+// given period boundaries and usage, so the status write can be skipped.
+func budgetStatusCurrent(budget *kelos.TaskBudget, periodStart, periodEnd time.Time, used *kelos.TaskUsage) bool {
+	return budget.Status.ObservedGeneration == budget.Generation &&
+		metav1TimeEqual(budget.Status.CurrentPeriodStart, periodStart) &&
+		metav1TimeEqual(budget.Status.CurrentPeriodEnd, periodEnd) &&
+		usageEqual(budget.Status.Used, used)
+}
+
+// metav1TimeEqual reports whether a *metav1.Time equals a time.Time instant.
+func metav1TimeEqual(a *metav1.Time, b time.Time) bool {
+	return a != nil && a.Time.Equal(b)
+}
+
+// usageEqual reports whether two TaskUsage values are semantically equal.
+// CostUSD is compared with resource.Quantity.Cmp so equivalent quantities
+// (e.g. "1000m" and "1") are treated as equal.
+func usageEqual(a, b *kelos.TaskUsage) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	if (a.CostUSD == nil) != (b.CostUSD == nil) {
+		return false
+	}
+	if a.CostUSD != nil && a.CostUSD.Cmp(*b.CostUSD) != 0 {
+		return false
+	}
+	return int64PtrEqual(a.InputTokens, b.InputTokens) &&
+		int64PtrEqual(a.OutputTokens, b.OutputTokens)
+}
+
+func int64PtrEqual(a, b *int64) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
 // setBudgetDegradedCondition sets a Degraded condition on the TaskBudget so
 // operators can observe configuration or operational errors.
-func (r *TaskReconciler) setBudgetDegradedCondition(ctx context.Context, budget *kelos.TaskBudget, reason, message string) {
+func (e *budgetEnforcer) setBudgetDegradedCondition(ctx context.Context, budget *kelos.TaskBudget, reason, message string) {
 	logger := log.FromContext(ctx)
 	updateErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		if getErr := r.Get(ctx, client.ObjectKeyFromObject(budget), budget); getErr != nil {
+		if getErr := e.Get(ctx, client.ObjectKeyFromObject(budget), budget); getErr != nil {
 			return getErr
 		}
 		meta.SetStatusCondition(&budget.Status.Conditions, metav1.Condition{
@@ -311,7 +379,7 @@ func (r *TaskReconciler) setBudgetDegradedCondition(ctx context.Context, budget 
 			ObservedGeneration: budget.Generation,
 			LastTransitionTime: metav1.Now(),
 		})
-		return r.Status().Update(ctx, budget)
+		return e.Status().Update(ctx, budget)
 	})
 	if updateErr != nil {
 		logger.Error(updateErr, "Unable to set Degraded condition on TaskBudget", "budget", budget.Name)
@@ -320,7 +388,7 @@ func (r *TaskReconciler) setBudgetDegradedCondition(ctx context.Context, budget 
 
 // clearBudgetDegradedCondition removes the Degraded condition from a TaskBudget
 // after a successful evaluation, so operators see current state.
-func (r *TaskReconciler) clearBudgetDegradedCondition(ctx context.Context, budget *kelos.TaskBudget) {
+func (e *budgetEnforcer) clearBudgetDegradedCondition(ctx context.Context, budget *kelos.TaskBudget) {
 	hasCond := false
 	for _, c := range budget.Status.Conditions {
 		if c.Type == "Degraded" && c.Status == metav1.ConditionTrue {
@@ -334,21 +402,90 @@ func (r *TaskReconciler) clearBudgetDegradedCondition(ctx context.Context, budge
 
 	logger := log.FromContext(ctx)
 	updateErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		if getErr := r.Get(ctx, client.ObjectKeyFromObject(budget), budget); getErr != nil {
+		if getErr := e.Get(ctx, client.ObjectKeyFromObject(budget), budget); getErr != nil {
 			return getErr
 		}
 		meta.RemoveStatusCondition(&budget.Status.Conditions, "Degraded")
-		return r.Status().Update(ctx, budget)
+		return e.Status().Update(ctx, budget)
 	})
 	if updateErr != nil {
 		logger.Error(updateErr, "Unable to clear Degraded condition on TaskBudget", "budget", budget.Name)
 	}
 }
 
-// now returns the current time, using NowFunc if set for testability.
-func (r *TaskReconciler) now() time.Time {
-	if r.NowFunc != nil {
-		return r.NowFunc()
+// createTaskRecord creates an immutable TaskRecord for a completed Task.
+// It is idempotent: an AlreadyExists error is treated as success so the call
+// can be retried safely on subsequent reconciles. Non-AlreadyExists errors are
+// returned to trigger a requeue.
+func (e *budgetEnforcer) createTaskRecord(ctx context.Context, task *kelos.Task) error {
+	logger := log.FromContext(ctx)
+
+	if task.Status.Usage == nil {
+		return nil
 	}
-	return time.Now()
+
+	ttl := defaultTaskRecordTTL
+	record := &kelos.TaskRecord{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      string(task.UID),
+			Namespace: task.Namespace,
+			Labels:    task.Labels,
+		},
+		Spec: kelos.TaskRecordSpec{
+			TaskRef: kelos.TaskReference{
+				Name: task.Name,
+				UID:  task.UID,
+			},
+			Type:                      resolveTaskType(task),
+			Model:                     resolveTaskModel(task),
+			Phase:                     task.Status.Phase,
+			StartTime:                 task.Status.StartTime,
+			CompletionTime:            task.Status.CompletionTime,
+			Usage:                     task.Status.Usage.DeepCopy(),
+			TTLSecondsAfterCompletion: &ttl,
+		},
+	}
+
+	if err := e.Create(ctx, record); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return nil
+		}
+		logger.Error(err, "Unable to create TaskRecord", "task", task.Name)
+		return err
+	}
+	return nil
+}
+
+// gcExpiredTaskRecords deletes TaskRecords whose TTL has expired and returns
+// the duration until the next record expires (zero if none are pending).
+// Best-effort: errors are logged but do not fail the reconcile.
+func (e *budgetEnforcer) gcExpiredTaskRecords(ctx context.Context, namespace string) time.Duration {
+	logger := log.FromContext(ctx)
+
+	var records kelos.TaskRecordList
+	if err := e.List(ctx, &records, client.InNamespace(namespace)); err != nil {
+		logger.Error(err, "Listing TaskRecords for GC")
+		return 0
+	}
+
+	now := e.now()
+	var nextExpiry time.Duration
+	for i := range records.Items {
+		rec := &records.Items[i]
+		if rec.Spec.TTLSecondsAfterCompletion == nil || rec.Spec.CompletionTime == nil {
+			continue
+		}
+		expiry := rec.Spec.CompletionTime.Add(time.Duration(*rec.Spec.TTLSecondsAfterCompletion) * time.Second)
+		if now.After(expiry) {
+			if err := e.Delete(ctx, rec); err != nil && !apierrors.IsNotFound(err) {
+				logger.Error(err, "Deleting expired TaskRecord", "record", rec.Name)
+			}
+		} else {
+			remaining := expiry.Sub(now)
+			if nextExpiry == 0 || remaining < nextExpiry {
+				nextExpiry = remaining
+			}
+		}
+	}
+	return nextExpiry
 }

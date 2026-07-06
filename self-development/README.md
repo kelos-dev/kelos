@@ -30,7 +30,7 @@ while a worker or PR responder is handling an explicitly requested issue or PR.
 |---|---|---|---|
 | **kelos-workers** | Webhook: issue comment `/kelos pick-up` | Codex | Picks up issues, creates or updates PRs, self-reviews, and ensures CI passes |
 | **kelos-planner** | Webhook: issue comment `/kelos plan` | Codex | Investigates an issue and posts a structured implementation plan — advisory only, no code changes |
-| **kelos-reviewer** | Webhook: PR comment `/kelos review` | Codex | Reviews PRs on demand — analyzes code, checks conventions, and submits structured reviews |
+| **kelos-reviewer** | Webhook: PR comment `/kelos review` | Codex | Reviews PRs on demand — analyzes code, checks conventions, and updates a sticky review comment |
 | **kelos-api-reviewer** | Webhook: issue/PR comment `/kelos api-review` | Codex | Reviews Kubernetes API design on issues or PRs — naming, compatibility, CRD validation |
 | **kelos-pr-responder** | Webhook: PR review/comment on `generated-by-kelos` PRs | Codex | Re-engages on PR review feedback and updates the existing branch incrementally |
 | **kelos-triage** | Webhook: issue opened/labeled/reopened (`needs-actor`) | Codex | Classifies issues by kind/priority, detects duplicates, and recommends an actor |
@@ -103,9 +103,9 @@ Reviews open pull requests on demand when a maintainer posts `/kelos review` or 
 **Key features:**
 - Reads the full diff and surrounding context to understand changes
 - Checks correctness, tests, project conventions, security, and code quality
-- Runs `make test` to verify tests pass
-- Submits a structured review via `gh pr review` (approve, request changes, or comment)
-- Uses inline review comments for specific file/line findings
+- Reviews test adequacy without rerunning local validation
+- Creates or updates a single sticky PR comment with the structured review result
+- Summarizes specific file/line findings in the sticky comment without inline review comments
 - Read-only agent — does not push code or modify files
 
 **Handoff flow:**
@@ -134,7 +134,7 @@ Reviews issues and pull requests for Kubernetes API design conventions, compatib
 - References upstream Kubernetes API conventions and API review process documentation
 - Checks for correct use of `resource.Quantity`, `metav1.Time`, `metav1.Duration`
 - Verifies additive-only changes and forwards compatibility
-- For PRs: submits a structured review via `gh pr review` (approve, request changes, or comment)
+- For PRs: creates or updates a single sticky PR comment with structured API review feedback
 - For issues: posts a structured comment with API design guidance
 - Read-only agent — does not push code or modify files
 

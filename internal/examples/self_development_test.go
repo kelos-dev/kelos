@@ -193,6 +193,110 @@ func TestDevelopmentCommandPatternsMatchCommandLines(t *testing.T) {
 	}
 }
 
+func TestReviewersUseStickyPRComments(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		dir            string
+		file           string
+		repository     string
+		marker         string
+		templatePrefix string
+	}{
+		{
+			dir:            "self-development",
+			file:           "kelos-reviewer.yaml",
+			repository:     "kelos-dev/kelos",
+			marker:         "<!-- kelos-reviewer:sticky-review -->",
+			templatePrefix: "Format the PR comment body as:",
+		},
+		{
+			dir:            "self-development",
+			file:           "kelos-api-reviewer.yaml",
+			repository:     "kelos-dev/kelos",
+			marker:         "<!-- kelos-api-reviewer:sticky-review -->",
+			templatePrefix: "Format the PR comment body as:",
+		},
+		{
+			dir:            "self-development/kanon",
+			file:           "kanon-reviewer.yaml",
+			repository:     "kelos-dev/kanon",
+			marker:         "<!-- kanon-reviewer:sticky-review -->",
+			templatePrefix: "Format the PR comment body as:",
+		},
+		{
+			dir:            "self-development/agora",
+			file:           "agora-reviewer.yaml",
+			repository:     "kelos-dev/agora",
+			marker:         "<!-- agora-reviewer:sticky-review -->",
+			templatePrefix: "Format the PR comment body as:",
+		},
+	}
+
+	forbidden := []string{
+		`gh pr review`,
+		`/pulls/{{.Number}}/reviews`,
+		`comments=[`,
+		`.user.login == "kelos-bot[bot]"`,
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.file, func(t *testing.T) {
+			t.Parallel()
+
+			ts := readTaskSpawnerFromDir(t, tt.dir, tt.file)
+			prompt := ts.Spec.TaskTemplate.PromptTemplate
+
+			if !strings.Contains(prompt, tt.marker) {
+				t.Fatalf("%s prompt does not contain sticky marker %q", tt.file, tt.marker)
+			}
+			templateStart := strings.Index(prompt, tt.templatePrefix)
+			if templateStart == -1 {
+				t.Fatalf("%s prompt does not contain PR body template heading %q", tt.file, tt.templatePrefix)
+			}
+			markerStart := strings.Index(prompt[templateStart:], tt.marker)
+			if markerStart == -1 {
+				t.Fatalf("%s PR body template does not contain sticky marker %q", tt.file, tt.marker)
+			}
+			required := []string{
+				`comment_author=$(gh api user --jq .login)`,
+				`repos/` + tt.repository + `/issues/{{.Number}}/comments?per_page=100`,
+				`--paginate`,
+				`--slurp`,
+				`.user.login == env.STICKY_COMMENT_AUTHOR`,
+				`--method PATCH`,
+				`repos/` + tt.repository + `/issues/comments/$comment_id`,
+				`repos/` + tt.repository + `/issues/{{.Number}}/comments`,
+			}
+			for _, want := range required {
+				if !strings.Contains(prompt, want) {
+					t.Fatalf("%s/%s prompt does not contain sticky comment flow fragment %q", tt.dir, tt.file, want)
+				}
+			}
+			for _, notWant := range forbidden {
+				if strings.Contains(prompt, notWant) {
+					t.Fatalf("%s/%s prompt contains forbidden review submission fragment %q", tt.dir, tt.file, notWant)
+				}
+			}
+		})
+	}
+}
+
+func TestKelosAPIReviewerUsesConcreteIssueCommentBodyFile(t *testing.T) {
+	t.Parallel()
+
+	ts := readSelfDevelopmentTaskSpawner(t, "kelos-api-reviewer.yaml")
+	prompt := ts.Spec.TaskTemplate.PromptTemplate
+	want := `gh issue comment {{.Number}} --body-file /tmp/kelos-api-reviewer-comment.md`
+	if !strings.Contains(prompt, want) {
+		t.Fatalf("kelos-api-reviewer.yaml prompt does not contain concrete issue comment command %q", want)
+	}
+	if strings.Contains(prompt, `--body-file <file>`) {
+		t.Fatal("kelos-api-reviewer.yaml prompt contains placeholder issue comment body file")
+	}
+}
+
 func assertIgnoresDisruptions(t *testing.T, name string, policy *batchv1.PodFailurePolicy) {
 	t.Helper()
 
@@ -247,6 +351,11 @@ func TestKelosReviewerTriggerableByBot(t *testing.T) {
 func TestKelosAPIReviewerTriggerableByBot(t *testing.T) {
 	t.Parallel()
 	assertReviewerTriggerableByBot(t, "self-development", "kelos-api-reviewer.yaml", "kelos-dev/kelos", "/kelos api-review")
+}
+
+func TestKanonReviewerTriggerableByBot(t *testing.T) {
+	t.Parallel()
+	assertReviewerTriggerableByBot(t, "self-development/kanon", "kanon-reviewer.yaml", "kelos-dev/kanon", "/kelos review")
 }
 
 func TestAgoraReviewerTriggerableByBot(t *testing.T) {

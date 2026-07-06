@@ -40,7 +40,7 @@ maintain (`self-development/agora/*`) live in *this* repository, so they use the
 |---|---|---|---|
 | **agora-workers** | Webhook: issue comment `/kelos pick-up` | Codex | Picks up issues, creates or updates PRs, self-reviews, and ensures CI passes |
 | **agora-planner** | Webhook: issue comment `/kelos plan` | Codex | Investigates an issue and posts a structured implementation plan — advisory only, no code changes |
-| **agora-reviewer** | Webhook: PR comment `/kelos review` | Codex | Reviews PRs on demand — analyzes code, checks conventions, and submits structured reviews |
+| **agora-reviewer** | Webhook: PR comment `/kelos review` | Codex | Reviews PRs on demand — analyzes code, checks conventions, and updates a sticky review comment |
 | **agora-pr-responder** | Webhook: PR review/comment with `/kelos pick-up` | Codex | Re-engages on PR review feedback and updates the existing branch incrementally |
 | **agora-triage** | Webhook: issue opened/reopened (untriaged) | Codex | Classifies issues by kind/priority, detects duplicates, and recommends an actor |
 | **agora-fake-user** | Cron (daily 09:00 UTC) | Codex | Tests DX as a new user and maintains one unassigned issue slot for the highest-impact problem found |
@@ -109,11 +109,11 @@ kubectl apply -f self-development/agora/agora-planner.yaml
 
 ### agora-reviewer.yaml
 
-Reviews open pull requests on demand when a maintainer posts `/kelos review`.
+Reviews open pull requests on demand when a maintainer posts `/kelos review` or when an Agora worker posts `/kelos review` after pushing a generated PR and confirming CI passes.
 
 | | |
 |---|---|
-| **Trigger** | GitHub PR comment webhook with `/kelos review` |
+| **Trigger** | GitHub PR comment webhook with `/kelos review` from a maintainer or Agora worker handoff |
 | **Agent** | Codex |
 | **Concurrency** | 3 |
 
@@ -121,13 +121,14 @@ Reviews open pull requests on demand when a maintainer posts `/kelos review`.
 - Reads the full diff and surrounding context to understand changes
 - Checks correctness, tests, project conventions, security, and code quality
 - Pays special attention to public-contract changes (naming, shape, backward compatibility)
-- Submits a structured review via `gh pr review` (approve, request changes, or comment)
-- Uses inline review comments for specific file/line findings
+- Creates or updates a single sticky PR comment with the structured review result
+- Summarizes specific file/line findings in the sticky comment without inline review comments
 - Read-only agent — does not push code, modify files, or run local validation
 
 **Handoff flow:**
-1. `/kelos review` — requests a code review on the PR
-2. `/kelos review` — maintainer can retrigger review after changes are pushed
+1. `/kelos review` — maintainer requests a code review on the PR
+2. `/kelos review` — worker hands off a generated PR for review after pushing changes and confirming CI passes
+3. `/kelos review` — maintainer can retrigger review after changes are pushed
 
 **Deploy:**
 ```bash

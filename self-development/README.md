@@ -31,9 +31,9 @@ while a worker or PR responder is handling an explicitly requested issue or PR.
 | **kelos-workers** | Webhook: issue comment `/kelos pick-up` | Codex | Picks up issues, creates or updates PRs, self-reviews, and ensures CI passes |
 | **kelos-planner** | Webhook: issue comment `/kelos plan` | Codex | Investigates an issue and posts a structured implementation plan — advisory only, no code changes |
 | **kelos-reviewer** | Webhook: PR comment `/kelos review` | Codex | Reviews PRs on demand — analyzes code, checks conventions, and updates a sticky review comment |
-| **kelos-glm-reviewer** | Webhook: PR comment `/kelos glm-review` | GLM-5.2 | Runs a second code review path with Z.AI GLM-5.2 through OpenCode |
+| **kelos-glm-reviewer** | Webhook: PR comment `/kelos glm-review` | GLM-5.2 | Runs a second code review path with Z.AI GLM-5.2 through OpenCode and updates a sticky review comment |
 | **kelos-api-reviewer** | Webhook: issue/PR comment `/kelos api-review` | Codex | Reviews Kubernetes API design on issues or PRs — naming, compatibility, CRD validation |
-| **kelos-glm-api-reviewer** | Webhook: issue/PR comment `/kelos glm-api-review` | GLM-5.2 | Runs a second Kubernetes API design review path with Z.AI GLM-5.2 through OpenCode |
+| **kelos-glm-api-reviewer** | Webhook: issue/PR comment `/kelos glm-api-review` | GLM-5.2 | Runs a second Kubernetes API design review path with Z.AI GLM-5.2 through OpenCode and updates sticky PR comments |
 | **kelos-pr-responder** | Webhook: PR review/comment on `generated-by-kelos` PRs | Codex | Re-engages on PR review feedback and updates the existing branch incrementally |
 | **kelos-triage** | Webhook: issue opened/labeled/reopened (`needs-actor`) | Codex | Classifies issues by kind/priority, detects duplicates, and recommends an actor |
 | **kelos-fake-user** | Cron (daily 09:00 UTC) | Codex | Tests DX as a new user and maintains one unassigned issue slot for the highest-impact problem found |
@@ -133,7 +133,8 @@ Z.AI GLM-5.2 through the OpenCode runner. It uses a separate trigger from
 | **Concurrency** | 3 |
 
 **Key features:**
-- Uses the same code review checklist and structured `gh pr review` output as `kelos-reviewer`
+- Uses the same code review checklist and structured sticky comment output as `kelos-reviewer`
+- Creates or updates a single GLM-specific sticky PR comment with the structured review result
 - Provides an independent model-family review without replacing the Codex reviewer
 - Read-only agent — does not push code or modify files
 
@@ -188,6 +189,8 @@ uses a separate trigger from `kelos-api-reviewer`, which continues to handle
 **Key features:**
 - Uses the same Kubernetes API design checklist and structured output as `kelos-api-reviewer`
 - Works on both issues (API design proposals) and pull requests (API implementation review)
+- For PRs: creates or updates a single GLM-specific sticky PR comment with structured API review feedback
+- For issues: posts a structured comment with API design guidance
 - Provides an independent model-family review without replacing the Codex API reviewer
 - Read-only agent — does not push code or modify files
 

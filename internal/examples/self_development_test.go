@@ -224,6 +224,20 @@ func TestReviewersUseStickyPRComments(t *testing.T) {
 			templatePrefix: "Format the PR comment body as:",
 		},
 		{
+			dir:            "self-development",
+			file:           "kelos-glm-reviewer.yaml",
+			repository:     "kelos-dev/kelos",
+			marker:         "<!-- kelos-glm-reviewer:sticky-review -->",
+			templatePrefix: "Format the PR comment body as:",
+		},
+		{
+			dir:            "self-development",
+			file:           "kelos-glm-api-reviewer.yaml",
+			repository:     "kelos-dev/kelos",
+			marker:         "<!-- kelos-glm-api-reviewer:sticky-review -->",
+			templatePrefix: "Format the PR comment body as:",
+		},
+		{
 			dir:            "self-development/kanon",
 			file:           "kanon-reviewer.yaml",
 			repository:     "kelos-dev/kanon",
@@ -289,17 +303,38 @@ func TestReviewersUseStickyPRComments(t *testing.T) {
 	}
 }
 
-func TestKelosAPIReviewerUsesConcreteIssueCommentBodyFile(t *testing.T) {
+func TestKelosAPIReviewersUseConcreteIssueCommentBodyFile(t *testing.T) {
 	t.Parallel()
 
-	ts := readSelfDevelopmentTaskSpawner(t, "kelos-api-reviewer.yaml")
-	prompt := ts.Spec.TaskTemplate.PromptTemplate
-	want := `gh issue comment {{.Number}} --body-file /tmp/kelos-api-reviewer-comment.md`
-	if !strings.Contains(prompt, want) {
-		t.Fatalf("kelos-api-reviewer.yaml prompt does not contain concrete issue comment command %q", want)
+	tests := []struct {
+		file string
+		path string
+	}{
+		{
+			file: "kelos-api-reviewer.yaml",
+			path: "/tmp/kelos-api-reviewer-comment.md",
+		},
+		{
+			file: "kelos-glm-api-reviewer.yaml",
+			path: "/tmp/kelos-glm-api-reviewer-comment.md",
+		},
 	}
-	if strings.Contains(prompt, `--body-file <file>`) {
-		t.Fatal("kelos-api-reviewer.yaml prompt contains placeholder issue comment body file")
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.file, func(t *testing.T) {
+			t.Parallel()
+
+			ts := readSelfDevelopmentTaskSpawner(t, tt.file)
+			prompt := ts.Spec.TaskTemplate.PromptTemplate
+			want := `gh issue comment {{.Number}} --body-file ` + tt.path
+			if !strings.Contains(prompt, want) {
+				t.Fatalf("%s prompt does not contain concrete issue comment command %q", tt.file, want)
+			}
+			if strings.Contains(prompt, `--body-file <file>`) {
+				t.Fatalf("%s prompt contains placeholder issue comment body file", tt.file)
+			}
+		})
 	}
 }
 

@@ -343,6 +343,8 @@ The installation token is minted to a per-task Secret (`<task-name>-github-token
 | `spec.when.githubPullRequests.priorityLabels` | Priority-order labels for task selection when `maxConcurrency` is set; index 0 is highest priority | No |
 | `spec.when.githubPullRequests.reporting.enabled` | Post status comments (started, succeeded, failed) back to the GitHub pull request | No |
 | `spec.when.githubPullRequests.reporting.checks.name` | Creates a GitHub Check Run for each PR task, enabling branch protection and merge queue integration. Sets the Check Run name (defaults to `"Kelos: <taskspawner-name>"`, max 100 chars). The token used by the workspace must have `checks:write` permission. Not supported on `githubIssues` (rejected by CEL validation). | No |
+| `spec.when.githubPullRequests.filePatterns.include` | Doublestar globs for changed files to include after `exclude` patterns are removed. When omitted, any remaining changed file passes | No |
+| `spec.when.githubPullRequests.filePatterns.exclude` | Doublestar globs for changed files to remove before include matching. A PR with no remaining changed files is skipped | No |
 | `spec.when.githubPullRequests.pollInterval` | Per-source poll interval (e.g., `"30s"`, `"5m"`). Defaults to `5m` when omitted | No |
 | `spec.when.githubWebhook.events` | GitHub event types to listen for (e.g., `"issues"`, `"pull_request"`, `"push"`, `"issue_comment"`) | Yes (when using githubWebhook) |
 | `spec.when.githubWebhook.repository` | Restrict webhooks to a specific repository (`owner/repo` format); if empty, webhooks from any repository are accepted | No |
@@ -357,6 +359,8 @@ The installation token is minted to a per-task Secret (`<task-name>-github-token
 | `spec.when.githubWebhook.filters[].draft` | Filter PRs by draft status | No |
 | `spec.when.githubWebhook.filters[].author` | Filter by the event sender's username | No |
 | `spec.when.githubWebhook.filters[].excludeAuthors` | Exclude events sent by any of these usernames | No |
+| `spec.when.githubWebhook.filters[].filePatterns.include` | Doublestar globs for changed files to include after `exclude` patterns are removed. Applies to `push` and `pull_request` webhook filters | No |
+| `spec.when.githubWebhook.filters[].filePatterns.exclude` | Doublestar globs for changed files to remove before include matching. Events with no remaining changed files are skipped | No |
 | `spec.when.githubWebhook.filters[].bodyContains` | **Deprecated.** Filter by case-sensitive substring match on the comment/review body. Use `bodyPattern` instead | No |
 | `spec.when.githubWebhook.filters[].bodyPattern` | Require the comment/review body to match a Go re2 regular expression. When combined with `excludeBodyPatterns`, the body must match this pattern AND not match any exclude entry | No |
 | `spec.when.githubWebhook.filters[].excludeBodyPatterns` | Exclude events whose comment/review body matches any of these Go re2 regular expressions (OR semantics) | No |

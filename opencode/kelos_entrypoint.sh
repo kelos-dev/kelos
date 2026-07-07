@@ -42,6 +42,7 @@ fi
 ARGS=(
   "run"
   "--format" "json"
+  "--auto"
   "$PROMPT"
 )
 

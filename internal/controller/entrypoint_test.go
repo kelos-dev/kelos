@@ -70,6 +70,18 @@ func TestAgentEntrypointsHandleKelosEffort(t *testing.T) {
 	}
 }
 
+func TestOpenCodeEntrypointUsesAutoPermissions(t *testing.T) {
+	section := extractEntrypointSection(
+		t,
+		"../..//opencode/kelos_entrypoint.sh",
+		"ARGS=(",
+		"if [ -n \"${KELOS_EFFORT:-}\" ]; then",
+	)
+	if !strings.Contains(section, "\"--auto\"") {
+		t.Fatalf("expected OpenCode entrypoint args to include --auto, got:\n%s", section)
+	}
+}
+
 func TestOpenCodeEntrypointMapsZAIProviderKey(t *testing.T) {
 	tests := []struct {
 		name  string

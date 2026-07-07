@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
+	"github.com/kelos-dev/kelos/internal/admission"
 	"github.com/kelos-dev/kelos/internal/controller"
 	"github.com/kelos-dev/kelos/internal/conversion"
 	"github.com/kelos-dev/kelos/internal/githubapp"
@@ -70,10 +71,12 @@ var _ = BeforeSuite(func() {
 			filepath.Join("testdata", "certmanager-crds.yaml"),
 		},
 		ErrorIfCRDPathMissing: true,
-		// Rewrite the AgentConfig CRD's conversion webhook to the locally served
-		// endpoint (envtest generates the serving cert and CA bundle).
+		// Rewrite admission webhooks to the locally served endpoint.
 		WebhookInstallOptions: envtest.WebhookInstallOptions{
 			IgnoreSchemeConvertible: true,
+			Paths: []string{
+				filepath.Join("..", "..", "internal", "manifests", "charts", "kelos", "templates", "validating-webhook.yaml"),
+			},
 		},
 	}
 
@@ -124,6 +127,9 @@ var _ = BeforeSuite(func() {
 			WithConverter(registration.Converter).
 			Complete()).To(Succeed())
 	}
+	Expect(ctrl.NewWebhookManagedBy(mgr, &kelos.TaskBudget{}).
+		WithValidator(&admission.TaskBudgetValidator{}).
+		Complete()).To(Succeed())
 
 	tokenClient := githubapp.NewTokenClient()
 	tokenClient.BaseURL = mockGitHubServer.URL

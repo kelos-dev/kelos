@@ -13,7 +13,9 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
@@ -72,6 +74,10 @@ type TaskReconciler struct {
 	TokenClient  *githubapp.TokenClient
 	Recorder     record.EventRecorder
 	BranchLocker *BranchLocker
+
+	// NowFunc returns the current time. Defaults to time.Now.
+	// Overridable in tests for deterministic behavior.
+	NowFunc func() time.Time
 }
 
 // +kubebuilder:rbac:groups=kelos.dev,resources=tasks,verbs=get;list;watch;create;update;patch;delete
@@ -79,6 +85,9 @@ type TaskReconciler struct {
 // +kubebuilder:rbac:groups=kelos.dev,resources=tasks/finalizers,verbs=update
 // +kubebuilder:rbac:groups=kelos.dev,resources=workspaces,verbs=get;list;watch
 // +kubebuilder:rbac:groups=kelos.dev,resources=agentconfigs,verbs=get;list;watch
+// +kubebuilder:rbac:groups=kelos.dev,resources=taskrecords,verbs=get;list;watch;create;delete
+// +kubebuilder:rbac:groups=kelos.dev,resources=taskbudgets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=kelos.dev,resources=taskbudgets/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods/log,verbs=get
@@ -134,6 +143,14 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	}
 
 	if !jobExists && isTerminalTaskPhase(task.Status.Phase) {
+		// The Job may have been deleted before its TaskRecord was created (e.g. a
+		// transient create failure). Retry here so budget usage is not undercounted.
+		// TaskRecord TTL GC is handled by the dedicated TaskRecordReconciler.
+		if task.Status.Usage != nil {
+			if err := r.createTaskRecord(ctx, &task); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
 		return r.applyTaskTTL(ctx, &task, ctrl.Result{})
 	}
 
@@ -168,6 +185,14 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 				r.BranchLocker.Release(lockKey, task.Name)
 				return result, err
 			}
+		}
+
+		admitted, result, err := r.checkBudgetAdmission(ctx, &task)
+		if err != nil || !admitted {
+			if task.Spec.Branch != "" {
+				r.BranchLocker.Release(branchLockKey(&task), task.Name)
+			}
+			return result, err
 		}
 
 		return r.createJob(ctx, &task)
@@ -438,6 +463,9 @@ func (r *TaskReconciler) createJob(ctx context.Context, task *kelos.Task) (ctrl.
 		}
 		task.Status.Phase = kelos.TaskPhasePending
 		task.Status.JobName = job.Name
+		// Clear any stale message from a prior Waiting state (e.g. a budget-blocked
+		// or branch-lock wait) now that the Job has been created.
+		task.Status.Message = ""
 		return r.Status().Update(ctx, task)
 	}); err != nil {
 		logger.Error(err, "Unable to update Task status")
@@ -997,6 +1025,11 @@ func (r *TaskReconciler) updateStatus(ctx context.Context, task *kelos.Task, job
 		time.Since(task.Status.CompletionTime.Time) < outputRetryWindow
 
 	if !phaseChanged && !podNameChanged && !retryOutputs {
+		if isTerminalTaskPhase(task.Status.Phase) && task.Status.Usage != nil {
+			if err := r.createTaskRecord(ctx, task); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
 		return ctrl.Result{}, nil
 	}
 
@@ -1037,11 +1070,13 @@ func (r *TaskReconciler) updateStatus(ctx context.Context, task *kelos.Task, job
 				task.Status.CompletionTime = &now
 				task.Status.Outputs = outputs
 				task.Status.Results = results
+				task.Status.Usage = usageFromResults(results)
 			}
 		}
 		if retryOutputs && (outputs != nil || results != nil) {
 			task.Status.Outputs = outputs
 			task.Status.Results = results
+			task.Status.Usage = usageFromResults(results)
 		}
 		return r.Status().Update(ctx, task)
 	}); err != nil {
@@ -1064,6 +1099,18 @@ func (r *TaskReconciler) updateStatus(ctx context.Context, task *kelos.Task, job
 	// Record cost and token metrics when results are available
 	if (setCompletionTime || retryOutputs) && results != nil {
 		RecordCostTokenMetrics(task, results)
+	}
+
+	// Create a TaskRecord for budget accounting whenever a terminal Task has
+	// usage data. Keying on the terminal state (rather than only the transition
+	// or retry-output path) ensures a transient create failure is retried on a
+	// later reconcile instead of permanently undercounting budget usage.
+	// createTaskRecord is idempotent, so repeated calls are safe.
+	// TaskRecord TTL GC is handled by the dedicated TaskRecordReconciler.
+	if isTerminalTaskPhase(task.Status.Phase) && task.Status.Usage != nil {
+		if err := r.createTaskRecord(ctx, task); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	if setCompletionTime && (outputs != nil || results != nil) {
@@ -1389,6 +1436,79 @@ func RecordCostTokenMetrics(task *kelos.Task, results map[string]string) {
 	}
 }
 
+// usageFromResults parses cost-usd, input-tokens, output-tokens from the
+// string results map and returns a TaskUsage struct. Returns nil if no
+// usage data is present.
+func usageFromResults(results map[string]string) *kelos.TaskUsage {
+	if len(results) == 0 {
+		return nil
+	}
+
+	var usage kelos.TaskUsage
+	hasData := false
+
+	if costStr, ok := results["cost-usd"]; ok && costStr != "" {
+		q, err := resource.ParseQuantity(costStr)
+		if err == nil && !q.IsZero() && q.Cmp(resource.Quantity{}) >= 0 {
+			usage.CostUSD = &q
+			hasData = true
+		}
+	}
+	if inputStr, ok := results["input-tokens"]; ok && inputStr != "" {
+		tokens, err := strconv.ParseInt(inputStr, 10, 64)
+		if err == nil && tokens > 0 {
+			usage.InputTokens = &tokens
+			hasData = true
+		}
+	}
+	if outputStr, ok := results["output-tokens"]; ok && outputStr != "" {
+		tokens, err := strconv.ParseInt(outputStr, 10, 64)
+		if err == nil && tokens > 0 {
+			usage.OutputTokens = &tokens
+			hasData = true
+		}
+	}
+
+	if !hasData {
+		return nil
+	}
+	return &usage
+}
+
+const (
+	// defaultTaskRecordTTL is the default retention period for TaskRecords
+	// (30 days). Records older than this are garbage-collected.
+	defaultTaskRecordTTL int32 = 30 * 24 * 60 * 60
+)
+
+// now returns the current time, using NowFunc if set for testability.
+func (r *TaskReconciler) now() time.Time {
+	if r.NowFunc != nil {
+		return r.NowFunc()
+	}
+	return time.Now()
+}
+
+// budget returns a budgetEnforcer bound to this reconciler's client and clock.
+func (r *TaskReconciler) budget() *budgetEnforcer {
+	return &budgetEnforcer{Client: r.Client, now: r.now}
+}
+
+// checkBudgetAdmission checks all matching TaskBudgets before job creation.
+func (r *TaskReconciler) checkBudgetAdmission(ctx context.Context, task *kelos.Task) (bool, ctrl.Result, error) {
+	return r.budget().checkBudgetAdmission(ctx, task)
+}
+
+// createTaskRecord creates an immutable TaskRecord for a completed Task.
+func (r *TaskReconciler) createTaskRecord(ctx context.Context, task *kelos.Task) error {
+	return r.budget().createTaskRecord(ctx, task)
+}
+
+// sumPeriodUsage sums usage from TaskRecords matching the selector within the period.
+func (r *TaskReconciler) sumPeriodUsage(ctx context.Context, namespace string, selector labels.Selector, periodStart, periodEnd time.Time) (*kelos.TaskUsage, error) {
+	return r.budget().sumPeriodUsage(ctx, namespace, selector, periodStart, periodEnd)
+}
+
 // isJobFailed checks whether the Job has permanently failed by looking for a
 // JobFailed condition with status True. Unlike checking job.Status.Failed > 0,
 // this correctly handles Jobs with backoffLimit > 0 where intermediate pod
@@ -1409,7 +1529,39 @@ func (r *TaskReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&batchv1.Job{}).
 		Watches(&kelos.Task{}, handler.EnqueueRequestsFromMapFunc(r.enqueueDependentTasks)).
 		Watches(&kelos.Workspace{}, handler.EnqueueRequestsFromMapFunc(r.enqueueTasksForWorkspace)).
+		Watches(&kelos.TaskBudget{}, handler.EnqueueRequestsFromMapFunc(r.enqueueTasksBlockedByBudget)).
 		Complete(r)
+}
+
+// enqueueTasksBlockedByBudget returns reconcile requests for Tasks in Waiting
+// phase that have a BudgetBlocked condition. This allows budget-blocked tasks
+// to be re-evaluated when a TaskBudget changes (e.g. period rolls over).
+func (r *TaskReconciler) enqueueTasksBlockedByBudget(ctx context.Context, obj client.Object) []reconcile.Request {
+	budget, ok := obj.(*kelos.TaskBudget)
+	if !ok {
+		return nil
+	}
+
+	var taskList kelos.TaskList
+	if err := r.List(ctx, &taskList, client.InNamespace(budget.Namespace)); err != nil {
+		return nil
+	}
+
+	var requests []reconcile.Request
+	for _, t := range taskList.Items {
+		if t.Status.Phase != kelos.TaskPhaseWaiting {
+			continue
+		}
+		for _, c := range t.Status.Conditions {
+			if c.Type == "BudgetBlocked" && c.Status == metav1.ConditionTrue {
+				requests = append(requests, reconcile.Request{
+					NamespacedName: client.ObjectKeyFromObject(&t),
+				})
+				break
+			}
+		}
+	}
+	return requests
 }
 
 // enqueueTasksForWorkspace returns reconcile requests for Tasks that reference

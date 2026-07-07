@@ -11,6 +11,7 @@ END_MARKER="# END GENERATED: controller-rbac"
 
 CHART_RBAC="internal/manifests/charts/kelos/templates/rbac.yaml"
 CHART_CRD_DIR="internal/manifests/charts/kelos/templates/crds"
+CHART_VALIDATING_WEBHOOK="internal/manifests/charts/kelos/templates/validating-webhook.yaml"
 
 has_resource() {
   local file="$1"
@@ -74,6 +75,7 @@ validate_chart_resources() {
     "Role kelos-leader-election-role"
     "RoleBinding kelos-leader-election-rolebinding"
     "Deployment kelos-controller-manager"
+    "ValidatingWebhookConfiguration kelos-validating-webhook-configuration"
   )
 
   local entry
@@ -213,10 +215,10 @@ write_chart_crd_template() {
 
 # inject_kelos_conversion adds the conversion webhook config and the
 # cert-manager CA-injection annotation to kelos.dev CRDs that serve multiple
-# versions. CRDs with a single version (e.g. WorkerPool, v1alpha2-only) are
-# left as-is since no conversion is needed. controller-gen does not emit
-# spec.conversion, so it is injected here, before the chart templates are
-# derived from this file.
+# versions. CRDs with a single version (e.g. WorkerPool, TaskBudget,
+# TaskRecord) are left as-is since no conversion is needed. controller-gen does
+# not emit spec.conversion, so it is injected here, before the chart templates
+# are derived from this file.
 inject_kelos_conversion() {
   local file="$1"
   local tmp="${file}.conv.tmp"
@@ -258,10 +260,11 @@ END { flush() }
 }
 
 # verify_kelos_conversion fails fast if inject_kelos_conversion did not wire
-# multi-version kelos CRDs. Single-version CRDs (like WorkerPool) correctly
-# skip conversion. The CA annotation is injected into an existing annotations:
-# block, so a change in controller-gen output shape could silently drop it;
-# this guard catches that instead of shipping CRDs that fail conversion.
+# multi-version kelos CRDs. Single-version CRDs (like WorkerPool, TaskBudget,
+# TaskRecord) correctly skip conversion. The CA annotation is injected into an
+# existing annotations: block, so a change in controller-gen output shape could
+# silently drop it; this guard catches that instead of shipping CRDs that fail
+# conversion.
 verify_kelos_conversion() {
   local file="$1"
   local multi_version anno conv
@@ -286,10 +289,43 @@ generate_chart_crd_templates() {
   mkdir -p "${CHART_CRD_DIR}"
 
   write_chart_crd_template "${source}" "CustomResourceDefinition" "agentconfigs.kelos.dev" "${CHART_CRD_DIR}/agentconfig-crd.yaml"
+  write_chart_crd_template "${source}" "CustomResourceDefinition" "taskbudgets.kelos.dev" "${CHART_CRD_DIR}/taskbudget-crd.yaml"
+  write_chart_crd_template "${source}" "CustomResourceDefinition" "taskrecords.kelos.dev" "${CHART_CRD_DIR}/taskrecord-crd.yaml"
   write_chart_crd_template "${source}" "CustomResourceDefinition" "tasks.kelos.dev" "${CHART_CRD_DIR}/task-crd.yaml"
   write_chart_crd_template "${source}" "CustomResourceDefinition" "taskspawners.kelos.dev" "${CHART_CRD_DIR}/taskspawner-crd.yaml"
   write_chart_crd_template "${source}" "CustomResourceDefinition" "workerpools.kelos.dev" "${CHART_CRD_DIR}/workerpool-crd.yaml"
   write_chart_crd_template "${source}" "CustomResourceDefinition" "workspaces.kelos.dev" "${CHART_CRD_DIR}/workspace-crd.yaml"
+}
+
+inject_validating_webhook_ca_annotation() {
+  local source="$1"
+  local dest="$2"
+
+  awk '
+BEGIN {
+  in_metadata = 0
+  inserted = 0
+}
+/^metadata:[[:space:]]*$/ {
+  print
+  print "  annotations:"
+  print "    cert-manager.io/inject-ca-from: kelos-system/kelos-serving-cert"
+  in_metadata = 1
+  inserted = 1
+  next
+}
+in_metadata && /^  name:/ {
+  print
+  in_metadata = 0
+  next
+}
+{
+  print
+}
+END {
+  exit(inserted ? 0 : 1)
+}
+' "${source}" >"${dest}"
 }
 
 if [[ "$(grep -Fxc "${START_MARKER}" "${CHART_RBAC}")" -ne 1 ]]; then
@@ -316,6 +352,13 @@ GOCACHE="${TMPDIR}/go-build-cache" "${CONTROLLER_GEN}" \
   rbac:roleName=kelos-controller-role \
   paths="./..." \
   output:rbac:stdout >"${RBAC_FILE}"
+
+WEBHOOK_FILE="${TMPDIR}/validating-webhook.yaml"
+GOCACHE="${TMPDIR}/go-build-cache" "${CONTROLLER_GEN}" \
+  webhook \
+  paths="./..." \
+  output:webhook:stdout >"${WEBHOOK_FILE}"
+inject_validating_webhook_ca_annotation "${WEBHOOK_FILE}" "${CHART_VALIDATING_WEBHOOK}"
 
 # Splice generated RBAC into the chart's rbac.yaml template.
 awk -v start="${START_MARKER}" -v end="${END_MARKER}" -v rbac="${RBAC_FILE}" '

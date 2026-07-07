@@ -88,6 +88,25 @@ type WorkerPoolReconciler struct {
 	OpenCodeImagePullPolicy     corev1.PullPolicy
 	CursorImage                 string
 	CursorImagePullPolicy       corev1.PullPolicy
+
+	// NowFunc returns the current time. Defaults to time.Now.
+	// Overridable in tests for deterministic behavior.
+	NowFunc func() time.Time
+}
+
+// now returns the current time, using NowFunc if set for testability.
+func (r *WorkerPoolReconciler) now() time.Time {
+	if r.NowFunc != nil {
+		return r.NowFunc()
+	}
+	return time.Now()
+}
+
+// budget returns a budgetEnforcer bound to this reconciler's client and clock,
+// so worker-pool Tasks share the same budget admission and accounting logic as
+// Job-backed Tasks.
+func (r *WorkerPoolReconciler) budget() *budgetEnforcer {
+	return &budgetEnforcer{Client: r.Client, now: r.now}
 }
 
 // +kubebuilder:rbac:groups=kelos.dev,resources=workerpools,verbs=get;list;watch;update;patch
@@ -956,7 +975,18 @@ func (r *WorkerPoolReconciler) reconcileTask(ctx context.Context, task *kelos.Ta
 
 	switch task.Status.Phase {
 	case kelos.TaskPhaseSucceeded, kelos.TaskPhaseFailed:
-		return ctrl.Result{}, nil
+		// completeTask writes the terminal phase before creating the TaskRecord, so
+		// a transient createTaskRecord failure leaves the task terminal with no
+		// record. Retry here so budget usage is not undercounted. Also clear any
+		// leaked pod assignment from that failed completion attempt.
+		var recordErr error
+		if task.Status.Usage != nil {
+			recordErr = r.budget().createTaskRecord(ctx, task)
+		}
+		if err := r.clearTaskPodAssignmentIfStillAssigned(ctx, task); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, recordErr
 	case kelos.TaskPhaseRunning, kelos.TaskPhasePending:
 		if task.Status.PodName != "" {
 			return r.monitorTaskCompletion(ctx, task)
@@ -971,6 +1001,14 @@ func (r *WorkerPoolReconciler) reconcileTask(ctx context.Context, task *kelos.Ta
 
 func (r *WorkerPoolReconciler) assignTask(ctx context.Context, task *kelos.Task, poolName string) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
+
+	// Enforce TaskBudgets before claiming a worker pod, so worker-pool Tasks are
+	// gated by the same admission policy as Job-backed Tasks. A blocked Task is
+	// left in Waiting phase and requeued for re-evaluation when the period rolls.
+	admitted, result, err := r.budget().checkBudgetAdmission(ctx, task)
+	if err != nil || !admitted {
+		return result, err
+	}
 
 	// Find available worker pods
 	var podList corev1.PodList
@@ -1054,7 +1092,7 @@ func (r *WorkerPoolReconciler) monitorTaskCompletion(ctx context.Context, task *
 			if err := r.completeTask(ctx, task, kelos.TaskPhaseFailed, "Worker pod was deleted"); err != nil {
 				return ctrl.Result{}, err
 			}
-			return ctrl.Result{}, nil
+			return ctrl.Result{}, r.createWorkerTaskRecord(ctx, task)
 		}
 		return ctrl.Result{}, fmt.Errorf("workerpool: fetching worker pod %s for task %s: %w", task.Status.PodName, task.Name, err)
 	}
@@ -1065,20 +1103,22 @@ func (r *WorkerPoolReconciler) monitorTaskCompletion(ctx context.Context, task *
 		if err := r.completeTask(ctx, task, kelos.TaskPhaseSucceeded, ""); err != nil {
 			return ctrl.Result{}, err
 		}
+		recordErr := r.createWorkerTaskRecord(ctx, task)
 		if err := r.clearPodAssignment(ctx, &pod); err != nil {
 			logger.Error(err, "Failed to clear pod assignment after task success", "pod", pod.Name)
 		}
-		return ctrl.Result{}, nil
+		return ctrl.Result{}, recordErr
 
 	case "failed":
 		reason := pod.Annotations[kelos.AnnotationWorkerTaskFailReason]
 		if err := r.completeTask(ctx, task, kelos.TaskPhaseFailed, reason); err != nil {
 			return ctrl.Result{}, err
 		}
+		recordErr := r.createWorkerTaskRecord(ctx, task)
 		if err := r.clearPodAssignment(ctx, &pod); err != nil {
 			logger.Error(err, "Failed to clear pod assignment after task failure", "pod", pod.Name)
 		}
-		return ctrl.Result{}, nil
+		return ctrl.Result{}, recordErr
 
 	case "running", "":
 		// Still running, update task phase if needed
@@ -1103,7 +1143,7 @@ func (r *WorkerPoolReconciler) monitorTaskCompletion(ctx context.Context, task *
 
 func (r *WorkerPoolReconciler) completeTask(ctx context.Context, task *kelos.Task, phase kelos.TaskPhase, message string) error {
 	outputs, results := r.readPodOutputs(ctx, task.Namespace, task.Status.PodName, task.Name)
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		if err := r.Get(ctx, client.ObjectKeyFromObject(task), task); err != nil {
 			return err
 		}
@@ -1116,9 +1156,44 @@ func (r *WorkerPoolReconciler) completeTask(ctx context.Context, task *kelos.Tas
 		}
 		if results != nil {
 			task.Status.Results = results
+			task.Status.Usage = usageFromResults(results)
 		}
 		return r.Status().Update(ctx, task)
-	})
+	}); err != nil {
+		return err
+	}
+
+	if results != nil {
+		RecordCostTokenMetrics(task, results)
+	}
+	return nil
+}
+
+func (r *WorkerPoolReconciler) createWorkerTaskRecord(ctx context.Context, task *kelos.Task) error {
+	if task.Status.Usage != nil {
+		if err := r.budget().createTaskRecord(ctx, task); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *WorkerPoolReconciler) clearTaskPodAssignmentIfStillAssigned(ctx context.Context, task *kelos.Task) error {
+	if task.Status.PodName == "" {
+		return nil
+	}
+
+	var pod corev1.Pod
+	if err := r.Get(ctx, types.NamespacedName{Name: task.Status.PodName, Namespace: task.Namespace}, &pod); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("workerpool: fetching worker pod %s for terminal task %s: %w", task.Status.PodName, task.Name, err)
+	}
+	if pod.Annotations[kelos.AnnotationWorkerAssignedTask] != task.Name {
+		return nil
+	}
+	return r.clearPodAssignment(ctx, &pod)
 }
 
 func (r *WorkerPoolReconciler) readPodOutputs(ctx context.Context, namespace, podName, taskName string) ([]string, map[string]string) {
@@ -1357,6 +1432,7 @@ func (r *WorkerPoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				}
 				return task.Spec.WorkerPoolRef != nil
 			}))).
+		Watches(&kelos.TaskBudget{}, handler.EnqueueRequestsFromMapFunc(r.findWorkerPoolTasksForBudget)).
 		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(r.findPoolForPod),
 			builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
 				labels := obj.GetLabels()
@@ -1387,6 +1463,43 @@ func (r *WorkerPoolReconciler) findTasksForWorkerPool(ctx context.Context, obj c
 		},
 	})
 
+	return requests
+}
+
+// findWorkerPoolTasksForBudget enqueues worker-pool Tasks that are Waiting on a
+// budget block in the TaskBudget's namespace, so they are re-evaluated promptly
+// when a budget is created, updated, or deleted (e.g. the period rolls over).
+func (r *WorkerPoolReconciler) findWorkerPoolTasksForBudget(ctx context.Context, obj client.Object) []reconcile.Request {
+	budget, ok := obj.(*kelos.TaskBudget)
+	if !ok {
+		return nil
+	}
+
+	var taskList kelos.TaskList
+	if err := r.List(ctx, &taskList, client.InNamespace(budget.Namespace)); err != nil {
+		return nil
+	}
+
+	var requests []reconcile.Request
+	for i := range taskList.Items {
+		t := &taskList.Items[i]
+		if t.Spec.WorkerPoolRef == nil || t.Status.Phase != kelos.TaskPhaseWaiting {
+			continue
+		}
+		blocked := false
+		for _, c := range t.Status.Conditions {
+			if c.Type == "BudgetBlocked" && c.Status == metav1.ConditionTrue {
+				blocked = true
+				break
+			}
+		}
+		if !blocked {
+			continue
+		}
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: t.Name, Namespace: t.Namespace},
+		})
+	}
 	return requests
 }
 

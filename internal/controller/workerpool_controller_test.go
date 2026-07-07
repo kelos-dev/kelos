@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -20,6 +21,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 )
@@ -861,6 +863,160 @@ func TestIsPodAvailable_EmptyAnnotationTreatedAsAvailable(t *testing.T) {
 
 	pod.Annotations[kelos.AnnotationWorkerAssignedTask] = "some-task"
 	assert.False(t, isPodAvailable(pod), "pod with non-empty assigned-task annotation should not be available")
+}
+
+func TestWorkerPoolReconciler_FindWorkerPoolTasksForBudgetOnlyBudgetBlocked(t *testing.T) {
+	scheme := newWorkerPoolTestScheme()
+	budget := &kelos.TaskBudget{ObjectMeta: metav1.ObjectMeta{Name: "budget", Namespace: "default"}}
+	blocked := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "blocked", Namespace: "default"},
+		Spec: kelos.TaskSpec{
+			WorkerPoolRef: &kelos.WorkerPoolReference{Name: "pool"},
+		},
+		Status: kelos.TaskStatus{
+			Phase: kelos.TaskPhaseWaiting,
+			Conditions: []metav1.Condition{{
+				Type:   "BudgetBlocked",
+				Status: metav1.ConditionTrue,
+			}},
+		},
+	}
+	waitingOtherReason := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "waiting-other-reason", Namespace: "default"},
+		Spec: kelos.TaskSpec{
+			WorkerPoolRef: &kelos.WorkerPoolReference{Name: "pool"},
+		},
+		Status: kelos.TaskStatus{Phase: kelos.TaskPhaseWaiting},
+	}
+	jobBacked := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "job-backed", Namespace: "default"},
+		Status: kelos.TaskStatus{
+			Phase: kelos.TaskPhaseWaiting,
+			Conditions: []metav1.Condition{{
+				Type:   "BudgetBlocked",
+				Status: metav1.ConditionTrue,
+			}},
+		},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&kelos.Task{}).
+		WithObjects(budget, blocked, waitingOtherReason, jobBacked).
+		Build()
+
+	r := newWorkerPoolReconciler(cl, scheme)
+	requests := r.findWorkerPoolTasksForBudget(context.Background(), budget)
+	require.Len(t, requests, 1)
+	assert.Equal(t, types.NamespacedName{Name: "blocked", Namespace: "default"}, requests[0].NamespacedName)
+}
+
+func TestWorkerPoolReconciler_ClearsAssignmentWhenTaskRecordCreateFails(t *testing.T) {
+	scheme := newWorkerPoolTestScheme()
+	costUSD := resource.MustParse("1")
+	pool := newTestWorkerPool("pool", "default", 1)
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "task-1", Namespace: "default", UID: "task-uid"},
+		Spec: kelos.TaskSpec{
+			Prompt: "test",
+			WorkerPoolRef: &kelos.WorkerPoolReference{
+				Name: "pool",
+			},
+		},
+		Status: kelos.TaskStatus{
+			Phase:   kelos.TaskPhaseRunning,
+			PodName: "wp-pool-0",
+			Usage:   &kelos.TaskUsage{CostUSD: &costUSD},
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "wp-pool-0",
+			Namespace: "default",
+			Annotations: map[string]string{
+				kelos.AnnotationWorkerAssignedTask: "task-1",
+				kelos.AnnotationWorkerTaskStatus:   "succeeded",
+			},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&kelos.Task{}, &kelos.WorkerPool{}).
+		WithObjects(pool, task, pod).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Create: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+				if _, ok := obj.(*kelos.TaskRecord); ok {
+					return errors.New("transient taskrecord create failure")
+				}
+				return cl.Create(ctx, obj, opts...)
+			},
+		}).
+		Build()
+
+	r := newWorkerPoolReconciler(cl, scheme)
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "task-1", Namespace: "default"},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "transient taskrecord create failure")
+
+	var updatedPod corev1.Pod
+	require.NoError(t, cl.Get(context.Background(), types.NamespacedName{Name: "wp-pool-0", Namespace: "default"}, &updatedPod))
+	assert.Empty(t, updatedPod.Annotations[kelos.AnnotationWorkerAssignedTask])
+}
+
+func TestWorkerPoolReconciler_TerminalRetryClearsLeakedAssignment(t *testing.T) {
+	scheme := newWorkerPoolTestScheme()
+	costUSD := resource.MustParse("1")
+	completionTime := metav1.Now()
+	pool := newTestWorkerPool("pool", "default", 1)
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "task-1", Namespace: "default", UID: "task-uid"},
+		Spec: kelos.TaskSpec{
+			Prompt: "test",
+			WorkerPoolRef: &kelos.WorkerPoolReference{
+				Name: "pool",
+			},
+		},
+		Status: kelos.TaskStatus{
+			Phase:          kelos.TaskPhaseSucceeded,
+			PodName:        "wp-pool-0",
+			CompletionTime: &completionTime,
+			Usage:          &kelos.TaskUsage{CostUSD: &costUSD},
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "wp-pool-0",
+			Namespace: "default",
+			Annotations: map[string]string{
+				kelos.AnnotationWorkerAssignedTask: "task-1",
+				kelos.AnnotationWorkerTaskStatus:   "succeeded",
+			},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&kelos.Task{}, &kelos.WorkerPool{}).
+		WithObjects(pool, task, pod).
+		Build()
+
+	r := newWorkerPoolReconciler(cl, scheme)
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "task-1", Namespace: "default"},
+	})
+	require.NoError(t, err)
+
+	var updatedPod corev1.Pod
+	require.NoError(t, cl.Get(context.Background(), types.NamespacedName{Name: "wp-pool-0", Namespace: "default"}, &updatedPod))
+	assert.Empty(t, updatedPod.Annotations[kelos.AnnotationWorkerAssignedTask])
+
+	var record kelos.TaskRecord
+	require.NoError(t, cl.Get(context.Background(), types.NamespacedName{Name: "task-uid", Namespace: "default"}, &record))
 }
 
 func TestPodTemplateSpecEqual_IgnoresAPIDefaults(t *testing.T) {

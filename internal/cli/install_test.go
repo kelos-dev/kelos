@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -1010,6 +1011,26 @@ func TestKelosCRDsExist(t *testing.T) {
 	}
 	if len(missing) != 0 {
 		t.Fatalf("expected no missing Kelos CRDs, got %v", missing)
+	}
+}
+
+func TestKelosCRDNameSets(t *testing.T) {
+	for _, name := range []string{
+		"taskbudgets.kelos.dev",
+		"taskrecords.kelos.dev",
+		"workerpools.kelos.dev",
+	} {
+		if !slices.Contains(kelosCRDNames, name) {
+			t.Fatalf("expected %s to be staged during install upgrades", name)
+		}
+		if slices.Contains(kelosConversionCRDNames, name) {
+			t.Fatalf("did not expect single-version CRD %s in conversion CA wait list", name)
+		}
+	}
+	for _, name := range kelosConversionCRDNames {
+		if !slices.Contains(kelosCRDNames, name) {
+			t.Fatalf("conversion CRD %s must also be in staged CRD list", name)
+		}
 	}
 }
 

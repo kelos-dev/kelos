@@ -3,6 +3,7 @@ package v1alpha2
 import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -51,7 +52,8 @@ const (
 	TaskPhaseSucceeded TaskPhase = "Succeeded"
 	// TaskPhaseFailed means the Task has failed.
 	TaskPhaseFailed TaskPhase = "Failed"
-	// TaskPhaseWaiting means the Task is waiting for dependencies or branch lock.
+	// TaskPhaseWaiting means the Task is waiting for dependencies, branch lock,
+	// or budget admission.
 	TaskPhaseWaiting TaskPhase = "Waiting"
 )
 
@@ -412,6 +414,37 @@ type TaskStatus struct {
 	// Results contains structured key-value outputs produced by the agent.
 	// +optional
 	Results map[string]string `json:"results,omitempty"`
+
+	// Usage contains structured cost and token usage populated from results
+	// when the Task reaches a terminal phase.
+	// +optional
+	Usage *TaskUsage `json:"usage,omitempty"`
+
+	// Conditions provides detailed status information.
+	// +optional
+	// +listType=map
+	// +listMapKey=type
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
+}
+
+// TaskUsage contains structured cost and token usage reported by the agent.
+type TaskUsage struct {
+	// CostUSD is the reported agent cost in USD.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="type(self) == int ? self >= 0 : !quantity(self).isLessThan(quantity('0'))",message="costUSD must be non-negative"
+	CostUSD *resource.Quantity `json:"costUSD,omitempty"`
+
+	// InputTokens is the number of input tokens consumed.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	InputTokens *int64 `json:"inputTokens,omitempty"`
+
+	// OutputTokens is the number of output tokens produced.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	OutputTokens *int64 `json:"outputTokens,omitempty"`
 }
 
 // +genclient

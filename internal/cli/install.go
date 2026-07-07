@@ -41,6 +41,16 @@ const installWaitTimeout = 2 * time.Minute
 var kelosCRDNames = []string{
 	"agentconfigs.kelos.dev",
 	"tasks.kelos.dev",
+	"taskbudgets.kelos.dev",
+	"taskrecords.kelos.dev",
+	"taskspawners.kelos.dev",
+	"workerpools.kelos.dev",
+	"workspaces.kelos.dev",
+}
+
+var kelosConversionCRDNames = []string{
+	"agentconfigs.kelos.dev",
+	"tasks.kelos.dev",
 	"taskspawners.kelos.dev",
 	"workspaces.kelos.dev",
 }
@@ -599,7 +609,7 @@ func waitForKelosCRDConversionCABundles(ctx context.Context, dyn dynamic.Interfa
 		if !ok {
 			return false, nil
 		}
-		for _, name := range kelosCRDNames {
+		for _, name := range kelosConversionCRDNames {
 			crd, err := dyn.Resource(crdGVR).Get(ctx, name, metav1.GetOptions{})
 			if err != nil {
 				if errors.IsNotFound(err) {

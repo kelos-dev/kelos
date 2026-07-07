@@ -858,21 +858,87 @@ func TestRunCycleWithSource_MaxTotalTasksLimitsCreation(t *testing.T) {
 	if len(taskList.Items) != 2 {
 		t.Errorf("Expected 2 tasks (maxTotalTasks=2), got %d", len(taskList.Items))
 	}
+}
 
-	// Check TaskBudgetExhausted condition
+func TestRunCycleWithSource_MaxTotalTasksReachedCondition(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	ts.Spec.MaxTotalTasks = int32Ptr(2)
+	cl, key := setupTest(t, ts)
+
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{ID: "1", Title: "Item 1"},
+			{ID: "2", Title: "Item 2"},
+			{ID: "3", Title: "Item 3"},
+		},
+	}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
 	var updatedTS kelos.TaskSpawner
 	if err := cl.Get(context.Background(), key, &updatedTS); err != nil {
 		t.Fatalf("Getting TaskSpawner: %v", err)
 	}
-	foundCondition := false
-	for _, c := range updatedTS.Status.Conditions {
-		if c.Type == "TaskBudgetExhausted" && c.Status == metav1.ConditionTrue {
-			foundCondition = true
-			break
+	cond := findSpawnerCondition(updatedTS.Status.Conditions, "MaxTotalTasksReached")
+	if cond == nil {
+		t.Fatalf("Expected MaxTotalTasksReached condition to be set")
+	}
+	if cond.Status != metav1.ConditionTrue {
+		t.Errorf("Expected MaxTotalTasksReached=True after reaching limit, got %q", cond.Status)
+	}
+	compatCond := findSpawnerCondition(updatedTS.Status.Conditions, "TaskBudgetExhausted")
+	if compatCond == nil {
+		t.Fatalf("Expected TaskBudgetExhausted condition to be set")
+	}
+	if compatCond.Status != metav1.ConditionTrue {
+		t.Errorf("Expected TaskBudgetExhausted=True after reaching limit, got %q", compatCond.Status)
+	}
+}
+
+// findSpawnerCondition returns the condition of the given type, or nil.
+func findSpawnerCondition(conditions []metav1.Condition, condType string) *metav1.Condition {
+	for i := range conditions {
+		if conditions[i].Type == condType {
+			return &conditions[i]
 		}
 	}
-	if !foundCondition {
-		t.Error("Expected TaskBudgetExhausted condition to be True")
+	return nil
+}
+
+func TestRunCycleWithSource_MaxTotalTasksNotReachedCondition(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	ts.Spec.MaxTotalTasks = int32Ptr(10)
+	cl, key := setupTest(t, ts)
+
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{ID: "1", Title: "Item 1"},
+		},
+	}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var updatedTS kelos.TaskSpawner
+	if err := cl.Get(context.Background(), key, &updatedTS); err != nil {
+		t.Fatalf("Getting TaskSpawner: %v", err)
+	}
+	cond := findSpawnerCondition(updatedTS.Status.Conditions, "MaxTotalTasksReached")
+	if cond == nil {
+		t.Fatalf("Expected MaxTotalTasksReached condition to be set")
+	}
+	if cond.Status != metav1.ConditionFalse {
+		t.Errorf("Expected MaxTotalTasksReached=False below limit, got %q", cond.Status)
+	}
+	compatCond := findSpawnerCondition(updatedTS.Status.Conditions, "TaskBudgetExhausted")
+	if compatCond == nil {
+		t.Fatalf("Expected TaskBudgetExhausted condition to be set")
+	}
+	if compatCond.Status != metav1.ConditionFalse {
+		t.Errorf("Expected TaskBudgetExhausted=False below limit, got %q", compatCond.Status)
 	}
 }
 

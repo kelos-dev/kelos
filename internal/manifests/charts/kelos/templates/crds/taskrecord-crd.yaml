@@ -1,0 +1,163 @@
+{{- if .Values.crds.install }}
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.0
+    {{- if .Values.crds.keep }}
+    "helm.sh/resource-policy": keep
+    {{- end }}
+  name: taskrecords.kelos.dev
+spec:
+  group: kelos.dev
+  names:
+    kind: TaskRecord
+    listKind: TaskRecordList
+    plural: taskrecords
+    shortNames:
+    - tr
+    singular: taskrecord
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.taskRef.name
+      name: Task
+      type: string
+    - jsonPath: .spec.type
+      name: Type
+      type: string
+    - jsonPath: .spec.phase
+      name: Phase
+      type: string
+    - jsonPath: .spec.usage.costUSD
+      name: Cost
+      priority: 1
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha2
+    schema:
+      openAPIV3Schema:
+        description: |-
+          TaskRecord is an immutable terminal record for one completed Task.
+          It preserves accounting data after the Task itself is deleted by TTL.
+          The name is derived from the Task UID to guarantee uniqueness.
+          No ownerReference is set so garbage collection does not remove it.
+          Records with spec.ttlSecondsAfterCompletion set are automatically deleted
+          by the controller after the specified duration.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: TaskRecordSpec is the immutable terminal record for one completed
+              Task.
+            properties:
+              completionTime:
+                description: CompletionTime is when the Task completed.
+                format: date-time
+                type: string
+              model:
+                description: |-
+                  Model is the effective model of the Task, resolved from
+                  Task.spec.worker.model with a fallback to the legacy Task.spec.model, if set.
+                type: string
+              phase:
+                description: Phase is the terminal Task phase.
+                enum:
+                - Succeeded
+                - Failed
+                type: string
+              startTime:
+                description: StartTime is when the Task started running.
+                format: date-time
+                type: string
+              taskRef:
+                description: TaskRef identifies the Task this record was created from.
+                properties:
+                  name:
+                    description: Name is the Task name.
+                    minLength: 1
+                    type: string
+                  uid:
+                    description: UID is the Task UID.
+                    type: string
+                required:
+                - name
+                - uid
+                type: object
+              ttlSecondsAfterCompletion:
+                description: |-
+                  TTLSecondsAfterCompletion is the number of seconds after CompletionTime
+                  before the TaskRecord is eligible for automatic deletion. If unset,
+                  the record is retained indefinitely. The controller garbage-collects
+                  expired records during reconciliation.
+                format: int32
+                minimum: 0
+                type: integer
+              type:
+                description: |-
+                  Type is the effective agent type of the Task, resolved from
+                  Task.spec.worker.type with a fallback to the legacy Task.spec.type.
+                enum:
+                - claude-code
+                - codex
+                - gemini
+                - opencode
+                - cursor
+                type: string
+              usage:
+                description: Usage contains structured token and cost usage reported
+                  by the Task.
+                properties:
+                  costUSD:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: CostUSD is the reported agent cost in USD.
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                    x-kubernetes-validations:
+                    - message: costUSD must be non-negative
+                      rule: 'type(self) == int ? self >= 0 : !quantity(self).isLessThan(quantity(''0''))'
+                  inputTokens:
+                    description: InputTokens is the number of input tokens consumed.
+                    format: int64
+                    minimum: 0
+                    type: integer
+                  outputTokens:
+                    description: OutputTokens is the number of output tokens produced.
+                    format: int64
+                    minimum: 0
+                    type: integer
+                type: object
+            required:
+            - completionTime
+            - phase
+            - taskRef
+            type: object
+            x-kubernetes-validations:
+            - message: TaskRecord spec is immutable after creation
+              rule: self == oldSelf
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources: {}
+{{- end }}

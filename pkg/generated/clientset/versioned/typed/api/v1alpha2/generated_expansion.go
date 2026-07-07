@@ -22,6 +22,10 @@ type AgentConfigExpansion interface{}
 
 type TaskExpansion interface{}
 
+type TaskBudgetExpansion interface{}
+
+type TaskRecordExpansion interface{}
+
 type TaskSpawnerExpansion interface{}
 
 type WorkerPoolExpansion interface{}

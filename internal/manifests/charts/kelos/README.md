@@ -87,7 +87,10 @@ NAMESPACE=kelos-system
 for crd in \
   agentconfigs.kelos.dev \
   tasks.kelos.dev \
+  taskbudgets.kelos.dev \
+  taskrecords.kelos.dev \
   taskspawners.kelos.dev \
+  workerpools.kelos.dev \
   workspaces.kelos.dev
 do
   kubectl label crd "$crd" app.kubernetes.io/managed-by=Helm --overwrite

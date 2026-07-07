@@ -363,7 +363,7 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 
 		// Enforce max total tasks limit
 		if maxTotalTasks > 0 && ts.Status.TotalTasksCreated+newTasksCreated >= maxTotalTasks {
-			log.Info("Task budget exhausted, skipping remaining items", "totalCreated", ts.Status.TotalTasksCreated+newTasksCreated, "maxTotalTasks", maxTotalTasks)
+			log.Info("Max total tasks reached, skipping remaining items", "totalCreated", ts.Status.TotalTasksCreated+newTasksCreated, "maxTotalTasks", maxTotalTasks)
 			break
 		}
 
@@ -462,21 +462,23 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 		ObservedGeneration: ts.Generation,
 	})
 
-	// Set TaskBudgetExhausted condition
+	// Surface whether the spawner's maxTotalTasks limit has been reached, so
+	// clients and tests can observe that task creation has stopped for that
+	// reason while the limit itself is still enforced above.
+	conditionStatus := metav1.ConditionFalse
+	conditionReason := "LimitAvailable"
+	conditionMessage := "maxTotalTasks limit has not been reached"
 	if maxTotalTasks > 0 && ts.Status.TotalTasksCreated >= maxTotalTasks {
+		conditionStatus = metav1.ConditionTrue
+		conditionReason = "LimitReached"
+		conditionMessage = fmt.Sprintf("Total tasks created (%d) has reached maxTotalTasks (%d)", ts.Status.TotalTasksCreated, maxTotalTasks)
+	}
+	for _, conditionType := range []string{"MaxTotalTasksReached", "TaskBudgetExhausted"} {
 		meta.SetStatusCondition(&ts.Status.Conditions, metav1.Condition{
-			Type:               "TaskBudgetExhausted",
-			Status:             metav1.ConditionTrue,
-			Reason:             "BudgetReached",
-			Message:            fmt.Sprintf("Total tasks created (%d) has reached maxTotalTasks (%d)", ts.Status.TotalTasksCreated, maxTotalTasks),
-			ObservedGeneration: ts.Generation,
-		})
-	} else {
-		meta.SetStatusCondition(&ts.Status.Conditions, metav1.Condition{
-			Type:               "TaskBudgetExhausted",
-			Status:             metav1.ConditionFalse,
-			Reason:             "BudgetAvailable",
-			Message:            "Task budget has not been exhausted",
+			Type:               conditionType,
+			Status:             conditionStatus,
+			Reason:             conditionReason,
+			Message:            conditionMessage,
 			ObservedGeneration: ts.Generation,
 		})
 	}

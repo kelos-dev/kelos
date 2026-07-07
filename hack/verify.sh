@@ -18,10 +18,14 @@ cd "${REPO_ROOT}"
 GENERATED_FILES=(
   internal/manifests/install-crd.yaml
   internal/manifests/charts/kelos/templates/crds/agentconfig-crd.yaml
+  internal/manifests/charts/kelos/templates/crds/taskbudget-crd.yaml
   internal/manifests/charts/kelos/templates/crds/task-crd.yaml
+  internal/manifests/charts/kelos/templates/crds/taskrecord-crd.yaml
   internal/manifests/charts/kelos/templates/crds/taskspawner-crd.yaml
+  internal/manifests/charts/kelos/templates/crds/workerpool-crd.yaml
   internal/manifests/charts/kelos/templates/crds/workspace-crd.yaml
   internal/manifests/charts/kelos/templates/rbac.yaml
+  internal/manifests/charts/kelos/templates/validating-webhook.yaml
   api/v1alpha1/zz_generated.deepcopy.go
   api/v1alpha2/zz_generated.deepcopy.go
 )

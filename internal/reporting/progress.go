@@ -192,6 +192,8 @@ func extractOpenCodeText(r io.Reader) string {
 
 		if event.Type == "text" && event.Text != "" {
 			lastText = event.Text
+		} else if event.Type == "text" && event.Part != nil && event.Part.Text != "" {
+			lastText = event.Part.Text
 		}
 	}
 
@@ -250,6 +252,11 @@ type geminiProgressEvent struct {
 }
 
 type openCodeProgressEvent struct {
-	Type string `json:"type"`
+	Type string                `json:"type"`
+	Text string                `json:"text,omitempty"`
+	Part *openCodeProgressPart `json:"part,omitempty"`
+}
+
+type openCodeProgressPart struct {
 	Text string `json:"text,omitempty"`
 }

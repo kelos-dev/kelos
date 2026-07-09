@@ -74,6 +74,9 @@ kelos run -p "Add tests" --workspace my-ws --agent-config my-ac
 kelos run -p "Refactor auth" --model opus --effort high --branch feature/auth
 kelos run -p "Fix bug" -w
 
+kelos run --from taskspawner/daily-audit
+kelos run --from taskspawner/issue-worker -f values.yaml
+
 kelos create workspace my-ws --repo https://github.com/org/repo.git --ref main --secret github-token
 kelos create agentconfig my-ac --skill review=@review.md --dry-run
 

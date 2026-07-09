@@ -40,6 +40,9 @@ kelos run -p "Fix bug" -w
 ## Creating Resources
 
 ```bash
+kelos run --from taskspawner/daily-audit
+kelos run --from taskspawner/issue-worker -f values.yaml
+
 kelos create workspace my-ws \
   --repo https://github.com/org/repo.git \
   --ref main \
@@ -57,6 +60,13 @@ kelos create agentconfig my-ac \
 
 kelos create agentconfig my-ac --skill review=@review.md --dry-run
 ```
+
+`kelos run --from taskspawner/NAME` creates a standalone Task from the
+spawner's template. Use `-f values.yaml` to expose the file's top-level YAML or
+JSON keys as template values, or `-f -` to read them from stdin. Manual Tasks
+bypass source filters and TaskSpawner suspension and limits; they do not update
+TaskSpawner status or enable source reporting. Cron templates receive the
+current UTC time and configured schedule by default.
 
 ## Managing Resources
 

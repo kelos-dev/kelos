@@ -43,7 +43,17 @@ kubectl get taskspawners -w
 kubectl get tasks -w
 ```
 
-7. **Cleanup:**
+7. **Create a standalone Task without waiting for the schedule:**
+
+```bash
+kelos run --from taskspawner/weekly-dependency-update
+```
+
+The command always uses the current UTC time for `{{.Time}}`, so no values file
+is needed. It instantiates the Task template directly; it does not update the
+TaskSpawner's status or apply its concurrency and lifetime limits.
+
+8. **Cleanup:**
 
 ```bash
 kubectl delete -f examples/04-taskspawner-cron/

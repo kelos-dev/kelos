@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"context"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -189,6 +190,23 @@ var _ = Describe("Cron TaskSpawner", func() {
 		Eventually(func() string {
 			return f.GetTaskSpawnerPhase("cron-spawner")
 		}, 3*time.Minute, 10*time.Second).Should(Equal("Running"))
+
+		By("creating a standalone Task from the cron TaskSpawner")
+		output := framework.KelosOutput(
+			"run",
+			"--from", "taskspawner/cron-spawner",
+			"--name", "cron-manual-task",
+			"-n", f.Namespace,
+		)
+		Expect(output).To(Equal("task/cron-manual-task created"))
+
+		By("verifying the standalone Task uses the current cron context")
+		manualTask, err := f.KelosClientset.ApiV1alpha2().Tasks(f.Namespace).Get(context.TODO(), "cron-manual-task", metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(manualTask.Spec.Prompt).To(ContainSubstring("Cron triggered at "))
+		Expect(manualTask.Spec.Prompt).To(ContainSubstring("(schedule: * * * * *)"))
+		Expect(manualTask.Labels).NotTo(HaveKey("kelos.dev/taskspawner"))
+		Expect(manualTask.Annotations).To(HaveKeyWithValue("kelos.dev/created-from-taskspawner", "cron-spawner"))
 
 		By("verifying at least one Task was created")
 		Eventually(func() []string {

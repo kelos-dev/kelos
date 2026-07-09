@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -753,46 +752,7 @@ func deriveUpstreamRepo(ts *kelos.TaskSpawner) string {
 	} else if ts.Spec.When.GitHubPullRequests != nil && ts.Spec.When.GitHubPullRequests.Repo != "" {
 		repoOverride = ts.Spec.When.GitHubPullRequests.Repo
 	}
-	if repoOverride == "" {
-		return ""
-	}
-	// Detect shorthand "owner/repo" format by checking that the first
-	// segment has no ":" (rules out SSH "git@host:owner/repo") and no "."
-	// (rules out "https://host/..."). Anything else is treated as a URL.
-	parts := strings.SplitN(repoOverride, "/", 2)
-	if len(parts) == 2 && !strings.Contains(parts[0], ":") && !strings.Contains(parts[0], ".") {
-		return repoOverride
-	}
-	// Parse full URL to extract owner/repo.
-	owner, repo := parseOwnerRepo(repoOverride)
-	if owner != "" && repo != "" {
-		return owner + "/" + repo
-	}
-	return ""
-}
-
-// parseOwnerRepo extracts owner and repo from a GitHub repository URL.
-// Supports HTTPS (https://host/owner/repo) and SSH (git@host:owner/repo).
-func parseOwnerRepo(repoURL string) (string, string) {
-	repoURL = strings.TrimSuffix(repoURL, ".git")
-	repoURL = strings.TrimSuffix(repoURL, "/")
-
-	// Handle SSH format: git@host:owner/repo
-	// SSH URLs have no "//" after the colon, unlike "https://".
-	if idx := strings.Index(repoURL, ":"); idx > 0 && !strings.HasPrefix(repoURL, "http") {
-		path := repoURL[idx+1:]
-		parts := strings.SplitN(path, "/", 2)
-		if len(parts) == 2 {
-			return parts[0], parts[1]
-		}
-	}
-
-	// Handle HTTPS format: https://host/owner/repo
-	parts := strings.Split(repoURL, "/")
-	if len(parts) >= 2 {
-		return parts[len(parts)-2], parts[len(parts)-1]
-	}
-	return "", ""
+	return source.GitHubRepositoryName(repoOverride)
 }
 
 func parsePollInterval(s string) time.Duration {

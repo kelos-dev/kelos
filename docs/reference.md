@@ -407,6 +407,45 @@ The installation token is minted to a per-task Secret (`<task-name>-github-token
 | `spec.maxConcurrency` | Limit max concurrent running tasks (important for cost control) | No |
 | `spec.maxTotalTasks` | Lifetime limit on total tasks created by this spawner | No |
 | `spec.suspend` | Pause the spawner without deleting it; resume with `spec.suspend: false` (default: `false`) | No |
+
+### Manual Task Creation
+
+Run a standalone Task from any TaskSpawner's `taskTemplate`:
+
+```bash
+kelos run --from taskspawner/daily-audit
+kelos run --from taskspawner/issue-worker -f values.yaml
+```
+
+The values file is a YAML or JSON object whose top-level keys are exposed
+directly to the Go template. Use `-f -` to read it from stdin. For example:
+
+```yaml
+ID: "42"
+Number: 42
+Title: Fix the login timeout
+Body: Reproduce and fix the timeout under load.
+Kind: Issue
+```
+
+Kelos supplies `TriggerType: manual` and the current UTC time as
+`TriggerTime`. Cron TaskSpawners also receive the current UTC time as `Time`
+and their configured expression as `Schedule`; these cron values cannot be
+overridden by `-f`. A static template or a cron template that only uses the
+supplied defaults does not require a values file. Rendering fails if a template
+uses a key that is not supplied.
+
+Manual creation bypasses source filters and creates a standalone Task. It does
+not apply `spec.suspend`, `spec.maxConcurrency`, or `spec.maxTotalTasks`, does
+not enable source reporting, and does not update TaskSpawner status. The Task
+has no TaskSpawner owner reference or `kelos.dev/taskspawner` label. Instead,
+Kelos records its origin with `kelos.dev/created-from-taskspawner`,
+`kelos.dev/trigger-type`, and `kelos.dev/trigger-time` annotations.
+
+Configured `contextSources` are fetched after the values are resolved, matching
+automatic Task creation. `--dry-run` still connects to the cluster to read the
+TaskSpawner and any Secrets referenced by context sources.
+
 <a id="prompttemplate-variables"></a>
 
 ### promptTemplate Variables
@@ -723,6 +762,7 @@ The `kelos` CLI lets you manage the full lifecycle without writing YAML.
 | Command | Description |
 |---------|-------------|
 | `kelos run` | Create and run a new Task |
+| `kelos run --from taskspawner/<name>` | Run a standalone Task from a TaskSpawner template |
 | `kelos create workspace` | Create a Workspace resource |
 | `kelos create agentconfig` | Create an AgentConfig resource |
 | `kelos get <resource> [name]` | List resources or view a specific resource (`tasks`, `taskspawners`, `workspaces`, `agentconfigs`, `workerpools`) |
@@ -755,8 +795,10 @@ When the same key is set multiple ways, precedence is: chart defaults, then `--v
 
 ### `kelos run` Flags
 
-- `--prompt, -p`: Task prompt (required unless `--prompt-file` is set)
+- `--prompt, -p`: Task prompt (required unless `--prompt-file` or `--from` is set)
 - `--prompt-file`: Read task prompt from a file path; use `-` to read from stdin (mutually exclusive with `--prompt`)
+- `--from`: Run the Task template from a `taskspawner/name` reference
+- `--values, -f`: Read top-level template values from a YAML or JSON file; use `-` to read from stdin (requires `--from`)
 - `--type, -t`: Agent type (default: `claude-code`)
 - `--model`: Model override
 - `--effort`: Agent reasoning effort
@@ -771,6 +813,7 @@ When the same key is set multiple ways, precedence is: chart defaults, then `--v
 - `--watch, -w`: Watch task status after creation
 - `--secret`: Pre-created secret name
 - `--credential-type`: Credential type when using `--secret` (default: `api-key`)
+- `--dry-run`: Render the Task without creating it; with `--from`, the TaskSpawner and any context-source Secrets are still read
 
 ### `kelos get` Flags
 

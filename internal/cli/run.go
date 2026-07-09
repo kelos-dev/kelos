@@ -53,12 +53,52 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 		agentConfigRefs []string
 		dependsOn       []string
 		branch          string
+		from            string
+		valuesFile      string
 	)
 
 	cmd := &cobra.Command{
 		Use:   "run",
 		Short: "Create and run a new Task",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if from != "" {
+				if err := validateTaskSpawnerRunFlags(cmd); err != nil {
+					return err
+				}
+				spawnerName, err := parseTaskSpawnerReference(from)
+				if err != nil {
+					return err
+				}
+				values, err := readTaskTemplateValues(valuesFile, cmd.Flags().Changed("values"), cmd.InOrStdin())
+				if err != nil {
+					return err
+				}
+				cl, ns, err := cfg.NewClient()
+				if err != nil {
+					return err
+				}
+				options := runFromTaskSpawnerOptions{Name: name, Values: values, ErrorWriter: os.Stderr}
+				if dryRun {
+					task, err := buildTaskFromTaskSpawner(cmd.Context(), cl, ns, spawnerName, options)
+					if err != nil {
+						return err
+					}
+					return printYAML(os.Stdout, task)
+				}
+				task, err := createTaskFromTaskSpawner(cmd.Context(), cl, ns, spawnerName, options)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(os.Stdout, "task/%s created\n", task.Name)
+				if watch {
+					return watchTask(cmd.Context(), cl, task.Name, ns, os.Stdout, os.Stderr)
+				}
+				return nil
+			}
+			if cmd.Flags().Changed("values") {
+				return fmt.Errorf("--values requires --from")
+			}
+
 			if c := cfg.Config; c != nil {
 				if !cmd.Flags().Changed("secret") && c.Secret != "" {
 					secret = c.Secret
@@ -357,7 +397,7 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&prompt, "prompt", "p", "", "task prompt (required unless --prompt-file is set)")
+	cmd.Flags().StringVarP(&prompt, "prompt", "p", "", "task prompt (required unless --prompt-file or --from is set)")
 	cmd.Flags().StringVar(&promptFile, "prompt-file", "", "read task prompt from a file (use - for stdin)")
 	cmd.Flags().StringVarP(&agentType, "type", "t", "claude-code", "agent type (claude-code, codex, gemini, opencode, cursor)")
 	cmd.Flags().StringVar(&secret, "secret", "", "secret name with credentials (overrides oauthToken/apiKey in config)")
@@ -375,6 +415,8 @@ func newRunCommand(cfg *ClientConfig) *cobra.Command {
 	cmd.Flags().StringArrayVar(&agentConfigRefs, "agent-config", nil, "name of AgentConfig resource(s) to use (repeatable)")
 	cmd.Flags().StringArrayVar(&dependsOn, "depends-on", nil, "Task names this task depends on (repeatable)")
 	cmd.Flags().StringVar(&branch, "branch", "", "Git branch to work on")
+	cmd.Flags().StringVar(&from, "from", "", "TaskSpawner reference in taskspawner/name form")
+	cmd.Flags().StringVarP(&valuesFile, "values", "f", "", "template values file in YAML or JSON format (use - for stdin)")
 
 	cmd.MarkFlagsMutuallyExclusive("prompt", "prompt-file")
 

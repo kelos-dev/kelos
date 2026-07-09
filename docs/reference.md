@@ -797,7 +797,7 @@ When the same key is set multiple ways, precedence is: chart defaults, then `--v
 
 - `--prompt, -p`: Task prompt (required unless `--prompt-file` or `--from` is set)
 - `--prompt-file`: Read task prompt from a file path; use `-` to read from stdin (mutually exclusive with `--prompt`)
-- `--from`: Run the Task template from a `taskspawner/name` reference
+- `--from`: Run the Task template from a `taskspawner/<name>` reference
 - `--values, -f`: Read top-level template values from a YAML or JSON file; use `-` to read from stdin (requires `--from`)
 - `--type, -t`: Agent type (default: `claude-code`)
 - `--model`: Model override

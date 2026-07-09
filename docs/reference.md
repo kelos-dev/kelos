@@ -726,7 +726,7 @@ The `kelos` CLI lets you manage the full lifecycle without writing YAML.
 | `kelos create workspace` | Create a Workspace resource |
 | `kelos create agentconfig` | Create an AgentConfig resource |
 | `kelos get <resource> [name]` | List resources or view a specific resource (`tasks`, `taskspawners`, `workspaces`, `agentconfigs`, `workerpools`) |
-| `kelos delete <resource> [name]` | Delete a resource (`tasks`, `taskspawners`, `workspaces`, `agentconfigs`) |
+| `kelos delete <resource> [name]` | Delete a resource (`tasks`, `taskspawners`, `workspaces`, `agentconfigs`, `workerpools`) |
 | `kelos logs <task-name> [-f]` | View or stream logs from a task |
 | `kelos suspend taskspawner <name>` | Pause a TaskSpawner (stops polling, running tasks continue) |
 | `kelos resume taskspawner <name>` | Resume a paused TaskSpawner |
@@ -781,7 +781,7 @@ When the same key is set multiple ways, precedence is: chart defaults, then `--v
 
 ### `kelos delete` Flags
 
-- `--all`: Delete every resource of the given type in the namespace; mutually exclusive with a resource name. Supported by `task`, `workspace`, `taskspawner`, and `agentconfig` subcommands
+- `--all`: Delete every resource of the given type in the namespace; mutually exclusive with a resource name. Supported by `task`, `workspace`, `taskspawner`, `agentconfig`, and `workerpool` subcommands
 
 ### Common Flags
 
@@ -822,10 +822,12 @@ In addition to subcommands and flags, the following arguments complete dynamical
 | `kelos get taskspawner <TAB>` | taskspawner names |
 | `kelos get workspace <TAB>` | workspace names |
 | `kelos get agentconfig <TAB>` | agentconfig names |
+| `kelos get workerpool <TAB>` | workerpool names |
 | `kelos delete task <TAB>` | task names |
 | `kelos delete taskspawner <TAB>` | taskspawner names |
 | `kelos delete workspace <TAB>` | workspace names |
 | `kelos delete agentconfig <TAB>` | agentconfig names |
+| `kelos delete workerpool <TAB>` | workerpool names |
 | `kelos suspend taskspawner <TAB>` | taskspawner names |
 | `kelos resume taskspawner <TAB>` | taskspawner names |
 

@@ -17,9 +17,11 @@ func TestValidArgsFunctionWired(t *testing.T) {
 		{"get task", []string{"get", "task"}},
 		{"get taskspawner", []string{"get", "taskspawner"}},
 		{"get workspace", []string{"get", "workspace"}},
+		{"get workerpool", []string{"get", "workerpool"}},
 		{"delete task", []string{"delete", "task"}},
 		{"delete workspace", []string{"delete", "workspace"}},
 		{"delete taskspawner", []string{"delete", "taskspawner"}},
+		{"delete workerpool", []string{"delete", "workerpool"}},
 		{"logs", []string{"logs"}},
 	}
 
@@ -64,6 +66,7 @@ func TestCompletionWithInvalidKubeconfig(t *testing.T) {
 		{"completeTaskNames", completeTaskNames(cfg)},
 		{"completeTaskSpawnerNames", completeTaskSpawnerNames(cfg)},
 		{"completeWorkspaceNames", completeWorkspaceNames(cfg)},
+		{"completeWorkerPoolNames", completeWorkerPoolNames(cfg)},
 	}
 
 	for _, tt := range fns {
@@ -89,6 +92,7 @@ func TestCompletionSkipsAfterFirstArg(t *testing.T) {
 		{"completeTaskNames", completeTaskNames(cfg)},
 		{"completeTaskSpawnerNames", completeTaskSpawnerNames(cfg)},
 		{"completeWorkspaceNames", completeWorkspaceNames(cfg)},
+		{"completeWorkerPoolNames", completeWorkerPoolNames(cfg)},
 	}
 
 	for _, tt := range fns {

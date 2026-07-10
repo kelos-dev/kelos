@@ -58,7 +58,13 @@ jobs:
             --namespace cert-manager \
             --create-namespace \
             --set crds.enabled=true \
-            --set global.leaderElection.namespace=cert-manager
+            --set global.leaderElection.namespace=cert-manager \
+            --set resources.requests.cpu=50m \
+            --set resources.requests.memory=64Mi \
+            --set webhook.resources.requests.cpu=50m \
+            --set webhook.resources.requests.memory=64Mi \
+            --set cainjector.resources.requests.cpu=50m \
+            --set cainjector.resources.requests.memory=64Mi
           kubectl rollout status deployment/cert-manager -n cert-manager --timeout=300s
           kubectl rollout status deployment/cert-manager-webhook -n cert-manager --timeout=300s
           kubectl rollout status deployment/cert-manager-cainjector -n cert-manager --timeout=300s

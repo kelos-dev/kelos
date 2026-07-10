@@ -73,7 +73,7 @@ spec:
       actionability, and confidence.
     - Publish the candidate through the kelos-fake-strategist issue slot.
       Find the current open issue slot with:
-      gh issue list --state open --label generated-by-kelos --search "kelos-taskspawner=kelos-fake-strategist in:body" --json number,title,body,assignees
+      gh issue list --state open --label generated-by-kelos --limit 1000 --json number,title,body,assignees --jq 'map(select((.body // "") | contains("<!-- kelos-taskspawner=kelos-fake-strategist -->")))'
       - If an open slot exists and has assignees, treat it as ongoing. Do not
         edit it, do not update related PRs, and do not create another issue.
       - If an open unassigned slot exists, compare your candidate with the

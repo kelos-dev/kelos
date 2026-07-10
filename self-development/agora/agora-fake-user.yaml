@@ -99,7 +99,7 @@ spec:
       - Publish the candidate through this TaskSpawner's single issue slot.
         Find the current open issue slot with:
         ```
-        gh issue list --state open --label generated-by-kelos --search "kelos-taskspawner=agora-fake-user in:body" --json number,title,body,assignees
+        gh issue list --state open --label generated-by-kelos --limit 1000 --json number,title,body,assignees --jq 'map(select((.body // "") | contains("<!-- kelos-taskspawner=agora-fake-user -->")))'
         ```
         - If an open slot exists and has assignees, treat it as ongoing. Do not
           edit it, do not update related PRs, and do not create another issue.

@@ -439,22 +439,23 @@ func TestAgoraIssueCreatorsUseTriageAcceptedLabel(t *testing.T) {
 	}
 }
 
-func TestStickyIssueSlotCommandsUseTriageAcceptedLabel(t *testing.T) {
+func TestStickyIssueSlotCommands(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		dir  string
-		file string
+		dir    string
+		file   string
+		marker string
 	}{
-		{dir: "self-development", file: "kelos-fake-strategist.yaml"},
-		{dir: "self-development", file: "kelos-fake-user.yaml"},
-		{dir: "self-development", file: "kelos-self-update.yaml"},
-		{dir: "self-development/agora", file: "agora-fake-strategist.yaml"},
-		{dir: "self-development/agora", file: "agora-fake-user.yaml"},
-		{dir: "self-development/agora", file: "agora-self-update.yaml"},
-		{dir: "self-development/kanon", file: "kanon-fake-strategist.yaml"},
-		{dir: "self-development/kanon", file: "kanon-fake-user.yaml"},
-		{dir: "self-development/kanon", file: "kanon-self-update.yaml"},
+		{dir: "self-development", file: "kelos-fake-strategist.yaml", marker: "kelos-fake-strategist"},
+		{dir: "self-development", file: "kelos-fake-user.yaml", marker: "kelos-fake-user"},
+		{dir: "self-development", file: "kelos-self-update.yaml", marker: "kelos-self-update"},
+		{dir: "self-development/agora", file: "agora-fake-strategist.yaml", marker: "agora-fake-strategist"},
+		{dir: "self-development/agora", file: "agora-fake-user.yaml", marker: "agora-fake-user"},
+		{dir: "self-development/agora", file: "agora-self-update.yaml", marker: "agora-self-update"},
+		{dir: "self-development/kanon", file: "kanon-fake-strategist.yaml", marker: "kanon-fake-strategist"},
+		{dir: "self-development/kanon", file: "kanon-fake-user.yaml", marker: "kanon-fake-user"},
+		{dir: "self-development/kanon", file: "kanon-self-update.yaml", marker: "kanon-self-update"},
 	}
 
 	for _, tt := range tests {
@@ -464,11 +465,12 @@ func TestStickyIssueSlotCommandsUseTriageAcceptedLabel(t *testing.T) {
 
 			ts := readTaskSpawnerFromDir(t, tt.dir, tt.file)
 			assertStickyIssueCommandsUseTriageAccepted(t, tt.dir+"/"+tt.file, ts.Spec.TaskTemplate.PromptTemplate)
+			assertStickyIssueLookupUsesExactMarker(t, tt.dir+"/"+tt.file, ts.Spec.TaskTemplate.PromptTemplate, tt.marker)
 		})
 	}
 }
 
-func TestManualFakeStrategistTaskUsesTriageAcceptedLabel(t *testing.T) {
+func TestManualFakeStrategistTaskStickyIssueCommands(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join("..", "..", "self-development", "tasks", "fake-strategist-task.yaml")
@@ -478,6 +480,7 @@ func TestManualFakeStrategistTaskUsesTriageAcceptedLabel(t *testing.T) {
 	}
 
 	assertStickyIssueCommandsUseTriageAccepted(t, path, string(data))
+	assertStickyIssueLookupUsesExactMarker(t, path, string(data), "kelos-fake-strategist")
 }
 
 func TestAgoraPlannerOnlyTriggersForIssues(t *testing.T) {
@@ -955,6 +958,15 @@ func assertStickyIssueCommandsUseTriageAccepted(t *testing.T, name, prompt strin
 	}
 	if !strings.Contains(prompt, wantCreate) {
 		t.Fatalf("%s prompt does not add triage-accepted when creating a sticky issue slot", name)
+	}
+}
+
+func assertStickyIssueLookupUsesExactMarker(t *testing.T, name, prompt, marker string) {
+	t.Helper()
+
+	want := `gh issue list --state open --label generated-by-kelos --limit 1000 --json number,title,body,assignees --jq 'map(select((.body // "") | contains("<!-- kelos-taskspawner=` + marker + ` -->")))'`
+	if !strings.Contains(prompt, want) {
+		t.Fatalf("%s prompt does not filter sticky issue slots by the exact marker", name)
 	}
 }
 

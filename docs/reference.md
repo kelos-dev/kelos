@@ -191,6 +191,8 @@ For each labeled Secret with a non-empty `CODEX_AUTH_JSON` key, the controller m
 
 A WorkerPool manages a fleet of persistent worker pods backed by a StatefulSet. Tasks reference a WorkerPool via `spec.workerPoolRef` to execute on pre-warmed infrastructure instead of creating per-task Jobs.
 
+A WorkerPool's Workspace may use either a PAT-style or a GitHub App secret. For App secrets the controller mints a short-lived installation token into a `<pool-name>-github-token` Secret and re-mints it before expiry (see [Workspace authentication](#workspace-authentication)), so long-lived worker pods keep a valid token without restarts.
+
 | Field | Description | Required |
 |-------|-------------|----------|
 | `spec.worker.type` | Agent type | Yes |
@@ -278,7 +280,7 @@ kubectl create secret generic github-app-creds \
 
 GitHub Apps are preferred over PATs for production use because they offer fine-grained permissions, higher rate limits, no dependency on a specific user account, and automatically expiring tokens.
 
-The installation token is minted to a per-task Secret (`<task-name>-github-token`) at admission and is mounted into the agent pod as a file at `/kelos/github-token/GITHUB_TOKEN`. While the task is running, the controller re-mints the token before it expires and updates the Secret in place. The kubelet syncs the file contents automatically, and the agent image's git credential helper and `gh` wrapper read the file on each invocation, so tasks that run longer than the ~1h installation-token TTL keep working without a pod restart.
+The installation token is minted to a derived Secret and mounted into the agent pod as a file at `/kelos/github-token/GITHUB_TOKEN`. For per-Task Jobs the Secret is `<task-name>-github-token` (minted at admission); for WorkerPools it is `<pool-name>-github-token` (minted on first reconcile). In both cases the controller re-mints the token before it expires and updates the Secret in place. The kubelet syncs the file contents automatically, and the agent image's git credential helper and `gh` wrapper read the file on each invocation, so runs that last longer than the ~1h installation-token TTL keep working without a pod restart. This makes GitHub App secrets usable for persistent WorkerPools, not just ephemeral Task pods.
 
 ## AgentConfig
 

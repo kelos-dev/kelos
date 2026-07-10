@@ -20,6 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -181,6 +183,44 @@ func TestTaskAgentEnvIncludesPerTaskModelAndEffort(t *testing.T) {
 	}
 	if got := lastEnvValue(env, "KELOS_UPSTREAM_REPO"); got != "upstream/repo" {
 		t.Errorf("KELOS_UPSTREAM_REPO = %q, want task upstream repo", got)
+	}
+}
+
+func TestTaskAgentEnvRefreshesGitHubTokenFromFile(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("ghs_fresh_token\n"), 0o600); err != nil {
+		t.Fatalf("writing token file: %v", err)
+	}
+	t.Setenv("KELOS_GITHUB_TOKEN_FILE", tokenFile)
+
+	task := &kelos.Task{Spec: kelos.TaskSpec{Prompt: "Fix the bug"}}
+
+	// The pod-start (frozen) token env vars should be overridden by the
+	// current file contents; GH_ENTERPRISE_TOKEN is absent so it stays unset.
+	base := []string{"GITHUB_TOKEN=stale", "GH_TOKEN=stale", "OTHER=value"}
+	env := taskAgentEnv(base, task)
+
+	if got := lastEnvValue(env, "GITHUB_TOKEN"); got != "ghs_fresh_token" {
+		t.Errorf("GITHUB_TOKEN = %q, want refreshed token", got)
+	}
+	if got := lastEnvValue(env, "GH_TOKEN"); got != "ghs_fresh_token" {
+		t.Errorf("GH_TOKEN = %q, want refreshed token", got)
+	}
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "GH_ENTERPRISE_TOKEN=") {
+			t.Errorf("GH_ENTERPRISE_TOKEN unexpectedly set: %q", kv)
+		}
+	}
+}
+
+func TestTaskAgentEnvNoTokenFileLeavesEnvUnchanged(t *testing.T) {
+	t.Setenv("KELOS_GITHUB_TOKEN_FILE", "")
+
+	task := &kelos.Task{Spec: kelos.TaskSpec{Prompt: "Fix the bug"}}
+	env := taskAgentEnv([]string{"GITHUB_TOKEN=pat-value"}, task)
+
+	if got := lastEnvValue(env, "GITHUB_TOKEN"); got != "pat-value" {
+		t.Errorf("GITHUB_TOKEN = %q, want original PAT value", got)
 	}
 }
 

@@ -558,64 +558,9 @@ func (r *TaskReconciler) resolveGitHubAppToken(ctx context.Context, task *kelos.
 		return nil, fmt.Errorf("parsing GitHub App credentials: %w", err)
 	}
 
-	// Use a per-call TokenClient so that concurrent reconciles with different
-	// hosts do not race on the shared r.TokenClient.BaseURL.
-	tc := &githubapp.TokenClient{
-		BaseURL: r.TokenClient.BaseURL,
-		Client:  r.TokenClient.Client,
-	}
-	if workspace.Repo != "" {
-		host, _, _ := parseGitHubRepo(workspace.Repo)
-		if apiBaseURL := gitHubAPIBaseURL(host); apiBaseURL != "" {
-			tc.BaseURL = apiBaseURL
-		}
-	}
-
-	tokenResp, err := tc.GenerateInstallationToken(ctx, creds)
-	if err != nil {
-		return nil, fmt.Errorf("generating installation token: %w", err)
-	}
-
-	// Create a new secret with the generated token, owned by the Task
-	tokenSecretName := task.Name + "-github-token"
-	tokenAnnotations := map[string]string{
-		githubAppSecretAnnotation: workspace.SecretRef.Name,
-		tokenExpiresAtAnnotation:  tokenResp.ExpiresAt.UTC().Format(time.RFC3339),
-	}
-	tokenSecret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:        tokenSecretName,
-			Namespace:   task.Namespace,
-			Annotations: tokenAnnotations,
-		},
-		StringData: map[string]string{
-			"GITHUB_TOKEN": tokenResp.Token,
-		},
-	}
-
-	if err := controllerutil.SetControllerReference(task, tokenSecret, r.Scheme); err != nil {
-		return nil, fmt.Errorf("setting owner reference on token secret: %w", err)
-	}
-
-	if err := r.Create(ctx, tokenSecret); err != nil {
-		if !apierrors.IsAlreadyExists(err) {
-			return nil, fmt.Errorf("creating token secret: %w", err)
-		}
-		// Update existing secret
-		existing := &corev1.Secret{}
-		if err := r.Get(ctx, client.ObjectKey{Name: tokenSecretName, Namespace: task.Namespace}, existing); err != nil {
-			return nil, fmt.Errorf("fetching existing token secret: %w", err)
-		}
-		existing.StringData = tokenSecret.StringData
-		if existing.Annotations == nil {
-			existing.Annotations = map[string]string{}
-		}
-		for k, v := range tokenAnnotations {
-			existing.Annotations[k] = v
-		}
-		if err := r.Update(ctx, existing); err != nil {
-			return nil, fmt.Errorf("updating token secret: %w", err)
-		}
+	tokenSecretName := githubTokenSecretName(task.Name)
+	if _, err := mintGitHubAppTokenSecret(ctx, r.Client, r.Scheme, r.TokenClient, task, tokenSecretName, workspace.SecretRef.Name, workspace.Repo, creds); err != nil {
+		return nil, err
 	}
 
 	// Return a modified workspace spec that points to the generated token secret
@@ -683,96 +628,29 @@ func (r *TaskReconciler) ensurePluginConfigMap(ctx context.Context, task *kelos.
 func (r *TaskReconciler) refreshGitHubAppTokenIfNeeded(ctx context.Context, task *kelos.Task) (time.Duration, error) {
 	logger := log.FromContext(ctx)
 
-	tokenSecretName := task.Name + "-github-token"
-	var tokenSecret corev1.Secret
-	if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: tokenSecretName}, &tokenSecret); err != nil {
-		if apierrors.IsNotFound(err) {
-			return 0, nil
-		}
-		return 0, fmt.Errorf("fetching token secret %q: %w", tokenSecretName, err)
-	}
+	tokenSecretName := githubTokenSecretName(task.Name)
 
-	appSecretName := tokenSecret.Annotations[githubAppSecretAnnotation]
-	if appSecretName == "" {
-		return 0, nil
-	}
-
-	retryAfter := tokenRefreshRetryInterval
-	expiresAtStr := tokenSecret.Annotations[tokenExpiresAtAnnotation]
-	if expiresAtStr != "" {
-		expiresAt, err := time.Parse(time.RFC3339, expiresAtStr)
-		if err == nil {
-			retryAfter = tokenRefreshFailureRetryAfter(expiresAt)
-			refreshAt := expiresAt.Add(-tokenRefreshMargin)
-			if time.Now().Before(refreshAt) {
-				return time.Until(refreshAt), nil
-			}
-		}
-	}
-
-	if r.TokenClient == nil {
-		return retryAfter, fmt.Errorf("GitHub App token refresh requested but TokenClient is not configured")
-	}
-
-	var appSecret corev1.Secret
-	if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: appSecretName}, &appSecret); err != nil {
-		return retryAfter, fmt.Errorf("fetching GitHub App secret %q: %w", appSecretName, err)
-	}
-	if !githubapp.IsGitHubApp(appSecret.Data) {
-		return 0, nil
-	}
-
-	creds, err := githubapp.ParseCredentials(appSecret.Data)
-	if err != nil {
-		return retryAfter, fmt.Errorf("parsing GitHub App credentials: %w", err)
-	}
-
-	tc := &githubapp.TokenClient{
-		BaseURL: r.TokenClient.BaseURL,
-		Client:  r.TokenClient.Client,
-	}
-	if resolveTaskWorkspaceRef(task) != nil {
+	// Resolve the workspace repo so refreshed tokens are minted against the
+	// correct GitHub API host for GitHub Enterprise workspaces.
+	repoURL := ""
+	if ref := resolveTaskWorkspaceRef(task); ref != nil {
 		var ws kelos.Workspace
-		if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: resolveTaskWorkspaceRef(task).Name}, &ws); err != nil {
+		if err := r.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: ref.Name}, &ws); err != nil {
 			// Fall back to the controller-wide BaseURL. Log at V(1) so
 			// operators can correlate a later 401 against the wrong
 			// API host with the lookup that failed here.
-			logger.V(1).Info("Unable to fetch workspace for token refresh, using default API base URL", "workspace", resolveTaskWorkspaceRef(task).Name, "error", err)
-		} else if ws.Spec.Repo != "" {
-			host, _, _ := parseGitHubRepo(ws.Spec.Repo)
-			if apiBaseURL := gitHubAPIBaseURL(host); apiBaseURL != "" {
-				tc.BaseURL = apiBaseURL
-			}
+			logger.V(1).Info("Unable to fetch workspace for token refresh, using default API base URL", "workspace", ref.Name, "error", err)
+		} else {
+			repoURL = ws.Spec.Repo
 		}
 	}
 
-	tokenResp, err := tc.GenerateInstallationToken(ctx, creds)
-	if err != nil {
-		return retryAfter, fmt.Errorf("generating refreshed installation token: %w", err)
+	next, expiresAt, refreshed, err := refreshGitHubAppTokenSecret(ctx, r.Client, r.TokenClient, task.Namespace, tokenSecretName, repoURL)
+	if refreshed {
+		logger.Info("Refreshed GitHub App installation token", "task", task.Name, "expiresAt", expiresAt)
+		r.recordEvent(task, corev1.EventTypeNormal, "GitHubTokenRefreshed", "Refreshed GitHub App installation token (expires at %s)", expiresAt.UTC().Format(time.RFC3339))
 	}
-
-	// StringData wins over Data on the apiserver, so writing through
-	// StringData is the idiomatic way to update a Secret in place and
-	// matches resolveGitHubAppToken on the initial-mint path.
-	tokenSecret.StringData = map[string]string{
-		"GITHUB_TOKEN": tokenResp.Token,
-	}
-	if tokenSecret.Annotations == nil {
-		tokenSecret.Annotations = map[string]string{}
-	}
-	tokenSecret.Annotations[tokenExpiresAtAnnotation] = tokenResp.ExpiresAt.UTC().Format(time.RFC3339)
-	if err := r.Update(ctx, &tokenSecret); err != nil {
-		return retryAfter, fmt.Errorf("updating token secret with refreshed token: %w", err)
-	}
-
-	logger.Info("Refreshed GitHub App installation token", "task", task.Name, "expiresAt", tokenResp.ExpiresAt)
-	r.recordEvent(task, corev1.EventTypeNormal, "GitHubTokenRefreshed", "Refreshed GitHub App installation token (expires at %s)", tokenResp.ExpiresAt.UTC().Format(time.RFC3339))
-
-	next := time.Until(tokenResp.ExpiresAt.Add(-tokenRefreshMargin))
-	if next < 0 {
-		next = 0
-	}
-	return next, nil
+	return next, err
 }
 
 func tokenRefreshFailureRetryAfter(expiresAt time.Time) time.Duration {

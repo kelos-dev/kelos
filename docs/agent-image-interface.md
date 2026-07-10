@@ -124,15 +124,18 @@ failures when tailing pod logs.
 ### 8. GitHub token freshness
 
 For GitHub App-backed workspaces, the installation token has a ~1h TTL but
-the controller re-mints it in place while the Job is running. The
+the controller re-mints it in place while the workload is running. This
+applies to both per-Task Jobs and long-lived WorkerPool StatefulSets. The
 `GITHUB_TOKEN`, `GH_TOKEN`, and `GH_ENTERPRISE_TOKEN` env vars are still
 set for compatibility, but their values are frozen at pod start and will
-expire mid-run for long-running tasks.
+expire mid-run for long-running tasks and for pooled workers.
 
 **Custom agent images should read `$KELOS_GITHUB_TOKEN_FILE` on each
 GitHub call** instead of capturing the env var once. The file is mounted
-from the per-task token Secret; the kubelet auto-syncs its contents
-(~60s latency) so each read returns the current token.
+from the derived token Secret — `<task-name>-github-token` for per-Task
+Jobs and `<pool-name>-github-token` for WorkerPools — and the kubelet
+auto-syncs its contents (~60s latency) so each read returns the current
+token.
 
 Two concrete recommendations:
 

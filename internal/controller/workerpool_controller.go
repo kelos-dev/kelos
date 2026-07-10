@@ -89,6 +89,11 @@ type WorkerPoolReconciler struct {
 	CursorImage                 string
 	CursorImagePullPolicy       corev1.PullPolicy
 
+	// TokenClient mints GitHub App installation tokens for workspaces backed
+	// by a GitHub App secret. Required for App-backed pools; PAT-style
+	// workspaces do not use it.
+	TokenClient *githubapp.TokenClient
+
 	// NowFunc returns the current time. Defaults to time.Now.
 	// Overridable in tests for deterministic behavior.
 	NowFunc func() time.Time
@@ -120,7 +125,7 @@ func (r *WorkerPoolReconciler) budget() *budgetEnforcer {
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update
 
 // Reconcile handles both WorkerPool infrastructure and Task assignment.
 func (r *WorkerPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -191,18 +196,19 @@ func (r *WorkerPoolReconciler) reconcilePool(ctx context.Context, pool *kelos.Wo
 	}
 	workspace = &ws.Spec
 
-	// Validate that the workspace secret is not a GitHub App secret.
-	// WorkerPool pods are long-lived, so short-lived GitHub App installation
-	// tokens cannot be refreshed per task. Only PAT-style secrets are supported.
+	// Resolve GitHub App-backed workspace secrets into a derived Secret
+	// holding a short-lived installation token, minting it on first use and
+	// re-minting it before expiry. PAT-style secrets are used as-is.
+	var refreshAfter time.Duration
 	if workspace.SecretRef != nil {
-		var wsSecret corev1.Secret
-		if err := r.Get(ctx, types.NamespacedName{Namespace: pool.Namespace, Name: workspace.SecretRef.Name}, &wsSecret); err != nil {
-			if !apierrors.IsNotFound(err) {
-				return ctrl.Result{}, fmt.Errorf("workerpool %s: fetching workspace secret %q: %w", pool.Name, workspace.SecretRef.Name, err)
-			}
-		} else if githubapp.IsGitHubApp(wsSecret.Data) {
-			return ctrl.Result{}, fmt.Errorf("workerpool %s: workspace %q uses a GitHub App secret which is not supported for persistent worker pools (use a PAT-style secret instead)", pool.Name, pool.Spec.Worker.WorkspaceRef.Name)
+		resolvedWorkspace, next, err := r.ensureGitHubAppToken(ctx, pool, workspace)
+		if err != nil {
+			logger.Error(err, "Unable to ensure GitHub App installation token", "workerpool", pool.Name)
+			r.recordEvent(pool, corev1.EventTypeWarning, "GitHubTokenFailed", "Failed to ensure GitHub App installation token: %v", err)
+			return ctrl.Result{}, err
 		}
+		workspace = resolvedWorkspace
+		refreshAfter = next
 	}
 
 	// Resolve AgentConfig
@@ -256,7 +262,104 @@ func (r *WorkerPoolReconciler) reconcilePool(ctx context.Context, pool *kelos.Wo
 		return ctrl.Result{}, err
 	}
 
+	// Schedule the next GitHub App token refresh alongside any StatefulSet
+	// requeue so the derived token Secret is re-minted before it expires.
+	if refreshAfter > 0 {
+		result = mergeReconcileResults(result, ctrl.Result{RequeueAfter: refreshAfter})
+	}
+
 	return result, nil
+}
+
+// ensureGitHubAppToken resolves a workspace secret that holds GitHub App
+// credentials into a derived Secret containing a short-lived installation
+// token, minting it on first use and re-minting it before expiry. It returns a
+// workspace spec pointing at the derived token Secret (or the original
+// workspace when the secret is a plain PAT or is not present yet), and the
+// duration until the next token refresh should be scheduled (0 when no refresh
+// is applicable).
+func (r *WorkerPoolReconciler) ensureGitHubAppToken(ctx context.Context, pool *kelos.WorkerPool, workspace *kelos.WorkspaceSpec) (*kelos.WorkspaceSpec, time.Duration, error) {
+	logger := log.FromContext(ctx)
+
+	var appSecret corev1.Secret
+	if err := r.Get(ctx, types.NamespacedName{Namespace: pool.Namespace, Name: workspace.SecretRef.Name}, &appSecret); err != nil {
+		if apierrors.IsNotFound(err) {
+			// Secret not present yet; leave the workspace untouched and let a
+			// later reconcile (triggered by the secret watch) resolve it.
+			return workspace, 0, nil
+		}
+		return nil, 0, fmt.Errorf("workerpool %s: fetching workspace secret %q: %w", pool.Name, workspace.SecretRef.Name, err)
+	}
+
+	if !githubapp.IsGitHubApp(appSecret.Data) {
+		return workspace, 0, nil
+	}
+
+	if r.TokenClient == nil {
+		return nil, 0, fmt.Errorf("workerpool %s: workspace %q uses a GitHub App secret but TokenClient is not configured", pool.Name, workspace.SecretRef.Name)
+	}
+
+	tokenSecretName := githubTokenSecretName(pool.Name)
+
+	// Mint the derived token Secret if it does not exist yet. When it already
+	// exists, the refresh below re-mints it only when close to expiry, so we
+	// avoid a GitHub API call on every reconcile.
+	var derived corev1.Secret
+	switch err := r.Get(ctx, types.NamespacedName{Namespace: pool.Namespace, Name: tokenSecretName}, &derived); {
+	case err != nil && !apierrors.IsNotFound(err):
+		return nil, 0, fmt.Errorf("workerpool %s: fetching token secret %q: %w", pool.Name, tokenSecretName, err)
+	case apierrors.IsNotFound(err):
+		logger.Info("Detected GitHub App secret, generating installation token", "workerpool", pool.Name, "secret", workspace.SecretRef.Name)
+		creds, err := githubapp.ParseCredentials(appSecret.Data)
+		if err != nil {
+			return nil, 0, fmt.Errorf("workerpool %s: parsing GitHub App credentials: %w", pool.Name, err)
+		}
+		if _, err := mintGitHubAppTokenSecret(ctx, r.Client, r.Scheme, r.TokenClient, pool, tokenSecretName, workspace.SecretRef.Name, workspace.Repo, creds); err != nil {
+			return nil, 0, fmt.Errorf("workerpool %s: %w", pool.Name, err)
+		}
+	case !metav1.IsControlledBy(&derived, pool):
+		// A Task and a WorkerPool can share a name in a namespace and both
+		// derive <name>-github-token. Refuse to refresh or mount a token
+		// Secret owned by another resource: doing so would mint into and point
+		// the pool's pods at a Secret garbage-collected with a different owner.
+		return nil, 0, fmt.Errorf("workerpool %s: token secret %q already exists and is not controlled by this WorkerPool", pool.Name, tokenSecretName)
+	case derived.Annotations[githubAppSecretAnnotation] != workspace.SecretRef.Name:
+		// The Workspace now points at a different App Secret than the one the
+		// derived Secret was minted from. The refresh path keys off the derived
+		// Secret's kelos.dev/github-app-secret annotation, so without re-minting
+		// here it would keep reading the stale source Secret and never adopt the
+		// new credential. Re-mint from the current workspace.SecretRef.Name,
+		// which rewrites the annotation and the token in place.
+		logger.Info("Workspace GitHub App secret changed, re-minting installation token",
+			"workerpool", pool.Name,
+			"previousSecret", derived.Annotations[githubAppSecretAnnotation],
+			"secret", workspace.SecretRef.Name)
+		creds, err := githubapp.ParseCredentials(appSecret.Data)
+		if err != nil {
+			return nil, 0, fmt.Errorf("workerpool %s: parsing GitHub App credentials: %w", pool.Name, err)
+		}
+		if _, err := mintGitHubAppTokenSecret(ctx, r.Client, r.Scheme, r.TokenClient, pool, tokenSecretName, workspace.SecretRef.Name, workspace.Repo, creds); err != nil {
+			return nil, 0, fmt.Errorf("workerpool %s: %w", pool.Name, err)
+		}
+	}
+
+	next, expiresAt, refreshed, refreshErr := refreshGitHubAppTokenSecret(ctx, r.Client, r.TokenClient, pool.Namespace, tokenSecretName, workspace.Repo)
+	if refreshErr != nil {
+		// Non-fatal: the token Secret exists and may still be valid. Log,
+		// emit an event, and requeue to retry before expiry.
+		logger.Error(refreshErr, "Unable to refresh GitHub App installation token", "workerpool", pool.Name)
+		r.recordEvent(pool, corev1.EventTypeWarning, "GitHubTokenRefreshFailed", "Failed to refresh GitHub App installation token: %v", refreshErr)
+		if next == 0 {
+			next = tokenRefreshRetryInterval
+		}
+	} else if refreshed {
+		logger.Info("Refreshed GitHub App installation token", "workerpool", pool.Name, "expiresAt", expiresAt)
+		r.recordEvent(pool, corev1.EventTypeNormal, "GitHubTokenRefreshed", "Refreshed GitHub App installation token (expires at %s)", expiresAt.UTC().Format(time.RFC3339))
+	}
+
+	resolved := *workspace
+	resolved.SecretRef = &kelos.SecretReference{Name: tokenSecretName}
+	return &resolved, next, nil
 }
 
 func (r *WorkerPoolReconciler) reconcileService(ctx context.Context, pool *kelos.WorkerPool, svcName string) error {
@@ -531,10 +634,16 @@ func (r *WorkerPoolReconciler) buildStatefulSet(pool *kelos.WorkerPool, stsName,
 			Value: GHConfigDir,
 		})
 
-		// Token refresh support: worker runner reads this secret name
+		// Expose the mounted token file path so the worker runner can re-read
+		// the token on every task, picking up controller-side refreshes without
+		// a pod restart. The secret-backed GITHUB_TOKEN / GH_TOKEN env vars
+		// above are frozen at pod start, so the file is the source of truth for
+		// long-lived pools. Only the main container runs the worker runner; the
+		// init-container credential helper hardcodes the mount path via
+		// gitCredentialHelper(), so it does not need this env var.
 		envVars = append(envVars, corev1.EnvVar{
-			Name:  "KELOS_TOKEN_SECRET",
-			Value: workspace.SecretRef.Name,
+			Name:  "KELOS_GITHUB_TOKEN_FILE",
+			Value: GitHubTokenMountPath + "/" + GitHubTokenSecretKey,
 		})
 	}
 
@@ -574,11 +683,46 @@ func (r *WorkerPoolReconciler) buildStatefulSet(pool *kelos.WorkerPool, stsName,
 		},
 	}
 
+	// Mount the workspace token Secret as a file so the git credential helper
+	// and worker runner read the current token on each use. kubelet syncs
+	// secret-volume updates into the running pod, so a controller-side token
+	// refresh propagates without a pod restart.
+	if workspace != nil && workspace.SecretRef != nil {
+		volumes = append(volumes, corev1.Volume{
+			Name: GitHubTokenVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: workspace.SecretRef.Name,
+					Items: []corev1.KeyToPath{
+						{Key: GitHubTokenSecretKey, Path: GitHubTokenSecretKey},
+					},
+					Optional: ptr.To(true),
+				},
+			},
+		})
+		mainContainer.VolumeMounts = append(mainContainer.VolumeMounts, corev1.VolumeMount{
+			Name:      GitHubTokenVolumeName,
+			MountPath: GitHubTokenMountPath,
+			ReadOnly:  true,
+		})
+	}
+
 	// Build workspace init containers (git-clone, remote-setup, workspace-files)
 	if workspace != nil {
 		volumeMount := corev1.VolumeMount{
 			Name:      WorkspaceVolumeName,
 			MountPath: WorkspaceMountPath,
+		}
+
+		// Containers that need the cloned repo plus, when a token Secret is
+		// configured, the auto-syncing token file used by the credential helper.
+		workspaceVolumeMounts := []corev1.VolumeMount{volumeMount}
+		if workspace.SecretRef != nil {
+			workspaceVolumeMounts = append(workspaceVolumeMounts, corev1.VolumeMount{
+				Name:      GitHubTokenVolumeName,
+				MountPath: GitHubTokenMountPath,
+				ReadOnly:  true,
+			})
 		}
 
 		targetPath := WorkspaceMountPath + "/repo"
@@ -596,7 +740,7 @@ func (r *WorkerPoolReconciler) buildStatefulSet(pool *kelos.WorkerPool, stsName,
 			Image:        GitCloneImage,
 			Args:         cloneArgs,
 			Env:          workspaceEnvVars,
-			VolumeMounts: []corev1.VolumeMount{volumeMount},
+			VolumeMounts: append([]corev1.VolumeMount(nil), workspaceVolumeMounts...),
 			SecurityContext: &corev1.SecurityContext{
 				RunAsUser: &agentUID,
 			},

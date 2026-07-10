@@ -276,6 +276,7 @@ func main() {
 		Scheme:                      mgr.GetScheme(),
 		Recorder:                    mgr.GetEventRecorderFor("kelos-controller"),
 		Clientset:                   clientset,
+		TokenClient:                 githubapp.NewTokenClient(),
 		WorkerRunnerImage:           workerRunnerImage,
 		WorkerRunnerImagePullPolicy: corev1.PullPolicy(workerRunnerImagePullPolicy),
 		ClaudeCodeImage:             claudeCodeImage,

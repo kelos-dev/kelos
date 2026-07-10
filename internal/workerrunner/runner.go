@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -284,6 +285,21 @@ func (r *Runner) runAgent(ctx context.Context, task *kelos.Task) error {
 
 func taskAgentEnv(base []string, task *kelos.Task) []string {
 	env := append([]string{}, base...)
+
+	// Refresh the GitHub token env vars from the mounted token file so
+	// env-reading tools pick up controller-side token refreshes. The token
+	// env vars in os.Environ() are captured at pod start and never update,
+	// so for long-lived worker pods they go stale once the installation token
+	// is re-minted. The git credential helper already re-reads the file per
+	// git call; this covers tools that read GITHUB_TOKEN/GH_TOKEN directly.
+	// Only env vars already present are overridden, matching whichever the
+	// pod set (GH_TOKEN for github.com, GH_ENTERPRISE_TOKEN for GHE).
+	if token := currentGitHubToken(); token != "" {
+		env = overrideEnvIfPresent(env, "GITHUB_TOKEN", token)
+		env = overrideEnvIfPresent(env, "GH_TOKEN", token)
+		env = overrideEnvIfPresent(env, "GH_ENTERPRISE_TOKEN", token)
+	}
+
 	env = append(env, "KELOS_PROMPT="+task.Spec.Prompt)
 	if task.Spec.Model != "" {
 		env = append(env, "KELOS_MODEL="+task.Spec.Model)
@@ -293,6 +309,36 @@ func taskAgentEnv(base []string, task *kelos.Task) []string {
 	}
 	if task.Spec.UpstreamRepo != "" {
 		env = append(env, "KELOS_UPSTREAM_REPO="+task.Spec.UpstreamRepo)
+	}
+	return env
+}
+
+// currentGitHubToken reads the current GitHub token from the file named by
+// KELOS_GITHUB_TOKEN_FILE, returning "" when the env var is unset or the file
+// is missing/unreadable/empty. The file is a kubelet-synced secret volume, so
+// it reflects controller-side token refreshes within the kubelet sync period.
+func currentGitHubToken() string {
+	tokenFile := os.Getenv("KELOS_GITHUB_TOKEN_FILE")
+	if tokenFile == "" {
+		return ""
+	}
+	data, err := os.ReadFile(tokenFile)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// overrideEnvIfPresent replaces the value of key in env when it is already
+// present, leaving env unchanged otherwise. It edits in place so the agent
+// subprocess sees a single, up-to-date value rather than a duplicate key.
+func overrideEnvIfPresent(env []string, key, value string) []string {
+	prefix := key + "="
+	for i, kv := range env {
+		if strings.HasPrefix(kv, prefix) {
+			env[i] = prefix + value
+			return env
+		}
 	}
 	return env
 }

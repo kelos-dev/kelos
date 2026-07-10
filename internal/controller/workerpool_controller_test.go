@@ -2,9 +2,17 @@ package controller
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/json"
+	"encoding/pem"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -24,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
+	"github.com/kelos-dev/kelos/internal/githubapp"
 )
 
 func newWorkerPoolTestScheme() *runtime.Scheme {
@@ -1038,7 +1047,27 @@ func TestPodTemplateSpecEqual_IgnoresAPIDefaults(t *testing.T) {
 	assert.False(t, podTemplateSpecEqual(desired, *changed))
 }
 
-func TestWorkerPoolReconciler_RejectsGitHubAppSecret(t *testing.T) {
+func TestWorkerPoolReconciler_MintsGitHubAppTokenSecret(t *testing.T) {
+	// A GitHub App-backed workspace is now supported: the reconciler mints a
+	// derived <pool>-github-token Secret and points the StatefulSet at it,
+	// mounting the token as a file so refreshes propagate into running pods.
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	keyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(key),
+	})
+
+	expiresAt := time.Now().Add(1 * time.Hour).UTC().Truncate(time.Second)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"token":      "ghs_minted_token",
+			"expires_at": expiresAt.Format(time.RFC3339),
+		})
+	}))
+	defer server.Close()
+
 	scheme := newWorkerPoolTestScheme()
 	pool := newTestWorkerPool("my-pool", "default", 1)
 
@@ -1056,7 +1085,6 @@ func TestWorkerPoolReconciler_RejectsGitHubAppSecret(t *testing.T) {
 		},
 	}
 
-	// GitHub App secret has appID, installationID, privateKey
 	appSecret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "github-app-secret",
@@ -1065,7 +1093,7 @@ func TestWorkerPoolReconciler_RejectsGitHubAppSecret(t *testing.T) {
 		Data: map[string][]byte{
 			"appID":          []byte("12345"),
 			"installationID": []byte("67890"),
-			"privateKey":     []byte("-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----"),
+			"privateKey":     keyPEM,
 		},
 	}
 
@@ -1076,12 +1104,228 @@ func TestWorkerPoolReconciler_RejectsGitHubAppSecret(t *testing.T) {
 		Build()
 
 	r := newWorkerPoolReconciler(cl, scheme)
+	r.TokenClient = &githubapp.TokenClient{BaseURL: server.URL, Client: server.Client()}
+
+	_, err = r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "my-pool", Namespace: "default"},
+	})
+	require.NoError(t, err)
+
+	// A derived token Secret was minted, owned by the pool, with the token
+	// and refresh annotations.
+	var tokenSecret corev1.Secret
+	require.NoError(t, cl.Get(context.Background(),
+		types.NamespacedName{Name: "my-pool-github-token", Namespace: "default"}, &tokenSecret))
+	assert.Equal(t, "ghs_minted_token", tokenSecret.StringData["GITHUB_TOKEN"])
+	assert.Equal(t, "github-app-secret", tokenSecret.Annotations["kelos.dev/github-app-secret"])
+	assert.Equal(t, expiresAt.Format(time.RFC3339), tokenSecret.Annotations["kelos.dev/token-expires-at"])
+	require.Len(t, tokenSecret.OwnerReferences, 1)
+	assert.Equal(t, "my-pool", tokenSecret.OwnerReferences[0].Name)
+
+	// The StatefulSet points at the derived Secret via the token-file volume
+	// and exposes KELOS_GITHUB_TOKEN_FILE.
+	var sts appsv1.StatefulSet
+	require.NoError(t, cl.Get(context.Background(),
+		types.NamespacedName{Name: workerPoolStatefulSetName("my-pool"), Namespace: "default"}, &sts))
+
+	var tokenVolume *corev1.Volume
+	for i := range sts.Spec.Template.Spec.Volumes {
+		if sts.Spec.Template.Spec.Volumes[i].Name == GitHubTokenVolumeName {
+			tokenVolume = &sts.Spec.Template.Spec.Volumes[i]
+			break
+		}
+	}
+	require.NotNil(t, tokenVolume, "expected token-file volume %q", GitHubTokenVolumeName)
+	require.NotNil(t, tokenVolume.Secret)
+	assert.Equal(t, "my-pool-github-token", tokenVolume.Secret.SecretName)
+
+	main := sts.Spec.Template.Spec.Containers[0]
+	assert.Contains(t, envValue(main.Env, "KELOS_GITHUB_TOKEN_FILE"), GitHubTokenMountPath)
+	assert.True(t, hasVolumeMount(main.VolumeMounts, GitHubTokenVolumeName, GitHubTokenMountPath),
+		"main container should mount the token file volume")
+}
+
+func TestWorkerPoolReconciler_RefusesForeignOwnedTokenSecret(t *testing.T) {
+	// A Task and a WorkerPool can share a name in a namespace and both derive
+	// <name>-github-token. If a derived token Secret named <pool>-github-token
+	// already exists but is controlled by another resource, the reconciler must
+	// refuse to refresh or mount it rather than clobber the other owner's token
+	// and mis-tie garbage collection.
+	scheme := newWorkerPoolTestScheme()
+	pool := newTestWorkerPool("my-pool", "default", 1)
+	pool.UID = "pool-uid"
+
+	ws := &kelos.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-workspace", Namespace: "default"},
+		Spec: kelos.WorkspaceSpec{
+			Repo:      "https://github.com/example/repo.git",
+			Ref:       "main",
+			SecretRef: &kelos.SecretReference{Name: "github-app-secret"},
+		},
+	}
+
+	appSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "github-app-secret", Namespace: "default"},
+		Data: map[string][]byte{
+			"appID":          []byte("12345"),
+			"installationID": []byte("67890"),
+			"privateKey":     []byte("-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----"),
+		},
+	}
+
+	// A pre-existing token Secret controlled by a Task of the same name.
+	controller := true
+	foreignToken := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-pool-github-token",
+			Namespace: "default",
+			Annotations: map[string]string{
+				"kelos.dev/github-app-secret": "github-app-secret",
+				"kelos.dev/token-expires-at":  time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+			},
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: kelos.GroupVersion.String(),
+				Kind:       "Task",
+				Name:       "my-pool",
+				UID:        "task-uid",
+				Controller: &controller,
+			}},
+		},
+		StringData: map[string]string{"GITHUB_TOKEN": "ghs_task_token"},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&kelos.Task{}, &kelos.WorkerPool{}).
+		WithObjects(pool, ws, appSecret, foreignToken).
+		Build()
+
+	r := newWorkerPoolReconciler(cl, scheme)
+	r.TokenClient = &githubapp.TokenClient{}
 
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: "my-pool", Namespace: "default"},
 	})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "GitHub App secret which is not supported for persistent worker pools")
+	assert.Contains(t, err.Error(), "not controlled by this WorkerPool")
+
+	// The other owner's token was left untouched.
+	var after corev1.Secret
+	require.NoError(t, cl.Get(context.Background(),
+		types.NamespacedName{Name: "my-pool-github-token", Namespace: "default"}, &after))
+	require.Len(t, after.OwnerReferences, 1)
+	assert.Equal(t, "task-uid", string(after.OwnerReferences[0].UID))
+}
+
+func TestWorkerPoolReconciler_ReMintsTokenOnWorkspaceSecretChange(t *testing.T) {
+	// When an existing pool's Workspace switches from GitHub App Secret A to
+	// Secret B, the derived <pool>-github-token Secret already exists, so the
+	// mint path is skipped. The refresh path keys off the derived Secret's
+	// kelos.dev/github-app-secret annotation, so without re-minting the pool
+	// would keep serving the stale Secret A credential. The reconciler must
+	// detect the annotation mismatch and re-mint from the current SecretRef.
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	keyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(key),
+	})
+
+	expiresAt := time.Now().Add(1 * time.Hour).UTC().Truncate(time.Second)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"token":      "ghs_token_from_secret_b",
+			"expires_at": expiresAt.Format(time.RFC3339),
+		})
+	}))
+	defer server.Close()
+
+	scheme := newWorkerPoolTestScheme()
+	pool := newTestWorkerPool("my-pool", "default", 1)
+	pool.UID = "pool-uid"
+
+	// The Workspace now points at Secret B.
+	ws := &kelos.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-workspace", Namespace: "default"},
+		Spec: kelos.WorkspaceSpec{
+			Repo:      "https://github.com/example/repo.git",
+			Ref:       "main",
+			SecretRef: &kelos.SecretReference{Name: "github-app-secret-b"},
+		},
+	}
+
+	appSecretB := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "github-app-secret-b", Namespace: "default"},
+		Data: map[string][]byte{
+			"appID":          []byte("12345"),
+			"installationID": []byte("67890"),
+			"privateKey":     keyPEM,
+		},
+	}
+
+	// A pre-existing derived token Secret, controlled by the pool, minted from
+	// the old Secret A and still far from expiry (so the refresh path alone
+	// would not re-mint it).
+	controller := true
+	derived := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-pool-github-token",
+			Namespace: "default",
+			Annotations: map[string]string{
+				"kelos.dev/github-app-secret": "github-app-secret-a",
+				"kelos.dev/token-expires-at":  time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+			},
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: kelos.GroupVersion.String(),
+				Kind:       "WorkerPool",
+				Name:       "my-pool",
+				UID:        "pool-uid",
+				Controller: &controller,
+			}},
+		},
+		StringData: map[string]string{"GITHUB_TOKEN": "ghs_token_from_secret_a"},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&kelos.Task{}, &kelos.WorkerPool{}).
+		WithObjects(pool, ws, appSecretB, derived).
+		Build()
+
+	r := newWorkerPoolReconciler(cl, scheme)
+	r.TokenClient = &githubapp.TokenClient{BaseURL: server.URL, Client: server.Client()}
+
+	_, err = r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "my-pool", Namespace: "default"},
+	})
+	require.NoError(t, err)
+
+	// The derived Secret was re-minted from Secret B: the token and the source
+	// annotation both track the current workspace credential.
+	var after corev1.Secret
+	require.NoError(t, cl.Get(context.Background(),
+		types.NamespacedName{Name: "my-pool-github-token", Namespace: "default"}, &after))
+	assert.Equal(t, "ghs_token_from_secret_b", after.StringData["GITHUB_TOKEN"])
+	assert.Equal(t, "github-app-secret-b", after.Annotations["kelos.dev/github-app-secret"])
+}
+
+func envValue(env []corev1.EnvVar, name string) string {
+	for _, e := range env {
+		if e.Name == name {
+			return e.Value
+		}
+	}
+	return ""
+}
+
+func hasVolumeMount(mounts []corev1.VolumeMount, name, path string) bool {
+	for _, m := range mounts {
+		if m.Name == name && m.MountPath == path {
+			return true
+		}
+	}
+	return false
 }
 
 func int32Ptr(v int32) *int32 { return &v }

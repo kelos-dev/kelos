@@ -189,9 +189,11 @@ For each labeled Secret with a non-empty `CODEX_AUTH_JSON` key, the controller m
 
 ## Session
 
-A Session is one interactive Claude Code, Codex, or OpenCode conversation backed by one
-owned Pod. Its spec is immutable. Conversation events stay in the live runtime
-process and are not stored in the Kubernetes API.
+A Session is one interactive Claude Code, Codex, or OpenCode conversation backed
+by a one-replica StatefulSet. The StatefulSet's headless governing Service is
+used only for Kubernetes workload identity; web and terminal clients still
+connect through the Session control path. The spec is immutable. Conversation
+events stay out of the Kubernetes API and are retained on the Session workspace.
 
 | Field | Description | Required |
 |-------|-------------|----------|
@@ -203,20 +205,36 @@ process and are not stored in the Kubernetes API.
 | `spec.worker.workspaceRef.name` | Workspace cloned into the Session Pod | No |
 | `spec.worker.agentConfigRefs[].name` | Ordered AgentConfig resources | No |
 | `spec.worker.podOverrides` | Pod resources, scheduling, environment, volumes, and sidecars | No |
+| `spec.volumeClaimTemplate` | PersistentVolumeClaimSpec for the Session workspace; omit to use `emptyDir` | No |
 | `status.phase` | Infrastructure phase: `Pending`, `Ready`, or `Failed` | Output |
 | `status.podName` | Session Pod name | Output |
-| `status.podUID` | Identity of the Pod that owns the live conversation | Output |
+| `status.podUID` | Identity of the Pod running the live conversation | Output |
 
 Use `kelos session connect NAME` for terminal chat. Web chat is served by the
 optional shared `kelos-session-server`; both clients use the same event stream
 and provider conversation. Both clients can stream agent and tool activity,
 answer user-input requests, and interrupt active work without ending the
-provider conversation.
+provider conversation. If the Pod is deleted or evicted, the StatefulSet creates
+a replacement. Web and terminal clients reconnect to it. Work active at the
+time of failure is reported as interrupted and is not submitted again
+automatically. The terminal client also does not retry a request whose delivery
+cannot be confirmed; it reports that uncertainty so the user can decide whether
+to submit it again.
+
+When `spec.volumeClaimTemplate` is set, the StatefulSet provisions the Session
+workspace from that template and reuses it across Pod replacement. Built-in
+workspace initialization is skipped after the persistent workspace has been
+initialized, while `Workspace.spec.setupCommand` runs in each replacement
+container. Deleting the Session deletes the claim; PersistentVolume retention
+afterward follows the StorageClass reclaim policy. When the field is omitted,
+the workspace uses `emptyDir`, so conversation history and workspace changes do
+not survive Pod replacement.
 
 The shared web server is restricted to its configured
 `sessionServer.defaultNamespace`. Its creation API accepts provider,
 credentials, model, effort, Workspace, and AgentConfig references; image and Pod
-overrides require direct Kubernetes API access governed by Kubernetes RBAC.
+overrides and `volumeClaimTemplate` require direct Kubernetes API access governed
+by Kubernetes RBAC.
 
 ## WorkerPool
 

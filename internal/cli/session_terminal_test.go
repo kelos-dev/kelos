@@ -18,6 +18,7 @@ func TestSessionTerminalRendersANSIEvents(t *testing.T) {
 	encoder := json.NewEncoder(&events)
 	for _, event := range []sessionruntime.Event{
 		{Type: sessionruntime.EventHistoryEnd},
+		{Type: sessionruntime.EventRuntimeRecovered, Text: "Session runtime restarted"},
 		{Type: sessionruntime.EventUserMessage, Text: "hello"},
 		{Type: sessionruntime.EventAssistantDelta, Text: "working"},
 		{Type: sessionruntime.EventToolStarted, ToolName: "shell"},
@@ -52,6 +53,7 @@ func TestSessionTerminalRendersANSIEvents(t *testing.T) {
 	got := output.String()
 	for _, want := range []string{
 		"\x1b[7m  hello  \x1b[0m",
+		"\x1b[1m\x1b[33mSession runtime restarted\x1b[0m",
 		"\x1b[1m\x1b[36m↳ shell\x1b[0m",
 		"\x1b[32mcompleted\x1b[0m",
 		"\x1b[31m-old\x1b[0m",

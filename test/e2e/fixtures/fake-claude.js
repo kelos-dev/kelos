@@ -1,10 +1,22 @@
 #!/usr/bin/env node
 
 const readline = require('node:readline');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const sessionID = 'kelos-e2e-session';
-let turn = 0;
+const stateDirectory = process.env.CLAUDE_CONFIG_DIR || process.cwd();
+const turnPath = path.join(stateDirectory, 'kelos-e2e-turn');
+let turn = Number.parseInt(readFile(turnPath, '0'), 10) || 0;
 let pending = null;
+
+function readFile(file, fallback) {
+  try {
+    return fs.readFileSync(file, 'utf8');
+  } catch {
+    return fallback;
+  }
+}
 
 function send(value) {
   process.stdout.write(`${JSON.stringify(value)}\n`);
@@ -37,6 +49,8 @@ function promptText(message) {
 
 function handleUser(message) {
   turn += 1;
+  fs.mkdirSync(stateDirectory, {recursive: true});
+  fs.writeFileSync(turnPath, String(turn));
   const prompt = promptText(message);
   if (prompt === 'question') {
     pending = {kind: 'question'};
@@ -64,6 +78,16 @@ function handleUser(message) {
   }
   if (prompt === 'block') {
     pending = {kind: 'block'};
+    return;
+  }
+  if (prompt === 'write-state') {
+    fs.writeFileSync(path.join(process.cwd(), 'kelos-recovery-state'), 'preserved');
+    complete(`turn ${turn}: state written`);
+    return;
+  }
+  if (prompt === 'read-state') {
+    const state = readFile(path.join(process.cwd(), 'kelos-recovery-state'), 'missing');
+    complete(`turn ${turn}: state ${state}`);
     return;
   }
   complete(`turn ${turn}: ${prompt}`);

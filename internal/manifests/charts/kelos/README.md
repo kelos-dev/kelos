@@ -170,6 +170,25 @@ If `CODEX_AUTH_JSON` does not include `client_id` (top-level or `tokens.client_i
 
 ## Session Web Chat
 
+Sessions use `emptyDir` workspaces unless `spec.volumeClaimTemplate` is set.
+Configure persistent storage on each Session that must preserve provider state,
+repository changes, and chat event history across Pod replacement:
+
+```yaml
+spec:
+  volumeClaimTemplate:
+    accessModes:
+      - ReadWriteOnce
+    storageClassName: standard-rwo
+    resources:
+      requests:
+        storage: 20Gi
+```
+
+The selected StorageClass must dynamically provision or otherwise bind a
+matching volume. Deleting the Session deletes its claim; the StorageClass
+reclaim policy controls the underlying PersistentVolume.
+
 The shared Session server serves the web application and bridges each chat to
 its Session Pod through Kubernetes exec. It is disabled by default and requires
 a non-empty static token in an existing Secret:

@@ -147,6 +147,12 @@ func runSessionTerminal(ctx context.Context, input io.Reader, output io.Writer, 
 			switch event.Type {
 			case sessionruntime.EventHistoryEnd:
 				write("\n%s\n\n", formatter.muted("Connected. Type a message, /interrupt, /answer INPUT QUESTION VALUE, or /quit."))
+			case sessionruntime.EventRuntimeRecovered:
+				if streaming {
+					write("\n")
+					streaming = false
+				}
+				write("%s\n", formatter.warning(event.Text))
 			case sessionruntime.EventUserMessage:
 				if streaming {
 					write("\n")

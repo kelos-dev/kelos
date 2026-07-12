@@ -421,6 +421,9 @@ function handleEvent(event) {
     case 'history.end':
       scrollToBottom(false);
       break;
+    case 'runtime.recovered':
+      renderRecovery(event);
+      break;
     case 'user.message':
       renderUser(event);
       break;
@@ -670,6 +673,15 @@ function renderError(event) {
   const card = document.createElement('div');
   card.className = 'error-card';
   card.textContent = event.text || 'The Session runtime reported an error.';
+  elements.messages.append(card);
+  scrollToBottom();
+}
+
+function renderRecovery(event) {
+  ensureConversation();
+  const card = document.createElement('div');
+  card.className = 'recovery-card';
+  card.textContent = event.text || 'Session runtime recovered';
   elements.messages.append(card);
   scrollToBottom();
 }

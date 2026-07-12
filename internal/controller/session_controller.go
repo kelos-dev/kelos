@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apiMeta "k8s.io/apimachinery/pkg/api/meta"
@@ -19,7 +20,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/githubapp"
@@ -36,6 +39,8 @@ const (
 	sessionCodexHome         = "/workspace/.kelos/session/codex-home"
 	sessionOpenCodeConfigDir = "/workspace/.kelos/session/opencode-config"
 	sessionOpenCodeDataDir   = "/workspace/.kelos/session/opencode-data"
+	sessionInitializedPath   = "/workspace/.kelos/session/initialized"
+	sessionNameAnnotation    = "kelos.dev/session-name"
 	sessionReadyCondition    = "Ready"
 )
 
@@ -52,12 +57,14 @@ type SessionReconciler struct {
 
 // +kubebuilder:rbac:groups=kelos.dev,resources=sessions,verbs=get;list;watch
 // +kubebuilder:rbac:groups=kelos.dev,resources=sessions/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;delete
+// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create
 
-// Reconcile creates and observes the Pod that owns a Session conversation.
+// Reconcile creates and observes the StatefulSet that owns a Session conversation.
 func (r *SessionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
@@ -70,24 +77,49 @@ func (r *SessionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, err
 	}
 
-	var pod corev1.Pod
-	err := r.Get(ctx, client.ObjectKeyFromObject(&session), &pod)
+	workloadName := sessionWorkloadName(&session)
+	var statefulSet appsv1.StatefulSet
+	err := r.Get(ctx, client.ObjectKey{Namespace: session.Namespace, Name: workloadName}, &statefulSet)
 	if apierrors.IsNotFound(err) {
-		if session.Status.PodName != "" || session.Status.PodUID != "" {
-			return ctrl.Result{}, r.updateSessionStatus(ctx, &session, nil, kelos.SessionPhaseFailed, "Session Pod was lost", "PodLost")
+		return r.createSessionStatefulSet(ctx, &session)
+	}
+	if err != nil {
+		logger.Error(err, "Unable to fetch Session StatefulSet", "session", session.Name)
+		return ctrl.Result{}, err
+	}
+
+	if !metav1.IsControlledBy(&statefulSet, &session) {
+		message := fmt.Sprintf("StatefulSet %q already exists and is not controlled by this Session", statefulSet.Name)
+		return ctrl.Result{}, r.updateSessionStatus(ctx, &session, nil, kelos.SessionPhaseFailed, message, "StatefulSetConflict")
+	}
+	if statefulSet.DeletionTimestamp != nil {
+		return ctrl.Result{}, r.updateSessionStatus(ctx, &session, nil, kelos.SessionPhasePending, "Session StatefulSet is terminating and will be recreated", "StatefulSetTerminating")
+	}
+	if err := r.ensureSessionService(ctx, &session); err != nil {
+		message := fmt.Sprintf("Failed to prepare Session governing Service: %v", err)
+		return ctrl.Result{}, r.updateSessionStatus(ctx, &session, nil, kelos.SessionPhaseFailed, message, "ServiceFailed")
+	}
+
+	podName := statefulSet.Name + "-0"
+	var pod corev1.Pod
+	err = r.Get(ctx, client.ObjectKey{Namespace: session.Namespace, Name: podName}, &pod)
+	if apierrors.IsNotFound(err) {
+		if err := r.updateSessionStatus(ctx, &session, nil, kelos.SessionPhasePending, "Session Pod is starting", "PodStarting"); err != nil {
+			return ctrl.Result{}, err
 		}
-		return r.createSessionPod(ctx, &session)
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 	}
 	if err != nil {
 		logger.Error(err, "Unable to fetch Session Pod", "session", session.Name)
 		return ctrl.Result{}, err
 	}
-
-	if !metav1.IsControlledBy(&pod, &session) {
-		message := fmt.Sprintf("Pod %q already exists and is not controlled by this Session", pod.Name)
-		return ctrl.Result{}, r.updateSessionStatus(ctx, &session, &pod, kelos.SessionPhaseFailed, message, "PodConflict")
+	if !metav1.IsControlledBy(&pod, &statefulSet) {
+		message := fmt.Sprintf("Pod %q already exists and is not controlled by StatefulSet %q", pod.Name, statefulSet.Name)
+		return ctrl.Result{}, r.updateSessionStatus(ctx, &session, nil, kelos.SessionPhaseFailed, message, "PodConflict")
 	}
-
+	if pod.DeletionTimestamp != nil {
+		return ctrl.Result{}, r.updateSessionStatus(ctx, &session, &pod, kelos.SessionPhasePending, "Session Pod is terminating and will be recreated", "PodTerminating")
+	}
 	phase, message, reason := sessionPhaseForPod(&pod)
 	if err := r.updateSessionStatus(ctx, &session, &pod, phase, message, reason); err != nil {
 		return ctrl.Result{}, err
@@ -102,7 +134,7 @@ func (r *SessionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return result, nil
 }
 
-func (r *SessionReconciler) createSessionPod(ctx context.Context, session *kelos.Session) (ctrl.Result, error) {
+func (r *SessionReconciler) createSessionStatefulSet(ctx context.Context, session *kelos.Session) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	workspace, agentConfig, waitingMessage, err := r.resolveSessionInputs(ctx, session)
 	if err != nil {
@@ -116,14 +148,12 @@ func (r *SessionReconciler) createSessionPod(ctx context.Context, session *kelos
 		}
 		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 	}
-
-	pod, configMap, err := r.buildSessionPod(session, workspace, agentConfig)
+	statefulSet, configMap, err := r.buildSessionStatefulSet(session, workspace, agentConfig)
 	if err != nil {
-		message := fmt.Sprintf("Failed to build Session Pod: %v", err)
-		_ = r.updateSessionStatus(ctx, session, nil, kelos.SessionPhaseFailed, message, "PodBuildFailed")
+		message := fmt.Sprintf("Failed to build Session StatefulSet: %v", err)
+		_ = r.updateSessionStatus(ctx, session, nil, kelos.SessionPhaseFailed, message, "StatefulSetBuildFailed")
 		return ctrl.Result{}, err
 	}
-
 	if configMap != nil {
 		if err := controllerutil.SetControllerReference(session, configMap, r.Scheme); err != nil {
 			return ctrl.Result{}, fmt.Errorf("setting Session owner on plugin ConfigMap: %w", err)
@@ -142,25 +172,52 @@ func (r *SessionReconciler) createSessionPod(ctx context.Context, session *kelos
 		}
 	}
 
-	if err := controllerutil.SetControllerReference(session, pod, r.Scheme); err != nil {
-		return ctrl.Result{}, fmt.Errorf("setting Session owner on Pod: %w", err)
+	if err := r.ensureSessionService(ctx, session); err != nil {
+		message := fmt.Sprintf("Failed to prepare Session governing Service: %v", err)
+		_ = r.updateSessionStatus(ctx, session, nil, kelos.SessionPhaseFailed, message, "ServiceFailed")
+		return ctrl.Result{}, err
 	}
-	if err := r.Create(ctx, pod); err != nil {
+	if err := controllerutil.SetControllerReference(session, statefulSet, r.Scheme); err != nil {
+		return ctrl.Result{}, fmt.Errorf("setting Session owner on StatefulSet: %w", err)
+	}
+	if err := r.Create(ctx, statefulSet); err != nil {
 		if apierrors.IsAlreadyExists(err) {
 			return ctrl.Result{Requeue: true}, nil
 		}
-		logger.Error(err, "Unable to create Session Pod", "session", session.Name)
+		logger.Error(err, "Unable to create Session StatefulSet", "session", session.Name)
 		return ctrl.Result{}, err
 	}
 
 	if r.Recorder != nil {
-		r.Recorder.Eventf(session, corev1.EventTypeNormal, "PodCreated", "Created Pod %s for Session", pod.Name)
+		r.Recorder.Eventf(session, corev1.EventTypeNormal, "StatefulSetCreated", "Created StatefulSet %s for Session", statefulSet.Name)
 	}
-	if err := r.updateSessionStatus(ctx, session, pod, kelos.SessionPhasePending, "Session Pod is starting", "PodStarting"); err != nil {
+	if err := r.updateSessionStatus(ctx, session, nil, kelos.SessionPhasePending, "Session Pod is starting", "PodStarting"); err != nil {
 		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{Requeue: true}, nil
+}
+
+func (r *SessionReconciler) ensureSessionService(ctx context.Context, session *kelos.Session) error {
+	var existing corev1.Service
+	key := client.ObjectKey{Namespace: session.Namespace, Name: sessionWorkloadName(session)}
+	if err := r.Get(ctx, key, &existing); err == nil {
+		if !metav1.IsControlledBy(&existing, session) {
+			return fmt.Errorf("Service %q already exists and is not controlled by this Session", existing.Name)
+		}
+		return nil
+	} else if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("getting Session Service %q: %w", key.Name, err)
+	}
+
+	service := buildSessionService(session)
+	if err := controllerutil.SetControllerReference(session, service, r.Scheme); err != nil {
+		return fmt.Errorf("setting Session owner on Service: %w", err)
+	}
+	if err := r.Create(ctx, service); err != nil {
+		return fmt.Errorf("creating Session Service %q: %w", service.Name, err)
+	}
+	return nil
 }
 
 func (r *SessionReconciler) resolveSessionInputs(ctx context.Context, session *kelos.Session) (*kelos.WorkspaceSpec, *kelos.AgentConfigSpec, string, error) {
@@ -380,7 +437,7 @@ func sessionGitHubTokenSecretName(sessionName string) string {
 	return truncateResourceName(sessionName + "-session-github-token")
 }
 
-func (r *SessionReconciler) buildSessionPod(session *kelos.Session, workspace *kelos.WorkspaceSpec, agentConfig *kelos.AgentConfigSpec) (*corev1.Pod, *corev1.ConfigMap, error) {
+func (r *SessionReconciler) buildSessionStatefulSet(session *kelos.Session, workspace *kelos.WorkspaceSpec, agentConfig *kelos.AgentConfigSpec) (*appsv1.StatefulSet, *corev1.ConfigMap, error) {
 	worker := session.Spec.Worker.DeepCopy()
 	task := &kelos.Task{
 		ObjectMeta: metav1.ObjectMeta{Name: session.Name, Namespace: session.Namespace},
@@ -458,23 +515,42 @@ func (r *SessionReconciler) buildSessionPod(session *kelos.Session, workspace *k
 		ReadOnly:  true,
 	})
 
-	hasWorkspace := false
-	for _, volume := range podSpec.Volumes {
-		if volume.Name == WorkspaceVolumeName {
-			hasWorkspace = true
+	workspaceVolume := -1
+	for i := range podSpec.Volumes {
+		if podSpec.Volumes[i].Name == WorkspaceVolumeName {
+			workspaceVolume = i
 			break
 		}
 	}
-	if !hasWorkspace {
+	if workspaceVolume == -1 {
 		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
 			Name:         WorkspaceVolumeName,
 			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 		})
+		workspaceVolume = len(podSpec.Volumes) - 1
 		mainContainer.VolumeMounts = append(mainContainer.VolumeMounts, corev1.VolumeMount{
 			Name:      WorkspaceVolumeName,
 			MountPath: WorkspaceMountPath,
 		})
 		mainContainer.WorkingDir = WorkspaceMountPath
+	}
+	var volumeClaimTemplates []corev1.PersistentVolumeClaim
+	var retentionPolicy *appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy
+	if session.Spec.VolumeClaimTemplate == nil {
+		podSpec.Volumes[workspaceVolume].VolumeSource = corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}
+	} else {
+		podSpec.Volumes = append(podSpec.Volumes[:workspaceVolume], podSpec.Volumes[workspaceVolume+1:]...)
+		volumeClaimTemplates = []corev1.PersistentVolumeClaim{{
+			ObjectMeta: metav1.ObjectMeta{Name: WorkspaceVolumeName},
+			Spec:       *session.Spec.VolumeClaimTemplate.DeepCopy(),
+		}}
+		retentionPolicy = &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{
+			WhenDeleted: appsv1.DeletePersistentVolumeClaimRetentionPolicyType,
+			WhenScaled:  appsv1.DeletePersistentVolumeClaimRetentionPolicyType,
+		}
+	}
+	if err := prepareSessionWorkspaceInit(podSpec.InitContainers); err != nil {
+		return nil, nil, err
 	}
 
 	podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
@@ -514,15 +590,83 @@ func (r *SessionReconciler) buildSessionPod(session *kelos.Session, workspace *k
 	labels["kelos.dev/component"] = "session"
 	labels["kelos.dev/session"] = sessionLabelValue(session)
 
-	pod := &corev1.Pod{
+	selector := sessionSelectorLabels(session)
+	statefulSet := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      session.Name,
+			Name:      sessionWorkloadName(session),
 			Namespace: session.Namespace,
 			Labels:    labels,
 		},
-		Spec: podSpec,
+		Spec: appsv1.StatefulSetSpec{
+			Replicas:                             ptr.To(int32(1)),
+			ServiceName:                          sessionWorkloadName(session),
+			Selector:                             &metav1.LabelSelector{MatchLabels: selector},
+			PersistentVolumeClaimRetentionPolicy: retentionPolicy,
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels:      labels,
+					Annotations: map[string]string{sessionNameAnnotation: session.Name},
+				},
+				Spec: podSpec,
+			},
+			VolumeClaimTemplates: volumeClaimTemplates,
+		},
 	}
-	return pod, configMap, nil
+	return statefulSet, configMap, nil
+}
+
+func buildSessionService(session *kelos.Session) *corev1.Service {
+	labels := sessionSelectorLabels(session)
+	return &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      sessionWorkloadName(session),
+			Namespace: session.Namespace,
+			Labels:    labels,
+		},
+		Spec: corev1.ServiceSpec{
+			ClusterIP: corev1.ClusterIPNone,
+			Selector:  labels,
+		},
+	}
+}
+
+func sessionWorkloadName(session *kelos.Session) string {
+	return truncateResourceName("session-" + session.Name)
+}
+
+func sessionSelectorLabels(session *kelos.Session) map[string]string {
+	return map[string]string{
+		"kelos.dev/component": "session",
+		"kelos.dev/session":   sessionLabelValue(session),
+	}
+}
+
+func prepareSessionWorkspaceInit(containers []corev1.Container) error {
+	for i := range containers {
+		container := &containers[i]
+		switch container.Name {
+		case "git-clone":
+			prefix := `if [ -f ` + sessionInitializedPath + ` ]; then exit 0; fi
+rm -rf -- /workspace/repo
+`
+			if len(container.Command) == 0 {
+				originalArgs := append([]string(nil), container.Args...)
+				container.Command = []string{"sh", "-c"}
+				container.Args = append([]string{prefix + `exec git "$@"`, "git"}, originalArgs...)
+			} else if len(container.Command) == 3 && container.Command[0] == "sh" && container.Command[1] == "-c" {
+				container.Command[2] = prefix + container.Command[2]
+			} else {
+				return fmt.Errorf("Session workspace init container %q has an unsupported command", container.Name)
+			}
+		case "remote-setup", "branch-setup", "workspace-files":
+			if len(container.Command) != 3 || container.Command[0] != "sh" || container.Command[1] != "-c" {
+				return fmt.Errorf("Session workspace init container %q has an unsupported command", container.Name)
+			}
+			container.Command[2] = `if [ -f ` + sessionInitializedPath + ` ]; then exit 0; fi
+` + container.Command[2]
+		}
+	}
+	return nil
 }
 
 func setSessionContainerEnv(container *corev1.Container, name, value string) {
@@ -646,7 +790,17 @@ func (r *SessionReconciler) updateSessionStatus(ctx context.Context, session *ke
 func (r *SessionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&kelos.Session{}).
-		Owns(&corev1.Pod{}).
+		Owns(&appsv1.StatefulSet{}).
+		Owns(&corev1.Service{}).
 		Owns(&corev1.Secret{}).
+		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(r.findSessionForPod)).
 		Complete(r)
+}
+
+func (r *SessionReconciler) findSessionForPod(_ context.Context, obj client.Object) []reconcile.Request {
+	name := obj.GetAnnotations()[sessionNameAnnotation]
+	if name == "" {
+		return nil
+	}
+	return []reconcile.Request{{NamespacedName: client.ObjectKey{Namespace: obj.GetNamespace(), Name: name}}}
 }

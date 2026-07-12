@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,6 +22,8 @@ const (
 	DefaultSocketPath = "/tmp/kelos-session/runtime.sock"
 	DefaultStateDir   = "/workspace/.kelos/session"
 	DefaultWorkingDir = "/workspace/repo"
+	journalFileName   = "events.jsonl"
+	initializedFile   = "initialized"
 )
 
 // Config configures the resident Session runtime.
@@ -36,8 +39,9 @@ type Config struct {
 }
 
 type turnRequest struct {
-	id   string
-	text string
+	id       string
+	text     string
+	accepted chan struct{}
 }
 
 type pendingInput struct {
@@ -58,10 +62,12 @@ type Server struct {
 	journal  *Journal
 	provider Provider
 
-	turns      chan turnRequest
-	nextTurnID atomic.Int64
-	activeMu   sync.Mutex
-	activeTurn string
+	submitMu      sync.Mutex
+	appendMessage func(Event) error
+	turns         chan turnRequest
+	nextTurnID    atomic.Int64
+	activeMu      sync.Mutex
+	activeTurn    string
 
 	inputMu       sync.Mutex
 	pendingInputs map[string]*pendingInput
@@ -74,6 +80,7 @@ func NewServer(config Config, journal *Journal, provider Provider) *Server {
 		config:        config,
 		journal:       journal,
 		provider:      provider,
+		appendMessage: journal.Append,
 		turns:         make(chan turnRequest, 32),
 		pendingInputs: map[string]*pendingInput{},
 	}
@@ -87,11 +94,23 @@ func Run(ctx context.Context, config Config) error {
 	if err := os.MkdirAll(config.StateDir, 0700); err != nil {
 		return fmt.Errorf("creating Session state directory: %w", err)
 	}
-	if err := runAgentSetup(ctx, config.WorkingDir); err != nil {
+	initialized, err := sessionInitialized(config.StateDir)
+	if err != nil {
 		return err
 	}
+	if err := runAgentSetup(ctx, config.WorkingDir, config.Environment); err != nil {
+		return err
+	}
+	if !initialized {
+		if err := os.WriteFile(filepath.Join(config.StateDir, initializedFile), []byte("initialized\n"), 0600); err != nil {
+			return fmt.Errorf("recording initialized Session workspace: %w", err)
+		}
+	}
 
-	journal := NewJournal()
+	journal, err := OpenJournal(filepath.Join(config.StateDir, journalFileName))
+	if err != nil {
+		return err
+	}
 	provider, err := NewProvider(ctx, ProviderConfig{
 		AgentType:   config.AgentType,
 		WorkingDir:  config.WorkingDir,
@@ -106,19 +125,43 @@ func Run(ctx context.Context, config Config) error {
 		return err
 	}
 
-	return NewServer(config, journal, provider).Serve(ctx)
+	recovery, err := recoverJournal(journal)
+	if err != nil {
+		_ = provider.Close()
+		journal.Close()
+		return err
+	}
+	server := NewServer(config, journal, provider)
+	server.nextTurnID.Store(recovery.nextTurnID)
+	server.nextInputID.Store(recovery.nextInputID)
+	return server.Serve(ctx)
 }
 
-func runAgentSetup(ctx context.Context, workingDir string) error {
+func sessionInitialized(stateDir string) (bool, error) {
+	_, err := os.Stat(filepath.Join(stateDir, initializedFile))
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return false, fmt.Errorf("checking initialized Session workspace: %w", err)
+}
+
+func runAgentSetup(ctx context.Context, workingDir string, environment []string) error {
 	command := exec.CommandContext(ctx, "/kelos_entrypoint.sh")
 	command.Dir = workingDir
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr
-	command.Env = replaceProcessEnv(os.Environ(), "KELOS_SESSION_SETUP_ONLY", "1")
+	command.Env = sessionSetupEnvironment(environment)
 	if err := command.Run(); err != nil {
 		return fmt.Errorf("preparing Session agent environment: %w", err)
 	}
 	return nil
+}
+
+func sessionSetupEnvironment(environment []string) []string {
+	return replaceProcessEnv(environment, "KELOS_SESSION_SETUP_ONLY", "1")
 }
 
 func replaceProcessEnv(current []string, name, value string) []string {
@@ -157,6 +200,7 @@ func (s *Server) Serve(ctx context.Context) error {
 		select {
 		case <-serveCtx.Done():
 		case <-providerDone:
+		case <-s.journal.Failed():
 		}
 		_ = listener.Close()
 	}()
@@ -172,6 +216,9 @@ func (s *Server) Serve(ctx context.Context) error {
 		if err != nil {
 			if serveCtx.Err() != nil {
 				return nil
+			}
+			if journalErr := s.journal.Err(); journalErr != nil {
+				return journalErr
 			}
 			select {
 			case <-providerDone:
@@ -190,6 +237,11 @@ func (s *Server) runTurns(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case turn := <-s.turns:
+			select {
+			case <-turn.accepted:
+			case <-ctx.Done():
+				return
+			}
 			s.runTurn(ctx, turn)
 		}
 	}
@@ -207,8 +259,9 @@ func (s *Server) runTurn(ctx context.Context, turn turnRequest) {
 		s.activeMu.Unlock()
 	}()
 
-	s.journal.Append(Event{Type: EventUserMessage, TurnID: turn.id, Text: turn.text})
-	s.journal.Append(Event{Type: EventTurnStarted, TurnID: turn.id, Status: "running"})
+	if err := s.journal.Append(Event{Type: EventTurnStarted, TurnID: turn.id, Status: "running"}); err != nil {
+		return
+	}
 	sink := &turnSink{server: s, turnID: turn.id}
 	err := s.provider.RunTurn(ctx, turn.text, sink)
 	if s.config.AgentType == "claude-code" || s.config.AgentType == "opencode" {
@@ -221,6 +274,9 @@ func (s *Server) runTurn(ctx context.Context, turn turnRequest) {
 		return
 	}
 	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
 		sink.Emit(Event{Type: EventError, Text: err.Error(), Status: "failed"})
 		sink.Emit(Event{Type: EventTurnCompleted, Status: "failed"})
 		return
@@ -242,30 +298,119 @@ func workspaceDiff(ctx context.Context, workingDir string) string {
 	return string(output)
 }
 
-func (s *Server) submitMessage(text string) error {
+func (s *Server) submitMessage(text, requestID string) error {
 	if strings.TrimSpace(text) == "" {
 		return errors.New("message must not be empty")
 	}
+	s.submitMu.Lock()
+	defer s.submitMu.Unlock()
+	if err := s.journal.Err(); err != nil {
+		return fmt.Errorf("recording Session message: %w", err)
+	}
 	turn := turnRequest{
-		id:   fmt.Sprintf("turn-%d", s.nextTurnID.Add(1)),
-		text: text,
+		id:       fmt.Sprintf("turn-%d", s.nextTurnID.Add(1)),
+		text:     text,
+		accepted: make(chan struct{}),
 	}
 	select {
 	case s.turns <- turn:
+		if err := s.appendMessage(Event{Type: EventUserMessage, RequestID: requestID, TurnID: turn.id, Text: turn.text}); err != nil {
+			return fmt.Errorf("recording Session message: %w", err)
+		}
+		close(turn.accepted)
 		return nil
 	default:
 		return errors.New("Session message queue is full")
 	}
 }
 
-func (s *Server) interruptTurn(ctx context.Context) error {
+type journalRecovery struct {
+	nextTurnID  int64
+	nextInputID int64
+}
+
+func recoverJournal(journal *Journal) (journalRecovery, error) {
+	events := journal.Snapshot()
+	if len(events) == 0 {
+		return journalRecovery{}, nil
+	}
+	turns := map[string]bool{}
+	turnOrder := make([]string, 0)
+	inputs := map[string]string{}
+	inputOrder := make([]string, 0)
+	recovery := journalRecovery{}
+	for _, event := range events {
+		if value := numericEventID(event.TurnID, "turn-"); value > recovery.nextTurnID {
+			recovery.nextTurnID = value
+		}
+		if value := numericEventID(event.InputID, "input-"); value > recovery.nextInputID {
+			recovery.nextInputID = value
+		}
+		if event.TurnID != "" && event.Type != EventTurnCompleted {
+			if _, exists := turns[event.TurnID]; !exists {
+				turnOrder = append(turnOrder, event.TurnID)
+			}
+			turns[event.TurnID] = true
+		}
+		switch event.Type {
+		case EventTurnCompleted:
+			delete(turns, event.TurnID)
+		case EventInputRequested:
+			if event.InputID != "" {
+				if _, exists := inputs[event.InputID]; !exists {
+					inputOrder = append(inputOrder, event.InputID)
+				}
+				inputs[event.InputID] = event.TurnID
+			}
+		case EventInputResolved:
+			delete(inputs, event.InputID)
+		}
+	}
+	message := "Session runtime restarted"
+	if len(turns) > 0 || len(inputs) > 0 {
+		message += "; unfinished work was interrupted"
+	}
+	if err := journal.Append(Event{Type: EventRuntimeRecovered, Text: message, Status: "recovered"}); err != nil {
+		return recovery, fmt.Errorf("recording Session recovery: %w", err)
+	}
+	for _, inputID := range inputOrder {
+		if turnID, pending := inputs[inputID]; pending {
+			if err := journal.Append(Event{Type: EventInputResolved, TurnID: turnID, InputID: inputID, Status: "cancelled"}); err != nil {
+				return recovery, fmt.Errorf("recording recovered Session input: %w", err)
+			}
+		}
+	}
+	for _, turnID := range turnOrder {
+		if turns[turnID] {
+			if err := journal.Append(Event{Type: EventTurnCompleted, TurnID: turnID, Status: "interrupted"}); err != nil {
+				return recovery, fmt.Errorf("recording recovered Session turn: %w", err)
+			}
+		}
+	}
+	return recovery, nil
+}
+
+func numericEventID(value, prefix string) int64 {
+	if !strings.HasPrefix(value, prefix) {
+		return 0
+	}
+	number, err := strconv.ParseInt(strings.TrimPrefix(value, prefix), 10, 64)
+	if err != nil || number < 0 {
+		return 0
+	}
+	return number
+}
+
+func (s *Server) interruptTurn(ctx context.Context, requestID string) error {
 	s.activeMu.Lock()
 	turnID := s.activeTurn
 	s.activeMu.Unlock()
 	if turnID == "" {
 		return ErrNoActiveTurn
 	}
-	s.journal.Append(Event{Type: EventTurnInterrupting, TurnID: turnID, Status: "interrupting"})
+	if err := s.journal.Append(Event{Type: EventTurnInterrupting, RequestID: requestID, TurnID: turnID, Status: "interrupting"}); err != nil {
+		return fmt.Errorf("recording Session interruption: %w", err)
+	}
 	if err := s.provider.Interrupt(ctx); err != nil {
 		return err
 	}
@@ -373,21 +518,21 @@ func (s *Server) handleConnection(ctx context.Context, connection net.Conn) {
 			subscribe(request.Since)
 		case "message":
 			subscribe(0)
-			if err := s.submitMessage(request.Text); err != nil {
-				out <- Event{Type: EventError, Text: err.Error(), Status: "rejected"}
+			if err := s.submitMessage(request.Text, request.RequestID); err != nil {
+				out <- Event{Type: EventError, RequestID: request.RequestID, Text: err.Error(), Status: "rejected"}
 			}
 		case "input":
 			subscribe(0)
-			if err := s.resolveInput(request.InputID, request.Answers, request.Cancel); err != nil {
-				out <- Event{Type: EventError, Text: err.Error(), Status: "rejected"}
+			if err := s.resolveInput(request.InputID, request.Answers, request.Cancel, request.RequestID); err != nil {
+				out <- Event{Type: EventError, RequestID: request.RequestID, Text: err.Error(), Status: "rejected"}
 			}
 		case "interrupt":
 			subscribe(0)
-			if err := s.interruptTurn(connectionCtx); err != nil {
-				out <- Event{Type: EventError, Text: err.Error(), Status: "rejected"}
+			if err := s.interruptTurn(connectionCtx, request.RequestID); err != nil {
+				out <- Event{Type: EventError, RequestID: request.RequestID, Text: err.Error(), Status: "rejected"}
 			}
 		default:
-			out <- Event{Type: EventError, Text: fmt.Sprintf("unsupported client request type %q", request.Type), Status: "rejected"}
+			out <- Event{Type: EventError, RequestID: request.RequestID, Text: fmt.Sprintf("unsupported client request type %q", request.Type), Status: "rejected"}
 		}
 	}
 }
@@ -401,7 +546,7 @@ func (s *turnSink) Emit(event Event) {
 	if event.TurnID == "" {
 		event.TurnID = s.turnID
 	}
-	s.server.journal.Append(event)
+	_ = s.server.journal.Append(event)
 }
 
 func (s *turnSink) RequestInput(ctx context.Context, request InputRequest) (map[string][]string, error) {
@@ -457,13 +602,13 @@ func (s *turnSink) RequestInput(ctx context.Context, request InputRequest) (map[
 		pending.resolved = true
 		s.server.inputMu.Unlock()
 		if cancelled {
-			s.server.journal.Append(Event{Type: EventInputResolved, InputID: request.ID, Status: "cancelled"})
+			_ = s.server.journal.Append(Event{Type: EventInputResolved, InputID: request.ID, Status: "cancelled"})
 		}
 		return nil, ctx.Err()
 	}
 }
 
-func (s *Server) resolveInput(id string, answers map[string][]string, cancel bool) error {
+func (s *Server) resolveInput(id string, answers map[string][]string, cancel bool, requestID string) error {
 	s.inputMu.Lock()
 	pending := s.pendingInputs[id]
 	if pending == nil {
@@ -475,15 +620,22 @@ func (s *Server) resolveInput(id string, answers map[string][]string, cancel boo
 		return fmt.Errorf("input request %q was already resolved", id)
 	}
 	if cancel {
+		if err := s.journal.Append(Event{Type: EventInputResolved, RequestID: requestID, InputID: id, Status: "cancelled"}); err != nil {
+			s.inputMu.Unlock()
+			return fmt.Errorf("recording Session input cancellation: %w", err)
+		}
 		pending.resolved = true
 		s.inputMu.Unlock()
-		s.journal.Append(Event{Type: EventInputResolved, InputID: id, Status: "cancelled"})
 		pending.result <- pendingInputResult{cancelled: true}
 		return nil
 	}
 	if len(answers) == 0 {
 		s.inputMu.Unlock()
 		return errors.New("input response must contain at least one answer")
+	}
+	updated := make(map[string][]string, len(pending.answers)+len(answers))
+	for questionID, values := range pending.answers {
+		updated[questionID] = append([]string(nil), values...)
 	}
 	for questionID, values := range answers {
 		if _, exists := pending.questions[questionID]; !exists {
@@ -494,20 +646,28 @@ func (s *Server) resolveInput(id string, answers map[string][]string, cancel boo
 			s.inputMu.Unlock()
 			return fmt.Errorf("input question %q must contain an answer", questionID)
 		}
-		copied := append([]string(nil), values...)
-		pending.answers[questionID] = copied
+		updated[questionID] = append([]string(nil), values...)
 	}
-	if len(pending.answers) < len(pending.questions) {
+	if len(updated) < len(pending.questions) {
+		if err := s.journal.Append(Event{Type: EventRequestAccepted, RequestID: requestID, InputID: id, Status: "accepted"}); err != nil {
+			s.inputMu.Unlock()
+			return fmt.Errorf("recording Session input response: %w", err)
+		}
+		pending.answers = updated
 		s.inputMu.Unlock()
 		return nil
 	}
+	if err := s.journal.Append(Event{Type: EventInputResolved, RequestID: requestID, InputID: id, Status: "answered"}); err != nil {
+		s.inputMu.Unlock()
+		return fmt.Errorf("recording Session input response: %w", err)
+	}
+	pending.answers = updated
 	pending.resolved = true
 	resolved := make(map[string][]string, len(pending.answers))
 	for questionID, values := range pending.answers {
 		resolved[questionID] = append([]string(nil), values...)
 	}
 	s.inputMu.Unlock()
-	s.journal.Append(Event{Type: EventInputResolved, InputID: id, Status: "answered"})
 	pending.result <- pendingInputResult{answers: resolved}
 	return nil
 }

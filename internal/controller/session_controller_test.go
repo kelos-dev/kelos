@@ -9,11 +9,14 @@ import (
 	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -26,9 +29,12 @@ import (
 	"github.com/kelos-dev/kelos/internal/githubapp"
 )
 
-func TestSessionReconcilerCreatesAndObservesPod(t *testing.T) {
+func TestSessionReconcilerCreatesStatefulSetAndObservesPod(t *testing.T) {
 	t.Parallel()
 	scheme := runtime.NewScheme()
+	if err := appsv1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
 	if err := corev1.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +48,7 @@ func TestSessionReconcilerCreatesAndObservesPod(t *testing.T) {
 	}}
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithStatusSubresource(&kelos.Session{}, &corev1.Pod{}).
+		WithStatusSubresource(&kelos.Session{}, &corev1.Pod{}, &appsv1.StatefulSet{}).
 		WithObjects(session).
 		Build()
 	reconciler := testSessionReconciler(cl, scheme)
@@ -51,47 +57,101 @@ func TestSessionReconcilerCreatesAndObservesPod(t *testing.T) {
 		t.Fatalf("Reconcile() error = %v", err)
 	}
 
-	var pod corev1.Pod
-	if err := cl.Get(context.Background(), request.NamespacedName, &pod); err != nil {
-		t.Fatalf("getting Session Pod: %v", err)
+	workloadKey := client.ObjectKey{Namespace: session.Namespace, Name: sessionWorkloadName(session)}
+	var statefulSet appsv1.StatefulSet
+	if err := cl.Get(context.Background(), workloadKey, &statefulSet); err != nil {
+		t.Fatalf("getting Session StatefulSet: %v", err)
 	}
-	if !metav1.IsControlledBy(&pod, session) {
-		t.Fatal("Session Pod does not have the Session as controller owner")
+	if !metav1.IsControlledBy(&statefulSet, session) {
+		t.Fatal("Session StatefulSet does not have the Session as controller owner")
 	}
-	if pod.Spec.RestartPolicy != corev1.RestartPolicyAlways {
-		t.Fatalf("restartPolicy = %q, want %q", pod.Spec.RestartPolicy, corev1.RestartPolicyAlways)
+	if statefulSet.Spec.Replicas == nil || *statefulSet.Spec.Replicas != 1 {
+		t.Fatalf("StatefulSet replicas = %v, want 1", statefulSet.Spec.Replicas)
 	}
-	if got := pod.Labels["kelos.dev/session"]; got != session.Name {
+	if statefulSet.Spec.ServiceName != workloadKey.Name {
+		t.Fatalf("StatefulSet serviceName = %q, want %q", statefulSet.Spec.ServiceName, workloadKey.Name)
+	}
+	var service corev1.Service
+	if err := cl.Get(context.Background(), workloadKey, &service); err != nil {
+		t.Fatalf("getting Session Service: %v", err)
+	}
+	if !metav1.IsControlledBy(&service, session) || service.Spec.ClusterIP != corev1.ClusterIPNone {
+		t.Fatalf("Session Service = %#v", service)
+	}
+	if !reflect.DeepEqual(service.Spec.Selector, statefulSet.Spec.Selector.MatchLabels) {
+		t.Fatalf("Session Service selector = %#v, want %#v", service.Spec.Selector, statefulSet.Spec.Selector.MatchLabels)
+	}
+	podSpec := statefulSet.Spec.Template.Spec
+	if workspaceVolume := findVolume(podSpec.Volumes, WorkspaceVolumeName); workspaceVolume != nil {
+		t.Fatalf("workspace volume = %#v, want StatefulSet volume claim template", workspaceVolume)
+	}
+	if len(statefulSet.Spec.VolumeClaimTemplates) != 1 || statefulSet.Spec.VolumeClaimTemplates[0].Name != WorkspaceVolumeName {
+		t.Fatalf("volumeClaimTemplates = %#v", statefulSet.Spec.VolumeClaimTemplates)
+	}
+	storage := statefulSet.Spec.VolumeClaimTemplates[0].Spec.Resources.Requests[corev1.ResourceStorage]
+	if storage.Cmp(resource.MustParse("1Gi")) != 0 {
+		t.Fatalf("workspace storage = %s, want 1Gi", storage.String())
+	}
+	retention := statefulSet.Spec.PersistentVolumeClaimRetentionPolicy
+	if retention == nil || retention.WhenDeleted != appsv1.DeletePersistentVolumeClaimRetentionPolicyType || retention.WhenScaled != appsv1.DeletePersistentVolumeClaimRetentionPolicyType {
+		t.Fatalf("persistentVolumeClaimRetentionPolicy = %#v", retention)
+	}
+	if podSpec.RestartPolicy != corev1.RestartPolicyAlways {
+		t.Fatalf("restartPolicy = %q, want %q", podSpec.RestartPolicy, corev1.RestartPolicyAlways)
+	}
+	if got := statefulSet.Spec.Template.Labels["kelos.dev/session"]; got != session.Name {
 		t.Fatalf("kelos.dev/session label = %q, want %q", got, session.Name)
 	}
-	if _, exists := pod.Labels["kelos.dev/task"]; exists {
+	if _, exists := statefulSet.Spec.Template.Labels["kelos.dev/task"]; exists {
 		t.Fatal("Session Pod retained the Task label")
 	}
-	if len(pod.Spec.Containers) == 0 || len(pod.Spec.Containers[0].Command) != 1 || pod.Spec.Containers[0].Command[0] != sessionRuntimeBinary {
-		t.Fatalf("agent command = %v, want %q", pod.Spec.Containers[0].Command, sessionRuntimeBinary)
+	if statefulSet.Spec.Template.Annotations[sessionNameAnnotation] != session.Name {
+		t.Fatalf("Session Pod template annotations = %#v", statefulSet.Spec.Template.Annotations)
 	}
-	if pod.Spec.SecurityContext == nil || pod.Spec.SecurityContext.FSGroup == nil || *pod.Spec.SecurityContext.FSGroup != AgentUID {
-		t.Fatalf("pod FSGroup = %#v, want %d", pod.Spec.SecurityContext, AgentUID)
+	if len(podSpec.Containers) == 0 || len(podSpec.Containers[0].Command) != 1 || podSpec.Containers[0].Command[0] != sessionRuntimeBinary {
+		t.Fatalf("agent command = %v, want %q", podSpec.Containers[0].Command, sessionRuntimeBinary)
 	}
-	if len(pod.Spec.InitContainers) == 0 || pod.Spec.InitContainers[0].Image != "runtime:test" {
-		t.Fatalf("runtime init container = %#v", pod.Spec.InitContainers)
+	if podSpec.SecurityContext == nil || podSpec.SecurityContext.FSGroup == nil || *podSpec.SecurityContext.FSGroup != AgentUID {
+		t.Fatalf("pod FSGroup = %#v, want %d", podSpec.SecurityContext, AgentUID)
 	}
-	runtimeSecurity := pod.Spec.InitContainers[0].SecurityContext
+	if len(podSpec.InitContainers) == 0 || podSpec.InitContainers[0].Image != "runtime:test" {
+		t.Fatalf("runtime init container = %#v", podSpec.InitContainers)
+	}
+	runtimeSecurity := podSpec.InitContainers[0].SecurityContext
 	if runtimeSecurity == nil || runtimeSecurity.AllowPrivilegeEscalation == nil || *runtimeSecurity.AllowPrivilegeEscalation ||
 		runtimeSecurity.RunAsNonRoot == nil || !*runtimeSecurity.RunAsNonRoot ||
 		runtimeSecurity.SeccompProfile == nil || runtimeSecurity.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault ||
 		runtimeSecurity.Capabilities == nil || len(runtimeSecurity.Capabilities.Drop) != 1 || runtimeSecurity.Capabilities.Drop[0] != "ALL" {
 		t.Fatalf("runtime init container securityContext = %#v", runtimeSecurity)
 	}
-	if pod.Spec.AutomountServiceAccountToken == nil || *pod.Spec.AutomountServiceAccountToken {
-		t.Fatalf("automountServiceAccountToken = %v, want false", pod.Spec.AutomountServiceAccountToken)
+	if podSpec.AutomountServiceAccountToken == nil || *podSpec.AutomountServiceAccountToken {
+		t.Fatalf("automountServiceAccountToken = %v, want false", podSpec.AutomountServiceAccountToken)
 	}
-	for _, env := range pod.Spec.Containers[0].Env {
+	for _, env := range podSpec.Containers[0].Env {
 		if env.Name == "KELOS_SESSION_SETUP_ONLY" {
 			t.Fatalf("reserved KELOS_SESSION_SETUP_ONLY reached the Session container with value %q", env.Value)
 		}
 	}
 
+	pod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            statefulSet.Name + "-0",
+			Namespace:       session.Namespace,
+			Labels:          statefulSet.Spec.Template.Labels,
+			Annotations:     statefulSet.Spec.Template.Annotations,
+			OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(&statefulSet, appsv1.SchemeGroupVersion.WithKind("StatefulSet"))},
+		},
+		Spec: statefulSet.Spec.Template.Spec,
+	}
+	pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+		Name: WorkspaceVolumeName,
+		VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+			ClaimName: WorkspaceVolumeName + "-" + statefulSet.Name + "-0",
+		}},
+	})
+	if err := cl.Create(context.Background(), &pod); err != nil {
+		t.Fatalf("creating Session Pod: %v", err)
+	}
 	pod.Status.Phase = corev1.PodRunning
 	pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
 	if err := cl.Status().Update(context.Background(), &pod); err != nil {
@@ -108,8 +168,8 @@ func TestSessionReconcilerCreatesAndObservesPod(t *testing.T) {
 	if updated.Status.Phase != kelos.SessionPhaseReady {
 		t.Fatalf("Session phase = %q, want %q", updated.Status.Phase, kelos.SessionPhaseReady)
 	}
-	if updated.Status.PodName != session.Name {
-		t.Fatalf("Session podName = %q, want %q", updated.Status.PodName, session.Name)
+	if updated.Status.PodName != pod.Name {
+		t.Fatalf("Session podName = %q, want %q", updated.Status.PodName, pod.Name)
 	}
 	if len(updated.Status.Conditions) != 1 || updated.Status.Conditions[0].Type != sessionReadyCondition || updated.Status.Conditions[0].Status != metav1.ConditionTrue {
 		t.Fatalf("Session conditions = %#v", updated.Status.Conditions)
@@ -121,11 +181,11 @@ func TestSessionCodexPodUsesPersistentCodexHome(t *testing.T) {
 	session := testSession("codex-chat", "codex")
 	session.Spec.Worker.PodOverrides = &kelos.PodOverrides{Env: []corev1.EnvVar{{Name: "CODEX_HOME", Value: "/tmp/ignored"}}}
 	reconciler := testSessionReconciler(nil, nil)
-	pod, _, err := reconciler.buildSessionPod(session, nil, nil)
+	statefulSet, _, err := reconciler.buildSessionStatefulSet(session, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, env := range pod.Spec.Containers[0].Env {
+	for _, env := range statefulSet.Spec.Template.Spec.Containers[0].Env {
 		if env.Name == "CODEX_HOME" {
 			if env.Value != sessionCodexHome || env.ValueFrom != nil {
 				t.Fatalf("CODEX_HOME = %#v, want %q", env, sessionCodexHome)
@@ -141,11 +201,11 @@ func TestSessionClaudePodUsesPersistentConfig(t *testing.T) {
 	session := testSession("claude-chat", "claude-code")
 	session.Spec.Worker.PodOverrides = &kelos.PodOverrides{Env: []corev1.EnvVar{{Name: "CLAUDE_CONFIG_DIR", Value: "/tmp/ignored"}}}
 	reconciler := testSessionReconciler(nil, nil)
-	pod, _, err := reconciler.buildSessionPod(session, nil, nil)
+	statefulSet, _, err := reconciler.buildSessionStatefulSet(session, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, env := range pod.Spec.Containers[0].Env {
+	for _, env := range statefulSet.Spec.Template.Spec.Containers[0].Env {
 		if env.Name == "CLAUDE_CONFIG_DIR" {
 			if env.Value != sessionClaudeConfigDir || env.ValueFrom != nil {
 				t.Fatalf("CLAUDE_CONFIG_DIR = %#v, want %q", env, sessionClaudeConfigDir)
@@ -164,7 +224,7 @@ func TestSessionOpenCodePodUsesPersistentDirectories(t *testing.T) {
 		{Name: "XDG_DATA_HOME", Value: "/tmp/ignored"},
 	}}
 	reconciler := testSessionReconciler(nil, nil)
-	pod, _, err := reconciler.buildSessionPod(session, nil, nil)
+	statefulSet, _, err := reconciler.buildSessionStatefulSet(session, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +232,7 @@ func TestSessionOpenCodePodUsesPersistentDirectories(t *testing.T) {
 		"OPENCODE_CONFIG_DIR": sessionOpenCodeConfigDir,
 		"XDG_DATA_HOME":       sessionOpenCodeDataDir,
 	}
-	for _, env := range pod.Spec.Containers[0].Env {
+	for _, env := range statefulSet.Spec.Template.Spec.Containers[0].Env {
 		if value, exists := want[env.Name]; exists {
 			if env.Value != value || env.ValueFrom != nil {
 				t.Fatalf("%s = %#v, want %q", env.Name, env, value)
@@ -185,6 +245,53 @@ func TestSessionOpenCodePodUsesPersistentDirectories(t *testing.T) {
 	}
 }
 
+func TestPrepareSessionWorkspaceInitPreservesCloneCommands(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name      string
+		container corev1.Container
+		wantArgs  []string
+	}{
+		{
+			name:      "image entrypoint",
+			container: corev1.Container{Name: "git-clone", Args: []string{"clone", "repo", "/workspace/repo"}},
+			wantArgs:  []string{"clone", "repo", "/workspace/repo"},
+		},
+		{
+			name: "shell command",
+			container: corev1.Container{
+				Name:    "git-clone",
+				Command: []string{"sh", "-c", `git -c credential.helper= "$@"`},
+				Args:    []string{"--", "clone", "repo", "/workspace/repo"},
+			},
+			wantArgs: []string{"--", "clone", "repo", "/workspace/repo"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			containers := []corev1.Container{tt.container}
+			if err := prepareSessionWorkspaceInit(containers); err != nil {
+				t.Fatal(err)
+			}
+			script := ""
+			if len(containers[0].Command) == 3 {
+				script = containers[0].Command[2]
+			} else if len(containers[0].Command) == 2 && len(containers[0].Args) > 0 {
+				script = containers[0].Args[0]
+			}
+			if !strings.Contains(script, sessionInitializedPath) || !strings.Contains(script, "rm -rf -- /workspace/repo") {
+				t.Fatalf("prepared command = %#v", containers[0].Command)
+			}
+			if tt.name == "shell command" && !strings.Contains(script, `credential.helper`) {
+				t.Fatalf("prepared command lost original shell command: %q", script)
+			}
+			if got := containers[0].Args[len(containers[0].Args)-len(tt.wantArgs):]; !reflect.DeepEqual(got, tt.wantArgs) {
+				t.Fatalf("prepared args = %#v, want suffix %#v", containers[0].Args, tt.wantArgs)
+			}
+		})
+	}
+}
+
 func TestSessionPluginConfigMapUsesSessionIdentity(t *testing.T) {
 	t.Parallel()
 	session := testSession("shared-name", "claude-code")
@@ -193,7 +300,7 @@ func TestSessionPluginConfigMapUsesSessionIdentity(t *testing.T) {
 		Skills: []kelos.SkillDefinition{{Name: "review", Content: "Review changes"}},
 	}}}
 	reconciler := testSessionReconciler(nil, nil)
-	pod, configMap, err := reconciler.buildSessionPod(session, nil, agentConfig)
+	statefulSet, configMap, err := reconciler.buildSessionStatefulSet(session, nil, agentConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +310,7 @@ func TestSessionPluginConfigMapUsesSessionIdentity(t *testing.T) {
 	if configMap.Name == PluginConfigMapName(session.Name) {
 		t.Fatalf("Session plugin ConfigMap reused Task name %q", configMap.Name)
 	}
-	for _, volume := range pod.Spec.Volumes {
+	for _, volume := range statefulSet.Spec.Template.Spec.Volumes {
 		if volume.Name == PluginStagingVolumeName && volume.ConfigMap != nil {
 			if volume.ConfigMap.Name != configMap.Name {
 				t.Fatalf("plugin volume ConfigMap = %q, want %q", volume.ConfigMap.Name, configMap.Name)
@@ -242,6 +349,35 @@ func TestSessionGitHubTokenSecretNameBoundsLongNames(t *testing.T) {
 	}
 }
 
+func TestSessionWorkloadNameBoundsLongNames(t *testing.T) {
+	t.Parallel()
+	session := testSession(strings.Repeat("a", 253), "codex")
+	name := sessionWorkloadName(session)
+	if len(name) > 63 {
+		t.Fatalf("Session workload name length = %d, want at most 63", len(name))
+	}
+	if name != sessionWorkloadName(session) {
+		t.Fatal("Session workload name is not deterministic")
+	}
+}
+
+func TestSessionReconcilerMapsStatefulSetPod(t *testing.T) {
+	t.Parallel()
+	reconciler := &SessionReconciler{}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name:        "session-chat-0",
+		Namespace:   "default",
+		Annotations: map[string]string{sessionNameAnnotation: "chat"},
+	}}
+	requests := reconciler.findSessionForPod(context.Background(), pod)
+	if len(requests) != 1 || requests[0].Name != "chat" || requests[0].Namespace != "default" {
+		t.Fatalf("findSessionForPod() = %#v", requests)
+	}
+	if requests := reconciler.findSessionForPod(context.Background(), &corev1.Pod{}); len(requests) != 0 {
+		t.Fatalf("findSessionForPod() returned requests for an unannotated Pod: %#v", requests)
+	}
+}
+
 func TestSessionReconcilerRecreatesMissingGitHubTokenSecret(t *testing.T) {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -259,6 +395,7 @@ func TestSessionReconcilerRecreatesMissingGitHubTokenSecret(t *testing.T) {
 	defer server.Close()
 
 	scheme := runtime.NewScheme()
+	_ = appsv1.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
 	_ = kelos.AddToScheme(scheme)
 	session := testSession("recover-token", "codex")
@@ -278,14 +415,16 @@ func TestSessionReconcilerRecreatesMissingGitHubTokenSecret(t *testing.T) {
 			"privateKey":     keyPEM,
 		},
 	}
+	statefulSet := testSessionStatefulSet(session)
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      session.Name,
+			Name:      statefulSet.Name + "-0",
 			Namespace: session.Namespace,
 			UID:       types.UID("pod-uid"),
 			OwnerReferences: []metav1.OwnerReference{
-				*metav1.NewControllerRef(session, kelos.GroupVersion.WithKind("Session")),
+				*metav1.NewControllerRef(statefulSet, appsv1.SchemeGroupVersion.WithKind("StatefulSet")),
 			},
+			Annotations: map[string]string{sessionNameAnnotation: session.Name},
 		},
 		Spec: corev1.PodSpec{Volumes: []corev1.Volume{{
 			Name: GitHubTokenVolumeName,
@@ -300,8 +439,8 @@ func TestSessionReconcilerRecreatesMissingGitHubTokenSecret(t *testing.T) {
 	}
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithStatusSubresource(&kelos.Session{}, &corev1.Pod{}).
-		WithObjects(session, workspace, source, pod).
+		WithStatusSubresource(&kelos.Session{}, &corev1.Pod{}, &appsv1.StatefulSet{}).
+		WithObjects(session, workspace, source, statefulSet, pod).
 		Build()
 	reconciler := testSessionReconciler(cl, scheme)
 	reconciler.TokenClient = &githubapp.TokenClient{BaseURL: server.URL, Client: server.Client()}
@@ -361,38 +500,30 @@ func TestSessionPhaseForPodReportsContainerFailures(t *testing.T) {
 	}
 }
 
-func TestSessionReconcilerDoesNotReplaceLostPod(t *testing.T) {
+func TestSessionWithoutVolumeClaimUsesEmptyDir(t *testing.T) {
 	t.Parallel()
-	scheme := runtime.NewScheme()
-	_ = corev1.AddToScheme(scheme)
-	_ = kelos.AddToScheme(scheme)
-	session := testSession("lost", "codex")
-	session.Status = kelos.SessionStatus{Phase: kelos.SessionPhaseReady, PodName: "lost", PodUID: types.UID("pod-1")}
-	cl := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&kelos.Session{}).WithObjects(session).Build()
-	reconciler := testSessionReconciler(cl, scheme)
-	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(session)}
-	if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
-		t.Fatalf("Reconcile() error = %v", err)
-	}
-	var updated kelos.Session
-	if err := cl.Get(context.Background(), request.NamespacedName, &updated); err != nil {
+	session := testSession("ephemeral", "codex")
+	session.Spec.VolumeClaimTemplate = nil
+	statefulSet, _, err := testSessionReconciler(nil, nil).buildSessionStatefulSet(session, nil, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Status.Phase != kelos.SessionPhaseFailed || updated.Status.Message != "Session Pod was lost" {
-		t.Fatalf("Session status = %#v", updated.Status)
+	if len(statefulSet.Spec.VolumeClaimTemplates) != 0 {
+		t.Fatalf("volumeClaimTemplates = %#v, want none", statefulSet.Spec.VolumeClaimTemplates)
 	}
-	var pods corev1.PodList
-	if err := cl.List(context.Background(), &pods, client.InNamespace(session.Namespace)); err != nil {
-		t.Fatal(err)
+	if statefulSet.Spec.PersistentVolumeClaimRetentionPolicy != nil {
+		t.Fatalf("persistentVolumeClaimRetentionPolicy = %#v, want nil", statefulSet.Spec.PersistentVolumeClaimRetentionPolicy)
 	}
-	if len(pods.Items) != 0 {
-		t.Fatalf("created %d replacement Pods, want none", len(pods.Items))
+	workspaceVolume := findVolume(statefulSet.Spec.Template.Spec.Volumes, WorkspaceVolumeName)
+	if workspaceVolume == nil || workspaceVolume.EmptyDir == nil {
+		t.Fatalf("workspace volume = %#v, want emptyDir", workspaceVolume)
 	}
 }
 
 func TestSessionReconcilerWaitsForWorkspace(t *testing.T) {
 	t.Parallel()
 	scheme := runtime.NewScheme()
+	_ = appsv1.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
 	_ = kelos.AddToScheme(scheme)
 	session := testSession("waiting", "claude-code")
@@ -423,12 +554,31 @@ func testSession(name, provider string) *kelos.Session {
 			Namespace: "default",
 			UID:       types.UID(name + "-uid"),
 		},
-		Spec: kelos.SessionSpec{Worker: kelos.WorkerSpec{
-			Type: provider,
-			Credentials: &kelos.Credentials{
-				Type: kelos.CredentialTypeNone,
+		Spec: kelos.SessionSpec{
+			Worker: kelos.WorkerSpec{
+				Type: provider,
+				Credentials: &kelos.Credentials{
+					Type: kelos.CredentialTypeNone,
+				},
 			},
-		}},
+			VolumeClaimTemplate: &corev1.PersistentVolumeClaimSpec{
+				AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+				Resources: corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{
+					corev1.ResourceStorage: resource.MustParse("1Gi"),
+				}},
+			},
+		},
+	}
+}
+
+func testSessionStatefulSet(session *kelos.Session) *appsv1.StatefulSet {
+	return &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            sessionWorkloadName(session),
+			Namespace:       session.Namespace,
+			UID:             types.UID(sessionWorkloadName(session) + "-uid"),
+			OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(session, kelos.GroupVersion.WithKind("Session"))},
+		},
 	}
 }
 
@@ -444,4 +594,13 @@ func testSessionReconciler(cl client.Client, scheme *runtime.Scheme) *SessionRec
 		SessionRuntimeImage: "runtime:test",
 		Recorder:            record.NewFakeRecorder(10),
 	}
+}
+
+func findVolume(volumes []corev1.Volume, name string) *corev1.Volume {
+	for i := range volumes {
+		if volumes[i].Name == name {
+			return &volumes[i]
+		}
+	}
+	return nil
 }

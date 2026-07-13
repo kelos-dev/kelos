@@ -415,6 +415,60 @@ function ensureConversation() {
   if (elements.messages.querySelector('.welcome')) elements.messages.replaceChildren();
 }
 
+function trimURLSuffix(value) {
+  const openingBrackets = '([{';
+  const closingBrackets = ')]}';
+  const bracketBalance = [0, 0, 0];
+  for (const character of value) {
+    const openingIndex = openingBrackets.indexOf(character);
+    if (openingIndex >= 0) bracketBalance[openingIndex]++;
+    const closingIndex = closingBrackets.indexOf(character);
+    if (closingIndex >= 0) bracketBalance[closingIndex]--;
+  }
+
+  let end = value.length;
+  while (end > 0) {
+    const character = value[end - 1];
+    if ('.,;:!?'.includes(character)) {
+      end--;
+      continue;
+    }
+    const closingIndex = closingBrackets.indexOf(character);
+    if (closingIndex < 0 || bracketBalance[closingIndex] >= 0) break;
+    bracketBalance[closingIndex]++;
+    end--;
+  }
+  return value.slice(0, end);
+}
+
+function renderMessageText(element, text) {
+  const value = text || '';
+  const pattern = /https?:\/\/[^\s<>"']+/gi;
+  const fragment = document.createDocumentFragment();
+  let textEnd = 0;
+
+  for (const match of value.matchAll(pattern)) {
+    const linkText = trimURLSuffix(match[0]);
+    try {
+      new URL(linkText);
+    } catch {
+      continue;
+    }
+
+    fragment.append(document.createTextNode(value.slice(textEnd, match.index)));
+    const link = document.createElement('a');
+    link.href = linkText;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.textContent = linkText;
+    fragment.append(link);
+    textEnd = match.index + linkText.length;
+  }
+
+  fragment.append(document.createTextNode(value.slice(textEnd)));
+  element.replaceChildren(fragment);
+}
+
 function handleEvent(event) {
   if (event.id) state.lastEventID = Math.max(state.lastEventID, event.id);
   switch (event.type) {
@@ -479,7 +533,7 @@ function renderUser(event) {
   row.className = 'event-row user';
   const bubble = document.createElement('div');
   bubble.className = 'message-bubble';
-  bubble.textContent = event.text;
+  renderMessageText(bubble, event.text);
   row.append(bubble);
   elements.messages.append(row);
   scrollToBottom();
@@ -504,7 +558,10 @@ function assistantBubble(turnID) {
 }
 
 function endAssistantSegment(turnID) {
-  state.assistantSegmentByTurn.delete(turnID || 'current');
+  const key = turnID || 'current';
+  const bubble = state.assistantSegmentByTurn.get(key);
+  if (bubble) renderMessageText(bubble, bubble.textContent);
+  state.assistantSegmentByTurn.delete(key);
 }
 
 function renderAssistantDelta(event) {
@@ -516,6 +573,7 @@ function renderAssistantDelta(event) {
 function renderAssistantMessage(event) {
   const bubble = assistantBubble(event.turnId);
   if (!bubble.textContent && event.text) bubble.textContent = event.text;
+  renderMessageText(bubble, bubble.textContent);
   scrollToBottom();
 }
 

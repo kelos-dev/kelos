@@ -1,6 +1,6 @@
 <h1 align="center">Kelos</h1>
 
-<p align="center"><strong>Orchestrate autonomous AI coding agents on Kubernetes.</strong></p>
+<p align="center"><strong>Manage coding agent workflows and environments on Kubernetes.</strong></p>
 
 <p align="center">
   <a href="https://github.com/kelos-dev/kelos/actions/workflows/ci.yaml"><img src="https://github.com/kelos-dev/kelos/actions/workflows/ci.yaml/badge.svg" alt="CI"></a>
@@ -12,6 +12,7 @@
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> &middot;
+  <a href="#sessions">Sessions</a> &middot;
   <a href="#kelos-skill">Kelos Skill</a> &middot;
   <a href="#examples">Examples</a> &middot;
   <a href="#integration">Integration</a> &middot;
@@ -19,44 +20,44 @@
   <a href="examples/">YAML Manifests</a>
 </p>
 
-Kelos is a Kubernetes-native framework for AI coding agents. It does two things:
+Kelos is a Kubernetes-native framework for coding agent workflows. Define the agent, its execution environment, and how work moves through your development process as Kubernetes specs:
 
-1. **Defines the agent and the environment it runs in as one unit** — the prompt, model, instructions, plugins, MCP servers, git workspace, credentials, and Pod resources all live together as Kubernetes resources you can version-control.
-2. **Defines how agents integrate with your workflows** — trigger runs from GitHub issues, PRs, webhooks, Linear, Jira, schedules, or any HTTP source, and chain agents into pipelines.
+1. **Environment as specs** — Model, credentials, git workspace, instructions, plugins, MCP servers, and Pod resources are version-controlled Kubernetes resources.
+2. **Workflow as specs** — Run individual Tasks, keep long-lived Sessions, react to external events with TaskSpawners, and connect work into pipelines.
 
-Supports **Claude Code**, **OpenAI Codex**, **Google Gemini**, **OpenCode**, **Cursor**, and [custom agent images](docs/agent-image-interface.md).
+Kelos supports **Claude Code**, **OpenAI Codex**, **Google Gemini**, **OpenCode**, **Cursor**, and [custom agent images](docs/agent-image-interface.md). Claude Code, Codex, and OpenCode can also run as durable Sessions shared by reconnecting web and terminal clients.
 
 ## How It Works
 
-<img width="2310" height="1582" alt="kelos-resources" src="https://github.com/user-attachments/assets/a03c388e-cc28-4a25-972f-e0e506b4d583" />
+<img alt="Kelos resources for coding agent workflows and environments" src="docs/images/kelos-resources.png" />
 
-You define what needs to be done, and Kelos handles the "how" — from cloning the right repo and injecting credentials to running the agent and capturing its outputs (branch names, commit SHAs, PR URLs, and token usage).
+Define the desired agent, environment, and workflow. Kelos reconciles those specs into Kubernetes workloads, clones repositories, injects credentials and configuration, and manages each resource's lifecycle. Task results such as branch names, commit SHAs, PR URLs, and token usage are captured in status.
 
 ### Core Primitives
 
-Kelos is built on a small set of resources, grouped by the two concerns above:
+Kelos is built on a small set of resources:
 
-**Defining the agent and its environment**
+**Agent environments**
 
-- **Tasks** — A single agent run: prompt, model, effort, credentials, and Pod-level overrides.
-- **Sessions** — A durable Claude Code, Codex, or OpenCode conversation shared by reconnecting web and terminal chat.
 - **Workspaces** — The git repository (URL, ref, auth) the agent operates in.
 - **AgentConfigs** — Reusable bundles of agent instructions (`AGENTS.md`, `CLAUDE.md`), plugins (skills and agents), and MCP servers.
 
-**Integrating with workflows**
+**Workloads and workflows**
 
+- **Tasks** — A single coding agent run: prompt, model, effort, credentials, and Pod-level overrides.
+- **Sessions** — A durable Claude Code, Codex, or OpenCode conversation shared by reconnecting web and terminal clients.
 - **TaskSpawners** — React to external triggers (GitHub Issues/PRs, webhooks, Linear, Jira, Cron, Generic Webhooks) and create Tasks automatically.
 
 ## Why Kelos?
 
-AI coding agents are evolving from interactive CLI tools into autonomous background workers — managed like infrastructure, not invoked like commands. Kelos provides the framework to manage this transition at scale.
+Kelos makes coding agent work part of the Kubernetes declarative control plane instead of leaving agent setup and execution as one-off local commands.
 
-- **Workflow as YAML** — Define your development workflow declaratively: what triggers agents, what they do, and how they hand off. Version-control it, review it in PRs, and GitOps it like any other infrastructure.
+- **Workflow and environment as YAML** — Define agents, runtime environments, triggers, dependencies, and handoffs declaratively. Version-control the specs, review them in PRs, and GitOps them like any other infrastructure.
 - **Orchestration, not just execution** — Don't just run an agent; manage its entire lifecycle. Chain tasks with `dependsOn` and pass results (branch names, PR URLs, token usage) between pipeline stages. Use `TaskSpawner` to build event-driven workers that react to GitHub issues, PRs, or schedules.
-- **Host-isolated autonomy** — Each task runs in an isolated, ephemeral Pod with a freshly cloned git workspace. Agents have no access to your host machine — use [scoped tokens and branch protection](#security-considerations) to control repository access.
+- **Host-isolated execution** — Tasks run in isolated, ephemeral Pods, while Sessions run in dedicated StatefulSets and can use persistent workspaces. Agents have no access to your host machine — use [scoped tokens and branch protection](#security-considerations) to control repository access.
 - **Standardized interface** — Plug in any agent (Claude, Codex, Gemini, OpenCode, Cursor, or your own) using a simple [container interface](docs/agent-image-interface.md). Kelos handles credential injection, workspace management, and Kubernetes plumbing.
 - **Scalable parallelism** — Fan out agents across multiple repositories. Kubernetes handles scheduling, resource management, and queueing — scale is limited by your cluster capacity and API provider quotas.
-- **Observable & CI-native** — Every agent run is a first-class Kubernetes resource with deterministic outputs (branch names, PR URLs, commit SHAs, token usage) captured into status. Monitor via `kubectl`, manage via the `kelos` CLI or declarative YAML (GitOps-ready), and integrate with ArgoCD or GitHub Actions.
+- **Observable & CI-native** — Tasks and Sessions are first-class Kubernetes resources. Task outputs (branch names, PR URLs, commit SHAs, token usage) are captured into status. Monitor via `kubectl`, manage via the `kelos` CLI or declarative YAML (GitOps-ready), and integrate with ArgoCD or GitHub Actions.
 
 ## Quick Start
 
@@ -294,6 +295,20 @@ Or pass `--secret` to `kelos run` with a pre-created secret (api-key is the defa
 
 </details>
 
+## Sessions
+
+A Session represents one long-lived agent conversation in a dedicated StatefulSet. Web and terminal clients share the same conversation, and disconnecting a client does not stop the agent runtime. With a persistent workspace, the conversation and files also survive Pod replacement.
+
+The ready-to-apply example creates a persistent Claude Code Session. Replace the API key placeholder in [`examples/16-session/credentials-secret.yaml`](examples/16-session/credentials-secret.yaml), then run:
+
+```bash
+kubectl apply -f examples/16-session/
+kelos get session interactive-review
+kelos session connect interactive-review
+```
+
+The optional shared Session server provides web chat for the same conversation. You can reconnect from either client, answer provider questions, or interrupt active work without ending the Session. See the [interactive Session example](examples/16-session/) and [Session reference](docs/reference.md#session) for provider, storage, and web server configuration.
+
 ## Kelos Skill
 
 The [Kelos skill](skills/kelos/) teaches AI coding agents how to author and operate Kelos resources. Install it via [skills.sh](https://skills.sh):
@@ -491,6 +506,7 @@ See the [Integration guide](docs/integration.md) for examples of both approaches
 
 ## Orchestration Patterns
 
+- **Developer-Guided Sessions** — Keep a coding agent and its workspace running in the cluster, collaborate through web or terminal chat, and reconnect to the same conversation later.
 - **Autonomous Self-Development** — Build a feedback loop where agents pick up issues, write code, self-review, and fix CI flakes until the task is complete. Kelos itself is developed this way — see [Case Study: Kelos Developing Kelos](#case-study-kelos-developing-kelos) below.
 - **Event-Driven Bug Fixing** — Automatically spawn agents to investigate and fix bugs as soon as they are labeled in GitHub. See [Auto-fix GitHub issues](#auto-fix-github-issues-with-taskspawner).
 - **Fleet-Wide Refactoring** — Orchestrate a "fan-out" where dozens of agents apply the same refactoring pattern across a fleet of microservices in parallel.
@@ -538,7 +554,7 @@ See [full CLI reference](docs/reference.md#cli-reference) and [Shell Completion]
 
 ## Security Considerations
 
-Kelos runs agents in isolated, ephemeral Pods with no access to your host machine, SSH keys, or other processes. The risk surface is limited to what the injected credentials allow.
+Kelos runs agents in isolated Kubernetes Pods with no access to your host machine, SSH keys, or other host processes. Tasks use ephemeral Pods; Sessions use dedicated StatefulSets and may attach persistent storage. The risk surface is limited to the Pod configuration, persistent data, and credentials you provide.
 
 **What agents CAN do:** Push branches, create PRs, and call the GitHub API using the injected `GITHUB_TOKEN`.
 
@@ -550,9 +566,9 @@ Best practices:
 - **Enable branch protection.** Require PR reviews before merging to `main`. Agents can push branches and open PRs, but protected branches prevent direct pushes to your default branch.
 - **Use `maxConcurrency` and `maxTotalTasks`.** Limit how many tasks a TaskSpawner can create to prevent runaway agent activity.
 - **Use `podOverrides.activeDeadlineSeconds`.** Set a timeout to prevent tasks from running indefinitely.
-- **Audit via Kubernetes.** Every agent run is a first-class Kubernetes resource — use `kubectl get tasks` and cluster audit logs to track what was created and by whom.
+- **Audit via Kubernetes.** Tasks and Sessions are first-class Kubernetes resources — use `kubectl get tasks`, `kubectl get sessions`, and cluster audit logs to track what was created and by whom.
 
-> **About `--dangerously-skip-permissions`:** Claude Code uses this flag for non-interactive operation. Despite the name, the actual risk is minimal — agents run inside ephemeral containers with no host access. The flag simply disables interactive approval prompts, which is necessary for autonomous execution.
+> **About `--dangerously-skip-permissions`:** Claude Code uses this flag for autonomous Tasks. Despite the name, the actual risk is minimal — Tasks run inside ephemeral containers with no host access. The flag disables interactive approval prompts so the Task can run unattended.
 
 Kelos uses standard Kubernetes RBAC — use namespace isolation to separate teams. Each TaskSpawner automatically creates a scoped ServiceAccount and RoleBinding.
 
@@ -560,7 +576,7 @@ Kelos uses standard Kubernetes RBAC — use namespace isolation to separate team
 
 Running AI agents costs real money. Here's how to stay in control:
 
-**Model and effort costs vary significantly.** Use `spec.model` (or `model` in config) to choose the model for each workflow, and use `spec.effort` (or `effort` in config) to lower reasoning effort for routine work or raise it for complex reviews and planning. Check your provider's pricing page for current rates.
+**Model and effort costs vary significantly.** For Tasks, use `spec.model` and `spec.effort` (or `model` and `effort` in config). For Sessions, use `spec.worker.model` and `spec.worker.effort`. Check your provider's pricing page for current rates.
 
 **Use `maxConcurrency` to cap spend.** Without it, a TaskSpawner can create unlimited concurrent tasks. If 100 issues match your filter on first poll, that's 100 simultaneous agent runs. Always set a limit:
 

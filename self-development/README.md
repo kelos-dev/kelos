@@ -9,6 +9,10 @@ repository while keeping the configuration in this repo.
 The nested [`kanon/`](kanon/README.md) directory does the same for the sibling
 [`kelos-dev/kanon`](https://github.com/kelos-dev/kanon) repository.
 
+[`cs`](cs) creates persistent interactive Codex environments for developing
+Kelos with the same Workspace, credentials, model, effort, and Git identity as
+the `kelos-workers` TaskSpawner.
+
 ## How It Works
 
 <img width="2694" height="1966" alt="kelos-self-development" src="https://github.com/user-attachments/assets/10719599-426e-4c3d-87a0-cde43e1b3113" />
@@ -389,6 +393,29 @@ Rebases and squashes PR branch commits into a single clean commit when a maintai
 ```bash
 kubectl apply -f self-development/kelos-squash-commits.yaml
 ```
+
+## Interactive Development Session
+
+`cs NAME` creates a persistent Codex Session with the same Workspace,
+credentials, model, effort, and Git identity as `kelos-workers`. It does not use
+the worker's resource settings or AgentConfig, allowing namespace resource
+defaults to apply without the instructions for an ephemeral autonomous GitHub
+bot.
+
+The Session requires the `kelos-agent` Workspace and `kelos-credentials` Secret
+described below. Its `10Gi` workspace persists across Pod replacement and is
+deleted with the Session.
+
+Add this directory to your `PATH` and run the script from any directory:
+
+```bash
+export PATH="$PWD/self-development:$PATH"
+cs my-session
+```
+
+`cs` embeds the Session manifest and uses the current kubectl context and
+namespace. It fails if that name already exists and prints the `kelos session
+connect` command after creation.
 
 ## Prerequisites
 

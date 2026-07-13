@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+
+set -o errexit
+set -o nounset
+set -o pipefail
+
+usage() {
+  echo "Usage: cs NAME" >&2
+}
+
+if [[ $# -ne 1 ]]; then
+  usage
+  exit 2
+fi
+
+name=$1
+if [[ ${#name} -gt 253 || ! $name =~ ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$ ]]; then
+  echo "Session name must be a lowercase Kubernetes DNS name" >&2
+  exit 2
+fi
+
+kubectl create -f - <<EOF
+apiVersion: kelos.dev/v1alpha2
+kind: Session
+metadata:
+  name: ${name}
+spec:
+  volumeClaimTemplate:
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 10Gi
+  worker:
+    workspaceRef:
+      name: kelos-agent
+    model: gpt-5.6-sol
+    effort: xhigh
+    type: codex
+    credentials:
+      type: oauth
+      secretRef:
+        name: kelos-credentials
+    podOverrides:
+      env:
+        - name: GIT_AUTHOR_NAME
+          value: "Gunju Kim"
+        - name: GIT_AUTHOR_EMAIL
+          value: "gjkim042@gmail.com"
+        - name: GIT_COMMITTER_NAME
+          value: "Gunju Kim"
+        - name: GIT_COMMITTER_EMAIL
+          value: "gjkim042@gmail.com"
+EOF
+
+echo "Connect with: kelos session connect $name"

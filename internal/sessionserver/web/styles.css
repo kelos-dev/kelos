@@ -28,8 +28,14 @@ button { color: inherit; }
 .brand-mark { width: 37px; height: 37px; display: grid; place-items: center; border-radius: 12px; background: var(--accent); color: #fff; font: 700 17px/1 ui-monospace, SFMono-Regular, Menlo, monospace; box-shadow: 0 7px 16px rgba(29, 81, 59, .2); }
 .brand { font: 600 17px/1.05 Georgia, "Times New Roman", serif; letter-spacing: -.015em; }
 .brand-subtitle { margin-top: 4px; color: var(--muted); font-size: 11px; font-weight: 650; letter-spacing: .11em; text-transform: uppercase; }
-.new-session-button { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; margin: 25px 0 24px; padding: 11px 14px; border: 1px solid #cbd4cd; border-radius: 12px; background: rgba(255,255,255,.7); font-size: 13px; font-weight: 700; cursor: pointer; transition: background .15s, transform .15s, box-shadow .15s; }
+.new-session-button { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; margin: 25px 0 15px; padding: 11px 14px; border: 1px solid #cbd4cd; border-radius: 12px; background: rgba(255,255,255,.7); font-size: 13px; font-weight: 700; cursor: pointer; transition: background .15s, transform .15s, box-shadow .15s; }
 .new-session-button:hover { background: #fff; transform: translateY(-1px); box-shadow: 0 7px 18px rgba(32,51,41,.08); }
+.namespace-form { margin: 0 0 22px; padding: 0 5px; }
+.namespace-form label { display: block; margin: 0 5px 6px; color: var(--faint); font-size: 9px; font-weight: 800; letter-spacing: .11em; text-transform: uppercase; }
+.namespace-form div { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+.namespace-form input { min-width: 0; padding: 8px 9px; border: 1px solid #cbd4cd; border-right: 0; border-radius: 9px 0 0 9px; outline: 0; background: var(--card); color: var(--ink); font-size: 11px; }
+.namespace-form input:focus { border-color: #779b88; box-shadow: 0 0 0 3px rgba(56,114,88,.08); }
+.namespace-form button { padding: 8px 9px; border: 1px solid #cbd4cd; border-radius: 0 9px 9px 0; background: var(--accent); color: white; font-size: 10px; font-weight: 700; cursor: pointer; }
 .sidebar-label { padding: 0 10px 9px; color: var(--faint); font-size: 10px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
 .session-list { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
 .session-item { width: 100%; display: grid; grid-template-columns: 9px minmax(0,1fr); gap: 9px; padding: 11px 10px; border: 0; border-radius: 11px; background: transparent; text-align: left; cursor: pointer; transition: background .15s; }

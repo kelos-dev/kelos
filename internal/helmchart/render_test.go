@@ -211,8 +211,9 @@ func TestRender_SessionServer(t *testing.T) {
 		"resources:\n      - sessions\n    verbs:\n      - create\n      - delete\n      - get\n      - list\n      - patch\n      - watch",
 		"--token-file=/var/run/secrets/kelos-session/token",
 		"--default-namespace=team-a",
-		"kind: Role\nmetadata:\n  name: kelos-session-server-role\n  namespace: team-a",
-		"kind: RoleBinding\nmetadata:\n  name: kelos-session-server-rolebinding\n  namespace: team-a",
+		"kind: ClusterRole\nmetadata:\n  name: kelos-session-server-role",
+		"kind: ClusterRoleBinding\nmetadata:\n  name: kelos-session-server-rolebinding",
+		"roleRef:\n  apiGroup: rbac.authorization.k8s.io\n  kind: ClusterRole\n  name: kelos-session-server-role",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Errorf("expected Session server render to contain %q", expected)

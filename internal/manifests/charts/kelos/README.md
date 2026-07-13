@@ -211,13 +211,18 @@ kubectl port-forward -n kelos-system service/kelos-session-server 8080:80
 ```
 
 Then open `http://localhost:8080` and enter the token. The token represents one
-shared user that can create, list, delete, and connect to Sessions only in
-`sessionServer.defaultNamespace` (`default` unless overridden). That namespace
-must already exist. The creation form accepts provider, credentials, model,
-Workspace, AgentConfig references, and an optional persistent volume claim. YAML
-mode server-side applies one `kelos.dev/v1alpha2` Session manifest with the same
-worker fields as the form in the configured namespace. The manifest may also
-include labels, annotations, and an optional persistent volume claim.
+shared user that can create, list, delete, and connect to Sessions in any
+namespace. The web application operates on one active namespace at a time and
+can switch it live from the sidebar. `sessionServer.defaultNamespace` (`default`
+unless overridden) sets the initial active namespace. The selected namespace
+must already exist. Session, Workspace, AgentConfig, and previously used
+credential options are loaded only from the active namespace. The creation form
+accepts provider, credentials, model, Workspace, AgentConfig references, and an
+optional persistent volume claim. YAML mode server-side applies one
+`kelos.dev/v1alpha2` Session manifest in the active namespace with the same
+worker fields as the form. The manifest may also include labels, annotations,
+and an optional persistent volume claim. Pod and image overrides remain
+available only through the Kubernetes API and its RBAC.
 
 ## Uninstall
 

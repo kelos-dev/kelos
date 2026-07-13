@@ -13,6 +13,9 @@ const elements = {
   dialog: document.querySelector('#session-dialog'),
   form: document.querySelector('#session-form'),
   dialogError: document.querySelector('#dialog-error'),
+  namespaceForm: document.querySelector('#namespace-form'),
+  activeNamespace: document.querySelector('#active-namespace'),
+  namespace: document.querySelector('[name="namespace"]'),
   provider: document.querySelector('[name="provider"]'),
   credentialType: document.querySelector('#credential-type'),
   secretField: document.querySelector('#secret-field'),
@@ -52,6 +55,8 @@ const state = {
   activeTurn: false,
   interrupting: false,
   defaultNamespace: 'default',
+  namespace: 'default',
+  namespaceGeneration: 0,
   options: {credentials: [], workspaces: [], agentConfigs: []},
   selectedAgentConfigs: [],
   creationMode: 'form',
@@ -100,7 +105,7 @@ function renderSessions() {
   if (!state.sessions.length) {
     const empty = document.createElement('div');
     empty.className = 'sidebar-empty';
-    empty.textContent = 'No Sessions are visible yet.';
+    empty.textContent = `No Sessions in ${state.namespace}.`;
     elements.list.append(empty);
     return;
   }
@@ -130,8 +135,11 @@ function renderSessions() {
 }
 
 async function loadSessions({quiet = false} = {}) {
+  const namespace = state.namespace;
+  const generation = state.namespaceGeneration;
   try {
-    const sessions = await api('/api/sessions');
+    const sessions = await api(`/api/sessions?namespace=${encodeURIComponent(namespace)}`);
+    if (generation !== state.namespaceGeneration) return;
     state.sessions = sessions;
     if (state.selected) {
       const current = sessions.find(item => sessionKey(item) === sessionKey(state.selected));
@@ -146,14 +154,16 @@ async function loadSessions({quiet = false} = {}) {
     }
     renderSessions();
   } catch (error) {
-    if (!quiet) showToast(error.message);
+    if (!quiet && generation === state.namespaceGeneration) showToast(error.message);
   }
 }
 
 async function loadConfig() {
   const config = await api('/api/config');
   state.defaultNamespace = config.defaultNamespace;
-  elements.form.elements.namespace.value = state.defaultNamespace;
+  state.namespace = window.localStorage.getItem('kelos-session-namespace') || state.defaultNamespace;
+  elements.activeNamespace.value = state.namespace;
+  elements.namespace.value = state.namespace;
 }
 
 function defaultSessionYAML() {
@@ -161,7 +171,7 @@ function defaultSessionYAML() {
 kind: Session
 metadata:
   name: my-session
-  namespace: ${state.defaultNamespace}
+  namespace: ${state.namespace}
 spec:
   worker:
     type: claude-code
@@ -194,10 +204,47 @@ function updateVolumeClaimFields() {
 }
 
 async function loadOptions() {
-  state.options = await api('/api/options');
+  const namespace = state.namespace;
+  const generation = state.namespaceGeneration;
+  let options;
+  try {
+    options = await api(`/api/options?namespace=${encodeURIComponent(namespace)}`);
+  } catch (error) {
+    if (generation !== state.namespaceGeneration) return;
+    throw error;
+  }
+  if (generation !== state.namespaceGeneration) return;
+  state.options = options;
   renderCredentialOptions();
   renderWorkspaceOptions();
   renderAgentConfigOptions();
+}
+
+function resetNamespaceReferences() {
+  state.selectedAgentConfigs = [];
+  elements.credentialSecret.value = '';
+  elements.credentialSecretCustom.value = '';
+  elements.workspace.value = '';
+  elements.workspaceCustom.value = '';
+}
+
+async function switchNamespace(namespace) {
+  namespace = namespace.trim();
+  if (!namespace || namespace === state.namespace) return;
+  state.namespace = namespace;
+  state.namespaceGeneration += 1;
+  state.sessions = [];
+  state.options = {credentials: [], workspaces: [], agentConfigs: []};
+  window.localStorage.setItem('kelos-session-namespace', namespace);
+  elements.activeNamespace.value = namespace;
+  elements.namespace.value = namespace;
+  resetNamespaceReferences();
+  elements.yaml.value = '';
+  renderCredentialOptions();
+  renderWorkspaceOptions();
+  renderAgentConfigOptions();
+  selectSession(null);
+  await Promise.all([loadSessions(), loadOptions()]);
 }
 
 function addOption(select, value, label) {
@@ -906,6 +953,14 @@ async function openDialog() {
 document.querySelector('#new-session').addEventListener('click', openDialog);
 document.querySelector('#welcome-new').addEventListener('click', openDialog);
 document.querySelectorAll('.close-dialog').forEach(button => button.addEventListener('click', () => elements.dialog.close()));
+elements.namespaceForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  try {
+    await switchNamespace(elements.activeNamespace.value);
+  } catch (error) {
+    showToast(error.message);
+  }
+});
 elements.credentialType.addEventListener('change', () => {
   const option = elements.credentialSecret.selectedOptions[0];
   if (option?.dataset.type && option.dataset.type !== elements.credentialType.value) {
@@ -948,7 +1003,7 @@ elements.form.addEventListener('submit', async event => {
   try {
     let created;
     if (state.creationMode === 'yaml') {
-      created = await api('/api/sessions/apply', {
+      created = await api(`/api/sessions/apply?namespace=${encodeURIComponent(state.namespace)}`, {
         method: 'POST',
         headers: {'Content-Type': 'application/yaml'},
         body: elements.yaml.value,
@@ -988,7 +1043,7 @@ elements.form.addEventListener('submit', async event => {
     elements.dialog.close();
     elements.form.reset();
     state.selectedAgentConfigs = [];
-    elements.form.elements.namespace.value = state.defaultNamespace;
+    elements.namespace.value = state.namespace;
     elements.yaml.value = '';
     updateVolumeClaimFields();
     setCreationMode('form');
@@ -1034,7 +1089,7 @@ document.querySelector('#open-sidebar').addEventListener('click', () => elements
 document.querySelector('#close-sidebar').addEventListener('click', () => elements.sidebar.classList.remove('open'));
 
 const configReady = loadConfig();
-Promise.all([configReady, loadOptions()]).then(() => loadSessions()).then(() => {
+configReady.then(() => Promise.all([loadOptions(), loadSessions()])).then(() => {
   if (state.sessions.length) selectSession(state.sessions[0]);
 }).catch(error => showToast(error.message));
 window.setInterval(() => loadSessions({quiet: true}), 5000);

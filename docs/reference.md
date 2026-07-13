@@ -230,13 +230,17 @@ afterward follows the StorageClass reclaim policy. When the field is omitted,
 the workspace uses `emptyDir`, so conversation history and workspace changes do
 not survive Pod replacement.
 
-The shared web server is restricted to its configured
-`sessionServer.defaultNamespace`. Its creation form accepts provider,
-credentials, model, Workspace, AgentConfig references, and an optional persistent
-volume claim. YAML mode server-side applies one `kelos.dev/v1alpha2` Session
-manifest with the same worker fields and namespace restriction as the form. The
-manifest may also include labels, annotations, and an optional persistent volume
-claim.
+The shared web server can create, list, delete, and connect to Sessions across
+namespaces while the web application operates on one active namespace at a
+time. Users can switch the active namespace live from the sidebar.
+`sessionServer.defaultNamespace` sets its initial value, and Session, Workspace,
+AgentConfig, and credential options are loaded only from the active namespace.
+The creation form accepts provider, credentials, model, Workspace, AgentConfig
+references, and an optional persistent volume claim. YAML mode server-side
+applies one `kelos.dev/v1alpha2` Session manifest in the active namespace with
+the same worker fields as the form. The manifest may also include labels,
+annotations, and an optional persistent volume claim. Image and Pod overrides
+require direct Kubernetes API access governed by Kubernetes RBAC.
 
 ## WorkerPool
 

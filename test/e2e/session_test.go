@@ -31,10 +31,7 @@ import (
 	"github.com/kelos-dev/kelos/test/e2e/framework"
 )
 
-const (
-	sessionWebNamespace = "default"
-	sessionWebTokenEnv  = "E2E_SESSION_WEB_TOKEN"
-)
+const sessionWebTokenEnv = "E2E_SESSION_WEB_TOKEN"
 
 //go:embed fixtures/fake-claude.js
 var fakeClaude string
@@ -56,17 +53,17 @@ var _ = Describe("Session remote control", func() {
 		sessionName := strings.TrimPrefix(f.Namespace, "e2e-")
 		configMapName := sessionName + "-provider"
 		mode := int32(0555)
-		_, err := f.Clientset.CoreV1().ConfigMaps(sessionWebNamespace).Create(context.TODO(), &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: sessionWebNamespace},
+		_, err := f.Clientset.CoreV1().ConfigMaps(f.Namespace).Create(context.TODO(), &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: f.Namespace},
 			Data:       map[string]string{"claude": fakeClaude},
 		}, metav1.CreateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(func() {
-			_ = f.Clientset.CoreV1().ConfigMaps(sessionWebNamespace).Delete(context.TODO(), configMapName, metav1.DeleteOptions{})
+			_ = f.Clientset.CoreV1().ConfigMaps(f.Namespace).Delete(context.TODO(), configMapName, metav1.DeleteOptions{})
 		})
 
 		created := createSession(f, &kelos.Session{
-			ObjectMeta: metav1.ObjectMeta{Name: sessionName, Namespace: sessionWebNamespace},
+			ObjectMeta: metav1.ObjectMeta{Name: sessionName, Namespace: f.Namespace},
 			Spec: kelos.SessionSpec{
 				Worker: kelos.WorkerSpec{
 					Type:        "claude-code",
@@ -99,35 +96,35 @@ var _ = Describe("Session remote control", func() {
 			},
 		})
 		DeferCleanup(func() {
-			_ = f.KelosClientset.ApiV1alpha2().Sessions(sessionWebNamespace).Delete(context.TODO(), sessionName, metav1.DeleteOptions{})
+			_ = f.KelosClientset.ApiV1alpha2().Sessions(f.Namespace).Delete(context.TODO(), sessionName, metav1.DeleteOptions{})
 		})
 		DeferCleanup(func() {
 			if CurrentSpecReport().Failed() {
-				collectSessionDebugInfo(f, sessionWebNamespace, sessionName)
+				collectSessionDebugInfo(f, f.Namespace, sessionName)
 			}
 		})
 
-		current := waitForSessionPhase(f, sessionWebNamespace, sessionName, kelos.SessionPhaseReady)
-		pod, err := f.Clientset.CoreV1().Pods(sessionWebNamespace).Get(context.TODO(), current.Status.PodName, metav1.GetOptions{})
+		current := waitForSessionPhase(f, f.Namespace, sessionName, kelos.SessionPhaseReady)
+		pod, err := f.Clientset.CoreV1().Pods(f.Namespace).Get(context.TODO(), current.Status.PodName, metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(current.Status.PodUID).To(Equal(pod.UID))
 		controllerRef := metav1.GetControllerOf(pod)
 		Expect(controllerRef).NotTo(BeNil())
-		statefulSet, err := f.Clientset.AppsV1().StatefulSets(sessionWebNamespace).Get(context.TODO(), controllerRef.Name, metav1.GetOptions{})
+		statefulSet, err := f.Clientset.AppsV1().StatefulSets(f.Namespace).Get(context.TODO(), controllerRef.Name, metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(metav1.IsControlledBy(statefulSet, created)).To(BeTrue())
 		Expect(metav1.IsControlledBy(pod, statefulSet)).To(BeTrue())
 		Expect(statefulSet.Spec.Replicas).NotTo(BeNil())
 		Expect(*statefulSet.Spec.Replicas).To(Equal(int32(1)))
-		pods, err := f.Clientset.CoreV1().Pods(sessionWebNamespace).List(context.TODO(), metav1.ListOptions{
+		pods, err := f.Clientset.CoreV1().Pods(f.Namespace).List(context.TODO(), metav1.ListOptions{
 			LabelSelector: "kelos.dev/session=" + sessionName,
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(pods.Items).To(HaveLen(1))
 
 		By("completing turns through separate terminal connections")
-		runTerminalTurn(sessionWebNamespace, sessionName, "terminal-one", "agent › turn 1: terminal-one")
-		runTerminalTurn(sessionWebNamespace, sessionName, "terminal-two", "agent › turn 2: terminal-two")
+		runTerminalTurn(f.Namespace, sessionName, "terminal-one", "agent › turn 1: terminal-one")
+		runTerminalTurn(f.Namespace, sessionName, "terminal-two", "agent › turn 2: terminal-two")
 
 		By("authenticating to the shared Session web server")
 		baseURL := startSessionServerPortForward()
@@ -139,10 +136,10 @@ var _ = Describe("Session remote control", func() {
 
 		webClient := loginSessionWeb(baseURL, token)
 		Eventually(func() []string {
-			return listWebSessions(webClient, baseURL)
+			return listWebSessions(webClient, baseURL, f.Namespace)
 		}, 30*time.Second, 200*time.Millisecond).Should(ContainElement(sessionName))
 
-		connection := connectSessionWebSocket(webClient, baseURL, sessionName)
+		connection := connectSessionWebSocket(webClient, baseURL, f.Namespace, sessionName)
 		DeferCleanup(func() { _ = connection.Close() })
 		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "subscribe"})
 		seenFirstTurn := false
@@ -198,7 +195,7 @@ var _ = Describe("Session remote control", func() {
 			return event.Type == sessionruntime.EventAssistantDelta && event.Text == "turn 6: after"
 		})
 		waitForTurnCompletion(connection, "completed")
-		Expect(waitForSessionPhase(f, sessionWebNamespace, sessionName, kelos.SessionPhaseReady).Status.PodUID).To(Equal(pod.UID))
+		Expect(waitForSessionPhase(f, f.Namespace, sessionName, kelos.SessionPhaseReady).Status.PodUID).To(Equal(pod.UID))
 
 		By("recovering conversation and workspace state after the Pod is deleted")
 		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "message", Text: "write-state"})
@@ -213,16 +210,16 @@ var _ = Describe("Session remote control", func() {
 		oldPodUID := pod.UID
 		oldClaimName := sessionWorkspaceClaimName(pod)
 		Expect(oldClaimName).NotTo(BeEmpty())
-		Expect(f.Clientset.CoreV1().Pods(sessionWebNamespace).Delete(context.TODO(), pod.Name, metav1.DeleteOptions{})).To(Succeed())
+		Expect(f.Clientset.CoreV1().Pods(f.Namespace).Delete(context.TODO(), pod.Name, metav1.DeleteOptions{})).To(Succeed())
 		_ = connection.Close()
 
-		recovered := waitForSessionPodReplacement(f, sessionWebNamespace, sessionName, oldPodUID)
-		replacement, err := f.Clientset.CoreV1().Pods(sessionWebNamespace).Get(context.TODO(), recovered.Status.PodName, metav1.GetOptions{})
+		recovered := waitForSessionPodReplacement(f, f.Namespace, sessionName, oldPodUID)
+		replacement, err := f.Clientset.CoreV1().Pods(f.Namespace).Get(context.TODO(), recovered.Status.PodName, metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(replacement.UID).NotTo(Equal(oldPodUID))
 		Expect(sessionWorkspaceClaimName(replacement)).To(Equal(oldClaimName))
 
-		connection = connectSessionWebSocket(webClient, baseURL, sessionName)
+		connection = connectSessionWebSocket(webClient, baseURL, f.Namespace, sessionName)
 		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "subscribe"})
 		seenRecovery := false
 		seenInterruptedTurn := false
@@ -243,9 +240,9 @@ var _ = Describe("Session remote control", func() {
 		waitForTurnCompletion(connection, "completed")
 
 		By("deleting the Session and its StatefulSet-backed Pod")
-		Expect(f.KelosClientset.ApiV1alpha2().Sessions(sessionWebNamespace).Delete(context.TODO(), sessionName, metav1.DeleteOptions{})).To(Succeed())
-		waitForPodDeletion(f, sessionWebNamespace, pod.Name)
-		waitForPVCDeletion(f, sessionWebNamespace, oldClaimName)
+		Expect(f.KelosClientset.ApiV1alpha2().Sessions(f.Namespace).Delete(context.TODO(), sessionName, metav1.DeleteOptions{})).To(Succeed())
+		waitForPodDeletion(f, f.Namespace, pod.Name)
+		waitForPVCDeletion(f, f.Namespace, oldClaimName)
 	})
 
 	It("runs an OpenCode conversation through terminal chat", func() {
@@ -507,8 +504,8 @@ func loginSessionWeb(baseURL, token string) *http.Client {
 	return client
 }
 
-func listWebSessions(client *http.Client, baseURL string) []string {
-	response, err := client.Get(baseURL + "/api/sessions")
+func listWebSessions(client *http.Client, baseURL, namespace string) []string {
+	response, err := client.Get(baseURL + "/api/sessions?namespace=" + url.QueryEscape(namespace))
 	if err != nil {
 		return nil
 	}
@@ -529,14 +526,14 @@ func listWebSessions(client *http.Client, baseURL string) []string {
 	return names
 }
 
-func connectSessionWebSocket(client *http.Client, baseURL, sessionName string) *websocket.Conn {
+func connectSessionWebSocket(client *http.Client, baseURL, namespace, sessionName string) *websocket.Conn {
 	parsed, err := url.Parse(baseURL)
 	Expect(err).NotTo(HaveOccurred())
 	header := http.Header{}
 	for _, cookie := range client.Jar.Cookies(parsed) {
 		header.Add("Cookie", cookie.String())
 	}
-	webSocketURL := "ws://" + parsed.Host + "/api/sessions/" + sessionWebNamespace + "/" + sessionName + "/connect"
+	webSocketURL := "ws://" + parsed.Host + "/api/sessions/" + namespace + "/" + sessionName + "/connect"
 	connection, response, err := websocket.DefaultDialer.Dial(webSocketURL, header)
 	if response != nil && response.Body != nil {
 		response.Body.Close()

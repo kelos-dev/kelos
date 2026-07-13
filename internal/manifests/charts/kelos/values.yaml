@@ -44,6 +44,7 @@ sessionServer:
   replicas: 1
   secretName: ""
   tokenKey: token
+  # Initial active namespace in the Session web application.
   defaultNamespace: default
   secureCookie: false
   service:

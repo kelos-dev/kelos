@@ -1112,31 +1112,52 @@ func TestDeleteAllCustomResources_DeletesExistingResources(t *testing.T) {
 
 func TestDeleteSessionServerRBACAcrossNamespaces(t *testing.T) {
 	scheme := runtime.NewScheme()
-	objects := []*unstructured.Unstructured{
+	objects := []runtime.Object{
+		rbacObject("ClusterRole", "kelos-session-server-role", ""),
+		rbacObject("ClusterRoleBinding", "kelos-session-server-rolebinding", ""),
 		rbacObject("Role", "kelos-session-server-role", "team-a"),
 		rbacObject("RoleBinding", "kelos-session-server-rolebinding", "team-a"),
+		rbacObject("ClusterRole", "unrelated-cluster-role", ""),
+		rbacObject("ClusterRoleBinding", "unrelated-cluster-rolebinding", ""),
 		rbacObject("Role", "unrelated-role", "team-a"),
 		rbacObject("RoleBinding", "unrelated-rolebinding", "team-a"),
 	}
 	listKinds := map[schema.GroupVersionResource]string{
-		roleGVR:        "RoleList",
-		roleBindingGVR: "RoleBindingList",
+		clusterRoleGVR:        "ClusterRoleList",
+		clusterRoleBindingGVR: "ClusterRoleBindingList",
+		roleGVR:               "RoleList",
+		roleBindingGVR:        "RoleBindingList",
 	}
-	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, listKinds, objects[0], objects[1], objects[2], objects[3])
+	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, listKinds, objects...)
 	if err := deleteSessionServerRBAC(context.Background(), client); err != nil {
 		t.Fatalf("deleteSessionServerRBAC() error = %v", err)
 	}
 
 	for _, resource := range []struct {
-		gvr  schema.GroupVersionResource
-		name string
+		gvr       schema.GroupVersionResource
+		name      string
+		namespace string
 	}{
-		{gvr: roleGVR, name: "kelos-session-server-role"},
-		{gvr: roleBindingGVR, name: "kelos-session-server-rolebinding"},
+		{gvr: clusterRoleGVR, name: "kelos-session-server-role"},
+		{gvr: clusterRoleBindingGVR, name: "kelos-session-server-rolebinding"},
+		{gvr: roleGVR, name: "kelos-session-server-role", namespace: "team-a"},
+		{gvr: roleBindingGVR, name: "kelos-session-server-rolebinding", namespace: "team-a"},
 	} {
-		if _, err := client.Resource(resource.gvr).Namespace("team-a").Get(context.Background(), resource.name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		var err error
+		if resource.namespace == "" {
+			_, err = client.Resource(resource.gvr).Get(context.Background(), resource.name, metav1.GetOptions{})
+		} else {
+			_, err = client.Resource(resource.gvr).Namespace(resource.namespace).Get(context.Background(), resource.name, metav1.GetOptions{})
+		}
+		if !apierrors.IsNotFound(err) {
 			t.Fatalf("%s still exists: %v", resource.name, err)
 		}
+	}
+	if _, err := client.Resource(clusterRoleGVR).Get(context.Background(), "unrelated-cluster-role", metav1.GetOptions{}); err != nil {
+		t.Fatalf("unrelated ClusterRole was removed: %v", err)
+	}
+	if _, err := client.Resource(clusterRoleBindingGVR).Get(context.Background(), "unrelated-cluster-rolebinding", metav1.GetOptions{}); err != nil {
+		t.Fatalf("unrelated ClusterRoleBinding was removed: %v", err)
 	}
 	if _, err := client.Resource(roleGVR).Namespace("team-a").Get(context.Background(), "unrelated-role", metav1.GetOptions{}); err != nil {
 		t.Fatalf("unrelated Role was removed: %v", err)

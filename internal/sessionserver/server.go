@@ -308,10 +308,6 @@ func (s *Server) api(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	namespace, name := parts[1], parts[2]
-	if namespace != s.defaultNamespace {
-		writeError(writer, http.StatusForbidden, fmt.Sprintf("namespace %q is not served", namespace))
-		return
-	}
 	if len(parts) == 4 && parts[3] == "connect" && request.Method == http.MethodGet {
 		s.connectSession(writer, request, namespace, name)
 		return
@@ -330,7 +326,7 @@ func (s *Server) api(writer http.ResponseWriter, request *http.Request) {
 
 func (s *Server) listSessions(writer http.ResponseWriter, request *http.Request) {
 	var list kelos.SessionList
-	if err := s.client.List(request.Context(), &list, client.InNamespace(s.defaultNamespace)); err != nil {
+	if err := s.client.List(request.Context(), &list, client.InNamespace(s.requestNamespace(request))); err != nil {
 		writeError(writer, http.StatusInternalServerError, fmt.Sprintf("listing Sessions: %v", err))
 		return
 	}
@@ -345,18 +341,19 @@ func (s *Server) listSessions(writer http.ResponseWriter, request *http.Request)
 }
 
 func (s *Server) listSessionOptions(writer http.ResponseWriter, request *http.Request) {
+	namespace := s.requestNamespace(request)
 	var sessions kelos.SessionList
-	if err := s.client.List(request.Context(), &sessions, client.InNamespace(s.defaultNamespace)); err != nil {
+	if err := s.client.List(request.Context(), &sessions, client.InNamespace(namespace)); err != nil {
 		writeError(writer, http.StatusInternalServerError, fmt.Sprintf("listing Sessions for form options: %v", err))
 		return
 	}
 	var workspaces kelos.WorkspaceList
-	if err := s.client.List(request.Context(), &workspaces, client.InNamespace(s.defaultNamespace)); err != nil {
+	if err := s.client.List(request.Context(), &workspaces, client.InNamespace(namespace)); err != nil {
 		writeError(writer, http.StatusInternalServerError, fmt.Sprintf("listing Workspaces for form options: %v", err))
 		return
 	}
 	var agentConfigs kelos.AgentConfigList
-	if err := s.client.List(request.Context(), &agentConfigs, client.InNamespace(s.defaultNamespace)); err != nil {
+	if err := s.client.List(request.Context(), &agentConfigs, client.InNamespace(namespace)); err != nil {
 		writeError(writer, http.StatusInternalServerError, fmt.Sprintf("listing AgentConfigs for form options: %v", err))
 		return
 	}
@@ -367,6 +364,14 @@ func (s *Server) listSessionOptions(writer http.ResponseWriter, request *http.Re
 		AgentConfigs: objectNames(agentConfigs.Items, func(item kelos.AgentConfig) string { return item.Name }),
 	}
 	writeJSON(writer, http.StatusOK, options)
+}
+
+func (s *Server) requestNamespace(request *http.Request) string {
+	namespace := strings.TrimSpace(request.URL.Query().Get("namespace"))
+	if namespace == "" {
+		return s.defaultNamespace
+	}
+	return namespace
 }
 
 func credentialOptions(sessions []kelos.Session) []credentialOption {
@@ -422,10 +427,6 @@ func (s *Server) createSession(writer http.ResponseWriter, request *http.Request
 		writeError(writer, http.StatusBadRequest, "name and namespace are required")
 		return
 	}
-	if payload.Namespace != s.defaultNamespace {
-		writeError(writer, http.StatusForbidden, fmt.Sprintf("namespace %q is not served", payload.Namespace))
-		return
-	}
 	session := &kelos.Session{
 		TypeMeta: metav1.TypeMeta{APIVersion: kelos.GroupVersion.String(), Kind: "Session"},
 		ObjectMeta: metav1.ObjectMeta{
@@ -460,15 +461,16 @@ func (s *Server) applySession(writer http.ResponseWriter, request *http.Request)
 	}
 	session.Name = strings.TrimSpace(session.Name)
 	session.Namespace = strings.TrimSpace(session.Namespace)
+	namespace := s.requestNamespace(request)
 	if session.Namespace == "" {
-		session.Namespace = s.defaultNamespace
+		session.Namespace = namespace
 	}
 	if session.Name == "" {
 		writeError(writer, http.StatusBadRequest, "Session metadata.name is required")
 		return
 	}
-	if session.Namespace != s.defaultNamespace {
-		writeError(writer, http.StatusForbidden, fmt.Sprintf("namespace %q is not served", session.Namespace))
+	if session.Namespace != namespace {
+		writeError(writer, http.StatusForbidden, fmt.Sprintf("namespace %q is not active", session.Namespace))
 		return
 	}
 

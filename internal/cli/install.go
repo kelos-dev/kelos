@@ -57,11 +57,15 @@ var kelosConversionCRDNames = []string{
 }
 
 var (
-	crdGVR            = schema.GroupVersionResource{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}
-	endpointSlicesGVR = discoveryv1.SchemeGroupVersion.WithResource("endpointslices")
-	roleGVR           = schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "roles"}
-	roleBindingGVR    = schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "rolebindings"}
-	secretGVR         = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
+	crdGVR                = schema.GroupVersionResource{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}
+	endpointSlicesGVR     = discoveryv1.SchemeGroupVersion.WithResource("endpointslices")
+	clusterRoleGVR        = schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterroles"}
+	clusterRoleBindingGVR = schema.GroupVersionResource{
+		Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterrolebindings",
+	}
+	roleGVR        = schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "roles"}
+	roleBindingGVR = schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "rolebindings"}
+	secretGVR      = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
 )
 
 type helmValuesOptions struct {
@@ -876,12 +880,15 @@ func newUninstallCommand(cfg *ClientConfig) *cobra.Command {
 
 func deleteSessionServerRBAC(ctx context.Context, dyn dynamic.Interface) error {
 	resources := []struct {
-		gvr  schema.GroupVersionResource
-		name string
-		kind string
+		gvr        schema.GroupVersionResource
+		name       string
+		kind       string
+		namespaced bool
 	}{
-		{gvr: roleBindingGVR, name: "kelos-session-server-rolebinding", kind: "RoleBinding"},
-		{gvr: roleGVR, name: "kelos-session-server-role", kind: "Role"},
+		{gvr: clusterRoleBindingGVR, name: "kelos-session-server-rolebinding", kind: "ClusterRoleBinding"},
+		{gvr: clusterRoleGVR, name: "kelos-session-server-role", kind: "ClusterRole"},
+		{gvr: roleBindingGVR, name: "kelos-session-server-rolebinding", kind: "RoleBinding", namespaced: true},
+		{gvr: roleGVR, name: "kelos-session-server-role", kind: "Role", namespaced: true},
 	}
 	for _, resource := range resources {
 		list, err := dyn.Resource(resource.gvr).List(ctx, metav1.ListOptions{})
@@ -896,8 +903,14 @@ func deleteSessionServerRBAC(ctx context.Context, dyn dynamic.Interface) error {
 			if item.GetName() != resource.name {
 				continue
 			}
-			if err := dyn.Resource(resource.gvr).Namespace(item.GetNamespace()).Delete(ctx, item.GetName(), metav1.DeleteOptions{}); err != nil && !errors.IsNotFound(err) {
-				return fmt.Errorf("deleting Session server %s %s/%s: %w", resource.kind, item.GetNamespace(), item.GetName(), err)
+			var err error
+			if resource.namespaced {
+				err = dyn.Resource(resource.gvr).Namespace(item.GetNamespace()).Delete(ctx, item.GetName(), metav1.DeleteOptions{})
+			} else {
+				err = dyn.Resource(resource.gvr).Delete(ctx, item.GetName(), metav1.DeleteOptions{})
+			}
+			if err != nil && !errors.IsNotFound(err) {
+				return fmt.Errorf("deleting Session server %s %s: %w", resource.kind, item.GetName(), err)
 			}
 		}
 	}

@@ -80,6 +80,9 @@ func TestSessionFormUsesResourceSelectors(t *testing.T) {
 		t.Fatalf("GET / status = %d body = %s", response.Code, response.Body.String())
 	}
 	for _, expected := range []string{
+		`id="namespace-form"`,
+		`id="active-namespace"`,
+		`name="namespace" required value="default" autocomplete="off" readonly>`,
 		`id="credential-secret"`,
 		`id="workspace-select"`,
 		`id="agent-config-select"`,
@@ -156,7 +159,7 @@ spec:
       type: none
     model: gpt-5
 `
-	request := httptest.NewRequest(http.MethodPost, "/api/sessions/apply", strings.NewReader(manifest))
+	request := httptest.NewRequest(http.MethodPost, "/api/sessions/apply?namespace=team-a", strings.NewReader(manifest))
 	request.Header.Set("Authorization", "Bearer secret-token")
 	request.Header.Set("Content-Type", "application/yaml")
 	response := httptest.NewRecorder()
@@ -166,7 +169,7 @@ spec:
 	}
 
 	var session kelos.Session
-	if err := server.client.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: "yaml-chat"}, &session); err != nil {
+	if err := server.client.Get(t.Context(), client.ObjectKey{Namespace: "team-a", Name: "yaml-chat"}, &session); err != nil {
 		t.Fatal(err)
 	}
 	if session.Labels["source"] != "web" {
@@ -184,14 +187,14 @@ spec:
 	}
 
 	updated := strings.Replace(manifest, "source: web", "source: yaml", 1)
-	request = httptest.NewRequest(http.MethodPost, "/api/sessions/apply", strings.NewReader(updated))
+	request = httptest.NewRequest(http.MethodPost, "/api/sessions/apply?namespace=team-a", strings.NewReader(updated))
 	request.Header.Set("Authorization", "Bearer secret-token")
 	response = httptest.NewRecorder()
 	server.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
 		t.Fatalf("reapply status = %d body = %s", response.Code, response.Body.String())
 	}
-	if err := server.client.Get(t.Context(), client.ObjectKey{Namespace: "default", Name: "yaml-chat"}, &session); err != nil {
+	if err := server.client.Get(t.Context(), client.ObjectKey{Namespace: "team-a", Name: "yaml-chat"}, &session); err != nil {
 		t.Fatal(err)
 	}
 	if session.Labels["source"] != "yaml" {
@@ -282,7 +285,7 @@ func TestSessionAPIHappyPath(t *testing.T) {
 
 	payload := map[string]any{
 		"name":      "chat",
-		"namespace": "default",
+		"namespace": "team-a",
 		"worker": map[string]any{
 			"type":        "codex",
 			"credentials": map[string]string{"type": "none"},
@@ -297,7 +300,7 @@ func TestSessionAPIHappyPath(t *testing.T) {
 		t.Fatalf("create status = %d body = %s", response.Code, response.Body.String())
 	}
 
-	request = httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	request = httptest.NewRequest(http.MethodGet, "/api/sessions?namespace=team-a", nil)
 	request.Header.Set("Authorization", "Bearer secret-token")
 	response = httptest.NewRecorder()
 	server.ServeHTTP(response, request)
@@ -308,11 +311,11 @@ func TestSessionAPIHappyPath(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &sessions); err != nil {
 		t.Fatal(err)
 	}
-	if len(sessions) != 1 || sessions[0].Name != "chat" || sessions[0].Provider != "codex" {
+	if len(sessions) != 1 || sessions[0].Name != "chat" || sessions[0].Namespace != "team-a" || sessions[0].Provider != "codex" {
 		t.Fatalf("listed Sessions = %#v", sessions)
 	}
 
-	request = httptest.NewRequest(http.MethodDelete, "/api/sessions/default/chat", nil)
+	request = httptest.NewRequest(http.MethodDelete, "/api/sessions/team-a/chat", nil)
 	request.Header.Set("Authorization", "Bearer secret-token")
 	response = httptest.NewRecorder()
 	server.ServeHTTP(response, request)
@@ -321,18 +324,13 @@ func TestSessionAPIHappyPath(t *testing.T) {
 	}
 }
 
-func TestSessionAPIRejectsOtherNamespacesAndUnsafeWorkerFields(t *testing.T) {
+func TestSessionAPIRejectsUnsafeWorkerFields(t *testing.T) {
 	server := testServer(t)
 	for _, test := range []struct {
 		name       string
 		payload    string
 		wantStatus int
 	}{
-		{
-			name:       "other namespace",
-			payload:    `{"name":"chat","namespace":"team-a","worker":{"type":"codex","credentials":{"type":"none"}}}`,
-			wantStatus: http.StatusForbidden,
-		},
 		{
 			name:       "custom image",
 			payload:    `{"name":"chat","namespace":"default","worker":{"type":"codex","credentials":{"type":"none"},"image":"example.invalid/unsafe:latest"}}`,
@@ -354,17 +352,9 @@ func TestSessionAPIRejectsOtherNamespacesAndUnsafeWorkerFields(t *testing.T) {
 			}
 		})
 	}
-
-	request := httptest.NewRequest(http.MethodGet, "/api/sessions/team-a/chat", nil)
-	request.Header.Set("Authorization", "Bearer secret-token")
-	response := httptest.NewRecorder()
-	server.ServeHTTP(response, request)
-	if response.Code != http.StatusForbidden {
-		t.Fatalf("cross-namespace get status = %d, want %d", response.Code, http.StatusForbidden)
-	}
 }
 
-func TestSessionAPIListsOnlyConfiguredNamespace(t *testing.T) {
+func TestSessionAPIListsRequestedNamespace(t *testing.T) {
 	server := testServer(t)
 	for _, namespace := range []string{"default", "team-a"} {
 		session := &kelos.Session{
@@ -378,19 +368,30 @@ func TestSessionAPIListsOnlyConfiguredNamespace(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	request := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
-	request.Header.Set("Authorization", "Bearer secret-token")
-	response := httptest.NewRecorder()
-	server.ServeHTTP(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("list status = %d body = %s", response.Code, response.Body.String())
-	}
-	var sessions []sessionSummary
-	if err := json.Unmarshal(response.Body.Bytes(), &sessions); err != nil {
-		t.Fatal(err)
-	}
-	if len(sessions) != 1 || sessions[0].Namespace != "default" {
-		t.Fatalf("listed Sessions = %#v", sessions)
+	for _, test := range []struct {
+		name          string
+		path          string
+		wantNamespace string
+	}{
+		{name: "default namespace", path: "/api/sessions", wantNamespace: "default"},
+		{name: "requested namespace", path: "/api/sessions?namespace=team-a", wantNamespace: "team-a"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, test.path, nil)
+			request.Header.Set("Authorization", "Bearer secret-token")
+			response := httptest.NewRecorder()
+			server.ServeHTTP(response, request)
+			if response.Code != http.StatusOK {
+				t.Fatalf("list status = %d body = %s", response.Code, response.Body.String())
+			}
+			var sessions []sessionSummary
+			if err := json.Unmarshal(response.Body.Bytes(), &sessions); err != nil {
+				t.Fatal(err)
+			}
+			if len(sessions) != 1 || sessions[0].Namespace != test.wantNamespace {
+				t.Fatalf("listed Sessions = %#v", sessions)
+			}
+		})
 	}
 }
 
@@ -497,6 +498,26 @@ func TestSessionOptionsAPI(t *testing.T) {
 	if got := strings.Join(options.AgentConfigs, ","); got != "defaults,tools" {
 		t.Errorf("AgentConfig options = %q, want %q", got, "defaults,tools")
 	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/options?namespace=team-a", nil)
+	request.Header.Set("Authorization", "Bearer secret-token")
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("team-a options status = %d body = %s", response.Code, response.Body.String())
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &options); err != nil {
+		t.Fatal(err)
+	}
+	if len(options.Credentials) != 1 || options.Credentials[0].Name != "other-credentials" {
+		t.Errorf("team-a credential options = %#v", options.Credentials)
+	}
+	if got := strings.Join(options.Workspaces, ","); got != "other" {
+		t.Errorf("team-a workspace options = %q, want %q", got, "other")
+	}
+	if got := strings.Join(options.AgentConfigs, ","); got != "other" {
+		t.Errorf("team-a AgentConfig options = %q, want %q", got, "other")
+	}
 }
 
 func TestNewRejectsEmptyToken(t *testing.T) {
@@ -518,7 +539,7 @@ func TestNewRejectsEmptyDefaultNamespace(t *testing.T) {
 func TestConnectSessionBridgesReadySession(t *testing.T) {
 	server := testServer(t)
 	session := &kelos.Session{
-		ObjectMeta: metav1.ObjectMeta{Name: "chat", Namespace: "default"},
+		ObjectMeta: metav1.ObjectMeta{Name: "chat", Namespace: "team-a"},
 		Spec: kelos.SessionSpec{Worker: kelos.WorkerSpec{
 			Type:        "codex",
 			Credentials: &kelos.Credentials{Type: kelos.CredentialTypeNone},
@@ -531,8 +552,8 @@ func TestConnectSessionBridgesReadySession(t *testing.T) {
 	bridged := make(chan struct{})
 	server.bridge = func(_ context.Context, connection *sessionSocket, namespace, podName string) error {
 		defer close(bridged)
-		if namespace != "default" || podName != "chat-pod" {
-			t.Errorf("bridge target = %s/%s, want default/chat-pod", namespace, podName)
+		if namespace != "team-a" || podName != "chat-pod" {
+			t.Errorf("bridge target = %s/%s, want team-a/chat-pod", namespace, podName)
 		}
 		var request map[string]any
 		if err := connection.ReadJSON(&request); err != nil {
@@ -547,7 +568,7 @@ func TestConnectSessionBridgesReadySession(t *testing.T) {
 	httpServer := httptest.NewServer(server)
 	defer httpServer.Close()
 	header := http.Header{"Authorization": []string{"Bearer secret-token"}}
-	connection, response, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http")+"/api/sessions/default/chat/connect", header)
+	connection, response, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http")+"/api/sessions/team-a/chat/connect", header)
 	if err != nil {
 		if response != nil {
 			t.Fatalf("connecting WebSocket: %v (status %d)", err, response.StatusCode)

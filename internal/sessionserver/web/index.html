@@ -21,6 +21,13 @@
       <button class="new-session-button" id="new-session">
         <span aria-hidden="true">＋</span> New session
       </button>
+      <form class="namespace-form" id="namespace-form">
+        <label for="active-namespace">Namespace</label>
+        <div>
+          <input id="active-namespace" required autocomplete="off" aria-label="Active namespace">
+          <button type="submit">Switch</button>
+        </div>
+      </form>
       <div class="sidebar-label">Conversations</div>
       <div class="session-list" id="session-list" aria-live="polite"></div>
       <div class="sidebar-footer">
@@ -166,7 +173,7 @@
       <div class="mode-panel yaml-panel" id="session-yaml-panel" hidden>
         <label for="session-yaml">Session manifest</label>
         <textarea id="session-yaml" name="sessionYAML" rows="19" spellcheck="false" aria-describedby="session-yaml-help"></textarea>
-        <small id="session-yaml-help">Apply one <code>kelos.dev/v1alpha2</code> Session in the configured namespace.</small>
+        <small id="session-yaml-help">Apply one <code>kelos.dev/v1alpha2</code> Session in the active namespace.</small>
       </div>
       <div class="dialog-error" id="dialog-error" role="alert"></div>
       <div class="dialog-actions">

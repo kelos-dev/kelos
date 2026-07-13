@@ -118,6 +118,22 @@ func (p *fakeProvider) Close() error {
 	return nil
 }
 
+func TestSessionSetupEnvironmentKeepsWorkspaceSetupCommand(t *testing.T) {
+	setupCommand := `KELOS_SETUP_COMMAND=["sh","-c","pip install --user some-tool"]`
+	environment := sessionSetupEnvironment([]string{setupCommand, "KELOS_SESSION_SETUP_ONLY=0"})
+	values := map[string]string{}
+	for _, entry := range environment {
+		name, value, _ := strings.Cut(entry, "=")
+		values[name] = value
+	}
+	if values["KELOS_SETUP_COMMAND"] != strings.TrimPrefix(setupCommand, "KELOS_SETUP_COMMAND=") {
+		t.Fatalf("KELOS_SETUP_COMMAND = %q", values["KELOS_SETUP_COMMAND"])
+	}
+	if values["KELOS_SESSION_SETUP_ONLY"] != "1" {
+		t.Fatalf("KELOS_SESSION_SETUP_ONLY = %q, want 1", values["KELOS_SESSION_SETUP_ONLY"])
+	}
+}
+
 func TestServerSharesConversationAcrossConnections(t *testing.T) {
 	stateDir := shortRuntimeTempDir(t)
 	journal := NewJournal()
@@ -143,7 +159,7 @@ func TestServerSharesConversationAcrossConnections(t *testing.T) {
 	if err := encoder.Encode(ClientRequest{Type: "subscribe"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := encoder.Encode(ClientRequest{Type: "message", Text: "hello"}); err != nil {
+	if err := encoder.Encode(ClientRequest{Type: "message", RequestID: "request-message", Text: "hello"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -160,6 +176,11 @@ func TestServerSharesConversationAcrossConnections(t *testing.T) {
 	}
 	_ = connection.Close()
 	assertEventTypes(t, first, EventUserMessage, EventTurnStarted, EventAssistantDelta)
+	for _, event := range first {
+		if event.Type == EventUserMessage && event.RequestID != "request-message" {
+			t.Fatalf("user message request ID = %q", event.RequestID)
+		}
+	}
 
 	second, err := net.Dial("unix", config.SocketPath)
 	if err != nil {
@@ -271,10 +292,10 @@ func TestServerSharesInputRequestAcrossConnections(t *testing.T) {
 		retained = append(retained, event)
 	}
 	assertEventTypes(t, retained, EventInputRequested)
-	if err := secondEncoder.Encode(ClientRequest{Type: "input", InputID: "input-test", Answers: map[string][]string{"first": {"one"}}}); err != nil {
+	if err := secondEncoder.Encode(ClientRequest{Type: "input", RequestID: "request-input-1", InputID: "input-test", Answers: map[string][]string{"first": {"one"}}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := secondEncoder.Encode(ClientRequest{Type: "input", InputID: "input-test", Answers: map[string][]string{"second": {"two", "three"}}}); err != nil {
+	if err := secondEncoder.Encode(ClientRequest{Type: "input", RequestID: "request-input-2", InputID: "input-test", Answers: map[string][]string{"second": {"two", "three"}}}); err != nil {
 		t.Fatal(err)
 	}
 	var resumed []Event
@@ -288,7 +309,16 @@ func TestServerSharesInputRequestAcrossConnections(t *testing.T) {
 			break
 		}
 	}
-	assertEventTypes(t, resumed, EventInputResolved, EventAssistantMessage, EventTurnCompleted)
+	assertEventTypes(t, resumed, EventRequestAccepted, EventInputResolved, EventAssistantMessage, EventTurnCompleted)
+	requestIDs := map[string]bool{}
+	for _, event := range resumed {
+		if event.RequestID != "" {
+			requestIDs[event.RequestID] = true
+		}
+	}
+	if !requestIDs["request-input-1"] || !requestIDs["request-input-2"] {
+		t.Fatalf("input response request IDs = %v", requestIDs)
+	}
 	select {
 	case answers := <-provider.answers:
 		if !reflect.DeepEqual(answers, map[string][]string{"first": {"one"}, "second": {"two", "three"}}) {
@@ -336,7 +366,7 @@ func TestServerInterruptsActiveTurn(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("provider turn did not start")
 	}
-	if err := encoder.Encode(ClientRequest{Type: "interrupt"}); err != nil {
+	if err := encoder.Encode(ClientRequest{Type: "interrupt", RequestID: "request-interrupt"}); err != nil {
 		t.Fatal(err)
 	}
 	var events []Event
@@ -354,10 +384,52 @@ func TestServerInterruptsActiveTurn(t *testing.T) {
 		}
 	}
 	assertEventTypes(t, events, EventTurnInterrupting, EventTurnCompleted)
+	for _, event := range events {
+		if event.Type == EventTurnInterrupting && event.RequestID != "request-interrupt" {
+			t.Fatalf("interrupt request ID = %q", event.RequestID)
+		}
+	}
 
 	cancel()
 	if err := <-serveDone; err != nil {
 		t.Fatalf("Serve() error = %v", err)
+	}
+}
+
+func TestServerRecoversActiveTurnAfterShutdown(t *testing.T) {
+	journal := NewJournal()
+	defer journal.Close()
+	provider := &fakeProvider{resume: make(chan struct{})}
+	server := NewServer(Config{}, journal, provider)
+	_, events, _, stop := journal.Subscribe(0)
+	defer stop()
+	ctx, cancel := context.WithCancel(context.Background())
+	turnDone := make(chan struct{})
+	go func() {
+		server.runTurn(ctx, turnRequest{id: "turn-1"})
+		close(turnDone)
+	}()
+
+	if event := <-events; event.Type != EventTurnStarted {
+		t.Fatalf("first event = %#v", event)
+	}
+	if event := <-events; event.Type != EventAssistantDelta {
+		t.Fatalf("second event = %#v", event)
+	}
+	cancel()
+	select {
+	case <-turnDone:
+	case <-time.After(time.Second):
+		t.Fatal("active turn did not stop")
+	}
+
+	if _, err := recoverJournal(journal); err != nil {
+		t.Fatal(err)
+	}
+	recovered := journal.Snapshot()
+	assertEventTypes(t, recovered, EventTurnStarted, EventAssistantDelta, EventRuntimeRecovered, EventTurnCompleted)
+	if completion := recovered[len(recovered)-1]; completion.Status != "interrupted" {
+		t.Fatalf("recovered turn completion = %#v", completion)
 	}
 }
 
@@ -385,6 +457,97 @@ func TestInputRequestCancellationResolvesEvent(t *testing.T) {
 	}
 	if event := <-events; event.Type != EventInputResolved || event.Status != "cancelled" {
 		t.Fatalf("resolved event = %#v", event)
+	}
+}
+
+func TestSubmitMessageDoesNotStartProviderWhenJournalWriteFails(t *testing.T) {
+	journal, err := OpenJournal(filepath.Join(t.TempDir(), journalFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	if err := journal.file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	provider := &fakeProvider{}
+	server := NewServer(Config{}, journal, provider)
+	ctx, cancel := context.WithCancel(context.Background())
+	runDone := make(chan struct{})
+	go func() {
+		server.runTurns(ctx)
+		close(runDone)
+	}()
+	if err := server.submitMessage("work", "request-message"); err == nil {
+		t.Fatal("submitMessage() succeeded after the journal failed")
+	}
+	cancel()
+	<-runDone
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	if len(provider.prompts) != 0 {
+		t.Fatalf("provider prompts = %v, want none", provider.prompts)
+	}
+}
+
+func TestServerSerializesConcurrentMessageAcceptance(t *testing.T) {
+	journal := NewJournal()
+	defer journal.Close()
+	server := NewServer(Config{}, journal, &fakeProvider{})
+	firstAppending := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	secondAppending := make(chan struct{})
+	appendMessage := server.appendMessage
+	server.appendMessage = func(event Event) error {
+		switch event.Text {
+		case "first":
+			close(firstAppending)
+			<-releaseFirst
+		case "second":
+			close(secondAppending)
+		}
+		return appendMessage(event)
+	}
+
+	firstDone := make(chan error, 1)
+	go func() { firstDone <- server.submitMessage("first", "request-first") }()
+	select {
+	case <-firstAppending:
+	case <-time.After(time.Second):
+		t.Fatal("first message did not reach the journal")
+	}
+	secondDone := make(chan error, 1)
+	secondStarted := make(chan struct{})
+	go func() {
+		close(secondStarted)
+		secondDone <- server.submitMessage("second", "request-second")
+	}()
+	<-secondStarted
+	secondReachedJournal := false
+	select {
+	case <-secondAppending:
+		secondReachedJournal = true
+	case <-time.After(time.Second):
+	}
+	close(releaseFirst)
+	if err := <-firstDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-secondDone; err != nil {
+		t.Fatal(err)
+	}
+	if secondReachedJournal {
+		t.Fatal("second message reached the journal before the first message was accepted")
+	}
+
+	events := journal.Snapshot()
+	assertEventTypes(t, events, EventUserMessage, EventUserMessage)
+	if events[0].Text != "first" || events[1].Text != "second" {
+		t.Fatalf("message order = %q, %q", events[0].Text, events[1].Text)
+	}
+	firstTurn := <-server.turns
+	secondTurn := <-server.turns
+	if firstTurn.text != "first" || secondTurn.text != "second" {
+		t.Fatalf("turn order = %q, %q", firstTurn.text, secondTurn.text)
 	}
 }
 

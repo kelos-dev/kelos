@@ -1,7 +1,7 @@
 # Interactive Session
 
-This example creates one Claude Code conversation in a dedicated Pod. Replace
-the API key placeholder, then apply both files:
+This example creates one Claude Code conversation in a dedicated one-replica
+StatefulSet. Replace the API key placeholder, then apply both files:
 
 ```bash
 kubectl apply -f examples/16-session/
@@ -20,7 +20,11 @@ provider question.
 
 The same conversation is available in the Session web application when the
 shared Session server is enabled. Disconnecting either client does not stop the
-agent runtime. Deleting the Session deletes its Pod and ends the conversation:
+agent runtime. If the Pod is removed, the StatefulSet recreates it on the
+Session's persistent workspace; active work is marked interrupted and both
+clients reconnect without replaying it. Deleting the Session deletes its
+StatefulSet, Pod, governing Service, and persistent workspace and ends the
+conversation:
 
 ```bash
 kubectl delete session interactive-review

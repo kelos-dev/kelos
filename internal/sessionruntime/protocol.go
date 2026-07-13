@@ -4,6 +4,8 @@ import "context"
 
 const (
 	EventHistoryEnd       = "history.end"
+	EventRequestAccepted  = "request.accepted"
+	EventRuntimeRecovered = "runtime.recovered"
 	EventUserMessage      = "user.message"
 	EventTurnStarted      = "turn.started"
 	EventTurnInterrupting = "turn.interrupting"
@@ -22,6 +24,7 @@ const (
 type Event struct {
 	ID        int64           `json:"id,omitempty"`
 	Type      string          `json:"type"`
+	RequestID string          `json:"requestId,omitempty"`
 	TurnID    string          `json:"turnId,omitempty"`
 	Text      string          `json:"text,omitempty"`
 	ToolID    string          `json:"toolId,omitempty"`
@@ -34,12 +37,13 @@ type Event struct {
 
 // ClientRequest is a command sent by a web or terminal client.
 type ClientRequest struct {
-	Type    string              `json:"type"`
-	Since   int64               `json:"since,omitempty"`
-	Text    string              `json:"text,omitempty"`
-	InputID string              `json:"inputId,omitempty"`
-	Answers map[string][]string `json:"answers,omitempty"`
-	Cancel  bool                `json:"cancel,omitempty"`
+	Type      string              `json:"type"`
+	RequestID string              `json:"requestId,omitempty"`
+	Since     int64               `json:"since,omitempty"`
+	Text      string              `json:"text,omitempty"`
+	InputID   string              `json:"inputId,omitempty"`
+	Answers   map[string][]string `json:"answers,omitempty"`
+	Cancel    bool                `json:"cancel,omitempty"`
 }
 
 // InputOption describes one structured answer offered by a provider.

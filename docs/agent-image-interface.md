@@ -23,21 +23,36 @@ The task prompt is passed as the first positional argument (`$1`). Kelos sets
 `Args: ["<prompt>"]` on the container.
 
 For a `Session`, Kelos injects its own long-running process as the container
-command. That process invokes `/kelos_entrypoint.sh` once with
+command. That process invokes `/kelos_entrypoint.sh` when the runtime starts with
 `KELOS_SESSION_SETUP_ONLY=1` and no prompt. In this mode the entrypoint must
 prepare credentials, instructions, plugins, MCP configuration, and the
 workspace setup command, then exit successfully without starting the provider.
+Kelos runs the workspace setup command whenever the Session runtime container
+starts, including in a replacement Pod, because setup can install into the
+container's writable layer. Setup commands must therefore be safe to run again.
+The built-in repository clone, remotes, branch, and workspace-file initialization
+are skipped when a replacement Pod resumes an initialized workspace.
 The corresponding `claude`, `codex`, or `opencode` executable must remain available on
 `PATH` for the Session runtime.
 
-For Codex Sessions, Kelos sets `CODEX_HOME` to Pod-local Session storage so the
-app-server thread can resume after a container restart. Codex-compatible
-entrypoints must write authentication, configuration, instructions, and skills
-under `CODEX_HOME` when it is set.
+The provider-state paths below are stored on the Session workspace. They survive
+container restarts. They survive Pod replacement only when
+`Session.spec.volumeClaimTemplate` is configured; an `emptyDir` workspace is
+discarded with the Pod.
+
+For Claude Code Sessions, Kelos sets `CLAUDE_CONFIG_DIR` to the Session workspace
+so provider credentials and conversation state can be reused by a restarted
+runtime. Claude-compatible entrypoints must honor this variable.
+
+For Codex Sessions, Kelos sets `CODEX_HOME` to the Session workspace so the
+app-server thread can resume from retained state. Codex-compatible entrypoints
+must write authentication, configuration, instructions, and skills under
+`CODEX_HOME` when it is set.
 
 For OpenCode Sessions, Kelos sets `OPENCODE_CONFIG_DIR` and `XDG_DATA_HOME` to
-Pod-local Session storage so configuration and the provider conversation survive
-a container restart. OpenCode-compatible entrypoints must honor these variables.
+the Session workspace so configuration and the provider conversation can be
+reused by a restarted runtime. OpenCode-compatible entrypoints must honor these
+variables.
 
 ### 3. Environment variables
 
@@ -143,10 +158,10 @@ failures when tailing pod logs.
 
 For GitHub App-backed workspaces, the installation token has a ~1h TTL but
 the controller re-mints it in place while the workload is running. This
-applies to both per-Task Jobs and long-lived WorkerPool StatefulSets. The
+applies to per-Task Jobs and long-lived Session and WorkerPool StatefulSets. The
 `GITHUB_TOKEN`, `GH_TOKEN`, and `GH_ENTERPRISE_TOKEN` env vars are still
 set for compatibility, but their values are frozen at pod start and will
-expire mid-run for long-running tasks and for pooled workers.
+expire mid-run for Sessions, long-running Tasks, and pooled workers.
 
 **Custom agent images should read `$KELOS_GITHUB_TOKEN_FILE` on each
 GitHub call** instead of capturing the env var once. The file is mounted

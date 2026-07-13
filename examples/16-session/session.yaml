@@ -4,6 +4,12 @@ metadata:
   name: interactive-review
   namespace: default
 spec:
+  volumeClaimTemplate:
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 10Gi
   worker:
     type: claude-code
     credentials:

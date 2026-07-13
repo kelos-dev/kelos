@@ -7,8 +7,6 @@ import (
 	"testing"
 
 	"k8s.io/client-go/rest"
-
-	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 )
 
 func TestSessionConnectStreamsReadySession(t *testing.T) {
@@ -21,16 +19,10 @@ func TestSessionConnectStreamsReadySession(t *testing.T) {
 		resolveConfig: func() (*rest.Config, string, error) {
 			return restConfig, "team-a", nil
 		},
-		getSession: func(_ context.Context, gotConfig *rest.Config, namespace, name string) (*kelos.Session, error) {
-			if gotConfig != restConfig || namespace != "team-a" || name != "chat" {
-				t.Fatalf("Session lookup = config %p namespace %q name %q", gotConfig, namespace, name)
-			}
-			return &kelos.Session{Status: kelos.SessionStatus{Phase: kelos.SessionPhaseReady, PodName: "chat-pod"}}, nil
-		},
-		connect: func(_ context.Context, gotConfig *rest.Config, namespace, podName string, gotStdin io.Reader, gotStdout, gotStderr io.Writer, color bool) error {
+		connect: func(_ context.Context, gotConfig *rest.Config, namespace, name string, gotStdin io.Reader, gotStdout, gotStderr io.Writer, color bool) error {
 			connected = true
-			if gotConfig != restConfig || namespace != "team-a" || podName != "chat-pod" {
-				t.Fatalf("Session connection = config %p namespace %q pod %q", gotConfig, namespace, podName)
+			if gotConfig != restConfig || namespace != "team-a" || name != "chat" {
+				t.Fatalf("Session connection = config %p namespace %q name %q", gotConfig, namespace, name)
 			}
 			if gotStdin != stdin || gotStdout != stdout || gotStderr != stderr {
 				t.Fatal("Session connection did not receive the command streams")

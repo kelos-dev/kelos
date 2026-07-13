@@ -22,7 +22,9 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/sessionruntime"
@@ -65,28 +67,36 @@ var _ = Describe("Session remote control", func() {
 
 		created := createSession(f, &kelos.Session{
 			ObjectMeta: metav1.ObjectMeta{Name: sessionName, Namespace: sessionWebNamespace},
-			Spec: kelos.SessionSpec{Worker: kelos.WorkerSpec{
-				Type:        "claude-code",
-				Credentials: &kelos.Credentials{Type: kelos.CredentialTypeNone},
-				PodOverrides: &kelos.PodOverrides{
-					Env: []corev1.EnvVar{{
-						Name:  "PATH",
-						Value: "/workspace/fake-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-					}},
-					Volumes: []corev1.Volume{{
-						Name: "fake-provider",
-						VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
-							LocalObjectReference: corev1.LocalObjectReference{Name: configMapName},
-							DefaultMode:          &mode,
+			Spec: kelos.SessionSpec{
+				Worker: kelos.WorkerSpec{
+					Type:        "claude-code",
+					Credentials: &kelos.Credentials{Type: kelos.CredentialTypeNone},
+					PodOverrides: &kelos.PodOverrides{
+						Env: []corev1.EnvVar{{
+							Name:  "PATH",
+							Value: "/workspace/fake-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 						}},
-					}},
-					VolumeMounts: []corev1.VolumeMount{{
-						Name:      "fake-provider",
-						MountPath: "/workspace/fake-bin",
-						ReadOnly:  true,
+						Volumes: []corev1.Volume{{
+							Name: "fake-provider",
+							VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+								LocalObjectReference: corev1.LocalObjectReference{Name: configMapName},
+								DefaultMode:          &mode,
+							}},
+						}},
+						VolumeMounts: []corev1.VolumeMount{{
+							Name:      "fake-provider",
+							MountPath: "/workspace/fake-bin",
+							ReadOnly:  true,
+						}},
+					},
+				},
+				VolumeClaimTemplate: &corev1.PersistentVolumeClaimSpec{
+					AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+					Resources: corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{
+						corev1.ResourceStorage: resource.MustParse("1Gi"),
 					}},
 				},
-			}},
+			},
 		})
 		DeferCleanup(func() {
 			_ = f.KelosClientset.ApiV1alpha2().Sessions(sessionWebNamespace).Delete(context.TODO(), sessionName, metav1.DeleteOptions{})
@@ -101,7 +111,14 @@ var _ = Describe("Session remote control", func() {
 		pod, err := f.Clientset.CoreV1().Pods(sessionWebNamespace).Get(context.TODO(), current.Status.PodName, metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(current.Status.PodUID).To(Equal(pod.UID))
-		Expect(metav1.IsControlledBy(pod, created)).To(BeTrue())
+		controllerRef := metav1.GetControllerOf(pod)
+		Expect(controllerRef).NotTo(BeNil())
+		statefulSet, err := f.Clientset.AppsV1().StatefulSets(sessionWebNamespace).Get(context.TODO(), controllerRef.Name, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(metav1.IsControlledBy(statefulSet, created)).To(BeTrue())
+		Expect(metav1.IsControlledBy(pod, statefulSet)).To(BeTrue())
+		Expect(statefulSet.Spec.Replicas).NotTo(BeNil())
+		Expect(*statefulSet.Spec.Replicas).To(Equal(int32(1)))
 		pods, err := f.Clientset.CoreV1().Pods(sessionWebNamespace).List(context.TODO(), metav1.ListOptions{
 			LabelSelector: "kelos.dev/session=" + sessionName,
 		})
@@ -183,9 +200,52 @@ var _ = Describe("Session remote control", func() {
 		waitForTurnCompletion(connection, "completed")
 		Expect(waitForSessionPhase(f, sessionWebNamespace, sessionName, kelos.SessionPhaseReady).Status.PodUID).To(Equal(pod.UID))
 
-		By("deleting the Session and its owned Pod")
+		By("recovering conversation and workspace state after the Pod is deleted")
+		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "message", Text: "write-state"})
+		waitForSessionEvent(connection, func(event sessionruntime.Event) bool {
+			return event.Type == sessionruntime.EventAssistantDelta && event.Text == "turn 7: state written"
+		})
+		waitForTurnCompletion(connection, "completed")
+		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "message", Text: "block"})
+		waitForSessionEvent(connection, func(event sessionruntime.Event) bool {
+			return event.Type == sessionruntime.EventTurnStarted && event.TurnID == "turn-8"
+		})
+		oldPodUID := pod.UID
+		oldClaimName := sessionWorkspaceClaimName(pod)
+		Expect(oldClaimName).NotTo(BeEmpty())
+		Expect(f.Clientset.CoreV1().Pods(sessionWebNamespace).Delete(context.TODO(), pod.Name, metav1.DeleteOptions{})).To(Succeed())
+		_ = connection.Close()
+
+		recovered := waitForSessionPodReplacement(f, sessionWebNamespace, sessionName, oldPodUID)
+		replacement, err := f.Clientset.CoreV1().Pods(sessionWebNamespace).Get(context.TODO(), recovered.Status.PodName, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(replacement.UID).NotTo(Equal(oldPodUID))
+		Expect(sessionWorkspaceClaimName(replacement)).To(Equal(oldClaimName))
+
+		connection = connectSessionWebSocket(webClient, baseURL, sessionName)
+		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "subscribe"})
+		seenRecovery := false
+		seenInterruptedTurn := false
+		for {
+			event := readSessionEvent(connection)
+			seenRecovery = seenRecovery || event.Type == sessionruntime.EventRuntimeRecovered
+			seenInterruptedTurn = seenInterruptedTurn || (event.Type == sessionruntime.EventTurnCompleted && event.TurnID == "turn-8" && event.Status == "interrupted")
+			if event.Type == sessionruntime.EventHistoryEnd {
+				break
+			}
+		}
+		Expect(seenRecovery).To(BeTrue())
+		Expect(seenInterruptedTurn).To(BeTrue())
+		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "message", Text: "read-state"})
+		waitForSessionEvent(connection, func(event sessionruntime.Event) bool {
+			return event.Type == sessionruntime.EventAssistantDelta && event.Text == "turn 9: state preserved"
+		})
+		waitForTurnCompletion(connection, "completed")
+
+		By("deleting the Session and its StatefulSet-backed Pod")
 		Expect(f.KelosClientset.ApiV1alpha2().Sessions(sessionWebNamespace).Delete(context.TODO(), sessionName, metav1.DeleteOptions{})).To(Succeed())
 		waitForPodDeletion(f, sessionWebNamespace, pod.Name)
+		waitForPVCDeletion(f, sessionWebNamespace, oldClaimName)
 	})
 
 	It("runs an OpenCode conversation through terminal chat", func() {
@@ -307,11 +367,40 @@ func waitForSessionPhase(f *framework.Framework, namespace, name string, phase k
 	return session
 }
 
+func waitForSessionPodReplacement(f *framework.Framework, namespace, name string, oldUID types.UID) *kelos.Session {
+	var recovered *kelos.Session
+	Eventually(func() bool {
+		session, err := f.KelosClientset.ApiV1alpha2().Sessions(namespace).Get(context.TODO(), name, metav1.GetOptions{})
+		if err != nil || session.Status.Phase != kelos.SessionPhaseReady || session.Status.PodUID == "" || session.Status.PodUID == oldUID {
+			return false
+		}
+		recovered = session
+		return true
+	}, 3*time.Minute, time.Second).Should(BeTrue(), "Session %s/%s did not recover from Pod loss", namespace, name)
+	return recovered
+}
+
+func sessionWorkspaceClaimName(pod *corev1.Pod) string {
+	for _, volume := range pod.Spec.Volumes {
+		if volume.Name == "workspace" && volume.PersistentVolumeClaim != nil {
+			return volume.PersistentVolumeClaim.ClaimName
+		}
+	}
+	return ""
+}
+
 func waitForPodDeletion(f *framework.Framework, namespace, name string) {
 	Eventually(func() bool {
 		_, err := f.Clientset.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 		return apierrors.IsNotFound(err)
 	}, 2*time.Minute, time.Second).Should(BeTrue(), "Pod %s/%s was not deleted", namespace, name)
+}
+
+func waitForPVCDeletion(f *framework.Framework, namespace, name string) {
+	Eventually(func() bool {
+		_, err := f.Clientset.CoreV1().PersistentVolumeClaims(namespace).Get(context.TODO(), name, metav1.GetOptions{})
+		return apierrors.IsNotFound(err)
+	}, 2*time.Minute, time.Second).Should(BeTrue(), "PersistentVolumeClaim %s/%s was not deleted", namespace, name)
 }
 
 func collectSessionDebugInfo(f *framework.Framework, namespace, name string) {
@@ -330,6 +419,14 @@ func collectSessionDebugInfo(f *framework.Framework, namespace, name string) {
 		return
 	}
 	fmt.Fprintf(GinkgoWriter, "Session Pod %s/%s: phase=%s\n", namespace, pod.Name, pod.Status.Phase)
+	if claimName := sessionWorkspaceClaimName(pod); claimName != "" {
+		claim, err := f.Clientset.CoreV1().PersistentVolumeClaims(namespace).Get(context.TODO(), claimName, metav1.GetOptions{})
+		if err != nil {
+			fmt.Fprintf(GinkgoWriter, "Session PersistentVolumeClaim %s/%s: %v\n", namespace, claimName, err)
+		} else {
+			fmt.Fprintf(GinkgoWriter, "Session PersistentVolumeClaim %s/%s: phase=%s\n", namespace, claimName, claim.Status.Phase)
+		}
+	}
 	containers := make([]corev1.Container, 0, len(pod.Spec.InitContainers)+len(pod.Spec.Containers))
 	containers = append(containers, pod.Spec.InitContainers...)
 	containers = append(containers, pod.Spec.Containers...)

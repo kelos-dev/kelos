@@ -138,6 +138,9 @@ var _ = Describe("Session remote control", func() {
 		Eventually(func() []string {
 			return listWebSessions(webClient, baseURL, f.Namespace)
 		}, 30*time.Second, 200*time.Millisecond).Should(ContainElement(sessionName))
+		Eventually(func() sessionruntime.RuntimeState {
+			return webSessionRuntimeState(webClient, baseURL, f.Namespace, sessionName)
+		}, 30*time.Second, 200*time.Millisecond).Should(Equal(sessionruntime.RuntimeStateWaiting))
 
 		connection := connectSessionWebSocket(webClient, baseURL, f.Namespace, sessionName)
 		DeferCleanup(func() { _ = connection.Close() })
@@ -169,6 +172,9 @@ var _ = Describe("Session remote control", func() {
 		})
 		Expect(input.Questions).To(HaveLen(1))
 		Expect(input.Questions[0].Question).To(Equal("Which database?"))
+		Eventually(func() sessionruntime.RuntimeState {
+			return webSessionRuntimeState(webClient, baseURL, f.Namespace, sessionName)
+		}, 30*time.Second, 200*time.Millisecond).Should(Equal(sessionruntime.RuntimeStateWaiting))
 		sendSessionRequest(connection, sessionruntime.ClientRequest{
 			Type:    "input",
 			InputID: input.InputID,
@@ -184,11 +190,26 @@ var _ = Describe("Session remote control", func() {
 		waitForSessionEvent(connection, func(event sessionruntime.Event) bool {
 			return event.Type == sessionruntime.EventTurnStarted
 		})
+		_ = connection.Close()
+		Eventually(func() sessionruntime.RuntimeState {
+			return webSessionRuntimeState(webClient, baseURL, f.Namespace, sessionName)
+		}, 30*time.Second, 200*time.Millisecond).Should(Equal(sessionruntime.RuntimeStateRunning))
+		connection = connectSessionWebSocket(webClient, baseURL, f.Namespace, sessionName)
+		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "subscribe"})
+		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "status"})
+		for readSessionEvent(connection).Type != sessionruntime.EventHistoryEnd {
+		}
+		status := readSessionEvent(connection)
+		Expect(status.Type).To(Equal(sessionruntime.EventRuntimeStatus))
+		Expect(status.RuntimeState).To(Equal(sessionruntime.RuntimeStateRunning))
 		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "interrupt"})
 		waitForSessionEvent(connection, func(event sessionruntime.Event) bool {
 			return event.Type == sessionruntime.EventTurnInterrupting
 		})
 		waitForTurnCompletion(connection, "interrupted")
+		Eventually(func() sessionruntime.RuntimeState {
+			return webSessionRuntimeState(webClient, baseURL, f.Namespace, sessionName)
+		}, 30*time.Second, 200*time.Millisecond).Should(Equal(sessionruntime.RuntimeStateWaiting))
 
 		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "message", Text: "after"})
 		waitForSessionEvent(connection, func(event sessionruntime.Event) bool {
@@ -524,6 +545,30 @@ func listWebSessions(client *http.Client, baseURL, namespace string) []string {
 		names = append(names, session.Name)
 	}
 	return names
+}
+
+func webSessionRuntimeState(client *http.Client, baseURL, namespace, name string) sessionruntime.RuntimeState {
+	response, err := client.Get(baseURL + "/api/sessions?namespace=" + url.QueryEscape(namespace))
+	if err != nil {
+		return ""
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return ""
+	}
+	var sessions []struct {
+		Name         string                      `json:"name"`
+		RuntimeState sessionruntime.RuntimeState `json:"runtimeState"`
+	}
+	if json.NewDecoder(response.Body).Decode(&sessions) != nil {
+		return ""
+	}
+	for _, session := range sessions {
+		if session.Name == name {
+			return session.RuntimeState
+		}
+	}
+	return ""
 }
 
 func connectSessionWebSocket(client *http.Client, baseURL, namespace, sessionName string) *websocket.Conn {

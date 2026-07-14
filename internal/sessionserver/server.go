@@ -18,8 +18,10 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
+	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -34,6 +36,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
+	"github.com/kelos-dev/kelos/internal/sessionruntime"
 )
 
 const (
@@ -68,6 +71,7 @@ type Server struct {
 	handler          http.Handler
 	upgrader         websocket.Upgrader
 	bridge           func(context.Context, *sessionSocket, string, string) error
+	runtimeState     func(context.Context, string, string) (sessionruntime.RuntimeState, error)
 }
 
 type sessionSocket struct {
@@ -88,11 +92,12 @@ func (c *sessionSocket) WriteMessage(messageType int, data []byte) error {
 }
 
 type sessionSummary struct {
-	Name      string             `json:"name"`
-	Namespace string             `json:"namespace"`
-	Provider  string             `json:"provider"`
-	Phase     kelos.SessionPhase `json:"phase,omitempty"`
-	Message   string             `json:"message,omitempty"`
+	Name         string                      `json:"name"`
+	Namespace    string                      `json:"namespace"`
+	Provider     string                      `json:"provider"`
+	Phase        kelos.SessionPhase          `json:"phase,omitempty"`
+	Message      string                      `json:"message,omitempty"`
+	RuntimeState sessionruntime.RuntimeState `json:"runtimeState,omitempty"`
 }
 
 type sessionOptions struct {
@@ -182,6 +187,7 @@ func New(config Config) (*Server, error) {
 		},
 	}
 	server.bridge = server.bridgeExec
+	server.runtimeState = server.queryRuntimeState
 	server.handler = server.routes()
 	return server, nil
 }
@@ -336,6 +342,31 @@ func (s *Server) listSessions(writer http.ResponseWriter, request *http.Request)
 	items := make([]sessionSummary, 0, len(list.Items))
 	for i := range list.Items {
 		items = append(items, summarize(&list.Items[i]))
+	}
+	statusContext, cancel := context.WithTimeout(request.Context(), 4*time.Second)
+	defer cancel()
+	group, statusContext := errgroup.WithContext(statusContext)
+	group.SetLimit(8)
+	for i := range list.Items {
+		if list.Items[i].Status.Phase != kelos.SessionPhaseReady {
+			continue
+		}
+		if list.Items[i].Status.PodName == "" {
+			writeError(writer, http.StatusInternalServerError, fmt.Sprintf("getting runtime state for Session %q: ready Session has no Pod", list.Items[i].Name))
+			return
+		}
+		group.Go(func() error {
+			state, err := s.runtimeState(statusContext, list.Items[i].Namespace, list.Items[i].Status.PodName)
+			if err != nil {
+				return fmt.Errorf("getting runtime state for Session %q: %w", list.Items[i].Name, err)
+			}
+			items[i].RuntimeState = state
+			return nil
+		})
+	}
+	if err := group.Wait(); err != nil {
+		writeError(writer, http.StatusInternalServerError, err.Error())
+		return
 	}
 	writeJSON(writer, http.StatusOK, items)
 }
@@ -639,6 +670,39 @@ func (s *Server) bridgeExec(ctx context.Context, connection *sessionSocket, name
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+func (s *Server) queryRuntimeState(ctx context.Context, namespace, podName string) (sessionruntime.RuntimeState, error) {
+	request := s.clientset.CoreV1().RESTClient().Post().
+		Resource("pods").
+		Namespace(namespace).
+		Name(podName).
+		SubResource("exec")
+	request.VersionedParams(&corev1.PodExecOptions{
+		Container: kelos.AgentContainerName,
+		Command:   []string{sessionRuntimeClient, "status"},
+		Stdout:    true,
+		Stderr:    true,
+		TTY:       false,
+	}, clientgoscheme.ParameterCodec)
+	executor, err := remotecommand.NewSPDYExecutor(s.restConfig, http.MethodPost, request.URL())
+	if err != nil {
+		return "", fmt.Errorf("creating Session status connection: %w", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := executor.StreamWithContext(ctx, remotecommand.StreamOptions{Stdout: &stdout, Stderr: &stderr, Tty: false}); err != nil {
+		if message := strings.TrimSpace(stderr.String()); message != "" {
+			return "", fmt.Errorf("querying Session runtime: %w: %s", err, message)
+		}
+		return "", fmt.Errorf("querying Session runtime: %w", err)
+	}
+	state := sessionruntime.RuntimeState(strings.TrimSpace(stdout.String()))
+	if state != sessionruntime.RuntimeStateRunning && state != sessionruntime.RuntimeStateWaiting {
+		return "", fmt.Errorf("querying Session runtime: invalid state %q", state)
+	}
+	return state, nil
 }
 
 func newJSONLineScanner(reader io.Reader) *bufio.Scanner {

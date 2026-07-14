@@ -100,6 +100,19 @@ function providerInitials(provider) {
   return provider === 'claude-code' ? 'CC' : provider === 'codex' ? 'CX' : provider === 'opencode' ? 'OC' : 'AI';
 }
 
+function sessionStatus(session) {
+  return session.phase === 'Ready' ? session.runtimeState : (session.phase || 'Pending');
+}
+
+function updateSelectedRuntimeState(runtimeState) {
+  if (!state.selected || !['Running', 'Waiting'].includes(runtimeState)) return;
+  state.selected.runtimeState = runtimeState;
+  const listed = state.sessions.find(session => sessionKey(session) === sessionKey(state.selected));
+  if (listed) listed.runtimeState = runtimeState;
+  renderSessions();
+  renderHeader();
+}
+
 function renderSessions() {
   elements.list.replaceChildren();
   if (!state.sessions.length) {
@@ -114,7 +127,7 @@ function renderSessions() {
     button.className = `session-item${state.selected && sessionKey(state.selected) === sessionKey(session) ? ' active' : ''}`;
     button.type = 'button';
     const dot = document.createElement('span');
-    dot.className = `phase-dot ${String(session.phase || '').toLowerCase()}`;
+    dot.className = `phase-dot ${String(sessionStatus(session) || '').toLowerCase()}`;
     const text = document.createElement('span');
     const name = document.createElement('div');
     name.className = 'session-item-name';
@@ -126,7 +139,9 @@ function renderSessions() {
     provider.textContent = providerLabel(session.provider);
     const namespace = document.createElement('span');
     namespace.textContent = `· ${session.namespace}`;
-    meta.append(provider, namespace);
+    const status = document.createElement('span');
+    status.textContent = `· ${sessionStatus(session)}`;
+    meta.append(provider, namespace, status);
     text.append(name, meta);
     button.append(dot, text);
     button.addEventListener('click', () => selectSession(session));
@@ -434,7 +449,7 @@ function renderHeader() {
     return;
   }
   elements.title.textContent = session.name;
-  elements.meta.textContent = `${session.namespace} · ${providerLabel(session.provider)} · ${session.phase || 'Pending'}`;
+  elements.meta.textContent = `${session.namespace} · ${providerLabel(session.provider)} · ${sessionStatus(session)}`;
   if (session.phase !== 'Ready') {
     setConnection(session.phase === 'Failed' ? 'error' : 'connecting', session.phase || 'Pending');
     setComposer(false);
@@ -492,6 +507,7 @@ function connectSocket() {
     if (generation !== state.socketGeneration) return;
     state.reconnectDelay = 800;
     socket.send(JSON.stringify({type: 'subscribe', since: state.lastEventID}));
+    socket.send(JSON.stringify({type: 'status'}));
     setConnection('connected', 'Connected');
     setComposer(true);
     updateComposerAction();
@@ -582,7 +598,11 @@ function handleEvent(event) {
       scrollToBottom(false);
       break;
     case 'runtime.recovered':
+      updateSelectedRuntimeState('Waiting');
       renderRecovery(event);
+      break;
+    case 'runtime.status':
+      updateSelectedRuntimeState(event.runtimeState);
       break;
     case 'user.message':
       renderUser(event);
@@ -591,6 +611,7 @@ function handleEvent(event) {
       endAssistantSegment(event.turnId);
       state.activeTurn = true;
       state.interrupting = false;
+      updateSelectedRuntimeState('Running');
       acceptQueuedMessage(event.turnId);
       updateComposerAction();
       break;
@@ -614,9 +635,11 @@ function handleEvent(event) {
       break;
     case 'input.requested':
       endAssistantSegment(event.turnId);
+      updateSelectedRuntimeState('Waiting');
       renderInputRequest(event);
       break;
     case 'input.resolved':
+      updateSelectedRuntimeState('Running');
       resolveInputCard(event);
       break;
     case 'file.diff':
@@ -870,6 +893,7 @@ function renderError(event) {
     state.interrupting = false;
     updateComposerAction();
   }
+  if (event.status === 'failed') updateSelectedRuntimeState('Waiting');
   ensureConversation();
   const card = document.createElement('div');
   card.className = 'error-card';
@@ -890,6 +914,7 @@ function renderRecovery(event) {
 function renderTurnEnd(event) {
   state.activeTurn = false;
   state.interrupting = false;
+  updateSelectedRuntimeState('Waiting');
   acceptQueuedMessage(event.turnId);
   updateComposerAction();
   if (event.status === 'interrupted') showToast('Active work interrupted');

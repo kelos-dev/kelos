@@ -417,6 +417,24 @@ func (s *Server) interruptTurn(ctx context.Context, requestID string) error {
 	return nil
 }
 
+func (s *Server) runtimeState() RuntimeState {
+	s.activeMu.Lock()
+	active := s.activeTurn != ""
+	s.activeMu.Unlock()
+	if !active {
+		return RuntimeStateWaiting
+	}
+
+	s.inputMu.Lock()
+	defer s.inputMu.Unlock()
+	for _, input := range s.pendingInputs {
+		if !input.resolved {
+			return RuntimeStateWaiting
+		}
+	}
+	return RuntimeStateRunning
+}
+
 func (s *Server) handleConnection(ctx context.Context, connection net.Conn) {
 	defer connection.Close()
 	connectionCtx, cancel := context.WithCancel(ctx)
@@ -516,6 +534,8 @@ func (s *Server) handleConnection(ctx context.Context, connection net.Conn) {
 		switch request.Type {
 		case "subscribe":
 			subscribe(request.Since)
+		case "status":
+			out <- Event{Type: EventRuntimeStatus, RuntimeState: s.runtimeState()}
 		case "message":
 			subscribe(0)
 			if err := s.submitMessage(request.Text, request.RequestID); err != nil {

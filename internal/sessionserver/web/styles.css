@@ -42,7 +42,8 @@ button { color: inherit; }
 .session-item:hover { background: rgba(255,255,255,.55); }
 .session-item.active { background: #fff; box-shadow: 0 4px 14px rgba(35,49,42,.06); }
 .phase-dot { width: 7px; height: 7px; margin-top: 5px; border-radius: 50%; background: #9ca69f; }
-.phase-dot.ready { background: #4b9a6f; box-shadow: 0 0 0 3px rgba(75,154,111,.12); }
+.phase-dot.running { background: #4b9a6f; box-shadow: 0 0 0 3px rgba(75,154,111,.12); animation: pulse 1.1s infinite; }
+.phase-dot.waiting { background: #7e9186; box-shadow: 0 0 0 3px rgba(126,145,134,.1); }
 .phase-dot.failed { background: #c55b5b; }
 .session-item-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 680; }
 .session-item-meta { display: flex; gap: 6px; margin-top: 4px; color: var(--faint); font-size: 10.5px; }

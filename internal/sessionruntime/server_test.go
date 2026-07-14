@@ -396,6 +396,50 @@ func TestServerInterruptsActiveTurn(t *testing.T) {
 	}
 }
 
+func TestServerReportsRuntimeState(t *testing.T) {
+	stateDir := shortRuntimeTempDir(t)
+	journal := NewJournal()
+	server := NewServer(Config{SocketPath: filepath.Join(stateDir, "runtime.sock")}, journal, &fakeProvider{})
+	ctx, cancel := context.WithCancel(context.Background())
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- server.Serve(ctx) }()
+	waitForRuntime(t, server.config.SocketPath)
+
+	assertState := func(want RuntimeState) {
+		t.Helper()
+		got, err := QueryStatus(t.Context(), server.config.SocketPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("runtime state = %q, want %q", got, want)
+		}
+	}
+
+	assertState(RuntimeStateWaiting)
+	server.activeMu.Lock()
+	server.activeTurn = "turn-1"
+	server.activeMu.Unlock()
+	assertState(RuntimeStateRunning)
+	server.inputMu.Lock()
+	server.pendingInputs["input-1"] = &pendingInput{}
+	server.inputMu.Unlock()
+	assertState(RuntimeStateWaiting)
+	server.inputMu.Lock()
+	server.pendingInputs["input-1"].resolved = true
+	server.inputMu.Unlock()
+	assertState(RuntimeStateRunning)
+	server.activeMu.Lock()
+	server.activeTurn = ""
+	server.activeMu.Unlock()
+	assertState(RuntimeStateWaiting)
+
+	cancel()
+	if err := <-serveDone; err != nil {
+		t.Fatalf("Serve() error = %v", err)
+	}
+}
+
 func TestServerRecoversActiveTurnAfterShutdown(t *testing.T) {
 	journal := NewJournal()
 	defer journal.Close()

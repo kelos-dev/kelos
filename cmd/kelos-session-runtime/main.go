@@ -49,7 +49,7 @@ func main() {
 		return
 	}
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "Usage: kelos-session-runtime <serve|health|client>")
+		fmt.Fprintln(os.Stderr, "Usage: kelos-session-runtime <serve|health|client|status>")
 		os.Exit(2)
 	}
 
@@ -60,6 +60,8 @@ func main() {
 		runHealth()
 	case "client":
 		runClient()
+	case "status":
+		runStatus()
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %q\n", os.Args[1])
 		os.Exit(2)
@@ -111,4 +113,18 @@ func runClient() {
 		fmt.Fprintf(os.Stderr, "Session client failed: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func runStatus() {
+	flags := flag.NewFlagSet("status", flag.ExitOnError)
+	socket := flags.String("socket", envOrDefault("KELOS_SESSION_SOCKET", sessionruntime.DefaultSocketPath), "Session runtime socket")
+	_ = flags.Parse(os.Args[2:])
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer cancel()
+	state, err := sessionruntime.QueryStatus(ctx, *socket)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	fmt.Fprintln(os.Stdout, state)
 }

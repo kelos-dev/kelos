@@ -2,6 +2,7 @@ package sessionruntime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -49,4 +50,30 @@ func RunJSONClient(ctx context.Context, socketPath string) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// QueryStatus returns the current runtime state from a resident Session runtime.
+func QueryStatus(ctx context.Context, socketPath string) (RuntimeState, error) {
+	connection, err := (&net.Dialer{}).DialContext(ctx, "unix", socketPath)
+	if err != nil {
+		return "", fmt.Errorf("connecting to Session runtime: %w", err)
+	}
+	defer connection.Close()
+	stopClose := context.AfterFunc(ctx, func() { _ = connection.Close() })
+	defer stopClose()
+
+	if err := json.NewEncoder(connection).Encode(ClientRequest{Type: "status"}); err != nil {
+		return "", fmt.Errorf("requesting Session runtime status: %w", err)
+	}
+	var event Event
+	if err := json.NewDecoder(connection).Decode(&event); err != nil {
+		return "", fmt.Errorf("reading Session runtime status: %w", err)
+	}
+	if event.Type != EventRuntimeStatus {
+		return "", fmt.Errorf("reading Session runtime status: unexpected event type %q", event.Type)
+	}
+	if event.RuntimeState != RuntimeStateRunning && event.RuntimeState != RuntimeStateWaiting {
+		return "", fmt.Errorf("reading Session runtime status: invalid state %q", event.RuntimeState)
+	}
+	return event.RuntimeState, nil
 }

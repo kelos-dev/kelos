@@ -6,6 +6,7 @@ const (
 	EventHistoryEnd       = "history.end"
 	EventRequestAccepted  = "request.accepted"
 	EventRuntimeRecovered = "runtime.recovered"
+	EventRuntimeStatus    = "runtime.status"
 	EventUserMessage      = "user.message"
 	EventTurnStarted      = "turn.started"
 	EventTurnInterrupting = "turn.interrupting"
@@ -20,19 +21,28 @@ const (
 	EventError            = "error"
 )
 
+// RuntimeState describes whether a ready Session is working or waiting for input.
+type RuntimeState string
+
+const (
+	RuntimeStateRunning RuntimeState = "Running"
+	RuntimeStateWaiting RuntimeState = "Waiting"
+)
+
 // Event is one conversation event exposed through the shared Session control interface.
 type Event struct {
-	ID        int64           `json:"id,omitempty"`
-	Type      string          `json:"type"`
-	RequestID string          `json:"requestId,omitempty"`
-	TurnID    string          `json:"turnId,omitempty"`
-	Text      string          `json:"text,omitempty"`
-	ToolID    string          `json:"toolId,omitempty"`
-	ToolName  string          `json:"toolName,omitempty"`
-	Status    string          `json:"status,omitempty"`
-	InputID   string          `json:"inputId,omitempty"`
-	Questions []InputQuestion `json:"questions,omitempty"`
-	Diff      string          `json:"diff,omitempty"`
+	ID           int64           `json:"id,omitempty"`
+	Type         string          `json:"type"`
+	RequestID    string          `json:"requestId,omitempty"`
+	TurnID       string          `json:"turnId,omitempty"`
+	Text         string          `json:"text,omitempty"`
+	ToolID       string          `json:"toolId,omitempty"`
+	ToolName     string          `json:"toolName,omitempty"`
+	Status       string          `json:"status,omitempty"`
+	InputID      string          `json:"inputId,omitempty"`
+	Questions    []InputQuestion `json:"questions,omitempty"`
+	Diff         string          `json:"diff,omitempty"`
+	RuntimeState RuntimeState    `json:"runtimeState,omitempty"`
 }
 
 // ClientRequest is a command sent by a web or terminal client.

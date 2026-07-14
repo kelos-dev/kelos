@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
+	"github.com/kelos-dev/kelos/internal/sessionruntime"
 )
 
 func TestAuthenticationProtectsApplicationAndAPI(t *testing.T) {
@@ -392,6 +393,117 @@ func TestSessionAPIListsRequestedNamespace(t *testing.T) {
 				t.Fatalf("listed Sessions = %#v", sessions)
 			}
 		})
+	}
+}
+
+func TestSessionAPIShowsRuntimeStateForEveryReadySession(t *testing.T) {
+	server := testServer(t)
+	for _, session := range []kelos.Session{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "running-chat", Namespace: "default"},
+			Spec:       kelos.SessionSpec{Worker: kelos.WorkerSpec{Type: "codex"}},
+			Status:     kelos.SessionStatus{Phase: kelos.SessionPhaseReady, PodName: "running-pod"},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "waiting-chat", Namespace: "default"},
+			Spec:       kelos.SessionSpec{Worker: kelos.WorkerSpec{Type: "claude-code"}},
+			Status:     kelos.SessionStatus{Phase: kelos.SessionPhaseReady, PodName: "waiting-pod"},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "pending-chat", Namespace: "default"},
+			Spec:       kelos.SessionSpec{Worker: kelos.WorkerSpec{Type: "opencode"}},
+			Status:     kelos.SessionStatus{Phase: kelos.SessionPhasePending},
+		},
+	} {
+		if err := server.client.Create(t.Context(), &session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	states := map[string]sessionruntime.RuntimeState{
+		"running-pod": sessionruntime.RuntimeStateRunning,
+		"waiting-pod": sessionruntime.RuntimeStateWaiting,
+	}
+	var stateMu sync.Mutex
+	server.runtimeState = func(_ context.Context, _, podName string) (sessionruntime.RuntimeState, error) {
+		stateMu.Lock()
+		defer stateMu.Unlock()
+		return states[podName], nil
+	}
+
+	list := func() map[string]sessionSummary {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+		request.Header.Set("Authorization", "Bearer secret-token")
+		response := httptest.NewRecorder()
+		server.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("list status = %d body = %s", response.Code, response.Body.String())
+		}
+		var sessions []sessionSummary
+		if err := json.Unmarshal(response.Body.Bytes(), &sessions); err != nil {
+			t.Fatal(err)
+		}
+		byName := make(map[string]sessionSummary, len(sessions))
+		for _, session := range sessions {
+			byName[session.Name] = session
+		}
+		return byName
+	}
+
+	sessions := list()
+	if got := sessions["running-chat"].RuntimeState; got != sessionruntime.RuntimeStateRunning {
+		t.Fatalf("running-chat runtime state = %q, want %q", got, sessionruntime.RuntimeStateRunning)
+	}
+	if got := sessions["waiting-chat"].RuntimeState; got != sessionruntime.RuntimeStateWaiting {
+		t.Fatalf("waiting-chat runtime state = %q, want %q", got, sessionruntime.RuntimeStateWaiting)
+	}
+	if got := sessions["pending-chat"].RuntimeState; got != "" {
+		t.Fatalf("pending-chat runtime state = %q, want empty", got)
+	}
+
+	stateMu.Lock()
+	states["running-pod"] = sessionruntime.RuntimeStateWaiting
+	stateMu.Unlock()
+	if got := list()["running-chat"].RuntimeState; got != sessionruntime.RuntimeStateWaiting {
+		t.Fatalf("refreshed running-chat runtime state = %q, want %q", got, sessionruntime.RuntimeStateWaiting)
+	}
+}
+
+func TestSessionApplicationRendersRuntimeState(t *testing.T) {
+	server := testServer(t)
+	for _, asset := range []struct {
+		path string
+		want []string
+	}{
+		{
+			path: "/assets/app.js",
+			want: []string{
+				"status.textContent = `· ${sessionStatus(session)}`;",
+				"elements.meta.textContent = `${session.namespace} · ${providerLabel(session.provider)} · ${sessionStatus(session)}`;",
+				"socket.send(JSON.stringify({type: 'status'}));",
+				"case 'runtime.status':\n      updateSelectedRuntimeState(event.runtimeState);",
+			},
+		},
+		{
+			path: "/assets/styles.css",
+			want: []string{
+				".phase-dot.running { background: #4b9a6f;",
+				".phase-dot.waiting { background: #7e9186;",
+			},
+		},
+	} {
+		request := httptest.NewRequest(http.MethodGet, asset.path, nil)
+		request.Header.Set("Authorization", "Bearer secret-token")
+		response := httptest.NewRecorder()
+		server.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("GET %s status = %d body = %s", asset.path, response.Code, response.Body.String())
+		}
+		for _, want := range asset.want {
+			if !strings.Contains(response.Body.String(), want) {
+				t.Errorf("GET %s does not contain %q", asset.path, want)
+			}
+		}
 	}
 }
 

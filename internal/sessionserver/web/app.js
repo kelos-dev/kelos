@@ -3,7 +3,15 @@ const elements = {
   title: document.querySelector('#session-title'),
   meta: document.querySelector('#session-meta'),
   messages: document.querySelector('#messages'),
+  changes: document.querySelector('#changes-view'),
+  changesList: document.querySelector('#changes-list'),
+  changesSummary: document.querySelector('#changes-summary'),
+  changesCount: document.querySelector('#changes-count'),
+  viewTabs: document.querySelector('.view-tabs'),
+  conversationTab: document.querySelector('#conversation-tab'),
+  changesTab: document.querySelector('#changes-tab'),
   welcome: document.querySelector('#welcome'),
+  composerWrap: document.querySelector('.composer-wrap'),
   composer: document.querySelector('#composer'),
   input: document.querySelector('#message-input'),
   send: document.querySelector('#send-message'),
@@ -51,6 +59,7 @@ const state = {
   tools: new Map(),
   inputs: new Map(),
   diffs: new Map(),
+  fileChanges: new Map(),
   queuedMessages: new Map(),
   activeTurn: false,
   interrupting: false,
@@ -387,11 +396,14 @@ function selectSession(session) {
   state.tools.clear();
   state.inputs.clear();
   state.diffs.clear();
+  state.fileChanges.clear();
   state.queuedMessages.clear();
   elements.queue.replaceChildren();
   elements.queue.hidden = true;
   state.activeTurn = false;
   state.interrupting = false;
+  setActiveView('conversation');
+  renderFileChanges();
   elements.messages.replaceChildren();
   renderSessions();
   renderHeader();
@@ -425,6 +437,8 @@ function createWelcome() {
 function renderHeader() {
   const session = state.selected;
   elements.deleteButton.disabled = !session;
+  elements.conversationTab.disabled = !session;
+  elements.changesTab.disabled = !session;
   updateComposerAction();
   if (!session) {
     elements.title.textContent = 'Choose a session';
@@ -846,23 +860,231 @@ function resolveInputCard(event) {
 
 function renderDiff(event) {
   if (!event.diff) return;
+  const files = parseFileDiffs(event.diff);
+  updateFileChanges(files);
   const key = event.turnId || `diff-${event.id || 'current'}`;
-  const existing = state.diffs.get(key);
-  if (existing) {
-    existing.textContent = event.diff;
+  let block = state.diffs.get(key);
+  const created = !block;
+  if (!block) {
+    ensureConversation();
+    const card = document.createElement('section');
+    card.className = 'diff-card';
+    card.setAttribute('aria-label', 'File changes');
+    const header = document.createElement('div');
+    header.className = 'diff-card-header';
+    const title = document.createElement('strong');
+    title.textContent = 'File changes';
+    const count = document.createElement('span');
+    const list = document.createElement('div');
+    list.className = 'changes-list';
+    header.append(title, count);
+    card.append(header, list);
+    elements.messages.append(card);
+    block = {count, list, files: new Map()};
+    state.diffs.set(key, block);
+  }
+  for (const file of files) block.files.set(file.name, file.diff);
+  renderDiffBlock(block, created);
+  if (created) scrollToBottom();
+}
+
+function updateFileChanges(files) {
+  for (const file of files) state.fileChanges.set(file.name, file.diff);
+  renderFileChanges();
+}
+
+function parseFileDiffs(diff) {
+  const lines = diff.split('\n');
+  const starts = [];
+  lines.forEach((line, index) => {
+    if (line.startsWith('diff --git ') || /^\*\*\* (?:Add|Delete|Update) File: /.test(line)) starts.push(index);
+  });
+  if (!starts.length) starts.push(0);
+
+  return starts.map((start, index) => {
+    const segment = lines.slice(start, starts[index + 1] ?? lines.length);
+    return {name: diffFileName(segment) || 'File changes', diff: segment.join('\n')};
+  });
+}
+
+function diffFileName(lines) {
+  const patchHeader = lines.find(line => /^\*\*\* (?:Add|Delete|Update) File: /.test(line));
+  if (patchHeader) return patchHeader.replace(/^\*\*\* (?:Add|Delete|Update) File: /, '');
+
+  for (const prefix of ['+++ ', '--- ']) {
+    const header = lines.find(line => line.startsWith(prefix));
+    if (!header) continue;
+    const path = normalizeDiffPath(header.slice(prefix.length));
+    if (path !== '/dev/null') return path;
+  }
+
+  const header = lines.find(line => line.startsWith('diff --git '));
+  if (!header) return '';
+  const quotedPath = header.match(/ ("(?:\\.|[^"\\])*")$/)?.[1];
+  if (quotedPath) return normalizeDiffPath(quotedPath);
+  const separator = header.lastIndexOf(' b/');
+  return normalizeDiffPath(separator < 0 ? header.slice('diff --git '.length) : header.slice(separator + 1));
+}
+
+function normalizeDiffPath(value) {
+  const rawPath = value.split('\t', 1)[0];
+  const path = rawPath.startsWith('"') && rawPath.endsWith('"')
+    ? decodeGitQuotedPath(rawPath.slice(1, -1))
+    : rawPath;
+  return path.replace(/^[ab]\//, '');
+}
+
+function decodeGitQuotedPath(value) {
+  const bytes = [];
+  const encoder = new TextEncoder();
+  const escapedBytes = {a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, '\\': 92, '"': 34};
+  const append = text => bytes.push(...encoder.encode(text));
+
+  for (let index = 0; index < value.length;) {
+    if (value[index] !== '\\') {
+      const character = String.fromCodePoint(value.codePointAt(index));
+      append(character);
+      index += character.length;
+      continue;
+    }
+
+    index++;
+    if (index === value.length) {
+      append('\\');
+      break;
+    }
+    const octal = value.slice(index).match(/^[0-7]{1,3}/)?.[0];
+    if (octal) {
+      bytes.push(Number.parseInt(octal, 8));
+      index += octal.length;
+      continue;
+    }
+    const escaped = value[index];
+    if (Object.prototype.hasOwnProperty.call(escapedBytes, escaped)) bytes.push(escapedBytes[escaped]);
+    else append(escaped);
+    index++;
+  }
+
+  return new TextDecoder().decode(new Uint8Array(bytes));
+}
+
+function renderFileChanges() {
+  const openFiles = new Set(
+    [...elements.changesList.querySelectorAll('.file-change[open]')].map(item => item.dataset.path),
+  );
+  const count = state.fileChanges.size;
+  elements.changesCount.textContent = String(count);
+  elements.changesSummary.textContent = count === 1 ? '1 changed file' : `${count} changed files`;
+
+  if (!count) {
+    elements.changesList.replaceChildren();
+    const empty = document.createElement('div');
+    empty.className = 'changes-empty';
+    empty.textContent = state.selected ? 'No file changes yet.' : 'Choose a Session to inspect its file changes.';
+    elements.changesList.append(empty);
     return;
   }
-  ensureConversation();
-  const details = document.createElement('details');
-  details.className = 'diff-card';
-  const summary = document.createElement('summary');
-  summary.textContent = 'File changes';
-  const pre = document.createElement('pre');
-  pre.textContent = event.diff;
-  details.append(summary, pre);
-  elements.messages.append(details);
-  state.diffs.set(key, pre);
-  scrollToBottom();
+
+  renderFileChangeList(elements.changesList, state.fileChanges, openFiles);
+}
+
+function renderDiffBlock(block, created) {
+  const openFiles = new Set(
+    [...block.list.querySelectorAll('.file-change[open]')].map(item => item.dataset.path),
+  );
+  if (created && block.files.size === 1) openFiles.add(block.files.keys().next().value);
+  const count = block.files.size;
+  block.count.textContent = count === 1 ? '1 file' : `${count} files`;
+  renderFileChangeList(block.list, block.files, openFiles);
+}
+
+function renderFileChangeList(list, files, openFiles) {
+  list.replaceChildren();
+  for (const [path, diff] of files) {
+    const details = document.createElement('details');
+    details.className = 'file-change';
+    details.dataset.path = path;
+    details.open = openFiles.has(path);
+    const summary = document.createElement('summary');
+    const name = document.createElement('span');
+    name.className = 'file-change-name';
+    name.textContent = path;
+    const stats = diffStats(diff);
+    const stat = document.createElement('span');
+    stat.className = 'file-change-stat';
+    stat.setAttribute('aria-label', `${stats.added} additions and ${stats.removed} deletions`);
+    const added = document.createElement('span');
+    added.className = 'file-change-added';
+    added.textContent = `+${stats.added}`;
+    const removed = document.createElement('span');
+    removed.className = 'file-change-removed';
+    removed.textContent = `−${stats.removed}`;
+    stat.append(added, removed);
+    summary.append(name, stat);
+    details.append(summary, renderDiffLines(diff));
+    list.append(details);
+  }
+}
+
+function diffStats(diff) {
+  let added = 0;
+  let removed = 0;
+  for (const line of diff.split('\n')) {
+    const kind = diffChangeKind(line);
+    if (kind === 'added') added++;
+    if (kind === 'removed') removed++;
+  }
+  return {added, removed};
+}
+
+function diffChangeKind(line) {
+  if (line.startsWith('+') && !line.startsWith('+++ ')) return 'added';
+  if (line.startsWith('-') && !line.startsWith('--- ')) return 'removed';
+  return '';
+}
+
+function renderDiffLines(diff) {
+  const lines = document.createElement('div');
+  lines.className = 'diff-lines';
+  for (const text of diff.split('\n')) {
+    const line = document.createElement('div');
+    line.className = 'diff-line';
+    const kind = diffChangeKind(text);
+    if (kind) line.classList.add(kind);
+    if (text.startsWith('@@')) line.classList.add('hunk');
+    if (/^(diff --git |index |--- |\+\+\+ )/.test(text)) line.classList.add('metadata');
+    line.textContent = text || ' ';
+    lines.append(line);
+  }
+  return lines;
+}
+
+function setActiveView(view) {
+  const changesActive = view === 'changes';
+  elements.messages.hidden = changesActive;
+  elements.composerWrap.hidden = changesActive;
+  elements.changes.hidden = !changesActive;
+  elements.conversationTab.setAttribute('aria-selected', String(!changesActive));
+  elements.changesTab.setAttribute('aria-selected', String(changesActive));
+  elements.conversationTab.tabIndex = changesActive ? -1 : 0;
+  elements.changesTab.tabIndex = changesActive ? 0 : -1;
+}
+
+function handleViewTabKeydown(event) {
+  const tabs = [elements.conversationTab, elements.changesTab].filter(tab => !tab.disabled);
+  const current = tabs.indexOf(event.target);
+  if (current < 0) return;
+
+  let target;
+  if (event.key === 'ArrowLeft') target = tabs[(current - 1 + tabs.length) % tabs.length];
+  if (event.key === 'ArrowRight') target = tabs[(current + 1) % tabs.length];
+  if (event.key === 'Home') target = tabs[0];
+  if (event.key === 'End') target = tabs[tabs.length - 1];
+  if (!target) return;
+
+  event.preventDefault();
+  target.click();
+  target.focus();
 }
 
 function renderError(event) {
@@ -1072,6 +1294,9 @@ elements.deleteButton.addEventListener('click', async () => {
     showToast(error.message);
   }
 });
+elements.conversationTab.addEventListener('click', () => setActiveView('conversation'));
+elements.changesTab.addEventListener('click', () => setActiveView('changes'));
+elements.viewTabs.addEventListener('keydown', handleViewTabKeydown);
 
 function interruptActiveTurn() {
   if (!state.socket || state.socket.readyState !== WebSocket.OPEN || !state.activeTurn || state.interrupting) return;

@@ -98,6 +98,66 @@ func TestSessionFormUsesResourceSelectors(t *testing.T) {
 	}
 }
 
+func TestApplicationIncludesFileChangesView(t *testing.T) {
+	server := testServer(t)
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.Header.Set("Authorization", "Bearer secret-token")
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET / status = %d body = %s", response.Code, response.Body.String())
+	}
+
+	for _, expected := range []string{
+		`id="conversation-tab" type="button" role="tab" aria-selected="true" aria-controls="messages" tabindex="0"`,
+		`id="changes-tab" type="button" role="tab" aria-selected="false" aria-controls="changes-view" tabindex="-1"`,
+		`id="changes-count"`,
+		`id="changes-view"`,
+		`id="changes-list"`,
+		`No file changes yet.`,
+	} {
+		if !strings.Contains(response.Body.String(), expected) {
+			t.Errorf("Session application does not contain %s", expected)
+		}
+	}
+
+	javascript, err := webFiles.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		`state.fileChanges.set(file.name, file.diff)`,
+		`state.diffs.set(key, block)`,
+		`renderFileChangeList(block.list, block.files, openFiles)`,
+		`const path = normalizeDiffPath(header.slice(prefix.length))`,
+		`const rawPath = value.split('\t', 1)[0]`,
+		`return new TextDecoder().decode(new Uint8Array(bytes))`,
+		`!line.startsWith('+++ ')`,
+		`!line.startsWith('--- ')`,
+		`elements.viewTabs.addEventListener('keydown', handleViewTabKeydown)`,
+	} {
+		if !strings.Contains(string(javascript), expected) {
+			t.Errorf("file changes JavaScript does not contain %q", expected)
+		}
+	}
+
+	styles, err := webFiles.ReadFile("web/styles.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		`.diff-card .file-change`,
+		`.diff-line.added`,
+		`.diff-line.removed`,
+		`--diff-added-bg:#173424`,
+		`--diff-removed-bg:#3a2020`,
+	} {
+		if !strings.Contains(string(styles), expected) {
+			t.Errorf("file changes styles do not contain %q", expected)
+		}
+	}
+}
+
 func TestSessionFormAPICreatesPersistentSession(t *testing.T) {
 	server := testServer(t)
 	payload := `{

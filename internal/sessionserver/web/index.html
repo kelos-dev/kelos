@@ -44,17 +44,33 @@
           <div class="session-meta" id="session-meta">Select an existing conversation or create one.</div>
         </div>
         <div class="header-actions">
+          <div class="view-tabs" role="tablist" aria-label="Session view">
+            <button id="conversation-tab" type="button" role="tab" aria-selected="true" aria-controls="messages" tabindex="0" disabled>Conversation</button>
+            <button id="changes-tab" type="button" role="tab" aria-selected="false" aria-controls="changes-view" tabindex="-1" disabled>Changes <span id="changes-count">0</span></button>
+          </div>
           <span class="connection-pill" id="connection-pill" data-state="idle"><span></span>Not connected</span>
           <button class="icon-button danger" id="delete-session" aria-label="Delete session" title="Delete session" disabled>⌫</button>
         </div>
       </header>
 
-      <section class="messages" id="messages" aria-live="polite">
+      <section class="messages" id="messages" role="tabpanel" aria-labelledby="conversation-tab" aria-live="polite">
         <div class="welcome" id="welcome">
           <div class="welcome-orbit"><span>K</span></div>
           <h1>A workspace that keeps the thread</h1>
           <p>Start with Claude Code, Codex, or OpenCode, then continue the same conversation here or from your terminal.</p>
           <button class="primary-button" id="welcome-new">Create your first session</button>
+        </div>
+      </section>
+
+      <section class="changes-view" id="changes-view" role="tabpanel" aria-labelledby="changes-tab" hidden>
+        <header class="changes-header">
+          <div>
+            <h2>File changes</h2>
+            <p id="changes-summary">No changed files</p>
+          </div>
+        </header>
+        <div class="changes-list" id="changes-list" aria-live="polite">
+          <div class="changes-empty">No file changes yet.</div>
         </div>
       </section>
 

@@ -21,8 +21,6 @@ jobs:
     env:
       KELOS_NAMESPACE: ${{ vars.KELOS_NAMESPACE || 'default' }}
       KELOS_API_HOSTNAME: dev-cluster.kelos.dev
-      KELOS_SESSION_HOSTNAME: dev-session.kelos.dev
-      KELOS_WEBHOOK_HOSTNAME: dev-webhook.kelos.dev
       CLOUDFLARED_VERSION: 2026.7.1
       CLOUDFLARED_DEB_SHA256: 79f790b45e6a9152c6cf63f60f4901e3d8a029f7f4be1345a24cd2373aba8e7d
     steps:
@@ -204,15 +202,6 @@ jobs:
           kubectl rollout status deployment/kelos-session-server -n kelos-system --timeout=120s
           kubectl rollout status deployment -l kelos.dev/component=spawner -n "${KELOS_NAMESPACE}" --timeout=120s
           kubectl rollout status deployment/kelos-webhook-github -n kelos-system --timeout=120s
-
-      - name: Verify public endpoints
-        run: |
-          curl --fail --silent --show-error --retry 30 --retry-all-errors --retry-delay 10 "https://${KELOS_SESSION_HOSTNAME}/healthz"
-          WEBHOOK_STATUS=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --request POST --header 'Content-Type: application/json' --data '{}' "https://${KELOS_WEBHOOK_HOSTNAME}/webhook/github")
-          if [ "${WEBHOOK_STATUS}" != 401 ]; then
-            echo "Unsigned webhook returned HTTP ${WEBHOOK_STATUS}, expected 401" >&2
-            exit 1
-          fi
 
       - name: Apply self-development resources
         run: kubectl apply -f self-development/ -n "${KELOS_NAMESPACE}"

@@ -64,6 +64,15 @@ spec:
       and pod restarts while the Session and its PVC exist. Commit and push work
       that must outlive the Session.
 
+      Implementation guidance:
+      - When a safety guard has two outcomes, assert both directions.
+      - When you narrow behavior by a flag or scope (e.g. `--agent`/`--project`),
+        cover that scope directly, not only indirectly through another path.
+      - When you remove or disable behavior, add a negative assertion that the
+        output no longer contains the removed keys or fields.
+      - When a PR introduces or changes user-facing behavior, update the matching
+        `README.md` documentation in the same PR.
+
       Webhook:
       - Event: {{.Event}}
       - Action: {{.Action}}

@@ -127,12 +127,15 @@ spec:
                 ```
                 git push --force origin <existing-branch>
                 ```
-            v. Update the existing PR title and body:
+            v. Update the existing PR title and body, and ensure the
+               `agent/kelos-image-update` label is applied (older PRs created
+               before this label existed won't have it):
                Write the updated body to a temp file first, then:
                ```
                gh pr edit <pr-number> \
                  --title "Update <agent-name> image to <latest-version>" \
-                 --body-file /tmp/pr-body.md
+                 --body-file /tmp/pr-body.md \
+                 --add-label agent/kelos-image-update
                ```
                The PR body (`/tmp/pr-body.md`) MUST follow `.github/PULL_REQUEST_TEMPLATE.md`:
                - Start with `/kind feature` on its own line
@@ -159,7 +162,7 @@ spec:
             gh pr create \
               --title "Update <agent-name> image to <latest-version>" \
               --body-file /tmp/pr-body.md \
-              --label generated-by-kelos --label ok-to-test --label kind/feature
+              --label generated-by-kelos --label ok-to-test --label kind/feature --label agent/kelos-image-update
             ```
             The PR body (`/tmp/pr-body.md`) MUST follow `.github/PULL_REQUEST_TEMPLATE.md`:
             - Start with `/kind feature` on its own line

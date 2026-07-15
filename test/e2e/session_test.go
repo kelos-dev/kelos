@@ -304,7 +304,7 @@ func describeSessionProviderTests(cfg agentTestConfig) {
 		f := framework.NewFramework(fmt.Sprintf("session-%s", cfg.AgentType))
 
 		BeforeEach(func() {
-			if *cfg.SecretValue == "" {
+			if cfg.credentialsMissing() {
 				Skip(cfg.EnvVar + " not set")
 			}
 		})
@@ -332,6 +332,45 @@ func describeSessionProviderTests(cfg agentTestConfig) {
 			Expect(f.KelosClientset.ApiV1alpha2().Sessions(f.Namespace).Delete(context.TODO(), "provider-session", metav1.DeleteOptions{})).To(Succeed())
 			waitForPodDeletion(f, f.Namespace, current.Status.PodName)
 		})
+
+		It("recovers an empty conversation after Pod recreation", func() {
+			const sessionName = "empty-provider-session"
+			f.CreateSecret(cfg.SecretName, cfg.SecretKey+"="+*cfg.SecretValue)
+			createSession(f, &kelos.Session{
+				ObjectMeta: metav1.ObjectMeta{Name: sessionName},
+				Spec: kelos.SessionSpec{
+					Worker: kelos.WorkerSpec{
+						Type:  cfg.AgentType,
+						Model: cfg.Model,
+						Credentials: &kelos.Credentials{
+							Type:      cfg.CredentialType,
+							SecretRef: &kelos.SecretReference{Name: cfg.SecretName},
+						},
+					},
+					VolumeClaimTemplate: sessionTestVolumeClaimTemplate(),
+				},
+			})
+			DeferCleanup(func() {
+				_ = f.KelosClientset.ApiV1alpha2().Sessions(f.Namespace).Delete(context.TODO(), sessionName, metav1.DeleteOptions{})
+			})
+			DeferCleanup(func() {
+				if CurrentSpecReport().Failed() {
+					collectSessionDebugInfo(f, f.Namespace, sessionName)
+				}
+			})
+
+			current := waitForSessionPhase(f, f.Namespace, sessionName, kelos.SessionPhaseReady)
+			Expect(current.Status.PodUID).NotTo(BeEmpty())
+			Expect(f.Clientset.CoreV1().Pods(f.Namespace).Delete(context.TODO(), current.Status.PodName, metav1.DeleteOptions{})).To(Succeed())
+			recovered := waitForSessionPodReplacement(f, f.Namespace, sessionName, current.Status.PodUID)
+			Expect(recovered.Status.PodUID).NotTo(Equal(current.Status.PodUID))
+			runTerminalTurn(
+				f.Namespace,
+				sessionName,
+				"Join these fragments without spaces and reply with only the result: EMPTY_, SESSION_, READY",
+				"agent › EMPTY_SESSION_READY",
+			)
+		})
 	})
 }
 
@@ -349,6 +388,15 @@ func createSession(f *framework.Framework, session *kelos.Session) *kelos.Sessio
 	created, err := f.KelosClientset.ApiV1alpha2().Sessions(session.Namespace).Create(context.TODO(), session, metav1.CreateOptions{})
 	Expect(err).NotTo(HaveOccurred())
 	return created
+}
+
+func sessionTestVolumeClaimTemplate() *corev1.PersistentVolumeClaimSpec {
+	return &corev1.PersistentVolumeClaimSpec{
+		AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+		Resources: corev1.VolumeResourceRequirements{Requests: corev1.ResourceList{
+			corev1.ResourceStorage: resource.MustParse("1Gi"),
+		}},
+	}
 }
 
 func waitForSessionPhase(f *framework.Framework, namespace, name string, phase kelos.SessionPhase) *kelos.Session {

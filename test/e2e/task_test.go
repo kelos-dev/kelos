@@ -17,7 +17,7 @@ func describeAgentTests(cfg agentTestConfig) {
 		f := framework.NewFramework(fmt.Sprintf("task-%s", cfg.AgentType))
 
 		BeforeEach(func() {
-			if *cfg.SecretValue == "" {
+			if cfg.credentialsMissing() {
 				Skip(cfg.EnvVar + " not set")
 			}
 		})
@@ -61,7 +61,7 @@ func describeAgentTests(cfg agentTestConfig) {
 		f := framework.NewFramework(fmt.Sprintf("ws-%s", cfg.AgentType))
 
 		BeforeEach(func() {
-			if *cfg.SecretValue == "" {
+			if cfg.credentialsMissing() {
 				Skip(cfg.EnvVar + " not set")
 			}
 		})
@@ -122,7 +122,7 @@ func describeAgentTests(cfg agentTestConfig) {
 		f := framework.NewFramework(fmt.Sprintf("output-%s", cfg.AgentType))
 
 		BeforeEach(func() {
-			if *cfg.SecretValue == "" {
+			if cfg.credentialsMissing() {
 				Skip(cfg.EnvVar + " not set")
 			}
 		})
@@ -216,7 +216,7 @@ func describeAgentTests(cfg agentTestConfig) {
 		f := framework.NewFramework(fmt.Sprintf("deps-%s", cfg.AgentType))
 
 		BeforeEach(func() {
-			if *cfg.SecretValue == "" {
+			if cfg.credentialsMissing() {
 				Skip(cfg.EnvVar + " not set")
 			}
 		})
@@ -277,7 +277,7 @@ func describeAgentTests(cfg agentTestConfig) {
 		f := framework.NewFramework(fmt.Sprintf("cleanup-%s", cfg.AgentType))
 
 		BeforeEach(func() {
-			if *cfg.SecretValue == "" {
+			if cfg.credentialsMissing() {
 				Skip(cfg.EnvVar + " not set")
 			}
 		})

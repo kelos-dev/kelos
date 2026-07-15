@@ -167,6 +167,41 @@ func TestOpenCodeProviderFailsWhenSavedSessionIsMissing(t *testing.T) {
 	fake.close()
 }
 
+func TestOpenCodeProviderRetriesStalledHealthRequest(t *testing.T) {
+	var mu sync.Mutex
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		mu.Lock()
+		requests++
+		attempt := requests
+		mu.Unlock()
+		if attempt == 1 {
+			<-request.Context().Done()
+			return
+		}
+		writeOpenCodeJSON(response, map[string]bool{"healthy": true})
+	}))
+	defer server.Close()
+
+	client, err := newOpenCodeClient(server.URL, t.TempDir(), server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := newOpenCodeProviderState(t.Context(), ProviderConfig{}, client)
+	defer provider.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if err := provider.waitForHealthWithRequestTimeout(ctx, 10*time.Millisecond); err != nil {
+		t.Fatalf("waitForHealthWithRequestTimeout() error = %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if requests < 2 {
+		t.Fatalf("OpenCode health requests = %d, want at least 2", requests)
+	}
+}
+
 func TestOpenCodeCommandEnvironmentMapsProviderKey(t *testing.T) {
 	tests := []struct {
 		model string

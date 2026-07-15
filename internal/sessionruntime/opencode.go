@@ -17,7 +17,10 @@ import (
 	"time"
 )
 
-const openCodeServerURL = "http://127.0.0.1:4096"
+const (
+	openCodeServerURL            = "http://127.0.0.1:4096"
+	openCodeHealthRequestTimeout = time.Second
+)
 
 type openCodeClient struct {
 	baseURL    *url.URL
@@ -177,18 +180,29 @@ func (p *OpenCodeProvider) initialize(ctx context.Context) error {
 }
 
 func (p *OpenCodeProvider) waitForHealth(ctx context.Context) error {
+	return p.waitForHealthWithRequestTimeout(ctx, openCodeHealthRequestTimeout)
+}
+
+func (p *OpenCodeProvider) waitForHealthWithRequestTimeout(ctx context.Context, requestTimeout time.Duration) error {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
+	var lastErr error
 	for {
 		var health struct {
 			Healthy bool `json:"healthy"`
 		}
-		if err := p.client.doJSON(ctx, http.MethodGet, "/global/health", false, nil, &health); err == nil && health.Healthy {
+		requestCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+		lastErr = p.client.doJSON(requestCtx, http.MethodGet, "/global/health", false, nil, &health)
+		cancel()
+		if lastErr == nil && health.Healthy {
 			return nil
+		}
+		if lastErr == nil {
+			lastErr = errors.New("OpenCode server reported unhealthy")
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("waiting for OpenCode server health: %w", ctx.Err())
+			return fmt.Errorf("waiting for OpenCode server health: %w (last attempt: %v)", ctx.Err(), lastErr)
 		case <-p.done:
 			if err := p.providerError(); err != nil {
 				return err

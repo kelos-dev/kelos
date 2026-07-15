@@ -268,7 +268,7 @@ func describePluginTaskTests(cfg agentTestConfig) {
 		taskName := fmt.Sprintf("plugin-task-%s", cfg.AgentType)
 
 		BeforeEach(func() {
-			if *cfg.SecretValue == "" {
+			if cfg.credentialsMissing() {
 				Skip(cfg.EnvVar + " not set")
 			}
 		})

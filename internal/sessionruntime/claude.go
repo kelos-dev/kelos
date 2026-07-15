@@ -92,13 +92,6 @@ func NewClaudeProvider(ctx context.Context, config ProviderConfig) (*ClaudeProvi
 		cancel()
 		return nil, fmt.Errorf("starting Claude Code: %w", err)
 	}
-	if !resume {
-		if err := writeClaudeSessionID(config.StateDir, sessionID); err != nil {
-			cancel()
-			_ = command.Wait()
-			return nil, fmt.Errorf("saving Claude Code session ID: %w", err)
-		}
-	}
 
 	provider := &ClaudeProvider{
 		config:         config,
@@ -287,7 +280,10 @@ func (p *ClaudeProvider) readLoop(reader io.Reader) {
 			return
 		}
 		if result != nil && done != nil {
-			p.persistSessionID()
+			if err := p.persistSessionID(); err != nil {
+				p.readErr = fmt.Errorf("saving Claude Code session ID: %w", err)
+				return
+			}
 			select {
 			case done <- *result:
 			default:
@@ -618,13 +614,14 @@ func (p *ClaudeProvider) emitClaudeToolStart(id, name string, sink EventSink) {
 	sink.Emit(Event{Type: EventToolStarted, ToolID: id, ToolName: name, Status: "running"})
 }
 
-func (p *ClaudeProvider) persistSessionID() {
+func (p *ClaudeProvider) persistSessionID() error {
 	p.sessionMu.Lock()
 	sessionID := p.sessionID
 	p.sessionMu.Unlock()
 	if sessionID != "" {
-		_ = writeClaudeSessionID(p.config.StateDir, sessionID)
+		return writeClaudeSessionID(p.config.StateDir, sessionID)
 	}
+	return nil
 }
 
 func writeClaudeSessionID(stateDir, sessionID string) error {

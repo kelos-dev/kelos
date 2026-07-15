@@ -170,7 +170,8 @@ func isMissingCodexRollout(err error, threadID string) bool {
 	var requestErr *codexRequestError
 	return errors.As(err, &requestErr) &&
 		requestErr.method == "thread/resume" &&
-		requestErr.message == "no rollout found for thread id "+threadID
+		(requestErr.message == "no rollout found" ||
+			requestErr.message == "no rollout found for thread id "+threadID)
 }
 
 func (p *CodexProvider) threadParams(params map[string]any) map[string]any {

@@ -671,6 +671,44 @@ func TestWriteClaudeSessionID(t *testing.T) {
 	}
 }
 
+func TestClaudeProviderPersistsSessionOnlyAfterCompletedTurn(t *testing.T) {
+	binDir := t.TempDir()
+	claudePath := filepath.Join(binDir, "claude")
+	if err := os.WriteFile(claudePath, []byte(`#!/bin/sh
+while IFS= read -r line; do
+  printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"materialized-session"}'
+done
+`), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	stateDir := t.TempDir()
+	provider, err := NewClaudeProvider(t.Context(), ProviderConfig{
+		StateDir:   stateDir,
+		WorkingDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer provider.Close()
+
+	sessionPath := filepath.Join(stateDir, "claude-session-id")
+	if _, err := os.Stat(sessionPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Claude session ID exists before a completed turn: %v", err)
+	}
+	if err := provider.RunTurn(t.Context(), "hello", &collectingSink{}); err != nil {
+		t.Fatalf("RunTurn() error = %v", err)
+	}
+	data, err := os.ReadFile(sessionPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "materialized-session\n" {
+		t.Fatalf("Claude session ID file = %q, want %q", data, "materialized-session\\n")
+	}
+}
+
 func TestClaudeInterruptUsesControlProtocol(t *testing.T) {
 	reader, writer := io.Pipe()
 	interactionCtx, interactionCancel := context.WithCancel(context.Background())
@@ -861,7 +899,7 @@ func TestCodexOpenThreadReplacesUnmaterializedThread(t *testing.T) {
 				pending <- codexResponse{Error: &struct {
 					Code    int    `json:"code"`
 					Message string `json:"message"`
-				}{Code: -32600, Message: "no rollout found for thread id thread-1"}}
+				}{Code: -32600, Message: "no rollout found"}}
 				continue
 			}
 			pending <- codexResponse{Result: json.RawMessage(`{"thread":{"id":"thread-2"}}`)}
@@ -883,6 +921,41 @@ func TestCodexOpenThreadReplacesUnmaterializedThread(t *testing.T) {
 	}
 	if string(data) != "thread-2\n" {
 		t.Fatalf("saved thread ID = %q, want thread-2", data)
+	}
+}
+
+func TestIsMissingCodexRollout(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "short message",
+			err:  &codexRequestError{method: "thread/resume", code: -32600, message: "no rollout found"},
+			want: true,
+		},
+		{
+			name: "message with matching thread ID",
+			err:  &codexRequestError{method: "thread/resume", code: -32600, message: "no rollout found for thread id thread-1"},
+			want: true,
+		},
+		{
+			name: "message with different thread ID",
+			err:  &codexRequestError{method: "thread/resume", code: -32600, message: "no rollout found for thread id thread-2"},
+		},
+		{
+			name: "different method",
+			err:  &codexRequestError{method: "thread/start", code: -32600, message: "no rollout found"},
+		},
+		{name: "different error", err: errors.New("no rollout found")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isMissingCodexRollout(tt.err, "thread-1"); got != tt.want {
+				t.Fatalf("isMissingCodexRollout() = %t, want %t", got, tt.want)
+			}
+		})
 	}
 }
 

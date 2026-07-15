@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,6 +29,16 @@ type codexResponse struct {
 type codexTurnResult struct {
 	status string
 	error  string
+}
+
+type codexRequestError struct {
+	method  string
+	code    int
+	message string
+}
+
+func (e *codexRequestError) Error() string {
+	return fmt.Sprintf("Codex request %s failed (%d): %s", e.method, e.code, e.message)
 }
 
 // CodexProvider owns one Codex app-server thread.
@@ -120,6 +131,10 @@ func (p *CodexProvider) openThread(ctx context.Context) error {
 		if threadID != "" {
 			result, err := p.request(ctx, "thread/resume", p.threadParams(map[string]any{"threadId": threadID}))
 			if err != nil {
+				if isMissingCodexRollout(err, threadID) {
+					log.Printf("Codex thread rollout missing, starting replacement thread threadID=%s", threadID)
+					return p.startThread(ctx, statePath)
+				}
 				return fmt.Errorf("resuming Codex thread %q: %w", threadID, err)
 			}
 			id := codexThreadID(result)
@@ -133,7 +148,10 @@ func (p *CodexProvider) openThread(ctx context.Context) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("reading saved Codex thread ID: %w", err)
 	}
+	return p.startThread(ctx, statePath)
+}
 
+func (p *CodexProvider) startThread(ctx context.Context, statePath string) error {
 	result, err := p.request(ctx, "thread/start", p.threadParams(map[string]any{}))
 	if err != nil {
 		return fmt.Errorf("starting Codex thread: %w", err)
@@ -146,6 +164,13 @@ func (p *CodexProvider) openThread(ctx context.Context) error {
 		return fmt.Errorf("saving Codex thread ID: %w", err)
 	}
 	return nil
+}
+
+func isMissingCodexRollout(err error, threadID string) bool {
+	var requestErr *codexRequestError
+	return errors.As(err, &requestErr) &&
+		requestErr.method == "thread/resume" &&
+		requestErr.message == "no rollout found for thread id "+threadID
 }
 
 func (p *CodexProvider) threadParams(params map[string]any) map[string]any {
@@ -321,7 +346,7 @@ func (p *CodexProvider) request(ctx context.Context, method string, params any) 
 	select {
 	case value := <-response:
 		if value.Error != nil {
-			return nil, fmt.Errorf("Codex request %s failed (%d): %s", method, value.Error.Code, value.Error.Message)
+			return nil, &codexRequestError{method: method, code: value.Error.Code, message: value.Error.Message}
 		}
 		return value.Result, nil
 	case <-ctx.Done():

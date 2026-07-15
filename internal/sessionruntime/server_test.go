@@ -824,6 +824,68 @@ func TestCodexInterruptUsesActiveTurn(t *testing.T) {
 	}
 }
 
+func TestCodexOpenThreadReplacesUnmaterializedThread(t *testing.T) {
+	stateDir := t.TempDir()
+	statePath := filepath.Join(stateDir, "codex-thread-id")
+	if err := os.WriteFile(statePath, []byte("thread-1\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	reader, writer := io.Pipe()
+	provider := &CodexProvider{
+		config:  ProviderConfig{StateDir: stateDir},
+		ctx:     context.Background(),
+		stdin:   writer,
+		pending: map[string]chan codexResponse{},
+		done:    make(chan struct{}),
+	}
+	requestDone := make(chan error, 1)
+	go func() {
+		decoder := json.NewDecoder(reader)
+		for i, wantMethod := range []string{"thread/resume", "thread/start"} {
+			var request struct {
+				ID     int64  `json:"id"`
+				Method string `json:"method"`
+			}
+			if err := decoder.Decode(&request); err != nil {
+				requestDone <- err
+				return
+			}
+			if request.Method != wantMethod {
+				requestDone <- fmt.Errorf("request %d method = %q, want %q", i, request.Method, wantMethod)
+				return
+			}
+			provider.pendingMu.Lock()
+			pending := provider.pending[strconv.FormatInt(request.ID, 10)]
+			provider.pendingMu.Unlock()
+			if i == 0 {
+				pending <- codexResponse{Error: &struct {
+					Code    int    `json:"code"`
+					Message string `json:"message"`
+				}{Code: -32600, Message: "no rollout found for thread id thread-1"}}
+				continue
+			}
+			pending <- codexResponse{Result: json.RawMessage(`{"thread":{"id":"thread-2"}}`)}
+		}
+		requestDone <- nil
+	}()
+	if err := provider.openThread(t.Context()); err != nil {
+		t.Fatalf("openThread() error = %v", err)
+	}
+	if requestErr := <-requestDone; requestErr != nil {
+		t.Fatal(requestErr)
+	}
+	if provider.threadID != "thread-2" {
+		t.Fatalf("thread ID = %q, want thread-2", provider.threadID)
+	}
+	data, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "thread-2\n" {
+		t.Fatalf("saved thread ID = %q, want thread-2", data)
+	}
+}
+
 func TestCodexOpenThreadReturnsResumeFailure(t *testing.T) {
 	stateDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(stateDir, "codex-thread-id"), []byte("thread-1\n"), 0600); err != nil {

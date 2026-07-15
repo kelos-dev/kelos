@@ -505,6 +505,79 @@ func TestSessionTUIForcedColorIgnoresNoColorEnvironment(t *testing.T) {
 	}
 }
 
+func TestSessionTUIScreen256ColorUsesDetectedBackground(t *testing.T) {
+	t.Setenv("TERM", "screen-256color")
+	t.Setenv("COLORTERM", "")
+	renderer := newSessionTUIRenderer(io.Discard, true)
+	if got := renderer.ColorProfile(); got != termenv.ANSI256 {
+		t.Fatalf("screen color profile = %v, want ANSI256", got)
+	}
+
+	tests := []struct {
+		name       string
+		background sessionTUIRGB
+		want       lipgloss.Color
+	}{
+		{name: "dark", background: sessionTUIRGB{}, want: lipgloss.Color("#1e1e1e")},
+		{name: "light", background: sessionTUIRGB{red: 255, green: 255, blue: 255}, want: lipgloss.Color("#f4f4f4")},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			styles := newSessionTUIStyles(renderer, true, &sessionTUIDefaultColors{background: test.background})
+			if got := styles.base.GetBackground(); got != (lipgloss.NoColor{}) {
+				t.Errorf("base background = %v, want terminal default", got)
+			}
+			if got := styles.user.GetBackground(); got != test.want {
+				t.Errorf("user and composer background = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestSessionTUIScreen256ColorLeavesUnknownBackgroundUnstyled(t *testing.T) {
+	t.Setenv("TERM", "screen-256color")
+	renderer := newSessionTUIRenderer(io.Discard, true)
+	styles := newSessionTUIStyles(renderer, true, nil)
+
+	if got := styles.user.GetBackground(); got != (lipgloss.NoColor{}) {
+		t.Fatalf("unknown user and composer background = %v, want terminal default", got)
+	}
+}
+
+func TestSessionTUIDoesNotStyleWhenColorDisabled(t *testing.T) {
+	renderer := newSessionTUIRenderer(io.Discard, false)
+	styles := newSessionTUIStyles(renderer, false, &sessionTUIDefaultColors{background: sessionTUIRGB{}})
+
+	if got := styles.base.Render("assistant") + styles.user.Render("user"); got != "assistantuser" {
+		t.Fatalf("disabled color output = %q, want unstyled output", got)
+	}
+}
+
+func TestParseSessionTUIDefaultColors(t *testing.T) {
+	colors := parseSessionTUIDefaultColors([]byte("typed\x1b]11;rgba:00/80/ff/ff\x1b\\noise\x1b]10;rgb:eeee/eeee/eeee\a"))
+	if colors == nil {
+		t.Fatal("default colors were not parsed")
+	}
+	if want := (sessionTUIRGB{red: 238, green: 238, blue: 238}); colors.foreground != want {
+		t.Errorf("foreground = %#v, want %#v", colors.foreground, want)
+	}
+	if want := (sessionTUIRGB{red: 0, green: 128, blue: 255}); colors.background != want {
+		t.Errorf("background = %#v, want %#v", colors.background, want)
+	}
+}
+
+func TestParseSessionTUIDefaultColorsRejectsIncompleteResponse(t *testing.T) {
+	for _, response := range []string{
+		"\x1b]10;rgb:eeee/eeee/eeee\x1b\\",
+		"\x1b]10;rgb:eeee/eeee/eeee\x1b\\\x1b]11;rgb:nope\a",
+		"\x1b]10;rgb:eeee/eeee/eeee\x1b\\\x1b]11;rgb:1111/1111/1111",
+	} {
+		if got := parseSessionTUIDefaultColors([]byte(response)); got != nil {
+			t.Errorf("parseSessionTUIDefaultColors(%q) = %#v, want nil", response, got)
+		}
+	}
+}
+
 func TestSessionTUISubmittedTextRendersFromUserEventOnce(t *testing.T) {
 	model, requests := newSessionTUITestModel()
 	history := captureSessionTUIHistory(model)
@@ -613,6 +686,7 @@ func newSessionTUITestModel() (*sessionTUIModel, *bytes.Buffer) {
 		json.NewEncoder(requests),
 		io.Discard,
 		false,
+		nil,
 		nil,
 	), requests
 }

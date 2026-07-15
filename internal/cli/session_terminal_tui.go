@@ -149,7 +149,11 @@ func runSessionTUI(ctx context.Context, input io.Reader, output io.Writer, event
 		}
 		return sessionTUITerminateMsg{}
 	}
-	model := newSessionTUIModel(events, requests, output, color, waitForTermination)
+	var defaultColors *sessionTUIDefaultColors
+	if color {
+		defaultColors = probeSessionTUIDefaultColors(input, output)
+	}
+	model := newSessionTUIModel(events, requests, output, color, defaultColors, waitForTermination)
 	program := tea.NewProgram(
 		model,
 		tea.WithInput(input),
@@ -169,9 +173,9 @@ func runSessionTUI(ctx context.Context, input io.Reader, output io.Writer, event
 	return nil
 }
 
-func newSessionTUIModel(events *json.Decoder, requests *json.Encoder, output io.Writer, color bool, waitForTermination tea.Cmd) *sessionTUIModel {
+func newSessionTUIModel(events *json.Decoder, requests *json.Encoder, output io.Writer, color bool, defaultColors *sessionTUIDefaultColors, waitForTermination tea.Cmd) *sessionTUIModel {
 	renderer := newSessionTUIRenderer(output, color)
-	styles := newSessionTUIStyles(renderer, color)
+	styles := newSessionTUIStyles(renderer, color, defaultColors)
 	input := textarea.New()
 	input.Prompt = "> "
 	input.Placeholder = ""
@@ -213,7 +217,7 @@ func newSessionTUIRenderer(output io.Writer, color bool) *lipgloss.Renderer {
 	return renderer
 }
 
-func newSessionTUIStyles(renderer *lipgloss.Renderer, color bool) sessionTUIStyles {
+func newSessionTUIStyles(renderer *lipgloss.Renderer, color bool, defaultColors *sessionTUIDefaultColors) sessionTUIStyles {
 	base := renderer.NewStyle()
 	styles := sessionTUIStyles{
 		base:         base,
@@ -236,7 +240,9 @@ func newSessionTUIStyles(renderer *lipgloss.Renderer, color bool) sessionTUIStyl
 		return styles
 	}
 
-	styles.user = base.Background(lipgloss.AdaptiveColor{Light: "254", Dark: "236"})
+	if defaultColors != nil && (renderer.ColorProfile() == termenv.TrueColor || renderer.ColorProfile() == termenv.ANSI256) {
+		styles.user = base.Background(lipgloss.Color(sessionTUIUserMessageBackground(defaultColors.background)))
+	}
 	styles.muted = base.Faint(true)
 	styles.warning = base.Foreground(lipgloss.Color("3")).Bold(true)
 	styles.error = base.Foreground(lipgloss.Color("1")).Bold(true)

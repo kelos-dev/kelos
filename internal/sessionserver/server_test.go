@@ -333,6 +333,27 @@ func TestSessionComposerUsesOneSendAndInterruptAction(t *testing.T) {
 	}
 }
 
+func TestSessionComposerKeepsDraftsPerSession(t *testing.T) {
+	source, err := webFiles.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for description, expected := range map[string]string{
+		"draft storage":           `promptDrafts: new Map()`,
+		"draft save key":          `state.promptDrafts.set(sessionKey(session), elements.input.value)`,
+		"draft clear key":         `state.promptDrafts.delete(sessionKey(session))`,
+		"Session selection save":  "function selectSession(session) {\n  savePromptDraft(state.selected);",
+		"Session draft restore":   `state.promptDrafts.get(sessionKey(session))`,
+		"prompt submission clear": "state.socket.send(JSON.stringify({type: 'message', text}));\n    clearPromptDraft(state.selected);",
+		"Session deletion clear":  "selectSession(null);\n    clearPromptDraft(session);",
+		"composer input save":     "elements.input.addEventListener('input', () => {\n  savePromptDraft(state.selected);",
+	} {
+		if !strings.Contains(string(source), expected) {
+			t.Errorf("Session composer is missing %s: %s", description, expected)
+		}
+	}
+}
+
 func TestSessionAPIHappyPath(t *testing.T) {
 	server := testServer(t)
 	request := httptest.NewRequest(http.MethodGet, "/api/config", nil)

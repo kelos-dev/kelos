@@ -61,6 +61,7 @@ const state = {
   diffs: new Map(),
   fileChanges: new Map(),
   queuedMessages: new Map(),
+  promptDrafts: new Map(),
   activeTurn: false,
   interrupting: false,
   defaultNamespace: 'default',
@@ -99,6 +100,30 @@ function showToast(message) {
 
 function sessionKey(session) {
   return `${session.namespace}/${session.name}`;
+}
+
+function savePromptDraft(session) {
+  if (!session) return;
+  if (elements.input.value) {
+    state.promptDrafts.set(sessionKey(session), elements.input.value);
+  } else {
+    state.promptDrafts.delete(sessionKey(session));
+  }
+}
+
+function restorePromptDraft(session) {
+  elements.input.value = session ? state.promptDrafts.get(sessionKey(session)) || '' : '';
+  resizeComposer();
+}
+
+function clearPromptDraft(session) {
+  if (!session) return;
+  state.promptDrafts.delete(sessionKey(session));
+  if (state.selected && sessionKey(state.selected) === sessionKey(session)) {
+    elements.input.value = '';
+    resizeComposer();
+    updateComposerAction();
+  }
 }
 
 function providerLabel(provider) {
@@ -389,6 +414,7 @@ function renderSelectedAgentConfigs() {
 }
 
 function selectSession(session) {
+  savePromptDraft(state.selected);
   closeSocket();
   state.selected = session;
   state.lastEventID = 0;
@@ -404,6 +430,7 @@ function selectSession(session) {
   state.interrupting = false;
   setActiveView('conversation');
   renderFileChanges();
+  restorePromptDraft(session);
   elements.messages.replaceChildren();
   renderSessions();
   renderHeader();
@@ -1134,9 +1161,7 @@ elements.composer.addEventListener('submit', event => {
   if (!state.socket || state.socket.readyState !== WebSocket.OPEN) return;
   if (text) {
     state.socket.send(JSON.stringify({type: 'message', text}));
-    elements.input.value = '';
-    resizeComposer();
-    updateComposerAction();
+    clearPromptDraft(state.selected);
   } else if (state.activeTurn) {
     interruptActiveTurn();
   }
@@ -1149,6 +1174,7 @@ elements.input.addEventListener('keydown', event => {
   }
 });
 elements.input.addEventListener('input', () => {
+  savePromptDraft(state.selected);
   resizeComposer();
   updateComposerAction();
 });
@@ -1288,6 +1314,7 @@ elements.deleteButton.addEventListener('click', async () => {
   try {
     await api(`/api/sessions/${encodeURIComponent(session.namespace)}/${encodeURIComponent(session.name)}`, {method: 'DELETE'});
     selectSession(null);
+    clearPromptDraft(session);
     await loadSessions();
     showToast('Session deleted');
   } catch (error) {

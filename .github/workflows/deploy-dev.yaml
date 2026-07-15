@@ -195,7 +195,7 @@ jobs:
           kubectl patch service kelos-webhook-github -n kelos-system --type=merge \
             --patch '{"spec":{"ports":[{"name":"webhook","nodePort":30081,"port":8443,"protocol":"TCP","targetPort":"webhook"}]}}'
           kubectl rollout restart deployment/kelos-controller-manager -n kelos-system
-          kubectl rollout status deployment/kelos-controller-manager -n kelos-system --timeout=120s
+          kubectl rollout status deployment/kelos-controller-manager -n kelos-system --timeout=300s
           mapfile -t session_statefulsets < <(
             kubectl get statefulset --all-namespaces \
               -l kelos.dev/component=session \
@@ -212,11 +212,11 @@ jobs:
           for statefulset in "${session_statefulsets[@]}"; do
             namespace="${statefulset%%/*}"
             name="${statefulset#*/}"
-            kubectl rollout status "statefulset/${name}" -n "${namespace}" --timeout=120s
+            kubectl rollout status "statefulset/${name}" -n "${namespace}" --timeout=300s
           done
-          kubectl rollout status deployment/kelos-session-server -n kelos-system --timeout=120s
-          kubectl rollout status deployment -l kelos.dev/component=spawner -n "${KELOS_NAMESPACE}" --timeout=120s
-          kubectl rollout status deployment/kelos-webhook-github -n kelos-system --timeout=120s
+          kubectl rollout status deployment/kelos-session-server -n kelos-system --timeout=300s
+          kubectl rollout status deployment -l kelos.dev/component=spawner -n "${KELOS_NAMESPACE}" --timeout=300s
+          kubectl rollout status deployment/kelos-webhook-github -n kelos-system --timeout=300s
 
       - name: Apply self-development resources
         run: kubectl apply -f self-development/ -n "${KELOS_NAMESPACE}"

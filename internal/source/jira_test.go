@@ -501,3 +501,149 @@ func TestExtractIssueNumber(t *testing.T) {
 		})
 	}
 }
+
+// TestJiraDiscoverLegacySearchFallback verifies that when the Cloud-only
+// token-paginated /rest/api/2/search/jql endpoint returns 404 (as on Jira
+// Data Center/Server), the source falls back to the classic offset-paginated
+// /rest/api/2/search endpoint and still returns all discovered issues.
+func TestJiraDiscoverLegacySearchFallback(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/api/2/search/jql":
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(`{"message":"HTTP 404 Not Found","status-code":404,"sub-code":-1}`))
+		case "/rest/api/2/search":
+			startAt := r.URL.Query().Get("startAt")
+			if startAt == "" || startAt == "0" {
+				json.NewEncoder(w).Encode(jiraSearchResponse{
+					StartAt: 0,
+					Total:   2,
+					Issues: []jiraIssue{
+						{Key: "PROJ-1", Fields: jiraIssueFields{Summary: "Issue 1"}},
+					},
+				})
+				return
+			}
+			json.NewEncoder(w).Encode(jiraSearchResponse{
+				StartAt: 1,
+				Total:   2,
+				Issues: []jiraIssue{
+					{Key: "PROJ-2", Fields: jiraIssueFields{Summary: "Issue 2"}},
+				},
+			})
+		default:
+			t.Fatalf("unexpected request path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	s := &JiraSource{
+		BaseURL: server.URL,
+		Project: "PROJ",
+		Token:   "test-pat",
+	}
+
+	items, err := s.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+	if items[0].ID != "PROJ-1" || items[1].ID != "PROJ-2" {
+		t.Errorf("unexpected items: %+v", items)
+	}
+}
+
+// TestJiraDiscoverNonNotFoundErrorNotRetried verifies that non-404 errors
+// from the Cloud endpoint are returned directly, without attempting the
+// legacy fallback (avoiding masking real failures like auth errors).
+func TestJiraDiscoverNonNotFoundErrorNotRetried(t *testing.T) {
+	var legacyHit bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/api/2/search/jql":
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"message":"unauthorized"}`))
+		case "/rest/api/2/search":
+			legacyHit = true
+			json.NewEncoder(w).Encode(jiraSearchResponse{IsLast: true})
+		}
+	}))
+	defer server.Close()
+
+	s := &JiraSource{
+		BaseURL: server.URL,
+		Project: "PROJ",
+		Token:   "test-pat",
+	}
+
+	_, err := s.Discover(context.Background())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "401") {
+		t.Errorf("expected error to mention status 401, got: %v", err)
+	}
+	if legacyHit {
+		t.Error("legacy endpoint should not be hit for non-404 errors")
+	}
+}
+
+// TestJiraDiscoverLegacyFallbackAfterCloudPageMidRun verifies that when the
+// Cloud endpoint succeeds for one or more pages before 404ing on a later
+// page (e.g. a flaky proxy or an endpoint that disappears mid-run), the
+// legacy fallback resumes pagination from the issues already collected
+// instead of restarting at offset 0 and duplicating them.
+func TestJiraDiscoverLegacyFallbackAfterCloudPageMidRun(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/api/2/search/jql":
+			if r.URL.Query().Get("nextPageToken") == "" {
+				json.NewEncoder(w).Encode(jiraSearchResponse{
+					NextPageToken: "tok1",
+					Issues: []jiraIssue{
+						{Key: "PROJ-1", Fields: jiraIssueFields{Summary: "Issue 1"}},
+					},
+				})
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(`{"message":"HTTP 404 Not Found","status-code":404,"sub-code":-1}`))
+		case "/rest/api/2/search":
+			startAt := r.URL.Query().Get("startAt")
+			if startAt != "1" {
+				t.Errorf("expected legacy fallback to resume at startAt=1, got %q", startAt)
+			}
+			json.NewEncoder(w).Encode(jiraSearchResponse{
+				StartAt: 1,
+				Total:   2,
+				Issues: []jiraIssue{
+					{Key: "PROJ-2", Fields: jiraIssueFields{Summary: "Issue 2"}},
+				},
+			})
+		default:
+			t.Fatalf("unexpected request path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	s := &JiraSource{
+		BaseURL: server.URL,
+		Project: "PROJ",
+		Token:   "test-pat",
+	}
+
+	items, err := s.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d: %+v", len(items), items)
+	}
+	if items[0].ID != "PROJ-1" || items[1].ID != "PROJ-2" {
+		t.Errorf("unexpected items: %+v", items)
+	}
+}

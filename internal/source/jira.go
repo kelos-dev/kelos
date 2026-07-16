@@ -3,6 +3,7 @@ package source
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -36,6 +37,22 @@ type jiraSearchResponse struct {
 	Issues        []jiraIssue `json:"issues"`
 	NextPageToken string      `json:"nextPageToken"`
 	IsLast        bool        `json:"isLast"`
+
+	// StartAt and Total are only populated by the legacy /rest/api/2/search
+	// endpoint, which paginates by offset instead of NextPageToken.
+	StartAt int `json:"startAt"`
+	Total   int `json:"total"`
+}
+
+// jiraAPIError carries the HTTP status code returned by the Jira API so
+// callers can distinguish a missing endpoint (404) from other failures.
+type jiraAPIError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *jiraAPIError) Error() string {
+	return fmt.Sprintf("Jira API returned status %d: %s", e.StatusCode, e.Body)
 }
 
 type jiraIssue struct {
@@ -109,13 +126,36 @@ func (s *JiraSource) Discover(ctx context.Context) ([]WorkItem, error) {
 func (s *JiraSource) fetchAllIssues(ctx context.Context) ([]jiraIssue, error) {
 	var allIssues []jiraIssue
 	var nextPageToken string
+	startAt := 0
+
+	// legacy tracks whether we've fallen back to the offset-paginated
+	// /rest/api/2/search endpoint. The token-paginated /rest/api/2/search/jql
+	// endpoint used below is Jira Cloud-only; Jira Data Center/Server
+	// instances 404 on it and only expose the classic endpoint, so on a 404
+	// we switch to it for the remainder of this discovery run.
+	legacy := false
 
 	for page := 0; page < maxJiraPages; page++ {
-		result, err := s.fetchIssuesPage(ctx, nextPageToken)
+		result, err := s.fetchIssuesPage(ctx, nextPageToken, startAt, legacy)
 		if err != nil {
-			return nil, err
+			if !legacy && isJiraNotFound(err) {
+				legacy = true
+				startAt = len(allIssues)
+				result, err = s.fetchIssuesPage(ctx, nextPageToken, startAt, legacy)
+			}
+			if err != nil {
+				return nil, err
+			}
 		}
 		allIssues = append(allIssues, result.Issues...)
+
+		if legacy {
+			startAt += len(result.Issues)
+			if len(result.Issues) == 0 || startAt >= result.Total {
+				break
+			}
+			continue
+		}
 
 		if result.IsLast || result.NextPageToken == "" {
 			break
@@ -124,6 +164,12 @@ func (s *JiraSource) fetchAllIssues(ctx context.Context) ([]jiraIssue, error) {
 	}
 
 	return allIssues, nil
+}
+
+// isJiraNotFound reports whether err is a Jira API 404 response.
+func isJiraNotFound(err error) bool {
+	var apiErr *jiraAPIError
+	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound
 }
 
 func (s *JiraSource) buildJQL() string {
@@ -149,8 +195,12 @@ func splitJQLOrderBy(jql string) (filter, orderBy string) {
 	return strings.TrimSpace(jql[:idx]), strings.TrimSpace(jql[idx:])
 }
 
-func (s *JiraSource) fetchIssuesPage(ctx context.Context, nextPageToken string) (*jiraSearchResponse, error) {
-	u, err := url.Parse(strings.TrimRight(s.BaseURL, "/") + "/rest/api/2/search/jql")
+func (s *JiraSource) fetchIssuesPage(ctx context.Context, nextPageToken string, startAt int, legacy bool) (*jiraSearchResponse, error) {
+	path := "/rest/api/2/search/jql"
+	if legacy {
+		path = "/rest/api/2/search"
+	}
+	u, err := url.Parse(strings.TrimRight(s.BaseURL, "/") + path)
 	if err != nil {
 		return nil, fmt.Errorf("parsing base URL: %w", err)
 	}
@@ -158,7 +208,9 @@ func (s *JiraSource) fetchIssuesPage(ctx context.Context, nextPageToken string) 
 	params := url.Values{}
 	params.Set("jql", s.buildJQL())
 	params.Set("maxResults", strconv.Itoa(maxJiraResults))
-	if nextPageToken != "" {
+	if legacy {
+		params.Set("startAt", strconv.Itoa(startAt))
+	} else if nextPageToken != "" {
 		params.Set("nextPageToken", nextPageToken)
 	}
 	params.Set("fields", "summary,status,labels,comment,issuetype")
@@ -188,7 +240,7 @@ func (s *JiraSource) fetchIssuesPage(ctx context.Context, nextPageToken string) 
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return nil, fmt.Errorf("Jira API returned status %d: %s", resp.StatusCode, string(body))
+		return nil, &jiraAPIError{StatusCode: resp.StatusCode, Body: string(body)}
 	}
 
 	var result jiraSearchResponse

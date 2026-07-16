@@ -56,6 +56,9 @@ const state = {
   socketGeneration: 0,
   reconnectTimer: null,
   reconnectDelay: 800,
+  bottomScrollFrame: null,
+  sessionViews: new Map(),
+  currentView: null,
   lastEventID: 0,
   assistantSegmentByTurn: new Map(),
   assistantTextByTurn: new Map(),
@@ -67,6 +70,9 @@ const state = {
   promptDrafts: new Map(),
   activeTurn: false,
   interrupting: false,
+  replayingHistory: false,
+  pinHistoryToBottom: false,
+  fileChangesDirty: false,
   defaultNamespace: 'default',
   namespace: 'default',
   namespaceGeneration: 0,
@@ -81,6 +87,7 @@ const state = {
 };
 
 const customOption = '__custom__';
+const maxCachedSessionViews = 5;
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -108,6 +115,141 @@ function showToast(message) {
 
 function sessionKey(session) {
   return `${session.namespace}/${session.name}`;
+}
+
+function sessionViewKey(session) {
+  return `${sessionKey(session)}/${session.uid || 'unknown'}`;
+}
+
+function moveChildren(element) {
+  const fragment = document.createDocumentFragment();
+  while (element.firstChild) fragment.append(element.firstChild);
+  return fragment;
+}
+
+function createSessionView() {
+  return {
+    messages: document.createDocumentFragment(),
+    queue: document.createDocumentFragment(),
+    changes: document.createDocumentFragment(),
+    lastEventID: 0,
+    journalID: '',
+    assistantSegmentByTurn: new Map(),
+    assistantTextByTurn: new Map(),
+    tools: new Map(),
+    inputs: new Map(),
+    diffs: new Map(),
+    fileChanges: new Map(),
+    queuedMessages: new Map(),
+    activeTurn: false,
+    interrupting: false,
+    replayingHistory: false,
+    pinHistoryToBottom: false,
+    fileChangesDirty: false,
+    historyLoaded: false,
+    statusPlaceholder: false,
+  };
+}
+
+function saveCurrentSessionView() {
+  const view = state.currentView;
+  if (!view) return;
+  view.messages = moveChildren(elements.messages);
+  view.queue = moveChildren(elements.queue);
+  view.changes = moveChildren(elements.changesList);
+  view.lastEventID = state.lastEventID;
+  view.assistantSegmentByTurn = state.assistantSegmentByTurn;
+  view.assistantTextByTurn = state.assistantTextByTurn;
+  view.tools = state.tools;
+  view.inputs = state.inputs;
+  view.diffs = state.diffs;
+  view.fileChanges = state.fileChanges;
+  view.queuedMessages = state.queuedMessages;
+  view.activeTurn = state.activeTurn;
+  view.interrupting = state.interrupting;
+  view.replayingHistory = state.replayingHistory;
+  view.pinHistoryToBottom = state.pinHistoryToBottom;
+  view.fileChangesDirty = state.fileChangesDirty;
+}
+
+function updateFileChangesHeader() {
+  const count = state.fileChanges.size;
+  elements.changesCount.textContent = String(count);
+  elements.changesSummary.textContent = count === 1 ? '1 changed file' : `${count} changed files`;
+}
+
+function activateSessionView(view) {
+  state.currentView = view;
+  state.lastEventID = view.lastEventID;
+  state.assistantSegmentByTurn = view.assistantSegmentByTurn;
+  state.assistantTextByTurn = view.assistantTextByTurn;
+  state.tools = view.tools;
+  state.inputs = view.inputs;
+  state.diffs = view.diffs;
+  state.fileChanges = view.fileChanges;
+  state.queuedMessages = view.queuedMessages;
+  state.activeTurn = view.activeTurn;
+  state.interrupting = view.interrupting;
+  state.replayingHistory = view.replayingHistory;
+  state.pinHistoryToBottom = view.pinHistoryToBottom;
+  state.fileChangesDirty = view.fileChangesDirty;
+  const hasChanges = view.changes.hasChildNodes();
+  elements.messages.replaceChildren(view.messages);
+  elements.queue.replaceChildren(view.queue);
+  elements.changesList.replaceChildren(view.changes);
+  elements.queue.hidden = state.queuedMessages.size === 0;
+  updateFileChangesHeader();
+  if (!hasChanges) renderFileChanges();
+}
+
+function cachedSessionView(session) {
+  const key = sessionViewKey(session);
+  let view = state.sessionViews.get(key);
+  if (view) state.sessionViews.delete(key);
+  else view = createSessionView();
+  state.sessionViews.set(key, view);
+  while (state.sessionViews.size > maxCachedSessionViews) {
+    state.sessionViews.delete(state.sessionViews.keys().next().value);
+  }
+  return view;
+}
+
+function discardSessionView(session) {
+  if (session) state.sessionViews.delete(sessionViewKey(session));
+}
+
+function resetCurrentSessionView() {
+  const view = state.currentView;
+  state.lastEventID = 0;
+  state.assistantSegmentByTurn = new Map();
+  state.assistantTextByTurn = new Map();
+  state.tools = new Map();
+  state.inputs = new Map();
+  state.diffs = new Map();
+  state.fileChanges = new Map();
+  state.queuedMessages = new Map();
+  state.activeTurn = false;
+  state.interrupting = false;
+  state.replayingHistory = true;
+  state.pinHistoryToBottom = true;
+  state.fileChangesDirty = false;
+  elements.messages.replaceChildren();
+  elements.queue.replaceChildren();
+  elements.queue.hidden = true;
+  renderFileChanges();
+  if (view) {
+    view.historyLoaded = false;
+    view.statusPlaceholder = false;
+    view.lastEventID = 0;
+    view.assistantSegmentByTurn = state.assistantSegmentByTurn;
+    view.assistantTextByTurn = state.assistantTextByTurn;
+    view.tools = state.tools;
+    view.inputs = state.inputs;
+    view.diffs = state.diffs;
+    view.fileChanges = state.fileChanges;
+    view.queuedMessages = state.queuedMessages;
+    view.pinHistoryToBottom = true;
+  }
 }
 
 function savePromptDraft(session) {
@@ -235,11 +377,17 @@ async function loadSessions({quiet = false} = {}) {
     if (state.selected) {
       const current = sessions.find(item => sessionKey(item) === sessionKey(state.selected));
       if (current) {
-        const becameReady = state.selected.phase !== 'Ready' && current.phase === 'Ready';
-        state.selected = current;
-        renderHeader();
-        if (becameReady) connectSocket();
+        if (state.selected.uid && current.uid && state.selected.uid !== current.uid) {
+          discardSessionView(state.selected);
+          selectSession(current);
+        } else {
+          const becameReady = state.selected.phase !== 'Ready' && current.phase === 'Ready';
+          state.selected = current;
+          renderHeader();
+          if (becameReady) connectSocket();
+        }
       } else {
+        discardSessionView(state.selected);
         selectSession(null);
       }
     }
@@ -648,30 +796,40 @@ async function loadSessionSource(name) {
 function selectSession(session) {
   savePromptDraft(state.selected);
   closeSocket();
+  saveCurrentSessionView();
   state.selected = session;
-  state.lastEventID = 0;
-  state.assistantSegmentByTurn.clear();
-  state.assistantTextByTurn.clear();
-  state.tools.clear();
-  state.inputs.clear();
-  state.diffs.clear();
-  state.fileChanges.clear();
-  state.queuedMessages.clear();
-  elements.queue.replaceChildren();
-  elements.queue.hidden = true;
-  state.activeTurn = false;
-  state.interrupting = false;
+  state.currentView = null;
   setActiveView('conversation');
-  renderFileChanges();
   restorePromptDraft(session);
   elements.messages.replaceChildren();
+  elements.queue.replaceChildren();
+  elements.changesList.replaceChildren();
   renderSessions();
   renderHeader();
   elements.sidebar.classList.remove('open');
   if (!session) {
+    resetCurrentSessionView();
+    state.replayingHistory = false;
+    state.pinHistoryToBottom = false;
     elements.messages.append(elements.welcome || createWelcome());
     return;
   }
+  const view = cachedSessionView(session);
+  const hasCachedMessages = view.messages.hasChildNodes();
+  const hasCachedHistory = hasCachedMessages && !view.statusPlaceholder;
+  activateSessionView(view);
+  state.pinHistoryToBottom = true;
+  if (view.historyLoaded) {
+    connectSocket();
+    scheduleBottomAnchor();
+    return;
+  }
+  if (hasCachedHistory) {
+    if (session.phase === 'Ready') connectSocket();
+    scheduleBottomAnchor();
+    return;
+  }
+  elements.messages.replaceChildren();
   const loading = document.createElement('div');
   loading.className = 'welcome';
   const title = document.createElement('h1');
@@ -680,7 +838,9 @@ function selectSession(session) {
   detail.textContent = session.message || 'The controller is preparing the workspace and agent runtime.';
   loading.append(title, detail);
   elements.messages.append(loading);
+  view.statusPlaceholder = true;
   if (session.phase === 'Ready') connectSocket();
+  scheduleBottomAnchor();
 }
 
 function createWelcome() {
@@ -760,6 +920,10 @@ function closeSocket() {
   state.socketGeneration += 1;
   window.clearTimeout(state.reconnectTimer);
   state.reconnectTimer = null;
+  if (state.bottomScrollFrame !== null) {
+    window.cancelAnimationFrame(state.bottomScrollFrame);
+    state.bottomScrollFrame = null;
+  }
   if (state.socket) {
     state.socket.onclose = null;
     state.socket.close();
@@ -771,7 +935,10 @@ function closeSocket() {
 
 function connectSocket() {
   if (!state.selected || state.selected.phase !== 'Ready') return;
+  const pinToBottom = state.pinHistoryToBottom || messagesNearBottom();
   closeSocket();
+  state.replayingHistory = true;
+  state.pinHistoryToBottom = pinToBottom;
   const generation = state.socketGeneration;
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const namespace = encodeURIComponent(state.selected.namespace);
@@ -782,7 +949,12 @@ function connectSocket() {
   socket.addEventListener('open', () => {
     if (generation !== state.socketGeneration) return;
     state.reconnectDelay = 800;
-    socket.send(JSON.stringify({type: 'subscribe', since: state.lastEventID}));
+    socket.send(JSON.stringify({
+      type: 'subscribe',
+      since: state.lastEventID,
+      journalId: state.currentView?.journalID || '',
+      historyBounds: true,
+    }));
     setConnection('connected', 'Connected');
     setComposer(true);
     updateComposerAction();
@@ -809,7 +981,9 @@ function connectSocket() {
 }
 
 function ensureConversation() {
-  if (elements.messages.querySelector('.welcome')) elements.messages.replaceChildren();
+  if (!elements.messages.querySelector('.welcome')) return;
+  elements.messages.replaceChildren();
+  if (state.currentView) state.currentView.statusPlaceholder = false;
 }
 
 function trimURLSuffix(value) {
@@ -1229,11 +1403,40 @@ function completedAssistantText(eventText, streamedText) {
   return eventText || streamedText || '';
 }
 
+function finishHistoryReplay() {
+  const pinToBottom = state.pinHistoryToBottom;
+  state.replayingHistory = false;
+  if (state.fileChangesDirty) {
+    state.fileChangesDirty = false;
+    renderFileChanges();
+  }
+  for (const block of state.diffs.values()) {
+    if (!block.dirty) continue;
+    renderDiffBlock(block, block.openFirst);
+    block.dirty = false;
+    block.openFirst = false;
+  }
+  if (state.currentView) {
+    state.currentView.historyLoaded = true;
+    state.currentView.lastEventID = state.lastEventID;
+  }
+  ensureConversation();
+  if (pinToBottom) scheduleBottomAnchor();
+  state.pinHistoryToBottom = false;
+}
+
 function handleEvent(event) {
   if (event.id) state.lastEventID = Math.max(state.lastEventID, event.id);
   switch (event.type) {
+    case 'history.start':
+      if (event.reset || (state.currentView?.journalID && state.currentView.journalID !== event.journalId)) {
+        resetCurrentSessionView();
+      }
+      if (state.currentView && event.journalId) state.currentView.journalID = event.journalId;
+      state.replayingHistory = true;
+      break;
     case 'history.end':
-      scrollToBottom(false);
+      finishHistoryReplay();
       break;
     case 'runtime.recovered':
       renderRecovery(event);
@@ -1365,9 +1568,12 @@ function endAssistantSegment(turnID) {
 function renderAssistantDelta(event) {
   const key = event.turnId || 'current';
   const bubble = assistantBubble(event.turnId);
-  const text = (state.assistantTextByTurn.get(key) || '') + (event.text || '');
+  const delta = event.text || '';
+  const text = (state.assistantTextByTurn.get(key) || '') + delta;
   state.assistantTextByTurn.set(key, text);
-  bubble.append(document.createTextNode(event.text || ''));
+  const tail = bubble.lastChild;
+  if (tail?.nodeType === 3) tail.appendData(delta);
+  else bubble.append(document.createTextNode(delta));
   scrollToBottom();
 }
 
@@ -1532,13 +1738,19 @@ function renderDiff(event) {
     state.diffs.set(key, block);
   }
   for (const file of files) block.files.set(file.name, file.diff);
-  renderDiffBlock(block, created);
-  if (created) scrollToBottom();
+  if (state.replayingHistory) {
+    block.dirty = true;
+    block.openFirst = block.openFirst || created;
+  } else {
+    renderDiffBlock(block, created);
+    if (created) scrollToBottom();
+  }
 }
 
 function updateFileChanges(files) {
   for (const file of files) state.fileChanges.set(file.name, file.diff);
-  renderFileChanges();
+  if (state.replayingHistory) state.fileChangesDirty = true;
+  else renderFileChanges();
 }
 
 function parseFileDiffs(diff) {
@@ -1621,8 +1833,7 @@ function renderFileChanges() {
     [...elements.changesList.querySelectorAll('.file-change[open]')].map(item => item.dataset.path),
   );
   const count = state.fileChanges.size;
-  elements.changesCount.textContent = String(count);
-  elements.changesSummary.textContent = count === 1 ? '1 changed file' : `${count} changed files`;
+  updateFileChangesHeader();
 
   if (!count) {
     elements.changesList.replaceChildren();
@@ -1770,10 +1981,33 @@ function renderTurnEnd(event) {
 }
 
 function scrollToBottom(smooth = true) {
-  const distance = elements.messages.scrollHeight - elements.messages.scrollTop - elements.messages.clientHeight;
+  if (state.replayingHistory) {
+    if (state.pinHistoryToBottom) scheduleBottomAnchor();
+    return;
+  }
+  const distance = messagesBottomDistance();
   if (distance < 240 || !smooth) {
     elements.messages.scrollTo({top: elements.messages.scrollHeight, behavior: smooth ? 'smooth' : 'auto'});
   }
+}
+
+function messagesBottomDistance() {
+  return elements.messages.scrollHeight - elements.messages.scrollTop - elements.messages.clientHeight;
+}
+
+function messagesNearBottom() {
+  return messagesBottomDistance() < 240;
+}
+
+function scheduleBottomAnchor() {
+  if (state.bottomScrollFrame !== null) return;
+  state.bottomScrollFrame = window.requestAnimationFrame(() => {
+    state.bottomScrollFrame = null;
+    const scrollBehavior = elements.messages.style.scrollBehavior;
+    elements.messages.style.scrollBehavior = 'auto';
+    elements.messages.scrollTop = elements.messages.scrollHeight;
+    elements.messages.style.scrollBehavior = scrollBehavior;
+  });
 }
 
 elements.composer.addEventListener('submit', event => {
@@ -1946,6 +2180,7 @@ elements.deleteButton.addEventListener('click', async () => {
   if (!session || !window.confirm(`Delete Session ${session.namespace}/${session.name}? The live conversation will end.`)) return;
   try {
     await api(`/api/sessions/${encodeURIComponent(session.namespace)}/${encodeURIComponent(session.name)}`, {method: 'DELETE'});
+    discardSessionView(session);
     selectSession(null);
     clearPromptDraft(session);
     await loadSessions();

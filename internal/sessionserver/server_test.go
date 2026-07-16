@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -121,6 +122,41 @@ func TestSessionSourceJavaScriptPreservesSelectedSource(t *testing.T) {
 	}
 	if strings.Contains(javascript, "No namespace-scoped references.") {
 		t.Error("Session source JavaScript claims there are no namespace-scoped references without checking advanced settings")
+	}
+}
+
+func TestSessionJavaScriptCachesIncrementalHistory(t *testing.T) {
+	source, err := webFiles.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	javascript := string(source)
+	for description, expected := range map[string]string{
+		"bounded Session view cache":       "const maxCachedSessionViews = 5;",
+		"Session incarnation cache key":    "function sessionViewKey(session) {",
+		"recreated Session invalidation":   "state.selected.uid !== current.uid",
+		"view state preservation":          "function saveCurrentSessionView() {",
+		"incremental history subscription": "historyBounds: true",
+		"journal identity subscription":    "journalId: state.currentView?.journalID || '',",
+		"stale history reset":              "if (event.reset ||",
+		"replaced journal reset":           "state.currentView.journalID !== event.journalId",
+		"deferred history rendering":       "function finishHistoryReplay() {",
+		"selection bottom pin":             "state.pinHistoryToBottom = true;",
+		"frame-batched bottom anchor":      "function scheduleBottomAnchor() {",
+		"instant bottom positioning":       "elements.messages.scrollTop = elements.messages.scrollHeight;",
+	} {
+		if !strings.Contains(javascript, expected) {
+			t.Errorf("Session JavaScript is missing %s: %s", description, expected)
+		}
+	}
+}
+
+func TestSessionSummaryIncludesUID(t *testing.T) {
+	summary := summarize(&kelos.Session{ObjectMeta: metav1.ObjectMeta{
+		Name: "chat", Namespace: "team-a", UID: types.UID("session-incarnation"),
+	}})
+	if summary.UID != "session-incarnation" {
+		t.Fatalf("Session summary UID = %q, want session-incarnation", summary.UID)
 	}
 }
 
@@ -249,6 +285,17 @@ func TestApplicationMarkdownBehavior(t *testing.T) {
 	command := exec.Command(node, "testdata/markdown_renderer_test.js")
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("running Markdown renderer tests: %v\n%s", err, output)
+	}
+}
+
+func TestApplicationSessionHistoryBehavior(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node.js is not installed")
+	}
+	command := exec.Command(node, "testdata/session_history_test.js")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("running Session history tests: %v\n%s", err, output)
 	}
 }
 

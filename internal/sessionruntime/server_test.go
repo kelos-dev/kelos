@@ -650,6 +650,62 @@ func TestJournalBoundsRetainedHistory(t *testing.T) {
 	}
 }
 
+func TestServerResetsHistoryForReplacedJournalWithOverlappingIDs(t *testing.T) {
+	previousJournal := newJournal(2)
+	defer previousJournal.Close()
+	for i := 0; i < 2; i++ {
+		if err := previousJournal.Append(Event{Type: EventAssistantDelta, Text: strconv.Itoa(i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	journal := newJournal(2)
+	defer journal.Close()
+	for i := 0; i < 3; i++ {
+		if err := journal.Append(Event{Type: EventAssistantDelta, Text: strconv.Itoa(i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	server := &Server{journal: journal}
+	serverConnection, clientConnection := net.Pipe()
+	defer clientConnection.Close()
+	go server.handleConnection(t.Context(), serverConnection)
+	if err := json.NewEncoder(clientConnection).Encode(ClientRequest{
+		Type:          "subscribe",
+		Since:         2,
+		JournalID:     previousJournal.journalID,
+		HistoryBounds: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	decoder := json.NewDecoder(clientConnection)
+	var start Event
+	if err := decoder.Decode(&start); err != nil {
+		t.Fatal(err)
+	}
+	if start.Type != EventHistoryStart || start.FirstEventID != 2 || start.LastEventID != 3 || start.JournalID != journal.journalID || !start.Reset {
+		t.Fatalf("history start = %#v", start)
+	}
+	for _, wantID := range []int64{2, 3} {
+		var event Event
+		if err := decoder.Decode(&event); err != nil {
+			t.Fatal(err)
+		}
+		if event.ID != wantID {
+			t.Fatalf("retained event ID = %d, want %d", event.ID, wantID)
+		}
+	}
+	var end Event
+	if err := decoder.Decode(&end); err != nil {
+		t.Fatal(err)
+	}
+	if end.Type != EventHistoryEnd {
+		t.Fatalf("final event = %#v, want history end", end)
+	}
+}
+
 func TestJournalSignalsSubscriberOverflow(t *testing.T) {
 	journal := NewJournal()
 	defer journal.Close()

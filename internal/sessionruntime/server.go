@@ -525,11 +525,20 @@ func (s *Server) handleConnection(ctx context.Context, connection net.Conn) {
 			subscriptionCancel()
 		}
 	}()
-	subscribe := func(since int64) {
+	subscribe := func(since int64, journalID string, includeHistoryBounds bool) {
 		if subscriptionCancel != nil {
 			return
 		}
-		retained, stream, overflow, stop := s.journal.Subscribe(since)
+		var bounds HistoryBounds
+		var retained []Event
+		var stream <-chan Event
+		var overflow <-chan struct{}
+		var stop func()
+		if includeHistoryBounds {
+			bounds, retained, stream, overflow, stop = s.journal.SubscribeWithBounds(since, journalID)
+		} else {
+			retained, stream, overflow, stop = s.journal.Subscribe(since)
+		}
 		subscriptionCancel = stop
 		disconnect := func() {
 			cancel()
@@ -545,6 +554,15 @@ func (s *Server) handleConnection(ctx context.Context, connection net.Conn) {
 			case <-connectionCtx.Done():
 				return false
 			}
+		}
+		if includeHistoryBounds && !enqueue(Event{
+			Type:         EventHistoryStart,
+			FirstEventID: bounds.FirstEventID,
+			LastEventID:  bounds.LastEventID,
+			JournalID:    bounds.JournalID,
+			Reset:        bounds.Reset,
+		}) {
+			return
 		}
 		for _, event := range retained {
 			if !enqueue(event) {
@@ -593,19 +611,19 @@ func (s *Server) handleConnection(ctx context.Context, connection net.Conn) {
 		}
 		switch request.Type {
 		case "subscribe":
-			subscribe(request.Since)
+			subscribe(request.Since, request.JournalID, request.HistoryBounds)
 		case "message":
-			subscribe(0)
+			subscribe(0, "", false)
 			if err := s.submitMessage(request.Text, request.RequestID); err != nil {
 				out <- Event{Type: EventError, RequestID: request.RequestID, Text: err.Error(), Status: "rejected"}
 			}
 		case "input":
-			subscribe(0)
+			subscribe(0, "", false)
 			if err := s.resolveInput(request.InputID, request.Answers, request.Cancel, request.RequestID); err != nil {
 				out <- Event{Type: EventError, RequestID: request.RequestID, Text: err.Error(), Status: "rejected"}
 			}
 		case "interrupt":
-			subscribe(0)
+			subscribe(0, "", false)
 			if err := s.interruptTurn(connectionCtx, request.RequestID); err != nil {
 				out <- Event{Type: EventError, RequestID: request.RequestID, Text: err.Error(), Status: "rejected"}
 			}

@@ -90,6 +90,7 @@ func (c *sessionSocket) WriteMessage(messageType int, data []byte) error {
 type sessionSummary struct {
 	Name        string                    `json:"name"`
 	Namespace   string                    `json:"namespace"`
+	UID         string                    `json:"uid,omitempty"`
 	Provider    string                    `json:"provider"`
 	Phase       kelos.SessionPhase        `json:"phase,omitempty"`
 	Message     string                    `json:"message,omitempty"`
@@ -542,6 +543,7 @@ func summarize(session *kelos.Session) sessionSummary {
 	return sessionSummary{
 		Name:        session.Name,
 		Namespace:   session.Namespace,
+		UID:         string(session.UID),
 		Provider:    session.Spec.Worker.Type,
 		Phase:       session.Status.Phase,
 		Message:     session.Status.Message,

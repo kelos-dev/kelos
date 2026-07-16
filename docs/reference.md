@@ -224,6 +224,12 @@ and provider conversation. Both clients can stream agent and tool activity,
 answer user-input requests, and interrupt active work without ending the
 provider conversation.
 
+Selecting a Session in the web chat opens its conversation at the latest
+retained message. Ordinary reconnects resume the event stream incrementally and
+preserve an intentional upward scroll position. If the Session or runtime
+journal was replaced or its retained history was truncated, the web client
+discards its cached view and rebuilds it from the available retained history.
+
 Web messages render safe core Markdown: paragraphs and headings; emphasis,
 strong text, strikethrough, and inline code; ordered, unordered, and task lists;
 blockquotes and horizontal rules; HTTP(S) links; and fenced or indented code

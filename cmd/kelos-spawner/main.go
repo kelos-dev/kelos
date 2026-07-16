@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"net/http"
@@ -15,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/validation"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -300,7 +303,7 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 
 	var newItems []source.WorkItem
 	for _, item := range items {
-		taskName := fmt.Sprintf("%s-%s", ts.Name, item.ID)
+		taskName := buildTaskName(ts.Name, item.ID)
 		existing, found := existingTaskMap[taskName]
 		if !found {
 			newItems = append(newItems, item)
@@ -366,7 +369,7 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 			break
 		}
 
-		taskName := fmt.Sprintf("%s-%s", ts.Name, item.ID)
+		taskName := buildTaskName(ts.Name, item.ID)
 
 		templateVars := source.WorkItemToTemplateVars(item)
 
@@ -768,4 +771,37 @@ func parsePollInterval(s string) time.Duration {
 		return 5 * time.Minute
 	}
 	return d
+}
+
+// taskNameMaxLength bounds generated Task names to a single RFC 1123 label.
+// Although a Kubernetes object name may be up to DNS1123SubdomainMaxLength, the
+// name is reused as the kelos.dev/task label value and as the Job name, both of
+// which are limited to a 63-character label.
+const taskNameMaxLength = validation.DNS1123LabelMaxLength
+
+// buildTaskName combines a spawner name and work item ID into a valid RFC 1123
+// name (at most taskNameMaxLength) for use as a Task object name. It normalizes
+// IDs that are not name-safe on their own, such as Jira issue keys (e.g.
+// "PROJECT-1234"), whose uppercase letters would otherwise be rejected by
+// Kubernetes. Names that are already valid and within length are returned
+// unchanged. Over-length names are truncated with a short hash suffix so that
+// distinct names do not collide on a shared prefix.
+func buildTaskName(spawnerName, itemID string) string {
+	combined := spawnerName + "-" + itemID
+
+	if len(combined) <= taskNameMaxLength && len(validation.IsDNS1123Subdomain(combined)) == 0 {
+		return combined
+	}
+
+	segments := strings.FieldsFunc(strings.ToLower(combined), func(r rune) bool {
+		return !('a' <= r && r <= 'z' || '0' <= r && r <= '9')
+	})
+	name := strings.Join(segments, "-")
+
+	if len(name) > taskNameMaxLength {
+		sum := sha256.Sum256([]byte(name))
+		suffix := "-" + hex.EncodeToString(sum[:])[:10]
+		name = strings.TrimRight(name[:taskNameMaxLength-len(suffix)], "-") + suffix
+	}
+	return name
 }

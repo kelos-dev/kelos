@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
@@ -180,6 +181,74 @@ func TestApplicationIncludesFileChangesView(t *testing.T) {
 		if !strings.Contains(string(styles), expected) {
 			t.Errorf("file changes styles do not contain %q", expected)
 		}
+	}
+}
+
+func TestApplicationRendersMarkdownSafely(t *testing.T) {
+	javascript, err := webFiles.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		`const pre = document.createElement('pre')`,
+		`const code = document.createElement('code')`,
+		`if (/^[a-z0-9_+-]+$/i.test(language))`,
+		`code.textContent = content`,
+		"code.className = `language-${language.toLowerCase()}`",
+		`const paragraph = document.createElement('p')`,
+		"const element = document.createElement(`h${heading[1].length}`)",
+		`const list = document.createElement(firstItem.ordered ? 'ol' : 'ul')`,
+		`const blockquote = document.createElement('blockquote')`,
+		`const element = document.createElement(tags[0])`,
+		`if (url.protocol !== 'http:' && url.protocol !== 'https:') return false`,
+		`appendInlineMarkdown(link, label, depth + 1, false, scanBudget)`,
+		`completedAssistantText(event.text, state.assistantTextByTurn.get(key))`,
+		`state.assistantTextByTurn.set(key, text)`,
+		`renderMessageMarkdown(bubble, state.assistantTextByTurn.get(key) || '')`,
+	} {
+		if !strings.Contains(string(javascript), expected) {
+			t.Errorf("Markdown rendering JavaScript does not contain %q", expected)
+		}
+	}
+	for _, unsafe := range []string{"innerHTML", "outerHTML", "insertAdjacentHTML"} {
+		if strings.Contains(string(javascript), unsafe) {
+			t.Errorf("Markdown rendering JavaScript contains unsafe DOM API %q", unsafe)
+		}
+	}
+
+	styles, err := webFiles.ReadFile("web/styles.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		`.message-bubble h1, .message-bubble h2`,
+		`.message-bubble blockquote {`,
+		`.message-bubble .inline-code {`,
+		`.message-bubble .task-list-item { list-style: none;`,
+		`display: grid; grid-template-columns: auto minmax(0, 1fr)`,
+		`.message-bubble pre {`,
+		`overflow-x: auto`,
+		`content: attr(data-language)`,
+		`--code-bg:#0d1410`,
+		`--code-ink:#e3ebe5`,
+	} {
+		if !strings.Contains(string(styles), expected) {
+			t.Errorf("Markdown rendering styles do not contain %q", expected)
+		}
+	}
+	if strings.Contains(string(styles), `.message-bubble .task-list {`) {
+		t.Error("Markdown rendering styles suppress markers for ordinary items in mixed task lists")
+	}
+}
+
+func TestApplicationMarkdownBehavior(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node.js is not installed")
+	}
+	command := exec.Command(node, "testdata/markdown_renderer_test.js")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("running Markdown renderer tests: %v\n%s", err, output)
 	}
 }
 

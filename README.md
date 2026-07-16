@@ -307,7 +307,7 @@ kelos get session interactive-review
 kelos session connect interactive-review
 ```
 
-The optional shared Session server provides web chat for the same conversation. You can reconnect from either client, answer provider questions, or interrupt active work without ending the Session. See the [interactive Session example](examples/16-session/) and [Session reference](docs/reference.md#session) for provider, storage, and web server configuration.
+The optional shared Session server provides web chat for the same conversation. You can reconnect from either client, answer provider questions, or interrupt active work without ending the Session. Web messages render safe core Markdown formatting, including fenced code blocks; see the [Session reference](docs/reference.md#session) for the supported formatting and limitations, and the [interactive Session example](examples/16-session/) for provider, storage, and web server configuration.
 
 ## Kelos Skill
 

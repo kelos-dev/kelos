@@ -17,6 +17,9 @@
   --diff-added-bg: #e7f3ea;
   --diff-removed: #9b3f3f;
   --diff-removed-bg: #f8e8e8;
+  --code-bg: #f1f4f1;
+  --code-border: #d5ddd7;
+  --code-ink: #243129;
   --shadow: 0 18px 55px rgba(28, 45, 36, .09);
   font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
@@ -90,6 +93,27 @@ button { color: inherit; }
 .user-message .message-bubble { max-width: 100%; }
 .message-bubble { max-width: min(78%, 700px); padding: 13px 16px; border-radius: 18px; font-size: 14px; line-height: 1.62; white-space: pre-wrap; overflow-wrap: anywhere; }
 .message-bubble a { color: var(--accent-2); text-decoration: underline; text-underline-offset: 2px; }
+.message-bubble > :first-child { margin-top: 0; }
+.message-bubble > :last-child { margin-bottom: 0; }
+.message-bubble p { margin: 0 0 .75em; }
+.message-bubble h1, .message-bubble h2, .message-bubble h3, .message-bubble h4, .message-bubble h5, .message-bubble h6 { margin: 1em 0 .45em; line-height: 1.3; }
+.message-bubble h1 { font-size: 1.55em; }
+.message-bubble h2 { font-size: 1.35em; }
+.message-bubble h3 { font-size: 1.18em; }
+.message-bubble h4, .message-bubble h5, .message-bubble h6 { font-size: 1em; }
+.message-bubble ul, .message-bubble ol { margin: 0 0 .8em; padding-left: 1.7em; }
+.message-bubble li + li { margin-top: .25em; }
+.message-bubble li > p { margin: 0; }
+.message-bubble blockquote { margin: .75em 0; padding: .2em 0 .2em 1em; border-left: 3px solid var(--code-border); color: var(--muted); }
+.message-bubble hr { margin: 1em 0; border: 0; border-top: 1px solid var(--line); }
+.message-bubble .inline-code { padding: .12em .32em; border: 1px solid var(--code-border); border-radius: 5px; background: var(--code-bg); color: var(--code-ink); font: .9em/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; white-space: pre-wrap; }
+.message-bubble .task-list-item { list-style: none; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: flex-start; gap: .25em .5em; }
+.message-bubble .task-list-item > input { grid-column: 1; grid-row: 1; margin: .38em 0 0; accent-color: var(--accent); }
+.message-bubble .task-list-item > :not(input) { grid-column: 2; min-width: 0; }
+.message-bubble pre { position: relative; max-width: 100%; margin: .75em 0; overflow-x: auto; border: 1px solid var(--code-border); border-radius: 10px; background: var(--code-bg); color: var(--code-ink); white-space: pre; overflow-wrap: normal; }
+.message-bubble pre::before { content: attr(data-language); position: absolute; top: 7px; right: 10px; color: var(--faint); font: 700 9px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing: .05em; text-transform: uppercase; }
+.message-bubble pre code { display: block; min-width: max-content; padding: 12px 14px; font: 12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace; white-space: inherit; }
+.message-bubble pre[data-language] code { padding-top: 27px; }
 .user .message-bubble { border-bottom-right-radius: 5px; background: #dfe9e2; }
 .assistant { gap: 11px; align-items: flex-start; }
 .agent-avatar { flex: 0 0 auto; width: 29px; height: 29px; display: grid; place-items: center; margin-top: 2px; border-radius: 9px; background: var(--accent); color: white; font: 700 11px/1 ui-monospace, monospace; }
@@ -240,7 +264,7 @@ button { color: inherit; }
 }
 
 @media (prefers-color-scheme: dark) {
-  :root { color-scheme: dark; --ink:#edf2ee; --muted:#9ba9a0; --faint:#7f8e85; --line:#334039; --line-soft:#29342e; --canvas:#111814; --panel:#171f1a; --card:#1b241f; --accent:#3c8463; --accent-2:#4a9673; --accent-soft:#233a2e; --diff-added:#8bd5a5; --diff-added-bg:#173424; --diff-removed:#ef9a9a; --diff-removed-bg:#3a2020; --shadow:0 18px 55px rgba(0,0,0,.25); }
+  :root { color-scheme: dark; --ink:#edf2ee; --muted:#9ba9a0; --faint:#7f8e85; --line:#334039; --line-soft:#29342e; --canvas:#111814; --panel:#171f1a; --card:#1b241f; --accent:#3c8463; --accent-2:#4a9673; --accent-soft:#233a2e; --diff-added:#8bd5a5; --diff-added-bg:#173424; --diff-removed:#ef9a9a; --diff-removed-bg:#3a2020; --code-bg:#0d1410; --code-border:#334039; --code-ink:#e3ebe5; --shadow:0 18px 55px rgba(0,0,0,.25); }
   .new-session-button, .session-item.active { background: #202a24; }
   .new-session-button:hover, .session-item:hover { background: #242f29; }
   .conversation-header { background: rgba(17,24,20,.88); }

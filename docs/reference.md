@@ -219,12 +219,20 @@ Use `kelos session connect NAME` for terminal chat. Web chat is served by the
 optional shared `kelos-session-server`; both clients use the same event stream
 and provider conversation. Both clients can stream agent and tool activity,
 answer user-input requests, and interrupt active work without ending the
-provider conversation. If the Pod is deleted or evicted, the StatefulSet creates
-a replacement. Web and terminal clients reconnect to it. Work active at the
-time of failure is reported as interrupted and is not submitted again
-automatically. The terminal client also does not retry a request whose delivery
-cannot be confirmed; it reports that uncertainty so the user can decide whether
-to submit it again.
+provider conversation.
+
+Web messages render safe core Markdown: paragraphs and headings; emphasis,
+strong text, strikethrough, and inline code; ordered, unordered, and task lists;
+blockquotes and horizontal rules; HTTP(S) links; and fenced or indented code
+blocks. The renderer does not interpret raw HTML, load embedded images, or
+render tables. Fenced code may include a language label, and long code lines
+scroll horizontally.
+
+If the Pod is deleted or evicted, the StatefulSet creates a replacement. Web
+and terminal clients reconnect to it. Work active at the time of failure is
+reported as interrupted and is not submitted again automatically. The terminal
+client also does not retry a request whose delivery cannot be confirmed; it
+reports that uncertainty so the user can decide whether to submit it again.
 
 The controller's `--version` flag defaults to its build version and applies to
 every managed image argument that does not already include a tag or digest. A

@@ -58,6 +58,7 @@ const state = {
   reconnectDelay: 800,
   lastEventID: 0,
   assistantSegmentByTurn: new Map(),
+  assistantTextByTurn: new Map(),
   tools: new Map(),
   inputs: new Map(),
   diffs: new Map(),
@@ -601,6 +602,7 @@ function selectSession(session) {
   state.selected = session;
   state.lastEventID = 0;
   state.assistantSegmentByTurn.clear();
+  state.assistantTextByTurn.clear();
   state.tools.clear();
   state.inputs.clear();
   state.diffs.clear();
@@ -775,32 +777,395 @@ function trimURLSuffix(value) {
   return value.slice(0, end);
 }
 
-function renderMessageText(element, text) {
-  const value = text || '';
-  const pattern = /https?:\/\/[^\s<>"']+/gi;
-  const fragment = document.createDocumentFragment();
-  let textEnd = 0;
+function appendLink(parent, href, label, depth, scanBudget) {
+  let url;
+  try {
+    url = new URL(href);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
 
-  for (const match of value.matchAll(pattern)) {
-    const linkText = trimURLSuffix(match[0]);
-    try {
-      new URL(linkText);
-    } catch {
+  const link = document.createElement('a');
+  link.href = url.href;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  appendInlineMarkdown(link, label, depth + 1, false, scanBudget);
+  parent.append(link);
+  return true;
+}
+
+function appendCodeBlock(parent, content, info) {
+  const pre = document.createElement('pre');
+  const code = document.createElement('code');
+  const language = info.trim().split(/\s+/, 1)[0];
+  if (/^[a-z0-9_+-]+$/i.test(language)) {
+    pre.dataset.language = language;
+    code.className = `language-${language.toLowerCase()}`;
+  }
+  code.textContent = content;
+  pre.append(code);
+  parent.append(pre);
+}
+
+function createInlineScanBudget(value) {
+  // Bound repeated delimiter and link searches; exhausted parses render the remainder as plain text.
+  return {remaining: Math.max(1024, value.length * 8), exhausted: false};
+}
+
+function findWithBudget(value, search, start, scanBudget) {
+  if (scanBudget.exhausted || scanBudget.remaining <= 0) {
+    scanBudget.exhausted = true;
+    return -1;
+  }
+  const match = value.indexOf(search, start);
+  const scanned = Math.max(0, (match < 0 ? value.length : match + search.length) - start);
+  if (scanned > scanBudget.remaining) {
+    scanBudget.remaining = 0;
+    scanBudget.exhausted = true;
+    return -1;
+  }
+  scanBudget.remaining -= scanned;
+  return match;
+}
+
+function consumeScanBudget(scanBudget, amount = 1) {
+  if (scanBudget.exhausted || amount > scanBudget.remaining) {
+    scanBudget.remaining = 0;
+    scanBudget.exhausted = true;
+    return false;
+  }
+  scanBudget.remaining -= amount;
+  return true;
+}
+
+function findMarkdownLink(value, start, scanBudget) {
+  const labelEnd = findWithBudget(value, '](', start + 1, scanBudget);
+  if (labelEnd < 0) return null;
+
+  let parentheses = 0;
+  for (let index = labelEnd + 2; index < value.length; index++) {
+    if (!consumeScanBudget(scanBudget)) return null;
+    if (value[index] === '\\') {
+      index++;
+      continue;
+    }
+    if (value[index] === '(') parentheses++;
+    if (value[index] !== ')') continue;
+    if (parentheses > 0) {
+      parentheses--;
       continue;
     }
 
-    fragment.append(document.createTextNode(value.slice(textEnd, match.index)));
-    const link = document.createElement('a');
-    link.href = linkText;
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
-    link.textContent = linkText;
-    fragment.append(link);
-    textEnd = match.index + linkText.length;
+    const target = value.slice(labelEnd + 2, index).trim();
+    const destination = target.match(/^<([^>]+)>|^(\S+)/);
+    if (!destination) return null;
+    return {
+      end: index + 1,
+      href: destination[1] || destination[2],
+      label: value.slice(start + 1, labelEnd),
+    };
+  }
+  return null;
+}
+
+function isAlphanumeric(character) {
+  return Boolean(character) && /[\p{L}\p{N}]/u.test(character);
+}
+
+function isExactDelimiterRun(value, index, marker) {
+  return value[index - 1] !== marker[0] && value[index + marker.length] !== marker[0];
+}
+
+function canOpenDelimiter(value, index, marker) {
+  const before = value[index - 1] || '';
+  const after = value[index + marker.length] || '';
+  if (!isExactDelimiterRun(value, index, marker) || !after || /\s/u.test(after)) return false;
+  return marker[0] !== '_' || !isAlphanumeric(before) || !isAlphanumeric(after);
+}
+
+function findClosingDelimiter(value, index, marker, scanBudget) {
+  let closing = findWithBudget(value, marker, index + marker.length, scanBudget);
+  while (closing >= 0) {
+    const before = value[closing - 1] || '';
+    const after = value[closing + marker.length] || '';
+    const intrawordUnderscore = marker[0] === '_' && isAlphanumeric(before) && isAlphanumeric(after);
+    if (isExactDelimiterRun(value, closing, marker) && before && !/\s/u.test(before) && !intrawordUnderscore) return closing;
+    closing = findWithBudget(value, marker, closing + marker.length, scanBudget);
+  }
+  return -1;
+}
+
+function appendInlineMarkdown(parent, value, depth = 0, allowLinks = true, budget = null) {
+  if (depth > 20) {
+    parent.append(document.createTextNode(value));
+    return;
+  }
+  const scanBudget = budget || createInlineScanBudget(value);
+
+  const delimiters = [
+    ['***', ['strong', 'em']],
+    ['___', ['strong', 'em']],
+    ['**', ['strong']],
+    ['__', ['strong']],
+    ['~~', ['del']],
+    ['*', ['em']],
+    ['_', ['em']],
+  ];
+  const escapedPunctuation = String.raw`\\` + '`*{}[]()#+-.!_>';
+  let textStart = 0;
+  let index = 0;
+
+  const appendTextBefore = (end) => {
+    if (end > textStart) parent.append(document.createTextNode(value.slice(textStart, end)));
+  };
+
+  while (index < value.length) {
+    if (value[index] === '\\' && index + 1 < value.length && escapedPunctuation.includes(value[index + 1])) {
+      appendTextBefore(index);
+      parent.append(document.createTextNode(value[index + 1]));
+      index += 2;
+      textStart = index;
+      continue;
+    }
+
+    if (value[index] === '`') {
+      let markerEnd = index + 1;
+      while (value[markerEnd] === '`') markerEnd++;
+      if (!consumeScanBudget(scanBudget, markerEnd - index)) break;
+      const marker = value.slice(index, markerEnd);
+      const closing = findWithBudget(value, marker, markerEnd, scanBudget);
+      if (scanBudget.exhausted) break;
+      if (closing >= markerEnd) {
+        appendTextBefore(index);
+        const code = document.createElement('code');
+        code.className = 'inline-code';
+        code.textContent = value.slice(markerEnd, closing).replace(/\n/g, ' ');
+        parent.append(code);
+        index = closing + marker.length;
+        textStart = index;
+        continue;
+      }
+      index = markerEnd;
+      continue;
+    }
+
+    if (allowLinks && value[index] === '[' && value[index - 1] !== '!') {
+      const markdownLink = findMarkdownLink(value, index, scanBudget);
+      if (scanBudget.exhausted) break;
+      if (markdownLink) {
+        const holder = document.createDocumentFragment();
+        if (appendLink(holder, markdownLink.href, markdownLink.label, depth, scanBudget)) {
+          appendTextBefore(index);
+          parent.append(holder);
+          index = markdownLink.end;
+          textStart = index;
+          continue;
+        }
+      }
+    }
+
+    const possibleScheme = value.slice(index, index + 8).toLowerCase();
+    if (allowLinks && (possibleScheme.startsWith('http://') || possibleScheme.startsWith('https://'))) {
+      const match = value.slice(index).match(/^https?:\/\/[^\s<>"']+/i);
+      const linkText = trimURLSuffix(match[0]);
+      const holder = document.createDocumentFragment();
+      if (appendLink(holder, linkText, linkText, depth, scanBudget)) {
+        appendTextBefore(index);
+        parent.append(holder);
+        index += linkText.length;
+        textStart = index;
+        continue;
+      }
+    }
+
+    let matchedDelimiter = false;
+    for (const [marker, tags] of delimiters) {
+      if (!value.startsWith(marker, index) || !canOpenDelimiter(value, index, marker)) continue;
+      const closing = findClosingDelimiter(value, index, marker, scanBudget);
+      if (scanBudget.exhausted) break;
+      if (closing <= index + marker.length) continue;
+
+      appendTextBefore(index);
+      const element = document.createElement(tags[0]);
+      let contentParent = element;
+      for (const tag of tags.slice(1)) {
+        const nested = document.createElement(tag);
+        contentParent.append(nested);
+        contentParent = nested;
+      }
+      appendInlineMarkdown(contentParent, value.slice(index + marker.length, closing), depth + 1, allowLinks, scanBudget);
+      parent.append(element);
+      index = closing + marker.length;
+      textStart = index;
+      matchedDelimiter = true;
+      break;
+    }
+    if (scanBudget.exhausted) break;
+    if (matchedDelimiter) continue;
+
+    index++;
   }
 
-  fragment.append(document.createTextNode(value.slice(textEnd)));
+  appendTextBefore(value.length);
+}
+
+function matchFence(line) {
+  const match = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+  if (!match || (match[1][0] === '`' && match[2].includes('`'))) return null;
+  return {marker: match[1], info: match[2].trim()};
+}
+
+function isClosingFence(line, marker) {
+  const value = line.replace(/^ {0,3}/, '');
+  let markerEnd = 0;
+  while (value[markerEnd] === marker[0]) markerEnd++;
+  return markerEnd >= marker.length && value.slice(markerEnd).trim() === '';
+}
+
+function matchListItem(line) {
+  const match = line.match(/^( {0,3})([-+*]|\d+[.)])[\t ]+(.*)$/);
+  if (!match) return null;
+  const ordered = /^\d/.test(match[2]);
+  return {
+    indent: match[1].length,
+    ordered,
+    start: ordered ? Number.parseInt(match[2], 10) : 1,
+    text: match[3],
+  };
+}
+
+function isHorizontalRule(line) {
+  const compact = line.trim().replace(/[\t ]/g, '');
+  return compact.length >= 3 && (/^\*+$/.test(compact) || /^-+$/.test(compact) || /^_+$/.test(compact));
+}
+
+function startsMarkdownBlock(line) {
+  return line.trim() === '' || Boolean(matchFence(line)) || /^ {0,3}#{1,6}(?:[\t ]|$)/.test(line) ||
+    /^ {0,3}>/.test(line) || Boolean(matchListItem(line)) || /^( {4}|\t)/.test(line) || isHorizontalRule(line);
+}
+
+function appendMarkdownBlocks(parent, value, depth = 0) {
+  const lines = value.replace(/\r\n?/g, '\n').split('\n');
+  let index = 0;
+
+  while (index < lines.length) {
+    if (lines[index].trim() === '') {
+      index++;
+      continue;
+    }
+
+    const fence = matchFence(lines[index]);
+    if (fence) {
+      const codeLines = [];
+      index++;
+      while (index < lines.length && !isClosingFence(lines[index], fence.marker)) {
+        codeLines.push(lines[index]);
+        index++;
+      }
+      if (index < lines.length) index++;
+      appendCodeBlock(parent, codeLines.join('\n'), fence.info);
+      continue;
+    }
+
+    if (/^( {4}|\t)/.test(lines[index])) {
+      const codeLines = [];
+      while (index < lines.length && (/^( {4}|\t)/.test(lines[index]) || lines[index].trim() === '')) {
+        codeLines.push(lines[index].replace(/^( {4}|\t)/, ''));
+        index++;
+      }
+      appendCodeBlock(parent, codeLines.join('\n'), '');
+      continue;
+    }
+
+    const heading = lines[index].match(/^ {0,3}(#{1,6})([\t ]+.*|[\t ]*)$/);
+    if (heading) {
+      const element = document.createElement(`h${heading[1].length}`);
+      const headingText = (heading[2] || '').replace(/[\t ]+#+[\t ]*$/, '').trim();
+      appendInlineMarkdown(element, headingText);
+      parent.append(element);
+      index++;
+      continue;
+    }
+
+    if (isHorizontalRule(lines[index])) {
+      parent.append(document.createElement('hr'));
+      index++;
+      continue;
+    }
+
+    if (/^ {0,3}>/.test(lines[index])) {
+      const quoteLines = [];
+      while (index < lines.length) {
+        const quote = lines[index].match(/^ {0,3}>[\t ]?(.*)$/);
+        if (!quote) break;
+        quoteLines.push(quote[1]);
+        index++;
+      }
+      const blockquote = document.createElement('blockquote');
+      if (depth < 20) appendMarkdownBlocks(blockquote, quoteLines.join('\n'), depth + 1);
+      else appendInlineMarkdown(blockquote, quoteLines.join('\n'), depth + 1);
+      parent.append(blockquote);
+      continue;
+    }
+
+    const firstItem = matchListItem(lines[index]);
+    if (firstItem) {
+      const list = document.createElement(firstItem.ordered ? 'ol' : 'ul');
+      if (firstItem.ordered && firstItem.start !== 1) list.start = firstItem.start;
+      while (index < lines.length) {
+        const item = matchListItem(lines[index]);
+        if (!item || item.ordered !== firstItem.ordered || item.indent !== firstItem.indent) break;
+
+        const itemLines = [item.text];
+        index++;
+        const continuationIndent = item.indent + 2;
+        while (index < lines.length && lines[index].startsWith(' '.repeat(continuationIndent))) {
+          itemLines.push(lines[index].slice(continuationIndent));
+          index++;
+        }
+
+        const listItem = document.createElement('li');
+        const task = itemLines[0].match(/^\[([ xX])\][\t ]+(.*)$/);
+        if (task) {
+          list.classList.add('task-list');
+          listItem.className = 'task-list-item';
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.checked = task[1].toLowerCase() === 'x';
+          checkbox.disabled = true;
+          listItem.append(checkbox);
+          itemLines[0] = task[2];
+        }
+        if (depth < 20) appendMarkdownBlocks(listItem, itemLines.join('\n'), depth + 1);
+        else appendInlineMarkdown(listItem, itemLines.join('\n'), depth + 1);
+        list.append(listItem);
+      }
+      parent.append(list);
+      continue;
+    }
+
+    const paragraphLines = [lines[index]];
+    index++;
+    while (index < lines.length && !startsMarkdownBlock(lines[index])) {
+      paragraphLines.push(lines[index]);
+      index++;
+    }
+    const paragraph = document.createElement('p');
+    appendInlineMarkdown(paragraph, paragraphLines.join('\n'));
+    parent.append(paragraph);
+  }
+}
+
+function renderMessageMarkdown(element, text) {
+  const fragment = document.createDocumentFragment();
+  appendMarkdownBlocks(fragment, text || '');
+
   element.replaceChildren(fragment);
+}
+
+function completedAssistantText(eventText, streamedText) {
+  return eventText || streamedText || '';
 }
 
 function handleEvent(event) {
@@ -878,7 +1243,7 @@ function renderAcceptedUser(event) {
   message.className = 'user-message';
   const bubble = document.createElement('div');
   bubble.className = 'message-bubble';
-  renderMessageText(bubble, event.text);
+  renderMessageMarkdown(bubble, event.text);
   message.append(bubble);
   row.append(message);
   elements.messages.append(row);
@@ -931,20 +1296,28 @@ function assistantBubble(turnID) {
 function endAssistantSegment(turnID) {
   const key = turnID || 'current';
   const bubble = state.assistantSegmentByTurn.get(key);
-  if (bubble) renderMessageText(bubble, bubble.textContent);
+  if (bubble) renderMessageMarkdown(bubble, state.assistantTextByTurn.get(key) || '');
   state.assistantSegmentByTurn.delete(key);
+  state.assistantTextByTurn.delete(key);
 }
 
 function renderAssistantDelta(event) {
+  const key = event.turnId || 'current';
   const bubble = assistantBubble(event.turnId);
+  const text = (state.assistantTextByTurn.get(key) || '') + (event.text || '');
+  state.assistantTextByTurn.set(key, text);
   bubble.append(document.createTextNode(event.text || ''));
   scrollToBottom();
 }
 
 function renderAssistantMessage(event) {
+  const key = event.turnId || 'current';
   const bubble = assistantBubble(event.turnId);
-  if (!bubble.textContent && event.text) bubble.textContent = event.text;
-  renderMessageText(bubble, bubble.textContent);
+  const text = completedAssistantText(event.text, state.assistantTextByTurn.get(key));
+  state.assistantTextByTurn.set(key, text);
+  renderMessageMarkdown(bubble, text);
+  state.assistantSegmentByTurn.delete(key);
+  state.assistantTextByTurn.delete(key);
   scrollToBottom();
 }
 

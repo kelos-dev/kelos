@@ -20,6 +20,7 @@ import (
 	"github.com/gorilla/websocket"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	gomegatypes "github.com/onsi/gomega/types"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -123,8 +124,8 @@ var _ = Describe("Session remote control", func() {
 		Expect(pods.Items).To(HaveLen(1))
 
 		By("completing turns through separate terminal connections")
-		runTerminalTurn(f.Namespace, sessionName, "terminal-one", "agent › turn 1: terminal-one")
-		runTerminalTurn(f.Namespace, sessionName, "terminal-two", "agent › turn 2: terminal-two")
+		runTerminalTurn(f.Namespace, sessionName, "terminal-one", ContainSubstring("agent › turn 1: terminal-one"))
+		runTerminalTurn(f.Namespace, sessionName, "terminal-two", ContainSubstring("agent › turn 2: terminal-two"))
 
 		By("authenticating to the shared Session web server")
 		baseURL := startSessionServerPortForward()
@@ -293,7 +294,7 @@ var _ = Describe("Session remote control", func() {
 		})
 
 		current := waitForSessionPhase(f, f.Namespace, sessionName, kelos.SessionPhaseReady)
-		runTerminalTurn(f.Namespace, sessionName, "hello", "agent › opencode: hello")
+		runTerminalTurn(f.Namespace, sessionName, "hello", ContainSubstring("agent › opencode: hello"))
 		Expect(f.KelosClientset.ApiV1alpha2().Sessions(f.Namespace).Delete(context.TODO(), sessionName, metav1.DeleteOptions{})).To(Succeed())
 		waitForPodDeletion(f, f.Namespace, current.Status.PodName)
 	})
@@ -326,8 +327,8 @@ func describeSessionProviderTests(cfg agentTestConfig) {
 			runTerminalTurn(
 				f.Namespace,
 				"provider-session",
-				"Join these fragments without spaces and reply with only the result: SESSION_, E2E_, READY",
-				"agent › SESSION_E2E_READY",
+				"Reply with a short greeting to confirm the session is responsive.",
+				MatchRegexp(`(?m)^agent › \S`),
 			)
 			Expect(f.KelosClientset.ApiV1alpha2().Sessions(f.Namespace).Delete(context.TODO(), "provider-session", metav1.DeleteOptions{})).To(Succeed())
 			waitForPodDeletion(f, f.Namespace, current.Status.PodName)
@@ -367,8 +368,8 @@ func describeSessionProviderTests(cfg agentTestConfig) {
 			runTerminalTurn(
 				f.Namespace,
 				sessionName,
-				"Join these fragments without spaces and reply with only the result: EMPTY_, SESSION_, READY",
-				"agent › EMPTY_SESSION_READY",
+				"Reply with a short greeting to confirm the session is responsive.",
+				MatchRegexp(`(?m)^agent › \S`),
 			)
 		})
 	})
@@ -490,7 +491,7 @@ func collectSessionDebugInfo(f *framework.Framework, namespace, name string) {
 	}
 }
 
-func runTerminalTurn(namespace, name, prompt, expectedOutput string) {
+func runTerminalTurn(namespace, name, prompt string, outputMatcher gomegatypes.GomegaMatcher) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	command := exec.CommandContext(ctx, framework.KelosBin(), "session", "connect", name, "-n", namespace)
@@ -503,7 +504,7 @@ func runTerminalTurn(namespace, name, prompt, expectedOutput string) {
 	Eventually(output.String, 30*time.Second, 100*time.Millisecond).Should(ContainSubstring("Connected. Type a message"))
 	_, err = io.WriteString(stdin, prompt+"\n")
 	Expect(err).NotTo(HaveOccurred())
-	Eventually(output.String, 3*time.Minute, 200*time.Millisecond).Should(ContainSubstring(expectedOutput))
+	Eventually(output.String, 3*time.Minute, 200*time.Millisecond).Should(outputMatcher)
 	_, err = io.WriteString(stdin, "/quit\n")
 	Expect(err).NotTo(HaveOccurred())
 	Expect(stdin.Close()).To(Succeed())

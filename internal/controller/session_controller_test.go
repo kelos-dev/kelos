@@ -110,6 +110,106 @@ func TestSessionReconcilerUpdatesStatefulSetRuntime(t *testing.T) {
 	}
 }
 
+func TestSessionReconcilerMigratesWorkspaceClaimOwnership(t *testing.T) {
+	t.Parallel()
+	scheme := runtime.NewScheme()
+	if err := appsv1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := rbacv1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := kelos.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+
+	session := testSession("chat", "claude-code")
+	statefulSet := testSessionStatefulSet(session)
+	statefulSet.Spec.VolumeClaimTemplates = []corev1.PersistentVolumeClaim{{
+		ObjectMeta: metav1.ObjectMeta{Name: WorkspaceVolumeName},
+		Spec:       *session.Spec.VolumeClaimTemplate.DeepCopy(),
+	}}
+	statefulSet.Spec.PersistentVolumeClaimRetentionPolicy = &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{
+		WhenDeleted: appsv1.DeletePersistentVolumeClaimRetentionPolicyType,
+		WhenScaled:  appsv1.DeletePersistentVolumeClaimRetentionPolicyType,
+	}
+	claim := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      WorkspaceVolumeName + "-" + statefulSet.Name + "-0",
+			Namespace: session.Namespace,
+			OwnerReferences: []metav1.OwnerReference{
+				*metav1.NewControllerRef(statefulSet, appsv1.SchemeGroupVersion.WithKind("StatefulSet")),
+			},
+		},
+		Spec: *session.Spec.VolumeClaimTemplate.DeepCopy(),
+	}
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&kelos.Session{}, &corev1.Pod{}, &appsv1.StatefulSet{}).
+		WithObjects(session, statefulSet, claim).
+		Build()
+	reconciler := testSessionReconciler(cl, scheme)
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(session)}
+	if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+
+	var updatedStatefulSet appsv1.StatefulSet
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(statefulSet), &updatedStatefulSet); err != nil {
+		t.Fatal(err)
+	}
+	retention := updatedStatefulSet.Spec.PersistentVolumeClaimRetentionPolicy
+	if retention == nil || retention.WhenDeleted != appsv1.RetainPersistentVolumeClaimRetentionPolicyType || retention.WhenScaled != appsv1.RetainPersistentVolumeClaimRetentionPolicyType {
+		t.Fatalf("persistentVolumeClaimRetentionPolicy = %#v, want Retain/Retain", retention)
+	}
+	var updatedClaim corev1.PersistentVolumeClaim
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(claim), &updatedClaim); err != nil {
+		t.Fatal(err)
+	}
+	if !metav1.IsControlledBy(&updatedClaim, session) {
+		t.Fatalf("workspace PersistentVolumeClaim ownerReferences = %#v, want Session owner", updatedClaim.OwnerReferences)
+	}
+}
+
+func TestSessionReconcilerDoesNotStealWorkspaceClaim(t *testing.T) {
+	t.Parallel()
+	scheme := runtime.NewScheme()
+	if err := appsv1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := kelos.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+
+	session := testSession("chat", "claude-code")
+	statefulSet := testSessionStatefulSet(session)
+	statefulSet.Spec.VolumeClaimTemplates = []corev1.PersistentVolumeClaim{{ObjectMeta: metav1.ObjectMeta{Name: WorkspaceVolumeName}}}
+	otherOwner := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+		Name:      "other-owner",
+		Namespace: session.Namespace,
+		UID:       types.UID("other-owner-uid"),
+	}}
+	claim := &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{
+		Name:      WorkspaceVolumeName + "-" + statefulSet.Name + "-0",
+		Namespace: session.Namespace,
+		OwnerReferences: []metav1.OwnerReference{
+			*metav1.NewControllerRef(otherOwner, corev1.SchemeGroupVersion.WithKind("ConfigMap")),
+		},
+	}}
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(session, statefulSet, otherOwner, claim).Build()
+	reconciler := testSessionReconciler(cl, scheme)
+	err := reconciler.ensureSessionWorkspaceClaimOwnership(context.Background(), session, statefulSet)
+	if err == nil || !strings.Contains(err.Error(), `PersistentVolumeClaim "workspace-session-chat-0" is controlled by ConfigMap "other-owner"`) {
+		t.Fatalf("ensureSessionWorkspaceClaimOwnership() error = %v", err)
+	}
+}
+
 func TestSessionReconcilerCreatesStatefulSetAndObservesPod(t *testing.T) {
 	t.Parallel()
 	scheme := runtime.NewScheme()
@@ -181,8 +281,11 @@ func TestSessionReconcilerCreatesStatefulSetAndObservesPod(t *testing.T) {
 		t.Fatalf("workspace storage = %s, want 1Gi", storage.String())
 	}
 	retention := statefulSet.Spec.PersistentVolumeClaimRetentionPolicy
-	if retention == nil || retention.WhenDeleted != appsv1.DeletePersistentVolumeClaimRetentionPolicyType || retention.WhenScaled != appsv1.DeletePersistentVolumeClaimRetentionPolicyType {
+	if retention == nil || retention.WhenDeleted != appsv1.RetainPersistentVolumeClaimRetentionPolicyType || retention.WhenScaled != appsv1.RetainPersistentVolumeClaimRetentionPolicyType {
 		t.Fatalf("persistentVolumeClaimRetentionPolicy = %#v", retention)
+	}
+	if !metav1.IsControlledBy(&statefulSet.Spec.VolumeClaimTemplates[0], session) {
+		t.Fatalf("workspace claim template ownerReferences = %#v, want Session owner", statefulSet.Spec.VolumeClaimTemplates[0].OwnerReferences)
 	}
 	if podSpec.RestartPolicy != corev1.RestartPolicyAlways {
 		t.Fatalf("restartPolicy = %q, want %q", podSpec.RestartPolicy, corev1.RestartPolicyAlways)

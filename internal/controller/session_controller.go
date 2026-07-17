@@ -60,6 +60,7 @@ type SessionReconciler struct {
 // +kubebuilder:rbac:groups=kelos.dev,resources=sessions,verbs=get;list;watch
 // +kubebuilder:rbac:groups=kelos.dev,resources=sessions/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;patch
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update
@@ -108,6 +109,9 @@ func (r *SessionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, r.updateSessionStatus(ctx, &session, nil, kelos.SessionPhaseFailed, message, "RuntimeAccessFailed")
 	}
 	if err := r.ensureSessionRuntime(ctx, &session, &statefulSet, serviceAccountName); err != nil {
+		return ctrl.Result{}, err
+	}
+	if err := r.ensureSessionWorkspaceClaimOwnership(ctx, &session, &statefulSet); err != nil {
 		return ctrl.Result{}, err
 	}
 	if err := r.ensureSessionService(ctx, &session); err != nil {
@@ -253,11 +257,60 @@ func (r *SessionReconciler) ensureSessionRuntime(ctx context.Context, session *k
 	})
 	statefulSet.Spec.Template.Spec.ServiceAccountName = serviceAccountName
 	statefulSet.Spec.Template.Spec.AutomountServiceAccountToken = ptr.To(true)
-	if reflect.DeepEqual(original.Spec.Template.Spec, statefulSet.Spec.Template.Spec) {
+	if session.Spec.VolumeClaimTemplate != nil {
+		statefulSet.Spec.PersistentVolumeClaimRetentionPolicy = &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{
+			WhenDeleted: appsv1.RetainPersistentVolumeClaimRetentionPolicyType,
+			WhenScaled:  appsv1.RetainPersistentVolumeClaimRetentionPolicyType,
+		}
+	}
+	templateMatches := reflect.DeepEqual(original.Spec.Template.Spec, statefulSet.Spec.Template.Spec)
+	retentionMatches := reflect.DeepEqual(original.Spec.PersistentVolumeClaimRetentionPolicy, statefulSet.Spec.PersistentVolumeClaimRetentionPolicy)
+	if templateMatches && retentionMatches {
 		return nil
 	}
 	if err := r.Patch(ctx, statefulSet, client.MergeFrom(original)); err != nil {
 		return fmt.Errorf("patching Session StatefulSet %q runtime configuration: %w", statefulSet.Name, err)
+	}
+	return nil
+}
+
+func (r *SessionReconciler) ensureSessionWorkspaceClaimOwnership(ctx context.Context, session *kelos.Session, statefulSet *appsv1.StatefulSet) error {
+	if session.Spec.VolumeClaimTemplate == nil {
+		return nil
+	}
+	for i := range statefulSet.Spec.VolumeClaimTemplates {
+		template := &statefulSet.Spec.VolumeClaimTemplates[i]
+		key := client.ObjectKey{
+			Namespace: statefulSet.Namespace,
+			Name:      fmt.Sprintf("%s-%s-0", template.Name, statefulSet.Name),
+		}
+		var claim corev1.PersistentVolumeClaim
+		if err := r.Get(ctx, key, &claim); apierrors.IsNotFound(err) {
+			continue
+		} else if err != nil {
+			return fmt.Errorf("getting Session workspace PersistentVolumeClaim %q: %w", key.Name, err)
+		}
+		if metav1.IsControlledBy(&claim, session) {
+			continue
+		}
+		if owner := metav1.GetControllerOf(&claim); owner != nil && !metav1.IsControlledBy(&claim, statefulSet) {
+			return fmt.Errorf("Session workspace PersistentVolumeClaim %q is controlled by %s %q", claim.Name, owner.Kind, owner.Name)
+		}
+
+		original := claim.DeepCopy()
+		ownerReferences := make([]metav1.OwnerReference, 0, len(claim.OwnerReferences))
+		for _, ownerReference := range claim.OwnerReferences {
+			if ownerReference.UID != statefulSet.UID {
+				ownerReferences = append(ownerReferences, ownerReference)
+			}
+		}
+		claim.OwnerReferences = ownerReferences
+		if err := controllerutil.SetControllerReference(session, &claim, r.Scheme, controllerutil.WithBlockOwnerDeletion(false)); err != nil {
+			return fmt.Errorf("setting Session owner on workspace PersistentVolumeClaim %q: %w", claim.Name, err)
+		}
+		if err := r.Patch(ctx, &claim, client.MergeFrom(original)); err != nil {
+			return fmt.Errorf("patching Session workspace PersistentVolumeClaim %q ownership: %w", claim.Name, err)
+		}
 	}
 	return nil
 }
@@ -612,13 +665,18 @@ func (r *SessionReconciler) buildSessionStatefulSet(session *kelos.Session, work
 		podSpec.Volumes[workspaceVolume].VolumeSource = corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}
 	} else {
 		podSpec.Volumes = append(podSpec.Volumes[:workspaceVolume], podSpec.Volumes[workspaceVolume+1:]...)
+		claimOwnerReference := *metav1.NewControllerRef(session, kelos.GroupVersion.WithKind("Session"))
+		claimOwnerReference.BlockOwnerDeletion = ptr.To(false)
 		volumeClaimTemplates = []corev1.PersistentVolumeClaim{{
-			ObjectMeta: metav1.ObjectMeta{Name: WorkspaceVolumeName},
-			Spec:       *session.Spec.VolumeClaimTemplate.DeepCopy(),
+			ObjectMeta: metav1.ObjectMeta{
+				Name:            WorkspaceVolumeName,
+				OwnerReferences: []metav1.OwnerReference{claimOwnerReference},
+			},
+			Spec: *session.Spec.VolumeClaimTemplate.DeepCopy(),
 		}}
 		retentionPolicy = &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{
-			WhenDeleted: appsv1.DeletePersistentVolumeClaimRetentionPolicyType,
-			WhenScaled:  appsv1.DeletePersistentVolumeClaimRetentionPolicyType,
+			WhenDeleted: appsv1.RetainPersistentVolumeClaimRetentionPolicyType,
+			WhenScaled:  appsv1.RetainPersistentVolumeClaimRetentionPolicyType,
 		}
 	}
 	if err := prepareSessionWorkspaceInit(podSpec.InitContainers); err != nil {
@@ -873,6 +931,7 @@ func (r *SessionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&appsv1.StatefulSet{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.Secret{}).
+		Owns(&corev1.PersistentVolumeClaim{}).
 		Owns(&corev1.ServiceAccount{}).
 		Owns(&rbacv1.Role{}).
 		Owns(&rbacv1.RoleBinding{}).

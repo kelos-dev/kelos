@@ -261,13 +261,15 @@ the branch and a colored, text-labeled pull request state in both the Session
 sidebar and conversation header.
 
 When `spec.volumeClaimTemplate` is set, the StatefulSet provisions the Session
-workspace from that template and reuses it across Pod replacement. Built-in
-workspace initialization is skipped after the persistent workspace has been
-initialized, while `Workspace.spec.setupCommand` runs in each replacement
-container. Deleting the Session deletes the claim; PersistentVolume retention
-afterward follows the StorageClass reclaim policy. When the field is omitted,
-the workspace uses `emptyDir`, so conversation history and workspace changes do
-not survive Pod replacement.
+workspace from that template and reuses it across Pod and StatefulSet
+replacement. The claim is owned by the Session and uses the StatefulSet's
+`Retain` policy for deletion and scaling, so it remains until the Session is
+deleted. Built-in workspace initialization is skipped after the persistent
+workspace has been initialized, while `Workspace.spec.setupCommand` runs in
+each replacement container. PersistentVolume retention afterward follows the
+StorageClass reclaim policy. When the field is omitted, the workspace uses
+`emptyDir`, so conversation history and workspace changes do not survive Pod
+replacement.
 
 The shared web server can create, list, delete, and connect to Sessions across
 namespaces while the web application operates on one active namespace at a

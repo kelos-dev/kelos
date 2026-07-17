@@ -194,8 +194,9 @@ spec:
 ```
 
 The selected StorageClass must dynamically provision or otherwise bind a
-matching volume. Deleting the Session deletes its claim; the StorageClass
-reclaim policy controls the underlying PersistentVolume.
+matching volume. The claim survives Pod, StatefulSet, and scaling changes and
+is deleted with its owning Session; the StorageClass reclaim policy controls
+the underlying PersistentVolume.
 
 The shared Session server serves the web application and bridges each chat to
 its Session Pod through Kubernetes exec. It is disabled by default and requires

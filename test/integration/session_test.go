@@ -95,6 +95,10 @@ spec:
 			g.Expect(statefulSet.Spec.Template.Spec.Containers[0].Command).To(Equal([]string{"/kelos/bin/kelos-session-runtime"}))
 			g.Expect(statefulSet.Spec.VolumeClaimTemplates).To(HaveLen(1))
 			g.Expect(statefulSet.Spec.VolumeClaimTemplates[0].Name).To(Equal("workspace"))
+			g.Expect(metav1.IsControlledBy(&statefulSet.Spec.VolumeClaimTemplates[0], session)).To(BeTrue())
+			g.Expect(statefulSet.Spec.PersistentVolumeClaimRetentionPolicy).NotTo(BeNil())
+			g.Expect(statefulSet.Spec.PersistentVolumeClaimRetentionPolicy.WhenDeleted).To(Equal(appsv1.RetainPersistentVolumeClaimRetentionPolicyType))
+			g.Expect(statefulSet.Spec.PersistentVolumeClaimRetentionPolicy.WhenScaled).To(Equal(appsv1.RetainPersistentVolumeClaimRetentionPolicyType))
 			storage := statefulSet.Spec.VolumeClaimTemplates[0].Spec.Resources.Requests[corev1.ResourceStorage]
 			g.Expect(storage.Cmp(resource.MustParse("1Gi"))).To(Equal(0))
 		}, 10*time.Second, 100*time.Millisecond).Should(Succeed())

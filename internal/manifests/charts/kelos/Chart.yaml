@@ -3,3 +3,8 @@ name: kelos
 description: Kelos controller and CRDs
 type: application
 version: 0.1.0
+dependencies:
+  - name: kelos-crds
+    alias: crds
+    version: 0.1.0
+    condition: crds.install

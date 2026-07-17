@@ -1,0 +1,5 @@
+apiVersion: v2
+name: kelos-crds
+description: Kelos custom resource definitions
+type: application
+version: 0.1.0

@@ -3,12 +3,18 @@ package helmchart
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
+	"encoding/base64"
+	"encoding/json"
 	"io"
 	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/kelos-dev/kelos/internal/manifests"
+	"helm.sh/helm/v3/pkg/chartutil"
+	"helm.sh/helm/v3/pkg/release"
+	corev1 "k8s.io/api/core/v1"
 	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
 	sigyaml "sigs.k8s.io/yaml"
 )
@@ -18,6 +24,66 @@ import (
 // if :latest tag is specified" — the leading non-whitespace requirement
 // distinguishes "registry/name:latest" from " :latest" prose.
 var imageLatestRefRE = regexp.MustCompile(`\S:latest`)
+
+func TestHelmReleaseSecretFitsKubernetesLimit(t *testing.T) {
+	tests := []struct {
+		name        string
+		installCRDs bool
+	}{
+		{name: "controller only", installCRDs: false},
+		{name: "controller and CRDs", installCRDs: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vals := map[string]interface{}{
+				"crds": map[string]interface{}{"install": tt.installCRDs},
+			}
+			ch, err := loadChart(manifests.ChartFS)
+			if err != nil {
+				t.Fatalf("loading chart: %v", err)
+			}
+			if err := chartutil.ProcessDependenciesWithMerge(ch, vals); err != nil {
+				t.Fatalf("processing chart dependencies: %v", err)
+			}
+			manifest, err := Render(manifests.ChartFS, vals)
+			if err != nil {
+				t.Fatalf("rendering Helm release: %v", err)
+			}
+			rel := &release.Release{
+				Name:      "kelos",
+				Namespace: "kelos-system",
+				Chart:     ch,
+				Config:    vals,
+				Info:      &release.Info{Status: release.StatusPendingInstall},
+				Manifest:  string(manifest),
+				Version:   1,
+			}
+
+			releaseJSON, err := json.Marshal(rel)
+			if err != nil {
+				t.Fatalf("marshaling Helm release: %v", err)
+			}
+			var compressed bytes.Buffer
+			writer, err := gzip.NewWriterLevel(&compressed, gzip.BestCompression)
+			if err != nil {
+				t.Fatalf("creating gzip writer: %v", err)
+			}
+			if _, err := writer.Write(releaseJSON); err != nil {
+				t.Fatalf("compressing Helm release: %v", err)
+			}
+			if err := writer.Close(); err != nil {
+				t.Fatalf("closing gzip writer: %v", err)
+			}
+
+			secretDataSize := base64.StdEncoding.EncodedLen(compressed.Len())
+			t.Logf("Helm release Secret data size: %d bytes", secretDataSize)
+			if secretDataSize > corev1.MaxSecretSize {
+				t.Errorf("Helm release Secret data is %d bytes, want at most %d", secretDataSize, corev1.MaxSecretSize)
+			}
+		})
+	}
+}
 
 func TestRender_NilValues(t *testing.T) {
 	data, err := Render(manifests.ChartFS, nil)

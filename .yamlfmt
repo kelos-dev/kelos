@@ -3,3 +3,4 @@ formatter:
 exclude:
   - internal/manifests/install-crd.yaml
   - internal/manifests/charts/kelos/templates/
+  - internal/manifests/charts/kelos/charts/kelos-crds/templates/

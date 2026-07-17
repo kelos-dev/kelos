@@ -19,12 +19,16 @@ import (
 // Render loads a Helm chart from the given embedded filesystem, merges the
 // provided values with the chart defaults, renders the templates, and returns
 // the result as a multi-document YAML byte slice suitable for parseManifests.
-// CRDs under templates/ participate like any other template, so callers that
-// need a controller-only manifest should disable CRD templates via values.
+// CRDs in the conditional crds subchart participate like any other template,
+// so callers that need a controller-only manifest should disable the subchart
+// via values.
 func Render(chartFS fs.FS, values map[string]interface{}) ([]byte, error) {
 	ch, err := loadChart(chartFS)
 	if err != nil {
 		return nil, fmt.Errorf("loading chart: %w", err)
+	}
+	if err := chartutil.ProcessDependenciesWithMerge(ch, values); err != nil {
+		return nil, fmt.Errorf("processing chart dependencies: %w", err)
 	}
 
 	releaseOpts := chartutil.ReleaseOptions{

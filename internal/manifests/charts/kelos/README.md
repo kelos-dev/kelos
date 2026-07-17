@@ -75,6 +75,8 @@ helm upgrade --install kelos oci://ghcr.io/kelos-dev/charts/kelos \
 ```
 
 With `crds.install=false`, Helm manages only the controller resources.
+The CRDs are packaged in a conditional subchart, so controller-only releases
+do not store the CRD payload in Helm's release Secret.
 
 ### Option 2: Adopt Existing CRDs Into Helm
 

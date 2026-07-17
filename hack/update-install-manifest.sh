@@ -10,7 +10,7 @@ START_MARKER="# BEGIN GENERATED: controller-rbac"
 END_MARKER="# END GENERATED: controller-rbac"
 
 CHART_RBAC="internal/manifests/charts/kelos/templates/rbac.yaml"
-CHART_CRD_DIR="internal/manifests/charts/kelos/templates/crds"
+CHART_CRD_DIR="internal/manifests/charts/kelos/charts/kelos-crds/templates"
 CHART_VALIDATING_WEBHOOK="internal/manifests/charts/kelos/templates/validating-webhook.yaml"
 
 has_resource() {
@@ -179,7 +179,7 @@ BEGIN {
 }
 in_annotations && /controller-gen\.kubebuilder\.io\/version:/ {
   print
-  print "    {{- if .Values.crds.keep }}"
+  print "    {{- if .Values.keep }}"
   print "    \"helm.sh/resource-policy\": keep"
   print "    {{- end }}"
   inserted = 1
@@ -206,11 +206,7 @@ write_chart_crd_template() {
   extract_resource_doc "${source}" "${kind}" "${name}" >"${extracted}"
   escape_helm_template_placeholders "${extracted}" >"${content}"
 
-  {
-    printf '{{- if .Values.crds.install }}\n'
-    inject_chart_crd_keep_annotation "${content}"
-    printf '{{- end }}\n'
-  } >"${dest}"
+  inject_chart_crd_keep_annotation "${content}" >"${dest}"
 }
 
 # inject_kelos_conversion adds the conversion webhook config and the

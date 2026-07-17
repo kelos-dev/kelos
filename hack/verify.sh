@@ -17,14 +17,14 @@ cd "${REPO_ROOT}"
 # Files explicitly written by the update / verify pipeline.
 GENERATED_FILES=(
   internal/manifests/install-crd.yaml
-  internal/manifests/charts/kelos/templates/crds/agentconfig-crd.yaml
-  internal/manifests/charts/kelos/templates/crds/session-crd.yaml
-  internal/manifests/charts/kelos/templates/crds/taskbudget-crd.yaml
-  internal/manifests/charts/kelos/templates/crds/task-crd.yaml
-  internal/manifests/charts/kelos/templates/crds/taskrecord-crd.yaml
-  internal/manifests/charts/kelos/templates/crds/taskspawner-crd.yaml
-  internal/manifests/charts/kelos/templates/crds/workerpool-crd.yaml
-  internal/manifests/charts/kelos/templates/crds/workspace-crd.yaml
+  internal/manifests/charts/kelos/charts/kelos-crds/templates/agentconfig-crd.yaml
+  internal/manifests/charts/kelos/charts/kelos-crds/templates/session-crd.yaml
+  internal/manifests/charts/kelos/charts/kelos-crds/templates/taskbudget-crd.yaml
+  internal/manifests/charts/kelos/charts/kelos-crds/templates/task-crd.yaml
+  internal/manifests/charts/kelos/charts/kelos-crds/templates/taskrecord-crd.yaml
+  internal/manifests/charts/kelos/charts/kelos-crds/templates/taskspawner-crd.yaml
+  internal/manifests/charts/kelos/charts/kelos-crds/templates/workerpool-crd.yaml
+  internal/manifests/charts/kelos/charts/kelos-crds/templates/workspace-crd.yaml
   internal/manifests/charts/kelos/templates/rbac.yaml
   internal/manifests/charts/kelos/templates/validating-webhook.yaml
   api/v1alpha1/zz_generated.deepcopy.go

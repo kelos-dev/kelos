@@ -125,6 +125,15 @@ button { color: inherit; }
 .message-bubble li > p { margin: 0; }
 .message-bubble blockquote { margin: .75em 0; padding: .2em 0 .2em 1em; border-left: 3px solid var(--code-border); color: var(--muted); }
 .message-bubble hr { margin: 1em 0; border: 0; border-top: 1px solid var(--line); }
+.message-bubble .markdown-table-container { max-width: 100%; margin: .75em 0; overflow-x: auto; }
+.message-bubble table { min-width: 100%; width: max-content; border-spacing: 0; border-collapse: separate; border: 1px solid var(--line); border-radius: 9px; background: var(--card); white-space: normal; overflow: hidden; }
+.message-bubble th, .message-bubble td { min-width: 7em; padding: .5em .7em; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.message-bubble th { background: var(--panel); font-weight: 700; }
+.message-bubble tr > :last-child { border-right: 0; }
+.message-bubble tbody tr:last-child td { border-bottom: 0; }
+.message-bubble thead:only-child th { border-bottom: 0; }
+.message-bubble .table-align-center { text-align: center; }
+.message-bubble .table-align-right { text-align: right; }
 .message-bubble .inline-code { padding: .12em .32em; border: 1px solid var(--code-border); border-radius: 5px; background: var(--code-bg); color: var(--code-ink); font: .9em/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; white-space: pre-wrap; }
 .message-bubble .task-list-item { list-style: none; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: flex-start; gap: .25em .5em; }
 .message-bubble .task-list-item > input { grid-column: 1; grid-row: 1; margin: .38em 0 0; accent-color: var(--accent); }

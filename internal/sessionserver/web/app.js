@@ -1151,7 +1151,7 @@ function appendInlineMarkdown(parent, value, depth = 0, allowLinks = true, budge
     ['*', ['em']],
     ['_', ['em']],
   ];
-  const escapedPunctuation = String.raw`\\` + '`*{}[]()#+-.!_>';
+  const escapedPunctuation = String.raw`\\` + '`*{}[]()#+-.!_>|';
   let textStart = 0;
   let index = 0;
 
@@ -1279,6 +1279,156 @@ function isHorizontalRule(line) {
   return compact.length >= 3 && (/^\*+$/.test(compact) || /^-+$/.test(compact) || /^_+$/.test(compact));
 }
 
+const maxMarkdownTableCells = 10000;
+
+function unescapeTablePipes(value) {
+  return value.replaceAll('\\|', '|');
+}
+
+function matchingCodeSpanEnds(value) {
+  const runsByLength = new Map();
+  for (let index = 0; index < value.length;) {
+    if (value[index] !== '`') {
+      index++;
+      continue;
+    }
+    let end = index + 1;
+    while (value[end] === '`') end++;
+    const length = end - index;
+    let backslashes = 0;
+    for (let previous = index - 1; previous >= 0 && value[previous] === '\\'; previous--) backslashes++;
+    if (!runsByLength.has(length)) runsByLength.set(length, []);
+    runsByLength.get(length).push({start: index, end, escaped: backslashes % 2 === 1});
+    index = end;
+  }
+
+  const matches = new Map();
+  for (const runs of runsByLength.values()) {
+    for (let index = 0; index + 1 < runs.length; index++) {
+      if (!runs[index].escaped) matches.set(runs[index].start, runs[index + 1].end);
+    }
+  }
+  return matches;
+}
+
+function splitTableRow(line) {
+  const value = line.trim();
+  const codeSpanEnds = matchingCodeSpanEnds(value);
+  const cells = [];
+  let cell = '';
+  let hasSeparator = false;
+  let trailingSeparator = false;
+
+  for (let index = 0; index < value.length;) {
+    const codeSpanEnd = codeSpanEnds.get(index);
+    if (codeSpanEnd !== undefined) {
+      cell += unescapeTablePipes(value.slice(index, codeSpanEnd));
+      index = codeSpanEnd;
+      trailingSeparator = false;
+      continue;
+    }
+    if (value[index] === '\\' && index + 1 < value.length) {
+      cell += value[index + 1] === '|' ? '|' : value.slice(index, index + 2);
+      index += 2;
+      trailingSeparator = false;
+      continue;
+    }
+    if (value[index] === '|') {
+      cells.push(cell.trim());
+      cell = '';
+      hasSeparator = true;
+      trailingSeparator = true;
+      index++;
+      continue;
+    }
+    cell += value[index];
+    trailingSeparator = false;
+    index++;
+  }
+  cells.push(cell.trim());
+
+  if (!hasSeparator) return null;
+  if (value.startsWith('|')) cells.shift();
+  if (trailingSeparator) cells.pop();
+  return cells;
+}
+
+function tableAlignments(line) {
+  const cells = splitTableRow(line);
+  if (!cells || cells.length === 0) return null;
+
+  const alignments = [];
+  for (const cell of cells) {
+    if (!/^:?-+:?$/.test(cell)) return null;
+    if (cell.startsWith(':') && cell.endsWith(':')) alignments.push('center');
+    else if (cell.endsWith(':')) alignments.push('right');
+    else if (cell.startsWith(':')) alignments.push('left');
+    else alignments.push('');
+  }
+  return alignments;
+}
+
+function matchTable(lines, index) {
+  if (index + 1 >= lines.length) return null;
+  const headers = splitTableRow(lines[index]);
+  const alignments = tableAlignments(lines[index + 1]);
+  if (!headers || !alignments || headers.length !== alignments.length) return null;
+
+  const rows = [];
+  let renderedCells = headers.length;
+  let oversized = renderedCells > maxMarkdownTableCells;
+  let next = index + 2;
+  while (next < lines.length && !startsMarkdownBlock(lines[next])) {
+    if (!oversized) {
+      const cells = splitTableRow(lines[next]) || [lines[next].trim()];
+      if (renderedCells > maxMarkdownTableCells - headers.length) {
+        oversized = true;
+        rows.length = 0;
+      } else {
+        rows.push(headers.map((_, cellIndex) => cells[cellIndex] || ''));
+        renderedCells += headers.length;
+      }
+    }
+    next++;
+  }
+  return {headers, alignments, rows, next, oversized};
+}
+
+function appendTable(parent, tableData) {
+  const container = document.createElement('div');
+  container.className = 'markdown-table-container';
+  const table = document.createElement('table');
+  const head = document.createElement('thead');
+  const headerRow = document.createElement('tr');
+
+  tableData.headers.forEach((value, index) => {
+    const header = document.createElement('th');
+    if (tableData.alignments[index]) header.className = `table-align-${tableData.alignments[index]}`;
+    appendInlineMarkdown(header, value);
+    headerRow.append(header);
+  });
+  head.append(headerRow);
+  table.append(head);
+
+  if (tableData.rows.length > 0) {
+    const body = document.createElement('tbody');
+    for (const row of tableData.rows) {
+      const tableRow = document.createElement('tr');
+      row.forEach((value, index) => {
+        const cell = document.createElement('td');
+        if (tableData.alignments[index]) cell.className = `table-align-${tableData.alignments[index]}`;
+        appendInlineMarkdown(cell, value);
+        tableRow.append(cell);
+      });
+      body.append(tableRow);
+    }
+    table.append(body);
+  }
+
+  container.append(table);
+  parent.append(container);
+}
+
 function startsMarkdownBlock(line) {
   return line.trim() === '' || Boolean(matchFence(line)) || /^ {0,3}#{1,6}(?:[\t ]|$)/.test(line) ||
     /^ {0,3}>/.test(line) || Boolean(matchListItem(line)) || /^( {4}|\t)/.test(line) || isHorizontalRule(line);
@@ -1381,6 +1531,19 @@ function appendMarkdownBlocks(parent, value, depth = 0) {
         list.append(listItem);
       }
       parent.append(list);
+      continue;
+    }
+
+    const table = matchTable(lines, index);
+    if (table) {
+      if (table.oversized) {
+        const paragraph = document.createElement('p');
+        paragraph.textContent = lines.slice(index, table.next).join('\n');
+        parent.append(paragraph);
+      } else {
+        appendTable(parent, table);
+      }
+      index = table.next;
       continue;
     }
 

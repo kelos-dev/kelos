@@ -122,6 +122,48 @@ const mixedTasks = render('- [x] done\n- ordinary');
 assert.match(mixedTasks, /<ul class="task-list"><li class="task-list-item">/);
 assert.match(mixedTasks, /<li><p>ordinary<\/p><\/li>/);
 
+const table = render([
+  '| Name | Result | Note |',
+  '| :--- | :----: | ---: |',
+  '| **alpha** | [safe](https://example.com/path) | `a\\|b` |',
+  '| escaped \\| pipe | <img src=x onerror=alert(1)> | short |',
+  '| missing | cell |',
+  '| extra | cells | are | ignored |',
+].join('\n'));
+assert.match(table, /<div class="markdown-table-container"><table><thead><tr>/);
+assert.match(table, /<th class="table-align-left">Name<\/th>/);
+assert.match(table, /<th class="table-align-center">Result<\/th>/);
+assert.match(table, /<th class="table-align-right">Note<\/th>/);
+assert.match(table, /<td class="table-align-left"><strong>alpha<\/strong><\/td>/);
+assert.match(table, /<td class="table-align-center"><a href="https:\/\/example.com\/path" target="_blank" rel="noopener noreferrer">safe<\/a><\/td>/);
+assert.match(table, /<td class="table-align-right"><code class="inline-code">a\|b<\/code><\/td>/);
+assert.match(table, /<td class="table-align-left">escaped \| pipe<\/td>/);
+assert.match(table, /<td class="table-align-center">&lt;img src=x onerror=alert\(1\)&gt;<\/td>/);
+assert.match(table, /<td class="table-align-right"><\/td>/);
+assert.doesNotMatch(table, /<img|ignored/);
+
+const tableWithoutOuterPipes = render('Name | Result\n--- | ---:\nonly-first\nfirst | second');
+assert.match(tableWithoutOuterPipes, /<table><thead><tr><th>Name<\/th><th class="table-align-right">Result<\/th><\/tr><\/thead>/);
+assert.match(tableWithoutOuterPipes, /<tbody><tr><td>only-first<\/td><td class="table-align-right"><\/td><\/tr>/);
+assert.match(tableWithoutOuterPipes, /<tr><td>first<\/td><td class="table-align-right">second<\/td><\/tr><\/tbody>/);
+
+const escapedBacktick = render('| first | second |\n| --- | --- |\n| `code\\` | value |');
+assert.match(escapedBacktick, /<tbody><tr><td><code class="inline-code">code\\<\/code><\/td><td>value<\/td><\/tr><\/tbody>/);
+
+assert.equal(render('ordinary | prose\nwithout a delimiter'), '<div><p>ordinary | prose\nwithout a delimiter<\/p><\/div>');
+assert.doesNotMatch(render('| one | two |\n| --- |'), /<table>/);
+
+const oversizedColumnCount = Math.floor(maxMarkdownTableCells / 2) + 1;
+const oversizedTable = [
+  Array(oversizedColumnCount).fill('heading').join(' | '),
+  Array(oversizedColumnCount).fill('---').join(' | '),
+  Array(oversizedColumnCount).fill('value').join(' | '),
+].join('\n');
+const oversizedRoot = new TestNode('div');
+renderMessageMarkdown(oversizedRoot, oversizedTable);
+assert.equal(oversizedRoot.textContent, oversizedTable);
+assert.doesNotMatch(serialize(oversizedRoot), /<table>/);
+
 const identifiers = render('assistant_segment_by_turn and foo__bar__baz');
 assert.equal(identifiers, '<div><p>assistant_segment_by_turn and foo__bar__baz</p></div>');
 

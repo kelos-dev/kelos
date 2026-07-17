@@ -153,9 +153,10 @@ When `spec.credentials.type` is `none`, no secret is required; supply credential
 
 ### Codex OAuth Token Refresh
 
-A `codex` `oauth` credential (`CODEX_AUTH_JSON`) is a ChatGPT-mode bundle carrying a short-lived `access_token` plus a long-lived `refresh_token`. Kelos writes this bundle to `~/.codex/auth.json` and configures Codex to use file-backed credentials (`cli_auth_credentials_store = "file"`), matching OpenAI's CI/CD auth guidance. Codex refreshes that file in place during runs, but agent pods are ephemeral, so refreshed tokens are lost unless they are written back to the Secret.
-
-Kelos ships a controller that creates one CronJob per labeled credentials Secret, refreshing each bundle independently of agent activity. Label each credentials Secret to opt in:
+A `codex` `oauth` credential (`CODEX_AUTH_JSON`) contains a short-lived access
+token and a long-lived refresh token. To keep the credential usable between
+agent runs, configure a refresh schedule and label each credentials Secret that
+Kelos should refresh:
 
 ```yaml
 # values.yaml
@@ -167,7 +168,11 @@ codexAuthRefresher:
 kubectl label secret codex-credentials kelos.dev/codex-oauth-refresh=true
 ```
 
-For each labeled Secret with a non-empty `CODEX_AUTH_JSON` key, the controller manages a dedicated CronJob in the Secret's namespace with access limited to that Secret. The CronJob seeds `auth.json` from that one Secret, invokes Codex so the CLI performs its own refresh, and writes the refreshed file back to only the `CODEX_AUTH_JSON` key — other keys are preserved and the token is never logged. Removing the label or deleting the Secret removes the managed refresh resources. Secrets without a `CODEX_AUTH_JSON` bundle, or whose bundle carries no `refresh_token` (e.g. API-key credentials), are skipped. Externally-managed Secrets (ExternalSecrets, Vault, sealed-secrets) will overwrite the refreshed value on their next sync and are not supported.
+Kelos updates only the `CODEX_AUTH_JSON` key; it preserves other keys and does
+not log the token. Removing the label stops refreshes. Secrets with a missing or
+empty `CODEX_AUTH_JSON` value, or without a refresh token, are not refreshed.
+Externally-managed Secrets (ExternalSecrets, Vault, sealed-secrets) overwrite
+the refreshed value on their next sync and are not supported.
 
 <a id="workerspec"></a>
 
@@ -189,11 +194,10 @@ For each labeled Secret with a non-empty `CODEX_AUTH_JSON` key, the controller m
 
 ## Session
 
-A Session is one interactive Claude Code, Codex, or OpenCode conversation backed
-by a one-replica StatefulSet. The StatefulSet's headless governing Service is
-used only for Kubernetes workload identity; web and terminal clients still
-connect through the Session control path. The spec is immutable. Conversation
-events stay out of the Kubernetes API and are retained on the Session workspace.
+A Session is one interactive Claude Code, Codex, or OpenCode conversation that
+web and terminal clients can share and reconnect to. The spec is immutable.
+Conversation history is retained on the Session workspace rather than in the
+Kubernetes API.
 
 | Field | Description | Required |
 |-------|-------------|----------|
@@ -224,11 +228,9 @@ and provider conversation. Both clients can stream agent and tool activity,
 answer user-input requests, and interrupt active work without ending the
 provider conversation.
 
-Selecting a Session in the web chat opens its conversation at the latest
-retained message. Ordinary reconnects resume the event stream incrementally and
-preserve an intentional upward scroll position. If the Session or runtime
-journal was replaced or its retained history was truncated, the web client
-discards its cached view and rebuilds it from the available retained history.
+Selecting a Session in the web chat opens it at the latest retained message.
+Reconnecting preserves an intentional upward scroll position and shows the
+history that remains available on the Session workspace.
 
 Web messages render safe core Markdown: paragraphs and headings; emphasis,
 strong text, strikethrough, and inline code; ordered, unordered, and task lists;
@@ -237,39 +239,27 @@ blocks. The renderer does not interpret raw HTML, load embedded images, or
 render tables. Fenced code may include a language label, and long code lines
 scroll horizontally.
 
-If the Pod is deleted or evicted, the StatefulSet creates a replacement. Web
-and terminal clients reconnect to it. Work active at the time of failure is
-reported as interrupted and is not submitted again automatically. The terminal
-client also does not retry a request whose delivery cannot be confirmed; it
-reports that uncertainty so the user can decide whether to submit it again.
+If the Session Pod is deleted or evicted, clients reconnect after its
+replacement is ready. Work active at the time of failure is reported as
+interrupted and is not submitted again automatically. The terminal client also
+does not retry a request whose delivery cannot be confirmed; it reports that
+uncertainty so the user can decide whether to submit it again.
 
-The controller's `--version` flag defaults to its build version and applies to
-every managed image argument that does not already include a tag or digest. A
-tagged or digested image argument remains an explicit override. When the
-resolved `--session-runtime-image` changes, the controller updates every
-existing Session StatefulSet, and the StatefulSet replaces its Pod through a
-rolling update. Active work is interrupted and is not submitted again
-automatically. Helm passes the shared `image.tag` value through `--version`, so
-upgrading to a chart with a different image tag rolls existing Session Pods as
-well as the controller.
+Session Pods that use the default runtime image are replaced when a Kelos
+upgrade changes that image. An explicitly tagged or digested runtime image
+remains pinned. Replacement interrupts active work, which is not submitted
+again automatically.
 
-The Session runtime owns `status.branch` and `status.pullRequest`. It publishes
-them when it starts, after each provider turn, and periodically while the Session
-is ready. Its Role permits status patches only for its own Session, and every
-patch verifies the current Pod identity and phase. The shared web client shows
-the branch and a colored, text-labeled pull request state in both the Session
-sidebar and conversation header.
+`status.branch` and `status.pullRequest` reflect the Session workspace while it
+is ready. The web client shows both values in the Session sidebar and
+conversation header.
 
-When `spec.volumeClaimTemplate` is set, the StatefulSet provisions the Session
-workspace from that template and reuses it across Pod and StatefulSet
-replacement. The claim is owned by the Session and uses the StatefulSet's
-`Retain` policy for deletion and scaling, so it remains until the Session is
-deleted. Built-in workspace initialization is skipped after the persistent
-workspace has been initialized, while `Workspace.spec.setupCommand` runs in
-each replacement container. PersistentVolume retention afterward follows the
-StorageClass reclaim policy. When the field is omitted, the workspace uses
-`emptyDir`, so conversation history and workspace changes do not survive Pod
-replacement.
+When `spec.volumeClaimTemplate` is set, conversation history and workspace
+changes survive Pod replacement. The claim remains until the Session is
+deleted, after which PersistentVolume retention follows the StorageClass
+reclaim policy. `Workspace.spec.setupCommand` runs again in each replacement
+container. When the field is omitted, the workspace uses `emptyDir`, so its
+history and changes do not survive Pod replacement.
 
 The shared web server can create, list, delete, and connect to Sessions across
 namespaces while the web application operates on one active namespace at a
@@ -289,7 +279,9 @@ optional persistent volume claim.
 
 A WorkerPool manages a fleet of persistent worker pods backed by a StatefulSet. Tasks reference a WorkerPool via `spec.workerPoolRef` to execute on pre-warmed infrastructure instead of creating per-task Jobs.
 
-A WorkerPool's Workspace may use either a PAT-style or a GitHub App secret. For App secrets the controller mints a short-lived installation token into a `<pool-name>-github-token` Secret and re-mints it before expiry (see [Workspace authentication](#workspace-authentication)), so long-lived worker pods keep a valid token without restarts.
+A WorkerPool's Workspace may use either a PAT-style or a GitHub App secret.
+GitHub App credentials are refreshed before they expire, so long-lived workers
+keep repository access without restarting (see [Workspace authentication](#workspace-authentication)).
 
 | Field | Description | Required |
 |-------|-------------|----------|
@@ -361,7 +353,8 @@ kubectl create secret generic github-token \
 
 **GitHub App (recommended for production/org use):**
 
-The secret contains three keys, and the controller automatically exchanges them for a short-lived installation token before each task run:
+The secret contains three keys. Kelos exchanges them for a short-lived
+installation token:
 
 | Key | Description |
 |-----|-------------|
@@ -378,7 +371,10 @@ kubectl create secret generic github-app-creds \
 
 GitHub Apps are preferred over PATs for production use because they offer fine-grained permissions, higher rate limits, no dependency on a specific user account, and automatically expiring tokens.
 
-The installation token is minted to a derived Secret and mounted into the agent pod as a file at `/kelos/github-token/GITHUB_TOKEN`. For per-Task Jobs the Secret is `<task-name>-github-token` (minted at admission); for WorkerPools it is `<pool-name>-github-token` (minted on first reconcile). In both cases the controller re-mints the token before it expires and updates the Secret in place. The kubelet syncs the file contents automatically, and the agent image's git credential helper and `gh` wrapper read the file on each invocation, so runs that last longer than the ~1h installation-token TTL keep working without a pod restart. This makes GitHub App secrets usable for persistent WorkerPools, not just ephemeral Task pods.
+Kelos refreshes the installation token before it expires. Tasks and WorkerPools
+use the refreshed token without a Pod restart. Custom agent images must follow
+the token-handling requirements in the [Agent Image Interface](agent-image-interface.md#github-token-freshness)
+to receive refreshed credentials during long-running work.
 
 ## AgentConfig
 
@@ -702,11 +698,13 @@ TaskBudget defines observed-spend admission limits for Tasks. When a Task's labe
 - List errors when summing usage block admission (fail closed) and set a `Degraded` condition on the budget.
 - The `Degraded` condition is cleared automatically after a successful evaluation.
 - A zero limit (e.g., `maxOutputTokens: 0`) blocks all matching Tasks immediately.
-- `status.used` is refreshed both during admission and by a dedicated controller when matching TaskRecords change, and it resets when the accounting period rolls over.
+- `status.used` reflects matching TaskRecords and resets when the accounting period rolls over.
 
 ## TaskRecord
 
-TaskRecord is an immutable terminal record for a completed Task that reported usage data. It preserves accounting data after the Task itself is deleted by TTL. Tasks that complete without usage (e.g., nil or missing usage output) do not generate a TaskRecord. The record name is derived from the Task UID to guarantee uniqueness. No `ownerReference` is set so garbage collection does not remove it.
+TaskRecord is an immutable terminal record for a completed Task that reported
+usage data. It preserves accounting data after the Task itself is deleted by
+TTL. Tasks that complete without usage do not generate a TaskRecord.
 
 | Field | Description | Required |
 |-------|-------------|----------|
@@ -891,7 +889,7 @@ The `kelos` CLI lets you manage the full lifecycle without writing YAML.
 - `--controller-resource-limits`: Resource limits for the controller container as comma-separated `name=value` pairs, for example `cpu=500m,memory=128Mi`
 
 `kelos install` renders the embedded Helm chart but still manages CRDs separately, so `crds.install` must be omitted or set to `false`.
-`kelos install --dry-run` prints the controller-side chart manifests only; it omits CRDs because real installs apply them in a staged sequence after certificate and conversion webhook readiness.
+`kelos install --dry-run` prints the chart manifests and omits CRDs.
 When the same key is set multiple ways, precedence is: chart defaults, then `--values` files, then compatibility install flags, then explicit `--set`, `--set-string`, and `--set-file` overrides.
 
 ### `kelos run` Flags

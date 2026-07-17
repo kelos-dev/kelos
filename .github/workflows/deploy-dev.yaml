@@ -196,24 +196,10 @@ jobs:
             --patch '{"spec":{"ports":[{"name":"webhook","nodePort":30081,"port":8443,"protocol":"TCP","targetPort":"webhook"}]}}'
           kubectl rollout restart deployment/kelos-controller-manager -n kelos-system
           kubectl rollout status deployment/kelos-controller-manager -n kelos-system --timeout=300s
-          mapfile -t session_statefulsets < <(
-            kubectl get statefulset --all-namespaces \
-              -l kelos.dev/component=session \
-              -o 'jsonpath={range .items[*]}{.metadata.namespace}{"/"}{.metadata.name}{"\n"}{end}'
-          )
-          for statefulset in "${session_statefulsets[@]}"; do
-            namespace="${statefulset%%/*}"
-            name="${statefulset#*/}"
-            kubectl rollout restart "statefulset/${name}" -n "${namespace}"
-          done
+          kubectl delete statefulset --all-namespaces -l kelos.dev/component=session
           kubectl rollout restart deployment/kelos-session-server -n kelos-system
           kubectl rollout restart deployment -l kelos.dev/component=spawner -n "${KELOS_NAMESPACE}"
           kubectl rollout restart deployment/kelos-webhook-github -n kelos-system
-          for statefulset in "${session_statefulsets[@]}"; do
-            namespace="${statefulset%%/*}"
-            name="${statefulset#*/}"
-            kubectl rollout status "statefulset/${name}" -n "${namespace}" --timeout=300s
-          done
           kubectl rollout status deployment/kelos-session-server -n kelos-system --timeout=300s
           kubectl rollout status deployment -l kelos.dev/component=spawner -n "${KELOS_NAMESPACE}" --timeout=300s
           kubectl rollout status deployment/kelos-webhook-github -n kelos-system --timeout=300s

@@ -1,7 +1,6 @@
 package sessionruntime
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -129,7 +128,10 @@ func (p *CodexProvider) openThread(ctx context.Context) error {
 	if data, err := os.ReadFile(statePath); err == nil {
 		threadID := strings.TrimSpace(string(data))
 		if threadID != "" {
-			result, err := p.request(ctx, "thread/resume", p.threadParams(map[string]any{"threadId": threadID}))
+			result, err := p.request(ctx, "thread/resume", p.threadParams(map[string]any{
+				"threadId":     threadID,
+				"excludeTurns": true,
+			}))
 			if err != nil {
 				if isMissingCodexRollout(err, threadID) {
 					log.Printf("Codex thread rollout missing, starting replacement thread threadID=%s", threadID)
@@ -376,11 +378,8 @@ func (p *CodexProvider) write(value any) error {
 
 func (p *CodexProvider) readLoop(reader io.Reader) {
 	defer close(p.done)
-	scanner := bufio.NewScanner(reader)
-	buffer := make([]byte, 64*1024)
-	scanner.Buffer(buffer, 8*1024*1024)
-	for scanner.Scan() {
-		line := append([]byte(nil), scanner.Bytes()...)
+	decoder := json.NewDecoder(reader)
+	for {
 		var envelope struct {
 			ID     json.RawMessage `json:"id"`
 			Method string          `json:"method"`
@@ -391,7 +390,10 @@ func (p *CodexProvider) readLoop(reader io.Reader) {
 				Message string `json:"message"`
 			} `json:"error"`
 		}
-		if err := json.Unmarshal(line, &envelope); err != nil {
+		if err := decoder.Decode(&envelope); err != nil {
+			if errors.Is(err, io.EOF) {
+				return
+			}
 			p.readErr = fmt.Errorf("decoding Codex app-server message: %w", err)
 			return
 		}
@@ -412,9 +414,6 @@ func (p *CodexProvider) readLoop(reader io.Reader) {
 				response <- codexResponse{Result: envelope.Result, Error: envelope.Error}
 			}
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		p.readErr = fmt.Errorf("reading Codex app-server output: %w", err)
 	}
 }
 

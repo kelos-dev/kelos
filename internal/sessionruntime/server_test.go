@@ -1,6 +1,7 @@
 package sessionruntime
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1025,6 +1026,10 @@ func TestCodexOpenThreadReplacesUnmaterializedThread(t *testing.T) {
 			var request struct {
 				ID     int64  `json:"id"`
 				Method string `json:"method"`
+				Params struct {
+					ThreadID     string `json:"threadId"`
+					ExcludeTurns bool   `json:"excludeTurns"`
+				} `json:"params"`
 			}
 			if err := decoder.Decode(&request); err != nil {
 				requestDone <- err
@@ -1032,6 +1037,10 @@ func TestCodexOpenThreadReplacesUnmaterializedThread(t *testing.T) {
 			}
 			if request.Method != wantMethod {
 				requestDone <- fmt.Errorf("request %d method = %q, want %q", i, request.Method, wantMethod)
+				return
+			}
+			if i == 0 && (request.Params.ThreadID != "thread-1" || !request.Params.ExcludeTurns) {
+				requestDone <- fmt.Errorf("resume params = %#v, want thread ID with excluded turns", request.Params)
 				return
 			}
 			provider.pendingMu.Lock()
@@ -1063,6 +1072,38 @@ func TestCodexOpenThreadReplacesUnmaterializedThread(t *testing.T) {
 	}
 	if string(data) != "thread-2\n" {
 		t.Fatalf("saved thread ID = %q, want thread-2", data)
+	}
+}
+
+func TestCodexReadLoopAcceptsLargeMessage(t *testing.T) {
+	response := make(chan codexResponse, 1)
+	provider := &CodexProvider{
+		pending: map[string]chan codexResponse{"1": response},
+		done:    make(chan struct{}),
+	}
+	message, err := json.Marshal(map[string]any{
+		"id": 1,
+		"result": map[string]any{
+			"thread":  map[string]string{"id": "thread-1"},
+			"payload": strings.Repeat("x", 8*1024*1024),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	message = append(message, '\n')
+
+	provider.readLoop(bytes.NewReader(message))
+	if provider.readErr != nil {
+		t.Fatalf("readLoop() error = %v", provider.readErr)
+	}
+	select {
+	case got := <-response:
+		if id := codexThreadID(got.Result); id != "thread-1" {
+			t.Fatalf("thread ID = %q, want thread-1", id)
+		}
+	default:
+		t.Fatal("large Codex response was not delivered")
 	}
 }
 

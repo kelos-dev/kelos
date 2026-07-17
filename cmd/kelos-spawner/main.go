@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -193,6 +194,10 @@ func runReportingCycle(ctx context.Context, cl client.Client, key types.Namespac
 	return nil
 }
 
+func taskNameForWorkItem(taskSpawnerName, workItemID string) string {
+	return strings.ToLower(taskSpawnerName + "-" + workItemID)
+}
+
 func runCycle(ctx context.Context, cl client.Client, key types.NamespacedName, githubOwner, githubRepo, githubAPIBaseURL string, tokenResolver func(context.Context) (string, error), jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) error {
 	return runCycleWithProxy(ctx, cl, key, githubOwner, githubRepo, "", githubAPIBaseURL, tokenResolver, jiraBaseURL, jiraProject, jiraJQL, httpClient)
 }
@@ -300,7 +305,7 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 
 	var newItems []source.WorkItem
 	for _, item := range items {
-		taskName := fmt.Sprintf("%s-%s", ts.Name, item.ID)
+		taskName := taskNameForWorkItem(ts.Name, item.ID)
 		existing, found := existingTaskMap[taskName]
 		if !found {
 			newItems = append(newItems, item)
@@ -366,7 +371,7 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 			break
 		}
 
-		taskName := fmt.Sprintf("%s-%s", ts.Name, item.ID)
+		taskName := taskNameForWorkItem(ts.Name, item.ID)
 
 		templateVars := source.WorkItemToTemplateVars(item)
 

@@ -506,6 +506,16 @@ The installation token is minted to a derived Secret and mounted into the agent 
 | `spec.maxTotalTasks` | Lifetime limit on total tasks created by this spawner | No |
 | `spec.suspend` | Pause the spawner without deleting it; resume with `spec.suspend: false` (default: `false`) | No |
 
+### Generated Task Names
+
+For `githubIssues`, `githubPullRequests`, `jira`, and `cron` sources, Kelos first
+lowercases the work item ID when forming the Task name:
+`<TaskSpawner name>-<lowercase work item ID>`.
+
+Lowercasing the Task name does not change the source data exposed to templates
+and logs. In particular, `{{.ID}}` remains the raw work item ID (for example,
+`ENG-42`). Webhook-backed TaskSpawners use delivery-based Task names instead.
+
 ### Manual Task Creation
 
 Run a standalone Task from any TaskSpawner's `taskTemplate`:

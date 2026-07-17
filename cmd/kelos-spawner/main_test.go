@@ -140,6 +140,67 @@ func newTask(name, namespace, spawnerName string, phase kelos.TaskPhase) kelos.T
 	}
 }
 
+func TestTaskNameForWorkItem(t *testing.T) {
+	tests := []struct {
+		name            string
+		taskSpawnerName string
+		workItemID      string
+		want            string
+	}{
+		{
+			name:            "Jira issue key",
+			taskSpawnerName: "tools-kelos-agent-mpf-analyze",
+			workItemID:      "MPF-17",
+			want:            "tools-kelos-agent-mpf-analyze-mpf-17",
+		},
+		{
+			name:            "lowercase identifier",
+			taskSpawnerName: "spawner",
+			workItemID:      "issue-42",
+			want:            "spawner-issue-42",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := taskNameForWorkItem(tt.taskSpawnerName, tt.workItemID)
+			if got != tt.want {
+				t.Errorf("taskNameForWorkItem() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunCycleWithSource_LowercasesTaskNameIdempotently(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	ts.Spec.TaskTemplate.PromptTemplate = "{{.ID}}"
+	cl, key := setupTest(t, ts)
+	src := &fakeSource{
+		items: []source.WorkItem{{ID: "MPF-17", Title: "Jira issue"}},
+	}
+
+	for range 2 {
+		if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+			t.Fatalf("Unexpected error: %v", err)
+		}
+	}
+
+	var taskList kelos.TaskList
+	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatalf("Listing tasks: %v", err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task after two cycles, got %d", len(taskList.Items))
+	}
+	task := taskList.Items[0]
+	if task.Name != "spawner-mpf-17" {
+		t.Errorf("Task name = %q, want %q", task.Name, "spawner-mpf-17")
+	}
+	if task.Spec.Prompt != "MPF-17" {
+		t.Errorf("Task prompt = %q, want raw ID %q", task.Spec.Prompt, "MPF-17")
+	}
+}
+
 func TestBuildSource_GitHubIssuesWithBaseURL(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 

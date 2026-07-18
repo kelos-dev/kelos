@@ -196,7 +196,11 @@ jobs:
             --patch '{"spec":{"ports":[{"name":"webhook","nodePort":30081,"port":8443,"protocol":"TCP","targetPort":"webhook"}]}}'
           kubectl rollout restart deployment/kelos-controller-manager -n kelos-system
           kubectl rollout status deployment/kelos-controller-manager -n kelos-system --timeout=300s
-          kubectl delete statefulset --all-namespaces -l kelos.dev/component=session
+          kubectl get statefulset --all-namespaces -l kelos.dev/component=session \
+            -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' | \
+            while read -r namespace name; do
+              kubectl rollout restart "statefulset/${name}" -n "${namespace}"
+            done
           kubectl rollout restart deployment/kelos-session-server -n kelos-system
           kubectl rollout restart deployment -l kelos.dev/component=spawner -n "${KELOS_NAMESPACE}"
           kubectl rollout restart deployment/kelos-webhook-github -n kelos-system

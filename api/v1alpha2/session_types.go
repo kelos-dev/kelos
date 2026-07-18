@@ -18,6 +18,13 @@ const (
 	SessionPhaseFailed SessionPhase = "Failed"
 )
 
+const (
+	// SessionConditionReady indicates whether the Session infrastructure is ready for clients.
+	SessionConditionReady = "Ready"
+	// SessionConditionActive indicates whether the Session runtime has an unfinished turn.
+	SessionConditionActive = "Active"
+)
+
 // SessionPullRequestState represents the lifecycle state of a Session pull request.
 type SessionPullRequestState string
 

@@ -24,6 +24,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apiMeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -516,10 +517,12 @@ var _ = Describe("Session remote control", func() {
 		})
 
 		waitForSessionPhase(f, f.Namespace, sessionName, kelos.SessionPhaseReady)
+		waitForSessionActivity(f, f.Namespace, sessionName, metav1.ConditionFalse)
 		waitForSessionWorkspaceStatus(f, f.Namespace, sessionName, "", nil)
 
 		By("publishing the current branch and pull request")
 		runTerminalTurn(f.Namespace, sessionName, "create-git-workspace", ContainSubstring("agent › turn 1: git workspace created"))
+		waitForSessionActivity(f, f.Namespace, sessionName, metav1.ConditionFalse)
 		waitForSessionWorkspaceStatus(f, f.Namespace, sessionName, branch, pullRequest)
 
 		By("clearing workspace status when the repository is removed")
@@ -648,6 +651,20 @@ func waitForSessionWorkspaceStatus(f *framework.Framework, namespace, name, bran
 		g.Expect(session.Status.Branch).To(Equal(branch))
 		g.Expect(session.Status.PullRequest).To(Equal(pullRequest))
 	}, time.Minute, time.Second).Should(Succeed(), "Session %s/%s workspace status was not updated", namespace, name)
+}
+
+func waitForSessionActivity(f *framework.Framework, namespace, name string, status metav1.ConditionStatus) {
+	Eventually(func() metav1.ConditionStatus {
+		session, err := f.KelosClientset.ApiV1alpha2().Sessions(namespace).Get(context.TODO(), name, metav1.GetOptions{})
+		if err != nil {
+			return ""
+		}
+		condition := apiMeta.FindStatusCondition(session.Status.Conditions, kelos.SessionConditionActive)
+		if condition == nil {
+			return ""
+		}
+		return condition.Status
+	}, time.Minute, time.Second).Should(Equal(status), "Session %s/%s runtime did not report Active=%s", namespace, name, status)
 }
 
 func waitForSessionPodReplacement(f *framework.Framework, namespace, name string, oldUID types.UID) *kelos.Session {

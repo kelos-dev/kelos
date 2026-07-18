@@ -287,6 +287,13 @@ function providerInitials(provider) {
   return provider === 'claude-code' ? 'CC' : provider === 'codex' ? 'CX' : provider === 'opencode' ? 'OC' : 'AI';
 }
 
+function sessionDisplayStatus(session) {
+  if (session.phase !== 'Ready') return session.phase || 'Pending';
+  if (session.active === true) return 'Active';
+  if (session.active === false) return 'Idle';
+  return session.phase;
+}
+
 function safeHTTPURL(value) {
   if (!value) return null;
   try {
@@ -337,7 +344,8 @@ function renderSessions() {
     button.className = 'session-item-select';
     button.type = 'button';
     const dot = document.createElement('span');
-    dot.className = `phase-dot ${String(session.phase || '').toLowerCase()}`;
+    const displayStatus = sessionDisplayStatus(session);
+    dot.className = `phase-dot ${String(displayStatus).toLowerCase()}`;
     const text = document.createElement('span');
     const name = document.createElement('div');
     name.className = 'session-item-name';
@@ -349,7 +357,9 @@ function renderSessions() {
     provider.textContent = providerLabel(session.provider);
     const namespace = document.createElement('span');
     namespace.textContent = `· ${session.namespace}`;
-    meta.append(provider, namespace);
+    const activity = document.createElement('span');
+    activity.textContent = `· ${displayStatus}`;
+    meta.append(provider, namespace, activity);
     text.append(name, meta);
     if (session.branch) {
       const branch = document.createElement('div');
@@ -872,7 +882,7 @@ function renderHeader() {
     return;
   }
   elements.title.textContent = session.name;
-  const details = [session.namespace, providerLabel(session.provider), session.phase || 'Pending'];
+  const details = [session.namespace, providerLabel(session.provider), sessionDisplayStatus(session)];
   if (session.branch) details.push(session.branch);
   const detailText = document.createElement('span');
   detailText.className = 'session-meta-details';

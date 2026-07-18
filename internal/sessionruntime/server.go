@@ -25,35 +25,40 @@ import (
 )
 
 const (
-	DefaultSocketPath                     = "/tmp/kelos-session/runtime.sock"
-	DefaultStateDir                       = "/workspace/.kelos/session"
-	DefaultWorkingDir                     = "/workspace/repo"
-	journalFileName                       = "events.jsonl"
-	initializedFile                       = "initialized"
-	defaultWorkspaceStatusPublishInterval = 30 * time.Second
-	defaultWorkspaceStatusRetryInterval   = 2 * time.Second
+	DefaultSocketPath                   = "/tmp/kelos-session/runtime.sock"
+	DefaultStateDir                     = "/workspace/.kelos/session"
+	DefaultWorkingDir                   = "/workspace/repo"
+	journalFileName                     = "events.jsonl"
+	initializedFile                     = "initialized"
+	defaultSessionStatusPublishInterval = 30 * time.Second
+	defaultSessionStatusRetryInterval   = 2 * time.Second
 )
 
 // Config configures the resident Session runtime.
 type Config struct {
-	SocketPath             string
-	StateDir               string
-	WorkingDir             string
-	AgentType              string
-	Model                  string
-	Effort                 string
-	PluginDir              string
-	Environment            []string
-	PublishWorkspaceStatus WorkspaceStatusPublisher
-	SessionName            string
-	PodUID                 types.UID
-	SessionClient          clientv1alpha2.SessionInterface
+	SocketPath           string
+	StateDir             string
+	WorkingDir           string
+	AgentType            string
+	Model                string
+	Effort               string
+	PluginDir            string
+	Environment          []string
+	PublishSessionStatus SessionStatusPublisher
+	SessionName          string
+	PodUID               types.UID
+	SessionClient        clientv1alpha2.SessionInterface
 }
 
 type turnRequest struct {
 	id       string
 	text     string
 	accepted chan struct{}
+}
+
+type sessionStatusPublishRequest struct {
+	active                       bool
+	refreshWorkspaceAfterPublish bool
 }
 
 type pendingInput struct {
@@ -84,29 +89,33 @@ type Server struct {
 	activeMu      sync.Mutex
 	activeTurn    string
 
-	inputMu                        sync.Mutex
-	pendingInputs                  map[string]*pendingInput
-	nextInputID                    atomic.Int64
-	refreshWorkspaceStatus         func(context.Context) error
-	publishWorkspaceStatus         func(context.Context) error
-	workspaceStatusRefreshes       chan struct{}
-	workspaceStatusPublishInterval time.Duration
-	workspaceStatusRetryInterval   time.Duration
+	inputMu                      sync.Mutex
+	pendingInputs                map[string]*pendingInput
+	nextInputID                  atomic.Int64
+	refreshWorkspaceStatus       func(context.Context) error
+	publishSessionStatus         func(context.Context, bool) error
+	workspaceStatusRefreshes     chan struct{}
+	sessionStatusMu              sync.Mutex
+	sessionStatusPublishQueue    []sessionStatusPublishRequest
+	sessionStatusPublishWakeups  chan struct{}
+	sessionStatusPublishInterval time.Duration
+	sessionStatusRetryInterval   time.Duration
 }
 
 // NewServer constructs a Session server around injected provider and journal implementations.
 func NewServer(config Config, journal *Journal, provider Provider) *Server {
 	return &Server{
-		config:                         config,
-		journal:                        journal,
-		provider:                       provider,
-		appendMessage:                  journal.Append,
-		turns:                          make(chan turnRequest, 32),
-		updateReport:                   make(chan struct{}, 1),
-		pendingInputs:                  map[string]*pendingInput{},
-		workspaceStatusRefreshes:       make(chan struct{}, 1),
-		workspaceStatusPublishInterval: defaultWorkspaceStatusPublishInterval,
-		workspaceStatusRetryInterval:   defaultWorkspaceStatusRetryInterval,
+		config:                       config,
+		journal:                      journal,
+		provider:                     provider,
+		appendMessage:                journal.Append,
+		turns:                        make(chan turnRequest, 32),
+		updateReport:                 make(chan struct{}, 1),
+		pendingInputs:                map[string]*pendingInput{},
+		workspaceStatusRefreshes:     make(chan struct{}, 1),
+		sessionStatusPublishWakeups:  make(chan struct{}, 1),
+		sessionStatusPublishInterval: defaultSessionStatusPublishInterval,
+		sessionStatusRetryInterval:   defaultSessionStatusRetryInterval,
 	}
 }
 
@@ -156,26 +165,30 @@ func Run(ctx context.Context, config Config) error {
 		return err
 	}
 	server := NewServer(config, journal, provider)
-	publishWorkspaceStatus := func(ctx context.Context) error {
-		status, err := readWorkspaceStatus(ctx, realWorkspaceStatusRunner{}, config.StateDir, config.WorkingDir)
-		if err != nil {
-			return err
-		}
-		return config.PublishWorkspaceStatus(ctx, status)
+	publishSessionStatus := func(ctx context.Context, active bool) error {
+		return publishObservedSessionStatus(ctx, config.PublishSessionStatus, active, func(ctx context.Context) (WorkspaceStatus, error) {
+			return readWorkspaceStatus(ctx, realWorkspaceStatusRunner{}, config.StateDir, config.WorkingDir)
+		})
 	}
 	server.refreshWorkspaceStatus = func(ctx context.Context) error {
-		status, refreshErr := refreshWorkspaceStatus(ctx, config.StateDir, config.WorkingDir, config.Environment)
-		if config.PublishWorkspaceStatus == nil {
-			return refreshErr
-		}
-		return errors.Join(refreshErr, config.PublishWorkspaceStatus(ctx, status))
+		_, err := refreshWorkspaceStatus(ctx, config.StateDir, config.WorkingDir, config.Environment)
+		return err
 	}
-	if config.PublishWorkspaceStatus != nil {
-		server.publishWorkspaceStatus = publishWorkspaceStatus
+	if config.PublishSessionStatus != nil {
+		server.publishSessionStatus = publishSessionStatus
 	}
 	server.nextTurnID.Store(recovery.nextTurnID)
 	server.nextInputID.Store(recovery.nextInputID)
 	return server.Serve(ctx)
+}
+
+func publishObservedSessionStatus(ctx context.Context, publisher SessionStatusPublisher, active bool, readStatus func(context.Context) (WorkspaceStatus, error)) error {
+	workspaceStatus, readErr := readStatus(ctx)
+	status := ObservedSessionStatus{Active: active}
+	if readErr == nil {
+		status.WorkspaceStatus = &workspaceStatus
+	}
+	return errors.Join(readErr, publisher(ctx, status))
 }
 
 func sessionInitialized(stateDir string) (bool, error) {
@@ -249,10 +262,11 @@ func (s *Server) Serve(ctx context.Context) error {
 
 	providerDone := s.provider.Done()
 	go s.runWorkspaceStatusRefreshes(serveCtx)
-	if s.publishWorkspaceStatus != nil {
-		go s.runWorkspaceStatusPublishes(serveCtx)
+	if s.publishSessionStatus != nil {
+		go s.runSessionStatusPublishes(serveCtx)
 	}
 	s.requestWorkspaceStatusRefresh()
+	s.requestSessionStatusPublish()
 	go s.runTurns(serveCtx)
 	go func() {
 		select {
@@ -316,29 +330,116 @@ func (s *Server) runWorkspaceStatusRefreshes(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-s.workspaceStatusRefreshes:
-			if err := s.refreshWorkspaceStatus(ctx); err != nil {
+			err := s.refreshWorkspaceStatus(ctx)
+			s.requestSessionStatusPublishAfterWorkspaceRefresh()
+			if err != nil {
 				log.Printf("Unable to refresh Session workspace status error=%v", err)
 			}
 		}
 	}
 }
 
-func (s *Server) runWorkspaceStatusPublishes(ctx context.Context) {
-	timer := time.NewTimer(s.workspaceStatusRetryInterval)
+func (s *Server) requestSessionStatusPublish() {
+	s.queueSessionStatusPublish(false, false)
+}
+
+func (s *Server) requestSessionStatusPublishAfterWorkspaceRefresh() {
+	s.queueSessionStatusPublish(true, false)
+}
+
+func (s *Server) requestPeriodicSessionStatusPublish() {
+	s.queueSessionStatusPublish(true, true)
+}
+
+func (s *Server) queueSessionStatusPublish(force, refreshWorkspaceAfterPublish bool) {
+	if s.publishSessionStatus == nil {
+		return
+	}
+	s.activeMu.Lock()
+	active := s.activeTurn != ""
+	s.sessionStatusMu.Lock()
+	queued := force || len(s.sessionStatusPublishQueue) == 0 || s.sessionStatusPublishQueue[len(s.sessionStatusPublishQueue)-1].active != active
+	if queued {
+		s.sessionStatusPublishQueue = append(s.sessionStatusPublishQueue, sessionStatusPublishRequest{
+			active:                       active,
+			refreshWorkspaceAfterPublish: refreshWorkspaceAfterPublish,
+		})
+	}
+	s.sessionStatusMu.Unlock()
+	s.activeMu.Unlock()
+	if !queued {
+		return
+	}
+	select {
+	case s.sessionStatusPublishWakeups <- struct{}{}:
+	default:
+	}
+}
+
+func (s *Server) nextSessionStatusPublish() (sessionStatusPublishRequest, bool) {
+	s.sessionStatusMu.Lock()
+	defer s.sessionStatusMu.Unlock()
+	if len(s.sessionStatusPublishQueue) == 0 {
+		return sessionStatusPublishRequest{}, false
+	}
+	return s.sessionStatusPublishQueue[0], true
+}
+
+func (s *Server) completeSessionStatusPublish() {
+	s.sessionStatusMu.Lock()
+	defer s.sessionStatusMu.Unlock()
+	s.sessionStatusPublishQueue = s.sessionStatusPublishQueue[1:]
+}
+
+func (s *Server) runSessionStatusPublishes(ctx context.Context) {
+	timer := time.NewTimer(s.sessionStatusPublishInterval)
 	defer timer.Stop()
+	var (
+		request sessionStatusPublishRequest
+		pending bool
+	)
 	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-timer.C:
-			next := s.workspaceStatusPublishInterval
-			if err := s.publishWorkspaceStatus(ctx); err != nil {
-				log.Printf("Unable to publish Session workspace status error=%v", err)
-				next = s.workspaceStatusRetryInterval
+		if !pending {
+			if next, ok := s.nextSessionStatusPublish(); ok {
+				request = next
+				pending = true
 			} else {
+				select {
+				case <-ctx.Done():
+					return
+				case <-s.sessionStatusPublishWakeups:
+					continue
+				case <-timer.C:
+					s.requestPeriodicSessionStatusPublish()
+					continue
+				}
+			}
+		}
+		next := s.sessionStatusPublishInterval
+		err := s.publishSessionStatus(ctx, request.active)
+		if err != nil {
+			log.Printf("Unable to publish Session runtime status error=%v", err)
+			next = s.sessionStatusRetryInterval
+		} else {
+			s.completeSessionStatusPublish()
+			if request.refreshWorkspaceAfterPublish {
 				s.requestWorkspaceStatusRefresh()
 			}
-			timer.Reset(next)
+			pending = false
+		}
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timer.Reset(next)
+		if err != nil {
+			select {
+			case <-ctx.Done():
+				return
+			case <-timer.C:
+			}
 		}
 	}
 }
@@ -349,12 +450,14 @@ func (s *Server) runTurn(ctx context.Context, turn turnRequest) {
 	s.activeMu.Lock()
 	s.activeTurn = turn.id
 	s.activeMu.Unlock()
+	s.requestSessionStatusPublish()
 	defer func() {
 		s.activeMu.Lock()
 		if s.activeTurn == turn.id {
 			s.activeTurn = ""
 		}
 		s.activeMu.Unlock()
+		s.requestSessionStatusPublish()
 	}()
 
 	if err := s.journal.Append(Event{Type: EventTurnStarted, TurnID: turn.id, Status: "running"}); err != nil {

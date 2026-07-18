@@ -180,51 +180,171 @@ func TestRunTurnQueuesWorkspaceStatusRefresh(t *testing.T) {
 	close(releaseRefresh)
 }
 
-func TestServerRetriesWorkspaceStatusPublication(t *testing.T) {
+func TestServerQueuesStatusPublicationAfterWorkspaceRefresh(t *testing.T) {
 	journal := NewJournal()
 	defer journal.Close()
 	server := NewServer(Config{}, journal, &fakeProvider{})
-	server.workspaceStatusRetryInterval = 10 * time.Millisecond
-	server.workspaceStatusPublishInterval = time.Hour
+	refreshed := make(chan struct{})
+	server.refreshWorkspaceStatus = func(context.Context) error {
+		close(refreshed)
+		return nil
+	}
+	server.publishSessionStatus = func(context.Context, bool) error { return nil }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go server.runWorkspaceStatusRefreshes(ctx)
+
+	server.requestSessionStatusPublish()
+	select {
+	case <-server.sessionStatusPublishWakeups:
+	case <-time.After(time.Second):
+		t.Fatal("initial Session status publication was not requested")
+	}
+	server.requestWorkspaceStatusRefresh()
+	select {
+	case <-refreshed:
+	case <-time.After(time.Second):
+		t.Fatal("workspace status was not refreshed")
+	}
+	select {
+	case <-server.sessionStatusPublishWakeups:
+	case <-time.After(time.Second):
+		t.Fatal("Session status publication was not requested after workspace refresh")
+	}
+	server.sessionStatusMu.Lock()
+	defer server.sessionStatusMu.Unlock()
+	want := []sessionStatusPublishRequest{{active: false}, {active: false}}
+	if !reflect.DeepEqual(server.sessionStatusPublishQueue, want) {
+		t.Fatalf("pending Session status = %v, want two idle publications", server.sessionStatusPublishQueue)
+	}
+}
+
+func TestPublishObservedSessionStatusPublishesActivityWhenWorkspaceReadFails(t *testing.T) {
+	readErr := errors.New("workspace unavailable")
+	var got ObservedSessionStatus
+	err := publishObservedSessionStatus(
+		context.Background(),
+		func(_ context.Context, status ObservedSessionStatus) error {
+			got = status
+			return nil
+		},
+		true,
+		func(context.Context) (WorkspaceStatus, error) {
+			return WorkspaceStatus{}, readErr
+		},
+	)
+	if !errors.Is(err, readErr) {
+		t.Fatalf("publishObservedSessionStatus() error = %v, want %v", err, readErr)
+	}
+	if !got.Active || got.WorkspaceStatus != nil {
+		t.Fatalf("published Session status = %#v, want active with unobserved workspace", got)
+	}
+}
+
+func TestServerRetriesSessionStatusPublicationInOrder(t *testing.T) {
+	journal := NewJournal()
+	defer journal.Close()
+	server := NewServer(Config{}, journal, &fakeProvider{})
+	server.sessionStatusRetryInterval = 10 * time.Millisecond
+	server.sessionStatusPublishInterval = time.Hour
 	attempts := 0
-	published := make(chan struct{}, 1)
-	server.publishWorkspaceStatus = func(context.Context) error {
+	activity := make(chan bool, 3)
+	server.publishSessionStatus = func(_ context.Context, active bool) error {
 		attempts++
+		activity <- active
 		if attempts == 1 {
 			return errors.New("not ready")
-		}
-		select {
-		case published <- struct{}{}:
-		default:
 		}
 		return nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go server.runWorkspaceStatusPublishes(ctx)
-	select {
-	case <-published:
-	case <-time.After(time.Second):
-		t.Fatal("workspace status publication was not retried")
-	}
+	server.runTurn(ctx, turnRequest{id: "turn-1", text: "work"})
+	go server.runSessionStatusPublishes(ctx)
+
+	assertActivity(t, activity, true)
+	assertActivity(t, activity, true)
+	assertActivity(t, activity, false)
 }
 
 func TestServerRefreshesWorkspaceStatusAfterPeriodicPublication(t *testing.T) {
 	journal := NewJournal()
 	defer journal.Close()
 	server := NewServer(Config{}, journal, &fakeProvider{})
-	server.workspaceStatusRetryInterval = 10 * time.Millisecond
-	server.workspaceStatusPublishInterval = time.Hour
-	server.publishWorkspaceStatus = func(context.Context) error { return nil }
+	server.sessionStatusRetryInterval = time.Hour
+	server.sessionStatusPublishInterval = 10 * time.Millisecond
+	server.publishSessionStatus = func(context.Context, bool) error { return nil }
 	server.refreshWorkspaceStatus = func(context.Context) error { return nil }
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go server.runWorkspaceStatusPublishes(ctx)
+	go server.runSessionStatusPublishes(ctx)
 
 	select {
 	case <-server.workspaceStatusRefreshes:
 	case <-time.After(time.Second):
 		t.Fatal("periodic workspace status publication did not request a refresh")
+	}
+}
+
+func TestRunTurnPublishesActivityTransitions(t *testing.T) {
+	journal := NewJournal()
+	defer journal.Close()
+	provider := &fakeProvider{resume: make(chan struct{})}
+	server := NewServer(Config{}, journal, provider)
+	server.sessionStatusPublishInterval = time.Hour
+	activity := make(chan bool, 2)
+	server.publishSessionStatus = func(_ context.Context, active bool) error {
+		activity <- active
+		return nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go server.runSessionStatusPublishes(ctx)
+
+	turnDone := make(chan struct{})
+	go func() {
+		server.runTurn(ctx, turnRequest{id: "turn-1", text: "work"})
+		close(turnDone)
+	}()
+	assertActivity(t, activity, true)
+	close(provider.resume)
+	select {
+	case <-turnDone:
+	case <-time.After(time.Second):
+		t.Fatal("runTurn() did not finish")
+	}
+	assertActivity(t, activity, false)
+}
+
+func TestRunTurnPreservesShortActivityTransitions(t *testing.T) {
+	journal := NewJournal()
+	defer journal.Close()
+	server := NewServer(Config{}, journal, &fakeProvider{})
+	server.sessionStatusPublishInterval = time.Hour
+	activity := make(chan bool, 2)
+	server.publishSessionStatus = func(_ context.Context, active bool) error {
+		activity <- active
+		return nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	server.runTurn(ctx, turnRequest{id: "turn-1", text: "work"})
+	go server.runSessionStatusPublishes(ctx)
+
+	assertActivity(t, activity, true)
+	assertActivity(t, activity, false)
+}
+
+func assertActivity(t *testing.T, activity <-chan bool, want bool) {
+	t.Helper()
+	select {
+	case got := <-activity:
+		if got != want {
+			t.Fatalf("published activity = %t, want %t", got, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("activity %t was not published", want)
 	}
 }
 

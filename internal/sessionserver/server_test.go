@@ -614,13 +614,18 @@ func TestSessionAPIHappyPath(t *testing.T) {
 	}
 }
 
-func TestSummarizeIncludesWorkspaceStatus(t *testing.T) {
+func TestSummarizeIncludesRuntimeStatus(t *testing.T) {
 	session := &kelos.Session{
 		ObjectMeta: metav1.ObjectMeta{Name: "chat", Namespace: "default"},
 		Spec:       kelos.SessionSpec{Worker: kelos.WorkerSpec{Type: "codex"}},
 		Status: kelos.SessionStatus{
 			Phase:  kelos.SessionPhaseReady,
 			Branch: "feature/session-status",
+			Conditions: []metav1.Condition{{
+				Type:   kelos.SessionConditionActive,
+				Status: metav1.ConditionTrue,
+				Reason: "TurnActive",
+			}},
 			PullRequest: &kelos.SessionPullRequest{
 				URL:   "https://github.com/kelos-dev/kelos/pull/42",
 				State: kelos.SessionPullRequestStateOpen,
@@ -629,17 +634,83 @@ func TestSummarizeIncludesWorkspaceStatus(t *testing.T) {
 	}
 
 	summary := summarize(session)
-	if summary.Branch != session.Status.Branch || summary.PullRequest == nil || *summary.PullRequest != *session.Status.PullRequest {
+	if summary.Active == nil || !*summary.Active || summary.Branch != session.Status.Branch || summary.PullRequest == nil || *summary.PullRequest != *session.Status.PullRequest {
 		t.Fatalf("summarize() = %#v", summary)
 	}
 }
 
-func TestSessionViewsIncludeWorkspaceStatus(t *testing.T) {
+func TestListSessionsOrdersByRecentActivity(t *testing.T) {
+	server := testServer(t)
+	now := time.Now()
+	for _, session := range []*kelos.Session{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "newly-created", Namespace: "default", CreationTimestamp: metav1.NewTime(now)},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "recently-idle", Namespace: "default", CreationTimestamp: metav1.NewTime(now.Add(-3 * time.Hour))},
+			Status: kelos.SessionStatus{Conditions: []metav1.Condition{{
+				Type:               kelos.SessionConditionActive,
+				Status:             metav1.ConditionFalse,
+				Reason:             "Idle",
+				LastTransitionTime: metav1.NewTime(now.Add(-30 * time.Minute)),
+			}}},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "active", Namespace: "default", CreationTimestamp: metav1.NewTime(now.Add(-4 * time.Hour))},
+			Status: kelos.SessionStatus{Conditions: []metav1.Condition{{
+				Type:               kelos.SessionConditionActive,
+				Status:             metav1.ConditionTrue,
+				Reason:             "TurnActive",
+				LastTransitionTime: metav1.NewTime(now.Add(-time.Hour)),
+			}}},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "unknown", Namespace: "default", CreationTimestamp: metav1.NewTime(now.Add(-2 * time.Hour))},
+			Status: kelos.SessionStatus{Conditions: []metav1.Condition{{
+				Type:               kelos.SessionConditionActive,
+				Status:             metav1.ConditionUnknown,
+				Reason:             "Unavailable",
+				LastTransitionTime: metav1.NewTime(now.Add(time.Hour)),
+			}}},
+		},
+	} {
+		if err := server.client.Create(context.Background(), session); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	request.Header.Set("Authorization", "Bearer secret-token")
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("list status = %d body = %s", response.Code, response.Body.String())
+	}
+	var sessions []sessionSummary
+	if err := json.Unmarshal(response.Body.Bytes(), &sessions); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"newly-created", "recently-idle", "active", "unknown"}
+	if len(sessions) != len(want) {
+		t.Fatalf("listed Sessions = %d, want %d", len(sessions), len(want))
+	}
+	for i := range want {
+		if sessions[i].Name != want[i] {
+			t.Fatalf("Session order = %#v, want %v", sessions, want)
+		}
+	}
+}
+
+func TestSessionViewsIncludeRuntimeStatus(t *testing.T) {
 	javascript, err := webFiles.ReadFile("web/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for description, expected := range map[string]string{
+		"active display status":      `if (session.active === true) return 'Active';`,
+		"idle display status":        `if (session.active === false) return 'Idle';`,
+		"activity status in sidebar": "activity.textContent = `· ${displayStatus}`;",
+		"activity status in header":  `sessionDisplayStatus(session)`,
 		"branch text":                `branch.textContent = session.branch;`,
 		"validated pull request URL": `const url = safeHTTPURL(pullRequest?.url);`,
 		"pull request state label":   "link.textContent = state ? `${pullRequestLabel(url)} · ${state}` : pullRequestLabel(url);",
@@ -659,6 +730,14 @@ func TestSessionViewsIncludeWorkspaceStatus(t *testing.T) {
 	}
 	if !strings.Contains(string(styles), `.session-item-branch { margin-top: 5px;`) {
 		t.Error("Session sidebar does not style branch information")
+	}
+	for state, expected := range map[string]string{
+		"idle":   `.phase-dot.ready, .phase-dot.idle {`,
+		"active": `.phase-dot.active {`,
+	} {
+		if !strings.Contains(string(styles), expected) {
+			t.Errorf("Session views do not style %s activity", state)
+		}
 	}
 	for state, expected := range map[string]string{
 		"draft":  `.pull-request-link[data-state="draft"] { color: var(--faint); }`,

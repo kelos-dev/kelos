@@ -82,24 +82,24 @@ func runServe() {
 		fmt.Fprintf(os.Stderr, "Invalid configuration: %v\n", err)
 		os.Exit(1)
 	}
-	publisher, err := sessionruntime.NewWorkspaceStatusPublisher(sessionClient, sessionName, podUID)
+	publisher, err := sessionruntime.NewSessionStatusPublisher(sessionClient, sessionName, podUID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Invalid configuration: %v\n", err)
 		os.Exit(1)
 	}
 	config := sessionruntime.Config{
-		SocketPath:             envOrDefault("KELOS_SESSION_SOCKET", sessionruntime.DefaultSocketPath),
-		StateDir:               envOrDefault("KELOS_SESSION_STATE_DIR", sessionruntime.DefaultStateDir),
-		WorkingDir:             envOrDefault("KELOS_SESSION_WORKING_DIR", sessionruntime.DefaultWorkingDir),
-		AgentType:              agentType,
-		Model:                  os.Getenv("KELOS_MODEL"),
-		Effort:                 os.Getenv("KELOS_EFFORT"),
-		PluginDir:              os.Getenv("KELOS_PLUGIN_DIR"),
-		Environment:            os.Environ(),
-		PublishWorkspaceStatus: publisher,
-		SessionName:            sessionName,
-		PodUID:                 podUID,
-		SessionClient:          sessionClient,
+		SocketPath:           envOrDefault("KELOS_SESSION_SOCKET", sessionruntime.DefaultSocketPath),
+		StateDir:             envOrDefault("KELOS_SESSION_STATE_DIR", sessionruntime.DefaultStateDir),
+		WorkingDir:           envOrDefault("KELOS_SESSION_WORKING_DIR", sessionruntime.DefaultWorkingDir),
+		AgentType:            agentType,
+		Model:                os.Getenv("KELOS_MODEL"),
+		Effort:               os.Getenv("KELOS_EFFORT"),
+		PluginDir:            os.Getenv("KELOS_PLUGIN_DIR"),
+		Environment:          os.Environ(),
+		PublishSessionStatus: publisher,
+		SessionName:          sessionName,
+		PodUID:               podUID,
+		SessionClient:        sessionClient,
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()

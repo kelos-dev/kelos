@@ -18,10 +18,12 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apiMeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -93,6 +95,7 @@ type sessionSummary struct {
 	UID         string                    `json:"uid,omitempty"`
 	Provider    string                    `json:"provider"`
 	Phase       kelos.SessionPhase        `json:"phase,omitempty"`
+	Active      *bool                     `json:"active,omitempty"`
 	Message     string                    `json:"message,omitempty"`
 	Branch      string                    `json:"branch,omitempty"`
 	PullRequest *kelos.SessionPullRequest `json:"pullRequest,omitempty"`
@@ -321,6 +324,11 @@ func (s *Server) listSessions(writer http.ResponseWriter, request *http.Request)
 		return
 	}
 	sort.Slice(list.Items, func(i, j int) bool {
+		activityI := sessionActivityTime(&list.Items[i])
+		activityJ := sessionActivityTime(&list.Items[j])
+		if !activityI.Equal(activityJ) {
+			return activityI.After(activityJ)
+		}
 		return list.Items[i].CreationTimestamp.After(list.Items[j].CreationTimestamp.Time)
 	})
 	items := make([]sessionSummary, 0, len(list.Items))
@@ -540,7 +548,7 @@ func (s *Server) deleteSession(writer http.ResponseWriter, request *http.Request
 }
 
 func summarize(session *kelos.Session) sessionSummary {
-	return sessionSummary{
+	summary := sessionSummary{
 		Name:        session.Name,
 		Namespace:   session.Namespace,
 		UID:         string(session.UID),
@@ -550,6 +558,24 @@ func summarize(session *kelos.Session) sessionSummary {
 		Branch:      session.Status.Branch,
 		PullRequest: session.Status.PullRequest,
 	}
+	if condition := sessionActiveCondition(session); condition != nil && condition.Status != metav1.ConditionUnknown {
+		active := condition.Status == metav1.ConditionTrue
+		summary.Active = &active
+	}
+	return summary
+}
+
+func sessionActiveCondition(session *kelos.Session) *metav1.Condition {
+	return apiMeta.FindStatusCondition(session.Status.Conditions, kelos.SessionConditionActive)
+}
+
+func sessionActivityTime(session *kelos.Session) time.Time {
+	activity := session.CreationTimestamp.Time
+	condition := sessionActiveCondition(session)
+	if condition != nil && condition.Status != metav1.ConditionUnknown && condition.LastTransitionTime.After(activity) {
+		activity = condition.LastTransitionTime.Time
+	}
+	return activity
 }
 
 func (s *Server) connectSession(writer http.ResponseWriter, request *http.Request, namespace, name string) {

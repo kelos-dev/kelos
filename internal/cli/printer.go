@@ -10,6 +10,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apiMeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/util/duration"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/yaml"
@@ -415,6 +416,9 @@ func printSessionDetail(w io.Writer, session *kelos.Session) {
 	printField(w, "Namespace", session.Namespace)
 	printField(w, "Type", session.Spec.Worker.Type)
 	printField(w, "Phase", string(session.Status.Phase))
+	if condition := apiMeta.FindStatusCondition(session.Status.Conditions, kelos.SessionConditionActive); condition != nil {
+		printField(w, "Active", string(condition.Status))
+	}
 	if credentials := session.Spec.Worker.Credentials; credentials != nil {
 		printField(w, "Credential Type", string(credentials.Type))
 		if credentials.SecretRef != nil {

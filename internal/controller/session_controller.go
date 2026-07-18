@@ -44,7 +44,6 @@ const (
 	sessionOpenCodeDataDir      = "/workspace/.kelos/session/opencode-data"
 	sessionInitializedPath      = "/workspace/.kelos/session/initialized"
 	sessionNameAnnotation       = "kelos.dev/session-name"
-	sessionReadyCondition       = "Ready"
 )
 
 // SessionReconciler reconciles a Session object.
@@ -1028,6 +1027,13 @@ func (r *SessionReconciler) updateSessionStatus(ctx context.Context, session *ke
 	if pod == nil || phase != kelos.SessionPhaseReady || session.Status.PodUID != pod.UID {
 		session.Status.Branch = ""
 		session.Status.PullRequest = nil
+		apiMeta.SetStatusCondition(&session.Status.Conditions, metav1.Condition{
+			Type:               kelos.SessionConditionActive,
+			Status:             metav1.ConditionUnknown,
+			ObservedGeneration: session.Generation,
+			Reason:             "RuntimeStatusUnknown",
+			Message:            "Session runtime activity has not been reported",
+		})
 	}
 	if pod != nil {
 		session.Status.PodName = pod.Name
@@ -1038,7 +1044,7 @@ func (r *SessionReconciler) updateSessionStatus(ctx context.Context, session *ke
 		conditionStatus = metav1.ConditionTrue
 	}
 	apiMeta.SetStatusCondition(&session.Status.Conditions, metav1.Condition{
-		Type:               sessionReadyCondition,
+		Type:               kelos.SessionConditionReady,
 		Status:             conditionStatus,
 		ObservedGeneration: session.Generation,
 		Reason:             reason,

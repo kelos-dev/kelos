@@ -18,6 +18,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apiMeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -725,12 +726,14 @@ func TestSessionReconcilerCreatesStatefulSetAndObservesPod(t *testing.T) {
 	if updated.Status.PodName != pod.Name {
 		t.Fatalf("Session podName = %q, want %q", updated.Status.PodName, pod.Name)
 	}
-	if len(updated.Status.Conditions) != 1 || updated.Status.Conditions[0].Type != sessionReadyCondition || updated.Status.Conditions[0].Status != metav1.ConditionTrue {
+	ready := apiMeta.FindStatusCondition(updated.Status.Conditions, kelos.SessionConditionReady)
+	active := apiMeta.FindStatusCondition(updated.Status.Conditions, kelos.SessionConditionActive)
+	if ready == nil || ready.Status != metav1.ConditionTrue || active == nil || active.Status != metav1.ConditionUnknown {
 		t.Fatalf("Session conditions = %#v", updated.Status.Conditions)
 	}
 }
 
-func TestUpdateSessionStatusClearsStaleWorkspaceStatus(t *testing.T) {
+func TestUpdateSessionStatusInvalidatesStaleRuntimeStatus(t *testing.T) {
 	tests := []struct {
 		name      string
 		phase     kelos.SessionPhase
@@ -754,6 +757,11 @@ func TestUpdateSessionStatusClearsStaleWorkspaceStatus(t *testing.T) {
 				URL:   "https://github.com/kelos-dev/kelos/pull/42",
 				State: kelos.SessionPullRequestStateOpen,
 			}
+			session.Status.Conditions = []metav1.Condition{{
+				Type:   kelos.SessionConditionActive,
+				Status: metav1.ConditionTrue,
+				Reason: "TurnActive",
+			}}
 			cl := fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithStatusSubresource(&kelos.Session{}).
@@ -773,9 +781,13 @@ func TestUpdateSessionStatusClearsStaleWorkspaceStatus(t *testing.T) {
 			if err := cl.Get(context.Background(), client.ObjectKeyFromObject(session), &updated); err != nil {
 				t.Fatal(err)
 			}
-			cleared := updated.Status.Branch == "" && updated.Status.PullRequest == nil
+			activity := apiMeta.FindStatusCondition(updated.Status.Conditions, kelos.SessionConditionActive)
+			cleared := activity != nil && activity.Status == metav1.ConditionUnknown && updated.Status.Branch == "" && updated.Status.PullRequest == nil
 			if cleared != tt.wantClear {
-				t.Fatalf("workspace status cleared = %t, want %t: %#v", cleared, tt.wantClear, updated.Status)
+				t.Fatalf("runtime-owned status invalidated = %t, want %t: %#v", cleared, tt.wantClear, updated.Status)
+			}
+			if !tt.wantClear && (activity == nil || activity.Status != metav1.ConditionTrue) {
+				t.Fatalf("Active condition = %#v, want True", activity)
 			}
 		})
 	}

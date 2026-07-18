@@ -213,6 +213,8 @@ Kubernetes API.
 | `status.phase` | Infrastructure phase: `Pending`, `Ready`, or `Failed` | Output |
 | `status.podName` | Session Pod name | Output |
 | `status.podUID` | Identity of the Pod running the live conversation | Output |
+| `status.conditions[type=Ready]` | Whether the Session infrastructure is ready for clients | Output |
+| `status.conditions[type=Active]` | Whether the runtime has an unfinished turn; `Unknown` means activity has not been reported | Output |
 | `status.branch` | Currently checked-out git branch in the Session workspace | Output |
 | `status.pullRequest.url` | Web URL of the pull request associated with the current branch | Output |
 | `status.pullRequest.state` | Pull request lifecycle state: `Draft`, `Open`, `Merged`, or `Closed` | Output |
@@ -253,9 +255,14 @@ until it is answered or interrupted. Rejected turns are not retried
 automatically; submit them again after the Session reconnects. An explicitly
 tagged or digested runtime image remains pinned.
 
-`status.branch` and `status.pullRequest` reflect the Session workspace while it
-is ready. The web client shows both values in the Session sidebar and
-conversation header.
+`Active=True` means the runtime has an unfinished turn, including a turn waiting
+for user input; `Active=False` means it is idle. Activity becomes `Unknown` when
+it cannot be reported, such as while the Session Pod is being replaced. Clients
+should use condition type and status as the contract; condition reasons and
+messages are informational. The shared web client orders Sessions by recent
+activity, newest first. Creation counts as the initial activity. It shows
+activity, `status.branch`, and the pull request with a colored, text-labeled state
+in both the Session sidebar and conversation header.
 
 When `spec.volumeClaimTemplate` is set, conversation history and workspace
 changes survive Pod replacement. The claim remains until the Session is

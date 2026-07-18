@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,27 @@ import (
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 )
+
+func TestPrintSessionDetailIncludesActivity(t *testing.T) {
+	session := &kelos.Session{
+		ObjectMeta: metav1.ObjectMeta{Name: "chat", Namespace: "default"},
+		Spec:       kelos.SessionSpec{Worker: kelos.WorkerSpec{Type: "codex"}},
+		Status: kelos.SessionStatus{
+			Phase: kelos.SessionPhaseReady,
+			Conditions: []metav1.Condition{{
+				Type:   kelos.SessionConditionActive,
+				Status: metav1.ConditionTrue,
+				Reason: "TurnActive",
+			}},
+		},
+	}
+
+	var output bytes.Buffer
+	printSessionDetail(&output, session)
+	if !regexp.MustCompile(`(?m)^Active:\s+True$`).MatchString(output.String()) {
+		t.Fatalf("Session detail is missing activity: \n%s", output.String())
+	}
+}
 
 func TestPrintWorkspaceTable(t *testing.T) {
 	workspaces := []kelos.Workspace{

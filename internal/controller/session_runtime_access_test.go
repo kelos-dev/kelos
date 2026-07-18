@@ -59,14 +59,22 @@ func TestEnsureSessionRuntimeAccess(t *testing.T) {
 			if err := cl.Get(context.Background(), key, &role); err != nil {
 				t.Fatal(err)
 			}
-			wantRule := rbacv1.PolicyRule{
-				APIGroups:     []string{kelos.GroupVersion.Group},
-				Resources:     []string{"sessions/status"},
-				ResourceNames: []string{session.Name},
-				Verbs:         []string{"patch"},
+			wantRules := []rbacv1.PolicyRule{
+				{
+					APIGroups:     []string{kelos.GroupVersion.Group},
+					Resources:     []string{"sessions"},
+					ResourceNames: []string{session.Name},
+					Verbs:         []string{"get", "watch", "patch"},
+				},
+				{
+					APIGroups:     []string{kelos.GroupVersion.Group},
+					Resources:     []string{"sessions/status"},
+					ResourceNames: []string{session.Name},
+					Verbs:         []string{"patch"},
+				},
 			}
-			if len(role.Rules) != 1 || !reflect.DeepEqual(role.Rules[0], wantRule) {
-				t.Fatalf("Session runtime Role rules = %#v, want %#v", role.Rules, wantRule)
+			if !reflect.DeepEqual(role.Rules, wantRules) {
+				t.Fatalf("Session runtime Role rules = %#v, want %#v", role.Rules, wantRules)
 			}
 
 			var roleBinding rbacv1.RoleBinding

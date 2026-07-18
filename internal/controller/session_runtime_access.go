@@ -87,12 +87,20 @@ func sessionRuntimeServiceAccount(session *kelos.Session) *corev1.ServiceAccount
 func sessionRuntimeRole(session *kelos.Session) *rbacv1.Role {
 	return &rbacv1.Role{
 		ObjectMeta: sessionRuntimeAccessObjectMeta(session),
-		Rules: []rbacv1.PolicyRule{{
-			APIGroups:     []string{kelos.GroupVersion.Group},
-			Resources:     []string{"sessions/status"},
-			ResourceNames: []string{session.Name},
-			Verbs:         []string{"patch"},
-		}},
+		Rules: []rbacv1.PolicyRule{
+			{
+				APIGroups:     []string{kelos.GroupVersion.Group},
+				Resources:     []string{"sessions"},
+				ResourceNames: []string{session.Name},
+				Verbs:         []string{"get", "watch", "patch"},
+			},
+			{
+				APIGroups:     []string{kelos.GroupVersion.Group},
+				Resources:     []string{"sessions/status"},
+				ResourceNames: []string{session.Name},
+				Verbs:         []string{"patch"},
+			},
+		},
 	}
 }
 

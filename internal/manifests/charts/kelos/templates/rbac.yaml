@@ -37,6 +37,7 @@ rules:
   resources:
   - pods
   verbs:
+  - delete
   - get
   - list
   - patch
@@ -101,12 +102,20 @@ rules:
   - kelos.dev
   resources:
   - agentconfigs
-  - sessions
   - taskbudgets
   - workspaces
   verbs:
   - get
   - list
+  - watch
+- apiGroups:
+  - kelos.dev
+  resources:
+  - sessions
+  verbs:
+  - get
+  - list
+  - patch
   - watch
 - apiGroups:
   - kelos.dev

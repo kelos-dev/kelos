@@ -17,6 +17,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"k8s.io/apimachinery/pkg/types"
+
+	"github.com/kelos-dev/kelos/internal/sessionupdate"
+	clientv1alpha2 "github.com/kelos-dev/kelos/pkg/generated/clientset/versioned/typed/api/v1alpha2"
 )
 
 const (
@@ -40,6 +45,9 @@ type Config struct {
 	PluginDir              string
 	Environment            []string
 	PublishWorkspaceStatus WorkspaceStatusPublisher
+	SessionName            string
+	PodUID                 types.UID
+	SessionClient          clientv1alpha2.SessionInterface
 }
 
 type turnRequest struct {
@@ -70,6 +78,9 @@ type Server struct {
 	appendMessage func(Event) error
 	turns         chan turnRequest
 	nextTurnID    atomic.Int64
+	outstanding   int
+	updateRequest *sessionupdate.Request
+	updateReport  chan struct{}
 	activeMu      sync.Mutex
 	activeTurn    string
 
@@ -91,6 +102,7 @@ func NewServer(config Config, journal *Journal, provider Provider) *Server {
 		provider:                       provider,
 		appendMessage:                  journal.Append,
 		turns:                          make(chan turnRequest, 32),
+		updateReport:                   make(chan struct{}, 1),
 		pendingInputs:                  map[string]*pendingInput{},
 		workspaceStatusRefreshes:       make(chan struct{}, 1),
 		workspaceStatusPublishInterval: defaultWorkspaceStatusPublishInterval,
@@ -208,6 +220,18 @@ func replaceProcessEnv(current []string, name, value string) []string {
 func (s *Server) Serve(ctx context.Context) error {
 	serveCtx, cancelServe := context.WithCancel(ctx)
 	defer cancelServe()
+	defer func() {
+		_ = s.provider.Close()
+		s.journal.Close()
+		_ = os.Remove(s.config.SocketPath)
+	}()
+	if err := s.initializeSessionUpdate(serveCtx); err != nil {
+		return err
+	}
+	if s.config.SessionClient != nil {
+		go s.runSessionUpdateWatch(serveCtx)
+		go s.runSessionUpdateReporter(serveCtx)
+	}
 	if err := os.MkdirAll(filepath.Dir(s.config.SocketPath), 0700); err != nil {
 		return fmt.Errorf("creating Session socket directory: %w", err)
 	}
@@ -240,11 +264,6 @@ func (s *Server) Serve(ctx context.Context) error {
 	}()
 
 	log.Printf("Session runtime ready socket=%s provider=%s", s.config.SocketPath, s.config.AgentType)
-	defer func() {
-		_ = s.provider.Close()
-		s.journal.Close()
-		_ = os.Remove(s.config.SocketPath)
-	}()
 	for {
 		connection, err := listener.Accept()
 		if err != nil {
@@ -326,6 +345,7 @@ func (s *Server) runWorkspaceStatusPublishes(ctx context.Context) {
 
 func (s *Server) runTurn(ctx context.Context, turn turnRequest) {
 	defer s.requestWorkspaceStatusRefresh()
+	defer s.finishTurn()
 	s.activeMu.Lock()
 	s.activeTurn = turn.id
 	s.activeMu.Unlock()
@@ -382,6 +402,9 @@ func (s *Server) submitMessage(text, requestID string) error {
 	}
 	s.submitMu.Lock()
 	defer s.submitMu.Unlock()
+	if s.updateRequest != nil {
+		return errors.New("Session runtime is draining for an update; retry after it reconnects")
+	}
 	if err := s.journal.Err(); err != nil {
 		return fmt.Errorf("recording Session message: %w", err)
 	}
@@ -392,7 +415,9 @@ func (s *Server) submitMessage(text, requestID string) error {
 	}
 	select {
 	case s.turns <- turn:
+		s.outstanding++
 		if err := s.appendMessage(Event{Type: EventUserMessage, RequestID: requestID, TurnID: turn.id, Text: turn.text}); err != nil {
+			s.outstanding--
 			return fmt.Errorf("recording Session message: %w", err)
 		}
 		close(turn.accepted)

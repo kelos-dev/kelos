@@ -17,6 +17,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -28,6 +29,7 @@ import (
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/githubapp"
+	"github.com/kelos-dev/kelos/internal/sessionupdate"
 )
 
 func TestSessionReconcilerUpdatesStatefulSetRuntime(t *testing.T) {
@@ -60,6 +62,10 @@ func TestSessionReconcilerUpdatesStatefulSetRuntime(t *testing.T) {
 			statefulSet := testSessionStatefulSet(session)
 			statefulSet.Spec.Template.Spec.InitContainers[0].Image = "runtime:old"
 			statefulSet.Spec.Template.Spec.InitContainers[0].ImagePullPolicy = corev1.PullAlways
+			statefulSet.Spec.UpdateStrategy = appsv1.StatefulSetUpdateStrategy{
+				Type:          appsv1.RollingUpdateStatefulSetStrategyType,
+				RollingUpdate: &appsv1.RollingUpdateStatefulSetStrategy{},
+			}
 			cl := fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithStatusSubresource(&kelos.Session{}, &corev1.Pod{}, &appsv1.StatefulSet{}).
@@ -82,6 +88,9 @@ func TestSessionReconcilerUpdatesStatefulSetRuntime(t *testing.T) {
 			}
 			if runtimeContainer.ImagePullPolicy != tt.wantPull {
 				t.Fatalf("runtime init container imagePullPolicy = %q, want %q", runtimeContainer.ImagePullPolicy, tt.wantPull)
+			}
+			if updated.Spec.UpdateStrategy.Type != appsv1.OnDeleteStatefulSetStrategyType || updated.Spec.UpdateStrategy.RollingUpdate != nil {
+				t.Fatalf("StatefulSet updateStrategy = %#v, want OnDelete", updated.Spec.UpdateStrategy)
 			}
 			podSpec := updated.Spec.Template.Spec
 			if podSpec.ServiceAccountName != sessionRuntimeAccessName(session) {
@@ -210,6 +219,323 @@ func TestSessionReconcilerDoesNotStealWorkspaceClaim(t *testing.T) {
 	}
 }
 
+func TestSessionReconcilerTreatsAdmissionRewrittenRuntimeImageAsCurrent(t *testing.T) {
+	scheme := runtime.NewScheme()
+	for _, add := range []func(*runtime.Scheme) error{appsv1.AddToScheme, corev1.AddToScheme, rbacv1.AddToScheme, kelos.AddToScheme} {
+		if err := add(scheme); err != nil {
+			t.Fatal(err)
+		}
+	}
+	session := testSession("chat", "claude-code")
+	reconciler := testSessionReconciler(nil, nil)
+	statefulSet, _, err := reconciler.buildSessionStatefulSet(session, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statefulSet.UID = types.UID(statefulSet.Name + "-uid")
+	statefulSet.OwnerReferences = []metav1.OwnerReference{*metav1.NewControllerRef(session, kelos.GroupVersion.WithKind("Session"))}
+	statefulSet.Status.UpdateRevision = "desired-revision"
+	statefulSet.Status.ObservedGeneration = statefulSet.Generation
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      statefulSet.Name + "-0",
+			Namespace: session.Namespace,
+			UID:       types.UID("pod-uid"),
+			Labels: map[string]string{
+				appsv1.StatefulSetRevisionLabel: statefulSet.Status.UpdateRevision,
+			},
+			OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(statefulSet, appsv1.SchemeGroupVersion.WithKind("StatefulSet"))},
+		},
+		Spec: *statefulSet.Spec.Template.Spec.DeepCopy(),
+		Status: corev1.PodStatus{
+			Phase:      corev1.PodRunning,
+			Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
+		},
+	}
+	pod.Spec.InitContainers[0].Image = "mirror.example/kelos-session-runtime@sha256:admitted"
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&kelos.Session{}, &corev1.Pod{}, &appsv1.StatefulSet{}).
+		WithObjects(session, statefulSet, pod).
+		Build()
+	reconciler = testSessionReconciler(cl, scheme)
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(session)}
+	result, err := reconciler.Reconcile(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if result.Requeue || result.RequeueAfter != 0 {
+		t.Fatalf("Reconcile() result = %#v, want no runtime update requeue", result)
+	}
+	var currentPod corev1.Pod
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(pod), &currentPod); err != nil {
+		t.Fatalf("admission-rewritten Session Pod was replaced: %v", err)
+	}
+	var updatedSession kelos.Session
+	if err := cl.Get(context.Background(), request.NamespacedName, &updatedSession); err != nil {
+		t.Fatal(err)
+	}
+	if hasSessionRuntimeUpdateAnnotations(&updatedSession) {
+		t.Fatalf("admission-rewritten Session Pod entered drain protocol: %#v", updatedSession.Annotations)
+	}
+}
+
+func TestSessionReconcilerWaitsForMatchingRuntimeDrain(t *testing.T) {
+	scheme := runtime.NewScheme()
+	for _, add := range []func(*runtime.Scheme) error{appsv1.AddToScheme, corev1.AddToScheme, rbacv1.AddToScheme, kelos.AddToScheme} {
+		if err := add(scheme); err != nil {
+			t.Fatal(err)
+		}
+	}
+	session := testSession("chat", "claude-code")
+	statefulSet := testSessionStatefulSet(session)
+	statefulSet.Status.UpdateRevision = "desired-revision"
+	statefulSet.Status.ObservedGeneration = statefulSet.Generation
+	statefulSet.Spec.Template.Spec.InitContainers[0].Image = "runtime:old"
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            statefulSet.Name + "-0",
+			Namespace:       session.Namespace,
+			UID:             types.UID("pod-uid"),
+			OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(statefulSet, appsv1.SchemeGroupVersion.WithKind("StatefulSet"))},
+			Annotations:     map[string]string{sessionNameAnnotation: session.Name},
+			Labels:          map[string]string{appsv1.StatefulSetRevisionLabel: "stale-revision"},
+		},
+		Spec: *statefulSet.Spec.Template.Spec.DeepCopy(),
+		Status: corev1.PodStatus{
+			Phase:      corev1.PodRunning,
+			Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
+		},
+	}
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&kelos.Session{}, &corev1.Pod{}, &appsv1.StatefulSet{}).
+		WithObjects(session, statefulSet, pod).
+		Build()
+	reconciler := testSessionReconciler(cl, scheme)
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(session)}
+	if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
+		t.Fatalf("Reconcile() requesting drain error = %v", err)
+	}
+
+	var updatedSession kelos.Session
+	if err := cl.Get(context.Background(), request.NamespacedName, &updatedSession); err != nil {
+		t.Fatal(err)
+	}
+	drainRequest, err := sessionupdate.Decode(updatedSession.Annotations[sessionupdate.RequestAnnotation])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := sessionupdate.NewRequest(pod.UID, statefulSet.Status.UpdateRevision); !reflect.DeepEqual(drainRequest, want) {
+		t.Fatalf("runtime update request = %#v, want %#v", drainRequest, want)
+	}
+	var updatedStatefulSet appsv1.StatefulSet
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(statefulSet), &updatedStatefulSet); err != nil {
+		t.Fatal(err)
+	}
+	if got := updatedStatefulSet.Spec.Template.Spec.InitContainers[0].Image; got != "runtime:test" {
+		t.Fatalf("desired runtime image while draining = %q, want runtime:test", got)
+	}
+	if updatedStatefulSet.Spec.UpdateStrategy.Type != appsv1.OnDeleteStatefulSetStrategyType || updatedStatefulSet.Spec.UpdateStrategy.RollingUpdate != nil {
+		t.Fatalf("StatefulSet updateStrategy = %#v, want OnDelete", updatedStatefulSet.Spec.UpdateStrategy)
+	}
+	var currentPod corev1.Pod
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(pod), &currentPod); err != nil {
+		t.Fatalf("Session Pod was replaced before it drained: %v", err)
+	}
+
+	staleReport, err := sessionupdate.EncodeReport(sessionupdate.Report{
+		RequestID: drainRequest.ID,
+		PodUID:    types.UID("stale-pod"),
+		Phase:     sessionupdate.PhaseDrained,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updatedSession.Annotations[sessionupdate.ReportAnnotation] = staleReport
+	if err := cl.Update(context.Background(), &updatedSession); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
+		t.Fatalf("Reconcile() with stale drain acknowledgement error = %v", err)
+	}
+	if err := cl.Get(context.Background(), request.NamespacedName, &updatedSession); err != nil {
+		t.Fatal(err)
+	}
+	report, err := sessionupdate.DecodeReport(updatedSession.Annotations[sessionupdate.ReportAnnotation])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.PodUID != types.UID("stale-pod") {
+		t.Fatalf("runtime update report after controller reconcile = %#v", report)
+	}
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(pod), &currentPod); err != nil {
+		t.Fatalf("Session Pod was replaced after a stale drain acknowledgement: %v", err)
+	}
+
+	drainingReport, err := sessionupdate.EncodeReport(sessionupdate.Report{
+		RequestID: drainRequest.ID,
+		PodUID:    pod.UID,
+		Phase:     sessionupdate.PhaseDraining,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updatedSession.Annotations[sessionupdate.ReportAnnotation] = drainingReport
+	if err := cl.Update(context.Background(), &updatedSession); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
+		t.Fatalf("Reconcile() while draining error = %v", err)
+	}
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(pod), &currentPod); err != nil {
+		t.Fatalf("Session Pod was replaced while still draining: %v", err)
+	}
+	if err := cl.Get(context.Background(), request.NamespacedName, &updatedSession); err != nil {
+		t.Fatal(err)
+	}
+	drainedReport, err := sessionupdate.EncodeReport(sessionupdate.Report{
+		RequestID: drainRequest.ID,
+		PodUID:    pod.UID,
+		Phase:     sessionupdate.PhaseDrained,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updatedSession.Annotations[sessionupdate.ReportAnnotation] = drainedReport
+	if err := cl.Update(context.Background(), &updatedSession); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
+		t.Fatalf("Reconcile() after drain error = %v", err)
+	}
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(pod), &currentPod); !apierrors.IsNotFound(err) {
+		t.Fatalf("getting replaced Session Pod error = %v, want NotFound", err)
+	}
+	if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
+		t.Fatalf("Reconcile() after Pod replacement error = %v", err)
+	}
+	if err := cl.Get(context.Background(), request.NamespacedName, &updatedSession); err != nil {
+		t.Fatal(err)
+	}
+	if hasSessionRuntimeUpdateAnnotations(&updatedSession) {
+		t.Fatalf("runtime update annotations were not cleared: %#v", updatedSession.Annotations)
+	}
+}
+
+func TestSessionReconcilerReplacesFailedPodWithoutDrain(t *testing.T) {
+	t.Parallel()
+	scheme := runtime.NewScheme()
+	for _, add := range []func(*runtime.Scheme) error{appsv1.AddToScheme, corev1.AddToScheme, rbacv1.AddToScheme, kelos.AddToScheme} {
+		if err := add(scheme); err != nil {
+			t.Fatal(err)
+		}
+	}
+	session := testSession("failed-runtime", "claude-code")
+	statefulSet := testSessionStatefulSet(session)
+	statefulSet.Status.UpdateRevision = "desired-revision"
+	statefulSet.Status.ObservedGeneration = statefulSet.Generation
+	statefulSet.Spec.Template.Spec.InitContainers[0].Image = "runtime:old"
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            statefulSet.Name + "-0",
+			Namespace:       session.Namespace,
+			UID:             types.UID("failed-pod-uid"),
+			OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(statefulSet, appsv1.SchemeGroupVersion.WithKind("StatefulSet"))},
+			Labels:          map[string]string{appsv1.StatefulSetRevisionLabel: "stale-revision"},
+		},
+		Spec: *statefulSet.Spec.Template.Spec.DeepCopy(),
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			ContainerStatuses: []corev1.ContainerStatus{{
+				Name:  kelos.AgentContainerName,
+				State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "CrashLoopBackOff"}},
+			}},
+		},
+	}
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&kelos.Session{}, &corev1.Pod{}, &appsv1.StatefulSet{}).
+		WithObjects(session, statefulSet, pod).
+		Build()
+	reconciler := testSessionReconciler(cl, scheme)
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(session)}
+	if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+
+	var updatedStatefulSet appsv1.StatefulSet
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(statefulSet), &updatedStatefulSet); err != nil {
+		t.Fatal(err)
+	}
+	if got := updatedStatefulSet.Spec.Template.Spec.InitContainers[0].Image; got != "runtime:test" {
+		t.Fatalf("desired runtime image = %q, want runtime:test", got)
+	}
+	if updatedStatefulSet.Spec.UpdateStrategy.Type != appsv1.OnDeleteStatefulSetStrategyType || updatedStatefulSet.Spec.UpdateStrategy.RollingUpdate != nil {
+		t.Fatalf("StatefulSet updateStrategy = %#v, want OnDelete", updatedStatefulSet.Spec.UpdateStrategy)
+	}
+	var currentPod corev1.Pod
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(pod), &currentPod); !apierrors.IsNotFound(err) {
+		t.Fatalf("getting failed Session Pod error = %v, want NotFound", err)
+	}
+	var updatedSession kelos.Session
+	if err := cl.Get(context.Background(), request.NamespacedName, &updatedSession); err != nil {
+		t.Fatal(err)
+	}
+	if hasSessionRuntimeUpdateAnnotations(&updatedSession) {
+		t.Fatalf("failed Pod unexpectedly entered drain protocol: %#v", updatedSession.Annotations)
+	}
+}
+
+func TestSessionReconcilerKeepsDrainRequestWhilePodTerminates(t *testing.T) {
+	t.Parallel()
+	scheme := runtime.NewScheme()
+	for _, add := range []func(*runtime.Scheme) error{appsv1.AddToScheme, corev1.AddToScheme, rbacv1.AddToScheme, kelos.AddToScheme} {
+		if err := add(scheme); err != nil {
+			t.Fatal(err)
+		}
+	}
+	session := testSession("terminating-runtime", "claude-code")
+	session.Annotations = map[string]string{
+		sessionupdate.RequestAnnotation:     "request",
+		sessionupdate.ReportAnnotation:      "report",
+		sessionupdate.ForceUpdateAnnotation: "true",
+	}
+	statefulSet := testSessionStatefulSet(session)
+	now := metav1.Now()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              statefulSet.Name + "-0",
+			Namespace:         session.Namespace,
+			UID:               types.UID("terminating-pod-uid"),
+			DeletionTimestamp: &now,
+			Finalizers:        []string{"test.kelos.dev/terminating"},
+			OwnerReferences:   []metav1.OwnerReference{*metav1.NewControllerRef(statefulSet, appsv1.SchemeGroupVersion.WithKind("StatefulSet"))},
+		},
+		Spec: *statefulSet.Spec.Template.Spec.DeepCopy(),
+	}
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&kelos.Session{}, &corev1.Pod{}, &appsv1.StatefulSet{}).
+		WithObjects(session, statefulSet, pod).
+		Build()
+	reconciler := testSessionReconciler(cl, scheme)
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(session)}
+	if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+
+	var updatedSession kelos.Session
+	if err := cl.Get(context.Background(), request.NamespacedName, &updatedSession); err != nil {
+		t.Fatal(err)
+	}
+	for annotation, want := range session.Annotations {
+		if got := updatedSession.Annotations[annotation]; got != want {
+			t.Fatalf("Session annotation %q = %q, want %q", annotation, got, want)
+		}
+	}
+}
+
 func TestSessionReconcilerCreatesStatefulSetAndObservesPod(t *testing.T) {
 	t.Parallel()
 	scheme := runtime.NewScheme()
@@ -254,6 +580,9 @@ func TestSessionReconcilerCreatesStatefulSetAndObservesPod(t *testing.T) {
 	}
 	if statefulSet.Spec.ServiceName != workloadKey.Name {
 		t.Fatalf("StatefulSet serviceName = %q, want %q", statefulSet.Spec.ServiceName, workloadKey.Name)
+	}
+	if statefulSet.Spec.UpdateStrategy.Type != appsv1.OnDeleteStatefulSetStrategyType || statefulSet.Spec.UpdateStrategy.RollingUpdate != nil {
+		t.Fatalf("StatefulSet updateStrategy = %#v, want OnDelete", statefulSet.Spec.UpdateStrategy)
 	}
 	accessName := sessionRuntimeAccessName(session)
 	if statefulSet.Spec.Template.Spec.ServiceAccountName != accessName {
@@ -334,7 +663,7 @@ func TestSessionReconcilerCreatesStatefulSetAndObservesPod(t *testing.T) {
 			delete(wantRuntimeEnv, env.Name)
 		}
 		if env.Name == "KELOS_SESSION_POD_UID" {
-			if env.ValueFrom == nil || env.ValueFrom.FieldRef == nil || env.ValueFrom.FieldRef.FieldPath != "metadata.uid" {
+			if env.ValueFrom == nil || env.ValueFrom.FieldRef == nil || env.ValueFrom.FieldRef.APIVersion != "v1" || env.ValueFrom.FieldRef.FieldPath != "metadata.uid" {
 				t.Fatalf("KELOS_SESSION_POD_UID = %#v", env)
 			}
 			sawPodUID = true
@@ -343,12 +672,22 @@ func TestSessionReconcilerCreatesStatefulSetAndObservesPod(t *testing.T) {
 	if len(wantRuntimeEnv) != 0 || !sawPodUID {
 		t.Fatalf("Session runtime environment is missing %v", wantRuntimeEnv)
 	}
+	statefulSet.Status.UpdateRevision = "desired-revision"
+	statefulSet.Status.ObservedGeneration = statefulSet.Generation
+	if err := cl.Status().Update(context.Background(), &statefulSet); err != nil {
+		t.Fatalf("updating StatefulSet status: %v", err)
+	}
+	podLabels := make(map[string]string, len(statefulSet.Spec.Template.Labels)+1)
+	for key, value := range statefulSet.Spec.Template.Labels {
+		podLabels[key] = value
+	}
+	podLabels[appsv1.StatefulSetRevisionLabel] = statefulSet.Status.UpdateRevision
 
 	pod := corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            statefulSet.Name + "-0",
 			Namespace:       session.Namespace,
-			Labels:          statefulSet.Spec.Template.Labels,
+			Labels:          podLabels,
 			Annotations:     statefulSet.Spec.Template.Annotations,
 			OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(&statefulSet, appsv1.SchemeGroupVersion.WithKind("StatefulSet"))},
 		},
@@ -697,6 +1036,8 @@ func TestSessionReconcilerRecreatesMissingGitHubTokenSecret(t *testing.T) {
 		},
 	}
 	statefulSet := testSessionStatefulSet(session)
+	statefulSet.Status.UpdateRevision = "desired-revision"
+	statefulSet.Status.ObservedGeneration = statefulSet.Generation
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      statefulSet.Name + "-0",
@@ -706,18 +1047,20 @@ func TestSessionReconcilerRecreatesMissingGitHubTokenSecret(t *testing.T) {
 				*metav1.NewControllerRef(statefulSet, appsv1.SchemeGroupVersion.WithKind("StatefulSet")),
 			},
 			Annotations: map[string]string{sessionNameAnnotation: session.Name},
+			Labels:      map[string]string{appsv1.StatefulSetRevisionLabel: statefulSet.Status.UpdateRevision},
 		},
-		Spec: corev1.PodSpec{Volumes: []corev1.Volume{{
-			Name: GitHubTokenVolumeName,
-			VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
-				SecretName: sessionGitHubTokenSecretName(session.Name),
-			}},
-		}}},
+		Spec: *statefulSet.Spec.Template.Spec.DeepCopy(),
 		Status: corev1.PodStatus{
 			Phase:      corev1.PodRunning,
 			Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
 		},
 	}
+	pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+		Name: GitHubTokenVolumeName,
+		VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
+			SecretName: sessionGitHubTokenSecretName(session.Name),
+		}},
+	})
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithStatusSubresource(&kelos.Session{}, &corev1.Pod{}, &appsv1.StatefulSet{}).

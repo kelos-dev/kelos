@@ -14,6 +14,7 @@ import (
 
 	"github.com/kelos-dev/kelos/internal/sessionruntime"
 	clientset "github.com/kelos-dev/kelos/pkg/generated/clientset/versioned"
+	clientv1alpha2 "github.com/kelos-dev/kelos/pkg/generated/clientset/versioned/typed/api/v1alpha2"
 )
 
 func selfCopy(destination string) error {
@@ -76,7 +77,12 @@ func runServe() {
 		fmt.Fprintln(os.Stderr, "Invalid configuration: KELOS_AGENT_TYPE must be set")
 		os.Exit(1)
 	}
-	publisher, err := workspaceStatusPublisherFromEnvironment()
+	sessionClient, sessionName, podUID, err := sessionClientFromEnvironment()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Invalid configuration: %v\n", err)
+		os.Exit(1)
+	}
+	publisher, err := sessionruntime.NewWorkspaceStatusPublisher(sessionClient, sessionName, podUID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Invalid configuration: %v\n", err)
 		os.Exit(1)
@@ -91,6 +97,9 @@ func runServe() {
 		PluginDir:              os.Getenv("KELOS_PLUGIN_DIR"),
 		Environment:            os.Environ(),
 		PublishWorkspaceStatus: publisher,
+		SessionName:            sessionName,
+		PodUID:                 podUID,
+		SessionClient:          sessionClient,
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
@@ -100,22 +109,22 @@ func runServe() {
 	}
 }
 
-func workspaceStatusPublisherFromEnvironment() (sessionruntime.WorkspaceStatusPublisher, error) {
+func sessionClientFromEnvironment() (clientv1alpha2.SessionInterface, string, types.UID, error) {
 	sessionName := os.Getenv("KELOS_SESSION_NAME")
 	namespace := os.Getenv("KELOS_SESSION_NAMESPACE")
 	podUID := types.UID(os.Getenv("KELOS_SESSION_POD_UID"))
 	if sessionName == "" || namespace == "" || podUID == "" {
-		return nil, fmt.Errorf("KELOS_SESSION_NAME, KELOS_SESSION_NAMESPACE, and KELOS_SESSION_POD_UID must be set")
+		return nil, "", "", fmt.Errorf("KELOS_SESSION_NAME, KELOS_SESSION_NAMESPACE, and KELOS_SESSION_POD_UID must be set")
 	}
 	config, err := rest.InClusterConfig()
 	if err != nil {
-		return nil, fmt.Errorf("loading in-cluster Kubernetes configuration: %w", err)
+		return nil, "", "", fmt.Errorf("loading in-cluster Kubernetes configuration: %w", err)
 	}
 	client, err := clientset.NewForConfig(config)
 	if err != nil {
-		return nil, fmt.Errorf("creating Kubernetes client: %w", err)
+		return nil, "", "", fmt.Errorf("creating Kubernetes client: %w", err)
 	}
-	return sessionruntime.NewWorkspaceStatusPublisher(client.ApiV1alpha2().Sessions(namespace), sessionName, podUID)
+	return client.ApiV1alpha2().Sessions(namespace), sessionName, podUID, nil
 }
 
 func runHealth() {

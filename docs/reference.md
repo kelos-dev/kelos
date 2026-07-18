@@ -247,9 +247,11 @@ does not retry a request whose delivery cannot be confirmed; it reports that
 uncertainty so the user can decide whether to submit it again.
 
 Session Pods that use the default runtime image are replaced when a Kelos
-upgrade changes that image. An explicitly tagged or digested runtime image
-remains pinned. Replacement interrupts active work, which is not submitted
-again automatically.
+upgrade changes that image. Before replacement, Kelos stops accepting new turns
+and waits for accepted work to finish. Pending user input delays the update
+until it is answered or interrupted. Rejected turns are not retried
+automatically; submit them again after the Session reconnects. An explicitly
+tagged or digested runtime image remains pinned.
 
 `status.branch` and `status.pullRequest` reflect the Session workspace while it
 is ready. The web client shows both values in the Session sidebar and

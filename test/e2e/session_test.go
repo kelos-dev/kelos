@@ -21,6 +21,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	gomegatypes "github.com/onsi/gomega/types"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -29,6 +30,7 @@ import (
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/sessionruntime"
+	"github.com/kelos-dev/kelos/internal/sessionupdate"
 	"github.com/kelos-dev/kelos/test/e2e/framework"
 )
 
@@ -247,6 +249,162 @@ var _ = Describe("Session remote control", func() {
 		Expect(f.KelosClientset.ApiV1alpha2().Sessions(f.Namespace).Delete(context.TODO(), sessionName, metav1.DeleteOptions{})).To(Succeed())
 		waitForPodDeletion(f, f.Namespace, pod.Name)
 		waitForPVCDeletion(f, f.Namespace, oldClaimName)
+	})
+
+	It("waits for active work before updating the Session runtime", func() {
+		token := os.Getenv(sessionWebTokenEnv)
+		if token == "" {
+			Skip(sessionWebTokenEnv + " not set")
+		}
+
+		const sessionName = "runtime-drain"
+		configMapName := sessionName + "-provider"
+		mode := int32(0555)
+		_, err := f.Clientset.CoreV1().ConfigMaps(f.Namespace).Create(context.TODO(), &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: f.Namespace},
+			Data:       map[string]string{"claude": fakeClaude},
+		}, metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() {
+			_ = f.Clientset.CoreV1().ConfigMaps(f.Namespace).Delete(context.TODO(), configMapName, metav1.DeleteOptions{})
+		})
+
+		createSession(f, &kelos.Session{
+			ObjectMeta: metav1.ObjectMeta{Name: sessionName},
+			Spec: kelos.SessionSpec{Worker: kelos.WorkerSpec{
+				Type:        "claude-code",
+				Credentials: &kelos.Credentials{Type: kelos.CredentialTypeNone},
+				PodOverrides: &kelos.PodOverrides{
+					Env: []corev1.EnvVar{{
+						Name:  "PATH",
+						Value: "/workspace/fake-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+					}},
+					Volumes: []corev1.Volume{{
+						Name: "fake-provider",
+						VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+							LocalObjectReference: corev1.LocalObjectReference{Name: configMapName},
+							DefaultMode:          &mode,
+						}},
+					}},
+					VolumeMounts: []corev1.VolumeMount{{
+						Name:      "fake-provider",
+						MountPath: "/workspace/fake-bin",
+						ReadOnly:  true,
+					}},
+				},
+			}},
+		})
+		DeferCleanup(func() {
+			_ = f.KelosClientset.ApiV1alpha2().Sessions(f.Namespace).Delete(context.TODO(), sessionName, metav1.DeleteOptions{})
+		})
+		DeferCleanup(func() {
+			if CurrentSpecReport().Failed() {
+				collectSessionDebugInfo(f, f.Namespace, sessionName)
+			}
+		})
+
+		current := waitForSessionPhase(f, f.Namespace, sessionName, kelos.SessionPhaseReady)
+		podUID := current.Status.PodUID
+		pod, err := f.Clientset.CoreV1().Pods(f.Namespace).Get(context.TODO(), current.Status.PodName, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		controllerRef := metav1.GetControllerOf(pod)
+		Expect(controllerRef).NotTo(BeNil())
+		statefulSet, err := f.Clientset.AppsV1().StatefulSets(f.Namespace).Get(context.TODO(), controllerRef.Name, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		originalRuntimeImage := sessionRuntimeImage(statefulSet)
+		Expect(originalRuntimeImage).NotTo(BeEmpty())
+		Expect(statefulSet.Status.UpdateRevision).NotTo(BeEmpty())
+		Expect(statefulSet.Spec.UpdateStrategy.Type).To(Equal(appsv1.OnDeleteStatefulSetStrategyType))
+		Expect(statefulSet.Spec.UpdateStrategy.RollingUpdate).To(BeNil())
+
+		baseURL := startSessionServerPortForward()
+		connection := connectSessionWebSocket(loginSessionWeb(baseURL, token), baseURL, f.Namespace, sessionName)
+		DeferCleanup(func() { _ = connection.Close() })
+		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "subscribe"})
+		waitForSessionEvent(connection, func(event sessionruntime.Event) bool {
+			return event.Type == sessionruntime.EventHistoryEnd
+		})
+
+		By("holding a turn open at a user-input request")
+		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "message", Text: "question"})
+		input := waitForSessionEvent(connection, func(event sessionruntime.Event) bool {
+			return event.Type == sessionruntime.EventInputRequested
+		})
+		Expect(input.Questions).To(HaveLen(1))
+
+		By("making the current Pod runtime stale")
+		const staleRuntimeImage = "example.invalid/kelos-session-runtime:stale"
+		const staleRuntimeRevision = "stale-runtime-revision"
+		Eventually(func() error {
+			currentPod, getErr := f.Clientset.CoreV1().Pods(f.Namespace).Get(context.TODO(), pod.Name, metav1.GetOptions{})
+			if getErr != nil {
+				return getErr
+			}
+			if currentPod.UID != podUID {
+				return fmt.Errorf("Session Pod was replaced before runtime drift: got UID %s, want %s", currentPod.UID, podUID)
+			}
+			if !setPodSessionRuntimeImage(currentPod, staleRuntimeImage) {
+				return fmt.Errorf("Pod %s has no Session runtime init container", currentPod.Name)
+			}
+			if currentPod.Labels == nil {
+				currentPod.Labels = map[string]string{}
+			}
+			currentPod.Labels[appsv1.StatefulSetRevisionLabel] = staleRuntimeRevision
+			_, updateErr := f.Clientset.CoreV1().Pods(f.Namespace).Update(context.TODO(), currentPod, metav1.UpdateOptions{})
+			return updateErr
+		}, time.Minute, time.Second).Should(Succeed())
+
+		By("observing the runtime drain while the desired StatefulSet and current Pod stay in place")
+		Eventually(func(g Gomega) {
+			session, getErr := f.KelosClientset.ApiV1alpha2().Sessions(f.Namespace).Get(context.TODO(), sessionName, metav1.GetOptions{})
+			g.Expect(getErr).NotTo(HaveOccurred())
+			report, decodeErr := sessionupdate.DecodeReport(session.Annotations[sessionupdate.ReportAnnotation])
+			g.Expect(decodeErr).NotTo(HaveOccurred())
+			g.Expect(report.PodUID).To(Equal(podUID))
+			g.Expect(report.Phase).To(Equal(sessionupdate.PhaseDraining))
+		}, time.Minute, 200*time.Millisecond).Should(Succeed())
+		Consistently(func() bool {
+			currentStatefulSet, getErr := f.Clientset.AppsV1().StatefulSets(f.Namespace).Get(context.TODO(), statefulSet.Name, metav1.GetOptions{})
+			if getErr != nil {
+				return false
+			}
+			currentPod, getErr := f.Clientset.CoreV1().Pods(f.Namespace).Get(context.TODO(), pod.Name, metav1.GetOptions{})
+			if getErr != nil {
+				return false
+			}
+			session, getErr := f.KelosClientset.ApiV1alpha2().Sessions(f.Namespace).Get(context.TODO(), sessionName, metav1.GetOptions{})
+			return getErr == nil &&
+				sessionRuntimeImage(currentStatefulSet) == originalRuntimeImage &&
+				currentStatefulSet.Spec.UpdateStrategy.Type == appsv1.OnDeleteStatefulSetStrategyType &&
+				currentPod.UID == podUID && podSessionRuntimeImage(currentPod) == staleRuntimeImage &&
+				currentPod.Labels[appsv1.StatefulSetRevisionLabel] == staleRuntimeRevision &&
+				session.Status.PodUID == podUID
+		}, 5*time.Second, 200*time.Millisecond).Should(BeTrue())
+
+		By("answering the input and allowing the drained runtime update to proceed")
+		sendSessionRequest(connection, sessionruntime.ClientRequest{
+			Type:    "input",
+			InputID: input.InputID,
+			Answers: map[string][]string{input.Questions[0].ID: {"PostgreSQL"}},
+		})
+		Eventually(func(g Gomega) {
+			currentStatefulSet, getErr := f.Clientset.AppsV1().StatefulSets(f.Namespace).Get(context.TODO(), statefulSet.Name, metav1.GetOptions{})
+			g.Expect(getErr).NotTo(HaveOccurred())
+			g.Expect(sessionRuntimeImage(currentStatefulSet)).To(Equal(originalRuntimeImage))
+			g.Expect(currentStatefulSet.Spec.UpdateStrategy.Type).To(Equal(appsv1.OnDeleteStatefulSetStrategyType))
+			session, getErr := f.KelosClientset.ApiV1alpha2().Sessions(f.Namespace).Get(context.TODO(), sessionName, metav1.GetOptions{})
+			g.Expect(getErr).NotTo(HaveOccurred())
+			g.Expect(session.Status.Phase).To(Equal(kelos.SessionPhaseReady))
+			g.Expect(session.Status.PodUID).NotTo(Equal(podUID))
+			currentPod, getErr := f.Clientset.CoreV1().Pods(f.Namespace).Get(context.TODO(), session.Status.PodName, metav1.GetOptions{})
+			g.Expect(getErr).NotTo(HaveOccurred())
+			g.Expect(currentPod.UID).To(Equal(session.Status.PodUID))
+			g.Expect(podSessionRuntimeImage(currentPod)).To(Equal(originalRuntimeImage))
+			g.Expect(currentPod.Labels).To(HaveKeyWithValue(appsv1.StatefulSetRevisionLabel, currentStatefulSet.Status.UpdateRevision))
+			g.Expect(session.Annotations).NotTo(HaveKey(sessionupdate.RequestAnnotation))
+			g.Expect(session.Annotations).NotTo(HaveKey(sessionupdate.ReportAnnotation))
+			g.Expect(session.Annotations).NotTo(HaveKey(sessionupdate.ForceUpdateAnnotation))
+		}, 2*time.Minute, time.Second).Should(Succeed())
 	})
 
 	It("runs an OpenCode conversation through terminal chat", func() {
@@ -512,6 +670,37 @@ func sessionWorkspaceClaimName(pod *corev1.Pod) string {
 		}
 	}
 	return ""
+}
+
+func sessionRuntimeImage(statefulSet *appsv1.StatefulSet) string {
+	for i := range statefulSet.Spec.Template.Spec.InitContainers {
+		container := &statefulSet.Spec.Template.Spec.InitContainers[i]
+		if container.Name == "kelos-session-runtime" {
+			return container.Image
+		}
+	}
+	return ""
+}
+
+func podSessionRuntimeImage(pod *corev1.Pod) string {
+	for i := range pod.Spec.InitContainers {
+		container := &pod.Spec.InitContainers[i]
+		if container.Name == "kelos-session-runtime" {
+			return container.Image
+		}
+	}
+	return ""
+}
+
+func setPodSessionRuntimeImage(pod *corev1.Pod, image string) bool {
+	for i := range pod.Spec.InitContainers {
+		container := &pod.Spec.InitContainers[i]
+		if container.Name == "kelos-session-runtime" {
+			container.Image = image
+			return true
+		}
+	}
+	return false
 }
 
 func waitForPodDeletion(f *framework.Framework, namespace, name string) {

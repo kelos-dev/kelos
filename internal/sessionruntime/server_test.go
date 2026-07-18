@@ -16,6 +16,13 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+
+	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
+	"github.com/kelos-dev/kelos/internal/sessionupdate"
+	kelosfake "github.com/kelos-dev/kelos/pkg/generated/clientset/versioned/fake"
 )
 
 type fakeProvider struct {
@@ -635,6 +642,98 @@ func TestServerSerializesConcurrentMessageAcceptance(t *testing.T) {
 	secondTurn := <-server.turns
 	if firstTurn.text != "first" || secondTurn.text != "second" {
 		t.Fatalf("turn order = %q, %q", firstTurn.text, secondTurn.text)
+	}
+}
+
+func TestServerDrainsAcceptedTurnsBeforeRuntimeUpdate(t *testing.T) {
+	journal := NewJournal()
+	defer journal.Close()
+	podUID := types.UID("pod-uid")
+	server := NewServer(Config{PodUID: podUID}, journal, &fakeProvider{})
+	if err := server.submitMessage("first", "request-first"); err != nil {
+		t.Fatal(err)
+	}
+	request := sessionupdate.NewRequest(podUID, "desired-revision")
+	encoded, err := sessionupdate.Encode(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := server.observeSessionUpdate(&kelos.Session{ObjectMeta: metav1.ObjectMeta{
+		Annotations: map[string]string{sessionupdate.RequestAnnotation: encoded},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.submitMessage("second", "request-second"); err == nil || !strings.Contains(err.Error(), "draining") {
+		t.Fatalf("submitMessage() error = %v, want draining rejection", err)
+	}
+	report := server.sessionRuntimeUpdateReport()
+	if report == nil || report.RequestID != request.ID || report.PodUID != podUID || report.Phase != sessionupdate.PhaseDraining {
+		t.Fatalf("runtime update report = %#v", report)
+	}
+
+	server.finishTurn()
+	report = server.sessionRuntimeUpdateReport()
+	if report == nil || report.Phase != sessionupdate.PhaseDrained {
+		t.Fatalf("runtime update report after finishing turn = %#v", report)
+	}
+	if err := server.observeSessionUpdate(&kelos.Session{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.submitMessage("after update cancelled", "request-after"); err != nil {
+		t.Fatalf("submitMessage() after cancelling drain error = %v", err)
+	}
+}
+
+func TestServerAcknowledgesSessionRuntimeUpdate(t *testing.T) {
+	podUID := types.UID("pod-uid")
+	request := sessionupdate.NewRequest(podUID, "desired-revision")
+	encoded, err := sessionupdate.Encode(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := &kelos.Session{ObjectMeta: metav1.ObjectMeta{
+		Name:        "chat",
+		Namespace:   "default",
+		Annotations: map[string]string{sessionupdate.RequestAnnotation: encoded},
+	}}
+	clientset := kelosfake.NewSimpleClientset(session)
+	server := NewServer(Config{
+		SessionName:   session.Name,
+		PodUID:        podUID,
+		SessionClient: clientset.ApiV1alpha2().Sessions(session.Namespace),
+	}, NewJournal(), &fakeProvider{})
+	defer server.journal.Close()
+	if err := server.initializeSessionUpdate(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := clientset.ApiV1alpha2().Sessions(session.Namespace).Get(t.Context(), session.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := sessionupdate.DecodeReport(updated.Annotations[sessionupdate.ReportAnnotation])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.RequestID != request.ID || report.PodUID != podUID || report.Phase != sessionupdate.PhaseDrained {
+		t.Fatalf("runtime update report = %#v", report)
+	}
+
+	delete(updated.Annotations, sessionupdate.RequestAnnotation)
+	if _, err := clientset.ApiV1alpha2().Sessions(session.Namespace).Update(t.Context(), updated, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.observeSessionUpdate(updated); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.reportSessionUpdate(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	updated, err = clientset.ApiV1alpha2().Sessions(session.Namespace).Get(t.Context(), session.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := updated.Annotations[sessionupdate.ReportAnnotation]; exists {
+		t.Fatalf("runtime update report was not removed: %q", updated.Annotations[sessionupdate.ReportAnnotation])
 	}
 }
 

@@ -27,6 +27,7 @@ import (
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/githubapp"
+	"github.com/kelos-dev/kelos/internal/sessionupdate"
 )
 
 const (
@@ -57,9 +58,9 @@ type SessionReconciler struct {
 	TokenClient                   *githubapp.TokenClient
 }
 
-// +kubebuilder:rbac:groups=kelos.dev,resources=sessions,verbs=get;list;watch
+// +kubebuilder:rbac:groups=kelos.dev,resources=sessions,verbs=get;list;watch;patch
 // +kubebuilder:rbac:groups=kelos.dev,resources=sessions/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;delete
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;patch
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create
@@ -108,7 +109,7 @@ func (r *SessionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		message := fmt.Sprintf("Failed to prepare Session runtime access: %v", err)
 		return ctrl.Result{}, r.updateSessionStatus(ctx, &session, nil, kelos.SessionPhaseFailed, message, "RuntimeAccessFailed")
 	}
-	if err := r.ensureSessionRuntime(ctx, &session, &statefulSet, serviceAccountName); err != nil {
+	if err := r.ensureSessionWorkspaceClaimRetention(ctx, &session, &statefulSet); err != nil {
 		return ctrl.Result{}, err
 	}
 	if err := r.ensureSessionWorkspaceClaimOwnership(ctx, &session, &statefulSet); err != nil {
@@ -118,11 +119,19 @@ func (r *SessionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		message := fmt.Sprintf("Failed to prepare Session governing Service: %v", err)
 		return ctrl.Result{}, r.updateSessionStatus(ctx, &session, nil, kelos.SessionPhaseFailed, message, "ServiceFailed")
 	}
+	if err := r.ensureSessionRuntime(ctx, &session, &statefulSet, serviceAccountName); err != nil {
+		return ctrl.Result{}, err
+	}
 
 	podName := statefulSet.Name + "-0"
 	var pod corev1.Pod
 	err = r.Get(ctx, client.ObjectKey{Namespace: session.Namespace, Name: podName}, &pod)
 	if apierrors.IsNotFound(err) {
+		if hasSessionRuntimeUpdateAnnotations(&session) {
+			if err := r.clearSessionRuntimeUpdateRequest(ctx, &session); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
 		if err := r.updateSessionStatus(ctx, &session, nil, kelos.SessionPhasePending, "Session Pod is starting", "PodStarting"); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -149,6 +158,13 @@ func (r *SessionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		result.RequeueAfter = tokenRefreshRetryInterval
 	} else if next > 0 {
 		result.RequeueAfter = next
+	}
+	updateResult, waitingForUpdate, err := r.reconcileSessionRuntimeUpdate(ctx, &session, &statefulSet, &pod, phase)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if waitingForUpdate && (result.RequeueAfter == 0 || updateResult.RequeueAfter < result.RequeueAfter) {
+		result = updateResult
 	}
 	return result, nil
 }
@@ -252,26 +268,138 @@ func (r *SessionReconciler) ensureSessionRuntime(ctx context.Context, session *k
 	setSessionContainerEnvVar(mainContainer, corev1.EnvVar{
 		Name: "KELOS_SESSION_POD_UID",
 		ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{
-			FieldPath: "metadata.uid",
+			APIVersion: "v1",
+			FieldPath:  "metadata.uid",
 		}},
 	})
 	statefulSet.Spec.Template.Spec.ServiceAccountName = serviceAccountName
 	statefulSet.Spec.Template.Spec.AutomountServiceAccountToken = ptr.To(true)
-	if session.Spec.VolumeClaimTemplate != nil {
-		statefulSet.Spec.PersistentVolumeClaimRetentionPolicy = &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{
-			WhenDeleted: appsv1.RetainPersistentVolumeClaimRetentionPolicyType,
-			WhenScaled:  appsv1.RetainPersistentVolumeClaimRetentionPolicyType,
-		}
-	}
-	templateMatches := reflect.DeepEqual(original.Spec.Template.Spec, statefulSet.Spec.Template.Spec)
-	retentionMatches := reflect.DeepEqual(original.Spec.PersistentVolumeClaimRetentionPolicy, statefulSet.Spec.PersistentVolumeClaimRetentionPolicy)
-	if templateMatches && retentionMatches {
+	statefulSet.Spec.UpdateStrategy = appsv1.StatefulSetUpdateStrategy{Type: appsv1.OnDeleteStatefulSetStrategyType}
+	if reflect.DeepEqual(original.Spec.Template.Spec, statefulSet.Spec.Template.Spec) &&
+		reflect.DeepEqual(original.Spec.UpdateStrategy, statefulSet.Spec.UpdateStrategy) {
 		return nil
 	}
 	if err := r.Patch(ctx, statefulSet, client.MergeFrom(original)); err != nil {
 		return fmt.Errorf("patching Session StatefulSet %q runtime configuration: %w", statefulSet.Name, err)
 	}
 	return nil
+}
+
+func (r *SessionReconciler) ensureSessionWorkspaceClaimRetention(ctx context.Context, session *kelos.Session, statefulSet *appsv1.StatefulSet) error {
+	if session.Spec.VolumeClaimTemplate == nil {
+		return nil
+	}
+	desired := &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{
+		WhenDeleted: appsv1.RetainPersistentVolumeClaimRetentionPolicyType,
+		WhenScaled:  appsv1.RetainPersistentVolumeClaimRetentionPolicyType,
+	}
+	if reflect.DeepEqual(statefulSet.Spec.PersistentVolumeClaimRetentionPolicy, desired) {
+		return nil
+	}
+	original := statefulSet.DeepCopy()
+	statefulSet.Spec.PersistentVolumeClaimRetentionPolicy = desired
+	if err := r.Patch(ctx, statefulSet, client.MergeFrom(original)); err != nil {
+		return fmt.Errorf("patching Session StatefulSet %q workspace claim retention: %w", statefulSet.Name, err)
+	}
+	return nil
+}
+
+func (r *SessionReconciler) reconcileSessionRuntimeUpdate(
+	ctx context.Context,
+	session *kelos.Session,
+	statefulSet *appsv1.StatefulSet,
+	pod *corev1.Pod,
+	phase kelos.SessionPhase,
+) (ctrl.Result, bool, error) {
+	if statefulSet.Status.UpdateRevision == "" || statefulSet.Status.ObservedGeneration < statefulSet.Generation {
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, true, nil
+	}
+	// The controller revision remains stable when Pod admission rewrites fields such as container images.
+	podCurrent := pod.Labels[appsv1.StatefulSetRevisionLabel] == statefulSet.Status.UpdateRevision
+	if podCurrent {
+		if !hasSessionRuntimeUpdateAnnotations(session) {
+			return ctrl.Result{}, false, nil
+		}
+		if err := r.clearSessionRuntimeUpdateRequest(ctx, session); err != nil {
+			return ctrl.Result{}, true, err
+		}
+		return ctrl.Result{Requeue: true}, true, nil
+	}
+	if pod.UID == "" {
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, true, nil
+	}
+	if phase == kelos.SessionPhaseFailed {
+		return r.replaceSessionPod(ctx, session, pod)
+	}
+
+	request := sessionupdate.NewRequest(pod.UID, statefulSet.Status.UpdateRevision)
+	encoded, err := sessionupdate.Encode(request)
+	if err != nil {
+		return ctrl.Result{}, true, err
+	}
+	if session.Annotations[sessionupdate.RequestAnnotation] != encoded {
+		if err := r.setSessionRuntimeUpdateRequest(ctx, session, encoded); err != nil {
+			return ctrl.Result{}, true, err
+		}
+		if r.Recorder != nil {
+			r.Recorder.Eventf(session, corev1.EventTypeNormal, "RuntimeUpdateDraining", "Waiting for Session Pod %s to drain before replacing it with its updated runtime", pod.Name)
+		}
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, true, nil
+	}
+
+	force := session.Annotations[sessionupdate.ForceUpdateAnnotation]
+	var report sessionupdate.Report
+	if value := session.Annotations[sessionupdate.ReportAnnotation]; value != "" {
+		report, err = sessionupdate.DecodeReport(value)
+		if err != nil {
+			return ctrl.Result{}, true, fmt.Errorf("reading runtime update report for Session %q: %w", session.Name, err)
+		}
+	}
+	drained := report.RequestID == request.ID && report.PodUID == pod.UID && report.Phase == sessionupdate.PhaseDrained
+	if !drained && force != "true" && force != request.ID {
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, true, nil
+	}
+	return r.replaceSessionPod(ctx, session, pod)
+}
+
+func (r *SessionReconciler) replaceSessionPod(ctx context.Context, session *kelos.Session, pod *corev1.Pod) (ctrl.Result, bool, error) {
+	if err := r.Delete(ctx, pod, client.Preconditions{UID: &pod.UID}); err != nil && !apierrors.IsNotFound(err) {
+		return ctrl.Result{}, true, fmt.Errorf("deleting Session Pod %q for runtime update: %w", pod.Name, err)
+	}
+	if r.Recorder != nil {
+		r.Recorder.Eventf(session, corev1.EventTypeNormal, "RuntimeUpdateReplacing", "Replacing Session Pod %s with its updated runtime", pod.Name)
+	}
+	return ctrl.Result{Requeue: true}, true, nil
+}
+
+func (r *SessionReconciler) setSessionRuntimeUpdateRequest(ctx context.Context, session *kelos.Session, value string) error {
+	original := session.DeepCopy()
+	if session.Annotations == nil {
+		session.Annotations = map[string]string{}
+	}
+	session.Annotations[sessionupdate.RequestAnnotation] = value
+	delete(session.Annotations, sessionupdate.ReportAnnotation)
+	if err := r.Patch(ctx, session, client.MergeFrom(original)); err != nil {
+		return fmt.Errorf("requesting runtime drain for Session %q: %w", session.Name, err)
+	}
+	return nil
+}
+
+func (r *SessionReconciler) clearSessionRuntimeUpdateRequest(ctx context.Context, session *kelos.Session) error {
+	original := session.DeepCopy()
+	delete(session.Annotations, sessionupdate.RequestAnnotation)
+	delete(session.Annotations, sessionupdate.ReportAnnotation)
+	delete(session.Annotations, sessionupdate.ForceUpdateAnnotation)
+	if err := r.Patch(ctx, session, client.MergeFrom(original)); err != nil {
+		return fmt.Errorf("clearing runtime update request for Session %q: %w", session.Name, err)
+	}
+	return nil
+}
+
+func hasSessionRuntimeUpdateAnnotations(session *kelos.Session) bool {
+	return session.Annotations[sessionupdate.RequestAnnotation] != "" ||
+		session.Annotations[sessionupdate.ReportAnnotation] != "" ||
+		session.Annotations[sessionupdate.ForceUpdateAnnotation] != ""
 }
 
 func (r *SessionReconciler) ensureSessionWorkspaceClaimOwnership(ctx context.Context, session *kelos.Session, statefulSet *appsv1.StatefulSet) error {
@@ -615,7 +743,8 @@ func (r *SessionReconciler) buildSessionStatefulSet(session *kelos.Session, work
 	setSessionContainerEnvVar(mainContainer, corev1.EnvVar{
 		Name: "KELOS_SESSION_POD_UID",
 		ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{
-			FieldPath: "metadata.uid",
+			APIVersion: "v1",
+			FieldPath:  "metadata.uid",
 		}},
 	})
 	switch worker.Type {
@@ -732,6 +861,7 @@ func (r *SessionReconciler) buildSessionStatefulSet(session *kelos.Session, work
 			Replicas:                             ptr.To(int32(1)),
 			ServiceName:                          sessionWorkloadName(session),
 			Selector:                             &metav1.LabelSelector{MatchLabels: selector},
+			UpdateStrategy:                       appsv1.StatefulSetUpdateStrategy{Type: appsv1.OnDeleteStatefulSetStrategyType},
 			PersistentVolumeClaimRetentionPolicy: retentionPolicy,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{

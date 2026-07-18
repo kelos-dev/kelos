@@ -106,12 +106,20 @@ spec:
 		Expect(k8sClient.Get(ctx, client.ObjectKey{Namespace: namespace, Name: statefulSet.Spec.ServiceName}, &service)).To(Succeed())
 		Expect(service.Spec.ClusterIP).To(Equal(corev1.ClusterIPNone))
 		Expect(metav1.IsControlledBy(&service, session)).To(BeTrue())
+		statefulSet.Status.UpdateRevision = "desired-revision"
+		statefulSet.Status.ObservedGeneration = statefulSet.Generation
+		Expect(k8sClient.Status().Update(ctx, &statefulSet)).To(Succeed())
+		podLabels := make(map[string]string, len(statefulSet.Spec.Template.Labels)+1)
+		for key, value := range statefulSet.Spec.Template.Labels {
+			podLabels[key] = value
+		}
+		podLabels[appsv1.StatefulSetRevisionLabel] = statefulSet.Status.UpdateRevision
 
 		pod := corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:            statefulSet.Name + "-0",
 				Namespace:       namespace,
-				Labels:          statefulSet.Spec.Template.Labels,
+				Labels:          podLabels,
 				Annotations:     statefulSet.Spec.Template.Annotations,
 				OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(&statefulSet, appsv1.SchemeGroupVersion.WithKind("StatefulSet"))},
 			},
@@ -145,7 +153,7 @@ spec:
 		Eventually(func(g Gomega) {
 			g.Expect(k8sClient.Get(ctx, key, &statefulSet)).To(Succeed())
 			g.Expect(statefulSet.Spec.Template.Spec.InitContainers).NotTo(BeEmpty())
-			g.Expect(statefulSet.Spec.UpdateStrategy.Type).To(Equal(appsv1.RollingUpdateStatefulSetStrategyType))
+			g.Expect(statefulSet.Spec.UpdateStrategy.Type).To(Equal(appsv1.OnDeleteStatefulSetStrategyType))
 		}, 10*time.Second, 100*time.Millisecond).Should(Succeed())
 
 		statefulSet.Spec.Template.Spec.InitContainers[0].Image = "runtime:old"

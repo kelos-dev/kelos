@@ -80,6 +80,9 @@ Kelos sets the following reserved environment variables on agent containers:
 | `KELOS_PLUGIN_DIR` | Path to plugin directory containing skills and agents. Each subdirectory is one plugin in the `<plugin>/skills/<skill>/SKILL.md` layout; skills.sh packages from `spec.skills` appear under the `skills-sh` plugin | When `agentConfigRefs` is set and `plugins` or `skills` is non-empty |
 | `KELOS_SETUP_COMMAND` | JSON-encoded exec-form array from `Workspace.spec.setupCommand`, executed by the entrypoint before the agent starts | When the workspace defines `setupCommand` |
 | `KELOS_SESSION_SETUP_ONLY` | Requests environment preparation without starting an agent process | Set by the Session runtime only while invoking the entrypoint |
+| `KELOS_SESSION_NAME` | Name of the owning Session resource | Sessions only |
+| `KELOS_SESSION_NAMESPACE` | Namespace of the owning Session resource | Sessions only |
+| `KELOS_SESSION_POD_UID` | UID of the current Session Pod | Sessions only |
 
 > The names listed in this table are reserved for Kelos behavior. When Kelos
 > sets one on a workload, `PodOverrides.Env` entries that reuse the same name are

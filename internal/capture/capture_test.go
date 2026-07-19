@@ -1,6 +1,7 @@
 package capture
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"strings"
@@ -276,6 +277,53 @@ func TestCaptureOutputsUpstreamRepoNoPRs(t *testing.T) {
 		"base-branch: main",
 	}
 	assertOutputLines(t, expected, outputs)
+}
+
+func TestRunClaudeCodeResultStatus(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantCode   int
+		wantStderr string
+	}{
+		{
+			name:       "completed result",
+			input:      `{"type":"result","subtype":"success","is_error":false,"stop_reason":"end_turn","terminal_reason":"completed","total_cost_usd":0.01}` + "\n",
+			wantCode:   0,
+			wantStderr: "",
+		},
+		{
+			name:       "incomplete result",
+			input:      `{"type":"result","subtype":"success","is_error":false,"stop_reason":"tool_use","result":"Starting the next tool","total_cost_usd":0.01}` + "\n",
+			wantCode:   1,
+			wantStderr: "kelos-capture: Claude Code run incomplete (stop_reason=tool_use)\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("KELOS_BASE_BRANCH", "")
+			commandRunner := mockRunner{commands: map[string]mockResult{
+				"git rev-parse --is-inside-work-tree": {err: fmt.Errorf("not a git repo")},
+			}}
+			var stdout, stderr bytes.Buffer
+			gotCode := run("claude-code", strings.NewReader(tt.input), &stdout, &stderr, commandRunner)
+			if gotCode != tt.wantCode {
+				t.Fatalf("run() exit code = %d, want %d", gotCode, tt.wantCode)
+			}
+			if stderr.String() != tt.wantStderr {
+				t.Fatalf("stderr = %q, want %q", stderr.String(), tt.wantStderr)
+			}
+			if !strings.HasPrefix(stdout.String(), tt.input) {
+				t.Fatalf("stdout does not preserve agent output: %q", stdout.String())
+			}
+			if !strings.Contains(stdout.String(), markerStart+"\n") ||
+				!strings.Contains(stdout.String(), "cost-usd: 0.01\n") ||
+				!strings.Contains(stdout.String(), markerEnd+"\n") {
+				t.Fatalf("stdout is missing captured outputs: %q", stdout.String())
+			}
+		})
+	}
 }
 
 func TestMain(m *testing.M) {

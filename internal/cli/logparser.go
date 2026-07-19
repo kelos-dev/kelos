@@ -7,18 +7,22 @@ import (
 	"io"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/kelos-dev/kelos/internal/claudecode"
 )
 
 // StreamEvent represents a single NDJSON event from claude-code --output-format stream-json.
 type StreamEvent struct {
-	Type         string          `json:"type"`
-	Subtype      string          `json:"subtype,omitempty"`
-	Model        string          `json:"model,omitempty"`
-	Message      *MessagePayload `json:"message,omitempty"`
-	Result       string          `json:"result,omitempty"`
-	IsError      bool            `json:"is_error,omitempty"`
-	NumTurns     int             `json:"num_turns,omitempty"`
-	TotalCostUSD float64         `json:"total_cost_usd,omitempty"`
+	Type           string          `json:"type"`
+	Subtype        string          `json:"subtype,omitempty"`
+	Model          string          `json:"model,omitempty"`
+	Message        *MessagePayload `json:"message,omitempty"`
+	Result         string          `json:"result,omitempty"`
+	IsError        bool            `json:"is_error,omitempty"`
+	StopReason     string          `json:"stop_reason,omitempty"`
+	TerminalReason string          `json:"terminal_reason,omitempty"`
+	NumTurns       int             `json:"num_turns,omitempty"`
+	TotalCostUSD   float64         `json:"total_cost_usd,omitempty"`
 }
 
 // MessagePayload is the message field within assistant events.
@@ -80,14 +84,24 @@ func ParseAndFormatLogs(r io.Reader, stdout, stderr io.Writer) error {
 				}
 			}
 		case "result":
+			completion := claudecode.Result{
+				Subtype:        event.Subtype,
+				IsError:        event.IsError,
+				StopReason:     event.StopReason,
+				TerminalReason: event.TerminalReason,
+			}
+			status := completion.Status()
 			fmt.Fprintf(stderr, "\n[result] ")
-			if event.IsError {
+			switch status {
+			case claudecode.ResultError:
 				fmt.Fprintf(stderr, "error")
-			} else {
+			case claudecode.ResultIncomplete:
+				fmt.Fprintf(stderr, "incomplete (%s)", completion.Details())
+			default:
 				fmt.Fprintf(stderr, "completed")
 			}
 			fmt.Fprintf(stderr, " (%d turns, $%.4f)\n", event.NumTurns, event.TotalCostUSD)
-			if event.IsError && event.Result != "" {
+			if status == claudecode.ResultError && event.Result != "" {
 				fmt.Fprintf(stdout, "%s\n", event.Result)
 			}
 		}

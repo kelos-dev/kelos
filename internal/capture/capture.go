@@ -22,23 +22,29 @@ const (
 // per-agent token usage in memory, then emits deterministic outputs
 // (branch, commit, PRs, token usage) between markers on stdout. It is
 // intended to be the right-hand side of a pipe from the agent process so
-// that no on-disk copy of the stream is required.
+// that no on-disk copy of the stream is required. It returns non-zero when
+// the stream cannot be processed or Claude Code reports an incomplete result.
 func Run() int {
-	agentType := os.Getenv("KELOS_AGENT_TYPE")
-	usage, err := StreamUsage(agentType, os.Stdin, os.Stdout)
+	return run(os.Getenv("KELOS_AGENT_TYPE"), os.Stdin, os.Stdout, os.Stderr, realRunner{})
+}
+
+func run(agentType string, input io.Reader, stdout, stderr io.Writer, commandRunner runner) int {
+	usage, err := StreamUsage(agentType, input, stdout)
+	exitCode := 0
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "kelos-capture: error reading agent output: %v\n", err)
+		fmt.Fprintf(stderr, "kelos-capture: %v\n", err)
+		exitCode = 1
 	}
-	outputs := captureOutputs(realRunner{}, usage)
+	outputs := captureOutputs(commandRunner, usage)
 	if len(outputs) == 0 {
-		return 0
+		return exitCode
 	}
-	fmt.Println(markerStart)
+	fmt.Fprintln(stdout, markerStart)
 	for _, line := range outputs {
-		fmt.Println(line)
+		fmt.Fprintln(stdout, line)
 	}
-	fmt.Println(markerEnd)
-	return 0
+	fmt.Fprintln(stdout, markerEnd)
+	return exitCode
 }
 
 // runner abstracts command execution for testing.

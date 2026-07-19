@@ -152,6 +152,63 @@ func TestClaudeEntrypointUsesPersistentSessionConfig(t *testing.T) {
 	assertPathMissing(t, filepath.Join(home, ".claude.json"))
 }
 
+func TestClaudeEntrypointPropagatesPipelineFailures(t *testing.T) {
+	tests := []struct {
+		name            string
+		agentExitCode   string
+		captureExitCode string
+		wantExitCode    int
+	}{
+		{name: "success", agentExitCode: "0", captureExitCode: "0", wantExitCode: 0},
+		{name: "capture failure", agentExitCode: "0", captureExitCode: "7", wantExitCode: 7},
+		{name: "agent failure takes precedence", agentExitCode: "6", captureExitCode: "7", wantExitCode: 6},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			home := filepath.Join(tmp, "home")
+			if err := os.MkdirAll(home, 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			writeFile(t, filepath.Join(tmp, "claude"), "#!/bin/bash\nprintf '%s\\n' '{\"type\":\"result\"}'\nexit \"$FAKE_AGENT_EXIT_CODE\"\n")
+			if err := os.Chmod(filepath.Join(tmp, "claude"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			capturePath := filepath.Join(tmp, "kelos-capture")
+			writeFile(t, capturePath, "#!/bin/bash\ncat\nexit \"$FAKE_CAPTURE_EXIT_CODE\"\n")
+			if err := os.Chmod(capturePath, 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			entrypointData, err := os.ReadFile("../../claude-code/kelos_entrypoint.sh")
+			if err != nil {
+				t.Fatal(err)
+			}
+			entrypointPath := filepath.Join(tmp, "kelos_entrypoint.sh")
+			entrypointContent := strings.ReplaceAll(string(entrypointData), "/kelos/kelos-capture", capturePath)
+			writeFile(t, entrypointPath, entrypointContent)
+			if err := os.Chmod(entrypointPath, 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			command := exec.Command("bash", entrypointPath, "test prompt")
+			command.Env = []string{
+				"HOME=" + home,
+				"PATH=" + tmp + ":/usr/bin:/bin",
+				"FAKE_AGENT_EXIT_CODE=" + tt.agentExitCode,
+				"FAKE_CAPTURE_EXIT_CODE=" + tt.captureExitCode,
+			}
+			output, runErr := command.CombinedOutput()
+			gotExitCode := command.ProcessState.ExitCode()
+			if gotExitCode != tt.wantExitCode {
+				t.Fatalf("entrypoint exit code = %d, want %d: %v\n%s", gotExitCode, tt.wantExitCode, runErr, output)
+			}
+		})
+	}
+}
+
 func TestOpenCodeEntrypointUsesAutoPermissions(t *testing.T) {
 	section := extractEntrypointSection(
 		t,

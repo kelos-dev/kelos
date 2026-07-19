@@ -70,9 +70,21 @@ func TestParseAndFormatLogs(t *testing.T) {
 		},
 		{
 			name:       "result success",
-			input:      `{"type":"result","result":"done","is_error":false,"num_turns":3,"total_cost_usd":0.0142}`,
+			input:      `{"type":"result","subtype":"success","result":"done","is_error":false,"num_turns":3,"total_cost_usd":0.0142}`,
 			wantStdout: "",
 			wantStderr: "\n[result] completed (3 turns, $0.0142)\n",
+		},
+		{
+			name:       "result incomplete tool use",
+			input:      `{"type":"result","subtype":"success","result":"Starting the next tool","is_error":false,"stop_reason":"tool_use","num_turns":9,"total_cost_usd":0.0142}`,
+			wantStdout: "",
+			wantStderr: "\n[result] incomplete (stop_reason=tool_use) (9 turns, $0.0142)\n",
+		},
+		{
+			name:       "result incomplete terminal reason",
+			input:      `{"type":"result","subtype":"success","result":"Starting the next tool","is_error":false,"stop_reason":"tool_use","terminal_reason":"aborted_tools","num_turns":9,"total_cost_usd":0.0142}`,
+			wantStdout: "",
+			wantStderr: "\n[result] incomplete (terminal_reason=aborted_tools, stop_reason=tool_use) (9 turns, $0.0142)\n",
 		},
 		{
 			name:       "result error",
@@ -99,7 +111,7 @@ func TestParseAndFormatLogs(t *testing.T) {
 				`{"type":"assistant","message":{"content":[{"type":"text","text":"I'll fix the bug."},{"type":"tool_use","name":"Read","input":{"file_path":"/src/main.go"}}]}}`,
 				`{"type":"user","message":{"content":[{"type":"tool_result"}]}}`,
 				`{"type":"assistant","message":{"content":[{"type":"text","text":"Done."},{"type":"tool_use","name":"Edit","input":{"file_path":"/src/main.go","old_string":"old","new_string":"new"}}]}}`,
-				`{"type":"result","result":"done","is_error":false,"num_turns":2,"total_cost_usd":0.05}`,
+				`{"type":"result","subtype":"success","result":"done","is_error":false,"num_turns":2,"total_cost_usd":0.05}`,
 			}, "\n"),
 			wantStdout: "I'll fix the bug.\nDone.\n",
 			wantStderr: "[init] model=claude-sonnet-4-20250514\n\n--- Turn 1 ---\n[tool] Read: /src/main.go\n\n--- Turn 2 ---\n[tool] Edit: /src/main.go\n\n[result] completed (2 turns, $0.0500)\n",

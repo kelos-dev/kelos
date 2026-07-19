@@ -18,7 +18,7 @@ func TestStreamUsage(t *testing.T) {
 			name:      "claude-code result",
 			agentType: "claude-code",
 			content: `{"type":"assistant","message":"thinking..."}
-{"type":"result","total_cost_usd":0.0532,"usage":{"input_tokens":15230,"output_tokens":4821}}
+{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.0532,"usage":{"input_tokens":15230,"output_tokens":4821}}
 `,
 			want: map[string]string{
 				"cost-usd":      "0.0532",
@@ -29,8 +29,8 @@ func TestStreamUsage(t *testing.T) {
 		{
 			name:      "claude-code uses last result",
 			agentType: "claude-code",
-			content: `{"type":"result","total_cost_usd":0.01,"usage":{"input_tokens":100,"output_tokens":50}}
-{"type":"result","total_cost_usd":0.05,"usage":{"input_tokens":200,"output_tokens":100}}
+			content: `{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.01,"usage":{"input_tokens":100,"output_tokens":50}}
+{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.05,"usage":{"input_tokens":200,"output_tokens":100}}
 `,
 			want: map[string]string{
 				"cost-usd":      "0.05",
@@ -42,7 +42,7 @@ func TestStreamUsage(t *testing.T) {
 			name:      "claude-code captures response",
 			agentType: "claude-code",
 			content: `{"type":"assistant","message":"thinking..."}
-{"type":"result","total_cost_usd":0.05,"result":"Here are the PRs I opened.","usage":{"input_tokens":200,"output_tokens":100}}
+{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.05,"result":"Here are the PRs I opened.","usage":{"input_tokens":200,"output_tokens":100}}
 `,
 			want: map[string]string{
 				"cost-usd":      "0.05",
@@ -174,7 +174,7 @@ func TestStreamUsage(t *testing.T) {
 			name:      "malformed JSON lines are skipped",
 			agentType: "claude-code",
 			content: `not json
-{"type":"result","total_cost_usd":0.1,"usage":{"input_tokens":500,"output_tokens":200}}
+{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.1,"usage":{"input_tokens":500,"output_tokens":200}}
 `,
 			want: map[string]string{
 				"cost-usd":      "0.1",
@@ -204,11 +204,26 @@ func TestStreamUsage(t *testing.T) {
 	}
 }
 
+func TestStreamUsageRejectsIncompleteClaudeCodeResult(t *testing.T) {
+	in := `{"type":"result","subtype":"success","is_error":false,"stop_reason":"tool_use","result":"Starting the next tool","total_cost_usd":0.01,"usage":{"input_tokens":1,"output_tokens":2}}` + "\n"
+	var out bytes.Buffer
+	usage, err := StreamUsage("claude-code", strings.NewReader(in), &out)
+	if err == nil || err.Error() != "Claude Code run incomplete (stop_reason=tool_use)" {
+		t.Fatalf("StreamUsage() error = %v, want incomplete tool use", err)
+	}
+	if usage["cost-usd"] != "0.01" {
+		t.Fatalf("cost-usd = %q, want %q", usage["cost-usd"], "0.01")
+	}
+	if out.String() != in {
+		t.Fatalf("forwarded output = %q, want %q", out.String(), in)
+	}
+}
+
 // TestStreamUsageForwardsUnterminatedLine verifies that an input that does
 // not end with a newline still has its final line forwarded (terminated
 // with a newline, matching what `tee` produced previously).
 func TestStreamUsageForwardsUnterminatedLine(t *testing.T) {
-	in := `{"type":"result","total_cost_usd":0.01,"usage":{"input_tokens":1,"output_tokens":2}}`
+	in := `{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.01,"usage":{"input_tokens":1,"output_tokens":2}}`
 	var out bytes.Buffer
 	got, err := StreamUsage("claude-code", strings.NewReader(in), &out)
 	if err != nil {
@@ -231,7 +246,7 @@ func TestStreamUsageForwardsUnterminatedLine(t *testing.T) {
 // behaviour.
 func TestStreamUsageForwardsLargeLineByteForByte(t *testing.T) {
 	huge := strings.Repeat("a", 11*1024*1024)
-	tail := `{"type":"result","total_cost_usd":0.01,"usage":{"input_tokens":1,"output_tokens":2}}`
+	tail := `{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.01,"usage":{"input_tokens":1,"output_tokens":2}}`
 	in := huge + "\n" + tail + "\n"
 	var out bytes.Buffer
 	got, err := StreamUsage("claude-code", strings.NewReader(in), &out)
@@ -250,7 +265,7 @@ func TestStreamUsageForwardsLargeLineByteForByte(t *testing.T) {
 // surfaced only at the final Flush is returned to the caller, not
 // silently swallowed.
 func TestStreamUsagePropagatesFlushError(t *testing.T) {
-	in := `{"type":"result","total_cost_usd":0.01,"usage":{"input_tokens":1,"output_tokens":2}}` + "\n"
+	in := `{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.01,"usage":{"input_tokens":1,"output_tokens":2}}` + "\n"
 	_, err := StreamUsage("claude-code", strings.NewReader(in), errWriter{})
 	if err == nil {
 		t.Fatalf("expected flush error, got nil")

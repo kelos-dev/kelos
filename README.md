@@ -17,7 +17,8 @@
   <a href="#examples">Examples</a> &middot;
   <a href="#integration">Integration</a> &middot;
   <a href="docs/reference.md">Reference</a> &middot;
-  <a href="examples/">YAML Manifests</a>
+  <a href="examples/">YAML Manifests</a> &middot;
+  <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
 Kelos is a Kubernetes-native framework for coding agent workflows. Define the agent, its execution environment, and how work moves through your development process as Kubernetes specs:
@@ -662,13 +663,11 @@ make image              # build docker image
 
 ## Contributing
 
-1. Fork the repo and create a feature branch.
-2. Make your changes and run `make verify` to ensure everything passes.
-3. Open a pull request with a clear description of the change.
-
-For significant changes, please open an issue first to discuss the approach.
-
-We welcome contributions of all kinds — see [good first issues](https://github.com/kelos-dev/kelos/labels/good%20first%20issue) for places to start.
+We welcome contributions of all kinds. Read the
+[contributing guide](CONTRIBUTING.md) for development setup, testing, API
+compatibility, and pull request requirements. See
+[good first issues](https://github.com/kelos-dev/kelos/labels/good%20first%20issue)
+for places to start.
 
 ## License
 

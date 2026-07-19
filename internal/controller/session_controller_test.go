@@ -734,6 +734,7 @@ func TestSessionReconcilerCreatesStatefulSetAndObservesPod(t *testing.T) {
 }
 
 func TestUpdateSessionStatusInvalidatesStaleRuntimeStatus(t *testing.T) {
+	lastActivityTime := metav1.NewTime(time.Now().UTC().Truncate(time.Second).Add(-time.Hour))
 	tests := []struct {
 		name      string
 		phase     kelos.SessionPhase
@@ -758,9 +759,10 @@ func TestUpdateSessionStatusInvalidatesStaleRuntimeStatus(t *testing.T) {
 				State: kelos.SessionPullRequestStateOpen,
 			}
 			session.Status.Conditions = []metav1.Condition{{
-				Type:   kelos.SessionConditionActive,
-				Status: metav1.ConditionTrue,
-				Reason: "TurnActive",
+				Type:               kelos.SessionConditionActive,
+				Status:             metav1.ConditionTrue,
+				Reason:             "TurnActive",
+				LastTransitionTime: lastActivityTime,
 			}}
 			cl := fake.NewClientBuilder().
 				WithScheme(scheme).
@@ -788,6 +790,9 @@ func TestUpdateSessionStatusInvalidatesStaleRuntimeStatus(t *testing.T) {
 			}
 			if !tt.wantClear && (activity == nil || activity.Status != metav1.ConditionTrue) {
 				t.Fatalf("Active condition = %#v, want True", activity)
+			}
+			if tt.wantClear && (updated.Status.LastActivityTime == nil || !updated.Status.LastActivityTime.Time.Equal(lastActivityTime.Time)) {
+				t.Fatalf("lastActivityTime = %v, want preserved %v", updated.Status.LastActivityTime, lastActivityTime)
 			}
 		})
 	}

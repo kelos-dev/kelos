@@ -571,6 +571,12 @@ func sessionActiveCondition(session *kelos.Session) *metav1.Condition {
 
 func sessionActivityTime(session *kelos.Session) time.Time {
 	activity := session.CreationTimestamp.Time
+	if session.Status.LastActivityTime != nil {
+		if session.Status.LastActivityTime.After(activity) {
+			return session.Status.LastActivityTime.Time
+		}
+		return activity
+	}
 	condition := sessionActiveCondition(session)
 	if condition != nil && condition.Status != metav1.ConditionUnknown && condition.LastTransitionTime.After(activity) {
 		activity = condition.LastTransitionTime.Time

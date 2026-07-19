@@ -47,6 +47,7 @@ func NewSessionStatusPublisher(client clientv1alpha2.SessionInterface, sessionNa
 			reason = "TurnActive"
 			message = "Session runtime has an unfinished turn"
 		}
+		previousActive := apiMeta.FindStatusCondition(session.Status.Conditions, kelos.SessionConditionActive)
 		conditions := append([]metav1.Condition(nil), session.Status.Conditions...)
 		apiMeta.SetStatusCondition(&conditions, metav1.Condition{
 			Type:               kelos.SessionConditionActive,
@@ -55,7 +56,15 @@ func NewSessionStatusPublisher(client clientv1alpha2.SessionInterface, sessionNa
 			Reason:             reason,
 			Message:            message,
 		})
-		operations := make([]sessionStatusPatchOperation, 0, 6)
+		activityTime := session.Status.LastActivityTime
+		if activityTime == nil || (previousActive != nil && previousActive.Status != metav1.ConditionUnknown && previousActive.Status != conditionStatus) {
+			if previousActive != nil && previousActive.Status != metav1.ConditionUnknown && previousActive.Status == conditionStatus {
+				activityTime = &previousActive.LastTransitionTime
+			} else if active := apiMeta.FindStatusCondition(conditions, kelos.SessionConditionActive); active != nil {
+				activityTime = &active.LastTransitionTime
+			}
+		}
+		operations := make([]sessionStatusPatchOperation, 0, 7)
 		if session.ResourceVersion != "" {
 			operations = append(operations, sessionStatusPatchOperation{Op: "test", Path: "/metadata/resourceVersion", Value: session.ResourceVersion})
 		}
@@ -63,6 +72,7 @@ func NewSessionStatusPublisher(client clientv1alpha2.SessionInterface, sessionNa
 			sessionStatusPatchOperation{Op: "test", Path: "/status/podUID", Value: string(podUID)},
 			sessionStatusPatchOperation{Op: "test", Path: "/status/phase", Value: kelos.SessionPhaseReady},
 			sessionStatusPatchOperation{Op: "add", Path: "/status/conditions", Value: conditions},
+			sessionStatusPatchOperation{Op: "add", Path: "/status/lastActivityTime", Value: activityTime},
 		)
 		if status.WorkspaceStatus != nil {
 			operations = append(operations,

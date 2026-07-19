@@ -639,29 +639,41 @@ func TestSummarizeIncludesRuntimeStatus(t *testing.T) {
 	}
 }
 
-func TestListSessionsOrdersByRecentActivity(t *testing.T) {
+func TestListSessionsOrdersByRecentActivityAcrossPodReplacement(t *testing.T) {
 	server := testServer(t)
 	now := time.Now()
+	recentlyIdleTime := metav1.NewTime(now.Add(-30 * time.Minute))
+	activeTime := metav1.NewTime(now.Add(-time.Hour))
+	recreatedActivityTime := metav1.NewTime(now.Add(-90 * time.Minute))
 	for _, session := range []*kelos.Session{
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "newly-created", Namespace: "default", CreationTimestamp: metav1.NewTime(now)},
 		},
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "recently-idle", Namespace: "default", CreationTimestamp: metav1.NewTime(now.Add(-3 * time.Hour))},
-			Status: kelos.SessionStatus{Conditions: []metav1.Condition{{
+			Status: kelos.SessionStatus{LastActivityTime: &recentlyIdleTime, Conditions: []metav1.Condition{{
 				Type:               kelos.SessionConditionActive,
 				Status:             metav1.ConditionFalse,
 				Reason:             "Idle",
-				LastTransitionTime: metav1.NewTime(now.Add(-30 * time.Minute)),
+				LastTransitionTime: recentlyIdleTime,
 			}}},
 		},
 		{
 			ObjectMeta: metav1.ObjectMeta{Name: "active", Namespace: "default", CreationTimestamp: metav1.NewTime(now.Add(-4 * time.Hour))},
-			Status: kelos.SessionStatus{Conditions: []metav1.Condition{{
+			Status: kelos.SessionStatus{LastActivityTime: &activeTime, Conditions: []metav1.Condition{{
 				Type:               kelos.SessionConditionActive,
 				Status:             metav1.ConditionTrue,
 				Reason:             "TurnActive",
-				LastTransitionTime: metav1.NewTime(now.Add(-time.Hour)),
+				LastTransitionTime: activeTime,
+			}}},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "recreated", Namespace: "default", CreationTimestamp: metav1.NewTime(now.Add(-5 * time.Hour))},
+			Status: kelos.SessionStatus{LastActivityTime: &recreatedActivityTime, Conditions: []metav1.Condition{{
+				Type:               kelos.SessionConditionActive,
+				Status:             metav1.ConditionFalse,
+				Reason:             "Idle",
+				LastTransitionTime: metav1.NewTime(now.Add(-time.Minute)),
 			}}},
 		},
 		{
@@ -690,7 +702,7 @@ func TestListSessionsOrdersByRecentActivity(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &sessions); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"newly-created", "recently-idle", "active", "unknown"}
+	want := []string{"newly-created", "recently-idle", "active", "recreated", "unknown"}
 	if len(sessions) != len(want) {
 		t.Fatalf("listed Sessions = %d, want %d", len(sessions), len(want))
 	}

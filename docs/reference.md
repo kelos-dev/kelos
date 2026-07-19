@@ -213,6 +213,7 @@ Kubernetes API.
 | `status.phase` | Infrastructure phase: `Pending`, `Ready`, or `Failed` | Output |
 | `status.podName` | Session Pod name | Output |
 | `status.podUID` | Identity of the Pod running the live conversation | Output |
+| `status.lastActivityTime` | When runtime activity was first reported or last changed; Pod replacement does not change it | Output |
 | `status.conditions[type=Ready]` | Whether the Session infrastructure is ready for clients | Output |
 | `status.conditions[type=Active]` | Whether the runtime has an unfinished turn; `Unknown` means activity has not been reported | Output |
 | `status.branch` | Currently checked-out git branch in the Session workspace | Output |
@@ -260,9 +261,11 @@ for user input; `Active=False` means it is idle. Activity becomes `Unknown` when
 it cannot be reported, such as while the Session Pod is being replaced. Clients
 should use condition type and status as the contract; condition reasons and
 messages are informational. The shared web client orders Sessions by recent
-activity, newest first. Creation counts as the initial activity. It shows
-activity, `status.branch`, and the pull request with a colored, text-labeled state
-in both the Session sidebar and conversation header.
+activity, newest first, using `status.lastActivityTime`. Creation counts as the
+initial activity until the runtime first reports its activity state. Replacing a
+Session Pod does not change the order. The web client shows activity,
+`status.branch`, and the pull request with a colored, text-labeled state in both
+the Session sidebar and conversation header.
 
 When `spec.volumeClaimTemplate` is set, conversation history and workspace
 changes survive Pod replacement. The claim remains until the Session is

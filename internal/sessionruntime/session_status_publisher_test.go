@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	apiMeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -57,6 +58,9 @@ func TestSessionStatusPublisherPatchesLiveSession(t *testing.T) {
 	if got.Status.Phase != kelos.SessionPhaseReady || got.Status.PodUID != podUID {
 		t.Fatalf("publisher changed controller-owned status: %#v", got.Status)
 	}
+	if got.Status.LastActivityTime == nil {
+		t.Fatalf("Session lastActivityTime was not initialized: %#v", got.Status)
+	}
 
 	want.Active = false
 	if err := publisher(context.Background(), want); err != nil {
@@ -69,6 +73,83 @@ func TestSessionStatusPublisherPatchesLiveSession(t *testing.T) {
 	active = apiMeta.FindStatusCondition(got.Status.Conditions, kelos.SessionConditionActive)
 	if active == nil || active.Status != metav1.ConditionFalse || active.Reason != "Idle" {
 		t.Fatalf("Session Active condition = %#v, want False with reason Idle", active)
+	}
+	if got.Status.LastActivityTime == nil {
+		t.Fatalf("Session lastActivityTime was cleared: %#v", got.Status)
+	}
+}
+
+func TestSessionStatusPublisherUpdatesActivityTimeOnStateChange(t *testing.T) {
+	const sessionName = "chat"
+	podUID := types.UID("live-pod")
+	lastActivityTime := metav1.NewTime(time.Now().UTC().Truncate(time.Second).Add(-time.Hour))
+	clientset := clientfake.NewSimpleClientset(&kelos.Session{
+		ObjectMeta: metav1.ObjectMeta{Name: sessionName, Namespace: "default"},
+		Status: kelos.SessionStatus{
+			Phase:            kelos.SessionPhaseReady,
+			PodUID:           podUID,
+			LastActivityTime: &lastActivityTime,
+			Conditions: []metav1.Condition{{
+				Type:               kelos.SessionConditionActive,
+				Status:             metav1.ConditionTrue,
+				Reason:             "TurnActive",
+				LastTransitionTime: lastActivityTime,
+			}},
+		},
+	})
+	publisher, err := NewSessionStatusPublisher(clientset.ApiV1alpha2().Sessions("default"), sessionName, podUID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := publisher(context.Background(), ObservedSessionStatus{Active: false}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := clientset.ApiV1alpha2().Sessions("default").Get(context.Background(), sessionName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.LastActivityTime == nil || !got.Status.LastActivityTime.After(lastActivityTime.Time) {
+		t.Fatalf("Session lastActivityTime = %v, want after %v", got.Status.LastActivityTime, lastActivityTime)
+	}
+}
+
+func TestSessionStatusPublisherPreservesActivityTimeAfterPodReplacement(t *testing.T) {
+	const sessionName = "chat"
+	podUID := types.UID("replacement-pod")
+	lastActivityTime := metav1.NewTime(time.Now().UTC().Truncate(time.Second).Add(-time.Hour))
+	clientset := clientfake.NewSimpleClientset(&kelos.Session{
+		ObjectMeta: metav1.ObjectMeta{Name: sessionName, Namespace: "default"},
+		Status: kelos.SessionStatus{
+			Phase:            kelos.SessionPhaseReady,
+			PodUID:           podUID,
+			LastActivityTime: &lastActivityTime,
+			Conditions: []metav1.Condition{{
+				Type:               kelos.SessionConditionActive,
+				Status:             metav1.ConditionUnknown,
+				Reason:             "RuntimeStatusUnknown",
+				LastTransitionTime: metav1.Now(),
+			}},
+		},
+	})
+	publisher, err := NewSessionStatusPublisher(clientset.ApiV1alpha2().Sessions("default"), sessionName, podUID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := publisher(context.Background(), ObservedSessionStatus{Active: false}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := clientset.ApiV1alpha2().Sessions("default").Get(context.Background(), sessionName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.LastActivityTime == nil || !got.Status.LastActivityTime.Time.Equal(lastActivityTime.Time) {
+		t.Fatalf("Session lastActivityTime = %v, want preserved %v", got.Status.LastActivityTime, lastActivityTime)
+	}
+	active := apiMeta.FindStatusCondition(got.Status.Conditions, kelos.SessionConditionActive)
+	if active == nil || active.Status != metav1.ConditionFalse {
+		t.Fatalf("Session Active condition = %#v, want False", active)
 	}
 }
 

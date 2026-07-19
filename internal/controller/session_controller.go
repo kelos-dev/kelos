@@ -1027,6 +1027,13 @@ func (r *SessionReconciler) updateSessionStatus(ctx context.Context, session *ke
 	if pod == nil || phase != kelos.SessionPhaseReady || session.Status.PodUID != pod.UID {
 		session.Status.Branch = ""
 		session.Status.PullRequest = nil
+		if session.Status.LastActivityTime == nil {
+			active := apiMeta.FindStatusCondition(session.Status.Conditions, kelos.SessionConditionActive)
+			if active != nil && active.Status != metav1.ConditionUnknown && !active.LastTransitionTime.IsZero() {
+				lastActivityTime := active.LastTransitionTime
+				session.Status.LastActivityTime = &lastActivityTime
+			}
+		}
 		apiMeta.SetStatusCondition(&session.Status.Conditions, metav1.Condition{
 			Type:               kelos.SessionConditionActive,
 			Status:             metav1.ConditionUnknown,

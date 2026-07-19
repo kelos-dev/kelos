@@ -7214,6 +7214,12 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              lastActivityTime:
+                description: |-
+                  LastActivityTime is when the runtime activity was first reported or last changed.
+                  Pod replacement does not change this timestamp.
+                format: date-time
+                type: string
               message:
                 description: Message provides additional information about the current
                   phase.

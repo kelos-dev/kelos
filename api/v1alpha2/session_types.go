@@ -85,6 +85,11 @@ type SessionStatus struct {
 	// +optional
 	Message string `json:"message,omitempty"`
 
+	// LastActivityTime is when the runtime activity was first reported or last changed.
+	// Pod replacement does not change this timestamp.
+	// +optional
+	LastActivityTime *metav1.Time `json:"lastActivityTime,omitempty"`
+
 	// Branch is the currently checked-out git branch in the Session workspace.
 	// +optional
 	Branch string `json:"branch,omitempty"`

@@ -248,6 +248,13 @@ on-disk copy of the stream and the pod does not need ephemeral storage for
 agent output. `PIPESTATUS[0]` captures the agent's exit code correctly with
 `set -uo pipefail`.
 
+The Claude Code reference entrypoint also checks the capture process exit code.
+`kelos-capture` returns non-zero when Claude Code emits a terminal result that
+does not represent normal completion, such as `stop_reason: tool_use`. The
+entrypoint preserves Claude Code's own non-zero exit code when present;
+otherwise, it propagates the capture failure so the Task is not reported as
+successful.
+
 Also use `set -uo pipefail` (without `-e`) so the capture step runs even if
 the agent exits non-zero.
 

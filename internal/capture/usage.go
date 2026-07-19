@@ -4,9 +4,12 @@ import (
 	"bufio"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/kelos-dev/kelos/internal/claudecode"
 )
 
 // usageAccumulator consumes the agent's JSON-lines output one line at a
@@ -41,7 +44,8 @@ func newUsageAccumulator(agentType string) usageAccumulator {
 // final newline appended if the input did not end in one, matching what
 // `tee` produced previously), and returns the parsed token usage for the
 // given agent type. Returns nil usage for empty/unknown agent types or
-// when no usage data is present.
+// when no usage data is present. For Claude Code, an incomplete final result
+// returns the parsed usage together with a non-nil error.
 //
 // Bytes from r are forwarded to w exactly as read, in order — there is no
 // scanner buffer between us and r, so an arbitrarily long line is still
@@ -91,7 +95,17 @@ func StreamUsage(agentType string, r io.Reader, w io.Writer) (usage map[string]s
 	if acc == nil {
 		return nil, nil
 	}
-	return acc.result(), nil
+	usage = acc.result()
+	if agentType == "claude-code" {
+		lastResultAccumulator, ok := acc.(*lastResultAccumulator)
+		if ok && lastResultAccumulator.last != nil {
+			completion := extractClaudeCodeCompletion(lastResultAccumulator.last)
+			if completion.Status() != claudecode.ResultCompleted {
+				return usage, errors.New(completion.FailureMessage())
+			}
+		}
+	}
+	return usage, nil
 }
 
 // lastResultAccumulator keeps only the most recent line whose "type" is
@@ -199,6 +213,19 @@ func extractClaudeCode(m map[string]any) map[string]string {
 		return nil
 	}
 	return result
+}
+
+func extractClaudeCodeCompletion(m map[string]any) claudecode.Result {
+	subtype, _ := m["subtype"].(string)
+	isError, _ := m["is_error"].(bool)
+	stopReason, _ := m["stop_reason"].(string)
+	terminalReason, _ := m["terminal_reason"].(string)
+	return claudecode.Result{
+		Subtype:        subtype,
+		IsError:        isError,
+		StopReason:     stopReason,
+		TerminalReason: terminalReason,
+	}
 }
 
 // extractCursor reads token counts and the agent response from a cursor

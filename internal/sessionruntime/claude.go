@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kelos-dev/kelos/internal/claudecode"
 	"k8s.io/apimachinery/pkg/util/uuid"
 )
 
@@ -361,13 +362,15 @@ func newProviderScanner(reader io.Reader) *bufio.Scanner {
 
 func (p *ClaudeProvider) handleClaudeLine(line []byte, sink EventSink) (*claudeTurnResult, error) {
 	var envelope struct {
-		Type      string          `json:"type"`
-		Subtype   string          `json:"subtype"`
-		IsError   bool            `json:"is_error"`
-		Result    string          `json:"result"`
-		SessionID string          `json:"session_id"`
-		Event     json.RawMessage `json:"event"`
-		Message   json.RawMessage `json:"message"`
+		Type           string          `json:"type"`
+		Subtype        string          `json:"subtype"`
+		IsError        bool            `json:"is_error"`
+		Result         string          `json:"result"`
+		StopReason     string          `json:"stop_reason"`
+		TerminalReason string          `json:"terminal_reason"`
+		SessionID      string          `json:"session_id"`
+		Event          json.RawMessage `json:"event"`
+		Message        json.RawMessage `json:"message"`
 	}
 	if err := json.Unmarshal(line, &envelope); err != nil {
 		return nil, fmt.Errorf("decoding Claude Code event: %w", err)
@@ -388,10 +391,19 @@ func (p *ClaudeProvider) handleClaudeLine(line []byte, sink EventSink) (*claudeT
 		p.emitClaudeMessage(envelope.Type, envelope.Message, sink)
 	case "result":
 		result := &claudeTurnResult{}
-		if envelope.IsError || envelope.Subtype != "success" {
-			result.error = envelope.Result
+		completion := claudecode.Result{
+			Subtype:        envelope.Subtype,
+			IsError:        envelope.IsError,
+			StopReason:     envelope.StopReason,
+			TerminalReason: envelope.TerminalReason,
+		}
+		status := completion.Status()
+		if status != claudecode.ResultCompleted {
+			if status == claudecode.ResultError {
+				result.error = envelope.Result
+			}
 			if result.error == "" {
-				result.error = "Claude Code returned an unsuccessful result"
+				result.error = completion.FailureMessage()
 			}
 		}
 		return result, nil

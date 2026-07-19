@@ -863,6 +863,54 @@ func TestClaudeEventMapping(t *testing.T) {
 	assertEventTypes(t, sink.events, EventAssistantDelta, EventToolStarted, EventToolCompleted)
 }
 
+func TestClaudeResultCompletion(t *testing.T) {
+	tests := []struct {
+		name      string
+		line      string
+		wantError string
+	}{
+		{
+			name: "normal completion",
+			line: `{"type":"result","subtype":"success","is_error":false,"stop_reason":"end_turn","terminal_reason":"completed","result":"done"}`,
+		},
+		{
+			name: "older result without reasons",
+			line: `{"type":"result","subtype":"success","is_error":false,"result":"done"}`,
+		},
+		{
+			name:      "pending tool use",
+			line:      `{"type":"result","subtype":"success","is_error":false,"stop_reason":"tool_use","result":"Starting the next tool"}`,
+			wantError: "Claude Code run incomplete (stop_reason=tool_use)",
+		},
+		{
+			name:      "aborted tools",
+			line:      `{"type":"result","subtype":"success","is_error":false,"stop_reason":"tool_use","terminal_reason":"aborted_tools","result":"Starting the next tool"}`,
+			wantError: "Claude Code run incomplete (terminal_reason=aborted_tools, stop_reason=tool_use)",
+		},
+		{
+			name:      "explicit error preserves result text",
+			line:      `{"type":"result","subtype":"error_max_turns","is_error":true,"stop_reason":"tool_use","terminal_reason":"max_turns","result":"Reached maximum number of turns"}`,
+			wantError: "Reached maximum number of turns",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := &ClaudeProvider{}
+			result, err := provider.handleClaudeLine([]byte(tt.line), &collectingSink{})
+			if err != nil {
+				t.Fatalf("handleClaudeLine() error = %v", err)
+			}
+			if result == nil {
+				t.Fatal("handleClaudeLine() returned nil result")
+			}
+			if result.error != tt.wantError {
+				t.Fatalf("result error = %q, want %q", result.error, tt.wantError)
+			}
+		})
+	}
+}
+
 func TestClaudeInputResponse(t *testing.T) {
 	reader, writer := io.Pipe()
 	sink := &inputAnswerSink{answers: map[string][]string{"question-1": {"PostgreSQL"}}}

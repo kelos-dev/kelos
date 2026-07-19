@@ -91,6 +91,12 @@ if [ -n "${KELOS_PLUGIN_DIR:-}" ] && [ -d "${KELOS_PLUGIN_DIR}" ]; then
 fi
 
 claude "${ARGS[@]}" | /kelos/kelos-capture
-AGENT_EXIT_CODE=${PIPESTATUS[0]}
+PIPE_EXIT_CODES=("${PIPESTATUS[@]}")
+AGENT_EXIT_CODE=${PIPE_EXIT_CODES[0]}
+CAPTURE_EXIT_CODE=${PIPE_EXIT_CODES[1]}
 
-exit $AGENT_EXIT_CODE
+if [ "$AGENT_EXIT_CODE" -ne 0 ]; then
+  exit "$AGENT_EXIT_CODE"
+fi
+
+exit "$CAPTURE_EXIT_CODE"

@@ -31,6 +31,18 @@ spec:
       - `make update` — run formatters and update module metadata
       - `make test` — run all unit tests
       - `make build` — build the kanon binary
+
+    ## Testing
+    - When a safety guard has two outcomes, assert both directions.
+    - When you narrow behavior by a flag or scope (e.g. `--agent`/`--project`),
+      cover that scope directly, not only indirectly through another path.
+    - When you remove or disable behavior, add a negative assertion that the
+      output no longer contains the removed keys/fields, so a regression that
+      re-introduces it is caught.
+
+    ## Documentation
+    - When a PR introduces or changes user-facing behavior, update the matching
+      `README.md` documentation in the same PR.
 ---
 apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner

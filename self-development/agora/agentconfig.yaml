@@ -3,8 +3,6 @@ kind: AgentConfig
 metadata:
   name: agora-dev-agent
 spec:
-  skills:
-    - source: gjkim42/kanon-repo
   agentsMD: |
     # Agora Development Agent
 

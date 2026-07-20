@@ -16,6 +16,7 @@ spec:
       secretRef:
         name: kelos-credentials
     agentConfigRefs:
+      - name: base-agent
       - name: kelos-fake-strategist-agent
     podOverrides:
       resources:

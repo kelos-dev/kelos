@@ -3,8 +3,6 @@ kind: AgentConfig
 metadata:
   name: kelos-glm-api-reviewer-agent
 spec:
-  skills:
-    - source: gjkim42/kanon-repo
   agentsMD: |
     # Kelos GLM API Reviewer Agent
 
@@ -88,6 +86,7 @@ spec:
           limits:
             ephemeral-storage: "4Gi"
       agentConfigRefs:
+        - name: base-agent
         - name: kelos-glm-api-reviewer-agent
     ttlSecondsAfterFinished: 864000
     podFailurePolicy:

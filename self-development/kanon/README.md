@@ -12,11 +12,12 @@ the agents they spawn operate on the Kanon repository.
 
 ## How It Works
 
-Each TaskSpawner references an `AgentConfig` that defines git identity, comment
-signatures, and standard constraints. Some agents (pr-responder, triage,
-squash-commits) share the base `agentconfig.yaml` (`kanon-dev-agent`), while
-others (workers, planner, reviewer, fake-user, fake-strategist) define their own
-`AgentConfig` inline.
+Each TaskSpawner references the root [`base-agent`](../base-agent.yaml) first
+for shared instructions and skills. It then references an AgentConfig with
+repository- or role-specific instructions: pr-responder, triage, and
+squash-commits share `agentconfig.yaml` (`kanon-dev-agent`), while workers,
+planner, reviewer, fake-user, and fake-strategist define their own AgentConfig
+inline.
 
 Autonomous discovery agents that publish GitHub issues maintain at most one
 open `generated-by-kelos` issue slot per TaskSpawner. The issue body includes a
@@ -31,7 +32,7 @@ Eight spawners operate directly on the Kanon repository through the
 `kanon-agent` Workspace. The two meta-maintenance spawners
 (`kanon-config-update`, `kanon-self-update`) are different: the files they
 maintain (`self-development/kanon/*`) live in *this* repository, so they use the
-`kelos-agent` Workspace and the `kelos-dev-agent` AgentConfig from
+`kelos-agent` Workspace and the `kelos-dev-agent` role AgentConfig from
 `self-development/`, and they read Kanon's activity cross-repo with
 `gh ... --repo kelos-dev/kanon`.
 
@@ -54,16 +55,18 @@ maintain (`self-development/kanon/*`) live in *this* repository, so they use the
 > Kubernetes CRDs/API surface to review) and `kelos-image-update` (Kanon has no
 > coding-agent Dockerfiles to bump).
 
-Apply the whole directory at once — this includes `agentconfig.yaml`, which
-defines the shared `kanon-dev-agent` referenced by the pr-responder, triage, and
-squash-commits spawners:
+Apply the root `base-agent` first, then the whole directory. The directory
+includes `agentconfig.yaml`, which defines the `kanon-dev-agent` role
+instructions referenced by the pr-responder, triage, and squash-commits
+spawners:
 
 ```bash
+kubectl apply -f self-development/base-agent.yaml
 kubectl apply -f self-development/kanon/
 ```
 
 The per-spawner `kubectl apply` commands below are for deploying or updating an
-individual spawner.
+individual spawner after `base-agent` is installed.
 
 ### kanon-workers.yaml
 
@@ -244,7 +247,7 @@ Runs daily to update the Kanon agent configuration based on patterns found in Ka
 | **Workspace** | `kelos-agent` (edits `self-development/kanon/` in this repo) |
 | **Concurrency** | 1 |
 
-Reviews recent `kelos-dev/kanon` PRs and their review comments to identify recurring feedback patterns, then updates the configuration under `self-development/kanon/` (the shared `agentconfig.yaml` or a specific TaskSpawner prompt). Opens a PR against this repository using `/kind cleanup` and `release-note: NONE`, since it only touches `self-development/kanon/`.
+Reviews recent `kelos-dev/kanon` PRs and their review comments to identify recurring feedback patterns, then updates the configuration under `self-development/kanon/` (the shared Kanon role instructions in `agentconfig.yaml` or a specific TaskSpawner prompt). Opens a PR against this repository using `/kind cleanup` and `release-note: NONE`, since it only touches `self-development/kanon/`.
 Skips uncertain or contradictory feedback, and skips an existing configuration
 PR when it has assignees.
 

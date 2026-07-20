@@ -39,6 +39,7 @@ spec:
           - name: GIT_COMMITTER_EMAIL
             value: "gjkim042@gmail.com"
       agentConfigRefs:
+        - name: base-agent
         - name: kelos-dev-agent
     ttlSecondsAfterFinished: 864000
     podFailurePolicy:
@@ -60,7 +61,8 @@ spec:
 
       The Kanon agent configuration lives in this repository (github.com/kelos-dev/kelos),
       under `self-development/kanon/`:
-      - `self-development/kanon/agentconfig.yaml` — shared AgentConfig (`kanon-dev-agent`)
+      - `self-development/base-agent.yaml` — shared instructions and skills used by every resource
+      - `self-development/kanon/agentconfig.yaml` — shared Kanon role instructions (`kanon-dev-agent`)
       - `self-development/kanon/*.yaml` — TaskSpawner prompt templates and per-agent AgentConfigs
 
       You are checked out on the kelos repository. Read Kanon's activity with
@@ -90,6 +92,7 @@ spec:
 
          **Shared changes** (affect all Kanon agents):
          - Update `self-development/kanon/agentconfig.yaml` if the feedback is about shared agent behavior or project conventions
+         - Keep shared skills only in `self-development/base-agent.yaml`; do not duplicate them in Kanon role AgentConfigs
 
          **Task-specific changes** (affect a specific agent):
          - Update the relevant TaskSpawner prompt in `self-development/kanon/*.yaml`

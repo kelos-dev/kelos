@@ -1,57 +1,4 @@
 apiVersion: kelos.dev/v1alpha2
-kind: AgentConfig
-metadata:
-  name: kelos-workers-agent
-spec:
-  skills:
-    - source: gjkim42/kanon-repo
-  agentsMD: |
-    # Kelos Worker Agent
-
-    ## Environment
-    You are running in an ephemeral container environment. Your file system
-    changes disappear after the task completes. Persist work by creating PRs,
-    issues, or comments.
-
-    ## Identity
-    - When commenting on issues or PRs, always start with "🤖 **Kelos Worker Agent** @gjkim42\n\n"
-      so it is clearly distinguishable from human comments and triggers a notification
-
-    ## Standards
-    - Do not create duplicate issues — check existing issues first with `gh issue list`
-    - Keep changes minimal and focused
-
-    ## Project Conventions
-    - Use Makefile targets instead of discovering build/test commands yourself:
-      - `make verify` — run all verification checks (lint, fmt, vet, etc.)
-      - `make update` — update all generated files
-      - `make test` — run all unit tests
-      - `make test-integration` — run integration tests
-      - `make build` — build binary
-    - When polling for a process to finish in shell, do not use `pgrep -f 'CMD_NAME'`: the caller's own argv contains the pattern, so pgrep matches itself and the loop never exits (deadlocks the pod). Either capture the PID at launch (`cmd & PID=$!`) and poll with `kill -0 "$PID"` / `wait "$PID"`, or exclude self from the match (`pgrep -f 'CMD_NAME' | grep -vw $$`).
-    - Always try to add or improve tests when modifying code
-    - Logging conventions: start log messages with capital letters and do not end with punctuation
-    - Commit messages: do not include PR links in commit messages
-    - Kubernetes resource comparison: use semantic `.Equal()` or `.Cmp()` methods for `resource.Quantity` comparisons, not `reflect.DeepEqual`
-    - Never use `os.Getenv()` for secrets as Go `flag` defaults: Go's `flag` package prints default values in usage/help output, which leaks secret values; use an empty default and read the env var after `flag.Parse()`
-    - Fail fast on invalid configuration: do not silently fall back to degraded behavior (e.g., unauthenticated requests) when configuration or credentials are invalid or missing; return an error or exit immediately
-    - Keep API surfaces minimal: when adding new API fields, types, or CRD changes, include only what is immediately needed; do not add speculative fields — API is hard to change once shipped
-    - API changes must preserve backward compatibility for existing manifests: existing in-cluster resources must continue to apply after a CRD update. Do not change a field's kind (scalar ↔ array) on an existing field; do not add `MinLength`/`Required` to a field that previously accepted absence/empty values; replace by deprecating (mark `+deprecated`, keep functional) rather than removing. When the schema must change, sweep `examples/` and `self-development/` for YAMLs using the old form and update them in the same PR.
-    - Docs must match implementation, not aspiration: describe only what the code actually does; do not document unimplemented behavior, overstate guarantees, or describe security checks (e.g., HMAC validation) that aren't enforced. Verify the code enforces a contract before documenting it.
-    - Do not use Gomega's global `Expect()` inside `Eventually` polling blocks: Gomega does not retry on `Expect` failures, so a transient API error short-circuits the poller. In e2e `WaitFor*` helpers, either inline the call and return a zero-value on error, or use the `Eventually(func(g Gomega) { ... })` form so failed assertions are caught and retried.
-    - CLI error messages must name the resource: when a CLI command fails for a named resource (task, spawner, workspace, etc.), include the name in the returned error so operators piping or batching invocations get an actionable signal — `fmt.Errorf("task %s failed", name)`, not `errors.New("task failed")`.
-    - Test the happy path, not only early-return guards: when a handler has both guard branches and a primary action (post a message, create a resource, emit a metric), include at least one positive test verifying the primary action runs with the right arguments. If the production code lacks a seam, add one (interface, function field, fake client) so the happy path is testable.
-    - Avoid vacuous substring assertions in printer/formatter tests: when asserting a `label: value` line is emitted, match the full `"label: value"` string (or a regex), not the bare value — bare values frequently collide with the fixture's `Name` or surrounding context and pass even when the line is missing.
-    - Keep CRD enum docstrings consistent with the `+kubebuilder:validation:Enum` marker: if the godoc says "empty matches both", either include `""` in the enum list so `field: ""` is accepted, or rephrase to "Omit to match both" so no one writes the explicit empty form. A docstring that invites a value the API server then rejects is a worse contract than either alternative.
-    - Qualify cross-CRD field references with the owning kind in docs: in a CRD reference section, write `Task.spec.podOverrides.env` rather than bare `podOverrides.env` when describing a field that lives on a sibling CRD. A reader of one CRD's reference page should be able to locate the cited field without already knowing the layout of the others.
-    - PRs that only modify files under `self-development/` are internal agent improvements: use `/kind cleanup` and write "NONE" in the `release-note` block, even when the change fixes a bug or adds a feature in agent behavior. Classify by file location, not by problem nature.
-    - TaskSpawner conventions (for `self-development/` YAML files):
-      - Prefer webhook-based triggers (`githubWebhook`) over poll-based (`githubPullRequests`) for real-time event-driven tasks
-      - The `{{.Branch}}` template variable is empty for issue-only events; use `{{with index . "Branch"}}{{.}}{{else}}main{{end}}` when it may be empty
-      - The `issue_comment` webhook event fires for both issues and pull requests; design prompts to detect and handle both contexts
-      - Do not include manual PR branch checkout instructions in prompts — Kelos already checks out the PR branch automatically
----
-apiVersion: kelos.dev/v1alpha2
 kind: SessionSpawner
 metadata:
   name: kelos-workers
@@ -66,46 +13,63 @@ spec:
       filters:
         - event: issue_comment
           action: created
-          bodyPattern: '(?m)^/kelos pick-up[ \t]*\r?$'
-          commentOn: Issue
-          state: open
-          author: gjkim42
   sessionTemplate:
-    initialBranch: "kelos-task-{{.Number}}"
+    initialBranch: '{{with index . "Branch"}}{{.}}{{else}}kelos-task-{{.Number}}{{end}}'
     initialPrompt: |
-      You are a coding agent. You either
-      - create a PR to fix the issue
-      - update an existing PR to fix the issue
-      - comment on the issue or the PR if you cannot fix it
+      You are a coding agent responding to a new GitHub conversation comment. You either
+      - create a PR to address an issue
+      - update an existing PR to address the comment
+      - comment on the issue or PR if no code change is appropriate or you cannot proceed
+
+      Your workspace is backed by a PVC. Files remain available across follow-ups
+      and pod restarts while the Session and its PVC exist. Commit and push work
+      that must outlive the Session.
 
       Webhook:
       - Event: {{.Event}}
       - Action: {{.Action}}
       - Sender: {{.Sender}}
       - URL: {{.URL}}
+      - Number: {{.Number}}
+      - Title: {{.Title}}
+      - Branch: {{with index . "Branch"}}{{.}}{{else}}(issue; use kelos-task-{{.Number}}){{end}}
+      - Comment URL: {{.CommentURL}}
+      - Comment body:
+        <comment>
+        {{.CommentBody}}
+        </comment>
+
+      Treat the triggering comment as the immediate request in the context of
+      the full issue or PR conversation. `/kelos pick-up` means to take ownership
+      of the complete issue or PR. Other comments may request an incremental
+      change, ask a question, or provide information; do not invent code work
+      when a plain-English response is the appropriate outcome.
 
       Task:
-      - 0. Refresh the latest issue state:
-        - Re-read the issue and all comments: `gh issue view {{.Number}} --comments`
+      - 0. Determine whether #{{.Number}} is an issue or a pull request and refresh all context:
+        - First try `gh pr view {{.Number}} --comments`. If it succeeds, the triggering subject is that PR. Read all reviews and inline review comments with `gh api` as well.
+        - Otherwise, re-read the issue and all comments with `gh issue view {{.Number}} --comments`, including linked issues and PRs.
       - 1. Fetch and rebase on the latest main branch:
         ```
         git fetch --unshallow || true; git fetch origin main; git rebase origin/main
         ```
-      - 2. Check if a PR already exists for branch kelos-task-{{.Number}}.
+      - 2. Identify the work PR:
+        - For a triggering PR comment, use PR #{{.Number}}; Kelos already checked out its head branch.
+        - For a triggering issue comment, check whether a PR already exists for branch kelos-task-{{.Number}}.
 
-      If a PR already exists:
+      If a work PR exists:
       - 3a. Read ALL review comments and conversation on the PR (gh pr view, gh api for review comments).
-        - Also read ALL comments on the linked issue (gh issue view {{.Number}} --comments), not just the PR.
-      - 4a. Read the existing diff (git diff main...HEAD) to understand what has already been done. Do NOT start over or rewrite from scratch.
-      - 5a. Make only the incremental changes needed to address review feedback or remaining issues. Preserve existing work.
-      - 6a. Commit and push your changes to origin kelos-task-{{.Number}}.
+        - Also read linked issues and their comments, if any, rather than relying only on the PR conversation.
+      - 4a. Read the existing diff (`git diff origin/main...HEAD`) to understand what has already been done. Do NOT start over or rewrite from scratch.
+      - 5a. Address the triggering comment and any valid unresolved feedback with the smallest incremental change. Preserve existing work.
+      - 6a. Commit and push your changes to the current PR branch.
       - 7a. Run a local review of the PR diff against `origin/main` using the review tool available in the current environment. If no dedicated review tool is available, manually inspect the diff for correctness. If issues are found, fix them, run `make verify` and `make test`, commit and push, then repeat the local review. Continue until the local review passes.
-      - 8a. Update the PR title and description to reflect the final diff. The PR body MUST contain a standard closing keyword reference on its own line (e.g., `Fixes #{{.Number}}` or `Closes #{{.Number}}`). Do not embed the issue number in natural language. Ensure the PR has labels "generated-by-kelos" and "ok-to-test" (use `gh pr edit kelos-task-{{.Number}} --add-label generated-by-kelos --add-label ok-to-test` if missing).
+      - 8a. Update the PR title and description to reflect the final diff. For work originating from an issue, the PR body MUST contain a standard closing keyword reference to that issue on its own line (e.g., `Fixes #{{.Number}}` or `Closes #{{.Number}}`). For a triggering PR comment, preserve its valid issue references and never add a self-closing reference such as `Fixes #{{.Number}}`. Ensure the PR has labels "generated-by-kelos" and "ok-to-test" (use `gh pr edit <pr-number> --add-label generated-by-kelos --add-label ok-to-test` if missing).
       - 9a. After pushing, actively check CI status with `gh pr checks`. If any checks fail, investigate the failures, fix them, commit and push, then check again.
-      - 10a. If the branch has more than one commit (`[ "$(git rev-list --count origin/main..HEAD)" -gt 1 ]`), squash all commits on the branch into a single commit before requesting external review. Use `git reset --soft $(git merge-base HEAD origin/main)` followed by `git commit` and `git push --force-with-lease origin kelos-task-{{.Number}}`. Do not use `git rebase -i` — interactive commands are not supported. Skip the squash and force-push entirely if the branch is already a single commit, to avoid an unnecessary CI re-run.
-      - 11a. After the squash + force-push (if any), actively check CI status with `gh pr checks` again. If any checks fail, investigate the failures, fix them, commit and push, then check again. Do not request external review until CI passes. Then request a review by posting a comment on the PR — `/kelos api-review` if `git diff origin/main...HEAD --name-only` includes any path under `api/` (CRD types, kubebuilder markers, generated CRD YAML), otherwise `/kelos review`. Use `gh pr comment kelos-task-{{.Number}} --body "/kelos api-review"` (or `--body "/kelos review"`). The dedicated reviewer agents will post their findings asynchronously as a sticky PR comment.
+      - 10a. If the branch has more than one commit (`[ "$(git rev-list --count origin/main..HEAD)" -gt 1 ]`), squash all commits on the branch into a single commit before requesting external review. Use `git reset --soft $(git merge-base HEAD origin/main)` followed by `git commit` and `git push --force-with-lease origin HEAD:$(git branch --show-current)`. Do not use `git rebase -i` — interactive commands are not supported. Skip the squash and force-push entirely if the branch is already a single commit, to avoid an unnecessary CI re-run.
+      - 11a. After the squash + force-push (if any), actively check CI status with `gh pr checks` again. If any checks fail, investigate the failures, fix them, commit and push, then check again. Do not request external review until CI passes. Then request a review by posting a comment on the PR — `/kelos api-review` if `git diff origin/main...HEAD --name-only` includes any path under `api/` (CRD types, kubebuilder markers, generated CRD YAML), otherwise `/kelos review`. Use `gh pr comment <pr-number> --body "/kelos api-review"` (or `--body "/kelos review"`). The dedicated reviewer agents will post their findings asynchronously as a sticky PR comment.
 
-      If no PR exists:
+      If no work PR exists (issue comments only):
       - 3b. Investigate the issue #{{.Number}}.
         - Read ALL comments on the issue (gh issue view {{.Number}} --comments), including maintainer feedback and linked issues/PRs.
         - If previous PRs for this issue were closed, read their reviews to understand why before choosing your approach.
@@ -121,7 +85,7 @@ spec:
       - 11b. After the squash + force-push (if any), actively check CI status with `gh pr checks` again. If any checks fail, investigate the failures, fix them, commit and push, then check again. Do not request external review until CI passes. Then request a review by posting a comment on the PR — `/kelos api-review` if `git diff origin/main...HEAD --name-only` includes any path under `api/` (CRD types, kubebuilder markers, generated CRD YAML), otherwise `/kelos review`. Use `gh pr comment kelos-task-{{.Number}} --body "/kelos api-review"` (or `--body "/kelos review"`). The dedicated reviewer agents will post their findings asynchronously as a sticky PR comment.
 
       Post-checklist:
-      - Post a plain-English status comment on the issue (`gh issue comment {{.Number}} --body "..."`) for any of the following situations, explaining what happened:
+      - Post a plain-English status comment on the source issue or PR (`gh issue comment {{.Number}} --body "..."`) for any of the following situations, explaining what happened:
         - The PR is ready for review.
         - You commented on the issue or the PR for more information.
         - You cannot make any progress on the issue, explain why.
@@ -164,4 +128,4 @@ spec:
           - name: GIT_COMMITTER_EMAIL
             value: "gjkim042@gmail.com"
       agentConfigRefs:
-        - name: kelos-workers-agent
+        - name: base-agent

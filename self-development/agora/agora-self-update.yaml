@@ -30,6 +30,7 @@ spec:
           limits:
             ephemeral-storage: "2Gi"
       agentConfigRefs:
+        - name: base-agent
         - name: kelos-dev-agent
     ttlSecondsAfterFinished: 864000
     podFailurePolicy:
@@ -48,10 +49,11 @@ spec:
       define how the Agora agents develop the Agora project (github.com/kelos-dev/agora).
 
       Those workflow files live in this repository (github.com/kelos-dev/kelos),
-      under `self-development/agora/`: TaskSpawner definitions and the shared AgentConfig
-      that orchestrate Agora's autonomous development loop. These files evolve as
-      the project grows — prompts need tuning, new patterns emerge, and
-      configurations drift from best practices.
+      under `self-development/agora/`: TaskSpawner definitions and role-specific
+      AgentConfigs that orchestrate Agora's autonomous development loop. Every
+      resource references `self-development/base-agent.yaml` first for shared
+      instructions and skills. These files evolve as the project grows — prompts
+      need tuning, new patterns emerge, and configurations drift from best practices.
 
       You are checked out on the kelos repository. Read Agora's activity with
       `gh ... --repo kelos-dev/agora`, and file any improvement issues against
@@ -71,6 +73,7 @@ spec:
          - Check that resource requests/limits, models, TTLs, and other settings are appropriate
          - Verify that webhook repositories (`kelos-dev/agora`), events, labels, excludeLabels, and filters are correct and consistent
          - Ensure AgentConfig instructions in `self-development/agora/agentconfig.yaml` match Agora's current conventions and Makefile targets
+         - Ensure every TaskSpawner references `base-agent` first and role-specific AgentConfigs do not duplicate its skills
          - Look for inconsistencies between TaskSpawners that should share the same configuration
 
       3. **Workflow Completeness**

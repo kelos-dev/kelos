@@ -54,6 +54,7 @@ spec:
           - name: GIT_COMMITTER_EMAIL
             value: "gjkim042@gmail.com"
       agentConfigRefs:
+        - name: base-agent
         - name: kelos-dev-agent
     ttlSecondsAfterFinished: 864000
     podFailurePolicy:

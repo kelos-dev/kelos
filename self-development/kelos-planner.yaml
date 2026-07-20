@@ -3,8 +3,6 @@ kind: AgentConfig
 metadata:
   name: kelos-planner-agent
 spec:
-  skills:
-    - source: gjkim42/kanon-repo
   agentsMD: |
     # Kelos Planner Agent
 
@@ -63,6 +61,7 @@ spec:
           limits:
             ephemeral-storage: "2Gi"
       agentConfigRefs:
+        - name: base-agent
         - name: kelos-planner-agent
     ttlSecondsAfterFinished: 864000
     podFailurePolicy:

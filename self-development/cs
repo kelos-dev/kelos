@@ -32,6 +32,8 @@ spec:
       requests:
         storage: 10Gi
   worker:
+    agentConfigRefs:
+      - name: base-agent
     workspaceRef:
       name: kelos-agent
     model: gpt-5.6-sol

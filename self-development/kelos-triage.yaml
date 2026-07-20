@@ -44,6 +44,7 @@ spec:
           limits:
             ephemeral-storage: "2Gi"
       agentConfigRefs:
+        - name: base-agent
         - name: kelos-dev-agent
     ttlSecondsAfterFinished: 864000
     podFailurePolicy:

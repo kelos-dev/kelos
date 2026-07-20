@@ -3,8 +3,6 @@ kind: AgentConfig
 metadata:
   name: kanon-workers-agent
 spec:
-  skills:
-    - source: gjkim42/kanon-repo
   agentsMD: |
     # Kanon Worker Agent
 
@@ -83,6 +81,7 @@ spec:
           - name: GIT_COMMITTER_EMAIL
             value: "gjkim042@gmail.com"
       agentConfigRefs:
+        - name: base-agent
         - name: kanon-workers-agent
     ttlSecondsAfterFinished: 864000
     podFailurePolicy:

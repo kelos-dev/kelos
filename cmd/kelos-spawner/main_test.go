@@ -2942,9 +2942,10 @@ func TestRunCycleWithSource_ContextSources_RequiredFailure(t *testing.T) {
 		},
 	}
 
-	// Cycle should succeed (error is per-item, not cycle-level) but no task created.
-	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
-		t.Fatalf("Unexpected error: %v", err)
+	// A required context-source failure produces no Task, so the cycle must
+	// surface an error (not report a healthy, zero-Task discovery).
+	if err := runCycleWithSource(context.Background(), cl, key, src); err == nil {
+		t.Fatal("Expected cycle error when a required context source fails")
 	}
 
 	var taskList kelos.TaskList
@@ -2953,5 +2954,244 @@ func TestRunCycleWithSource_ContextSources_RequiredFailure(t *testing.T) {
 	}
 	if len(taskList.Items) != 0 {
 		t.Fatalf("Expected 0 tasks (required context source failed), got %d", len(taskList.Items))
+	}
+
+	// The failure must be recorded on the TaskSpawner status.
+	var got kelos.TaskSpawner
+	if err := cl.Get(context.Background(), key, &got); err != nil {
+		t.Fatalf("Get TaskSpawner: %v", err)
+	}
+	if !hasCondition(got.Status.Conditions, conditionDiscoveryError, metav1.ConditionTrue) {
+		t.Errorf("expected DiscoveryError condition True, conditions = %#v", got.Status.Conditions)
+	}
+}
+
+// TestRunCycleWithSource_AbortedCyclePreservesWatermark ensures a cycle that
+// aborts before creating Tasks (here, an unresolvable nameTemplate) does not
+// advance LastDiscoveryTime. CronSource uses that watermark as the lower bound
+// for the next discovery, so advancing it would permanently skip the ticks the
+// failed cycle never processed once the configuration is fixed.
+func TestRunCycleWithSource_AbortedCyclePreservesWatermark(t *testing.T) {
+	ts := newTaskSpawner("cron-spawner", "default", nil)
+	ts.Spec.When = kelos.When{Cron: &kelos.Cron{Schedule: "0 * * * *"}}
+	ts.Spec.TaskTemplate.NameTemplate = "task-{{.Missing}}" // unresolvable
+	cl, key := setupTest(t, ts)
+
+	watermark := metav1.NewTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	var cur kelos.TaskSpawner
+	if err := cl.Get(context.Background(), key, &cur); err != nil {
+		t.Fatalf("Get TaskSpawner: %v", err)
+	}
+	cur.Status.LastDiscoveryTime = &watermark
+	if err := cl.Status().Update(context.Background(), &cur); err != nil {
+		t.Fatalf("seeding LastDiscoveryTime: %v", err)
+	}
+
+	src := &fakeSource{items: []source.WorkItem{{ID: "1", Title: "tick"}}}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err == nil {
+		t.Fatal("expected cycle to fail on unresolvable nameTemplate")
+	}
+
+	var got kelos.TaskSpawner
+	if err := cl.Get(context.Background(), key, &got); err != nil {
+		t.Fatalf("Get TaskSpawner: %v", err)
+	}
+	if got.Status.LastDiscoveryTime == nil || !got.Status.LastDiscoveryTime.Time.Equal(watermark.Time) {
+		t.Errorf("LastDiscoveryTime advanced on aborted cycle: got %v, want %v", got.Status.LastDiscoveryTime, watermark.Time)
+	}
+}
+
+func TestRunCycleWithSource_NameTemplate(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	ts.Spec.TaskTemplate.NameTemplate = "custom-{{.ID}}"
+	cl, key := setupTest(t, ts)
+
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{ID: "1", Title: "Item 1"},
+		},
+	}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var taskList kelos.TaskList
+	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatalf("Listing tasks: %v", err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task, got %d", len(taskList.Items))
+	}
+	if got := taskList.Items[0].Name; got != "custom-1" {
+		t.Errorf("task name = %q, want %q (nameTemplate not applied)", got, "custom-1")
+	}
+}
+
+func TestRunCycleWithSource_NameTemplateResolutionErrorFailsCycle(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	ts.Spec.TaskTemplate.NameTemplate = "task-{{.Missing}}" // missing key -> render error
+	cl, key := setupTest(t, ts)
+
+	src := &fakeSource{items: []source.WorkItem{{ID: "1", Title: "Item 1"}}}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err == nil {
+		t.Fatal("expected cycle to fail on unresolvable nameTemplate")
+	}
+
+	var taskList kelos.TaskList
+	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatalf("Listing tasks: %v", err)
+	}
+	if len(taskList.Items) != 0 {
+		t.Fatalf("expected no tasks created on resolution error, got %d", len(taskList.Items))
+	}
+
+	// The failure must surface on the TaskSpawner status.
+	var got kelos.TaskSpawner
+	if err := cl.Get(context.Background(), key, &got); err != nil {
+		t.Fatalf("Get TaskSpawner: %v", err)
+	}
+	if got.Status.Phase != kelos.TaskSpawnerPhaseFailed {
+		t.Errorf("Phase = %q, want %q", got.Status.Phase, kelos.TaskSpawnerPhaseFailed)
+	}
+	if !hasCondition(got.Status.Conditions, conditionDiscoveryError, metav1.ConditionTrue) {
+		t.Errorf("expected DiscoveryError condition True, conditions = %#v", got.Status.Conditions)
+	}
+}
+
+func hasCondition(conditions []metav1.Condition, condType string, status metav1.ConditionStatus) bool {
+	for _, c := range conditions {
+		if c.Type == condType {
+			return c.Status == status
+		}
+	}
+	return false
+}
+
+// TestRunCycleWithSource_NameTemplateCollisionWithOtherSpawner ensures a
+// rendered name that collides with a Task owned by a different spawner surfaces
+// an error instead of being silently treated as deduplication.
+func TestRunCycleWithSource_NameTemplateCollisionWithOtherSpawner(t *testing.T) {
+	ts := newTaskSpawner("spawner-b", "default", nil)
+	ts.Spec.TaskTemplate.NameTemplate = "shared-{{.ID}}"
+	// A Task with the same rendered name already exists, owned by spawner-a.
+	other := newTask("shared-1", "default", "spawner-a", kelos.TaskPhaseRunning)
+	cl, key := setupTest(t, ts, other)
+
+	src := &fakeSource{items: []source.WorkItem{{ID: "1", Title: "Item 1"}}}
+
+	// A cycle that hits a collision is not a success and must not increment the
+	// success counter.
+	beforeTotal := testutil.ToFloat64(discoveryTotal)
+	err := runCycleWithSource(context.Background(), cl, key, src)
+	if err == nil {
+		t.Fatal("expected error on cross-spawner name collision")
+	}
+	if delta := testutil.ToFloat64(discoveryTotal) - beforeTotal; delta != 0 {
+		t.Errorf("discoveryTotal changed by %f on a failed cycle, want 0", delta)
+	}
+
+	var taskList kelos.TaskList
+	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatalf("Listing tasks: %v", err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Fatalf("expected the other spawner's Task to remain the only Task, got %d", len(taskList.Items))
+	}
+	if got := taskList.Items[0].Labels["kelos.dev/taskspawner"]; got != "spawner-a" {
+		t.Errorf("existing Task ownership changed: label = %q, want %q", got, "spawner-a")
+	}
+
+	// The collision must surface on the TaskSpawner status.
+	var got kelos.TaskSpawner
+	if err := cl.Get(context.Background(), key, &got); err != nil {
+		t.Fatalf("Get TaskSpawner: %v", err)
+	}
+	if !hasCondition(got.Status.Conditions, conditionDiscoveryError, metav1.ConditionTrue) {
+		t.Errorf("expected DiscoveryError condition True, conditions = %#v", got.Status.Conditions)
+	}
+}
+
+// TestRunCycleWithSource_StaleOwnerUIDDoesNotDedup ensures a Task carrying this
+// spawner's label but a controller owner reference from a different (recreated)
+// spawner instance is not treated as owned for deduplication — it must surface
+// as a collision instead of silently suppressing the work item.
+func TestRunCycleWithSource_StaleOwnerUIDDoesNotDedup(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	ts.Spec.TaskTemplate.NameTemplate = "shared-{{.ID}}"
+
+	controller := true
+	stale := kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "shared-1",
+			Namespace: "default",
+			Labels:    map[string]string{"kelos.dev/taskspawner": "spawner"},
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: kelos.GroupVersion.String(),
+				Kind:       "TaskSpawner",
+				Name:       "spawner",
+				UID:        "old-uid", // different from ts.UID ("spawner-uid")
+				Controller: &controller,
+			}},
+		},
+		Spec:   kelos.TaskSpec{Type: "claude-code", Prompt: "stale"},
+		Status: kelos.TaskStatus{Phase: kelos.TaskPhaseRunning},
+	}
+	cl, key := setupTest(t, ts, stale)
+
+	src := &fakeSource{items: []source.WorkItem{{ID: "1", Title: "Item 1"}}}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err == nil {
+		t.Fatal("expected collision error: a stale-owner Task must not deduplicate the item")
+	}
+
+	var taskList kelos.TaskList
+	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatalf("Listing tasks: %v", err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Fatalf("expected only the stale Task to remain, got %d", len(taskList.Items))
+	}
+}
+
+// TestRunCycleWithSource_NameTemplateDedup verifies the dedup lookup uses the
+// rendered name: an existing Task whose name matches the nameTemplate output is
+// not recreated, while a new item is.
+func TestRunCycleWithSource_NameTemplateDedup(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	ts.Spec.TaskTemplate.NameTemplate = "custom-{{.ID}}"
+	existing := newTask("custom-1", "default", "spawner", kelos.TaskPhaseRunning)
+	cl, key := setupTest(t, ts, existing)
+
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{ID: "1", Title: "Item 1"}, // already exists as custom-1
+			{ID: "2", Title: "Item 2"}, // new
+		},
+	}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var taskList kelos.TaskList
+	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatalf("Listing tasks: %v", err)
+	}
+	names := make([]string, 0, len(taskList.Items))
+	for _, task := range taskList.Items {
+		names = append(names, task.Name)
+	}
+	if len(taskList.Items) != 2 {
+		t.Fatalf("Expected 2 tasks (custom-1, custom-2), got %d: %v", len(taskList.Items), names)
+	}
+	got := map[string]bool{}
+	for _, n := range names {
+		got[n] = true
+	}
+	if !got["custom-1"] || !got["custom-2"] {
+		t.Errorf("Expected tasks custom-1 and custom-2, got %v", names)
 	}
 }

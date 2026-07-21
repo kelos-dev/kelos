@@ -189,7 +189,12 @@ func buildTaskFromTaskSpawner(ctx context.Context, cl client.Client, namespace, 
 	if err != nil {
 		return nil, fmt.Errorf("creating Task builder for TaskSpawner %s: %w", spawner.Name, err)
 	}
-	task, err := builder.BuildTask(taskName, namespace, &spawner.Spec.TaskTemplate, vars, nil)
+	// Manual runs manage their own name (an explicit --name or a unique
+	// -manual- suffix), so bypass the spawner's nameTemplate: it targets
+	// automated deduplication and its variables may be absent for a manual run.
+	taskTemplate := spawner.Spec.TaskTemplate
+	taskTemplate.NameTemplate = ""
+	task, err := builder.BuildTask(taskName, namespace, &taskTemplate, vars, nil)
 	if err != nil {
 		return nil, fmt.Errorf("building task %s from TaskSpawner %s: %w", taskName, spawner.Name, err)
 	}

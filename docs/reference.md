@@ -593,12 +593,13 @@ to receive refreshed credentials during long-running work.
 | `spec.taskTemplate.promptTemplate` | Go text/template for prompt (see [template variables](#prompttemplate-variables) below) | No |
 | `spec.taskTemplate.dependsOn` | Task names that spawned Tasks depend on. Not supported with `workerPoolRef` | No |
 | `spec.taskTemplate.branch` | Git branch template for spawned Tasks (supports Go template variables, e.g., `kelos-task-{{.Number}}`). Not supported with `workerPoolRef` | No |
+| `spec.taskTemplate.nameTemplate` | Go text/template for the spawned Task's name (overrides the default naming below). The rendered value is lowercased, sanitized to a valid resource name, and truncated to 63 characters. Use a deterministic template (e.g. `{{.Number}}`) to deduplicate Tasks: work items that render to the same name reuse the existing Task instead of creating a duplicate — the recommended way to avoid duplicate Tasks from multiple GitHub webhook deliveries for the same pull request. Names must be unique across the whole namespace; a collision with a Task owned by a different TaskSpawner (or any unrelated Task) is an error, not deduplication (see [Generated Task Names](#generated-task-names)). Keep the identifying part within the first 63 characters. `.Context.NAME` is not available to `nameTemplate` on any source — a Task's identity must not depend on mutable external data | No |
 | `spec.taskTemplate.ttlSecondsAfterFinished` | Auto-delete spawned tasks after N seconds | No |
 | `spec.taskTemplate.podFailurePolicy` | Kubernetes Job pod failure policy copied to spawned Tasks as `Task.spec.podFailurePolicy` | No |
 | `spec.taskTemplate.podOverrides` | **(Deprecated)** Pod customization — use `taskTemplate.worker.podOverrides` instead | Legacy |
 | `spec.taskTemplate.metadata.labels` | Labels merged into spawned Tasks; values support the same Go template variables as `branch`/`promptTemplate`; the `kelos.dev/taskspawner` label is always set to the TaskSpawner name and overrides any user value for that key | No |
 | `spec.taskTemplate.metadata.annotations` | Annotations merged into spawned Tasks; values support the same Go template variables as `branch`/`promptTemplate`; source annotations (e.g. `kelos.dev/source-kind`) are applied after rendering and override conflicting user values | No |
-| `spec.taskTemplate.contextSources` | External data sources fetched in parallel before task creation; each source's value is exposed as `{{.Context.NAME}}` in `branch`, `promptTemplate`, and `metadata` templates (see [Context Sources](#context-sources) below). Maximum 8 entries; names must be unique | No |
+| `spec.taskTemplate.contextSources` | External data sources fetched in parallel before task creation; each source's value is exposed as `{{.Context.NAME}}` in `branch`, `promptTemplate`, and `metadata` templates — but not in `nameTemplate` (see [Context Sources](#context-sources) below). Maximum 8 entries; names must be unique | No |
 | `spec.taskTemplate.upstreamRepo` | Upstream repository in `owner/repo` format; injected as `KELOS_UPSTREAM_REPO` into the agent container. Typically auto-derived from `githubIssues.repo`/`githubPullRequests.repo`, but can be set explicitly for fork workflows | No |
 | `spec.maxConcurrency` | Limit max concurrent running tasks (important for cost control) | No |
 | `spec.maxTotalTasks` | Lifetime limit on total tasks created by this spawner | No |
@@ -613,6 +614,25 @@ lowercases the work item ID when forming the Task name:
 Lowercasing the Task name does not change the source data exposed to templates
 and logs. In particular, `{{.ID}}` remains the raw work item ID (for example,
 `ENG-42`). Webhook-backed TaskSpawners use delivery-based Task names instead.
+
+When `spec.taskTemplate.nameTemplate` is set, it overrides these default schemes
+for all sources: the Task name is the rendered template (lowercased, sanitized,
+and truncated to 63 characters). A deterministic template deduplicates Tasks —
+work items or webhook deliveries that render to the same name reuse the existing
+Task instead of creating a duplicate.
+
+Deduplication is **ownership-scoped**, not per spawner name. A Task name is unique
+across the entire namespace, so a rendered name is reused only when the existing
+Task belongs to the same TaskSpawner (matched by controller owner-reference UID,
+or the `kelos.dev/taskspawner` label for ownerless legacy Tasks). If a rendered
+name collides with a Task owned by a different TaskSpawner — or any unrelated Task
+using that name — Kelos does **not** silently reuse it: the webhook path returns
+an error (HTTP 500, so the delivery is retried), the polling path records a
+`DiscoveryError` condition and failure on the TaskSpawner, and the Slack path
+surfaces the error in the server logs. Ensure each TaskSpawner's
+`nameTemplate` renders names that are unique across the namespace (for example by
+including the TaskSpawner-specific prefix, and a repository qualifier when one
+endpoint serves multiple repositories).
 
 ### Manual Task Creation
 
@@ -646,7 +666,9 @@ not apply `spec.suspend`, `spec.maxConcurrency`, or `spec.maxTotalTasks`, does
 not enable source reporting, and does not update TaskSpawner status. The Task
 has no TaskSpawner owner reference or `kelos.dev/taskspawner` label. Instead,
 Kelos records its origin with `kelos.dev/created-from-taskspawner`,
-`kelos.dev/trigger-type`, and `kelos.dev/trigger-time` annotations.
+`kelos.dev/trigger-type`, and `kelos.dev/trigger-time` annotations. Manual runs
+also ignore `spec.taskTemplate.nameTemplate`: the Task is named from `--name`
+when provided, otherwise `<taskspawner>-manual-<suffix>`.
 
 Configured `contextSources` are fetched after the values are resolved, matching
 automatic Task creation. `--dry-run` still connects to the cluster to read the

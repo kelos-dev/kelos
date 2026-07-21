@@ -335,6 +335,48 @@ func TestCreateTaskAlreadyExists(t *testing.T) {
 	}
 }
 
+// TestCreateTaskNameCollisionWithUnrelatedTask ensures a nameTemplate that
+// renders a name already used by a Task owned by a different spawner surfaces an
+// error instead of silently suppressing the Slack message as deduplication.
+func TestCreateTaskNameCollisionWithUnrelatedTask(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
+
+	spawner := &kelos.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{Name: "spawner-b", Namespace: "default", UID: "uid-b"},
+		Spec: kelos.TaskSpawnerSpec{
+			TaskTemplate: kelos.TaskTemplate{
+				Type:           "claude-code",
+				Credentials:    &kelos.Credentials{Type: kelos.CredentialTypeNone},
+				NameTemplate:   "shared-name",
+				PromptTemplate: "{{.Body}}",
+			},
+		},
+	}
+	msg := &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "hi", Body: "hi", Timestamp: "1.1"}
+
+	unrelated := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "shared-name",
+			Namespace: "default",
+			Labels:    map[string]string{"kelos.dev/taskspawner": "spawner-a"},
+		},
+		Spec: kelos.TaskSpec{Type: "claude-code", Prompt: "other"},
+	}
+
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(unrelated).Build()
+	tb, err := taskbuilder.NewTaskBuilder(nil)
+	if err != nil {
+		t.Fatalf("NewTaskBuilder: %v", err)
+	}
+	h := &SlackHandler{client: cl, log: logr.Discard(), taskBuilder: tb}
+
+	if err := h.createTask(context.Background(), spawner, msg); err == nil {
+		t.Fatal("expected error on name collision with an unrelated Task, got nil")
+	}
+}
+
 func TestHandleMemberJoinedChannelIgnoresOtherUsers(t *testing.T) {
 	h := &SlackHandler{
 		log:         logr.Discard(),

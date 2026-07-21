@@ -214,6 +214,62 @@ var _ = Describe("Cron TaskSpawner", func() {
 		}, 3*time.Minute, 2*time.Second).ShouldNot(BeEmpty())
 	})
 
+	It("should deduplicate Tasks across cron ticks when nameTemplate is deterministic", func() {
+		By("creating OAuth credentials secret")
+		f.CreateSecret("claude-credentials",
+			"CLAUDE_CODE_OAUTH_TOKEN="+oauthToken)
+
+		By("creating an every-minute cron TaskSpawner with a constant nameTemplate")
+		// A constant nameTemplate renders the same Task name every tick, so after
+		// the first Task all later ticks must reuse it (owned deduplication)
+		// rather than create duplicates or error.
+		f.CreateTaskSpawner(&kelos.TaskSpawner{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "cron-dedup",
+			},
+			Spec: kelos.TaskSpawnerSpec{
+				When: kelos.When{
+					Cron: &kelos.Cron{
+						Schedule: "* * * * *",
+					},
+				},
+				TaskTemplate: kelos.TaskTemplate{
+					Type:  "claude-code",
+					Model: claudeCodeModel,
+					Credentials: &kelos.Credentials{
+						Type:      kelos.CredentialTypeOAuth,
+						SecretRef: &kelos.SecretReference{Name: "claude-credentials"},
+					},
+					NameTemplate:   "cron-dedup-fixed",
+					PromptTemplate: "Print 'Hello from cron dedup'",
+				},
+			},
+		})
+
+		By("waiting for CronJob to be created")
+		f.WaitForCronJobCreated("cron-dedup")
+
+		By("waiting for the deterministically named Task to be created")
+		Eventually(func() []string {
+			return f.ListTaskNames("kelos.dev/taskspawner=cron-dedup")
+		}, 3*time.Minute, 2*time.Second).Should(ConsistOf("cron-dedup-fixed"))
+
+		By("verifying later cron ticks reuse the same Task instead of creating duplicates")
+		Consistently(func() []string {
+			return f.ListTaskNames("kelos.dev/taskspawner=cron-dedup")
+		}, 75*time.Second, 5*time.Second).Should(ConsistOf("cron-dedup-fixed"))
+
+		By("verifying the spawner stayed healthy (owned dedup, not an error)")
+		Expect(f.GetTaskSpawnerPhase("cron-dedup")).To(Equal("Running"))
+		spawner, err := f.KelosClientset.ApiV1alpha2().TaskSpawners(f.Namespace).Get(context.TODO(), "cron-dedup", metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		for _, c := range spawner.Status.Conditions {
+			if c.Type == "DiscoveryError" {
+				Expect(string(c.Status)).To(Equal("False"), "dedup must not raise DiscoveryError")
+			}
+		}
+	})
+
 	It("should be accessible via CLI with cron source info", func() {
 		By("creating a cron TaskSpawner")
 		f.CreateTaskSpawner(&kelos.TaskSpawner{

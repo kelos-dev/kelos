@@ -123,6 +123,28 @@ func TestBuildTaskFromTaskSpawnerMissingTemplateValue(t *testing.T) {
 	}
 }
 
+func TestBuildTaskFromTaskSpawnerIgnoresNameTemplate(t *testing.T) {
+	spawner := testManualTaskSpawner("webhook-spawner")
+	spawner.Spec.When.GenericWebhook = &kelos.GenericWebhook{Source: "alerts"}
+	spawner.Spec.TaskTemplate.PromptTemplate = "Investigate {{.Title}}"
+	// A nameTemplate referencing a variable a manual run does not provide must
+	// not break the manual run, and the explicit --name must win.
+	spawner.Spec.TaskTemplate.NameTemplate = "responder-pr-{{.Number}}"
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(spawner).Build()
+
+	task, err := buildTaskFromTaskSpawner(context.Background(), cl, "default", spawner.Name, runFromTaskSpawnerOptions{
+		Name:   "manual-webhook-task",
+		Values: map[string]interface{}{"Title": "API latency"},
+		Now:    time.Date(2026, 7, 10, 1, 2, 3, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("buildTaskFromTaskSpawner: %v", err)
+	}
+	if task.Name != "manual-webhook-task" {
+		t.Errorf("task name = %q, want %q (nameTemplate should be ignored for manual runs)", task.Name, "manual-webhook-task")
+	}
+}
+
 func TestBuildTaskFromTaskSpawnerPreservesIntegerValues(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "values.yaml")
 	if err := os.WriteFile(path, []byte("Number: 42\n"), 0o600); err != nil {

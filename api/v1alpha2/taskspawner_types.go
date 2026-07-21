@@ -901,7 +901,7 @@ type TaskTemplate struct {
 	// Available variables (all sources): {{.ID}}, {{.Title}}, {{.Kind}}
 	// GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
 	// GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}
-	// GitHub webhook sources: {{.Event}}, {{.Action}}, {{.Sender}}, {{.Ref}}, {{.Repository}}, {{.Payload}} (full payload access)
+	// GitHub webhook sources: {{.Event}}, {{.Action}}, {{.Sender}}, {{.Ref}}, {{.Repository}}, {{.Payload}} (full payload access); issue and pull request events also expose {{.Number}}, {{.Title}}, {{.Body}}, {{.URL}} (plus {{.Branch}} for pull requests)
 	// Linear webhook sources: {{.Type}}, {{.Action}}, {{.State}}, {{.Labels}}, {{.IssueID}}, {{.Payload}}
 	// Cron sources: {{.Time}}, {{.Schedule}}
 	// When contextSources are configured: .Context.NAME for each source
@@ -912,12 +912,45 @@ type TaskTemplate struct {
 	// Available variables (all sources): {{.ID}}, {{.Title}}, {{.Kind}}
 	// GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
 	// GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}
-	// GitHub webhook sources: {{.Event}}, {{.Action}}, {{.Sender}}, {{.Ref}}, {{.Repository}}, {{.Payload}} (full payload access)
+	// GitHub webhook sources: {{.Event}}, {{.Action}}, {{.Sender}}, {{.Ref}}, {{.Repository}}, {{.Payload}} (full payload access); issue and pull request events also expose {{.Number}}, {{.Title}}, {{.Body}}, {{.URL}} (plus {{.Branch}} for pull requests)
 	// Linear webhook sources: {{.Type}}, {{.Action}}, {{.State}}, {{.Labels}}, {{.IssueID}}, {{.Payload}}
 	// Cron sources: {{.Time}}, {{.Schedule}}
 	// When contextSources are configured: .Context.NAME for each source
 	// +optional
 	PromptTemplate string `json:"promptTemplate,omitempty"`
+
+	// NameTemplate is a Go text/template for rendering the spawned Task's name.
+	// The rendered value is lowercased and sanitized into a valid Kubernetes
+	// resource name (invalid characters replaced with "-") and truncated to 63
+	// characters. When unset, the spawner falls back to its default naming.
+	// Use a deterministic template (e.g. "{{.Number}}") to deduplicate Tasks:
+	// events that render to the same name reuse the existing Task instead of
+	// creating a duplicate, but only when that Task is owned by this TaskSpawner.
+	// This is the recommended way to avoid duplicate Tasks from multiple GitHub
+	// webhook deliveries for the same pull request.
+	// Task names are unique across the whole namespace, so the rendered name must
+	// be namespace-unique: a collision with a Task owned by a different
+	// TaskSpawner (or any unrelated Task) is an error, not deduplication. Include
+	// a TaskSpawner-specific prefix, and — because a webhook endpoint may receive
+	// events from multiple repositories where a bare number collides across
+	// repos — a repository identifier (e.g. {{.Repository}}) or a scoped source
+	// (when.githubWebhook.repository).
+	// Because the name is truncated to 63 characters, keep the identifying part
+	// of the template (e.g. the number) within the first 63 characters: names
+	// that differ only past that point collapse to the same value and would
+	// reuse a single Task for distinct work items.
+	// Available variables (all sources): {{.ID}}, {{.Title}}, {{.Kind}}
+	// GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
+	// GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}
+	// GitHub webhook sources: {{.Event}}, {{.Action}}, {{.Sender}}, {{.Ref}}, {{.Repository}}, {{.Payload}} (full payload access); issue and pull request events also expose {{.Number}}, {{.Title}}, {{.Body}}, {{.URL}} (plus {{.Branch}} for pull requests)
+	// Linear webhook sources: {{.Type}}, {{.Action}}, {{.State}}, {{.Labels}}, {{.IssueID}}, {{.Payload}}
+	// Cron sources: {{.Time}}, {{.Schedule}}
+	// Context sources (.Context.NAME) are not available to nameTemplate on any
+	// source: a Task's identity must not depend on mutable external data, so
+	// context is excluded from name rendering and a nameTemplate that references
+	// .Context fails to render.
+	// +optional
+	NameTemplate string `json:"nameTemplate,omitempty"`
 
 	// TTLSecondsAfterFinished limits the lifetime of a Task that has finished
 	// execution (either Succeeded or Failed). If set, spawned Tasks will be
@@ -949,7 +982,8 @@ type TaskTemplate struct {
 
 	// ContextSources declares external data sources to query before task
 	// creation. Each source's response is available as .Context.NAME
-	// in promptTemplate, branch, and metadata templates. Sources are
+	// in promptTemplate, branch, and metadata templates (but not in
+	// nameTemplate, whose output must not depend on mutable data). Sources are
 	// fetched in parallel during the discovery cycle.
 	// +optional
 	// +kubebuilder:validation:MaxItems=8

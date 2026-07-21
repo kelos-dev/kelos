@@ -104,8 +104,40 @@ The webhook server validates GitHub signatures using HMAC-SHA256:
 
 ### Idempotency
 - Webhook deliveries are tracked by `X-GitHub-Delivery` header
-- Duplicate deliveries (e.g., retries) are ignored
+- Duplicate deliveries (e.g., retries) with the same delivery ID are ignored
 - Delivery cache entries expire after 24 hours
+
+### Deduplicating Tasks for the Same Pull Request
+By default each delivery produces a Task with a unique, delivery-derived name, so
+GitHub sending several distinct deliveries for one PR (for example an `opened`
+event plus one `labeled` event per label, all within a second) creates one Task
+per delivery. Set `taskTemplate.nameTemplate` to a deterministic value to collapse
+these into a single Task (see the `pr-burst-responder` spawner in
+[`taskspawner.yaml`](./taskspawner.yaml)):
+
+```yaml
+taskTemplate:
+  # Deliveries that render to the same name reuse the existing Task instead of
+  # creating a duplicate. This spawner is scoped to one repository
+  # (when.githubWebhook.repository), so a bare PR number is a stable, unique
+  # identity. The rendered value is lowercased, sanitized to a valid resource
+  # name, and truncated to 63 characters.
+  nameTemplate: "pr-burst-responder-{{.Number}}"
+```
+
+Once a Task with the rendered name exists, later deliveries that render to the
+same name are skipped. Choose a template that identifies the underlying work item
+(the PR number) rather than the delivery, and use it only for burst events for the
+same PR state — not for repeatable `issue_comment`/`pull_request_review` commands,
+which want a fresh Task each time (leave `nameTemplate` unset there).
+
+The rendered name must be unique across everything the endpoint serves. Scope the
+spawner to one repository (as above), or include a repository qualifier — but put
+the bounded PR number first, e.g. `pr-{{.Number}}-{{.Repository}}`, because the
+name is truncated to 63 characters: an unbounded repository value placed first can
+fill the budget before the number and collapse every PR in that repo to one name.
+`.Context.NAME` values are not available to `nameTemplate` (a Task's identity must
+not depend on mutable external data).
 
 ### Fault Isolation
 - Per-source webhook servers provide fault isolation

@@ -27,7 +27,7 @@ RUN ARCH=$(dpkg --print-architecture) \
 
 ENV PATH="/usr/local/go/bin:${PATH}"
 
-ARG CODEX_VERSION=0.144.5
+ARG CODEX_VERSION=0.144.6
 RUN npm install -g @openai/codex@${CODEX_VERSION}
 
 COPY codex/kelos_entrypoint.sh /kelos_entrypoint.sh

@@ -90,15 +90,17 @@ func (c *sessionSocket) WriteMessage(messageType int, data []byte) error {
 }
 
 type sessionSummary struct {
-	Name        string                    `json:"name"`
-	Namespace   string                    `json:"namespace"`
-	UID         string                    `json:"uid,omitempty"`
-	Provider    string                    `json:"provider"`
-	Phase       kelos.SessionPhase        `json:"phase,omitempty"`
-	Active      *bool                     `json:"active,omitempty"`
-	Message     string                    `json:"message,omitempty"`
-	Branch      string                    `json:"branch,omitempty"`
-	PullRequest *kelos.SessionPullRequest `json:"pullRequest,omitempty"`
+	Name           string                    `json:"name"`
+	Namespace      string                    `json:"namespace"`
+	UID            string                    `json:"uid,omitempty"`
+	Provider       string                    `json:"provider"`
+	Phase          kelos.SessionPhase        `json:"phase,omitempty"`
+	Active         *bool                     `json:"active,omitempty"`
+	CreatedAt      *metav1.Time              `json:"createdAt,omitempty"`
+	LastActivityAt *metav1.Time              `json:"lastActivityAt,omitempty"`
+	Message        string                    `json:"message,omitempty"`
+	Branch         string                    `json:"branch,omitempty"`
+	PullRequest    *kelos.SessionPullRequest `json:"pullRequest,omitempty"`
 }
 
 type sessionOptions struct {
@@ -553,14 +555,19 @@ func (s *Server) deleteSession(writer http.ResponseWriter, request *http.Request
 
 func summarize(session *kelos.Session) sessionSummary {
 	summary := sessionSummary{
-		Name:        session.Name,
-		Namespace:   session.Namespace,
-		UID:         string(session.UID),
-		Provider:    session.Spec.Worker.Type,
-		Phase:       session.Status.Phase,
-		Message:     session.Status.Message,
-		Branch:      session.Status.Branch,
-		PullRequest: session.Status.PullRequest,
+		Name:           session.Name,
+		Namespace:      session.Namespace,
+		UID:            string(session.UID),
+		Provider:       session.Spec.Worker.Type,
+		Phase:          session.Status.Phase,
+		LastActivityAt: session.Status.LastActivityTime,
+		Message:        session.Status.Message,
+		Branch:         session.Status.Branch,
+		PullRequest:    session.Status.PullRequest,
+	}
+	if !session.CreationTimestamp.IsZero() {
+		createdAt := session.CreationTimestamp
+		summary.CreatedAt = &createdAt
 	}
 	if condition := sessionActiveCondition(session); condition != nil && condition.Status != metav1.ConditionUnknown {
 		active := condition.Status == metav1.ConditionTrue

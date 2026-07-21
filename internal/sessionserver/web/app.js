@@ -294,6 +294,66 @@ function sessionDisplayStatus(session) {
   return session.phase;
 }
 
+function parseSessionTimestamp(value) {
+  const milliseconds = Date.parse(value || '');
+  return Number.isNaN(milliseconds) ? null : new Date(milliseconds);
+}
+
+function sessionTimestamp(session) {
+  const lastActivity = parseSessionTimestamp(session.lastActivityAt);
+  if (lastActivity) return {date: lastActivity, activity: true};
+  const created = parseSessionTimestamp(session.createdAt);
+  return created ? {date: created, activity: false} : null;
+}
+
+function formatSessionRecency(session, compact = false, now = Date.now()) {
+  if (session.active === true) return compact ? 'Now' : 'Active now';
+  const timestamp = sessionTimestamp(session);
+  if (!timestamp) return '';
+  const elapsed = Math.max(0, now - timestamp.date.getTime());
+  const minutes = Math.floor(elapsed / 60000);
+  let value;
+  if (minutes < 1) {
+    value = compact ? 'Now' : 'just now';
+  } else if (minutes < 60) {
+    value = compact ? `${minutes}m` : `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+  } else {
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) {
+      value = compact ? `${hours}h` : `${hours} hour${hours === 1 ? '' : 's'} ago`;
+    } else {
+      const days = Math.floor(hours / 24);
+      if (days < 7) {
+        value = compact ? `${days}d` : `${days} day${days === 1 ? '' : 's'} ago`;
+      } else {
+        const currentYear = new Date(now).getFullYear();
+        value = new Intl.DateTimeFormat(undefined, {
+          month: 'short',
+          day: 'numeric',
+          ...(timestamp.date.getFullYear() === currentYear ? {} : {year: 'numeric'}),
+        }).format(timestamp.date);
+      }
+    }
+  }
+  if (compact) return value;
+  return `${timestamp.activity ? 'Last active' : 'Created'} ${value}`;
+}
+
+function createSessionTimestamp(session, compact, className) {
+  const timestamp = sessionTimestamp(session);
+  const label = formatSessionRecency(session, compact);
+  if (!timestamp || !label) return null;
+  const element = document.createElement('time');
+  element.className = className;
+  element.dateTime = timestamp.date.toISOString();
+  element.textContent = label;
+  const exact = new Intl.DateTimeFormat(undefined, {dateStyle: 'medium', timeStyle: 'long'}).format(timestamp.date);
+  const exactLabel = `${session.active === true && timestamp.activity ? 'Active since' : timestamp.activity ? 'Last active' : 'Created'} ${exact}`;
+  element.title = exactLabel;
+  element.setAttribute('aria-label', exactLabel);
+  return element;
+}
+
 function safeHTTPURL(value) {
   if (!value) return null;
   try {
@@ -347,9 +407,14 @@ function renderSessions() {
     const displayStatus = sessionDisplayStatus(session);
     dot.className = `phase-dot ${String(displayStatus).toLowerCase()}`;
     const text = document.createElement('span');
+    const titleRow = document.createElement('div');
+    titleRow.className = 'session-item-title-row';
     const name = document.createElement('div');
     name.className = 'session-item-name';
     name.textContent = session.name;
+    titleRow.append(name);
+    const timestamp = createSessionTimestamp(session, true, 'session-item-time');
+    if (timestamp) titleRow.append(timestamp);
     const meta = document.createElement('div');
     meta.className = 'session-item-meta';
     const provider = document.createElement('span');
@@ -360,7 +425,7 @@ function renderSessions() {
     const activity = document.createElement('span');
     activity.textContent = `· ${displayStatus}`;
     meta.append(provider, namespace, activity);
-    text.append(name, meta);
+    text.append(titleRow, meta);
     if (session.branch) {
       const branch = document.createElement('div');
       branch.className = 'session-item-branch';
@@ -896,6 +961,13 @@ function renderHeader() {
     separator.className = 'session-meta-separator';
     separator.textContent = '·';
     elements.meta.append(separator, link);
+  }
+  const timestamp = createSessionTimestamp(session, false, 'session-meta-time');
+  if (timestamp) {
+    const separator = document.createElement('span');
+    separator.className = 'session-meta-separator';
+    separator.textContent = '·';
+    elements.meta.append(separator, timestamp);
   }
   if (session.phase !== 'Ready') {
     setConnection(session.phase === 'Failed' ? 'error' : 'connecting', session.phase || 'Pending');

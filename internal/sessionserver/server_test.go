@@ -640,12 +640,15 @@ func TestSessionAPIHappyPath(t *testing.T) {
 }
 
 func TestSummarizeIncludesRuntimeStatus(t *testing.T) {
+	createdAt := metav1.NewTime(time.Now().Add(-time.Hour))
+	lastActivityAt := metav1.NewTime(time.Now().Add(-time.Minute))
 	session := &kelos.Session{
-		ObjectMeta: metav1.ObjectMeta{Name: "chat", Namespace: "default"},
+		ObjectMeta: metav1.ObjectMeta{Name: "chat", Namespace: "default", CreationTimestamp: createdAt},
 		Spec:       kelos.SessionSpec{Worker: kelos.WorkerSpec{Type: "codex"}},
 		Status: kelos.SessionStatus{
-			Phase:  kelos.SessionPhaseReady,
-			Branch: "feature/session-status",
+			Phase:            kelos.SessionPhaseReady,
+			LastActivityTime: &lastActivityAt,
+			Branch:           "feature/session-status",
 			Conditions: []metav1.Condition{{
 				Type:   kelos.SessionConditionActive,
 				Status: metav1.ConditionTrue,
@@ -661,6 +664,12 @@ func TestSummarizeIncludesRuntimeStatus(t *testing.T) {
 	summary := summarize(session)
 	if summary.Active == nil || !*summary.Active || summary.Branch != session.Status.Branch || summary.PullRequest == nil || *summary.PullRequest != *session.Status.PullRequest {
 		t.Fatalf("summarize() = %#v", summary)
+	}
+	if summary.CreatedAt == nil || !summary.CreatedAt.Equal(&createdAt) {
+		t.Fatalf("summarize() CreatedAt = %v, want %v", summary.CreatedAt, createdAt)
+	}
+	if summary.LastActivityAt == nil || !summary.LastActivityAt.Equal(&lastActivityAt) {
+		t.Fatalf("summarize() LastActivityAt = %v, want %v", summary.LastActivityAt, lastActivityAt)
 	}
 }
 
@@ -755,6 +764,8 @@ func TestSessionViewsIncludeRuntimeStatus(t *testing.T) {
 		"pull request link target":   `link.target = '_blank';`,
 		"sidebar pull request link":  `createPullRequestLink(session.pullRequest, 'session-item-pull-request');`,
 		"header pull request link":   `createPullRequestLink(session.pullRequest, 'session-meta-pull-request');`,
+		"sidebar activity timestamp": `createSessionTimestamp(session, true, 'session-item-time');`,
+		"header activity timestamp":  `createSessionTimestamp(session, false, 'session-meta-time');`,
 	} {
 		if !strings.Contains(string(javascript), expected) {
 			t.Errorf("Session views are missing %s: %s", description, expected)

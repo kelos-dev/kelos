@@ -10,6 +10,7 @@ class TestNode {
     this.children = [];
     this.parent = null;
     this.hidden = false;
+    this.attributes = new Map();
     this.classes = new Set();
     this.classList = {
       add: (...names) => names.forEach((name) => this.classes.add(name)),
@@ -56,6 +57,10 @@ class TestNode {
       if (match) return match;
     }
     return null;
+  }
+
+  setAttribute(name, value) {
+    this.attributes.set(name, String(value));
   }
 
   set textContent(value) {
@@ -141,6 +146,7 @@ function applicationSlice(start, end) {
 }
 
 vm.runInThisContext(applicationSlice('function sessionKey', 'function savePromptDraft'), {filename: 'app.js'});
+vm.runInThisContext(applicationSlice('function parseSessionTimestamp', 'function safeHTTPURL'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function selectSession', 'function renderHeader'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function ensureConversation', 'function trimURLSuffix'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function finishHistoryReplay', 'function handleEvent'), {filename: 'app.js'});
@@ -239,9 +245,37 @@ function testReselectRefreshesStatusPlaceholder() {
   assert.equal(socketConnections, 0);
 }
 
+function testSessionTimestampFormatting() {
+  const now = Date.parse('2026-07-21T12:00:00Z');
+  const active = {active: true, lastActivityAt: '2026-07-21T11:52:00Z'};
+  assert.equal(formatSessionRecency(active, true, now), 'Now');
+  assert.equal(formatSessionRecency(active, false, now), 'Active now');
+
+  const idle = {active: false, lastActivityAt: '2026-07-21T11:52:00Z', createdAt: '2026-07-20T12:00:00Z'};
+  assert.equal(formatSessionRecency(idle, true, now), '8m');
+  assert.equal(formatSessionRecency(idle, false, now), 'Last active 8 minutes ago');
+
+  const pending = {createdAt: '2026-07-21T09:00:00Z'};
+  assert.equal(formatSessionRecency(pending, true, now), '3h');
+  assert.equal(formatSessionRecency(pending, false, now), 'Created 3 hours ago');
+  assert.equal(formatSessionRecency({}, false, now), '');
+}
+
+function testSessionTimestampElement() {
+  const session = {active: false, lastActivityAt: new Date(Date.now() - 60000).toISOString()};
+  const timestamp = createSessionTimestamp(session, true, 'session-item-time');
+  assert.equal(timestamp.tag, 'time');
+  assert.equal(timestamp.className, 'session-item-time');
+  assert.equal(timestamp.dateTime, session.lastActivityAt);
+  assert.match(timestamp.title, /^Last active /);
+  assert.equal(timestamp.attributes.get('aria-label'), timestamp.title);
+}
+
 testSessionViewSaveAndRestore();
 testSessionViewReset();
 testHistoryReplayCompletion();
 testReselectRefreshesStatusPlaceholder();
+testSessionTimestampFormatting();
+testSessionTimestampElement();
 
 process.stdout.write('Session history tests passed\n');

@@ -238,6 +238,12 @@ Selecting a Session in the web chat opens it at the latest retained message.
 Reconnecting preserves an intentional upward scroll position and shows the
 history that remains available on the Session workspace.
 
+The Session sidebar shows compact relative activity times, and the selected
+Session header shows whether it is active now, when it was last active, or when
+it was created if runtime activity has not been reported. Hover over the
+timestamp to see the exact time in the browser's locale and time zone; the
+exact value is also available to assistive technology.
+
 Web messages render safe Markdown: paragraphs and headings; emphasis,
 strong text, strikethrough, and inline code; ordered, unordered, and task lists;
 blockquotes and horizontal rules; HTTP(S) links; fenced or indented code blocks;

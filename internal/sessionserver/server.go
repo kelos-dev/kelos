@@ -27,6 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/uuid"
 	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -36,6 +37,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
+	"github.com/kelos-dev/kelos/internal/sessionreset"
 )
 
 const (
@@ -101,6 +103,7 @@ type sessionSummary struct {
 	Message        string                    `json:"message,omitempty"`
 	Branch         string                    `json:"branch,omitempty"`
 	PullRequest    *kelos.SessionPullRequest `json:"pullRequest,omitempty"`
+	Resetting      bool                      `json:"resetting,omitempty"`
 }
 
 type sessionOptions struct {
@@ -305,6 +308,10 @@ func (s *Server) api(writer http.ResponseWriter, request *http.Request) {
 	namespace, name := parts[1], parts[2]
 	if len(parts) == 4 && parts[3] == "connect" && request.Method == http.MethodGet {
 		s.connectSession(writer, request, namespace, name)
+		return
+	}
+	if len(parts) == 4 && parts[3] == "reset" && request.Method == http.MethodPost {
+		s.resetSession(writer, request, namespace, name)
 		return
 	}
 	if len(parts) != 3 {
@@ -553,6 +560,29 @@ func (s *Server) deleteSession(writer http.ResponseWriter, request *http.Request
 	writer.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) resetSession(writer http.ResponseWriter, request *http.Request, namespace, name string) {
+	session, _, err := sessionreset.Request(
+		request.Context(),
+		s.client,
+		client.ObjectKey{Namespace: namespace, Name: name},
+		string(uuid.NewUUID()),
+	)
+	if err != nil {
+		status := http.StatusInternalServerError
+		switch {
+		case apierrors.IsNotFound(err):
+			status = http.StatusNotFound
+		case apierrors.IsForbidden(err):
+			status = http.StatusForbidden
+		case apierrors.IsConflict(err):
+			status = http.StatusConflict
+		}
+		writeError(writer, status, err.Error())
+		return
+	}
+	writeJSON(writer, http.StatusAccepted, summarize(session))
+}
+
 func summarize(session *kelos.Session) sessionSummary {
 	summary := sessionSummary{
 		Name:           session.Name,
@@ -564,6 +594,7 @@ func summarize(session *kelos.Session) sessionSummary {
 		Message:        session.Status.Message,
 		Branch:         session.Status.Branch,
 		PullRequest:    session.Status.PullRequest,
+		Resetting:      session.Annotations[sessionreset.RequestAnnotation] != "",
 	}
 	if !session.CreationTimestamp.IsZero() {
 		createdAt := session.CreationTimestamp

@@ -286,11 +286,12 @@ button { color: inherit; }
   .mobile-only { display: grid; }
   .brand-row .mobile-only { margin-left: auto; }
   .conversation { height: 100%; height: 100dvh; }
-  .conversation-header { display: grid; grid-template-areas: "menu heading delete" "tabs tabs connection"; grid-template-columns: 48px minmax(0, 1fr) 48px; gap: 8px 10px; padding: calc(8px + env(safe-area-inset-top)) calc(10px + env(safe-area-inset-right)) 9px calc(10px + env(safe-area-inset-left)); }
+  .conversation-header { display: grid; grid-template-areas: "menu heading reset delete" "tabs tabs connection connection"; grid-template-columns: 48px minmax(0, 1fr) 48px 48px; gap: 8px 10px; padding: calc(8px + env(safe-area-inset-top)) calc(10px + env(safe-area-inset-right)) 9px calc(10px + env(safe-area-inset-left)); }
   #open-sidebar { grid-area: menu; }
   .session-heading { grid-area: heading; }
   .header-actions { display: contents; }
   .view-tabs { grid-area: tabs; width: fit-content; }
+  #reset-session { grid-area: reset; }
   #delete-session { grid-area: delete; }
   .connection-pill { grid-area: connection; width: 48px; height: 48px; max-width: 48px; justify-content: center; justify-self: end; overflow: hidden; padding: 0; color: transparent; font-size: 0; gap: 0; }
   .icon-button { width: 48px; height: 48px; }

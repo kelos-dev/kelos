@@ -43,7 +43,7 @@ func newSessionCommand(cfg *ClientConfig) *cobra.Command {
 			return cmd.Help()
 		},
 	}
-	command.AddCommand(newSessionConnectCommand(cfg))
+	command.AddCommand(newSessionConnectCommand(cfg), newSessionResetCommand(cfg))
 	return command
 }
 

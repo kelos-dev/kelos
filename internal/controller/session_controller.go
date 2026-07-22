@@ -27,6 +27,7 @@ import (
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/githubapp"
+	"github.com/kelos-dev/kelos/internal/sessionreset"
 	"github.com/kelos-dev/kelos/internal/sessionupdate"
 )
 
@@ -60,7 +61,7 @@ type SessionReconciler struct {
 // +kubebuilder:rbac:groups=kelos.dev,resources=sessions,verbs=get;list;watch;patch
 // +kubebuilder:rbac:groups=kelos.dev,resources=sessions/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;delete
-// +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;patch
+// +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;delete;patch
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update
@@ -85,17 +86,23 @@ func (r *SessionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	workloadName := sessionWorkloadName(&session)
 	var statefulSet appsv1.StatefulSet
 	err := r.Get(ctx, client.ObjectKey{Namespace: session.Namespace, Name: workloadName}, &statefulSet)
-	if apierrors.IsNotFound(err) {
-		return r.createSessionStatefulSet(ctx, &session)
-	}
-	if err != nil {
+	statefulSetMissing := apierrors.IsNotFound(err)
+	if err != nil && !statefulSetMissing {
 		logger.Error(err, "Unable to fetch Session StatefulSet", "session", session.Name)
 		return ctrl.Result{}, err
 	}
-
-	if !metav1.IsControlledBy(&statefulSet, &session) {
+	if !statefulSetMissing && !metav1.IsControlledBy(&statefulSet, &session) {
 		message := fmt.Sprintf("StatefulSet %q already exists and is not controlled by this Session", statefulSet.Name)
 		return ctrl.Result{}, r.updateSessionStatus(ctx, &session, nil, kelos.SessionPhaseFailed, message, "StatefulSetConflict")
+	}
+	if session.Annotations[sessionreset.RequestAnnotation] != "" {
+		if statefulSetMissing {
+			return r.reconcileSessionReset(ctx, &session, nil)
+		}
+		return r.reconcileSessionReset(ctx, &session, &statefulSet)
+	}
+	if apierrors.IsNotFound(err) {
+		return r.createSessionStatefulSet(ctx, &session)
 	}
 	if statefulSet.DeletionTimestamp != nil {
 		return ctrl.Result{}, r.updateSessionStatus(ctx, &session, nil, kelos.SessionPhasePending, "Session StatefulSet is terminating and will be recreated", "StatefulSetTerminating")
@@ -152,7 +159,7 @@ func (r *SessionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, err
 	}
 	result := ctrl.Result{}
-	if next, err := r.refreshSessionGitHubAppTokenIfNeeded(ctx, &session, &pod); err != nil {
+	if next, err := r.refreshSessionGitHubAppTokenIfNeeded(ctx, &session, &pod.Spec); err != nil {
 		logger.Error(err, "Unable to refresh Session GitHub App token", "session", session.Name)
 		result.RequeueAfter = tokenRefreshRetryInterval
 	} else if next > 0 {
@@ -299,6 +306,240 @@ func (r *SessionReconciler) ensureSessionWorkspaceClaimRetention(ctx context.Con
 	statefulSet.Spec.PersistentVolumeClaimRetentionPolicy = desired
 	if err := r.Patch(ctx, statefulSet, client.MergeFrom(original)); err != nil {
 		return fmt.Errorf("patching Session StatefulSet %q workspace claim retention: %w", statefulSet.Name, err)
+	}
+	return nil
+}
+
+func (r *SessionReconciler) reconcileSessionReset(
+	ctx context.Context,
+	session *kelos.Session,
+	statefulSet *appsv1.StatefulSet,
+) (ctrl.Result, error) {
+	requestID := session.Annotations[sessionreset.RequestAnnotation]
+	state := sessionreset.State{RequestID: requestID, Phase: sessionreset.PhaseStopping}
+	if value := session.Annotations[sessionreset.StateAnnotation]; value != "" {
+		current, err := sessionreset.DecodeState(value)
+		if err != nil {
+			message := fmt.Sprintf("Session reset state is invalid: %v", err)
+			_ = r.updateSessionStatus(ctx, session, nil, kelos.SessionPhaseFailed, message, "ResetStateInvalid")
+			return ctrl.Result{}, err
+		}
+		if current.RequestID == requestID {
+			state = current
+		}
+	}
+	if value, err := sessionreset.EncodeState(state); err != nil {
+		return ctrl.Result{}, err
+	} else if session.Annotations[sessionreset.StateAnnotation] != value {
+		if err := r.setSessionResetState(ctx, session, value); err != nil {
+			return ctrl.Result{}, err
+		}
+		if r.Recorder != nil {
+			r.Recorder.Event(session, corev1.EventTypeNormal, "ResetStarted", "Started resetting Session workspace")
+		}
+	}
+
+	switch state.Phase {
+	case sessionreset.PhaseStopping:
+		if err := r.updateSessionStatus(ctx, session, nil, kelos.SessionPhasePending, "Session Pod is stopping for workspace reset", "ResetStopping"); err != nil {
+			return ctrl.Result{}, err
+		}
+		stopped, err := r.stopSessionForReset(ctx, session, statefulSet)
+		if err != nil || !stopped {
+			return ctrl.Result{RequeueAfter: 2 * time.Second}, err
+		}
+		state.Phase = sessionreset.PhaseDeletingStorage
+		value, err := sessionreset.EncodeState(state)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if err := r.setSessionResetState(ctx, session, value); err != nil {
+			return ctrl.Result{}, err
+		}
+		fallthrough
+
+	case sessionreset.PhaseDeletingStorage:
+		if err := r.updateSessionStatus(ctx, session, nil, kelos.SessionPhasePending, "Session workspace storage is being deleted", "ResetDeletingStorage"); err != nil {
+			return ctrl.Result{}, err
+		}
+		stopped, err := r.stopSessionForReset(ctx, session, statefulSet)
+		if err != nil || !stopped {
+			return ctrl.Result{RequeueAfter: 2 * time.Second}, err
+		}
+		deleted, err := r.deleteSessionWorkspaceForReset(ctx, session, statefulSet)
+		if err != nil || !deleted {
+			return ctrl.Result{RequeueAfter: 2 * time.Second}, err
+		}
+		state.Phase = sessionreset.PhaseStarting
+		value, err := sessionreset.EncodeState(state)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if err := r.setSessionResetState(ctx, session, value); err != nil {
+			return ctrl.Result{}, err
+		}
+		fallthrough
+
+	case sessionreset.PhaseStarting:
+		return r.startSessionAfterReset(ctx, session, statefulSet)
+	default:
+		return ctrl.Result{}, fmt.Errorf("resetting Session %q: unsupported phase %q", session.Name, state.Phase)
+	}
+}
+
+func (r *SessionReconciler) stopSessionForReset(ctx context.Context, session *kelos.Session, statefulSet *appsv1.StatefulSet) (bool, error) {
+	if statefulSet != nil && statefulSet.DeletionTimestamp == nil {
+		if err := r.setSessionReplicas(ctx, statefulSet, 0); err != nil {
+			return false, err
+		}
+	}
+
+	var pod corev1.Pod
+	key := client.ObjectKey{Namespace: session.Namespace, Name: sessionWorkloadName(session) + "-0"}
+	if err := r.Get(ctx, key, &pod); apierrors.IsNotFound(err) {
+		return true, nil
+	} else if err != nil {
+		return false, fmt.Errorf("getting Session Pod %q for reset: %w", key.Name, err)
+	}
+	if statefulSet != nil {
+		if !metav1.IsControlledBy(&pod, statefulSet) {
+			return false, fmt.Errorf("Session Pod %q is not controlled by StatefulSet %q", pod.Name, statefulSet.Name)
+		}
+	} else if pod.Annotations[sessionNameAnnotation] != session.Name {
+		return false, fmt.Errorf("Pod %q is not associated with Session %q", pod.Name, session.Name)
+	}
+	if pod.DeletionTimestamp != nil {
+		return false, nil
+	}
+	if err := r.Delete(ctx, &pod, client.Preconditions{UID: &pod.UID}); err != nil && !apierrors.IsNotFound(err) {
+		return false, fmt.Errorf("deleting Session Pod %q for reset: %w", pod.Name, err)
+	}
+	return false, nil
+}
+
+func (r *SessionReconciler) deleteSessionWorkspaceForReset(ctx context.Context, session *kelos.Session, statefulSet *appsv1.StatefulSet) (bool, error) {
+	if session.Spec.VolumeClaimTemplate == nil {
+		return true, nil
+	}
+	claimName := fmt.Sprintf("%s-%s-0", WorkspaceVolumeName, sessionWorkloadName(session))
+	var claim corev1.PersistentVolumeClaim
+	if err := r.Get(ctx, client.ObjectKey{Namespace: session.Namespace, Name: claimName}, &claim); apierrors.IsNotFound(err) {
+		return true, nil
+	} else if err != nil {
+		return false, fmt.Errorf("getting Session workspace PersistentVolumeClaim %q for reset: %w", claimName, err)
+	}
+	owner := metav1.GetControllerOf(&claim)
+	ownedByStatefulSet := owner != nil && owner.APIVersion == appsv1.SchemeGroupVersion.String() &&
+		owner.Kind == "StatefulSet" && owner.Name == sessionWorkloadName(session) &&
+		(statefulSet == nil || owner.UID == statefulSet.UID)
+	if !metav1.IsControlledBy(&claim, session) && !ownedByStatefulSet {
+		return false, fmt.Errorf("Session workspace PersistentVolumeClaim %q is not controlled by Session %q", claim.Name, session.Name)
+	}
+	if claim.DeletionTimestamp != nil {
+		return false, nil
+	}
+	if err := r.Delete(ctx, &claim, client.Preconditions{UID: &claim.UID}); err != nil && !apierrors.IsNotFound(err) {
+		return false, fmt.Errorf("deleting Session workspace PersistentVolumeClaim %q for reset: %w", claim.Name, err)
+	}
+	if r.Recorder != nil {
+		r.Recorder.Eventf(session, corev1.EventTypeNormal, "ResetStorageDeleted", "Deleted workspace PersistentVolumeClaim %s", claim.Name)
+	}
+	return false, nil
+}
+
+func (r *SessionReconciler) startSessionAfterReset(ctx context.Context, session *kelos.Session, statefulSet *appsv1.StatefulSet) (ctrl.Result, error) {
+	if err := r.updateSessionStatus(ctx, session, nil, kelos.SessionPhasePending, "Session Pod is starting with a fresh workspace", "ResetStarting"); err != nil {
+		return ctrl.Result{}, err
+	}
+	if statefulSet == nil {
+		return r.createSessionStatefulSet(ctx, session)
+	}
+	if statefulSet.DeletionTimestamp != nil {
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+	}
+	if err := r.ensureSessionResetStartPrerequisites(ctx, session, statefulSet); err != nil {
+		return ctrl.Result{}, err
+	}
+	if err := r.setSessionReplicas(ctx, statefulSet, 1); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	var pod corev1.Pod
+	key := client.ObjectKey{Namespace: session.Namespace, Name: statefulSet.Name + "-0"}
+	if err := r.Get(ctx, key, &pod); apierrors.IsNotFound(err) {
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+	} else if err != nil {
+		return ctrl.Result{}, fmt.Errorf("getting replacement Session Pod %q after reset: %w", key.Name, err)
+	}
+	if !metav1.IsControlledBy(&pod, statefulSet) {
+		return ctrl.Result{}, fmt.Errorf("replacement Session Pod %q is not controlled by StatefulSet %q", pod.Name, statefulSet.Name)
+	}
+	if pod.DeletionTimestamp != nil {
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+	}
+	phase, message, reason := sessionPhaseForPod(&pod)
+	if err := r.updateSessionStatus(ctx, session, &pod, phase, message, reason); err != nil {
+		return ctrl.Result{}, err
+	}
+	if phase != kelos.SessionPhaseReady {
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+	}
+	if err := r.clearSessionReset(ctx, session); err != nil {
+		return ctrl.Result{}, err
+	}
+	if r.Recorder != nil {
+		r.Recorder.Event(session, corev1.EventTypeNormal, "ResetCompleted", "Completed Session workspace reset")
+	}
+	return ctrl.Result{Requeue: true}, nil
+}
+
+func (r *SessionReconciler) ensureSessionResetStartPrerequisites(ctx context.Context, session *kelos.Session, statefulSet *appsv1.StatefulSet) error {
+	serviceAccountName := statefulSet.Spec.Template.Spec.ServiceAccountName
+	if serviceAccountName == "" {
+		serviceAccountName = sessionRuntimeAccessName(session)
+	}
+	if err := r.ensureSessionRuntimeAccess(ctx, session, serviceAccountName); err != nil {
+		return fmt.Errorf("preparing Session %q runtime access after reset: %w", session.Name, err)
+	}
+	if err := r.ensureSessionService(ctx, session); err != nil {
+		return fmt.Errorf("preparing Session %q governing Service after reset: %w", session.Name, err)
+	}
+	if _, err := r.refreshSessionGitHubAppTokenIfNeeded(ctx, session, &statefulSet.Spec.Template.Spec); err != nil {
+		return fmt.Errorf("preparing Session %q GitHub App token after reset: %w", session.Name, err)
+	}
+	return nil
+}
+
+func (r *SessionReconciler) setSessionReplicas(ctx context.Context, statefulSet *appsv1.StatefulSet, replicas int32) error {
+	if statefulSet.Spec.Replicas != nil && *statefulSet.Spec.Replicas == replicas {
+		return nil
+	}
+	original := statefulSet.DeepCopy()
+	statefulSet.Spec.Replicas = ptr.To(replicas)
+	if err := r.Patch(ctx, statefulSet, client.MergeFrom(original)); err != nil {
+		return fmt.Errorf("scaling Session StatefulSet %q to %d replicas: %w", statefulSet.Name, replicas, err)
+	}
+	return nil
+}
+
+func (r *SessionReconciler) setSessionResetState(ctx context.Context, session *kelos.Session, value string) error {
+	original := session.DeepCopy()
+	if session.Annotations == nil {
+		session.Annotations = map[string]string{}
+	}
+	session.Annotations[sessionreset.StateAnnotation] = value
+	if err := r.Patch(ctx, session, client.MergeFromWithOptions(original, client.MergeFromWithOptimisticLock{})); err != nil {
+		return fmt.Errorf("updating Session %q reset state: %w", session.Name, err)
+	}
+	return nil
+}
+
+func (r *SessionReconciler) clearSessionReset(ctx context.Context, session *kelos.Session) error {
+	original := session.DeepCopy()
+	delete(session.Annotations, sessionreset.RequestAnnotation)
+	delete(session.Annotations, sessionreset.StateAnnotation)
+	if err := r.Patch(ctx, session, client.MergeFromWithOptions(original, client.MergeFromWithOptimisticLock{})); err != nil {
+		return fmt.Errorf("completing Session %q reset: %w", session.Name, err)
 	}
 	return nil
 }
@@ -577,12 +818,12 @@ func (r *SessionReconciler) resolveSessionGitHubAppToken(ctx context.Context, se
 	return resolved, nil
 }
 
-func (r *SessionReconciler) refreshSessionGitHubAppTokenIfNeeded(ctx context.Context, session *kelos.Session, pod *corev1.Pod) (time.Duration, error) {
+func (r *SessionReconciler) refreshSessionGitHubAppTokenIfNeeded(ctx context.Context, session *kelos.Session, podSpec *corev1.PodSpec) (time.Duration, error) {
 	tokenSecretName := sessionGitHubTokenSecretName(session.Name)
 	var tokenSecret corev1.Secret
 	if err := r.Get(ctx, client.ObjectKey{Namespace: session.Namespace, Name: tokenSecretName}, &tokenSecret); err != nil {
 		if apierrors.IsNotFound(err) {
-			if !sessionPodUsesSecret(pod, tokenSecretName) {
+			if !sessionPodSpecUsesSecret(podSpec, tokenSecretName) {
 				return 0, nil
 			}
 			return r.recreateSessionGitHubAppToken(ctx, session)
@@ -637,8 +878,8 @@ func (r *SessionReconciler) refreshSessionGitHubAppTokenIfNeeded(ctx context.Con
 	return time.Until(response.ExpiresAt.Add(-tokenRefreshMargin)), nil
 }
 
-func sessionPodUsesSecret(pod *corev1.Pod, name string) bool {
-	for _, volume := range pod.Spec.Volumes {
+func sessionPodSpecUsesSecret(podSpec *corev1.PodSpec, name string) bool {
+	for _, volume := range podSpec.Volumes {
 		if volume.Name == GitHubTokenVolumeName && volume.Secret != nil && volume.Secret.SecretName == name {
 			return true
 		}

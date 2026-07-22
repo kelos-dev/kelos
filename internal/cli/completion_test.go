@@ -26,6 +26,7 @@ func TestValidArgsFunctionWired(t *testing.T) {
 		{"delete session", []string{"delete", "session"}},
 		{"logs", []string{"logs"}},
 		{"session connect", []string{"session", "connect"}},
+		{"session reset", []string{"session", "reset"}},
 	}
 
 	for _, tt := range tests {

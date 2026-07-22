@@ -205,8 +205,9 @@ matching volume. The claim survives Pod, StatefulSet, and scaling changes and
 is deleted with its owning Session; the StorageClass reclaim policy controls
 the underlying PersistentVolume.
 
-The shared Session server serves the web application and bridges each chat to
-its Session Pod through Kubernetes exec. It is disabled by default and requires
+The shared Session server serves the web application, bridges each chat to its
+Session Pod through Kubernetes exec, and can request a destructive Session
+workspace reset after user confirmation. It is disabled by default and requires
 a non-empty static token in an existing Secret:
 
 ```bash

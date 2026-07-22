@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
+	"github.com/kelos-dev/kelos/internal/sessionreset"
 	"github.com/kelos-dev/kelos/internal/sessionruntime"
 	"github.com/kelos-dev/kelos/internal/sessionupdate"
 	"github.com/kelos-dev/kelos/test/e2e/framework"
@@ -51,7 +52,7 @@ var portForwardAddressPattern = regexp.MustCompile(`Forwarding from 127\.0\.0\.1
 var _ = Describe("Session remote control", func() {
 	f := framework.NewFramework("session-control")
 
-	It("shares one provider session across terminal and web clients", func() {
+	It("shares one provider session across clients and resets its workspace", func() {
 		token := os.Getenv(sessionWebTokenEnv)
 		if token == "" {
 			Skip(sessionWebTokenEnv + " not set")
@@ -243,6 +244,38 @@ var _ = Describe("Session remote control", func() {
 		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "message", Text: "read-state"})
 		waitForSessionEvent(connection, func(event sessionruntime.Event) bool {
 			return event.Type == sessionruntime.EventAssistantDelta && event.Text == "turn 9: state preserved"
+		})
+		waitForTurnCompletion(connection, "completed")
+
+		By("resetting the Session and deleting its persisted workspace")
+		preservedClaim, err := f.Clientset.CoreV1().PersistentVolumeClaims(f.Namespace).Get(context.TODO(), oldClaimName, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		_ = connection.Close()
+		resetSessionThroughWeb(webClient, baseURL, f.Namespace, sessionName)
+
+		reset := waitForSessionPodReplacement(f, f.Namespace, sessionName, replacement.UID)
+		Eventually(func(g Gomega) {
+			current, err := f.KelosClientset.ApiV1alpha2().Sessions(f.Namespace).Get(context.TODO(), sessionName, metav1.GetOptions{})
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(current.Annotations).NotTo(HaveKey(sessionreset.RequestAnnotation))
+			g.Expect(current.Annotations).NotTo(HaveKey(sessionreset.StateAnnotation))
+		}, 3*time.Minute, time.Second).Should(Succeed())
+		resetPod, err := f.Clientset.CoreV1().Pods(f.Namespace).Get(context.TODO(), reset.Status.PodName, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(resetPod.UID).NotTo(Equal(replacement.UID))
+		Expect(sessionWorkspaceClaimName(resetPod)).To(Equal(oldClaimName))
+		resetClaim, err := f.Clientset.CoreV1().PersistentVolumeClaims(f.Namespace).Get(context.TODO(), oldClaimName, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(resetClaim.UID).NotTo(Equal(preservedClaim.UID))
+
+		connection = connectSessionWebSocket(webClient, baseURL, f.Namespace, sessionName)
+		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "subscribe"})
+		waitForSessionEvent(connection, func(event sessionruntime.Event) bool {
+			return event.Type == sessionruntime.EventHistoryEnd
+		})
+		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "message", Text: "read-state"})
+		waitForSessionEvent(connection, func(event sessionruntime.Event) bool {
+			return event.Type == sessionruntime.EventAssistantDelta && event.Text == "turn 1: state missing"
 		})
 		waitForTurnCompletion(connection, "completed")
 
@@ -926,6 +959,23 @@ func createSessionThroughWeb(client *http.Client, baseURL string, payload any) {
 	body, err := io.ReadAll(response.Body)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(response.StatusCode).To(Equal(http.StatusCreated), "Session web create response: %s", body)
+}
+
+func resetSessionThroughWeb(client *http.Client, baseURL, namespace, name string) {
+	endpoint := fmt.Sprintf("%s/api/sessions/%s/%s/reset", baseURL, url.PathEscape(namespace), url.PathEscape(name))
+	request, err := http.NewRequest(http.MethodPost, endpoint, nil)
+	Expect(err).NotTo(HaveOccurred())
+	response, err := client.Do(request)
+	Expect(err).NotTo(HaveOccurred())
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(response.StatusCode).To(Equal(http.StatusAccepted), "Session web reset response: %s", body)
+	var summary struct {
+		Resetting bool `json:"resetting"`
+	}
+	Expect(json.Unmarshal(body, &summary)).To(Succeed())
+	Expect(summary.Resetting).To(BeTrue())
 }
 
 func listWebSessions(client *http.Client, baseURL, namespace string) []string {

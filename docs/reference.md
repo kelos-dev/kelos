@@ -297,9 +297,19 @@ container. Persistent storage is recommended for durable Sessions. When the
 field is omitted, the workspace uses `emptyDir`, which is primarily useful for
 development because its history and changes do not survive Pod replacement.
 
-The shared web server can create, list, delete, and connect to Sessions across
-namespaces while the web application operates on one active namespace at a
-time. Users can switch the active namespace live from the sidebar.
+Reset a Session with `kelos session reset NAME` or the reset action in the
+shared web client. Reset preserves the Session resource and immutable spec but
+permanently deletes its retained conversation history and workspace changes.
+The controller stops the Session Pod before deleting its PersistentVolumeClaim,
+then creates a fresh claim and replacement Pod. An `emptyDir` Session resets by
+replacing only its Pod. Workspace initialization and
+`Workspace.spec.setupCommand` run again, and a configured `spec.initialPrompt`
+is submitted to the new conversation. The StorageClass reclaim policy controls
+whether the old underlying PersistentVolume is deleted or retained.
+
+The shared web server can create, list, reset, delete, and connect to Sessions
+across namespaces while the web application operates on one active namespace
+at a time. Users can switch the active namespace live from the sidebar.
 `sessionServer.defaultNamespace` sets its initial value, and Session, Workspace,
 AgentConfig, and credential options are loaded only from the active namespace.
 Selecting an existing Session as a source populates both the form fields and the
@@ -962,6 +972,7 @@ The `kelos` CLI lets you manage the full lifecycle without writing YAML.
 | `kelos run` | Create and run a new Task |
 | `kelos run --from taskspawner/<name>` | Run a standalone Task from a TaskSpawner template |
 | `kelos session connect NAME` | Continue a ready Session through terminal chat |
+| `kelos session reset NAME` | Permanently clear a Session workspace and start a fresh conversation |
 | `kelos create workspace` | Create a Workspace resource |
 | `kelos create agentconfig` | Create an AgentConfig resource |
 | `kelos get <resource> [name]` | List resources or view a specific resource (`tasks`, `sessions`, `taskspawners`, `workspaces`, `agentconfigs`, `workerpools`) |
@@ -1025,6 +1036,10 @@ When the same key is set multiple ways, precedence is: chart defaults, then `--v
 
 - `--all`: Delete every resource of the given type in the namespace; mutually exclusive with a resource name. Supported by `task`, `session`, `workspace`, `taskspawner`, `agentconfig`, and `workerpool` subcommands
 
+### `kelos session reset` Flags
+
+- `--yes, -y`: Skip confirmation that conversation history and workspace changes will be permanently deleted
+
 ### Common Flags
 
 - `--config`: Path to config file (default `~/.kelos/config.yaml`)
@@ -1075,6 +1090,7 @@ In addition to subcommands and flags, the following arguments complete dynamical
 | `kelos suspend taskspawner <TAB>` | taskspawner names |
 | `kelos resume taskspawner <TAB>` | taskspawner names |
 | `kelos session connect <TAB>` | session names |
+| `kelos session reset <TAB>` | session names |
 
 Enum-valued flags — `kelos run --type`, `kelos run --credential-type`, `kelos get --output`, and `kelos get task --phase` — complete from their fixed value set without contacting the cluster.
 

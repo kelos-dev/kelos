@@ -24,6 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
+	"github.com/kelos-dev/kelos/internal/sessionreset"
 )
 
 func TestAuthenticationProtectsApplicationAndAPI(t *testing.T) {
@@ -503,6 +504,31 @@ func TestSessionComposerUsesOneSendAndInterruptAction(t *testing.T) {
 	}
 }
 
+func TestSessionResetControlWarnsAndUsesResetEndpoint(t *testing.T) {
+	index, err := webFiles.ReadFile("web/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(index), `id="reset-session" aria-label="Reset session"`) {
+		t.Fatal("Session header does not contain the reset action")
+	}
+
+	javascript, err := webFiles.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for description, expected := range map[string]string{
+		"destructive warning":       "This permanently deletes its conversation history and all workspace changes.",
+		"reset API request":         "/reset`, {method: 'POST'}",
+		"reset history clearing":    "resetCurrentSessionView();\n    discardSessionView(session);",
+		"reset connection blocking": "state.selected.resetting",
+	} {
+		if !strings.Contains(string(javascript), expected) {
+			t.Errorf("Session reset control is missing %s: %s", description, expected)
+		}
+	}
+}
+
 func TestSessionComposerKeepsDraftsPerSession(t *testing.T) {
 	source, err := webFiles.ReadFile("web/app.js")
 	if err != nil {
@@ -568,7 +594,7 @@ func TestSessionUIAdaptsToPhoneViewport(t *testing.T) {
 	for description, expected := range map[string]string{
 		"dynamic viewport height":    `height: 100dvh`,
 		"landscape phone breakpoint": `(max-height: 500px) and (pointer: coarse)`,
-		"two-row phone header":       `grid-template-areas: "menu heading delete" "tabs tabs connection"`,
+		"two-row phone header":       `grid-template-areas: "menu heading reset delete" "tabs tabs connection connection"`,
 		"48-pixel touch targets":     `.icon-button { width: 48px; height: 48px; }`,
 		"phone safe-area padding":    `env(safe-area-inset-bottom)`,
 		"non-zooming form fields":    `.composer textarea, .yaml-panel textarea, .form-grid input`,
@@ -628,6 +654,28 @@ func TestSessionAPIHappyPath(t *testing.T) {
 	}
 	if len(sessions) != 1 || sessions[0].Name != "chat" || sessions[0].Namespace != "team-a" || sessions[0].Provider != "codex" {
 		t.Fatalf("listed Sessions = %#v", sessions)
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/sessions/team-a/chat/reset", nil)
+	request.Header.Set("Authorization", "Bearer secret-token")
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("reset status = %d body = %s", response.Code, response.Body.String())
+	}
+	var resetSummary sessionSummary
+	if err := json.Unmarshal(response.Body.Bytes(), &resetSummary); err != nil {
+		t.Fatal(err)
+	}
+	if !resetSummary.Resetting {
+		t.Fatalf("reset Session summary = %#v", resetSummary)
+	}
+	var resetSession kelos.Session
+	if err := server.client.Get(context.Background(), client.ObjectKey{Namespace: "team-a", Name: "chat"}, &resetSession); err != nil {
+		t.Fatal(err)
+	}
+	if resetSession.Annotations[sessionreset.RequestAnnotation] == "" {
+		t.Fatal("reset endpoint did not request a Session reset")
 	}
 
 	request = httptest.NewRequest(http.MethodDelete, "/api/sessions/team-a/chat", nil)

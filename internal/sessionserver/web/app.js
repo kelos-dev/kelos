@@ -44,6 +44,7 @@ const elements = {
   persistentVolume: document.querySelector('#volume-claim-enabled'),
   volumeClaimFields: document.querySelector('#volume-claim-fields'),
   createButton: document.querySelector('#create-session'),
+  resetButton: document.querySelector('#reset-session'),
   deleteButton: document.querySelector('#delete-session'),
   sidebar: document.querySelector('#sidebar'),
   openSidebar: document.querySelector('#open-sidebar'),
@@ -288,6 +289,7 @@ function providerInitials(provider) {
 }
 
 function sessionDisplayStatus(session) {
+  if (session.resetting) return 'Resetting';
   if (session.phase !== 'Ready') return session.phase || 'Pending';
   if (session.active === true) return 'Active';
   if (session.active === false) return 'Idle';
@@ -459,8 +461,13 @@ async function loadSessions({quiet = false} = {}) {
           discardSessionView(state.selected);
           selectSession(current);
         } else {
-          const becameReady = state.selected.phase !== 'Ready' && current.phase === 'Ready';
+          const beganReset = !state.selected.resetting && current.resetting;
+          const becameReady = (state.selected.phase !== 'Ready' || state.selected.resetting) && current.phase === 'Ready' && !current.resetting;
           state.selected = current;
+          if (beganReset) {
+            closeSocket();
+            resetCurrentSessionView();
+          }
           renderHeader();
           if (becameReady) connectSocket();
         }
@@ -914,13 +921,13 @@ function selectSession(session) {
   const loading = document.createElement('div');
   loading.className = 'welcome';
   const title = document.createElement('h1');
-  title.textContent = session.phase === 'Ready' ? 'Opening conversation…' : 'Preparing the Session Pod…';
+  title.textContent = session.resetting ? 'Resetting the Session…' : session.phase === 'Ready' ? 'Opening conversation…' : 'Preparing the Session Pod…';
   const detail = document.createElement('p');
   detail.textContent = session.message || 'The controller is preparing the workspace and agent runtime.';
   loading.append(title, detail);
   elements.messages.append(loading);
   view.statusPlaceholder = true;
-  if (session.phase === 'Ready') connectSocket();
+  if (session.phase === 'Ready' && !session.resetting) connectSocket();
   scheduleBottomAnchor();
 }
 
@@ -937,6 +944,7 @@ function createWelcome() {
 
 function renderHeader() {
   const session = state.selected;
+  elements.resetButton.disabled = !session || session.resetting;
   elements.deleteButton.disabled = !session;
   elements.conversationTab.disabled = !session;
   elements.changesTab.disabled = !session;
@@ -969,7 +977,10 @@ function renderHeader() {
     separator.textContent = '·';
     elements.meta.append(separator, timestamp);
   }
-  if (session.phase !== 'Ready') {
+  if (session.resetting) {
+    setConnection('connecting', 'Resetting');
+    setComposer(false);
+  } else if (session.phase !== 'Ready') {
     setConnection(session.phase === 'Failed' ? 'error' : 'connecting', session.phase || 'Pending');
     setComposer(false);
   }
@@ -1022,7 +1033,7 @@ function closeSocket() {
 }
 
 function connectSocket() {
-  if (!state.selected || state.selected.phase !== 'Ready') return;
+  if (!state.selected || state.selected.phase !== 'Ready' || state.selected.resetting) return;
   const pinToBottom = state.pinHistoryToBottom || messagesNearBottom();
   closeSocket();
   state.replayingHistory = true;
@@ -2440,6 +2451,23 @@ elements.deleteButton.addEventListener('click', async () => {
     clearPromptDraft(session);
     await loadSessions();
     showToast('Session deleted');
+  } catch (error) {
+    showToast(error.message);
+  }
+});
+elements.resetButton.addEventListener('click', async () => {
+  const session = state.selected;
+  if (!session || session.resetting || !window.confirm(`Reset Session ${session.namespace}/${session.name}? This permanently deletes its conversation history and all workspace changes.`)) return;
+  try {
+    const resetting = await api(`/api/sessions/${encodeURIComponent(session.namespace)}/${encodeURIComponent(session.name)}/reset`, {method: 'POST'});
+    closeSocket();
+    resetCurrentSessionView();
+    discardSessionView(session);
+    state.currentView = null;
+    clearPromptDraft(session);
+    selectSession(resetting);
+    await loadSessions();
+    showToast('Session reset requested');
   } catch (error) {
     showToast(error.message);
   }

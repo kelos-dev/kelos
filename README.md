@@ -309,7 +309,7 @@ kelos get session interactive-review
 kelos session connect interactive-review
 ```
 
-The optional shared Session server provides web chat for the same conversation. You can reconnect from either client, answer provider questions, or interrupt active work without ending the Session. Web messages render safe core Markdown formatting, including fenced code blocks; see the [Session reference](docs/reference.md#session) for the supported formatting and limitations, and the [interactive Session example](examples/16-session/) for provider, storage, and web server configuration.
+The optional shared Session server provides web chat for the same conversation. You can reconnect from either client, answer provider questions, interrupt active work, or reset the Session to a fresh workspace. Reset permanently deletes retained conversation history and workspace changes while preserving the Session configuration; it is also available through `kelos session reset NAME`. Web messages render safe core Markdown formatting, including fenced code blocks; see the [Session reference](docs/reference.md#session) for the supported formatting and limitations, and the [interactive Session example](examples/16-session/) for provider, storage, and web server configuration.
 
 ## Kelos Skill
 
@@ -544,6 +544,7 @@ See the [`self-development/` README](self-development/README.md) for the full pi
 | `kelos run` | Create and run a new Task |
 | `kelos run --from taskspawner/<name> [-f values.yaml]` | Run a standalone Task from a TaskSpawner template |
 | `kelos session connect NAME` | Continue a Session through terminal chat |
+| `kelos session reset NAME` | Permanently clear a Session workspace and start a fresh conversation |
 | `kelos get <resource> [name]` | List resources or view a specific resource (`tasks`, `sessions`, `taskspawners`, `workspaces`, `agentconfigs`, `workerpools`) |
 | `kelos delete <resource> [name]` | Delete a resource (`tasks`, `sessions`, `taskspawners`, `workspaces`, `agentconfigs`, `workerpools`); supports `--all` to delete every resource of that type in the namespace |
 | `kelos logs <task-name> [-f]` | View or stream logs from a task |

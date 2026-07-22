@@ -97,6 +97,7 @@ function resetHarness() {
     changesList: new TestNode('div'),
     changesCount: new TestNode('span'),
     changesSummary: new TestNode('span'),
+    input: new TestNode('textarea'),
     sidebar: new TestNode('aside'),
     welcome: null,
   };
@@ -132,8 +133,10 @@ global.closeSocket = () => {};
 global.setActiveView = () => {};
 global.renderSessions = () => {};
 global.renderHeader = () => {};
+global.resizeComposer = () => {};
 global.scheduleBottomAnchor = () => { bottomAnchors++; };
 global.connectSocket = () => { socketConnections++; };
+global.updateComposerAction = () => {};
 
 const application = fs.readFileSync(path.join(__dirname, '..', 'web', 'app.js'), 'utf8');
 
@@ -146,6 +149,7 @@ function applicationSlice(start, end) {
 }
 
 vm.runInThisContext(applicationSlice('function sessionKey', 'function savePromptDraft'), {filename: 'app.js'});
+vm.runInThisContext(applicationSlice('function savePromptDraft', 'function providerLabel'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function parseSessionTimestamp', 'function safeHTTPURL'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function selectSession', 'function renderHeader'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function ensureConversation', 'function trimURLSuffix'), {filename: 'app.js'});
@@ -192,6 +196,20 @@ function testSessionViewReset() {
   assert.equal(state.pinHistoryToBottom, true);
   assert.equal(view.historyLoaded, false);
   assert.equal(view.statusPlaceholder, false);
+}
+
+function testSessionResetClearsPromptDraft() {
+  resetHarness();
+  const session = {namespace: 'default', name: 'one', uid: 'uid-one', phase: 'Ready'};
+  state.selected = session;
+  elements.input.value = 'unsent prompt';
+  savePromptDraft(session);
+
+  clearPromptDraft(session);
+  selectSession({...session, resetting: true});
+
+  assert.equal(elements.input.value, '');
+  assert.equal(state.promptDrafts.has(sessionKey(session)), false);
 }
 
 function testHistoryReplayCompletion() {
@@ -273,6 +291,7 @@ function testSessionTimestampElement() {
 
 testSessionViewSaveAndRestore();
 testSessionViewReset();
+testSessionResetClearsPromptDraft();
 testHistoryReplayCompletion();
 testReselectRefreshesStatusPlaceholder();
 testSessionTimestampFormatting();

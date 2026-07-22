@@ -24,12 +24,14 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/githubapp"
+	"github.com/kelos-dev/kelos/internal/sessionreset"
 	"github.com/kelos-dev/kelos/internal/sessionupdate"
 )
 
@@ -181,6 +183,119 @@ func TestSessionReconcilerMigratesWorkspaceClaimOwnership(t *testing.T) {
 	}
 	if !metav1.IsControlledBy(&updatedClaim, session) {
 		t.Fatalf("workspace PersistentVolumeClaim ownerReferences = %#v, want Session owner", updatedClaim.OwnerReferences)
+	}
+}
+
+func TestSessionReconcilerResetsPersistentWorkspace(t *testing.T) {
+	t.Parallel()
+	scheme := runtime.NewScheme()
+	if err := appsv1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := rbacv1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := kelos.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+
+	session := testSession("chat", "codex")
+	session.Annotations = map[string]string{sessionreset.RequestAnnotation: "reset-1"}
+	statefulSet := testSessionStatefulSet(session)
+	statefulSet.Spec.Replicas = ptr.To(int32(1))
+	statefulSet.Spec.VolumeClaimTemplates = []corev1.PersistentVolumeClaim{{
+		ObjectMeta: metav1.ObjectMeta{Name: WorkspaceVolumeName},
+		Spec:       *session.Spec.VolumeClaimTemplate.DeepCopy(),
+	}}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name:            statefulSet.Name + "-0",
+		Namespace:       session.Namespace,
+		UID:             types.UID("old-pod-uid"),
+		Annotations:     map[string]string{sessionNameAnnotation: session.Name},
+		OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(statefulSet, appsv1.SchemeGroupVersion.WithKind("StatefulSet"))},
+	}}
+	claimName := WorkspaceVolumeName + "-" + statefulSet.Name + "-0"
+	claim := &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{
+		Name:            claimName,
+		Namespace:       session.Namespace,
+		UID:             types.UID("old-claim-uid"),
+		OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(session, kelos.GroupVersion.WithKind("Session"))},
+	}}
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&kelos.Session{}, &corev1.Pod{}, &appsv1.StatefulSet{}).
+		WithObjects(session, statefulSet, pod, claim).
+		Build()
+	reconciler := testSessionReconciler(cl, scheme)
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(session)}
+
+	if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
+		t.Fatalf("Reconcile() stopping error = %v", err)
+	}
+	var updatedStatefulSet appsv1.StatefulSet
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(statefulSet), &updatedStatefulSet); err != nil {
+		t.Fatal(err)
+	}
+	if updatedStatefulSet.Spec.Replicas == nil || *updatedStatefulSet.Spec.Replicas != 0 {
+		t.Fatalf("StatefulSet replicas = %v, want 0", updatedStatefulSet.Spec.Replicas)
+	}
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(pod), &corev1.Pod{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("old Session Pod still exists: %v", err)
+	}
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(claim), &corev1.PersistentVolumeClaim{}); err != nil {
+		t.Fatalf("workspace claim was deleted before the Pod stopped: %v", err)
+	}
+
+	if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
+		t.Fatalf("Reconcile() deleting storage error = %v", err)
+	}
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(claim), &corev1.PersistentVolumeClaim{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("old workspace claim still exists: %v", err)
+	}
+
+	if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
+		t.Fatalf("Reconcile() starting error = %v", err)
+	}
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(statefulSet), &updatedStatefulSet); err != nil {
+		t.Fatal(err)
+	}
+	if updatedStatefulSet.Spec.Replicas == nil || *updatedStatefulSet.Spec.Replicas != 1 {
+		t.Fatalf("StatefulSet replicas = %v, want 1", updatedStatefulSet.Spec.Replicas)
+	}
+
+	replacementClaim := claim.DeepCopy()
+	replacementClaim.ResourceVersion = ""
+	replacementClaim.UID = types.UID("new-claim-uid")
+	if err := cl.Create(context.Background(), replacementClaim); err != nil {
+		t.Fatal(err)
+	}
+	replacementPod := pod.DeepCopy()
+	replacementPod.ResourceVersion = ""
+	replacementPod.UID = types.UID("new-pod-uid")
+	if err := cl.Create(context.Background(), replacementPod); err != nil {
+		t.Fatal(err)
+	}
+	replacementPod.Status.Phase = corev1.PodRunning
+	replacementPod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
+	if err := cl.Status().Update(context.Background(), replacementPod); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
+		t.Fatalf("Reconcile() completion error = %v", err)
+	}
+	var updatedSession kelos.Session
+	if err := cl.Get(context.Background(), request.NamespacedName, &updatedSession); err != nil {
+		t.Fatal(err)
+	}
+	if updatedSession.Annotations[sessionreset.RequestAnnotation] != "" || updatedSession.Annotations[sessionreset.StateAnnotation] != "" {
+		t.Fatalf("reset annotations were not cleared: %#v", updatedSession.Annotations)
+	}
+	if updatedSession.Status.Phase != kelos.SessionPhaseReady || updatedSession.Status.PodUID != replacementPod.UID {
+		t.Fatalf("Session status after reset = %#v", updatedSession.Status)
 	}
 }
 
@@ -1127,12 +1242,14 @@ func TestSessionReconcilerRecreatesMissingGitHubTokenSecret(t *testing.T) {
 			Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
 		},
 	}
-	pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+	tokenVolume := corev1.Volume{
 		Name: GitHubTokenVolumeName,
 		VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
 			SecretName: sessionGitHubTokenSecretName(session.Name),
 		}},
-	})
+	}
+	pod.Spec.Volumes = append(pod.Spec.Volumes, tokenVolume)
+	statefulSet.Spec.Template.Spec.Volumes = append(statefulSet.Spec.Template.Spec.Volumes, tokenVolume)
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithStatusSubresource(&kelos.Session{}, &corev1.Pod{}, &appsv1.StatefulSet{}).
@@ -1156,6 +1273,70 @@ func TestSessionReconcilerRecreatesMissingGitHubTokenSecret(t *testing.T) {
 	}
 	if !metav1.IsControlledBy(&recreated, session) {
 		t.Fatal("recreated token Secret is not controlled by the Session")
+	}
+
+	if err := cl.Delete(context.Background(), &recreated); err != nil {
+		t.Fatal(err)
+	}
+	serviceAccount := sessionRuntimeServiceAccount(session)
+	if err := cl.Delete(context.Background(), serviceAccount); err != nil {
+		t.Fatal(err)
+	}
+	service := buildSessionService(session)
+	if err := cl.Delete(context.Background(), service); err != nil {
+		t.Fatal(err)
+	}
+	if err := cl.Delete(context.Background(), pod); err != nil {
+		t.Fatal(err)
+	}
+	var resetStatefulSet appsv1.StatefulSet
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(statefulSet), &resetStatefulSet); err != nil {
+		t.Fatal(err)
+	}
+	resetStatefulSet.Spec.Replicas = ptr.To(int32(0))
+	if err := cl.Update(context.Background(), &resetStatefulSet); err != nil {
+		t.Fatal(err)
+	}
+	state, err := sessionreset.EncodeState(sessionreset.State{RequestID: "reset-1", Phase: sessionreset.PhaseStarting})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resetting kelos.Session
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(session), &resetting); err != nil {
+		t.Fatal(err)
+	}
+	resetting.Annotations = map[string]string{
+		sessionreset.RequestAnnotation: "reset-1",
+		sessionreset.StateAnnotation:   state,
+	}
+	if err := cl.Update(context.Background(), &resetting); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err = reconciler.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(session)})
+	if err != nil {
+		t.Fatalf("Reconcile() reset start error = %v", err)
+	}
+	if result.RequeueAfter <= 0 {
+		t.Fatalf("Reconcile() reset start requeueAfter = %s, want positive duration", result.RequeueAfter)
+	}
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(serviceAccount), &corev1.ServiceAccount{}); err != nil {
+		t.Fatalf("getting recreated runtime ServiceAccount: %v", err)
+	}
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(service), &corev1.Service{}); err != nil {
+		t.Fatalf("getting recreated governing Service: %v", err)
+	}
+	if err := cl.Get(context.Background(), client.ObjectKey{Namespace: session.Namespace, Name: sessionGitHubTokenSecretName(session.Name)}, &recreated); err != nil {
+		t.Fatalf("getting token Secret recreated during reset: %v", err)
+	}
+	if got := string(recreated.Data[GitHubTokenSecretKey]); got != "ghs_recreated" {
+		t.Fatalf("reset token = %q, want ghs_recreated", got)
+	}
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(statefulSet), &resetStatefulSet); err != nil {
+		t.Fatal(err)
+	}
+	if resetStatefulSet.Spec.Replicas == nil || *resetStatefulSet.Spec.Replicas != 1 {
+		t.Fatalf("StatefulSet replicas after prerequisite repair = %v, want 1", resetStatefulSet.Spec.Replicas)
 	}
 }
 

@@ -60,6 +60,7 @@ spec:
           state: open
           author: gjkim42
       reporting:
+        enabled: true
         checks: {}
   maxConcurrency: 3
   taskTemplate:

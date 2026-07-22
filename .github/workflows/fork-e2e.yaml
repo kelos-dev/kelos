@@ -40,6 +40,7 @@ jobs:
     with:
       checkout-ref: refs/pull/${{ github.event.pull_request.number }}/merge
       persist-credentials: false
+      allow-unsafe-pr-checkout: true
       expected-head-sha: ${{ github.event.pull_request.head.sha }}
       use-environment-secrets: true
       environment-name: ok-to-test

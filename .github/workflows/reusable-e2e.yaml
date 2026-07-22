@@ -11,6 +11,10 @@ on:
         description: Whether to persist git credentials after checkout
         type: boolean
         default: true
+      allow-unsafe-pr-checkout:
+        description: Whether to allow fork PR checkout from a trusted workflow
+        type: boolean
+        default: false
       expected-sha:
         description: If set, validate HEAD matches this SHA after checkout
         type: string
@@ -50,6 +54,7 @@ jobs:
           ref: ${{ inputs.checkout-ref }}
           persist-credentials: ${{ inputs.persist-credentials }}
           fetch-depth: 2
+          allow-unsafe-pr-checkout: ${{ inputs.allow-unsafe-pr-checkout }}
 
       - name: Validate E2E secrets
         env:

@@ -43,6 +43,7 @@
         <div class="session-heading">
           <div class="session-title" id="session-title">Choose a session</div>
           <div class="session-meta" id="session-meta">Select an existing conversation or create one.</div>
+          <button class="session-section-button" id="session-section" type="button" disabled hidden>＋ Add section</button>
         </div>
         <div class="header-actions">
           <div class="view-tabs" role="tablist" aria-label="Session view">
@@ -117,6 +118,11 @@
         <label>
           <span>Namespace</span>
           <input name="namespace" required value="default" autocomplete="off" readonly>
+        </label>
+        <label>
+          <span>Section <em>optional</em></span>
+          <input name="section" list="session-sections" maxlength="64" placeholder="Planning" autocomplete="off">
+          <datalist id="session-sections"></datalist>
         </label>
         <label>
           <span>Provider</span>

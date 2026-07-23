@@ -2,6 +2,8 @@ const elements = {
   list: document.querySelector('#session-list'),
   title: document.querySelector('#session-title'),
   meta: document.querySelector('#session-meta'),
+  sectionButton: document.querySelector('#session-section'),
+  sectionOptions: document.querySelector('#session-sections'),
   messages: document.querySelector('#messages'),
   changes: document.querySelector('#changes-view'),
   changesList: document.querySelector('#changes-list'),
@@ -399,52 +401,95 @@ function renderSessions() {
     elements.list.append(empty);
     return;
   }
-  for (const session of state.sessions) {
-    const item = document.createElement('div');
-    item.className = `session-item${state.selected && sessionKey(state.selected) === sessionKey(session) ? ' active' : ''}`;
-    const button = document.createElement('button');
-    button.className = 'session-item-select';
-    button.type = 'button';
-    const dot = document.createElement('span');
-    const displayStatus = sessionDisplayStatus(session);
-    dot.className = `phase-dot ${String(displayStatus).toLowerCase()}`;
-    const text = document.createElement('span');
-    const titleRow = document.createElement('div');
-    titleRow.className = 'session-item-title-row';
-    const name = document.createElement('div');
-    name.className = 'session-item-name';
-    name.textContent = session.name;
-    titleRow.append(name);
-    const timestamp = createSessionTimestamp(session, true, 'session-item-time');
-    if (timestamp) titleRow.append(timestamp);
-    const meta = document.createElement('div');
-    meta.className = 'session-item-meta';
-    const provider = document.createElement('span');
-    provider.className = 'provider-badge';
-    provider.textContent = providerLabel(session.provider);
-    const namespace = document.createElement('span');
-    namespace.textContent = `· ${session.namespace}`;
-    const activity = document.createElement('span');
-    activity.textContent = `· ${displayStatus}`;
-    meta.append(provider, namespace, activity);
-    text.append(titleRow, meta);
-    if (session.branch) {
-      const branch = document.createElement('div');
-      branch.className = 'session-item-branch';
-      branch.textContent = session.branch;
-      branch.title = session.branch;
-      text.append(branch);
-    }
-    button.append(dot, text);
-    button.addEventListener('click', () => selectSession(session));
-    item.append(button);
-    const link = createPullRequestLink(session.pullRequest, 'session-item-pull-request');
-    if (link) {
-      item.classList.add('has-pull-request');
-      item.append(link);
-    }
-    elements.list.append(item);
+
+  const grouped = state.sessions.some(session => session.section);
+  if (!grouped) {
+    for (const session of state.sessions) elements.list.append(createSessionListItem(session));
+    return;
   }
+
+  const sessionsBySection = new Map();
+  for (const session of state.sessions) {
+    const section = session.section || '';
+    if (!sessionsBySection.has(section)) sessionsBySection.set(section, []);
+    sessionsBySection.get(section).push(session);
+  }
+  const sections = Array.from(sessionsBySection.keys())
+    .filter(Boolean)
+    .sort((left, right) => left.localeCompare(right, undefined, {sensitivity: 'base'}));
+  if (sessionsBySection.has('')) sections.push('');
+
+  for (const section of sections) {
+    const group = document.createElement('section');
+    group.className = 'session-section-group';
+    const heading = document.createElement('h2');
+    heading.className = 'session-section-heading';
+    const name = document.createElement('span');
+    name.textContent = section || 'Unsectioned';
+    const count = document.createElement('span');
+    count.className = 'session-section-count';
+    count.textContent = String(sessionsBySection.get(section).length);
+    heading.append(name, count);
+    group.append(heading);
+    for (const session of sessionsBySection.get(section)) {
+      group.append(createSessionListItem(session));
+    }
+    elements.list.append(group);
+  }
+}
+
+function createSessionListItem(session) {
+  const item = document.createElement('div');
+  item.className = `session-item${state.selected && sessionKey(state.selected) === sessionKey(session) ? ' active' : ''}`;
+  const button = document.createElement('button');
+  button.className = 'session-item-select';
+  button.type = 'button';
+  const dot = document.createElement('span');
+  const displayStatus = sessionDisplayStatus(session);
+  dot.className = `phase-dot ${String(displayStatus).toLowerCase()}`;
+  const text = document.createElement('span');
+  const titleRow = document.createElement('div');
+  titleRow.className = 'session-item-title-row';
+  const name = document.createElement('div');
+  name.className = 'session-item-name';
+  name.textContent = session.name;
+  titleRow.append(name);
+  const timestamp = createSessionTimestamp(session, true, 'session-item-time');
+  if (timestamp) titleRow.append(timestamp);
+  const meta = document.createElement('div');
+  meta.className = 'session-item-meta';
+  const provider = document.createElement('span');
+  provider.className = 'provider-badge';
+  provider.textContent = providerLabel(session.provider);
+  const namespace = document.createElement('span');
+  namespace.textContent = `· ${session.namespace}`;
+  const activity = document.createElement('span');
+  activity.textContent = `· ${displayStatus}`;
+  meta.append(provider, namespace, activity);
+  text.append(titleRow, meta);
+  if (session.branch) {
+    const branch = document.createElement('div');
+    branch.className = 'session-item-branch';
+    branch.textContent = session.branch;
+    branch.title = session.branch;
+    text.append(branch);
+  }
+  button.append(dot, text);
+  button.addEventListener('click', () => selectSession(session));
+  item.append(button);
+  const link = createPullRequestLink(session.pullRequest, 'session-item-pull-request');
+  if (link) {
+    item.classList.add('has-pull-request');
+    item.append(link);
+  }
+  return item;
+}
+
+function renderSectionOptions() {
+  elements.sectionOptions.replaceChildren();
+  const sections = Array.from(new Set(state.sessions.map(session => session.section).filter(Boolean)))
+    .sort((left, right) => left.localeCompare(right, undefined, {sensitivity: 'base'}));
+  for (const section of sections) addOption(elements.sectionOptions, section, section);
 }
 
 async function loadSessions({quiet = false} = {}) {
@@ -454,6 +499,7 @@ async function loadSessions({quiet = false} = {}) {
     const sessions = await api(`/api/sessions?namespace=${encodeURIComponent(namespace)}`);
     if (generation !== state.namespaceGeneration) return;
     state.sessions = sessions;
+    renderSectionOptions();
     if (state.selected) {
       const current = sessions.find(item => sessionKey(item) === sessionKey(state.selected));
       if (current) {
@@ -575,6 +621,7 @@ async function switchNamespace(namespace) {
   elements.yaml.value = '';
   if (hadLoadedSource) resetSourceValues();
   renderSessionSourceOptions();
+  renderSectionOptions();
   renderCredentialOptions();
   renderWorkspaceOptions();
   renderAgentConfigOptions();
@@ -944,6 +991,8 @@ function createWelcome() {
 
 function renderHeader() {
   const session = state.selected;
+  elements.sectionButton.hidden = !session;
+  elements.sectionButton.disabled = !session;
   elements.resetButton.disabled = !session || session.resetting;
   elements.deleteButton.disabled = !session;
   elements.conversationTab.disabled = !session;
@@ -957,6 +1006,8 @@ function renderHeader() {
     return;
   }
   elements.title.textContent = session.name;
+  elements.sectionButton.textContent = session.section ? `Section: ${session.section}` : '＋ Add section';
+  elements.sectionButton.title = session.section ? 'Change or remove section' : 'Add Session to a section';
   const details = [session.namespace, providerLabel(session.provider), sessionDisplayStatus(session)];
   if (session.branch) details.push(session.branch);
   const detailText = document.createElement('span');
@@ -2355,6 +2406,7 @@ elements.formMode.addEventListener('click', () => setCreationMode('form'));
 elements.yamlMode.addEventListener('click', () => setCreationMode('yaml'));
 elements.persistentVolume.addEventListener('change', updateVolumeClaimFields);
 renderSessionSourceOptions();
+renderSectionOptions();
 renderCredentialOptions();
 renderWorkspaceOptions();
 renderAgentConfigOptions();
@@ -2394,6 +2446,8 @@ elements.form.addEventListener('submit', async event => {
         namespace: values.get('namespace').trim(),
         worker,
       };
+      const section = values.get('section').trim();
+      if (section) payload.section = section;
       const initialBranch = values.get('initialBranch').trim();
       if (initialBranch) payload.initialBranch = initialBranch;
       const initialPrompt = values.get('initialPrompt');
@@ -2438,6 +2492,29 @@ elements.form.addEventListener('submit', async event => {
     elements.dialogError.textContent = error.message;
   } finally {
     setCreatingSession(false);
+  }
+});
+
+elements.sectionButton.addEventListener('click', async () => {
+  const session = state.selected;
+  if (!session) return;
+  const section = window.prompt('Enter a section name. Leave it empty to remove this Session from its section.', session.section || '');
+  if (section === null) return;
+  elements.sectionButton.disabled = true;
+  try {
+    const updated = await api(
+      `/api/sessions/${encodeURIComponent(session.namespace)}/${encodeURIComponent(session.name)}/section`,
+      {method: 'PATCH', body: JSON.stringify({section})},
+    );
+    state.sessions = state.sessions.map(item => sessionKey(item) === sessionKey(updated) ? updated : item);
+    if (state.selected && sessionKey(state.selected) === sessionKey(updated)) state.selected = updated;
+    renderSectionOptions();
+    renderSessions();
+    renderHeader();
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    if (state.selected) elements.sectionButton.disabled = false;
   }
 });
 

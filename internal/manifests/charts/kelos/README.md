@@ -234,7 +234,11 @@ can switch it live from the sidebar. `sessionServer.defaultNamespace` (`default`
 unless overridden) sets the initial active namespace. The selected namespace
 must already exist. Session, Workspace, AgentConfig, and previously used
 credential options are loaded only from the active namespace. The creation
-dialog can generate a new Session from an existing Session in that namespace,
+form and selected Session header can assign Sessions to sidebar sections.
+Assignments are stored in the `kelos.dev/session-section` annotation, and
+existing section names in the active namespace are suggested when creating a
+Session. The creation dialog can generate a new Session from an existing
+Session in that namespace,
 copying its complete `Session.spec` into the form and editable YAML manifest but
 not copying its metadata, conversation, or volume data. The creation form
 accepts provider, credentials, model, Workspace, AgentConfig references, and an

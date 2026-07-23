@@ -48,6 +48,10 @@ button { color: inherit; }
 .namespace-form button { padding: 8px 9px; border: 1px solid #cbd4cd; border-radius: 0 9px 9px 0; background: var(--accent); color: white; font-size: 10px; font-weight: 700; cursor: pointer; }
 .sidebar-label { padding: 0 10px 9px; color: var(--faint); font-size: 10px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
 .session-list { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+.session-section-group + .session-section-group { margin-top: 14px; }
+.session-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; padding: 5px 10px 6px; color: var(--faint); font-size: 9px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.session-section-heading > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-section-count { flex: none; min-width: 17px; height: 17px; display: grid; place-items: center; padding: 0 4px; border-radius: 999px; background: var(--line-soft); font-size: 8.5px; letter-spacing: 0; }
 .session-item { width: 100%; border-radius: 11px; background: transparent; transition: background .15s; }
 .session-item:hover { background: rgba(255,255,255,.55); }
 .session-item.active { background: #fff; box-shadow: 0 4px 14px rgba(35,49,42,.06); }
@@ -86,6 +90,10 @@ button { color: inherit; }
 .session-meta-time { font-variant-numeric: tabular-nums; }
 .session-meta a { color: var(--accent-2); font-weight: 700; text-decoration: none; }
 .session-meta a:hover { text-decoration: underline; }
+.session-section-button { max-width: 100%; display: inline-flex; margin-top: 6px; padding: 3px 7px; overflow: hidden; border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: var(--muted); font-size: 9.5px; font-weight: 700; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.session-section-button:hover { border-color: #c5ccc6; color: var(--ink); }
+.session-section-button:disabled { opacity: .45; cursor: default; }
+.session-section-button[hidden] { display: none; }
 .header-actions { display: flex; align-items: center; gap: 8px; }
 .view-tabs { display: flex; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
 .view-tabs button { padding: 6px 9px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 10.5px; font-weight: 700; cursor: pointer; }

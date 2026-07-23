@@ -244,6 +244,17 @@ it was created if runtime activity has not been reported. Hover over the
 timestamp to see the exact time in the browser's locale and time zone; the
 exact value is also available to assistive technology.
 
+Sessions can be categorized into sections from the creation form or from the
+section control beneath the selected Session's name. Named sections are sorted
+alphabetically in the sidebar, Sessions retain their activity order within a
+section, and Sessions without a section appear under **Unsectioned** once at
+least one section exists. Existing section names in the active namespace are
+suggested by the creation form. Assignments are stored in the
+`kelos.dev/session-section` annotation, so Session manifests can set the same
+annotation directly. Clearing the section control removes the annotation.
+Section names entered through the form or control are trimmed and limited to
+64 characters.
+
 Web messages render safe Markdown: paragraphs and headings; emphasis,
 strong text, strikethrough, and inline code; ordered, unordered, and task lists;
 blockquotes and horizontal rules; HTTP(S) links; fenced or indented code blocks;

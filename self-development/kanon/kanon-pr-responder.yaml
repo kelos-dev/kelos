@@ -1,5 +1,5 @@
 apiVersion: kelos.dev/v1alpha2
-kind: TaskSpawner
+kind: SessionSpawner
 metadata:
   name: kanon-pr-responder
 spec:
@@ -24,11 +24,13 @@ spec:
           state: open
           draft: false
           author: gjkim42
-      reporting:
-        enabled: true
-        checks: {}
-  maxConcurrency: 8
-  taskTemplate:
+  sessionTemplate:
+    volumeClaimTemplate:
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 10Gi
     worker:
       workspaceRef:
         name: kanon-agent
@@ -58,21 +60,13 @@ spec:
             value: "gjkim042@gmail.com"
       agentConfigRefs:
         - name: base-agent
-        - name: kanon-dev-agent
-    ttlSecondsAfterFinished: 864000
-    podFailurePolicy:
-      rules:
-        - action: Ignore
-          onPodConditions:
-            - type: DisruptionTarget
-              status: "True"
-        - action: FailJob
-          onExitCodes:
-            operator: NotIn
-            values: [0]
-    branch: "{{.Branch}}"
-    promptTemplate: |
+    initialBranch: "{{.Branch}}"
+    initialPrompt: |
       You are a coding agent updating an existing PR in response to review feedback.
+
+      Your workspace is backed by a PVC. Files remain available across follow-ups
+      and pod restarts while the Session and its PVC exist. Commit and push work
+      that must outlive the Session.
 
       Webhook:
       - Event: {{.Event}}
@@ -101,9 +95,9 @@ spec:
       - 9. After pushing, actively check CI status with `gh pr checks {{.Number}}`. If any checks fail, investigate the failures, fix them, commit and push, then check again. Do not request review until CI passes.
 
       Post-checklist:
-      - If the PR is ready for human review, you need more information, or you cannot make progress, post a plain-English PR comment explaining the current state. Maintainers can resume the PR later with `/kelos pick-up`. When all review feedback was already addressed in previous commits and no new comments require action, keep the explanation brief (e.g. "All review feedback was addressed in previous commits. Ready for re-review.") instead of repeating a full status breakdown. Never post duplicate or near-identical status messages.
+      - If the PR is ready for human review, you need more information, or you cannot make progress, post a plain-English PR comment explaining the current state. Continue routine follow-ups through the Session's web or terminal clients. When all review feedback was already addressed in previous commits and no new comments require action, keep the explanation brief (e.g. "All review feedback was addressed in previous commits. Ready for re-review.") instead of repeating a full status breakdown. Never post duplicate or near-identical status messages.
       - If you find follow-up work outside the current PR scope, you may create
         a separate GitHub issue:
         - First check existing issues with `gh issue list` to avoid duplicates.
         - Keep the follow-up narrowly scoped and label it `generated-by-kelos`.
-        - Follow-up issues are exempt from the per-TaskSpawner issue slot cap.
+        - Follow-up issues are exempt from autonomous discovery issue slot caps.

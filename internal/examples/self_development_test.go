@@ -14,6 +14,7 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
 	sigyaml "sigs.k8s.io/yaml"
 
@@ -105,13 +106,11 @@ func TestSelfDevelopmentRoleAgentConfigsDoNotDuplicateBaseSkills(t *testing.T) {
 		{dir: "self-development/agora", file: "agora-fake-user.yaml"},
 		{dir: "self-development/agora", file: "agora-planner.yaml"},
 		{dir: "self-development/agora", file: "agora-reviewer.yaml"},
-		{dir: "self-development/agora", file: "agora-workers.yaml"},
 		{dir: "self-development/kanon", file: "agentconfig.yaml"},
 		{dir: "self-development/kanon", file: "kanon-fake-strategist.yaml"},
 		{dir: "self-development/kanon", file: "kanon-fake-user.yaml"},
 		{dir: "self-development/kanon", file: "kanon-planner.yaml"},
 		{dir: "self-development/kanon", file: "kanon-reviewer.yaml"},
-		{dir: "self-development/kanon", file: "kanon-workers.yaml"},
 	}
 
 	for _, tt := range files {
@@ -143,7 +142,7 @@ func TestSelfDevelopmentSpawnersUseBaseAgent(t *testing.T) {
 		{dir: "self-development", file: "kelos-glm-reviewer.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "kelos-glm-reviewer-agent"}}},
 		{dir: "self-development", file: "kelos-image-update.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "kelos-image-update-agent"}}},
 		{dir: "self-development", file: "kelos-planner.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "kelos-planner-agent"}}},
-		{dir: "self-development", file: "kelos-pr-responder.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "kelos-dev-agent"}}},
+		{dir: "self-development", file: "kelos-pr-responder.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}}},
 		{dir: "self-development", file: "kelos-reviewer.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "kelos-reviewer-agent"}}},
 		{dir: "self-development", file: "kelos-self-update.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "kelos-self-update-agent"}}},
 		{dir: "self-development", file: "kelos-squash-commits.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "kelos-dev-agent"}}},
@@ -153,22 +152,22 @@ func TestSelfDevelopmentSpawnersUseBaseAgent(t *testing.T) {
 		{dir: "self-development/agora", file: "agora-fake-strategist.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "agora-fake-strategist-agent"}}},
 		{dir: "self-development/agora", file: "agora-fake-user.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "agora-fake-user-agent"}}},
 		{dir: "self-development/agora", file: "agora-planner.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "agora-planner-agent"}}},
-		{dir: "self-development/agora", file: "agora-pr-responder.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "agora-dev-agent"}}},
+		{dir: "self-development/agora", file: "agora-pr-responder.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}}},
 		{dir: "self-development/agora", file: "agora-reviewer.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "agora-reviewer-agent"}}},
 		{dir: "self-development/agora", file: "agora-self-update.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "kelos-dev-agent"}}},
 		{dir: "self-development/agora", file: "agora-squash-commits.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "agora-dev-agent"}}},
 		{dir: "self-development/agora", file: "agora-triage.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "agora-dev-agent"}}},
-		{dir: "self-development/agora", file: "agora-workers.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "agora-workers-agent"}}},
+		{dir: "self-development/agora", file: "agora-workers.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}}},
 		{dir: "self-development/kanon", file: "kanon-config-update.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "kelos-dev-agent"}}},
 		{dir: "self-development/kanon", file: "kanon-fake-strategist.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "kanon-fake-strategist-agent"}}},
 		{dir: "self-development/kanon", file: "kanon-fake-user.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "kanon-fake-user-agent"}}},
 		{dir: "self-development/kanon", file: "kanon-planner.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "kanon-planner-agent"}}},
-		{dir: "self-development/kanon", file: "kanon-pr-responder.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "kanon-dev-agent"}}},
+		{dir: "self-development/kanon", file: "kanon-pr-responder.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}}},
 		{dir: "self-development/kanon", file: "kanon-reviewer.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "kanon-reviewer-agent"}}},
 		{dir: "self-development/kanon", file: "kanon-self-update.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "kelos-dev-agent"}}},
 		{dir: "self-development/kanon", file: "kanon-squash-commits.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "kanon-dev-agent"}}},
 		{dir: "self-development/kanon", file: "kanon-triage.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "kanon-dev-agent"}}},
-		{dir: "self-development/kanon", file: "kanon-workers.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "kanon-workers-agent"}}},
+		{dir: "self-development/kanon", file: "kanon-workers.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}}},
 	}
 	for _, tt := range tests {
 		tt := tt
@@ -204,7 +203,6 @@ func TestDevelopmentTaskSpawnersIgnoreDisruptions(t *testing.T) {
 		{dir: "self-development", file: "kelos-glm-reviewer.yaml"},
 		{dir: "self-development", file: "kelos-image-update.yaml"},
 		{dir: "self-development", file: "kelos-planner.yaml"},
-		{dir: "self-development", file: "kelos-pr-responder.yaml"},
 		{dir: "self-development", file: "kelos-reviewer.yaml"},
 		{dir: "self-development", file: "kelos-self-update.yaml"},
 		{dir: "self-development", file: "kelos-squash-commits.yaml"},
@@ -213,12 +211,10 @@ func TestDevelopmentTaskSpawnersIgnoreDisruptions(t *testing.T) {
 		{dir: "self-development/kanon", file: "kanon-fake-strategist.yaml"},
 		{dir: "self-development/kanon", file: "kanon-fake-user.yaml"},
 		{dir: "self-development/kanon", file: "kanon-planner.yaml"},
-		{dir: "self-development/kanon", file: "kanon-pr-responder.yaml"},
 		{dir: "self-development/kanon", file: "kanon-reviewer.yaml"},
 		{dir: "self-development/kanon", file: "kanon-self-update.yaml"},
 		{dir: "self-development/kanon", file: "kanon-squash-commits.yaml"},
 		{dir: "self-development/kanon", file: "kanon-triage.yaml"},
-		{dir: "self-development/kanon", file: "kanon-workers.yaml"},
 	}
 
 	for _, tt := range tests {
@@ -232,108 +228,145 @@ func TestDevelopmentTaskSpawnersIgnoreDisruptions(t *testing.T) {
 	}
 }
 
-func TestDevelopmentSessionSpawnerUsesPersistentWorkspace(t *testing.T) {
+func TestDevelopmentSessionSpawnersUsePersistentWorkspace(t *testing.T) {
 	t.Parallel()
-
-	_, spawner := readSpawnerFromDir(t, "self-development", "kelos-workers.yaml")
-	if spawner == nil {
-		t.Fatal("SessionSpawner is nil")
-	}
-	if spawner.Spec.SessionTemplate.VolumeClaimTemplate == nil {
-		t.Fatal("SessionSpawner sessionTemplate.volumeClaimTemplate is nil")
-	}
-	if spawner.Spec.SessionTemplate.InitialPrompt == "" {
-		t.Fatal("SessionSpawner sessionTemplate.initialPrompt is empty")
-	}
-	if !strings.Contains(spawner.Spec.SessionTemplate.InitialPrompt, "Your workspace is backed by a PVC") {
-		t.Fatal("SessionSpawner initialPrompt does not describe its persistent workspace")
-	}
-	wantAgentConfigs := []kelos.AgentConfigReference{{Name: "base-agent"}}
-	if !reflect.DeepEqual(spawner.Spec.SessionTemplate.Worker.AgentConfigRefs, wantAgentConfigs) {
-		t.Fatalf("SessionSpawner agentConfigRefs = %v, want %v", spawner.Spec.SessionTemplate.Worker.AgentConfigRefs, wantAgentConfigs)
-	}
-}
-
-func TestDevelopmentSessionSpawnerMatchesEveryIssueAndPullRequestComment(t *testing.T) {
-	t.Parallel()
-
-	_, sessionSpawner := readSpawnerFromDir(t, "self-development", "kelos-workers.yaml")
-	if sessionSpawner == nil {
-		t.Fatal("SessionSpawner is nil")
-	}
-	spawner := sessionSpawner.Spec.When.GitHubWebhook
-	if spawner == nil {
-		t.Fatal("SessionSpawner spec.when.githubWebhook is nil")
-	}
-	if !reflect.DeepEqual(spawner.ExcludeAuthors, []string{"kelos-bot[bot]"}) {
-		t.Fatalf("excludeAuthors = %v, want [kelos-bot[bot]]", spawner.ExcludeAuthors)
-	}
-	if len(spawner.Filters) != 1 {
-		t.Fatalf("filters length = %d, want 1", len(spawner.Filters))
-	}
-	filter := spawner.Filters[0]
-	wantFilter := kelos.GitHubWebhookFilter{Event: "issue_comment", Action: "created"}
-	if !reflect.DeepEqual(filter, wantFilter) {
-		t.Fatalf("filter = %#v, want %#v", filter, wantFilter)
-	}
-
-	for _, commentOn := range []string{kelos.CommentOnIssue, kelos.CommentOnPullRequest} {
-		commentOn := commentOn
-		for _, body := range []string{"Please investigate this", "/kelos pick-up"} {
-			body := body
-			t.Run(commentOn+"/"+body, func(t *testing.T) {
-				payloadFilter := filter
-				payloadFilter.CommentOn = commentOn
-				payload := developmentWebhookPayload(t, spawner.Repository, payloadFilter, body)
-				eventData, err := webhook.ParseGitHubWebhook("issue_comment", payload)
-				if err != nil {
-					t.Fatalf("ParseGitHubWebhook() error = %v", err)
-				}
-
-				got, err := webhook.MatchesGitHubEvent(spawner, "issue_comment", eventData)
-				if err != nil {
-					t.Fatalf("MatchesGitHubEvent() error = %v", err)
-				}
-				if !got {
-					t.Fatal("MatchesGitHubEvent() = false, want true")
-				}
-			})
-		}
-	}
-
-	botFilter := filter
-	botFilter.Author = "kelos-bot[bot]"
-	botPayload := developmentWebhookPayload(t, spawner.Repository, botFilter, "/kelos pick-up")
-	botEvent, err := webhook.ParseGitHubWebhook("issue_comment", botPayload)
-	if err != nil {
-		t.Fatalf("ParseGitHubWebhook(bot) error = %v", err)
-	}
-	if got, err := webhook.MatchesGitHubEvent(spawner, "issue_comment", botEvent); err != nil || got {
-		t.Fatalf("MatchesGitHubEvent(bot) = %v, %v, want false, nil", got, err)
-	}
-}
-
-func TestDevelopmentSessionSpawnerUsesPRBranchAndIssueFallback(t *testing.T) {
-	t.Parallel()
-
-	_, spawner := readSpawnerFromDir(t, "self-development", "kelos-workers.yaml")
-	if spawner == nil {
-		t.Fatal("SessionSpawner is nil")
-	}
 
 	tests := []struct {
-		name   string
-		branch string
-		want   string
+		dir  string
+		file string
 	}{
-		{name: "pull request", branch: "feature-branch", want: "feature-branch"},
-		{name: "issue", branch: "", want: "kelos-task-42"},
+		{dir: "self-development", file: "kelos-workers.yaml"},
+		{dir: "self-development", file: "kelos-pr-responder.yaml"},
+		{dir: "self-development/agora", file: "agora-workers.yaml"},
+		{dir: "self-development/agora", file: "agora-pr-responder.yaml"},
+		{dir: "self-development/kanon", file: "kanon-workers.yaml"},
+		{dir: "self-development/kanon", file: "kanon-pr-responder.yaml"},
 	}
 	for _, tt := range tests {
 		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.dir+"/"+tt.file, func(t *testing.T) {
+			t.Parallel()
+
+			sessionSpawner := readSessionSpawnerFromDir(t, tt.dir, tt.file)
+			if sessionSpawner.Spec.SessionTemplate.VolumeClaimTemplate == nil {
+				t.Fatalf("%s sessionTemplate.volumeClaimTemplate is nil", tt.file)
+			}
+			claim := sessionSpawner.Spec.SessionTemplate.VolumeClaimTemplate
+			if !reflect.DeepEqual(claim.AccessModes, []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}) {
+				t.Fatalf("%s volumeClaimTemplate.accessModes = %v, want [ReadWriteOnce]", tt.file, claim.AccessModes)
+			}
+			if storage := claim.Resources.Requests[corev1.ResourceStorage]; storage.Cmp(resource.MustParse("10Gi")) != 0 {
+				t.Fatalf("%s volumeClaimTemplate storage = %s, want 10Gi", tt.file, storage.String())
+			}
+			if sessionSpawner.Spec.SessionTemplate.InitialPrompt == "" {
+				t.Fatalf("%s sessionTemplate.initialPrompt is empty", tt.file)
+			}
+			if !strings.Contains(sessionSpawner.Spec.SessionTemplate.InitialPrompt, "Your workspace is backed by a PVC") {
+				t.Fatalf("%s initialPrompt does not describe its persistent workspace", tt.file)
+			}
+		})
+	}
+}
+
+func TestDevelopmentSessionSpawnersMatchPickUpOnly(t *testing.T) {
+	t.Parallel()
+
+	wantFilter := kelos.GitHubWebhookFilter{
+		Event:       "issue_comment",
+		Action:      "created",
+		BodyPattern: `(?m)^/kelos pick-up[ \t]*\r?$`,
+		CommentOn:   kelos.CommentOnIssue,
+		State:       "open",
+		Author:      "gjkim42",
+	}
+	spawners := []struct {
+		dir  string
+		file string
+	}{
+		{dir: "self-development", file: "kelos-workers.yaml"},
+		{dir: "self-development/agora", file: "agora-workers.yaml"},
+		{dir: "self-development/kanon", file: "kanon-workers.yaml"},
+	}
+
+	for _, tt := range spawners {
+		tt := tt
+		t.Run(tt.dir+"/"+tt.file, func(t *testing.T) {
+			t.Parallel()
+
+			sessionSpawner := readSessionSpawnerFromDir(t, tt.dir, tt.file)
+			spawner := sessionSpawner.Spec.When.GitHubWebhook
+			if spawner == nil {
+				t.Fatal("SessionSpawner spec.when.githubWebhook is nil")
+			}
+			if !reflect.DeepEqual(spawner.ExcludeAuthors, []string{"kelos-bot[bot]"}) {
+				t.Fatalf("excludeAuthors = %v, want [kelos-bot[bot]]", spawner.ExcludeAuthors)
+			}
+			if !reflect.DeepEqual(spawner.Filters, []kelos.GitHubWebhookFilter{wantFilter}) {
+				t.Fatalf("filters = %#v, want %#v", spawner.Filters, []kelos.GitHubWebhookFilter{wantFilter})
+			}
+
+			prFilter := wantFilter
+			prFilter.CommentOn = kelos.CommentOnPullRequest
+			closedFilter := wantFilter
+			closedFilter.State = "closed"
+			otherAuthorFilter := wantFilter
+			otherAuthorFilter.Author = "octocat"
+
+			cases := []struct {
+				name   string
+				filter kelos.GitHubWebhookFilter
+				body   string
+				want   bool
+			}{
+				{name: "pick-up on open issue", filter: wantFilter, body: "/kelos pick-up", want: true},
+				{name: "ordinary issue comment", filter: wantFilter, body: "Please investigate this", want: false},
+				{name: "pick-up on pull request", filter: prFilter, body: "/kelos pick-up", want: false},
+				{name: "pick-up on closed issue", filter: closedFilter, body: "/kelos pick-up", want: false},
+				{name: "pick-up from another author", filter: otherAuthorFilter, body: "/kelos pick-up", want: false},
+			}
+
+			for _, tc := range cases {
+				tc := tc
+				t.Run(tc.name, func(t *testing.T) {
+					payload := developmentWebhookPayload(t, spawner.Repository, tc.filter, tc.body)
+					eventData, err := webhook.ParseGitHubWebhook("issue_comment", payload)
+					if err != nil {
+						t.Fatalf("ParseGitHubWebhook() error = %v", err)
+					}
+
+					got, err := webhook.MatchesGitHubEvent(spawner, "issue_comment", eventData)
+					if err != nil {
+						t.Fatalf("MatchesGitHubEvent() error = %v", err)
+					}
+					if got != tc.want {
+						t.Fatalf("MatchesGitHubEvent() = %v, want %v", got, tc.want)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestDevelopmentSessionSpawnersUseIssueBranches(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		dir  string
+		file string
+		want string
+	}{
+		{dir: "self-development", file: "kelos-workers.yaml", want: "kelos-task-42"},
+		{dir: "self-development/agora", file: "agora-workers.yaml", want: "agora-task-42"},
+		{dir: "self-development/kanon", file: "kanon-workers.yaml", want: "kanon-task-42"},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.dir+"/"+tt.file, func(t *testing.T) {
+			t.Parallel()
+
+			spawner := readSessionSpawnerFromDir(t, tt.dir, tt.file)
+
 			got, err := sessionbuilder.Render("initialBranch", spawner.Spec.SessionTemplate.InitialBranch, map[string]interface{}{
-				"Branch": tt.branch,
 				"Number": 42,
 			})
 			if err != nil {
@@ -341,6 +374,67 @@ func TestDevelopmentSessionSpawnerUsesPRBranchAndIssueFallback(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Fatalf("initialBranch = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDevelopmentPRResponderSessionSpawnersMatchPickUpOnPullRequests(t *testing.T) {
+	t.Parallel()
+
+	notDraft := false
+	wantFilters := []kelos.GitHubWebhookFilter{
+		{
+			Event:       "issue_comment",
+			Action:      "created",
+			BodyPattern: `(?m)^/kelos pick-up[ \t]*\r?$`,
+			CommentOn:   kelos.CommentOnPullRequest,
+			State:       "open",
+			Author:      "gjkim42",
+		},
+		{
+			Event:       "pull_request_review",
+			Action:      "submitted",
+			BodyPattern: `(?m)^/kelos pick-up[ \t]*\r?$`,
+			State:       "open",
+			Draft:       &notDraft,
+			Author:      "gjkim42",
+		},
+	}
+	tests := []struct {
+		dir  string
+		file string
+	}{
+		{dir: "self-development", file: "kelos-pr-responder.yaml"},
+		{dir: "self-development/agora", file: "agora-pr-responder.yaml"},
+		{dir: "self-development/kanon", file: "kanon-pr-responder.yaml"},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.dir+"/"+tt.file, func(t *testing.T) {
+			t.Parallel()
+
+			sessionSpawner := readSessionSpawnerFromDir(t, tt.dir, tt.file)
+
+			spawner := sessionSpawner.Spec.When.GitHubWebhook
+			if spawner == nil {
+				t.Fatal("SessionSpawner spec.when.githubWebhook is nil")
+			}
+			if spawner.Reporting != nil {
+				t.Fatalf("SessionSpawner githubWebhook.reporting = %v, want nil", spawner.Reporting)
+			}
+			if !reflect.DeepEqual(spawner.Filters, wantFilters) {
+				t.Fatalf("filters = %#v, want %#v", spawner.Filters, wantFilters)
+			}
+
+			got, err := sessionbuilder.Render("initialBranch", sessionSpawner.Spec.SessionTemplate.InitialBranch, map[string]interface{}{
+				"Branch": "feature-branch",
+			})
+			if err != nil {
+				t.Fatalf("Render() error = %v", err)
+			}
+			if want := "feature-branch"; got != want {
+				t.Fatalf("initialBranch = %q, want %q", got, want)
 			}
 		})
 	}
@@ -354,6 +448,7 @@ func TestDevelopmentCommandPatternsMatchCommandLines(t *testing.T) {
 		file    string
 		command string
 	}{
+		{dir: "self-development", file: "kelos-workers.yaml", command: "/kelos pick-up"},
 		{dir: "self-development", file: "kelos-planner.yaml", command: "/kelos plan"},
 		{dir: "self-development", file: "kelos-reviewer.yaml", command: "/kelos review"},
 		{dir: "self-development", file: "kelos-api-reviewer.yaml", command: "/kelos api-review"},
@@ -361,6 +456,8 @@ func TestDevelopmentCommandPatternsMatchCommandLines(t *testing.T) {
 		{dir: "self-development", file: "kelos-glm-api-reviewer.yaml", command: "/kelos glm-api-review"},
 		{dir: "self-development", file: "kelos-pr-responder.yaml", command: "/kelos pick-up"},
 		{dir: "self-development", file: "kelos-squash-commits.yaml", command: "/kelos squash-commits"},
+		{dir: "self-development/agora", file: "agora-workers.yaml", command: "/kelos pick-up"},
+		{dir: "self-development/agora", file: "agora-pr-responder.yaml", command: "/kelos pick-up"},
 		{dir: "self-development/kanon", file: "kanon-workers.yaml", command: "/kelos pick-up"},
 		{dir: "self-development/kanon", file: "kanon-planner.yaml", command: "/kelos plan"},
 		{dir: "self-development/kanon", file: "kanon-reviewer.yaml", command: "/kelos review"},
@@ -689,8 +786,13 @@ func TestAgoraIssueCreatorsUseTriageAcceptedLabel(t *testing.T) {
 		t.Run(file, func(t *testing.T) {
 			t.Parallel()
 
-			ts := readTaskSpawnerFromDir(t, "self-development/agora", file)
-			prompt := ts.Spec.TaskTemplate.PromptTemplate
+			taskSpawner, sessionSpawner := readSpawnerFromDir(t, "self-development/agora", file)
+			var prompt string
+			if taskSpawner != nil {
+				prompt = taskSpawner.Spec.TaskTemplate.PromptTemplate
+			} else {
+				prompt = sessionSpawner.Spec.SessionTemplate.InitialPrompt
+			}
 			if !strings.Contains(prompt, "triage-accepted") {
 				t.Fatalf("%s prompt does not mention triage-accepted", file)
 			}
@@ -826,7 +928,7 @@ func TestAgoraPlannerOnlyTriggersForIssues(t *testing.T) {
 	}
 }
 
-func TestDevelopmentTaskSpawnersSetExpectedEffort(t *testing.T) {
+func TestDevelopmentSpawnersSetExpectedEffort(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -848,6 +950,8 @@ func TestDevelopmentTaskSpawnersSetExpectedEffort(t *testing.T) {
 		{dir: "self-development", file: "kelos-image-update.yaml", effort: "medium"},
 		{dir: "self-development", file: "kelos-fake-user.yaml", effort: "medium"},
 		{dir: "self-development", file: "kelos-squash-commits.yaml", effort: "medium"},
+		{dir: "self-development/agora", file: "agora-workers.yaml", effort: "xhigh"},
+		{dir: "self-development/agora", file: "agora-pr-responder.yaml", effort: "xhigh"},
 		{dir: "self-development/kanon", file: "kanon-workers.yaml", effort: "xhigh"},
 		{dir: "self-development/kanon", file: "kanon-planner.yaml", effort: "xhigh"},
 		{dir: "self-development/kanon", file: "kanon-reviewer.yaml", effort: "xhigh"},
@@ -1213,6 +1317,16 @@ func readTaskSpawnerFromDir(t *testing.T, dir, file string) *kelos.TaskSpawner {
 		t.Fatalf("no TaskSpawner found in %s", filepath.Join("..", "..", dir, file))
 	}
 	return taskSpawner
+}
+
+func readSessionSpawnerFromDir(t *testing.T, dir, file string) *kelos.SessionSpawner {
+	t.Helper()
+
+	_, sessionSpawner := readSpawnerFromDir(t, dir, file)
+	if sessionSpawner == nil {
+		t.Fatalf("no SessionSpawner found in %s", filepath.Join("..", "..", dir, file))
+	}
+	return sessionSpawner
 }
 
 func readGitHubWebhookFromDir(t *testing.T, dir, file string) *kelos.GitHubWebhook {

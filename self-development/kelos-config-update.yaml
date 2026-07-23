@@ -36,6 +36,7 @@ spec:
           - name: GIT_COMMITTER_EMAIL
             value: "gjkim042@gmail.com"
       agentConfigRefs:
+        - name: base-agent
         - name: kelos-dev-agent
     ttlSecondsAfterFinished: 864000
     podFailurePolicy:
@@ -55,7 +56,8 @@ spec:
 
       Agent configuration includes:
       - `AGENTS.md` — project-level conventions and instructions for all agents
-      - `self-development/agentconfig.yaml` — shared AgentConfig (agentsMD, plugins, skills, subagents, commands)
+      - `self-development/base-agent.yaml` — checked-in copy of `gjkim42/kanon-repo` instructions and shared skills
+      - `self-development/agentconfig.yaml` — Kelos-specific AgentConfig used by general-purpose TaskSpawners
       - `self-development/*.yaml` — TaskSpawner and SessionSpawner prompt templates that guide each agent's behavior
 
       Task:
@@ -81,7 +83,8 @@ spec:
 
          **Project-level changes** (affect all agents):
          - Update `AGENTS.md` if the feedback is about general project conventions
-         - Update `self-development/agentconfig.yaml` if the feedback is about shared agent behavior
+         - Update the applicable role-specific AgentConfig for shared TaskSpawner behavior
+         - Only update `self-development/base-agent.yaml` to synchronize changes from its upstream `gjkim42/kanon-repo` sources
 
          **Task-specific changes** (affect a specific agent):
          - Update the relevant spawner prompt in `self-development/*.yaml`

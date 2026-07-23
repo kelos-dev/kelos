@@ -3,8 +3,6 @@ kind: AgentConfig
 metadata:
   name: kelos-fake-strategist-agent
 spec:
-  skills:
-    - source: gjkim42/kanon-repo
   agentsMD: |
     # Kelos Strategist Agent
 
@@ -61,6 +59,7 @@ spec:
           limits:
             ephemeral-storage: "2Gi"
       agentConfigRefs:
+        - name: base-agent
         - name: kelos-fake-strategist-agent
     ttlSecondsAfterFinished: 864000
     podFailurePolicy:

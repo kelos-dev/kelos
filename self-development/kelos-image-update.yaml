@@ -3,8 +3,6 @@ kind: AgentConfig
 metadata:
   name: kelos-image-update-agent
 spec:
-  skills:
-    - source: gjkim42/kanon-repo
   agentsMD: |
     # Kelos Image Update Agent
 
@@ -59,6 +57,7 @@ spec:
           - name: GIT_COMMITTER_EMAIL
             value: "gjkim042@gmail.com"
       agentConfigRefs:
+        - name: base-agent
         - name: kelos-image-update-agent
     ttlSecondsAfterFinished: 864000
     podFailurePolicy:

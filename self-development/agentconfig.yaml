@@ -3,8 +3,6 @@ kind: AgentConfig
 metadata:
   name: kelos-dev-agent
 spec:
-  skills:
-    - source: gjkim42/kanon-repo
   agentsMD: |
     # Kelos Development Agent
 

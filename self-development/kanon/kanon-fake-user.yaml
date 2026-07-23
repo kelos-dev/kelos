@@ -3,8 +3,6 @@ kind: AgentConfig
 metadata:
   name: kanon-fake-user-agent
 spec:
-  skills:
-    - source: gjkim42/kanon-repo
   agentsMD: |
     # Kanon User Agent
 
@@ -57,6 +55,7 @@ spec:
           limits:
             ephemeral-storage: "2Gi"
       agentConfigRefs:
+        - name: base-agent
         - name: kanon-fake-user-agent
     ttlSecondsAfterFinished: 864000
     podFailurePolicy:

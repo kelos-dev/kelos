@@ -3,8 +3,6 @@ kind: AgentConfig
 metadata:
   name: kelos-self-update-agent
 spec:
-  skills:
-    - source: gjkim42/kanon-repo
   agentsMD: |
     # Kelos Self-Update Agent
 
@@ -61,6 +59,7 @@ spec:
           limits:
             ephemeral-storage: "2Gi"
       agentConfigRefs:
+        - name: base-agent
         - name: kelos-self-update-agent
     ttlSecondsAfterFinished: 864000
     podFailurePolicy:
@@ -94,7 +93,8 @@ spec:
       2. **Configuration Alignment**
          - Check that resource requests/limits, models, TTLs, and other settings are appropriate
          - Verify that webhook repositories, events, labels, excludeLabels, and filters are correct and consistent
-         - Ensure AgentConfig instructions in `agentconfig.yaml` match the project's current conventions in `AGENTS.md`
+         - Ensure every root spawner references `base-agent` first, with role-specific AgentConfigs after it
+         - Ensure `base-agent.yaml` matches `gjkim42/kanon-repo`'s `instructions/AGENTS.md` and shared skills package
          - Look for inconsistencies between spawners that should share the same configuration
 
       3. **Workflow Completeness**

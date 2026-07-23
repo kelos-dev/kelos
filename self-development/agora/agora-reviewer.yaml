@@ -3,8 +3,6 @@ kind: AgentConfig
 metadata:
   name: agora-reviewer-agent
 spec:
-  skills:
-    - source: gjkim42/kanon-repo
   agentsMD: |
     # Agora Reviewer Agent
 
@@ -83,6 +81,7 @@ spec:
           limits:
             ephemeral-storage: "4Gi"
       agentConfigRefs:
+        - name: base-agent
         - name: agora-reviewer-agent
     ttlSecondsAfterFinished: 864000
     podFailurePolicy:

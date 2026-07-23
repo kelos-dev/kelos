@@ -1,0 +1,25 @@
+apiVersion: kelos.dev/v1alpha2
+kind: AgentConfig
+metadata:
+  name: base-agent
+spec:
+  skills:
+    - source: gjkim42/kanon-repo
+  agentsMD: |
+    # AGENTS.md
+
+    ## Rules
+
+    - Use plain English in code comments and docstrings unless otherwise specified.
+    - Write comments only when they add information the code cannot express. Prefer comments that explain why a decision exists, and avoid comments that merely restate what the code does. If code needs a comment to be understandable, simplify or rename it first. Comments are appropriate for complex regular expressions, algorithms, non-obvious constraints, and tradeoffs. When editing code, review nearby existing comments and TODOs, and remove or update any that are obsolete. Use docstrings and API documentation to explain purpose, usage, and behavior.
+    - Never encode change history in code. Comments, docstrings, and identifiers must describe only the current state — no "old vs new", "before/after", "previously/now", "changed from X to Y" comments, and no names like `newParser`, `handleV2`, or `legacyFoo`. Once merged, today's "new" is just the code (and soon the old one), so such references rot immediately. Change history belongs in git commits and PR descriptions.
+    - When a significant design decision changes mid-work (a different approach, a renamed concept, a replaced mechanism), rewrite the affected code, comments, tests, and docs so the result reads as if it had been designed this way from the beginning. Remove every leftover of the abandoned approach: dead branches, shims and indirection that existed only to serve the old design, names and structure shaped by it, tests that pin its behavior, and doc sections that describe it. This cleanup covers only the code touched by the decision — it is not a license for unrelated refactors. The diff may show the journey; the final tree must not.
+    - Do not rewrite existing comments or docstrings only because they are written in Korean. Preserve them unless they are incorrect, obsolete, unclear for the current change, or the user explicitly asks to translate them.
+    - Use `gh` CLI for GitHub operations (PRs, issues, repos, etc.) instead of MCP OSS tools.
+    - Do not prefix PR titles with `[codex]`.
+    - When addressing PR feedback, treat reviews as findings to verify, not instructions to execute blindly. First identify the current PR head, review state, author, timestamp, thread resolution, and whether the comment still applies to the current diff. Fix only feedback that is valid, current, actionable, and supported by the code; explicitly triage stale, resolved, superseded, speculative, preference-only, or non-actionable feedback instead of changing code for it.
+    - Make patches as simple as possible: solve the requested problem directly, keep changes narrowly scoped, follow existing patterns, and avoid opportunistic refactors, dependency churn, or formatting-only edits unless they are necessary for the task. Do not add defensive handling for unreasonable or highly unlikely cases unless there is a concrete requirement, observed failure, or codebase contract that justifies it.
+    - Treat CI-only and test-environment flakes as test or infrastructure problems unless there is concrete evidence of a product/runtime bug. Do not change product behavior just to mask CI timing, ordering, caching, or environment issues; fix the harness, readiness checks, isolation, or diagnostics instead.
+    - Add a regression test only when it pins a failure mode the shipped code must hold against — a defect present on the base branch (diff against `git merge-base HEAD origin/main`, falling back to develop) that this change fixes. Do not add regression tests for bugs introduced and then fixed within the same branch or session; that code never shipped, so the test guards nothing and just locks in transient work-in-progress. If a transient mid-session failure exposes a genuine edge case the final code must handle, cover it as ordinary edge-case test, not a regression test. Always write normal tests for the intended behavior of new or changed code.
+    - Use structured logging (key=value fields) when the project's logger supports it. Log messages should be concise plain English phrases or sentences that describe what happened. Put variable values and machine-readable categories in structured fields instead of interpolating them into the message string.
+    - Use dependency injection for components, especially anything env-derived. Clients / sub-components take their config as required constructor arguments and validate it there (fail fast on empty/invalid). Only the composition root (the application entry point) reads environment variables; every other module receives values via injection. No env-var fallbacks inside constructors, no module-level env-derived defaults inside client packages.

@@ -3,8 +3,6 @@ kind: AgentConfig
 metadata:
   name: agora-fake-strategist-agent
 spec:
-  skills:
-    - source: gjkim42/kanon-repo
   agentsMD: |
     # Agora Strategist Agent
 
@@ -59,6 +57,7 @@ spec:
           limits:
             ephemeral-storage: "2Gi"
       agentConfigRefs:
+        - name: base-agent
         - name: agora-fake-strategist-agent
     ttlSecondsAfterFinished: 864000
     podFailurePolicy:

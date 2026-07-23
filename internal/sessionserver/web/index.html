@@ -78,6 +78,11 @@
       </section>
 
       <footer class="composer-wrap">
+        <div class="session-progress" id="session-progress" data-state="idle" role="status" aria-live="polite" hidden>
+          <span class="session-progress-dot" aria-hidden="true">•</span>
+          <span id="session-progress-label"></span>
+          <span id="session-progress-elapsed" aria-hidden="true"></span>
+        </div>
         <div class="queued-prompts" id="queued-prompts" aria-label="Queued prompts" aria-live="polite" hidden></div>
         <form class="composer" id="composer">
           <textarea id="message-input" rows="1" placeholder="Choose a ready session to start chatting" aria-label="Message" disabled></textarea>

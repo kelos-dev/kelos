@@ -229,12 +229,16 @@ form or YAML manifest and leaves the new name blank. It does not copy the source
 metadata, conversation, or persistent-volume data.
 
 Use `kelos session connect NAME` for terminal chat. In an interactive terminal,
-press Enter to send a message, Ctrl+J to insert a newline, and Ctrl+C to
+press Enter to send a message, Ctrl+J to insert a newline, and Ctrl+C or Esc to
 interrupt an active turn. Ctrl+C exits the terminal client when no turn is
-active. Web chat is served by the optional shared `kelos-session-server`; both
-clients use the same event stream and provider conversation. Both clients can
-stream agent and tool activity, answer user-input requests, and interrupt
-active work without ending the provider conversation.
+active. The terminal client shows live connecting, reconnecting, working,
+waiting-for-input, and interrupting status with elapsed time. Web chat is
+served by the optional shared `kelos-session-server`; it shows connection
+status separately from working, waiting-for-input, and interrupting progress,
+including elapsed time for active work. Both clients use the same event stream
+and provider conversation. Both clients can stream agent and tool activity,
+answer user-input requests, and interrupt active work without ending the
+provider conversation.
 
 Selecting a Session in the web chat opens it at the latest retained message.
 Reconnecting preserves an intentional upward scroll position and shows the

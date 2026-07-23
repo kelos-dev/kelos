@@ -330,3 +330,50 @@ func TestTaskSpawnerFromHub_LeavesPolicyWithAuthorizationModern(t *testing.T) {
 		t.Errorf("triggerComment = %q, want empty to keep v1alpha1 validation valid", pr.TriggerComment)
 	}
 }
+
+func TestTaskSpawnerConvert_NameTemplateRoundTrips(t *testing.T) {
+	const nameTemplate = "responder-{{.Repository}}-pr-{{.Number}}"
+	hub := &v1alpha2.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{Name: "responder", Namespace: "default"},
+		Spec: v1alpha2.TaskSpawnerSpec{
+			When:         v1alpha2.When{GitHubWebhook: &v1alpha2.GitHubWebhook{Events: []string{"pull_request"}}},
+			TaskTemplate: v1alpha2.TaskTemplate{NameTemplate: nameTemplate},
+		},
+	}
+
+	// hub -> spoke: v1alpha1 has no nameTemplate field, so it is preserved in an
+	// internal annotation rather than dropped.
+	spoke := &v1alpha1.TaskSpawner{}
+	if err := taskSpawnerFromHub(context.Background(), hub, spoke); err != nil {
+		t.Fatalf("taskSpawnerFromHub() error = %v", err)
+	}
+	if got := spoke.Annotations[preservedNameTemplateAnnotation]; got != nameTemplate {
+		t.Fatalf("preserved annotation = %q, want %q", got, nameTemplate)
+	}
+
+	// spoke -> hub: the field is restored and the internal annotation removed.
+	back := &v1alpha2.TaskSpawner{}
+	if err := taskSpawnerToHub(context.Background(), spoke, back); err != nil {
+		t.Fatalf("taskSpawnerToHub() error = %v", err)
+	}
+	if got := back.Spec.TaskTemplate.NameTemplate; got != nameTemplate {
+		t.Errorf("round-tripped NameTemplate = %q, want %q", got, nameTemplate)
+	}
+	if _, ok := back.Annotations[preservedNameTemplateAnnotation]; ok {
+		t.Error("internal preservation annotation leaked onto hub object")
+	}
+}
+
+func TestTaskSpawnerFromHub_NoNameTemplateOmitsAnnotation(t *testing.T) {
+	hub := &v1alpha2.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{Name: "responder", Namespace: "default"},
+		Spec:       v1alpha2.TaskSpawnerSpec{When: v1alpha2.When{Cron: &v1alpha2.Cron{Schedule: "0 9 * * 1"}}},
+	}
+	spoke := &v1alpha1.TaskSpawner{}
+	if err := taskSpawnerFromHub(context.Background(), hub, spoke); err != nil {
+		t.Fatalf("taskSpawnerFromHub() error = %v", err)
+	}
+	if _, ok := spoke.Annotations[preservedNameTemplateAnnotation]; ok {
+		t.Error("annotation should not be set when nameTemplate is empty")
+	}
+}

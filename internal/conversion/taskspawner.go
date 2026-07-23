@@ -7,8 +7,14 @@ import (
 	v1alpha2 "github.com/kelos-dev/kelos/api/v1alpha2"
 )
 
+// preservedNameTemplateAnnotation carries taskTemplate.nameTemplate (a
+// v1alpha2-only field) across a v1alpha1 round-trip so a client that reads and
+// writes the object through v1alpha1 does not silently drop it. v1alpha1 does
+// not gain the capability — the value only survives in this annotation.
+const preservedNameTemplateAnnotation = "kelos.dev/v1alpha2-name-template"
+
 func taskSpawnerToHub(_ context.Context, src *v1alpha1.TaskSpawner, dst *v1alpha2.TaskSpawner) error {
-	dst.ObjectMeta = src.ObjectMeta
+	src.ObjectMeta.DeepCopyInto(&dst.ObjectMeta)
 	if err := convertViaJSON(&src.Spec, &dst.Spec); err != nil {
 		return err
 	}
@@ -16,11 +22,13 @@ func taskSpawnerToHub(_ context.Context, src *v1alpha1.TaskSpawner, dst *v1alpha
 		return err
 	}
 	foldTaskSpawnerForward(&src.Spec, &dst.Spec)
+	restorePreservedNameTemplate(src.Annotations, &dst.Spec.TaskTemplate)
+	deleteAnnotation(dst.Annotations, preservedNameTemplateAnnotation)
 	return nil
 }
 
 func taskSpawnerFromHub(_ context.Context, src *v1alpha2.TaskSpawner, dst *v1alpha1.TaskSpawner) error {
-	dst.ObjectMeta = src.ObjectMeta
+	src.ObjectMeta.DeepCopyInto(&dst.ObjectMeta)
 	if err := convertViaJSON(&src.Spec, &dst.Spec); err != nil {
 		return err
 	}
@@ -28,7 +36,28 @@ func taskSpawnerFromHub(_ context.Context, src *v1alpha2.TaskSpawner, dst *v1alp
 		return err
 	}
 	backfillTaskSpawnerLegacy(&dst.Spec)
+	setPreservedNameTemplateAnnotation(dst, src.Spec.TaskTemplate.NameTemplate)
 	return convertViaJSON(&src.Status, &dst.Status)
+}
+
+func setPreservedNameTemplateAnnotation(dst *v1alpha1.TaskSpawner, nameTemplate string) {
+	if nameTemplate == "" {
+		deleteAnnotation(dst.Annotations, preservedNameTemplateAnnotation)
+		return
+	}
+	if dst.Annotations == nil {
+		dst.Annotations = map[string]string{}
+	}
+	dst.Annotations[preservedNameTemplateAnnotation] = nameTemplate
+}
+
+func restorePreservedNameTemplate(annotations map[string]string, dst *v1alpha2.TaskTemplate) {
+	if dst.NameTemplate != "" {
+		return
+	}
+	if v, ok := annotations[preservedNameTemplateAnnotation]; ok {
+		dst.NameTemplate = v
+	}
 }
 
 func foldTaskSpawnerForward(src *v1alpha1.TaskSpawnerSpec, dst *v1alpha2.TaskSpawnerSpec) {

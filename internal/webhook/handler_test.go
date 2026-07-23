@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -2183,5 +2184,173 @@ func TestServeHTTP_ChecksOnlyWithoutCommentReporting(t *testing.T) {
 	}
 	if task.Annotations[reporting.AnnotationSourceSHA] != "aaa111bbb222" {
 		t.Errorf("Expected source-sha 'aaa111bbb222', got %q", task.Annotations[reporting.AnnotationSourceSHA])
+	}
+}
+
+// nameTemplateSpawner returns a pull_request spawner whose taskTemplate names
+// Tasks deterministically from the PR number, so repeated deliveries for the
+// same PR deduplicate.
+func nameTemplateSpawner() *kelos.TaskSpawner {
+	return &kelos.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "responder",
+			Namespace: "default",
+			UID:       "responder-uid",
+		},
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubWebhook: &kelos.GitHubWebhook{
+					Events: []string{"pull_request"},
+				},
+			},
+			TaskTemplate: kelos.TaskTemplate{
+				Type:           "claude-code",
+				Credentials:    &kelos.Credentials{Type: "api-key"},
+				WorkspaceRef:   &kelos.WorkspaceReference{Name: "test-workspace"},
+				NameTemplate:   "responder-pr-{{.Number}}",
+				PromptTemplate: "{{.Title}}",
+			},
+		},
+	}
+}
+
+// prWebhookPayload builds a minimal pull_request webhook payload for the given
+// PR number.
+func prWebhookPayload(number int) []byte {
+	return []byte(fmt.Sprintf(`{
+		"action": "opened",
+		"sender": {"login": "testuser"},
+		"repository": {"full_name": "org/repo", "name": "repo", "owner": {"login": "org"}},
+		"pull_request": {
+			"number": %d,
+			"title": "Test PR",
+			"body": "PR body",
+			"html_url": "https://github.com/org/repo/pull/%d",
+			"state": "open",
+			"head": {"ref": "feature-branch"}
+		}
+	}`, number, number))
+}
+
+// sendPRWebhook delivers a pull_request webhook with the given delivery ID.
+func sendPRWebhook(t *testing.T, handler *WebhookHandler, payload []byte, deliveryID string) {
+	t.Helper()
+	sig := signPayload(payload, []byte(testSecret))
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
+	req.Header.Set(GitHubEventHeader, "pull_request")
+	req.Header.Set(GitHubSignatureHeader, sig)
+	req.Header.Set(GitHubDeliveryHeader, deliveryID)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Delivery %s: expected %d, got %d", deliveryID, http.StatusOK, rr.Code)
+	}
+}
+
+// TestServeHTTP_DuplicateTasksDedupedByNameTemplate covers issue #1155: when a
+// spawner configures a deterministic nameTemplate, multiple webhook deliveries
+// for the same PR (each with a unique X-GitHub-Delivery) collapse to one Task.
+func TestServeHTTP_DuplicateTasksDedupedByNameTemplate(t *testing.T) {
+	handler := newTestHandler(t, nameTemplateSpawner())
+
+	payload := prWebhookPayload(123)
+	// Five distinct deliveries for the same PR, as GitHub would send for an
+	// "opened" plus several "labeled" events within the same second.
+	for _, id := range []string{"d-1", "d-2", "d-3", "d-4", "d-5"} {
+		sendPRWebhook(t, handler, payload, id)
+	}
+
+	var taskList kelos.TaskList
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+	if len(taskList.Items) != 1 {
+		names := make([]string, 0, len(taskList.Items))
+		for _, task := range taskList.Items {
+			names = append(names, task.Name)
+		}
+		t.Fatalf("Expected 1 task for PR #123, got %d: %s", len(taskList.Items), strings.Join(names, ", "))
+	}
+	if got := taskList.Items[0].Name; got != "responder-pr-123" {
+		t.Errorf("task name = %q, want %q", got, "responder-pr-123")
+	}
+}
+
+// TestCreateTask_NameCollisionWithUnrelatedTaskErrors ensures a rendered name
+// that collides with a Task NOT owned by this spawner surfaces an error instead
+// of silently succeeding as a dedup no-op.
+func TestCreateTask_NameCollisionWithUnrelatedTaskErrors(t *testing.T) {
+	spawner := nameTemplateSpawner()
+	unrelated := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "responder-pr-123", // matches nameTemplate output for PR 123
+			Namespace: "default",
+		},
+		Spec: kelos.TaskSpec{Type: "claude-code", Prompt: "unrelated"},
+	}
+	handler := newTestHandler(t, spawner, unrelated)
+
+	eventData, err := ParseGitHubWebhook("pull_request", prWebhookPayload(123))
+	if err != nil {
+		t.Fatalf("ParseGitHubWebhook: %v", err)
+	}
+	parsed := &ParsedWebhook{GitHub: eventData}
+
+	_, err = handler.createTask(context.Background(), spawner, "pull_request", parsed, "delivery-collide")
+	if err == nil {
+		t.Fatal("expected error when rendered name collides with an unrelated Task, got nil")
+	}
+	if !strings.Contains(err.Error(), "responder-pr-123") {
+		t.Errorf("error should name the colliding Task, got: %v", err)
+	}
+}
+
+// TestServeHTTP_UnrelatedNameCollisionReturns500 ensures a rendered name that
+// collides with a Task not owned by the spawner fails the delivery (HTTP 500)
+// so GitHub retries, rather than being silently swallowed as a dedup no-op.
+func TestServeHTTP_UnrelatedNameCollisionReturns500(t *testing.T) {
+	spawner := nameTemplateSpawner()
+	unrelated := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "responder-pr-123", Namespace: "default"},
+		Spec:       kelos.TaskSpec{Type: "claude-code", Prompt: "unrelated"},
+	}
+	handler := newTestHandler(t, spawner, unrelated)
+
+	payload := prWebhookPayload(123)
+	sig := signPayload(payload, []byte(testSecret))
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
+	req.Header.Set(GitHubEventHeader, "pull_request")
+	req.Header.Set(GitHubSignatureHeader, sig)
+	req.Header.Set(GitHubDeliveryHeader, "delivery-collide")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected HTTP 500 on unrelated name collision, got %d", rr.Code)
+	}
+
+	var taskList kelos.TaskList
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Fatalf("expected the unrelated Task to remain the only Task, got %d", len(taskList.Items))
+	}
+}
+
+// TestServeHTTP_DistinctPRsCreateSeparateTasks ensures the nameTemplate dedup
+// does not over-collapse: different PRs still get their own Tasks.
+func TestServeHTTP_DistinctPRsCreateSeparateTasks(t *testing.T) {
+	handler := newTestHandler(t, nameTemplateSpawner())
+
+	sendPRWebhook(t, handler, prWebhookPayload(1), "pr-1")
+	sendPRWebhook(t, handler, prWebhookPayload(2), "pr-2")
+
+	var taskList kelos.TaskList
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+	if len(taskList.Items) != 2 {
+		t.Fatalf("Expected 2 tasks for 2 distinct PRs, got %d", len(taskList.Items))
 	}
 }

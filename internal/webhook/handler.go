@@ -382,6 +382,7 @@ func (h *WebhookHandler) processWebhook(ctx context.Context, eventType string, p
 
 	tasksCreated := 0
 	linearLabelsEnriched := false
+	var taskSpawnerErrors []error
 
 	for _, spawner := range spawners {
 		spawnerLog := log.WithValues("spawner", spawner.Name, "namespace", spawner.Namespace)
@@ -432,14 +433,19 @@ func (h *WebhookHandler) processWebhook(ctx context.Context, eventType string, p
 		spawnerLog.Info("Webhook matches spawner filters - creating task")
 
 		// Create task for this spawner
-		err = h.createTask(ctx, spawner, eventType, parsed, deliveryID)
+		created, err := h.createTask(ctx, spawner, eventType, parsed, deliveryID)
 		if err != nil {
 			spawnerLog.Error(err, "Failed to create task")
+			taskSpawnerErrors = append(taskSpawnerErrors, fmt.Errorf("spawner %s: %w", spawner.Name, err))
 			continue
 		}
 
-		tasksCreated++
-		spawnerLog.Info("Successfully created task from webhook")
+		if created {
+			tasksCreated++
+			spawnerLog.Info("Successfully created task from webhook")
+		} else {
+			spawnerLog.Info("Webhook deduplicated against existing task, no new task created")
+		}
 	}
 
 	sessionsProcessed := 0
@@ -457,7 +463,7 @@ func (h *WebhookHandler) processWebhook(ctx context.Context, eventType string, p
 	}
 
 	log.Info("Webhook processing completed", "taskSpawners", len(spawners), "sessionSpawners", len(sessionSpawners), "tasksCreated", tasksCreated, "sessionsProcessed", sessionsProcessed)
-	return tasksCreated > 0 || sessionsProcessed > 0, errors.Join(sessionErrors...)
+	return tasksCreated > 0 || sessionsProcessed > 0, errors.Join(append(taskSpawnerErrors, sessionErrors...)...)
 }
 
 // getMatchingSpawners returns TaskSpawners that match the webhook source.
@@ -546,8 +552,10 @@ func (h *WebhookHandler) matchesSpawner(ctx context.Context, spawner *kelos.Task
 	}
 }
 
-// createTask creates a new Task from the webhook event.
-func (h *WebhookHandler) createTask(ctx context.Context, spawner *kelos.TaskSpawner, eventType string, parsed *ParsedWebhook, deliveryID string) error {
+// createTask creates a Task from the webhook event. It returns true when a
+// new Task was created, and false when the delivery was deduplicated against a
+// Task this spawner already owns.
+func (h *WebhookHandler) createTask(ctx context.Context, spawner *kelos.TaskSpawner, eventType string, parsed *ParsedWebhook, deliveryID string) (bool, error) {
 	log := h.log.WithValues("spawner", spawner.Name, "namespace", spawner.Namespace, "eventType", eventType, "deliveryID", deliveryID)
 
 	// Extract template variables based on source
@@ -564,10 +572,34 @@ func (h *WebhookHandler) createTask(ctx context.Context, spawner *kelos.TaskSpaw
 		templateVars = ExtractGenericWorkItem(parsed.Generic)
 
 	default:
-		return fmt.Errorf("unsupported source: %s", h.source)
+		return false, fmt.Errorf("unsupported source: %s", h.source)
 	}
 
 	log.Info("Extracted template variables", "ID", templateVars["ID"], "Title", templateVars["Title"], "Action", templateVars["Action"])
+
+	// Pre-Create deduplication: when a deterministic nameTemplate is configured,
+	// the name is context-independent, so resolve it and skip if this spawner
+	// already owns a Task with it — before fetching context sources or building.
+	// This avoids failing a duplicate delivery (and making external calls) just
+	// because a context source is temporarily unavailable. A post-Create check
+	// below still handles races where the Task is created concurrently.
+	if spawner.Spec.TaskTemplate.NameTemplate != "" {
+		resolvedName, err := taskbuilder.ResolveTaskName("", &spawner.Spec.TaskTemplate, templateVars)
+		if err != nil {
+			return false, fmt.Errorf("resolving task name: %w", err)
+		}
+		existing := &kelos.Task{}
+		switch getErr := h.client.Get(ctx, client.ObjectKey{Namespace: spawner.Namespace, Name: resolvedName}, existing); {
+		case getErr == nil:
+			if taskbuilder.TaskBelongsToSpawner(existing, spawner.Name, spawner.UID) {
+				log.Info("Task already exists for spawner, skipping duplicate", "task", resolvedName)
+				return false, nil
+			}
+			return false, fmt.Errorf("task %s name collides with an existing Task not owned by spawner %s", resolvedName, spawner.Name)
+		case !apierrors.IsNotFound(getErr):
+			return false, fmt.Errorf("reading existing Task %s: %w", resolvedName, getErr)
+		}
+	}
 
 	// Enrich with external context sources
 	if len(spawner.Spec.TaskTemplate.ContextSources) > 0 {
@@ -579,17 +611,22 @@ func (h *WebhookHandler) createTask(ctx context.Context, spawner *kelos.TaskSpaw
 		}
 		contextData, err := fetcher.FetchAll(ctx, spawner.Spec.TaskTemplate.ContextSources, templateVars)
 		if err != nil {
-			return fmt.Errorf("fetching context sources: %w", err)
+			return false, fmt.Errorf("fetching context sources: %w", err)
 		}
 		templateVars["Context"] = contextData
 	}
 
+	// Default task name uses a hash of the delivery ID, so every delivery
+	// produces a distinct Task. Configure taskTemplate.nameTemplate with a
+	// deterministic value (e.g. "{{.Number}}") to deduplicate Tasks across
+	// multiple deliveries for the same pull request. When nameTemplate is set,
+	// BuildTask renders the name from it and this default is ignored.
 	taskName := webhookSpawnName(spawner.Name, eventType, deliveryID)
 
 	// Resolve GVK for the spawner owner reference
 	gvks, _, err := h.client.Scheme().ObjectKinds(spawner)
 	if err != nil || len(gvks) == 0 {
-		return fmt.Errorf("failed to get GVK for TaskSpawner: %w", err)
+		return false, fmt.Errorf("failed to get GVK for TaskSpawner: %w", err)
 	}
 	gvk := gvks[0]
 
@@ -607,7 +644,7 @@ func (h *WebhookHandler) createTask(ctx context.Context, spawner *kelos.TaskSpaw
 		},
 	)
 	if err != nil {
-		return fmt.Errorf("failed to build task: %w", err)
+		return false, fmt.Errorf("failed to build task: %w", err)
 	}
 
 	// Stamp reporting annotations for GitHub webhook sources when reporting is configured.
@@ -637,10 +674,27 @@ func (h *WebhookHandler) createTask(ctx context.Context, spawner *kelos.TaskSpaw
 	}
 
 	if err := h.client.Create(ctx, task); err != nil {
-		return fmt.Errorf("failed to create task: %w", err)
+		// A configured nameTemplate makes Task names deterministic, so a second
+		// delivery for the same work item collides with the Task already created
+		// for it. Treat that as a successful no-op — the intended deduplication
+		// path — but only when the existing Task belongs to this spawner. A name
+		// collision with an unrelated Task must surface as an error rather than
+		// silently dropping this event.
+		if apierrors.IsAlreadyExists(err) {
+			existing := &kelos.Task{}
+			if getErr := h.client.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: task.Name}, existing); getErr != nil {
+				return false, fmt.Errorf("failed to read existing Task %s after create conflict: %w", task.Name, getErr)
+			}
+			if taskbuilder.TaskBelongsToSpawner(existing, spawner.Name, spawner.UID) {
+				log.Info("Task already exists for spawner, skipping duplicate", "task", task.Name)
+				return false, nil
+			}
+			return false, fmt.Errorf("task %s name collides with an existing Task not owned by spawner %s", task.Name, spawner.Name)
+		}
+		return false, fmt.Errorf("failed to create task: %w", err)
 	}
 
-	return nil
+	return true, nil
 }
 
 // webhookSpawnName preserves the deterministic naming used for webhook-created

@@ -69,6 +69,12 @@ spec:
     # Template for the git branch (optional)
     branch: "kelos-webhook-{{.Event}}-{{.ID}}"
 
+    # This spawner listens for repeatable triggers (issue_comment,
+    # pull_request_review), so it intentionally omits nameTemplate: each delivery
+    # gets its own Task via the default per-delivery name, and every "/kelos"
+    # comment or submitted review creates a fresh Task. See the second spawner
+    # below for deterministic per-PR naming (deduplication) on burst events.
+
     # Template for the task prompt
     promptTemplate: |
       # GitHub {{.Event}} Event: {{.Action}}
@@ -122,6 +128,54 @@ spec:
         kelos.dev/github-sender: "{{.Sender}}"
 
     # Auto-cleanup completed tasks after 1 hour
+    ttlSecondsAfterFinished: 3600
+
+---
+# Deduplication example: collapse the burst of deliveries GitHub sends for a
+# single pull request state change (e.g. "opened" plus one "labeled" per label,
+# all within a second) into a single Task.
+apiVersion: kelos.dev/v1alpha2
+kind: TaskSpawner
+metadata:
+  name: pr-burst-responder
+  namespace: default
+spec:
+  when:
+    githubWebhook:
+      # Scope to a single repository so a bare PR number is a stable, unique
+      # identity. Serving multiple repositories from one endpoint would require a
+      # repository qualifier in nameTemplate to avoid PR-number collisions across
+      # repos — and the identifying part must stay within the first 63 characters
+      # (put the bounded PR number first if you add an unbounded repo value).
+      repository: myorg/myrepo
+      # Only burst events for the same PR state — not repeatable comment/review
+      # commands, which want a fresh Task each time.
+      events:
+        - "pull_request"
+      filters:
+        - event: "pull_request"
+          action: "opened"
+          draft: false
+        - event: "pull_request"
+          action: "labeled"
+          labels: ["review-requested"]
+        - event: "pull_request"
+          action: "ready_for_review"
+  taskTemplate:
+    type: claude-code
+    credentials:
+      type: api-key
+      secretRef:
+        name: claude-credentials
+    workspaceRef:
+      name: my-repo-workspace
+    # Deterministic per-PR name: the several deliveries for the same PR render to
+    # this name, so the first creates the Task and the rest reuse it. (.Context
+    # values are not available to nameTemplate.)
+    nameTemplate: "pr-burst-responder-{{.Number}}"
+    promptTemplate: |
+      Review pull request #{{.Number}}: {{.Title}}
+      {{with index . "URL"}}URL: {{.}}{{end}}
     ttlSecondsAfterFinished: 3600
 
 ---

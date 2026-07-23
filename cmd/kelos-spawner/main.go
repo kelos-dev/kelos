@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"net/http"
@@ -297,6 +298,14 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 	activeTasks := 0
 	for i := range existingTaskList.Items {
 		t := &existingTaskList.Items[i]
+		// The label selector can match Tasks left by a since-recreated
+		// TaskSpawner of the same name (stale controller owner UID). Only Tasks
+		// this spawner actually owns count for deduplication and concurrency; a
+		// same-name Task owned by someone else must fall through to the create
+		// path and surface as a collision rather than silently suppress work.
+		if !taskbuilder.TaskBelongsToSpawner(t, ts.Name, ts.UID) {
+			continue
+		}
 		existingTaskMap[t.Name] = t
 		if t.Status.Phase != kelos.TaskPhaseSucceeded && t.Status.Phase != kelos.TaskPhaseFailed {
 			activeTasks++
@@ -305,7 +314,18 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 
 	var newItems []source.WorkItem
 	for _, item := range items {
-		taskName := taskNameForWorkItem(ts.Name, item.ID)
+		// Resolve the Task name the same way BuildTask will, so a configured
+		// nameTemplate is honored when matching against existing Tasks for
+		// deduplication. The name template renders from the work item's base
+		// variables (context sources are not available at this stage).
+		taskName, err := taskbuilder.ResolveTaskName(taskNameForWorkItem(ts.Name, item.ID), &ts.Spec.TaskTemplate, source.WorkItemToTemplateVars(item))
+		if err != nil {
+			// A name resolution failure is a configuration problem (bad template,
+			// missing key, empty result) affecting every item. Fail the cycle and
+			// record it on the TaskSpawner status instead of silently dropping all
+			// matching items while reporting a successful discovery.
+			return recordCycleFailure(ctx, cl, key, fmt.Errorf("resolving task name for item %s: %w", item.ID, err))
+		}
 		existing, found := existingTaskMap[taskName]
 		if !found {
 			newItems = append(newItems, item)
@@ -358,6 +378,7 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 	}
 
 	newTasksCreated := 0
+	var createErrs []error
 	for _, item := range newItems {
 		// Enforce max concurrency limit
 		if maxConcurrency > 0 && int32(activeTasks) >= maxConcurrency {
@@ -371,7 +392,9 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 			break
 		}
 
-		taskName := taskNameForWorkItem(ts.Name, item.ID)
+		// Default name used when no nameTemplate is configured; BuildTask
+		// resolves the final name (honoring nameTemplate) and sets task.Name.
+		defaultName := taskNameForWorkItem(ts.Name, item.ID)
 
 		templateVars := source.WorkItemToTemplateVars(item)
 
@@ -380,6 +403,7 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 			contextData, err := contextFetcher.FetchAll(ctx, ts.Spec.TaskTemplate.ContextSources, templateVars)
 			if err != nil {
 				log.Error(err, "Fetching context sources", "item", item.ID)
+				createErrs = append(createErrs, fmt.Errorf("item %s: fetching context sources: %w", item.ID, err))
 				continue
 			}
 			templateVars["Context"] = contextData
@@ -388,11 +412,12 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 		tb, err := taskbuilder.NewTaskBuilder(cl)
 		if err != nil {
 			log.Error(err, "creating task builder", "item", item.ID)
+			createErrs = append(createErrs, fmt.Errorf("item %s: creating task builder: %w", item.ID, err))
 			continue
 		}
 
 		task, err := tb.BuildTask(
-			taskName,
+			defaultName,
 			ts.Namespace,
 			&ts.Spec.TaskTemplate,
 			templateVars,
@@ -405,6 +430,7 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 		)
 		if err != nil {
 			log.Error(err, "building task", "item", item.ID)
+			createErrs = append(createErrs, fmt.Errorf("item %s: building task: %w", item.ID, err))
 			continue
 		}
 
@@ -430,14 +456,30 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 
 		if err := cl.Create(ctx, task); err != nil {
 			if apierrors.IsAlreadyExists(err) {
-				log.Info("Task already exists, skipping", "task", taskName)
+				// The dedup map only holds this spawner's Tasks, so a collision
+				// here is with a Task not in it. Confirm ownership before treating
+				// it as a benign duplicate; a clash with an unrelated Task (e.g.
+				// another spawner rendering the same nameTemplate) is a config
+				// error that must surface rather than silently drop this item.
+				existing := &kelos.Task{}
+				if getErr := cl.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: task.Name}, existing); getErr != nil {
+					log.Error(getErr, "Reading existing Task after create conflict", "task", task.Name)
+					createErrs = append(createErrs, fmt.Errorf("item %s: reading existing Task %s: %w", item.ID, task.Name, getErr))
+				} else if taskbuilder.TaskBelongsToSpawner(existing, ts.Name, ts.UID) {
+					log.Info("Task already exists, skipping", "task", task.Name)
+				} else {
+					err := fmt.Errorf("task %s name collides with an existing Task not owned by spawner %s", task.Name, ts.Name)
+					log.Error(err, "creating Task", "task", task.Name)
+					createErrs = append(createErrs, fmt.Errorf("item %s: %w", item.ID, err))
+				}
 			} else {
-				log.Error(err, "creating Task", "task", taskName)
+				log.Error(err, "creating Task", "task", task.Name)
+				createErrs = append(createErrs, fmt.Errorf("item %s: creating Task %s: %w", item.ID, task.Name, err))
 			}
 			continue
 		}
 
-		log.Info("Created Task", "task", taskName, "item", item.ID)
+		log.Info("Created Task", "task", task.Name, "item", item.ID)
 		newTasksCreated++
 		activeTasks++
 	}
@@ -449,6 +491,8 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 		return fmt.Errorf("re-fetching TaskSpawner for status update: %w", err)
 	}
 
+	cycleErr := errors.Join(createErrs...)
+
 	now := metav1.Now()
 	ts.Status.Phase = kelos.TaskSpawnerPhaseRunning
 	ts.Status.LastDiscoveryTime = &now
@@ -456,6 +500,14 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 	ts.Status.TotalTasksCreated += newTasksCreated
 	ts.Status.ActiveTasks = activeTasks
 	ts.Status.Message = fmt.Sprintf("Discovered %d items, created %d tasks total", ts.Status.TotalDiscovered, ts.Status.TotalTasksCreated)
+	if cycleErr != nil {
+		ts.Status.Message = fmt.Sprintf("Discovered %d items, created %d tasks total; %d creation error(s): %v", ts.Status.TotalDiscovered, ts.Status.TotalTasksCreated, len(createErrs), cycleErr)
+	}
+
+	// Record whether task creation hit errors this cycle so a persistent
+	// namespace name collision surfaces on the resource instead of the spawner
+	// reporting healthy.
+	setDiscoveryErrorCondition(&ts, cycleErr)
 
 	// Clear Suspended condition since we are running
 	meta.SetStatusCondition(&ts.Status.Conditions, metav1.Condition{
@@ -491,10 +543,64 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 		return fmt.Errorf("updating TaskSpawner status: %w", err)
 	}
 
+	// Surface per-item creation failures (e.g. a rendered name colliding with a
+	// Task owned by another spawner) after status has been updated, so the
+	// reconciler records the error and other items are still processed. A cycle
+	// that hit creation errors is not a success, so do not count it as one.
+	if cycleErr != nil {
+		return cycleErr
+	}
+
 	// Count the cycle as successful only after the status write commits.
 	discoveryTotal.Inc()
 
 	return nil
+}
+
+// conditionDiscoveryError is set on a TaskSpawner when a discovery cycle fails
+// to create one or more Tasks (e.g. a name collision or an unresolvable
+// nameTemplate), so the failure is visible on the resource.
+const conditionDiscoveryError = "DiscoveryError"
+
+// setDiscoveryErrorCondition records (or clears) the DiscoveryError condition
+// based on whether the cycle hit creation errors.
+func setDiscoveryErrorCondition(ts *kelos.TaskSpawner, cycleErr error) {
+	status := metav1.ConditionFalse
+	reason := "NoErrors"
+	message := "Task creation succeeded for all discovered items"
+	if cycleErr != nil {
+		status = metav1.ConditionTrue
+		reason = "TaskCreationFailed"
+		message = cycleErr.Error()
+	}
+	meta.SetStatusCondition(&ts.Status.Conditions, metav1.Condition{
+		Type:               conditionDiscoveryError,
+		Status:             status,
+		Reason:             reason,
+		Message:            message,
+		ObservedGeneration: ts.Generation,
+	})
+}
+
+// recordCycleFailure marks the TaskSpawner as failed with an actionable message
+// for cycle-level errors that abort before the normal status update (e.g. an
+// unresolvable nameTemplate), then returns the original error.
+func recordCycleFailure(ctx context.Context, cl client.Client, key types.NamespacedName, cycleErr error) error {
+	var ts kelos.TaskSpawner
+	if getErr := cl.Get(ctx, key, &ts); getErr != nil {
+		return errors.Join(cycleErr, fmt.Errorf("fetching TaskSpawner to record failure: %w", getErr))
+	}
+	// Do not advance LastDiscoveryTime: the cycle aborted without processing the
+	// discovered ticks, and CronSource uses that watermark as the lower bound for
+	// the next discovery. Advancing it here would permanently skip the ticks that
+	// this failed cycle did not create Tasks for once the configuration is fixed.
+	ts.Status.Phase = kelos.TaskSpawnerPhaseFailed
+	ts.Status.Message = cycleErr.Error()
+	setDiscoveryErrorCondition(&ts, cycleErr)
+	if updErr := cl.Status().Update(ctx, &ts); updErr != nil {
+		return errors.Join(cycleErr, fmt.Errorf("updating TaskSpawner status: %w", updErr))
+	}
+	return cycleErr
 }
 
 // sourceAnnotations returns annotations that stamp GitHub source metadata

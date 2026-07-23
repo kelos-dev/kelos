@@ -416,14 +416,25 @@ func (h *SlackHandler) createTask(ctx context.Context, spawner *kelos.TaskSpawne
 	}
 
 	if err := h.client.Create(ctx, task); err != nil {
+		// A configured nameTemplate can render a deterministic name; a collision
+		// is deduplication only when the existing Task belongs to this spawner.
+		// A clash with an unrelated Task must surface as an error rather than
+		// silently dropping the Slack message.
 		if apierrors.IsAlreadyExists(err) {
-			h.log.Info("Task already exists, skipping", "task", taskName)
-			return nil
+			existing := &kelos.Task{}
+			if getErr := h.client.Get(ctx, client.ObjectKey{Namespace: task.Namespace, Name: task.Name}, existing); getErr != nil {
+				return fmt.Errorf("reading existing Task %s after create conflict: %w", task.Name, getErr)
+			}
+			if taskbuilder.TaskBelongsToSpawner(existing, spawner.Name, spawner.UID) {
+				h.log.Info("Task already exists for spawner, skipping", "task", task.Name)
+				return nil
+			}
+			return fmt.Errorf("task %s name collides with an existing Task not owned by spawner %s", task.Name, spawner.Name)
 		}
 		return fmt.Errorf("Creating task: %w", err)
 	}
 
-	h.log.Info("Created task from Slack message", "task", taskName, "spawner", spawner.Name)
+	h.log.Info("Created task from Slack message", "task", task.Name, "spawner", spawner.Name)
 	return nil
 }
 

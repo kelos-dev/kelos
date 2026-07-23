@@ -309,7 +309,7 @@ kelos get session interactive-review
 kelos session connect interactive-review
 ```
 
-The optional shared Session server provides web chat for the same conversation. You can reconnect from either client, answer provider questions, interrupt active work, categorize Sessions into sidebar sections, or reset the Session to a fresh workspace. Reset permanently deletes retained conversation history and workspace changes while preserving the Session configuration; it is also available through `kelos session reset NAME`. Web messages render safe core Markdown formatting, including fenced code blocks; see the [Session reference](docs/reference.md#session) for the supported formatting and limitations, and the [interactive Session example](examples/16-session/) for provider, storage, and web server configuration.
+The terminal client shows live connection and agent progress with elapsed time; press `Esc` to interrupt active work. The optional shared Session server provides web chat for the same conversation. You can reconnect from either client, answer provider questions, interrupt active work, categorize Sessions into sidebar sections, or reset the Session to a fresh workspace. Reset permanently deletes retained conversation history and workspace changes while preserving the Session configuration; it is also available through `kelos session reset NAME`. Web messages render safe core Markdown formatting, including fenced code blocks; see the [Session reference](docs/reference.md#session) for the supported formatting and limitations, and the [interactive Session example](examples/16-session/) for provider, storage, and web server configuration.
 
 ## Kelos Skill
 

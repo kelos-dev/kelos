@@ -232,7 +232,9 @@ Use `kelos session connect NAME` for terminal chat. Web chat is served by the
 optional shared `kelos-session-server`; both clients use the same event stream
 and provider conversation. Both clients can stream agent and tool activity,
 answer user-input requests, and interrupt active work without ending the
-provider conversation.
+provider conversation. In an interactive terminal, the client shows live
+connecting, reconnecting, working, waiting-for-input, and interrupting status
+with elapsed time. Press `Esc` while a turn is active to interrupt it.
 
 Selecting a Session in the web chat opens it at the latest retained message.
 Reconnecting preserves an intentional upward scroll position and shows the

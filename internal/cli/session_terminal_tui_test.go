@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -149,6 +150,133 @@ func TestSessionTUIKeepsInputWhileAssistantStreams(t *testing.T) {
 			t.Fatalf("terminal view = %q, want %q", view, want)
 		}
 	}
+}
+
+func TestSessionTUIShowsTurnProgressUntilCompletion(t *testing.T) {
+	model, _ := newSessionTUITestModel()
+	now := time.Date(2026, time.July, 23, 12, 0, 0, 0, time.UTC)
+	model.now = func() time.Time { return now }
+	model.connectionStarted = now
+	if got := strings.TrimSpace(stripSessionTUIANSI(model.progressView())); got != "• Connecting (0s)" {
+		t.Fatalf("connecting progress = %q", got)
+	}
+	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventHistoryEnd})
+	if progress := model.progressView(); progress != "" {
+		t.Fatalf("idle progress = %q, want empty", progress)
+	}
+
+	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventTurnStarted, TurnID: "turn-1"})
+	if got := strings.TrimSpace(stripSessionTUIANSI(model.progressView())); got != "• Working (0s • esc to interrupt)" {
+		t.Fatalf("working progress = %q", got)
+	}
+
+	now = now.Add(65 * time.Second)
+	if got := strings.TrimSpace(stripSessionTUIANSI(model.progressView())); got != "• Working (1m 05s • esc to interrupt)" {
+		t.Fatalf("elapsed progress = %q", got)
+	}
+
+	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventInputRequested, TurnID: "turn-1", InputID: "input-1"})
+	if got := strings.TrimSpace(stripSessionTUIANSI(model.progressView())); got != "• Waiting for input (1m 05s • esc to interrupt)" {
+		t.Fatalf("input progress = %q", got)
+	}
+
+	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventInputResolved, TurnID: "turn-1", InputID: "input-1"})
+	if got := strings.TrimSpace(stripSessionTUIANSI(model.progressView())); !strings.HasPrefix(got, "• Working") {
+		t.Fatalf("resumed progress = %q", got)
+	}
+
+	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventTurnCompleted, TurnID: "turn-1", Status: "completed"})
+	if progress := model.progressView(); progress != "" {
+		t.Fatalf("completed progress = %q, want empty", progress)
+	}
+}
+
+func TestSessionTUIEscInterruptsActiveTurn(t *testing.T) {
+	model, requests := newSessionTUITestModel()
+	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventHistoryEnd})
+	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventTurnStarted, TurnID: "turn-1"})
+
+	model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+	var request sessionruntime.ClientRequest
+	if err := json.NewDecoder(requests).Decode(&request); err != nil {
+		t.Fatal(err)
+	}
+	if request.Type != "interrupt" {
+		t.Fatalf("escape request = %#v, want interrupt", request)
+	}
+	progress := strings.TrimSpace(stripSessionTUIANSI(model.progressView()))
+	if !strings.HasPrefix(progress, "• Interrupting (") || strings.Contains(progress, "esc to interrupt") {
+		t.Fatalf("interrupt progress = %q", progress)
+	}
+
+	model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if requests.Len() != 0 {
+		t.Fatalf("second escape submitted another request: %q", requests.String())
+	}
+
+	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventError, Status: "rejected", Text: "no active turn"})
+	if progress := strings.TrimSpace(stripSessionTUIANSI(model.progressView())); !strings.HasPrefix(progress, "• Working (") {
+		t.Fatalf("rejected interrupt progress = %q", progress)
+	}
+}
+
+func TestSessionTUIReconnectProgressOverridesActiveTurn(t *testing.T) {
+	model, _ := newSessionTUITestModel()
+	now := time.Date(2026, time.July, 23, 12, 0, 0, 0, time.UTC)
+	model.now = func() time.Time { return now }
+	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventHistoryEnd})
+	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventTurnStarted, TurnID: "turn-1"})
+	model.applyEvent(sessionruntime.Event{
+		Type:   sessionTerminalEventDiagnostic,
+		Status: sessionTerminalStatusReconnecting,
+		Text:   "Session connection lost",
+	})
+
+	now = now.Add(5 * time.Second)
+	model.applyEvent(sessionruntime.Event{
+		Type:   sessionTerminalEventDiagnostic,
+		Status: sessionTerminalStatusReconnecting,
+		Text:   "Still reconnecting",
+	})
+	if got := strings.TrimSpace(stripSessionTUIANSI(model.progressView())); got != "• Reconnecting (5s)" {
+		t.Fatalf("reconnect progress = %q", got)
+	}
+
+	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventHistoryEnd})
+	if got := strings.TrimSpace(stripSessionTUIANSI(model.progressView())); !strings.HasPrefix(got, "• Working (") {
+		t.Fatalf("reconnected progress = %q", got)
+	}
+}
+
+func TestFormatSessionTUIElapsed(t *testing.T) {
+	tests := []struct {
+		elapsed time.Duration
+		want    string
+	}{
+		{elapsed: 59 * time.Second, want: "59s"},
+		{elapsed: 60 * time.Second, want: "1m 00s"},
+		{elapsed: 61 * time.Second, want: "1m 01s"},
+		{elapsed: 2*time.Hour + 3*time.Minute + 9*time.Second, want: "2h 03m 09s"},
+	}
+	for _, test := range tests {
+		if got := formatSessionTUIElapsed(test.elapsed); got != test.want {
+			t.Errorf("formatSessionTUIElapsed(%s) = %q, want %q", test.elapsed, got, test.want)
+		}
+	}
+}
+
+func TestSessionTUIProgressStaysOnOneRow(t *testing.T) {
+	model, _ := newSessionTUITestModel()
+	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventHistoryEnd})
+	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventTurnStarted, TurnID: "turn-1"})
+	model.resize(12, 8)
+
+	progress := model.progressView()
+	if strings.Contains(progress, "\n") {
+		t.Fatalf("narrow progress wrapped: %q", progress)
+	}
+	assertSessionTUIBlockWidth(t, progress, 12)
 }
 
 func TestSessionTUIBatchesLoadedHistory(t *testing.T) {

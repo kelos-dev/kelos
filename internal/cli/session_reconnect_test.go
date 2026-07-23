@@ -262,6 +262,26 @@ func TestSessionTerminalDiagnosticWriterEmitsCompleteLines(t *testing.T) {
 	}
 }
 
+func TestSessionTerminalDiagnosticWriterEmitsConnectionStatus(t *testing.T) {
+	var events bytes.Buffer
+	writer := &sessionTerminalDiagnosticWriter{
+		events: newSessionTerminalEventSink(t.Context(), &events),
+	}
+	if err := writer.sendDiagnostic("Session connection lost", sessionTerminalStatusReconnecting); err != nil {
+		t.Fatal(err)
+	}
+
+	var event sessionruntime.Event
+	if err := json.NewDecoder(&events).Decode(&event); err != nil {
+		t.Fatal(err)
+	}
+	if event.Type != sessionTerminalEventDiagnostic ||
+		event.Text != "Session connection lost" ||
+		event.Status != sessionTerminalStatusReconnecting {
+		t.Fatalf("diagnostic event = %#v", event)
+	}
+}
+
 func TestSessionTerminalEventSinkStopsAfterCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	eventReader, eventWriter := io.Pipe()

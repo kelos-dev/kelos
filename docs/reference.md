@@ -1016,6 +1016,8 @@ The `kelos` CLI lets you manage the full lifecycle without writing YAML.
 | `kelos suspend taskspawner <name>` | Pause a TaskSpawner (stops polling, running tasks continue) |
 | `kelos resume taskspawner <name>` | Resume a paused TaskSpawner |
 
+`kelos logs <task-name> -f` waits while the task Pod is unscheduled, Pending, or initializing its target container, then streams logs once the container is available. Failed Tasks and non-transient container startup failures return an error instead of retrying indefinitely.
+
 ### `kelos install` Flags
 
 - `--values, -f`: Load Helm values from a YAML file; repeat to merge multiple files, or use `-` to read from stdin

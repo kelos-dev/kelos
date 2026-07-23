@@ -532,7 +532,7 @@ to receive refreshed credentials during long-running work.
 | `spec.when.githubIssues.author` | Filter by issue author username | No |
 | `spec.when.githubIssues.excludeAuthors` | Exclude issues created by any of these usernames (client-side) | No |
 | `spec.when.githubIssues.priorityLabels` | Priority-order labels for task selection when `maxConcurrency` is set; index 0 is highest priority | No |
-| `spec.when.githubIssues.reporting.enabled` | Post status comments (started, succeeded, failed) back to the GitHub issue | No |
+| `spec.when.githubIssues.reporting.enabled` | Create or update one status comment back to the GitHub issue | No |
 | `spec.when.githubIssues.pollInterval` | Per-source poll interval (e.g., `"30s"`, `"5m"`). Defaults to `5m` when omitted | No |
 | `spec.when.githubPullRequests.repo` | Override repository to poll for PRs (in `owner/repo` format or full URL); defaults to workspace repo URL | No |
 | `spec.when.githubPullRequests.labels` | Filter pull requests by labels | No |
@@ -548,7 +548,7 @@ to receive refreshed credentials during long-running work.
 | `spec.when.githubPullRequests.excludeAuthors` | Exclude PRs opened by any of these usernames (client-side) | No |
 | `spec.when.githubPullRequests.draft` | Filter by draft state | No |
 | `spec.when.githubPullRequests.priorityLabels` | Priority-order labels for task selection when `maxConcurrency` is set; index 0 is highest priority | No |
-| `spec.when.githubPullRequests.reporting.enabled` | Post status comments (started, succeeded, failed) back to the GitHub pull request | No |
+| `spec.when.githubPullRequests.reporting.enabled` | Create or update one status comment back to the GitHub pull request | No |
 | `spec.when.githubPullRequests.reporting.checks.name` | Creates a GitHub Check Run for each PR task, enabling branch protection and merge queue integration. Sets the Check Run name (defaults to `"Kelos: <taskspawner-name>"`, max 100 chars). The token used by the workspace must have `checks:write` permission. Not supported on `githubIssues` (rejected by CEL validation). | No |
 | `spec.when.githubPullRequests.filePatterns.include` | Doublestar globs for changed files to include after `exclude` patterns are removed. When omitted, any remaining changed file passes | No |
 | `spec.when.githubPullRequests.filePatterns.exclude` | Doublestar globs for changed files to remove before include matching. A PR with no remaining changed files is skipped | No |
@@ -572,7 +572,7 @@ to receive refreshed credentials during long-running work.
 | `spec.when.githubWebhook.filters[].bodyPattern` | Require the comment/review body to match a Go re2 regular expression. When combined with `excludeBodyPatterns`, the body must match this pattern AND not match any exclude entry | No |
 | `spec.when.githubWebhook.filters[].excludeBodyPatterns` | Exclude events whose comment/review body matches any of these Go re2 regular expressions (OR semantics) | No |
 | `spec.when.githubWebhook.filters[].commentOn` | Scope `issue_comment` events to comments posted on a specific subject: `"Issue"` matches plain issues, `"PullRequest"` matches pull requests. Empty matches both. Ignored for other events | No |
-| `spec.when.githubWebhook.reporting.enabled` | Post status comments (started, succeeded, failed) back to the originating issue or PR | No |
+| `spec.when.githubWebhook.reporting.enabled` | Create or update one status comment back to the originating issue or PR | No |
 | `spec.when.githubWebhook.reporting.checks.name` | Creates a GitHub Check Run for tasks spawned by PR-related webhook events, enabling branch protection and merge queue integration. Sets the Check Run name (defaults to `"Kelos: <taskspawner-name>"`, max 100 chars). The token used by the workspace must have `checks:write` permission. Requires `events` to include at least one of `pull_request`, `pull_request_review`, `pull_request_review_comment`, or `pull_request_target` (enforced by CEL validation). | No |
 | `spec.when.linearWebhook.types` | Linear resource types to listen for (e.g., `"Issue"`, `"Comment"`) | Yes (when using linearWebhook) |
 | `spec.when.linearWebhook.filters[].type` | Scope filter to a specific resource type | No |

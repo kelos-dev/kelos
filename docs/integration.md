@@ -106,7 +106,7 @@ spec:
 
 **Status reporting:** Two independent options:
 
-- `reporting.enabled: true` posts status comments (started, succeeded, failed) on the PR.
+- `reporting.enabled: true` creates or updates one status comment on the PR as the task state changes.
 - `reporting.checks.name` creates a GitHub Check Run for each PR task, so the run can be required by branch protection rules or referenced from a merge queue. The Check Run starts as `in_progress` when the task begins and is updated to `success` or `failure` on completion. The name defaults to `"Kelos: <taskspawner-name>"` and appears in branch protection rule configuration and the PR Checks tab; the token referenced by the workspace must have `checks:write` permission.
 
 ```yaml
@@ -115,7 +115,7 @@ spec:
     githubPullRequests:
       labels: [needs-review]
       reporting:
-        enabled: true            # status comments on the PR
+        enabled: true            # status comment on the PR
         checks:
           name: kelos/pr-review  # required-status-check name (optional override)
 ```
@@ -190,7 +190,7 @@ spec:
 
 **Filtering options:** `events` (required), `repository`, `excludeAuthors`, and per-filter fields: `action`, `labels`, `excludeLabels`, `state`, `branch`, `draft`, `author`, `bodyPattern`, `excludeBodyPatterns`, `commentOn` (scopes `issue_comment` events to `"Issue"` or `"PullRequest"`). The legacy `bodyContains` substring filter is **deprecated** — use `bodyPattern` (Go re2 regular expression) instead.
 
-**Status reporting:** Like `githubPullRequests`, the webhook source supports `reporting.enabled` (status comments back to the originating issue or PR) and `reporting.checks.name` (GitHub Check Runs for branch protection). Check Runs require `events` to include at least one pull-request event type (`pull_request`, `pull_request_review`, `pull_request_review_comment`, or `pull_request_target`); the configuration is rejected at admission otherwise.
+**Status reporting:** Like `githubPullRequests`, the webhook source supports `reporting.enabled` (one status comment back to the originating issue or PR) and `reporting.checks.name` (GitHub Check Runs for branch protection). Check Runs require `events` to include at least one pull-request event type (`pull_request`, `pull_request_review`, `pull_request_review_comment`, or `pull_request_target`); the configuration is rejected at admission otherwise.
 
 **Webhook-specific variables:** `{{.Event}}`, `{{.Action}}`, `{{.Sender}}`, `{{.Ref}}`, `{{.Repository}}`, `{{.Payload}}` (full payload access).
 

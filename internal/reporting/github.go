@@ -8,9 +8,14 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
-const defaultBaseURL = "https://api.github.com"
+const (
+	defaultBaseURL            = "https://api.github.com"
+	githubStatusCommentHeader = "🤖 **Kelos Task Status**"
+	commentsPageSize          = 100
+)
 
 // GitHubReporter posts and updates issue/PR comments on GitHub.
 // TokenFunc, when set, is called on every API request to resolve the current
@@ -45,7 +50,8 @@ type createCommentRequest struct {
 }
 
 type commentResponse struct {
-	ID int64 `json:"id"`
+	ID   int64  `json:"id"`
+	Body string `json:"body"`
 }
 
 // CreateComment creates a comment on a GitHub issue or pull request and returns
@@ -112,6 +118,67 @@ func (r *GitHubReporter) UpdateComment(ctx context.Context, commentID int64, bod
 	return nil
 }
 
+// FindTaskStatusComment returns the latest Kelos status comment for a task on
+// the given issue or pull request.
+func (r *GitHubReporter) FindTaskStatusComment(ctx context.Context, number int, taskName string) (int64, bool, error) {
+	var matchedID int64
+
+	for page := 1; ; page++ {
+		comments, err := r.listCommentsPage(ctx, number, page)
+		if err != nil {
+			return 0, false, err
+		}
+
+		for _, comment := range comments {
+			if isTaskStatusComment(comment.Body, taskName) {
+				matchedID = comment.ID
+			}
+		}
+
+		if len(comments) < commentsPageSize {
+			break
+		}
+	}
+
+	if matchedID == 0 {
+		return 0, false, nil
+	}
+	return matchedID, true, nil
+}
+
+func (r *GitHubReporter) listCommentsPage(ctx context.Context, number, page int) ([]commentResponse, error) {
+	url := fmt.Sprintf("%s/repos/%s/%s/issues/%d/comments?per_page=%d&page=%d", r.baseURL(), r.Owner, r.Repo, number, commentsPageSize, page)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+	r.setHeaders(req)
+
+	resp, err := r.httpClient().Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("listing comments: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("GitHub API returned status %d: %s", resp.StatusCode, string(errBody))
+	}
+
+	var comments []commentResponse
+	if err := json.NewDecoder(resp.Body).Decode(&comments); err != nil {
+		return nil, fmt.Errorf("decoding comments response: %w", err)
+	}
+
+	return comments, nil
+}
+
+func isTaskStatusComment(body, taskName string) bool {
+	return strings.Contains(body, githubStatusCommentHeader) &&
+		strings.Contains(body, fmt.Sprintf("Task `%s` ", taskName))
+}
+
 // resolveToken returns the current GitHub token. When TokenFunc is set it
 // is called to resolve the token dynamically. Falls back to the static
 // Token field.
@@ -132,15 +199,15 @@ func (r *GitHubReporter) setHeaders(req *http.Request) {
 
 // FormatAcceptedComment returns the comment body for an accepted task.
 func FormatAcceptedComment(taskName string) string {
-	return fmt.Sprintf("🤖 **Kelos Task Status**\n\nTask `%s` has been **accepted** and is being processed.", taskName)
+	return fmt.Sprintf("%s\n\nTask `%s` has been **accepted** and is being processed.", githubStatusCommentHeader, taskName)
 }
 
 // FormatSucceededComment returns the comment body for a succeeded task.
 func FormatSucceededComment(taskName string) string {
-	return fmt.Sprintf("🤖 **Kelos Task Status**\n\nTask `%s` has **succeeded**. ✅", taskName)
+	return fmt.Sprintf("%s\n\nTask `%s` has **succeeded**. ✅", githubStatusCommentHeader, taskName)
 }
 
 // FormatFailedComment returns the comment body for a failed task.
 func FormatFailedComment(taskName string) string {
-	return fmt.Sprintf("🤖 **Kelos Task Status**\n\nTask `%s` has **failed**. ❌", taskName)
+	return fmt.Sprintf("%s\n\nTask `%s` has **failed**. ❌", githubStatusCommentHeader, taskName)
 }

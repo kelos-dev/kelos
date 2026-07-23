@@ -153,6 +153,93 @@ func TestUpdateCommentError(t *testing.T) {
 	}
 }
 
+func TestFindTaskStatusComment(t *testing.T) {
+	var (
+		gotMethod  string
+		gotPath    string
+		gotPage    string
+		gotPerPage string
+		gotAuth    string
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotPage = r.URL.Query().Get("page")
+		gotPerPage = r.URL.Query().Get("per_page")
+		gotAuth = r.Header.Get("Authorization")
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode([]commentResponse{
+			{ID: 111, Body: "Unrelated comment"},
+			{ID: 222, Body: FormatAcceptedComment("test-task")},
+			{ID: 333, Body: FormatSucceededComment("test-task")},
+		})
+	}))
+	defer server.Close()
+
+	reporter := &GitHubReporter{
+		Owner:   "owner",
+		Repo:    "repo",
+		Token:   "token",
+		BaseURL: server.URL,
+	}
+
+	commentID, found, err := reporter.FindTaskStatusComment(context.Background(), 42, "test-task")
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("Expected status comment to be found")
+	}
+	if commentID != 333 {
+		t.Errorf("Expected latest comment ID 333, got %d", commentID)
+	}
+	if gotMethod != http.MethodGet {
+		t.Errorf("Expected GET, got %s", gotMethod)
+	}
+	if gotPath != "/repos/owner/repo/issues/42/comments" {
+		t.Errorf("Unexpected path: %s", gotPath)
+	}
+	if gotPage != "1" {
+		t.Errorf("Expected page 1, got %q", gotPage)
+	}
+	if gotPerPage != "100" {
+		t.Errorf("Expected per_page 100, got %q", gotPerPage)
+	}
+	if gotAuth != "token token" {
+		t.Errorf("Expected auth %q, got %q", "token token", gotAuth)
+	}
+}
+
+func TestFindTaskStatusCommentNotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode([]commentResponse{
+			{ID: 111, Body: FormatAcceptedComment("other-task")},
+		})
+	}))
+	defer server.Close()
+
+	reporter := &GitHubReporter{
+		Owner:   "owner",
+		Repo:    "repo",
+		Token:   "token",
+		BaseURL: server.URL,
+	}
+
+	commentID, found, err := reporter.FindTaskStatusComment(context.Background(), 42, "test-task")
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if found {
+		t.Fatal("Expected no status comment to be found")
+	}
+	if commentID != 0 {
+		t.Errorf("Expected comment ID 0, got %d", commentID)
+	}
+}
+
 func TestCreateCommentNoToken(t *testing.T) {
 	var gotAuth string
 

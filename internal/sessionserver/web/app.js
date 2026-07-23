@@ -3,7 +3,15 @@ const elements = {
   title: document.querySelector('#session-title'),
   meta: document.querySelector('#session-meta'),
   sectionButton: document.querySelector('#session-section'),
-  sectionOptions: document.querySelector('#session-sections'),
+  sectionSelect: document.querySelector('#session-section-select'),
+  sectionCustom: document.querySelector('#session-section-custom'),
+  sectionDialog: document.querySelector('#section-dialog'),
+  sectionForm: document.querySelector('#section-form'),
+  sectionDialogDescription: document.querySelector('#section-dialog-description'),
+  sectionChoice: document.querySelector('#section-choice'),
+  sectionChoiceCustom: document.querySelector('#section-choice-custom'),
+  sectionDialogError: document.querySelector('#section-dialog-error'),
+  saveSectionButton: document.querySelector('#save-session-section'),
   messages: document.querySelector('#messages'),
   changes: document.querySelector('#changes-view'),
   changesList: document.querySelector('#changes-list'),
@@ -90,6 +98,7 @@ const state = {
   creatingSession: false,
   sourceStorageClassNamePresent: false,
   loadedSource: null,
+  sectionSaving: false,
 };
 
 const customOption = '__custom__';
@@ -485,11 +494,67 @@ function createSessionListItem(session) {
   return item;
 }
 
-function renderSectionOptions() {
-  elements.sectionOptions.replaceChildren();
-  const sections = Array.from(new Set(state.sessions.map(session => session.section).filter(Boolean)))
+function sessionSectionNames() {
+  return Array.from(new Set(state.sessions.map(session => session.section).filter(Boolean)))
     .sort((left, right) => left.localeCompare(right, undefined, {sensitivity: 'base'}));
-  for (const section of sections) addOption(elements.sectionOptions, section, section);
+}
+
+function createsNewSection(select) {
+  return select.selectedOptions[0]?.dataset.createSection === 'true';
+}
+
+function populateSectionSelect(select, selected, emptyLabel, createNew = false) {
+  const sections = sessionSectionNames();
+  select.replaceChildren();
+  const actions = document.createElement('optgroup');
+  actions.label = 'Actions';
+  addOption(actions, '', emptyLabel);
+  const createOption = addOption(actions, '', '＋ Create new section…');
+  createOption.dataset.createSection = 'true';
+  select.append(actions);
+  if (sections.length) {
+    const existing = document.createElement('optgroup');
+    existing.label = 'Existing sections';
+    for (const section of sections) addOption(existing, section, section);
+    select.append(existing);
+  }
+  select.selectedIndex = 0;
+  if (createNew) createOption.selected = true;
+  else if (sections.includes(selected)) select.value = selected;
+}
+
+function updateCustomSectionField(select, input) {
+  const custom = createsNewSection(select);
+  input.hidden = !custom;
+  input.required = custom;
+  if (!custom) input.value = '';
+  validateCustomSectionField(select, input);
+}
+
+function validateCustomSectionField(select, input) {
+  const empty = createsNewSection(select) && !input.value.trim();
+  input.setCustomValidity(empty ? 'Enter a section name' : '');
+}
+
+function selectedSection(select, input) {
+  return createsNewSection(select) ? input.value.trim() : select.value;
+}
+
+function selectedSectionPayload(select, input, includeEmpty = false) {
+  const section = selectedSection(select, input);
+  return section || includeEmpty ? {section} : {};
+}
+
+function renderSectionOptions() {
+  const selected = elements.sectionSelect.value;
+  const createNew = createsNewSection(elements.sectionSelect);
+  populateSectionSelect(elements.sectionSelect, selected, 'No section (leave unsectioned)', createNew);
+  updateCustomSectionField(elements.sectionSelect, elements.sectionCustom);
+}
+
+function resetSectionSelection() {
+  elements.sectionSelect.selectedIndex = 0;
+  elements.sectionCustom.value = '';
 }
 
 async function loadSessions({quiet = false} = {}) {
@@ -604,6 +669,7 @@ function resetNamespaceReferences() {
   elements.credentialSecretCustom.value = '';
   elements.workspace.value = '';
   elements.workspaceCustom.value = '';
+  resetSectionSelection();
 }
 
 async function switchNamespace(namespace) {
@@ -880,6 +946,7 @@ function resetSourceValues() {
   elements.sessionSourceStatus.hidden = true;
   elements.sessionSourceStatus.textContent = '';
   renderSessionSourceOptions();
+  renderSectionOptions();
   renderCredentialOptions();
   renderWorkspaceOptions();
   renderAgentConfigOptions();
@@ -1006,8 +1073,8 @@ function renderHeader() {
     return;
   }
   elements.title.textContent = session.name;
-  elements.sectionButton.textContent = session.section ? `Section: ${session.section}` : '＋ Add section';
-  elements.sectionButton.title = session.section ? 'Change or remove section' : 'Add Session to a section';
+  elements.sectionButton.textContent = session.section ? `Section: ${session.section}` : '＋ Choose section';
+  elements.sectionButton.title = session.section ? 'Move Session to another section' : 'Move Session to a section';
   const details = [session.namespace, providerLabel(session.provider), sessionDisplayStatus(session)];
   if (session.branch) details.push(session.branch);
   const detailText = document.createElement('span');
@@ -2393,6 +2460,13 @@ elements.credentialSecret.addEventListener('change', () => {
   updateCredentialField();
 });
 elements.workspace.addEventListener('change', updateWorkspaceField);
+elements.sectionSelect.addEventListener('change', () => {
+  updateCustomSectionField(elements.sectionSelect, elements.sectionCustom);
+  if (!elements.sectionCustom.hidden) elements.sectionCustom.focus();
+});
+elements.sectionCustom.addEventListener('input', () => {
+  validateCustomSectionField(elements.sectionSelect, elements.sectionCustom);
+});
 elements.agentConfig.addEventListener('change', () => {
   elements.addAgentConfig.disabled = !elements.agentConfig.value;
 });
@@ -2416,6 +2490,7 @@ setCreationMode('form');
 elements.form.addEventListener('submit', async event => {
   event.preventDefault();
   if (state.sourceLoading || state.creatingSession) return;
+  validateCustomSectionField(elements.sectionSelect, elements.sectionCustom);
   if (!elements.form.reportValidity()) return;
   elements.dialogError.textContent = '';
   setCreatingSession(true);
@@ -2446,8 +2521,7 @@ elements.form.addEventListener('submit', async event => {
         namespace: values.get('namespace').trim(),
         worker,
       };
-      const section = values.get('section').trim();
-      if (section) payload.section = section;
+      Object.assign(payload, selectedSectionPayload(elements.sectionSelect, elements.sectionCustom));
       const initialBranch = values.get('initialBranch').trim();
       if (initialBranch) payload.initialBranch = initialBranch;
       const initialPrompt = values.get('initialPrompt');
@@ -2482,6 +2556,7 @@ elements.form.addEventListener('submit', async event => {
     updateVolumeClaimFields();
     setCreationMode('form');
     renderSessionSourceOptions();
+    renderSectionOptions();
     renderCredentialOptions();
     renderWorkspaceOptions();
     renderAgentConfigOptions();
@@ -2495,26 +2570,84 @@ elements.form.addEventListener('submit', async event => {
   }
 });
 
-elements.sectionButton.addEventListener('click', async () => {
+function openSectionDialog() {
   const session = state.selected;
-  if (!session) return;
-  const section = window.prompt('Enter a section name. Leave it empty to remove this Session from its section.', session.section || '');
-  if (section === null) return;
-  elements.sectionButton.disabled = true;
+  if (!session || state.sectionSaving) return;
+  elements.sectionDialogError.textContent = '';
+  elements.sectionDialogDescription.textContent = `Choose where Session ${session.name} appears in the sidebar.`;
+  elements.sectionChoiceCustom.value = '';
+  populateSectionSelect(elements.sectionChoice, session.section || '', 'Unsectioned (remove assignment)');
+  updateCustomSectionField(elements.sectionChoice, elements.sectionChoiceCustom);
+  elements.sectionDialog.showModal();
+  window.setTimeout(() => elements.sectionChoice.focus(), 0);
+}
+
+function setSectionSaving(saving) {
+  state.sectionSaving = saving;
+  elements.sectionChoice.disabled = saving;
+  elements.sectionChoiceCustom.disabled = saving;
+  elements.saveSectionButton.disabled = saving;
+  elements.sectionDialog.setAttribute('aria-busy', String(saving));
+  document.querySelectorAll('.close-section-dialog').forEach(button => {
+    button.disabled = saving;
+  });
+}
+
+function closeSectionDialog() {
+  if (!state.sectionSaving) elements.sectionDialog.close();
+}
+
+function handleSectionDialogCancel(event) {
+  if (state.sectionSaving) event.preventDefault();
+}
+
+elements.sectionButton.addEventListener('click', openSectionDialog);
+elements.sectionChoice.addEventListener('change', () => {
+  updateCustomSectionField(elements.sectionChoice, elements.sectionChoiceCustom);
+  if (!elements.sectionChoiceCustom.hidden) elements.sectionChoiceCustom.focus();
+});
+elements.sectionChoiceCustom.addEventListener('input', () => {
+  validateCustomSectionField(elements.sectionChoice, elements.sectionChoiceCustom);
+});
+document.querySelectorAll('.close-section-dialog').forEach(button => {
+  button.addEventListener('click', closeSectionDialog);
+});
+elements.sectionDialog.addEventListener('cancel', handleSectionDialogCancel);
+
+elements.sectionForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  if (state.sectionSaving) return;
+  validateCustomSectionField(elements.sectionChoice, elements.sectionChoiceCustom);
+  if (!elements.sectionForm.reportValidity()) return;
+  const session = state.selected;
+  if (!session) {
+    elements.sectionDialog.close();
+    return;
+  }
+  const sectionPayload = selectedSectionPayload(elements.sectionChoice, elements.sectionChoiceCustom, true);
+  const section = sectionPayload.section;
+  if (section === (session.section || '')) {
+    elements.sectionDialog.close();
+    return;
+  }
+  elements.sectionDialogError.textContent = '';
+  setSectionSaving(true);
   try {
     const updated = await api(
       `/api/sessions/${encodeURIComponent(session.namespace)}/${encodeURIComponent(session.name)}/section`,
-      {method: 'PATCH', body: JSON.stringify({section})},
+      {method: 'PATCH', body: JSON.stringify(sectionPayload)},
     );
     state.sessions = state.sessions.map(item => sessionKey(item) === sessionKey(updated) ? updated : item);
     if (state.selected && sessionKey(state.selected) === sessionKey(updated)) state.selected = updated;
     renderSectionOptions();
     renderSessions();
     renderHeader();
+    elements.sectionDialog.close();
+    showToast(section ? `Moved Session to ${section}` : 'Moved Session to Unsectioned');
   } catch (error) {
-    showToast(error.message);
+    elements.sectionDialogError.textContent = error.message;
   } finally {
-    if (state.selected) elements.sectionButton.disabled = false;
+    setSectionSaving(false);
   }
 });
 

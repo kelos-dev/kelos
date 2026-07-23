@@ -121,8 +121,14 @@
         </label>
         <label>
           <span>Section <em>optional</em></span>
-          <input name="section" list="session-sections" maxlength="64" placeholder="Planning" autocomplete="off">
-          <datalist id="session-sections"></datalist>
+          <select name="section" id="session-section-select">
+            <optgroup label="Actions">
+              <option value="">No section (leave unsectioned)</option>
+              <option value="" data-create-section="true">＋ Create new section…</option>
+            </optgroup>
+          </select>
+          <input name="sectionCustom" id="session-section-custom" maxlength="64" placeholder="New section name" autocomplete="off" hidden>
+          <small>Choose an existing section or create one once for future Sessions.</small>
         </label>
         <label>
           <span>Provider</span>
@@ -221,6 +227,34 @@
       <div class="dialog-actions">
         <button class="secondary-button close-dialog" type="button">Cancel</button>
         <button class="primary-button" id="create-session" value="default">Create session</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="session-dialog section-dialog" id="section-dialog" aria-labelledby="section-dialog-title" aria-describedby="section-dialog-description">
+    <form id="section-form">
+      <div class="dialog-header">
+        <div>
+          <h2 id="section-dialog-title">Move to section</h2>
+          <p id="section-dialog-description">Choose where this Session appears in the sidebar.</p>
+        </div>
+        <button class="icon-button close-section-dialog" type="button" aria-label="Close">×</button>
+      </div>
+      <label class="section-field">
+        <span>Section</span>
+        <select name="sectionChoice" id="section-choice">
+          <optgroup label="Actions">
+            <option value="">Unsectioned (remove assignment)</option>
+            <option value="" data-create-section="true">＋ Create new section…</option>
+          </optgroup>
+        </select>
+        <input name="sectionChoiceCustom" id="section-choice-custom" maxlength="64" placeholder="New section name" autocomplete="off" hidden>
+        <small>New section names become available to other Sessions in this namespace.</small>
+      </label>
+      <div class="dialog-error" id="section-dialog-error" role="alert"></div>
+      <div class="dialog-actions">
+        <button class="secondary-button close-section-dialog" type="button">Cancel</button>
+        <button class="primary-button" id="save-session-section">Save section</button>
       </div>
     </form>
   </dialog>

@@ -20,15 +20,16 @@ import (
 )
 
 const (
-	sessionTUIDefaultWidth   = 80
-	sessionTUIDefaultHeight  = 24
-	sessionTUIComposerHeight = 3
-	sessionTUIComposerGap    = 1
-	sessionTUIFooterHeight   = sessionTUIComposerHeight + sessionTUIComposerGap
-	sessionTUIQueueMaxHeight = 8
-	sessionTUIIndent         = 2
-	sessionTUIFrameInterval  = time.Second / 30
-	sessionTUIReflowDelay    = 75 * time.Millisecond
+	sessionTUIDefaultWidth     = 80
+	sessionTUIDefaultHeight    = 24
+	sessionTUIComposerHeight   = 3
+	sessionTUIComposerGap      = 1
+	sessionTUIFooterHeight     = sessionTUIComposerHeight + sessionTUIComposerGap
+	sessionTUIQueueMaxHeight   = 8
+	sessionTUIIndent           = 2
+	sessionTUIFrameInterval    = time.Second / 30
+	sessionTUIProgressInterval = time.Second
+	sessionTUIReflowDelay      = 75 * time.Millisecond
 )
 
 // sessionTUIClearHistory resets the scroll region, screen, and scrollback before history is replayed.
@@ -62,6 +63,8 @@ type sessionTUIEventResult struct {
 }
 
 type sessionTUIRefreshMsg struct{}
+
+type sessionTUIProgressMsg struct{}
 
 type sessionTUIReflowMsg struct {
 	generation int
@@ -115,6 +118,13 @@ type sessionTUIModel struct {
 	height             int
 	ready              bool
 	streamingAt        int
+	connectionStatus   string
+	connectionStarted  time.Time
+	activeTurnID       string
+	activeTurnStarted  time.Time
+	waitingForInput    bool
+	turnInterrupting   bool
+	progressScheduled  bool
 	history            []string
 	historyAt          int
 	draft              string
@@ -128,6 +138,7 @@ type sessionTUIModel struct {
 	nextHistoryID      uint64
 	printHistory       func(string) tea.Cmd
 	waitForTermination tea.Cmd
+	now                func() time.Time
 	sizeInitialized    bool
 	reflowGeneration   int
 	quitRequested      bool
@@ -176,6 +187,7 @@ func runSessionTUI(ctx context.Context, input io.Reader, output io.Writer, event
 func newSessionTUIModel(events *json.Decoder, requests *json.Encoder, output io.Writer, color bool, defaultColors *sessionTUIDefaultColors, waitForTermination tea.Cmd) *sessionTUIModel {
 	renderer := newSessionTUIRenderer(output, color)
 	styles := newSessionTUIStyles(renderer, color, defaultColors)
+	now := time.Now
 	input := textarea.New()
 	input.Prompt = "> "
 	input.Placeholder = ""
@@ -196,10 +208,13 @@ func newSessionTUIModel(events *json.Decoder, requests *json.Encoder, output io.
 		queuedTurns:        make(map[string]string),
 		width:              sessionTUIDefaultWidth,
 		height:             sessionTUIDefaultHeight,
+		connectionStatus:   sessionTerminalStatusConnecting,
+		connectionStarted:  now(),
 		historyAt:          -1,
 		streamingAt:        -1,
 		printHistory:       func(rendered string) tea.Cmd { return tea.Println(rendered) },
 		waitForTermination: waitForTermination,
+		now:                now,
 	}
 	return model
 }
@@ -273,7 +288,7 @@ func sessionTUITextAreaStyle(background lipgloss.Style) textarea.Style {
 }
 
 func (m *sessionTUIModel) Init() tea.Cmd {
-	return tea.Batch(m.readEvent(), m.waitForTermination)
+	return tea.Batch(m.readEvent(), m.waitForTermination, m.scheduleProgress())
 }
 
 func (m *sessionTUIModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
@@ -302,6 +317,15 @@ func (m *sessionTUIModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshScheduled = false
 		m.refreshActiveView()
 		return m, nil
+	case sessionTUIProgressMsg:
+		if m.quitRequested {
+			return m, nil
+		}
+		m.progressScheduled = false
+		if !m.progressVisible() {
+			return m, nil
+		}
+		return m, m.scheduleProgress()
 	case sessionTUIReflowMsg:
 		if m.quitRequested || message.generation != m.reflowGeneration {
 			return m, nil
@@ -321,6 +345,11 @@ func (m *sessionTUIModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyEnter:
 			if m.ready {
 				return m, m.submitInput()
+			}
+			return m, nil
+		case tea.KeyEsc:
+			if m.canInterruptTurn() {
+				return m, m.interruptTurn()
 			}
 			return m, nil
 		case tea.KeyUp:
@@ -420,11 +449,22 @@ func (m *sessionTUIModel) applyEvent(event sessionruntime.Event) sessionTUIComma
 	case sessionruntime.EventHistoryEnd:
 		m.appendBlock(sessionTUIBlockNotice, "Connected. Type a message, /interrupt, /answer INPUT QUESTION VALUE, or /quit.")
 		m.ready = true
-		commands.ui = m.input.Focus()
+		m.connectionStatus = ""
+		commands.ui = tea.Batch(m.input.Focus(), m.scheduleProgress())
 	case sessionruntime.EventRuntimeRecovered:
 		m.appendBlock(sessionTUIBlockWarning, event.Text)
 	case sessionTerminalEventDiagnostic:
 		m.appendBlock(sessionTUIBlockWarning, event.Text)
+		switch event.Status {
+		case sessionTerminalStatusConnecting, sessionTerminalStatusReconnecting:
+			if m.connectionStatus != event.Status {
+				m.connectionStarted = m.now()
+			}
+			m.connectionStatus = event.Status
+			commands.ui = m.scheduleProgress()
+		case sessionTerminalStatusConnected:
+			m.connectionStatus = ""
+		}
 	case sessionruntime.EventUserMessage:
 		if event.TurnID == "" {
 			m.finishStreaming()
@@ -434,6 +474,13 @@ func (m *sessionTUIModel) applyEvent(event sessionruntime.Event) sessionTUIComma
 		}
 	case sessionruntime.EventTurnStarted:
 		m.acceptQueuedTurn(event.TurnID)
+		if m.activeTurnID != event.TurnID {
+			m.activeTurnStarted = m.now()
+		}
+		m.activeTurnID = event.TurnID
+		m.waitingForInput = false
+		m.turnInterrupting = false
+		commands.ui = m.scheduleProgress()
 	case sessionruntime.EventAssistantDelta:
 		m.appendAssistantDelta(event.Text)
 	case sessionruntime.EventAssistantMessage:
@@ -449,11 +496,14 @@ func (m *sessionTUIModel) applyEvent(event sessionruntime.Event) sessionTUIComma
 		m.appendBlock(sessionTUIBlockToolStatus, event.Status)
 	case sessionruntime.EventInputRequested:
 		m.finishStreaming()
+		m.waitingForInput = true
 		m.appendBlock(sessionTUIBlockInput, sessionTUIInputRequestText(event))
 	case sessionruntime.EventInputResolved:
+		m.waitingForInput = false
 		m.appendBlock(sessionTUIBlockNotice, fmt.Sprintf("Input %s %s.", event.InputID, event.Status))
 	case sessionruntime.EventTurnInterrupting:
 		m.finishStreaming()
+		m.turnInterrupting = true
 		m.appendBlock(sessionTUIBlockWarning, "Interrupting active work…")
 	case sessionruntime.EventFileDiff:
 		m.finishStreaming()
@@ -461,11 +511,19 @@ func (m *sessionTUIModel) applyEvent(event sessionruntime.Event) sessionTUIComma
 	case sessionruntime.EventTurnCompleted:
 		m.acceptQueuedTurn(event.TurnID)
 		m.finishStreaming()
+		if event.TurnID == "" || event.TurnID == m.activeTurnID {
+			m.activeTurnID = ""
+			m.waitingForInput = false
+			m.turnInterrupting = false
+		}
 		if event.Status == "interrupted" {
 			m.appendBlock(sessionTUIBlockWarning, "Turn interrupted.")
 		}
 	case sessionruntime.EventError:
 		m.finishStreaming()
+		if event.Status == "rejected" {
+			m.turnInterrupting = false
+		}
 		m.appendBlock(sessionTUIBlockError, "error: "+event.Text)
 	}
 	if event.Type == sessionruntime.EventAssistantDelta && m.ready {
@@ -487,6 +545,35 @@ func (m *sessionTUIModel) scheduleRefresh() tea.Cmd {
 	return tea.Tick(sessionTUIFrameInterval, func(time.Time) tea.Msg {
 		return sessionTUIRefreshMsg{}
 	})
+}
+
+func (m *sessionTUIModel) scheduleProgress() tea.Cmd {
+	if m.progressScheduled || !m.progressVisible() {
+		return nil
+	}
+	m.progressScheduled = true
+	return tea.Tick(sessionTUIProgressInterval, func(time.Time) tea.Msg {
+		return sessionTUIProgressMsg{}
+	})
+}
+
+func (m *sessionTUIModel) progressVisible() bool {
+	connecting := m.connectionStatus == sessionTerminalStatusReconnecting ||
+		(m.connectionStatus == sessionTerminalStatusConnecting && !m.ready)
+	return connecting || m.activeTurnID != ""
+}
+
+func (m *sessionTUIModel) canInterruptTurn() bool {
+	return m.ready && m.connectionStatus == "" && m.activeTurnID != "" && !m.turnInterrupting
+}
+
+func (m *sessionTUIModel) interruptTurn() tea.Cmd {
+	if err := m.requests.Encode(sessionruntime.ClientRequest{Type: "interrupt"}); err != nil {
+		m.err = err
+		return m.quit()
+	}
+	m.turnInterrupting = true
+	return m.scheduleProgress()
 }
 
 func sessionTUIInputRequestText(event sessionruntime.Event) string {
@@ -840,11 +927,16 @@ func (m *sessionTUIModel) composerView() string {
 }
 
 func (m *sessionTUIModel) footerView() string {
-	queue := m.queueView()
-	if queue == "" {
-		return m.composerView()
+	parts := make([]string, 0, 3)
+	if progress := m.progressView(); progress != "" {
+		parts = append(parts, progress)
 	}
-	return queue + "\n" + m.composerView()
+	queue := m.queueView()
+	if queue != "" {
+		parts = append(parts, queue)
+	}
+	parts = append(parts, m.composerView())
+	return strings.Join(parts, "\n")
 }
 
 func (m *sessionTUIModel) queueView() string {
@@ -853,9 +945,70 @@ func (m *sessionTUIModel) queueView() string {
 		blocks = append(blocks, m.renderQueuedUserBlock(m.queuedTurns[turnID]))
 	}
 	lines := strings.Split(strings.Join(blocks, "\n"), "\n")
-	maxHeight := min(sessionTUIQueueMaxHeight, max(0, m.height-sessionTUIFooterHeight))
+	progressHeight := 0
+	if m.progressVisible() {
+		progressHeight = 1
+	}
+	maxHeight := min(sessionTUIQueueMaxHeight, max(0, m.height-sessionTUIFooterHeight-progressHeight))
 	if len(lines) > maxHeight {
 		lines = lines[:maxHeight]
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (m *sessionTUIModel) progressView() string {
+	if !m.progressVisible() {
+		return ""
+	}
+	label := ""
+	started := m.activeTurnStarted
+	showInterrupt := false
+	switch {
+	case m.connectionStatus == sessionTerminalStatusReconnecting:
+		label = "Reconnecting"
+		started = m.connectionStarted
+	case m.connectionStatus == sessionTerminalStatusConnecting && !m.ready:
+		label = "Connecting"
+		started = m.connectionStarted
+	case m.turnInterrupting:
+		label = "Interrupting"
+	case m.waitingForInput:
+		label = "Waiting for input"
+		showInterrupt = true
+	default:
+		label = "Working"
+		showInterrupt = true
+	}
+	elapsed := m.now().Sub(started)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	details := formatSessionTUIElapsed(elapsed)
+	if showInterrupt {
+		details += " • esc to interrupt"
+	}
+	text := truncateSessionTUIProgress("• "+label+" ("+details+")", max(1, m.width))
+	return m.styles.pending.Width(max(1, m.width)).MaxWidth(max(1, m.width)).Render(text)
+}
+
+func formatSessionTUIElapsed(elapsed time.Duration) string {
+	seconds := uint64(elapsed / time.Second)
+	if seconds < 60 {
+		return fmt.Sprintf("%ds", seconds)
+	}
+	if seconds < 60*60 {
+		return fmt.Sprintf("%dm %02ds", seconds/60, seconds%60)
+	}
+	return fmt.Sprintf("%dh %02dm %02ds", seconds/(60*60), (seconds/60)%60, seconds%60)
+}
+
+func truncateSessionTUIProgress(text string, width int) string {
+	runes := []rune(text)
+	if len(runes) <= width {
+		return text
+	}
+	if width == 1 {
+		return "…"
+	}
+	return string(runes[:width-1]) + "…"
 }

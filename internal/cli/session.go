@@ -244,10 +244,29 @@ func (w *sessionTerminalDiagnosticWriter) Flush() error {
 }
 
 func (w *sessionTerminalDiagnosticWriter) send(line string) error {
+	return w.sendEvent(line, "")
+}
+
+func (w *sessionTerminalDiagnosticWriter) sendDiagnostic(line, status string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.sendEvent(line, status)
+}
+
+func (w *sessionTerminalDiagnosticWriter) sendEvent(line, status string) error {
 	if line == "" {
 		return nil
 	}
-	return w.events.send(sessionruntime.Event{Type: sessionTerminalEventDiagnostic, Text: line})
+	return w.events.send(sessionruntime.Event{Type: sessionTerminalEventDiagnostic, Text: line, Status: status})
+}
+
+func reportSessionTerminalDiagnostic(writer io.Writer, status, format string, args ...any) {
+	text := fmt.Sprintf(format, args...)
+	if diagnostics, ok := writer.(*sessionTerminalDiagnosticWriter); ok {
+		_ = diagnostics.sendDiagnostic(text, status)
+		return
+	}
+	fmt.Fprintln(writer, text)
 }
 
 type pendingSessionRequest struct {
@@ -388,7 +407,11 @@ func connectSessionWithDependencies(
 		}
 		stream, err := dependencies.openStream(terminalCtx, namespace, session.Status.PodName, diagnostics)
 		if err != nil {
-			fmt.Fprintf(diagnostics, "Session connection failed; retrying: %v\n", err)
+			status := sessionTerminalStatusConnecting
+			if connectedBefore {
+				status = sessionTerminalStatusReconnecting
+			}
+			reportSessionTerminalDiagnostic(diagnostics, status, "Session connection failed; retrying: %v", err)
 			if err := waitForSessionRetry(terminalCtx, terminalDone); err != nil {
 				if errors.Is(err, errSessionTerminalClosed) {
 					return nil
@@ -404,7 +427,11 @@ func connectSessionWithDependencies(
 			if diagnosticWriter != nil {
 				_ = diagnosticWriter.Flush()
 			}
-			fmt.Fprintf(diagnostics, "Session connection failed; retrying: %v\n", err)
+			status := sessionTerminalStatusConnecting
+			if connectedBefore {
+				status = sessionTerminalStatusReconnecting
+			}
+			reportSessionTerminalDiagnostic(diagnostics, status, "Session connection failed; retrying: %v", err)
 			if err := waitForSessionRetry(terminalCtx, terminalDone); err != nil {
 				if errors.Is(err, errSessionTerminalClosed) {
 					return nil
@@ -463,7 +490,7 @@ func connectSessionWithDependencies(
 				}
 				pendingRequests[len(pendingRequests)-1].sent = true
 				if err := encoder.Encode(request); err != nil {
-					fmt.Fprintf(diagnostics, "Session connection lost while sending input: %v\n", err)
+					reportSessionTerminalDiagnostic(diagnostics, sessionTerminalStatusReconnecting, "Session connection lost while sending input: %v", err)
 					reconnect = true
 				}
 			case result := <-events:
@@ -477,7 +504,7 @@ func connectSessionWithDependencies(
 				}
 				if event.Type == sessionruntime.EventHistoryEnd {
 					if announceReconnect {
-						fmt.Fprintln(diagnostics, "Reconnected to Session runtime")
+						reportSessionTerminalDiagnostic(diagnostics, sessionTerminalStatusConnected, "Reconnected to Session runtime")
 						announceReconnect = false
 					}
 					connectedBefore = true
@@ -488,7 +515,7 @@ func connectSessionWithDependencies(
 						}
 						pendingRequests[i].sent = true
 						if err := encoder.Encode(pendingRequests[i].request); err != nil {
-							fmt.Fprintf(diagnostics, "Session connection lost while sending input: %v\n", err)
+							reportSessionTerminalDiagnostic(diagnostics, sessionTerminalStatusReconnecting, "Session connection lost while sending input: %v", err)
 							reconnect = true
 							break
 						}
@@ -515,7 +542,7 @@ func connectSessionWithDependencies(
 			_ = diagnosticWriter.Flush()
 		}
 		pendingRequests = discardUnconfirmedSessionRequests(pendingRequests, diagnostics)
-		fmt.Fprintln(diagnostics, "Session connection lost; waiting for the runtime to recover")
+		reportSessionTerminalDiagnostic(diagnostics, sessionTerminalStatusReconnecting, "Session connection lost; waiting for the runtime to recover")
 		if err := waitForSessionRetry(terminalCtx, terminalDone); err != nil {
 			if errors.Is(err, errSessionTerminalClosed) {
 				return nil
@@ -561,19 +588,27 @@ func waitForReadySession(
 			return nil, fmt.Errorf("Session %q was deleted", name)
 		}
 		if err != nil {
-			fmt.Fprintf(stderr, "Getting Session %q failed; retrying: %v\n", name, err)
+			status := sessionTerminalStatusConnecting
+			if retryFailed {
+				status = sessionTerminalStatusReconnecting
+			}
+			reportSessionTerminalDiagnostic(stderr, status, "Getting Session %q failed; retrying: %v", name, err)
 		} else if session.Status.Phase == kelos.SessionPhaseFailed {
 			if !retryFailed {
 				return nil, fmt.Errorf("Session %q failed: %s", name, session.Status.Message)
 			}
 			if !reportedWaiting {
-				fmt.Fprintf(stderr, "Waiting for Session %q to recover\n", name)
+				reportSessionTerminalDiagnostic(stderr, sessionTerminalStatusReconnecting, "Waiting for Session %q to recover", name)
 				reportedWaiting = true
 			}
 		} else if session.Status.Phase == kelos.SessionPhaseReady && session.Status.PodName != "" {
 			return session, nil
 		} else if !reportedWaiting {
-			fmt.Fprintf(stderr, "Waiting for Session %q to become ready\n", name)
+			status := sessionTerminalStatusConnecting
+			if retryFailed {
+				status = sessionTerminalStatusReconnecting
+			}
+			reportSessionTerminalDiagnostic(stderr, status, "Waiting for Session %q to become ready", name)
 			reportedWaiting = true
 		}
 		if err := waitForSessionRetry(ctx, terminalDone); err != nil {

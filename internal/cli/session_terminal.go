@@ -18,6 +18,10 @@ import (
 const (
 	sessionTerminalEventDiagnostic = "terminal.diagnostic"
 
+	sessionTerminalStatusConnected    = "connected"
+	sessionTerminalStatusConnecting   = "connecting"
+	sessionTerminalStatusReconnecting = "reconnecting"
+
 	sessionANSIReset   = "\x1b[0m"
 	sessionANSIBold    = "\x1b[1m"
 	sessionANSIDim     = "\x1b[2m"

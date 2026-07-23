@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
@@ -63,22 +64,43 @@ func Request(ctx context.Context, cl client.Client, key client.ObjectKey, reques
 	if requestID == "" {
 		return nil, false, fmt.Errorf("requesting Session %q reset: request ID must not be empty", key.Name)
 	}
-	var session kelos.Session
-	if err := cl.Get(ctx, key, &session); err != nil {
-		return nil, false, fmt.Errorf("getting Session %q for reset: %w", key.Name, err)
-	}
-	if session.Annotations[RequestAnnotation] != "" {
-		return &session, false, nil
-	}
 
-	original := session.DeepCopy()
-	if session.Annotations == nil {
-		session.Annotations = map[string]string{}
-	}
-	session.Annotations[RequestAnnotation] = requestID
-	delete(session.Annotations, StateAnnotation)
-	if err := cl.Patch(ctx, &session, client.MergeFromWithOptions(original, client.MergeFromWithOptimisticLock{})); err != nil {
+	var (
+		session   *kelos.Session
+		requested bool
+		operation = "getting"
+	)
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		operation = "getting"
+		var current kelos.Session
+		if err := cl.Get(ctx, key, &current); err != nil {
+			return err
+		}
+		if current.Annotations[RequestAnnotation] != "" {
+			session = &current
+			requested = false
+			return nil
+		}
+
+		original := current.DeepCopy()
+		if current.Annotations == nil {
+			current.Annotations = map[string]string{}
+		}
+		current.Annotations[RequestAnnotation] = requestID
+		delete(current.Annotations, StateAnnotation)
+
+		operation = "requesting"
+		if err := cl.Patch(ctx, &current, client.MergeFromWithOptions(original, client.MergeFromWithOptimisticLock{})); err != nil {
+			return err
+		}
+		session = &current
+		requested = true
+		return nil
+	}); err != nil {
+		if operation == "getting" {
+			return nil, false, fmt.Errorf("getting Session %q for reset: %w", key.Name, err)
+		}
 		return nil, false, fmt.Errorf("requesting Session %q reset: %w", key.Name, err)
 	}
-	return &session, true, nil
+	return session, requested, nil
 }

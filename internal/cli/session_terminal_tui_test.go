@@ -614,6 +614,7 @@ func TestSessionTUICtrlJInsertsNewlineAndEnterSubmits(t *testing.T) {
 	model.input.SetValue("first")
 
 	model.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
+	_ = model.composerView()
 	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("second")})
 
 	if got := model.input.Value(); got != "first\nsecond" {
@@ -622,8 +623,18 @@ func TestSessionTUICtrlJInsertsNewlineAndEnterSubmits(t *testing.T) {
 	if got := model.input.Height(); got != 2 {
 		t.Fatalf("composer input height = %d, want 2", got)
 	}
-	if lines := strings.Split(stripSessionTUIANSI(model.composerView()), "\n"); len(lines) != 4 {
+	lines := strings.Split(stripSessionTUIANSI(model.composerView()), "\n")
+	if len(lines) != 4 {
 		t.Fatalf("multiline composer has %d rows, want 4: %q", len(lines), lines)
+	}
+	rendered := strings.Join(lines, "\n")
+	if got := strings.Count(rendered, ">"); got != 1 {
+		t.Fatalf("multiline composer has %d prompts, want 1: %q", got, lines)
+	}
+	for _, want := range []string{"> first", "  second"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("multiline composer = %q, want %q", lines, want)
+		}
 	}
 
 	model.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -658,6 +669,47 @@ func TestSessionTUICtrlJAllowsInputBeyondComposerHeight(t *testing.T) {
 	}
 	if got := model.input.Value(); !strings.HasSuffix(got, fmt.Sprintf("line %d", sessionTUIComposerMaxVisibleRows+1)) {
 		t.Fatalf("input beyond composer height = %q", got)
+	}
+	if got := strings.Count(stripSessionTUIANSI(model.composerView()), ">"); got != 1 {
+		t.Fatalf("scrolled multiline composer has %d prompts, want 1", got)
+	}
+}
+
+func TestSessionTUICtrlJKeepsPromptVisibleInShortComposer(t *testing.T) {
+	model, _ := newSessionTUITestModel()
+	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventHistoryEnd})
+	model.Update(tea.WindowSizeMsg{Width: 14, Height: 4})
+	model.input.SetValue("first")
+	model.input.CursorEnd()
+
+	model.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
+	_ = model.composerView()
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("second")})
+
+	view := stripSessionTUIANSI(model.composerView())
+	if got := strings.Count(view, ">"); got != 1 {
+		t.Fatalf("short multiline composer has %d prompts, want 1: %q", got, view)
+	}
+	if !strings.Contains(view, "> second") {
+		t.Fatalf("short multiline composer = %q, want visible prompt before current line", view)
+	}
+}
+
+func TestSessionTUICtrlJKeepsWrappedFirstLineVisible(t *testing.T) {
+	model, _ := newSessionTUITestModel()
+	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventHistoryEnd})
+	model.Update(tea.WindowSizeMsg{Width: 14, Height: 8})
+
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("first line wraps")})
+	if got := model.input.Height(); got != 2 {
+		t.Fatalf("wrapped first line uses %d rows, want 2", got)
+	}
+	_ = model.composerView()
+	model.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
+
+	view := stripSessionTUIANSI(model.composerView())
+	if !strings.Contains(view, "> first line") {
+		t.Fatalf("multiline composer hid the first wrapped line after Ctrl+J: %q", view)
 	}
 }
 

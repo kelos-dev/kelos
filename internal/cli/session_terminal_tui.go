@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/kelos-dev/kelos/internal/sessionruntime"
 	"github.com/muesli/termenv"
 )
@@ -26,6 +27,7 @@ const (
 	sessionTUIComposerMinHeight      = 3
 	sessionTUIComposerMaxVisibleRows = 8
 	sessionTUIComposerGap            = 1
+	sessionTUIComposerPrompt         = "> "
 	sessionTUIQueueMaxHeight         = 8
 	sessionTUIIndent                 = 2
 	sessionTUIFrameInterval          = time.Second / 30
@@ -179,14 +181,14 @@ func newSessionTUIModel(events *json.Decoder, requests *json.Encoder, output io.
 	renderer := newSessionTUIRenderer(output, color)
 	styles := newSessionTUIStyles(renderer, color, defaultColors)
 	input := textarea.New()
-	input.Prompt = "> "
+	input.Prompt = ""
 	input.Placeholder = ""
 	input.ShowLineNumbers = false
 	input.EndOfBufferCharacter = ' '
 	input.MaxHeight = 0
 	input.MaxWidth = 0
 	input.SetHeight(1)
-	input.SetWidth(sessionTUIDefaultWidth)
+	input.SetWidth(sessionTUIDefaultWidth - len(sessionTUIComposerPrompt))
 	input.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("ctrl+j"))
 	input.FocusedStyle = sessionTUITextAreaStyle(styles.user)
 	input.BlurredStyle = sessionTUITextAreaStyle(styles.user)
@@ -329,6 +331,10 @@ func (m *sessionTUIModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.submitInput()
 			}
 			return m, nil
+		case tea.KeyCtrlJ:
+			if m.ready {
+				m.input.SetHeight(min(m.input.Height()+1, m.composerMaxHeight()))
+			}
 		case tea.KeyUp:
 			if m.ready && !strings.Contains(m.input.Value(), "\n") {
 				m.previousInput()
@@ -585,7 +591,7 @@ func (m *sessionTUIModel) resize(width, height int) tea.Cmd {
 	changed := m.sizeInitialized && (m.width != width || m.height != height)
 	m.width = width
 	m.height = height
-	m.input.SetWidth(width)
+	m.input.SetWidth(max(1, width-len(sessionTUIComposerPrompt)))
 	m.resizeComposer()
 	m.invalidateTranscript()
 	if m.ready {
@@ -860,16 +866,32 @@ func (m *sessionTUIModel) composerView() string {
 		return blank + "\n" + loading + "\n" + blank
 	}
 	middle := strings.TrimSuffix(m.input.View(), "\n")
+	lines := strings.Split(middle, "\n")
+	continuation := strings.Repeat(" ", len(sessionTUIComposerPrompt))
+	for index := range lines {
+		prefix := continuation
+		if index == 0 {
+			prefix = m.styles.user.Bold(true).Render(sessionTUIComposerPrompt)
+		}
+		lines[index] = prefix + lines[index]
+	}
+	middle = strings.Join(lines, "\n")
 	middle = m.renderUserRow(middle)
 	return blank + "\n" + middle + "\n" + blank
 }
 
 func (m *sessionTUIModel) resizeComposer() {
-	maxHeight := min(
+	maxHeight := m.composerMaxHeight()
+	wrapped := ansi.Wordwrap(m.input.Value(), max(1, m.input.Width()), "")
+	inputHeight := strings.Count(ansi.Hardwrap(wrapped, max(1, m.input.Width()), true), "\n") + 1
+	m.input.SetHeight(min(max(1, inputHeight), maxHeight))
+}
+
+func (m *sessionTUIModel) composerMaxHeight() int {
+	return min(
 		sessionTUIComposerMaxVisibleRows,
 		max(1, m.height-sessionTUIComposerMinHeight-sessionTUIComposerGap),
 	)
-	m.input.SetHeight(min(m.input.LineCount(), maxHeight))
 }
 
 func (m *sessionTUIModel) composerHeight() int {

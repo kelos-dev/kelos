@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"regexp"
 	"strings"
@@ -79,15 +80,15 @@ func TestSessionTUIComposerUsesFullWidthPadding(t *testing.T) {
 	composer := model.composerView()
 	assertSessionTUIBlockWidth(t, composer, 14)
 	lines := strings.Split(stripSessionTUIANSI(composer), "\n")
-	if len(lines) != sessionTUIComposerHeight {
-		t.Fatalf("composer has %d rows, want %d: %q", len(lines), sessionTUIComposerHeight, lines)
+	if len(lines) != model.composerHeight() {
+		t.Fatalf("composer has %d rows, want %d: %q", len(lines), model.composerHeight(), lines)
 	}
 	if !strings.HasPrefix(lines[1], "> draft") {
 		t.Fatalf("composer text row = %q, want > prefix", lines[1])
 	}
 	viewLines := strings.Split(stripSessionTUIANSI(model.View()), "\n")
-	if len(viewLines) != sessionTUIFooterHeight {
-		t.Fatalf("terminal view has %d rows, want %d: %q", len(viewLines), sessionTUIFooterHeight, viewLines)
+	if len(viewLines) != model.footerHeight() {
+		t.Fatalf("terminal view has %d rows, want %d: %q", len(viewLines), model.footerHeight(), viewLines)
 	}
 	if gap := viewLines[0]; gap != "" {
 		t.Fatalf("row before composer = %q, want an unstyled blank row", gap)
@@ -604,6 +605,108 @@ func TestSessionTUISubmittedTextRendersFromUserEventOnce(t *testing.T) {
 	}
 	if view := stripSessionTUIANSI(model.View()); strings.Contains(view, "hello") {
 		t.Fatalf("submitted text remains in inline view after commit: %q", view)
+	}
+}
+
+func TestSessionTUICtrlJInsertsNewlineAndEnterSubmits(t *testing.T) {
+	model, requests := newSessionTUITestModel()
+	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventHistoryEnd})
+	model.input.SetValue("first")
+
+	model.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("second")})
+
+	if got := model.input.Value(); got != "first\nsecond" {
+		t.Fatalf("input after Ctrl+J = %q, want multiline prompt", got)
+	}
+	if got := model.input.Height(); got != 2 {
+		t.Fatalf("composer input height = %d, want 2", got)
+	}
+	if lines := strings.Split(stripSessionTUIANSI(model.composerView()), "\n"); len(lines) != 4 {
+		t.Fatalf("multiline composer has %d rows, want 4: %q", len(lines), lines)
+	}
+
+	model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	var request sessionruntime.ClientRequest
+	if err := json.NewDecoder(requests).Decode(&request); err != nil {
+		t.Fatal(err)
+	}
+	if request.Type != "message" || request.Text != "first\nsecond" {
+		t.Fatalf("submitted request = %#v, want multiline message", request)
+	}
+	if got := model.input.Height(); got != 1 {
+		t.Fatalf("composer input height after submit = %d, want 1", got)
+	}
+}
+
+func TestSessionTUICtrlJAllowsInputBeyondComposerHeight(t *testing.T) {
+	model, _ := newSessionTUITestModel()
+	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventHistoryEnd})
+	model.input.SetValue("line 1")
+
+	for line := 2; line <= sessionTUIComposerMaxVisibleRows+1; line++ {
+		model.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
+		model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(fmt.Sprintf("line %d", line))})
+	}
+
+	if got := model.input.LineCount(); got != sessionTUIComposerMaxVisibleRows+1 {
+		t.Fatalf("input line count = %d, want %d", got, sessionTUIComposerMaxVisibleRows+1)
+	}
+	if got := model.input.Height(); got != sessionTUIComposerMaxVisibleRows {
+		t.Fatalf("composer input height = %d, want viewport cap %d", got, sessionTUIComposerMaxVisibleRows)
+	}
+	if got := model.input.Value(); !strings.HasSuffix(got, fmt.Sprintf("line %d", sessionTUIComposerMaxVisibleRows+1)) {
+		t.Fatalf("input beyond composer height = %q", got)
+	}
+}
+
+func TestSessionTUICtrlCInterruptsActiveTurnAndQuitsWhenIdle(t *testing.T) {
+	model, requests := newSessionTUITestModel()
+	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventTurnStarted, TurnID: "turn-1"})
+
+	if _, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlC}); cmd != nil {
+		t.Fatal("Ctrl+C returned a quit command while a turn was active")
+	}
+	var request sessionruntime.ClientRequest
+	if err := json.NewDecoder(requests).Decode(&request); err != nil {
+		t.Fatal(err)
+	}
+	if request.Type != "interrupt" {
+		t.Fatalf("Ctrl+C request = %#v, want interrupt", request)
+	}
+	if model.quitRequested {
+		t.Fatal("Ctrl+C requested terminal exit while a turn was active")
+	}
+
+	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventTurnCompleted, TurnID: "turn-1", Status: "interrupted"})
+	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatal("Ctrl+C did not quit while idle")
+	}
+	if message := cmd(); message == nil {
+		t.Fatal("Ctrl+C idle quit command returned no message")
+	} else if _, ok := message.(tea.QuitMsg); !ok {
+		t.Fatalf("Ctrl+C idle quit command returned %T, want tea.QuitMsg", message)
+	}
+}
+
+func TestSessionTUIJournalResetClearsActiveTurn(t *testing.T) {
+	model, _ := newSessionTUITestModel()
+	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventTurnStarted, TurnID: "turn-1"})
+	if !model.turnActive {
+		t.Fatal("turn.started did not mark the turn active")
+	}
+
+	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventHistoryStart, JournalID: "original"})
+	if !model.turnActive {
+		t.Fatal("unchanged journal cleared the active turn")
+	}
+
+	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventHistoryStart, JournalID: "replacement", Reset: true})
+
+	if model.turnActive {
+		t.Fatal("replacement journal did not clear the active turn")
 	}
 }
 

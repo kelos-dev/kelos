@@ -49,9 +49,11 @@ func TestSessionTerminalReconnectsToReplacementPod(t *testing.T) {
 						t.Error(err)
 						return
 					}
-					if subscribe.Type != "subscribe" || subscribe.Since != 0 {
+					if subscribe.Type != "subscribe" || subscribe.Since != 0 || subscribe.JournalID != "" || !subscribe.HistoryBounds {
 						t.Errorf("first subscribe = %#v", subscribe)
 					}
+					_ = encoder.Encode(sessionruntime.Event{Type: sessionruntime.EventHistoryStart, JournalID: "journal-1"})
+					_ = encoder.Encode(sessionruntime.Event{ID: 1, Type: sessionruntime.EventTurnStarted, TurnID: "turn-1", Status: "running"})
 					_ = encoder.Encode(sessionruntime.Event{Type: sessionruntime.EventHistoryEnd})
 					close(firstConnected)
 					var request sessionruntime.ClientRequest
@@ -74,9 +76,10 @@ func TestSessionTerminalReconnectsToReplacementPod(t *testing.T) {
 						t.Error(err)
 						return
 					}
-					if subscribe.Type != "subscribe" || subscribe.Since != 0 {
+					if subscribe.Type != "subscribe" || subscribe.Since != 1 || subscribe.JournalID != "journal-1" || !subscribe.HistoryBounds {
 						t.Errorf("replacement subscribe = %#v", subscribe)
 					}
+					_ = encoder.Encode(sessionruntime.Event{Type: sessionruntime.EventHistoryStart, JournalID: "journal-2", Reset: true})
 					_ = encoder.Encode(sessionruntime.Event{ID: 1, Type: sessionruntime.EventRuntimeRecovered, Text: "Session runtime restarted"})
 					_ = encoder.Encode(sessionruntime.Event{Type: sessionruntime.EventHistoryEnd})
 					close(secondConnected)

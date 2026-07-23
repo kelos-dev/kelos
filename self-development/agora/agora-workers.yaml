@@ -1,39 +1,5 @@
 apiVersion: kelos.dev/v1alpha2
-kind: AgentConfig
-metadata:
-  name: agora-workers-agent
-spec:
-  agentsMD: |
-    # Agora Worker Agent
-
-    Agora (github.com/kelos-dev/agora) is a local coordination server for
-    humans and coding agents. It serves a browser UI and JSON API for timeline
-    events, targeted inboxes, instructions, decisions, and status updates.
-
-    ## Environment
-    You are running in an ephemeral container environment. Your file system
-    changes disappear after the task completes. Persist work by creating PRs,
-    issues, or comments.
-
-    ## Identity
-    - When commenting on issues or PRs, always start with "🤖 **Kelos Worker Agent** @gjkim42\n\n"
-      so it is clearly distinguishable from human comments and triggers a notification
-
-    ## Standards
-    - Do not create duplicate issues — check existing issues first with `gh issue list`
-    - Keep changes minimal and focused
-
-    ## Project Conventions
-    - Use Makefile targets instead of discovering build/test commands yourself:
-      - `make verify` — verify formatting, modules, vet, and tests
-      - `make update` — run formatters and update module metadata
-      - `make test` — run all unit tests
-      - `make build` — build the agora binary
-      - `make run` — run the server locally
-      - `make image` — build the Agora container image
----
-apiVersion: kelos.dev/v1alpha2
-kind: TaskSpawner
+kind: SessionSpawner
 metadata:
   name: agora-workers
 spec:
@@ -47,14 +13,17 @@ spec:
       filters:
         - event: issue_comment
           action: created
-          bodyPattern: '(?m)^[ \t]*/kelos pick-up[ \t]*\r?$'
+          bodyPattern: '(?m)^/kelos pick-up[ \t]*\r?$'
           commentOn: Issue
           state: open
           author: gjkim42
-      reporting:
-        enabled: true
-  maxConcurrency: 8
-  taskTemplate:
+  sessionTemplate:
+    volumeClaimTemplate:
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 10Gi
     worker:
       workspaceRef:
         name: agora-agent
@@ -84,24 +53,16 @@ spec:
             value: "gjkim042@gmail.com"
       agentConfigRefs:
         - name: base-agent
-        - name: agora-workers-agent
-    ttlSecondsAfterFinished: 864000
-    podFailurePolicy:
-      rules:
-        - action: Ignore
-          onPodConditions:
-            - type: DisruptionTarget
-              status: "True"
-        - action: FailJob
-          onExitCodes:
-            operator: NotIn
-            values: [0]
-    branch: "agora-task-{{.Number}}"
-    promptTemplate: |
+    initialBranch: "agora-task-{{.Number}}"
+    initialPrompt: |
       You are a coding agent. You either
       - create a PR to fix the issue
       - update an existing PR to fix the issue
       - comment on the issue or the PR if you cannot fix it
+
+      Your workspace is backed by a PVC. Files remain available across follow-ups
+      and pod restarts while the Session and its PVC exist. Commit and push work
+      that must outlive the Session.
 
       Webhook:
       - Event: {{.Event}}
@@ -154,4 +115,4 @@ spec:
         create a separate GitHub issue:
         - First check existing issues with `gh issue list` to avoid duplicates.
         - Keep the follow-up narrowly scoped and label it `generated-by-kelos` and `triage-accepted`.
-        - Follow-up issues are exempt from the per-TaskSpawner issue slot cap.
+        - Follow-up issues are exempt from autonomous discovery issue slot caps.

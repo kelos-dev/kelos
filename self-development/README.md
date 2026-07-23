@@ -23,8 +23,9 @@ directory and its nested Agora and Kanon directories references
 [`gjkim42/kanon-repo`'s `instructions/AGENTS.md`](https://github.com/gjkim42/kanon-repo/blob/main/instructions/AGENTS.md)
 and installs all skills from that repository through `spec.skills`.
 Tasks and TaskSpawners add a second role-specific AgentConfig when they need
-local identity, conventions, or workflow instructions. The `kelos-workers`
-SessionSpawner and Sessions created with `cs` use only `base-agent`.
+local identity, conventions, or workflow instructions. The issue and PR
+pick-up SessionSpawners for Kelos, Agora, and Kanon, plus Sessions created with
+`cs`, use only `base-agent`.
 
 Apply the shared AgentConfig before deploying any self-development resource:
 
@@ -48,13 +49,13 @@ while a worker or PR responder is handling an explicitly requested issue or PR.
 
 | Spawner | Trigger | Agent | Description |
 |---|---|---|---|
-| **kelos-workers** | Webhook: every new issue/PR conversation comment | Codex | Responds in a durable Session, creates or updates PRs when needed, self-reviews, and ensures CI passes |
+| **kelos-workers** | Webhook: issue comment `/kelos pick-up` | Codex | Picks up an open issue in a durable Session, creates or updates its PR, self-reviews, and ensures CI passes |
 | **kelos-planner** | Webhook: issue comment `/kelos plan` | Codex | Investigates an issue and posts a structured implementation plan — advisory only, no code changes |
 | **kelos-reviewer** | Webhook: PR comment `/kelos review` | Codex | Reviews PRs on demand — analyzes code, checks conventions, and updates a sticky review comment |
 | **kelos-glm-reviewer** | Webhook: PR comment `/kelos glm-review` | GLM-5.2 | Runs a second code review path with Z.AI GLM-5.2 through OpenCode and updates a sticky review comment |
 | **kelos-api-reviewer** | Webhook: issue/PR comment `/kelos api-review` | Codex | Reviews Kubernetes API design on issues or PRs — naming, compatibility, CRD validation |
 | **kelos-glm-api-reviewer** | Webhook: issue/PR comment `/kelos glm-api-review` | GLM-5.2 | Runs a second Kubernetes API design review path with Z.AI GLM-5.2 through OpenCode and updates sticky PR comments |
-| **kelos-pr-responder** | Webhook: PR review/comment on `generated-by-kelos` PRs | Codex | Re-engages on PR review feedback and updates the existing branch incrementally |
+| **kelos-pr-responder** | Webhook: PR comment/review `/kelos pick-up` | Codex | Picks up an open PR in a durable Session and updates its existing branch incrementally |
 | **kelos-triage** | Webhook: issue opened/labeled/reopened (`needs-actor`) | Codex | Classifies issues by kind/priority, detects duplicates, and recommends an actor |
 | **kelos-fake-user** | Cron (daily 09:00 UTC) | Codex | Tests DX as a new user and maintains one unassigned issue slot for the highest-impact problem found |
 | **kelos-fake-strategist** | Cron (every 12 hours) | Codex | Explores new use cases, integrations, and API ideas while maintaining one unassigned strategic issue slot |
@@ -65,40 +66,33 @@ while a worker or PR responder is handling an explicitly requested issue or PR.
 
 ### kelos-workers.yaml
 
-Creates a durable Session for every new non-bot comment in an issue or pull
-request conversation. The triggering comment is the immediate request;
-`/kelos pick-up` tells the worker to take ownership of the complete issue or PR.
-Follow-ups can continue through the Session's web or terminal clients after the
-initial turn.
+Creates a durable Session when the maintainer posts `/kelos pick-up` on an open
+issue. Follow-ups continue through the Session's web or terminal clients after
+the initial turn.
 
 | | |
 |---|---|
-| **Trigger** | Every GitHub `issue_comment` webhook with action `created`, on issues and PRs |
+| **Trigger** | GitHub `issue_comment` webhook with an exact `/kelos pick-up` command from `gjkim42` on an open issue |
 | **Agent** | Codex |
 | **Storage** | 10 GiB persistent volume per created Session |
 
 **Key features:**
 - Automatically checks for existing PRs and updates them incrementally
-- Uses the PR head branch for PR comments and `kelos-task-<number>` for issue comments
+- Uses `kelos-task-<number>` for the issue branch
 - Self-reviews PRs before requesting human review
 - Ensures CI passes before completion
-- Treats `/kelos pick-up` as a request to handle the complete issue or PR
+- Requires `/kelos pick-up` from the maintainer before starting work
 - Excludes comments from `kelos-bot[bot]` to prevent self-trigger loops
 - Keeps the Session available for later web or terminal follow-ups
 - Hands off PR review feedback to `kelos-pr-responder`
 - May create separate follow-up issues for out-of-scope discoveries; those
-  follow-ups are exempt from the per-TaskSpawner issue slot cap
+  follow-ups are exempt from autonomous discovery issue slot caps
 
 **Deploy:**
 ```bash
-kubectl delete taskspawner kelos-workers --ignore-not-found
 kubectl apply -f self-development/base-agent.yaml
 kubectl apply -f self-development/kelos-workers.yaml
 ```
-
-The delete is required when migrating an existing installation because
-`TaskSpawner/kelos-workers` and `SessionSpawner/kelos-workers` are distinct
-Kubernetes objects. Leaving both installed would run both worker flows.
 
 ### kelos-planner.yaml
 
@@ -237,24 +231,26 @@ kubectl apply -f self-development/kelos-glm-api-reviewer.yaml
 
 ### kelos-pr-responder.yaml
 
-Picks up open GitHub pull requests labeled `generated-by-kelos` when a reviewer requests changes.
+Creates a durable Session when the maintainer posts an exact `/kelos pick-up`
+PR comment or review on an open pull request.
 
 | | |
 |---|---|
-| **Trigger** | GitHub PR review/comment webhooks on `generated-by-kelos` pull requests |
+| **Trigger** | GitHub PR comment or review webhook with an exact `/kelos pick-up` command from `gjkim42` on an open PR; review events also exclude drafts |
 | **Agent** | Codex |
-| **Concurrency** | 8 |
+| **Storage** | 10 GiB persistent volume per created Session |
 
 **Key features:**
 - Reuses the existing PR branch instead of starting over
 - Reads review comments and PR conversation before making incremental changes
-- Lets the maintainer stay on the PR page for the common review-feedback loop
+- Keeps the Session available for later web or terminal follow-ups
 - Requires `/kelos pick-up` PR comment or review body to be picked up
 - May create separate follow-up issues for out-of-scope discoveries; those
-  follow-ups are exempt from the per-TaskSpawner issue slot cap
+  follow-ups are exempt from autonomous discovery issue slot caps
 
 **Deploy:**
 ```bash
+kubectl apply -f self-development/base-agent.yaml
 kubectl apply -f self-development/kelos-pr-responder.yaml
 ```
 
@@ -573,7 +569,7 @@ To adapt these examples for your own repository:
    | `bodyPattern` | `TaskSpawner.spec.when.githubWebhook.filters[]` | Go re2 regex match against the comment/review body — the modern replacement for substring-only matching. |
    | `excludeBodyPatterns` | `TaskSpawner.spec.when.githubWebhook.filters[]` | Companion to `bodyPattern`: a list of regexes that, if any match, drop the event. Use to carve out bot-echo replies that would otherwise match `bodyPattern`. |
    | `commentOn` | `TaskSpawner.spec.when.githubWebhook.filters[]` | Scopes `issue_comment` events to `Issue` or `PullRequest`. GitHub fires `issue_comment` for both, so set this to keep issue-only spawners off PRs (and vice versa). |
-   | `author` | `TaskSpawner.spec.when.githubWebhook.filters[]` | Restrict matches to a single sender's username. Omit it to accept every sender not listed in top-level `excludeAuthors`, as `kelos-workers` does. |
+   | `author` | `TaskSpawner.spec.when.githubWebhook.filters[]` | Restrict matches to a single sender's username. Omit it to accept every sender not listed in top-level `excludeAuthors`; `kelos-workers` sets it to the maintainer as an approval gate. |
    | `draft` | `TaskSpawner.spec.when.githubWebhook.filters[]` | Match by PR draft status. Set `false` to skip drafts; omit to match both. |
 
    See [docs/reference.md](../docs/reference.md#taskspawner) for the full
@@ -630,10 +626,10 @@ To adapt these examples for your own repository:
 The key pattern in these examples is webhook-triggered handoff plus runtime re-validation:
 
 1. GitHub delivers an `issue_comment`, `issues`, or `pull_request_review` webhook
-2. The matching TaskSpawner creates a Task, or `kelos-workers` creates a Session
+2. The matching TaskSpawner creates a Task, while the issue and PR pick-up spawners for Kelos, Agora, and Kanon create Sessions
 3. The agent re-reads the latest issue or PR state with `gh` before acting, so asynchronous label updates are respected
 4. If the agent needs human input, it posts a plain-English status comment describing what happened
-5. Every fresh issue or PR conversation comment creates a `kelos-workers` Session; explicit commands or relabel events retrigger the other matching automation
+5. An exact `/kelos pick-up` command creates a Session for an open issue or PR; explicit commands or relabel events retrigger the other matching automation
 
 Each matching webhook delivery creates a discrete Task or Session. A created
 Session remains available for interactive follow-ups through Session clients.
@@ -653,9 +649,8 @@ spawners when those spawners include a matching bot-author filter.
 - If the issue or PR matched before you deployed the webhook server, retrigger it with a new comment or relabel
 
 **SessionSpawner not creating a Session:**
-- Check the SessionSpawner status: `kubectl get sessionspawner kelos-workers -o yaml`
-- Check created Sessions: `SPAWNER_UID=$(kubectl get sessionspawner kelos-workers -o jsonpath='{.metadata.uid}'); kubectl get sessions -l kelos.dev/sessionspawner="$SPAWNER_UID"`
-- Ensure the old `TaskSpawner/kelos-workers` was removed during migration
+- Check the SessionSpawner status: `kubectl get sessionspawner <name> -o yaml`
+- Check created Sessions: `SPAWNER_UID=$(kubectl get sessionspawner <name> -o jsonpath='{.metadata.uid}'); kubectl get sessions -l kelos.dev/sessionspawner="$SPAWNER_UID"`
 - Check the same Workspace, credentials, webhook server, and recent-delivery details listed above
 
 **Tasks failing immediately:**

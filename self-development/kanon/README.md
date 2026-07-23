@@ -12,12 +12,12 @@ the agents they spawn operate on the Kanon repository.
 
 ## How It Works
 
-Each TaskSpawner references the root [`base-agent`](../base-agent.yaml) first
-for shared instructions and skills. It then references an AgentConfig with
-repository- or role-specific instructions: pr-responder, triage, and
-squash-commits share `agentconfig.yaml` (`kanon-dev-agent`), while workers,
-planner, reviewer, fake-user, and fake-strategist define their own AgentConfig
-inline.
+Every spawner references the root [`base-agent`](../base-agent.yaml) for shared
+instructions and skills. The issue and PR pick-up SessionSpawners reference
+only `base-agent`. The remaining TaskSpawners add repository- or role-specific
+instructions where needed: triage and squash-commits share `agentconfig.yaml`
+(`kanon-dev-agent`), while planner, reviewer, fake-user, and fake-strategist
+define their own AgentConfig inline.
 
 Autonomous discovery agents that publish GitHub issues maintain at most one
 open `generated-by-kelos` issue slot per TaskSpawner. The issue body includes a
@@ -36,14 +36,14 @@ maintain (`self-development/kanon/*`) live in *this* repository, so they use the
 `self-development/`, and they read Kanon's activity cross-repo with
 `gh ... --repo kelos-dev/kanon`.
 
-## TaskSpawners
+## Spawners
 
-| TaskSpawner | Trigger | Agent | Description |
+| Spawner | Trigger | Agent | Description |
 |---|---|---|---|
-| **kanon-workers** | Webhook: issue comment `/kelos pick-up` | Codex | Picks up issues, creates or updates PRs, self-reviews, and ensures CI passes |
+| **kanon-workers** | Webhook: issue comment `/kelos pick-up` | Codex | Creates durable Sessions for issue work, including PR creation or updates |
 | **kanon-planner** | Webhook: issue comment `/kelos plan` | Codex | Investigates an issue and posts a structured implementation plan — advisory only, no code changes |
 | **kanon-reviewer** | Webhook: PR comment `/kelos review` | Codex | Reviews PRs on demand — analyzes code, checks conventions, and updates a sticky review comment |
-| **kanon-pr-responder** | Webhook: PR review/comment with `/kelos pick-up` | Codex | Re-engages on PR review feedback and updates the existing branch incrementally |
+| **kanon-pr-responder** | Webhook: PR review/comment with `/kelos pick-up` | Codex | Creates durable Sessions for PR review feedback on the existing branch |
 | **kanon-triage** | Webhook: issue opened/reopened (untriaged) | Codex | Classifies issues by kind/priority, detects duplicates, and recommends an actor |
 | **kanon-fake-user** | Cron (daily 09:00 UTC) | Codex | Tests DX as a new user and maintains one unassigned issue slot for the highest-impact problem found |
 | **kanon-fake-strategist** | Cron (every 12 hours) | Codex | Explores new use cases, integrations, and managed-settings types while maintaining one unassigned strategic issue slot |
@@ -57,8 +57,7 @@ maintain (`self-development/kanon/*`) live in *this* repository, so they use the
 
 Apply the root `base-agent` first, then the whole directory. The directory
 includes `agentconfig.yaml`, which defines the `kanon-dev-agent` role
-instructions referenced by the pr-responder, triage, and squash-commits
-spawners:
+instructions referenced by the triage and squash-commits spawners:
 
 ```bash
 kubectl apply -f self-development/base-agent.yaml
@@ -70,22 +69,24 @@ individual spawner after `base-agent` is installed.
 
 ### kanon-workers.yaml
 
-Picks up open GitHub issues when a maintainer posts `/kelos pick-up` and creates autonomous agent tasks to fix them.
+Picks up open GitHub issues when a maintainer posts `/kelos pick-up` and
+creates a durable Session to fix them.
 
 | | |
 |---|---|
 | **Trigger** | GitHub `issue_comment` webhook with `/kelos pick-up` |
 | **Agent** | Codex |
-| **Concurrency** | 8 |
+| **Storage** | 10 Gi PVC |
 
 **Key features:**
 - Automatically checks for existing PRs and updates them incrementally
 - Self-reviews PRs before requesting human review
 - Ensures CI passes before completion
 - Requires a `/kelos pick-up` comment to pick up an issue (maintainer approval gate)
-- Hands off PR review feedback to `kanon-pr-responder`
+- Keeps the workspace across Session follow-ups and pod restarts
+- Supports routine follow-ups through the Session's web or terminal clients
 - May create separate follow-up issues for out-of-scope discoveries; those
-  follow-ups are exempt from the per-TaskSpawner issue slot cap
+  follow-ups are exempt from autonomous discovery issue slot caps
 
 **Deploy:**
 ```bash
@@ -148,15 +149,17 @@ Picks up open GitHub pull requests when a reviewer requests changes with `/kelos
 |---|---|
 | **Trigger** | GitHub PR comment with `/kelos pick-up`, or a PR review whose body contains `/kelos pick-up` |
 | **Agent** | Codex |
-| **Concurrency** | 8 |
+| **Storage** | 10 Gi PVC |
 
 **Key features:**
 - Reuses the existing PR branch instead of starting over
 - Reads review comments and PR conversation before making incremental changes
 - Lets the maintainer stay on the PR page for the common review-feedback loop
 - Requires a `/kelos pick-up` PR comment or review body to be picked up
+- Keeps the workspace across Session follow-ups and pod restarts
+- Supports routine follow-ups through the Session's web or terminal clients
 - May create separate follow-up issues for out-of-scope discoveries; those
-  follow-ups are exempt from the per-TaskSpawner issue slot cap
+  follow-ups are exempt from autonomous discovery issue slot caps
 
 **Deploy:**
 ```bash
@@ -373,17 +376,16 @@ The token needs `repo` (full control) and `workflow` (if your repo uses GitHub A
 
 ### 4. GitHub Webhook Secret and Delivery
 
-The issue and pull request TaskSpawners are webhook-driven. Reuse the
-`github-webhook-secret` from your existing deployment, then configure a
-repository webhook on `kelos-dev/kanon`:
+The issue and PR pick-up SessionSpawners and the remaining webhook
+TaskSpawners are event-driven. Reuse the `github-webhook-secret` from your
+existing deployment, then configure a repository webhook on `kelos-dev/kanon`:
 
 - Point it at the same `https://<your-domain>/webhook/github` endpoint
 - Use the same shared secret
 - Subscribe to `issues`, `issue_comment`, and `pull_request_review`
 
-Webhook TaskSpawners only react to **new** events after deployment. Retrigger an
-existing issue or PR with a fresh comment or relabel if it was already in a
-matching state.
+Webhook spawners only react to **new** events after deployment. Retrigger an
+existing issue or PR with a fresh matching event if needed.
 
 ### 5. Agent Credentials Secret
 
@@ -395,32 +397,33 @@ kubectl create secret generic kelos-credentials \
   --from-file=CODEX_AUTH_JSON=$HOME/.codex/auth.json
 ```
 
-For API-key auth, change the task template credential type to `api-key` and use
+For API-key auth, change the worker credential type to `api-key` and use
 `--from-literal=CODEX_API_KEY=<your-openai-api-key>`.
 
 ## Customizing
 
-The `TaskSpawner.spec.when.githubWebhook` filters and template variables work
-exactly as in `self-development/`. See
+The `spec.when.githubWebhook` filters and template variables work the same for
+TaskSpawner and SessionSpawner resources. See
 [`self-development/README.md`](../README.md#customizing-for-your-repository)
 for the webhook filter field reference and the full
 [template variable table](../README.md), and
-[docs/reference.md](../../docs/reference.md#taskspawner) for the authoritative
-`TaskSpawner` field reference.
+[docs/reference.md](../../docs/reference.md) for the authoritative field
+references.
 
 ## Troubleshooting
 
-**TaskSpawner not creating tasks:**
-- Check the TaskSpawner status: `kubectl get taskspawner <name> -o yaml`
+**Webhook spawner not creating work:**
+- For pick-up, check the SessionSpawner status: `kubectl get sessionspawner <name> -o yaml`
+- For other automation, check the TaskSpawner status: `kubectl get taskspawner <name> -o yaml`
 - Verify the Workspaces exist: `kubectl get workspace kanon-agent kelos-agent`
 - Ensure credentials are configured: `kubectl get secret kelos-credentials`
 - Ensure the GitHub webhook server is enabled and the `github-webhook-secret` exists
 - Review the `kelos-dev/kanon` repository webhook's recent deliveries in GitHub
 
-**Tasks failing immediately:**
+**Sessions or tasks failing immediately:**
 - Verify the agent credentials are valid
 - Check the Workspace repository is accessible and the token has push access to it
-- Review task logs: `kubectl logs -l job-name=<job-name>`
+- Review the corresponding Session or Task status and pod logs
 
 **Triage or PR/issue creation failing on labels:**
 - Confirm the labels from [Repository labels](#2-repository-labels) exist on `kelos-dev/kanon` — `gh` errors when adding or creating with a label that does not exist

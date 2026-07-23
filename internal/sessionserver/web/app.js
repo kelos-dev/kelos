@@ -18,6 +18,9 @@ const elements = {
   input: document.querySelector('#message-input'),
   send: document.querySelector('#send-message'),
   composerHint: document.querySelector('#composer-hint'),
+  progress: document.querySelector('#session-progress'),
+  progressLabel: document.querySelector('#session-progress-label'),
+  progressElapsed: document.querySelector('#session-progress-elapsed'),
   queue: document.querySelector('#queued-prompts'),
   connection: document.querySelector('#connection-pill'),
   dialog: document.querySelector('#session-dialog'),
@@ -75,7 +78,11 @@ const state = {
   queuedMessages: new Map(),
   promptDrafts: new Map(),
   activeTurn: false,
+  activeTurnID: '',
+  activeTurnStartedAt: 0,
+  waitingForInput: false,
   interrupting: false,
+  progressTimer: null,
   replayingHistory: false,
   pinHistoryToBottom: false,
   fileChangesDirty: false,
@@ -148,6 +155,9 @@ function createSessionView() {
     fileChanges: new Map(),
     queuedMessages: new Map(),
     activeTurn: false,
+    activeTurnID: '',
+    activeTurnStartedAt: 0,
+    waitingForInput: false,
     interrupting: false,
     replayingHistory: false,
     pinHistoryToBottom: false,
@@ -172,6 +182,9 @@ function saveCurrentSessionView() {
   view.fileChanges = state.fileChanges;
   view.queuedMessages = state.queuedMessages;
   view.activeTurn = state.activeTurn;
+  view.activeTurnID = state.activeTurnID;
+  view.activeTurnStartedAt = state.activeTurnStartedAt;
+  view.waitingForInput = state.waitingForInput;
   view.interrupting = state.interrupting;
   view.replayingHistory = state.replayingHistory;
   view.pinHistoryToBottom = state.pinHistoryToBottom;
@@ -195,6 +208,9 @@ function activateSessionView(view) {
   state.fileChanges = view.fileChanges;
   state.queuedMessages = view.queuedMessages;
   state.activeTurn = view.activeTurn;
+  state.activeTurnID = view.activeTurnID;
+  state.activeTurnStartedAt = view.activeTurnStartedAt;
+  state.waitingForInput = view.waitingForInput;
   state.interrupting = view.interrupting;
   state.replayingHistory = view.replayingHistory;
   state.pinHistoryToBottom = view.pinHistoryToBottom;
@@ -206,6 +222,7 @@ function activateSessionView(view) {
   elements.queue.hidden = state.queuedMessages.size === 0;
   updateFileChangesHeader();
   if (!hasChanges) renderFileChanges();
+  refreshSessionProgress();
 }
 
 function cachedSessionView(session) {
@@ -235,6 +252,9 @@ function resetCurrentSessionView() {
   state.fileChanges = new Map();
   state.queuedMessages = new Map();
   state.activeTurn = false;
+  state.activeTurnID = '';
+  state.activeTurnStartedAt = 0;
+  state.waitingForInput = false;
   state.interrupting = false;
   state.replayingHistory = true;
   state.pinHistoryToBottom = true;
@@ -254,7 +274,59 @@ function resetCurrentSessionView() {
     view.diffs = state.diffs;
     view.fileChanges = state.fileChanges;
     view.queuedMessages = state.queuedMessages;
+    view.activeTurn = false;
+    view.activeTurnID = '';
+    view.activeTurnStartedAt = 0;
+    view.waitingForInput = false;
+    view.interrupting = false;
     view.pinHistoryToBottom = true;
+  }
+  refreshSessionProgress();
+}
+
+function formatSessionProgressElapsed(elapsedMilliseconds) {
+  const totalSeconds = Math.max(0, Math.floor(elapsedMilliseconds / 1000));
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const seconds = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  if (totalMinutes < 60) return `${totalMinutes}m ${String(seconds).padStart(2, '0')}s`;
+  const minutes = totalMinutes % 60;
+  const hours = Math.floor(totalMinutes / 60);
+  return `${hours}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`;
+}
+
+function renderSessionProgress(now = Date.now()) {
+  if (!state.activeTurn) {
+    elements.progress.hidden = true;
+    elements.progress.dataset.state = 'idle';
+    elements.progressLabel.textContent = '';
+    elements.progressElapsed.textContent = '';
+    return;
+  }
+  let label = 'Working';
+  let status = 'working';
+  if (state.interrupting) {
+    label = 'Interrupting';
+    status = 'interrupting';
+  } else if (state.waitingForInput) {
+    label = 'Waiting for input';
+    status = 'waiting';
+  }
+  const startedAt = state.activeTurnStartedAt || now;
+  elements.progress.hidden = false;
+  elements.progress.dataset.state = status;
+  if (elements.progressLabel.textContent !== label) elements.progressLabel.textContent = label;
+  elements.progressElapsed.textContent = `(${formatSessionProgressElapsed(now - startedAt)})`;
+}
+
+function refreshSessionProgress() {
+  if (state.progressTimer !== null) {
+    window.clearInterval(state.progressTimer);
+    state.progressTimer = null;
+  }
+  renderSessionProgress();
+  if (state.activeTurn) {
+    state.progressTimer = window.setInterval(() => renderSessionProgress(), 1000);
   }
 }
 
@@ -1759,14 +1831,21 @@ function handleEvent(event) {
       break;
     case 'turn.started':
       endAssistantSegment(event.turnId);
+      if (!state.activeTurn || state.activeTurnID !== event.turnId) {
+        state.activeTurnStartedAt = Date.now();
+      }
       state.activeTurn = true;
+      state.activeTurnID = event.turnId || '';
+      state.waitingForInput = false;
       state.interrupting = false;
       acceptQueuedMessage(event.turnId);
       updateComposerAction();
+      refreshSessionProgress();
       break;
     case 'turn.interrupting':
       state.interrupting = true;
       updateComposerAction();
+      refreshSessionProgress();
       break;
     case 'assistant.delta':
       renderAssistantDelta(event);
@@ -1784,9 +1863,13 @@ function handleEvent(event) {
       break;
     case 'input.requested':
       endAssistantSegment(event.turnId);
+      state.waitingForInput = true;
+      refreshSessionProgress();
       renderInputRequest(event);
       break;
     case 'input.resolved':
+      state.waitingForInput = false;
+      refreshSessionProgress();
       resolveInputCard(event);
       break;
     case 'file.diff':
@@ -2263,6 +2346,7 @@ function renderError(event) {
   if (event.status === 'rejected') {
     state.interrupting = false;
     updateComposerAction();
+    refreshSessionProgress();
   }
   ensureConversation();
   const card = document.createElement('div');
@@ -2283,9 +2367,13 @@ function renderRecovery(event) {
 
 function renderTurnEnd(event) {
   state.activeTurn = false;
+  state.activeTurnID = '';
+  state.activeTurnStartedAt = 0;
+  state.waitingForInput = false;
   state.interrupting = false;
   acceptQueuedMessage(event.turnId);
   updateComposerAction();
+  refreshSessionProgress();
   if (event.status === 'interrupted') showToast('Active work interrupted');
   const divider = document.createElement('div');
   divider.className = 'turn-divider';
@@ -2557,6 +2645,7 @@ function interruptActiveTurn() {
   if (!state.socket || state.socket.readyState !== WebSocket.OPEN || !state.activeTurn || state.interrupting) return;
   state.interrupting = true;
   updateComposerAction();
+  refreshSessionProgress();
   state.socket.send(JSON.stringify({type: 'interrupt'}));
 }
 

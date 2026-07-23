@@ -213,6 +213,12 @@ button { color: inherit; }
 .recovery-card { padding: 12px 14px; border-color: rgba(197,138,62,.3); background: #fff9ef; color: #8a5b1f; font-size: 12px; line-height: 1.5; }
 .turn-divider { height: 1px; margin: 2px 0 22px 40px; background: linear-gradient(90deg,var(--line),transparent); }
 .composer-wrap { padding: 12px max(24px, calc((100% - 850px) / 2)) 19px; background: linear-gradient(transparent, var(--canvas) 20%); }
+.session-progress { display: flex; align-items: center; gap: 5px; min-height: 18px; margin: 0 4px 7px; color: var(--muted); font-size: 11px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.session-progress[hidden] { display: none; }
+.session-progress-dot { color: var(--accent-2); animation: pulse 1.1s infinite; }
+.session-progress[data-state="waiting"] .session-progress-dot { color: var(--warning); animation: none; }
+.session-progress[data-state="interrupting"] { color: var(--warning); }
+.session-progress[data-state="interrupting"] .session-progress-dot { color: var(--warning); }
 .queued-prompts { max-height: 150px; display: grid; gap: 6px; margin-bottom: 8px; overflow-y: auto; }
 .queued-prompts[hidden] { display: none; }
 .queued-prompt { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--accent-soft); }

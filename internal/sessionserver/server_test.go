@@ -499,6 +499,9 @@ func TestSessionComposerUsesOneSendAndInterruptAction(t *testing.T) {
 	if !strings.Contains(body, `id="queued-prompts"`) {
 		t.Error("Session composer does not contain the queued prompts region")
 	}
+	if !strings.Contains(body, `id="session-progress"`) {
+		t.Error("Session composer does not contain the agent progress region")
+	}
 	if strings.Contains(body, `id="stop-session"`) {
 		t.Error("Session header contains a separate interrupt action")
 	}

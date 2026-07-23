@@ -265,6 +265,72 @@ func TestSessionTerminalDiagnosticWriterEmitsCompleteLines(t *testing.T) {
 	}
 }
 
+func TestReportSessionTerminalDiagnosticEmitsStatus(t *testing.T) {
+	var events bytes.Buffer
+	writer := &sessionTerminalDiagnosticWriter{
+		events: newSessionTerminalEventSink(t.Context(), &events),
+	}
+
+	reportSessionTerminalDiagnostic(writer, sessionTerminalStatusReconnecting, "Waiting for Session %q to recover", "chat")
+
+	var event sessionruntime.Event
+	if err := json.NewDecoder(&events).Decode(&event); err != nil {
+		t.Fatal(err)
+	}
+	if event.Type != sessionTerminalEventDiagnostic ||
+		event.Status != sessionTerminalStatusReconnecting ||
+		event.Text != `Waiting for Session "chat" to recover` {
+		t.Fatalf("diagnostic event = %#v", event)
+	}
+}
+
+func TestReportSessionTerminalDiagnosticPreservesRedirectedTextAndEmitsStatus(t *testing.T) {
+	var events bytes.Buffer
+	var diagnostics bytes.Buffer
+	writer := &sessionTerminalDiagnosticWriter{
+		events: newSessionTerminalEventSink(t.Context(), &events),
+		output: &diagnostics,
+	}
+
+	reportSessionTerminalDiagnostic(writer, sessionTerminalStatusReconnecting, "Waiting for Session %q to recover", "chat")
+
+	if got := diagnostics.String(); got != "Waiting for Session \"chat\" to recover\n" {
+		t.Fatalf("redirected diagnostics = %q", got)
+	}
+	var event sessionruntime.Event
+	if err := json.NewDecoder(&events).Decode(&event); err != nil {
+		t.Fatal(err)
+	}
+	if event.Type != sessionTerminalEventDiagnostic ||
+		event.Status != sessionTerminalStatusReconnecting ||
+		event.Text != "" {
+		t.Fatalf("diagnostic event = %#v, want status-only reconnect event", event)
+	}
+}
+
+func TestSessionTerminalDiagnosticWriterForwardsRedirectedText(t *testing.T) {
+	var events bytes.Buffer
+	var diagnostics bytes.Buffer
+	writer := &sessionTerminalDiagnosticWriter{
+		events: newSessionTerminalEventSink(t.Context(), &events),
+		output: &diagnostics,
+	}
+
+	if _, err := io.WriteString(writer, "stream warning\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Flush(); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := diagnostics.String(); got != "stream warning\n" {
+		t.Fatalf("redirected diagnostics = %q", got)
+	}
+	if events.Len() != 0 {
+		t.Fatalf("redirected stream diagnostic also reached TUI: %q", events.String())
+	}
+}
+
 func TestSessionTerminalEventSinkStopsAfterCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	eventReader, eventWriter := io.Pipe()

@@ -11,6 +11,7 @@ class TestNode {
     this.parent = null;
     this.hidden = false;
     this.attributes = new Map();
+    this.dataset = {};
     this.classes = new Set();
     this.classList = {
       add: (...names) => names.forEach((name) => this.classes.add(name)),
@@ -89,6 +90,16 @@ global.document = {
 
 let bottomAnchors;
 let socketConnections;
+let progressTimers;
+
+global.window = {
+  clearInterval: (timer) => progressTimers.delete(timer),
+  setInterval: (callback) => {
+    const timer = progressTimers.size + 1;
+    progressTimers.set(timer, callback);
+    return timer;
+  },
+};
 
 function resetHarness() {
   global.elements = {
@@ -98,6 +109,9 @@ function resetHarness() {
     changesCount: new TestNode('span'),
     changesSummary: new TestNode('span'),
     input: new TestNode('textarea'),
+    progress: new TestNode('div'),
+    progressLabel: new TestNode('span'),
+    progressElapsed: new TestNode('span'),
     sidebar: new TestNode('aside'),
     welcome: null,
   };
@@ -115,13 +129,18 @@ function resetHarness() {
     fileChanges: new Map(),
     queuedMessages: new Map(),
     activeTurn: false,
+    activeTurnID: '',
+    activeTurnStartedAt: 0,
+    waitingForInput: false,
     interrupting: false,
+    progressTimer: null,
     replayingHistory: false,
     pinHistoryToBottom: false,
     fileChangesDirty: false,
   };
   bottomAnchors = 0;
   socketConnections = 0;
+  progressTimers = new Map();
 }
 
 global.maxCachedSessionViews = 5;
@@ -137,6 +156,12 @@ global.resizeComposer = () => {};
 global.scheduleBottomAnchor = () => { bottomAnchors++; };
 global.connectSocket = () => { socketConnections++; };
 global.updateComposerAction = () => {};
+global.endAssistantSegment = () => {};
+global.acceptQueuedMessage = () => {};
+global.renderInputRequest = () => {};
+global.resolveInputCard = () => {};
+global.scrollToBottom = () => {};
+global.showToast = () => {};
 
 const application = fs.readFileSync(path.join(__dirname, '..', 'web', 'app.js'), 'utf8');
 
@@ -154,6 +179,8 @@ vm.runInThisContext(applicationSlice('function parseSessionTimestamp', 'function
 vm.runInThisContext(applicationSlice('function selectSession', 'function renderHeader'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function ensureConversation', 'function trimURLSuffix'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function finishHistoryReplay', 'function handleEvent'), {filename: 'app.js'});
+vm.runInThisContext(applicationSlice('function handleEvent', 'function renderUser'), {filename: 'app.js'});
+vm.runInThisContext(applicationSlice('function renderError', 'function scrollToBottom'), {filename: 'app.js'});
 
 function testSessionViewSaveAndRestore() {
   resetHarness();
@@ -196,6 +223,65 @@ function testSessionViewReset() {
   assert.equal(state.pinHistoryToBottom, true);
   assert.equal(view.historyLoaded, false);
   assert.equal(view.statusPlaceholder, false);
+}
+
+function testSessionProgressLifecycle() {
+  resetHarness();
+  const view = createSessionView();
+  activateSessionView(view);
+  assert.equal(elements.progress.hidden, true);
+
+  handleEvent({type: 'turn.started', turnId: 'turn-1'});
+  const startedAt = Date.parse('2026-07-23T12:00:00Z');
+  state.activeTurnStartedAt = startedAt;
+  renderSessionProgress(startedAt + 65000);
+  assert.equal(elements.progress.hidden, false);
+  assert.equal(elements.progress.dataset.state, 'working');
+  assert.equal(elements.progressLabel.textContent, 'Working');
+  assert.equal(elements.progressElapsed.textContent, '(1m 05s)');
+
+  handleEvent({type: 'input.requested', turnId: 'turn-1', inputId: 'input-1'});
+  assert.equal(elements.progress.dataset.state, 'waiting');
+  assert.equal(elements.progressLabel.textContent, 'Waiting for input');
+
+  handleEvent({type: 'input.resolved', turnId: 'turn-1', inputId: 'input-1'});
+  assert.equal(elements.progress.dataset.state, 'working');
+
+  handleEvent({type: 'turn.interrupting', turnId: 'turn-1'});
+  assert.equal(elements.progress.dataset.state, 'interrupting');
+  assert.equal(elements.progressLabel.textContent, 'Interrupting');
+
+  handleEvent({type: 'error', turnId: 'turn-1', status: 'rejected', text: 'Still working'});
+  assert.equal(elements.progress.dataset.state, 'working');
+
+  handleEvent({type: 'turn.completed', turnId: 'turn-1', status: 'completed'});
+  assert.equal(elements.progress.hidden, true);
+  assert.equal(state.progressTimer, null);
+}
+
+function testSessionProgressSurvivesCachedViewSwitch() {
+  resetHarness();
+  const activeView = createSessionView();
+  activateSessionView(activeView);
+  state.activeTurn = true;
+  state.activeTurnID = 'turn-1';
+  state.activeTurnStartedAt = Date.parse('2026-07-23T12:00:00Z');
+  state.waitingForInput = true;
+  refreshSessionProgress();
+  saveCurrentSessionView();
+
+  activateSessionView(createSessionView());
+  assert.equal(elements.progress.hidden, true);
+  activateSessionView(activeView);
+  assert.equal(elements.progress.hidden, false);
+  assert.equal(elements.progressLabel.textContent, 'Waiting for input');
+  assert.equal(state.activeTurnStartedAt, Date.parse('2026-07-23T12:00:00Z'));
+}
+
+function testSessionProgressElapsedFormatting() {
+  assert.equal(formatSessionProgressElapsed(59000), '59s');
+  assert.equal(formatSessionProgressElapsed(60000), '1m 00s');
+  assert.equal(formatSessionProgressElapsed(7389000), '2h 03m 09s');
 }
 
 function testSessionResetClearsPromptDraft() {
@@ -291,6 +377,9 @@ function testSessionTimestampElement() {
 
 testSessionViewSaveAndRestore();
 testSessionViewReset();
+testSessionProgressLifecycle();
+testSessionProgressSurvivesCachedViewSwitch();
+testSessionProgressElapsedFormatting();
 testSessionResetClearsPromptDraft();
 testHistoryReplayCompletion();
 testReselectRefreshesStatusPlaceholder();

@@ -232,13 +232,18 @@ Use `kelos session connect NAME` for terminal chat. In an interactive terminal,
 press Enter to send a message, Ctrl+J to insert a newline, and Ctrl+C or Esc to
 interrupt an active turn. Ctrl+C exits the terminal client when no turn is
 active. The terminal client shows live connecting, reconnecting, working,
-waiting-for-input, and interrupting status with elapsed time. Web chat is
-served by the optional shared `kelos-session-server`; it shows connection
-status separately from working, waiting-for-input, and interrupting progress,
-including elapsed time for active work. Both clients use the same event stream
-and provider conversation. Both clients can stream agent and tool activity,
-answer user-input requests, and interrupt active work without ending the
-provider conversation.
+waiting-for-input, and interrupting progress with elapsed time. A separate
+status bar beneath the composer shows the Session name, agent type, model and
+effort when available, working directory, git branch, and associated pull
+request number. Codex Sessions also show reported context use, weekly limit
+remaining, and cumulative input and output tokens. Less important status-bar
+items are omitted as the terminal narrows. Web chat is served by the optional
+shared `kelos-session-server`; it shows connection status separately from
+working, waiting-for-input, and interrupting progress, including elapsed time
+for active work. Both clients use the same event stream and provider
+conversation. Both clients can stream agent and tool activity, answer
+user-input requests, and interrupt active work without ending the provider
+conversation.
 
 Selecting a Session in the web chat opens it at the latest retained message.
 Reconnecting preserves an intentional upward scroll position and shows the

@@ -62,6 +62,12 @@ type CodexProvider struct {
 	interactionCancel context.CancelFunc
 	turnMu            sync.Mutex
 
+	statusMu    sync.Mutex
+	model       string
+	effort      string
+	usage       *RuntimeUsage
+	weeklyLimit *RuntimeRateLimit
+
 	threadID string
 	done     chan struct{}
 	readErr  error
@@ -120,6 +126,15 @@ func NewCodexProvider(ctx context.Context, config ProviderConfig) (*CodexProvide
 		provider.Close()
 		return nil, err
 	}
+	rateLimitCtx, rateLimitCancel := context.WithTimeout(ctx, 5*time.Second)
+	if result, err := provider.request(rateLimitCtx, "account/rateLimits/read", nil); err == nil {
+		if limit := codexWeeklyRateLimit(result); limit != nil {
+			provider.statusMu.Lock()
+			provider.weeklyLimit = limit
+			provider.statusMu.Unlock()
+		}
+	}
+	rateLimitCancel()
 	return provider, nil
 }
 
@@ -144,6 +159,10 @@ func (p *CodexProvider) openThread(ctx context.Context) error {
 				return fmt.Errorf("resuming Codex thread %q: response did not include a thread ID", threadID)
 			}
 			p.threadID = id
+			p.statusMu.Lock()
+			p.model = codexThreadModel(result)
+			p.effort = codexThreadEffort(result)
+			p.statusMu.Unlock()
 			return nil
 		}
 		return errors.New("resuming Codex thread: saved thread ID is empty")
@@ -162,6 +181,11 @@ func (p *CodexProvider) startThread(ctx context.Context, statePath string) error
 	if p.threadID == "" {
 		return errors.New("starting Codex thread: response did not include a thread ID")
 	}
+	p.statusMu.Lock()
+	p.model = codexThreadModel(result)
+	p.effort = codexThreadEffort(result)
+	p.usage = &RuntimeUsage{}
+	p.statusMu.Unlock()
 	if err := os.WriteFile(statePath, []byte(p.threadID+"\n"), 0600); err != nil {
 		return fmt.Errorf("saving Codex thread ID: %w", err)
 	}
@@ -198,6 +222,26 @@ func codexThreadID(result json.RawMessage) string {
 	return response.Thread.ID
 }
 
+func codexThreadModel(result json.RawMessage) string {
+	var response struct {
+		Model string `json:"model"`
+	}
+	if json.Unmarshal(result, &response) != nil {
+		return ""
+	}
+	return response.Model
+}
+
+func codexThreadEffort(result json.RawMessage) string {
+	var response struct {
+		Effort string `json:"reasoningEffort"`
+	}
+	if json.Unmarshal(result, &response) != nil {
+		return ""
+	}
+	return response.Effort
+}
+
 func codexTurnID(result json.RawMessage) string {
 	var response struct {
 		Turn struct {
@@ -225,6 +269,7 @@ func (p *CodexProvider) RunTurn(ctx context.Context, prompt string, sink EventSi
 	p.interactionCtx = interactionCtx
 	p.interactionCancel = interactionCancel
 	p.activeMu.Unlock()
+	p.emitRuntimeStatus(sink)
 	defer func() {
 		interactionCancel()
 		p.activeMu.Lock()
@@ -343,7 +388,11 @@ func (p *CodexProvider) request(ctx context.Context, method string, params any) 
 		p.pendingMu.Unlock()
 	}()
 
-	if err := p.write(map[string]any{"id": id, "method": method, "params": params}); err != nil {
+	message := map[string]any{"id": id, "method": method}
+	if params != nil {
+		message["params"] = params
+	}
+	if err := p.write(message); err != nil {
 		return nil, err
 	}
 	select {
@@ -422,6 +471,29 @@ func (p *CodexProvider) handleNotification(method string, params json.RawMessage
 	sink := p.activeSink
 	done := p.turnDone
 	p.activeMu.Unlock()
+
+	switch method {
+	case "thread/tokenUsage/updated":
+		if usage := codexRuntimeUsage(params); usage != nil {
+			p.statusMu.Lock()
+			p.usage = usage
+			p.statusMu.Unlock()
+			if sink != nil {
+				sink.Emit(Event{Type: EventRuntimeStatus, Runtime: &RuntimeStatus{Usage: usage}})
+			}
+		}
+		return
+	case "account/rateLimits/updated":
+		if limit := codexWeeklyRateLimit(params); limit != nil {
+			p.statusMu.Lock()
+			p.weeklyLimit = limit
+			p.statusMu.Unlock()
+			if sink != nil {
+				sink.Emit(Event{Type: EventRuntimeStatus, Runtime: &RuntimeStatus{WeeklyLimit: limit}})
+			}
+		}
+		return
+	}
 	if sink == nil {
 		return
 	}
@@ -463,6 +535,95 @@ func (p *CodexProvider) handleNotification(method string, params json.RawMessage
 	case "error":
 		sink.Emit(Event{Type: EventError, Text: string(params)})
 	}
+}
+
+func (p *CodexProvider) emitRuntimeStatus(sink EventSink) {
+	status := p.runtimeStatusSnapshot()
+	if !status.empty() {
+		sink.Emit(Event{Type: EventRuntimeStatus, Runtime: &status})
+	}
+}
+
+func (p *CodexProvider) runtimeStatusSnapshot() RuntimeStatus {
+	p.statusMu.Lock()
+	defer p.statusMu.Unlock()
+	status := RuntimeStatus{}
+	status.Model = p.model
+	status.Effort = p.effort
+	if status.Effort == "" {
+		status.Effort = p.config.Effort
+	}
+	if p.usage != nil {
+		usage := *p.usage
+		status.Usage = &usage
+	}
+	if p.weeklyLimit != nil {
+		limit := *p.weeklyLimit
+		status.WeeklyLimit = &limit
+	}
+	return status
+}
+
+func codexRuntimeUsage(params json.RawMessage) *RuntimeUsage {
+	var value struct {
+		TokenUsage *struct {
+			Total struct {
+				InputTokens  int64 `json:"inputTokens"`
+				OutputTokens int64 `json:"outputTokens"`
+				TotalTokens  int64 `json:"totalTokens"`
+			} `json:"total"`
+			Last struct {
+				TotalTokens int64 `json:"totalTokens"`
+			} `json:"last"`
+			ModelContextWindow *int64 `json:"modelContextWindow"`
+		} `json:"tokenUsage"`
+	}
+	if json.Unmarshal(params, &value) != nil || value.TokenUsage == nil {
+		return nil
+	}
+	usage := &RuntimeUsage{
+		InputTokens:   value.TokenUsage.Total.InputTokens,
+		OutputTokens:  value.TokenUsage.Total.OutputTokens,
+		TotalTokens:   value.TokenUsage.Total.TotalTokens,
+		ContextTokens: value.TokenUsage.Last.TotalTokens,
+	}
+	if value.TokenUsage.ModelContextWindow != nil {
+		usage.ContextWindow = *value.TokenUsage.ModelContextWindow
+	}
+	return usage
+}
+
+func codexWeeklyRateLimit(params json.RawMessage) *RuntimeRateLimit {
+	type rateLimitWindow struct {
+		UsedPercent       int    `json:"usedPercent"`
+		WindowDurationMin *int64 `json:"windowDurationMins"`
+	}
+	var value struct {
+		RateLimits *struct {
+			Primary   *rateLimitWindow `json:"primary"`
+			Secondary *rateLimitWindow `json:"secondary"`
+		} `json:"rateLimits"`
+	}
+	if json.Unmarshal(params, &value) != nil || value.RateLimits == nil {
+		return nil
+	}
+	const (
+		sixDaysMinutes   = 6 * 24 * 60
+		eightDaysMinutes = 8 * 24 * 60
+	)
+	for _, window := range []*rateLimitWindow{value.RateLimits.Secondary, value.RateLimits.Primary} {
+		if window == nil || window.WindowDurationMin == nil {
+			continue
+		}
+		if *window.WindowDurationMin < sixDaysMinutes || *window.WindowDurationMin > eightDaysMinutes {
+			continue
+		}
+		return &RuntimeRateLimit{UsedPercent: min(100, max(0, window.UsedPercent))}
+	}
+	if value.RateLimits.Secondary != nil {
+		return &RuntimeRateLimit{UsedPercent: min(100, max(0, value.RateLimits.Secondary.UsedPercent))}
+	}
+	return nil
 }
 
 func (p *CodexProvider) emitCodexItem(method string, params json.RawMessage, sink EventSink) {

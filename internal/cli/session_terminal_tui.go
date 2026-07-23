@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -28,6 +29,7 @@ const (
 	sessionTUIComposerMaxVisibleRows = 8
 	sessionTUIComposerGap            = 1
 	sessionTUIComposerPrompt         = "> "
+	sessionTUIStatusBarHeight        = 1
 	sessionTUIQueueMaxHeight         = 8
 	sessionTUIIndent                 = 2
 	sessionTUIFrameInterval          = time.Second / 30
@@ -58,6 +60,11 @@ type sessionTUIBlock struct {
 	stream   *strings.Builder
 	rendered string
 	dirty    bool
+}
+
+type sessionTUIStatusSegment struct {
+	text     string
+	priority int
 }
 
 type sessionTUIEventResult struct {
@@ -147,6 +154,7 @@ type sessionTUIModel struct {
 	reflowGeneration   int
 	quitRequested      bool
 	quitting           bool
+	runtimeStatus      sessionruntime.RuntimeStatus
 }
 
 func runSessionTUI(ctx context.Context, input io.Reader, output io.Writer, events *json.Decoder, requests *json.Encoder, color bool) error {
@@ -468,6 +476,10 @@ func (m *sessionTUIModel) applyEvent(event sessionruntime.Event) sessionTUIComma
 			m.activeTurnID = ""
 			m.waitingForInput = false
 			m.turnInterrupting = false
+		}
+	case sessionruntime.EventRuntimeStatus:
+		if event.Runtime != nil {
+			m.runtimeStatus = *event.Runtime
 		}
 	case sessionruntime.EventHistoryEnd:
 		m.appendBlock(sessionTUIBlockNotice, "Connected. Enter sends, Ctrl+J inserts a newline, and Ctrl+C or Esc interrupts active work. Ctrl+C quits when idle. Use /answer INPUT QUESTION VALUE or /quit.")
@@ -981,7 +993,7 @@ func (m *sessionTUIModel) composerMaxHeight() int {
 	}
 	return min(
 		sessionTUIComposerMaxVisibleRows,
-		max(1, m.height-sessionTUIComposerMinHeight-sessionTUIComposerGap-progressHeight),
+		max(1, m.height-sessionTUIComposerMinHeight-sessionTUIComposerGap-progressHeight-sessionTUIStatusBarHeight),
 	)
 }
 
@@ -990,11 +1002,11 @@ func (m *sessionTUIModel) composerHeight() int {
 }
 
 func (m *sessionTUIModel) footerHeight() int {
-	return m.composerHeight() + sessionTUIComposerGap
+	return m.composerHeight() + sessionTUIComposerGap + sessionTUIStatusBarHeight
 }
 
 func (m *sessionTUIModel) footerView() string {
-	parts := make([]string, 0, 3)
+	parts := make([]string, 0, 4)
 	if progress := m.progressView(); progress != "" {
 		parts = append(parts, progress)
 	}
@@ -1002,8 +1014,166 @@ func (m *sessionTUIModel) footerView() string {
 	if queue != "" {
 		parts = append(parts, queue)
 	}
-	parts = append(parts, m.composerView())
+	parts = append(parts, m.composerView(), m.statusBarView())
 	return strings.Join(parts, "\n")
+}
+
+func (m *sessionTUIModel) statusBarView() string {
+	width := max(1, m.width)
+	padding := min(sessionTUIIndent, max(0, (width-1)/2))
+	contentWidth := max(1, width-padding*2)
+	status := sessionTUIFitStatusSegments(m.statusBarSegments(), contentWidth)
+	content := strings.Repeat(" ", padding) + m.styles.muted.Render(status)
+	content += strings.Repeat(" ", max(0, contentWidth-lipgloss.Width(status))+padding)
+	return m.styles.base.Width(width).MaxWidth(width).Render(content)
+}
+
+func (m *sessionTUIModel) statusBarSegments() []sessionTUIStatusSegment {
+	status := m.runtimeStatus
+	segments := make([]sessionTUIStatusSegment, 0, 11)
+	add := func(text string, priority int) {
+		if text != "" {
+			segments = append(segments, sessionTUIStatusSegment{text: text, priority: priority})
+		}
+	}
+
+	add(status.SessionName, 82)
+	add(status.AgentType, 65)
+	add(strings.TrimSpace(status.Model+" "+status.Effort), 100)
+	add(sessionTUIPath(status.WorkingDir, status.HomeDir), 95)
+	add(status.Branch, 90)
+	if status.PullRequestNumber > 0 {
+		add(fmt.Sprintf("PR #%d", status.PullRequestNumber), 85)
+	}
+	if status.Usage != nil {
+		if status.Usage.ContextWindow > 0 {
+			add(fmt.Sprintf("Context %d%% used", sessionTUIContextUsedPercent(*status.Usage)), 78)
+		}
+	}
+	if status.WeeklyLimit != nil {
+		remaining := 100 - min(100, max(0, status.WeeklyLimit.UsedPercent))
+		add(fmt.Sprintf("weekly %d%% left", remaining), 72)
+	}
+	if status.Usage != nil {
+		add(formatSessionTUITokens(status.Usage.InputTokens)+" in", 50)
+		add(formatSessionTUITokens(status.Usage.OutputTokens)+" out", 50)
+	}
+	if len(segments) == 0 {
+		add(m.statusBarFallback(), 100)
+	}
+	return segments
+}
+
+func (m *sessionTUIModel) statusBarFallback() string {
+	switch {
+	case !m.ready:
+		return "Connecting"
+	case m.turnActive:
+		return "Working"
+	case len(m.queuedTurnOrder) > 0:
+		return "Queued"
+	default:
+		return "Ready"
+	}
+}
+
+func sessionTUIFitStatusSegments(segments []sessionTUIStatusSegment, width int) string {
+	visible := append([]sessionTUIStatusSegment(nil), segments...)
+	render := func() string {
+		values := make([]string, 0, len(visible))
+		for _, segment := range visible {
+			values = append(values, segment.text)
+		}
+		return strings.Join(values, " · ")
+	}
+	for len(visible) > 1 && lipgloss.Width(render()) > width {
+		remove := 0
+		for index := 1; index < len(visible); index++ {
+			if visible[index].priority <= visible[remove].priority {
+				remove = index
+			}
+		}
+		visible = append(visible[:remove], visible[remove+1:]...)
+	}
+	return truncateSessionTUIStatus(render(), width)
+}
+
+func truncateSessionTUIStatus(value string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(value) <= width {
+		return value
+	}
+	if width == 1 {
+		return "…"
+	}
+	var truncated strings.Builder
+	for _, character := range value {
+		candidate := truncated.String() + string(character) + "…"
+		if lipgloss.Width(candidate) > width {
+			break
+		}
+		truncated.WriteRune(character)
+	}
+	return truncated.String() + "…"
+}
+
+func sessionTUIPath(workingDir, homeDir string) string {
+	homeDir = strings.TrimSuffix(homeDir, "/")
+	if homeDir == "" {
+		return workingDir
+	}
+	if workingDir == homeDir {
+		return "~"
+	}
+	if strings.HasPrefix(workingDir, homeDir+"/") {
+		return "~/" + strings.TrimPrefix(workingDir, homeDir+"/")
+	}
+	return workingDir
+}
+
+func sessionTUIContextUsedPercent(usage sessionruntime.RuntimeUsage) int64 {
+	const baselineTokens int64 = 12_000
+	if usage.ContextWindow <= baselineTokens {
+		return 100
+	}
+	effectiveWindow := usage.ContextWindow - baselineTokens
+	used := max(int64(0), usage.ContextTokens-baselineTokens)
+	return min(int64(100), (used*100+effectiveWindow/2)/effectiveWindow)
+}
+
+func formatSessionTUITokens(value int64) string {
+	value = max(int64(0), value)
+	if value < 1_000 {
+		return strconv.FormatInt(value, 10)
+	}
+	scaled := float64(value)
+	suffix := "K"
+	switch {
+	case value >= 1_000_000_000_000:
+		scaled /= 1_000_000_000_000
+		suffix = "T"
+	case value >= 1_000_000_000:
+		scaled /= 1_000_000_000
+		suffix = "B"
+	case value >= 1_000_000:
+		scaled /= 1_000_000
+		suffix = "M"
+	default:
+		scaled /= 1_000
+	}
+	decimals := 0
+	if scaled < 10 {
+		decimals = 2
+	} else if scaled < 100 {
+		decimals = 1
+	}
+	formatted := strconv.FormatFloat(scaled, 'f', decimals, 64)
+	if strings.Contains(formatted, ".") {
+		formatted = strings.TrimRight(strings.TrimRight(formatted, "0"), ".")
+	}
+	return formatted + suffix
 }
 
 func (m *sessionTUIModel) queueView() string {

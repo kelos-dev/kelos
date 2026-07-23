@@ -90,6 +90,11 @@ type Server struct {
 	activeMu      sync.Mutex
 	activeTurn    string
 
+	runtimeStatusMu             sync.RWMutex
+	runtimeStatus               RuntimeStatus
+	runtimeStatusSubscribers    map[int]chan RuntimeStatus
+	nextRuntimeStatusSubscriber int
+
 	inputMu                      sync.Mutex
 	pendingInputs                map[string]*pendingInput
 	nextInputID                  atomic.Int64
@@ -105,19 +110,25 @@ type Server struct {
 
 // NewServer constructs a Session server around injected provider and journal implementations.
 func NewServer(config Config, journal *Journal, provider Provider) *Server {
-	return &Server{
+	server := &Server{
 		config:                       config,
 		journal:                      journal,
 		provider:                     provider,
 		appendMessage:                journal.Append,
 		turns:                        make(chan turnRequest, 32),
 		updateReport:                 make(chan struct{}, 1),
+		runtimeStatus:                newRuntimeStatus(config),
+		runtimeStatusSubscribers:     map[int]chan RuntimeStatus{},
 		pendingInputs:                map[string]*pendingInput{},
 		workspaceStatusRefreshes:     make(chan struct{}, 1),
 		sessionStatusPublishWakeups:  make(chan struct{}, 1),
 		sessionStatusPublishInterval: defaultSessionStatusPublishInterval,
 		sessionStatusRetryInterval:   defaultSessionStatusRetryInterval,
 	}
+	if provider, ok := provider.(runtimeStatusProvider); ok {
+		server.updateProviderRuntimeStatus(provider.runtimeStatusSnapshot())
+	}
+	return server
 }
 
 // Run prepares the agent image and serves the Session until ctx is cancelled.
@@ -172,7 +183,8 @@ func Run(ctx context.Context, config Config) error {
 		})
 	}
 	server.refreshWorkspaceStatus = func(ctx context.Context) error {
-		_, err := refreshWorkspaceStatus(ctx, config.StateDir, config.WorkingDir, config.Environment)
+		status, err := refreshWorkspaceStatus(ctx, config.StateDir, config.WorkingDir, config.Environment)
+		server.updateWorkspaceRuntimeStatus(status)
 		return err
 	}
 	if config.PublishSessionStatus != nil {
@@ -682,7 +694,11 @@ func (s *Server) handleConnection(ctx context.Context, connection net.Conn) {
 		} else {
 			retained, stream, overflow, stop = s.journal.Subscribe(since)
 		}
-		subscriptionCancel = stop
+		statusStream, stopStatus := s.subscribeRuntimeStatus()
+		subscriptionCancel = func() {
+			stop()
+			stopStatus()
+		}
 		disconnect := func() {
 			cancel()
 			_ = connection.Close()
@@ -712,6 +728,11 @@ func (s *Server) handleConnection(ctx context.Context, connection net.Conn) {
 				return
 			}
 		}
+		if status := s.runtimeStatusSnapshot(); !status.empty() {
+			if !enqueue(Event{Type: EventRuntimeStatus, Runtime: &status}) {
+				return
+			}
+		}
 		if !enqueue(Event{Type: EventHistoryEnd}) {
 			return
 		}
@@ -728,12 +749,14 @@ func (s *Server) handleConnection(ctx context.Context, connection net.Conn) {
 						disconnect()
 						return
 					}
-					select {
-					case out <- event:
-					case <-overflow:
-						disconnect()
+					if !sendLiveEvent(connectionCtx, out, overflow, event, disconnect) {
 						return
-					case <-connectionCtx.Done():
+					}
+				case status, ok := <-statusStream:
+					if !ok {
+						return
+					}
+					if !sendLiveEvent(connectionCtx, out, overflow, Event{Type: EventRuntimeStatus, Runtime: &status}, disconnect) {
 						return
 					}
 				}
@@ -776,12 +799,28 @@ func (s *Server) handleConnection(ctx context.Context, connection net.Conn) {
 	}
 }
 
+func sendLiveEvent(ctx context.Context, out chan<- Event, overflow <-chan struct{}, event Event, disconnect func()) bool {
+	select {
+	case out <- event:
+		return true
+	case <-overflow:
+		disconnect()
+		return false
+	case <-ctx.Done():
+		return false
+	}
+}
+
 type turnSink struct {
 	server *Server
 	turnID string
 }
 
 func (s *turnSink) Emit(event Event) {
+	if event.Type == EventRuntimeStatus && event.Runtime != nil {
+		s.server.updateProviderRuntimeStatus(*event.Runtime)
+		return
+	}
 	if event.TurnID == "" {
 		event.TurnID = s.turnID
 	}

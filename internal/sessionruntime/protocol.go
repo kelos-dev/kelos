@@ -5,6 +5,7 @@ import "context"
 const (
 	EventHistoryStart     = "history.start"
 	EventHistoryEnd       = "history.end"
+	EventRuntimeStatus    = "runtime.status"
 	EventRequestAccepted  = "request.accepted"
 	EventRuntimeRecovered = "runtime.recovered"
 	EventUserMessage      = "user.message"
@@ -38,6 +39,35 @@ type Event struct {
 	LastEventID  int64           `json:"lastEventId,omitempty"`
 	JournalID    string          `json:"journalId,omitempty"`
 	Reset        bool            `json:"reset,omitempty"`
+	Runtime      *RuntimeStatus  `json:"runtime,omitempty"`
+}
+
+// RuntimeStatus describes the current Session and workspace for connected clients.
+type RuntimeStatus struct {
+	SessionName       string            `json:"sessionName,omitempty"`
+	AgentType         string            `json:"agentType,omitempty"`
+	Model             string            `json:"model,omitempty"`
+	Effort            string            `json:"effort,omitempty"`
+	WorkingDir        string            `json:"workingDir,omitempty"`
+	HomeDir           string            `json:"homeDir,omitempty"`
+	Branch            string            `json:"branch,omitempty"`
+	PullRequestNumber int               `json:"pullRequestNumber,omitempty"`
+	Usage             *RuntimeUsage     `json:"usage,omitempty"`
+	WeeklyLimit       *RuntimeRateLimit `json:"weeklyLimit,omitempty"`
+}
+
+// RuntimeUsage describes cumulative provider token use and the model context window.
+type RuntimeUsage struct {
+	InputTokens   int64 `json:"inputTokens"`
+	OutputTokens  int64 `json:"outputTokens"`
+	TotalTokens   int64 `json:"totalTokens"`
+	ContextTokens int64 `json:"contextTokens,omitempty"`
+	ContextWindow int64 `json:"contextWindow,omitempty"`
+}
+
+// RuntimeRateLimit describes one provider usage window.
+type RuntimeRateLimit struct {
+	UsedPercent int `json:"usedPercent"`
 }
 
 // ClientRequest is a command sent by a web or terminal client.

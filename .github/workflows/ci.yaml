@@ -71,7 +71,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Test
-        run: make test
+        run: make test TEST_FLAGS=-race
 
   test-integration:
     runs-on: ubuntu-latest
@@ -83,7 +83,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Integration Test
-        run: make test-integration
+        run: make test-integration TEST_FLAGS=-race
 
   test-e2e:
     if: >-

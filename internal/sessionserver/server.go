@@ -19,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/gorilla/websocket"
 	corev1 "k8s.io/api/core/v1"
@@ -41,10 +43,12 @@ import (
 )
 
 const (
-	authCookieName       = "kelos_session_auth"
-	sessionRuntimeClient = "/kelos/bin/kelos-session-runtime"
-	sessionApplyManager  = "kelos-session-server"
-	requestBodyLimit     = 1024 * 1024
+	authCookieName           = "kelos_session_auth"
+	sessionRuntimeClient     = "/kelos/bin/kelos-session-runtime"
+	sessionApplyManager      = "kelos-session-server"
+	sessionSectionAnnotation = "kelos.dev/session-section"
+	maxSessionSectionLength  = 64
+	requestBodyLimit         = 1024 * 1024
 )
 
 //go:embed web/*
@@ -103,6 +107,7 @@ type sessionSummary struct {
 	Message        string                    `json:"message,omitempty"`
 	Branch         string                    `json:"branch,omitempty"`
 	PullRequest    *kelos.SessionPullRequest `json:"pullRequest,omitempty"`
+	Section        string                    `json:"section,omitempty"`
 	Resetting      bool                      `json:"resetting,omitempty"`
 }
 
@@ -125,7 +130,12 @@ type createSessionRequest struct {
 	Worker              kelos.WorkerSpec                  `json:"worker"`
 	InitialBranch       string                            `json:"initialBranch,omitempty"`
 	InitialPrompt       string                            `json:"initialPrompt,omitempty"`
+	Section             string                            `json:"section,omitempty"`
 	VolumeClaimTemplate *corev1.PersistentVolumeClaimSpec `json:"volumeClaimTemplate,omitempty"`
+}
+
+type updateSessionSectionRequest struct {
+	Section string `json:"section"`
 }
 
 type sessionManifest struct {
@@ -314,6 +324,10 @@ func (s *Server) api(writer http.ResponseWriter, request *http.Request) {
 		s.resetSession(writer, request, namespace, name)
 		return
 	}
+	if len(parts) == 4 && parts[3] == "section" && request.Method == http.MethodPatch {
+		s.updateSessionSection(writer, request, namespace, name)
+		return
+	}
 	if len(parts) != 3 {
 		writeError(writer, http.StatusNotFound, "not found")
 		return
@@ -468,6 +482,11 @@ func (s *Server) createSession(writer http.ResponseWriter, request *http.Request
 		writeError(writer, http.StatusBadRequest, "name and namespace are required")
 		return
 	}
+	section, err := normalizeSessionSection(payload.Section)
+	if err != nil {
+		writeError(writer, http.StatusBadRequest, err.Error())
+		return
+	}
 	session := &kelos.Session{
 		TypeMeta: metav1.TypeMeta{APIVersion: kelos.GroupVersion.String(), Kind: "Session"},
 		ObjectMeta: metav1.ObjectMeta{
@@ -480,6 +499,9 @@ func (s *Server) createSession(writer http.ResponseWriter, request *http.Request
 			InitialPrompt:       payload.InitialPrompt,
 			VolumeClaimTemplate: payload.VolumeClaimTemplate,
 		},
+	}
+	if section != "" {
+		session.Annotations = map[string]string{sessionSectionAnnotation: section}
 	}
 	if err := s.client.Create(request.Context(), session); err != nil {
 		status := http.StatusInternalServerError
@@ -583,6 +605,67 @@ func (s *Server) resetSession(writer http.ResponseWriter, request *http.Request,
 	writeJSON(writer, http.StatusAccepted, summarize(session))
 }
 
+func (s *Server) updateSessionSection(writer http.ResponseWriter, request *http.Request, namespace, name string) {
+	var payload updateSessionSectionRequest
+	if err := decodeJSON(request.Body, &payload); err != nil {
+		writeError(writer, http.StatusBadRequest, err.Error())
+		return
+	}
+	section, err := normalizeSessionSection(payload.Section)
+	if err != nil {
+		writeError(writer, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	var session kelos.Session
+	if err := s.client.Get(request.Context(), client.ObjectKey{Namespace: namespace, Name: name}, &session); err != nil {
+		writeKubernetesError(writer, fmt.Sprintf("getting Session %q to update its section", name), err)
+		return
+	}
+	original := session.DeepCopy()
+	if section == "" {
+		delete(session.Annotations, sessionSectionAnnotation)
+	} else {
+		if session.Annotations == nil {
+			session.Annotations = map[string]string{}
+		}
+		session.Annotations[sessionSectionAnnotation] = section
+	}
+	if err := s.client.Patch(
+		request.Context(),
+		&session,
+		client.MergeFromWithOptions(original, client.MergeFromWithOptimisticLock{}),
+	); err != nil {
+		status := http.StatusInternalServerError
+		switch {
+		case apierrors.IsNotFound(err):
+			status = http.StatusNotFound
+		case apierrors.IsInvalid(err):
+			status = http.StatusBadRequest
+		case apierrors.IsForbidden(err):
+			status = http.StatusForbidden
+		case apierrors.IsConflict(err):
+			status = http.StatusConflict
+		}
+		writeError(writer, status, fmt.Sprintf("updating section for Session %q: %v", name, err))
+		return
+	}
+	writeJSON(writer, http.StatusOK, summarize(&session))
+}
+
+func normalizeSessionSection(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if utf8.RuneCountInString(value) > maxSessionSectionLength {
+		return "", fmt.Errorf("section must be at most %d characters", maxSessionSectionLength)
+	}
+	for _, character := range value {
+		if unicode.IsControl(character) {
+			return "", errors.New("section must not contain control characters")
+		}
+	}
+	return value, nil
+}
+
 func summarize(session *kelos.Session) sessionSummary {
 	summary := sessionSummary{
 		Name:           session.Name,
@@ -594,6 +677,7 @@ func summarize(session *kelos.Session) sessionSummary {
 		Message:        session.Status.Message,
 		Branch:         session.Status.Branch,
 		PullRequest:    session.Status.PullRequest,
+		Section:        session.Annotations[sessionSectionAnnotation],
 		Resetting:      session.Annotations[sessionreset.RequestAnnotation] != "",
 	}
 	if !session.CreationTimestamp.IsZero() {

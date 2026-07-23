@@ -627,6 +627,7 @@ func TestSessionAPIHappyPath(t *testing.T) {
 	payload := map[string]any{
 		"name":      "chat",
 		"namespace": "team-a",
+		"section":   "Planning",
 		"worker": map[string]any{
 			"type":        "codex",
 			"credentials": map[string]string{"type": "none"},
@@ -652,7 +653,7 @@ func TestSessionAPIHappyPath(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &sessions); err != nil {
 		t.Fatal(err)
 	}
-	if len(sessions) != 1 || sessions[0].Name != "chat" || sessions[0].Namespace != "team-a" || sessions[0].Provider != "codex" {
+	if len(sessions) != 1 || sessions[0].Name != "chat" || sessions[0].Namespace != "team-a" || sessions[0].Provider != "codex" || sessions[0].Section != "Planning" {
 		t.Fatalf("listed Sessions = %#v", sessions)
 	}
 
@@ -687,12 +688,94 @@ func TestSessionAPIHappyPath(t *testing.T) {
 	}
 }
 
+func TestSessionSectionAPI(t *testing.T) {
+	server := testServer(t)
+	session := &kelos.Session{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "chat",
+			Namespace:   "team-a",
+			Annotations: map[string]string{"owner": "platform"},
+		},
+		Spec: kelos.SessionSpec{Worker: kelos.WorkerSpec{Type: "codex"}},
+	}
+	if err := server.client.Create(t.Context(), session); err != nil {
+		t.Fatal(err)
+	}
+
+	request := httptest.NewRequest(http.MethodPatch, "/api/sessions/team-a/chat/section", strings.NewReader(`{"section":"  In progress  "}`))
+	request.Header.Set("Authorization", "Bearer secret-token")
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("set section status = %d body = %s", response.Code, response.Body.String())
+	}
+	var summary sessionSummary
+	if err := json.Unmarshal(response.Body.Bytes(), &summary); err != nil {
+		t.Fatal(err)
+	}
+	if summary.Section != "In progress" {
+		t.Fatalf("set section summary = %#v", summary)
+	}
+
+	var updated kelos.Session
+	if err := server.client.Get(t.Context(), client.ObjectKey{Namespace: "team-a", Name: "chat"}, &updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.Annotations[sessionSectionAnnotation] != "In progress" || updated.Annotations["owner"] != "platform" {
+		t.Fatalf("Session annotations after setting section = %v", updated.Annotations)
+	}
+
+	request = httptest.NewRequest(http.MethodPatch, "/api/sessions/team-a/chat/section", strings.NewReader(`{"section":""}`))
+	request.Header.Set("Authorization", "Bearer secret-token")
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("clear section status = %d body = %s", response.Code, response.Body.String())
+	}
+	if err := server.client.Get(t.Context(), client.ObjectKey{Namespace: "team-a", Name: "chat"}, &updated); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := updated.Annotations[sessionSectionAnnotation]; exists || updated.Annotations["owner"] != "platform" {
+		t.Fatalf("Session annotations after clearing section = %v", updated.Annotations)
+	}
+}
+
+func TestNormalizeSessionSection(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		value     string
+		want      string
+		wantError bool
+	}{
+		{name: "trimmed", value: "  Customer work  ", want: "Customer work"},
+		{name: "empty", value: "  ", want: ""},
+		{name: "unicode", value: strings.Repeat("界", maxSessionSectionLength), want: strings.Repeat("界", maxSessionSectionLength)},
+		{name: "too long", value: strings.Repeat("a", maxSessionSectionLength+1), wantError: true},
+		{name: "control character", value: "one\ntwo", wantError: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := normalizeSessionSection(test.value)
+			if (err != nil) != test.wantError {
+				t.Fatalf("normalizeSessionSection(%q) error = %v, wantError %t", test.value, err, test.wantError)
+			}
+			if got != test.want {
+				t.Fatalf("normalizeSessionSection(%q) = %q, want %q", test.value, got, test.want)
+			}
+		})
+	}
+}
+
 func TestSummarizeIncludesRuntimeStatus(t *testing.T) {
 	createdAt := metav1.NewTime(time.Now().Add(-time.Hour))
 	lastActivityAt := metav1.NewTime(time.Now().Add(-time.Minute))
 	session := &kelos.Session{
-		ObjectMeta: metav1.ObjectMeta{Name: "chat", Namespace: "default", CreationTimestamp: createdAt},
-		Spec:       kelos.SessionSpec{Worker: kelos.WorkerSpec{Type: "codex"}},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "chat",
+			Namespace:         "default",
+			CreationTimestamp: createdAt,
+			Annotations:       map[string]string{sessionSectionAnnotation: "Reviews"},
+		},
+		Spec: kelos.SessionSpec{Worker: kelos.WorkerSpec{Type: "codex"}},
 		Status: kelos.SessionStatus{
 			Phase:            kelos.SessionPhaseReady,
 			LastActivityTime: &lastActivityAt,
@@ -710,7 +793,7 @@ func TestSummarizeIncludesRuntimeStatus(t *testing.T) {
 	}
 
 	summary := summarize(session)
-	if summary.Active == nil || !*summary.Active || summary.Branch != session.Status.Branch || summary.PullRequest == nil || *summary.PullRequest != *session.Status.PullRequest {
+	if summary.Active == nil || !*summary.Active || summary.Branch != session.Status.Branch || summary.PullRequest == nil || *summary.PullRequest != *session.Status.PullRequest || summary.Section != "Reviews" {
 		t.Fatalf("summarize() = %#v", summary)
 	}
 	if summary.CreatedAt == nil || !summary.CreatedAt.Equal(&createdAt) {
@@ -843,6 +926,52 @@ func TestSessionViewsIncludeRuntimeStatus(t *testing.T) {
 	} {
 		if !strings.Contains(string(styles), expected) {
 			t.Errorf("Session views do not style %s pull requests", state)
+		}
+	}
+}
+
+func TestSessionUISections(t *testing.T) {
+	index, err := webFiles.ReadFile("web/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for description, expected := range map[string]string{
+		"selected Session section control": `id="session-section" type="button"`,
+		"new Session section input":        `name="section" list="session-sections" maxlength="64"`,
+		"existing section suggestions":     `id="session-sections"`,
+	} {
+		if !strings.Contains(string(index), expected) {
+			t.Errorf("Session page is missing %s: %s", description, expected)
+		}
+	}
+
+	javascript, err := webFiles.ReadFile("web/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for description, expected := range map[string]string{
+		"section grouping":        `const sessionsBySection = new Map();`,
+		"unsectioned group":       `name.textContent = section || 'Unsectioned';`,
+		"section suggestions":     `function renderSectionOptions() {`,
+		"section create payload":  `if (section) payload.section = section;`,
+		"section update endpoint": "/section`,",
+		"section PATCH request":   `{method: 'PATCH', body: JSON.stringify({section})}`,
+	} {
+		if !strings.Contains(string(javascript), expected) {
+			t.Errorf("Session behavior is missing %s: %s", description, expected)
+		}
+	}
+
+	styles, err := webFiles.ReadFile("web/styles.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for description, expected := range map[string]string{
+		"section headings": `.session-section-heading {`,
+		"section control":  `.session-section-button {`,
+	} {
+		if !strings.Contains(string(styles), expected) {
+			t.Errorf("Session styles are missing %s: %s", description, expected)
 		}
 	}
 }

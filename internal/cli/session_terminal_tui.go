@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -20,15 +21,15 @@ import (
 )
 
 const (
-	sessionTUIDefaultWidth   = 80
-	sessionTUIDefaultHeight  = 24
-	sessionTUIComposerHeight = 3
-	sessionTUIComposerGap    = 1
-	sessionTUIFooterHeight   = sessionTUIComposerHeight + sessionTUIComposerGap
-	sessionTUIQueueMaxHeight = 8
-	sessionTUIIndent         = 2
-	sessionTUIFrameInterval  = time.Second / 30
-	sessionTUIReflowDelay    = 75 * time.Millisecond
+	sessionTUIDefaultWidth           = 80
+	sessionTUIDefaultHeight          = 24
+	sessionTUIComposerMinHeight      = 3
+	sessionTUIComposerMaxVisibleRows = 8
+	sessionTUIComposerGap            = 1
+	sessionTUIQueueMaxHeight         = 8
+	sessionTUIIndent                 = 2
+	sessionTUIFrameInterval          = time.Second / 30
+	sessionTUIReflowDelay            = 75 * time.Millisecond
 )
 
 // sessionTUIClearHistory resets the scroll region, screen, and scrollback before history is replayed.
@@ -114,6 +115,7 @@ type sessionTUIModel struct {
 	width              int
 	height             int
 	ready              bool
+	turnActive         bool
 	streamingAt        int
 	history            []string
 	historyAt          int
@@ -181,10 +183,11 @@ func newSessionTUIModel(events *json.Decoder, requests *json.Encoder, output io.
 	input.Placeholder = ""
 	input.ShowLineNumbers = false
 	input.EndOfBufferCharacter = ' '
-	input.MaxHeight = 1
+	input.MaxHeight = 0
 	input.MaxWidth = 0
 	input.SetHeight(1)
 	input.SetWidth(sessionTUIDefaultWidth)
+	input.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("ctrl+j"))
 	input.FocusedStyle = sessionTUITextAreaStyle(styles.user)
 	input.BlurredStyle = sessionTUITextAreaStyle(styles.user)
 
@@ -317,6 +320,9 @@ func (m *sessionTUIModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch message.Type {
 		case tea.KeyCtrlC:
+			if m.turnActive {
+				return m, m.interruptTurn()
+			}
 			return m, m.quit()
 		case tea.KeyEnter:
 			if m.ready {
@@ -341,6 +347,7 @@ func (m *sessionTUIModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(message)
+	m.resizeComposer()
 	return m, cmd
 }
 
@@ -383,6 +390,15 @@ func (m *sessionTUIModel) submitInput() tea.Cmd {
 	m.historyAt = -1
 	m.draft = ""
 	m.input.Reset()
+	m.resizeComposer()
+	return nil
+}
+
+func (m *sessionTUIModel) interruptTurn() tea.Cmd {
+	if err := m.requests.Encode(sessionruntime.ClientRequest{Type: "interrupt"}); err != nil {
+		m.err = err
+		return m.quit()
+	}
 	return nil
 }
 
@@ -398,6 +414,7 @@ func (m *sessionTUIModel) previousInput() {
 	}
 	m.input.SetValue(m.history[m.historyAt])
 	m.input.CursorEnd()
+	m.resizeComposer()
 }
 
 func (m *sessionTUIModel) nextInput() {
@@ -412,13 +429,18 @@ func (m *sessionTUIModel) nextInput() {
 		m.input.SetValue(m.draft)
 	}
 	m.input.CursorEnd()
+	m.resizeComposer()
 }
 
 func (m *sessionTUIModel) applyEvent(event sessionruntime.Event) sessionTUICommands {
 	var commands sessionTUICommands
 	switch event.Type {
+	case sessionruntime.EventHistoryStart:
+		if event.Reset {
+			m.turnActive = false
+		}
 	case sessionruntime.EventHistoryEnd:
-		m.appendBlock(sessionTUIBlockNotice, "Connected. Type a message, /interrupt, /answer INPUT QUESTION VALUE, or /quit.")
+		m.appendBlock(sessionTUIBlockNotice, "Connected. Enter sends, Ctrl+J inserts a newline, and Ctrl+C interrupts active work or quits when idle. Use /answer INPUT QUESTION VALUE or /quit.")
 		m.ready = true
 		commands.ui = m.input.Focus()
 	case sessionruntime.EventRuntimeRecovered:
@@ -433,6 +455,7 @@ func (m *sessionTUIModel) applyEvent(event sessionruntime.Event) sessionTUIComma
 			m.appendQueuedUser(event.TurnID, event.Text)
 		}
 	case sessionruntime.EventTurnStarted:
+		m.turnActive = true
 		m.acceptQueuedTurn(event.TurnID)
 	case sessionruntime.EventAssistantDelta:
 		m.appendAssistantDelta(event.Text)
@@ -459,6 +482,7 @@ func (m *sessionTUIModel) applyEvent(event sessionruntime.Event) sessionTUIComma
 		m.finishStreaming()
 		m.appendBlock(sessionTUIBlockDiff, event.Diff)
 	case sessionruntime.EventTurnCompleted:
+		m.turnActive = false
 		m.acceptQueuedTurn(event.TurnID)
 		m.finishStreaming()
 		if event.Status == "interrupted" {
@@ -562,6 +586,7 @@ func (m *sessionTUIModel) resize(width, height int) tea.Cmd {
 	m.width = width
 	m.height = height
 	m.input.SetWidth(width)
+	m.resizeComposer()
 	m.invalidateTranscript()
 	if m.ready {
 		m.refreshActiveView()
@@ -839,6 +864,22 @@ func (m *sessionTUIModel) composerView() string {
 	return blank + "\n" + middle + "\n" + blank
 }
 
+func (m *sessionTUIModel) resizeComposer() {
+	maxHeight := min(
+		sessionTUIComposerMaxVisibleRows,
+		max(1, m.height-sessionTUIComposerMinHeight-sessionTUIComposerGap),
+	)
+	m.input.SetHeight(min(m.input.LineCount(), maxHeight))
+}
+
+func (m *sessionTUIModel) composerHeight() int {
+	return m.input.Height() + sessionTUIComposerMinHeight - 1
+}
+
+func (m *sessionTUIModel) footerHeight() int {
+	return m.composerHeight() + sessionTUIComposerGap
+}
+
 func (m *sessionTUIModel) footerView() string {
 	queue := m.queueView()
 	if queue == "" {
@@ -853,7 +894,7 @@ func (m *sessionTUIModel) queueView() string {
 		blocks = append(blocks, m.renderQueuedUserBlock(m.queuedTurns[turnID]))
 	}
 	lines := strings.Split(strings.Join(blocks, "\n"), "\n")
-	maxHeight := min(sessionTUIQueueMaxHeight, max(0, m.height-sessionTUIFooterHeight))
+	maxHeight := min(sessionTUIQueueMaxHeight, max(0, m.height-m.footerHeight()))
 	if len(lines) > maxHeight {
 		lines = lines[:maxHeight]
 	}

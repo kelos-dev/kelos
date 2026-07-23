@@ -376,6 +376,7 @@ func connectSessionWithDependencies(
 	}()
 
 	var lastEventID int64
+	var journalID string
 	connectedBefore := false
 	pendingRequests := make([]pendingSessionRequest, 0)
 	for {
@@ -399,7 +400,12 @@ func connectSessionWithDependencies(
 		}
 		announceReconnect := connectedBefore
 		encoder := json.NewEncoder(stream.requests)
-		if err := encoder.Encode(sessionruntime.ClientRequest{Type: "subscribe", Since: lastEventID}); err != nil {
+		if err := encoder.Encode(sessionruntime.ClientRequest{
+			Type:          "subscribe",
+			Since:         lastEventID,
+			JournalID:     journalID,
+			HistoryBounds: true,
+		}); err != nil {
 			stream.Close()
 			if diagnosticWriter != nil {
 				_ = diagnosticWriter.Flush()
@@ -474,6 +480,12 @@ func connectSessionWithDependencies(
 				event := result.event
 				if event.RequestID != "" {
 					pendingRequests = removePendingSessionRequest(pendingRequests, event.RequestID)
+				}
+				if event.Type == sessionruntime.EventHistoryStart {
+					journalID = event.JournalID
+					if event.Reset {
+						lastEventID = 0
+					}
 				}
 				if event.Type == sessionruntime.EventHistoryEnd {
 					if announceReconnect {

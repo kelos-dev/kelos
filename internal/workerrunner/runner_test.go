@@ -186,6 +186,40 @@ func TestTaskAgentEnvIncludesPerTaskModelAndEffort(t *testing.T) {
 	}
 }
 
+// A worker pod is long-lived and serves many Tasks, so its pod-level env cannot
+// carry the current Task's identity, and a pooled Task cannot use
+// podOverrides.env to supply it (the CRD forbids podOverrides with
+// workerPoolRef). Without this the agent has no way to know which Task it is
+// running.
+func TestTaskAgentEnvIncludesTaskName(t *testing.T) {
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "task-abc123"},
+		Spec:       kelos.TaskSpec{Prompt: "Fix the bug"},
+	}
+
+	env := taskAgentEnv([]string{"OTHER=value"}, task)
+
+	if got := lastEnvValue(env, "KELOS_TASK_NAME"); got != "task-abc123" {
+		t.Errorf("KELOS_TASK_NAME = %q, want task name", got)
+	}
+}
+
+// Each Task must see its own name, not a value left over from the previous Task
+// this worker ran. taskAgentEnv is always called with the pod's pristine
+// os.Environ(), but appending last also makes it win over any inherited value.
+func TestTaskAgentEnvTaskNameOverridesInheritedValue(t *testing.T) {
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "task-second"},
+		Spec:       kelos.TaskSpec{Prompt: "Fix the bug"},
+	}
+
+	env := taskAgentEnv([]string{"KELOS_TASK_NAME=task-first"}, task)
+
+	if got := lastEnvValue(env, "KELOS_TASK_NAME"); got != "task-second" {
+		t.Errorf("KELOS_TASK_NAME = %q, want the current task name", got)
+	}
+}
+
 func TestTaskAgentEnvRefreshesGitHubTokenFromFile(t *testing.T) {
 	tokenFile := filepath.Join(t.TempDir(), "token")
 	if err := os.WriteFile(tokenFile, []byte("ghs_fresh_token\n"), 0o600); err != nil {

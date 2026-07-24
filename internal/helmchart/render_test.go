@@ -717,6 +717,11 @@ func TestRender_PodMonitorEnabled(t *testing.T) {
 	if !strings.Contains(spec, "app.kubernetes.io/name: kelos") {
 		t.Errorf("expected control-plane selector on app.kubernetes.io/name: kelos, got:\n%s", spec)
 	}
+	// session-server shares the name label but is not a metrics endpoint, so
+	// the selector must exclude it explicitly rather than rely on the port name.
+	if !strings.Contains(spec, "session-server") || !strings.Contains(spec, "NotIn") {
+		t.Errorf("expected control-plane selector to exclude session-server via NotIn, got:\n%s", spec)
+	}
 	if !strings.Contains(spec, "port: metrics") {
 		t.Errorf("expected metrics port endpoint, got:\n%s", spec)
 	}

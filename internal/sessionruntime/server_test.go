@@ -1223,6 +1223,9 @@ func TestClaudeEventMapping(t *testing.T) {
 		}
 	}
 	assertEventTypes(t, sink.events, EventAssistantDelta, EventToolStarted, EventToolCompleted)
+	if got := sink.events[2].Output; got != "ok" {
+		t.Fatalf("Claude tool output = %q, want ok", got)
+	}
 }
 
 func TestClaudeResultCompletion(t *testing.T) {
@@ -1403,10 +1406,14 @@ func TestCodexEventMapping(t *testing.T) {
 	provider := &CodexProvider{activeSink: sink, turnDone: done}
 	provider.handleNotification("item/agentMessage/delta", json.RawMessage(`{"delta":"hello"}`))
 	provider.handleNotification("item/started", json.RawMessage(`{"item":{"type":"commandExecution","id":"tool-1","command":"make test"}}`))
+	provider.handleNotification("item/commandExecution/outputDelta", json.RawMessage(`{"itemId":"tool-1","delta":"ok\n"}`))
 	provider.handleNotification("item/completed", json.RawMessage(`{"item":{"type":"commandExecution","id":"tool-1","command":"make test","status":"completed"}}`))
 	provider.handleNotification("turn/diff/updated", json.RawMessage(`{"diff":"+updated"}`))
 	provider.handleNotification("turn/completed", json.RawMessage(`{"turn":{"status":"completed"}}`))
 	assertEventTypes(t, sink.events, EventAssistantDelta, EventToolStarted, EventToolCompleted, EventFileDiff)
+	if got := sink.events[2].Output; got != "ok\n" {
+		t.Fatalf("Codex tool output = %q, want %q", got, "ok\n")
+	}
 	select {
 	case result := <-done:
 		if result.status != "completed" || result.error != "" {
@@ -1512,6 +1519,45 @@ func TestCodexRequestOmitsNilParams(t *testing.T) {
 	pending <- codexResponse{Result: json.RawMessage(`{}`)}
 	if err := <-requestDone; err != nil {
 		t.Fatalf("Codex request error = %v", err)
+	}
+}
+
+func TestCodexToolResultOutputMapping(t *testing.T) {
+	tests := []struct {
+		name   string
+		params string
+		want   string
+	}{
+		{
+			name:   "dynamic tool text",
+			params: `{"item":{"type":"dynamicToolCall","id":"tool-1","tool":"exec","status":"completed","contentItems":[{"type":"inputText","text":"command output"}]}}`,
+			want:   "command output",
+		},
+		{
+			name:   "MCP text",
+			params: `{"item":{"type":"mcpToolCall","id":"tool-1","server":"github","tool":"search","status":"completed","result":{"content":[{"type":"text","text":"search result"}]}}}`,
+			want:   "search result",
+		},
+		{
+			name:   "tool error",
+			params: `{"item":{"type":"mcpToolCall","id":"tool-1","server":"github","tool":"search","status":"failed","error":{"message":"search failed"}}}`,
+			want:   "search failed",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			sink := &collectingSink{}
+			provider := &CodexProvider{}
+
+			provider.emitCodexItem("item/completed", json.RawMessage(test.params), sink)
+
+			if len(sink.events) != 1 {
+				t.Fatalf("Codex tool events = %#v, want one completion", sink.events)
+			}
+			if got := sink.events[0].Output; got != test.want {
+				t.Fatalf("Codex tool output = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 

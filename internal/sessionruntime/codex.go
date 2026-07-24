@@ -30,6 +30,19 @@ type codexTurnResult struct {
 	error  string
 }
 
+type codexToolResult struct {
+	Content []json.RawMessage `json:"content"`
+}
+
+type codexToolContentItem struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+type codexToolError struct {
+	Message string `json:"message"`
+}
+
 type codexRequestError struct {
 	method  string
 	code    int
@@ -52,6 +65,9 @@ type CodexProvider struct {
 	nextID    atomic.Int64
 	pendingMu sync.Mutex
 	pending   map[string]chan codexResponse
+
+	outputMu       sync.Mutex
+	commandOutputs map[string]*boundedToolOutput
 
 	activeMu          sync.Mutex
 	activeSink        EventSink
@@ -506,6 +522,14 @@ func (p *CodexProvider) handleNotification(method string, params json.RawMessage
 		if json.Unmarshal(params, &value) == nil && value.Delta != "" {
 			sink.Emit(Event{Type: EventAssistantDelta, Text: value.Delta})
 		}
+	case "item/commandExecution/outputDelta":
+		var value struct {
+			ItemID string `json:"itemId"`
+			Delta  string `json:"delta"`
+		}
+		if json.Unmarshal(params, &value) == nil && value.ItemID != "" && value.Delta != "" {
+			p.appendCodexCommandOutput(value.ItemID, value.Delta)
+		}
 	case "item/started", "item/completed":
 		p.emitCodexItem(method, params, sink)
 	case "turn/diff/updated":
@@ -532,6 +556,7 @@ func (p *CodexProvider) handleNotification(method string, params json.RawMessage
 			default:
 			}
 		}
+		p.clearCodexCommandOutputs()
 	case "error":
 		sink.Emit(Event{Type: EventError, Text: string(params)})
 	}
@@ -629,14 +654,18 @@ func codexWeeklyRateLimit(params json.RawMessage) *RuntimeRateLimit {
 func (p *CodexProvider) emitCodexItem(method string, params json.RawMessage, sink EventSink) {
 	var value struct {
 		Item struct {
-			Type    string `json:"type"`
-			ID      string `json:"id"`
-			Text    string `json:"text"`
-			Command string `json:"command"`
-			Tool    string `json:"tool"`
-			Server  string `json:"server"`
-			Query   string `json:"query"`
-			Status  string `json:"status"`
+			Type         string                 `json:"type"`
+			ID           string                 `json:"id"`
+			Text         string                 `json:"text"`
+			Command      string                 `json:"command"`
+			Tool         string                 `json:"tool"`
+			Server       string                 `json:"server"`
+			Query        string                 `json:"query"`
+			Status       string                 `json:"status"`
+			Output       string                 `json:"aggregatedOutput"`
+			Result       *codexToolResult       `json:"result"`
+			ContentItems []codexToolContentItem `json:"contentItems"`
+			Error        *codexToolError        `json:"error"`
 		} `json:"item"`
 	}
 	if json.Unmarshal(params, &value) != nil {
@@ -646,6 +675,9 @@ func (p *CodexProvider) emitCodexItem(method string, params json.RawMessage, sin
 	if item.Type == "agentMessage" && method == "item/completed" {
 		sink.Emit(Event{Type: EventAssistantMessage, Text: item.Text})
 		return
+	}
+	if item.Type == "commandExecution" && method == "item/started" {
+		p.takeCodexCommandOutput(item.ID)
 	}
 
 	name := item.Type
@@ -672,7 +704,95 @@ func (p *CodexProvider) emitCodexItem(method string, params json.RawMessage, sin
 			status = "completed"
 		}
 	}
-	sink.Emit(Event{Type: eventType, ToolID: item.ID, ToolName: name, Status: status})
+	output := ""
+	if method == "item/completed" {
+		output = codexToolOutput(item.Type, item.Output, item.Result, item.ContentItems, item.Error)
+		if item.Type == "commandExecution" {
+			streamed := p.takeCodexCommandOutput(item.ID)
+			if output == "" {
+				output = streamed
+			}
+		}
+	}
+	sink.Emit(Event{Type: eventType, ToolID: item.ID, ToolName: name, Output: output, Status: status})
+}
+
+func (p *CodexProvider) appendCodexCommandOutput(itemID, delta string) {
+	p.outputMu.Lock()
+	defer p.outputMu.Unlock()
+	if p.commandOutputs == nil {
+		p.commandOutputs = make(map[string]*boundedToolOutput)
+	}
+	output := p.commandOutputs[itemID]
+	if output == nil {
+		output = newBoundedToolOutput(maxToolOutputBytes)
+		p.commandOutputs[itemID] = output
+	}
+	output.WriteString(delta)
+}
+
+func (p *CodexProvider) takeCodexCommandOutput(itemID string) string {
+	p.outputMu.Lock()
+	defer p.outputMu.Unlock()
+	output := p.commandOutputs[itemID]
+	delete(p.commandOutputs, itemID)
+	if output == nil {
+		return ""
+	}
+	return output.String()
+}
+
+func (p *CodexProvider) clearCodexCommandOutputs() {
+	p.outputMu.Lock()
+	defer p.outputMu.Unlock()
+	p.commandOutputs = nil
+}
+
+func codexToolOutput(
+	itemType, aggregatedOutput string,
+	result *codexToolResult,
+	contentItems []codexToolContentItem,
+	toolError *codexToolError,
+) string {
+	if aggregatedOutput != "" {
+		return truncateToolOutput(aggregatedOutput)
+	}
+	output := newBoundedToolOutput(maxToolOutputBytes)
+	wroteOutput := false
+	appendOutput := func(text string) {
+		if text == "" {
+			return
+		}
+		if wroteOutput {
+			output.WriteString("\n")
+		}
+		output.WriteString(text)
+		wroteOutput = true
+	}
+	switch itemType {
+	case "mcpToolCall":
+		if result != nil {
+			for _, raw := range result.Content {
+				var content struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				}
+				if json.Unmarshal(raw, &content) == nil && content.Type == "text" {
+					appendOutput(content.Text)
+				}
+			}
+		}
+	case "dynamicToolCall":
+		for _, content := range contentItems {
+			if content.Type == "inputText" {
+				appendOutput(content.Text)
+			}
+		}
+	}
+	if !wroteOutput && toolError != nil {
+		appendOutput(toolError.Message)
+	}
+	return output.String()
 }
 
 func (p *CodexProvider) handleServerRequest(id json.RawMessage, method string, params json.RawMessage) {

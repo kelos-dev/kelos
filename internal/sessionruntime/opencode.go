@@ -59,6 +59,8 @@ type openCodePart struct {
 	Tool      string `json:"tool"`
 	State     struct {
 		Status string `json:"status"`
+		Output string `json:"output"`
+		Error  string `json:"error"`
 	} `json:"state"`
 }
 
@@ -605,7 +607,12 @@ func (p *OpenCodeProvider) openCodeToolEventsLocked(part openCodePart) []Event {
 		if status == "error" {
 			result = "failed"
 		}
-		events = append(events, Event{Type: EventToolCompleted, ToolID: part.ID, ToolName: name, Status: result})
+		output := part.State.Output
+		if output == "" {
+			output = part.State.Error
+		}
+		output = truncateToolOutput(output)
+		events = append(events, Event{Type: EventToolCompleted, ToolID: part.ID, ToolName: name, Output: output, Status: result})
 	}
 	p.toolStates[part.ID] = status
 	return events

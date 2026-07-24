@@ -2057,19 +2057,69 @@ function renderTool(event) {
   const card = document.createElement('div');
   card.className = 'tool-card';
   card.dataset.status = event.status || 'running';
+  const header = document.createElement('div');
+  header.className = 'tool-card-header';
   const icon = document.createElement('span');
   icon.className = 'tool-icon';
-  icon.textContent = '◇';
+  icon.textContent = event.status === 'failed' ? '!' : event.status && event.status !== 'running' ? '✓' : '◇';
   const name = document.createElement('span');
   name.className = 'tool-name';
   name.textContent = event.toolName || 'Tool';
   const status = document.createElement('span');
   status.className = 'tool-status';
   status.textContent = event.status || 'running';
-  card.append(icon, name, status);
+  header.append(icon, name, status);
+  card.append(header);
+  renderToolOutput(card, event.output);
   elements.messages.append(card);
   if (event.toolId) state.tools.set(event.toolId, card);
   scrollToBottom();
+}
+
+function toolOutputPreview(output, maxLines = 5) {
+  const text = String(output || '').replace(/\r\n?/g, '\n').replace(/\n+$/, '');
+  if (!text) return {text: '', fullText: '', totalLines: 0, omittedLines: 0};
+  const lines = text.split('\n');
+  if (lines.length <= maxLines) {
+    return {text, fullText: text, totalLines: lines.length, omittedLines: 0};
+  }
+  const head = Math.floor((maxLines - 1) / 2);
+  const tail = maxLines - 1 - head;
+  const omittedLines = lines.length - head - tail;
+  const preview = [
+    ...lines.slice(0, head),
+    `… +${omittedLines} lines`,
+    ...lines.slice(lines.length - tail),
+  ];
+  return {text: preview.join('\n'), fullText: text, totalLines: lines.length, omittedLines};
+}
+
+function renderToolOutput(card, output) {
+  const preview = toolOutputPreview(output);
+  if (!preview.text) return;
+  let container = card.querySelector('.tool-output');
+  if (!container) {
+    container = document.createElement('div');
+    container.className = 'tool-output';
+    card.append(container);
+  }
+  container.replaceChildren();
+  if (preview.omittedLines) {
+    const details = document.createElement('details');
+    details.className = 'tool-output-details';
+    const summary = document.createElement('summary');
+    summary.className = 'tool-output-summary';
+    summary.textContent = `Show all ${preview.totalLines} lines`;
+    const full = document.createElement('pre');
+    full.className = 'tool-output-full';
+    full.textContent = preview.fullText;
+    details.append(summary, full);
+    container.append(details);
+  }
+  const visible = document.createElement('pre');
+  visible.className = 'tool-output-preview';
+  visible.textContent = preview.text;
+  container.append(visible);
 }
 
 function completeTool(event) {
@@ -2081,6 +2131,7 @@ function completeTool(event) {
   card.dataset.status = event.status || 'completed';
   card.querySelector('.tool-status').textContent = event.status || 'completed';
   card.querySelector('.tool-icon').textContent = event.status === 'failed' ? '!' : '✓';
+  renderToolOutput(card, event.output);
 }
 
 function renderInputRequest(event) {

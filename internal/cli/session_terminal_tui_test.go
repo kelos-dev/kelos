@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -223,6 +224,119 @@ func TestSessionTUIAddsBlankRowAfterUserBlock(t *testing.T) {
 	}
 	if lines[3] != "" {
 		t.Fatalf("row after user block = %q, want an unstyled blank row", lines[3])
+	}
+}
+
+func TestSessionTUIAssistantBlockUsesCodexStyleBullet(t *testing.T) {
+	model, _ := newSessionTUITestModel()
+	model.Update(tea.WindowSizeMsg{Width: 12, Height: 8})
+
+	rendered := stripSessionTUIANSI(model.renderBlock(sessionTUIBlock{
+		kind: sessionTUIBlockAssistant,
+		text: "first line\nsecond",
+	}))
+	lines := strings.Split(rendered, "\n")
+	for index := range lines {
+		lines[index] = strings.TrimRight(lines[index], " ")
+	}
+	if want := "• first line\n  second"; strings.Join(lines, "\n") != want {
+		t.Fatalf("assistant block = %q, want %q", rendered, want)
+	}
+}
+
+func TestSessionTUIStreamingAssistantBlockUsesCodexStyleBullet(t *testing.T) {
+	model, _ := newSessionTUITestModel()
+	model.ready = true
+	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventAssistantDelta, Text: "working"})
+	model.Update(sessionTUIRefreshMsg{})
+
+	if view := stripSessionTUIANSI(model.View()); !strings.Contains(view, "• working") {
+		t.Fatalf("streaming assistant view = %q, want bullet prefix", view)
+	}
+}
+
+func TestSessionTUIToolBlockShowsCodexStyleOutputPreview(t *testing.T) {
+	model, _ := newSessionTUITestModel()
+	model.Update(tea.WindowSizeMsg{Width: 24, Height: 12})
+	model.applyEvent(sessionruntime.Event{
+		Type:     sessionruntime.EventToolStarted,
+		ToolID:   "tool-1",
+		ToolName: "make test",
+	})
+	model.applyEvent(sessionruntime.Event{
+		Type:   sessionruntime.EventToolCompleted,
+		ToolID: "tool-1",
+		Output: "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8",
+		Status: "completed",
+	})
+
+	lines := strings.Split(stripSessionTUIANSI(model.renderTranscript()), "\n")
+	for index := range lines {
+		lines[index] = strings.TrimRight(lines[index], " ")
+	}
+	want := []string{
+		"• Ran make test",
+		"  └ line 1",
+		"    line 2",
+		"    … +4 lines",
+		"    line 7",
+		"    line 8",
+	}
+	if !reflect.DeepEqual(lines, want) {
+		t.Fatalf("tool block = %#v, want %#v", lines, want)
+	}
+}
+
+func TestSessionTUIToolOutputStripsTerminalControlSequences(t *testing.T) {
+	model, _ := newSessionTUITestModel()
+	model.applyEvent(sessionruntime.Event{
+		Type:     sessionruntime.EventToolStarted,
+		ToolID:   "tool-1",
+		ToolName: "command",
+	})
+	model.applyEvent(sessionruntime.Event{
+		Type:   sessionruntime.EventToolCompleted,
+		ToolID: "tool-1",
+		Output: "safe\x1b]52;c;Y2xpcGJvYXJk\x07\n\x1b[2Jspoof\rrewritten\x00",
+		Status: "completed",
+	})
+
+	rendered := model.renderTranscript()
+	for _, unsafe := range []string{"\x1b", "\x07", "\r", "\x00", "Y2xpcGJvYXJk"} {
+		if strings.Contains(rendered, unsafe) {
+			t.Fatalf("tool output contains unsafe terminal content %q: %q", unsafe, rendered)
+		}
+	}
+	for _, want := range []string{"safe", "spoofrewritten"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("tool output = %q, want %q", rendered, want)
+		}
+	}
+}
+
+func TestSessionTUIAttributesParallelToolCompletion(t *testing.T) {
+	model, _ := newSessionTUITestModel()
+	model.Update(tea.WindowSizeMsg{Width: 40, Height: 12})
+	model.applyEvent(sessionruntime.Event{
+		Type:     sessionruntime.EventToolStarted,
+		ToolID:   "tool-a",
+		ToolName: "command A",
+	})
+	model.applyEvent(sessionruntime.Event{
+		Type:     sessionruntime.EventToolStarted,
+		ToolID:   "tool-b",
+		ToolName: "command B",
+	})
+	model.applyEvent(sessionruntime.Event{
+		Type:   sessionruntime.EventToolCompleted,
+		ToolID: "tool-a",
+		Output: "A output",
+		Status: "completed",
+	})
+
+	rendered := stripSessionTUIANSI(model.renderTranscript())
+	if !strings.Contains(rendered, "  └ command A: A output") {
+		t.Fatalf("parallel tool transcript = %q, want completion attributed to command A", rendered)
 	}
 }
 

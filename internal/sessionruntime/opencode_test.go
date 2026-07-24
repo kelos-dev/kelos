@@ -56,7 +56,7 @@ func TestOpenCodeProviderStreamsOrderedEvents(t *testing.T) {
 	fake.emit("message.part.updated", map[string]any{"part": map[string]any{"id": "reasoning-1", "messageID": "message-1", "sessionID": fake.sessionID, "type": "reasoning"}})
 	fake.emit("message.part.delta", map[string]any{"sessionID": fake.sessionID, "messageID": "message-1", "partID": "reasoning-1", "field": "text", "delta": "private reasoning"})
 	fake.emit("message.part.updated", map[string]any{"part": map[string]any{"id": "tool-1", "messageID": "message-1", "sessionID": fake.sessionID, "type": "tool", "tool": "bash", "state": map[string]string{"status": "running"}}})
-	fake.emit("message.part.updated", map[string]any{"part": map[string]any{"id": "tool-1", "messageID": "message-1", "sessionID": fake.sessionID, "type": "tool", "tool": "bash", "state": map[string]string{"status": "completed"}}})
+	fake.emit("message.part.updated", map[string]any{"part": map[string]any{"id": "tool-1", "messageID": "message-1", "sessionID": fake.sessionID, "type": "tool", "tool": "bash", "state": map[string]string{"status": "completed", "output": "ok\n"}}})
 	fake.emit("message.part.delta", map[string]any{"sessionID": fake.sessionID, "messageID": "message-1", "partID": "text-1", "field": "text", "delta": " world"})
 	fake.emit("message.part.updated", map[string]any{"part": map[string]any{"id": "text-1", "messageID": "message-1", "sessionID": fake.sessionID, "type": "text", "text": "hello world"}})
 	fake.emit("session.idle", map[string]string{"sessionID": fake.sessionID})
@@ -75,7 +75,7 @@ func TestOpenCodeProviderStreamsOrderedEvents(t *testing.T) {
 	want := []Event{
 		{Type: EventAssistantDelta, Text: "hello"},
 		{Type: EventToolStarted, ToolID: "tool-1", ToolName: "bash", Status: "running"},
-		{Type: EventToolCompleted, ToolID: "tool-1", ToolName: "bash", Status: "completed"},
+		{Type: EventToolCompleted, ToolID: "tool-1", ToolName: "bash", Output: "ok\n", Status: "completed"},
 		{Type: EventAssistantDelta, Text: " world"},
 	}
 	if got := sink.snapshot(); !reflect.DeepEqual(got, want) {

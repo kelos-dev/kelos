@@ -160,11 +160,17 @@ button { color: inherit; }
 .assistant .message-bubble { max-width: calc(100% - 45px); padding: 2px 2px 3px; border-radius: 0; background: transparent; }
 .assistant .message-bubble:empty::after { content: "Thinking…"; color: var(--faint); animation: pulse 1.1s infinite; }
 .tool-card, .input-card, .diff-card, .error-card, .recovery-card { margin: -7px 0 19px 40px; border: 1px solid var(--line); border-radius: 13px; background: var(--card); box-shadow: 0 4px 14px rgba(31,46,38,.035); }
-.tool-card { display: flex; align-items: center; gap: 10px; padding: 10px 13px; color: var(--muted); font-size: 12px; }
+.tool-card { padding: 10px 13px; color: var(--muted); font-size: 12px; }
+.tool-card-header { display: flex; align-items: center; gap: 10px; }
 .tool-icon { width: 25px; height: 25px; display: grid; place-items: center; border-radius: 8px; background: var(--panel); font-size: 12px; }
 .tool-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-family: ui-monospace,SFMono-Regular,Menlo,monospace; font-size: 11.5px; }
 .tool-status { color: var(--faint); font-size: 10px; text-transform: capitalize; }
 .tool-card[data-status="running"] .tool-icon { animation: pulse 1.1s infinite; }
+.tool-output { margin: 9px 0 1px 35px; padding-top: 9px; border-top: 1px solid var(--line); }
+.tool-output pre { max-height: 260px; margin: 0; overflow: auto; color: var(--muted); font: 10.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace; white-space: pre; }
+.tool-output-summary { margin-bottom: 7px; color: var(--accent-2); font-size: 10px; font-weight: 700; cursor: pointer; }
+.tool-output-details[open] + .tool-output-preview { display: none; }
+.tool-output-details:not([open]) .tool-output-full { display: none; }
 .input-card { padding: 15px; border-color: rgba(51,114,87,.3); }
 .input-card fieldset { margin: 13px 0 0; padding: 0; border: 0; }
 .input-card legend, .input-eyebrow { color: var(--accent-2); font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }

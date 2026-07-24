@@ -41,6 +41,53 @@ func TestBuildTask_ForwardsEffort(t *testing.T) {
 	}
 }
 
+func TestBuildTask_RendersFiles(t *testing.T) {
+	tb := &TaskBuilder{}
+	template := &kelos.TaskTemplate{
+		Type: "codex",
+		Credentials: &kelos.Credentials{
+			Type:      kelos.CredentialTypeAPIKey,
+			SecretRef: &kelos.SecretReference{Name: "credentials"},
+		},
+		PromptTemplate: "Review:{{range .Files}} {{.}}{{end}}",
+	}
+
+	task, err := tb.BuildTask("task-1", "default", template, map[string]interface{}{
+		"Title": "the bug",
+		"Files": []string{"main.go", "docs/guide.md"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("BuildTask() returned error: %v", err)
+	}
+	if want := "Review: main.go docs/guide.md"; task.Spec.Prompt != want {
+		t.Fatalf("task.Spec.Prompt = %q, want %q", task.Spec.Prompt, want)
+	}
+}
+
+func TestBuildTask_RendersEmptyFiles(t *testing.T) {
+	tb := &TaskBuilder{}
+	template := &kelos.TaskTemplate{
+		Type: "codex",
+		Credentials: &kelos.Credentials{
+			Type:      kelos.CredentialTypeAPIKey,
+			SecretRef: &kelos.SecretReference{Name: "credentials"},
+		},
+		// Referencing {{.Files}} must not trip missingkey=error when empty.
+		PromptTemplate: "Files: {{.Files}}",
+	}
+
+	task, err := tb.BuildTask("task-1", "default", template, map[string]interface{}{
+		"Title": "the bug",
+		"Files": []string(nil),
+	}, nil)
+	if err != nil {
+		t.Fatalf("BuildTask() returned error: %v", err)
+	}
+	if want := "Files: []"; task.Spec.Prompt != want {
+		t.Fatalf("task.Spec.Prompt = %q, want %q", task.Spec.Prompt, want)
+	}
+}
+
 func TestBuildTask_ForwardsPodFailurePolicy(t *testing.T) {
 	tb := &TaskBuilder{}
 	template := &kelos.TaskTemplate{

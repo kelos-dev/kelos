@@ -46,9 +46,9 @@ type GitHubEventData struct {
 	// ChangedFiles lists file paths modified by the event.
 	// For push events, populated from the payload. For PR events, lazily
 	// fetched from the GitHub API when a webhook filter uses FilePatterns.
-	// NOTE: intentionally not exposed in ExtractGitHubWorkItem template vars
-	// yet — the {{.ChangedFiles}} template variable is deferred to a follow-up
-	// to resolve API design questions (slice vs pre-joined string, fetch gating).
+	// Exposed to prompt templates as {{.Files}} via ExtractGitHubWorkItem.
+	// Because PR fetching is gated on FilePatterns, {{.Files}} is only
+	// populated for PR events when a filter's filePatterns forced the fetch.
 	ChangedFiles []string
 	// Tag is the tag name for create (ref_type=tag) and release events.
 	Tag string
@@ -688,6 +688,11 @@ func ExtractGitHubWorkItem(eventData *GitHubEventData) map[string]interface{} {
 		"ID":    eventData.ID,
 		"Title": eventData.Title,
 		"Kind":  "webhook",
+		// Files is the list of changed file paths. It is always present (so
+		// {{.Files}} never trips missingkey=error) but is only populated when a
+		// filter's filePatterns forced a changed-files fetch; otherwise it is
+		// empty. See the ChangedFiles field for details.
+		"Files": eventData.ChangedFiles,
 	}
 
 	// Add number, body, URL if available

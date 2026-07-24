@@ -52,6 +52,9 @@ func (r *TaskBudgetReconciler) budget() *budgetEnforcer {
 func (r *TaskBudgetReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
+	ctx, span := startReconcileSpan(ctx, "TaskBudget", req.NamespacedName)
+	defer span.End()
+
 	var budget kelos.TaskBudget
 	if err := r.Get(ctx, req.NamespacedName, &budget); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)

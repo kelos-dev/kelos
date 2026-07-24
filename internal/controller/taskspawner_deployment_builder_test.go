@@ -3089,3 +3089,116 @@ func TestReconcileDeployment_KeepsDeploymentWithNewLabels(t *testing.T) {
 		t.Errorf("expected kelos.dev/component label in selector")
 	}
 }
+
+func TestDeploymentBuilder_OTELEnvPropagation(t *testing.T) {
+	builder := NewDeploymentBuilder()
+	ts := &kelos.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "otel-spawner",
+			Namespace: "default",
+		},
+		Spec: kelos.TaskSpawnerSpec{
+			When:         kelos.When{GitHubIssues: &kelos.GitHubIssues{}},
+			TaskTemplate: kelos.TaskTemplate{Type: "claude-code"},
+		},
+	}
+
+	findEnv := func(envs []corev1.EnvVar, name string) (corev1.EnvVar, bool) {
+		for _, e := range envs {
+			if e.Name == name {
+				return e, true
+			}
+		}
+		return corev1.EnvVar{}, false
+	}
+
+	t.Run("endpoint set propagates OTEL env to spawner", func(t *testing.T) {
+		t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317")
+		t.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc")
+		t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "deployment.environment=test")
+
+		deploy := builder.Build(ts, nil, false)
+		env := deploy.Spec.Template.Spec.Containers[0].Env
+
+		if e, ok := findEnv(env, "OTEL_EXPORTER_OTLP_ENDPOINT"); !ok || e.Value != "http://otel-collector:4317" {
+			t.Errorf("OTEL_EXPORTER_OTLP_ENDPOINT = %q, ok=%v; want http://otel-collector:4317", e.Value, ok)
+		}
+		if e, ok := findEnv(env, "OTEL_EXPORTER_OTLP_PROTOCOL"); !ok || e.Value != "grpc" {
+			t.Errorf("OTEL_EXPORTER_OTLP_PROTOCOL = %q, ok=%v; want grpc", e.Value, ok)
+		}
+		if e, ok := findEnv(env, "OTEL_RESOURCE_ATTRIBUTES"); !ok || e.Value != "deployment.environment=test" {
+			t.Errorf("OTEL_RESOURCE_ATTRIBUTES = %q, ok=%v", e.Value, ok)
+		}
+	})
+
+	t.Run("no endpoint omits OTEL env", func(t *testing.T) {
+		t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+		t.Setenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "")
+		t.Setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "")
+
+		deploy := builder.Build(ts, nil, false)
+		env := deploy.Spec.Template.Spec.Containers[0].Env
+		if _, ok := findEnv(env, "OTEL_EXPORTER_OTLP_ENDPOINT"); ok {
+			t.Errorf("OTEL env should not be set without an endpoint; env=%v", env)
+		}
+	})
+
+	t.Run("headers secret ref propagates without leaking token", func(t *testing.T) {
+		t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317")
+		t.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc")
+		t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "deployment.environment=test")
+		t.Setenv("OTEL_EXPORTER_OTLP_HEADERS_SECRET_NAME", "otlp-creds")
+		t.Setenv("OTEL_EXPORTER_OTLP_HEADERS_SECRET_KEY", "headers")
+		// A literal header value is also present, but it must NOT be copied
+		// literally when a secret reference is configured.
+		t.Setenv("OTEL_EXPORTER_OTLP_HEADERS", "authorization=Bearer super-secret-token")
+
+		deploy := builder.Build(ts, nil, false)
+		env := deploy.Spec.Template.Spec.Containers[0].Env
+
+		headers, ok := findEnv(env, "OTEL_EXPORTER_OTLP_HEADERS")
+		if !ok {
+			t.Fatalf("expected OTEL_EXPORTER_OTLP_HEADERS env; env=%v", env)
+		}
+		if headers.Value != "" {
+			t.Errorf("OTEL_EXPORTER_OTLP_HEADERS literal Value = %q, want empty (token must not be copied)", headers.Value)
+		}
+		if headers.ValueFrom == nil || headers.ValueFrom.SecretKeyRef == nil {
+			t.Fatalf("expected OTEL_EXPORTER_OTLP_HEADERS to reference a secret; got %#v", headers)
+		}
+		if headers.ValueFrom.SecretKeyRef.Name != "otlp-creds" {
+			t.Errorf("secret name = %q, want otlp-creds", headers.ValueFrom.SecretKeyRef.Name)
+		}
+		if headers.ValueFrom.SecretKeyRef.Key != "headers" {
+			t.Errorf("secret key = %q, want headers", headers.ValueFrom.SecretKeyRef.Key)
+		}
+
+		// The other OTEL vars still propagate as literals.
+		if e, ok := findEnv(env, "OTEL_EXPORTER_OTLP_ENDPOINT"); !ok || e.Value != "http://otel-collector:4317" {
+			t.Errorf("OTEL_EXPORTER_OTLP_ENDPOINT = %q, ok=%v; want http://otel-collector:4317", e.Value, ok)
+		}
+		if e, ok := findEnv(env, "OTEL_EXPORTER_OTLP_PROTOCOL"); !ok || e.Value != "grpc" {
+			t.Errorf("OTEL_EXPORTER_OTLP_PROTOCOL = %q, ok=%v; want grpc", e.Value, ok)
+		}
+		if e, ok := findEnv(env, "OTEL_RESOURCE_ATTRIBUTES"); !ok || e.Value != "deployment.environment=test" {
+			t.Errorf("OTEL_RESOURCE_ATTRIBUTES = %q, ok=%v; want deployment.environment=test", e.Value, ok)
+		}
+	})
+
+	t.Run("headers secret ref defaults key when unset", func(t *testing.T) {
+		t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317")
+		t.Setenv("OTEL_EXPORTER_OTLP_HEADERS_SECRET_NAME", "otlp-creds")
+		t.Setenv("OTEL_EXPORTER_OTLP_HEADERS_SECRET_KEY", "")
+
+		deploy := builder.Build(ts, nil, false)
+		env := deploy.Spec.Template.Spec.Containers[0].Env
+
+		headers, ok := findEnv(env, "OTEL_EXPORTER_OTLP_HEADERS")
+		if !ok || headers.ValueFrom == nil || headers.ValueFrom.SecretKeyRef == nil {
+			t.Fatalf("expected OTEL_EXPORTER_OTLP_HEADERS secret ref; got %#v", headers)
+		}
+		if headers.ValueFrom.SecretKeyRef.Key != "OTEL_EXPORTER_OTLP_HEADERS" {
+			t.Errorf("secret key = %q, want default OTEL_EXPORTER_OTLP_HEADERS", headers.ValueFrom.SecretKeyRef.Key)
+		}
+	})
+}

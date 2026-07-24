@@ -27,6 +27,7 @@ import (
 	"github.com/kelos-dev/kelos/internal/conversion"
 	"github.com/kelos-dev/kelos/internal/githubapp"
 	"github.com/kelos-dev/kelos/internal/logging"
+	"github.com/kelos-dev/kelos/internal/observability"
 	"github.com/kelos-dev/kelos/internal/telemetry"
 	"github.com/kelos-dev/kelos/internal/version"
 )
@@ -239,6 +240,22 @@ func main() {
 		}
 		os.Exit(0)
 	}
+	// Initialize OpenTelemetry (OTLP) export when an endpoint is configured.
+	// No-op when OTEL_EXPORTER_OTLP_ENDPOINT and friends are unset, leaving the
+	// Prometheus /metrics endpoint as the only observability surface.
+	otelShutdown, err := observability.Setup(context.Background(), "kelos-controller", kelosVersion)
+	if err != nil {
+		setupLog.Error(err, "unable to set up OpenTelemetry")
+		os.Exit(1)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := otelShutdown(shutdownCtx); err != nil {
+			setupLog.Error(err, "error shutting down OpenTelemetry")
+		}
+	}()
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsserver.Options{BindAddress: metricsAddr},

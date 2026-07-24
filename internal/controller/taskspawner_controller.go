@@ -69,6 +69,9 @@ func isWebhookBased(ts *kelos.TaskSpawner) bool {
 func (r *TaskSpawnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
+	ctx, span := startReconcileSpan(ctx, "TaskSpawner", req.NamespacedName)
+	defer span.End()
+
 	var ts kelos.TaskSpawner
 	if err := r.Get(ctx, req.NamespacedName, &ts); err != nil {
 		if apierrors.IsNotFound(err) {

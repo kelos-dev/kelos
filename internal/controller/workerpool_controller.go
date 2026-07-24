@@ -132,6 +132,9 @@ func (r *WorkerPoolReconciler) budget() *budgetEnforcer {
 func (r *WorkerPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
+	ctx, span := startReconcileSpan(ctx, "WorkerPool", req.NamespacedName)
+	defer span.End()
+
 	var pool kelos.WorkerPool
 	poolErr := r.Get(ctx, req.NamespacedName, &pool)
 	if poolErr != nil && !apierrors.IsNotFound(poolErr) {

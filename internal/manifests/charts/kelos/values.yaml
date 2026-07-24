@@ -61,6 +61,31 @@ controller:
   resources:
     requests: {}
     limits: {}
+
+# observability configures OpenTelemetry (OTLP) export. When otlp.endpoint is
+# set, the controller and the spawner Deployments it launches push metrics and
+# traces to that OTLP collector, in addition to the existing Prometheus
+# /metrics endpoint. Leave otlp.endpoint empty to keep Prometheus-only behavior
+# (zero migration for existing operators).
+observability:
+  otlp:
+    # OTEL_EXPORTER_OTLP_ENDPOINT, e.g. http://otel-collector:4317
+    endpoint: ""
+    # OTEL_EXPORTER_OTLP_PROTOCOL: grpc (default) or http/protobuf
+    protocol: ""
+    # OTEL_EXPORTER_OTLP_HEADERS for NON-SENSITIVE headers only, e.g.
+    # "x-tenant=team-a". Do NOT put bearer tokens here — this value is rendered
+    # in plaintext into the Deployment manifest. Use headersSecretName for
+    # tokens (it takes precedence over this plaintext value).
+    headers: ""
+    # Name of a Secret providing OTEL_EXPORTER_OTLP_HEADERS (preferred for
+    # bearer tokens). When set, it takes precedence over the plaintext headers
+    # above and is mounted via secretKeyRef instead of a literal value.
+    headersSecretName: ""
+    # Key within the headersSecretName Secret holding the headers value.
+    headersSecretKey: "OTEL_EXPORTER_OTLP_HEADERS"
+    # OTEL_RESOURCE_ATTRIBUTES, e.g. "deployment.environment=production"
+    resourceAttributes: ""
 webhookServer:
   image: ghcr.io/kelos-dev/kelos-webhook-server
   sources:

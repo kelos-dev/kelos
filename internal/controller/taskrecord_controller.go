@@ -40,6 +40,9 @@ func (r *TaskRecordReconciler) now() time.Time {
 func (r *TaskRecordReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
+	ctx, span := startReconcileSpan(ctx, "TaskRecord", req.NamespacedName)
+	defer span.End()
+
 	var record kelos.TaskRecord
 	if err := r.Get(ctx, req.NamespacedName, &record); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)

@@ -91,6 +91,36 @@ spec:
             - --ghproxy-cache-ttl={{ .Values.ghproxy.cacheTTL }}
             {{- end }}
             - --codex-auth-refresher-schedule={{ .Values.codexAuthRefresher.schedule }}
+          {{- if .Values.observability.otlp.endpoint }}
+          env:
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.observability.otlp.endpoint | quote }}
+            {{- if .Values.observability.otlp.protocol }}
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: {{ .Values.observability.otlp.protocol | quote }}
+            {{- end }}
+            {{- if .Values.observability.otlp.headersSecretName }}
+            - name: OTEL_EXPORTER_OTLP_HEADERS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.observability.otlp.headersSecretName | quote }}
+                  key: {{ .Values.observability.otlp.headersSecretKey | quote }}
+            # Non-sensitive: only the Secret's name/key so the controller can
+            # propagate the header to spawner Deployments as a secretKeyRef
+            # rather than a literal token.
+            - name: OTEL_EXPORTER_OTLP_HEADERS_SECRET_NAME
+              value: {{ .Values.observability.otlp.headersSecretName | quote }}
+            - name: OTEL_EXPORTER_OTLP_HEADERS_SECRET_KEY
+              value: {{ .Values.observability.otlp.headersSecretKey | quote }}
+            {{- else if .Values.observability.otlp.headers }}
+            - name: OTEL_EXPORTER_OTLP_HEADERS
+              value: {{ .Values.observability.otlp.headers | quote }}
+            {{- end }}
+            {{- if .Values.observability.otlp.resourceAttributes }}
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: {{ .Values.observability.otlp.resourceAttributes | quote }}
+            {{- end }}
+          {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

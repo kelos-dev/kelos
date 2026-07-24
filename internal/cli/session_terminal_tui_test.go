@@ -94,6 +94,100 @@ func TestSessionTUIComposerUsesFullWidthPadding(t *testing.T) {
 	if gap := viewLines[0]; gap != "" {
 		t.Fatalf("row before composer = %q, want an unstyled blank row", gap)
 	}
+	if status := strings.TrimSpace(viewLines[len(viewLines)-1]); status != "Ready" {
+		t.Fatalf("status bar = %q, want Ready", status)
+	}
+}
+
+func TestSessionTUIStatusBarShowsRuntimeAndWorkspaceDetails(t *testing.T) {
+	model, _ := newSessionTUITestModel()
+	model.Update(tea.WindowSizeMsg{Width: 180, Height: 12})
+	model.applyEvent(sessionruntime.Event{
+		Type: sessionruntime.EventRuntimeStatus,
+		Runtime: &sessionruntime.RuntimeStatus{
+			SessionName:       "fix-session-tui",
+			AgentType:         "codex",
+			Model:             "gpt-5.6-sol",
+			Effort:            "xhigh",
+			WorkingDir:        "/home/agent/workspace/kelos",
+			HomeDir:           "/home/agent",
+			Branch:            "agent/fix-session-tui-multiline-prompt",
+			PullRequestNumber: 1547,
+			Usage: &sessionruntime.RuntimeUsage{
+				ContextWindow: 200_000,
+			},
+			WeeklyLimit: &sessionruntime.RuntimeRateLimit{UsedPercent: 31},
+		},
+	})
+
+	statusBar := strings.TrimSpace(stripSessionTUIANSI(model.statusBarView()))
+	want := "fix-session-tui · codex · gpt-5.6-sol xhigh · ~/workspace/kelos · agent/fix-session-tui-multiline-prompt · PR #1547 · Context 0% used · weekly 69% left · 0 in · 0 out"
+	if statusBar != want {
+		t.Fatalf("status bar = %q, want %q", statusBar, want)
+	}
+}
+
+func TestSessionTUIStatusBarPrioritizesModelAndPathAtNarrowWidths(t *testing.T) {
+	model, _ := newSessionTUITestModel()
+	model.runtimeStatus = sessionruntime.RuntimeStatus{
+		SessionName:       "fix-session-tui",
+		AgentType:         "codex",
+		Model:             "gpt-5.6-sol",
+		Effort:            "xhigh",
+		WorkingDir:        "/home/agent/workspace/kelos",
+		HomeDir:           "/home/agent",
+		Branch:            "agent/fix-session-tui-multiline-prompt",
+		PullRequestNumber: 1547,
+		Usage:             &sessionruntime.RuntimeUsage{ContextWindow: 200_000},
+		WeeklyLimit:       &sessionruntime.RuntimeRateLimit{UsedPercent: 31},
+	}
+	model.Update(tea.WindowSizeMsg{Width: 50, Height: 8})
+
+	statusBar := stripSessionTUIANSI(model.statusBarView())
+	assertSessionTUIBlockWidth(t, statusBar, 50)
+	for _, want := range []string{"gpt-5.6-sol xhigh", "~/workspace/kelos"} {
+		if !strings.Contains(statusBar, want) {
+			t.Fatalf("narrow status bar = %q, want %q", statusBar, want)
+		}
+	}
+	for _, omitted := range []string{"fix-session-tui", "Context", "weekly", " in", " out"} {
+		if strings.Contains(statusBar, omitted) {
+			t.Fatalf("narrow status bar retained %q: %q", omitted, statusBar)
+		}
+	}
+}
+
+func TestFormatSessionTUITokens(t *testing.T) {
+	for _, test := range []struct {
+		value int64
+		want  string
+	}{
+		{value: 0, want: "0"},
+		{value: 999, want: "999"},
+		{value: 1_200, want: "1.2K"},
+		{value: 12_345, want: "12.3K"},
+		{value: 100_000, want: "100K"},
+		{value: 1_250_000, want: "1.25M"},
+	} {
+		if got := formatSessionTUITokens(test.value); got != test.want {
+			t.Errorf("formatSessionTUITokens(%d) = %q, want %q", test.value, got, test.want)
+		}
+	}
+}
+
+func TestSessionTUIContextUsedPercent(t *testing.T) {
+	for _, test := range []struct {
+		usage sessionruntime.RuntimeUsage
+		want  int64
+	}{
+		{usage: sessionruntime.RuntimeUsage{ContextWindow: 200_000}, want: 0},
+		{usage: sessionruntime.RuntimeUsage{ContextTokens: 106_000, ContextWindow: 200_000}, want: 50},
+		{usage: sessionruntime.RuntimeUsage{ContextTokens: 250_000, ContextWindow: 200_000}, want: 100},
+	} {
+		if got := sessionTUIContextUsedPercent(test.usage); got != test.want {
+			t.Errorf("sessionTUIContextUsedPercent(%#v) = %d, want %d", test.usage, got, test.want)
+		}
+	}
 }
 
 func TestSessionTUIQueueStaysAboveComposerUntilAccepted(t *testing.T) {

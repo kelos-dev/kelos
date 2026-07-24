@@ -1088,6 +1088,70 @@ func TestServerResetsHistoryForReplacedJournalWithOverlappingIDs(t *testing.T) {
 	}
 }
 
+func TestServerStreamsRuntimeStatusOutsideConversationHistory(t *testing.T) {
+	journal := NewJournal()
+	defer journal.Close()
+	server := NewServer(Config{
+		SessionName: "fix-session-tui",
+		AgentType:   "codex",
+		Model:       "gpt-5.6-sol",
+		Effort:      "xhigh",
+		WorkingDir:  "/home/agent/workspace/kelos",
+		Environment: []string{"HOME=/home/agent"},
+	}, journal, &fakeProvider{})
+	server.updateWorkspaceRuntimeStatus(WorkspaceStatus{
+		Branch: "agent/fix-session-tui",
+		PullRequest: &kelos.SessionPullRequest{
+			URL: "https://github.com/kelos-dev/kelos/pull/1547",
+		},
+	})
+
+	serverConnection, clientConnection := net.Pipe()
+	defer clientConnection.Close()
+	go server.handleConnection(t.Context(), serverConnection)
+	if err := json.NewEncoder(clientConnection).Encode(ClientRequest{Type: "subscribe", HistoryBounds: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	decoder := json.NewDecoder(clientConnection)
+	var start, statusEvent, end Event
+	for _, event := range []*Event{&start, &statusEvent, &end} {
+		if err := decoder.Decode(event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if start.Type != EventHistoryStart || statusEvent.Type != EventRuntimeStatus || end.Type != EventHistoryEnd {
+		t.Fatalf("subscription events = %#v, %#v, %#v", start, statusEvent, end)
+	}
+	if statusEvent.Runtime == nil ||
+		statusEvent.Runtime.SessionName != "fix-session-tui" ||
+		statusEvent.Runtime.Model != "gpt-5.6-sol" ||
+		statusEvent.Runtime.Branch != "agent/fix-session-tui" ||
+		statusEvent.Runtime.PullRequestNumber != 1547 {
+		t.Fatalf("runtime status = %#v", statusEvent.Runtime)
+	}
+	if events := journal.Snapshot(); len(events) != 0 {
+		t.Fatalf("conversation journal contains runtime status: %#v", events)
+	}
+
+	server.updateProviderRuntimeStatus(RuntimeStatus{
+		Usage:       &RuntimeUsage{InputTokens: 1200, OutputTokens: 300, TotalTokens: 1500, ContextWindow: 200_000},
+		WeeklyLimit: &RuntimeRateLimit{UsedPercent: 31},
+	})
+	var update Event
+	if err := decoder.Decode(&update); err != nil {
+		t.Fatal(err)
+	}
+	if update.Type != EventRuntimeStatus ||
+		update.Runtime == nil ||
+		update.Runtime.Usage == nil ||
+		update.Runtime.Usage.InputTokens != 1200 ||
+		update.Runtime.WeeklyLimit == nil ||
+		update.Runtime.WeeklyLimit.UsedPercent != 31 {
+		t.Fatalf("runtime status update = %#v", update)
+	}
+}
+
 func TestJournalSignalsSubscriberOverflow(t *testing.T) {
 	journal := NewJournal()
 	defer journal.Close()
@@ -1100,6 +1164,22 @@ func TestJournalSignalsSubscriberOverflow(t *testing.T) {
 	case <-overflow:
 	default:
 		t.Fatal("subscriber overflow was not signaled")
+	}
+}
+
+func TestSendLiveEventDisconnectsOnOverflow(t *testing.T) {
+	out := make(chan Event)
+	overflow := make(chan struct{})
+	close(overflow)
+	disconnected := false
+
+	if sendLiveEvent(t.Context(), out, overflow, Event{Type: EventRuntimeStatus}, func() {
+		disconnected = true
+	}) {
+		t.Fatal("sendLiveEvent() = true, want overflow failure")
+	}
+	if !disconnected {
+		t.Fatal("sendLiveEvent() did not disconnect the overflowing subscriber")
 	}
 }
 
@@ -1337,6 +1417,104 @@ func TestCodexEventMapping(t *testing.T) {
 	}
 }
 
+func TestCodexRuntimeStatusMapping(t *testing.T) {
+	sink := &collectingSink{}
+	provider := &CodexProvider{activeSink: sink}
+	provider.handleNotification("thread/tokenUsage/updated", json.RawMessage(`{
+		"tokenUsage": {
+			"total": {
+				"totalTokens": 3000,
+				"inputTokens": 2400,
+				"outputTokens": 600
+			},
+			"last": {
+				"totalTokens": 2000
+			},
+			"modelContextWindow": 200000
+		}
+	}`))
+	provider.handleNotification("account/rateLimits/updated", json.RawMessage(`{
+		"rateLimits": {
+			"primary": {"usedPercent": 10, "windowDurationMins": 300},
+			"secondary": {"usedPercent": 31, "windowDurationMins": 10080}
+		}
+	}`))
+
+	if len(sink.events) != 2 {
+		t.Fatalf("runtime status events = %#v", sink.events)
+	}
+	usage := sink.events[0].Runtime
+	if sink.events[0].Type != EventRuntimeStatus ||
+		usage == nil ||
+		usage.Usage == nil ||
+		usage.Usage.InputTokens != 2400 ||
+		usage.Usage.OutputTokens != 600 ||
+		usage.Usage.TotalTokens != 3000 ||
+		usage.Usage.ContextTokens != 2000 ||
+		usage.Usage.ContextWindow != 200000 {
+		t.Fatalf("Codex token usage event = %#v", sink.events[0])
+	}
+	limit := sink.events[1].Runtime
+	if sink.events[1].Type != EventRuntimeStatus ||
+		limit == nil ||
+		limit.WeeklyLimit == nil ||
+		limit.WeeklyLimit.UsedPercent != 31 {
+		t.Fatalf("Codex rate limit event = %#v", sink.events[1])
+	}
+	if sparse := codexWeeklyRateLimit(json.RawMessage(`{
+		"rateLimits": {"secondary": {"usedPercent": 42}}
+	}`)); sparse == nil || sparse.UsedPercent != 42 {
+		t.Fatalf("sparse Codex weekly rate limit = %#v", sparse)
+	}
+
+	provider.model = "gpt-5.6-sol"
+	provider.config.Effort = "xhigh"
+	server := NewServer(Config{AgentType: "codex"}, NewJournal(), provider)
+	t.Cleanup(func() { server.journal.Close() })
+	initial := server.runtimeStatusSnapshot()
+	if initial.Model != "gpt-5.6-sol" ||
+		initial.Effort != "xhigh" ||
+		initial.WeeklyLimit == nil ||
+		initial.WeeklyLimit.UsedPercent != 31 {
+		t.Fatalf("initial server runtime status = %#v", initial)
+	}
+}
+
+func TestCodexRequestOmitsNilParams(t *testing.T) {
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+	provider := &CodexProvider{
+		stdin:   writer,
+		pending: map[string]chan codexResponse{},
+		done:    make(chan struct{}),
+	}
+	requestDone := make(chan error, 1)
+	go func() {
+		_, err := provider.request(t.Context(), "account/rateLimits/read", nil)
+		requestDone <- err
+	}()
+
+	var request map[string]json.RawMessage
+	if err := json.NewDecoder(reader).Decode(&request); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := request["params"]; exists {
+		t.Fatalf("parameterless Codex request contains params: %s", request["params"])
+	}
+	var id int64
+	if err := json.Unmarshal(request["id"], &id); err != nil {
+		t.Fatal(err)
+	}
+	provider.pendingMu.Lock()
+	pending := provider.pending[strconv.FormatInt(id, 10)]
+	provider.pendingMu.Unlock()
+	pending <- codexResponse{Result: json.RawMessage(`{}`)}
+	if err := <-requestDone; err != nil {
+		t.Fatalf("Codex request error = %v", err)
+	}
+}
+
 func TestCodexMcpElicitationUsesProtocolResponse(t *testing.T) {
 	reader, writer := io.Pipe()
 	sink := &collectingSink{}
@@ -1482,7 +1660,11 @@ func TestCodexOpenThreadReplacesUnmaterializedThread(t *testing.T) {
 				}{Code: -32600, Message: "no rollout found"}}
 				continue
 			}
-			pending <- codexResponse{Result: json.RawMessage(`{"thread":{"id":"thread-2"}}`)}
+			pending <- codexResponse{Result: json.RawMessage(`{
+				"thread":{"id":"thread-2"},
+				"model":"gpt-5.6-sol",
+				"reasoningEffort":"high"
+			}`)}
 		}
 		requestDone <- nil
 	}()
@@ -1495,12 +1677,92 @@ func TestCodexOpenThreadReplacesUnmaterializedThread(t *testing.T) {
 	if provider.threadID != "thread-2" {
 		t.Fatalf("thread ID = %q, want thread-2", provider.threadID)
 	}
+	status := provider.runtimeStatusSnapshot()
+	if status.Model != "gpt-5.6-sol" || status.Effort != "high" {
+		t.Fatalf("new Codex thread runtime status = %#v", status)
+	}
+	if status.Usage == nil ||
+		status.Usage.InputTokens != 0 ||
+		status.Usage.OutputTokens != 0 {
+		t.Fatalf("new Codex thread usage = %#v, want zero snapshot", status.Usage)
+	}
 	data, err := os.ReadFile(statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(data) != "thread-2\n" {
 		t.Fatalf("saved thread ID = %q, want thread-2", data)
+	}
+}
+
+func TestCodexOpenThreadDoesNotFabricateResumedUsage(t *testing.T) {
+	stateDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stateDir, "codex-thread-id"), []byte("thread-1\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+	provider := &CodexProvider{
+		config: ProviderConfig{
+			StateDir: stateDir,
+			Effort:   "low",
+		},
+		ctx:     context.Background(),
+		stdin:   writer,
+		pending: map[string]chan codexResponse{},
+		done:    make(chan struct{}),
+	}
+	requestDone := make(chan error, 1)
+	go func() {
+		var request struct {
+			ID     int64  `json:"id"`
+			Method string `json:"method"`
+			Params struct {
+				ThreadID     string `json:"threadId"`
+				ExcludeTurns bool   `json:"excludeTurns"`
+			} `json:"params"`
+		}
+		if err := json.NewDecoder(reader).Decode(&request); err != nil {
+			requestDone <- err
+			return
+		}
+		if request.Method != "thread/resume" ||
+			request.Params.ThreadID != "thread-1" ||
+			!request.Params.ExcludeTurns {
+			requestDone <- fmt.Errorf("resume request = %#v", request)
+			return
+		}
+		provider.pendingMu.Lock()
+		pending := provider.pending[strconv.FormatInt(request.ID, 10)]
+		provider.pendingMu.Unlock()
+		pending <- codexResponse{Result: json.RawMessage(`{
+			"thread":{"id":"thread-1"},
+			"model":"gpt-5.6-sol",
+			"reasoningEffort":"xhigh"
+		}`)}
+		requestDone <- nil
+	}()
+
+	if err := provider.openThread(t.Context()); err != nil {
+		t.Fatalf("openThread() error = %v", err)
+	}
+	if requestErr := <-requestDone; requestErr != nil {
+		t.Fatal(requestErr)
+	}
+	status := provider.runtimeStatusSnapshot()
+	if status.Model != "gpt-5.6-sol" || status.Effort != "xhigh" {
+		t.Fatalf("resumed Codex thread runtime status = %#v", status)
+	}
+	if status.Usage != nil {
+		t.Fatalf("resumed Codex thread usage = %#v, want unavailable", status.Usage)
+	}
+
+	journal := NewJournal()
+	defer journal.Close()
+	server := NewServer(Config{AgentType: "codex"}, journal, provider)
+	if initial := server.runtimeStatusSnapshot(); initial.Usage != nil || initial.Effort != "xhigh" {
+		t.Fatalf("resumed server runtime status = %#v", initial)
 	}
 }
 

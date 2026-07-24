@@ -8,11 +8,11 @@ import (
 	"io"
 	"os"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -20,11 +20,20 @@ import (
 )
 
 const (
-	taskStartMarker = "---KELOS_TASK_START---"
-	taskEndMarker   = "---KELOS_TASK_END---"
+	taskStartMarker        = "---KELOS_TASK_START---"
+	taskEndMarker          = "---KELOS_TASK_END---"
+	logStreamRetryInterval = 2 * time.Second
 )
 
 var errTaskLogSegmentNotFound = errors.New("task log segment not found")
+
+type logStreamRetryMode int
+
+const (
+	noLogStreamRetry logStreamRetryMode = iota
+	delayedLogStreamRetry
+	immediateLogStreamRetry
+)
 
 func newLogsCommand(cfg *ClientConfig) *cobra.Command {
 	var follow bool
@@ -89,7 +98,7 @@ func newLogsCommand(cfg *ClientConfig) *cobra.Command {
 
 			if follow && task.Spec.WorkspaceRef != nil {
 				fmt.Fprintf(os.Stderr, "Streaming init container (git-clone) logs...\n")
-				if err := streamLogs(ctx, cs, ns, podName, "git-clone", follow); err != nil {
+				if err := streamLogs(ctx, cl, cs, ns, task.Name, podName, "git-clone", follow); err != nil {
 					return err
 				}
 			}
@@ -99,9 +108,9 @@ func newLogsCommand(cfg *ClientConfig) *cobra.Command {
 			}
 			agentType := resolveAgentType(ctx, cl, ns, task)
 			if task.Spec.WorkerPoolRef != nil {
-				return streamWorkerPoolTaskAgentLogs(ctx, cs, ns, podName, containerName, agentType, task.Name, follow)
+				return streamWorkerPoolTaskAgentLogs(ctx, cl, cs, ns, podName, containerName, agentType, task.Name, follow)
 			}
-			return streamAgentLogs(ctx, cs, ns, podName, containerName, agentType, follow)
+			return streamAgentLogs(ctx, cl, cs, ns, task.Name, podName, containerName, agentType, follow)
 		},
 	}
 
@@ -173,79 +182,67 @@ func isTerminalTaskPhase(phase kelos.TaskPhase) bool {
 	return phase == kelos.TaskPhaseSucceeded || phase == kelos.TaskPhaseFailed
 }
 
-func streamLogs(ctx context.Context, cs *kubernetes.Clientset, namespace, podName, container string, follow bool) error {
+func streamLogs(ctx context.Context, cl client.Client, cs *kubernetes.Clientset, namespace, taskName, podName, container string, follow bool) error {
 	opts := &corev1.PodLogOptions{
 		Follow:    follow,
 		Container: container,
 	}
 
-	for {
-		stream, err := cs.CoreV1().Pods(namespace).GetLogs(podName, opts).Stream(ctx)
-		if err != nil {
-			if follow && isContainerNotReady(err) {
-				time.Sleep(2 * time.Second)
-				continue
-			}
-			return fmt.Errorf("streaming logs: %w", err)
-		}
-		defer stream.Close()
-
-		if _, err := io.Copy(os.Stdout, stream); err != nil {
-			return fmt.Errorf("reading logs: %w", err)
-		}
-		return nil
+	stream, err := openTaskLogStream(ctx, cl, namespace, taskName, podName, container, follow, logStreamRetryInterval, func(ctx context.Context) (io.ReadCloser, error) {
+		return cs.CoreV1().Pods(namespace).GetLogs(podName, opts).Stream(ctx)
+	})
+	if err != nil {
+		return err
 	}
+	defer stream.Close()
+
+	if _, err := io.Copy(os.Stdout, stream); err != nil {
+		return fmt.Errorf("reading logs: %w", err)
+	}
+	return nil
 }
 
-func streamAgentLogs(ctx context.Context, cs *kubernetes.Clientset, namespace, podName, container, agentType string, follow bool) error {
+func streamAgentLogs(ctx context.Context, cl client.Client, cs *kubernetes.Clientset, namespace, taskName, podName, container, agentType string, follow bool) error {
 	opts := &corev1.PodLogOptions{
 		Follow:    follow,
 		Container: container,
 	}
 
-	for {
-		stream, err := cs.CoreV1().Pods(namespace).GetLogs(podName, opts).Stream(ctx)
-		if err != nil {
-			if follow && isContainerNotReady(err) {
-				time.Sleep(2 * time.Second)
-				continue
-			}
-			return fmt.Errorf("streaming logs: %w", err)
-		}
-		defer stream.Close()
-
-		return parseAgentLogs(agentType, stream)
+	stream, err := openTaskLogStream(ctx, cl, namespace, taskName, podName, container, follow, logStreamRetryInterval, func(ctx context.Context) (io.ReadCloser, error) {
+		return cs.CoreV1().Pods(namespace).GetLogs(podName, opts).Stream(ctx)
+	})
+	if err != nil {
+		return err
 	}
+	defer stream.Close()
+
+	return parseAgentLogs(agentType, stream)
 }
 
-func streamWorkerPoolTaskAgentLogs(ctx context.Context, cs *kubernetes.Clientset, namespace, podName, container, agentType, taskName string, follow bool) error {
+func streamWorkerPoolTaskAgentLogs(ctx context.Context, cl client.Client, cs *kubernetes.Clientset, namespace, podName, container, agentType, taskName string, follow bool) error {
 	opts := &corev1.PodLogOptions{
 		Follow:    follow,
 		Container: container,
 	}
 
-	for {
-		stream, err := cs.CoreV1().Pods(namespace).GetLogs(podName, opts).Stream(ctx)
-		if err != nil {
-			if follow && isContainerNotReady(err) {
-				time.Sleep(2 * time.Second)
-				continue
-			}
-			return fmt.Errorf("streaming logs: %w", err)
-		}
-		defer stream.Close()
-
-		filtered, wait := filteredTaskLogReader(stream, taskName)
-		parseErr := parseAgentLogs(agentType, filtered)
-		filterErr := wait()
-		if errors.Is(parseErr, errTaskLogSegmentNotFound) || errors.Is(filterErr, errTaskLogSegmentNotFound) {
-			return fmt.Errorf("task %q logs not found in worker pod %s", taskName, podName)
-		}
-		if parseErr != nil {
-			return parseErr
-		}
-		return filterErr
+	stream, err := openTaskLogStream(ctx, cl, namespace, taskName, podName, container, follow, logStreamRetryInterval, func(ctx context.Context) (io.ReadCloser, error) {
+		return cs.CoreV1().Pods(namespace).GetLogs(podName, opts).Stream(ctx)
+	})
+	if err != nil {
+		return err
 	}
+	defer stream.Close()
+
+	filtered, wait := filteredTaskLogReader(stream, taskName)
+	parseErr := parseAgentLogs(agentType, filtered)
+	filterErr := wait()
+	if errors.Is(parseErr, errTaskLogSegmentNotFound) || errors.Is(filterErr, errTaskLogSegmentNotFound) {
+		return fmt.Errorf("task %q logs not found in worker pod %s", taskName, podName)
+	}
+	if parseErr != nil {
+		return parseErr
+	}
+	return filterErr
 }
 
 func parseAgentLogs(agentType string, stream io.Reader) error {
@@ -307,9 +304,102 @@ func filterTaskLogSegment(stream io.Reader, out io.Writer, taskName string) erro
 	return nil
 }
 
-func isContainerNotReady(err error) bool {
-	msg := err.Error()
-	return strings.Contains(msg, "is waiting to start") || strings.Contains(msg, "PodInitializing")
+func openTaskLogStream(
+	ctx context.Context,
+	cl client.Client,
+	namespace, taskName, podName, container string,
+	follow bool,
+	retryInterval time.Duration,
+	open func(context.Context) (io.ReadCloser, error),
+) (io.ReadCloser, error) {
+	immediateRetryUsed := false
+	for {
+		stream, err := open(ctx)
+		if err == nil {
+			return stream, nil
+		}
+		if !follow || !apierrors.IsBadRequest(err) {
+			return nil, fmt.Errorf("streaming logs: %w", err)
+		}
+
+		retryMode, retryErr := taskLogStreamRetryMode(ctx, cl, namespace, taskName, podName, container)
+		if retryErr != nil {
+			return nil, retryErr
+		}
+		switch retryMode {
+		case noLogStreamRetry:
+			return nil, fmt.Errorf("streaming logs: %w", err)
+		case immediateLogStreamRetry:
+			if immediateRetryUsed {
+				return nil, fmt.Errorf("streaming logs: %w", err)
+			}
+			immediateRetryUsed = true
+			continue
+		case delayedLogStreamRetry:
+			immediateRetryUsed = false
+		}
+
+		timer := time.NewTimer(retryInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, fmt.Errorf("streaming logs: %w", ctx.Err())
+		case <-timer.C:
+		}
+	}
+}
+
+func taskLogStreamRetryMode(ctx context.Context, cl client.Client, namespace, taskName, podName, container string) (logStreamRetryMode, error) {
+	task := &kelos.Task{}
+	if err := cl.Get(ctx, client.ObjectKey{Name: taskName, Namespace: namespace}, task); err != nil {
+		return noLogStreamRetry, fmt.Errorf("getting task %q while waiting for logs: %w", taskName, err)
+	}
+	if task.Status.Phase == kelos.TaskPhaseFailed {
+		msg := "unknown error"
+		if task.Status.Message != "" {
+			msg = task.Status.Message
+		}
+		return noLogStreamRetry, fmt.Errorf("task %q failed before logs could be streamed: %s", taskName, msg)
+	}
+	taskSucceeded := task.Status.Phase == kelos.TaskPhaseSucceeded
+
+	pod := &corev1.Pod{}
+	if err := cl.Get(ctx, client.ObjectKey{Name: podName, Namespace: namespace}, pod); err != nil {
+		return noLogStreamRetry, fmt.Errorf("getting pod %q while waiting for task %q logs: %w", podName, taskName, err)
+	}
+	if pod.Spec.NodeName == "" {
+		return delayedLogStreamRetry, nil
+	}
+
+	statuses := append(pod.Status.InitContainerStatuses, pod.Status.ContainerStatuses...)
+	for _, status := range statuses {
+		if status.Name != container {
+			continue
+		}
+		if status.State.Running != nil || status.State.Terminated != nil {
+			return immediateLogStreamRetry, nil
+		}
+		if taskSucceeded {
+			return noLogStreamRetry, fmt.Errorf("task %q reached phase %s before logs could be streamed", taskName, task.Status.Phase)
+		}
+		if status.State.Waiting == nil {
+			return noLogStreamRetry, nil
+		}
+		switch status.State.Waiting.Reason {
+		case "", "PodInitializing", "ContainerCreating":
+			return delayedLogStreamRetry, nil
+		default:
+			return noLogStreamRetry, nil
+		}
+	}
+
+	if taskSucceeded {
+		return noLogStreamRetry, fmt.Errorf("task %q reached phase %s before logs could be streamed", taskName, task.Status.Phase)
+	}
+	if pod.Status.Phase == corev1.PodPending {
+		return delayedLogStreamRetry, nil
+	}
+	return noLogStreamRetry, nil
 }
 
 // resolveAgentType determines the effective agent type for log parsing,

@@ -533,7 +533,7 @@ func KelosOutputWithStderr(args ...string) (string, string) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
-	Expect(err).NotTo(HaveOccurred())
+	Expect(err).NotTo(HaveOccurred(), "stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
 	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String())
 }
 

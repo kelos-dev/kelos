@@ -1836,14 +1836,36 @@ func TestMatchesGitHubEvent_FilePatterns(t *testing.T) {
 	}
 }
 
-func TestExtractGitHubWorkItemNoChangedFiles(t *testing.T) {
+func TestExtractGitHubWorkItemFilesEmpty(t *testing.T) {
 	eventData := &GitHubEventData{
 		Event: "issues",
 	}
 
 	vars := ExtractGitHubWorkItem(eventData)
-	if _, ok := vars["ChangedFiles"]; ok {
-		t.Error("ChangedFiles should not be set in template vars")
+	// Files is always present so {{.Files}} never trips missingkey=error, but
+	// it is empty when no changed files were fetched.
+	files, ok := vars["Files"]
+	if !ok {
+		t.Fatal("Files should always be present in template vars")
+	}
+	if got := files.([]string); len(got) != 0 {
+		t.Errorf("Files = %v, want empty", got)
+	}
+}
+
+func TestExtractGitHubWorkItemFilesPopulated(t *testing.T) {
+	eventData := &GitHubEventData{
+		Event:        "pull_request",
+		ChangedFiles: []string{"main.go", "docs/guide.md"},
+	}
+
+	vars := ExtractGitHubWorkItem(eventData)
+	files, ok := vars["Files"].([]string)
+	if !ok {
+		t.Fatal("Files should be a []string in template vars")
+	}
+	if len(files) != 2 || files[0] != "main.go" || files[1] != "docs/guide.md" {
+		t.Errorf("Files = %v, want [main.go docs/guide.md]", files)
 	}
 }
 

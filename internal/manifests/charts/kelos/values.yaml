@@ -9,6 +9,30 @@ image:
 telemetry:
   enabled: true
 
+# podMonitor optionally ships Prometheus Operator PodMonitor resources
+# (monitoring.coreos.com/v1) for scraping Kelos metrics. This requires the
+# Prometheus Operator CRDs to be installed in the cluster; leave disabled if
+# they are not present, otherwise the chart will fail to install.
+podMonitor:
+  # Scrape the control-plane pods (controller manager, webhook servers, slack
+  # server) in the release namespace. They all expose the metrics port (8080).
+  enabled: false
+  # Scrape interval and per-scrape timeout.
+  interval: 30s
+  scrapeTimeout: 10s
+  # honorLabels keeps metric labels exposed by the target when they collide
+  # with labels Prometheus would add.
+  honorLabels: false
+  # Extra labels and annotations on the PodMonitor object(s). Labels are
+  # commonly used to match a Prometheus instance's podMonitorSelector.
+  labels: {}
+  annotations: {}
+  spawners:
+    # Also ship a PodMonitor for dynamically-created spawner pods. These run in
+    # arbitrary namespaces, so this requires a Prometheus configured to select
+    # PodMonitors across namespaces (spec.namespaceSelector: {any: true}).
+    enabled: false
+
 # codexAuthRefresher lets the controller manage one scheduled Codex-image
 # CronJob in the target namespace per Secret labeled
 # kelos.dev/codex-oauth-refresh=true, keeping Codex OAuth credentials valid even

@@ -1,0 +1,65 @@
+{{- if .Values.podMonitor.enabled }}
+---
+# PodMonitor for the Kelos control-plane pods (controller manager, webhook
+# servers, slack server). They all carry app.kubernetes.io/name: kelos and
+# expose the metrics port (8080). session-server is intentionally not matched:
+# its 8080 port serves the web app, not Prometheus metrics.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: kelos-controlplane
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: kelos
+    app.kubernetes.io/component: manager
+    {{- with .Values.podMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.podMonitor.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kelos
+  podMetricsEndpoints:
+    - port: metrics
+      interval: {{ .Values.podMonitor.interval }}
+      scrapeTimeout: {{ .Values.podMonitor.scrapeTimeout }}
+      honorLabels: {{ .Values.podMonitor.honorLabels }}
+{{- if .Values.podMonitor.spawners.enabled }}
+---
+# PodMonitor for dynamically-created spawner pods. Spawner Deployments use the
+# kelos.dev/* label scheme (not app.kubernetes.io/name) and run in arbitrary
+# namespaces, so this selects across all namespaces. The scraping Prometheus
+# must be configured to select PodMonitors cluster-wide for this to take effect.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: kelos-spawners
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: kelos
+    app.kubernetes.io/component: spawner
+    {{- with .Values.podMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.podMonitor.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  namespaceSelector:
+    any: true
+  selector:
+    matchLabels:
+      kelos.dev/name: kelos
+      kelos.dev/component: spawner
+  podMetricsEndpoints:
+    - port: metrics
+      interval: {{ .Values.podMonitor.interval }}
+      scrapeTimeout: {{ .Values.podMonitor.scrapeTimeout }}
+      honorLabels: {{ .Values.podMonitor.honorLabels }}
+{{- end }}
+{{- end }}

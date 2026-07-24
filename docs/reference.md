@@ -1161,6 +1161,23 @@ Each spawner pod emits metrics scoped to its own TaskSpawner:
 | `kelos_spawner_tasks_created_total` | Counter | Tasks created by this spawner |
 | `kelos_spawner_discovery_duration_seconds` | Histogram | Duration of discovery cycles |
 
+### Scraping with Prometheus Operator
+
+The Helm chart can ship optional [Prometheus Operator](https://github.com/prometheus-operator/prometheus-operator)
+`PodMonitor` resources (`monitoring.coreos.com/v1`). They are disabled by
+default so the chart installs on clusters without the Prometheus Operator CRDs.
+Enable them via the `podMonitor` values:
+
+| Value | Default | Description |
+|-------|---------|-------------|
+| `podMonitor.enabled` | `false` | Ship a PodMonitor for the control-plane pods (controller manager, webhook servers, slack server) in the release namespace. They all expose the `metrics` port (8080). The session server is not scraped — its 8080 port serves the web app, not metrics. |
+| `podMonitor.interval` | `30s` | Scrape interval. |
+| `podMonitor.scrapeTimeout` | `10s` | Per-scrape timeout. |
+| `podMonitor.honorLabels` | `false` | Keep target-exposed labels when they collide with labels Prometheus would add. |
+| `podMonitor.labels` | `{}` | Extra labels on the PodMonitor object(s); commonly used to match a Prometheus instance's `podMonitorSelector`. |
+| `podMonitor.annotations` | `{}` | Extra annotations on the PodMonitor object(s). |
+| `podMonitor.spawners.enabled` | `false` | Additionally ship a PodMonitor for dynamically-created spawner pods. Spawner pods run in arbitrary namespaces, so this PodMonitor selects across all namespaces (`spec.namespaceSelector.any: true`) — the scraping Prometheus must be configured to select PodMonitors cluster-wide for it to take effect. |
+
 ## Telemetry
 
 Kelos collects anonymous, aggregate usage data to help improve the project. A `kelos-telemetry` CronJob runs daily at 06:00 UTC and reports the following:

@@ -682,6 +682,145 @@ func TestRender_WebhookServiceTypeRejectsUnsupported(t *testing.T) {
 	}
 }
 
+func TestRender_PodMonitorDisabledByDefault(t *testing.T) {
+	data, err := Render(manifests.ChartFS, nil)
+	if err != nil {
+		t.Fatalf("rendering chart: %v", err)
+	}
+	output := string(data)
+	if strings.Contains(output, "kind: PodMonitor") {
+		t.Error("expected no PodMonitor in default render")
+	}
+	if strings.Contains(output, "monitoring.coreos.com/v1") {
+		t.Error("expected no monitoring.coreos.com/v1 resources in default render")
+	}
+}
+
+func TestRender_PodMonitorEnabled(t *testing.T) {
+	vals := map[string]interface{}{
+		"podMonitor": map[string]interface{}{
+			"enabled":       true,
+			"interval":      "45s",
+			"scrapeTimeout": "12s",
+		},
+	}
+	data, err := Render(manifests.ChartFS, vals)
+	if err != nil {
+		t.Fatalf("rendering chart: %v", err)
+	}
+	output := string(data)
+
+	spec := extractPodMonitorSpec(t, output, "kelos-controlplane")
+	if !strings.Contains(spec, "apiVersion: monitoring.coreos.com/v1") {
+		t.Errorf("expected monitoring.coreos.com/v1 PodMonitor, got:\n%s", spec)
+	}
+	if !strings.Contains(spec, "app.kubernetes.io/name: kelos") {
+		t.Errorf("expected control-plane selector on app.kubernetes.io/name: kelos, got:\n%s", spec)
+	}
+	// session-server shares the name label but is not a metrics endpoint, so
+	// the selector must exclude it explicitly rather than rely on the port name.
+	if !strings.Contains(spec, "session-server") || !strings.Contains(spec, "NotIn") {
+		t.Errorf("expected control-plane selector to exclude session-server via NotIn, got:\n%s", spec)
+	}
+	if !strings.Contains(spec, "port: metrics") {
+		t.Errorf("expected metrics port endpoint, got:\n%s", spec)
+	}
+	if !strings.Contains(spec, "interval: 45s") {
+		t.Errorf("expected interval override 45s, got:\n%s", spec)
+	}
+	if !strings.Contains(spec, "scrapeTimeout: 12s") {
+		t.Errorf("expected scrapeTimeout override 12s, got:\n%s", spec)
+	}
+	if strings.Contains(output, "name: kelos-spawners") {
+		t.Error("expected no spawner PodMonitor when podMonitor.spawners.enabled is false")
+	}
+}
+
+func TestRender_PodMonitorSpawnersEnabled(t *testing.T) {
+	vals := map[string]interface{}{
+		"podMonitor": map[string]interface{}{
+			"enabled": true,
+			"spawners": map[string]interface{}{
+				"enabled": true,
+			},
+		},
+	}
+	data, err := Render(manifests.ChartFS, vals)
+	if err != nil {
+		t.Fatalf("rendering chart: %v", err)
+	}
+	output := string(data)
+
+	// Control-plane PodMonitor still renders.
+	extractPodMonitorSpec(t, output, "kelos-controlplane")
+
+	spec := extractPodMonitorSpec(t, output, "kelos-spawners")
+	if !strings.Contains(spec, "kelos.dev/component: spawner") {
+		t.Errorf("expected spawner selector on kelos.dev/component: spawner, got:\n%s", spec)
+	}
+	if !strings.Contains(spec, "any: true") {
+		t.Errorf("expected namespaceSelector any: true for cross-namespace spawner scraping, got:\n%s", spec)
+	}
+}
+
+func TestRender_PodMonitorSpawnersRequiresParentEnabled(t *testing.T) {
+	vals := map[string]interface{}{
+		"podMonitor": map[string]interface{}{
+			"enabled": false,
+			"spawners": map[string]interface{}{
+				"enabled": true,
+			},
+		},
+	}
+	data, err := Render(manifests.ChartFS, vals)
+	if err != nil {
+		t.Fatalf("rendering chart: %v", err)
+	}
+	if strings.Contains(string(data), "kind: PodMonitor") {
+		t.Error("expected no PodMonitor when podMonitor.enabled is false, even with spawners.enabled true")
+	}
+}
+
+func TestRender_PodMonitorLabelsAnnotations(t *testing.T) {
+	vals := map[string]interface{}{
+		"podMonitor": map[string]interface{}{
+			"enabled":     true,
+			"labels":      map[string]interface{}{"release": "kube-prometheus-stack"},
+			"annotations": map[string]interface{}{"owner": "platform-team"},
+		},
+	}
+	data, err := Render(manifests.ChartFS, vals)
+	if err != nil {
+		t.Fatalf("rendering chart: %v", err)
+	}
+	spec := extractPodMonitorSpec(t, string(data), "kelos-controlplane")
+	if !strings.Contains(spec, "release: kube-prometheus-stack") {
+		t.Errorf("expected custom label release: kube-prometheus-stack, got:\n%s", spec)
+	}
+	if !strings.Contains(spec, "owner: platform-team") {
+		t.Errorf("expected custom annotation owner: platform-team, got:\n%s", spec)
+	}
+}
+
+// extractPodMonitorSpec returns the YAML body for the PodMonitor named name from
+// the rendered chart output, or fails the test if not found.
+func extractPodMonitorSpec(t *testing.T, output, name string) string {
+	t.Helper()
+	docs := strings.Split(output, "---\n")
+	marker := "name: " + name + "\n"
+	for _, doc := range docs {
+		if !strings.Contains(doc, "kind: PodMonitor") {
+			continue
+		}
+		if !strings.Contains(doc, marker) {
+			continue
+		}
+		return doc
+	}
+	t.Fatalf("PodMonitor %q not found in rendered output", name)
+	return ""
+}
+
 func TestRender_ParseableOutput(t *testing.T) {
 	vals := map[string]interface{}{
 		"image": map[string]interface{}{

@@ -1391,6 +1391,32 @@ func TestConnectSessionBridgesReadySession(t *testing.T) {
 	}
 }
 
+func TestConnectSessionRejectsSuspendedSession(t *testing.T) {
+	server := testServer(t)
+	session := &kelos.Session{
+		ObjectMeta: metav1.ObjectMeta{Name: "chat", Namespace: "team-a"},
+		Spec: kelos.SessionSpec{Worker: kelos.WorkerSpec{
+			Type:        "codex",
+			Credentials: &kelos.Credentials{Type: kelos.CredentialTypeNone},
+		}},
+		Status: kelos.SessionStatus{Phase: kelos.SessionPhaseSuspended},
+	}
+	if err := server.client.Create(t.Context(), session); err != nil {
+		t.Fatal(err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/sessions/team-a/chat/connect", nil)
+	request.Header.Set("Authorization", "Bearer secret-token")
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("suspended Session status = %d body = %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), "is suspended") {
+		t.Fatalf("suspended Session body = %q", response.Body.String())
+	}
+}
+
 func TestSessionSocketSerializesWrites(t *testing.T) {
 	const writes = 32
 	serverDone := make(chan error, 1)

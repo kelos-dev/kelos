@@ -24,7 +24,17 @@ The same conversation is available in the Session web application when the
 shared Session server is enabled. Disconnecting either client does not stop the
 agent runtime. If the Pod or StatefulSet is removed, the controller recreates
 it on the Session-owned persistent workspace; active work is marked interrupted
-and both clients reconnect without replaying it. Deleting the Session deletes
+and both clients reconnect without replaying it.
+
+Suspend the runtime without deleting the Session or its persistent workspace,
+then resume it later:
+
+```bash
+kubectl patch session interactive-review --type merge -p '{"spec":{"replicas":0}}'
+kubectl patch session interactive-review --type merge -p '{"spec":{"replicas":1}}'
+```
+
+Deleting the Session deletes
 its StatefulSet, Pod, governing Service, and persistent workspace and ends the
 conversation:
 

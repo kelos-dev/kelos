@@ -1108,6 +1108,11 @@ func (in *SessionSpawnerWhen) DeepCopy() *SessionSpawnerWhen {
 func (in *SessionSpec) DeepCopyInto(out *SessionSpec) {
 	*out = *in
 	in.Worker.DeepCopyInto(&out.Worker)
+	if in.Replicas != nil {
+		in, out := &in.Replicas, &out.Replicas
+		*out = new(int32)
+		**out = **in
+	}
 	if in.VolumeClaimTemplate != nil {
 		in, out := &in.VolumeClaimTemplate, &out.VolumeClaimTemplate
 		*out = new(v1.PersistentVolumeClaimSpec)

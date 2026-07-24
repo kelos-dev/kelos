@@ -206,6 +206,34 @@ func TestSessionConnectionWaitsForTerminalCleanup(t *testing.T) {
 	}
 }
 
+func TestWaitForReadySessionReportsSuspension(t *testing.T) {
+	var stderr bytes.Buffer
+	var reads atomic.Int32
+	session, err := waitForReadySession(
+		t.Context(),
+		"default",
+		"chat",
+		&stderr,
+		func(context.Context, string, string) (*kelos.Session, error) {
+			if reads.Add(1) == 1 {
+				return &kelos.Session{Status: kelos.SessionStatus{Phase: kelos.SessionPhaseSuspended}}, nil
+			}
+			return &kelos.Session{Status: kelos.SessionStatus{Phase: kelos.SessionPhaseReady, PodName: "session-pod"}}, nil
+		},
+		make(chan error),
+		false,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.Status.PodName != "session-pod" {
+		t.Fatalf("ready Session Pod = %q, want session-pod", session.Status.PodName)
+	}
+	if !strings.Contains(stderr.String(), `Waiting for Session "chat" to resume`) {
+		t.Fatalf("Session diagnostics = %q", stderr.String())
+	}
+}
+
 func TestSessionConnectionReturnsTerminalDeliveryError(t *testing.T) {
 	runtimeEventSent := make(chan struct{})
 	terminalErr := errors.New("terminal output failed")

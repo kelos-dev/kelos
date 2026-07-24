@@ -75,6 +75,15 @@ spec:
                       from being submitted again after Pod replacement. An emptyDir workspace
                       loses that history and may submit the prompt again after Pod replacement.
                     type: string
+                  replicas:
+                    default: 1
+                    description: |-
+                      Replicas is the desired number of Session runtime pods.
+                      Defaults to 1 if not specified. Set to 0 to suspend the Session.
+                    format: int32
+                    maximum: 1
+                    minimum: 0
+                    type: integer
                   volumeClaimTemplate:
                     description: |-
                       VolumeClaimTemplate defines persistent storage for the Session workspace.

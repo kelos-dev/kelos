@@ -14,6 +14,8 @@ const (
 	SessionPhasePending SessionPhase = "Pending"
 	// SessionPhaseReady means the Session runtime is ready for clients.
 	SessionPhaseReady SessionPhase = "Ready"
+	// SessionPhaseSuspended means the Session runtime is scaled to zero.
+	SessionPhaseSuspended SessionPhase = "Suspended"
 	// SessionPhaseFailed means the Session cannot accept clients.
 	SessionPhaseFailed SessionPhase = "Failed"
 )
@@ -57,6 +59,14 @@ type SessionPullRequest struct {
 type SessionSpec struct {
 	// Worker defines the agent and execution environment for this Session.
 	Worker WorkerSpec `json:"worker"`
+
+	// Replicas is the desired number of Session runtime pods.
+	// Defaults to 1 if not specified. Set to 0 to suspend the Session.
+	// +optional
+	// +kubebuilder:default=1
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=1
+	Replicas *int32 `json:"replicas,omitempty"`
 
 	// InitialBranch is the git branch to check out when initializing the Session
 	// workspace. If the branch exists on the origin remote, the Session checks
@@ -140,7 +150,10 @@ type Session struct {
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Session spec is immutable after creation"
+	// +kubebuilder:validation:XValidation:rule="self.worker == oldSelf.worker",message="worker is immutable"
+	// +kubebuilder:validation:XValidation:rule="has(self.initialBranch) == has(oldSelf.initialBranch) && (!has(self.initialBranch) || self.initialBranch == oldSelf.initialBranch)",message="initialBranch is immutable"
+	// +kubebuilder:validation:XValidation:rule="has(self.initialPrompt) == has(oldSelf.initialPrompt) && (!has(self.initialPrompt) || self.initialPrompt == oldSelf.initialPrompt)",message="initialPrompt is immutable"
+	// +kubebuilder:validation:XValidation:rule="has(self.volumeClaimTemplate) == has(oldSelf.volumeClaimTemplate) && (!has(self.volumeClaimTemplate) || self.volumeClaimTemplate == oldSelf.volumeClaimTemplate)",message="volumeClaimTemplate is immutable"
 	Spec   SessionSpec   `json:"spec"`
 	Status SessionStatus `json:"status,omitempty"`
 }

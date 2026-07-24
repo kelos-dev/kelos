@@ -628,6 +628,15 @@ func waitForReadySession(
 				reportSessionTerminalDiagnostic(stderr, sessionTerminalStatusReconnecting, "Waiting for Session %q to recover", name)
 				reportedWaiting = true
 			}
+		} else if session.Status.Phase == kelos.SessionPhaseSuspended {
+			if !reportedWaiting {
+				status := sessionTerminalStatusConnecting
+				if retryFailed {
+					status = sessionTerminalStatusReconnecting
+				}
+				reportSessionTerminalDiagnostic(stderr, status, "Waiting for Session %q to resume", name)
+				reportedWaiting = true
+			}
 		} else if session.Status.Phase == kelos.SessionPhaseReady && session.Status.PodName != "" {
 			return session, nil
 		} else if !reportedWaiting {

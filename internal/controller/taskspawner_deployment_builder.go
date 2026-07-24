@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 
@@ -181,6 +182,11 @@ func (b *DeploymentBuilder) buildPodParts(ts *kelos.TaskSpawner, workspace *kelo
 		)
 	}
 
+	// Propagate the controller's OTLP configuration to the spawner pod so its
+	// discovery traces and metrics reach the same collector. No-op when the
+	// controller was not configured with an OTLP endpoint.
+	envVars = append(envVars, otelEnvForSpawner()...)
+
 	labels := map[string]string{
 		"kelos.dev/name":        "kelos",
 		"kelos.dev/component":   "spawner",
@@ -193,6 +199,56 @@ func (b *DeploymentBuilder) buildPodParts(ts *kelos.TaskSpawner, workspace *kelo
 		envVars: envVars,
 		labels:  labels,
 	}
+}
+
+// otelEnvForSpawner mirrors the controller's OTEL_* environment onto the
+// spawner pod so it exports to the same OTLP endpoint. It returns nil when no
+// OTLP endpoint is configured, preserving Prometheus-only behavior. The
+// spawner's service.name is set to kelos-spawner unless the operator pins one
+// via OTEL_RESOURCE_ATTRIBUTES.
+func otelEnvForSpawner() []corev1.EnvVar {
+	if os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") == "" &&
+		os.Getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT") == "" &&
+		os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") == "" {
+		return nil
+	}
+	var envVars []corev1.EnvVar
+	for _, name := range []string{
+		"OTEL_EXPORTER_OTLP_ENDPOINT",
+		"OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+		"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+		"OTEL_EXPORTER_OTLP_PROTOCOL",
+		"OTEL_RESOURCE_ATTRIBUTES",
+	} {
+		if v := os.Getenv(name); v != "" {
+			envVars = append(envVars, corev1.EnvVar{Name: name, Value: v})
+		}
+	}
+
+	// OTEL_EXPORTER_OTLP_HEADERS commonly carries a bearer token. When the
+	// controller was configured with the header via a Secret, propagate it to
+	// the spawner as a secretKeyRef instead of a literal value so the token is
+	// never written into the spawner Deployment manifest. The referenced Secret
+	// must exist in the TaskSpawner's namespace. Otherwise fall back to copying
+	// the literal header value (for non-sensitive headers).
+	if secretName := os.Getenv("OTEL_EXPORTER_OTLP_HEADERS_SECRET_NAME"); secretName != "" {
+		key := os.Getenv("OTEL_EXPORTER_OTLP_HEADERS_SECRET_KEY")
+		if key == "" {
+			key = "OTEL_EXPORTER_OTLP_HEADERS"
+		}
+		envVars = append(envVars, corev1.EnvVar{
+			Name: "OTEL_EXPORTER_OTLP_HEADERS",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
+					Key:                  key,
+				},
+			},
+		})
+	} else if v := os.Getenv("OTEL_EXPORTER_OTLP_HEADERS"); v != "" {
+		envVars = append(envVars, corev1.EnvVar{Name: "OTEL_EXPORTER_OTLP_HEADERS", Value: v})
+	}
+	return envVars
 }
 
 // Build creates a Deployment for the given TaskSpawner.

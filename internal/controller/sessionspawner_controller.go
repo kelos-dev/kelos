@@ -29,6 +29,9 @@ type SessionSpawnerReconciler struct {
 func (r *SessionSpawnerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
+	ctx, span := startReconcileSpan(ctx, "SessionSpawner", req.NamespacedName)
+	defer span.End()
+
 	var spawner kelos.SessionSpawner
 	if err := r.Get(ctx, req.NamespacedName, &spawner); err != nil {
 		if apierrors.IsNotFound(err) {

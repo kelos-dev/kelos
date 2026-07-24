@@ -1161,6 +1161,63 @@ Each spawner pod emits metrics scoped to its own TaskSpawner:
 | `kelos_spawner_tasks_created_total` | Counter | Tasks created by this spawner |
 | `kelos_spawner_discovery_duration_seconds` | Histogram | Duration of discovery cycles |
 
+### OpenTelemetry (OTLP) Export
+
+In addition to the Prometheus `/metrics` endpoint, the controller and spawner
+pods can push metrics and traces to an OpenTelemetry (OTLP) collector. OTLP
+export is **opt-in**: it activates only when an OTLP endpoint is configured, and
+the Prometheus endpoint continues to work unchanged in all cases.
+
+When enabled:
+
+- **Metrics** — every metric already listed above is bridged from the Prometheus
+  registry and pushed over OTLP, in addition to the pull-based `/metrics`
+  endpoint.
+- **Traces** — each controller reconcile emits a `reconcile.<Kind>` span (for
+  example `reconcile.Task`). The spawner emits a `spawner.discover` span per
+  discovery cycle with a child `spawner.create_task` span per Task it creates.
+  The spawner stamps W3C trace context onto each Task's `kelos.dev/traceparent`
+  annotation, so the Task's reconcile joins the same trace, and the agent pod
+  receives it as the standard `TRACEPARENT` environment variable for
+  OTEL-aware agents to continue.
+
+Configuration uses the standard OpenTelemetry environment variables, read by
+both the controller and the spawner Deployments it launches:
+
+| Variable | Description |
+|----------|-------------|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector endpoint, e.g. `http://otel-collector:4317`. Setting this (or a signal-specific `..._TRACES_ENDPOINT` / `..._METRICS_ENDPOINT`) enables export. |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` (default) or `http/protobuf`. |
+| `OTEL_EXPORTER_OTLP_HEADERS` | Additional **non-sensitive** headers only, e.g. `x-tenant=team-a`. Do not put bearer tokens here — this value is rendered in plaintext into the Deployment manifest. Load tokens from a Secret instead (see below). |
+| `OTEL_RESOURCE_ATTRIBUTES` | Extra resource attributes, e.g. `deployment.environment=production`. |
+| `OTEL_SERVICE_NAME` | Overrides the service name (defaults to `kelos-controller` / `kelos-spawner`). |
+
+When installing via Helm, set these through the `observability.otlp` values
+instead of editing env directly:
+
+```yaml
+observability:
+  otlp:
+    endpoint: "http://otel-collector:4317"
+    protocol: "grpc"
+    # Load bearer tokens from a Secret rather than the plaintext `headers` field.
+    headersSecretName: "otlp-creds"
+    headersSecretKey: "OTEL_EXPORTER_OTLP_HEADERS"
+    resourceAttributes: "deployment.environment=production"
+```
+
+For bearer tokens or any sensitive header, set `observability.otlp.headersSecretName`
+(and optionally `headersSecretKey`, default `OTEL_EXPORTER_OTLP_HEADERS`) to load
+`OTEL_EXPORTER_OTLP_HEADERS` from a Kubernetes Secret via `secretKeyRef`. This
+keeps the token out of the rendered manifests and values files. `headersSecretName`
+takes precedence over the plaintext `headers` value when both are set. The
+controller propagates the header to the spawner Deployments it launches as the
+same Secret reference (never a literal token), so the referenced Secret must also
+exist in each TaskSpawner's namespace.
+
+Leaving `observability.otlp.endpoint` empty (the default) keeps Prometheus as
+the only observability surface.
+
 ## Telemetry
 
 Kelos collects anonymous, aggregate usage data to help improve the project. A `kelos-telemetry` CronJob runs daily at 06:00 UTC and reports the following:

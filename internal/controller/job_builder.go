@@ -13,6 +13,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
+	"github.com/kelos-dev/kelos/internal/observability"
 )
 
 const (
@@ -351,6 +352,16 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 
 	agentType := resolveTaskType(task)
 	var envVars []corev1.EnvVar
+
+	// Propagate the discovery/reconcile trace into the agent pod via the
+	// standard W3C TRACEPARENT env var so OTEL-aware agents can continue the
+	// trace. The value is stamped onto the Task's annotations by the spawner.
+	if traceparent := observability.TraceparentFromAnnotations(task.Annotations); traceparent != "" {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "TRACEPARENT",
+			Value: traceparent,
+		})
+	}
 
 	if model := resolveTaskModel(task); model != "" {
 		envVars = append(envVars, corev1.EnvVar{

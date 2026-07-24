@@ -29,6 +29,7 @@ import (
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/githubapp"
+	"github.com/kelos-dev/kelos/internal/observability"
 )
 
 const (
@@ -108,6 +109,12 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		reconcileErrorsTotal.WithLabelValues("task").Inc()
 		return ctrl.Result{}, err
 	}
+
+	// Continue the trace started by the spawner when it created this Task, so
+	// discovery -> Task reconcile -> agent pod appear in one trace.
+	ctx = observability.ExtractTraceContext(ctx, task.Annotations)
+	ctx, span := startReconcileSpan(ctx, "Task", req.NamespacedName)
+	defer span.End()
 
 	// Handle deletion
 	if !task.DeletionTimestamp.IsZero() {

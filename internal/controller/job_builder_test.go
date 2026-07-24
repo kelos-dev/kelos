@@ -6321,3 +6321,64 @@ func TestBuildJob_WorkerSpecOverridesLegacy(t *testing.T) {
 			"worker-secret", apiKeyEnv.ValueFrom.SecretKeyRef.LocalObjectReference.Name)
 	}
 }
+
+func TestBuild_TraceparentEnvInjection(t *testing.T) {
+	newTask := func(annotations map[string]string) *kelos.Task {
+		return &kelos.Task{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "trace-task",
+				Namespace:   "default",
+				Annotations: annotations,
+			},
+			Spec: kelos.TaskSpec{
+				Type:   AgentTypeClaudeCode,
+				Prompt: "do work",
+				Credentials: &kelos.Credentials{
+					Type:      kelos.CredentialTypeAPIKey,
+					SecretRef: &kelos.SecretReference{Name: "my-secret"},
+				},
+			},
+		}
+	}
+
+	traceparent := "00-0102030405060708090a0b0c0d0e0f10-0102030405060708-01"
+
+	t.Run("annotation present injects TRACEPARENT", func(t *testing.T) {
+		builder := NewJobBuilder()
+		task := newTask(map[string]string{"kelos.dev/traceparent": traceparent})
+		job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+		if err != nil {
+			t.Fatalf("Build() returned error: %v", err)
+		}
+		container := job.Spec.Template.Spec.Containers[0]
+		var got string
+		var found bool
+		for _, env := range container.Env {
+			if env.Name == "TRACEPARENT" {
+				found = true
+				got = env.Value
+			}
+		}
+		if !found {
+			t.Fatalf("TRACEPARENT env not set; env=%v", container.Env)
+		}
+		if got != traceparent {
+			t.Errorf("TRACEPARENT value = %q, want %q", got, traceparent)
+		}
+	})
+
+	t.Run("no annotation omits TRACEPARENT", func(t *testing.T) {
+		builder := NewJobBuilder()
+		task := newTask(nil)
+		job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+		if err != nil {
+			t.Fatalf("Build() returned error: %v", err)
+		}
+		container := job.Spec.Template.Spec.Containers[0]
+		for _, env := range container.Env {
+			if env.Name == "TRACEPARENT" {
+				t.Errorf("TRACEPARENT should not be set without annotation; got %q", env.Value)
+			}
+		}
+	})
+}

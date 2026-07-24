@@ -74,6 +74,9 @@ type SessionReconciler struct {
 func (r *SessionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
+	ctx, span := startReconcileSpan(ctx, "Session", req.NamespacedName)
+	defer span.End()
+
 	var session kelos.Session
 	if err := r.Get(ctx, req.NamespacedName, &session); err != nil {
 		if apierrors.IsNotFound(err) {

@@ -300,6 +300,15 @@ func taskAgentEnv(base []string, task *kelos.Task) []string {
 		env = overrideEnvIfPresent(env, "GH_ENTERPRISE_TOKEN", token)
 	}
 
+	// Agent images that talk back to an external control plane (progress
+	// streaming, steering, cancellation) need to know which Task they are
+	// running. A Job-backed Task can carry that itself via podOverrides.env, but
+	// a pooled Task cannot: the CRD forbids podOverrides alongside
+	// workerPoolRef, the pool builds its worker pods from its own template, and
+	// the pod is long-lived across many Tasks so pod-level env cannot hold a
+	// per-Task value. Export it here, where the per-Task env is assembled.
+	env = append(env, "KELOS_TASK_NAME="+task.Name)
+
 	env = append(env, "KELOS_PROMPT="+task.Spec.Prompt)
 	if task.Spec.Model != "" {
 		env = append(env, "KELOS_MODEL="+task.Spec.Model)

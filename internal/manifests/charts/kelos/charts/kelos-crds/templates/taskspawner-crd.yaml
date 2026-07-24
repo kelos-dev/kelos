@@ -8290,6 +8290,31 @@ spec:
                               description: Body is a Go text/template for POST request
                                 bodies.
                               type: string
+                            githubAppAuth:
+                              description: |-
+                                GitHubAppAuth authenticates the request with a GitHub App installation
+                                token minted from credentials in a Secret. When set, an
+                                "Authorization: token <installation-token>" header is added to the
+                                request. An explicit Authorization header supplied via Headers or
+                                HeadersFrom takes precedence and disables GitHub App auth for that
+                                request.
+                              properties:
+                                apiBaseURL:
+                                  description: |-
+                                    APIBaseURL overrides the GitHub API base URL used to mint installation
+                                    tokens. Defaults to https://api.github.com. Set this for GitHub
+                                    Enterprise Server (e.g., "https://github.example.com/api/v3").
+                                  type: string
+                                secretName:
+                                  description: |-
+                                    SecretName is the name of a Secret in the same namespace as the
+                                    TaskSpawner holding GitHub App credentials. The Secret must contain
+                                    appID, installationID, and privateKey keys.
+                                  minLength: 1
+                                  type: string
+                              required:
+                              - secretName
+                              type: object
                             headers:
                               additionalProperties:
                                 type: string

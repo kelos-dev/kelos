@@ -726,6 +726,15 @@ type HTTPContextSource struct {
 	// +kubebuilder:validation:MaxItems=16
 	HeadersFrom []HTTPHeaderSource `json:"headersFrom,omitempty"`
 
+	// GitHubAppAuth authenticates the request with a GitHub App installation
+	// token minted from credentials in a Secret. When set, an
+	// "Authorization: token <installation-token>" header is added to the
+	// request. An explicit Authorization header supplied via Headers or
+	// HeadersFrom takes precedence and disables GitHub App auth for that
+	// request.
+	// +optional
+	GitHubAppAuth *GitHubAppContextAuth `json:"githubAppAuth,omitempty"`
+
 	// Body is a Go text/template for POST request bodies.
 	// +optional
 	Body string `json:"body,omitempty"`
@@ -755,6 +764,23 @@ type HTTPContextSource struct {
 	// +kubebuilder:default=32768
 	// +optional
 	MaxResponseBytes *int32 `json:"maxResponseBytes,omitempty"`
+}
+
+// GitHubAppContextAuth configures GitHub App installation-token
+// authentication for an HTTP context source.
+type GitHubAppContextAuth struct {
+	// SecretName is the name of a Secret in the same namespace as the
+	// TaskSpawner holding GitHub App credentials. The Secret must contain
+	// appID, installationID, and privateKey keys.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	SecretName string `json:"secretName"`
+
+	// APIBaseURL overrides the GitHub API base URL used to mint installation
+	// tokens. Defaults to https://api.github.com. Set this for GitHub
+	// Enterprise Server (e.g., "https://github.example.com/api/v3").
+	// +optional
+	APIBaseURL string `json:"apiBaseURL,omitempty"`
 }
 
 // ContextSource declares an external data source whose fetched value is

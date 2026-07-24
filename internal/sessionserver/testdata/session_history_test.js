@@ -10,8 +10,8 @@ class TestNode {
     this.children = [];
     this.parent = null;
     this.hidden = false;
-    this.attributes = new Map();
     this.dataset = {};
+    this.attributes = new Map();
     this.classes = new Set();
     this.classList = {
       add: (...names) => names.forEach((name) => this.classes.add(name)),
@@ -180,6 +180,7 @@ vm.runInThisContext(applicationSlice('function selectSession', 'function renderH
 vm.runInThisContext(applicationSlice('function ensureConversation', 'function trimURLSuffix'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function finishHistoryReplay', 'function handleEvent'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function handleEvent', 'function renderUser'), {filename: 'app.js'});
+vm.runInThisContext(applicationSlice('function renderTool', 'function renderInputRequest'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function renderError', 'function scrollToBottom'), {filename: 'app.js'});
 
 function testSessionViewSaveAndRestore() {
@@ -375,6 +376,70 @@ function testSessionTimestampElement() {
   assert.equal(timestamp.attributes.get('aria-label'), timestamp.title);
 }
 
+function testToolOutputRendering() {
+  resetHarness();
+  state.replayingHistory = true;
+  renderTool({type: 'tool.started', toolId: 'tool-1', toolName: 'make test', status: 'running'});
+  completeTool({
+    type: 'tool.completed',
+    toolId: 'tool-1',
+    status: 'completed',
+    output: 'line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\n',
+  });
+
+  const card = state.tools.get('tool-1');
+  assert.equal(card.dataset.status, 'completed');
+  assert.equal(card.querySelector('.tool-icon').textContent, '✓');
+  assert.equal(
+    card.querySelector('.tool-output-preview').textContent,
+    'line 1\nline 2\n… +4 lines\nline 7\nline 8',
+  );
+  assert.equal(card.querySelector('.tool-output-summary').textContent, 'Show all 8 lines');
+  assert.equal(
+    card.querySelector('.tool-output-full').textContent,
+    'line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8',
+  );
+}
+
+function testToolOutputRenderingNormalizesCarriageReturns() {
+  resetHarness();
+  state.replayingHistory = true;
+  renderTool({type: 'tool.started', toolId: 'tool-1', toolName: 'build', status: 'running'});
+  completeTool({
+    type: 'tool.completed',
+    toolId: 'tool-1',
+    status: 'completed',
+    output: 'step 1\rstep 2\rstep 3\rstep 4\rstep 5\rstep 6\rstep 7\rstep 8\r',
+  });
+
+  const card = state.tools.get('tool-1');
+  assert.equal(
+    card.querySelector('.tool-output-preview').textContent,
+    'step 1\nstep 2\n… +4 lines\nstep 7\nstep 8',
+  );
+  assert.equal(card.querySelector('.tool-output-summary').textContent, 'Show all 8 lines');
+  assert.equal(
+    card.querySelector('.tool-output-full').textContent,
+    'step 1\nstep 2\nstep 3\nstep 4\nstep 5\nstep 6\nstep 7\nstep 8',
+  );
+}
+
+function testHistoryToolCompletionRendersOutputWithoutStart() {
+  resetHarness();
+  state.replayingHistory = true;
+  completeTool({
+    type: 'tool.completed',
+    toolId: 'tool-1',
+    toolName: 'search',
+    status: 'completed',
+    output: 'result',
+  });
+
+  const card = state.tools.get('tool-1');
+  assert.equal(card.querySelector('.tool-icon').textContent, '✓');
+  assert.equal(card.querySelector('.tool-output-preview').textContent, 'result');
+}
+
 testSessionViewSaveAndRestore();
 testSessionViewReset();
 testSessionProgressLifecycle();
@@ -385,5 +450,8 @@ testHistoryReplayCompletion();
 testReselectRefreshesStatusPlaceholder();
 testSessionTimestampFormatting();
 testSessionTimestampElement();
+testToolOutputRendering();
+testToolOutputRenderingNormalizesCarriageReturns();
+testHistoryToolCompletionRendersOutputWithoutStart();
 
 process.stdout.write('Session history tests passed\n');

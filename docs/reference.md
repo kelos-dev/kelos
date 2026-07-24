@@ -245,6 +245,13 @@ conversation. Both clients can stream agent and tool activity, answer
 user-input requests, and interrupt active work without ending the provider
 conversation.
 
+Completed tool output is retained with Session history up to 512 KiB per tool
+result. Larger results keep their beginning and end around an
+`… output truncated …` marker. The terminal client strips terminal control
+sequences and displays at most five rendered output rows, retaining head and
+tail context. The web client displays a five-line preview and provides a control
+to expand retained results that exceed five lines.
+
 Selecting a Session in the web chat opens it at the latest retained message.
 Reconnecting preserves an intentional upward scroll position and shows the
 history that remains available on the Session workspace.

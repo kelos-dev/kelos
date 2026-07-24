@@ -31,6 +31,7 @@ type Event struct {
 	Text         string          `json:"text,omitempty"`
 	ToolID       string          `json:"toolId,omitempty"`
 	ToolName     string          `json:"toolName,omitempty"`
+	Output       string          `json:"output,omitempty"`
 	Status       string          `json:"status,omitempty"`
 	InputID      string          `json:"inputId,omitempty"`
 	Questions    []InputQuestion `json:"questions,omitempty"`

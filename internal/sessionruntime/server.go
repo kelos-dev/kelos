@@ -824,6 +824,9 @@ func (s *turnSink) Emit(event Event) {
 	if event.TurnID == "" {
 		event.TurnID = s.turnID
 	}
+	if event.Type == EventToolCompleted {
+		event.Output = truncateToolOutput(event.Output)
+	}
 	_ = s.server.journal.Append(event)
 }
 

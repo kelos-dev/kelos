@@ -52,7 +52,7 @@ type ClaudeProvider struct {
 	turnDone          chan claudeTurnResult
 	interactionCtx    context.Context
 	interactionCancel context.CancelFunc
-	seenTools         map[string]struct{}
+	seenTools         map[string]string
 	hadTextDelta      bool
 	interrupted       bool
 
@@ -153,7 +153,7 @@ func (p *ClaudeProvider) RunTurn(ctx context.Context, prompt string, sink EventS
 	p.turnDone = done
 	p.interactionCtx = interactionCtx
 	p.interactionCancel = interactionCancel
-	p.seenTools = map[string]struct{}{}
+	p.seenTools = map[string]string{}
 	p.hadTextDelta = false
 	p.interrupted = false
 	p.activeMu.Unlock()
@@ -579,12 +579,13 @@ func (p *ClaudeProvider) emitClaudeMessage(messageType string, raw json.RawMessa
 	}
 	var message struct {
 		Content []struct {
-			Type      string `json:"type"`
-			ID        string `json:"id"`
-			Name      string `json:"name"`
-			Text      string `json:"text"`
-			ToolUseID string `json:"tool_use_id"`
-			IsError   bool   `json:"is_error"`
+			Type      string          `json:"type"`
+			ID        string          `json:"id"`
+			Name      string          `json:"name"`
+			Text      string          `json:"text"`
+			ToolUseID string          `json:"tool_use_id"`
+			IsError   bool            `json:"is_error"`
+			Content   json.RawMessage `json:"content"`
 		} `json:"content"`
 	}
 	if json.Unmarshal(raw, &message) != nil {
@@ -607,23 +608,62 @@ func (p *ClaudeProvider) emitClaudeMessage(messageType string, raw json.RawMessa
 			if block.IsError {
 				status = "failed"
 			}
-			sink.Emit(Event{Type: EventToolCompleted, ToolID: block.ToolUseID, Status: status})
+			sink.Emit(Event{
+				Type:     EventToolCompleted,
+				ToolID:   block.ToolUseID,
+				ToolName: p.claudeToolName(block.ToolUseID),
+				Output:   claudeToolResultOutput(block.Content),
+				Status:   status,
+			})
 		}
 	}
+}
+
+func claudeToolResultOutput(raw json.RawMessage) string {
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return truncateToolOutput(text)
+	}
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(raw, &blocks) != nil {
+		return ""
+	}
+	output := newBoundedToolOutput(maxToolOutputBytes)
+	wroteOutput := false
+	for _, block := range blocks {
+		if block.Type != "text" || block.Text == "" {
+			continue
+		}
+		if wroteOutput {
+			output.WriteString("\n")
+		}
+		output.WriteString(block.Text)
+		wroteOutput = true
+	}
+	return output.String()
 }
 
 func (p *ClaudeProvider) emitClaudeToolStart(id, name string, sink EventSink) {
 	p.activeMu.Lock()
 	if p.seenTools == nil {
-		p.seenTools = map[string]struct{}{}
+		p.seenTools = map[string]string{}
 	}
 	if _, exists := p.seenTools[id]; exists && id != "" {
 		p.activeMu.Unlock()
 		return
 	}
-	p.seenTools[id] = struct{}{}
+	p.seenTools[id] = name
 	p.activeMu.Unlock()
 	sink.Emit(Event{Type: EventToolStarted, ToolID: id, ToolName: name, Status: "running"})
+}
+
+func (p *ClaudeProvider) claudeToolName(id string) string {
+	p.activeMu.Lock()
+	defer p.activeMu.Unlock()
+	return p.seenTools[id]
 }
 
 func (p *ClaudeProvider) persistSessionID() error {

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -32,6 +33,7 @@ const (
 	sessionTUIStatusBarHeight        = 1
 	sessionTUIQueueMaxHeight         = 8
 	sessionTUIIndent                 = 2
+	sessionTUIToolOutputMaxLines     = 5
 	sessionTUIFrameInterval          = time.Second / 30
 	sessionTUIProgressInterval       = time.Second
 	sessionTUIReflowDelay            = 75 * time.Millisecond
@@ -46,6 +48,7 @@ const (
 	sessionTUIBlockUser sessionTUIBlockKind = iota
 	sessionTUIBlockAssistant
 	sessionTUIBlockTool
+	sessionTUIBlockToolOutput
 	sessionTUIBlockToolStatus
 	sessionTUIBlockNotice
 	sessionTUIBlockWarning
@@ -60,6 +63,8 @@ type sessionTUIBlock struct {
 	stream   *strings.Builder
 	rendered string
 	dirty    bool
+	toolID   string
+	toolName string
 }
 
 type sessionTUIStatusSegment struct {
@@ -124,6 +129,7 @@ type sessionTUIModel struct {
 	blocks             []sessionTUIBlock
 	queuedTurns        map[string]string
 	queuedTurnOrder    []string
+	toolNames          map[string]string
 	width              int
 	height             int
 	ready              bool
@@ -219,6 +225,7 @@ func newSessionTUIModel(events *json.Decoder, requests *json.Encoder, output io.
 		input:              input,
 		styles:             styles,
 		queuedTurns:        make(map[string]string),
+		toolNames:          make(map[string]string),
 		width:              sessionTUIDefaultWidth,
 		height:             sessionTUIDefaultHeight,
 		connectionStatus:   sessionTerminalStatusConnecting,
@@ -529,9 +536,20 @@ func (m *sessionTUIModel) applyEvent(event sessionruntime.Event) sessionTUIComma
 		}
 	case sessionruntime.EventToolStarted:
 		m.finishStreaming()
-		m.appendBlock(sessionTUIBlockTool, event.ToolName)
+		m.appendToolStart(event)
 	case sessionruntime.EventToolCompleted:
-		m.appendBlock(sessionTUIBlockToolStatus, event.Status)
+		toolName, needsAttribution := m.toolCompletionAttribution(event)
+		output := strings.TrimRight(sanitizeSessionTUIToolOutput(event.Output), "\n")
+		if output != "" {
+			m.appendToolOutput(event.ToolID, toolName, output)
+		}
+		if output == "" || !sessionTUIToolSucceeded(event.Status) {
+			status := event.Status
+			if output == "" && needsAttribution && toolName != "" {
+				status = toolName + ": " + status
+			}
+			m.appendBlock(sessionTUIBlockToolStatus, status)
+		}
 	case sessionruntime.EventInputRequested:
 		m.finishStreaming()
 		m.waitingForInput = true
@@ -655,6 +673,52 @@ func (m *sessionTUIModel) finishStreaming() {
 
 func (m *sessionTUIModel) appendBlock(kind sessionTUIBlockKind, text string) {
 	m.blocks = append(m.blocks, sessionTUIBlock{kind: kind, text: text, dirty: true})
+}
+
+func (m *sessionTUIModel) appendToolStart(event sessionruntime.Event) {
+	name := sanitizeSessionTUIToolOutput(event.ToolName)
+	if event.ToolID != "" {
+		m.toolNames[event.ToolID] = name
+	}
+	m.blocks = append(m.blocks, sessionTUIBlock{
+		kind:     sessionTUIBlockTool,
+		text:     name,
+		dirty:    true,
+		toolID:   event.ToolID,
+		toolName: name,
+	})
+}
+
+func (m *sessionTUIModel) appendToolOutput(toolID, toolName, output string) {
+	m.blocks = append(m.blocks, sessionTUIBlock{
+		kind:     sessionTUIBlockToolOutput,
+		text:     output,
+		dirty:    true,
+		toolID:   toolID,
+		toolName: toolName,
+	})
+}
+
+func (m *sessionTUIModel) toolCompletionAttribution(event sessionruntime.Event) (string, bool) {
+	name := sanitizeSessionTUIToolOutput(event.ToolName)
+	if name == "" {
+		name = m.toolNames[event.ToolID]
+	}
+	if name == "" {
+		name = event.ToolID
+	}
+	if event.ToolID != "" {
+		delete(m.toolNames, event.ToolID)
+	}
+	if len(m.blocks) == 0 {
+		return name, true
+	}
+	previous := m.blocks[len(m.blocks)-1]
+	adjacent := previous.kind == sessionTUIBlockTool && previous.toolID == event.ToolID
+	if adjacent {
+		return "", false
+	}
+	return name, true
 }
 
 func (m *sessionTUIModel) appendQueuedUser(turnID, text string) bool {
@@ -850,9 +914,11 @@ func (m *sessionTUIModel) renderBlock(block sessionTUIBlock) string {
 	case sessionTUIBlockUser:
 		return m.renderUserBlock(text)
 	case sessionTUIBlockAssistant:
-		return m.renderIndentedBlock(text, sessionTUIIndent, m.styles.base)
+		return m.renderAssistantBlock(text)
 	case sessionTUIBlockTool:
-		return m.renderIndentedBlock("↳ "+text, sessionTUIIndent, m.styles.tool)
+		return m.renderToolBlock(text)
+	case sessionTUIBlockToolOutput:
+		return m.renderToolOutputBlock(text, block.toolName)
 	case sessionTUIBlockToolStatus:
 		return m.renderIndentedBlock(text, sessionTUIIndent*2, m.statusStyle(text))
 	case sessionTUIBlockNotice:
@@ -868,6 +934,86 @@ func (m *sessionTUIModel) renderBlock(block sessionTUIBlock) string {
 	default:
 		return ""
 	}
+}
+
+func (m *sessionTUIModel) renderAssistantBlock(text string) string {
+	if text == "" {
+		return ""
+	}
+	contentWidth := max(1, m.width-sessionTUIIndent)
+	wrapped := m.styles.base.Width(contentWidth).Render(strings.ReplaceAll(text, "\r\n", "\n"))
+	lines := strings.Split(wrapped, "\n")
+	for index, line := range lines {
+		prefix := strings.Repeat(" ", sessionTUIIndent)
+		if index == 0 {
+			prefix = m.styles.muted.Render("• ")
+		}
+		lines[index] = prefix + line
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m *sessionTUIModel) renderToolBlock(text string) string {
+	if text == "" {
+		return ""
+	}
+	contentWidth := max(1, m.width-sessionTUIIndent)
+	wrapped := m.styles.base.Width(contentWidth).Render("Ran " + strings.ReplaceAll(text, "\r\n", "\n"))
+	lines := strings.Split(wrapped, "\n")
+	for index, line := range lines {
+		prefix := strings.Repeat(" ", sessionTUIIndent)
+		if index == 0 {
+			prefix = m.styles.muted.Render("• ")
+		}
+		lines[index] = prefix + m.styles.tool.Render(line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m *sessionTUIModel) renderToolOutputBlock(output, toolName string) string {
+	if toolName != "" {
+		output = toolName + ": " + output
+	}
+	contentWidth := max(1, m.width-sessionTUIIndent*2)
+	wrapped := m.styles.base.Width(contentWidth).Render(output)
+	lines := strings.Split(wrapped, "\n")
+	if len(lines) > sessionTUIToolOutputMaxLines {
+		head := (sessionTUIToolOutputMaxLines - 1) / 2
+		tail := sessionTUIToolOutputMaxLines - 1 - head
+		omitted := len(lines) - head - tail
+		ellipsis := m.styles.base.Width(contentWidth).Render(fmt.Sprintf("… +%d lines", omitted))
+		lines = append(append(lines[:head:head], ellipsis), lines[len(lines)-tail:]...)
+	}
+	for index, line := range lines {
+		prefix := strings.Repeat(" ", sessionTUIIndent*2)
+		if index == 0 {
+			prefix = "  └ "
+		}
+		lines[index] = m.styles.muted.Render(prefix + line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func sessionTUIToolSucceeded(status string) bool {
+	switch strings.ToLower(status) {
+	case "completed", "success":
+		return true
+	default:
+		return false
+	}
+}
+
+func sanitizeSessionTUIToolOutput(output string) string {
+	output = ansi.Strip(strings.ReplaceAll(output, "\r\n", "\n"))
+	return strings.Map(func(character rune) rune {
+		if character == '\n' || character == '\t' {
+			return character
+		}
+		if unicode.IsControl(character) {
+			return -1
+		}
+		return character
+	}, output)
 }
 
 func (m *sessionTUIModel) renderUserBlock(text string) string {

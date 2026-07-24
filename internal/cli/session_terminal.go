@@ -206,8 +206,11 @@ func runSessionPlainTerminal(ctx context.Context, input io.Reader, output io.Wri
 				}
 				write("%s", event.Text)
 			case sessionruntime.EventAssistantMessage:
-				if !streaming && event.Text != "" {
-					write("%s%s", formatter.assistantPrefix(), event.Text)
+				if streaming {
+					write("\n")
+					streaming = false
+				} else if event.Text != "" {
+					write("%s%s\n", formatter.assistantPrefix(), event.Text)
 				}
 			case sessionruntime.EventToolStarted:
 				if streaming {

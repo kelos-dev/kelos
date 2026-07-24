@@ -54,6 +54,7 @@ type ClaudeProvider struct {
 	interactionCancel context.CancelFunc
 	seenTools         map[string]struct{}
 	hadTextDelta      bool
+	blockText         map[int]string
 	interrupted       bool
 
 	sessionMu sync.Mutex
@@ -155,6 +156,7 @@ func (p *ClaudeProvider) RunTurn(ctx context.Context, prompt string, sink EventS
 	p.interactionCancel = interactionCancel
 	p.seenTools = map[string]struct{}{}
 	p.hadTextDelta = false
+	p.blockText = map[int]string{}
 	p.interrupted = false
 	p.activeMu.Unlock()
 	defer func() {
@@ -165,6 +167,7 @@ func (p *ClaudeProvider) RunTurn(ctx context.Context, prompt string, sink EventS
 		p.interactionCtx = nil
 		p.interactionCancel = nil
 		p.seenTools = nil
+		p.blockText = nil
 		p.interrupted = false
 		p.activeMu.Unlock()
 	}()
@@ -545,6 +548,7 @@ func (p *ClaudeProvider) emitClaudeStreamEvent(raw json.RawMessage, sink EventSi
 	}
 	var event struct {
 		Type         string `json:"type"`
+		Index        int    `json:"index"`
 		ContentBlock struct {
 			Type string `json:"type"`
 			ID   string `json:"id"`
@@ -563,12 +567,25 @@ func (p *ClaudeProvider) emitClaudeStreamEvent(raw json.RawMessage, sink EventSi
 		if event.Delta.Type == "text_delta" && event.Delta.Text != "" {
 			p.activeMu.Lock()
 			p.hadTextDelta = true
+			if p.blockText != nil {
+				p.blockText[event.Index] += event.Delta.Text
+			}
 			p.activeMu.Unlock()
 			sink.Emit(Event{Type: EventAssistantDelta, Text: event.Delta.Text})
 		}
 	case "content_block_start":
 		if event.ContentBlock.Type == "tool_use" {
 			p.emitClaudeToolStart(event.ContentBlock.ID, event.ContentBlock.Name, sink)
+		}
+	case "content_block_stop":
+		// Close the streamed text bubble for this block so clients render
+		// each text block separately instead of concatenating a turn's text.
+		p.activeMu.Lock()
+		text := p.blockText[event.Index]
+		delete(p.blockText, event.Index)
+		p.activeMu.Unlock()
+		if text != "" {
+			sink.Emit(Event{Type: EventAssistantMessage, Text: text})
 		}
 	}
 }

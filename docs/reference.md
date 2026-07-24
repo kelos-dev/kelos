@@ -1170,12 +1170,15 @@ Kelos collects anonymous, aggregate usage data to help improve the project. A `k
 | Installation ID | Random UUID, generated once per cluster |
 | Kelos version | Installed controller version |
 | Kubernetes version | Cluster K8s version |
-| Task counts | Total tasks, breakdown by type and phase |
+| Task counts | Total Tasks, breakdown by effective agent type and phase |
+| Session counts | Total Sessions, breakdown by agent type and phase |
+| TaskSpawner sources | TaskSpawner counts by configured source type |
+| WorkerPool scale | WorkerPool counts by phase and aggregate desired, current, and ready replicas |
 | Resource adoption | Number of each resource in the latest Kelos API version and TaskSpawner source types in use |
 | Scale | Number of namespaces with Kelos resources |
 | Usage totals | Aggregate cost (USD), input tokens, and output tokens |
 
-No personal data, repository names, prompts, or source code is collected.
+No personal data, resource or namespace names, repository names, prompts, or source code is collected. Reports are sent as profile-less PostHog events.
 
 ### Disabling Telemetry
 

@@ -47,15 +47,18 @@ type PostHogClient interface {
 
 // Report contains anonymous aggregate telemetry data.
 type Report struct {
-	InstallationID string         `json:"installationId"`
-	Version        string         `json:"version"`
-	K8sVersion     string         `json:"k8sVersion"`
-	Environment    string         `json:"environment"`
-	Tasks          TaskReport     `json:"tasks"`
-	Features       FeatureReport  `json:"features"`
-	Resources      ResourceReport `json:"resources"`
-	Scale          ScaleReport    `json:"scale"`
-	Usage          UsageReport    `json:"usage"`
+	InstallationID string            `json:"installationId"`
+	Version        string            `json:"version"`
+	K8sVersion     string            `json:"k8sVersion"`
+	Environment    string            `json:"environment"`
+	Tasks          TaskReport        `json:"tasks"`
+	Sessions       SessionReport     `json:"sessions"`
+	TaskSpawners   TaskSpawnerReport `json:"taskSpawners"`
+	WorkerPools    WorkerPoolReport  `json:"workerPools"`
+	Features       FeatureReport     `json:"features"`
+	Resources      ResourceReport    `json:"resources"`
+	Scale          ScaleReport       `json:"scale"`
+	Usage          UsageReport       `json:"usage"`
 }
 
 // TaskReport contains aggregate task counts.
@@ -63,6 +66,28 @@ type TaskReport struct {
 	Total   int            `json:"total"`
 	ByType  map[string]int `json:"byType"`
 	ByPhase map[string]int `json:"byPhase"`
+}
+
+// SessionReport contains aggregate Session counts.
+type SessionReport struct {
+	Total   int            `json:"total"`
+	ByType  map[string]int `json:"byType"`
+	ByPhase map[string]int `json:"byPhase"`
+}
+
+// TaskSpawnerReport contains aggregate TaskSpawner counts.
+type TaskSpawnerReport struct {
+	Total    int            `json:"total"`
+	BySource map[string]int `json:"bySource"`
+}
+
+// WorkerPoolReport contains aggregate WorkerPool counts and replica totals.
+type WorkerPoolReport struct {
+	Total           int            `json:"total"`
+	ByPhase         map[string]int `json:"byPhase"`
+	DesiredReplicas int64          `json:"desiredReplicas"`
+	CurrentReplicas int64          `json:"currentReplicas"`
+	ReadyReplicas   int64          `json:"readyReplicas"`
 }
 
 // FeatureReport contains feature adoption counts.
@@ -97,7 +122,7 @@ func NewPostHogClient(endpoint string) (PostHogClient, error) {
 
 // Run collects anonymous aggregate telemetry and sends it to PostHog.
 func Run(ctx context.Context, log logr.Logger, c client.Client, clientset kubernetes.Interface, phClient PostHogClient, env string) error {
-	log.Info("Collecting anonymous usage data (task counts, feature adoption, scale metrics). " +
+	log.Info("Collecting anonymous usage data (resource counts, task and Session breakdowns, TaskSpawner sources, WorkerPool scale, usage totals). " +
 		"No personal data is collected. " +
 		"To disable: kelos install --disable-heartbeat")
 
@@ -129,6 +154,16 @@ func collect(ctx context.Context, c client.Client, clientset kubernetes.Interfac
 			ByType:  make(map[string]int),
 			ByPhase: make(map[string]int),
 		},
+		Sessions: SessionReport{
+			ByType:  make(map[string]int),
+			ByPhase: make(map[string]int),
+		},
+		TaskSpawners: TaskSpawnerReport{
+			BySource: make(map[string]int),
+		},
+		WorkerPools: WorkerPoolReport{
+			ByPhase: make(map[string]int),
+		},
 		Features:  FeatureReport{},
 		Resources: make(ResourceReport),
 		Scale:     ScaleReport{},
@@ -156,35 +191,67 @@ func collect(ctx context.Context, c client.Client, clientset kubernetes.Interfac
 		return nil, fmt.Errorf("collecting resource counts: %w", err)
 	}
 
-	// Collect task data.
+	// Collect WorkerPool data before Tasks so WorkerPool-backed Tasks can be
+	// attributed to the pool's effective agent type.
+	var workerPools kelos.WorkerPoolList
+	if err := c.List(ctx, &workerPools); err != nil {
+		return nil, fmt.Errorf("listing worker pools: %w", err)
+	}
+	report.WorkerPools.Total = len(workerPools.Items)
+	workerPoolTypes := make(map[types.NamespacedName]string, len(workerPools.Items))
+	for i := range workerPools.Items {
+		pool := &workerPools.Items[i]
+		workerPoolTypes[client.ObjectKeyFromObject(pool)] = normalizeAgentType(pool.Spec.Worker.Type)
+		report.WorkerPools.ByPhase[normalizeWorkerPoolPhase(pool.Status.Phase)]++
+
+		desiredReplicas := int32(1)
+		if pool.Spec.Replicas != nil {
+			desiredReplicas = *pool.Spec.Replicas
+		}
+		report.WorkerPools.DesiredReplicas += int64(desiredReplicas)
+		report.WorkerPools.CurrentReplicas += int64(pool.Status.Replicas)
+		report.WorkerPools.ReadyReplicas += int64(pool.Status.ReadyReplicas)
+	}
+
+	// TaskRecords are the canonical source for completed usage because they
+	// remain available after Tasks are deleted by TTL.
+	var taskRecords kelos.TaskRecordList
+	if err := c.List(ctx, &taskRecords); err != nil {
+		return nil, fmt.Errorf("listing task records: %w", err)
+	}
+	recordedTaskUIDs := make(map[types.UID]struct{}, len(taskRecords.Items))
+	for i := range taskRecords.Items {
+		record := &taskRecords.Items[i]
+		if record.Spec.Usage == nil {
+			continue
+		}
+		addUsage(&report.Usage, record.Spec.Usage)
+		if record.Spec.TaskRef.UID != "" {
+			recordedTaskUIDs[record.Spec.TaskRef.UID] = struct{}{}
+		}
+	}
+
+	// Collect Task data.
 	var tasks kelos.TaskList
 	if err := c.List(ctx, &tasks); err != nil {
 		return nil, fmt.Errorf("listing tasks: %w", err)
 	}
 	report.Tasks.Total = len(tasks.Items)
-	for _, t := range tasks.Items {
-		report.Tasks.ByType[t.Spec.Type]++
-		if t.Status.Phase != "" {
-			report.Tasks.ByPhase[string(t.Status.Phase)]++
+	for i := range tasks.Items {
+		task := &tasks.Items[i]
+		report.Tasks.ByType[effectiveTaskType(task, workerPoolTypes)]++
+		report.Tasks.ByPhase[normalizeTaskPhase(task.Status.Phase)]++
+
+		if task.UID != "" {
+			if _, recorded := recordedTaskUIDs[task.UID]; recorded {
+				continue
+			}
 		}
 
-		// Aggregate usage from results.
-		if t.Status.Results != nil {
-			if v, ok := t.Status.Results["cost_usd"]; ok {
-				if f, err := strconv.ParseFloat(v, 64); err == nil {
-					report.Usage.TotalCostUSD += f
-				}
-			}
-			if v, ok := t.Status.Results["input_tokens"]; ok {
-				if f, err := strconv.ParseFloat(v, 64); err == nil {
-					report.Usage.TotalInputTokens += f
-				}
-			}
-			if v, ok := t.Status.Results["output_tokens"]; ok {
-				if f, err := strconv.ParseFloat(v, 64); err == nil {
-					report.Usage.TotalOutputTokens += f
-				}
-			}
+		if task.Status.Usage != nil {
+			addUsage(&report.Usage, task.Status.Usage)
+		} else {
+			addLegacyResultUsage(&report.Usage, task.Status.Results)
 		}
 	}
 
@@ -194,8 +261,12 @@ func collect(ctx context.Context, c client.Client, clientset kubernetes.Interfac
 		return nil, fmt.Errorf("listing task spawners: %w", err)
 	}
 	report.Features.TaskSpawners = len(spawners.Items)
+	report.TaskSpawners.Total = len(spawners.Items)
 	sourceTypes := make(map[string]struct{})
-	for _, s := range spawners.Items {
+	for i := range spawners.Items {
+		s := &spawners.Items[i]
+		report.TaskSpawners.BySource[taskSpawnerSource(s.Spec.When)]++
+
 		if s.Spec.When.GitHubIssues != nil {
 			sourceTypes["github"] = struct{}{}
 		}
@@ -210,6 +281,18 @@ func collect(ctx context.Context, c client.Client, clientset kubernetes.Interfac
 		report.Features.SourceTypes = append(report.Features.SourceTypes, st)
 	}
 	sort.Strings(report.Features.SourceTypes)
+
+	// Collect Session data.
+	var sessions kelos.SessionList
+	if err := c.List(ctx, &sessions); err != nil {
+		return nil, fmt.Errorf("listing sessions: %w", err)
+	}
+	report.Sessions.Total = len(sessions.Items)
+	for i := range sessions.Items {
+		session := &sessions.Items[i]
+		report.Sessions.ByType[normalizeAgentType(session.Spec.Worker.Type)]++
+		report.Sessions.ByPhase[normalizeSessionPhase(session.Status.Phase)]++
+	}
 
 	// Collect AgentConfig data (v1alpha2 is the storage version).
 	var agentConfigs kelos.AgentConfigList
@@ -228,6 +311,118 @@ func collect(ctx context.Context, c client.Client, clientset kubernetes.Interfac
 	report.Scale.Namespaces = len(namespaces)
 
 	return report, nil
+}
+
+func effectiveTaskType(task *kelos.Task, workerPoolTypes map[types.NamespacedName]string) string {
+	if task.Spec.Worker != nil {
+		return normalizeAgentType(task.Spec.Worker.Type)
+	}
+	if task.Spec.WorkerPoolRef != nil {
+		if workerType, ok := workerPoolTypes[types.NamespacedName{
+			Namespace: task.Namespace,
+			Name:      task.Spec.WorkerPoolRef.Name,
+		}]; ok {
+			return workerType
+		}
+		return "unknown"
+	}
+	return normalizeAgentType(task.Spec.Type)
+}
+
+func normalizeAgentType(agentType string) string {
+	switch agentType {
+	case "claude-code", "codex", "gemini", "opencode", "cursor":
+		return agentType
+	default:
+		return "unknown"
+	}
+}
+
+func normalizeTaskPhase(phase kelos.TaskPhase) string {
+	switch phase {
+	case kelos.TaskPhasePending,
+		kelos.TaskPhaseRunning,
+		kelos.TaskPhaseSucceeded,
+		kelos.TaskPhaseFailed,
+		kelos.TaskPhaseWaiting:
+		return string(phase)
+	default:
+		return "Unknown"
+	}
+}
+
+func normalizeSessionPhase(phase kelos.SessionPhase) string {
+	switch phase {
+	case kelos.SessionPhasePending, kelos.SessionPhaseReady, kelos.SessionPhaseFailed:
+		return string(phase)
+	default:
+		return "Unknown"
+	}
+}
+
+func normalizeWorkerPoolPhase(phase kelos.WorkerPoolPhase) string {
+	switch phase {
+	case kelos.WorkerPoolPhasePending,
+		kelos.WorkerPoolPhaseReady,
+		kelos.WorkerPoolPhaseScaling,
+		kelos.WorkerPoolPhaseFailed:
+		return string(phase)
+	default:
+		return "Unknown"
+	}
+}
+
+func taskSpawnerSource(when kelos.When) string {
+	switch {
+	case when.GitHubIssues != nil:
+		return "github_issues"
+	case when.GitHubPullRequests != nil:
+		return "github_pull_requests"
+	case when.GitHubWebhook != nil:
+		return "github_webhook"
+	case when.LinearWebhook != nil:
+		return "linear_webhook"
+	case when.GenericWebhook != nil:
+		return "generic_webhook"
+	case when.Cron != nil:
+		return "cron"
+	case when.Jira != nil:
+		return "jira"
+	case when.Slack != nil:
+		return "slack"
+	default:
+		return "unknown"
+	}
+}
+
+func addUsage(report *UsageReport, usage *kelos.TaskUsage) {
+	if usage.CostUSD != nil {
+		report.TotalCostUSD += usage.CostUSD.AsApproximateFloat64()
+	}
+	if usage.InputTokens != nil {
+		report.TotalInputTokens += float64(*usage.InputTokens)
+	}
+	if usage.OutputTokens != nil {
+		report.TotalOutputTokens += float64(*usage.OutputTokens)
+	}
+}
+
+func addLegacyResultUsage(report *UsageReport, results map[string]string) {
+	if v, ok := results["cost_usd"]; ok {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			report.TotalCostUSD += f
+		}
+	}
+	if v, ok := results["input_tokens"]; ok {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			report.TotalInputTokens += f
+		}
+	}
+	if v, ok := results["output_tokens"]; ok {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			report.TotalOutputTokens += f
+		}
+	}
 }
 
 func collectResourceCounts(ctx context.Context, c client.Client, namespaces map[string]struct{}) (ResourceReport, error) {
@@ -286,6 +481,16 @@ func send(phClient PostHogClient, report *Report) error {
 		Set("tasks_total", report.Tasks.Total).
 		Set("tasks_by_type", report.Tasks.ByType).
 		Set("tasks_by_phase", report.Tasks.ByPhase).
+		Set("sessions_total", report.Sessions.Total).
+		Set("sessions_by_type", report.Sessions.ByType).
+		Set("sessions_by_phase", report.Sessions.ByPhase).
+		Set("taskspawners_total", report.TaskSpawners.Total).
+		Set("taskspawners_by_source", report.TaskSpawners.BySource).
+		Set("workerpools_total", report.WorkerPools.Total).
+		Set("workerpools_by_phase", report.WorkerPools.ByPhase).
+		Set("workerpools_desired_replicas", report.WorkerPools.DesiredReplicas).
+		Set("workerpools_current_replicas", report.WorkerPools.CurrentReplicas).
+		Set("workerpools_ready_replicas", report.WorkerPools.ReadyReplicas).
 		Set("feature_task_spawners", report.Features.TaskSpawners).
 		Set("feature_agent_configs", report.Features.AgentConfigs).
 		Set("feature_workspaces", report.Features.Workspaces).
@@ -293,7 +498,8 @@ func send(phClient PostHogClient, report *Report) error {
 		Set("scale_namespaces", report.Scale.Namespaces).
 		Set("usage_total_cost_usd", report.Usage.TotalCostUSD).
 		Set("usage_total_input_tokens", report.Usage.TotalInputTokens).
-		Set("usage_total_output_tokens", report.Usage.TotalOutputTokens)
+		Set("usage_total_output_tokens", report.Usage.TotalOutputTokens).
+		Set("$process_person_profile", false)
 	for resource, count := range report.Resources {
 		properties.Set("resources_"+resource, count)
 	}

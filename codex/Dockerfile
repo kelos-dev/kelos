@@ -3,6 +3,7 @@ FROM ubuntu:24.04
 ARG GO_VERSION=1.25.0
 
 RUN apt-get update && apt-get install -y \
+    bubblewrap \
     make \
     curl \
     ca-certificates \
@@ -29,6 +30,7 @@ ENV PATH="/usr/local/go/bin:${PATH}"
 
 ARG CODEX_VERSION=0.145.0
 RUN npm install -g @openai/codex@${CODEX_VERSION}
+RUN command -v bwrap
 
 COPY codex/kelos_entrypoint.sh /kelos_entrypoint.sh
 

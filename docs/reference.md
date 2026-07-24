@@ -213,6 +213,7 @@ the Session resource and is visible through the Kubernetes API.
 | `spec.initialBranch` | Git branch used to initialize the Session workspace. Checks out the branch from `origin` when it exists, or creates it from the Workspace ref. Requires `spec.worker.workspaceRef` | No |
 | `spec.initialPrompt` | Prompt submitted when the Session starts without retained conversation history. An `emptyDir` workspace may submit it again after Pod replacement | No |
 | `spec.volumeClaimTemplate` | PersistentVolumeClaimSpec for the Session workspace. Recommended for durable Sessions; omit to use an ephemeral `emptyDir` workspace | No |
+| `spec.idleTTLSeconds` | Automatically delete the Session after it has been idle (no active turn, no reported activity) this many seconds, measured from the later of `status.lastActivityTime` and the creation time. Deleting the Session removes its workspace storage. Omit to never reap; zero reaps as soon as it goes idle | No |
 | `status.phase` | Infrastructure phase: `Pending`, `Ready`, or `Failed` | Output |
 | `status.podName` | Session Pod name | Output |
 | `status.podUID` | Identity of the Pod running the live conversation | Output |

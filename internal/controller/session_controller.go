@@ -58,7 +58,7 @@ type SessionReconciler struct {
 	TokenClient                   *githubapp.TokenClient
 }
 
-// +kubebuilder:rbac:groups=kelos.dev,resources=sessions,verbs=get;list;watch;patch
+// +kubebuilder:rbac:groups=kelos.dev,resources=sessions,verbs=get;list;watch;patch;delete
 // +kubebuilder:rbac:groups=kelos.dev,resources=sessions/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;delete
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;delete;patch
@@ -81,6 +81,20 @@ func (r *SessionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 		logger.Error(err, "Unable to fetch Session")
 		return ctrl.Result{}, err
+	}
+
+	if session.DeletionTimestamp == nil && session.Annotations[sessionreset.RequestAnnotation] == "" {
+		if expired, _ := sessionIdleExpired(&session); expired {
+			logger.Info("Deleting Session due to idle TTL expiration", "session", session.Name)
+			if r.Recorder != nil {
+				r.Recorder.Event(&session, corev1.EventTypeNormal, "SessionIdleReaped", "Deleting Session after exceeding its idle TTL")
+			}
+			if err := r.Delete(ctx, &session); err != nil && !apierrors.IsNotFound(err) {
+				logger.Error(err, "Unable to delete idle Session", "session", session.Name)
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{}, nil
+		}
 	}
 
 	workloadName := sessionWorkloadName(&session)
@@ -171,6 +185,11 @@ func (r *SessionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 	if waitingForUpdate && (result.RequeueAfter == 0 || updateResult.RequeueAfter < result.RequeueAfter) {
 		result = updateResult
+	}
+	if _, remaining := sessionIdleExpired(&session); remaining > 0 {
+		if result.RequeueAfter == 0 || remaining < result.RequeueAfter {
+			result.RequeueAfter = remaining
+		}
 	}
 	return result, nil
 }
@@ -1203,6 +1222,43 @@ func sessionLabelValue(session *kelos.Session) string {
 	}
 	sum := sha256.Sum256([]byte(session.Name))
 	return hex.EncodeToString(sum[:16])
+}
+
+// sessionIdleExpired reports whether an idle Session has exceeded its idle TTL.
+// It returns (true, 0) if the Session should be deleted now, or (false, duration)
+// if it should be requeued after the given duration. A Session is only considered
+// idle when its Active condition is explicitly False; an active or unknown turn
+// never counts as idle.
+func sessionIdleExpired(session *kelos.Session) (bool, time.Duration) {
+	if session.Spec.IdleTTLSeconds == nil {
+		return false, 0
+	}
+	active := apiMeta.FindStatusCondition(session.Status.Conditions, kelos.SessionConditionActive)
+	if active == nil || active.Status != metav1.ConditionFalse {
+		return false, 0
+	}
+	ttl := time.Duration(*session.Spec.IdleTTLSeconds) * time.Second
+	expireAt := sessionIdleSince(session).Add(ttl)
+	remaining := time.Until(expireAt)
+	if remaining <= 0 {
+		return true, 0
+	}
+	return false, remaining
+}
+
+// sessionIdleSince returns the time from which Session idleness is measured: the
+// later of the Session creation time, the last reported activity time, and the
+// most recent Active condition transition.
+func sessionIdleSince(session *kelos.Session) time.Time {
+	since := session.CreationTimestamp.Time
+	if last := session.Status.LastActivityTime; last != nil && last.After(since) {
+		since = last.Time
+	}
+	if active := apiMeta.FindStatusCondition(session.Status.Conditions, kelos.SessionConditionActive); active != nil &&
+		active.Status != metav1.ConditionUnknown && active.LastTransitionTime.After(since) {
+		since = active.LastTransitionTime.Time
+	}
+	return since
 }
 
 func sessionPhaseForPod(pod *corev1.Pod) (kelos.SessionPhase, string, string) {

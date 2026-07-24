@@ -56,6 +56,18 @@ spec:
           spec:
             description: SessionSpec defines the desired state of a Session.
             properties:
+              idleTTLSeconds:
+                description: |-
+                  IdleTTLSeconds automatically deletes the Session after it has been idle for
+                  the given number of seconds. A Session is idle when it has no active turn
+                  and reports no activity; idleness is measured from the later of the last
+                  reported activity time and the Session creation time. Deleting the Session
+                  removes its workspace storage, so any uncommitted workspace changes are lost.
+                  If this field is unset, the Session is never reaped for idleness. If it is
+                  set to zero, the Session is eligible for deletion as soon as it goes idle.
+                format: int32
+                minimum: 0
+                type: integer
               initialBranch:
                 description: |-
                   InitialBranch is the git branch to check out when initializing the Session

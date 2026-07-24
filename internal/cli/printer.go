@@ -419,6 +419,9 @@ func printSessionDetail(w io.Writer, session *kelos.Session) {
 	if condition := apiMeta.FindStatusCondition(session.Status.Conditions, kelos.SessionConditionActive); condition != nil {
 		printField(w, "Active", string(condition.Status))
 	}
+	if session.Spec.IdleTTLSeconds != nil {
+		printField(w, "Idle TTL", fmt.Sprintf("%ds", *session.Spec.IdleTTLSeconds))
+	}
 	if credentials := session.Spec.Worker.Credentials; credentials != nil {
 		printField(w, "Credential Type", string(credentials.Type))
 		if credentials.SecretRef != nil {

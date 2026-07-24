@@ -752,6 +752,8 @@ The `promptTemplate` field uses Go `text/template` syntax. Available variables d
 | `spec.taskTemplate.contextSources[].http.method` | HTTP method: `GET` or `POST` (default: `GET`) | No |
 | `spec.taskTemplate.contextSources[].http.headers` | Static HTTP headers. Values support Go `text/template` variables from the work item | No |
 | `spec.taskTemplate.contextSources[].http.headersFrom` | HTTP header values sourced from Kubernetes Secrets in the same namespace as the TaskSpawner. Each entry sets `header` to the HTTP header name, `secretName` to the Secret name, and `secretKey` to the key within the Secret. Merged with `headers`; `headersFrom` wins on conflict. Maximum 16 entries | No |
+| `spec.taskTemplate.contextSources[].http.githubAppAuth.secretName` | Name of a Secret in the same namespace as the TaskSpawner holding GitHub App credentials (`appID`, `installationID`, `privateKey` keys). When set, an `Authorization: token <installation-token>` header is minted and added to the request. An explicit `Authorization` header from `headers`/`headersFrom` takes precedence and disables this. The token is reused across work items until it nears expiry | No |
+| `spec.taskTemplate.contextSources[].http.githubAppAuth.apiBaseURL` | GitHub API base URL used to mint installation tokens (default: `https://api.github.com`). Set for GitHub Enterprise Server, e.g. `https://github.example.com/api/v3` | No |
 | `spec.taskTemplate.contextSources[].http.body` | Request body template (Go `text/template`); used with `POST` | No |
 | `spec.taskTemplate.contextSources[].http.responseFilter.type` | Filter language for extracting a subset of the response. Currently only `JSONPath` is supported | No |
 | `spec.taskTemplate.contextSources[].http.responseFilter.expression` | Filter expression (e.g., `$.data.value` for JSONPath). When set, only the extracted value is stored; otherwise the entire response body is used | Conditional |
@@ -800,6 +802,20 @@ spec:
 
       Linked Jira description:
       {{.Context.jira}}
+```
+
+Example — fetch a GitHub API resource authenticated with a GitHub App installation token, reusing an existing GitHub App Secret:
+
+```yaml
+    contextSources:
+      - name: pr
+        http:
+          url: "https://api.github.com/repos/my-org/my-repo/pulls/{{.Number}}"
+          githubAppAuth:
+            secretName: my-github-app
+          responseFilter:
+            type: JSONPath
+            expression: "$.body"
 ```
 
 ## Task Status

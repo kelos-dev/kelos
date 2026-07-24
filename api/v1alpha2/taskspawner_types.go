@@ -475,6 +475,18 @@ type GitHubWebhookFilter struct {
 	// keys), then the webhook server's global GitHub token resolver.
 	// +optional
 	FilePatterns *FilePatterns `json:"filePatterns,omitempty"`
+
+	// Conclusion filters check_run events by the check run's conclusion.
+	// Ignored for other event types.
+	// +optional
+	// +kubebuilder:validation:Enum=success;failure;cancelled;timed_out;action_required;neutral;skipped;stale
+	Conclusion string `json:"conclusion,omitempty"`
+
+	// CheckName filters check_run events by the check run's name (exact match
+	// or glob, e.g. "lint", "unit-tests", "build-*"). Ignored for other event
+	// types.
+	// +optional
+	CheckName string `json:"checkName,omitempty"`
 }
 
 // LinearWebhook configures webhook-driven task spawning from Linear events.

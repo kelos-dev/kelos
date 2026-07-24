@@ -1,0 +1,101 @@
+apiVersion: kelos.dev/v1alpha2
+kind: TaskSpawner
+metadata:
+  name: ci-failure-fixer
+  namespace: default
+spec:
+  # Watch for failing CI checks and dispatch an agent to diagnose and fix them.
+  when:
+    githubWebhook:
+      repository: myorg/myrepo
+      events:
+        - "check_run"
+
+      # Do not react to check runs reported by our own automation.
+      excludeAuthors:
+        - "github-actions[bot]"
+        - "kelos-bot[bot]"
+
+      # Only spawn on completed, failed check runs, scoped by check name.
+      # Filters use OR semantics within the same event type.
+      filters:
+        - event: "check_run"
+          action: "completed"
+          conclusion: "failure"
+          checkName: "lint"
+        - event: "check_run"
+          action: "completed"
+          conclusion: "failure"
+          checkName: "unit-tests"
+        - event: "check_run"
+          action: "completed"
+          conclusion: "failure"
+          checkName: "build"
+
+  # Limit how many remediation agents run at once.
+  maxConcurrency: 2
+
+  taskTemplate:
+    type: claude-code
+    credentials:
+      type: api-key
+      secretRef:
+        name: claude-credentials
+    workspaceRef:
+      name: my-repo-workspace
+
+    # Work on the PR head branch that the check ran against.
+    branch: "{{.Branch}}"
+
+    # Collapse the burst of check_run deliveries for a single PR + check into a
+    # single Task. (.Context values are not available to nameTemplate.)
+    nameTemplate: "ci-fix-{{.Number}}-{{.CheckName}}"
+
+    promptTemplate: |
+      A CI check failed on a pull request. Diagnose and fix it.
+
+      ## CI failure details
+      - Check name: {{.CheckName}}
+      - Conclusion: {{.Conclusion}}
+      - PR #{{.Number}} on branch: {{.Branch}}
+      - Commit: {{.HeadSHA}}
+      - CI logs: {{.CheckRunURL}}
+
+      ## Steps
+      1. Read the PR diff: `gh pr diff {{.Number}}`
+      2. Fetch the failing check's annotations:
+         ```
+         run_id=$(gh api repos/{{.Repository}}/commits/{{.HeadSHA}}/check-runs \
+           --jq '.check_runs[] | select(.name=="{{.CheckName}}") | .id')
+         gh api repos/{{.Repository}}/check-runs/$run_id/annotations --jq '.[]'
+         ```
+      3. Identify the root cause from the logs and annotations.
+      4. Make the minimal change needed to pass the check.
+      5. Run the equivalent local check (e.g. `make verify`, `make test`).
+      6. Commit and push to `origin {{.Branch}}`.
+
+      ## Rules
+      - Do NOT refactor or improve code beyond fixing the CI failure.
+      - If the failure looks flaky (passes locally), comment on the PR instead of pushing.
+      - If you cannot determine the fix, comment on the PR explaining the failure.
+
+    metadata:
+      labels:
+        kelos.dev/trigger: "webhook"
+        kelos.dev/check: "{{.CheckName}}"
+      annotations:
+        kelos.dev/github-check-url: "{{.CheckRunURL}}"
+
+    ttlSecondsAfterFinished: 3600
+
+---
+# Example workspace configuration (referenced above)
+apiVersion: kelos.dev/v1alpha2
+kind: Workspace
+metadata:
+  name: my-repo-workspace
+  namespace: default
+spec:
+  repo: "https://github.com/myorg/myrepo.git"
+  # secretRef:
+  #   name: github-token

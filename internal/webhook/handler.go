@@ -886,6 +886,12 @@ func webhookSourceKind(eventType string, eventData *GitHubEventData) string {
 			return "pull-request"
 		}
 		return "issue"
+	case "check_run":
+		// A check_run is associated with a PR when the webhook payload links one.
+		if eventData.Number > 0 {
+			return "pull-request"
+		}
+		return "issue"
 	default:
 		return "issue"
 	}

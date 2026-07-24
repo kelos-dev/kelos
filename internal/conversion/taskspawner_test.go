@@ -262,6 +262,43 @@ func TestTaskSpawnerConvert_ModernFieldsRoundTrip(t *testing.T) {
 	}
 }
 
+// TestTaskSpawnerConvert_CheckRunFilterFieldsDownConvert verifies that the
+// v1alpha2-only check_run filter fields (Conclusion, CheckName) convert down to
+// v1alpha1 without error. v1alpha1 has no equivalent fields, so they are dropped
+// on down-conversion while the filter's shared fields are preserved.
+func TestTaskSpawnerConvert_CheckRunFilterFieldsDownConvert(t *testing.T) {
+	src := &v1alpha2.TaskSpawner{
+		Spec: v1alpha2.TaskSpawnerSpec{
+			When: v1alpha2.When{
+				GitHubWebhook: &v1alpha2.GitHubWebhook{
+					Events: []string{"check_run"},
+					Filters: []v1alpha2.GitHubWebhookFilter{
+						{
+							Event:      "check_run",
+							Action:     "completed",
+							Conclusion: "failure",
+							CheckName:  "lint*",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	dst := &v1alpha1.TaskSpawner{}
+	if err := taskSpawnerFromHub(context.Background(), src, dst); err != nil {
+		t.Fatalf("taskSpawnerFromHub() error = %v", err)
+	}
+
+	if dst.Spec.When.GitHubWebhook == nil || len(dst.Spec.When.GitHubWebhook.Filters) != 1 {
+		t.Fatalf("expected one webhook filter after down-conversion, got %#v", dst.Spec.When.GitHubWebhook)
+	}
+	filter := dst.Spec.When.GitHubWebhook.Filters[0]
+	if filter.Event != "check_run" || filter.Action != "completed" {
+		t.Errorf("shared filter fields not preserved: %#v", filter)
+	}
+}
+
 func TestTaskSpawnerFromHub_BackfillsLegacyFields(t *testing.T) {
 	src := &v1alpha2.TaskSpawner{
 		Spec: v1alpha2.TaskSpawnerSpec{

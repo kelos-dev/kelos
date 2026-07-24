@@ -127,6 +127,12 @@ func ParseGitHubWebhook(eventType string, payload []byte) (*GitHubEventData, err
 			data.RepositoryOwner = repo.GetOwner().GetLogin()
 			data.RepositoryName = repo.GetName()
 		}
+	case *github.CheckRunEvent:
+		if repo := e.GetRepo(); repo != nil {
+			data.Repository = repo.GetFullName()
+			data.RepositoryOwner = repo.GetOwner().GetLogin()
+			data.RepositoryName = repo.GetName()
+		}
 	}
 
 	// Extract common fields based on event type
@@ -252,6 +258,26 @@ func ParseGitHubWebhook(eventType string, payload []byte) (*GitHubEventData, err
 			data.Body = release.GetBody()
 			data.URL = release.GetHTMLURL()
 			data.ID = fmt.Sprintf("%d", release.GetID())
+		}
+
+	case *github.CheckRunEvent:
+		data.Action = e.GetAction()
+		data.Sender = e.GetSender().GetLogin()
+		if cr := e.GetCheckRun(); cr != nil {
+			data.ID = fmt.Sprintf("%d", cr.GetID())
+			data.Title = cr.GetName()
+			data.URL = cr.GetHTMLURL()
+			// The check run's head SHA identifies the commit under test.
+			data.HeadSHA = cr.GetHeadSHA()
+			// A check run may be associated with one or more pull requests.
+			// Use the first to expose the PR branch and number to templates.
+			for _, pr := range cr.PullRequests {
+				if head := pr.GetHead(); head != nil {
+					data.Branch = head.GetRef()
+					data.Number = pr.GetNumber()
+					break
+				}
+			}
 		}
 
 	default:
@@ -639,6 +665,26 @@ func matchesFilterWithoutFilePatterns(filter kelos.GitHubWebhookFilter, eventDat
 				}
 			}
 		}
+
+	case *github.CheckRunEvent:
+		if cr := e.GetCheckRun(); cr != nil {
+			// Conclusion filter (exact match).
+			if filter.Conclusion != "" && filter.Conclusion != cr.GetConclusion() {
+				return false
+			}
+
+			// CheckName filter (exact match or glob).
+			if filter.CheckName != "" {
+				matched, err := filepath.Match(filter.CheckName, cr.GetName())
+				if err != nil {
+					filterLog.Error(err, "Invalid checkName glob pattern, rejecting event", "pattern", filter.CheckName)
+					return false
+				}
+				if !matched {
+					return false
+				}
+			}
+		}
 	}
 
 	return true
@@ -714,6 +760,28 @@ func ExtractGitHubWorkItem(eventData *GitHubEventData) map[string]interface{} {
 	}
 	if eventData.RefType != "" {
 		vars["RefType"] = eventData.RefType
+	}
+
+	// For check_run events, add CI-specific variables so remediation task
+	// templates can reference the failed check, its logs, and the commit.
+	if crEvent, ok := eventData.RawEvent.(*github.CheckRunEvent); ok {
+		if cr := crEvent.GetCheckRun(); cr != nil {
+			if name := cr.GetName(); name != "" {
+				vars["CheckName"] = name
+			}
+			if conclusion := cr.GetConclusion(); conclusion != "" {
+				vars["Conclusion"] = conclusion
+			}
+			if url := cr.GetHTMLURL(); url != "" {
+				vars["CheckRunURL"] = url
+			}
+			if sha := cr.GetHeadSHA(); sha != "" {
+				vars["HeadSHA"] = sha
+			}
+			if app := cr.GetApp(); app != nil && app.GetName() != "" {
+				vars["CheckApp"] = app.GetName()
+			}
+		}
 	}
 
 	return vars

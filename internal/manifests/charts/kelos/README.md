@@ -236,9 +236,9 @@ must already exist. Session, Workspace, AgentConfig, and previously used
 credential options are loaded only from the active namespace. The creation
 form and selected Session header can assign Sessions to sidebar sections.
 Assignments are stored in the `kelos.dev/session-section` annotation, and
-existing section names in the active namespace are suggested when creating a
-Session. The creation dialog can generate a new Session from an existing
-Session in that namespace,
+the controls list existing section names in the active namespace or create a
+section once for later reuse. The creation dialog can generate a new Session
+from an existing Session in that namespace,
 copying its complete `Session.spec` into the form and editable YAML manifest but
 not copying its metadata, conversation, or volume data. The creation form
 accepts provider, credentials, model, Workspace, AgentConfig references, and an

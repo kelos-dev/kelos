@@ -314,6 +314,17 @@ func TestApplicationSessionHistoryBehavior(t *testing.T) {
 	}
 }
 
+func TestApplicationSectionChooserBehavior(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node.js is not installed")
+	}
+	command := exec.Command(node, "testdata/section_chooser_test.js")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("running section chooser tests: %v\n%s", err, output)
+	}
+}
+
 func TestSessionFormAPICreatesPersistentSession(t *testing.T) {
 	server := testServer(t)
 	payload := `{
@@ -940,8 +951,10 @@ func TestSessionUISections(t *testing.T) {
 	}
 	for description, expected := range map[string]string{
 		"selected Session section control": `id="session-section" type="button"`,
-		"new Session section input":        `name="section" list="session-sections" maxlength="64"`,
-		"existing section suggestions":     `id="session-sections"`,
+		"new Session section chooser":      `name="section" id="session-section-select"`,
+		"new section creation field":       `name="sectionCustom" id="session-section-custom" maxlength="64"`,
+		"section assignment dialog":        `id="section-dialog"`,
+		"assignment section chooser":       `name="sectionChoice" id="section-choice"`,
 	} {
 		if !strings.Contains(string(index), expected) {
 			t.Errorf("Session page is missing %s: %s", description, expected)
@@ -953,12 +966,8 @@ func TestSessionUISections(t *testing.T) {
 		t.Fatal(err)
 	}
 	for description, expected := range map[string]string{
-		"section grouping":        `const sessionsBySection = new Map();`,
-		"unsectioned group":       `name.textContent = section || 'Unsectioned';`,
-		"section suggestions":     `function renderSectionOptions() {`,
-		"section create payload":  `if (section) payload.section = section;`,
-		"section update endpoint": "/section`,",
-		"section PATCH request":   `{method: 'PATCH', body: JSON.stringify({section})}`,
+		"section grouping":  `const sessionsBySection = new Map();`,
+		"unsectioned group": `name.textContent = section || 'Unsectioned';`,
 	} {
 		if !strings.Contains(string(javascript), expected) {
 			t.Errorf("Session behavior is missing %s: %s", description, expected)
@@ -972,6 +981,8 @@ func TestSessionUISections(t *testing.T) {
 	for description, expected := range map[string]string{
 		"section headings": `.session-section-heading {`,
 		"section control":  `.session-section-button {`,
+		"section dialog":   `.section-dialog {`,
+		"section field":    `.section-field {`,
 	} {
 		if !strings.Contains(string(styles), expected) {
 			t.Errorf("Session styles are missing %s: %s", description, expected)

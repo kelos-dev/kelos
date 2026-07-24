@@ -1171,7 +1171,7 @@ Kelos collects anonymous, aggregate usage data to help improve the project. A `k
 | Kelos version | Installed controller version |
 | Kubernetes version | Cluster K8s version |
 | Task counts | Total tasks, breakdown by type and phase |
-| Feature adoption | Number of TaskSpawners, AgentConfigs, Workspaces, and source types in use |
+| Resource adoption | Number of each resource in the latest Kelos API version and TaskSpawner source types in use |
 | Scale | Number of namespaces with Kelos resources |
 | Usage totals | Aggregate cost (USD), input tokens, and output tokens |
 

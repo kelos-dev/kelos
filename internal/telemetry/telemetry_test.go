@@ -112,6 +112,26 @@ func TestCollect(t *testing.T) {
 		{ObjectMeta: metav1.ObjectMeta{Name: "ws-2", Namespace: "ns-c"}},
 	}
 
+	sessions := []kelos.Session{
+		{ObjectMeta: metav1.ObjectMeta{Name: "session-1", Namespace: "ns-d"}},
+	}
+
+	sessionSpawners := []kelos.SessionSpawner{
+		{ObjectMeta: metav1.ObjectMeta{Name: "session-spawner-1", Namespace: "ns-d"}},
+	}
+
+	taskBudgets := []kelos.TaskBudget{
+		{ObjectMeta: metav1.ObjectMeta{Name: "budget-1", Namespace: "ns-d"}},
+	}
+
+	taskRecords := []kelos.TaskRecord{
+		{ObjectMeta: metav1.ObjectMeta{Name: "record-1", Namespace: "ns-d"}},
+	}
+
+	workerPools := []kelos.WorkerPool{
+		{ObjectMeta: metav1.ObjectMeta{Name: "pool-1", Namespace: "ns-d"}},
+	}
+
 	// Build the fake client with objects.
 	objs := make([]runtime.Object, 0)
 	for i := range tasks {
@@ -125,6 +145,21 @@ func TestCollect(t *testing.T) {
 	}
 	for i := range workspaces {
 		objs = append(objs, &workspaces[i])
+	}
+	for i := range sessions {
+		objs = append(objs, &sessions[i])
+	}
+	for i := range sessionSpawners {
+		objs = append(objs, &sessionSpawners[i])
+	}
+	for i := range taskBudgets {
+		objs = append(objs, &taskBudgets[i])
+	}
+	for i := range taskRecords {
+		objs = append(objs, &taskRecords[i])
+	}
+	for i := range workerPools {
+		objs = append(objs, &workerPools[i])
 	}
 	// Pre-create the telemetry ConfigMap so we don't depend on Create.
 	objs = append(objs, &corev1.ConfigMap{
@@ -183,6 +218,23 @@ func TestCollect(t *testing.T) {
 		t.Errorf("Features.Workspaces = %d, want 2", report.Features.Workspaces)
 	}
 
+	expectedResources := ResourceReport{
+		"agentconfigs":    1,
+		"sessions":        1,
+		"sessionspawners": 1,
+		"taskbudgets":     1,
+		"taskrecords":     1,
+		"tasks":           3,
+		"taskspawners":    2,
+		"workerpools":     1,
+		"workspaces":      2,
+	}
+	for resource, expected := range expectedResources {
+		if report.Resources[resource] != expected {
+			t.Errorf("Resources[%s] = %d, want %d", resource, report.Resources[resource], expected)
+		}
+	}
+
 	sort.Strings(report.Features.SourceTypes)
 	if len(report.Features.SourceTypes) != 2 {
 		t.Fatalf("Features.SourceTypes length = %d, want 2", len(report.Features.SourceTypes))
@@ -191,9 +243,9 @@ func TestCollect(t *testing.T) {
 		t.Errorf("Features.SourceTypes = %v, want [cron github]", report.Features.SourceTypes)
 	}
 
-	// Verify scale (ns-a, ns-b, ns-c = 3 namespaces).
-	if report.Scale.Namespaces != 3 {
-		t.Errorf("Scale.Namespaces = %d, want 3", report.Scale.Namespaces)
+	// Verify scale (ns-a, ns-b, ns-c, ns-d = 4 namespaces).
+	if report.Scale.Namespaces != 4 {
+		t.Errorf("Scale.Namespaces = %d, want 4", report.Scale.Namespaces)
 	}
 
 	// Verify installation ID was read from ConfigMap.
@@ -231,6 +283,21 @@ func TestCollectEmpty(t *testing.T) {
 	if report.Features.Workspaces != 0 {
 		t.Errorf("Features.Workspaces = %d, want 0", report.Features.Workspaces)
 	}
+	for _, resource := range []string{
+		"agentconfigs",
+		"sessions",
+		"sessionspawners",
+		"taskbudgets",
+		"taskrecords",
+		"tasks",
+		"taskspawners",
+		"workerpools",
+		"workspaces",
+	} {
+		if report.Resources[resource] != 0 {
+			t.Errorf("Resources[%s] = %d, want 0", resource, report.Resources[resource])
+		}
+	}
 	if report.Scale.Namespaces != 0 {
 		t.Errorf("Scale.Namespaces = %d, want 0", report.Scale.Namespaces)
 	}
@@ -256,6 +323,11 @@ func TestSend(t *testing.T) {
 			AgentConfigs: 1,
 			Workspaces:   3,
 			SourceTypes:  []string{"cron", "github"},
+		},
+		Resources: ResourceReport{
+			"sessions":        4,
+			"sessionspawners": 2,
+			"workerpools":     1,
 		},
 		Scale: ScaleReport{Namespaces: 4},
 		Usage: UsageReport{
@@ -295,6 +367,15 @@ func TestSend(t *testing.T) {
 	}
 	if event.Properties["usage_total_cost_usd"] != 10.5 {
 		t.Errorf("usage_total_cost_usd = %v, want 10.5", event.Properties["usage_total_cost_usd"])
+	}
+	if event.Properties["resources_sessions"] != 4 {
+		t.Errorf("resources_sessions = %v, want 4", event.Properties["resources_sessions"])
+	}
+	if event.Properties["resources_sessionspawners"] != 2 {
+		t.Errorf("resources_sessionspawners = %v, want 2", event.Properties["resources_sessionspawners"])
+	}
+	if event.Properties["resources_workerpools"] != 1 {
+		t.Errorf("resources_workerpools = %v, want 1", event.Properties["resources_workerpools"])
 	}
 
 	if !phClient.closed {

@@ -6,13 +6,17 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
 	"github.com/posthog/posthog-go"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -43,14 +47,15 @@ type PostHogClient interface {
 
 // Report contains anonymous aggregate telemetry data.
 type Report struct {
-	InstallationID string        `json:"installationId"`
-	Version        string        `json:"version"`
-	K8sVersion     string        `json:"k8sVersion"`
-	Environment    string        `json:"environment"`
-	Tasks          TaskReport    `json:"tasks"`
-	Features       FeatureReport `json:"features"`
-	Scale          ScaleReport   `json:"scale"`
-	Usage          UsageReport   `json:"usage"`
+	InstallationID string         `json:"installationId"`
+	Version        string         `json:"version"`
+	K8sVersion     string         `json:"k8sVersion"`
+	Environment    string         `json:"environment"`
+	Tasks          TaskReport     `json:"tasks"`
+	Features       FeatureReport  `json:"features"`
+	Resources      ResourceReport `json:"resources"`
+	Scale          ScaleReport    `json:"scale"`
+	Usage          UsageReport    `json:"usage"`
 }
 
 // TaskReport contains aggregate task counts.
@@ -67,6 +72,9 @@ type FeatureReport struct {
 	Workspaces   int      `json:"workspaces"`
 	SourceTypes  []string `json:"sourceTypes"`
 }
+
+// ResourceReport contains counts keyed by Kubernetes resource name.
+type ResourceReport map[string]int
 
 // ScaleReport contains scale metrics.
 type ScaleReport struct {
@@ -121,9 +129,10 @@ func collect(ctx context.Context, c client.Client, clientset kubernetes.Interfac
 			ByType:  make(map[string]int),
 			ByPhase: make(map[string]int),
 		},
-		Features: FeatureReport{},
-		Scale:    ScaleReport{},
-		Usage:    UsageReport{},
+		Features:  FeatureReport{},
+		Resources: make(ResourceReport),
+		Scale:     ScaleReport{},
+		Usage:     UsageReport{},
 	}
 
 	// Get or create installation ID.
@@ -140,9 +149,14 @@ func collect(ctx context.Context, c client.Client, clientset kubernetes.Interfac
 	}
 	report.K8sVersion = sv.GitVersion
 
-	// Collect task data.
+	// Collect counts for every resource in the latest Kelos API version.
 	namespaces := make(map[string]struct{})
+	report.Resources, err = collectResourceCounts(ctx, c, namespaces)
+	if err != nil {
+		return nil, fmt.Errorf("collecting resource counts: %w", err)
+	}
 
+	// Collect task data.
 	var tasks kelos.TaskList
 	if err := c.List(ctx, &tasks); err != nil {
 		return nil, fmt.Errorf("listing tasks: %w", err)
@@ -153,7 +167,6 @@ func collect(ctx context.Context, c client.Client, clientset kubernetes.Interfac
 		if t.Status.Phase != "" {
 			report.Tasks.ByPhase[string(t.Status.Phase)]++
 		}
-		namespaces[t.Namespace] = struct{}{}
 
 		// Aggregate usage from results.
 		if t.Status.Results != nil {
@@ -183,7 +196,6 @@ func collect(ctx context.Context, c client.Client, clientset kubernetes.Interfac
 	report.Features.TaskSpawners = len(spawners.Items)
 	sourceTypes := make(map[string]struct{})
 	for _, s := range spawners.Items {
-		namespaces[s.Namespace] = struct{}{}
 		if s.Spec.When.GitHubIssues != nil {
 			sourceTypes["github"] = struct{}{}
 		}
@@ -205,9 +217,6 @@ func collect(ctx context.Context, c client.Client, clientset kubernetes.Interfac
 		return nil, fmt.Errorf("listing agent configs: %w", err)
 	}
 	report.Features.AgentConfigs = len(agentConfigs.Items)
-	for _, ac := range agentConfigs.Items {
-		namespaces[ac.Namespace] = struct{}{}
-	}
 
 	// Collect Workspace data.
 	var workspaces kelos.WorkspaceList
@@ -215,13 +224,58 @@ func collect(ctx context.Context, c client.Client, clientset kubernetes.Interfac
 		return nil, fmt.Errorf("listing workspaces: %w", err)
 	}
 	report.Features.Workspaces = len(workspaces.Items)
-	for _, w := range workspaces.Items {
-		namespaces[w.Namespace] = struct{}{}
-	}
 
 	report.Scale.Namespaces = len(namespaces)
 
 	return report, nil
+}
+
+func collectResourceCounts(ctx context.Context, c client.Client, namespaces map[string]struct{}) (ResourceReport, error) {
+	var listGVKs []schema.GroupVersionKind
+	for gvk := range c.Scheme().AllKnownTypes() {
+		if gvk.GroupVersion() == kelos.GroupVersion && strings.HasSuffix(gvk.Kind, "List") {
+			listGVKs = append(listGVKs, gvk)
+		}
+	}
+	sort.Slice(listGVKs, func(i, j int) bool {
+		return listGVKs[i].Kind < listGVKs[j].Kind
+	})
+
+	counts := make(ResourceReport, len(listGVKs))
+	for _, listGVK := range listGVKs {
+		listObject, err := c.Scheme().New(listGVK)
+		if err != nil {
+			return nil, fmt.Errorf("creating %s: %w", listGVK.Kind, err)
+		}
+		list, ok := listObject.(client.ObjectList)
+		if !ok {
+			return nil, fmt.Errorf("%s does not implement client.ObjectList", listGVK.Kind)
+		}
+		if err := c.List(ctx, list); err != nil {
+			return nil, fmt.Errorf("listing %s: %w", listGVK.Kind, err)
+		}
+
+		itemGVK := listGVK
+		itemGVK.Kind = strings.TrimSuffix(listGVK.Kind, "List")
+		resource, _ := meta.UnsafeGuessKindToResource(itemGVK)
+		count := 0
+		if err := meta.EachListItem(list, func(item runtime.Object) error {
+			count++
+			object, ok := item.(metav1.Object)
+			if !ok {
+				return fmt.Errorf("%T does not implement metav1.Object", item)
+			}
+			if namespace := object.GetNamespace(); namespace != "" {
+				namespaces[namespace] = struct{}{}
+			}
+			return nil
+		}); err != nil {
+			return nil, fmt.Errorf("reading %s: %w", listGVK.Kind, err)
+		}
+		counts[resource.Resource] = count
+	}
+
+	return counts, nil
 }
 
 func send(phClient PostHogClient, report *Report) error {
@@ -240,6 +294,9 @@ func send(phClient PostHogClient, report *Report) error {
 		Set("usage_total_cost_usd", report.Usage.TotalCostUSD).
 		Set("usage_total_input_tokens", report.Usage.TotalInputTokens).
 		Set("usage_total_output_tokens", report.Usage.TotalOutputTokens)
+	for resource, count := range report.Resources {
+		properties.Set("resources_"+resource, count)
+	}
 
 	if err := phClient.Enqueue(posthog.Capture{
 		DistinctId: report.InstallationID,

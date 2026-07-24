@@ -115,6 +115,7 @@ rules:
   resources:
   - sessions
   verbs:
+  - delete
   - get
   - list
   - patch

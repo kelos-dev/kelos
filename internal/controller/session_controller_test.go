@@ -1484,6 +1484,144 @@ func testSessionReconciler(cl client.Client, scheme *runtime.Scheme) *SessionRec
 	}
 }
 
+func TestSessionIdleExpired(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	activeCondition := func(status metav1.ConditionStatus, transition time.Time) metav1.Condition {
+		return metav1.Condition{
+			Type:               kelos.SessionConditionActive,
+			Status:             status,
+			Reason:             "Test",
+			LastTransitionTime: metav1.NewTime(transition),
+		}
+	}
+	newSession := func(ttl *int32, mutate func(*kelos.Session)) *kelos.Session {
+		s := testSession("idle", "codex")
+		s.CreationTimestamp = metav1.NewTime(now.Add(-time.Hour))
+		s.Spec.IdleTTLSeconds = ttl
+		if mutate != nil {
+			mutate(s)
+		}
+		return s
+	}
+	idleFor := func(d time.Duration) func(*kelos.Session) {
+		return func(s *kelos.Session) {
+			at := metav1.NewTime(now.Add(-d))
+			s.Status.LastActivityTime = &at
+			s.Status.Conditions = []metav1.Condition{activeCondition(metav1.ConditionFalse, now.Add(-d))}
+		}
+	}
+
+	tests := []struct {
+		name        string
+		session     *kelos.Session
+		wantExpired bool
+		wantRequeue bool
+	}{
+		{
+			name:    "no TTL is never reaped",
+			session: newSession(nil, idleFor(time.Hour)),
+		},
+		{
+			name: "active turn is not idle",
+			session: newSession(ptr.To(int32(60)), func(s *kelos.Session) {
+				s.Status.Conditions = []metav1.Condition{activeCondition(metav1.ConditionTrue, now.Add(-time.Hour))}
+			}),
+		},
+		{
+			name: "unknown activity is not idle",
+			session: newSession(ptr.To(int32(60)), func(s *kelos.Session) {
+				s.Status.Conditions = []metav1.Condition{activeCondition(metav1.ConditionUnknown, now.Add(-time.Hour))}
+			}),
+		},
+		{
+			name:    "missing active condition is not idle",
+			session: newSession(ptr.To(int32(60)), nil),
+		},
+		{
+			name:        "idle beyond TTL is reaped",
+			session:     newSession(ptr.To(int32(60)), idleFor(2*time.Minute)),
+			wantExpired: true,
+		},
+		{
+			name:        "idle within TTL requeues",
+			session:     newSession(ptr.To(int32(600)), idleFor(time.Minute)),
+			wantRequeue: true,
+		},
+		{
+			name:        "zero TTL reaps as soon as idle",
+			session:     newSession(ptr.To(int32(0)), idleFor(time.Second)),
+			wantExpired: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			expired, remaining := sessionIdleExpired(tt.session)
+			if expired != tt.wantExpired {
+				t.Fatalf("expired = %t, want %t", expired, tt.wantExpired)
+			}
+			if tt.wantRequeue && remaining <= 0 {
+				t.Fatalf("remaining = %s, want > 0", remaining)
+			}
+			if !tt.wantRequeue && !tt.wantExpired && remaining != 0 {
+				t.Fatalf("remaining = %s, want 0", remaining)
+			}
+		})
+	}
+}
+
+func TestSessionReconcileReapsIdleSession(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := kelos.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := appsv1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+
+	session := testSession("idle-reap", "codex")
+	session.CreationTimestamp = metav1.NewTime(time.Now().Add(-time.Hour))
+	session.Spec.IdleTTLSeconds = ptr.To(int32(60))
+	idleSince := metav1.NewTime(time.Now().Add(-10 * time.Minute))
+	session.Status.LastActivityTime = &idleSince
+	session.Status.Conditions = []metav1.Condition{{
+		Type:               kelos.SessionConditionActive,
+		Status:             metav1.ConditionFalse,
+		Reason:             "Idle",
+		LastTransitionTime: idleSince,
+	}}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&kelos.Session{}).
+		WithObjects(session).
+		Build()
+	recorder := record.NewFakeRecorder(10)
+	reconciler := testSessionReconciler(cl, scheme)
+	reconciler.Recorder = recorder
+	request := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(session)}
+
+	if _, err := reconciler.Reconcile(context.Background(), request); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+
+	var got kelos.Session
+	if err := cl.Get(context.Background(), request.NamespacedName, &got); !apierrors.IsNotFound(err) {
+		t.Fatalf("Session get after reap = %v, want NotFound", err)
+	}
+	select {
+	case event := <-recorder.Events:
+		if !strings.Contains(event, "SessionIdleReaped") {
+			t.Fatalf("recorded event = %q, want SessionIdleReaped", event)
+		}
+	default:
+		t.Fatal("expected a SessionIdleReaped event to be recorded")
+	}
+}
+
 func findVolume(volumes []corev1.Volume, name string) *corev1.Volume {
 	for i := range volumes {
 		if volumes[i].Name == name {

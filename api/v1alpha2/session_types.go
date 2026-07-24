@@ -78,6 +78,17 @@ type SessionSpec struct {
 	// this field to use an ephemeral emptyDir workspace, primarily for development.
 	// +optional
 	VolumeClaimTemplate *corev1.PersistentVolumeClaimSpec `json:"volumeClaimTemplate,omitempty"`
+
+	// IdleTTLSeconds automatically deletes the Session after it has been idle for
+	// the given number of seconds. A Session is idle when it has no active turn
+	// and reports no activity; idleness is measured from the later of the last
+	// reported activity time and the Session creation time. Deleting the Session
+	// removes its workspace storage, so any uncommitted workspace changes are lost.
+	// If this field is unset, the Session is never reaped for idleness. If it is
+	// set to zero, the Session is eligible for deletion as soon as it goes idle.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	IdleTTLSeconds *int32 `json:"idleTTLSeconds,omitempty"`
 }
 
 // SessionStatus defines the observed state of a Session.

@@ -70,6 +70,15 @@ spec:
                   from being submitted again after Pod replacement. An emptyDir workspace
                   loses that history and may submit the prompt again after Pod replacement.
                 type: string
+              replicas:
+                default: 1
+                description: |-
+                  Replicas is the desired number of Session runtime pods.
+                  Defaults to 1 if not specified. Set to 0 to suspend the Session.
+                format: int32
+                maximum: 1
+                minimum: 0
+                type: integer
               volumeClaimTemplate:
                 description: |-
                   VolumeClaimTemplate defines persistent storage for the Session workspace.
@@ -7156,8 +7165,18 @@ spec:
             - worker
             type: object
             x-kubernetes-validations:
-            - message: Session spec is immutable after creation
-              rule: self == oldSelf
+            - message: worker is immutable
+              rule: self.worker == oldSelf.worker
+            - message: initialBranch is immutable
+              rule: has(self.initialBranch) == has(oldSelf.initialBranch) && (!has(self.initialBranch)
+                || self.initialBranch == oldSelf.initialBranch)
+            - message: initialPrompt is immutable
+              rule: has(self.initialPrompt) == has(oldSelf.initialPrompt) && (!has(self.initialPrompt)
+                || self.initialPrompt == oldSelf.initialPrompt)
+            - message: volumeClaimTemplate is immutable
+              rule: has(self.volumeClaimTemplate) == has(oldSelf.volumeClaimTemplate)
+                && (!has(self.volumeClaimTemplate) || self.volumeClaimTemplate ==
+                oldSelf.volumeClaimTemplate)
             - message: worker.type must be claude-code, codex, or opencode
               rule: has(self.worker.type) && self.worker.type in ['claude-code', 'codex',
                 'opencode']

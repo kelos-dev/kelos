@@ -716,6 +716,10 @@ func (s *Server) connectSession(writer http.ResponseWriter, request *http.Reques
 		writeKubernetesError(writer, fmt.Sprintf("getting Session %q", name), err)
 		return
 	}
+	if session.Status.Phase == kelos.SessionPhaseSuspended {
+		writeError(writer, http.StatusConflict, fmt.Sprintf("Session %q is suspended", name))
+		return
+	}
 	if session.Status.Phase != kelos.SessionPhaseReady || session.Status.PodName == "" {
 		writeError(writer, http.StatusConflict, fmt.Sprintf("Session %q is not ready", name))
 		return

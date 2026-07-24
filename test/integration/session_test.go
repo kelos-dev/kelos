@@ -15,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
@@ -91,6 +92,8 @@ spec:
 	It("creates a one-replica StatefulSet and becomes ready with its Pod", func() {
 		session := validSession(namespace, "chat", "claude-code")
 		Expect(k8sClient.Create(ctx, session)).To(Succeed())
+		Expect(session.Spec.Replicas).NotTo(BeNil())
+		Expect(*session.Spec.Replicas).To(Equal(int32(1)))
 
 		var statefulSet appsv1.StatefulSet
 		Eventually(func(g Gomega) {
@@ -147,6 +150,71 @@ spec:
 			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(session), &current)).To(Succeed())
 			g.Expect(current.Status.Phase).To(Equal(kelos.SessionPhaseReady))
 			g.Expect(current.Status.PodName).To(Equal(pod.Name))
+		}, 10*time.Second, 100*time.Millisecond).Should(Succeed())
+	})
+
+	It("suspends and resumes a Session while retaining its workspace claim", func() {
+		session := validSession(namespace, "suspend", "codex")
+		Expect(k8sClient.Create(ctx, session)).To(Succeed())
+
+		statefulSetKey := client.ObjectKey{Namespace: namespace, Name: "session-" + session.Name}
+		Eventually(func(g Gomega) {
+			var statefulSet appsv1.StatefulSet
+			g.Expect(k8sClient.Get(ctx, statefulSetKey, &statefulSet)).To(Succeed())
+			g.Expect(statefulSet.Spec.Replicas).NotTo(BeNil())
+			g.Expect(*statefulSet.Spec.Replicas).To(Equal(int32(1)))
+		}, 10*time.Second, 100*time.Millisecond).Should(Succeed())
+
+		claim := &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:            "workspace-session-" + session.Name + "-0",
+				Namespace:       namespace,
+				OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(session, kelos.GroupVersion.WithKind("Session"))},
+			},
+			Spec: *session.Spec.VolumeClaimTemplate.DeepCopy(),
+		}
+		Expect(k8sClient.Create(ctx, claim)).To(Succeed())
+
+		Eventually(func() error {
+			var current kelos.Session
+			if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(session), &current); err != nil {
+				return err
+			}
+			current.Spec.Replicas = ptr.To(int32(0))
+			return k8sClient.Update(ctx, &current)
+		}, 10*time.Second, 100*time.Millisecond).Should(Succeed())
+
+		Eventually(func(g Gomega) {
+			var statefulSet appsv1.StatefulSet
+			g.Expect(k8sClient.Get(ctx, statefulSetKey, &statefulSet)).To(Succeed())
+			g.Expect(statefulSet.Spec.Replicas).NotTo(BeNil())
+			g.Expect(*statefulSet.Spec.Replicas).To(Equal(int32(0)))
+			var current kelos.Session
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(session), &current)).To(Succeed())
+			g.Expect(current.Status.Phase).To(Equal(kelos.SessionPhaseSuspended))
+			g.Expect(current.Status.PodName).To(BeEmpty())
+			g.Expect(current.Status.PodUID).To(BeEmpty())
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(claim), &corev1.PersistentVolumeClaim{})).To(Succeed())
+		}, 10*time.Second, 100*time.Millisecond).Should(Succeed())
+
+		Eventually(func() error {
+			var current kelos.Session
+			if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(session), &current); err != nil {
+				return err
+			}
+			current.Spec.Replicas = ptr.To(int32(1))
+			return k8sClient.Update(ctx, &current)
+		}, 10*time.Second, 100*time.Millisecond).Should(Succeed())
+
+		Eventually(func(g Gomega) {
+			var statefulSet appsv1.StatefulSet
+			g.Expect(k8sClient.Get(ctx, statefulSetKey, &statefulSet)).To(Succeed())
+			g.Expect(statefulSet.Spec.Replicas).NotTo(BeNil())
+			g.Expect(*statefulSet.Spec.Replicas).To(Equal(int32(1)))
+			var current kelos.Session
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(session), &current)).To(Succeed())
+			g.Expect(current.Status.Phase).To(Equal(kelos.SessionPhasePending))
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(claim), &corev1.PersistentVolumeClaim{})).To(Succeed())
 		}, 10*time.Second, 100*time.Millisecond).Should(Succeed())
 	})
 
@@ -221,11 +289,45 @@ spec:
 		Expect(k8sClient.Create(ctx, session)).NotTo(Succeed())
 	})
 
-	It("keeps the spec immutable", func() {
-		session := validSession(namespace, "immutable", "codex")
+	It("allows replicas to change", func() {
+		session := validSession(namespace, "mutable-replicas", "codex")
 		Expect(k8sClient.Create(ctx, session)).To(Succeed())
-		session.Spec.Worker.Model = "another-model"
-		Expect(k8sClient.Update(ctx, session)).NotTo(Succeed())
+		session.Spec.Replicas = ptr.To(int32(0))
+		Expect(k8sClient.Update(ctx, session)).To(Succeed())
+	})
+
+	It("rejects unsupported replica counts", func() {
+		for _, replicas := range []int32{-1, 2} {
+			session := validSession(namespace, fmt.Sprintf("replicas-%d", replicas+1), "codex")
+			session.Spec.Replicas = ptr.To(replicas)
+			Expect(k8sClient.Create(ctx, session)).NotTo(Succeed())
+		}
+	})
+
+	It("keeps Session configuration immutable", func() {
+		mutations := []struct {
+			name   string
+			mutate func(*kelos.Session)
+		}{
+			{name: "worker", mutate: func(session *kelos.Session) {
+				session.Spec.Worker.Model = "another-model"
+			}},
+			{name: "initial-branch", mutate: func(session *kelos.Session) {
+				session.Spec.InitialBranch = "another-branch"
+			}},
+			{name: "initial-prompt", mutate: func(session *kelos.Session) {
+				session.Spec.InitialPrompt = "another prompt"
+			}},
+			{name: "volume-claim-template", mutate: func(session *kelos.Session) {
+				session.Spec.VolumeClaimTemplate = nil
+			}},
+		}
+		for _, mutation := range mutations {
+			session := validSession(namespace, "immutable-"+mutation.name, "codex")
+			Expect(k8sClient.Create(ctx, session)).To(Succeed())
+			mutation.mutate(session)
+			Expect(k8sClient.Update(ctx, session)).NotTo(Succeed())
+		}
 	})
 })
 

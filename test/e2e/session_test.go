@@ -247,13 +247,44 @@ var _ = Describe("Session remote control", func() {
 		})
 		waitForTurnCompletion(connection, "completed")
 
-		By("resetting the Session and deleting its persisted workspace")
+		By("suspending and resuming the Session with its persisted workspace")
 		preservedClaim, err := f.Clientset.CoreV1().PersistentVolumeClaims(f.Namespace).Get(context.TODO(), oldClaimName, metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		_ = connection.Close()
+		updateSessionReplicas(f, f.Namespace, sessionName, 0)
+		suspended := waitForSessionPhase(f, f.Namespace, sessionName, kelos.SessionPhaseSuspended)
+		Expect(suspended.Status.PodName).To(BeEmpty())
+		Expect(suspended.Status.PodUID).To(BeEmpty())
+		waitForPodDeletion(f, f.Namespace, replacement.Name)
+		currentClaim, err := f.Clientset.CoreV1().PersistentVolumeClaims(f.Namespace).Get(context.TODO(), oldClaimName, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(currentClaim.UID).To(Equal(preservedClaim.UID))
+
+		updateSessionReplicas(f, f.Namespace, sessionName, 1)
+		resumed := waitForSessionPodReplacement(f, f.Namespace, sessionName, replacement.UID)
+		resumedPod, err := f.Clientset.CoreV1().Pods(f.Namespace).Get(context.TODO(), resumed.Status.PodName, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(sessionWorkspaceClaimName(resumedPod)).To(Equal(oldClaimName))
+		currentClaim, err = f.Clientset.CoreV1().PersistentVolumeClaims(f.Namespace).Get(context.TODO(), oldClaimName, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(currentClaim.UID).To(Equal(preservedClaim.UID))
+
+		connection = connectSessionWebSocket(webClient, baseURL, f.Namespace, sessionName)
+		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "subscribe"})
+		waitForSessionEvent(connection, func(event sessionruntime.Event) bool {
+			return event.Type == sessionruntime.EventHistoryEnd
+		})
+		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "message", Text: "read-state"})
+		waitForSessionEvent(connection, func(event sessionruntime.Event) bool {
+			return event.Type == sessionruntime.EventAssistantDelta && event.Text == "turn 10: state preserved"
+		})
+		waitForTurnCompletion(connection, "completed")
+
+		By("resetting the Session and deleting its persisted workspace")
+		_ = connection.Close()
 		resetSessionThroughWeb(webClient, baseURL, f.Namespace, sessionName)
 
-		reset := waitForSessionPodReplacement(f, f.Namespace, sessionName, replacement.UID)
+		reset := waitForSessionPodReplacement(f, f.Namespace, sessionName, resumedPod.UID)
 		Eventually(func(g Gomega) {
 			current, err := f.KelosClientset.ApiV1alpha2().Sessions(f.Namespace).Get(context.TODO(), sessionName, metav1.GetOptions{})
 			g.Expect(err).NotTo(HaveOccurred())
@@ -262,7 +293,7 @@ var _ = Describe("Session remote control", func() {
 		}, 3*time.Minute, time.Second).Should(Succeed())
 		resetPod, err := f.Clientset.CoreV1().Pods(f.Namespace).Get(context.TODO(), reset.Status.PodName, metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(resetPod.UID).NotTo(Equal(replacement.UID))
+		Expect(resetPod.UID).NotTo(Equal(resumedPod.UID))
 		Expect(sessionWorkspaceClaimName(resetPod)).To(Equal(oldClaimName))
 		resetClaim, err := f.Clientset.CoreV1().PersistentVolumeClaims(f.Namespace).Get(context.TODO(), oldClaimName, metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
@@ -732,6 +763,18 @@ func createSession(f *framework.Framework, session *kelos.Session) *kelos.Sessio
 	created, err := f.KelosClientset.ApiV1alpha2().Sessions(session.Namespace).Create(context.TODO(), session, metav1.CreateOptions{})
 	Expect(err).NotTo(HaveOccurred())
 	return created
+}
+
+func updateSessionReplicas(f *framework.Framework, namespace, name string, replicas int32) {
+	Eventually(func() error {
+		session, err := f.KelosClientset.ApiV1alpha2().Sessions(namespace).Get(context.TODO(), name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		session.Spec.Replicas = &replicas
+		_, err = f.KelosClientset.ApiV1alpha2().Sessions(namespace).Update(context.TODO(), session, metav1.UpdateOptions{})
+		return err
+	}, time.Minute, time.Second).Should(Succeed(), "Session %s/%s replicas did not update to %d", namespace, name, replicas)
 }
 
 func sessionTestVolumeClaimTemplate() *corev1.PersistentVolumeClaimSpec {

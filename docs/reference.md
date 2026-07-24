@@ -195,7 +195,8 @@ the refreshed value on their next sync and are not supported.
 ## Session
 
 A Session is one interactive Claude Code, Codex, or OpenCode conversation that
-web and terminal clients can share and reconnect to. The spec is immutable.
+web and terminal clients can share and reconnect to. The spec is immutable
+except for `spec.replicas`.
 Conversation events and history are retained on the Session workspace rather
 than in the Kubernetes API. If configured, `spec.initialPrompt` also remains in
 the Session resource and is visible through the Kubernetes API.
@@ -210,10 +211,11 @@ the Session resource and is visible through the Kubernetes API.
 | `spec.worker.workspaceRef.name` | Workspace cloned into the Session Pod | No |
 | `spec.worker.agentConfigRefs[].name` | Ordered AgentConfig resources | No |
 | `spec.worker.podOverrides` | Pod resources, scheduling, environment, volumes, and sidecars | No |
+| `spec.replicas` | Desired runtime Pod count: `0` suspends the Session and `1` runs it (defaults to `1`) | No |
 | `spec.initialBranch` | Git branch used to initialize the Session workspace. Checks out the branch from `origin` when it exists, or creates it from the Workspace ref. Requires `spec.worker.workspaceRef` | No |
 | `spec.initialPrompt` | Prompt submitted when the Session starts without retained conversation history. An `emptyDir` workspace may submit it again after Pod replacement | No |
 | `spec.volumeClaimTemplate` | PersistentVolumeClaimSpec for the Session workspace. Recommended for durable Sessions; omit to use an ephemeral `emptyDir` workspace | No |
-| `status.phase` | Infrastructure phase: `Pending`, `Ready`, or `Failed` | Output |
+| `status.phase` | Infrastructure phase: `Pending`, `Ready`, `Suspended`, or `Failed` | Output |
 | `status.podName` | Session Pod name | Output |
 | `status.podUID` | Identity of the Pod running the live conversation | Output |
 | `status.lastActivityTime` | When runtime activity was first reported or last changed; Pod replacement does not change it | Output |
@@ -314,9 +316,15 @@ container. Persistent storage is recommended for durable Sessions. When the
 field is omitted, the workspace uses `emptyDir`, which is primarily useful for
 development because its history and changes do not survive Pod replacement.
 
+Set `spec.replicas` to `0` to suspend a Session without deleting it, then set it
+back to `1` to resume. A suspended Session rejects web connection attempts and
+the terminal client waits for it to resume. Configured persistent workspace and
+conversation data remain available across suspension. An `emptyDir` workspace
+is deleted with the scaled-down Pod and starts empty after resuming.
+
 Reset a Session with `kelos session reset NAME` or the reset action in the
-shared web client. Reset preserves the Session resource and immutable spec but
-permanently deletes its retained conversation history and workspace changes.
+shared web client. Reset preserves the Session resource and its immutable spec
+fields but permanently deletes retained conversation history and workspace changes.
 The controller stops the Session Pod before deleting its PersistentVolumeClaim,
 then creates a fresh claim and replacement Pod. An `emptyDir` Session resets by
 replacing only its Pod. Workspace initialization and

@@ -35,6 +35,10 @@ type CodexAuthRefresherReconciler struct {
 
 func (r *CodexAuthRefresherReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
+
+	ctx, span := startReconcileSpan(ctx, "CodexAuthRefresher", req.NamespacedName)
+	defer span.End()
+
 	if r.Builder == nil {
 		r.Builder = NewCodexAuthRefresherBuilder()
 	}

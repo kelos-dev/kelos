@@ -41,6 +41,9 @@ type WorkspaceReconciler struct {
 func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
+	ctx, span := startReconcileSpan(ctx, "Workspace", req.NamespacedName)
+	defer span.End()
+
 	var workspace kelos.Workspace
 	if err := r.Get(ctx, req.NamespacedName, &workspace); err != nil {
 		if apierrors.IsNotFound(err) {

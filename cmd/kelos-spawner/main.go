@@ -11,6 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,12 +31,19 @@ import (
 	"github.com/kelos-dev/kelos/internal/contextfetch"
 	"github.com/kelos-dev/kelos/internal/githubapp"
 	"github.com/kelos-dev/kelos/internal/logging"
+	"github.com/kelos-dev/kelos/internal/observability"
 	"github.com/kelos-dev/kelos/internal/reporting"
 	"github.com/kelos-dev/kelos/internal/source"
 	"github.com/kelos-dev/kelos/internal/taskbuilder"
+	"github.com/kelos-dev/kelos/internal/version"
 )
 
 var scheme = runtime.NewScheme()
+
+// spawnerTracer records discovery-cycle and task-creation spans. It delegates
+// to the global TracerProvider installed by observability.Setup, so spans are
+// cheap no-ops when OTLP export is disabled.
+var spawnerTracer = otel.Tracer("github.com/kelos-dev/kelos/cmd/kelos-spawner")
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
@@ -82,6 +92,21 @@ func main() {
 	logger := zap.New(zap.UseFlagOptions(opts))
 	ctrl.SetLogger(logger)
 	log := ctrl.Log.WithName("spawner")
+
+	// Initialize OpenTelemetry (OTLP) export when an endpoint is configured.
+	// No-op when OTEL_EXPORTER_OTLP_ENDPOINT and friends are unset.
+	otelShutdown, err := observability.Setup(context.Background(), "kelos-spawner", version.Version)
+	if err != nil {
+		log.Error(err, "unable to set up OpenTelemetry")
+		os.Exit(1)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := otelShutdown(shutdownCtx); err != nil {
+			log.Error(err, "error shutting down OpenTelemetry")
+		}
+	}()
 
 	// Fall back to environment variables for credentials not passed via flags.
 	if githubToken == "" {
@@ -239,6 +264,14 @@ func runCycleWithSource(ctx context.Context, cl client.Client, key types.Namespa
 
 func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.NamespacedName, src source.Source) error {
 	log := ctrl.Log.WithName("spawner")
+
+	ctx, span := spawnerTracer.Start(ctx, "spawner.discover",
+		trace.WithAttributes(
+			attribute.String("kelos.spawner.name", key.Name),
+			attribute.String("k8s.namespace.name", key.Namespace),
+		),
+	)
+	defer span.End()
 
 	var ts kelos.TaskSpawner
 	if err := cl.Get(ctx, key, &ts); err != nil {
@@ -454,7 +487,20 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 			}
 		}
 
-		if err := cl.Create(ctx, task); err != nil {
+		// Open a child span for this Task creation and stamp its trace context
+		// onto the Task's annotations, so the Task controller and agent pod join
+		// the discovery trace.
+		createCtx, createSpan := spawnerTracer.Start(ctx, "spawner.create_task",
+			trace.WithAttributes(attribute.String("kelos.task.name", task.Name)),
+		)
+		if task.Annotations == nil {
+			task.Annotations = make(map[string]string)
+		}
+		observability.InjectTraceContext(createCtx, task.Annotations)
+
+		err = cl.Create(ctx, task)
+		createSpan.End()
+		if err != nil {
 			if apierrors.IsAlreadyExists(err) {
 				// The dedup map only holds this spawner's Tasks, so a collision
 				// here is with a Task not in it. Confirm ownership before treating

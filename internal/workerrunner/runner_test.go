@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -694,6 +695,28 @@ func TestWaitForAssignmentReleaseContextCancelled(t *testing.T) {
 	err := runner.waitForAssignmentRelease(ctx, "some-task")
 	if err == nil {
 		t.Fatal("Expected error from context cancellation")
+	}
+}
+
+func TestConfigureTaskProcessGroupCancellationKillsDescendants(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "leaked-child-ran")
+	ctx, cancel := context.WithCancel(context.Background())
+	cmd := exec.CommandContext(ctx, "sh", "-c", `(sleep 0.3; touch "$MARKER") & wait`)
+	cmd.Env = append(os.Environ(), "MARKER="+marker)
+	configureTaskProcessGroupCancellation(cmd)
+
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("Starting process tree: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	_ = cmd.Wait()
+
+	// If cancellation killed only the shell, its background child would be
+	// re-parented to PID 1 and create the marker after the parent exited.
+	time.Sleep(500 * time.Millisecond)
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Cancelled task left a descendant running; marker stat error = %v", err)
 	}
 }
 

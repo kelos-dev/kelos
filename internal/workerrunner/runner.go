@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
@@ -274,6 +275,7 @@ func (r *Runner) executeTask(ctx context.Context, taskName string) error {
 // all agent tooling are directly available on the filesystem.
 func (r *Runner) runAgent(ctx context.Context, task *kelos.Task) error {
 	cmd := exec.CommandContext(ctx, "/kelos_entrypoint.sh", task.Spec.Prompt)
+	configureTaskProcessGroupCancellation(cmd)
 	cmd.Dir = "/workspace/repo"
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -281,6 +283,27 @@ func (r *Runner) runAgent(ctx context.Context, task *kelos.Task) error {
 	cmd.Env = taskAgentEnv(os.Environ(), task)
 
 	return cmd.Run()
+}
+
+// configureTaskProcessGroupCancellation prevents a cancelled task from
+// leaving agent descendants behind in the long-lived worker pod. Without a
+// separate process group, CommandContext kills only /kelos_entrypoint.sh;
+// session drivers and agent CLIs are re-parented to PID 1 and keep consuming
+// resources while the runner starts the next task.
+func configureTaskProcessGroupCancellation(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return os.ErrProcessDone
+		}
+		if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
+			if errors.Is(err, syscall.ESRCH) {
+				return os.ErrProcessDone
+			}
+			return err
+		}
+		return nil
+	}
 }
 
 func taskAgentEnv(base []string, task *kelos.Task) []string {

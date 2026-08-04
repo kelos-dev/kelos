@@ -630,6 +630,58 @@ type Slack struct {
 	// +kubebuilder:validation:items:MinLength=1
 	// +kubebuilder:validation:items:MaxLength=256
 	ExcludePatterns []string `json:"excludePatterns,omitempty"`
+
+	// Scoring configures how Slack signals from external actors are turned
+	// into TaskScore records for Tasks this spawner created.
+	//
+	// Scoring config is deliberately per-trigger rather than a top-level
+	// spec.scoring section, matching the existing when.<source>.reporting fields,
+	// which are likewise observations of an outcome rather than triggers. The
+	// consequence is accepted permanently: only Slack-triggered spawners can score
+	// Slack reactions, because only they deliver a Slack result to react to. A
+	// source-independent scoring section would have to be a new field, not a move
+	// of this one.
+	// +optional
+	Scoring *SlackScoring `json:"scoring,omitempty"`
+}
+
+// SlackScoring configures which Slack signals score a Task result.
+type SlackScoring struct {
+	// Reactions maps emoji reactions on the agent's result message onto score
+	// verdicts. A reaction that is not listed is ignored rather than recorded, so
+	// unrelated emoji in a busy channel do not dilute the aggregate.
+	//
+	// Scoring is off when the list is absent or empty. There are no implicit
+	// default emoji.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	// +kubebuilder:validation:MaxItems=32
+	Reactions []SlackReactionScore `json:"reactions,omitempty"`
+}
+
+// SlackReactionScore maps one Slack emoji reaction onto a score verdict.
+type SlackReactionScore struct {
+	// Name is the Slack reaction name as Slack stores it: lowercase letters,
+	// digits, "_", "-", and "+". Give it without the surrounding colons and
+	// without a skin-tone modifier — "+1", not ":+1:" and not "+1::skin-tone-4".
+	// A reaction carrying a skin-tone modifier is matched against the base name,
+	// so "+1" covers every skin-tone variant of it.
+	//
+	// The alphabet is enforced rather than left permissive because matching is an
+	// exact comparison against the name Slack sends. Anything Slack cannot
+	// produce — an uppercase letter, a space, a literal emoji character, a
+	// skin-tone modifier — would be accepted and then never fire, silently
+	// recording no scores.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=64
+	// +kubebuilder:validation:Pattern=`^[a-z0-9_+-]+$`
+	Name string `json:"name"`
+
+	// Verdict is recorded when this reaction is added to a result message.
+	// +kubebuilder:validation:Required
+	Verdict ScoreVerdict `json:"verdict"`
 }
 
 // SlackTrigger defines a regex pattern trigger for Slack messages.
@@ -833,6 +885,15 @@ type TaskTemplateMetadata struct {
 	// text/template with the same variables as branch and promptTemplate.
 	// The kelos.dev/taskspawner label is always set to the TaskSpawner name
 	// and overrides any user value for that key.
+	//
+	// Do not set kelos.dev/slack-result-channel or kelos.dev/slack-result-ts.
+	// Kelos writes them to identify the single Slack message carrying a Task's
+	// result, and scoring resolves a reaction by selecting on them.
+	//
+	// A user-supplied value is overwritten with the real message identity when the
+	// Task reaches a terminal phase and its result is reported. Until then, a value
+	// shared across Tasks can make a reaction ambiguous — resolution fails with an
+	// error and records no score — if it happens to match a real result message.
 	// +optional
 	Labels map[string]string `json:"labels,omitempty"`
 

@@ -8,12 +8,15 @@ import (
 
 	"github.com/slack-go/slack"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
+	"github.com/kelos-dev/kelos/internal/scoring"
 )
 
 const (
@@ -543,7 +546,7 @@ func (tr *SlackTaskReporter) ReportTaskStatus(ctx context.Context, task *kelos.T
 				}
 				tr.clearProgressCache(task.UID)
 				tr.clearActivityState(task.UID)
-				return tr.persistSlackReportingState(ctx, task, desiredPhase)
+				return tr.persistSlackReportingState(ctx, task, desiredPhase, channel, progressTS)
 			}
 		}
 	}
@@ -572,14 +575,42 @@ func (tr *SlackTaskReporter) ReportTaskStatus(ctx context.Context, task *kelos.T
 		tr.clearActivityState(task.UID)
 	}
 
-	if err := tr.persistSlackReportingState(ctx, task, desiredPhase); err != nil {
+	if err := tr.persistSlackReportingState(ctx, task, desiredPhase, channel, firstReplyTS); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (tr *SlackTaskReporter) persistSlackReportingState(ctx context.Context, task *kelos.Task, desiredPhase string) error {
+// persistSlackReportingState records the reported phase on the Task and, for
+// terminal phases, the identity of the Slack message carrying the result so an
+// inbound reaction can be resolved back to this Task. resultTS is the message a
+// reader would react to; when the response was split across several messages it
+// is the first, which carries the header and the start of the response.
+func (tr *SlackTaskReporter) persistSlackReportingState(ctx context.Context, task *kelos.Task, desiredPhase, channel, resultTS string) error {
+	log := ctrl.Log.WithName("slack-reporter")
+
+	recordResult := resultTS != "" && (desiredPhase == "succeeded" || desiredPhase == "failed")
+
+	// The channel comes from an annotation, whose values are unconstrained, while
+	// label values are not. Writing an invalid value would fail the whole update,
+	// leaving the reported phase unrecorded — so the next cycle would re-post the
+	// terminal message and fail again, spamming the thread forever. Scoring is the
+	// lesser concern: drop the correlation labels and keep reporting correct.
+	if recordResult {
+		for _, field := range []struct{ name, value string }{
+			{"channel", channel},
+			{"result timestamp", resultTS},
+		} {
+			if errs := validation.IsValidLabelValue(field.value); len(errs) > 0 {
+				log.Info("Slack value is not a valid label value; skipping result correlation labels, so this Task's result cannot be scored",
+					"task", task.Name, "field", field.name, "value", field.value, "errors", errs)
+				recordResult = false
+				break
+			}
+		}
+	}
+
 	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		var current kelos.Task
 		if err := tr.Client.Get(ctx, client.ObjectKeyFromObject(task), &current); err != nil {
@@ -591,11 +622,20 @@ func (tr *SlackTaskReporter) persistSlackReportingState(ctx context.Context, tas
 		}
 		current.Annotations[AnnotationSlackReportPhase] = desiredPhase
 
+		if recordResult {
+			if current.Labels == nil {
+				current.Labels = make(map[string]string)
+			}
+			current.Labels[scoring.LabelSlackResultChannel] = channel
+			current.Labels[scoring.LabelSlackResultTS] = resultTS
+		}
+
 		if err := tr.Client.Update(ctx, &current); err != nil {
 			return err
 		}
 
 		task.Annotations = current.Annotations
+		task.Labels = current.Labels
 		return nil
 	}); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -604,7 +644,43 @@ func (tr *SlackTaskReporter) persistSlackReportingState(ctx context.Context, tas
 		return fmt.Errorf("persisting Slack reporting annotations on task %s: %w", task.Name, err)
 	}
 
+	if recordResult {
+		tr.copyResultLabelsToRecord(ctx, task, channel, resultTS)
+	}
+
 	return nil
+}
+
+// copyResultLabelsToRecord mirrors the result-message labels onto the Task's
+// TaskRecord, which outlives the Task's TTL and so is what late-arriving scores
+// resolve against.
+//
+// The record is written by the task controller when the Task reaches a terminal
+// phase, concurrently with this reporting cycle, so it may not exist yet. The
+// controller also copies these labels from the Task, backfilling them onto an
+// existing record, so between the two writers the labels land whichever way the
+// race resolves. A record that is still missing is therefore not an error.
+//
+// The write is a merge patch rather than a read-modify-write: it carries no
+// resourceVersion, so a concurrent update to the record cannot make it conflict.
+func (tr *SlackTaskReporter) copyResultLabelsToRecord(ctx context.Context, task *kelos.Task, channel, resultTS string) {
+	log := ctrl.Log.WithName("slack-reporter")
+
+	record := &kelos.TaskRecord{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: task.Namespace,
+			Name:      string(task.UID),
+		},
+	}
+	patch := client.RawPatch(types.MergePatchType, scoring.LabelMergePatch(map[string]string{
+		scoring.LabelSlackResultChannel: channel,
+		scoring.LabelSlackResultTS:      resultTS,
+	}))
+
+	if err := tr.Client.Patch(ctx, record, patch); err != nil && !apierrors.IsNotFound(err) {
+		log.Error(err, "Failed to label TaskRecord with Slack result message; scores arriving after the Task is deleted will not resolve",
+			"task", task.Name, "record", string(task.UID))
+	}
 }
 
 func (tr *SlackTaskReporter) resolveAgentType(ctx context.Context, task *kelos.Task) string {

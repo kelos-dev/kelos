@@ -2,6 +2,7 @@ package conversion
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -536,5 +537,170 @@ func TestTaskSpawnerFromHub_NoNameTemplateOmitsAnnotation(t *testing.T) {
 	}
 	if _, ok := spoke.Annotations[preservedNameTemplateAnnotation]; ok {
 		t.Error("annotation should not be set when nameTemplate is empty")
+	}
+}
+
+func TestTaskSpawnerConvert_SlackScoringRoundTrips(t *testing.T) {
+	scoring := &v1alpha2.SlackScoring{
+		Reactions: []v1alpha2.SlackReactionScore{
+			{Name: "+1", Verdict: v1alpha2.ScoreVerdictPositive},
+			{Name: "white_check_mark", Verdict: v1alpha2.ScoreVerdictPositive},
+			{Name: "-1", Verdict: v1alpha2.ScoreVerdictNegative},
+		},
+	}
+	hub := &v1alpha2.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{Name: "helper", Namespace: "default"},
+		Spec: v1alpha2.TaskSpawnerSpec{
+			When: v1alpha2.When{Slack: &v1alpha2.Slack{
+				Channels: []string{"C0123456789"},
+				Scoring:  scoring,
+			}},
+		},
+	}
+
+	// hub -> spoke: v1alpha1 has no scoring field, so it is preserved in an
+	// internal annotation rather than silently disabling scoring.
+	spoke := &v1alpha1.TaskSpawner{}
+	if err := taskSpawnerFromHub(context.Background(), hub, spoke); err != nil {
+		t.Fatalf("taskSpawnerFromHub() error = %v", err)
+	}
+	if spoke.Annotations[preservedSlackScoringAnnotation] == "" {
+		t.Fatalf("missing %s annotation", preservedSlackScoringAnnotation)
+	}
+
+	// spoke -> hub: the field is restored and the internal annotation removed.
+	back := &v1alpha2.TaskSpawner{}
+	if err := taskSpawnerToHub(context.Background(), spoke, back); err != nil {
+		t.Fatalf("taskSpawnerToHub() error = %v", err)
+	}
+	if back.Spec.When.Slack == nil || back.Spec.When.Slack.Scoring == nil {
+		t.Fatal("round-tripped Slack scoring = nil, want the preserved config")
+	}
+	got := back.Spec.When.Slack.Scoring.Reactions
+	want := []v1alpha2.SlackReactionScore{
+		{Name: "+1", Verdict: v1alpha2.ScoreVerdictPositive},
+		{Name: "white_check_mark", Verdict: v1alpha2.ScoreVerdictPositive},
+		{Name: "-1", Verdict: v1alpha2.ScoreVerdictNegative},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("round-tripped reactions = %+v, want %+v", got, want)
+	}
+	if _, ok := back.Annotations[preservedSlackScoringAnnotation]; ok {
+		t.Error("internal preservation annotation leaked onto hub object")
+	}
+}
+
+func TestTaskSpawnerFromHub_NoSlackScoringOmitsAnnotation(t *testing.T) {
+	tests := []struct {
+		name string
+		when v1alpha2.When
+	}{
+		{name: "slack source without scoring", when: v1alpha2.When{Slack: &v1alpha2.Slack{}}},
+		{name: "no slack source", when: v1alpha2.When{Cron: &v1alpha2.Cron{Schedule: "@daily"}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hub := &v1alpha2.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{Name: "helper", Namespace: "default"},
+				Spec:       v1alpha2.TaskSpawnerSpec{When: tt.when},
+			}
+			spoke := &v1alpha1.TaskSpawner{}
+			if err := taskSpawnerFromHub(context.Background(), hub, spoke); err != nil {
+				t.Fatalf("taskSpawnerFromHub() error = %v", err)
+			}
+			if _, ok := spoke.Annotations[preservedSlackScoringAnnotation]; ok {
+				t.Error("annotation should not be set when no scoring is configured")
+			}
+		})
+	}
+}
+
+func TestTaskSpawnerToHub_MalformedSlackScoringAnnotationIgnored(t *testing.T) {
+	spoke := &v1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "helper",
+			Namespace:   "default",
+			Annotations: map[string]string{preservedSlackScoringAnnotation: "{not json"},
+		},
+		Spec: v1alpha1.TaskSpawnerSpec{
+			When: v1alpha1.When{Slack: &v1alpha1.Slack{}},
+		},
+	}
+
+	hub := &v1alpha2.TaskSpawner{}
+	if err := taskSpawnerToHub(context.Background(), spoke, hub); err != nil {
+		t.Fatalf("taskSpawnerToHub() error = %v, want malformed annotation to be ignored", err)
+	}
+	if hub.Spec.When.Slack != nil && hub.Spec.When.Slack.Scoring != nil {
+		t.Error("malformed annotation should not produce a scoring config")
+	}
+}
+
+// The preservation annotation is user-writable and never passes the v1alpha2
+// schema — CRD validation runs against the request version, and v1alpha1 has no
+// scoring field. Entries that the schema would have rejected must be dropped, or
+// an out-of-enum verdict reaches TaskScore.spec.verdict where the enum is enforced
+// and every score creation for that reaction fails.
+func TestTaskSpawnerToHub_DropsInvalidRestoredSlackScoring(t *testing.T) {
+	tests := []struct {
+		name      string
+		annotated string
+		wantNames []string
+	}{
+		{
+			name:      "verdict outside the enum",
+			annotated: `{"reactions":[{"name":"+1","verdict":"Mixed"},{"name":"-1","verdict":"Negative"}]}`,
+			wantNames: []string{"-1"},
+		},
+		{
+			name:      "name outside Slack's alphabet",
+			annotated: `{"reactions":[{"name":"White_Check_Mark","verdict":"Positive"},{"name":"tada","verdict":"Positive"}]}`,
+			wantNames: []string{"tada"},
+		},
+		{
+			name:      "skin tone modifier",
+			annotated: `{"reactions":[{"name":"+1::skin-tone-4","verdict":"Positive"}]}`,
+			wantNames: nil,
+		},
+		{
+			name:      "empty name",
+			annotated: `{"reactions":[{"name":"","verdict":"Positive"}]}`,
+			wantNames: nil,
+		},
+		{
+			name:      "all entries valid",
+			annotated: `{"reactions":[{"name":"+1","verdict":"Positive"}]}`,
+			wantNames: []string{"+1"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spoke := &v1alpha1.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "helper",
+					Namespace:   "default",
+					Annotations: map[string]string{preservedSlackScoringAnnotation: tt.annotated},
+				},
+				Spec: v1alpha1.TaskSpawnerSpec{When: v1alpha1.When{Slack: &v1alpha1.Slack{}}},
+			}
+
+			hub := &v1alpha2.TaskSpawner{}
+			if err := taskSpawnerToHub(context.Background(), spoke, hub); err != nil {
+				t.Fatalf("taskSpawnerToHub() error = %v, want conversion never to be blocked", err)
+			}
+			if hub.Spec.When.Slack == nil || hub.Spec.When.Slack.Scoring == nil {
+				t.Fatal("scoring block was not restored at all")
+			}
+
+			var got []string
+			for _, entry := range hub.Spec.When.Slack.Scoring.Reactions {
+				got = append(got, entry.Name)
+			}
+			if !reflect.DeepEqual(got, tt.wantNames) {
+				t.Errorf("restored reactions = %v, want %v", got, tt.wantNames)
+			}
+		})
 	}
 }

@@ -34,6 +34,7 @@ type ApiV1alpha2Interface interface {
 	TasksGetter
 	TaskBudgetsGetter
 	TaskRecordsGetter
+	TaskScoresGetter
 	TaskSpawnersGetter
 	WorkerPoolsGetter
 	WorkspacesGetter
@@ -66,6 +67,10 @@ func (c *ApiV1alpha2Client) TaskBudgets(namespace string) TaskBudgetInterface {
 
 func (c *ApiV1alpha2Client) TaskRecords(namespace string) TaskRecordInterface {
 	return newTaskRecords(c, namespace)
+}
+
+func (c *ApiV1alpha2Client) TaskScores(namespace string) TaskScoreInterface {
+	return newTaskScores(c, namespace)
 }
 
 func (c *ApiV1alpha2Client) TaskSpawners(namespace string) TaskSpawnerInterface {

@@ -289,6 +289,7 @@ generate_chart_crd_templates() {
   write_chart_crd_template "${source}" "CustomResourceDefinition" "sessionspawners.kelos.dev" "${CHART_CRD_DIR}/sessionspawner-crd.yaml"
   write_chart_crd_template "${source}" "CustomResourceDefinition" "taskbudgets.kelos.dev" "${CHART_CRD_DIR}/taskbudget-crd.yaml"
   write_chart_crd_template "${source}" "CustomResourceDefinition" "taskrecords.kelos.dev" "${CHART_CRD_DIR}/taskrecord-crd.yaml"
+  write_chart_crd_template "${source}" "CustomResourceDefinition" "taskscores.kelos.dev" "${CHART_CRD_DIR}/taskscore-crd.yaml"
   write_chart_crd_template "${source}" "CustomResourceDefinition" "tasks.kelos.dev" "${CHART_CRD_DIR}/task-crd.yaml"
   write_chart_crd_template "${source}" "CustomResourceDefinition" "taskspawners.kelos.dev" "${CHART_CRD_DIR}/taskspawner-crd.yaml"
   write_chart_crd_template "${source}" "CustomResourceDefinition" "workerpools.kelos.dev" "${CHART_CRD_DIR}/workerpool-crd.yaml"

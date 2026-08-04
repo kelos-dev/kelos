@@ -6,6 +6,7 @@ import (
 
 	v1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 	v1alpha2 "github.com/kelos-dev/kelos/api/v1alpha2"
+	"github.com/kelos-dev/kelos/internal/scoring"
 )
 
 // preservedNameTemplateAnnotation carries taskTemplate.nameTemplate (a
@@ -20,6 +21,17 @@ const preservedNameTemplateAnnotation = "kelos.dev/v1alpha2-name-template"
 // writes the object through v1alpha1 would silently drop GitHub App
 // authentication from a stored v1alpha2 TaskSpawner.
 const preservedContextGitHubAppAuthAnnotation = "kelos.dev/v1alpha2-context-github-app-auth"
+
+// preservedSlackScoringAnnotation carries when.slack.scoring (a v1alpha2-only
+// field) across a v1alpha1 round-trip. Without it a client that reads and
+// writes the object through v1alpha1 would silently disable result scoring on a
+// stored v1alpha2 TaskSpawner.
+const preservedSlackScoringAnnotation = "kelos.dev/v1alpha2-slack-scoring"
+
+// maxRestoredSlackReactions mirrors the MaxItems marker on
+// SlackScoring.Reactions. Restored entries never passed that validation, so the
+// cap is re-applied when reading the preservation annotation.
+const maxRestoredSlackReactions = 32
 
 func taskSpawnerToHub(_ context.Context, src *v1alpha1.TaskSpawner, dst *v1alpha2.TaskSpawner) error {
 	src.ObjectMeta.DeepCopyInto(&dst.ObjectMeta)
@@ -36,6 +48,8 @@ func taskSpawnerToHub(_ context.Context, src *v1alpha1.TaskSpawner, dst *v1alpha
 		return err
 	}
 	deleteAnnotation(dst.Annotations, preservedContextGitHubAppAuthAnnotation)
+	restorePreservedSlackScoring(src.Annotations, &dst.Spec.When)
+	deleteAnnotation(dst.Annotations, preservedSlackScoringAnnotation)
 	return nil
 }
 
@@ -52,7 +66,76 @@ func taskSpawnerFromHub(_ context.Context, src *v1alpha2.TaskSpawner, dst *v1alp
 	if err := setPreservedContextGitHubAppAuth(dst, src.Spec.TaskTemplate); err != nil {
 		return err
 	}
+	if err := setPreservedSlackScoring(dst, src.Spec.When.Slack); err != nil {
+		return err
+	}
 	return convertViaJSON(&src.Status, &dst.Status)
+}
+
+// setPreservedSlackScoring records when.slack.scoring into an annotation on the
+// v1alpha1 object so it survives a v1alpha1 round-trip. The annotation is
+// cleared when the Slack source has no scoring configured.
+func setPreservedSlackScoring(dst *v1alpha1.TaskSpawner, slack *v1alpha2.Slack) error {
+	if slack == nil || slack.Scoring == nil {
+		deleteAnnotation(dst.Annotations, preservedSlackScoringAnnotation)
+		return nil
+	}
+	data, err := json.Marshal(slack.Scoring)
+	if err != nil {
+		return err
+	}
+	if dst.Annotations == nil {
+		dst.Annotations = map[string]string{}
+	}
+	dst.Annotations[preservedSlackScoringAnnotation] = string(data)
+	return nil
+}
+
+// restorePreservedSlackScoring restores a scoring block dropped by a v1alpha1
+// round-trip, unless the Slack source already carries one.
+func restorePreservedSlackScoring(annotations map[string]string, dst *v1alpha2.When) {
+	raw, ok := annotations[preservedSlackScoringAnnotation]
+	if !ok || raw == "" {
+		return
+	}
+	if dst.Slack == nil || dst.Slack.Scoring != nil {
+		return
+	}
+	var restored v1alpha2.SlackScoring
+	if err := json.Unmarshal([]byte(raw), &restored); err != nil {
+		// The annotation is best-effort preservation data and can be set by
+		// users; malformed data must not block API version conversion.
+		return
+	}
+
+	// The annotation is user-writable and never saw the v1alpha2 schema: CRD
+	// validation runs against the request version, and v1alpha1 has no scoring
+	// field. Everything the schema would have enforced is therefore re-applied
+	// here — per-entry constraints, the item cap, and name uniqueness — because an
+	// out-of-enum verdict would otherwise reach TaskScore.spec.verdict, where the
+	// enum *is* enforced, and fail every score creation for that reaction.
+	// Offending entries are dropped rather than rejected so conversion is never
+	// blocked.
+	valid := make([]v1alpha2.SlackReactionScore, 0, len(restored.Reactions))
+	seen := make(map[string]struct{}, len(restored.Reactions))
+	for _, entry := range restored.Reactions {
+		if len(valid) >= maxRestoredSlackReactions {
+			break
+		}
+		if !scoring.ValidReactionScore(entry) {
+			continue
+		}
+		// listMapKey=name makes duplicates unrepresentable in a stored v1alpha2
+		// object, so keeping more than one would leave the mapping ambiguous.
+		if _, duplicate := seen[entry.Name]; duplicate {
+			continue
+		}
+		seen[entry.Name] = struct{}{}
+		valid = append(valid, entry)
+	}
+	restored.Reactions = valid
+
+	dst.Slack.Scoring = &restored
 }
 
 func setPreservedNameTemplateAnnotation(dst *v1alpha1.TaskSpawner, nameTemplate string) {

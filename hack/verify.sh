@@ -23,6 +23,7 @@ GENERATED_FILES=(
   internal/manifests/charts/kelos/charts/kelos-crds/templates/taskbudget-crd.yaml
   internal/manifests/charts/kelos/charts/kelos-crds/templates/task-crd.yaml
   internal/manifests/charts/kelos/charts/kelos-crds/templates/taskrecord-crd.yaml
+  internal/manifests/charts/kelos/charts/kelos-crds/templates/taskscore-crd.yaml
   internal/manifests/charts/kelos/charts/kelos-crds/templates/taskspawner-crd.yaml
   internal/manifests/charts/kelos/charts/kelos-crds/templates/workerpool-crd.yaml
   internal/manifests/charts/kelos/charts/kelos-crds/templates/workspace-crd.yaml

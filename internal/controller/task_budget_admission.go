@@ -11,12 +11,14 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
+	"github.com/kelos-dev/kelos/internal/scoring"
 )
 
 // budgetBlockedMaxRequeue is the maximum requeue delay for budget-blocked tasks.
@@ -357,16 +359,46 @@ func encodeTaskBudgetLabelSnapshot(taskLabels map[string]string) (string, error)
 }
 
 func taskRecordLabels(task *kelos.Task) (map[string]string, error) {
-	if task.Annotations != nil {
-		if snapshot, ok := task.Annotations[taskBudgetLabelSnapshotAnnotation]; ok {
-			taskLabels, err := decodeTaskBudgetLabelSnapshot(snapshot)
-			if err != nil {
-				return nil, err
-			}
-			return copyStringMap(taskLabels), nil
+	var labels map[string]string
+	if snapshot, ok := task.Annotations[taskBudgetLabelSnapshotAnnotation]; ok {
+		taskLabels, err := decodeTaskBudgetLabelSnapshot(snapshot)
+		if err != nil {
+			return nil, err
 		}
+		labels = copyStringMap(taskLabels)
+	} else {
+		labels = copyStringMap(task.Labels)
 	}
-	return copyStringMap(task.Labels), nil
+	return withResultCorrelationLabels(labels, task), nil
+}
+
+// withResultCorrelationLabels copies the labels identifying the external
+// artifact carrying the Task's result onto the record's labels, so scores that
+// arrive after the Task's TTL removes it can still be resolved.
+//
+// They are copied explicitly rather than inherited because the budget label
+// snapshot, when present, replaces the Task's live labels — and the snapshot is
+// taken at admission, long before a result exists.
+//
+// The budget-relevant labels remain exactly the admission-time snapshot. These two
+// keys are added on top, which is sound only because a TaskBudget selector must not
+// reference them: a Task never carries them at admission but its record does, so a
+// selector matching one would count usage from Tasks that budget never admitted.
+// They are documented as reserved for exactly this reason; the selector field
+// already ships, so this cannot be enforced by validation without breaking
+// manifests that apply today.
+func withResultCorrelationLabels(labels map[string]string, task *kelos.Task) map[string]string {
+	for _, key := range []string{scoring.LabelSlackResultChannel, scoring.LabelSlackResultTS} {
+		value, ok := task.Labels[key]
+		if !ok {
+			continue
+		}
+		if labels == nil {
+			labels = make(map[string]string, 2)
+		}
+		labels[key] = value
+	}
+	return labels
 }
 
 func decodeTaskBudgetLabelSnapshot(snapshot string) (map[string]string, error) {
@@ -548,10 +580,63 @@ func (e *budgetEnforcer) createTaskRecord(ctx context.Context, task *kelos.Task)
 
 	if err := e.Create(ctx, record); err != nil {
 		if apierrors.IsAlreadyExists(err) {
+			// Best-effort: a scoring-correlation label must never fail budget
+			// accounting or hold up the Task lifecycle, so the error is logged
+			// rather than returned. Callers rely on this staying idempotent, and
+			// the reporter is the other writer of the same labels, so they
+			// converge on a later pass.
+			if err := e.backfillResultCorrelationLabels(ctx, task); err != nil {
+				logger.Error(err, "Unable to backfill result correlation labels on TaskRecord; scores arriving after this Task is deleted will not resolve",
+					"task", task.Name, "record", string(task.UID))
+			}
 			return nil
 		}
 		logger.Error(err, "Unable to create TaskRecord", "task", task.Name)
 		return err
+	}
+	return nil
+}
+
+// backfillResultCorrelationLabels copies the result-message labels onto an
+// existing TaskRecord when they are missing.
+//
+// Both writers of these labels can miss on a single pass. The reporter runs in
+// kelos-slack-server and labels the Task, then patches the record — but the
+// record may not exist yet, and the reporter does not revisit the Task once it
+// has recorded the reported phase. Meanwhile this controller may create the
+// record from a cached Task revision that predates the label write. Without a
+// backfill the labels reach neither object, and scores arriving after the Task's
+// TTL silently never resolve.
+//
+// The Task label write triggers another reconcile, which lands here through the
+// AlreadyExists path, so the labels converge on the next pass.
+func (e *budgetEnforcer) backfillResultCorrelationLabels(ctx context.Context, task *kelos.Task) error {
+	desired := withResultCorrelationLabels(nil, task)
+	if len(desired) == 0 {
+		return nil
+	}
+
+	var record kelos.TaskRecord
+	key := client.ObjectKey{Namespace: task.Namespace, Name: string(task.UID)}
+	if err := e.Get(ctx, key, &record); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+
+	missing := false
+	for labelKey, value := range desired {
+		if record.Labels[labelKey] != value {
+			missing = true
+			break
+		}
+	}
+	if !missing {
+		return nil
+	}
+
+	// A merge patch carries no resourceVersion, so this cannot conflict with the
+	// reporter writing the same labels concurrently.
+	if err := e.Patch(ctx, &record, client.RawPatch(types.MergePatchType, scoring.LabelMergePatch(desired))); err != nil {
+		return client.IgnoreNotFound(err)
 	}
 	return nil
 }

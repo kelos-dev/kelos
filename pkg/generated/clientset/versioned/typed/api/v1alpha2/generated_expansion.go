@@ -30,6 +30,8 @@ type TaskBudgetExpansion interface{}
 
 type TaskRecordExpansion interface{}
 
+type TaskScoreExpansion interface{}
+
 type TaskSpawnerExpansion interface{}
 
 type WorkerPoolExpansion interface{}

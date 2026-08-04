@@ -32,6 +32,14 @@ spec:
       name: Cost
       priority: 1
       type: string
+    - jsonPath: .status.scores.positive
+      name: Positive
+      priority: 1
+      type: integer
+    - jsonPath: .status.scores.negative
+      name: Negative
+      priority: 1
+      type: integer
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -153,9 +161,52 @@ spec:
             x-kubernetes-validations:
             - message: TaskRecord spec is immutable after creation
               rule: self == oldSelf
+          status:
+            description: |-
+              TaskRecordStatus holds observations about a completed Task that arrive after
+              the terminal record was written.
+            properties:
+              scores:
+                description: Scores aggregates the TaskScores recorded against this
+                  Task.
+                properties:
+                  lastObservedAt:
+                    description: LastObservedAt is the most recent ObservedAt across
+                      the aggregated scores.
+                    format: date-time
+                    type: string
+                  negative:
+                    description: |-
+                      Negative is the number of TaskScores with a Negative verdict. Serialized
+                      even when zero, for the same reason as Positive.
+                    format: int32
+                    type: integer
+                  positive:
+                    description: |-
+                      Positive is the number of TaskScores with a Positive verdict.
+
+                      Serialized even when zero: the summary is absent entirely for an unscored
+                      Task, so a present summary with zero here means "scored, none positive". With
+                      omitempty the print column would render that as <none>, which reads as
+                      unknown rather than zero. Still optional: only Kelos writes this status.
+                    format: int32
+                    type: integer
+                  total:
+                    description: |-
+                      Total is the number of TaskScores recorded against the Task. It counts every
+                      score, including any whose verdict this controller does not recognize, so
+                      Positive + Negative <= Total rather than == Total.
+
+                      Consumers should treat rates computed over a small Total as unreliable:
+                      most Tasks are never scored, and the actors who do score self-select.
+                    format: int32
+                    type: integer
+                type: object
+            type: object
         required:
         - spec
         type: object
     served: true
     storage: true
-    subresources: {}
+    subresources:
+      status: {}

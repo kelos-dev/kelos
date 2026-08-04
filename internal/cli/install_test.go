@@ -1026,6 +1026,7 @@ func TestKelosCRDNameSets(t *testing.T) {
 		"sessions.kelos.dev",
 		"taskbudgets.kelos.dev",
 		"taskrecords.kelos.dev",
+		"taskscores.kelos.dev",
 		"workerpools.kelos.dev",
 	} {
 		if !slices.Contains(kelosCRDNames, name) {

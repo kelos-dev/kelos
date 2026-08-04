@@ -7,7 +7,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -15,6 +19,7 @@ import (
 	"helm.sh/helm/v3/pkg/chartutil"
 	"helm.sh/helm/v3/pkg/release"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
 	sigyaml "sigs.k8s.io/yaml"
 )
@@ -970,4 +975,156 @@ func TestRender_ParseableOutput(t *testing.T) {
 	if validDocs == 0 {
 		t.Fatal("expected at least one valid YAML document in rendered output")
 	}
+}
+
+// The CRD adoption loop in the chart README is hand-maintained and has no
+// generator, so a new CRD is easy to forget there. Missing one leaves it without
+// Helm ownership metadata, and the next `helm upgrade` fails on that CRD.
+func TestChartREADMEAdoptionLoopListsEveryCRD(t *testing.T) {
+	readme, err := fs.ReadFile(manifests.ChartFS, "README.md")
+	if err != nil {
+		t.Fatalf("reading chart README: %v", err)
+	}
+
+	entries, err := fs.ReadDir(manifests.ChartFS, "charts/kelos-crds/templates")
+	if err != nil {
+		t.Fatalf("reading CRD templates: %v", err)
+	}
+
+	var found int
+	for _, entry := range entries {
+		data, err := fs.ReadFile(manifests.ChartFS, "charts/kelos-crds/templates/"+entry.Name())
+		if err != nil {
+			t.Fatalf("reading %s: %v", entry.Name(), err)
+		}
+		// Each template holds one CRD whose metadata.name is the resource name.
+		for _, line := range strings.Split(string(data), "\n") {
+			name, ok := strings.CutPrefix(strings.TrimSpace(line), "name: ")
+			if !ok || !strings.HasSuffix(name, ".kelos.dev") {
+				continue
+			}
+			found++
+			if !strings.Contains(string(readme), name) {
+				t.Errorf("chart README does not list %s in the CRD adoption loop", name)
+			}
+			break
+		}
+	}
+
+	if found == 0 {
+		t.Fatal("found no CRD names in the chart templates; the test is not checking anything")
+	}
+}
+
+// The scoring code paths write TaskRecord labels with a merge patch and manage
+// TaskScores, and RBAC verbs are not derivable from the code by any test that uses
+// the fake client — it does not enforce RBAC. These assertions pin the verbs the
+// two roles actually need, so swapping an update for a patch (or vice versa)
+// cannot silently produce a 403 in a real cluster.
+func TestRender_ScoringRBACVerbs(t *testing.T) {
+	data, err := Render(manifests.ChartFS, map[string]interface{}{
+		"slackServer": map[string]interface{}{"enabled": true},
+	})
+	if err != nil {
+		t.Fatalf("rendering chart: %v", err)
+	}
+	output := string(data)
+
+	// kelos-controller: creates records, merge-patches correlation labels onto an
+	// existing one, deletes on TTL expiry.
+	for _, expected := range []string{
+		"- taskrecords\n  verbs:\n  - create\n  - delete\n  - get\n  - list\n  - patch\n  - watch",
+		"- taskrecords/finalizers\n  - tasks/finalizers\n  - taskspawners/finalizers\n  verbs:\n  - update",
+		"- taskscores\n  verbs:\n  - get\n  - list\n  - update\n  - watch",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Errorf("controller role missing expected rule:\n%s", expected)
+		}
+	}
+
+	// The controller must not be able to delete TaskScores: retraction happens in
+	// kelos-slack-server and reclamation via garbage collection. Parsed rather than
+	// substring-matched, so the check does not depend on where delete would sort
+	// within the verb list.
+	verbs := roleVerbs(t, data, "kelos-controller-role", "taskscores")
+	if verbs == nil {
+		t.Fatal("no taskscores rule found in the controller role")
+	}
+	if _, granted := verbs["delete"]; granted {
+		t.Error("controller role grants delete on taskscores, which no code path uses")
+	}
+	for _, want := range []string{"get", "list", "update", "watch"} {
+		if _, granted := verbs[want]; !granted {
+			t.Errorf("controller role is missing %q on taskscores", want)
+		}
+	}
+
+	// kelos-slack-server: reads records to resolve a reaction after the Task's TTL,
+	// merge-patches the result labels onto them, and creates/deletes scores.
+	for _, expected := range []string{
+		"      - taskrecords\n    verbs:\n      - get\n      - list\n      - patch\n      - watch",
+		"      - taskscores\n    verbs:\n      - create\n      - delete\n      - get\n      - list\n      - watch",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Errorf("slack-server role missing expected rule:\n%s", expected)
+		}
+	}
+}
+
+// hack/verify.sh checks generated files against a hand-maintained list, so a new
+// chart CRD template that is missing from it is simply never verified — drift in it
+// would pass `make verify` silently.
+func TestVerifyScriptListsEveryChartCRD(t *testing.T) {
+	script, err := os.ReadFile(filepath.Join("..", "..", "hack", "verify.sh"))
+	if err != nil {
+		t.Fatalf("reading hack/verify.sh: %v", err)
+	}
+
+	entries, err := fs.ReadDir(manifests.ChartFS, "charts/kelos-crds/templates")
+	if err != nil {
+		t.Fatalf("reading CRD templates: %v", err)
+	}
+
+	var checked int
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), "-crd.yaml") {
+			continue
+		}
+		checked++
+		path := "internal/manifests/charts/kelos/charts/kelos-crds/templates/" + entry.Name()
+		if !strings.Contains(string(script), path) {
+			t.Errorf("hack/verify.sh does not verify the generated file %s", path)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("found no CRD templates; the test is not checking anything")
+	}
+}
+
+// roleVerbs returns the verb set the named ClusterRole grants on the given
+// resource, or nil when no rule mentions it.
+func roleVerbs(t *testing.T, rendered []byte, roleName, resource string) map[string]struct{} {
+	t.Helper()
+
+	for _, doc := range strings.Split(string(rendered), "\n---\n") {
+		var role rbacv1.ClusterRole
+		if err := sigyaml.Unmarshal([]byte(doc), &role); err != nil {
+			// Documents of other kinds do not unmarshal into a ClusterRole cleanly.
+			continue
+		}
+		if role.Kind != "ClusterRole" || role.Name != roleName {
+			continue
+		}
+		for _, rule := range role.Rules {
+			if !slices.Contains(rule.Resources, resource) {
+				continue
+			}
+			verbs := make(map[string]struct{}, len(rule.Verbs))
+			for _, verb := range rule.Verbs {
+				verbs[verb] = struct{}{}
+			}
+			return verbs
+		}
+	}
+	return nil
 }

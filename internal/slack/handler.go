@@ -41,6 +41,27 @@ type SlackHandler struct {
 	joinMessage              string
 	denySlackConnectChannels bool
 	cancel                   context.CancelFunc
+
+	// nowFunc and afterFunc are time seams for the reaction-resolution retry.
+	// Both default to the real clock; tests override them to avoid sleeping.
+	nowFunc   func() time.Time
+	afterFunc func(time.Duration) <-chan time.Time
+}
+
+// now returns the current time.
+func (h *SlackHandler) now() time.Time {
+	if h.nowFunc != nil {
+		return h.nowFunc()
+	}
+	return time.Now()
+}
+
+// after returns a channel that fires after d.
+func (h *SlackHandler) after(d time.Duration) <-chan time.Time {
+	if h.afterFunc != nil {
+		return h.afterFunc(d)
+	}
+	return time.After(d)
 }
 
 // NewSlackHandler creates a new handler. Call Start to begin listening.
@@ -142,6 +163,10 @@ func (h *SlackHandler) handleEventsAPI(ctx context.Context, evt socketmode.Event
 		h.handleMemberJoinedChannel(ctx, inner)
 	case *slackevents.MessageEvent:
 		h.handleMessageEvent(ctx, inner)
+	case *slackevents.ReactionAddedEvent:
+		h.handleReactionAdded(ctx, inner)
+	case *slackevents.ReactionRemovedEvent:
+		h.handleReactionRemoved(ctx, inner)
 	default:
 		return
 	}

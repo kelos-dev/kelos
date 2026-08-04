@@ -126,6 +126,7 @@ rules:
   - sessions/status
   - sessionspawners/status
   - taskbudgets/status
+  - taskrecords/status
   - tasks/status
   - taskspawners/status
   - workerpools/status
@@ -142,7 +143,16 @@ rules:
   - delete
   - get
   - list
+  - patch
   - watch
+- apiGroups:
+  - kelos.dev
+  resources:
+  - taskrecords/finalizers
+  - tasks/finalizers
+  - taskspawners/finalizers
+  verbs:
+  - update
 - apiGroups:
   - kelos.dev
   resources:
@@ -159,10 +169,12 @@ rules:
 - apiGroups:
   - kelos.dev
   resources:
-  - tasks/finalizers
-  - taskspawners/finalizers
+  - taskscores
   verbs:
+  - get
+  - list
   - update
+  - watch
 - apiGroups:
   - kelos.dev
   resources:
@@ -465,6 +477,28 @@ rules:
       - agentconfigs
       - workspaces
     verbs:
+      - get
+      - list
+      - watch
+  # Result scoring: TaskRecords are read to resolve a reaction to a Task after
+  # the Task's TTL removes it, and labelled with the result message identity.
+  # The label write is a merge patch, so it needs patch rather than update.
+  - apiGroups:
+      - kelos.dev
+    resources:
+      - taskrecords
+    verbs:
+      - get
+      - list
+      - patch
+      - watch
+  - apiGroups:
+      - kelos.dev
+    resources:
+      - taskscores
+    verbs:
+      - create
+      - delete
       - get
       - list
       - watch

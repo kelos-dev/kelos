@@ -85,7 +85,7 @@ type TaskReconciler struct {
 // +kubebuilder:rbac:groups=kelos.dev,resources=tasks/finalizers,verbs=update
 // +kubebuilder:rbac:groups=kelos.dev,resources=workspaces,verbs=get;list;watch
 // +kubebuilder:rbac:groups=kelos.dev,resources=agentconfigs,verbs=get;list;watch
-// +kubebuilder:rbac:groups=kelos.dev,resources=taskrecords,verbs=get;list;watch;create;delete
+// +kubebuilder:rbac:groups=kelos.dev,resources=taskrecords,verbs=get;list;watch;create;patch;delete
 // +kubebuilder:rbac:groups=kelos.dev,resources=taskbudgets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=kelos.dev,resources=taskbudgets/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete

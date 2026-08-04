@@ -66,6 +66,14 @@ type TaskRecordListerExpansion interface{}
 // TaskRecordNamespaceLister.
 type TaskRecordNamespaceListerExpansion interface{}
 
+// TaskScoreListerExpansion allows custom methods to be added to
+// TaskScoreLister.
+type TaskScoreListerExpansion interface{}
+
+// TaskScoreNamespaceListerExpansion allows custom methods to be added to
+// TaskScoreNamespaceLister.
+type TaskScoreNamespaceListerExpansion interface{}
+
 // TaskSpawnerListerExpansion allows custom methods to be added to
 // TaskSpawnerLister.
 type TaskSpawnerListerExpansion interface{}

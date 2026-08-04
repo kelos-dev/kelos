@@ -8,12 +8,15 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -22,6 +25,7 @@ import (
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/logging"
 	"github.com/kelos-dev/kelos/internal/reporting"
+	"github.com/kelos-dev/kelos/internal/scoring"
 	kelosslack "github.com/kelos-dev/kelos/internal/slack"
 )
 
@@ -78,12 +82,33 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Resolving a reaction to a Task falls back to TaskRecords, which starts a
+	// TaskRecord informer in this process. Records are retained for 30 days by
+	// default, so an unrestricted cache would hold every completed Task's record
+	// and every reaction event would scan all of them. Only records carrying the
+	// result-message timestamp are ever resolvable, so the cache is restricted to
+	// those: both the footprint and the scan stay proportional to results that can
+	// actually be scored. Tasks need no restriction — that informer already exists
+	// for the reporting loop.
+	resultTSExists, err := labels.NewRequirement(scoring.LabelSlackResultTS, selection.Exists, nil)
+	if err != nil {
+		setupLog.Error(err, "Unable to build TaskRecord cache selector")
+		os.Exit(1)
+	}
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "kelos-slack-server",
+		Cache: cache.Options{
+			ByObject: map[client.Object]cache.ByObject{
+				&kelos.TaskRecord{}: {
+					Label: labels.NewSelector().Add(*resultTSExists),
+				},
+			},
+		},
 	})
 	if err != nil {
 		setupLog.Error(err, "Unable to start manager")

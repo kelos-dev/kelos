@@ -36,6 +36,8 @@ type Interface interface {
 	TaskBudgets() TaskBudgetInformer
 	// TaskRecords returns a TaskRecordInformer.
 	TaskRecords() TaskRecordInformer
+	// TaskScores returns a TaskScoreInformer.
+	TaskScores() TaskScoreInformer
 	// TaskSpawners returns a TaskSpawnerInformer.
 	TaskSpawners() TaskSpawnerInformer
 	// WorkerPools returns a WorkerPoolInformer.
@@ -83,6 +85,11 @@ func (v *version) TaskBudgets() TaskBudgetInformer {
 // TaskRecords returns a TaskRecordInformer.
 func (v *version) TaskRecords() TaskRecordInformer {
 	return &taskRecordInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
+// TaskScores returns a TaskScoreInformer.
+func (v *version) TaskScores() TaskScoreInformer {
+	return &taskScoreInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }
 
 // TaskSpawners returns a TaskSpawnerInformer.

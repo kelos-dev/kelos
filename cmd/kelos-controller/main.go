@@ -353,6 +353,13 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "TaskRecord")
 		os.Exit(1)
 	}
+	if err = (&controller.TaskScoreReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "TaskScore")
+		os.Exit(1)
+	}
 	if err = (&controller.WorkerPoolReconciler{
 		Client:                      mgr.GetClient(),
 		Scheme:                      mgr.GetScheme(),

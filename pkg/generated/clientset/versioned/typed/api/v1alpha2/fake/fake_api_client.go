@@ -52,6 +52,10 @@ func (c *FakeApiV1alpha2) TaskRecords(namespace string) v1alpha2.TaskRecordInter
 	return newFakeTaskRecords(c, namespace)
 }
 
+func (c *FakeApiV1alpha2) TaskScores(namespace string) v1alpha2.TaskScoreInterface {
+	return newFakeTaskScores(c, namespace)
+}
+
 func (c *FakeApiV1alpha2) TaskSpawners(namespace string) v1alpha2.TaskSpawnerInterface {
 	return newFakeTaskSpawners(c, namespace)
 }

@@ -629,6 +629,9 @@ to receive refreshed credentials during long-running work.
 | `spec.when.slack.triggers[].pattern` | RE2 regex matched against message text (unanchored); leading `<@USER_ID>` mentions are stripped before matching; bot mention required unless `mentionOptional` is set; multiple triggers use OR semantics; when empty, every bot mention fires | No |
 | `spec.when.slack.triggers[].mentionOptional` | When `true`, fire on pattern match alone without requiring a bot @-mention | No |
 | `spec.when.slack.excludePatterns` | RE2 regex patterns that reject messages when any pattern matches (OR semantics); leading `<@USER_ID>` mentions are stripped before matching; does not apply to slash commands | No |
+| `spec.when.slack.scoring.reactions` | Reaction-to-verdict mappings. Max 32 entries | No |
+| `spec.when.slack.scoring.reactions[].name` | Slack reaction name as Slack stores it: lowercase letters, digits, `_`, `-`, `+`. Give it without surrounding colons and without a skin-tone modifier (`+1`, not `:+1:` or `+1::skin-tone-4`); it matches every skin-tone variant of that emoji. Max 64 characters; names must be unique within the list | Yes (per entry) |
+| `spec.when.slack.scoring.reactions[].verdict` | Verdict recorded when this reaction is added to a result message: `Positive` or `Negative` | Yes (per entry) |
 | `spec.when.webhook.source` | Short identifier for the generic webhook source (lowercase alphanumeric with optional hyphens). Determines the URL path (`/webhook/<source>`). The endpoint is currently unauthenticated — see [#1040](https://github.com/kelos-dev/kelos/issues/1040) | Yes (when using webhook) |
 | `spec.when.webhook.fieldMapping` | Map of template variable name → JSONPath expression evaluated against the request body. Each key becomes a top-level template variable. Lowercase `id`, `title`, `body`, `url` are also exposed as `{{.ID}}`, `{{.Title}}`, `{{.Body}}`, `{{.URL}}`. The `id` key is required (used for delivery deduplication and Task naming) | Yes (when using webhook) |
 | `spec.when.webhook.filters[].field` | JSONPath expression selecting the payload field to match | Yes (per filter) |
@@ -932,6 +935,138 @@ TTL. Tasks that complete without usage do not generate a TaskRecord.
 | `spec.usage.outputTokens` | Output tokens produced | No |
 | `spec.ttlSecondsAfterCompletion` | Seconds after `completionTime` before automatic deletion. If unset, the record is retained indefinitely. Controller-created records set this to 30 days | No |
 
+### TaskRecord Status
+
+| Field | Description |
+|-------|-------------|
+| `status.scores.positive` | Number of `Positive` TaskScores recorded against the Task |
+| `status.scores.negative` | Number of `Negative` TaskScores recorded against the Task |
+| `status.scores.total` | Total TaskScores recorded against the Task, including any whose verdict this version does not recognize |
+| `status.scores.lastObservedAt` | Most recent `spec.observedAt` across those scores |
+
+Most Tasks are never scored, and the people who do score self-select toward
+results that were surprisingly good or clearly wrong. Treat rates computed over a
+small `total` as unreliable.
+
+## TaskScore
+
+TaskScore is an immutable record of one external actor scoring one Task result —
+a reviewer reacting to the agent's answer in Slack, for example. A Task
+accumulates one TaskScore per actor per distinct signal.
+
+Scoring is opt-in per source. For Slack, map reaction names onto verdicts in
+`TaskSpawner.spec.when.slack.scoring.reactions`:
+
+```yaml
+when:
+  slack:
+    scoring:
+      reactions:
+        - name: "+1"
+          verdict: Positive
+        - name: white_check_mark
+          verdict: Positive
+        - name: "-1"
+          verdict: Negative
+```
+
+A reaction that is not listed is ignored rather than recorded, so unrelated emoji
+in a busy channel do not dilute the counts. Reaction names are unique, so the same
+emoji cannot be mapped to two verdicts.
+
+Names are validated against the alphabet Slack itself uses — lowercase letters,
+digits, `_`, `-`, and `+`. Anything Slack cannot send is rejected at admission
+rather than accepted and silently never matched, including uppercase names, spaces,
+literal emoji characters, and skin-tone modifiers (the base name already covers
+every variant of an emoji).
+
+Reaction scoring is available on Slack-triggered spawners only, since scoring is
+configured under `spec.when.slack`. A spawner triggered by GitHub or a webhook
+cannot configure it.
+
+Reaction scoring also requires the Slack app to grant the `reactions:read` scope
+and subscribe to the `reaction_added` and `reaction_removed` bot events. Without
+them Slack never delivers the events and no scores are recorded, with nothing
+logged — the configuration alone is not enough.
+
+Only the message carrying a Task's final result is scoreable. Reacting to the
+"accepted" acknowledgement posted while the Task is still running has no effect.
+When a response is long enough to be split across several Slack messages, the
+first one carries the score.
+
+Scores resolve through the Task while it exists and through its TaskRecord
+afterwards, so feedback that arrives days later still lands. A Task that never
+produced a TaskRecord — one that completed without reporting usage — can only be
+scored while the Task itself is still present.
+
+| Field | Description | Required |
+|-------|-------------|----------|
+| `spec.taskRef.name` | Name of the scored Task | Yes |
+| `spec.taskRef.uid` | UID of the scored Task | Yes |
+| `spec.verdict` | Normalized judgement: `Positive` or `Negative` | Yes |
+| `spec.source.type` | Integration that observed the score: `SlackReaction` | Yes |
+| `spec.source.actor` | External identity that scored the result (e.g. a Slack user ID); max 256 characters. Part of the score's identity — one actor's score for a given signal is recorded once rather than accumulating. Omit it when the source has no distinct actor; the empty string is rejected | No |
+| `spec.source.signal` | The score in the source system's own vocabulary (e.g. `+1`), with cosmetic variants folded — a Slack skin-tone modifier is stripped. The source's canonical signal name, not the exact bytes received. Max 256 characters | Yes |
+| `spec.source.uri` | Opaque locator for the scored artifact (e.g. `slack://C0123456789/1712345678.123456`); max 1024 characters. The format varies by source and is not part of the API contract — do not parse it | No |
+| `spec.observedAt` | When the scoring event happened in the source system | No |
+
+Removing a Slack reaction deletes the TaskScore it created, so a retracted
+reaction leaves no score behind. Retraction depends on neither the verdict mapping
+nor any TaskSpawner, so a reaction can still be withdrawn after its emoji was
+removed from `scoring.reactions`, after the owning TaskSpawner was deleted, or
+after scoring was disabled everywhere. Redelivery of the same reaction does not
+create a duplicate.
+
+The TaskSpawner that created the scored Task is recorded in the
+`kelos.dev/taskspawner` label rather than in the spec, so scores can be selected
+per spawner.
+
+TaskScores are owned by the TaskRecord for their Task once it exists, so they are
+deleted along with it when its TTL expires.
+
+Scores for a Task that never produced a TaskRecord are retained indefinitely, and
+this is an unbounded growth path rather than a stable steady state: a Task that
+fails before reporting usage produces no record, and a negative score on a failure
+is a likely thing for a reviewer to leave. Such scores carry no owner reference and
+are excluded from every summary. To find and remove them, select on the scored
+Task's UID label:
+
+```bash
+kubectl get taskscores -A -l kelos.dev/task-uid=<task-uid>
+```
+
+Scores whose `metadata.ownerReferences` is empty are the ones no TaskRecord will
+ever reclaim.
+
+Anyone who can react in a channel the bot is in can score a result. Kelos records
+the actor but does not weight or restrict scores by identity.
+
+### Reserved Labels
+
+Kelos writes these labels and selects on them.
+
+Do not set `kelos.dev/slack-result-channel` or `kelos.dev/slack-result-ts` yourself
+— for example through `TaskSpawner.spec.taskTemplate.metadata.labels`. They identify
+a single Slack message. A value you set is overwritten with the real identity when
+the Task's result is reported, but until then a value shared across Tasks can make a
+reaction ambiguous (resolution fails and no score is recorded) if it matches a real
+result message.
+
+Do not reference them in a `TaskBudget.spec.taskSelector` either. A Task does not
+carry them at admission time but its TaskRecord does, so a budget selecting on one
+would count spend from Tasks it never admitted.
+
+The other two keys are not a hazard: `kelos.dev/taskspawner` is always overwritten
+by Kelos, and `kelos.dev/task-uid` is only ever set on TaskScores, which users do
+not author.
+
+| Label | Set on | Meaning |
+|-------|--------|---------|
+| `kelos.dev/taskspawner` | Task, TaskRecord, TaskScore | Name of the TaskSpawner that created the Task. Copied onto the TaskRecord, which is how spawner-scoped scoring keeps working after the Task is deleted |
+| `kelos.dev/slack-result-channel` | Task, TaskRecord | Slack channel ID the Task's result was posted in |
+| `kelos.dev/slack-result-ts` | Task, TaskRecord | Timestamp of the Slack message carrying the Task's result |
+| `kelos.dev/task-uid` | TaskScore | UID of the scored Task, used to aggregate its scores |
+
 ## TaskSpawner Status
 
 | Field | Description |
@@ -1213,6 +1348,19 @@ The Kelos controller and spawner pods expose Prometheus metrics on their `/metri
 | `kelos_task_input_tokens_total` | Counter | namespace, type, spawner, model | Cumulative input tokens consumed by completed Tasks |
 | `kelos_task_output_tokens_total` | Counter | namespace, type, spawner, model | Cumulative output tokens consumed by completed Tasks |
 | `kelos_reconcile_errors_total` | Counter | controller | Reconciliation errors |
+
+### Scoring Metrics
+
+These are exported by `kelos-controller` and `kelos-slack-server`; only the Slack
+server records scores today, so on the controller they stay at zero. Both are incremented only when a
+TaskScore is actually created or deleted, so Slack's at-least-once event delivery
+does not inflate them. `verdict` is empty on a retraction whose score was not in
+cache when it was removed.
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `kelos_task_score_recorded_total` | Counter | namespace, spawner, verdict, source_type | Task scores recorded from external actors |
+| `kelos_task_score_retracted_total` | Counter | namespace, spawner, verdict, source_type | Task scores retracted by the actor who recorded them |
 
 ### Spawner Metrics
 

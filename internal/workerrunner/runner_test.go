@@ -23,7 +23,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"sort"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -698,26 +702,187 @@ func TestWaitForAssignmentReleaseContextCancelled(t *testing.T) {
 	}
 }
 
+// descendantScript forks a background child that publishes its PID and then
+// appends to a heartbeat file in a loop. The PID file lets the test cancel
+// only once the descendant exists, and the growing heartbeat lets it observe
+// whether the descendant is still executing without depending on any fixed
+// delay. The child appends rather than truncating because truncating an
+// already-empty file need not update its modification time.
+const descendantScript = `
+(while :; do printf 'x' >>"$HEARTBEAT"; sleep 0.05; done) &
+printf '%s' "$!" >"$PIDFILE.tmp"
+mv "$PIDFILE.tmp" "$PIDFILE"
+wait
+`
+
+const (
+	descendantPollInterval = 20 * time.Millisecond
+	descendantTimeout      = 30 * time.Second
+	descendantQuietWindow  = 500 * time.Millisecond
+)
+
 func TestConfigureTaskProcessGroupCancellationKillsDescendants(t *testing.T) {
-	marker := filepath.Join(t.TempDir(), "leaked-child-ran")
+	dir := t.TempDir()
+	pidFile := filepath.Join(dir, "child.pid")
+	heartbeat := filepath.Join(dir, "child.heartbeat")
+
 	ctx, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(ctx, "sh", "-c", `(sleep 0.3; touch "$MARKER") & wait`)
-	cmd.Env = append(os.Environ(), "MARKER="+marker)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "sh", "-c", descendantScript)
+	cmd.Env = append(os.Environ(), "PIDFILE="+pidFile, "HEARTBEAT="+heartbeat)
 	configureTaskProcessGroupCancellation(cmd)
 
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("Starting process tree: %v", err)
 	}
-	time.Sleep(50 * time.Millisecond)
-	cancel()
-	_ = cmd.Wait()
 
-	// If cancellation killed only the shell, its background child would be
-	// re-parented to PID 1 and create the marker after the parent exited.
-	time.Sleep(500 * time.Millisecond)
-	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("Cancelled task left a descendant running; marker stat error = %v", err)
+	// Cancel only after the descendant is observably running, so the
+	// assertion cannot pass merely because the shell had not forked yet.
+	pid := waitForRunningDescendant(t, pidFile, heartbeat)
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+
+	cancel()
+	if err := cmd.Wait(); err == nil {
+		t.Fatal("Expected an error from the cancelled task shell")
 	}
+
+	// A descendant that survived cancellation keeps growing the heartbeat;
+	// one that was killed leaves it frozen.
+	waitForDescendantToStop(t, pid, heartbeat)
+}
+
+// waitForRunningDescendant blocks until the background child has published its
+// PID and written its first heartbeat, and returns that PID.
+func waitForRunningDescendant(t *testing.T, pidFile, heartbeat string) int {
+	t.Helper()
+
+	deadline := time.Now().Add(descendantTimeout)
+	for {
+		data, err := os.ReadFile(pidFile)
+		if err == nil {
+			if info, statErr := os.Stat(heartbeat); statErr == nil && info.Size() > 0 {
+				pid, convErr := strconv.Atoi(strings.TrimSpace(string(data)))
+				if convErr != nil {
+					t.Fatalf("Parsing descendant PID %q: %v", data, convErr)
+				}
+				return pid
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("Descendant did not start within %s", descendantTimeout)
+		}
+		time.Sleep(descendantPollInterval)
+	}
+}
+
+// waitForDescendantToStop polls until the heartbeat file stops growing for a
+// full quiet window, failing if it is still advancing at the deadline.
+func waitForDescendantToStop(t *testing.T, pid int, heartbeat string) {
+	t.Helper()
+
+	deadline := time.Now().Add(descendantTimeout)
+	for {
+		before, err := os.Stat(heartbeat)
+		if err != nil {
+			t.Fatalf("Reading descendant heartbeat: %v", err)
+		}
+		time.Sleep(descendantQuietWindow)
+		after, err := os.Stat(heartbeat)
+		if err != nil {
+			t.Fatalf("Reading descendant heartbeat: %v", err)
+		}
+		if after.Size() == before.Size() {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("Cancelled task left descendant %d running after %s", pid, descendantTimeout)
+		}
+	}
+}
+
+func TestSweepSurvivingTaskProcessesKillsEveryOtherProcess(t *testing.T) {
+	procRoot := newProcFixture(t, "1", "7", "42")
+
+	var killed []int
+	sweepSurvivingTaskProcesses(1, procRoot, func(pid int, sig syscall.Signal) error {
+		if sig != syscall.SIGKILL {
+			t.Errorf("Signal = %v, want SIGKILL", sig)
+		}
+		killed = append(killed, pid)
+		return nil
+	})
+
+	sort.Ints(killed)
+	want := []int{7, 42}
+	if !reflect.DeepEqual(killed, want) {
+		t.Errorf("Killed = %v, want %v", killed, want)
+	}
+}
+
+func TestSweepSurvivingTaskProcessesSkipsWhenNotNamespaceInit(t *testing.T) {
+	procRoot := newProcFixture(t, "1", "7", "42")
+
+	var killed []int
+	sweepSurvivingTaskProcesses(4242, procRoot, func(pid int, _ syscall.Signal) error {
+		killed = append(killed, pid)
+		return nil
+	})
+
+	if len(killed) != 0 {
+		t.Errorf("Killed = %v, want no processes signalled when the runner is not PID 1", killed)
+	}
+}
+
+func TestKillProcessesExceptSkipsNonProcessEntries(t *testing.T) {
+	procRoot := newProcFixture(t, "9", "self", "meminfo")
+	// A regular file whose name parses as a PID must still be skipped.
+	if err := os.WriteFile(filepath.Join(procRoot, "11"), nil, 0o600); err != nil {
+		t.Fatalf("Writing fixture file: %v", err)
+	}
+
+	var killed []int
+	if err := killProcessesExcept(procRoot, 1, func(pid int, _ syscall.Signal) error {
+		killed = append(killed, pid)
+		return nil
+	}); err != nil {
+		t.Fatalf("killProcessesExcept() error = %v", err)
+	}
+
+	if !reflect.DeepEqual(killed, []int{9}) {
+		t.Errorf("Killed = %v, want [9]", killed)
+	}
+}
+
+func TestKillProcessesExceptIgnoresExitedProcesses(t *testing.T) {
+	procRoot := newProcFixture(t, "7")
+
+	if err := killProcessesExcept(procRoot, 1, func(int, syscall.Signal) error {
+		return syscall.ESRCH
+	}); err != nil {
+		t.Errorf("killProcessesExcept() error = %v, want nil for an already exited process", err)
+	}
+}
+
+func TestKillProcessesExceptUnreadableProcRoot(t *testing.T) {
+	err := killProcessesExcept(filepath.Join(t.TempDir(), "missing"), 1, func(int, syscall.Signal) error {
+		return nil
+	})
+	if err == nil {
+		t.Fatal("Expected an error for an unreadable proc root")
+	}
+}
+
+func newProcFixture(t *testing.T, entries ...string) string {
+	t.Helper()
+
+	procRoot := t.TempDir()
+	for _, entry := range entries {
+		if err := os.Mkdir(filepath.Join(procRoot, entry), 0o755); err != nil {
+			t.Fatalf("Creating proc fixture entry %s: %v", entry, err)
+		}
+	}
+	return procRoot
 }
 
 func TestRunMaxTasksPerWorker(t *testing.T) {

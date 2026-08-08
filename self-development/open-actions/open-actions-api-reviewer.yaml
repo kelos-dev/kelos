@@ -133,7 +133,7 @@ spec:
       - For issues: `gh issue view {{.Number}} --comments`
       - If a PR references an issue, also read the issue and its comments
       - If an issue references existing API types, read the relevant files under
-        `api/`, `config/`, and `docs/api-design.md`
+        `api/`, `config/`, and the `README.md` sections describing them
       - Understand the motivation and scope of the change or proposal
 
       ### 3. Review
@@ -147,7 +147,7 @@ spec:
       - Read the full diff: `git diff origin/main...HEAD`
       - For each changed API type, generated CRD, sample, schema test, label or
         annotation, flag, configuration value, or webhook contract, read the
-        full surrounding file and `docs/api-design.md`
+        full surrounding file and the relevant `README.md` sections
       - Review the diff using the API design checklist below
 
       **If this is an issue:**
@@ -226,7 +226,7 @@ spec:
       - Are XValidation rules correct for cross-field validation?
       - If CRD or API types changed, were
         `api/v1alpha1/zz_generated.deepcopy.go`, `config/crd/bases/`,
-        `config/samples/`, `docs/api-design.md`, and schema tests updated as
+        `config/samples/`, `README.md`, and schema tests updated as
         applicable?
 
       **Naming and documentation**:

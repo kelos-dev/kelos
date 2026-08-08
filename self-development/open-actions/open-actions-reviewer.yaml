@@ -237,9 +237,9 @@ spec:
       - When a PR introduces or changes a CRD field, validation, default,
         label, annotation, command-line flag, configuration value, webhook
         contract, or supported workflow behavior, require matching updates to
-        `docs/api-design.md`, generated CRDs, `config/samples/`, schema tests,
-        or `README.md` as applicable. Flag a user-facing change that ships
-        with no documentation update as P2.
+        generated CRDs, `config/samples/`, schema tests, or `README.md` as
+        applicable. Flag a user-facing change that ships with no
+        documentation update as P2.
 
       **Code quality**:
       - No unnecessary code, comments, or dead variables

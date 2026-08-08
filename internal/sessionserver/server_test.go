@@ -659,6 +659,7 @@ func TestSessionUIAdaptsToPhoneViewport(t *testing.T) {
 		"phone safe-area padding":    `env(safe-area-inset-bottom)`,
 		"non-zooming form fields":    `.composer textarea, .yaml-panel textarea, .form-grid input`,
 		"phone-sized dialog":         `max-height: calc(100dvh - 16px`,
+		"shrinking composer content": `.composer-wrap { min-width: 0;`,
 	} {
 		if !strings.Contains(string(styles), expected) {
 			t.Errorf("Session styles are missing %s: %s", description, expected)

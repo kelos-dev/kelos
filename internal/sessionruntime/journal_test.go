@@ -84,6 +84,78 @@ func TestJournalPersistsEventsAndRecoversInterruptedTurn(t *testing.T) {
 	}
 }
 
+func TestJournalRecoveryHandlesEventsWithoutTurnIDs(t *testing.T) {
+	journal := NewJournal()
+	defer journal.Close()
+	for _, event := range []Event{
+		{Type: EventUserMessage, Text: "message without a turn"},
+		{Type: EventTurnCompleted, Status: "completed"},
+		{Type: EventInputRequested, InputID: "input-1", Status: "pending"},
+	} {
+		if err := journal.Append(event); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	recovery, err := recoverJournal(journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recovery.queuedTurns) != 0 {
+		t.Fatalf("recovered queued turns = %#v", recovery.queuedTurns)
+	}
+	events := journal.Snapshot()
+	assertEventTypes(t, events,
+		EventUserMessage,
+		EventTurnCompleted,
+		EventInputRequested,
+		EventRuntimeRecovered,
+		EventInputResolved,
+	)
+	if resolved := events[len(events)-1]; resolved.InputID != "input-1" || resolved.TurnID != "" || resolved.Status != "cancelled" {
+		t.Fatalf("recovered input resolution = %#v", resolved)
+	}
+}
+
+func TestJournalCompactionPreservesQueuedTurnForRecovery(t *testing.T) {
+	path := filepath.Join(t.TempDir(), journalFileName)
+	journal, err := openJournal(path, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendEvent := func(event Event) {
+		t.Helper()
+		if err := journal.Append(event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	appendEvent(Event{Type: EventUserMessage, TurnID: "turn-1", Text: "active work"})
+	appendEvent(Event{Type: EventTurnStarted, TurnID: "turn-1", Status: "running"})
+	appendEvent(Event{Type: EventUserMessage, TurnID: "turn-2", Text: "queued work"})
+	for i := 0; i < 3; i++ {
+		appendEvent(Event{Type: EventAssistantDelta, TurnID: "turn-1", Text: fmt.Sprintf("event-%d", i+1)})
+	}
+	for _, event := range journal.Snapshot() {
+		if event.TurnID == "turn-2" {
+			t.Fatalf("queued turn remained in replay history after compaction: %#v", event)
+		}
+	}
+	journal.Close()
+
+	reopened, err := openJournal(path, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	recovery, err := recoverJournal(reopened)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recovery.queuedTurns) != 1 || recovery.queuedTurns[0].id != "turn-2" || recovery.queuedTurns[0].text != "queued work" {
+		t.Fatalf("recovered queued turns = %#v", recovery.queuedTurns)
+	}
+}
+
 func TestJournalIdentityPersistsUntilJournalIsReplaced(t *testing.T) {
 	path := filepath.Join(t.TempDir(), journalFileName)
 	journal, err := OpenJournal(path)

@@ -203,7 +203,7 @@ func encodeDrainReport(report *sessionupdate.Report) (any, error) {
 // sessionDrainReports returns the acknowledgement for each pending drain request
 // (runtime update and idle drain), or nil for a request that is not pending.
 //
-// A runtime-update report is Drained once no turn is in flight: the Pod is
+// A runtime-update report is Drained once no accepted turn remains: the Pod is
 // replaced and recovers from the journal, so an unpublished activity transition
 // is not lost.
 //

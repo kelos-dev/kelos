@@ -73,6 +73,102 @@ type interruptProvider struct {
 	closeOnce   sync.Once
 }
 
+type stuckInterruptProvider struct {
+	started                chan struct{}
+	interruptCalled        chan struct{}
+	runStopped             chan struct{}
+	done                   chan struct{}
+	acknowledge            bool
+	ignoreInterruptContext bool
+	interruptErr           error
+	startOnce              sync.Once
+	interruptOnce          sync.Once
+	closeOnce              sync.Once
+}
+
+type turnCompletionRaceProvider struct {
+	mu              sync.Mutex
+	runCount        int
+	firstStarted    chan struct{}
+	secondStarted   chan struct{}
+	finishFirst     chan struct{}
+	interruptCalled chan struct{}
+	finishInterrupt chan struct{}
+	done            chan struct{}
+	interruptOnce   sync.Once
+	closeOnce       sync.Once
+}
+
+func (p *turnCompletionRaceProvider) RunTurn(ctx context.Context, _ string, _ EventSink) error {
+	p.mu.Lock()
+	p.runCount++
+	runCount := p.runCount
+	p.mu.Unlock()
+	switch runCount {
+	case 1:
+		close(p.firstStarted)
+		select {
+		case <-p.finishFirst:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	case 2:
+		close(p.secondStarted)
+		<-ctx.Done()
+		return ctx.Err()
+	default:
+		return errors.New("unexpected provider turn")
+	}
+}
+
+func (p *turnCompletionRaceProvider) Interrupt(ctx context.Context) error {
+	p.interruptOnce.Do(func() { close(p.interruptCalled) })
+	select {
+	case <-p.finishInterrupt:
+		return ErrNoActiveTurn
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (p *turnCompletionRaceProvider) Done() <-chan struct{} { return p.done }
+func (p *turnCompletionRaceProvider) Close() error {
+	p.closeOnce.Do(func() { close(p.done) })
+	return nil
+}
+
+func (p *stuckInterruptProvider) RunTurn(ctx context.Context, _ string, _ EventSink) error {
+	p.startOnce.Do(func() { close(p.started) })
+	<-p.runStopped
+	return ctx.Err()
+}
+
+func (p *stuckInterruptProvider) Interrupt(ctx context.Context) error {
+	p.interruptOnce.Do(func() { close(p.interruptCalled) })
+	if p.interruptErr != nil {
+		return p.interruptErr
+	}
+	if p.acknowledge {
+		return nil
+	}
+	if p.ignoreInterruptContext {
+		<-p.done
+		return errors.New("provider stopped")
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (p *stuckInterruptProvider) Done() <-chan struct{} { return p.done }
+func (p *stuckInterruptProvider) Close() error {
+	p.closeOnce.Do(func() {
+		close(p.runStopped)
+		close(p.done)
+	})
+	return nil
+}
+
 func (p *interruptProvider) RunTurn(context.Context, string, EventSink) error {
 	p.startOnce.Do(func() { close(p.started) })
 	<-p.interrupted
@@ -855,6 +951,348 @@ func TestServerInterruptsActiveTurn(t *testing.T) {
 	cancel()
 	if err := <-serveDone; err != nil {
 		t.Fatalf("Serve() error = %v", err)
+	}
+}
+
+func TestServerGracefullyInterruptsDrainingTurn(t *testing.T) {
+	journal := NewJournal()
+	defer journal.Close()
+	provider := &interruptProvider{
+		started:     make(chan struct{}),
+		interrupted: make(chan struct{}),
+		done:        make(chan struct{}),
+	}
+	defer provider.Close()
+	server := NewServer(Config{PodUID: types.UID("pod-uid")}, journal, provider)
+	ctx, cancel := context.WithCancel(context.Background())
+	runDone := make(chan struct{})
+	go func() {
+		server.runTurns(ctx)
+		close(runDone)
+	}()
+	if err := server.submitMessage("work", "request-work"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-provider.started:
+	case <-time.After(time.Second):
+		t.Fatal("provider turn did not start")
+	}
+	podUID := server.config.PodUID
+	request := sessionupdate.NewRequest(podUID, "desired-revision")
+	encoded, err := sessionupdate.Encode(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := server.observeSessionUpdate(&kelos.Session{ObjectMeta: metav1.ObjectMeta{
+		Annotations: map[string]string{sessionupdate.RequestAnnotation: encoded},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.interruptTurn(t.Context(), "request-interrupt"); err != nil {
+		t.Fatalf("interruptTurn() error = %v", err)
+	}
+	select {
+	case <-provider.interrupted:
+	default:
+		t.Fatal("draining interruption did not call the provider")
+	}
+	select {
+	case <-provider.done:
+		t.Fatal("graceful draining interruption recycled the provider")
+	default:
+	}
+	report, _ := server.sessionDrainReports()
+	if report == nil || report.Phase != sessionupdate.PhaseDrained {
+		t.Fatalf("runtime update report = %#v, want Drained", report)
+	}
+	cancel()
+	<-runDone
+}
+
+func TestServerForcesStuckInterruptAfterTimeout(t *testing.T) {
+	for _, test := range []struct {
+		name                   string
+		acknowledge            bool
+		ignoreInterruptContext bool
+		interruptErr           error
+	}{
+		{name: "interrupt request does not return"},
+		{name: "interrupt request ignores cancellation", ignoreInterruptContext: true},
+		{name: "interrupt request fails", interruptErr: errors.New("interrupt failed")},
+		{name: "turn does not finish after interrupt", acknowledge: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server, provider, turnDone := startStuckInterruptServer(t, test.acknowledge)
+			provider.ignoreInterruptContext = test.ignoreInterruptContext
+			provider.interruptErr = test.interruptErr
+			server.interruptTimeout = 20 * time.Millisecond
+			if err := server.interruptTurn(t.Context(), "request-interrupt"); err != nil {
+				t.Fatalf("interruptTurn() error = %v", err)
+			}
+			assertStuckTurnInterrupted(t, server, provider, turnDone)
+			select {
+			case <-provider.interruptCalled:
+			default:
+				t.Fatal("provider interrupt was not attempted before timeout recovery")
+			}
+		})
+	}
+}
+
+func TestServerCompletesAcceptedInterruptAfterClientDisconnect(t *testing.T) {
+	server, provider, turnDone := startStuckInterruptServer(t, false)
+	server.interruptTimeout = 20 * time.Millisecond
+	serverConnection, clientConnection := net.Pipe()
+	connectionDone := make(chan struct{})
+	go func() {
+		server.handleConnection(t.Context(), serverConnection)
+		close(connectionDone)
+	}()
+	if err := json.NewEncoder(clientConnection).Encode(ClientRequest{Type: "interrupt", RequestID: "request-interrupt"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-provider.interruptCalled:
+	case <-time.After(time.Second):
+		t.Fatal("provider interrupt was not attempted")
+	}
+	if err := clientConnection.Close(); err != nil {
+		t.Fatal(err)
+	}
+	assertStuckTurnInterrupted(t, server, provider, turnDone)
+	select {
+	case <-connectionDone:
+	case <-time.After(time.Second):
+		t.Fatal("disconnected client handler did not finish")
+	}
+}
+
+func TestServerCancelsInterruptWhenRuntimeStops(t *testing.T) {
+	server, provider, _ := startStuckInterruptServer(t, false)
+	defer provider.Close()
+	server.interruptTimeout = time.Second
+	runtimeCtx, cancelRuntime := context.WithCancel(context.Background())
+	interruptDone := make(chan error, 1)
+	go func() {
+		interruptDone <- server.interruptTurn(runtimeCtx, "request-interrupt")
+	}()
+	select {
+	case <-provider.interruptCalled:
+	case <-time.After(time.Second):
+		t.Fatal("provider interrupt was not attempted")
+	}
+	cancelRuntime()
+	select {
+	case err := <-interruptDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("interruptTurn() error = %v, want context cancellation", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("runtime shutdown did not cancel provider interruption")
+	}
+	select {
+	case <-provider.done:
+		t.Fatal("runtime cancellation forced provider recovery")
+	default:
+	}
+}
+
+func TestServerDoesNotInterruptNextTurnWhenCompletionRacesWithInterrupt(t *testing.T) {
+	journal := NewJournal()
+	defer journal.Close()
+	provider := &turnCompletionRaceProvider{
+		firstStarted:    make(chan struct{}),
+		secondStarted:   make(chan struct{}),
+		finishFirst:     make(chan struct{}),
+		interruptCalled: make(chan struct{}),
+		finishInterrupt: make(chan struct{}),
+		done:            make(chan struct{}),
+	}
+	defer provider.Close()
+	server := NewServer(Config{}, journal, provider)
+	if err := server.submitMessage("first", "request-first"); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.submitMessage("second", "request-second"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	runDone := make(chan struct{})
+	go func() {
+		server.runTurns(ctx)
+		close(runDone)
+	}()
+	select {
+	case <-provider.firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first provider turn did not start")
+	}
+	interruptDone := make(chan error, 1)
+	go func() {
+		interruptDone <- server.interruptTurn(t.Context(), "request-interrupt")
+	}()
+	select {
+	case <-provider.interruptCalled:
+	case <-time.After(time.Second):
+		t.Fatal("provider interrupt was not attempted")
+	}
+	close(provider.finishFirst)
+	select {
+	case <-provider.secondStarted:
+		t.Fatal("second turn started while the first turn interruption was still pending")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(provider.finishInterrupt)
+	if err := <-interruptDone; err != nil {
+		t.Fatalf("interruptTurn() error = %v", err)
+	}
+	select {
+	case <-provider.secondStarted:
+	case <-time.After(time.Second):
+		t.Fatal("second provider turn did not start after interruption settled")
+	}
+	cancel()
+	<-runDone
+}
+
+func TestServerPreservesQueuedTurnAcrossForcedProviderRestart(t *testing.T) {
+	server, provider, turnDone := startStuckInterruptServer(t, false)
+	server.interruptTimeout = 20 * time.Millisecond
+	if err := server.submitMessage("queued work", "request-queued"); err != nil {
+		t.Fatal(err)
+	}
+	podUID := server.config.PodUID
+	request := sessionupdate.NewRequest(podUID, "desired-revision")
+	encoded, err := sessionupdate.Encode(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := server.observeSessionUpdate(&kelos.Session{ObjectMeta: metav1.ObjectMeta{
+		Annotations: map[string]string{sessionupdate.RequestAnnotation: encoded},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.interruptTurn(t.Context(), "request-interrupt"); err != nil {
+		t.Fatalf("interruptTurn() error = %v", err)
+	}
+	assertStuckTurnInterrupted(t, server, provider, turnDone)
+	if report, _ := server.sessionDrainReports(); report == nil || report.Phase != sessionupdate.PhaseDraining {
+		t.Fatalf("runtime update report = %#v, want Draining while queued work remains", report)
+	}
+
+	recovery, err := recoverJournal(server.journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recovery.queuedTurns) != 1 || recovery.queuedTurns[0].id != "turn-2" || recovery.queuedTurns[0].text != "queued work" {
+		t.Fatalf("recovered queued turns = %#v", recovery.queuedTurns)
+	}
+	restartedProvider := &fakeProvider{}
+	restarted := NewServer(Config{}, server.journal, restartedProvider)
+	if err := restarted.restoreTurns(recovery.queuedTurns); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	runDone := make(chan struct{})
+	go func() {
+		restarted.runTurns(ctx)
+		close(runDone)
+	}()
+	deadline := time.Now().Add(time.Second)
+	for {
+		restartedProvider.mu.Lock()
+		prompts := append([]string(nil), restartedProvider.prompts...)
+		restartedProvider.mu.Unlock()
+		if reflect.DeepEqual(prompts, []string{"queued work"}) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("provider prompts = %v, want queued work", prompts)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	<-runDone
+}
+
+func TestServerStopsAcceptingAndDispatchingTurnsWhileProviderRestarts(t *testing.T) {
+	journal := NewJournal()
+	defer journal.Close()
+	provider := &fakeProvider{}
+	server := NewServer(Config{}, journal, provider)
+	accepted := make(chan struct{})
+	close(accepted)
+	server.turns <- turnRequest{id: "turn-1", text: "queued work", accepted: accepted}
+	server.providerStopping.Store(true)
+
+	runDone := make(chan struct{})
+	go func() {
+		server.runTurns(t.Context())
+		close(runDone)
+	}()
+	select {
+	case <-runDone:
+	case <-time.After(time.Second):
+		t.Fatal("turn dispatcher did not stop")
+	}
+	if len(server.turns) != 1 {
+		t.Fatalf("queued turns = %d, want 1", len(server.turns))
+	}
+	if err := server.submitMessage("late work", "request-late"); err == nil || !strings.Contains(err.Error(), "restarting") {
+		t.Fatalf("submitMessage() error = %v, want provider restart rejection", err)
+	}
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	if len(provider.prompts) != 0 {
+		t.Fatalf("provider prompts = %v, want none", provider.prompts)
+	}
+}
+
+func startStuckInterruptServer(t *testing.T, acknowledge bool) (*Server, *stuckInterruptProvider, <-chan struct{}) {
+	t.Helper()
+	journal := NewJournal()
+	t.Cleanup(journal.Close)
+	provider := &stuckInterruptProvider{
+		started:         make(chan struct{}),
+		interruptCalled: make(chan struct{}),
+		runStopped:      make(chan struct{}),
+		done:            make(chan struct{}),
+		acknowledge:     acknowledge,
+	}
+	server := NewServer(Config{PodUID: types.UID("pod-uid")}, journal, provider)
+	if err := server.submitMessage("work", "request-work"); err != nil {
+		t.Fatal(err)
+	}
+	turnDone := make(chan struct{})
+	go func() {
+		server.runTurns(t.Context())
+		close(turnDone)
+	}()
+	select {
+	case <-provider.started:
+	case <-time.After(time.Second):
+		t.Fatal("provider turn did not start")
+	}
+	return server, provider, turnDone
+}
+
+func assertStuckTurnInterrupted(t *testing.T, server *Server, provider *stuckInterruptProvider, turnDone <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-turnDone:
+	case <-time.After(time.Second):
+		t.Fatal("forced interruption did not finish the turn")
+	}
+	select {
+	case <-provider.done:
+	default:
+		t.Fatal("stuck provider was not closed")
+	}
+	events := server.journal.Snapshot()
+	assertEventTypes(t, events, EventTurnInterrupting, EventTurnCompleted)
+	if completion := events[len(events)-1]; completion.Type != EventTurnCompleted || completion.Status != "interrupted" {
+		t.Fatalf("turn completion = %#v, want interrupted", completion)
 	}
 }
 

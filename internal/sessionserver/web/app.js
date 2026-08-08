@@ -1555,18 +1555,25 @@ function usesTouchComposer() {
   return window.matchMedia('(pointer: coarse)').matches;
 }
 
+function composerInterruptAction() {
+  return state.activeTurn && (elements.input.disabled || !elements.input.value.trim());
+}
+
 function updateComposerAction() {
   const connected = state.socket && state.socket.readyState === WebSocket.OPEN;
-  const interrupt = state.activeTurn && !elements.input.value.trim();
-  const action = state.activeTurn ? 'queue' : 'send';
+  const interrupt = composerInterruptAction();
+  const action = interrupt ? 'interrupt' : (state.activeTurn ? 'queue' : 'send');
+  const actionSymbol = interrupt ? '■' : '↑';
   elements.send.dataset.action = interrupt ? 'interrupt' : 'send';
-  elements.send.textContent = interrupt ? '■' : '↑';
+  elements.send.textContent = actionSymbol;
   elements.send.setAttribute('aria-label', interrupt ? 'Interrupt active work' : 'Send message');
   elements.send.title = interrupt ? 'Interrupt active work' : 'Send message';
-  elements.send.disabled = !connected || elements.input.disabled || (interrupt && state.interrupting);
+  elements.send.disabled = !connected || (interrupt ? state.interrupting : elements.input.disabled);
   elements.composerHint.textContent = usesTouchComposer()
-    ? `Tap ↑ to ${action} · Return for a new line`
-    : `Enter to ${action} · Shift+Enter for a new line`;
+    ? `Tap ${actionSymbol} to ${action} · Return for a new line`
+    : (interrupt && elements.input.disabled
+      ? `Click ${actionSymbol} to interrupt`
+      : `Enter to ${action} · Shift+Enter for a new line`);
 }
 
 function closeSocket() {
@@ -3161,16 +3168,20 @@ function scheduleBottomAnchor() {
   });
 }
 
-elements.composer.addEventListener('submit', event => {
-  event.preventDefault();
+function submitComposer() {
   const text = elements.input.value.trim();
   if (!state.socket || state.socket.readyState !== WebSocket.OPEN) return;
-  if (text) {
+  if (composerInterruptAction()) {
+    interruptActiveTurn();
+  } else if (text) {
     state.socket.send(JSON.stringify({type: 'message', text}));
     clearPromptDraft(state.selected);
-  } else if (state.activeTurn) {
-    interruptActiveTurn();
   }
+}
+
+elements.composer.addEventListener('submit', event => {
+  event.preventDefault();
+  submitComposer();
 });
 
 elements.input.addEventListener('keydown', event => {

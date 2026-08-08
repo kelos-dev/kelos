@@ -138,18 +138,21 @@ global.document = {
 };
 
 let bottomAnchors;
+let interruptRequests;
 let socketConnections;
 let progressTimers;
 let toasts;
 
 global.window = {
   clearInterval: (timer) => progressTimers.delete(timer),
+  matchMedia: () => ({matches: false}),
   setInterval: (callback) => {
     const timer = progressTimers.size + 1;
     progressTimers.set(timer, callback);
     return timer;
   },
 };
+global.WebSocket = {OPEN: 1};
 
 function resetHarness() {
   global.elements = {
@@ -158,7 +161,9 @@ function resetHarness() {
     changesList: new TestNode('div'),
     changesCount: new TestNode('span'),
     changesSummary: new TestNode('span'),
+    composerHint: new TestNode('span'),
     input: new TestNode('textarea'),
+    send: new TestNode('button'),
     progress: new TestNode('div'),
     progressLabel: new TestNode('span'),
     progressElapsed: new TestNode('span'),
@@ -200,6 +205,7 @@ function resetHarness() {
     fileChangesDirty: false,
   };
   bottomAnchors = 0;
+  interruptRequests = 0;
   socketConnections = 0;
   progressTimers = new Map();
   toasts = [];
@@ -226,6 +232,7 @@ global.acceptQueuedMessage = () => {};
 global.renderInputRequest = () => {};
 global.resolveInputCard = () => {};
 global.scrollToBottom = () => {};
+global.interruptActiveTurn = () => { interruptRequests++; };
 global.showToast = (message) => { toasts.push(message); };
 
 const application = fs.readFileSync(path.join(__dirname, '..', 'web', 'app.js'), 'utf8');
@@ -242,6 +249,7 @@ vm.runInThisContext(applicationSlice('function sessionKey', 'function savePrompt
 vm.runInThisContext(applicationSlice('function savePromptDraft', 'function providerLabel'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function parseSessionTimestamp', 'function safeHTTPURL'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function selectSession', 'function renderHeader'), {filename: 'app.js'});
+vm.runInThisContext(applicationSlice('function usesTouchComposer', 'function closeSocket'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function ensureConversation', 'function trimURLSuffix'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function completedAssistantText', 'function handleEvent'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function handleEvent', 'function renderUser'), {filename: 'app.js'});
@@ -249,6 +257,7 @@ vm.runInThisContext(applicationSlice('function renderUser', 'function renderTool
 vm.runInThisContext(applicationSlice('function renderTool', 'function renderInputRequest'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function renderDiff', 'function setActiveView'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function renderError', 'function scrollToBottom'), {filename: 'app.js'});
+vm.runInThisContext(applicationSlice('function submitComposer', "elements.composer.addEventListener('submit'"), {filename: 'app.js'});
 
 function testSessionViewSaveAndRestore() {
   resetHarness();
@@ -331,6 +340,39 @@ function testSessionProgressLifecycle() {
   handleEvent({type: 'turn.completed', turnId: 'turn-1', status: 'completed'});
   assert.equal(elements.progress.hidden, true);
   assert.equal(state.progressTimer, null);
+}
+
+function testComposerInterruptsWhileInputIsDisabled() {
+  resetHarness();
+  const sent = [];
+  state.socket = {
+    readyState: WebSocket.OPEN,
+    send: (message) => sent.push(message),
+  };
+  state.activeTurn = true;
+  elements.input.disabled = true;
+  elements.input.value = 'preserved draft';
+
+  updateComposerAction();
+
+  assert.equal(elements.send.dataset.action, 'interrupt');
+  assert.equal(elements.send.attributes.get('aria-label'), 'Interrupt active work');
+  assert.equal(elements.send.disabled, false);
+  assert.equal(elements.composerHint.textContent, 'Click ■ to interrupt');
+  assert.equal(elements.input.value, 'preserved draft');
+  window.matchMedia = () => ({matches: true});
+  updateComposerAction();
+  assert.equal(elements.composerHint.textContent, 'Tap ■ to interrupt · Return for a new line');
+  window.matchMedia = () => ({matches: false});
+
+  submitComposer();
+  assert.equal(interruptRequests, 1);
+  assert.deepEqual(sent, []);
+  assert.equal(elements.input.value, 'preserved draft');
+
+  state.interrupting = true;
+  updateComposerAction();
+  assert.equal(elements.send.disabled, true);
 }
 
 function testSessionProgressSurvivesCachedViewSwitch() {
@@ -713,6 +755,7 @@ function testHistoryToolCompletionRendersOutputWithoutStart() {
 testSessionViewSaveAndRestore();
 testSessionViewReset();
 testSessionProgressLifecycle();
+testComposerInterruptsWhileInputIsDisabled();
 testSessionProgressSurvivesCachedViewSwitch();
 testSessionProgressElapsedFormatting();
 testRuntimeStatusLifecycle();

@@ -32,6 +32,7 @@ const (
 	journalFileName                     = "events.jsonl"
 	activityPublishedFile               = "activity-published"
 	initializedFile                     = "initialized"
+	defaultInterruptTimeout             = 10 * time.Second
 	defaultSessionStatusPublishInterval = 30 * time.Second
 	defaultSessionStatusRetryInterval   = 2 * time.Second
 )
@@ -84,9 +85,11 @@ type pendingInputResult struct {
 
 // Server owns one provider process, event stream, and local client socket.
 type Server struct {
-	config   Config
-	journal  *Journal
-	provider Provider
+	config            Config
+	journal           *Journal
+	provider          Provider
+	providerCloseOnce sync.Once
+	providerCloseErr  error
 
 	submitMu      sync.Mutex
 	appendMessage func(Event) error
@@ -107,8 +110,15 @@ type Server struct {
 	updateRequest      *sessionupdate.Request
 	idleDrainRequest   *sessionupdate.Request
 	updateReport       chan struct{}
+	interruptMu        sync.Mutex
 	activeMu           sync.Mutex
 	activeTurn         string
+	activeTurnCancel   context.CancelCauseFunc
+	activeTurnDone     chan struct{}
+	providerStopping   atomic.Bool
+	providerStopOnce   sync.Once
+	providerStop       chan struct{}
+	interruptTimeout   time.Duration
 	pendingInputCount  atomic.Int64
 
 	runtimeStatusMu             sync.RWMutex
@@ -143,6 +153,8 @@ func NewServer(config Config, journal *Journal, provider Provider) *Server {
 		pendingInputs:                map[string]*pendingInput{},
 		workspaceStatusRefreshes:     make(chan struct{}, 1),
 		sessionStatusPublishWakeups:  make(chan struct{}, 1),
+		providerStop:                 make(chan struct{}),
+		interruptTimeout:             defaultInterruptTimeout,
 		sessionStatusPublishInterval: defaultSessionStatusPublishInterval,
 		sessionStatusRetryInterval:   defaultSessionStatusRetryInterval,
 	}
@@ -217,9 +229,12 @@ func Run(ctx context.Context, config Config) error {
 	}
 	server.nextTurnID.Store(recovery.nextTurnID)
 	server.nextInputID.Store(recovery.nextInputID)
-	// Journal recovery marks any interrupted turn complete, so every recovered turn
-	// is finished; a republished idle status may settle up to the highest of them.
-	server.completedTurnID.Store(recovery.nextTurnID)
+	server.completedTurnID.Store(recovery.completedTurnID)
+	if err := server.restoreTurns(recovery.queuedTurns); err != nil {
+		_ = provider.Close()
+		journal.Close()
+		return err
+	}
 	if server.activityMarkerPath != "" {
 		settledTurnID, err := loadSettledTurnID(server.activityMarkerPath)
 		if err != nil {
@@ -230,7 +245,7 @@ func Run(ctx context.Context, config Config) error {
 		server.settledTurnID.Store(settledTurnID)
 	}
 	// Republish activity when the journal holds locally accepted turns that were
-	// never durably settled to a published idle status. This covers both
+	// never durably settled to a published idle status. This covers queued or
 	// interrupted turns and turns that completed while their ordered Active status
 	// publications were still retrying: a container restart drops the in-memory
 	// publish queue, so without this a surviving idle-drain request could be
@@ -301,7 +316,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	serveCtx, cancelServe := context.WithCancel(ctx)
 	defer cancelServe()
 	defer func() {
-		_ = s.provider.Close()
+		_ = s.closeProvider()
 		s.journal.Close()
 		_ = os.Remove(s.config.SocketPath)
 	}()
@@ -384,13 +399,28 @@ func (s *Server) runTurns(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-s.providerStop:
+			return
 		case turn := <-s.turns:
 			select {
 			case <-turn.accepted:
 			case <-ctx.Done():
 				return
+			case <-s.providerStop:
+				// Leave accepted but unstarted work queued for journal recovery.
+				s.turns <- turn
+				return
+			}
+			if s.providerStopping.Load() {
+				// Leave accepted but unstarted work queued for journal recovery.
+				s.turns <- turn
+				return
 			}
 			s.runTurn(ctx, turn)
+			// Keep the next queued turn out of reach of an interrupt call that is
+			// still settling after this turn returned.
+			s.interruptMu.Lock()
+			s.interruptMu.Unlock()
 		}
 	}
 }
@@ -652,46 +682,64 @@ func (s *Server) runSessionStatusPublishes(ctx context.Context) {
 
 func (s *Server) runTurn(ctx context.Context, turn turnRequest) {
 	defer s.requestWorkspaceStatusRefresh()
-	defer s.finishTurn()
+	turnCtx, cancelTurn := context.WithCancelCause(ctx)
+	turnDone := make(chan struct{})
 	s.activeMu.Lock()
 	s.activeTurn = turn.id
+	s.activeTurnCancel = cancelTurn
+	s.activeTurnDone = turnDone
 	s.activeMu.Unlock()
 	s.requestSessionStatusPublish()
 	defer func() {
+		cancelTurn(nil)
 		s.activeMu.Lock()
 		if s.activeTurn == turn.id {
 			s.activeTurn = ""
+			s.activeTurnCancel = nil
+			s.activeTurnDone = nil
 		}
 		s.activeMu.Unlock()
 		// Advance the completed-turn high-water mark before requesting the idle
 		// publication so that publication carries a snapshot reflecting this turn.
 		s.markTurnCompleted(turn.id)
 		s.requestSessionStatusPublish()
+		s.finishTurn()
+		close(turnDone)
 	}()
 
 	if err := s.journal.Append(Event{Type: EventTurnStarted, TurnID: turn.id, Status: "running"}); err != nil {
 		return
 	}
 	sink := &turnSink{server: s, turnID: turn.id}
-	err := s.provider.RunTurn(ctx, turn.text, sink)
+	result := make(chan error, 1)
+	go func() {
+		result <- s.provider.RunTurn(turnCtx, turn.text, sink)
+	}()
+	var err error
+	select {
+	case err = <-result:
+	case <-turnCtx.Done():
+		err = context.Cause(turnCtx)
+	}
 	if s.config.AgentType == "claude-code" || s.config.AgentType == "opencode" {
-		if diff := workspaceDiff(ctx, s.config.WorkingDir); diff != "" {
+		if diff := workspaceDiff(turnCtx, s.config.WorkingDir); diff != "" {
 			sink.Emit(Event{Type: EventFileDiff, Diff: diff})
 		}
 	}
-	if errors.Is(err, ErrTurnInterrupted) {
-		sink.Emit(Event{Type: EventTurnCompleted, Status: "interrupted"})
+	sink.stop()
+	if errors.Is(err, ErrTurnInterrupted) || errors.Is(context.Cause(turnCtx), ErrTurnInterrupted) {
+		_ = s.journal.Append(Event{Type: EventTurnCompleted, TurnID: turn.id, Status: "interrupted"})
 		return
 	}
 	if err != nil {
-		if ctx.Err() != nil {
+		if turnCtx.Err() != nil {
 			return
 		}
-		sink.Emit(Event{Type: EventError, Text: err.Error(), Status: "failed"})
-		sink.Emit(Event{Type: EventTurnCompleted, Status: "failed"})
+		_ = s.journal.Append(Event{Type: EventError, TurnID: turn.id, Text: err.Error(), Status: "failed"})
+		_ = s.journal.Append(Event{Type: EventTurnCompleted, TurnID: turn.id, Status: "failed"})
 		return
 	}
-	sink.Emit(Event{Type: EventTurnCompleted, Status: "completed"})
+	_ = s.journal.Append(Event{Type: EventTurnCompleted, TurnID: turn.id, Status: "completed"})
 }
 
 func workspaceDiff(ctx context.Context, workingDir string) string {
@@ -720,6 +768,9 @@ func (s *Server) submitMessage(text, requestID string) error {
 	if s.updateRequest != nil {
 		return errors.New("Session runtime is draining for an update; retry after it reconnects")
 	}
+	if s.providerStopping.Load() {
+		return errors.New("Session provider is restarting; retry after it reconnects")
+	}
 	if err := s.journal.Err(); err != nil {
 		return fmt.Errorf("recording Session message: %w", err)
 	}
@@ -743,24 +794,34 @@ func (s *Server) submitMessage(text, requestID string) error {
 }
 
 type journalRecovery struct {
-	nextTurnID  int64
-	nextInputID int64
+	nextTurnID      int64
+	nextInputID     int64
+	completedTurnID int64
+	queuedTurns     []turnRequest
+}
+
+type journalTurnRecovery struct {
+	id        string
+	text      string
+	started   bool
+	completed bool
 }
 
 // hasUnsettledActivity reports whether the journal holds locally accepted turns
 // beyond the given durably-settled high-water mark. nextTurnID is the highest
-// turn ID observed in the journal, so any turn — interrupted or completed — whose
-// idle status was never durably published leaves nextTurnID above settledTurnID.
+// turn ID observed in the journal, so any queued, interrupted, or completed turn
+// whose idle status was never durably published leaves nextTurnID above
+// settledTurnID.
 func (r journalRecovery) hasUnsettledActivity(settledTurnID int64) bool {
 	return r.nextTurnID > settledTurnID
 }
 
 func recoverJournal(journal *Journal) (journalRecovery, error) {
-	events := journal.Snapshot()
+	events := journal.snapshotForRecovery()
 	if len(events) == 0 {
 		return journalRecovery{}, nil
 	}
-	turns := map[string]bool{}
+	turns := map[string]*journalTurnRecovery{}
 	turnOrder := make([]string, 0)
 	inputs := map[string]string{}
 	inputOrder := make([]string, 0)
@@ -772,16 +833,30 @@ func recoverJournal(journal *Journal) (journalRecovery, error) {
 		if value := numericEventID(event.InputID, "input-"); value > recovery.nextInputID {
 			recovery.nextInputID = value
 		}
-		if event.TurnID != "" && event.Type != EventTurnCompleted {
+		var turn *journalTurnRecovery
+		if event.TurnID != "" {
 			if _, exists := turns[event.TurnID]; !exists {
 				turnOrder = append(turnOrder, event.TurnID)
+				turns[event.TurnID] = &journalTurnRecovery{id: event.TurnID}
 			}
-			turns[event.TurnID] = true
+			turn = turns[event.TurnID]
 		}
 		switch event.Type {
+		case EventUserMessage:
+			if turn != nil {
+				turn.text = event.Text
+			}
 		case EventTurnCompleted:
-			delete(turns, event.TurnID)
+			if turn != nil {
+				turn.completed = true
+			}
+			if value := numericEventID(event.TurnID, "turn-"); value > recovery.completedTurnID {
+				recovery.completedTurnID = value
+			}
 		case EventInputRequested:
+			if turn != nil {
+				turn.started = true
+			}
 			if event.InputID != "" {
 				if _, exists := inputs[event.InputID]; !exists {
 					inputOrder = append(inputOrder, event.InputID)
@@ -790,10 +865,18 @@ func recoverJournal(journal *Journal) (journalRecovery, error) {
 			}
 		case EventInputResolved:
 			delete(inputs, event.InputID)
+		default:
+			if turn != nil {
+				turn.started = true
+			}
 		}
 	}
 	message := "Session runtime restarted"
-	if len(turns) > 0 || len(inputs) > 0 {
+	interruptedWork := len(inputs) > 0
+	for _, turn := range turns {
+		interruptedWork = interruptedWork || (!turn.completed && turn.started)
+	}
+	if interruptedWork {
 		message += "; unfinished work was interrupted"
 	}
 	if err := journal.Append(Event{Type: EventRuntimeRecovered, Text: message, Status: "recovered"}); err != nil {
@@ -807,13 +890,37 @@ func recoverJournal(journal *Journal) (journalRecovery, error) {
 		}
 	}
 	for _, turnID := range turnOrder {
-		if turns[turnID] {
-			if err := journal.Append(Event{Type: EventTurnCompleted, TurnID: turnID, Status: "interrupted"}); err != nil {
-				return recovery, fmt.Errorf("recording recovered Session turn: %w", err)
-			}
+		turn := turns[turnID]
+		if turn.completed {
+			continue
+		}
+		if !turn.started {
+			accepted := make(chan struct{})
+			close(accepted)
+			recovery.queuedTurns = append(recovery.queuedTurns, turnRequest{id: turn.id, text: turn.text, accepted: accepted})
+			continue
+		}
+		if err := journal.Append(Event{Type: EventTurnCompleted, TurnID: turnID, Status: "interrupted"}); err != nil {
+			return recovery, fmt.Errorf("recording recovered Session turn: %w", err)
+		}
+		if value := numericEventID(turnID, "turn-"); value > recovery.completedTurnID {
+			recovery.completedTurnID = value
 		}
 	}
 	return recovery, nil
+}
+
+func (s *Server) restoreTurns(turns []turnRequest) error {
+	if len(turns) > cap(s.turns) {
+		return fmt.Errorf("restoring %d queued Session turns: queue capacity is %d", len(turns), cap(s.turns))
+	}
+	s.submitMu.Lock()
+	defer s.submitMu.Unlock()
+	for _, turn := range turns {
+		s.turns <- turn
+		s.outstanding++
+	}
+	return nil
 }
 
 func numericEventID(value, prefix string) int64 {
@@ -827,20 +934,91 @@ func numericEventID(value, prefix string) int64 {
 	return number
 }
 
-func (s *Server) interruptTurn(ctx context.Context, requestID string) error {
+func (s *Server) interruptTurn(runtimeCtx context.Context, requestID string) error {
 	s.activeMu.Lock()
 	turnID := s.activeTurn
+	turnCancel := s.activeTurnCancel
+	turnDone := s.activeTurnDone
 	s.activeMu.Unlock()
 	if turnID == "" {
 		return ErrNoActiveTurn
 	}
+	s.interruptMu.Lock()
+	defer s.interruptMu.Unlock()
+	s.activeMu.Lock()
+	activeTurn := s.activeTurn
+	s.activeMu.Unlock()
+	if activeTurn != turnID {
+		return nil
+	}
 	if err := s.journal.Append(Event{Type: EventTurnInterrupting, RequestID: requestID, TurnID: turnID, Status: "interrupting"}); err != nil {
 		return fmt.Errorf("recording Session interruption: %w", err)
 	}
-	if err := s.provider.Interrupt(ctx); err != nil {
-		return err
+	interruptCtx, cancel := context.WithTimeout(runtimeCtx, s.interruptTimeout)
+	defer cancel()
+	interruptResult := make(chan error, 1)
+	go func() {
+		interruptResult <- s.provider.Interrupt(interruptCtx)
+	}()
+	select {
+	case err := <-interruptResult:
+		if err != nil && !errors.Is(err, ErrNoActiveTurn) {
+			if runtimeCtx.Err() != nil {
+				return runtimeCtx.Err()
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				log.Printf("Session provider interruption timed out turnID=%s", turnID)
+			} else {
+				log.Printf("Session provider interruption failed; stopping provider turnID=%s error=%v", turnID, err)
+			}
+			return s.stopInterruptedTurn(turnID, turnCancel, turnDone)
+		}
+	case <-interruptCtx.Done():
+		if runtimeCtx.Err() != nil {
+			return runtimeCtx.Err()
+		}
+		log.Printf("Session provider interruption timed out turnID=%s", turnID)
+		return s.stopInterruptedTurn(turnID, turnCancel, turnDone)
 	}
+	select {
+	case <-turnDone:
+		return nil
+	case <-interruptCtx.Done():
+		if runtimeCtx.Err() != nil {
+			return runtimeCtx.Err()
+		}
+		log.Printf("Session provider interruption timed out turnID=%s", turnID)
+		return s.stopInterruptedTurn(turnID, turnCancel, turnDone)
+	}
+}
+
+func (s *Server) stopInterruptedTurn(turnID string, cancel context.CancelCauseFunc, done <-chan struct{}) error {
+	if cancel == nil || done == nil {
+		return errors.New("Session active turn cannot be stopped")
+	}
+	s.activeMu.Lock()
+	if s.activeTurn != "" && s.activeTurn != turnID {
+		s.activeMu.Unlock()
+		return nil
+	}
+	s.activeMu.Unlock()
+	s.submitMu.Lock()
+	s.providerStopping.Store(true)
+	s.providerStopOnce.Do(func() { close(s.providerStop) })
+	s.submitMu.Unlock()
+	cancel(ErrTurnInterrupted)
+	if err := s.closeProvider(); err != nil {
+		log.Printf("Unable to restart Session provider after forced interruption error=%v", err)
+	}
+	<-done
 	return nil
+}
+
+func (s *Server) closeProvider() error {
+	s.providerCloseOnce.Do(func() {
+		s.providerCloseErr = s.provider.Close()
+	})
+	return s.providerCloseErr
 }
 
 func (s *Server) handleConnection(ctx context.Context, connection net.Conn) {
@@ -1023,7 +1201,7 @@ func (s *Server) handleConnection(ctx context.Context, connection net.Conn) {
 			}
 		case "interrupt":
 			subscribe(0, "", false, 0, 0)
-			if err := s.interruptTurn(connectionCtx, request.RequestID); err != nil {
+			if err := s.interruptTurn(ctx, request.RequestID); err != nil {
 				out <- Event{Type: EventError, RequestID: request.RequestID, Text: err.Error(), Status: "rejected"}
 			}
 		default:
@@ -1118,11 +1296,18 @@ func sendLiveEvent(ctx context.Context, out chan<- Event, overflow <-chan struct
 }
 
 type turnSink struct {
-	server *Server
-	turnID string
+	server  *Server
+	turnID  string
+	mu      sync.Mutex
+	stopped bool
 }
 
 func (s *turnSink) Emit(event Event) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped {
+		return
+	}
 	if event.Type == EventRuntimeStatus && event.Runtime != nil {
 		s.server.updateProviderRuntimeStatus(*event.Runtime)
 		return
@@ -1136,7 +1321,19 @@ func (s *turnSink) Emit(event Event) {
 	_ = s.server.journal.Append(event)
 }
 
+func (s *turnSink) stop() {
+	s.mu.Lock()
+	s.stopped = true
+	s.mu.Unlock()
+}
+
 func (s *turnSink) RequestInput(ctx context.Context, request InputRequest) (map[string][]string, error) {
+	s.mu.Lock()
+	stopped := s.stopped
+	s.mu.Unlock()
+	if stopped {
+		return nil, ErrInputCancelled
+	}
 	if request.ID == "" {
 		request.ID = fmt.Sprintf("input-%d", s.server.nextInputID.Add(1))
 	}

@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -34,10 +35,12 @@ type Journal struct {
 	path        string
 	file        *os.File
 	journalID   string
-	failure     chan struct{}
-	failureErr  error
-	failureOnce sync.Once
-	closed      bool
+	// pendingTurns keeps accepted prompts durable after they leave replay history.
+	pendingTurns map[string]Event
+	failure      chan struct{}
+	failureErr   error
+	failureOnce  sync.Once
+	closed       bool
 }
 
 type journalSubscriber struct {
@@ -60,17 +63,22 @@ func NewJournal() *Journal {
 
 func newJournal(maxEvents int) *Journal {
 	return &Journal{
-		maxEvents:   maxEvents,
-		nextID:      1,
-		journalID:   uuid.New().String(),
-		subscribers: map[int]*journalSubscriber{},
-		failure:     make(chan struct{}),
+		maxEvents:    maxEvents,
+		nextID:       1,
+		journalID:    uuid.New().String(),
+		pendingTurns: map[string]Event{},
+		subscribers:  map[int]*journalSubscriber{},
+		failure:      make(chan struct{}),
 	}
 }
 
 // OpenJournal opens or creates a durable event journal.
 func OpenJournal(path string) (*Journal, error) {
-	journal := newJournal(maxRetainedEvents)
+	return openJournal(path, maxRetainedEvents)
+}
+
+func openJournal(path string, maxEvents int) (*Journal, error) {
+	journal := newJournal(maxEvents)
 	journal.path = path
 	_, statErr := os.Stat(path)
 	journalExisted := statErr == nil
@@ -209,6 +217,7 @@ func (j *Journal) load() (string, bool, error) {
 			event.JournalID = ""
 		}
 		j.nextID = event.ID + 1
+		j.updatePendingTurns(event)
 		j.appendRetained(event)
 		offset += int64(len(line))
 		total++
@@ -216,7 +225,7 @@ func (j *Journal) load() (string, bool, error) {
 			break
 		}
 	}
-	return journalID, total > j.maxEvents, nil
+	return journalID, total > len(j.recoveryEvents()), nil
 }
 
 // Append records and broadcasts one event after writing it to durable storage.
@@ -254,6 +263,7 @@ func (j *Journal) Append(event Event) error {
 		}
 	}
 	j.nextID++
+	j.updatePendingTurns(event)
 	compacted := j.appendRetained(event)
 	if compacted && j.file != nil {
 		if err := j.rewrite(); err != nil {
@@ -271,6 +281,33 @@ func (j *Journal) Append(event Event) error {
 		}
 	}
 	return nil
+}
+
+func (j *Journal) updatePendingTurns(event Event) {
+	if event.TurnID == "" {
+		return
+	}
+	switch event.Type {
+	case EventUserMessage:
+		j.pendingTurns[event.TurnID] = event
+	case EventTurnStarted, EventTurnCompleted:
+		delete(j.pendingTurns, event.TurnID)
+	}
+}
+
+func (j *Journal) recoveryEvents() []Event {
+	events := append([]Event(nil), j.events[j.firstEvent:]...)
+	retained := make(map[int64]struct{}, len(events))
+	for _, event := range events {
+		retained[event.ID] = struct{}{}
+	}
+	for _, event := range j.pendingTurns {
+		if _, exists := retained[event.ID]; !exists {
+			events = append(events, event)
+		}
+	}
+	sort.Slice(events, func(i, k int) bool { return events[i].ID < events[k].ID })
+	return events
 }
 
 func (j *Journal) appendRetained(event Event) bool {
@@ -305,7 +342,7 @@ func (j *Journal) rewrite() error {
 		return fmt.Errorf("securing compacted Session event journal: %w", err)
 	}
 	writer := bufio.NewWriter(temporary)
-	for _, event := range j.events[j.firstEvent:] {
+	for _, event := range j.recoveryEvents() {
 		persistedEvent := event
 		persistedEvent.JournalID = j.journalID
 		encoded, err := json.Marshal(persistedEvent)
@@ -353,6 +390,12 @@ func (j *Journal) Snapshot() []Event {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	return append([]Event(nil), j.events[j.firstEvent:]...)
+}
+
+func (j *Journal) snapshotForRecovery() []Event {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.recoveryEvents()
 }
 
 // SnapshotWithBounds returns the retained events and their current journal identity.

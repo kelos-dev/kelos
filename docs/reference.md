@@ -260,7 +260,11 @@ from retained history that does not contain event timestamps and from turns
 interrupted by runtime recovery. Both clients use the same event stream and
 provider conversation. Both clients can stream agent and tool activity, answer
 user-input requests, and interrupt active work without ending the provider
-conversation.
+conversation. Kelos first asks the provider to interrupt gracefully, including
+while the runtime is draining. If the request fails or the turn does not finish
+within 10 seconds, Kelos marks the turn interrupted and restarts the provider.
+Clients reconnect to the retained conversation after a provider restart, and
+queued prompts accepted before the restart resume in their original order.
 
 Completed tool output is retained with Session history up to 512 KiB per tool
 result. Larger results keep their beginning and end around an

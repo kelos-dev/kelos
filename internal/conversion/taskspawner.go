@@ -26,6 +26,23 @@ const preservedContextGitHubAppAuthAnnotation = "kelos.dev/v1alpha2-context-gith
 // while the complete set remains in this annotation for restoration.
 const preservedTaskSpawnerCredentialsAnnotation = "kelos.dev/v1alpha2-taskspawner-credentials"
 
+// preservedGitHubCommentsReportingAnnotation carries v1alpha2 comment
+// reporting configuration across a v1alpha1 round-trip. v1alpha1 receives
+// enabled: true as a functional fallback while the complete configuration is
+// restored when the object returns to v1alpha2.
+const preservedGitHubCommentsReportingAnnotation = "kelos.dev/v1alpha2-github-comments-reporting"
+
+type preservedGitHubCommentsReporting struct {
+	GitHubIssues       *preservedGitHubCommentsSource `json:"githubIssues,omitempty"`
+	GitHubPullRequests *preservedGitHubCommentsSource `json:"githubPullRequests,omitempty"`
+	GitHubWebhook      *preservedGitHubCommentsSource `json:"githubWebhook,omitempty"`
+}
+
+type preservedGitHubCommentsSource struct {
+	Enabled  bool                             `json:"enabled,omitempty"`
+	Comments v1alpha2.GitHubCommentsReporting `json:"comments"`
+}
+
 func taskSpawnerToHub(_ context.Context, src *v1alpha1.TaskSpawner, dst *v1alpha2.TaskSpawner) error {
 	src.ObjectMeta.DeepCopyInto(&dst.ObjectMeta)
 	if err := convertViaJSON(&src.Spec, &dst.Spec); err != nil {
@@ -45,6 +62,8 @@ func taskSpawnerToHub(_ context.Context, src *v1alpha1.TaskSpawner, dst *v1alpha
 		return err
 	}
 	deleteAnnotation(dst.Annotations, preservedTaskSpawnerCredentialsAnnotation)
+	restorePreservedGitHubCommentsReporting(src.Annotations, &dst.Spec.When)
+	deleteAnnotation(dst.Annotations, preservedGitHubCommentsReportingAnnotation)
 	return nil
 }
 
@@ -62,6 +81,9 @@ func taskSpawnerFromHub(_ context.Context, src *v1alpha2.TaskSpawner, dst *v1alp
 		return err
 	}
 	if err := setPreservedTaskSpawnerCredentials(dst, src.Spec.Credentials); err != nil {
+		return err
+	}
+	if err := setPreservedGitHubCommentsReporting(dst, src.Spec.When); err != nil {
 		return err
 	}
 	return convertViaJSON(&src.Status, &dst.Status)
@@ -182,6 +204,92 @@ func restorePreservedTaskSpawnerCredentials(annotations map[string]string, dst *
 		dst.TaskTemplate.Worker.Credentials = nil
 	}
 	return nil
+}
+
+func setPreservedGitHubCommentsReporting(dst *v1alpha1.TaskSpawner, when v1alpha2.When) error {
+	preserved := preservedGitHubCommentsReporting{
+		GitHubIssues:       preservedCommentsSource(gitHubIssuesReporting(when)),
+		GitHubPullRequests: preservedCommentsSource(gitHubPullRequestsReporting(when)),
+		GitHubWebhook:      preservedCommentsSource(gitHubWebhookReporting(when)),
+	}
+	if preserved.GitHubIssues == nil && preserved.GitHubPullRequests == nil && preserved.GitHubWebhook == nil {
+		deleteAnnotation(dst.Annotations, preservedGitHubCommentsReportingAnnotation)
+		return nil
+	}
+
+	data, err := json.Marshal(preserved)
+	if err != nil {
+		return err
+	}
+	if dst.Annotations == nil {
+		dst.Annotations = map[string]string{}
+	}
+	dst.Annotations[preservedGitHubCommentsReportingAnnotation] = string(data)
+
+	if preserved.GitHubIssues != nil {
+		dst.Spec.When.GitHubIssues.Reporting.Enabled = true
+	}
+	if preserved.GitHubPullRequests != nil {
+		dst.Spec.When.GitHubPullRequests.Reporting.Enabled = true
+	}
+	if preserved.GitHubWebhook != nil {
+		dst.Spec.When.GitHubWebhook.Reporting.Enabled = true
+	}
+	return nil
+}
+
+func restorePreservedGitHubCommentsReporting(annotations map[string]string, when *v1alpha2.When) {
+	raw, ok := annotations[preservedGitHubCommentsReportingAnnotation]
+	if !ok || raw == "" {
+		return
+	}
+	var preserved preservedGitHubCommentsReporting
+	if err := json.Unmarshal([]byte(raw), &preserved); err != nil {
+		return
+	}
+	restoreCommentsSource(preserved.GitHubIssues, gitHubIssuesReporting(*when))
+	restoreCommentsSource(preserved.GitHubPullRequests, gitHubPullRequestsReporting(*when))
+	restoreCommentsSource(preserved.GitHubWebhook, gitHubWebhookReporting(*when))
+}
+
+func preservedCommentsSource(reporting *v1alpha2.GitHubReporting) *preservedGitHubCommentsSource {
+	if reporting == nil || reporting.Comments == nil {
+		return nil
+	}
+	return &preservedGitHubCommentsSource{
+		Enabled:  reporting.Enabled,
+		Comments: *reporting.Comments,
+	}
+}
+
+func restoreCommentsSource(preserved *preservedGitHubCommentsSource, reporting *v1alpha2.GitHubReporting) {
+	if preserved == nil || reporting == nil || !reporting.Enabled {
+		return
+	}
+	comments := preserved.Comments
+	reporting.Comments = &comments
+	reporting.Enabled = preserved.Enabled
+}
+
+func gitHubIssuesReporting(when v1alpha2.When) *v1alpha2.GitHubReporting {
+	if when.GitHubIssues == nil {
+		return nil
+	}
+	return when.GitHubIssues.Reporting
+}
+
+func gitHubPullRequestsReporting(when v1alpha2.When) *v1alpha2.GitHubReporting {
+	if when.GitHubPullRequests == nil {
+		return nil
+	}
+	return when.GitHubPullRequests.Reporting
+}
+
+func gitHubWebhookReporting(when v1alpha2.When) *v1alpha2.GitHubReporting {
+	if when.GitHubWebhook == nil {
+		return nil
+	}
+	return when.GitHubWebhook.Reporting
 }
 
 func taskSpawnerCredentialFallback(credentials []v1alpha2.SpawnerCredential) v1alpha2.SpawnerCredential {

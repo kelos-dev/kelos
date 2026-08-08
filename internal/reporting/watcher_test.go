@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -84,9 +86,10 @@ func (c *conflictOnceClient) Update(ctx context.Context, obj client.Object, opts
 func newTestServer(t *testing.T) (*httptest.Server, *[]commentRecord) {
 	t.Helper()
 	var (
-		mu      sync.Mutex
-		records []commentRecord
-		nextID  int64 = 1000
+		mu       sync.Mutex
+		records  []commentRecord
+		nextID   int64 = 1000
+		comments       = map[int64]string{}
 	)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -97,8 +100,28 @@ func newTestServer(t *testing.T) (*httptest.Server, *[]commentRecord) {
 		json.NewDecoder(r.Body).Decode(&body)
 
 		switch r.Method {
+		case http.MethodGet:
+			if r.URL.Path == "/user" {
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(githubUser{Login: "reporter"})
+				return
+			}
+			ids := make([]int64, 0, len(comments))
+			for id := range comments {
+				ids = append(ids, id)
+			}
+			sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+			response := make([]commentResponse, 0, len(ids))
+			for _, id := range ids {
+				response = append(response, commentResponse{
+					ID: id, Body: comments[id], User: githubUser{Login: "reporter"},
+				})
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(response)
 		case http.MethodPost:
 			nextID++
+			comments[nextID] = body.Body
 			records = append(records, commentRecord{
 				method: "create",
 				id:     nextID,
@@ -108,6 +131,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *[]commentRecord) {
 			json.NewEncoder(w).Encode(commentResponse{ID: nextID})
 		case http.MethodPatch:
 			id, _ := strconv.ParseInt(path.Base(r.URL.Path), 10, 64)
+			comments[id] = body.Body
 			records = append(records, commentRecord{
 				method: "update",
 				id:     id,
@@ -190,6 +214,105 @@ func TestReportTaskStatus_CreatesCommentOnPending(t *testing.T) {
 	}
 	if updated.Annotations[AnnotationGitHubCommentID] == "" {
 		t.Error("Expected comment ID to be set")
+	}
+}
+
+func TestReportTaskStatus_StickyCommentReusedAcrossTasks(t *testing.T) {
+	server, records := newTestServer(t)
+	defer server.Close()
+
+	annotations := func() map[string]string {
+		return map[string]string{
+			AnnotationGitHubReporting:   "enabled",
+			AnnotationGitHubCommentMode: string(kelos.GitHubCommentModeSticky),
+			AnnotationSourceNumber:      "42",
+			AnnotationSourceKind:        "issue",
+		}
+	}
+	first := newTaskWithAnnotations("first-task", "default", kelos.TaskPhasePending, annotations())
+	first.Labels = map[string]string{"kelos.dev/taskspawner": "reviewer"}
+	second := newTaskWithAnnotations("second-task", "default", kelos.TaskPhaseSucceeded, annotations())
+	second.Labels = map[string]string{"kelos.dev/taskspawner": "reviewer"}
+
+	cl := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(first, second).Build()
+	tr := &TaskReporter{
+		Client: cl,
+		Reporter: &GitHubReporter{
+			Owner: "owner", Repo: "repo", Token: "token", BaseURL: server.URL,
+		},
+	}
+
+	if err := tr.ReportTaskStatus(context.Background(), first); err != nil {
+		t.Fatalf("Reporting first task: %v", err)
+	}
+	if err := tr.ReportTaskStatus(context.Background(), second); err != nil {
+		t.Fatalf("Reporting second task: %v", err)
+	}
+
+	if len(*records) != 2 {
+		t.Fatalf("Expected one create and one update, got %d calls", len(*records))
+	}
+	if (*records)[0].method != "create" || (*records)[1].method != "update" {
+		t.Fatalf("Calls = %#v, want create then update", *records)
+	}
+	if (*records)[0].id != (*records)[1].id {
+		t.Errorf("Updated comment ID %d, want created comment ID %d", (*records)[1].id, (*records)[0].id)
+	}
+	const marker = "<!-- kelos.dev/github-status-comment:default/reviewer -->"
+	if !strings.Contains((*records)[0].body, marker) || !strings.Contains((*records)[1].body, marker) {
+		t.Errorf("Sticky marker missing from comments: %#v", *records)
+	}
+	if !strings.Contains((*records)[1].body, "second-task") {
+		t.Errorf("Updated sticky comment does not describe second task: %q", (*records)[1].body)
+	}
+}
+
+func TestReportTaskStatus_StickyCommentsScopedByTaskSpawner(t *testing.T) {
+	server, records := newTestServer(t)
+	defer server.Close()
+
+	annotations := func() map[string]string {
+		return map[string]string{
+			AnnotationGitHubReporting:   "enabled",
+			AnnotationGitHubCommentMode: string(kelos.GitHubCommentModeSticky),
+			AnnotationSourceNumber:      "42",
+			AnnotationSourceKind:        "issue",
+		}
+	}
+	first := newTaskWithAnnotations("first-task", "default", kelos.TaskPhasePending, annotations())
+	first.Labels = map[string]string{"kelos.dev/taskspawner": "first-spawner"}
+	second := newTaskWithAnnotations("second-task", "default", kelos.TaskPhasePending, annotations())
+	second.Labels = map[string]string{"kelos.dev/taskspawner": "second-spawner"}
+
+	cl := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(first, second).Build()
+	tr := &TaskReporter{
+		Client: cl,
+		Reporter: &GitHubReporter{
+			Owner: "owner", Repo: "repo", Token: "token", BaseURL: server.URL,
+		},
+	}
+
+	if err := tr.ReportTaskStatus(context.Background(), first); err != nil {
+		t.Fatalf("Reporting first task: %v", err)
+	}
+	if err := tr.ReportTaskStatus(context.Background(), second); err != nil {
+		t.Fatalf("Reporting second task: %v", err)
+	}
+
+	if len(*records) != 2 {
+		t.Fatalf("Expected two creates, got %d calls", len(*records))
+	}
+	if (*records)[0].method != "create" || (*records)[1].method != "create" {
+		t.Fatalf("Calls = %#v, want two creates", *records)
+	}
+	if (*records)[0].id == (*records)[1].id {
+		t.Errorf("Different TaskSpawners reused comment ID %d", (*records)[0].id)
+	}
+	if !strings.Contains((*records)[0].body, "default/first-spawner") {
+		t.Errorf("First comment has wrong marker: %q", (*records)[0].body)
+	}
+	if !strings.Contains((*records)[1].body, "default/second-spawner") {
+		t.Errorf("Second comment has wrong marker: %q", (*records)[1].body)
 	}
 }
 

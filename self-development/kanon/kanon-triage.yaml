@@ -22,7 +22,8 @@ spec:
             - triage-accepted
           state: open
       reporting:
-        enabled: true
+        comments:
+          mode: Sticky
   maxConcurrency: 8
   taskTemplate:
     worker:

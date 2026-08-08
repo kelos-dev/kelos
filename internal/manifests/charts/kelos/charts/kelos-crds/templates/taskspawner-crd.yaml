@@ -22698,9 +22698,28 @@ spec:
                                 maxLength: 100
                                 type: string
                             type: object
+                          comments:
+                            description: |-
+                              Comments configures task status comments on the originating GitHub issue
+                              or pull request. When nil, no comments are posted unless the deprecated
+                              Enabled field is true.
+                            properties:
+                              mode:
+                                default: PerTask
+                                description: |-
+                                  Mode controls whether comments are created per Task or reused across
+                                  Tasks from the same TaskSpawner and originating issue or pull request.
+                                  Defaults to PerTask.
+                                enum:
+                                - PerTask
+                                - Sticky
+                                type: string
+                            type: object
                           enabled:
-                            description: Enabled posts standard status comments back
-                              to the originating GitHub issue or PR.
+                            description: |-
+                              Enabled posts standard status comments back to the originating GitHub issue or PR.
+
+                              Deprecated: use Comments instead.
                             type: boolean
                         type: object
                       state:
@@ -22869,9 +22888,28 @@ spec:
                                 maxLength: 100
                                 type: string
                             type: object
+                          comments:
+                            description: |-
+                              Comments configures task status comments on the originating GitHub issue
+                              or pull request. When nil, no comments are posted unless the deprecated
+                              Enabled field is true.
+                            properties:
+                              mode:
+                                default: PerTask
+                                description: |-
+                                  Mode controls whether comments are created per Task or reused across
+                                  Tasks from the same TaskSpawner and originating issue or pull request.
+                                  Defaults to PerTask.
+                                enum:
+                                - PerTask
+                                - Sticky
+                                type: string
+                            type: object
                           enabled:
-                            description: Enabled posts standard status comments back
-                              to the originating GitHub issue or PR.
+                            description: |-
+                              Enabled posts standard status comments back to the originating GitHub issue or PR.
+
+                              Deprecated: use Comments instead.
                             type: boolean
                         type: object
                       reviewState:
@@ -23083,9 +23121,28 @@ spec:
                                 maxLength: 100
                                 type: string
                             type: object
+                          comments:
+                            description: |-
+                              Comments configures task status comments on the originating GitHub issue
+                              or pull request. When nil, no comments are posted unless the deprecated
+                              Enabled field is true.
+                            properties:
+                              mode:
+                                default: PerTask
+                                description: |-
+                                  Mode controls whether comments are created per Task or reused across
+                                  Tasks from the same TaskSpawner and originating issue or pull request.
+                                  Defaults to PerTask.
+                                enum:
+                                - PerTask
+                                - Sticky
+                                type: string
+                            type: object
                           enabled:
-                            description: Enabled posts standard status comments back
-                              to the originating GitHub issue or PR.
+                            description: |-
+                              Enabled posts standard status comments back to the originating GitHub issue or PR.
+
+                              Deprecated: use Comments instead.
                             type: boolean
                         type: object
                       repository:

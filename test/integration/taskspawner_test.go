@@ -2468,4 +2468,68 @@ var _ = Describe("TaskSpawner Controller", func() {
 			Expect(apierrors.IsInvalid(err)).To(BeTrue(), "error: %v", err)
 		})
 	})
+
+	Context("When configuring GitHub comment reporting", func() {
+		It("Should default the comment mode to PerTask", func() {
+			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test-taskspawner-comment-default"}}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			ts := &kelos.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{Name: "comment-default", Namespace: ns.Name},
+				Spec: kelos.TaskSpawnerSpec{
+					When: kelos.When{GitHubIssues: &kelos.GitHubIssues{
+						Repo: "kelos-dev/kelos",
+						Reporting: &kelos.GitHubReporting{
+							Comments: &kelos.GitHubCommentsReporting{},
+						},
+					}},
+					TaskTemplate: kelos.TaskTemplate{
+						Worker: &kelos.WorkerSpec{
+							Type: "claude-code",
+							Credentials: &kelos.Credentials{
+								Type:      kelos.CredentialTypeOAuth,
+								SecretRef: &kelos.SecretReference{Name: "claude-credentials"},
+							},
+							WorkspaceRef: &kelos.WorkspaceReference{Name: "workspace"},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ts)).Should(Succeed())
+
+			created := &kelos.TaskSpawner{}
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(ts), created)).Should(Succeed())
+			Expect(created.Spec.When.GitHubIssues.Reporting.Comments.Mode).To(Equal(kelos.GitHubCommentModePerTask))
+		})
+
+		It("Should reject an unsupported comment mode", func() {
+			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test-taskspawner-comment-invalid"}}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			ts := &kelos.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{Name: "comment-invalid", Namespace: ns.Name},
+				Spec: kelos.TaskSpawnerSpec{
+					When: kelos.When{GitHubIssues: &kelos.GitHubIssues{
+						Repo: "kelos-dev/kelos",
+						Reporting: &kelos.GitHubReporting{
+							Comments: &kelos.GitHubCommentsReporting{Mode: "Unsupported"},
+						},
+					}},
+					TaskTemplate: kelos.TaskTemplate{
+						Worker: &kelos.WorkerSpec{
+							Type: "claude-code",
+							Credentials: &kelos.Credentials{
+								Type:      kelos.CredentialTypeOAuth,
+								SecretRef: &kelos.SecretReference{Name: "claude-credentials"},
+							},
+							WorkspaceRef: &kelos.WorkspaceReference{Name: "workspace"},
+						},
+					},
+				},
+			}
+			err := k8sClient.Create(ctx, ts)
+			Expect(apierrors.IsInvalid(err)).To(BeTrue(), "error: %v", err)
+			Expect(err.Error()).To(ContainSubstring("Unsupported"))
+		})
+	})
 })

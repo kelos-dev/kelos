@@ -23,6 +23,7 @@ import (
 type reportingConfig struct {
 	TokenResolver    func(context.Context) (string, error)
 	GitHubAPIBaseURL string
+	GitHubAppID      string
 }
 
 // reportingReconciler watches Tasks with GitHub reporting annotations
@@ -69,10 +70,11 @@ func (r *reportingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	reporter := &reporting.TaskReporter{
 		Client: r.Client,
 		Reporter: &reporting.GitHubReporter{
-			Owner:     owner,
-			Repo:      repo,
-			TokenFunc: tokenFunc,
-			BaseURL:   r.config.GitHubAPIBaseURL,
+			Owner:       owner,
+			Repo:        repo,
+			TokenFunc:   tokenFunc,
+			GitHubAppID: r.config.GitHubAppID,
+			BaseURL:     r.config.GitHubAPIBaseURL,
 		},
 		Cache: r.cache,
 	}

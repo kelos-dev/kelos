@@ -401,6 +401,117 @@ func TestTaskSpawnerConvert_NameTemplateRoundTrips(t *testing.T) {
 	}
 }
 
+func TestTaskSpawnerConvert_GitHubCommentsReportingRoundTrips(t *testing.T) {
+	tests := []struct {
+		name               string
+		configureHub       func(*v1alpha2.When, *v1alpha2.GitHubReporting)
+		spokeReporting     func(*v1alpha1.When) *v1alpha1.GitHubReporting
+		roundTripReporting func(*v1alpha2.When) *v1alpha2.GitHubReporting
+	}{
+		{
+			name: "issues",
+			configureHub: func(when *v1alpha2.When, reporting *v1alpha2.GitHubReporting) {
+				when.GitHubIssues = &v1alpha2.GitHubIssues{Reporting: reporting}
+			},
+			spokeReporting: func(when *v1alpha1.When) *v1alpha1.GitHubReporting {
+				return when.GitHubIssues.Reporting
+			},
+			roundTripReporting: func(when *v1alpha2.When) *v1alpha2.GitHubReporting {
+				return when.GitHubIssues.Reporting
+			},
+		},
+		{
+			name: "pull requests",
+			configureHub: func(when *v1alpha2.When, reporting *v1alpha2.GitHubReporting) {
+				when.GitHubPullRequests = &v1alpha2.GitHubPullRequests{Reporting: reporting}
+			},
+			spokeReporting: func(when *v1alpha1.When) *v1alpha1.GitHubReporting {
+				return when.GitHubPullRequests.Reporting
+			},
+			roundTripReporting: func(when *v1alpha2.When) *v1alpha2.GitHubReporting {
+				return when.GitHubPullRequests.Reporting
+			},
+		},
+		{
+			name: "webhook",
+			configureHub: func(when *v1alpha2.When, reporting *v1alpha2.GitHubReporting) {
+				when.GitHubWebhook = &v1alpha2.GitHubWebhook{Reporting: reporting}
+			},
+			spokeReporting: func(when *v1alpha1.When) *v1alpha1.GitHubReporting {
+				return when.GitHubWebhook.Reporting
+			},
+			roundTripReporting: func(when *v1alpha2.When) *v1alpha2.GitHubReporting {
+				return when.GitHubWebhook.Reporting
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hub := &v1alpha2.TaskSpawner{ObjectMeta: metav1.ObjectMeta{Name: "reporter", Namespace: "default"}}
+			tt.configureHub(&hub.Spec.When, &v1alpha2.GitHubReporting{
+				Comments: &v1alpha2.GitHubCommentsReporting{Mode: v1alpha2.GitHubCommentModeSticky},
+			})
+
+			spoke := &v1alpha1.TaskSpawner{}
+			if err := taskSpawnerFromHub(context.Background(), hub, spoke); err != nil {
+				t.Fatalf("taskSpawnerFromHub() error = %v", err)
+			}
+			if !tt.spokeReporting(&spoke.Spec.When).Enabled {
+				t.Error("v1alpha1 fallback did not enable comment reporting")
+			}
+			if _, ok := spoke.Annotations[preservedGitHubCommentsReportingAnnotation]; !ok {
+				t.Fatal("expected preserved GitHub comments reporting annotation on spoke")
+			}
+
+			back := &v1alpha2.TaskSpawner{}
+			if err := taskSpawnerToHub(context.Background(), spoke, back); err != nil {
+				t.Fatalf("taskSpawnerToHub() error = %v", err)
+			}
+			reporting := tt.roundTripReporting(&back.Spec.When)
+			if reporting.Comments == nil || reporting.Comments.Mode != v1alpha2.GitHubCommentModeSticky {
+				t.Fatalf("round-tripped comments = %#v, want Sticky", reporting.Comments)
+			}
+			if reporting.Enabled {
+				t.Error("deprecated enabled field was not restored to false")
+			}
+			if _, ok := back.Annotations[preservedGitHubCommentsReportingAnnotation]; ok {
+				t.Error("internal preservation annotation leaked onto hub object")
+			}
+		})
+	}
+}
+
+func TestTaskSpawnerConvert_V1Alpha1CanDisablePreservedCommentsReporting(t *testing.T) {
+	hub := &v1alpha2.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{Name: "reporter", Namespace: "default"},
+		Spec: v1alpha2.TaskSpawnerSpec{
+			When: v1alpha2.When{
+				GitHubWebhook: &v1alpha2.GitHubWebhook{
+					Reporting: &v1alpha2.GitHubReporting{
+						Comments: &v1alpha2.GitHubCommentsReporting{Mode: v1alpha2.GitHubCommentModeSticky},
+					},
+				},
+			},
+		},
+	}
+
+	spoke := &v1alpha1.TaskSpawner{}
+	if err := taskSpawnerFromHub(context.Background(), hub, spoke); err != nil {
+		t.Fatalf("taskSpawnerFromHub() error = %v", err)
+	}
+	spoke.Spec.When.GitHubWebhook.Reporting.Enabled = false
+
+	back := &v1alpha2.TaskSpawner{}
+	if err := taskSpawnerToHub(context.Background(), spoke, back); err != nil {
+		t.Fatalf("taskSpawnerToHub() error = %v", err)
+	}
+	reporting := back.Spec.When.GitHubWebhook.Reporting
+	if reporting.Enabled || reporting.Comments != nil {
+		t.Errorf("round-tripped reporting = %#v, want comments disabled", reporting)
+	}
+}
+
 func TestTaskSpawnerConvert_CredentialsRoundTrip(t *testing.T) {
 	hub := &v1alpha2.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{Name: "multi-account", Namespace: "default"},

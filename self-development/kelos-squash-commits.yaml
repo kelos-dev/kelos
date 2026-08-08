@@ -22,7 +22,8 @@ spec:
           state: open
           author: gjkim42
       reporting:
-        enabled: true
+        comments:
+          mode: Sticky
         checks: {}
   maxConcurrency: 1
   taskTemplate:

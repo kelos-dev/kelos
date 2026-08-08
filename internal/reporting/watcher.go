@@ -21,6 +21,10 @@ const (
 	// enabled for this Task.
 	AnnotationGitHubReporting = "kelos.dev/github-reporting"
 
+	// AnnotationGitHubCommentMode records whether the reporter creates a
+	// comment per Task or reuses a sticky comment across Tasks.
+	AnnotationGitHubCommentMode = "kelos.dev/github-comment-mode"
+
 	// AnnotationSourceKind records whether the source item is an issue or pull-request.
 	AnnotationSourceKind = "kelos.dev/source-kind"
 
@@ -268,6 +272,20 @@ func (tr *TaskReporter) reportViaComment(ctx context.Context, task *kelos.Task) 
 		body = FormatFailedComment(task.Name)
 	}
 
+	if annotations[AnnotationGitHubCommentMode] == string(kelos.GitHubCommentModeSticky) {
+		marker, err := stickyCommentMarker(task)
+		if err != nil {
+			return err
+		}
+		body += "\n\n" + marker
+		if commentID == 0 {
+			commentID, err = tr.Reporter.FindCommentByMarker(ctx, number, marker)
+			if err != nil {
+				return fmt.Errorf("finding sticky GitHub comment for task %s: %w", task.Name, err)
+			}
+		}
+	}
+
 	if commentID == 0 {
 		log.Info("Creating GitHub status comment", "task", task.Name, "number", number, "phase", desiredPhase)
 		newID, err := tr.Reporter.CreateComment(ctx, number, body)
@@ -288,6 +306,14 @@ func (tr *TaskReporter) reportViaComment(ctx context.Context, task *kelos.Task) 
 	tr.Cache.store(task.UID, commentID, desiredPhase)
 
 	return tr.persistReportingState(ctx, task, commentID, desiredPhase)
+}
+
+func stickyCommentMarker(task *kelos.Task) (string, error) {
+	spawnerName := task.Labels["kelos.dev/taskspawner"]
+	if spawnerName == "" {
+		return "", fmt.Errorf("sticky GitHub comment for task %s requires kelos.dev/taskspawner label", task.Name)
+	}
+	return fmt.Sprintf("<!-- kelos.dev/github-status-comment:%s/%s -->", task.Namespace, spawnerName), nil
 }
 
 // reportViaCheckRun creates or updates a GitHub Check Run.

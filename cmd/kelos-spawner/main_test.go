@@ -2204,6 +2204,21 @@ func TestReportingEnabled_IssuesEnabled(t *testing.T) {
 	}
 }
 
+func TestReportingEnabled_CommentsConfigured(t *testing.T) {
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubIssues: &kelos.GitHubIssues{
+					Reporting: &kelos.GitHubReporting{Comments: &kelos.GitHubCommentsReporting{}},
+				},
+			},
+		},
+	}
+	if !reportingEnabled(ts) {
+		t.Error("Expected reporting to be enabled when comments are configured")
+	}
+}
+
 func TestReportingEnabled_IssuesDisabled(t *testing.T) {
 	ts := &kelos.TaskSpawner{
 		Spec: kelos.TaskSpawnerSpec{
@@ -2377,6 +2392,28 @@ func TestSourceAnnotations_ChecksAndCommentsEnabled(t *testing.T) {
 	}
 	if annotations[reporting.AnnotationGitHubChecks] != "enabled" {
 		t.Errorf("Expected github-checks 'enabled', got %q", annotations[reporting.AnnotationGitHubChecks])
+	}
+}
+
+func TestSourceAnnotations_StickyComments(t *testing.T) {
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitHubPullRequests: &kelos.GitHubPullRequests{
+					Reporting: &kelos.GitHubReporting{
+						Comments: &kelos.GitHubCommentsReporting{Mode: kelos.GitHubCommentModeSticky},
+					},
+				},
+			},
+		},
+	}
+
+	annotations := sourceAnnotations(ts, source.WorkItem{Number: 5, Kind: "PR"})
+	if annotations[reporting.AnnotationGitHubReporting] != "enabled" {
+		t.Errorf("Expected github-reporting 'enabled', got %q", annotations[reporting.AnnotationGitHubReporting])
+	}
+	if annotations[reporting.AnnotationGitHubCommentMode] != string(kelos.GitHubCommentModeSticky) {
+		t.Errorf("Expected Sticky comment mode, got %q", annotations[reporting.AnnotationGitHubCommentMode])
 	}
 }
 

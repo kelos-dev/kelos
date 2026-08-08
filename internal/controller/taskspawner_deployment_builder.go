@@ -370,7 +370,7 @@ func taskSpawnerNeedsGitHubToken(ts *kelos.TaskSpawner, ghProxyConfigured bool) 
 }
 
 func gitHubReportingNeedsToken(reporting *kelos.GitHubReporting) bool {
-	return reporting != nil && (reporting.Enabled || reporting.Checks != nil)
+	return reporting != nil && (reporting.Enabled || reporting.Comments != nil || reporting.Checks != nil)
 }
 
 func workspaceUsesGHProxy(workspace *kelos.WorkspaceSpec) bool {

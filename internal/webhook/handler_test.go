@@ -639,7 +639,7 @@ func TestServeHTTP_CreatesTaskForMatchingSpawner(t *testing.T) {
 	}
 }
 
-func TestServeHTTP_StampsReportingAnnotationsWhenEnabled(t *testing.T) {
+func TestServeHTTP_StampsStickyCommentReportingAnnotations(t *testing.T) {
 	spawner := &kelos.TaskSpawner{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "reporting-spawner",
@@ -651,7 +651,7 @@ func TestServeHTTP_StampsReportingAnnotationsWhenEnabled(t *testing.T) {
 				GitHubWebhook: &kelos.GitHubWebhook{
 					Events: []string{"issues"},
 					Reporting: &kelos.GitHubReporting{
-						Enabled: true,
+						Comments: &kelos.GitHubCommentsReporting{Mode: kelos.GitHubCommentModeSticky},
 					},
 				},
 			},
@@ -696,6 +696,9 @@ func TestServeHTTP_StampsReportingAnnotationsWhenEnabled(t *testing.T) {
 	task := taskList.Items[0]
 	if task.Annotations[reporting.AnnotationGitHubReporting] != "enabled" {
 		t.Errorf("Expected github-reporting 'enabled', got %q", task.Annotations[reporting.AnnotationGitHubReporting])
+	}
+	if task.Annotations[reporting.AnnotationGitHubCommentMode] != string(kelos.GitHubCommentModeSticky) {
+		t.Errorf("Expected Sticky comment mode, got %q", task.Annotations[reporting.AnnotationGitHubCommentMode])
 	}
 	if task.Annotations[reporting.AnnotationSourceKind] != "issue" {
 		t.Errorf("Expected source-kind 'issue', got %q", task.Annotations[reporting.AnnotationSourceKind])

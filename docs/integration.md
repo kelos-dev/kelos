@@ -61,7 +61,7 @@ commentPolicy:
   minimumPermission: write   # only repo collaborators can trigger
 ```
 
-**Status reporting:** Set `reporting.enabled: true` to post status updates (started, succeeded, failed) back to the issue as comments.
+**Status reporting:** Set `reporting.comments: {}` to post status updates (started, succeeded, failed) back to the issue. The default `PerTask` mode creates one comment for each Task. Set `reporting.comments.mode: Sticky` to maintain one comment per TaskSpawner and issue across Tasks.
 
 ### GitHub Pull Requests
 
@@ -106,7 +106,7 @@ spec:
 
 **Status reporting:** Two independent options:
 
-- `reporting.enabled: true` posts status comments (started, succeeded, failed) on the PR.
+- `reporting.comments` posts status comments (started, succeeded, failed) on the PR. `mode: PerTask` is the default and creates one comment for each Task. `mode: Sticky` maintains one comment per TaskSpawner and PR across Tasks.
 - `reporting.checks.name` creates a GitHub Check Run for each PR task, so the run can be required by branch protection rules or referenced from a merge queue. The Check Run starts as `in_progress` when the task begins and is updated to `success` or `failure` on completion. The name defaults to `"Kelos: <taskspawner-name>"` and appears in branch protection rule configuration and the PR Checks tab; the token referenced by the workspace must have `checks:write` permission.
 
 ```yaml
@@ -115,7 +115,8 @@ spec:
     githubPullRequests:
       labels: [needs-review]
       reporting:
-        enabled: true            # status comments on the PR
+        comments:
+          mode: Sticky           # one status comment across Tasks
         checks:
           name: kelos/pr-review  # required-status-check name (optional override)
 ```
@@ -190,7 +191,7 @@ spec:
 
 **Filtering options:** `events` (required), `repository`, `excludeAuthors`, and per-filter fields: `action`, `labels`, `excludeLabels`, `state`, `branch`, `draft`, `author`, `bodyPattern`, `excludeBodyPatterns`, `commentOn` (scopes `issue_comment` events to `"Issue"` or `"PullRequest"`). The legacy `bodyContains` substring filter is **deprecated** — use `bodyPattern` (Go re2 regular expression) instead.
 
-**Status reporting:** Like `githubPullRequests`, the webhook source supports `reporting.enabled` (status comments back to the originating issue or PR) and `reporting.checks.name` (GitHub Check Runs for branch protection). Check Runs require `events` to include at least one pull-request event type (`pull_request`, `pull_request_review`, `pull_request_review_comment`, or `pull_request_target`); the configuration is rejected at admission otherwise.
+**Status reporting:** Like `githubPullRequests`, the webhook source supports `reporting.comments` (status comments back to the originating issue or PR) and `reporting.checks.name` (GitHub Check Runs for branch protection). Comment mode defaults to `PerTask`; `Sticky` maintains one comment per TaskSpawner and originating issue or PR across Tasks. Check Runs require `events` to include at least one pull-request event type (`pull_request`, `pull_request_review`, `pull_request_review_comment`, or `pull_request_target`); the configuration is rejected at admission otherwise.
 
 **Webhook-specific variables:** `{{.Event}}`, `{{.Action}}`, `{{.Sender}}`, `{{.Ref}}`, `{{.Repository}}`, `{{.Payload}}` (full payload access).
 

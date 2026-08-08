@@ -69,19 +69,51 @@ type Cron struct {
 
 // GitHubReporting configures status reporting back to GitHub.
 // All GitHub sources (issues, pull requests, webhooks) support comment
-// reporting via the Enabled field. The Checks field is supported for
-// githubPullRequests and for githubWebhook sources that include at least
-// one pull-request event type; other sources reject it via CEL validation.
+// reporting. The Checks field is supported for githubPullRequests and for
+// githubWebhook sources that include at least one pull-request event type;
+// other sources reject it via CEL validation.
 type GitHubReporting struct {
 	// Enabled posts standard status comments back to the originating GitHub issue or PR.
+	//
+	// Deprecated: use Comments instead.
 	// +optional
 	Enabled bool `json:"enabled,omitempty"`
+
+	// Comments configures task status comments on the originating GitHub issue
+	// or pull request. When nil, no comments are posted unless the deprecated
+	// Enabled field is true.
+	// +optional
+	Comments *GitHubCommentsReporting `json:"comments,omitempty"`
 
 	// Checks creates GitHub Check Runs for pull request tasks. When nil,
 	// no Check Runs are created. Supported for githubPullRequests and
 	// githubWebhook sources with pull-request event types.
 	// +optional
 	Checks *GitHubChecksReporting `json:"checks,omitempty"`
+}
+
+// GitHubCommentMode controls how task status comments are reused.
+type GitHubCommentMode string
+
+const (
+	// GitHubCommentModePerTask creates one status comment for each Task and
+	// updates it as that Task's phase changes.
+	GitHubCommentModePerTask GitHubCommentMode = "PerTask"
+
+	// GitHubCommentModeSticky maintains one status comment per TaskSpawner and
+	// originating issue or pull request, updating it across Tasks.
+	GitHubCommentModeSticky GitHubCommentMode = "Sticky"
+)
+
+// GitHubCommentsReporting configures GitHub task status comment reporting.
+type GitHubCommentsReporting struct {
+	// Mode controls whether comments are created per Task or reused across
+	// Tasks from the same TaskSpawner and originating issue or pull request.
+	// Defaults to PerTask.
+	// +optional
+	// +kubebuilder:default=PerTask
+	// +kubebuilder:validation:Enum=PerTask;Sticky
+	Mode GitHubCommentMode `json:"mode,omitempty"`
 }
 
 // GitHubChecksReporting configures GitHub Check Run reporting for pull

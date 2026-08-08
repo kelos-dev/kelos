@@ -25,6 +25,7 @@ type spawnerRuntimeConfig struct {
 	GitHubOwner      string
 	GitHubRepo       string
 	GitHubAPIBaseURL string
+	GitHubAppID      string
 	GHProxyURL       string
 	TokenResolver    func(context.Context) (string, error)
 	JiraBaseURL      string
@@ -95,11 +96,12 @@ func runOnce(ctx context.Context, cl client.Client, key types.NamespacedName, cf
 		reporter := &reporting.TaskReporter{
 			Client: cl,
 			Reporter: &reporting.GitHubReporter{
-				Owner:     cfg.GitHubOwner,
-				Repo:      cfg.GitHubRepo,
-				TokenFunc: tokenFunc,
-				BaseURL:   cfg.GitHubAPIBaseURL,
-				Client:    cfg.HTTPClient,
+				Owner:       cfg.GitHubOwner,
+				Repo:        cfg.GitHubRepo,
+				TokenFunc:   tokenFunc,
+				GitHubAppID: cfg.GitHubAppID,
+				BaseURL:     cfg.GitHubAPIBaseURL,
+				Client:      cfg.HTTPClient,
 			},
 		}
 		if checksReportingEnabled(&ts) {

@@ -124,10 +124,12 @@ func main() {
 	// --github-token-file. The static --github-token already absorbed the
 	// GITHUB_TOKEN env fallback above.
 	var tokenResolver func(context.Context) (string, error)
+	var reportingGitHubAppID string
 	switch {
 	case githubToken != "":
 		tokenResolver = func(context.Context) (string, error) { return githubToken, nil }
 	case githubAppID != "" && githubAppInstallationID != "" && githubAppPrivateKey != "":
+		reportingGitHubAppID = githubAppID
 		creds, err := githubapp.ParseCredentials(map[string][]byte{
 			"appID":          []byte(githubAppID),
 			"installationID": []byte(githubAppInstallationID),
@@ -207,6 +209,7 @@ func main() {
 			config: reportingConfig{
 				TokenResolver:    tokenResolver,
 				GitHubAPIBaseURL: githubAPIBaseURL,
+				GitHubAppID:      reportingGitHubAppID,
 			},
 		}
 		if err := reportingReconciler.SetupWithManager(mgr); err != nil {

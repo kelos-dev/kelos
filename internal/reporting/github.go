@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 const defaultBaseURL = "https://api.github.com"
@@ -18,12 +19,13 @@ const defaultBaseURL = "https://api.github.com"
 // tokens that are refreshed in-process. When TokenFunc is nil the static
 // Token field is used instead.
 type GitHubReporter struct {
-	Owner     string
-	Repo      string
-	Token     string        // static token (used when TokenFunc is nil)
-	TokenFunc func() string // dynamic token resolver; takes precedence over Token
-	BaseURL   string
-	Client    *http.Client
+	Owner       string
+	Repo        string
+	Token       string        // static token (used when TokenFunc is nil)
+	TokenFunc   func() string // dynamic token resolver; takes precedence over Token
+	GitHubAppID string        // app ID when TokenFunc returns an installation token
+	BaseURL     string
+	Client      *http.Client
 }
 
 func (r *GitHubReporter) baseURL() string {
@@ -45,7 +47,111 @@ type createCommentRequest struct {
 }
 
 type commentResponse struct {
+	ID                    int64      `json:"id"`
+	Body                  string     `json:"body"`
+	User                  githubUser `json:"user"`
+	PerformedViaGitHubApp *githubApp `json:"performed_via_github_app"`
+}
+
+type githubUser struct {
+	Login string `json:"login"`
+}
+
+type githubApp struct {
 	ID int64 `json:"id"`
+}
+
+type commentOwner struct {
+	userLogin   string
+	githubAppID int64
+}
+
+func (o commentOwner) owns(comment commentResponse) bool {
+	if o.githubAppID != 0 {
+		return comment.PerformedViaGitHubApp != nil && comment.PerformedViaGitHubApp.ID == o.githubAppID
+	}
+	return strings.EqualFold(comment.User.Login, o.userLogin)
+}
+
+// FindCommentByMarker returns the newest comment containing marker, or zero
+// when no matching comment exists.
+func (r *GitHubReporter) FindCommentByMarker(ctx context.Context, number int, marker string) (int64, error) {
+	owner, err := r.commentOwner(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	var foundID int64
+	for page := 1; ; page++ {
+		url := fmt.Sprintf("%s/repos/%s/%s/issues/%d/comments?per_page=100&page=%d", r.baseURL(), r.Owner, r.Repo, number, page)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return 0, fmt.Errorf("creating request: %w", err)
+		}
+		r.setHeaders(req)
+
+		resp, err := r.httpClient().Do(req)
+		if err != nil {
+			return 0, fmt.Errorf("listing comments: %w", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+			resp.Body.Close()
+			return 0, fmt.Errorf("GitHub API returned status %d: %s", resp.StatusCode, string(errBody))
+		}
+
+		var comments []commentResponse
+		if err := json.NewDecoder(resp.Body).Decode(&comments); err != nil {
+			resp.Body.Close()
+			return 0, fmt.Errorf("decoding comments response: %w", err)
+		}
+		resp.Body.Close()
+
+		for _, comment := range comments {
+			if strings.Contains(comment.Body, marker) && owner.owns(comment) {
+				foundID = comment.ID
+			}
+		}
+		if len(comments) < 100 {
+			return foundID, nil
+		}
+	}
+}
+
+func (r *GitHubReporter) commentOwner(ctx context.Context) (commentOwner, error) {
+	if r.GitHubAppID != "" {
+		appID, err := strconv.ParseInt(r.GitHubAppID, 10, 64)
+		if err != nil || appID <= 0 {
+			return commentOwner{}, fmt.Errorf("invalid GitHub App ID %q", r.GitHubAppID)
+		}
+		return commentOwner{githubAppID: appID}, nil
+	}
+
+	url := r.baseURL() + "/user"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return commentOwner{}, fmt.Errorf("creating request: %w", err)
+	}
+	r.setHeaders(req)
+
+	resp, err := r.httpClient().Do(req)
+	if err != nil {
+		return commentOwner{}, fmt.Errorf("getting authenticated GitHub user: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return commentOwner{}, fmt.Errorf("GitHub API returned status %d: %s", resp.StatusCode, string(errBody))
+	}
+
+	var user githubUser
+	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
+		return commentOwner{}, fmt.Errorf("decoding authenticated user response: %w", err)
+	}
+	if user.Login == "" {
+		return commentOwner{}, fmt.Errorf("authenticated GitHub user response has no login")
+	}
+	return commentOwner{userLogin: user.Login}, nil
 }
 
 // CreateComment creates a comment on a GitHub issue or pull request and returns

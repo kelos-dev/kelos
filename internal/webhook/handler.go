@@ -656,7 +656,8 @@ func (h *WebhookHandler) createTask(ctx context.Context, spawner *kelos.TaskSpaw
 		spawner.Spec.When.GitHubWebhook != nil &&
 		spawner.Spec.When.GitHubWebhook.Reporting != nil {
 		rep := spawner.Spec.When.GitHubWebhook.Reporting
-		if rep.Enabled || rep.Checks != nil {
+		commentReportingEnabled := rep.Enabled || rep.Comments != nil
+		if commentReportingEnabled || rep.Checks != nil {
 			if task.Annotations == nil {
 				task.Annotations = make(map[string]string)
 			}
@@ -665,8 +666,13 @@ func (h *WebhookHandler) createTask(ctx context.Context, spawner *kelos.TaskSpaw
 			task.Annotations[reporting.AnnotationSourceOwner] = parsed.GitHub.RepositoryOwner
 			task.Annotations[reporting.AnnotationSourceRepo] = parsed.GitHub.RepositoryName
 		}
-		if rep.Enabled {
+		if commentReportingEnabled {
 			task.Annotations[reporting.AnnotationGitHubReporting] = "enabled"
+			commentMode := kelos.GitHubCommentModePerTask
+			if rep.Comments != nil && rep.Comments.Mode != "" {
+				commentMode = rep.Comments.Mode
+			}
+			task.Annotations[reporting.AnnotationGitHubCommentMode] = string(commentMode)
 		}
 		if rep.Checks != nil && parsed.GitHub.HeadSHA != "" {
 			task.Annotations[reporting.AnnotationGitHubChecks] = "enabled"

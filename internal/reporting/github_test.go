@@ -153,6 +153,78 @@ func TestUpdateCommentError(t *testing.T) {
 	}
 }
 
+func TestFindCommentByMarker(t *testing.T) {
+	const marker = "<!-- kelos.dev/github-status-comment:default/reviewer -->"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/user" {
+			json.NewEncoder(w).Encode(githubUser{Login: "reporter"})
+			return
+		}
+		if r.URL.Query().Get("page") == "1" {
+			comments := make([]commentResponse, 100)
+			for i := range comments {
+				comments[i] = commentResponse{ID: int64(i + 1), Body: "other comment", User: githubUser{Login: "reporter"}}
+			}
+			comments[49].Body = marker
+			json.NewEncoder(w).Encode(comments)
+			return
+		}
+		json.NewEncoder(w).Encode([]commentResponse{
+			{ID: 201, Body: "latest owned\n\n" + marker, User: githubUser{Login: "reporter"}},
+			{ID: 202, Body: "newer foreign\n\n" + marker, User: githubUser{Login: "other-user"}},
+		})
+	}))
+	defer server.Close()
+
+	reporter := &GitHubReporter{Owner: "owner", Repo: "repo", Token: "token", BaseURL: server.URL}
+	commentID, err := reporter.FindCommentByMarker(context.Background(), 42, marker)
+	if err != nil {
+		t.Fatalf("FindCommentByMarker() error = %v", err)
+	}
+	if commentID != 201 {
+		t.Errorf("FindCommentByMarker() = %d, want newest owned comment ID 201", commentID)
+	}
+}
+
+func TestFindCommentByMarkerForGitHubApp(t *testing.T) {
+	const marker = "<!-- kelos.dev/github-status-comment:default/reviewer -->"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/user" {
+			http.Error(w, "unexpected authenticated user request", http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode([]commentResponse{
+			{ID: 100, Body: marker, PerformedViaGitHubApp: &githubApp{ID: 123}},
+			{ID: 101, Body: marker, PerformedViaGitHubApp: &githubApp{ID: 456}},
+		})
+	}))
+	defer server.Close()
+
+	reporter := &GitHubReporter{
+		Owner: "owner", Repo: "repo", Token: "token", GitHubAppID: "123", BaseURL: server.URL,
+	}
+	commentID, err := reporter.FindCommentByMarker(context.Background(), 42, marker)
+	if err != nil {
+		t.Fatalf("FindCommentByMarker() error = %v", err)
+	}
+	if commentID != 100 {
+		t.Errorf("FindCommentByMarker() = %d, want app-owned comment ID 100", commentID)
+	}
+}
+
+func TestFindCommentByMarkerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"message":"forbidden"}`))
+	}))
+	defer server.Close()
+
+	reporter := &GitHubReporter{Owner: "owner", Repo: "repo", Token: "token", BaseURL: server.URL}
+	if _, err := reporter.FindCommentByMarker(context.Background(), 42, "marker"); err == nil {
+		t.Fatal("FindCommentByMarker() error = nil, want an error")
+	}
+}
+
 func TestCreateCommentNoToken(t *testing.T) {
 	var gotAuth string
 

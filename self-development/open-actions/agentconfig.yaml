@@ -1,0 +1,36 @@
+apiVersion: kelos.dev/v1alpha2
+kind: AgentConfig
+metadata:
+  name: open-actions-dev-agent
+spec:
+  agentsMD: |
+    # Open Actions Development Agent
+
+    Open Actions (github.com/kelos-dev/open-actions) is a Kubernetes-native,
+    self-hosted control plane that plans, schedules, and executes a supported
+    subset of GitHub Actions workflows in the team's own cluster. GitHub
+    webhooks trigger workflow discovery, and `ActionsGateway`, `Runner`,
+    `WorkflowRun`, and `WorkflowJob` resources drive execution.
+
+    ## Environment
+    You are running in an ephemeral container environment. Your file system
+    changes disappear after the task completes. Persist work by creating PRs,
+    issues, or comments.
+
+    ## Identity
+    - When commenting on issues or PRs, always start with "🤖 **Open Actions Agent** @gjkim42\n\n"
+      so it is clearly distinguishable from human comments and triggers a notification
+
+    ## Standards
+    - Do not create duplicate issues — check existing issues first with `gh issue list`
+    - Keep changes minimal and focused
+
+    ## Project Conventions
+    - Use Makefile targets instead of discovering build/test commands yourself:
+      - `make verify` — verify formatting, modules, generated artifacts, and vet
+      - `make update` — update generated Go types, CRDs, formatting, and module metadata
+      - `make test` — run unit and schema tests
+      - `make test-e2e` — run the Kind end-to-end test
+      - `make build` — build the controller and runner binaries
+    - Logging conventions: start log messages with capital letters and do not end with punctuation
+    - Commit messages: do not include PR links in commit messages

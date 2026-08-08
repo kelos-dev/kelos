@@ -9,9 +9,10 @@ repository while keeping the configuration in this repo.
 The nested [`kanon/`](kanon/README.md) directory does the same for the sibling
 [`kelos-dev/kanon`](https://github.com/kelos-dev/kanon) repository.
 
-The nested [`open-actions/`](open-actions/README.md) directory provides
-general and Kubernetes API reviewers for
-[`kelos-dev/open-actions`](https://github.com/kelos-dev/open-actions).
+The nested [`open-actions/`](open-actions/README.md) directory does the same
+for the sibling
+[`kelos-dev/open-actions`](https://github.com/kelos-dev/open-actions)
+repository.
 
 [`cs`](cs) creates persistent interactive Codex environments for developing
 Kelos with the same Workspace, credentials, model, effort, and Git identity as
@@ -28,8 +29,8 @@ directory and its nested Agora, Kanon, and Open Actions directories references
 and installs all skills from that repository through `spec.skills`.
 Tasks and TaskSpawners add a second role-specific AgentConfig when they need
 local identity, conventions, or workflow instructions. The issue and PR
-pick-up SessionSpawners for Kelos, Agora, and Kanon, plus Sessions created with
-`cs`, use only `base-agent`.
+pick-up SessionSpawners for Kelos, Agora, Kanon, and Open Actions, plus
+Sessions created with `cs`, use only `base-agent`.
 
 Apply the shared AgentConfig before deploying any self-development resource:
 
@@ -654,7 +655,7 @@ To adapt these examples for your own repository:
 The key pattern in these examples is webhook-triggered handoff plus runtime re-validation:
 
 1. GitHub delivers an `issue_comment`, `issues`, or `pull_request_review` webhook
-2. The matching TaskSpawner creates a Task, while the issue and PR pick-up spawners for Kelos, Agora, and Kanon create Sessions
+2. The matching TaskSpawner creates a Task, while the issue and PR pick-up spawners for Kelos, Agora, Kanon, and Open Actions create Sessions
 3. The agent re-reads the latest issue or PR state with `gh` before acting, so asynchronous label updates are respected
 4. If the agent needs human input, it posts a plain-English status comment describing what happened
 5. An exact `/kelos pick-up` command creates a Session for an open issue or PR; explicit commands or relabel events retrigger the other matching automation

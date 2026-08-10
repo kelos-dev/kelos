@@ -53,6 +53,7 @@ spec:
             value: "gjkim042@gmail.com"
       agentConfigRefs:
         - name: base-agent
+        - name: open-actions-dev-agent
     initialBranch: "open-actions-task-{{.Number}}"
     initialPrompt: |
       Let's address {{.URL}}

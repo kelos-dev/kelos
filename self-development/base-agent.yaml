@@ -5,6 +5,15 @@ metadata:
 spec:
   skills:
     - source: gjkim42/kanon-repo
+      skill: api-review
+    - source: gjkim42/kanon-repo
+      skill: design-cleanup
+    - source: gjkim42/kanon-repo
+      skill: gjkim-instruction
+    - source: gjkim42/kanon-repo
+      skill: pre-session-end
+    - source: gjkim42/kanon-repo
+      skill: review-all
   agentsMD: |
     # AGENTS.md
 

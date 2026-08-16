@@ -57,3 +57,7 @@ spec:
     initialPrompt: |
       Let's address {{.URL}}
       Find the best way to address it.
+      When behavior differs by command, flag, scope, or guard outcome, test each
+      affected path directly instead of relying on coverage through another path.
+      When removing or disabling behavior, assert that the removed output is absent.
+      Update `README.md` in the same PR for user-facing behavior changes.

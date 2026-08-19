@@ -3,6 +3,7 @@ package reporting
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"sync"
 	"unicode/utf8"
@@ -76,6 +77,27 @@ func (r *SlackReporter) UpdateMessage(ctx context.Context, channel, messageTS st
 		return fmt.Errorf("updating Slack message: %w", err)
 	}
 	return nil
+}
+
+// isPermanentSlackError reports whether err is a Slack API error that will
+// never succeed if retried, such as replying to a message Slack does not
+// allow replies to ("cannot_reply_to_message"). HTTP-level failures
+// (timeouts, 5xx) and rate limits are transient and remain retryable.
+//
+// slack-go returns SlackErrorResponse by value, with the API error code in
+// its Err field.
+//
+// The set is deliberately limited to cannot_reply_to_message. Other codes
+// that are arguably permanent (is_archived, channel_not_found, invalid_blocks,
+// msg_too_long) still retry, so suppressing them is a behavior change that
+// belongs in its own change with its own tests. Add them here when that
+// happens.
+func isPermanentSlackError(err error) bool {
+	var respErr slack.SlackErrorResponse
+	if !errors.As(err, &respErr) {
+		return false
+	}
+	return respErr.Err == "cannot_reply_to_message"
 }
 
 // contextBlock returns a context block displaying the task name.

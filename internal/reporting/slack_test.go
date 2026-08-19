@@ -3,6 +3,8 @@ package reporting
 import (
 	"context"
 	"encoding/base64"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -635,4 +637,29 @@ func assertContextContains(t *testing.T, block slack.Block, substr string) {
 		}
 	}
 	t.Errorf("context block does not contain %q", substr)
+}
+
+func TestIsPermanentSlackError(t *testing.T) {
+	cannotReply := slack.SlackErrorResponse{Err: "cannot_reply_to_message"}
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "cannot_reply_to_message", err: cannotReply, want: true},
+		{name: "wrapped cannot_reply_to_message", err: fmt.Errorf("posting Slack thread reply: %w", cannotReply), want: true},
+		{name: "rate limited stays retryable", err: slack.SlackErrorResponse{Err: "rate_limited"}, want: false},
+		{name: "other Slack API error", err: slack.SlackErrorResponse{Err: "is_archived"}, want: false},
+		{name: "HTTP status error", err: slack.StatusCodeError{Code: 500, Status: "server error"}, want: false},
+		{name: "non-Slack error", err: errors.New("boom"), want: false},
+		{name: "nil", err: nil, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isPermanentSlackError(tt.err); got != tt.want {
+				t.Errorf("isPermanentSlackError(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
 }

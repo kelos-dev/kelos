@@ -3063,3 +3063,201 @@ func TestAppendActivityContext_DoesNotMutateBase(t *testing.T) {
 		t.Errorf("base message mutated: blocks went from %d to %d", originalBlockCount, len(baseMsg.Blocks))
 	}
 }
+
+func TestSlackTaskReporter_CannotReplyToMessageNotRetried(t *testing.T) {
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-task",
+			Namespace: "default",
+			Annotations: map[string]string{
+				AnnotationSlackReporting: "enabled",
+				AnnotationSlackChannel:   "C123ABC",
+				AnnotationSlackThreadTS:  "1234567890.123456",
+			},
+		},
+		Spec: kelos.TaskSpec{
+			Type:   "claude-code",
+			Prompt: "test",
+			Credentials: &kelos.Credentials{
+				Type:      kelos.CredentialTypeOAuth,
+				SecretRef: &kelos.SecretReference{Name: "creds"},
+			},
+		},
+		Status: kelos.TaskStatus{
+			Phase:   kelos.TaskPhaseRunning,
+			PodName: "test-pod",
+		},
+	}
+
+	cl := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(task).Build()
+
+	attempts := 0
+	reporter := &fakeSlackReporter{
+		postFn: func(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error) {
+			attempts++
+			// slack-go surfaces API errors as a SlackErrorResponse value.
+			return "", slack.SlackErrorResponse{Err: "cannot_reply_to_message"}
+		},
+	}
+
+	// A ProgressReader and a pod are required for the second-cycle assertion
+	// below to mean anything: without them updateProgress returns at its
+	// ProgressReader/podName guards and the post count cannot grow no matter
+	// how the permanent error is handled. Production always wires one
+	// (cmd/kelos-slack-server/main.go).
+	tr := &SlackTaskReporter{
+		Client:         cl,
+		Reporter:       reporter,
+		ProgressReader: &fakeProgressReader{text: "Reading the changed files..."},
+	}
+
+	// A permanent Slack error must not wedge the task: the phase is still
+	// marked as reported so the 30s reporting cycle stops re-posting.
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if attempts != 1 {
+		t.Fatalf("expected exactly 1 post attempt, got %d", attempts)
+	}
+
+	var updated kelos.Task
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
+		t.Fatalf("getting updated task: %v", err)
+	}
+	if updated.Annotations[AnnotationSlackReportPhase] != "accepted" {
+		t.Errorf("report phase = %q, want accepted so the cycle does not retry", updated.Annotations[AnnotationSlackReportPhase])
+	}
+
+	// The next cycle takes the progress path, which posts its own thread
+	// reply. It must not attempt that post either: the transition failure
+	// already proved the thread rejects every reply.
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("unexpected error on second cycle: %v", err)
+	}
+	if attempts != 1 {
+		t.Errorf("expected no additional post attempt on the next cycle, got %d total", attempts)
+	}
+}
+
+func TestSlackTaskReporter_TransientReplyErrorStillRetried(t *testing.T) {
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-task",
+			Namespace: "default",
+			Annotations: map[string]string{
+				AnnotationSlackReporting: "enabled",
+				AnnotationSlackChannel:   "C123ABC",
+				AnnotationSlackThreadTS:  "1234567890.123456",
+			},
+		},
+		Spec: kelos.TaskSpec{
+			Type:   "claude-code",
+			Prompt: "test",
+			Credentials: &kelos.Credentials{
+				Type:      kelos.CredentialTypeOAuth,
+				SecretRef: &kelos.SecretReference{Name: "creds"},
+			},
+		},
+		Status: kelos.TaskStatus{
+			Phase: kelos.TaskPhasePending,
+		},
+	}
+
+	cl := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(task).Build()
+
+	reporter := &fakeSlackReporter{
+		postFn: func(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error) {
+			return "", errors.New("network timeout")
+		},
+	}
+
+	tr := &SlackTaskReporter{Client: cl, Reporter: reporter}
+
+	if err := tr.ReportTaskStatus(context.Background(), task); err == nil {
+		t.Fatal("expected error for transient failure")
+	}
+
+	var updated kelos.Task
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
+		t.Fatalf("getting updated task: %v", err)
+	}
+	if updated.Annotations[AnnotationSlackReportPhase] != "" {
+		t.Errorf("report phase = %q, want unset so transient errors are retried", updated.Annotations[AnnotationSlackReportPhase])
+	}
+}
+
+func TestSlackTaskReporter_PermanentProgressErrorNotReattempted(t *testing.T) {
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-task",
+			Namespace: "default",
+			UID:       "uid-124",
+			Annotations: map[string]string{
+				AnnotationSlackReporting:   "enabled",
+				AnnotationSlackChannel:     "C123ABC",
+				AnnotationSlackThreadTS:    "1234567890.123456",
+				AnnotationSlackReportPhase: "accepted",
+			},
+		},
+		Spec: kelos.TaskSpec{
+			Type:   "claude-code",
+			Prompt: "test",
+			Credentials: &kelos.Credentials{
+				Type:      kelos.CredentialTypeOAuth,
+				SecretRef: &kelos.SecretReference{Name: "creds"},
+			},
+		},
+		Status: kelos.TaskStatus{
+			Phase:   kelos.TaskPhaseRunning,
+			PodName: "test-pod",
+		},
+	}
+
+	cl := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(task).Build()
+
+	attempts := 0
+	reporter := &fakeSlackReporter{
+		postFn: func(ctx context.Context, channel, threadTS string, msg SlackMessage) (string, error) {
+			attempts++
+			return "", slack.SlackErrorResponse{Err: "cannot_reply_to_message"}
+		},
+	}
+
+	progress := &fakeProgressReader{text: "Searching through release tags..."}
+	tr := &SlackTaskReporter{
+		Client:         cl,
+		Reporter:       reporter,
+		ProgressReader: progress,
+	}
+
+	// First cycle: the permanent failure is logged and progress posting is
+	// blocked for the task. Suppression comes from the progressBlocked flag,
+	// not from snapshot text deduplication — setLastProgress is not reached
+	// on the error path.
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("expected 1 post attempt, got %d", attempts)
+	}
+
+	// Second cycle with the same snapshot: no re-post attempt.
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("unexpected error on second cycle: %v", err)
+	}
+	if attempts != 1 {
+		t.Errorf("expected no additional post attempt on the next cycle, got %d total", attempts)
+	}
+
+	// A new, distinct snapshot must not retry either: the thread rejects
+	// every reply, not just the one that failed, so text deduplication alone
+	// would let each fresh snapshot post again.
+	progress.text = "Now running the test suite..."
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("unexpected error on third cycle: %v", err)
+	}
+	if attempts != 1 {
+		t.Errorf("expected no post attempt for a new snapshot, got %d total", attempts)
+	}
+}

@@ -260,8 +260,12 @@ func extractGemini(m map[string]any) map[string]string {
 	result := make(map[string]string)
 	if v, ok := stats["inputTokens"]; ok {
 		result["input-tokens"] = formatNumber(v)
+	} else if v, ok := stats["totalInputTokens"]; ok {
+		result["input-tokens"] = formatNumber(v)
 	}
 	if v, ok := stats["outputTokens"]; ok {
+		result["output-tokens"] = formatNumber(v)
+	} else if v, ok := stats["totalOutputTokens"]; ok {
 		result["output-tokens"] = formatNumber(v)
 	}
 	if len(result) == 0 {
@@ -335,7 +339,14 @@ func extractOpencodeResponse(m map[string]any) string {
 	if m["type"] != "text" {
 		return ""
 	}
-	text, _ := m["text"].(string)
+	if text, _ := m["text"].(string); text != "" {
+		return text
+	}
+	part, ok := m["part"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	text, _ := part["text"].(string)
 	return text
 }
 

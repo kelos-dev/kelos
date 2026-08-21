@@ -59,4 +59,3 @@ spec:
       Find the best way to address it.
       When behavior differs by command, flag, scope, or guard outcome, test each
       affected path directly instead of relying on coverage through another path.
-      Update `README.md` in the same PR for user-facing behavior changes.

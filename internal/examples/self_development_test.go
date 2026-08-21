@@ -69,7 +69,13 @@ func TestSelfDevelopmentBaseAgentProvidesSharedInstructionsAndSkills(t *testing.
 	t.Parallel()
 
 	config := readAgentConfigFromDir(t, "self-development", "base-agent.yaml")
-	wantSkills := []kelos.SkillsShSpec{{Source: "gjkim42/kanon-repo"}}
+	wantSkills := []kelos.SkillsShSpec{
+		{Source: "gjkim42/kanon-repo", Skill: "api-review"},
+		{Source: "gjkim42/kanon-repo", Skill: "design-cleanup"},
+		{Source: "gjkim42/kanon-repo", Skill: "gjkim-instruction"},
+		{Source: "gjkim42/kanon-repo", Skill: "pre-session-end"},
+		{Source: "gjkim42/kanon-repo", Skill: "review-all"},
+	}
 	if !reflect.DeepEqual(config.Spec.Skills, wantSkills) {
 		t.Fatalf("base-agent skills = %v, want %v", config.Spec.Skills, wantSkills)
 	}

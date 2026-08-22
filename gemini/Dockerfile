@@ -28,7 +28,7 @@ RUN ARCH=$(dpkg --print-architecture) \
 
 ENV PATH="/usr/local/go/bin:${PATH}"
 
-ARG GEMINI_CLI_VERSION=0.55.1
+ARG GEMINI_CLI_VERSION=0.56.0
 RUN npm install -g @google/gemini-cli@${GEMINI_CLI_VERSION}
 
 COPY gemini/kelos_entrypoint.sh /kelos_entrypoint.sh

@@ -4,6 +4,7 @@
 - **Use Makefile targets** instead of discovering build/test commands yourself.
 - **Keep changes minimal.** Do not refactor, reorganize, or 'improve' code beyond what was explicitly requested.
 - **For CI/release workflows**, always use existing Makefile targets rather than reimplementing build logic in YAML.
+- **Centralize behavior that must stay in lockstep.** When two code paths intentionally implement the same behavior and differ only by an input or action, share the implementation instead of copying it. Route repeated build and generation commands through one Makefile target so their flags cannot drift. Do not abstract incidental similarity.
 - **Better tests.** Always try to add or improve tests(including integration, e2e) when modifying code.
 - **Logging conventions.** Start log messages with capital letters and do not end with punctuation.
 - **Commit messages.** Do not include PR links in commit messages.

@@ -17,7 +17,7 @@ Ready-to-use patterns and YAML manifests for orchestrating AI agents with Kelos.
 | [04-taskspawner-cron](04-taskspawner-cron/) | Run agent tasks on a cron schedule |
 | [05-task-with-agentconfig](05-task-with-agentconfig/) | Inject reusable instructions and plugins via AgentConfig |
 | [06-fork-workflow](06-fork-workflow/) | Discover upstream issues and work in a fork |
-| [07-task-pipeline](07-task-pipeline/) | Chain Tasks with `dependsOn` and pass results between stages |
+| [07-task-pipeline](07-task-pipeline/) | Manage a multi-node Task workflow with dependencies and result passing |
 | [08-task-with-kelos-skill](08-task-with-kelos-skill/) | Give an agent the Kelos skill for authoring and debugging resources |
 | [09-bedrock-credentials](09-bedrock-credentials/) | Run an agent using AWS Bedrock with static credentials or IRSA |
 | [10-taskspawner-github-webhook](10-taskspawner-github-webhook/) | Respond to GitHub webhook events (issues, PRs, pushes) in real time |

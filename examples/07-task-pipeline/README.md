@@ -1,15 +1,14 @@
 # 07 — Task Pipeline
 
-A multi-step pipeline that chains Tasks using `dependsOn` and passes results
-between stages. One agent scaffolds a feature, a second writes tests on the
-same branch, and a third opens a PR.
+A managed multi-step workflow. One agent scaffolds a feature, a second writes
+tests on the same branch, and a third opens a pull request.
 
 ## Use Case
 
-Break complex work into specialized steps. Each agent focuses on one job and
-hands off structured results (branch name, commit SHA) to the next stage. The
-controller ensures ordering, detects cycles, and fails fast if an upstream
-stage fails.
+Break complex work into named nodes while managing the workflow as one
+resource. Each node starts only after its declared dependencies succeed. The
+pipeline status summarizes progress and preserves every child Task's structured
+results.
 
 ## Resources
 
@@ -18,117 +17,83 @@ stage fails.
 | `credentials-secret.yaml` | Secret | Claude OAuth token for the agent |
 | `github-token-secret.yaml` | Secret | GitHub token for cloning and PR creation |
 | `workspace.yaml` | Workspace | Git repository to clone |
-| `pipeline.yaml` | Task (x3) | Three chained Tasks forming a pipeline |
+| `pipeline.yaml` | TaskPipeline | Three-node feature development workflow |
 
 ## How It Works
 
-```
-scaffold (Task)
+```text
+scaffold
     │  creates branch, writes code
-    │  outputs: branch, commit
-    │
+    │  results: branch, commit
     ▼
-write-tests (Task, dependsOn: [scaffold])
-    │  checks out the same branch
-    │  reads scaffold's branch via {{.Deps.scaffold.Results.branch}}
-    │  outputs: branch, commit
-    │
+write-tests (dependsOn: [scaffold])
+    │  reads scaffold's result from .Tasks
+    │  results: branch, commit
     ▼
-open-pr (Task, dependsOn: [write-tests])
-    │  reads branch from write-tests results
-    │  opens a pull request
-    │  outputs: pr URL
+open-pr (dependsOn: [write-tests])
+       opens a pull request
 ```
 
-## Key Concepts
+The controller creates one owned Task for each node when its dependencies have
+succeeded. This example's child Task names are `auth-feature-scaffold`,
+`auth-feature-write-tests`, and `auth-feature-open-pr`.
 
-- **`dependsOn`** — a Task lists the names of Tasks that must succeed before
-  it starts. The controller moves the Task to `Waiting` phase until all
-  dependencies reach `Succeeded`. If any dependency fails, the downstream
-  Task fails immediately.
+Downstream prompt templates receive dependency results under `.Tasks`, keyed by
+pipeline node name. Each value is a list because a matrix node can create more
+than one Task:
 
-- **Result passing** — when a Task completes, the controller captures
-  structured key-value outputs (branch, commit, PR URL, etc.) into
-  `status.results`. Downstream Tasks can reference these in their prompt
-  using Go template syntax:
+```text
+{{index .Tasks "scaffold" 0 "Results" "branch"}}
+```
 
-  ```
-  {{index .Deps "scaffold" "Results" "branch"}}
-  ```
+Missing template keys fail the node and pipeline with a status message; Kelos
+does not pass the unrendered template to an agent.
 
-  The `.Deps` map is keyed by dependency Task name and contains `Results`
-  (the key-value map) and `Outputs` (raw output lines).
-
-- **Branch serialization** — Tasks sharing the same `branch` value are
-  serialized automatically. Only one runs at a time, so the second Task
-  always sees the first Task's commits.
-
-- **Cycle detection** — the controller detects circular dependencies via DFS
-  and fails the Task immediately.
+All nodes use the same branch, so the Workspace contains the commits produced
+by the preceding node when the next Task starts.
 
 ## Steps
 
-1. **Edit the secrets** — replace placeholders in `credentials-secret.yaml`
-   and `github-token-secret.yaml`.
-
-2. **Edit `workspace.yaml`** — set your repository URL.
-
-3. **Apply the resources:**
+1. Edit the secrets and replace the placeholder values.
+2. Edit `workspace.yaml` and set your repository URL.
+3. Apply the resources:
 
 ```bash
 kubectl apply -f examples/07-task-pipeline/
 ```
 
-4. **Watch the pipeline progress:**
+4. Watch the pipeline and its child Tasks:
 
 ```bash
-kubectl get tasks -w
+kubectl get taskpipeline auth-feature -w
+kubectl get tasks -l kelos.dev/taskpipeline=auth-feature
 ```
 
-You should see `scaffold` run first, then `write-tests` move from `Waiting`
-to `Running`, and finally `open-pr`.
-
-5. **View results from a completed Task:**
+5. View the aggregate node results:
 
 ```bash
-kelos get task scaffold -o yaml | grep -A 10 results:
+kubectl get taskpipeline auth-feature -o yaml
 ```
 
-6. **Stream logs from any stage:**
+6. Stream logs from a node's child Task:
 
 ```bash
-kelos logs scaffold -f
-kelos logs write-tests -f
-kelos logs open-pr -f
+kelos logs auth-feature-scaffold -f
+kelos logs auth-feature-write-tests -f
+kelos logs auth-feature-open-pr -f
 ```
 
-7. **Cleanup:**
+7. Delete the pipeline and all owned Tasks:
 
 ```bash
 kubectl delete -f examples/07-task-pipeline/
 ```
 
-## CLI Equivalent
-
-You can create the same pipeline with the CLI:
-
-```bash
-kelos run -p "Scaffold a user authentication module" \
-  --name scaffold --branch feature/auth --workspace my-workspace -w
-
-kelos run -p 'Write tests for the auth module on branch {{index .Deps "scaffold" "Results" "branch"}}' \
-  --name write-tests --depends-on scaffold --branch feature/auth --workspace my-workspace -w
-
-kelos run -p 'Open a PR for branch {{index .Deps "write-tests" "Results" "branch"}}' \
-  --name open-pr --depends-on write-tests --branch feature/auth --workspace my-workspace -w
-```
-
 ## Notes
 
-- All three Tasks share the same `branch` value. This means even without
-  `dependsOn`, the branch lock would serialize them. Adding `dependsOn`
-  ensures strict ordering and enables result passing.
-- If `scaffold` fails, both `write-tests` and `open-pr` fail immediately
-  with a "dependency failed" message.
-- Set `ttlSecondsAfterFinished` on each Task if you want automatic cleanup
-  after the pipeline completes.
+- A failed child Task prevents new nodes from starting. Child Tasks that are
+  already active are allowed to finish before the pipeline becomes `Failed`.
+- A TaskPipeline spec is immutable. Delete and recreate the resource to run a
+  modified workflow.
+- Matrix fan-out and aggregate result templates are covered in the
+  [TaskPipeline reference](../../docs/reference.md#taskpipeline).

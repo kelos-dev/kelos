@@ -248,6 +248,7 @@ type consoleResourceDetail struct {
 var consoleResourceDefinitions = []consoleResourceDefinition{
 	{Resource: "sessions", Kind: "Session", Label: "Sessions", Group: "Workloads", NewList: func() client.ObjectList { return &kelos.SessionList{} }, New: func() client.Object { return &kelos.Session{} }},
 	{Resource: "tasks", Kind: "Task", Label: "Tasks", Group: "Workloads", NewList: func() client.ObjectList { return &kelos.TaskList{} }, New: func() client.Object { return &kelos.Task{} }},
+	{Resource: "taskpipelines", Kind: "TaskPipeline", Label: "Task pipelines", Group: "Workloads", NewList: func() client.ObjectList { return &kelos.TaskPipelineList{} }, New: func() client.Object { return &kelos.TaskPipeline{} }},
 	{Resource: "taskrecords", Kind: "TaskRecord", Label: "Task records", Group: "Workloads", NewList: func() client.ObjectList { return &kelos.TaskRecordList{} }, New: func() client.Object { return &kelos.TaskRecord{} }},
 	{Resource: "taskspawners", Kind: "TaskSpawner", Label: "Task spawners", Group: "Automation", NewList: func() client.ObjectList { return &kelos.TaskSpawnerList{} }, New: func() client.Object { return &kelos.TaskSpawner{} }},
 	{Resource: "sessionspawners", Kind: "SessionSpawner", Label: "Session spawners", Group: "Automation", NewList: func() client.ObjectList { return &kelos.SessionSpawnerList{} }, New: func() client.Object { return &kelos.SessionSpawner{} }},
@@ -591,6 +592,9 @@ func consoleResourceRelationships(objects []consoleResourceObject) ([]consoleRes
 			for _, dependency := range value.Spec.DependsOn {
 				add(source, consoleReferenceFor("tasks", dependency), "depends on", false)
 			}
+			if consoleOwnerRelationship(object.Object, source, "TaskPipeline", "creates", add) {
+				break
+			}
 			if !consoleOwnerRelationship(object.Object, source, "TaskSpawner", "creates", add) {
 				origin := value.Annotations["kelos.dev/created-from-taskspawner"]
 				if origin != "" {
@@ -612,6 +616,13 @@ func consoleResourceRelationships(objects []consoleResourceObject) ([]consoleRes
 			}
 			for _, dependency := range value.Spec.TaskTemplate.DependsOn {
 				add(source, consoleReferenceFor("tasks", dependency), "spawned Tasks depend on", false)
+			}
+		case *kelos.TaskPipeline:
+			for _, node := range value.Spec.Tasks {
+				consoleWorkerRelationships(source, node.TaskTemplate.Worker, add)
+				if node.TaskTemplate.WorkerPoolRef != nil {
+					add(source, consoleReferenceFor("workerpools", node.TaskTemplate.WorkerPoolRef.Name), "runs Tasks on", false)
+				}
 			}
 		case *kelos.SessionSpawner:
 			consoleWorkerRelationships(source, &value.Spec.SessionTemplate.Worker, add)

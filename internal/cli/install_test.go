@@ -858,6 +858,7 @@ func TestVersionCommand(t *testing.T) {
 // kelosListKinds maps kelos GVRs to their list kinds for the fake dynamic client.
 var kelosListKinds = map[schema.GroupVersionResource]string{
 	{Group: "kelos.dev", Version: "v1alpha2", Resource: "tasks"}:           "TaskList",
+	{Group: "kelos.dev", Version: "v1alpha2", Resource: "taskpipelines"}:   "TaskPipelineList",
 	{Group: "kelos.dev", Version: "v1alpha2", Resource: "taskspawners"}:    "TaskSpawnerList",
 	{Group: "kelos.dev", Version: "v1alpha2", Resource: "sessionspawners"}: "SessionSpawnerList",
 	{Group: "kelos.dev", Version: "v1alpha2", Resource: "sessions"}:        "SessionList",
@@ -1099,6 +1100,7 @@ func TestKelosCRDNameSets(t *testing.T) {
 	for _, name := range []string{
 		"sessions.kelos.dev",
 		"taskbudgets.kelos.dev",
+		"taskpipelines.kelos.dev",
 		"taskrecords.kelos.dev",
 		"workerpools.kelos.dev",
 	} {

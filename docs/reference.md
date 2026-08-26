@@ -192,6 +192,98 @@ the refreshed value on their next sync and are not supported.
 | `worker.agentConfigRefs[].name` | Ordered AgentConfig resources. Configs are merged in order | No |
 | `worker.podOverrides` | Pod customization (same fields as the legacy `spec.podOverrides`) | No |
 
+## TaskPipeline
+
+A TaskPipeline manages a directed acyclic graph (DAG) of named Task templates.
+Root nodes start immediately. Every other node starts after all nodes named in
+its `dependsOn` list have succeeded. The spec is immutable after creation.
+
+TaskPipeline is available only in `kelos.dev/v1alpha2`.
+
+| Field | Description | Required |
+|-------|-------------|----------|
+| `spec.tasks` | Pipeline nodes (1–64). Node names must be unique | Yes |
+| `spec.tasks[].name` | DNS-label name that identifies the node within the pipeline | Yes |
+| `spec.tasks[].dependsOn` | Names of nodes that must succeed first | No |
+| `spec.tasks[].taskTemplate.worker` | Inline execution environment; uses the same `WorkerSpec` as Task | One of worker or workerPoolRef |
+| `spec.tasks[].taskTemplate.workerPoolRef.name` | WorkerPool used for the node's child Tasks | One of worker or workerPoolRef |
+| `spec.tasks[].taskTemplate.prompt` | Go template rendered into each child Task's prompt | Yes |
+| `spec.tasks[].taskTemplate.branch` | Optional Go template rendered into each child Task's branch. Not supported with workerPoolRef | No |
+| `spec.tasks[].taskTemplate.upstreamRepo` | Upstream repository copied to each child Task | No |
+| `spec.tasks[].taskTemplate.podFailurePolicy` | Pod failure policy copied to each child Task. Not supported with workerPoolRef | No |
+| `spec.tasks[].matrix.parameters` | Static parameter lists whose Cartesian product creates parallel child Tasks | No |
+
+Deleting a TaskPipeline deletes its owned child Tasks. A node without a matrix
+creates one Task. A matrix node creates one Task for each parameter combination,
+up to 256 Tasks per node. Parameter names are sorted to make expansion and child
+Task names deterministic; values retain their manifest order. Child Task names
+use `<pipeline>-<node>` for a single Task and `<pipeline>-<node>-<index>` for a
+matrix, with a stable hash suffix when truncation is required.
+
+### Pipeline Templates and Results
+
+`taskTemplate.prompt` and `taskTemplate.branch` receive these variables:
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `.Matrix` | `map[string]string` | Parameter values for the current child Task; empty for a node without a matrix |
+| `.Tasks` | `map[string][]object` | Results from directly declared dependency nodes, keyed by node name |
+| `.Tasks.<node>[].Name` | string | Child Task name |
+| `.Tasks.<node>[].Matrix` | `map[string]string` | Matrix values used by the dependency Task |
+| `.Tasks.<node>[].Results` | `map[string]string` | Structured dependency results |
+| `.Tasks.<node>[].Outputs` | `[]string` | Raw dependency outputs |
+
+Use `index` when a node or result key contains characters that cannot be used in
+Go template dot notation. TaskPipeline's `index` is strict: a missing map key or
+an out-of-range list index fails the node and records the rendering error in
+pipeline status. The controller validates every template's syntax before
+starting the pipeline. It renders a dependent node only after its dependencies
+succeed, when their result keys are known.
+
+Example — fan out a scan across two services, then aggregate the results:
+
+```yaml
+apiVersion: kelos.dev/v1alpha2
+kind: TaskPipeline
+metadata:
+  name: security-scan
+spec:
+  tasks:
+    - name: scan
+      matrix:
+        parameters:
+          service: [auth, billing]
+      taskTemplate:
+        worker:
+          type: codex
+          credentials:
+            type: oauth
+            secretRef:
+              name: codex-credentials
+        prompt: |
+          Scan {{index .Matrix "service"}} and report a severity result.
+    - name: report
+      dependsOn: [scan]
+      taskTemplate:
+        worker:
+          type: codex
+          credentials:
+            type: oauth
+            secretRef:
+              name: codex-credentials
+        prompt: |
+          Summarize these scan results:
+          {{range index .Tasks "scan" -}}
+          - {{index .Matrix "service"}}: {{index .Results "severity"}}
+          {{end}}
+```
+
+`status.nodeStatuses` reports expected, active, successful, and failed Task
+counts for each node. Its `taskResults` list preserves each terminal child
+Task's matrix values, outputs, and structured results. Any failed child Task
+prevents new nodes from starting. Child Tasks that are already active finish
+before the TaskPipeline enters `Failed`.
+
 ## Session
 
 A Session is one interactive Claude Code, Codex, or OpenCode conversation that

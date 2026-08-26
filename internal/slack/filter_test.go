@@ -56,6 +56,64 @@ func TestMatchesSpawner(t *testing.T) {
 			want:      false,
 		},
 		{
+			name: "excluded channel rejects even with bot mention",
+			slackCfg: &kelos.Slack{
+				ExcludeFilters: []kelos.SlackFilter{{Channels: []string{"C1", "C2"}}},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> hi"},
+			botUserID: "UBOT1",
+			want:      false,
+		},
+		{
+			name: "excluded channel rejects even with matching trigger",
+			slackCfg: &kelos.Slack{
+				ExcludeFilters: []kelos.SlackFilter{{Channels: []string{"C1"}}},
+				Triggers: []kelos.SlackTrigger{
+					{Pattern: "fix.*bug", MentionOptional: boolPtr(true)},
+				},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "fix the bug"},
+			botUserID: "UBOT1",
+			want:      false,
+		},
+		{
+			name: "excluded channel rejects even when allowed list empty",
+			slackCfg: &kelos.Slack{
+				ExcludeFilters: []kelos.SlackFilter{{Channels: []string{"C1"}}},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> hi"},
+			botUserID: "UBOT1",
+			want:      false,
+		},
+		{
+			name: "excluded channel rejects slash command",
+			slackCfg: &kelos.Slack{
+				ExcludeFilters: []kelos.SlackFilter{{Channels: []string{"C1"}}},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "/triage something", IsSlashCommand: true},
+			botUserID: "UBOT1",
+			want:      false,
+		},
+		{
+			name: "excluded direct message rejects",
+			slackCfg: &kelos.Slack{
+				ExcludeFilters: []kelos.SlackFilter{{Channels: []string{"D0123456789"}}},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "D0123456789", Text: "<@UBOT1> hi"},
+			botUserID: "UBOT1",
+			want:      false,
+		},
+		{
+			name: "non-excluded channel still matches",
+			slackCfg: &kelos.Slack{
+				Channels:       []string{"C2", "C3"},
+				ExcludeFilters: []kelos.SlackFilter{{Channels: []string{"C1"}}},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C3", Text: "<@UBOT1> hi"},
+			botUserID: "UBOT1",
+			want:      true,
+		},
+		{
 			name: "trigger with pattern and mention matches",
 			slackCfg: &kelos.Slack{
 				Triggers: []kelos.SlackTrigger{
@@ -492,12 +550,83 @@ func TestMatchesChannel(t *testing.T) {
 		{"empty allowed list matches all", "C1", nil, true},
 		{"in allowed list", "C1", []string{"C1", "C2"}, true},
 		{"not in allowed list", "C3", []string{"C1", "C2"}, false},
+		{"direct message in allowed list", "D1", []string{"D1"}, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := matchesChannel(tt.channelID, tt.allowed); got != tt.want {
 				t.Errorf("matchesChannel() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestMatchesAnySlackExcludeFilter covers the exclusion rules on their own:
+// OR across rules, AND within a rule, and a criterion the message does not
+// carry never matching. A rule with no criteria matches everything, which is
+// why validation rejects one — asserted here so the matcher's half of that
+// contract is pinned alongside the CEL rule.
+func TestMatchesAnySlackExcludeFilter(t *testing.T) {
+	tests := []struct {
+		name    string
+		filters []kelos.SlackFilter
+		msg     *SlackMessageData
+		want    bool
+	}{
+		{
+			name: "no rules excludes nothing",
+			msg:  &SlackMessageData{ChannelID: "C1"},
+			want: false,
+		},
+		{
+			name:    "matching channel excludes",
+			filters: []kelos.SlackFilter{{Channels: []string{"C1"}}},
+			msg:     &SlackMessageData{ChannelID: "C1"},
+			want:    true,
+		},
+		{
+			name:    "non-matching channel does not exclude",
+			filters: []kelos.SlackFilter{{Channels: []string{"C2"}}},
+			msg:     &SlackMessageData{ChannelID: "C1"},
+			want:    false,
+		},
+		{
+			name:    "any rule matching excludes",
+			filters: []kelos.SlackFilter{{Channels: []string{"C9"}}, {Channels: []string{"C1"}}},
+			msg:     &SlackMessageData{ChannelID: "C1"},
+			want:    true,
+		},
+		{
+			name:    "channel list is ORed within a rule",
+			filters: []kelos.SlackFilter{{Channels: []string{"C1", "C2"}}},
+			msg:     &SlackMessageData{ChannelID: "C2"},
+			want:    true,
+		},
+		{
+			name:    "direct message excludes",
+			filters: []kelos.SlackFilter{{Channels: []string{"D0123456789"}}},
+			msg:     &SlackMessageData{ChannelID: "D0123456789"},
+			want:    true,
+		},
+		{
+			name:    "a criterion the message does not carry never matches",
+			filters: []kelos.SlackFilter{{Channels: []string{"C1"}}},
+			msg:     &SlackMessageData{ChannelID: ""},
+			want:    false,
+		},
+		{
+			name:    "a rule with no criteria matches everything",
+			filters: []kelos.SlackFilter{{}},
+			msg:     &SlackMessageData{ChannelID: "C1"},
+			want:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := matchesAnySlackExcludeFilter(tt.filters, tt.msg); got != tt.want {
+				t.Errorf("matchesAnySlackExcludeFilter() = %v, want %v", got, tt.want)
 			}
 		})
 	}

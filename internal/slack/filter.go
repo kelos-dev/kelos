@@ -67,10 +67,17 @@ func getOrCompileRegexp(pattern string) (*regexp.Regexp, error) {
 }
 
 // MatchesSpawner checks whether a Slack message matches the given TaskSpawner's
-// Slack configuration (channels, bot mention, trigger patterns, exclude
-// patterns, and bot message policy).
+// Slack configuration (channels, exclusion rules, bot mention, trigger
+// patterns, exclude patterns, and bot message policy). Exclusion rules are
+// evaluated before every other check, so a matching trigger cannot override one
+// and — unlike exclude patterns — the exclusion also covers slash commands.
 func MatchesSpawner(slackCfg *kelos.Slack, msg *SlackMessageData, botUserID string) bool {
 	if slackCfg == nil {
+		return false
+	}
+	// Exclusion is an additional gate ahead of everything else, including the
+	// slash-command bypass below.
+	if matchesAnySlackExcludeFilter(slackCfg.ExcludeFilters, msg) {
 		return false
 	}
 	if !matchesChannel(msg.ChannelID, slackCfg.Channels) {
@@ -132,8 +139,8 @@ func ExtractSlackWorkItem(msg *SlackMessageData) map[string]interface{} {
 	}
 }
 
-// matchesChannel returns true if channelID is in the allowed list,
-// or if the allowed list is empty (all channels permitted).
+// matchesChannel returns true if channelID is in the allowed list, or if the
+// allowed list is empty (all channels permitted).
 func matchesChannel(channelID string, allowed []string) bool {
 	if len(allowed) == 0 {
 		return true
@@ -144,6 +151,34 @@ func matchesChannel(channelID string, allowed []string) bool {
 		}
 	}
 	return false
+}
+
+// matchesAnySlackExcludeFilter reports whether any exclusion rule matches the
+// message (OR semantics across rules). A true result rejects the message.
+func matchesAnySlackExcludeFilter(filters []kelos.SlackFilter, msg *SlackMessageData) bool {
+	for _, filter := range filters {
+		if matchesSlackCriteria(filter, msg) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchesSlackCriteria evaluates the criteria shared by the inclusion and
+// exclusion directions: every criterion that is set must match (AND semantics),
+// and a criterion whose value the message does not carry never matches. A rule
+// with no criteria set therefore matches everything, which is why validation
+// rejects one — see SlackFilterMatchCriteria.
+func matchesSlackCriteria(filter kelos.SlackFilter, msg *SlackMessageData) bool {
+	if len(filter.Channels) > 0 {
+		if msg.ChannelID == "" {
+			return false
+		}
+		if !matchesChannel(msg.ChannelID, filter.Channels) {
+			return false
+		}
+	}
+	return true
 }
 
 // hasBotMention returns true if the message text contains an @-mention of

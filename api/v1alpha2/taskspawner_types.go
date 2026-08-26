@@ -699,7 +699,11 @@ type GenericWebhookFilter struct {
 // are configured on the server, not per-TaskSpawner.
 //
 // The bot must be invited to each channel it should listen in; the Channels
-// field is a post-delivery filter, not a privacy scope.
+// and ExcludeFilters fields are post-delivery filters, not a privacy scope.
+// The server has already received the message — and, for a thread reply, has
+// already fetched the thread history — before either field is consulted, and
+// the bot stays in an excluded channel and still greets it on join. Remove the
+// bot from a channel to stop delivery itself.
 //
 // Bot mention (@bot) is implicitly required by default. The handler knows its
 // own bot user ID from the Slack auth response. When Triggers are configured,
@@ -714,6 +718,21 @@ type Slack struct {
 	// +kubebuilder:validation:MaxItems=64
 	// +kubebuilder:validation:items:Pattern=`^[CG][A-Z0-9]{8,}$`
 	Channels []string `json:"channels,omitempty"`
+
+	// ExcludeFilters reject a Slack event when ANY entry matches (OR semantics
+	// across entries, AND semantics for the criteria within one entry). They are
+	// an additional gate on the existing matching, evaluated before everything
+	// else, so a matching Trigger cannot override an exclusion and — unlike
+	// ExcludePatterns — the exclusion also covers slash commands. A criterion
+	// the event does not carry never matches, so it does not reject the event.
+	//
+	// The rules are only guaranteed while the object is managed through
+	// v1alpha2. This field does not exist in v1alpha1; it survives a v1alpha1
+	// round-trip through a preservation annotation, so a v1alpha1 client that
+	// drops unknown annotations drops the exclusions with them.
+	// +optional
+	// +kubebuilder:validation:MaxItems=20
+	ExcludeFilters []SlackFilter `json:"excludeFilters,omitempty"`
 
 	// BotMessages controls whether bot-originated messages can trigger this
 	// spawner. Accepting bot messages carries loop risk — especially "All"
@@ -741,6 +760,24 @@ type Slack struct {
 	// +kubebuilder:validation:items:MinLength=1
 	// +kubebuilder:validation:items:MaxLength=256
 	ExcludePatterns []string `json:"excludePatterns,omitempty"`
+}
+
+// +kubebuilder:validation:XValidation:rule="has(self.channels) && size(self.channels) > 0",message="a Slack filter must set at least one non-empty matching criterion"
+// SlackFilter is a set of matching criteria for a Slack event. Every criterion
+// that is set must match; a criterion the event does not carry never matches.
+// The criteria serve both inclusion and exclusion, so one definition and one
+// matcher back either direction.
+type SlackFilter struct {
+	// Channels matches events posted in any of the given channel IDs (OR
+	// semantics within the list). Values are channel IDs (e.g. "C0123456789").
+	// Direct-message IDs ("D0123456789") are accepted here even though
+	// Slack.Channels does not accept them, so a spawner that listens in every
+	// channel can still be kept out of DMs.
+	// +optional
+	// +listType=set
+	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:Pattern=`^[CGD][A-Z0-9]{8,}$`
+	Channels []string `json:"channels,omitempty"`
 }
 
 // SlackTrigger defines a regex pattern trigger for Slack messages.

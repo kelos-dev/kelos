@@ -117,6 +117,16 @@ func FormatProgressMessage(text, taskName string) SlackMessage {
 	}
 }
 
+// degenerateNoticeText returns the notice shown in place of an agent response
+// that capture flagged as degenerate. The raw response is still preserved in
+// the Task's results; only the Slack rendering is substituted.
+func degenerateNoticeText(phase string) string {
+	if phase == "failed" {
+		return ":warning: The model returned an unusable reply. This ran twice and produced unusable output both times, so there is no answer to show."
+	}
+	return ":warning: The model returned an unusable reply, so there is no answer to show."
+}
+
 // FormatSlackTransitionMessage returns one or more rich Slack messages for a
 // task phase transition. When the agent response is short enough to fit in a
 // single message (≤ SlackBlockLimit blocks), a single SlackMessage is returned.
@@ -133,9 +143,15 @@ func FormatSlackTransitionMessage(phase, taskName, message string, results map[s
 		))
 	}
 
-	// Build the response blocks from the agent output.
+	// Build the response blocks from the agent output. When capture flagged
+	// the output as degenerate, the agent's final message is unusable, so a
+	// short notice is rendered in its place rather than the fragments.
 	resp := results["response"]
 	decoded := decodeResponse(resp)
+	if results["degenerate"] == "true" {
+		decoded = degenerateNoticeText(phase)
+		resp = decoded
+	}
 	var responseBlocks []slack.Block
 	if resp != "" {
 		responseBlocks = responseToBlocks(decoded)

@@ -636,3 +636,170 @@ func assertContextContains(t *testing.T, block slack.Block, substr string) {
 	}
 	t.Errorf("context block does not contain %q", substr)
 }
+
+// garbledResponse is the real degenerate output posted to a customer thread on
+// 2026-08-21: fragments of HTML with no answer in them.
+const garbledResponse = "`stale=False</li>\n</ul>\n</section\n</section>"
+
+const (
+	degenerateNotice       = ":warning: The model returned an unusable reply, so there is no answer to show."
+	degenerateNoticeFailed = ":warning: The model returned an unusable reply. This ran twice and produced unusable output both times, so there is no answer to show."
+)
+
+// allBlockText concatenates the text of every section and context block so a
+// test can assert that a fragment appears nowhere in the rendered message.
+func allBlockText(blocks []slack.Block) string {
+	var sb strings.Builder
+	for _, b := range blocks {
+		switch block := b.(type) {
+		case *slack.SectionBlock:
+			if block.Text != nil {
+				sb.WriteString(block.Text.Text)
+				sb.WriteString("\n")
+			}
+			for _, f := range block.Fields {
+				sb.WriteString(f.Text)
+				sb.WriteString("\n")
+			}
+		case *slack.HeaderBlock:
+			if block.Text != nil {
+				sb.WriteString(block.Text.Text)
+				sb.WriteString("\n")
+			}
+		case *slack.ContextBlock:
+			for _, elem := range block.ContextElements.Elements {
+				if txt, ok := elem.(*slack.TextBlockObject); ok {
+					sb.WriteString(txt.Text)
+					sb.WriteString("\n")
+				}
+			}
+		}
+	}
+	return sb.String()
+}
+
+// assertNoFragments fails if any part of the garbled response leaked into the
+// rendered blocks or the fallback text.
+func assertNoFragments(t *testing.T, msg SlackMessage) {
+	t.Helper()
+	rendered := allBlockText(msg.Blocks)
+	for _, fragment := range []string{"stale=False", "</ul>", "</section"} {
+		if strings.Contains(rendered, fragment) {
+			t.Errorf("blocks contain garbled fragment %q:\n%s", fragment, rendered)
+		}
+		if strings.Contains(msg.Text, fragment) {
+			t.Errorf("fallback text contains garbled fragment %q: %q", fragment, msg.Text)
+		}
+	}
+}
+
+func TestFormatSlackTransitionMessage_Degenerate(t *testing.T) {
+	t.Run("succeeded substitutes notice for fragments", func(t *testing.T) {
+		results := map[string]string{
+			"response":   b64(garbledResponse),
+			"degenerate": "true",
+		}
+		msgs := FormatSlackTransitionMessage("succeeded", "spawner-1234567890.123456", "", results)
+		if len(msgs) != 1 {
+			t.Fatalf("message count = %d, want 1", len(msgs))
+		}
+		got := msgs[0]
+		if got.Text != degenerateNotice+" (Task: spawner-1234567890.123456)" {
+			t.Errorf("fallback text = %q", got.Text)
+		}
+		assertBlockCount(t, got.Blocks, 2) // notice + context
+		assertSectionText(t, got.Blocks[0], degenerateNotice)
+		assertContextContains(t, got.Blocks[1], "Task: `spawner-1234567890.123456`")
+		assertNoFragments(t, got)
+	})
+
+	t.Run("succeeded keeps the PR link", func(t *testing.T) {
+		results := map[string]string{
+			"response":   b64(garbledResponse),
+			"degenerate": "true",
+			"pr":         "https://github.com/org/repo/pull/42",
+		}
+		got := firstMsg(t, FormatSlackTransitionMessage("succeeded", "spawner-1234567890.123456", "", results))
+		want := degenerateNotice + "\nPR: https://github.com/org/repo/pull/42 (Task: spawner-1234567890.123456)"
+		if got.Text != want {
+			t.Errorf("fallback text = %q, want %q", got.Text, want)
+		}
+		assertBlockCount(t, got.Blocks, 3) // notice + PR + context
+		assertSectionText(t, got.Blocks[0], degenerateNotice)
+		assertSectionText(t, got.Blocks[1], ":link: *Pull Request:* <https://github.com/org/repo/pull/42>")
+		assertNoFragments(t, got)
+	})
+
+	t.Run("failed keeps the error line", func(t *testing.T) {
+		results := map[string]string{
+			"response":   b64(garbledResponse),
+			"degenerate": "true",
+		}
+		got := firstMsg(t, FormatSlackTransitionMessage("failed", "spawner-1234567890.123456", "degenerate_output=turns=41,chars=58", results))
+		want := degenerateNoticeFailed + "\nError: degenerate_output=turns=41,chars=58 (Task: spawner-1234567890.123456)"
+		if got.Text != want {
+			t.Errorf("fallback text = %q, want %q", got.Text, want)
+		}
+		assertBlockCount(t, got.Blocks, 4) // header + notice + error + context
+		assertSectionText(t, got.Blocks[0], ":x: *Something went wrong*")
+		assertSectionText(t, got.Blocks[1], degenerateNoticeFailed)
+		assertSectionText(t, got.Blocks[2], ":warning: *Error:* degenerate_output=turns=41,chars=58")
+		assertNoFragments(t, got)
+	})
+
+	t.Run("no response still renders the notice", func(t *testing.T) {
+		results := map[string]string{"degenerate": "true"}
+		got := firstMsg(t, FormatSlackTransitionMessage("failed", "spawner-1234567890.123456", "", results))
+		if got.Text != degenerateNoticeFailed+" (Task: spawner-1234567890.123456)" {
+			t.Errorf("fallback text = %q", got.Text)
+		}
+		assertBlockCount(t, got.Blocks, 3) // header + notice + context
+		assertSectionText(t, got.Blocks[1], degenerateNoticeFailed)
+	})
+
+	t.Run("long degenerate output stays a single message", func(t *testing.T) {
+		var sb strings.Builder
+		for i := 0; i < 60; i++ {
+			if i > 0 {
+				sb.WriteString("\n\n")
+			}
+			sb.WriteString("### Header\n" + garbledResponse)
+		}
+		results := map[string]string{
+			"response":   b64(sb.String()),
+			"degenerate": "true",
+		}
+		msgs := FormatSlackTransitionMessage("succeeded", "spawner-1234567890.123456", "", results)
+		if len(msgs) != 1 {
+			t.Fatalf("message count = %d, want 1 (split path must not be entered)", len(msgs))
+		}
+		assertBlockCount(t, msgs[0].Blocks, 2) // notice + context
+		if len(msgs[0].Blocks) > SlackBlockLimit {
+			t.Errorf("block count = %d, must be <= %d", len(msgs[0].Blocks), SlackBlockLimit)
+		}
+		assertNoFragments(t, msgs[0])
+	})
+
+	t.Run("marker unset leaves the response untouched", func(t *testing.T) {
+		results := map[string]string{"response": b64("I need your GitHub username to proceed.")}
+		got := firstMsg(t, FormatSlackTransitionMessage("succeeded", "spawner-1234567890.123456", "", results))
+		if got.Text != "I need your GitHub username to proceed. (Task: spawner-1234567890.123456)" {
+			t.Errorf("fallback text = %q", got.Text)
+		}
+		assertBlockCount(t, got.Blocks, 2) // response + context
+		assertSectionText(t, got.Blocks[0], "I need your GitHub username to proceed.")
+	})
+
+	t.Run("marker set to a non-true value leaves the response untouched", func(t *testing.T) {
+		results := map[string]string{
+			"response":   b64("I need your GitHub username to proceed."),
+			"degenerate": "false",
+		}
+		got := firstMsg(t, FormatSlackTransitionMessage("succeeded", "spawner-1234567890.123456", "", results))
+		if got.Text != "I need your GitHub username to proceed. (Task: spawner-1234567890.123456)" {
+			t.Errorf("fallback text = %q", got.Text)
+		}
+		assertBlockCount(t, got.Blocks, 2) // response + context
+		assertSectionText(t, got.Blocks[0], "I need your GitHub username to proceed.")
+	})
+}

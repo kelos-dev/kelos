@@ -384,6 +384,10 @@ type Jira struct {
 }
 
 // GitHubWebhook configures matching for GitHub webhook events.
+// +kubebuilder:validation:XValidation:rule="!has(self.excludeFilters) || self.excludeFilters.all(f, (has(f.action) && size(f.action) > 0) || (has(f.author) && size(f.author) > 0) || (has(f.pullRequestAuthor) && size(f.pullRequestAuthor) > 0) || (has(f.branch) && size(f.branch) > 0) || (has(f.tag) && size(f.tag) > 0) || (has(f.state) && size(f.state) > 0) || (has(f.commentOn) && size(f.commentOn) > 0) || (has(f.conclusion) && size(f.conclusion) > 0) || (has(f.checkName) && size(f.checkName) > 0) || (has(f.bodyPattern) && size(f.bodyPattern) > 0) || (has(f.labels) && size(f.labels) > 0) || has(f.draft))",message="excludeFilters[] must set at least one non-empty matching criterion besides event"
+// +kubebuilder:validation:XValidation:rule="!has(self.excludeFilters) || self.excludeFilters.all(f, !has(f.filePatterns) && !has(f.bodyContains) && !has(f.excludeAuthors) && !has(f.excludeLabels) && !has(f.excludeBodyPatterns))",message="excludeFilters[] cannot use filePatterns, bodyContains, or the exclude* criteria"
+// +kubebuilder:validation:XValidation:rule="!has(self.excludeFilters) || self.excludeFilters.all(f, (has(f.event) && size(f.event) > 0) || (!has(f.labels) && !has(f.state) && !has(f.draft) && !has(f.commentOn) && !has(f.bodyPattern) && !has(f.conclusion) && !has(f.checkName)))",message="excludeFilters[] must set event when using a criterion that only applies to certain event types"
+// +kubebuilder:validation:XValidation:rule="!has(self.filters) || self.filters.all(f, has(f.event) && size(f.event) > 0)",message="filters[].event is required"
 // +kubebuilder:validation:XValidation:rule="!has(self.reporting) || !has(self.reporting.checks) || self.events.exists(e, e in ['pull_request', 'pull_request_review', 'pull_request_review_comment', 'pull_request_target']) || (self.events.exists(e, e == 'issue_comment') && has(self.filters) && self.filters.exists(f, f.event == 'issue_comment') && self.filters.all(f, f.event != 'issue_comment' || (has(f.commentOn) && f.commentOn == 'PullRequest')))",message="checks reporting requires a pull-request event type or PR-scoped issue_comment filters"
 type GitHubWebhook struct {
 	// Events is the list of GitHub event types to listen for.
@@ -411,9 +415,37 @@ type GitHubWebhook struct {
 
 	// Filters refine which events match. If multiple filters apply to the same
 	// event type, any matching filter accepts the event (OR semantics).
-	// If empty, all events in the Events list match.
+	// If empty, all events in the Events list match. Each entry must set Event.
 	// +optional
+	// +kubebuilder:validation:MaxItems=50
 	Filters []GitHubWebhookFilter `json:"filters,omitempty"`
+
+	// ExcludeFilters reject an event when ANY entry matches (OR semantics across
+	// entries, AND semantics for the criteria within one entry). They are
+	// evaluated outside the accepting Filters list, so a matching exclusion
+	// rejects the event regardless of which Filters entry would have accepted
+	// it. Unlike Filters, an entry here may omit Event, in which case it applies
+	// to every subscribed event type.
+	//
+	// Only Action, Author, PullRequestAuthor, Branch, and Tag are safe to use in
+	// a rule that omits Event: for those, a value the event does not carry never
+	// matches, so the rule does not reject the event. An event carrying no pull
+	// request author, such as push or check_run, is therefore never rejected by
+	// a PullRequestAuthor rule. The remaining criteria are evaluated only for
+	// the event types that carry them and are skipped — and so treated as
+	// satisfied — for any other event type, which would make an unscoped rule
+	// reject everything; a rule using one of them must set Event. Note that
+	// scoping to an event type that still does not carry the criterion leaves it
+	// satisfied, so Draft on an Event of issue_comment rejects every comment.
+	//
+	// FilePatterns, the deprecated BodyContains, and the ExcludeAuthors,
+	// ExcludeLabels, and ExcludeBodyPatterns criteria are rejected here:
+	// FilePatterns would need a changed-files fetch the exclusion path does not
+	// perform, and a negative criterion inverts inside an exclusion rule, so a
+	// rule built from one rejects every event that does not match it.
+	// +optional
+	// +kubebuilder:validation:MaxItems=20
+	ExcludeFilters []GitHubWebhookFilter `json:"excludeFilters,omitempty"`
 
 	// Reporting configures status reporting back to the originating GitHub issue or PR.
 	// +optional
@@ -429,10 +461,15 @@ const (
 )
 
 // GitHubWebhookFilter defines filtering criteria for GitHub webhook events.
+// The same type serves the accepting Filters list and the rejecting
+// ExcludeFilters list, so both paths share one set of criteria and one matcher.
 type GitHubWebhookFilter struct {
-	// Event is the GitHub event type this filter applies to.
-	// +kubebuilder:validation:Required
-	Event string `json:"event"`
+	// Event is the GitHub event type this filter applies to. It is required for
+	// an entry in Filters, enforced by validation on the parent GitHubWebhook.
+	// An entry in ExcludeFilters may omit it to apply the rule across every
+	// event type in Events.
+	// +optional
+	Event string `json:"event,omitempty"`
 
 	// Action filters by webhook action (e.g., "created", "opened", "submitted").
 	// +optional
@@ -503,6 +540,19 @@ type GitHubWebhookFilter struct {
 	// Author filters by the event sender's username.
 	// +optional
 	Author string `json:"author,omitempty"`
+
+	// PullRequestAuthor filters by the username that opened the pull request the
+	// event is about. That is a different subject from Author, which matches
+	// only the sender: a human acting on a bot's pull request is a human sender.
+	// Available for pull-request-bearing events, including pull_request,
+	// pull_request_target, pull_request_review, pull_request_review_comment,
+	// pull_request_review_thread, and issue_comment posted on a pull request.
+	// An event carrying no pull request author (push, issues, create, release,
+	// check_run) never matches this criterion. Matching is exact and
+	// case-sensitive.
+	// +optional
+	// +kubebuilder:validation:MaxLength=64
+	PullRequestAuthor string `json:"pullRequestAuthor,omitempty"`
 
 	// ExcludeAuthors excludes events sent by any of these usernames.
 	// +optional

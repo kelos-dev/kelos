@@ -310,6 +310,12 @@ func printTaskSpawnerDetail(w io.Writer, ts *kelos.TaskSpawner) {
 		if len(gh.ExcludeAuthors) > 0 {
 			printField(w, "Exclude Authors", fmt.Sprintf("%v", gh.ExcludeAuthors))
 		}
+		// Exclusion rules are why a spawner can look correctly configured and
+		// still not fire, so surface that they exist. The detail view prints
+		// scalars only; use -o yaml for the rules themselves.
+		if len(gh.ExcludeFilters) > 0 {
+			printField(w, "Exclude Filters", fmt.Sprintf("%d", len(gh.ExcludeFilters)))
+		}
 	} else if ts.Spec.When.LinearWebhook != nil {
 		lw := ts.Spec.When.LinearWebhook
 		printField(w, "Source", "Linear Webhook")

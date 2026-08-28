@@ -2955,3 +2955,442 @@ func TestExtractGitHubWorkItem_CheckRunEventWithoutPR(t *testing.T) {
 		t.Errorf("expected CheckName/HeadSHA to be populated, got CheckName=%v HeadSHA=%v", vars["CheckName"], vars["HeadSHA"])
 	}
 }
+
+func TestMatchesGitHubEvent_PullRequestAuthorFilter(t *testing.T) {
+	// The positive criterion, used on an accepting filter.
+	spawner := &kelos.GitHubWebhook{
+		Events: []string{"pull_request", "push"},
+		Filters: []kelos.GitHubWebhookFilter{
+			{
+				Event:             "pull_request",
+				PullRequestAuthor: "release-bot",
+			},
+		},
+	}
+
+	tests := []struct {
+		name      string
+		eventType string
+		payload   string
+		want      bool
+	}{
+		{
+			name:      "matching PR author is accepted",
+			eventType: "pull_request",
+			payload:   `{"action":"opened","sender":{"login":"human"},"pull_request":{"number":1,"user":{"login":"release-bot"}}}`,
+			want:      true,
+		},
+		{
+			name:      "different PR author is not accepted",
+			eventType: "pull_request",
+			payload:   `{"action":"opened","sender":{"login":"release-bot"},"pull_request":{"number":1,"user":{"login":"human"}}}`,
+			want:      false,
+		},
+		{
+			name:      "event with no PR author does not match the criterion",
+			eventType: "push",
+			payload:   `{"ref":"refs/heads/main","sender":{"login":"release-bot"},"head_commit":{"id":"abc"}}`,
+			want:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseAndMatch(t, spawner, tt.eventType, []byte(tt.payload))
+			if err != nil {
+				t.Fatalf("MatchesGitHubEvent() error = %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("MatchesGitHubEvent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestMatchesGitHubEvent_ExcludeFiltersHumanActionOnBotPR is the regression
+// case: a human takes a bot-authored PR out of draft. excludeAuthors matches
+// only the sender, so it admits the event; an excludeFilters rule keyed on
+// pullRequestAuthor rejects it.
+func TestMatchesGitHubEvent_ExcludeFiltersHumanActionOnBotPR(t *testing.T) {
+	payload := []byte(`{
+		"action":"ready_for_review",
+		"sender":{"login":"knechtionscoding"},
+		"pull_request":{"number":37938,"user":{"login":"anomalogravity[bot]"}}
+	}`)
+
+	// Documents the pre-existing behavior the exclusion rule exists to fix.
+	senderOnly := &kelos.GitHubWebhook{
+		Events:         []string{"pull_request"},
+		ExcludeAuthors: []string{"anomalogravity[bot]"},
+	}
+	got, err := parseAndMatch(t, senderOnly, "pull_request", payload)
+	if err != nil {
+		t.Fatalf("MatchesGitHubEvent() error = %v", err)
+	}
+	if !got {
+		t.Error("Expected excludeAuthors alone to admit a human-sent event on a bot-authored PR")
+	}
+
+	withExcludeFilter := &kelos.GitHubWebhook{
+		Events:         []string{"pull_request"},
+		ExcludeAuthors: []string{"anomalogravity[bot]"},
+		ExcludeFilters: []kelos.GitHubWebhookFilter{
+			{PullRequestAuthor: "anomalogravity[bot]"},
+		},
+	}
+	got, err = parseAndMatch(t, withExcludeFilter, "pull_request", payload)
+	if err != nil {
+		t.Fatalf("MatchesGitHubEvent() error = %v", err)
+	}
+	if got {
+		t.Error("Expected an excludeFilters pullRequestAuthor rule to reject the event")
+	}
+}
+
+func TestMatchesGitHubEvent_ExcludeFiltersOverrideAcceptingFilters(t *testing.T) {
+	// An exclusion wins over any accepting filter that would have matched,
+	// including one keyed on the sender.
+	spawner := &kelos.GitHubWebhook{
+		Events: []string{"pull_request"},
+		Filters: []kelos.GitHubWebhookFilter{
+			{Event: "pull_request", Author: "human-user"},
+			{Event: "pull_request", Action: "ready_for_review"},
+		},
+		ExcludeFilters: []kelos.GitHubWebhookFilter{
+			{PullRequestAuthor: "bot-user"},
+		},
+	}
+
+	payload := []byte(`{"action":"ready_for_review","sender":{"login":"human-user"},
+		"pull_request":{"number":1,"user":{"login":"bot-user"}}}`)
+	got, err := parseAndMatch(t, spawner, "pull_request", payload)
+	if err != nil {
+		t.Fatalf("MatchesGitHubEvent() error = %v", err)
+	}
+	if got {
+		t.Error("Expected an exclusion rule to reject the event despite two matching accepting filters")
+	}
+}
+
+func TestMatchesGitHubEvent_ExcludeFiltersConditionsAreANDed(t *testing.T) {
+	// Criteria within one rule are ANDed: the rule excludes only a bot-authored
+	// PR going out of draft, not every bot-authored PR event.
+	spawner := &kelos.GitHubWebhook{
+		Events: []string{"pull_request"},
+		ExcludeFilters: []kelos.GitHubWebhookFilter{
+			{Action: "ready_for_review", PullRequestAuthor: "bot-user"},
+		},
+	}
+
+	tests := []struct {
+		name    string
+		payload string
+		want    bool
+	}{
+		{
+			name: "both conditions hold, so the event is excluded",
+			payload: `{"action":"ready_for_review","sender":{"login":"human"},
+				"pull_request":{"number":1,"user":{"login":"bot-user"}}}`,
+			want: false,
+		},
+		{
+			name: "only the author matches, so the rule does not apply",
+			payload: `{"action":"opened","sender":{"login":"human"},
+				"pull_request":{"number":1,"user":{"login":"bot-user"}}}`,
+			want: true,
+		},
+		{
+			name: "only the action matches, so the rule does not apply",
+			payload: `{"action":"ready_for_review","sender":{"login":"human"},
+				"pull_request":{"number":1,"user":{"login":"human"}}}`,
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseAndMatch(t, spawner, "pull_request", []byte(tt.payload))
+			if err != nil {
+				t.Fatalf("MatchesGitHubEvent() error = %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("MatchesGitHubEvent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMatchesGitHubEvent_ExcludeFiltersAnyRuleRejects(t *testing.T) {
+	// OR semantics across rules: either rule is enough to reject.
+	spawner := &kelos.GitHubWebhook{
+		Events: []string{"pull_request"},
+		ExcludeFilters: []kelos.GitHubWebhookFilter{
+			{PullRequestAuthor: "bot-one"},
+			{PullRequestAuthor: "bot-two"},
+		},
+	}
+
+	for _, author := range []string{"bot-one", "bot-two"} {
+		payload := []byte(`{"action":"opened","sender":{"login":"human"},
+			"pull_request":{"number":1,"user":{"login":"` + author + `"}}}`)
+		got, err := parseAndMatch(t, spawner, "pull_request", payload)
+		if err != nil {
+			t.Fatalf("MatchesGitHubEvent() error = %v", err)
+		}
+		if got {
+			t.Errorf("Expected PR authored by %s to be excluded", author)
+		}
+	}
+}
+
+// TestMatchesGitHubEvent_ExcludeFiltersUnscopedAppliesAcrossEvents covers a rule
+// that omits event, which accepting filters may not do. It applies to every
+// subscribed event that carries the criterion, and leaves the rest matching.
+func TestMatchesGitHubEvent_ExcludeFiltersUnscopedAppliesAcrossEvents(t *testing.T) {
+	events := []string{
+		"pull_request", "pull_request_target", "pull_request_review",
+		"pull_request_review_comment", "pull_request_review_thread",
+		"issue_comment", "issues", "push", "check_run",
+	}
+	spawner := &kelos.GitHubWebhook{
+		Events: events,
+		ExcludeFilters: []kelos.GitHubWebhookFilter{
+			{PullRequestAuthor: "bot-user"},
+		},
+	}
+
+	tests := []struct {
+		name      string
+		eventType string
+		payload   string
+		want      bool
+	}{
+		{
+			name:      "pull_request is excluded",
+			eventType: "pull_request",
+			payload:   `{"action":"opened","sender":{"login":"human"},"pull_request":{"number":1,"user":{"login":"bot-user"}}}`,
+			want:      false,
+		},
+		{
+			name:      "pull_request_target is excluded",
+			eventType: "pull_request_target",
+			payload:   `{"action":"opened","sender":{"login":"human"},"pull_request":{"number":1,"user":{"login":"bot-user"}}}`,
+			want:      false,
+		},
+		{
+			name:      "pull_request_review is excluded",
+			eventType: "pull_request_review",
+			payload:   `{"action":"submitted","sender":{"login":"human"},"pull_request":{"number":1,"user":{"login":"bot-user"}},"review":{"body":"lgtm"}}`,
+			want:      false,
+		},
+		{
+			name:      "pull_request_review_comment is excluded",
+			eventType: "pull_request_review_comment",
+			payload:   `{"action":"created","sender":{"login":"human"},"pull_request":{"number":1,"user":{"login":"bot-user"}},"comment":{"body":"nit"}}`,
+			want:      false,
+		},
+		{
+			name:      "pull_request_review_thread is excluded",
+			eventType: "pull_request_review_thread",
+			payload:   `{"action":"resolved","sender":{"login":"human"},"pull_request":{"number":1,"user":{"login":"bot-user"}}}`,
+			want:      false,
+		},
+		{
+			name:      "issue_comment on a bot-authored PR is excluded",
+			eventType: "issue_comment",
+			payload: `{"action":"created","sender":{"login":"human"},
+				"issue":{"number":1,"pull_request":{"url":"https://api.github.com/repos/o/r/pulls/1"},"user":{"login":"bot-user"}},
+				"comment":{"body":"/gravity approve"}}`,
+			want: false,
+		},
+		{
+			name:      "issue_comment on a bot-authored plain issue still matches",
+			eventType: "issue_comment",
+			payload: `{"action":"created","sender":{"login":"human"},
+				"issue":{"number":1,"user":{"login":"bot-user"}},
+				"comment":{"body":"/gravity approve"}}`,
+			want: true,
+		},
+		{
+			name:      "issues carries no PR author and still matches",
+			eventType: "issues",
+			payload:   `{"action":"opened","sender":{"login":"human"},"issue":{"number":1,"user":{"login":"bot-user"}}}`,
+			want:      true,
+		},
+		{
+			name:      "push carries no PR author and still matches",
+			eventType: "push",
+			payload:   `{"ref":"refs/heads/main","sender":{"login":"human"},"head_commit":{"id":"abc"}}`,
+			want:      true,
+		},
+		{
+			// GitHub's check_run.pull_requests entries carry no user, which the
+			// godoc, the reference table, and example 17 all state. Pin it.
+			name:      "check_run carries no PR author and still matches",
+			eventType: "check_run",
+			payload: `{"action":"completed","sender":{"login":"human"},
+				"check_run":{"id":1,"name":"build","conclusion":"failure","head_sha":"abc",
+				"pull_requests":[{"number":7,"head":{"ref":"topic"},"base":{"ref":"main"}}]}}`,
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseAndMatch(t, spawner, tt.eventType, []byte(tt.payload))
+			if err != nil {
+				t.Fatalf("MatchesGitHubEvent() error = %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("MatchesGitHubEvent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMatchesGitHubEvent_ExcludeFiltersScopedToEvent(t *testing.T) {
+	// A rule that does set event applies only to that event type.
+	spawner := &kelos.GitHubWebhook{
+		Events: []string{"pull_request", "pull_request_review"},
+		ExcludeFilters: []kelos.GitHubWebhookFilter{
+			{Event: "pull_request", PullRequestAuthor: "bot-user"},
+		},
+	}
+
+	got, err := parseAndMatch(t, spawner, "pull_request",
+		[]byte(`{"action":"opened","sender":{"login":"human"},"pull_request":{"number":1,"user":{"login":"bot-user"}}}`))
+	if err != nil {
+		t.Fatalf("MatchesGitHubEvent() error = %v", err)
+	}
+	if got {
+		t.Error("Expected the scoped rule to exclude its own event type")
+	}
+
+	got, err = parseAndMatch(t, spawner, "pull_request_review",
+		[]byte(`{"action":"submitted","sender":{"login":"human"},"pull_request":{"number":1,"user":{"login":"bot-user"}},"review":{"body":"lgtm"}}`))
+	if err != nil {
+		t.Fatalf("MatchesGitHubEvent() error = %v", err)
+	}
+	if !got {
+		t.Error("Expected the scoped rule not to exclude a different event type")
+	}
+}
+
+// TestMatchesGitHubEvent_ExcludeFiltersSenderIndependence confirms the two
+// exclusion mechanisms match different subjects and neither subsumes the other.
+func TestMatchesGitHubEvent_ExcludeFiltersSenderIndependence(t *testing.T) {
+	// Bot sender, human-authored PR: excludeAuthors rejects, the rule does not.
+	payload := []byte(`{"action":"created","sender":{"login":"bot-user"},
+		"issue":{"number":1,"pull_request":{"url":"https://api.github.com/repos/o/r/pulls/1"},"user":{"login":"human"}},
+		"comment":{"body":"assessment"}}`)
+
+	ruleOnly := &kelos.GitHubWebhook{
+		Events:         []string{"issue_comment"},
+		ExcludeFilters: []kelos.GitHubWebhookFilter{{PullRequestAuthor: "bot-user"}},
+	}
+	got, err := parseAndMatch(t, ruleOnly, "issue_comment", payload)
+	if err != nil {
+		t.Fatalf("MatchesGitHubEvent() error = %v", err)
+	}
+	if !got {
+		t.Error("Expected a pullRequestAuthor rule not to exclude a bot-sent event on a human-authored PR")
+	}
+
+	senders := &kelos.GitHubWebhook{
+		Events:         []string{"issue_comment"},
+		ExcludeAuthors: []string{"bot-user"},
+	}
+	got, err = parseAndMatch(t, senders, "issue_comment", payload)
+	if err != nil {
+		t.Fatalf("MatchesGitHubEvent() error = %v", err)
+	}
+	if got {
+		t.Error("Expected excludeAuthors to exclude a bot-sent event")
+	}
+}
+
+// TestGitHubWebhookNeedsChangedFiles_ExcludedEventSkipsFetch pins that an
+// excluded event does not trigger the changed-files GitHub API fetch.
+func TestGitHubWebhookNeedsChangedFiles_ExcludedEventSkipsFetch(t *testing.T) {
+	spawner := &kelos.GitHubWebhook{
+		Events: []string{"pull_request"},
+		Filters: []kelos.GitHubWebhookFilter{
+			{
+				Event:        "pull_request",
+				FilePatterns: &kelos.FilePatterns{Include: []string{"**/*.go"}},
+			},
+		},
+	}
+	payload := []byte(`{"action":"opened","sender":{"login":"human"},"pull_request":{"number":1,"user":{"login":"bot-user"}}}`)
+	eventData, err := ParseGitHubWebhook("pull_request", payload)
+	if err != nil {
+		t.Fatalf("ParseGitHubWebhook() error = %v", err)
+	}
+
+	if !githubWebhookNeedsChangedFiles(spawner, "pull_request", eventData) {
+		t.Fatal("expected a filePatterns filter to need changed files without an exclusion")
+	}
+
+	spawner.ExcludeFilters = []kelos.GitHubWebhookFilter{{PullRequestAuthor: "bot-user"}}
+	if githubWebhookNeedsChangedFiles(spawner, "pull_request", eventData) {
+		t.Error("expected an excluded event to skip the changed-files fetch")
+	}
+}
+
+// TestMatchesCriteria_TypeSpecificCriteriaSkippedOutsideTheirArm documents why
+// CEL requires an event scope on a rule using a type-specific criterion. The
+// matcher's event-specific switch has no default arm, so these criteria are
+// skipped — and therefore satisfied — for any event type outside their arm. An
+// unscoped exclusion rule built from one would reject every such event, which is
+// why validation refuses it rather than the matcher silently allowing it. This
+// pins the matcher behavior so a future default arm shows up here as a change.
+func TestMatchesCriteria_TypeSpecificCriteriaSkippedOutsideTheirArm(t *testing.T) {
+	draft := true
+	tests := []struct {
+		name   string
+		filter kelos.GitHubWebhookFilter
+	}{
+		{"labels", kelos.GitHubWebhookFilter{Labels: []string{"wip"}}},
+		{"excludeLabels", kelos.GitHubWebhookFilter{ExcludeLabels: []string{"skip"}}},
+		{"state", kelos.GitHubWebhookFilter{State: "closed"}},
+		{"draft", kelos.GitHubWebhookFilter{Draft: &draft}},
+		{"commentOn", kelos.GitHubWebhookFilter{CommentOn: kelos.CommentOnPullRequest}},
+		{"bodyPattern", kelos.GitHubWebhookFilter{BodyPattern: "^/deploy"}},
+		{"conclusion", kelos.GitHubWebhookFilter{Conclusion: "failure"}},
+		{"checkName", kelos.GitHubWebhookFilter{CheckName: "build"}},
+	}
+
+	// A push payload reaches none of the switch arms.
+	eventData, err := ParseGitHubWebhook("push",
+		[]byte(`{"ref":"refs/heads/main","sender":{"login":"human"},"head_commit":{"id":"abc"}}`))
+	if err != nil {
+		t.Fatalf("ParseGitHubWebhook() error = %v", err)
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !matchesFilterWithoutFilePatterns(tt.filter, eventData) {
+				t.Errorf("criterion %s no longer matches a push event; the matcher gained a "+
+					"default arm, so the excludeFilters event-scoping rule can be relaxed for it", tt.name)
+			}
+		})
+	}
+
+	// The criteria that are safe unscoped behave the other way: a value the
+	// event does not carry never matches.
+	for _, tt := range []struct {
+		name   string
+		filter kelos.GitHubWebhookFilter
+	}{
+		{"action", kelos.GitHubWebhookFilter{Action: "opened"}},
+		{"author", kelos.GitHubWebhookFilter{Author: "someone-else"}},
+		{"pullRequestAuthor", kelos.GitHubWebhookFilter{PullRequestAuthor: "bot-user"}},
+		{"tag", kelos.GitHubWebhookFilter{Tag: "v1.0.0"}},
+	} {
+		t.Run(tt.name+" is safe unscoped", func(t *testing.T) {
+			if matchesFilterWithoutFilePatterns(tt.filter, eventData) {
+				t.Errorf("criterion %s matched a push event that does not carry it", tt.name)
+			}
+		})
+	}
+}

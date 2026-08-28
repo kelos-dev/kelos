@@ -2,6 +2,10 @@ package conversion
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"reflect"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -795,5 +799,326 @@ func TestTaskSpawnerFromHub_NoNameTemplateOmitsAnnotation(t *testing.T) {
 	}
 	if _, ok := spoke.Annotations[preservedNameTemplateAnnotation]; ok {
 		t.Error("annotation should not be set when nameTemplate is empty")
+	}
+}
+
+func TestTaskSpawnerConvert_GitHubWebhookExcludeFiltersRoundTrip(t *testing.T) {
+	src := &v1alpha2.TaskSpawner{
+		Spec: v1alpha2.TaskSpawnerSpec{
+			When: v1alpha2.When{
+				GitHubWebhook: &v1alpha2.GitHubWebhook{
+					Events:         []string{"pull_request"},
+					ExcludeAuthors: []string{"bot-user"},
+					Filters: []v1alpha2.GitHubWebhookFilter{
+						{Event: "pull_request", Action: "ready_for_review"},
+					},
+					ExcludeFilters: []v1alpha2.GitHubWebhookFilter{
+						{PullRequestAuthor: "bot-user"},
+						{Event: "pull_request", Action: "closed"},
+					},
+				},
+			},
+		},
+	}
+
+	down := &v1alpha1.TaskSpawner{}
+	if err := taskSpawnerFromHub(context.Background(), src, down); err != nil {
+		t.Fatalf("taskSpawnerFromHub() error = %v", err)
+	}
+	if down.Spec.When.GitHubWebhook == nil {
+		t.Fatal("expected githubWebhook config after down-conversion")
+	}
+	// Shared fields survive the down-conversion directly.
+	if got := down.Spec.When.GitHubWebhook.ExcludeAuthors; len(got) != 1 || got[0] != "bot-user" {
+		t.Errorf("shared excludeAuthors not preserved: %#v", got)
+	}
+	if len(down.Spec.When.GitHubWebhook.Filters) != 1 {
+		t.Errorf("accepting filters not preserved: %#v", down.Spec.When.GitHubWebhook.Filters)
+	}
+	// v1alpha1 cannot represent excludeFilters — the rules survive only via the
+	// preservation annotation.
+	if _, ok := down.Annotations[preservedGitHubWebhookExcludeFiltersAnnotation]; !ok {
+		t.Fatal("expected the excludeFilters preservation annotation")
+	}
+
+	up := &v1alpha2.TaskSpawner{}
+	if err := taskSpawnerToHub(context.Background(), down, up); err != nil {
+		t.Fatalf("taskSpawnerToHub() error = %v", err)
+	}
+	if up.Spec.When.GitHubWebhook == nil {
+		t.Fatal("expected githubWebhook config after up-conversion")
+	}
+	got := up.Spec.When.GitHubWebhook.ExcludeFilters
+	if len(got) != 2 {
+		t.Fatalf("restored %d exclude filters, want 2: %#v", len(got), got)
+	}
+	if got[0].PullRequestAuthor != "bot-user" || got[0].Event != "" {
+		t.Errorf("unscoped rule not restored intact: %#v", got[0])
+	}
+	if got[1].Event != "pull_request" || got[1].Action != "closed" {
+		t.Errorf("scoped rule not restored intact: %#v", got[1])
+	}
+	if _, ok := up.Annotations[preservedGitHubWebhookExcludeFiltersAnnotation]; ok {
+		t.Error("preservation annotation not cleaned up after restore")
+	}
+}
+
+func TestTaskSpawnerFromHub_NoExcludeFiltersOmitsAnnotation(t *testing.T) {
+	src := &v1alpha2.TaskSpawner{
+		Spec: v1alpha2.TaskSpawnerSpec{
+			When: v1alpha2.When{
+				GitHubWebhook: &v1alpha2.GitHubWebhook{
+					Events: []string{"pull_request"},
+				},
+			},
+		},
+	}
+
+	down := &v1alpha1.TaskSpawner{}
+	if err := taskSpawnerFromHub(context.Background(), src, down); err != nil {
+		t.Fatalf("taskSpawnerFromHub() error = %v", err)
+	}
+	if _, ok := down.Annotations[preservedGitHubWebhookExcludeFiltersAnnotation]; ok {
+		t.Error("expected no preservation annotation when excludeFilters is unset")
+	}
+}
+
+// TestTaskSpawnerToHub_OutOfSchemaExcludeFiltersAnnotationIgnored covers a
+// v1alpha1 object carrying a syntactically valid preservation annotation whose
+// contents violate the constraints the CRD enforces on excludeFilters. The API
+// server does not re-validate conversion webhook output, so the restore path
+// must reject it rather than emit an invalid v1alpha2 object.
+func TestTaskSpawnerToHub_OutOfSchemaExcludeFiltersAnnotationIgnored(t *testing.T) {
+	tooManyRules := make([]v1alpha2.GitHubWebhookFilter, v1alpha2.GitHubWebhookExcludeFiltersMaxItems+1)
+	for i := range tooManyRules {
+		tooManyRules[i] = v1alpha2.GitHubWebhookFilter{PullRequestAuthor: fmt.Sprintf("bot-%d", i)}
+	}
+	tooMany, err := json.Marshal(tooManyRules)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	overLongAuthor, err := json.Marshal([]v1alpha2.GitHubWebhookFilter{
+		{PullRequestAuthor: strings.Repeat("a", v1alpha2.GitHubWebhookFilterPullRequestAuthorMaxLength+1)},
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	tests := []struct {
+		name       string
+		annotation string
+	}{
+		{name: "more rules than MaxItems", annotation: string(tooMany)},
+		{name: "pull request author over MaxLength", annotation: string(overLongAuthor)},
+		{name: "rule with no criteria would exclude everything", annotation: `[{}]`},
+		{name: "rule using unsupported filePatterns", annotation: `[{"filePatterns":{"include":["**/*.go"]}}]`},
+		{name: "not a JSON array", annotation: `{"pullRequestAuthor":"bot"}`},
+		// Rejected criteria: a negative criterion inverts inside an exclusion
+		// rule, and bodyContains is deprecated. CEL refuses all four on a
+		// v1alpha2 write, so the restore path must refuse them too.
+		{name: "rule using excludeAuthors inverts", annotation: `[{"excludeAuthors":["dependabot[bot]"]}]`},
+		{name: "rule using excludeLabels inverts", annotation: `[{"excludeLabels":["skip"]}]`},
+		{name: "rule using excludeBodyPatterns inverts", annotation: `[{"excludeBodyPatterns":["^/deploy"]}]`},
+		{name: "rule using deprecated bodyContains", annotation: `[{"bodyContains":"deploy"}]`},
+		// Event-scoped criteria without an event scope: skipped, and so
+		// satisfied, outside their arm of the matcher, which would make the
+		// rule reject every delivery.
+		{name: "unscoped draft matches everything", annotation: `[{"draft":true}]`},
+		{name: "unscoped labels matches everything", annotation: `[{"labels":["wip"]}]`},
+		{name: "unscoped state matches everything", annotation: `[{"state":"closed"}]`},
+		{name: "unscoped conclusion matches everything", annotation: `[{"conclusion":"failure"}]`},
+		{name: "rule whose only criterion is an event scope", annotation: `[{"event":"pull_request"}]`},
+		// An empty but non-nil list is not a criterion the matcher acts on, so
+		// a rule carrying only one matches every event of that type.
+		{name: "scoped rule whose only criterion is an empty list", annotation: `[{"event":"pull_request","labels":[]}]`},
+		{name: "unscoped rule whose only criterion is an empty list", annotation: `[{"labels":[]}]`},
+		// An out-of-enum value is not merely invalid: the matcher switches on it,
+		// no arm matches, and the criterion is left satisfied, so the rule
+		// rejects every event of that type.
+		{name: "commentOn outside its enum", annotation: `[{"event":"issue_comment","commentOn":"Bogus"}]`},
+		{name: "conclusion outside its enum", annotation: `[{"event":"check_run","conclusion":"bogus"}]`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := &v1alpha1.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						preservedGitHubWebhookExcludeFiltersAnnotation: tt.annotation,
+					},
+				},
+				Spec: v1alpha1.TaskSpawnerSpec{
+					When: v1alpha1.When{
+						GitHubWebhook: &v1alpha1.GitHubWebhook{
+							Events: []string{"pull_request"},
+						},
+					},
+				},
+			}
+
+			up := &v1alpha2.TaskSpawner{}
+			if err := taskSpawnerToHub(context.Background(), src, up); err != nil {
+				t.Fatalf("taskSpawnerToHub() error = %v", err)
+			}
+			if up.Spec.When.GitHubWebhook == nil {
+				t.Fatal("expected githubWebhook config after up-conversion")
+			}
+			if got := up.Spec.When.GitHubWebhook.ExcludeFilters; len(got) != 0 {
+				t.Errorf("excludeFilters = %#v, want empty from out-of-schema annotation", got)
+			}
+		})
+	}
+}
+
+// TestTaskSpawnerConvert_FilterPullRequestAuthorDropsOnRoundTrip documents that
+// pullRequestAuthor on an accepting filter is dropped by a v1alpha1 round-trip,
+// the same way the other v1alpha2-only filter criteria (conclusion, checkName)
+// down-convert. Only the source-level excludeFilters list is preserved.
+func TestTaskSpawnerConvert_FilterPullRequestAuthorDropsOnRoundTrip(t *testing.T) {
+	src := &v1alpha2.TaskSpawner{
+		Spec: v1alpha2.TaskSpawnerSpec{
+			When: v1alpha2.When{
+				GitHubWebhook: &v1alpha2.GitHubWebhook{
+					Events: []string{"pull_request"},
+					Filters: []v1alpha2.GitHubWebhookFilter{
+						{Event: "pull_request", PullRequestAuthor: "bot-user"},
+					},
+				},
+			},
+		},
+	}
+
+	down := &v1alpha1.TaskSpawner{}
+	if err := taskSpawnerFromHub(context.Background(), src, down); err != nil {
+		t.Fatalf("taskSpawnerFromHub() error = %v", err)
+	}
+	up := &v1alpha2.TaskSpawner{}
+	if err := taskSpawnerToHub(context.Background(), down, up); err != nil {
+		t.Fatalf("taskSpawnerToHub() error = %v", err)
+	}
+	if len(up.Spec.When.GitHubWebhook.Filters) != 1 {
+		t.Fatalf("expected 1 filter after round-trip, got %d", len(up.Spec.When.GitHubWebhook.Filters))
+	}
+	filter := up.Spec.When.GitHubWebhook.Filters[0]
+	if filter.Event != "pull_request" {
+		t.Errorf("filter event = %q, want pull_request", filter.Event)
+	}
+	if filter.PullRequestAuthor != "" {
+		t.Errorf("filter pullRequestAuthor = %q, want dropped", filter.PullRequestAuthor)
+	}
+}
+
+// TestValidGitHubWebhookExcludeFilters_CoversEveryClassifiedCriterion drives the
+// restore-path checker from the API package's criteria buckets, so a criterion
+// added to a bucket without teaching the checker about it fails here rather than
+// silently restoring through the user-writable preservation annotation.
+func TestValidGitHubWebhookExcludeFilters_CoversEveryClassifiedCriterion(t *testing.T) {
+	// filterWith builds a rule whose only criterion is the named JSON tag.
+	filterWith := func(t *testing.T, criterion string) v1alpha2.GitHubWebhookFilter {
+		t.Helper()
+		filter := v1alpha2.GitHubWebhookFilter{}
+		value := reflect.ValueOf(&filter).Elem()
+		typ := value.Type()
+		for i := 0; i < typ.NumField(); i++ {
+			if strings.Split(typ.Field(i).Tag.Get("json"), ",")[0] != criterion {
+				continue
+			}
+			field := value.Field(i)
+			switch field.Kind() {
+			case reflect.String:
+				// A criterion that constrains its values needs a real one; "x"
+				// would be refused by the enum check rather than by the bucket
+				// rule under test.
+				sample := "x"
+				if allowed, ok := v1alpha2.GitHubWebhookFilterCriterionEnum(criterion); ok {
+					sample = ""
+					for _, v := range allowed {
+						if v != "" {
+							sample = v
+							break
+						}
+					}
+					if sample == "" {
+						t.Fatalf("criterion %q has no non-empty enum value to use", criterion)
+					}
+				}
+				field.SetString(sample)
+			case reflect.Slice:
+				field.Set(reflect.MakeSlice(field.Type(), 1, 1))
+				if field.Index(0).Kind() == reflect.String {
+					field.Index(0).SetString("x")
+				}
+			case reflect.Ptr:
+				field.Set(reflect.New(field.Type().Elem()))
+				if field.Elem().Kind() == reflect.Bool {
+					field.Elem().SetBool(true)
+				}
+			default:
+				t.Fatalf("criterion %q has unhandled kind %s", criterion, field.Kind())
+			}
+			return filter
+		}
+		t.Fatalf("criterion %q is not a field of GitHubWebhookFilter", criterion)
+		return filter
+	}
+
+	for _, criterion := range v1alpha2.GitHubWebhookExcludeFilterRejectedCriteria() {
+		t.Run("rejected/"+criterion, func(t *testing.T) {
+			if validGitHubWebhookExcludeFilters([]v1alpha2.GitHubWebhookFilter{filterWith(t, criterion)}) {
+				t.Errorf("a rule using the rejected criterion %q was accepted on restore", criterion)
+			}
+		})
+	}
+
+	for _, criterion := range v1alpha2.GitHubWebhookExcludeFilterEventScopedCriteria() {
+		t.Run("eventScoped/"+criterion, func(t *testing.T) {
+			unscoped := filterWith(t, criterion)
+			if validGitHubWebhookExcludeFilters([]v1alpha2.GitHubWebhookFilter{unscoped}) {
+				t.Errorf("an unscoped rule using the event-scoped criterion %q was accepted on restore", criterion)
+			}
+			scoped := unscoped
+			scoped.Event = "pull_request"
+			if !validGitHubWebhookExcludeFilters([]v1alpha2.GitHubWebhookFilter{scoped}) {
+				t.Errorf("a rule scoping %q to an event type was rejected on restore", criterion)
+			}
+		})
+	}
+
+	for _, criterion := range v1alpha2.GitHubWebhookExcludeFilterSafeUnscopedCriteria() {
+		t.Run("safeUnscoped/"+criterion, func(t *testing.T) {
+			if !validGitHubWebhookExcludeFilters([]v1alpha2.GitHubWebhookFilter{filterWith(t, criterion)}) {
+				t.Errorf("an unscoped rule using %q was rejected on restore, but it is safe unscoped", criterion)
+			}
+		})
+	}
+}
+
+// TestValidGitHubWebhookExcludeFilters_AcceptsEveryEnumValue pins that the enum
+// check refuses only genuinely out-of-enum values: every value a criterion's
+// marker admits must still restore, so tightening the check cannot quietly
+// start dropping valid rules.
+func TestValidGitHubWebhookExcludeFilters_AcceptsEveryEnumValue(t *testing.T) {
+	for _, criterion := range v1alpha2.GitHubWebhookFilterEnumCriteria() {
+		allowed, ok := v1alpha2.GitHubWebhookFilterCriterionEnum(criterion)
+		if !ok {
+			t.Fatalf("criterion %q reported as an enum but has no values", criterion)
+		}
+		for _, value := range allowed {
+			if value == "" {
+				continue // an unset criterion is covered by the no-criteria case
+			}
+			filter := v1alpha2.GitHubWebhookFilter{Event: "issue_comment"}
+			switch criterion {
+			case "commentOn":
+				filter.CommentOn = value
+			case "conclusion":
+				filter.Conclusion = value
+			default:
+				t.Fatalf("criterion %q has no fixture here; add one alongside the enum", criterion)
+			}
+			if !validGitHubWebhookExcludeFilters([]v1alpha2.GitHubWebhookFilter{filter}) {
+				t.Errorf("a rule with %s=%q was rejected on restore, but the marker admits it", criterion, value)
+			}
+		}
 	}
 }

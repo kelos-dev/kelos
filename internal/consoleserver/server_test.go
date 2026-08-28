@@ -1535,6 +1535,9 @@ func TestSessionUIAdaptsToPhoneViewport(t *testing.T) {
 	for description, expected := range map[string]string{
 		"dynamic viewport height":            `height: 100dvh`,
 		"desktop sidebar width":              `grid-template-columns: 260px minmax(0, 1fr)`,
+		"desktop active request width":       `.current-request { z-index: 2; grid-row: 2; grid-column: 1; width: min(calc(100% - 48px), 960px);`,
+		"desktop transcript width":           `.messages { min-height: 0; grid-row: 2; grid-column: 1; overflow-y: auto; padding: 28px max(24px, calc((100% - 960px) / 2)) 36px;`,
+		"desktop composer width":             `.composer-wrap { position: relative; z-index: 2; min-width: 0; grid-row: 3; padding: 12px max(24px, calc((100% - 960px) / 2)) 10px;`,
 		"landscape phone breakpoint":         `(max-height: 500px) and (pointer: coarse)`,
 		"phone sidebar width":                `width: min(88vw, 320px)`,
 		"phone navigation touch target":      `.console-nav button { min-height: 44px; padding: 8px 10px; font-size: 14px; }`,
@@ -1552,7 +1555,6 @@ func TestSessionUIAdaptsToPhoneViewport(t *testing.T) {
 		"mobile composer alignment":          `.composer textarea { min-height: 44px; padding: 10px 2px; line-height: 24px; }`,
 		"phone-sized dialog":                 `max-height: calc(100dvh - 16px`,
 		"scrolling sidebar controls":         `.sidebar-scroll { flex: 1; min-height: 0; overflow-y: auto;`,
-		"shrinking composer content":         `z-index: 2; min-width: 0;`,
 	} {
 		if !strings.Contains(string(styles), expected) {
 			t.Errorf("Session styles are missing %s: %s", description, expected)

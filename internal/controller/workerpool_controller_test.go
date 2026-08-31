@@ -206,6 +206,41 @@ func TestWorkerPoolReconciler_ReconcilesTaskWithSameNameAsWorkerPool(t *testing.
 	assert.Equal(t, "wp-shared-0", updatedTask.Status.PodName)
 }
 
+func TestWorkerPoolReconciler_BranchWorkspaceUsesSingleBranchClone(t *testing.T) {
+	scheme := newWorkerPoolTestScheme()
+	pool := newTestWorkerPool("my-pool", "default", 1)
+	ws := newTestWorkspace("default")
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&kelos.WorkerPool{}).
+		WithObjects(pool, ws).
+		Build()
+
+	r := newWorkerPoolReconciler(cl, scheme)
+	_, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "my-pool", Namespace: "default"},
+	})
+	require.NoError(t, err)
+
+	var sts appsv1.StatefulSet
+	err = cl.Get(context.Background(), types.NamespacedName{Name: "wp-my-pool", Namespace: "default"}, &sts)
+	require.NoError(t, err)
+
+	var gitClone *corev1.Container
+	for i := range sts.Spec.Template.Spec.InitContainers {
+		if sts.Spec.Template.Spec.InitContainers[i].Name == "git-clone" {
+			gitClone = &sts.Spec.Template.Spec.InitContainers[i]
+			break
+		}
+	}
+	require.NotNil(t, gitClone)
+	assert.Equal(t, []string{
+		"--", "clone", "--branch", "main", "--single-branch", "--depth", "1",
+		"--", ws.Spec.Repo, WorkspaceMountPath + "/repo",
+	}, gitClone.Args)
+}
+
 func TestWorkerPoolReconciler_CommitRefWorkspaceUsesCheckoutScript(t *testing.T) {
 	scheme := newWorkerPoolTestScheme()
 	pool := newTestWorkerPool("my-pool", "default", 1)

@@ -541,7 +541,7 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 		if workspace.Ref != "" && !commitRef {
 			cloneArgs = append(cloneArgs, "--branch", workspace.Ref)
 		}
-		cloneArgs = append(cloneArgs, "--no-single-branch", "--depth", "1", "--", workspace.Repo, targetPath)
+		cloneArgs = append(cloneArgs, "--single-branch", "--depth", "1", "--", workspace.Repo, targetPath)
 
 		initContainer := corev1.Container{
 			Name:         "git-clone",

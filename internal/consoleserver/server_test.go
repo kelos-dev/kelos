@@ -2693,17 +2693,20 @@ func TestConnectSessionBridgesAndAcknowledgesResumedSession(t *testing.T) {
 			Namespace:   "team-a",
 			Annotations: map[string]string{sessionsuspend.ResumeRequestAnnotation: "resume-request"},
 		},
-		Spec: kelos.SessionSpec{Worker: kelos.WorkerSpec{
-			Type:        "codex",
-			Credentials: &kelos.Credentials{Type: kelos.CredentialTypeNone},
-		}},
+		Spec: kelos.SessionSpec{
+			Worker: kelos.WorkerSpec{
+				Type:        "codex",
+				Credentials: &kelos.Credentials{Type: kelos.CredentialTypeNone},
+			},
+			IdlePolicy: &kelos.SessionIdlePolicy{SuspendAfterSeconds: ptr.To(int32(60))},
+		},
 		Status: kelos.SessionStatus{Phase: kelos.SessionPhaseReady, PodName: "chat-pod"},
 	}
 	if err := server.client.Create(t.Context(), session); err != nil {
 		t.Fatal(err)
 	}
 	bridged := make(chan struct{})
-	server.bridge = func(_ context.Context, connection *sessionSocket, namespace, podName string, acknowledgeResume func() error) error {
+	server.bridge = func(_ context.Context, connection *sessionSocket, namespace, podName string, refreshConnection func() error) error {
 		defer close(bridged)
 		if namespace != "team-a" || podName != "chat-pod" {
 			t.Errorf("bridge target = %s/%s, want team-a/chat-pod", namespace, podName)
@@ -2718,10 +2721,10 @@ func TestConnectSessionBridgesAndAcknowledgesResumedSession(t *testing.T) {
 		if err := connection.WriteJSON(map[string]any{"type": "history.end"}); err != nil {
 			return err
 		}
-		if acknowledgeResume == nil {
-			return errors.New("resume acknowledgement is not configured")
+		if refreshConnection == nil {
+			return errors.New("connection refresh is not configured")
 		}
-		return acknowledgeResume()
+		return refreshConnection()
 	}
 
 	httpServer := httptest.NewServer(server)
@@ -2759,6 +2762,39 @@ func TestConnectSessionBridgesAndAcknowledgesResumedSession(t *testing.T) {
 	}
 	if !sessionsuspend.ResumeAcknowledged(&updated) {
 		t.Fatalf("resume request was not acknowledged: %#v", updated.Annotations)
+	}
+	if _, ok := sessionsuspend.ConsoleActivityTime(&updated); !ok {
+		t.Fatalf("Console activity was not recorded: %#v", updated.Annotations)
+	}
+}
+
+func TestRefreshConsoleActivityRenewsReadyConnection(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	ready := make(chan struct{})
+	refreshed := make(chan struct{}, 2)
+	done := make(chan error, 1)
+	go func() {
+		done <- refreshConsoleActivity(ctx, ready, time.Millisecond, func() error {
+			refreshed <- struct{}{}
+			return nil
+		})
+	}()
+	close(ready)
+	for range 2 {
+		select {
+		case <-refreshed:
+		case <-time.After(time.Second):
+			t.Fatal("Console activity was not renewed")
+		}
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("refreshConsoleActivity() error = %v, want context cancellation", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("refreshConsoleActivity() did not stop")
 	}
 }
 

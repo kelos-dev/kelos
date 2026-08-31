@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -181,6 +182,35 @@ func TestRequestResumeRetriesPatchConflict(t *testing.T) {
 	}
 	if cl.patches != 2 {
 		t.Fatalf("Patch() called %d times, want 2", cl.patches)
+	}
+}
+
+func TestRecordConsoleActivityRefreshesLease(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := kelos.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	session := idleSuspendedSession()
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(session).Build()
+	key := client.ObjectKeyFromObject(session)
+
+	before := time.Now().UTC()
+	if err := RecordConsoleActivity(context.Background(), cl, key); err != nil {
+		t.Fatal(err)
+	}
+	var updated kelos.Session
+	if err := cl.Get(context.Background(), key, &updated); err != nil {
+		t.Fatal(err)
+	}
+	activityTime, ok := ConsoleActivityTime(&updated)
+	if !ok || activityTime.Before(before) || activityTime.After(time.Now().UTC()) {
+		t.Fatalf("ConsoleActivityTime() = %v, %t, want a current timestamp", activityTime, ok)
+	}
+	if remaining := ConsoleActivityLeaseRemaining(&updated, activityTime); remaining != ConsoleActivityLeaseDuration {
+		t.Fatalf("ConsoleActivityLeaseRemaining() = %s, want %s", remaining, ConsoleActivityLeaseDuration)
+	}
+	if remaining := ConsoleActivityLeaseRemaining(&updated, activityTime.Add(ConsoleActivityLeaseDuration+time.Second)); remaining != 0 {
+		t.Fatalf("expired ConsoleActivityLeaseRemaining() = %s, want 0", remaining)
 	}
 }
 

@@ -63,6 +63,7 @@ const (
 	taskLogOmittedMessage        = "[... earlier log output omitted ...]\n"
 	workerTaskLogLineLimit       = taskLogTailLineLimit + 2
 	workerTaskLogSinceMargin     = 5 * time.Second
+	consoleActivityInterval      = 20 * time.Second
 )
 
 var errTaskLogSegmentUnavailable = errors.New("Task log segment is unavailable in the recent WorkerPool log window")
@@ -1605,20 +1606,30 @@ func (s *Server) connectSession(writer http.ResponseWriter, request *http.Reques
 	}
 	socket := &sessionSocket{Conn: connection}
 	defer socket.Close()
-	var acknowledgeResume func() error
-	if sessionsuspend.ResumeRequested(&session) {
-		requestValue := session.Annotations[sessionsuspend.ResumeRequestAnnotation]
-		acknowledgeResume = func() error {
-			_, err := sessionsuspend.AcknowledgeResume(request.Context(), s.client, client.ObjectKeyFromObject(&session), requestValue)
-			return err
+	requestValue := session.Annotations[sessionsuspend.ResumeRequestAnnotation]
+	resumeAcknowledged := requestValue == ""
+	refreshIdlePeriod := session.Spec.IdlePolicy != nil &&
+		(session.Spec.IdlePolicy.SuspendAfterSeconds != nil || session.Spec.IdlePolicy.DeleteAfterSeconds != nil)
+	refreshConnection := func() error {
+		if !resumeAcknowledged {
+			if _, err := sessionsuspend.AcknowledgeResume(request.Context(), s.client, client.ObjectKeyFromObject(&session), requestValue); err != nil {
+				return err
+			}
+			resumeAcknowledged = true
 		}
+		if !refreshIdlePeriod {
+			return nil
+		}
+		return sessionsuspend.RecordConsoleActivity(request.Context(), s.client, client.ObjectKeyFromObject(&session))
 	}
-	if err := s.bridge(request.Context(), socket, namespace, session.Status.PodName, acknowledgeResume); err != nil {
+	if err := s.bridge(request.Context(), socket, namespace, session.Status.PodName, refreshConnection); err != nil {
 		_ = socket.WriteJSON(map[string]any{"type": "error", "text": err.Error(), "status": "failed"})
 	}
 }
 
-func (s *Server) bridgeExec(ctx context.Context, connection *sessionSocket, namespace, podName string, acknowledgeResume func() error) error {
+func (s *Server) bridgeExec(ctx context.Context, connection *sessionSocket, namespace, podName string, refreshConnection func() error) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	request := s.clientset.CoreV1().RESTClient().Post().
 		Resource("pods").
 		Namespace(namespace).
@@ -1660,8 +1671,9 @@ func (s *Server) bridgeExec(ctx context.Context, connection *sessionSocket, name
 	}()
 
 	outputDone := make(chan error, 2)
-	resumeAcknowledged := acknowledgeResume == nil
+	connectionReady := make(chan struct{})
 	forward := func(reader io.Reader, stderr bool) {
+		ready := false
 		scanner := newJSONLineScanner(reader)
 		for scanner.Scan() {
 			payload := append([]byte(nil), scanner.Bytes()...)
@@ -1674,14 +1686,15 @@ func (s *Server) bridgeExec(ctx context.Context, connection *sessionSocket, name
 				outputDone <- err
 				return
 			}
-			if !stderr && !resumeAcknowledged {
+			if !stderr && !ready {
 				var event sessionruntime.Event
 				if json.Unmarshal(payload, &event) == nil && event.Type == sessionruntime.EventHistoryEnd {
-					if err := acknowledgeResume(); err != nil {
+					if err := refreshConnection(); err != nil {
 						outputDone <- err
 						return
 					}
-					resumeAcknowledged = true
+					ready = true
+					close(connectionReady)
 				}
 			}
 		}
@@ -1710,6 +1723,11 @@ func (s *Server) bridgeExec(ctx context.Context, connection *sessionSocket, name
 		}
 	}()
 
+	activityDone := make(chan error, 1)
+	go func() {
+		activityDone <- refreshConsoleActivity(ctx, connectionReady, consoleActivityInterval, refreshConnection)
+	}()
+
 	select {
 	case err := <-streamDone:
 		return err
@@ -1717,8 +1735,30 @@ func (s *Server) bridgeExec(ctx context.Context, connection *sessionSocket, name
 		return err
 	case err := <-readDone:
 		return err
+	case err := <-activityDone:
+		return err
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+}
+
+func refreshConsoleActivity(ctx context.Context, ready <-chan struct{}, interval time.Duration, refresh func() error) error {
+	select {
+	case <-ready:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if err := refresh(); err != nil {
+				return err
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 }
 

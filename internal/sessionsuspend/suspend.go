@@ -15,6 +15,10 @@ import (
 )
 
 const (
+	// ConsoleActivityAnnotation records the latest activity from a connected Console client.
+	ConsoleActivityAnnotation = "kelos.dev/session-console-activity"
+	// ConsoleActivityLeaseDuration keeps a Session awake between Console heartbeats.
+	ConsoleActivityLeaseDuration = time.Minute
 	// ResumeRequestAnnotation asks the Session controller to resume an idle-suspended Session.
 	ResumeRequestAnnotation = "kelos.dev/session-idle-resume-request"
 	// ResumeRequestTimeAnnotation records when the controller observed the resume request.
@@ -26,6 +30,25 @@ const (
 	// IdlePolicyReason identifies a Session suspended by its idle policy.
 	IdlePolicyReason = kelos.SessionReasonIdlePolicyTriggered
 )
+
+// ConsoleActivityTime returns the latest activity reported by a connected Console client.
+func ConsoleActivityTime(session *kelos.Session) (time.Time, bool) {
+	activityTime, err := time.Parse(time.RFC3339Nano, session.Annotations[ConsoleActivityAnnotation])
+	return activityTime, err == nil
+}
+
+// ConsoleActivityLeaseRemaining returns how long a recent Console heartbeat protects a Session.
+func ConsoleActivityLeaseRemaining(session *kelos.Session, now time.Time) time.Duration {
+	activityTime, ok := ConsoleActivityTime(session)
+	if !ok {
+		return 0
+	}
+	remaining := activityTime.Add(ConsoleActivityLeaseDuration).Sub(now)
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
+}
 
 // IsIdlePolicySuspended reports whether the Session is suspended by its idle policy.
 func IsIdlePolicySuspended(session *kelos.Session) bool {
@@ -139,4 +162,23 @@ func AcknowledgeResume(ctx context.Context, cl client.Client, key client.ObjectK
 		return false, fmt.Errorf("acknowledging Session %q resume: %w", key.Name, err)
 	}
 	return acknowledged, nil
+}
+
+// RecordConsoleActivity refreshes the idle baseline for a connected Console client.
+func RecordConsoleActivity(ctx context.Context, cl client.Client, key client.ObjectKey) error {
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var current kelos.Session
+		if err := cl.Get(ctx, key, &current); err != nil {
+			return err
+		}
+		original := current.DeepCopy()
+		if current.Annotations == nil {
+			current.Annotations = map[string]string{}
+		}
+		current.Annotations[ConsoleActivityAnnotation] = time.Now().UTC().Format(time.RFC3339Nano)
+		return cl.Patch(ctx, &current, client.MergeFromWithOptions(original, client.MergeFromWithOptimisticLock{}))
+	}); err != nil {
+		return fmt.Errorf("recording Console activity for Session %q: %w", key.Name, err)
+	}
+	return nil
 }

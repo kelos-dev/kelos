@@ -1964,13 +1964,17 @@ func sessionIdlePolicyExpired(session *kelos.Session, afterSeconds *int32) (bool
 	if afterSeconds == nil || sessionsuspend.ResumeRequested(session) {
 		return false, 0
 	}
+	now := time.Now()
+	if remaining := sessionsuspend.ConsoleActivityLeaseRemaining(session, now); remaining > 0 {
+		return false, remaining
+	}
 	active := apiMeta.FindStatusCondition(session.Status.Conditions, kelos.SessionConditionActive)
 	if (active == nil || active.Status != metav1.ConditionFalse) && !sessionsuspend.IsIdlePolicySuspended(session) {
 		return false, 0
 	}
 	ttl := time.Duration(*afterSeconds) * time.Second
 	expireAt := sessionIdleSince(session).Add(ttl)
-	remaining := time.Until(expireAt)
+	remaining := expireAt.Sub(now)
 	if remaining <= 0 {
 		return true, 0
 	}
@@ -1986,6 +1990,9 @@ func sessionIdleSince(session *kelos.Session) time.Time {
 	since := session.CreationTimestamp.Time
 	if last := session.Status.LastActivityTime; last != nil && last.After(since) {
 		since = last.Time
+	}
+	if consoleActivity, ok := sessionsuspend.ConsoleActivityTime(session); ok && consoleActivity.After(since) {
+		since = consoleActivity
 	}
 	return since
 }

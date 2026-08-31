@@ -2575,6 +2575,28 @@ func TestSessionIdleExpired(t *testing.T) {
 			wantRequeue: true,
 		},
 		{
+			name: "connected Console protects an idle Session",
+			session: newSession(ptr.To(int32(0)), func(s *kelos.Session) {
+				idleFor(time.Hour)(s)
+				if s.Annotations == nil {
+					s.Annotations = map[string]string{}
+				}
+				s.Annotations[sessionsuspend.ConsoleActivityAnnotation] = now.UTC().Format(time.RFC3339Nano)
+			}),
+			wantRequeue: true,
+		},
+		{
+			name: "last Console activity resets the idle baseline",
+			session: newSession(ptr.To(int32(600)), func(s *kelos.Session) {
+				idleFor(time.Hour)(s)
+				if s.Annotations == nil {
+					s.Annotations = map[string]string{}
+				}
+				s.Annotations[sessionsuspend.ConsoleActivityAnnotation] = now.Add(-2 * time.Minute).UTC().Format(time.RFC3339Nano)
+			}),
+			wantRequeue: true,
+		},
+		{
 			name:        "zero TTL reaps as soon as idle",
 			session:     newSession(ptr.To(int32(0)), idleFor(time.Second)),
 			wantExpired: true,

@@ -218,8 +218,8 @@ the Session resource and is visible through the Kubernetes API.
 | `spec.initialBranch` | Git branch used to initialize the Session workspace. Checks out the branch from `origin` when it exists, or creates it from the Workspace ref. Requires `spec.worker.workspaceRef` | No |
 | `spec.initialPrompt` | Prompt submitted when the Session starts without retained conversation history. An `emptyDir` workspace may submit it again after Pod replacement | No |
 | `spec.volumeClaimTemplate` | PersistentVolumeClaimSpec for the Session workspace. Recommended for durable Sessions; omit to use an ephemeral `emptyDir` workspace | No |
-| `spec.idlePolicy.suspendAfterSeconds` | Automatically stop the Session runtime once it has been continuously idle for this many seconds without changing `spec.suspend`. Persistent workspace storage is retained. Selecting the Session in the web interface or starting a terminal connection resumes it. Omit to never suspend; zero suspends as soon as it goes idle. When deletion is also configured, this value must be less than `deleteAfterSeconds` | No |
-| `spec.idlePolicy.deleteAfterSeconds` | Automatically delete the Session once it has been continuously idle (no active turn, no reported activity) for this many seconds, measured from the later of `status.lastActivityTime` and the creation time. Renewed activity resets the idle period. Before deletion the runtime stops accepting new turns and any in-flight turn completes. Deleting the Session removes its workspace storage. Omit to never delete; zero deletes as soon as it goes idle. When suspension is also configured, this value must be greater than `suspendAfterSeconds` | No |
+| `spec.idlePolicy.suspendAfterSeconds` | Automatically stop the Session runtime once it has been continuously idle for this many seconds without changing `spec.suspend`. Persistent workspace storage is retained. Selecting the Session in the web interface or starting a terminal connection resumes it; an open Console conversation refreshes its idle period. Omit to never suspend; zero suspends as soon as it goes idle. When deletion is also configured, this value must be less than `deleteAfterSeconds` | No |
+| `spec.idlePolicy.deleteAfterSeconds` | Automatically delete the Session once it has been continuously idle (no active turn, no reported activity) for this many seconds, measured from the latest of `status.lastActivityTime`, the creation time, and connected Console activity. Before deletion the runtime stops accepting new turns and any in-flight turn completes. Deleting the Session removes its workspace storage. Omit to never delete; zero deletes as soon as it goes idle. When suspension is also configured, this value must be greater than `suspendAfterSeconds` | No |
 | `status.phase` | Infrastructure phase: `Pending`, `Ready`, `Suspended`, or `Failed` | Output |
 | `status.podName` | Session Pod name | Output |
 | `status.podUID` | Identity of the Pod running the live conversation | Output |
@@ -418,19 +418,21 @@ Pod does not change the order. The web client shows activity,
 `status.model`, `status.branch`, and the pull request with a colored,
 text-labeled state in both the Session sidebar and conversation header.
 
-Idle suspension and deletion use the same idle period, measured from the later
-of Session creation and `status.lastActivityTime`. Before either action, the
-runtime stops accepting new turns and waits for any in-flight turn to finish.
+Idle suspension and deletion use the same idle period, measured from the latest
+of Session creation, `status.lastActivityTime`, and connected web-client
+activity. Before either action, the runtime stops accepting new turns and waits
+for any in-flight turn to finish.
 When `spec.idlePolicy.suspendAfterSeconds` is reached, Kelos scales the runtime
 to zero and reports `status.phase: Suspended` with the `IdlePolicyTriggered`
 Ready-condition reason. `IdlePolicyTriggered` is stable and machine-readable so
 clients can distinguish idle suspension from `spec.suspend: true`. Selecting the
 Session in the web interface or starting a terminal connection resumes it; an
 existing client's automatic reconnect does not. Kelos keeps the resume request
-active until the client receives the runtime's conversation history. A resume
-acknowledgement starts a fresh idle period and keeps the runtime protected for a
-five-second connection grace. A resume request that is not acknowledged within
-10 minutes expires and safely drains any running work before returning the
+active until the client receives the runtime's conversation history. A connected
+web client refreshes the idle period while the conversation remains open. A
+resume acknowledgement starts a fresh idle period and keeps the runtime protected
+for a five-second connection grace. A resume request that is not acknowledged
+within 10 minutes expires and safely drains any running work before returning the
 Session to idle suspension, allowing its deletion deadline to proceed. When both
 idle actions are configured, `suspendAfterSeconds` must be less than
 `deleteAfterSeconds`; deletion still occurs at `deleteAfterSeconds`, including

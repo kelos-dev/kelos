@@ -221,7 +221,7 @@ func TestBuildClaudeCodeJob_WorkspaceWithRef(t *testing.T) {
 	initContainer := job.Spec.Template.Spec.InitContainers[0]
 	expectedArgs := []string{
 		"clone",
-		"--branch", "main", "--no-single-branch", "--depth", "1",
+		"--branch", "main", "--single-branch", "--depth", "1",
 		"--", "https://github.com/example/repo.git", WorkspaceMountPath + "/repo",
 	}
 

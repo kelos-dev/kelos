@@ -33,7 +33,7 @@ expectedArgs := []string{
 Run:
 
 ```bash
-make test TEST_FLAGS='-run ^TestBuildClaudeCodeJob_WorkspaceWithRef$ -count=1'
+make test TEST_FLAGS='-run TestBuildClaudeCodeJob_WorkspaceWithRef -count=1'
 ```
 
 Expected: FAIL because the builder still emits `--no-single-branch`.
@@ -51,7 +51,7 @@ cloneArgs = append(cloneArgs, "--single-branch", "--depth", "1", "--", workspace
 Run:
 
 ```bash
-make test TEST_FLAGS='-run ^TestBuildClaudeCodeJob_WorkspaceWithRef$ -count=1'
+make test TEST_FLAGS='-run TestBuildClaudeCodeJob_WorkspaceWithRef -count=1'
 ```
 
 Expected: PASS.
@@ -108,7 +108,7 @@ func TestWorkerPoolReconciler_BranchWorkspaceUsesSingleBranchClone(t *testing.T)
 Run:
 
 ```bash
-make test TEST_FLAGS='-run ^TestWorkerPoolReconciler_BranchWorkspaceUsesSingleBranchClone$ -count=1'
+make test TEST_FLAGS='-run TestWorkerPoolReconciler_BranchWorkspaceUsesSingleBranchClone -count=1'
 ```
 
 Expected: FAIL because the controller still emits `--no-single-branch`.
@@ -126,7 +126,7 @@ cloneArgs = append(cloneArgs, "--single-branch", "--depth", "1", "--", workspace
 Run:
 
 ```bash
-make test TEST_FLAGS='-run ^TestWorkerPoolReconciler_BranchWorkspaceUsesSingleBranchClone$ -count=1'
+make test TEST_FLAGS='-run TestWorkerPoolReconciler_BranchWorkspaceUsesSingleBranchClone -count=1'
 ```
 
 Expected: PASS.
@@ -136,18 +136,23 @@ Expected: PASS.
 **Files:**
 - Verify: `internal/controller/job_builder_test.go`
 - Verify: `internal/controller/workerpool_controller_test.go`
+- Modify: `test/integration/task_test.go:1285,1485,1563`
 
-- [ ] **Step 1: Verify configured refs, targeted branches, and commit-SHA paths together**
+- [ ] **Step 1: Update integration expectations for ref, authenticated, and default-branch clones**
+
+Replace the three remaining `--no-single-branch` expected arguments in `test/integration/task_test.go` with `--single-branch`.
+
+- [ ] **Step 2: Verify configured refs, targeted branches, and commit-SHA paths together**
 
 Run:
 
 ```bash
-make test TEST_FLAGS='-run "^(TestBuildClaudeCodeJob_WorkspaceWithRef|TestBuildClaudeCodeJob_WorkspaceWithCommitRefFetchesDetached|TestBuildJob_BranchSetupInitContainer|TestWorkerPoolReconciler_BranchWorkspaceUsesSingleBranchClone|TestWorkerPoolReconciler_CommitRefWorkspaceUsesCheckoutScript)$" -count=1'
+make test TEST_FLAGS='-run "TestBuildClaudeCodeJob_WorkspaceWithRef|TestBuildClaudeCodeJob_WorkspaceWithCommitRefFetchesDetached|TestBuildJob_BranchSetupInitContainer|TestWorkerPoolReconciler_BranchWorkspaceUsesSingleBranchClone|TestWorkerPoolReconciler_CommitRefWorkspaceUsesCheckoutScript" -count=1'
 ```
 
 Expected: PASS for all selected tests.
 
-- [ ] **Step 2: Run repository verification**
+- [ ] **Step 3: Run repository verification**
 
 Run:
 
@@ -157,7 +162,7 @@ make verify
 
 Expected: PASS with no generated, formatting, module, or vet differences.
 
-- [ ] **Step 3: Run all unit tests**
+- [ ] **Step 4: Run all unit tests**
 
 Run:
 
@@ -167,7 +172,7 @@ make test
 
 Expected: all tests related to this change pass. If `TestClaudeEntrypointUsesPersistentSessionConfig` remains the sole failure, record it as the verified pre-existing baseline fixture failure.
 
-- [ ] **Step 4: Run integration tests and build**
+- [ ] **Step 5: Run integration tests and build**
 
 Run:
 
@@ -178,14 +183,14 @@ make build
 
 Expected: both commands PASS.
 
-- [ ] **Step 5: Inspect and commit the implementation**
+- [ ] **Step 6: Inspect and commit the implementation**
 
 Run:
 
 ```bash
 git diff --check
 git diff -- internal/controller/job_builder.go internal/controller/job_builder_test.go internal/controller/workerpool_controller.go internal/controller/workerpool_controller_test.go
-git add docs/superpowers/plans/2026-08-31-single-branch-shallow-clones.md internal/controller/job_builder.go internal/controller/job_builder_test.go internal/controller/workerpool_controller.go internal/controller/workerpool_controller_test.go
+git add docs/superpowers/plans/2026-08-31-single-branch-shallow-clones.md internal/controller/job_builder.go internal/controller/job_builder_test.go internal/controller/workerpool_controller.go internal/controller/workerpool_controller_test.go test/integration/task_test.go
 git commit -m "fix(controller): shallow clone one workspace branch"
 ```
 

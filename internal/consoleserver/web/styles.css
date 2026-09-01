@@ -39,7 +39,7 @@ button { color: inherit; }
 .brand { font-size: 15px; font-weight: 650; letter-spacing: -.01em; }
 .brand-subtitle { margin-top: 1px; color: var(--muted); font-size: 11px; }
 .sidebar-scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
-.new-session-button { width: 100%; min-height: 40px; display: flex; align-items: center; justify-content: flex-start; gap: 9px; margin: 0; padding: 9px 10px; border: 0; border-radius: 9px; background: transparent; font-size: 13px; font-weight: 500; cursor: pointer; transition: background .15s; }
+.new-session-button { flex: none; width: 100%; min-height: 40px; display: flex; align-items: center; justify-content: flex-start; gap: 9px; margin: 0; padding: 9px 10px; border: 0; border-radius: 9px; background: transparent; font-size: 13px; font-weight: 500; cursor: pointer; transition: background .15s; }
 .new-session-button:hover { background: var(--line-soft); }
 .new-session-button span { width: 20px; font-size: 18px; text-align: center; }
 .namespace-form { margin: 8px 0; padding: 0 3px; }

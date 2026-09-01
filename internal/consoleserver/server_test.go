@@ -1521,9 +1521,12 @@ func TestSessionUIAdaptsToPhoneViewport(t *testing.T) {
 	if scrollStart < 0 || scrollEnd <= scrollStart {
 		t.Fatal("Session page does not define sidebar scrolling before the fixed footer")
 	}
+	newSessionAction := bytes.Index(index, []byte(`id="new-session"`))
+	if newSessionAction < 0 || newSessionAction >= scrollStart {
+		t.Fatal("Session page does not pin the new Session action above the scrolling sidebar content")
+	}
 	scrollContent := string(index[scrollStart:scrollEnd])
 	for description, expected := range map[string]string{
-		"new Session action":    `id="new-session"`,
 		"namespace switcher":    `id="namespace-form"`,
 		"console navigation":    `class="console-nav"`,
 		"Session conversations": `id="session-list"`,
@@ -1543,6 +1546,7 @@ func TestSessionUIAdaptsToPhoneViewport(t *testing.T) {
 		"phone navigation touch target":      `.console-nav button { min-height: 44px; padding: 8px 10px; font-size: 14px; }`,
 		"compact phone session row":          `.session-item-select { min-height: 60px; padding: 7px 48px 7px 8px; }`,
 		"phone create touch target":          `.new-session-button { min-height: 44px; margin-top: 4px; padding: 8px 10px; }`,
+		"fixed new Session action":           `.new-session-button { flex: none;`,
 		"section reorder touch target":       `.session-section-order-button { width: 44px; height: 44px; }`,
 		"single-row phone header":            `grid-template-areas: "menu heading actions"`,
 		"phone lifecycle actions in sidebar": `.session-lifecycle-action, #reset-session, #delete-session { display: none !important; }`,

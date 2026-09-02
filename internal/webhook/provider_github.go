@@ -63,10 +63,10 @@ func (githubProvider) annotate(task *kelos.Task, spawner *kelos.TaskSpawner, eve
 	annotations[reporting.AnnotationSourceOwner] = parsed.GitHub.RepositoryOwner
 	annotations[reporting.AnnotationSourceRepo] = parsed.GitHub.RepositoryName
 	if tracker.Checks != nil && parsed.GitHub.HeadSHA != "" {
-		annotations[reporting.AnnotationGitHubChecks] = "enabled"
+		annotations[reporting.AnnotationCheckReporting] = "enabled"
 		annotations[reporting.AnnotationSourceSHA] = parsed.GitHub.HeadSHA
 		if tracker.Checks.Name != "" {
-			annotations[reporting.AnnotationGitHubCheckName] = tracker.Checks.Name
+			annotations[reporting.AnnotationCheckName] = tracker.Checks.Name
 		}
 	}
 	addAnnotations(task, annotations)

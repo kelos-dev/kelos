@@ -80,8 +80,8 @@ func reportingAnnotations(tracker kelos.TrackerSource, kind string, number int, 
 		annotations[reporting.AnnotationWebhookGateway] = gatewayName
 	}
 	if tracker.Comments != nil {
-		annotations[reporting.AnnotationGitHubReporting] = "enabled"
-		annotations[reporting.AnnotationGitHubCommentMode] = string(tracker.CommentMode())
+		annotations[reporting.AnnotationCommentReporting] = "enabled"
+		annotations[reporting.AnnotationCommentMode] = string(tracker.CommentMode())
 	}
 	return annotations
 }

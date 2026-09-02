@@ -695,11 +695,11 @@ func TestServeHTTP_StampsStickyCommentReportingAnnotations(t *testing.T) {
 	}
 
 	task := taskList.Items[0]
-	if task.Annotations[reporting.AnnotationGitHubReporting] != "enabled" {
-		t.Errorf("Expected github-reporting 'enabled', got %q", task.Annotations[reporting.AnnotationGitHubReporting])
+	if task.Annotations[reporting.AnnotationCommentReporting] != "enabled" {
+		t.Errorf("Expected github-reporting 'enabled', got %q", task.Annotations[reporting.AnnotationCommentReporting])
 	}
-	if task.Annotations[reporting.AnnotationGitHubCommentMode] != string(kelos.CommentModeSticky) {
-		t.Errorf("Expected Sticky comment mode, got %q", task.Annotations[reporting.AnnotationGitHubCommentMode])
+	if task.Annotations[reporting.AnnotationCommentMode] != string(kelos.CommentModeSticky) {
+		t.Errorf("Expected Sticky comment mode, got %q", task.Annotations[reporting.AnnotationCommentMode])
 	}
 	if task.Annotations[reporting.AnnotationSourceKind] != "issue" {
 		t.Errorf("Expected source-kind 'issue', got %q", task.Annotations[reporting.AnnotationSourceKind])
@@ -767,7 +767,7 @@ func TestServeHTTP_NoReportingAnnotationsWhenDisabled(t *testing.T) {
 	}
 
 	task := taskList.Items[0]
-	if _, ok := task.Annotations[reporting.AnnotationGitHubReporting]; ok {
+	if _, ok := task.Annotations[reporting.AnnotationCommentReporting]; ok {
 		t.Error("Expected no github-reporting annotation when reporting is not enabled")
 	}
 }
@@ -839,8 +839,8 @@ func TestServeHTTP_ReportingAnnotationsPullRequest(t *testing.T) {
 	}
 
 	task := taskList.Items[0]
-	if task.Annotations[reporting.AnnotationGitHubReporting] != "enabled" {
-		t.Errorf("Expected github-reporting 'enabled', got %q", task.Annotations[reporting.AnnotationGitHubReporting])
+	if task.Annotations[reporting.AnnotationCommentReporting] != "enabled" {
+		t.Errorf("Expected github-reporting 'enabled', got %q", task.Annotations[reporting.AnnotationCommentReporting])
 	}
 	if task.Annotations[reporting.AnnotationSourceKind] != "pull-request" {
 		t.Errorf("Expected source-kind 'pull-request', got %q", task.Annotations[reporting.AnnotationSourceKind])
@@ -1228,8 +1228,8 @@ func TestServeHTTP_IssueCommentOnPR_EnrichesBranch(t *testing.T) {
 	if task.Spec.Prompt != "Review PR on branch feature-branch" {
 		t.Errorf("Expected prompt with enriched branch, got %q", task.Spec.Prompt)
 	}
-	if task.Annotations[reporting.AnnotationGitHubChecks] != "enabled" {
-		t.Errorf("Expected github-checks 'enabled', got %q", task.Annotations[reporting.AnnotationGitHubChecks])
+	if task.Annotations[reporting.AnnotationCheckReporting] != "enabled" {
+		t.Errorf("Expected github-checks 'enabled', got %q", task.Annotations[reporting.AnnotationCheckReporting])
 	}
 	if task.Annotations[reporting.AnnotationSourceSHA] != "enriched-sha-456" {
 		t.Errorf("Expected source-sha 'enriched-sha-456', got %q", task.Annotations[reporting.AnnotationSourceSHA])
@@ -1520,14 +1520,14 @@ func TestGitLabServeHTTP_StampsReportingAnnotations(t *testing.T) {
 	}
 	got := taskList.Items[0].Annotations
 	want := map[string]string{
-		reporting.AnnotationSourceProvider:    reporting.SourceProviderGitLab,
-		reporting.AnnotationSourceKind:        reporting.SourceKindMergeRequest,
-		reporting.AnnotationSourceNumber:      "7",
-		reporting.AnnotationSourceRepo:        "group/sub/repo",
-		reporting.AnnotationSourceBaseURL:     "https://gitlab.example.com",
-		reporting.AnnotationWebhookGateway:    "gl-gateway",
-		reporting.AnnotationGitHubReporting:   "enabled",
-		reporting.AnnotationGitHubCommentMode: string(kelos.CommentModeSticky),
+		reporting.AnnotationSourceProvider:   reporting.SourceProviderGitLab,
+		reporting.AnnotationSourceKind:       reporting.SourceKindMergeRequest,
+		reporting.AnnotationSourceNumber:     "7",
+		reporting.AnnotationSourceRepo:       "group/sub/repo",
+		reporting.AnnotationSourceBaseURL:    "https://gitlab.example.com",
+		reporting.AnnotationWebhookGateway:   "gl-gateway",
+		reporting.AnnotationCommentReporting: "enabled",
+		reporting.AnnotationCommentMode:      string(kelos.CommentModeSticky),
 	}
 	for k, v := range want {
 		if got[k] != v {
@@ -1566,7 +1566,7 @@ func TestGitLabServeHTTP_NoReportingAnnotationsWithoutReporting(t *testing.T) {
 	if len(taskList.Items) != 1 {
 		t.Fatalf("Expected 1 task, got %d", len(taskList.Items))
 	}
-	if _, ok := taskList.Items[0].Annotations[reporting.AnnotationGitHubReporting]; ok {
+	if _, ok := taskList.Items[0].Annotations[reporting.AnnotationCommentReporting]; ok {
 		t.Error("Expected no reporting annotation when gitlabWebhook.reporting is unset")
 	}
 }
@@ -2404,17 +2404,17 @@ func TestServeHTTP_ChecksAnnotationsForPRWebhook(t *testing.T) {
 	}
 
 	task := taskList.Items[0]
-	if task.Annotations[reporting.AnnotationGitHubReporting] != "enabled" {
-		t.Errorf("Expected github-reporting 'enabled', got %q", task.Annotations[reporting.AnnotationGitHubReporting])
+	if task.Annotations[reporting.AnnotationCommentReporting] != "enabled" {
+		t.Errorf("Expected github-reporting 'enabled', got %q", task.Annotations[reporting.AnnotationCommentReporting])
 	}
-	if task.Annotations[reporting.AnnotationGitHubChecks] != "enabled" {
-		t.Errorf("Expected github-checks 'enabled', got %q", task.Annotations[reporting.AnnotationGitHubChecks])
+	if task.Annotations[reporting.AnnotationCheckReporting] != "enabled" {
+		t.Errorf("Expected github-checks 'enabled', got %q", task.Annotations[reporting.AnnotationCheckReporting])
 	}
 	if task.Annotations[reporting.AnnotationSourceSHA] != "deadbeef123" {
 		t.Errorf("Expected source-sha 'deadbeef123', got %q", task.Annotations[reporting.AnnotationSourceSHA])
 	}
-	if task.Annotations[reporting.AnnotationGitHubCheckName] != "My Check" {
-		t.Errorf("Expected check name 'My Check', got %q", task.Annotations[reporting.AnnotationGitHubCheckName])
+	if task.Annotations[reporting.AnnotationCheckName] != "My Check" {
+		t.Errorf("Expected check name 'My Check', got %q", task.Annotations[reporting.AnnotationCheckName])
 	}
 	if task.Annotations[reporting.AnnotationSourceKind] != "pull-request" {
 		t.Errorf("Expected source-kind 'pull-request', got %q", task.Annotations[reporting.AnnotationSourceKind])
@@ -2480,10 +2480,10 @@ func TestServeHTTP_ChecksAnnotationsSkippedForIssueComment(t *testing.T) {
 	}
 
 	task := taskList.Items[0]
-	if task.Annotations[reporting.AnnotationGitHubReporting] != "enabled" {
-		t.Errorf("Expected github-reporting 'enabled', got %q", task.Annotations[reporting.AnnotationGitHubReporting])
+	if task.Annotations[reporting.AnnotationCommentReporting] != "enabled" {
+		t.Errorf("Expected github-reporting 'enabled', got %q", task.Annotations[reporting.AnnotationCommentReporting])
 	}
-	if _, ok := task.Annotations[reporting.AnnotationGitHubChecks]; ok {
+	if _, ok := task.Annotations[reporting.AnnotationCheckReporting]; ok {
 		t.Error("Expected no github-checks annotation for issue comment")
 	}
 	if _, ok := task.Annotations[reporting.AnnotationSourceSHA]; ok {
@@ -2558,12 +2558,12 @@ func TestServeHTTP_ChecksOnlyWithoutCommentReporting(t *testing.T) {
 
 	task := taskList.Items[0]
 	// Comment reporting should NOT be set
-	if _, ok := task.Annotations[reporting.AnnotationGitHubReporting]; ok {
+	if _, ok := task.Annotations[reporting.AnnotationCommentReporting]; ok {
 		t.Error("Expected no github-reporting annotation when Enabled is false")
 	}
 	// Checks should be set
-	if task.Annotations[reporting.AnnotationGitHubChecks] != "enabled" {
-		t.Errorf("Expected github-checks 'enabled', got %q", task.Annotations[reporting.AnnotationGitHubChecks])
+	if task.Annotations[reporting.AnnotationCheckReporting] != "enabled" {
+		t.Errorf("Expected github-checks 'enabled', got %q", task.Annotations[reporting.AnnotationCheckReporting])
 	}
 	if task.Annotations[reporting.AnnotationSourceSHA] != "aaa111bbb222" {
 		t.Errorf("Expected source-sha 'aaa111bbb222', got %q", task.Annotations[reporting.AnnotationSourceSHA])

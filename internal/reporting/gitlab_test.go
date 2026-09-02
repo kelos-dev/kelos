@@ -47,7 +47,7 @@ func TestGitLabReporterCreateComment(t *testing.T) {
 	server, calls := newGitLabReporterServer(t, nil)
 	defer server.Close()
 
-	r := &GitLabReporter{BaseURL: server.URL, Project: "group/sub/repo", Token: "glpat"}
+	r := &GitLabReporter{BaseURL: server.URL, Project: "group/sub/repo", TokenFunc: StaticToken("glpat")}
 	id, err := r.CreateComment(context.Background(), CommentTarget{Kind: "issue", Number: 42}, "hello")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -68,7 +68,7 @@ func TestGitLabReporterMergeRequestEndpoint(t *testing.T) {
 	server, calls := newGitLabReporterServer(t, nil)
 	defer server.Close()
 
-	r := &GitLabReporter{BaseURL: server.URL, Project: "group/repo", Token: "glpat"}
+	r := &GitLabReporter{BaseURL: server.URL, Project: "group/repo", TokenFunc: StaticToken("glpat")}
 	if err := r.UpdateComment(context.Background(), CommentTarget{Kind: SourceKindMergeRequest, Number: 7}, 555, "updated"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestGitLabReporterFindCommentByMarker(t *testing.T) {
 	})
 	defer server.Close()
 
-	r := &GitLabReporter{BaseURL: server.URL, Project: "group/repo", Token: "glpat"}
+	r := &GitLabReporter{BaseURL: server.URL, Project: "group/repo", TokenFunc: StaticToken("glpat")}
 	id, err := r.FindCommentByMarker(context.Background(), CommentTarget{Kind: "issue", Number: 9}, marker)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -125,13 +125,13 @@ func TestTaskReporterUsesGitLabReporter(t *testing.T) {
 	defer server.Close()
 
 	task := newTaskWithAnnotations("mr-task", "default", kelos.TaskPhasePending, map[string]string{
-		AnnotationGitHubReporting: "enabled",
-		AnnotationSourceNumber:    "7",
-		AnnotationSourceKind:      SourceKindMergeRequest,
+		AnnotationCommentReporting: "enabled",
+		AnnotationSourceNumber:     "7",
+		AnnotationSourceKind:       SourceKindMergeRequest,
 	})
 	tr := &TaskReporter{
 		Client:   fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(task).Build(),
-		Reporter: &GitLabReporter{BaseURL: server.URL, Project: "group/repo", Token: "glpat"},
+		Reporter: &GitLabReporter{BaseURL: server.URL, Project: "group/repo", TokenFunc: StaticToken("glpat")},
 	}
 	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
 		t.Fatalf("unexpected error: %v", err)

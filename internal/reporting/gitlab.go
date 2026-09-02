@@ -16,15 +16,20 @@ import (
 const SourceKindMergeRequest = "merge-request"
 
 // GitLabReporter posts and updates notes on GitLab issues and merge requests.
-// TokenFunc, when set, is called on every API request; otherwise Token is used.
 type GitLabReporter struct {
 	// BaseURL is the GitLab instance URL (e.g. "https://gitlab.example.com").
 	BaseURL string
 	// Project is the full project path (e.g. "group/subgroup/project").
-	Project   string
-	Token     string
+	Project string
+	// TokenFunc is called on every API request so a refreshed token is
+	// picked up without rebuilding the reporter.
 	TokenFunc func() string
 	Client    *http.Client
+}
+
+// StaticToken adapts a fixed token to the TokenFunc contract.
+func StaticToken(token string) func() string {
+	return func() string { return token }
 }
 
 type gitlabNote struct {
@@ -101,7 +106,7 @@ func (r *GitLabReporter) resolveToken() string {
 	if r.TokenFunc != nil {
 		return r.TokenFunc()
 	}
-	return r.Token
+	return ""
 }
 
 // do sends a JSON request and decodes the response into out when the status

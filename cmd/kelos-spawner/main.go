@@ -646,17 +646,17 @@ func sourceAnnotations(ts *kelos.TaskSpawner, item source.WorkItem) map[string]s
 	}
 
 	if tracker.Comments != nil {
-		annotations[reporting.AnnotationGitHubReporting] = "enabled"
-		annotations[reporting.AnnotationGitHubCommentMode] = string(tracker.CommentMode())
+		annotations[reporting.AnnotationCommentReporting] = "enabled"
+		annotations[reporting.AnnotationCommentMode] = string(tracker.CommentMode())
 	}
 
 	if tracker.Checks != nil {
-		annotations[reporting.AnnotationGitHubChecks] = "enabled"
+		annotations[reporting.AnnotationCheckReporting] = "enabled"
 		if item.HeadSHA != "" {
 			annotations[reporting.AnnotationSourceSHA] = item.HeadSHA
 		}
 		if tracker.Checks.Name != "" {
-			annotations[reporting.AnnotationGitHubCheckName] = tracker.Checks.Name
+			annotations[reporting.AnnotationCheckName] = tracker.Checks.Name
 		}
 	}
 

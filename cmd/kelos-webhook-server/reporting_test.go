@@ -70,11 +70,11 @@ func TestReportingReconcilerSkipsTasksOwnedByOtherServerMode(t *testing.T) {
 					Name:      "task",
 					Namespace: "default",
 					Annotations: map[string]string{
-						reporting.AnnotationGitHubReporting: "enabled",
-						reporting.AnnotationSourceOwner:     "owner",
-						reporting.AnnotationSourceRepo:      "repo",
-						reporting.AnnotationWebhookGateway:  tt.gatewayName,
-						reporting.AnnotationSourceProvider:  tt.provider,
+						reporting.AnnotationCommentReporting: "enabled",
+						reporting.AnnotationSourceOwner:      "owner",
+						reporting.AnnotationSourceRepo:       "repo",
+						reporting.AnnotationWebhookGateway:   tt.gatewayName,
+						reporting.AnnotationSourceProvider:   tt.provider,
 					},
 				},
 			}
@@ -198,12 +198,12 @@ func TestReportingReconcilerPostsGitLabNote(t *testing.T) {
 			gotPath, gotToken = "", ""
 			mu.Unlock()
 			annotations := map[string]string{
-				reporting.AnnotationGitHubReporting:   "enabled",
-				reporting.AnnotationGitHubCommentMode: string(kelos.CommentModePerTask),
-				reporting.AnnotationSourceProvider:    reporting.SourceProviderGitLab,
-				reporting.AnnotationSourceKind:        reporting.SourceKindMergeRequest,
-				reporting.AnnotationSourceNumber:      "7",
-				reporting.AnnotationSourceRepo:        "group/sub/repo",
+				reporting.AnnotationCommentReporting: "enabled",
+				reporting.AnnotationCommentMode:      string(kelos.CommentModePerTask),
+				reporting.AnnotationSourceProvider:   reporting.SourceProviderGitLab,
+				reporting.AnnotationSourceKind:       reporting.SourceKindMergeRequest,
+				reporting.AnnotationSourceNumber:     "7",
+				reporting.AnnotationSourceRepo:       "group/sub/repo",
 			}
 			for k, v := range tt.annotations {
 				annotations[k] = v
@@ -238,8 +238,8 @@ func TestReportingReconcilerPostsGitLabNote(t *testing.T) {
 			if err := reconciler.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "task"}, &updated); err != nil {
 				t.Fatal(err)
 			}
-			if updated.Annotations[reporting.AnnotationGitHubCommentID] != "77" {
-				t.Errorf("expected note id persisted, got %q", updated.Annotations[reporting.AnnotationGitHubCommentID])
+			if updated.Annotations[reporting.AnnotationCommentID] != "77" {
+				t.Errorf("expected note id persisted, got %q", updated.Annotations[reporting.AnnotationCommentID])
 			}
 		})
 	}
@@ -345,12 +345,12 @@ func TestReportingReconcilerUsesGatewayGitHubAppIdentityForStickyComments(t *tes
 			UID:       types.UID("task-uid"),
 			Labels:    map[string]string{"kelos.dev/taskspawner": "reviewer"},
 			Annotations: map[string]string{
-				reporting.AnnotationGitHubReporting:   "enabled",
-				reporting.AnnotationGitHubCommentMode: string(kelos.CommentModeSticky),
-				reporting.AnnotationSourceOwner:       "owner",
-				reporting.AnnotationSourceRepo:        "repo",
-				reporting.AnnotationSourceNumber:      "42",
-				reporting.AnnotationWebhookGateway:    gateway.Name,
+				reporting.AnnotationCommentReporting: "enabled",
+				reporting.AnnotationCommentMode:      string(kelos.CommentModeSticky),
+				reporting.AnnotationSourceOwner:      "owner",
+				reporting.AnnotationSourceRepo:       "repo",
+				reporting.AnnotationSourceNumber:     "42",
+				reporting.AnnotationWebhookGateway:   gateway.Name,
 			},
 		},
 		Status: kelos.TaskStatus{Phase: kelos.TaskPhasePending},
@@ -447,10 +447,10 @@ func TestReportingAnnotationPredicate_Create(t *testing.T) {
 		annotations map[string]string
 		want        bool
 	}{
-		{name: "reporting enabled", annotations: map[string]string{reporting.AnnotationGitHubReporting: "enabled"}, want: true},
-		{name: "checks enabled", annotations: map[string]string{reporting.AnnotationGitHubChecks: "enabled"}, want: true},
-		{name: "both enabled", annotations: map[string]string{reporting.AnnotationGitHubReporting: "enabled", reporting.AnnotationGitHubChecks: "enabled"}, want: true},
-		{name: "reporting disabled value", annotations: map[string]string{reporting.AnnotationGitHubReporting: "disabled"}, want: false},
+		{name: "reporting enabled", annotations: map[string]string{reporting.AnnotationCommentReporting: "enabled"}, want: true},
+		{name: "checks enabled", annotations: map[string]string{reporting.AnnotationCheckReporting: "enabled"}, want: true},
+		{name: "both enabled", annotations: map[string]string{reporting.AnnotationCommentReporting: "enabled", reporting.AnnotationCheckReporting: "enabled"}, want: true},
+		{name: "reporting disabled value", annotations: map[string]string{reporting.AnnotationCommentReporting: "disabled"}, want: false},
 		{name: "missing annotation", annotations: nil, want: false},
 		{name: "unrelated annotations only", annotations: map[string]string{"other": "value"}, want: false},
 	}
@@ -476,21 +476,21 @@ func TestReportingAnnotationPredicate_Update(t *testing.T) {
 	}{
 		{
 			name:        "enabled, phase changed",
-			annotations: map[string]string{reporting.AnnotationGitHubReporting: "enabled"},
+			annotations: map[string]string{reporting.AnnotationCommentReporting: "enabled"},
 			oldPhase:    kelos.TaskPhasePending,
 			newPhase:    kelos.TaskPhaseRunning,
 			want:        true,
 		},
 		{
 			name:        "enabled, phase unchanged",
-			annotations: map[string]string{reporting.AnnotationGitHubReporting: "enabled"},
+			annotations: map[string]string{reporting.AnnotationCommentReporting: "enabled"},
 			oldPhase:    kelos.TaskPhaseRunning,
 			newPhase:    kelos.TaskPhaseRunning,
 			want:        false,
 		},
 		{
 			name:        "checks only, phase changed",
-			annotations: map[string]string{reporting.AnnotationGitHubChecks: "enabled"},
+			annotations: map[string]string{reporting.AnnotationCheckReporting: "enabled"},
 			oldPhase:    kelos.TaskPhasePending,
 			newPhase:    kelos.TaskPhaseRunning,
 			want:        true,

@@ -48,7 +48,7 @@ const defaultGitLabBaseURL = "https://gitlab.com"
 type reportingReconciler struct {
 	client.Client
 	config reportingConfig
-	// cache survives across reconciles to backstop the AnnotationGitHubCommentID
+	// cache survives across reconciles to backstop the AnnotationCommentID
 	// annotation on fast Pending→Succeeded transitions where the annotation
 	// Update has not yet propagated to the controller-runtime cache.
 	cache *reporting.ReportStateCache
@@ -62,9 +62,7 @@ func (r *reportingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	if task.Annotations == nil ||
-		(task.Annotations[reporting.AnnotationGitHubReporting] != "enabled" &&
-			task.Annotations[reporting.AnnotationGitHubChecks] != "enabled") {
+	if !reportingEnabled(&task) {
 		return ctrl.Result{}, nil
 	}
 
@@ -120,7 +118,7 @@ func (r *reportingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		Cache: r.cache,
 	}
 
-	if task.Annotations[reporting.AnnotationGitHubChecks] == "enabled" {
+	if reporting.ReadAnnotation(task.Annotations, reporting.AnnotationCheckReporting) == "enabled" {
 		reporter.ChecksReporter = &reporting.ChecksReporter{
 			Owner:     owner,
 			Repo:      repo,
@@ -158,9 +156,9 @@ func (r *reportingReconciler) reportGitLab(ctx context.Context, task *kelos.Task
 	reporter := &reporting.TaskReporter{
 		Client: r.Client,
 		Reporter: &reporting.GitLabReporter{
-			BaseURL: baseURL,
-			Project: project,
-			Token:   token,
+			BaseURL:   baseURL,
+			Project:   project,
+			TokenFunc: reporting.StaticToken(token),
 		},
 		Cache: r.cache,
 	}
@@ -263,8 +261,8 @@ func (r *reportingReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 // reportingAnnotationPredicate filters Task events down to ones the reporter
-// actually cares about: only Tasks carrying the github-reporting annotation,
-// and only on phase transitions. Status sub-resource updates do not bump
+// actually cares about: only Tasks carrying a reporting annotation, and only
+// on phase transitions. Status sub-resource updates do not bump
 // metadata.generation, so GenerationChangedPredicate alone would miss them.
 type reportingAnnotationPredicate struct{}
 
@@ -291,5 +289,6 @@ func reportingEnabled(obj client.Object) bool {
 		return false
 	}
 	a := obj.GetAnnotations()
-	return a[reporting.AnnotationGitHubReporting] == "enabled" || a[reporting.AnnotationGitHubChecks] == "enabled"
+	return reporting.ReadAnnotation(a, reporting.AnnotationCommentReporting) == "enabled" ||
+		reporting.ReadAnnotation(a, reporting.AnnotationCheckReporting) == "enabled"
 }

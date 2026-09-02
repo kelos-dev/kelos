@@ -2079,7 +2079,7 @@ func TestSourceAnnotations_GitLab(t *testing.T) {
 			When: kelos.When{
 				GitLab: &kelos.GitLab{
 					Reporting: &kelos.GitLabReporting{
-						Comments: &kelos.GitLabCommentsReporting{Mode: kelos.CommentModeSticky},
+						Comments: &kelos.CommentsReporting{Mode: kelos.CommentModeSticky},
 					},
 				},
 			},
@@ -2354,7 +2354,7 @@ func TestReportingEnabled_CommentsConfigured(t *testing.T) {
 		Spec: kelos.TaskSpawnerSpec{
 			When: kelos.When{
 				GitHubIssues: &kelos.GitHubIssues{
-					Reporting: &kelos.GitHubReporting{Comments: &kelos.GitHubCommentsReporting{}},
+					Reporting: &kelos.GitHubReporting{Comments: &kelos.CommentsReporting{}},
 				},
 			},
 		},
@@ -2430,13 +2430,13 @@ func TestReportingEnabled_GitLab(t *testing.T) {
 	}
 
 	enabled := &kelos.TaskSpawner{Spec: kelos.TaskSpawnerSpec{When: kelos.When{GitLab: &kelos.GitLab{
-		Reporting: &kelos.GitLabReporting{Comments: &kelos.GitLabCommentsReporting{}},
+		Reporting: &kelos.GitLabReporting{Comments: &kelos.CommentsReporting{}},
 	}}}}
 	if !reportingEnabled(enabled) {
 		t.Error("Expected reporting to be enabled for GitLab comments reporting")
 	}
-	if got := resolvedCommentMode(enabled); got != kelos.CommentModePerTask {
-		t.Errorf("resolvedCommentMode = %q, want PerTask default", got)
+	if got := sourceAnnotations(enabled, source.WorkItem{Kind: "MR", Number: 1})[reporting.AnnotationGitHubCommentMode]; got != string(kelos.CommentModePerTask) {
+		t.Errorf("comment mode annotation = %q, want PerTask default", got)
 	}
 }
 
@@ -2566,7 +2566,7 @@ func TestSourceAnnotations_StickyComments(t *testing.T) {
 			When: kelos.When{
 				GitHubPullRequests: &kelos.GitHubPullRequests{
 					Reporting: &kelos.GitHubReporting{
-						Comments: &kelos.GitHubCommentsReporting{Mode: kelos.CommentModeSticky},
+						Comments: &kelos.CommentsReporting{Mode: kelos.CommentModeSticky},
 					},
 				},
 			},
@@ -2827,7 +2827,7 @@ func TestRunOnce_GitLabReportingUsesGitLabTokenResolver(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 	ts.Spec.Suspend = boolPtr(true)
 	ts.Spec.When = kelos.When{GitLab: &kelos.GitLab{
-		Reporting: &kelos.GitLabReporting{Comments: &kelos.GitLabCommentsReporting{}},
+		Reporting: &kelos.GitLabReporting{Comments: &kelos.CommentsReporting{}},
 	}}
 
 	cl, key := setupTest(t, ts)

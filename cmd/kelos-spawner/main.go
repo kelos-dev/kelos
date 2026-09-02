@@ -627,7 +627,8 @@ func recordCycleFailure(ctx context.Context, cl client.Client, key types.Namespa
 // (such as the reporting watcher) to identify the originating issue, pull
 // request, or merge request.
 func sourceAnnotations(ts *kelos.TaskSpawner, item source.WorkItem) map[string]string {
-	if ts.Spec.When.GitHubIssues == nil && ts.Spec.When.GitHubPullRequests == nil && ts.Spec.When.GitLab == nil {
+	tracker, ok := ts.Spec.When.Tracker()
+	if !ok {
 		return nil
 	}
 
@@ -644,77 +645,37 @@ func sourceAnnotations(ts *kelos.TaskSpawner, item source.WorkItem) map[string]s
 		reporting.AnnotationSourceNumber: strconv.Itoa(item.Number),
 	}
 
-	if reportingEnabled(ts) {
+	if tracker.Comments != nil {
 		annotations[reporting.AnnotationGitHubReporting] = "enabled"
-		annotations[reporting.AnnotationGitHubCommentMode] = string(resolvedCommentMode(ts))
+		annotations[reporting.AnnotationGitHubCommentMode] = string(tracker.CommentMode())
 	}
 
-	if checksReportingEnabled(ts) {
+	if tracker.Checks != nil {
 		annotations[reporting.AnnotationGitHubChecks] = "enabled"
 		if item.HeadSHA != "" {
 			annotations[reporting.AnnotationSourceSHA] = item.HeadSHA
 		}
-		if name := resolvedCheckName(ts); name != "" {
-			annotations[reporting.AnnotationGitHubCheckName] = name
+		if tracker.Checks.Name != "" {
+			annotations[reporting.AnnotationGitHubCheckName] = tracker.Checks.Name
 		}
 	}
 
 	return annotations
 }
 
-// reportingEnabled returns true when GitHub or GitLab comment reporting is
-// configured and enabled on the TaskSpawner. This only covers polling-based
-// sources; webhook-based reporting is handled by the webhook server and its
-// handler.
+// reportingEnabled returns true when comment reporting is configured on the
+// TaskSpawner's code-host source. This only covers polling-based sources;
+// webhook-based reporting is handled by the webhook server and its handler.
 func reportingEnabled(ts *kelos.TaskSpawner) bool {
-	if ts.Spec.When.GitHubIssues != nil && ts.Spec.When.GitHubIssues.Reporting != nil {
-		rep := ts.Spec.When.GitHubIssues.Reporting
-		return rep.Enabled || rep.Comments != nil
-	}
-	if ts.Spec.When.GitHubPullRequests != nil && ts.Spec.When.GitHubPullRequests.Reporting != nil {
-		rep := ts.Spec.When.GitHubPullRequests.Reporting
-		return rep.Enabled || rep.Comments != nil
-	}
-	if ts.Spec.When.GitLab != nil && ts.Spec.When.GitLab.Reporting != nil {
-		return ts.Spec.When.GitLab.Reporting.Comments != nil
-	}
-	return false
-}
-
-// resolvedCommentMode returns the configured comment mode. The deprecated
-// Enabled field and an empty Comments configuration retain PerTask behavior.
-func resolvedCommentMode(ts *kelos.TaskSpawner) kelos.CommentMode {
-	var mode kelos.CommentMode
-	switch {
-	case ts.Spec.When.GitHubIssues != nil && ts.Spec.When.GitHubIssues.Reporting != nil && ts.Spec.When.GitHubIssues.Reporting.Comments != nil:
-		mode = ts.Spec.When.GitHubIssues.Reporting.Comments.Mode
-	case ts.Spec.When.GitHubPullRequests != nil && ts.Spec.When.GitHubPullRequests.Reporting != nil && ts.Spec.When.GitHubPullRequests.Reporting.Comments != nil:
-		mode = ts.Spec.When.GitHubPullRequests.Reporting.Comments.Mode
-	case ts.Spec.When.GitLab != nil && ts.Spec.When.GitLab.Reporting != nil && ts.Spec.When.GitLab.Reporting.Comments != nil:
-		mode = ts.Spec.When.GitLab.Reporting.Comments.Mode
-	}
-	if mode != "" {
-		return mode
-	}
-	return kelos.CommentModePerTask
+	tracker, _ := ts.Spec.When.Tracker()
+	return tracker.Comments != nil
 }
 
 // checksReportingEnabled returns true when GitHub Checks API reporting is
-// configured and enabled on the TaskSpawner.
+// configured on the TaskSpawner.
 func checksReportingEnabled(ts *kelos.TaskSpawner) bool {
-	if ts.Spec.When.GitHubPullRequests != nil && ts.Spec.When.GitHubPullRequests.Reporting != nil && ts.Spec.When.GitHubPullRequests.Reporting.Checks != nil {
-		return true
-	}
-	return false
-}
-
-// resolvedCheckName returns the configured check name, or empty string for
-// the default.
-func resolvedCheckName(ts *kelos.TaskSpawner) string {
-	if ts.Spec.When.GitHubPullRequests != nil && ts.Spec.When.GitHubPullRequests.Reporting != nil && ts.Spec.When.GitHubPullRequests.Reporting.Checks != nil {
-		return ts.Spec.When.GitHubPullRequests.Reporting.Checks.Name
-	}
-	return ""
+	tracker, _ := ts.Spec.When.Tracker()
+	return tracker.Checks != nil
 }
 
 type resolvedGitHubCommentPolicy struct {
@@ -930,26 +891,19 @@ func newGitLabTokenResolver(token string) func(context.Context) (string, error) 
 }
 
 func priorityLabelsForTaskSpawner(ts *kelos.TaskSpawner) []string {
-	if ts.Spec.When.GitHubIssues != nil {
-		return ts.Spec.When.GitHubIssues.PriorityLabels
-	}
-	if ts.Spec.When.GitHubPullRequests != nil {
-		return ts.Spec.When.GitHubPullRequests.PriorityLabels
-	}
-	return nil
+	tracker, _ := ts.Spec.When.Tracker()
+	return tracker.PriorityLabels
 }
 
-// deriveUpstreamRepo extracts the owner/repo from the githubIssues.repo or
-// githubPullRequests.repo override, returning it in "owner/repo" format.
-// Returns an empty string when no override is configured.
+// deriveUpstreamRepo extracts the owner/repo from a GitHub source's repo
+// override, returning it in "owner/repo" format. Returns an empty string when
+// no override is configured.
 func deriveUpstreamRepo(ts *kelos.TaskSpawner) string {
-	var repoOverride string
-	if ts.Spec.When.GitHubIssues != nil && ts.Spec.When.GitHubIssues.Repo != "" {
-		repoOverride = ts.Spec.When.GitHubIssues.Repo
-	} else if ts.Spec.When.GitHubPullRequests != nil && ts.Spec.When.GitHubPullRequests.Repo != "" {
-		repoOverride = ts.Spec.When.GitHubPullRequests.Repo
+	tracker, _ := ts.Spec.When.Tracker()
+	if tracker.Provider != kelos.WorkspaceProviderGitHub {
+		return ""
 	}
-	return source.GitHubRepositoryName(repoOverride)
+	return source.GitHubRepositoryName(tracker.Repo)
 }
 
 func parsePollInterval(s string) time.Duration {

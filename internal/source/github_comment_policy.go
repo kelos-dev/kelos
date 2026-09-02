@@ -110,11 +110,7 @@ func (a *githubCommentAuthorizer) authorizationConfigured() bool {
 	return len(a.allowedUsers) > 0 || len(a.allowedTeams) > 0 || a.minimumPermission != ""
 }
 
-func (a *githubCommentAuthorizer) isAuthorized(ctx context.Context, actor githubUser) (bool, error) {
-	return a.isAuthorizedLogin(ctx, actor.Login)
-}
-
-func (a *githubCommentAuthorizer) isAuthorizedLogin(ctx context.Context, login string) (bool, error) {
+func (a *githubCommentAuthorizer) isAuthorized(ctx context.Context, login string) (bool, error) {
 	if a == nil || !a.authorizationConfigured() {
 		return true, nil
 	}
@@ -255,63 +251,15 @@ func (a *githubCommentAuthorizer) getJSON(ctx context.Context, path string, out 
 }
 
 func evaluateGitHubCommentPolicy(ctx context.Context, body string, bodyActor githubUser, comments []githubComment, policy githubCommentPolicy, authorizer *githubCommentAuthorizer) (bool, time.Time, error) {
-	cmds := policy.commands()
-	if !cmds.enabled() {
-		return true, time.Time{}, nil
-	}
-
-	bodyHasTrigger := cmds.Trigger != "" && containsCommand(body, cmds.Trigger)
-	bodyHasExclude := len(cmds.Excludes) > 0 && containsAnyCommand(body, cmds.Excludes)
-	var bodyMatches bodyMatch
-	if bodyHasTrigger || bodyHasExclude {
-		authorized, err := authorizer.isAuthorized(ctx, bodyActor)
-		if err != nil {
-			return false, time.Time{}, err
-		}
-		if authorized {
-			bodyMatches = bodyMatch{trigger: bodyHasTrigger, exclude: bodyHasExclude}
-		}
-	}
-
-	triggerMatch, excludeMatch := newCommentMatch(), newCommentMatch()
-	var err error
-	if cmds.Trigger != "" {
-		triggerMatch, err = latestAuthorizedCommentMatch(ctx, comments, []string{cmds.Trigger}, authorizer)
-		if err != nil {
-			return false, time.Time{}, err
-		}
-	}
-	if len(cmds.Excludes) > 0 {
-		excludeMatch, err = latestAuthorizedCommentMatch(ctx, comments, cmds.Excludes, authorizer)
-		if err != nil {
-			return false, time.Time{}, err
-		}
-	}
-
-	allowed, triggerTime := decideCommentPolicy(cmds, bodyMatches, triggerMatch, excludeMatch)
-	return allowed, triggerTime, nil
+	return evaluateCommentPolicy(ctx, policy.commands(), body, bodyActor.Login, githubCommentEntries(comments), authorizer)
 }
 
-func latestAuthorizedCommentMatch(ctx context.Context, comments []githubComment, commands []string, authorizer *githubCommentAuthorizer) (commentMatch, error) {
-	match := newCommentMatch()
-
-	for i, comment := range comments {
-		if !containsAnyCommand(comment.Body, commands) {
-			continue
-		}
-
-		authorized, err := authorizer.isAuthorized(ctx, comment.User)
-		if err != nil {
-			return commentMatch{}, err
-		}
-		if !authorized {
-			continue
-		}
-
-		match.record(i, comment.CreatedAt)
+func githubCommentEntries(comments []githubComment) []commentEntry {
+	entries := make([]commentEntry, len(comments))
+	for i, c := range comments {
+		entries[i] = commentEntry{Body: c.Body, Author: c.User.Login, CreatedAt: c.CreatedAt}
 	}
-
-	return match, nil
+	return entries
 }
 
 func normalizeGitHubLogin(login string) string {

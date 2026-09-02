@@ -283,29 +283,13 @@ func (g *GatewayHandler) listGatewayScopedSpawners(ctx context.Context, namespac
 		return nil, fmt.Errorf("listing TaskSpawners in namespace %s: %w", namespace, err)
 	}
 
+	provider, err := providerFor(source)
+	if err != nil {
+		return nil, err
+	}
 	spawners := make([]*kelos.TaskSpawner, 0)
 	for i := range spawnerList.Items {
-		when := &spawnerList.Items[i].Spec.When
-		var ref *kelos.GatewayReference
-		switch source {
-		case GitHubSource:
-			if when.GitHubWebhook != nil {
-				ref = when.GitHubWebhook.GatewayRef
-			}
-		case LinearSource:
-			if when.LinearWebhook != nil {
-				ref = when.LinearWebhook.GatewayRef
-			}
-		case GitLabSource:
-			if when.GitLabWebhook != nil {
-				ref = when.GitLabWebhook.GatewayRef
-			}
-		case GenericSource:
-			if when.GenericWebhook != nil {
-				ref = when.GenericWebhook.GatewayRef
-			}
-		}
-		if ref != nil && ref.Name == name {
+		if ref, _ := provider.gatewayRef(&spawnerList.Items[i]); ref != nil && ref.Name == name {
 			spawners = append(spawners, &spawnerList.Items[i])
 		}
 	}

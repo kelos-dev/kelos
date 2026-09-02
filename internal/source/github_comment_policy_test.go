@@ -264,18 +264,18 @@ func TestGitHubCommentAuthorizer_MinimumPermission(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got, err := authorizer.isAuthorizedLogin(context.Background(), tt.login)
+		got, err := authorizer.isAuthorized(context.Background(), tt.login)
 		if err != nil {
-			t.Fatalf("isAuthorizedLogin(%q) error = %v", tt.login, err)
+			t.Fatalf("isAuthorized(%q) error = %v", tt.login, err)
 		}
 		if got != tt.want {
-			t.Fatalf("isAuthorizedLogin(%q) = %v, want %v", tt.login, got, tt.want)
+			t.Fatalf("isAuthorized(%q) = %v, want %v", tt.login, got, tt.want)
 		}
 	}
 
 	// The second lookup should hit the cache.
-	if _, err := authorizer.isAuthorizedLogin(context.Background(), "bob"); err != nil {
-		t.Fatalf("cached isAuthorizedLogin() error = %v", err)
+	if _, err := authorizer.isAuthorized(context.Background(), "bob"); err != nil {
+		t.Fatalf("cached isAuthorized() error = %v", err)
 	}
 	if permissionChecks != 3 {
 		t.Fatalf("permission checks = %d, want %d", permissionChecks, 3)
@@ -311,13 +311,13 @@ func TestGitHubCommentAuthorizer_DoesNotCacheErrors(t *testing.T) {
 		t.Fatalf("newGitHubCommentAuthorizer() error = %v", err)
 	}
 
-	if _, err := authorizer.isAuthorizedLogin(context.Background(), "alice"); err == nil {
+	if _, err := authorizer.isAuthorized(context.Background(), "alice"); err == nil {
 		t.Fatal("Expected first permission lookup to fail")
 	}
 
-	got, err := authorizer.isAuthorizedLogin(context.Background(), "alice")
+	got, err := authorizer.isAuthorized(context.Background(), "alice")
 	if err != nil {
-		t.Fatalf("second isAuthorizedLogin() error = %v", err)
+		t.Fatalf("second isAuthorized() error = %v", err)
 	}
 	if !got {
 		t.Fatal("Expected second permission lookup to authorize alice")
@@ -352,11 +352,11 @@ func TestGitHubCommentAuthorizer_AllowedTeams(t *testing.T) {
 		t.Fatalf("newGitHubCommentAuthorizer() error = %v", err)
 	}
 
-	if got, err := authorizer.isAuthorizedLogin(context.Background(), "alice"); err != nil || !got {
-		t.Fatalf("isAuthorizedLogin(alice) = %v, %v, want true, nil", got, err)
+	if got, err := authorizer.isAuthorized(context.Background(), "alice"); err != nil || !got {
+		t.Fatalf("isAuthorized(alice) = %v, %v, want true, nil", got, err)
 	}
-	if got, err := authorizer.isAuthorizedLogin(context.Background(), "mallory"); err != nil || got {
-		t.Fatalf("isAuthorizedLogin(mallory) = %v, %v, want false, nil", got, err)
+	if got, err := authorizer.isAuthorized(context.Background(), "mallory"); err != nil || got {
+		t.Fatalf("isAuthorized(mallory) = %v, %v, want false, nil", got, err)
 	}
 }
 
@@ -389,9 +389,9 @@ func TestGitHubCommentAuthorizer_TeamAuthorizationStillWorksAfterPermissionError
 		t.Fatalf("newGitHubCommentAuthorizer() error = %v", err)
 	}
 
-	got, err := authorizer.isAuthorizedLogin(context.Background(), "alice")
+	got, err := authorizer.isAuthorized(context.Background(), "alice")
 	if err != nil {
-		t.Fatalf("isAuthorizedLogin(alice) error = %v", err)
+		t.Fatalf("isAuthorized(alice) error = %v", err)
 	}
 	if !got {
 		t.Fatal("Expected allowed team membership to authorize alice")

@@ -652,7 +652,7 @@ func TestServeHTTP_StampsStickyCommentReportingAnnotations(t *testing.T) {
 				GitHubWebhook: &kelos.GitHubWebhook{
 					Events: []string{"issues"},
 					Reporting: &kelos.GitHubReporting{
-						Comments: &kelos.GitHubCommentsReporting{Mode: kelos.CommentModeSticky},
+						Comments: &kelos.CommentsReporting{Mode: kelos.CommentModeSticky},
 					},
 				},
 			},
@@ -1489,7 +1489,7 @@ func TestGitLabServeHTTP_StampsReportingAnnotations(t *testing.T) {
 			When: kelos.When{
 				GitLabWebhook: &kelos.GitLabWebhook{
 					Events:    []string{"note"},
-					Reporting: &kelos.GitLabReporting{Comments: &kelos.GitLabCommentsReporting{Mode: kelos.CommentModeSticky}},
+					Reporting: &kelos.GitLabReporting{Comments: &kelos.CommentsReporting{Mode: kelos.CommentModeSticky}},
 				},
 			},
 			TaskTemplate: kelos.TaskTemplate{
@@ -2715,7 +2715,7 @@ func TestCreateTask_NameCollisionWithUnrelatedTaskErrors(t *testing.T) {
 	}
 	parsed := &ParsedWebhook{GitHub: eventData}
 
-	_, err = handler.createTask(context.Background(), spawner, "pull_request", parsed, "delivery-collide")
+	_, err = handler.createTask(context.Background(), githubProvider{}, spawner, "pull_request", parsed, "delivery-collide")
 	if err == nil {
 		t.Fatal("expected error when rendered name collides with an unrelated Task, got nil")
 	}

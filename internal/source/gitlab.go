@@ -2,9 +2,7 @@ package source
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"slices"
@@ -110,11 +108,33 @@ func (s *GitLabSource) baseURL() string {
 	return defaultGitLabBaseURL
 }
 
-func (s *GitLabSource) httpClient() *http.Client {
-	if s.Client != nil {
-		return s.Client
+// rest returns the REST plumbing for the GitLab API: PRIVATE-TOKEN auth and
+// X-Next-Page pagination.
+func (s *GitLabSource) rest() restClient {
+	return restClient{
+		name:   "GitLab",
+		client: s.Client,
+		authorize: func(req *http.Request) {
+			if s.Token != "" {
+				req.Header.Set("PRIVATE-TOKEN", s.Token)
+			}
+			req.Header.Set("Accept", "application/json")
+		},
+		nextPage: func(pageURL string, resp *http.Response) string {
+			next := resp.Header.Get("X-Next-Page")
+			if next == "" {
+				return ""
+			}
+			u, err := url.Parse(pageURL)
+			if err != nil {
+				return ""
+			}
+			q := u.Query()
+			q.Set("page", next)
+			u.RawQuery = q.Encode()
+			return u.String()
+		},
 	}
-	return http.DefaultClient
 }
 
 // Discover fetches issues and/or merge requests from GitLab and returns them
@@ -122,84 +142,82 @@ func (s *GitLabSource) httpClient() *http.Client {
 // issues and merge requests independently, so bare IIDs would collide when
 // both types are discovered by one spawner.
 func (s *GitLabSource) Discover(ctx context.Context) ([]WorkItem, error) {
-	policy := gitlabCommentPolicy{
-		TriggerComment:  s.TriggerComment,
-		ExcludeComments: s.ExcludeComments,
-		AllowedUsers:    s.AllowedUsers,
-	}
-	authorizer := newGitLabCommentAuthorizer(policy)
+	return discoverTracker(ctx, s)
+}
 
+func (s *GitLabSource) list(ctx context.Context) ([]trackerItem, error) {
 	excluded := make(map[string]struct{}, len(s.ExcludeLabels))
 	for _, l := range s.ExcludeLabels {
 		excluded[l] = struct{}{}
 	}
 
-	var items []WorkItem
+	var items []trackerItem
 	for _, resource := range s.resolvedResources() {
 		list, err := s.fetchAllItems(ctx, resource)
 		if err != nil {
 			return nil, err
 		}
-
 		for _, it := range list {
 			if hasAnyLabel(it.Labels, excluded) {
 				continue
 			}
-
-			item := WorkItem{
-				ID:      strconv.Itoa(it.IID),
-				Number:  it.IID,
-				Title:   it.Title,
-				Body:    it.Description,
-				URL:     it.WebURL,
-				Labels:  it.Labels,
-				Kind:    "Issue",
-				Branch:  it.SourceBranch,
-				HeadSHA: it.SHA,
+			item := trackerItem{
+				WorkItem: WorkItem{
+					ID:      strconv.Itoa(it.IID),
+					Number:  it.IID,
+					Title:   it.Title,
+					Body:    it.Description,
+					URL:     it.WebURL,
+					Labels:  it.Labels,
+					Kind:    "Issue",
+					Branch:  it.SourceBranch,
+					HeadSHA: it.SHA,
+				},
+				Author: it.Author.Username,
 			}
-
-			var pipelineTriggerTime time.Time
 			if resource == gitlabResourceMergeRequests {
 				item.ID = "mr-" + item.ID
 				item.Kind = "MR"
-
-				keep, triggerTime, err := s.enrichMergeRequest(ctx, it.IID, &item)
-				if err != nil {
-					return nil, err
-				}
-				if !keep {
-					continue
-				}
-				pipelineTriggerTime = triggerTime
 			}
-
-			notes, err := s.fetchNotes(ctx, resource, it.IID)
-			if err != nil {
-				return nil, fmt.Errorf("fetching notes for %s !%d: %w", resource, it.IID, err)
-			}
-			item.Comments = concatBodies(gitlabNoteBodies(gitlabConversationNotes(notes)))
-			if resource == gitlabResourceMergeRequests {
-				item.ReviewComments = concatGitLabDiffNotes(notes)
-			}
-
-			if policy.enabled() {
-				allowed, triggerTime := evaluateGitLabCommentPolicy(it.Description, it.Author.Username, notes, policy, authorizer)
-				if !allowed {
-					continue
-				}
-				if s.TriggerComment != "" {
-					item.TriggerTime = triggerTime
-				}
-			}
-			if pipelineTriggerTime.After(item.TriggerTime) {
-				item.TriggerTime = pipelineTriggerTime
-			}
-
 			items = append(items, item)
 		}
 	}
-
 	return items, nil
+}
+
+// enrich gates merge requests on pipeline status and review state before
+// fetching notes. The policy thread is every note; conversation notes fill
+// Comments and diff notes fill ReviewComments.
+func (s *GitLabSource) enrich(ctx context.Context, item *trackerItem) (bool, []commentEntry, time.Time, error) {
+	resource := gitlabResourceIssues
+	var pipelineTriggerTime time.Time
+	if item.Kind == "MR" {
+		resource = gitlabResourceMergeRequests
+		keep, triggerTime, err := s.enrichMergeRequest(ctx, item.Number, &item.WorkItem)
+		if err != nil || !keep {
+			return false, nil, time.Time{}, err
+		}
+		pipelineTriggerTime = triggerTime
+	}
+
+	notes, err := s.fetchNotes(ctx, resource, item.Number)
+	if err != nil {
+		return false, nil, time.Time{}, fmt.Errorf("fetching notes for %s !%d: %w", resource, item.Number, err)
+	}
+	item.Comments = concatBodies(gitlabNoteBodies(gitlabConversationNotes(notes)))
+	if item.Kind == "MR" {
+		item.ReviewComments = concatGitLabDiffNotes(notes)
+	}
+	return true, gitlabCommentEntries(notes), pipelineTriggerTime, nil
+}
+
+func (s *GitLabSource) commentPolicy(context.Context) (commentCommands, commentAuthorizer, error) {
+	policy := gitlabCommentPolicy{
+		TriggerComment:  s.TriggerComment,
+		ExcludeComments: s.ExcludeComments,
+		AllowedUsers:    s.AllowedUsers,
+	}
+	return policy.commands(), newGitLabCommentAuthorizer(policy), nil
 }
 
 // enrichMergeRequest loads the head pipeline and, when a review-state gate is
@@ -211,7 +229,7 @@ func (s *GitLabSource) enrichMergeRequest(ctx context.Context, iid int, item *Wo
 	// The list endpoint omits head_pipeline, so each merge request costs one
 	// detail call.
 	var detail gitlabItem
-	if err := s.getJSON(ctx, fmt.Sprintf("%s/%s/%d", s.projectURL(), gitlabResourceMergeRequests, iid), nil, &detail); err != nil {
+	if _, err := s.rest().getJSON(ctx, fmt.Sprintf("%s/%s/%d", s.projectURL(), gitlabResourceMergeRequests, iid), &detail); err != nil {
 		return false, time.Time{}, fmt.Errorf("fetching merge request !%d: %w", iid, err)
 	}
 
@@ -262,7 +280,7 @@ func (s *GitLabSource) fetchReviewState(ctx context.Context, iid int, detailedMe
 	}
 
 	var approvals gitlabApprovals
-	if err := s.getJSON(ctx, fmt.Sprintf("%s/%s/%d/approvals", s.projectURL(), gitlabResourceMergeRequests, iid), nil, &approvals); err != nil {
+	if _, err := s.rest().getJSON(ctx, fmt.Sprintf("%s/%s/%d/approvals", s.projectURL(), gitlabResourceMergeRequests, iid), &approvals); err != nil {
 		return "", fmt.Errorf("fetching approvals for merge request !%d: %w", iid, err)
 	}
 	if approvals.Approved {
@@ -353,6 +371,7 @@ func (s *GitLabSource) projectURL() string {
 func (s *GitLabSource) fetchAllItems(ctx context.Context, resource string) ([]gitlabItem, error) {
 	params := url.Values{}
 	params.Set("per_page", "100")
+	params.Set("page", "1")
 	state := s.State
 	if state == "" {
 		state = "opened"
@@ -361,17 +380,8 @@ func (s *GitLabSource) fetchAllItems(ctx context.Context, resource string) ([]gi
 	if len(s.Labels) > 0 {
 		params.Set("labels", strings.Join(s.Labels, ","))
 	}
-
-	var all []gitlabItem
-	err := s.fetchPages(ctx, s.projectURL()+"/"+resource, params, func(body io.Reader) (int, error) {
-		var page []gitlabItem
-		if err := json.NewDecoder(body).Decode(&page); err != nil {
-			return 0, err
-		}
-		all = append(all, page...)
-		return len(page), nil
-	})
-	return all, err
+	items, _, err := fetchAllPages[gitlabItem](ctx, s.rest(), s.projectURL()+"/"+resource+"?"+params.Encode())
+	return items, err
 }
 
 // fetchNotes returns an item's notes oldest first. They are requested newest
@@ -380,82 +390,11 @@ func (s *GitLabSource) fetchAllItems(ctx context.Context, resource string) ([]gi
 func (s *GitLabSource) fetchNotes(ctx context.Context, resource string, iid int) ([]gitlabNote, error) {
 	params := url.Values{}
 	params.Set("per_page", "100")
+	params.Set("page", "1")
 	params.Set("sort", "desc")
 	params.Set("order_by", "created_at")
 
-	var all []gitlabNote
-	err := s.fetchPages(ctx, fmt.Sprintf("%s/%s/%d/notes", s.projectURL(), resource, iid), params, func(body io.Reader) (int, error) {
-		var page []gitlabNote
-		if err := json.NewDecoder(body).Decode(&page); err != nil {
-			return 0, err
-		}
-		all = append(all, page...)
-		return len(page), nil
-	})
-	slices.Reverse(all)
-	return all, err
-}
-
-// fetchPages walks GitLab's page-number pagination, following the X-Next-Page
-// response header until it is empty or maxPages is reached.
-func (s *GitLabSource) fetchPages(ctx context.Context, endpoint string, params url.Values, decode func(io.Reader) (int, error)) error {
-	page := "1"
-	for i := 0; page != "" && i < maxPages; i++ {
-		params.Set("page", page)
-		resp, err := s.get(ctx, endpoint, params)
-		if err != nil {
-			return err
-		}
-		n, err := decode(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			return fmt.Errorf("decoding response: %w", err)
-		}
-		if n == 0 {
-			break
-		}
-		page = resp.Header.Get("X-Next-Page")
-	}
-	return nil
-}
-
-// getJSON fetches a single JSON document.
-func (s *GitLabSource) getJSON(ctx context.Context, endpoint string, params url.Values, out interface{}) error {
-	resp, err := s.get(ctx, endpoint, params)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return fmt.Errorf("decoding response: %w", err)
-	}
-	return nil
-}
-
-// get performs an authenticated GET and returns the response for a 200
-// status; any other status is returned as an error with the response body.
-func (s *GitLabSource) get(ctx context.Context, endpoint string, params url.Values) (*http.Response, error) {
-	target := endpoint
-	if len(params) > 0 {
-		target += "?" + params.Encode()
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
-	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
-	}
-	if s.Token != "" {
-		req.Header.Set("PRIVATE-TOKEN", s.Token)
-	}
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := s.httpClient().Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("fetching %s: %w", endpoint, err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		resp.Body.Close()
-		return nil, fmt.Errorf("GitLab API returned status %d: %s", resp.StatusCode, string(body))
-	}
-	return resp, nil
+	notes, _, err := fetchAllPages[gitlabNote](ctx, s.rest(), fmt.Sprintf("%s/%s/%d/notes?%s", s.projectURL(), resource, iid, params.Encode()))
+	slices.Reverse(notes)
+	return notes, err
 }

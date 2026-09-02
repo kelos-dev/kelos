@@ -94,7 +94,7 @@ type GitHubReporting struct {
 	// or pull request. When nil, no comments are posted unless the deprecated
 	// Enabled field is true.
 	// +optional
-	Comments *GitHubCommentsReporting `json:"comments,omitempty"`
+	Comments *CommentsReporting `json:"comments,omitempty"`
 
 	// Checks creates GitHub Check Runs for pull request tasks. When nil,
 	// no Check Runs are created. Supported for githubPullRequests and
@@ -117,10 +117,11 @@ const (
 	CommentModeSticky CommentMode = "Sticky"
 )
 
-// GitHubCommentsReporting configures GitHub task status comment reporting.
-type GitHubCommentsReporting struct {
+// CommentsReporting configures task status comment reporting on the
+// originating issue, pull request, or merge request.
+type CommentsReporting struct {
 	// Mode controls whether comments are created per Task or reused across
-	// Tasks from the same TaskSpawner and originating issue or pull request.
+	// Tasks from the same TaskSpawner and originating item.
 	// Defaults to PerTask.
 	// +optional
 	// +kubebuilder:default=PerTask
@@ -418,18 +419,7 @@ type GitLabReporting struct {
 	// Comments configures task status notes on the originating issue or
 	// merge request. When nil, no notes are posted.
 	// +optional
-	Comments *GitLabCommentsReporting `json:"comments,omitempty"`
-}
-
-// GitLabCommentsReporting configures GitLab task status note reporting.
-type GitLabCommentsReporting struct {
-	// Mode controls whether notes are created per Task or reused across
-	// Tasks from the same TaskSpawner and originating issue or merge request.
-	// Defaults to PerTask.
-	// +optional
-	// +kubebuilder:default=PerTask
-	// +kubebuilder:validation:Enum=PerTask;Sticky
-	Mode CommentMode `json:"mode,omitempty"`
+	Comments *CommentsReporting `json:"comments,omitempty"`
 }
 
 // GitLab discovers issues and merge requests from a GitLab project.

@@ -2,9 +2,7 @@ package source
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -80,15 +78,70 @@ func (s *GitHubSource) httpClient() *http.Client {
 	return http.DefaultClient
 }
 
+func (s *GitHubSource) rest() restClient {
+	return githubREST(s.Token, s.Client)
+}
+
+// githubREST returns the REST plumbing for the GitHub API: token auth and
+// Link-header pagination.
+func githubREST(token string, client *http.Client) restClient {
+	return restClient{
+		name:   "GitHub",
+		client: client,
+		authorize: func(req *http.Request) {
+			if token != "" {
+				req.Header.Set("Authorization", "token "+token)
+			}
+			req.Header.Set("Accept", "application/vnd.github.v3+json")
+		},
+		nextPage: func(_ string, resp *http.Response) string {
+			return parseNextLink(resp.Header.Get("Link"))
+		},
+	}
+}
+
 // Discover fetches issues from GitHub and returns them as WorkItems.
 func (s *GitHubSource) Discover(ctx context.Context) ([]WorkItem, error) {
+	return discoverTracker(ctx, s)
+}
+
+func (s *GitHubSource) list(ctx context.Context) ([]trackerItem, error) {
 	issues, err := s.fetchAllIssues(ctx)
 	if err != nil {
 		return nil, err
 	}
+	var items []trackerItem
+	for _, issue := range s.filterItems(issues) {
+		kind := "Issue"
+		if issue.PullRequest != nil {
+			kind = "PR"
+		}
+		items = append(items, trackerItem{
+			WorkItem: WorkItem{
+				ID:     strconv.Itoa(issue.Number),
+				Number: issue.Number,
+				Title:  issue.Title,
+				Body:   issue.Body,
+				URL:    issue.HTMLURL,
+				Labels: githubLabelNames(issue.Labels),
+				Kind:   kind,
+			},
+			Author: issue.User.Login,
+		})
+	}
+	return items, nil
+}
 
-	issues = s.filterItems(issues)
+func (s *GitHubSource) enrich(ctx context.Context, item *trackerItem) (bool, []commentEntry, time.Time, error) {
+	comments, err := fetchGitHubIssueComments(ctx, s.rest(), s.baseURL(), s.Owner, s.Repo, item.Number)
+	if err != nil {
+		return false, nil, time.Time{}, fmt.Errorf("fetching comments for issue #%d: %w", item.Number, err)
+	}
+	item.Comments = concatCommentBodies(comments)
+	return true, githubCommentEntries(comments), time.Time{}, nil
+}
 
+func (s *GitHubSource) commentPolicy(context.Context) (commentCommands, commentAuthorizer, error) {
 	policy := githubCommentPolicy{
 		TriggerComment:    s.TriggerComment,
 		ExcludeComments:   s.ExcludeComments,
@@ -96,67 +149,29 @@ func (s *GitHubSource) Discover(ctx context.Context) ([]WorkItem, error) {
 		AllowedTeams:      s.AllowedTeams,
 		MinimumPermission: s.MinimumPermission,
 	}
-	needsCommentFilter := s.TriggerComment != "" || len(s.ExcludeComments) > 0
-	var authorizer *githubCommentAuthorizer
-	if needsCommentFilter {
-		authorizer, err = newGitHubCommentAuthorizer(s.Owner, s.Repo, s.baseURL(), s.Token, s.httpClient(), policy)
-		if err != nil {
-			return nil, err
-		}
+	return githubCommentPolicyAuthorizer(s.Owner, s.Repo, s.baseURL(), s.Token, s.httpClient(), policy)
+}
+
+// githubCommentPolicyAuthorizer builds the authorizer only when a command is
+// configured, because it may call the GitHub API.
+func githubCommentPolicyAuthorizer(owner, repo, baseURL, token string, client *http.Client, policy githubCommentPolicy) (commentCommands, commentAuthorizer, error) {
+	cmds := policy.commands()
+	if !cmds.enabled() {
+		return cmds, nil, nil
 	}
-
-	var items []WorkItem
-	for _, issue := range issues {
-		var labels []string
-		for _, l := range issue.Labels {
-			labels = append(labels, l.Name)
-		}
-
-		rawComments, err := s.fetchComments(ctx, issue.Number)
-		if err != nil {
-			return nil, fmt.Errorf("fetching comments for issue #%d: %w", issue.Number, err)
-		}
-
-		comments := concatCommentBodies(rawComments)
-
-		var triggerTime time.Time
-		if needsCommentFilter {
-			commentAllowed, resolvedTriggerTime, err := evaluateGitHubCommentPolicy(ctx, issue.Body, issue.User, rawComments, policy, authorizer)
-			if err != nil {
-				return nil, fmt.Errorf("evaluating comment policy for issue #%d: %w", issue.Number, err)
-			}
-			if !commentAllowed {
-				continue
-			}
-			triggerTime = resolvedTriggerTime
-		}
-
-		kind := "Issue"
-		if issue.PullRequest != nil {
-			kind = "PR"
-		}
-
-		item := WorkItem{
-			ID:       strconv.Itoa(issue.Number),
-			Number:   issue.Number,
-			Title:    issue.Title,
-			Body:     issue.Body,
-			URL:      issue.HTMLURL,
-			Labels:   labels,
-			Comments: comments,
-			Kind:     kind,
-		}
-
-		// Record the timestamp of the most recent trigger comment so the
-		// spawner can retrigger completed tasks when a new trigger arrives.
-		if s.TriggerComment != "" {
-			item.TriggerTime = triggerTime
-		}
-
-		items = append(items, item)
+	authorizer, err := newGitHubCommentAuthorizer(owner, repo, baseURL, token, client, policy)
+	if err != nil {
+		return cmds, nil, err
 	}
+	return cmds, authorizer, nil
+}
 
-	return items, nil
+func githubLabelNames(labels []githubLabel) []string {
+	var names []string
+	for _, l := range labels {
+		names = append(names, l.Name)
+	}
+	return names
 }
 
 // containsAnyCommand reports whether body contains any of the given commands.
@@ -240,20 +255,11 @@ func (s *GitHubSource) filterItems(issues []githubIssue) []githubIssue {
 }
 
 func (s *GitHubSource) fetchAllIssues(ctx context.Context) ([]githubIssue, error) {
-	var allIssues []githubIssue
-
-	pageURL := s.buildIssuesURL()
-
-	for page := 0; pageURL != "" && page < maxPages; page++ {
-		issues, nextURL, err := s.fetchIssuesPage(ctx, pageURL)
-		if err != nil {
-			return nil, err
-		}
-		allIssues = append(allIssues, issues...)
-		pageURL = nextURL
+	issues, _, err := fetchAllPages[githubIssue](ctx, s.rest(), s.buildIssuesURL())
+	if err != nil {
+		return nil, fmt.Errorf("fetching issues: %w", err)
 	}
-
-	return allIssues, nil
+	return issues, nil
 }
 
 func (s *GitHubSource) buildIssuesURL() string {
@@ -283,86 +289,11 @@ func (s *GitHubSource) buildIssuesURL() string {
 	return u + "?" + params.Encode()
 }
 
-func (s *GitHubSource) fetchIssuesPage(ctx context.Context, pageURL string) ([]githubIssue, string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, pageURL, nil)
-	if err != nil {
-		return nil, "", fmt.Errorf("creating request: %w", err)
-	}
-
-	if s.Token != "" {
-		req.Header.Set("Authorization", "token "+s.Token)
-	}
-	req.Header.Set("Accept", "application/vnd.github.v3+json")
-
-	resp, err := s.httpClient().Do(req)
-	if err != nil {
-		return nil, "", fmt.Errorf("fetching issues: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return nil, "", fmt.Errorf("GitHub API returned status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var issues []githubIssue
-	if err := json.NewDecoder(resp.Body).Decode(&issues); err != nil {
-		return nil, "", fmt.Errorf("decoding issues: %w", err)
-	}
-
-	nextURL := parseNextLink(resp.Header.Get("Link"))
-
-	return issues, nextURL, nil
-}
-
-func (s *GitHubSource) fetchComments(ctx context.Context, issueNumber int) ([]githubComment, error) {
-	var allComments []githubComment
-
-	pageURL := fmt.Sprintf("%s/repos/%s/%s/issues/%d/comments?per_page=100",
-		s.baseURL(), s.Owner, s.Repo, issueNumber)
-
-	for page := 0; pageURL != "" && page < maxPages; page++ {
-		comments, nextURL, err := s.fetchCommentsPage(ctx, pageURL)
-		if err != nil {
-			return nil, err
-		}
-		allComments = append(allComments, comments...)
-		pageURL = nextURL
-	}
-
-	return allComments, nil
-}
-
-func (s *GitHubSource) fetchCommentsPage(ctx context.Context, pageURL string) ([]githubComment, string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, pageURL, nil)
-	if err != nil {
-		return nil, "", fmt.Errorf("creating request: %w", err)
-	}
-
-	if s.Token != "" {
-		req.Header.Set("Authorization", "token "+s.Token)
-	}
-	req.Header.Set("Accept", "application/vnd.github.v3+json")
-
-	resp, err := s.httpClient().Do(req)
-	if err != nil {
-		return nil, "", fmt.Errorf("fetching comments: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return nil, "", fmt.Errorf("GitHub API returned status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var comments []githubComment
-	if err := json.NewDecoder(resp.Body).Decode(&comments); err != nil {
-		return nil, "", fmt.Errorf("decoding comments: %w", err)
-	}
-
-	nextURL := parseNextLink(resp.Header.Get("Link"))
-
-	return comments, nextURL, nil
+// fetchGitHubIssueComments returns the conversation comments of an issue or
+// pull request (GitHub serves both from the issues endpoint).
+func fetchGitHubIssueComments(ctx context.Context, rest restClient, baseURL, owner, repo string, number int) ([]githubComment, error) {
+	comments, _, err := fetchAllPages[githubComment](ctx, rest, fmt.Sprintf("%s/repos/%s/%s/issues/%d/comments?per_page=100", baseURL, owner, repo, number))
+	return comments, err
 }
 
 // concatCommentBodies joins comment bodies into a single string separated by
@@ -370,36 +301,11 @@ func (s *GitHubSource) fetchCommentsPage(ctx context.Context, pageURL string) ([
 // dropped from the front so that the most recent (and most relevant) comments
 // are preserved.
 func concatCommentBodies(comments []githubComment) string {
-	totalBytes := 0
-	for _, c := range comments {
-		totalBytes += len(c.Body)
+	parts := make([]string, len(comments))
+	for i, c := range comments {
+		parts[i] = c.Body
 	}
-
-	// If within budget, return all comments.
-	if totalBytes <= maxCommentBytes {
-		parts := make([]string, len(comments))
-		for i, c := range comments {
-			parts[i] = c.Body
-		}
-		return strings.Join(parts, "\n---\n")
-	}
-
-	// Truncate from the front: keep the most recent comments.
-	var parts []string
-	remaining := maxCommentBytes
-	for i := len(comments) - 1; i >= 0; i-- {
-		if remaining-len(comments[i].Body) < 0 {
-			break
-		}
-		remaining -= len(comments[i].Body)
-		parts = append(parts, comments[i].Body)
-	}
-
-	// Reverse so comments are back in chronological order.
-	for i, j := 0, len(parts)-1; i < j; i, j = i+1, j-1 {
-		parts[i], parts[j] = parts[j], parts[i]
-	}
-	return strings.Join(parts, "\n---\n")
+	return concatBodies(parts)
 }
 
 var linkNextRe = regexp.MustCompile(`<([^>]+)>;\s*rel="next"`)

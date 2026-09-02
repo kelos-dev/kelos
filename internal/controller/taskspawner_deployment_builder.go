@@ -60,8 +60,8 @@ func (b *DeploymentBuilder) buildPodParts(ts *kelos.TaskSpawner, workspace *kelo
 	var envVars []corev1.EnvVar
 
 	if workspace != nil {
-		if gl := ts.Spec.When.GitLab; gl != nil {
-			args = append(args, gitLabSourceArgs(gl, workspace.Repo)...)
+		if tracker, _ := ts.Spec.When.Tracker(); tracker.Provider == kelos.WorkspaceProviderGitLab {
+			args = append(args, gitLabSourceArgs(ts.Spec.When.GitLab, workspace.Repo)...)
 		} else {
 			host, owner, repo := parseGitHubRepo(workspace.Repo)
 
@@ -354,27 +354,28 @@ func parseGitHubOwnerRepo(repoURL string) (owner, repo string) {
 	return owner, repo
 }
 
+// githubSourceRepoOverride returns the repository a GitHub polling source
+// polls instead of the Workspace repository, or "".
 func githubSourceRepoOverride(ts *kelos.TaskSpawner) string {
-	if ts.Spec.When.GitHubIssues != nil && ts.Spec.When.GitHubIssues.Repo != "" {
-		return ts.Spec.When.GitHubIssues.Repo
+	tracker, _ := ts.Spec.When.Tracker()
+	if tracker.Provider != kelos.WorkspaceProviderGitHub || tracker.Webhook {
+		return ""
 	}
-	if ts.Spec.When.GitHubPullRequests != nil && ts.Spec.When.GitHubPullRequests.Repo != "" {
-		return ts.Spec.When.GitHubPullRequests.Repo
-	}
-	return ""
+	return tracker.Repo
 }
 
 // taskSpawnerNeedsWorkspaceToken reports whether the spawner needs the
 // workspace token for API calls: GitHub sources unless a ghproxy fronts them
 // (reporting still needs it), and GitLab sources always.
 func taskSpawnerNeedsWorkspaceToken(ts *kelos.TaskSpawner, ghProxyConfigured bool) bool {
-	if ts.Spec.When.GitHubIssues != nil {
-		return !ghProxyConfigured || gitHubReportingNeedsToken(ts.Spec.When.GitHubIssues.Reporting)
+	tracker, ok := ts.Spec.When.Tracker()
+	if !ok || tracker.Webhook {
+		return false
 	}
-	if ts.Spec.When.GitHubPullRequests != nil {
-		return !ghProxyConfigured || gitHubReportingNeedsToken(ts.Spec.When.GitHubPullRequests.Reporting)
+	if tracker.Provider == kelos.WorkspaceProviderGitHub {
+		return !ghProxyConfigured || tracker.Comments != nil || tracker.Checks != nil
 	}
-	return ts.Spec.When.GitLab != nil
+	return true
 }
 
 // gitLabSourceArgs returns the spawner flags for a GitLab source. The
@@ -424,10 +425,6 @@ func parseGitLabRepo(repoURL string) (baseURL, project string) {
 		scheme = "https"
 	}
 	return (&url.URL{Scheme: scheme, Host: parsed.Host}).String(), strings.Trim(parsed.Path, "/")
-}
-
-func gitHubReportingNeedsToken(reporting *kelos.GitHubReporting) bool {
-	return reporting != nil && (reporting.Enabled || reporting.Comments != nil || reporting.Checks != nil)
 }
 
 func workspaceUsesGHProxy(workspace *kelos.WorkspaceSpec) bool {

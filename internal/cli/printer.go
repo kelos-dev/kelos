@@ -255,15 +255,8 @@ func printTaskSpawnerTable(w io.Writer, spawners []kelos.TaskSpawner, allNamespa
 // uses, mirroring the resolution in cmd/kelos-spawner: the active source's
 // pollInterval takes precedence over the default interval.
 func effectivePollInterval(ts *kelos.TaskSpawner) string {
-	switch {
-	case ts.Spec.When.GitHubIssues != nil && ts.Spec.When.GitHubIssues.PollInterval != "":
-		return ts.Spec.When.GitHubIssues.PollInterval
-	case ts.Spec.When.GitHubPullRequests != nil && ts.Spec.When.GitHubPullRequests.PollInterval != "":
-		return ts.Spec.When.GitHubPullRequests.PollInterval
-	case ts.Spec.When.Jira != nil && ts.Spec.When.Jira.PollInterval != "":
-		return ts.Spec.When.Jira.PollInterval
-	case ts.Spec.When.GitLab != nil && ts.Spec.When.GitLab.PollInterval != "":
-		return ts.Spec.When.GitLab.PollInterval
+	if interval := ts.Spec.When.PollInterval(); interval != "" {
+		return interval
 	}
 	return "5m"
 }

@@ -60,8 +60,8 @@ type preservedGitHubCommentsReporting struct {
 }
 
 type preservedGitHubCommentsSource struct {
-	Enabled  bool                             `json:"enabled,omitempty"`
-	Comments v1alpha2.GitHubCommentsReporting `json:"comments"`
+	Enabled  bool                       `json:"enabled,omitempty"`
+	Comments v1alpha2.CommentsReporting `json:"comments"`
 }
 
 func taskSpawnerToHub(_ context.Context, src *v1alpha1.TaskSpawner, dst *v1alpha2.TaskSpawner) error {

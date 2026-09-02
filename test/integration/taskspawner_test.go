@@ -2632,7 +2632,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					When: kelos.When{GitHubIssues: &kelos.GitHubIssues{
 						Repo: "kelos-dev/kelos",
 						Reporting: &kelos.GitHubReporting{
-							Comments: &kelos.GitHubCommentsReporting{},
+							Comments: &kelos.CommentsReporting{},
 						},
 					}},
 					TaskTemplate: kelos.TaskTemplate{
@@ -2664,7 +2664,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					When: kelos.When{GitHubIssues: &kelos.GitHubIssues{
 						Repo: "kelos-dev/kelos",
 						Reporting: &kelos.GitHubReporting{
-							Comments: &kelos.GitHubCommentsReporting{Mode: "Unsupported"},
+							Comments: &kelos.CommentsReporting{Mode: "Unsupported"},
 						},
 					}},
 					TaskTemplate: kelos.TaskTemplate{

@@ -183,14 +183,8 @@ func workspaceSecretTokenError(p workspaceProvider, secretName string, data map[
 // taskSpawnerSourceProvider returns the workspace provider a TaskSpawner
 // source is bound to, or "" for sources that work with any provider.
 func taskSpawnerSourceProvider(ts *kelos.TaskSpawner) string {
-	when := ts.Spec.When
-	switch {
-	case when.GitLab != nil || when.GitLabWebhook != nil:
-		return kelos.WorkspaceProviderGitLab
-	case when.GitHubIssues != nil || when.GitHubPullRequests != nil || when.GitHubWebhook != nil:
-		return kelos.WorkspaceProviderGitHub
-	}
-	return ""
+	tracker, _ := ts.Spec.When.Tracker()
+	return tracker.Provider
 }
 
 // workspaceValidationError marks a TaskSpawner whose Workspace cannot serve

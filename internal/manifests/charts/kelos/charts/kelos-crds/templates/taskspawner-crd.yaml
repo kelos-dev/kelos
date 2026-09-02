@@ -22709,7 +22709,7 @@ spec:
                                 default: PerTask
                                 description: |-
                                   Mode controls whether comments are created per Task or reused across
-                                  Tasks from the same TaskSpawner and originating issue or pull request.
+                                  Tasks from the same TaskSpawner and originating item.
                                   Defaults to PerTask.
                                 enum:
                                 - PerTask
@@ -22900,7 +22900,7 @@ spec:
                                 default: PerTask
                                 description: |-
                                   Mode controls whether comments are created per Task or reused across
-                                  Tasks from the same TaskSpawner and originating issue or pull request.
+                                  Tasks from the same TaskSpawner and originating item.
                                   Defaults to PerTask.
                                 enum:
                                 - PerTask
@@ -23146,7 +23146,7 @@ spec:
                                 default: PerTask
                                 description: |-
                                   Mode controls whether comments are created per Task or reused across
-                                  Tasks from the same TaskSpawner and originating issue or pull request.
+                                  Tasks from the same TaskSpawner and originating item.
                                   Defaults to PerTask.
                                 enum:
                                 - PerTask
@@ -23267,8 +23267,8 @@ spec:
                               mode:
                                 default: PerTask
                                 description: |-
-                                  Mode controls whether notes are created per Task or reused across
-                                  Tasks from the same TaskSpawner and originating issue or merge request.
+                                  Mode controls whether comments are created per Task or reused across
+                                  Tasks from the same TaskSpawner and originating item.
                                   Defaults to PerTask.
                                 enum:
                                 - PerTask
@@ -23460,8 +23460,8 @@ spec:
                               mode:
                                 default: PerTask
                                 description: |-
-                                  Mode controls whether notes are created per Task or reused across
-                                  Tasks from the same TaskSpawner and originating issue or merge request.
+                                  Mode controls whether comments are created per Task or reused across
+                                  Tasks from the same TaskSpawner and originating item.
                                   Defaults to PerTask.
                                 enum:
                                 - PerTask

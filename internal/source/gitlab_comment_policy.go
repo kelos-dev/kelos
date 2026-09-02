@@ -1,6 +1,7 @@
 package source
 
 import (
+	"context"
 	"strings"
 	"time"
 )
@@ -46,50 +47,29 @@ func newGitLabCommentAuthorizer(policy gitlabCommentPolicy) *gitlabCommentAuthor
 	return a
 }
 
-func (a *gitlabCommentAuthorizer) isAuthorized(username string) bool {
+// isAuthorized never fails: the allow-list is local, so no API call is made.
+func (a *gitlabCommentAuthorizer) isAuthorized(_ context.Context, username string) (bool, error) {
 	if !a.restricted {
-		return true
+		return true, nil
 	}
 	_, ok := a.allowedUsers[normalizeGitLabUsername(username)]
-	return ok
+	return ok, nil
 }
 
 // evaluateGitLabCommentPolicy reports whether the item passes the policy and,
 // when a trigger note matched, the note's creation time so re-triggers on a
-// finished item can be detected. A trigger in the description counts but
-// carries no time. System notes never match.
+// finished item can be detected.
 func evaluateGitLabCommentPolicy(description, author string, notes []gitlabNote, policy gitlabCommentPolicy, authorizer *gitlabCommentAuthorizer) (bool, time.Time) {
-	if !policy.enabled() {
-		return true, time.Time{}
-	}
-
-	cmds := policy.commands()
-	var body bodyMatch
-	if authorizer.isAuthorized(author) {
-		body.trigger = cmds.Trigger != "" && containsCommand(description, cmds.Trigger)
-		body.exclude = len(cmds.Excludes) > 0 && containsAnyCommand(description, cmds.Excludes)
-	}
-
-	triggerMatch, excludeMatch := newCommentMatch(), newCommentMatch()
-	if cmds.Trigger != "" {
-		triggerMatch = latestAuthorizedGitLabNote(notes, []string{cmds.Trigger}, authorizer)
-	}
-	if len(cmds.Excludes) > 0 {
-		excludeMatch = latestAuthorizedGitLabNote(notes, cmds.Excludes, authorizer)
-	}
-
-	return decideCommentPolicy(cmds, body, triggerMatch, excludeMatch)
+	allowed, triggerTime, _ := evaluateCommentPolicy(context.Background(), policy.commands(), description, author, gitlabCommentEntries(notes), authorizer)
+	return allowed, triggerTime
 }
 
-func latestAuthorizedGitLabNote(notes []gitlabNote, commands []string, authorizer *gitlabCommentAuthorizer) commentMatch {
-	match := newCommentMatch()
-	for i, note := range notes {
-		if note.System || !containsAnyCommand(note.Body, commands) || !authorizer.isAuthorized(note.Author.Username) {
-			continue
-		}
-		match.record(i, note.CreatedAt)
+func gitlabCommentEntries(notes []gitlabNote) []commentEntry {
+	entries := make([]commentEntry, len(notes))
+	for i, n := range notes {
+		entries[i] = commentEntry{Body: n.Body, Author: n.Author.Username, CreatedAt: n.CreatedAt, System: n.System}
 	}
-	return match
+	return entries
 }
 
 func normalizeGitLabUsername(username string) string {

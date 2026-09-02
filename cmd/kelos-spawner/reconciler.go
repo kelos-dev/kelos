@@ -96,7 +96,7 @@ func runOnce(ctx context.Context, cl client.Client, key types.NamespacedName, cf
 		}
 		// Reporting always uses the direct API base URL (writes bypass the proxy).
 		reporter := &reporting.TaskReporter{Client: cl}
-		if ts.Spec.When.GitLab != nil {
+		if tracker, _ := ts.Spec.When.Tracker(); tracker.Provider == kelos.WorkspaceProviderGitLab {
 			reporter.Reporter = &reporting.GitLabReporter{
 				BaseURL:   cfg.GitLabBaseURL,
 				Project:   cfg.GitLabProject,
@@ -130,24 +130,10 @@ func runOnce(ctx context.Context, cl client.Client, key types.NamespacedName, cf
 	return resolvedPollInterval(&ts), nil
 }
 
-// resolvedPollInterval returns the effective poll interval for the TaskSpawner.
-// It checks the active source's PollInterval first, falling back to the default.
+// resolvedPollInterval returns the effective poll interval for the TaskSpawner:
+// the active source's PollInterval, falling back to the default.
 func resolvedPollInterval(ts *kelos.TaskSpawner) time.Duration {
-	var sourceInterval string
-	switch {
-	case ts.Spec.When.GitHubIssues != nil:
-		sourceInterval = ts.Spec.When.GitHubIssues.PollInterval
-	case ts.Spec.When.GitHubPullRequests != nil:
-		sourceInterval = ts.Spec.When.GitHubPullRequests.PollInterval
-	case ts.Spec.When.Jira != nil:
-		sourceInterval = ts.Spec.When.Jira.PollInterval
-	case ts.Spec.When.GitLab != nil:
-		sourceInterval = ts.Spec.When.GitLab.PollInterval
-	}
-	if sourceInterval != "" {
-		return parsePollInterval(sourceInterval)
-	}
-	return parsePollInterval("")
+	return parsePollInterval(ts.Spec.When.PollInterval())
 }
 
 func (r *spawnerReconciler) requestsForTask(_ context.Context, obj client.Object) []reconcile.Request {

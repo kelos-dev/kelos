@@ -509,7 +509,7 @@ func TestTaskSpawnerConvert_GitHubCommentsReportingRoundTrips(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			hub := &v1alpha2.TaskSpawner{ObjectMeta: metav1.ObjectMeta{Name: "reporter", Namespace: "default"}}
 			tt.configureHub(&hub.Spec.When, &v1alpha2.GitHubReporting{
-				Comments: &v1alpha2.GitHubCommentsReporting{Mode: v1alpha2.CommentModeSticky},
+				Comments: &v1alpha2.CommentsReporting{Mode: v1alpha2.CommentModeSticky},
 			})
 
 			spoke := &v1alpha1.TaskSpawner{}
@@ -548,7 +548,7 @@ func TestTaskSpawnerConvert_V1Alpha1CanDisablePreservedCommentsReporting(t *test
 			When: v1alpha2.When{
 				GitHubWebhook: &v1alpha2.GitHubWebhook{
 					Reporting: &v1alpha2.GitHubReporting{
-						Comments: &v1alpha2.GitHubCommentsReporting{Mode: v1alpha2.CommentModeSticky},
+						Comments: &v1alpha2.CommentsReporting{Mode: v1alpha2.CommentModeSticky},
 					},
 				},
 			},

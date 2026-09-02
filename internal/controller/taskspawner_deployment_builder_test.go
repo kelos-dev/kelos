@@ -410,10 +410,10 @@ func TestDeploymentBuilder_GitHubTokenWhenGHProxyDisabled(t *testing.T) {
 
 func enableGitHubReporting(ts *kelos.TaskSpawner) {
 	if ts.Spec.When.GitHubIssues != nil {
-		ts.Spec.When.GitHubIssues.Reporting = &kelos.GitHubReporting{Comments: &kelos.GitHubCommentsReporting{}}
+		ts.Spec.When.GitHubIssues.Reporting = &kelos.GitHubReporting{Comments: &kelos.CommentsReporting{}}
 	}
 	if ts.Spec.When.GitHubPullRequests != nil {
-		ts.Spec.When.GitHubPullRequests.Reporting = &kelos.GitHubReporting{Comments: &kelos.GitHubCommentsReporting{}}
+		ts.Spec.When.GitHubPullRequests.Reporting = &kelos.GitHubReporting{Comments: &kelos.CommentsReporting{}}
 	}
 }
 

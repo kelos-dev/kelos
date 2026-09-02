@@ -321,6 +321,12 @@ func printTaskSpawnerDetail(w io.Writer, ts *kelos.TaskSpawner) {
 		if len(gl.Labels) > 0 {
 			printField(w, "Labels", fmt.Sprintf("%v", gl.Labels))
 		}
+		if gl.ReviewState != "" {
+			printField(w, "Review State", gl.ReviewState)
+		}
+		if gl.PipelineStatus != "" {
+			printField(w, "Pipeline Status", gl.PipelineStatus)
+		}
 	} else if ts.Spec.When.Cron != nil {
 		printField(w, "Source", "Cron")
 		printField(w, "Schedule", ts.Spec.When.Cron.Schedule)
@@ -344,6 +350,9 @@ func printTaskSpawnerDetail(w io.Writer, ts *kelos.TaskSpawner) {
 		printField(w, "Events", fmt.Sprintf("%v", gl.Events))
 		if gl.Project != "" {
 			printField(w, "Project", gl.Project)
+		}
+		if len(gl.ExcludeAuthors) > 0 {
+			printField(w, "Exclude Authors", fmt.Sprintf("%v", gl.ExcludeAuthors))
 		}
 	} else if ts.Spec.When.GenericWebhook != nil {
 		gw := ts.Spec.When.GenericWebhook

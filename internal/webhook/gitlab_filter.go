@@ -123,6 +123,7 @@ func ParseGitLabWebhook(payload []byte) (*GitLabEventData, error) {
 		if mr := mapObject(raw, "merge_request"); len(mr) > 0 {
 			data.Kind = "MR"
 			data.Number = mapInt(mr, "iid")
+			data.ID = "mr-" + strconv.Itoa(data.Number)
 			data.Branch = mapString(mr, "source_branch")
 			data.Title = mapString(mr, "title")
 			data.URL = mapString(mr, "url")

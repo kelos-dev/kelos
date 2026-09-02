@@ -7,8 +7,7 @@ tests on the same branch, and a third opens a pull request.
 
 Break complex work into named nodes while managing the workflow as one
 resource. Each node starts only after its declared dependencies succeed. The
-pipeline status summarizes progress and preserves every child Task's structured
-results.
+pipeline status summarizes progress with bounded per-node counts.
 
 ## Resources
 
@@ -26,11 +25,11 @@ scaffold
     │  creates branch, writes code
     │  results: branch, commit
     ▼
-write-tests (dependsOn: [scaffold])
-    │  reads scaffold's result from .Tasks
+write-tests (dependsOn: scaffold)
+    │  reads scaffold's result from .Deps
     │  results: branch, commit
     ▼
-open-pr (dependsOn: [write-tests])
+open-pr (dependsOn: write-tests)
        opens a pull request
 ```
 
@@ -38,16 +37,17 @@ The controller creates one owned Task for each node when its dependencies have
 succeeded. This example's child Task names are `auth-feature-scaffold`,
 `auth-feature-write-tests`, and `auth-feature-open-pr`.
 
-Downstream prompt templates receive dependency results under `.Tasks`, keyed by
+Downstream prompt templates receive dependency results under `.Deps`, keyed by
 pipeline node name. Each value is a list because a matrix node can create more
 than one Task:
 
 ```text
-{{index .Tasks "scaffold" 0 "Results" "branch"}}
+{{index .Deps "scaffold" 0 "Results" "branch"}}
 ```
 
-Missing template keys fail the node and pipeline with a status message; Kelos
-does not pass the unrendered template to an agent.
+Missing template keys fail the node and pipeline. The failure is reported by
+the TaskPipeline `Ready` condition; Kelos does not pass the unrendered template
+to an agent.
 
 All nodes use the same branch, so the Workspace contains the commits produced
 by the preceding node when the next Task starts.
@@ -69,10 +69,11 @@ kubectl get taskpipeline auth-feature -w
 kubectl get tasks -l kelos.dev/taskpipeline=auth-feature
 ```
 
-5. View the aggregate node results:
+5. View node progress and child Task results:
 
 ```bash
 kubectl get taskpipeline auth-feature -o yaml
+kubectl get tasks -l kelos.dev/taskpipeline=auth-feature -o yaml
 ```
 
 6. Stream logs from a node's child Task:
@@ -93,7 +94,7 @@ kubectl delete -f examples/07-task-pipeline/
 
 - A failed child Task prevents new nodes from starting. Child Tasks that are
   already active are allowed to finish before the pipeline becomes `Failed`.
-- A TaskPipeline spec is immutable. Delete and recreate the resource to run a
-  modified workflow.
+- `TaskPipeline.spec.tasks` is immutable. Delete and recreate the resource to
+  run a modified workflow.
 - Matrix fan-out and aggregate result templates are covered in the
   [TaskPipeline reference](../../docs/reference.md#taskpipeline).

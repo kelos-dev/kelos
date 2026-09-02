@@ -23,10 +23,12 @@ spec:
           - Basic middleware for protected routes
 
           Create the code, commit your changes, and push the branch.
+          Finish by reporting this structured result on its own line:
+          branch: feature/auth
 
     - name: write-tests
       dependsOn:
-        - scaffold
+        - name: scaffold
       taskTemplate:
         worker:
           type: claude-code
@@ -38,7 +40,7 @@ spec:
             name: my-workspace
         branch: feature/auth
         prompt: |
-          The scaffold task created an auth module on branch {{index .Tasks "scaffold" 0 "Results" "branch"}}.
+          The scaffold task created an auth module on branch {{index .Deps "scaffold" 0 "Results" "branch"}}.
 
           Write comprehensive tests for the authentication module:
           - Unit tests for token generation and validation
@@ -46,10 +48,12 @@ spec:
           - Edge cases: invalid credentials, expired tokens, duplicate registration
 
           Run the tests to make sure they pass. Commit and push.
+          Finish by reporting this structured result on its own line:
+          branch: feature/auth
 
     - name: open-pr
       dependsOn:
-        - write-tests
+        - name: write-tests
       taskTemplate:
         worker:
           type: claude-code
@@ -61,7 +65,7 @@ spec:
             name: my-workspace
         branch: feature/auth
         prompt: |
-          The auth module and its tests are ready on branch {{index .Tasks "write-tests" 0 "Results" "branch"}}.
+          The auth module and its tests are ready on branch {{index .Deps "write-tests" 0 "Results" "branch"}}.
 
           Review the full diff (git diff main...HEAD) and open a pull request:
           - Write a clear title and description summarizing the changes

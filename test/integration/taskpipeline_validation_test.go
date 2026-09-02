@@ -34,10 +34,10 @@ var _ = Describe("TaskPipeline API validation", func() {
 				},
 				{
 					Name:      "implement",
-					DependsOn: []string{"plan"},
+					DependsOn: []kelos.PipelineDependency{{Name: "plan"}},
 					TaskTemplate: kelos.PipelineTaskTemplate{
 						WorkerPoolRef: &kelos.WorkerPoolReference{Name: "workers"},
-						Prompt:        `Implement {{index .Tasks "plan" 0 "Results" "plan"}}`,
+						Prompt:        `Implement {{index .Deps "plan" 0 "Results" "plan"}}`,
 					},
 				},
 			}},
@@ -48,22 +48,27 @@ var _ = Describe("TaskPipeline API validation", func() {
 		Expect(k8sClient.Create(ctx, validPipeline("valid"), client.DryRunAll)).To(Succeed())
 	})
 
+	It("rejects a missing task graph", func() {
+		pipeline := &kelos.TaskPipeline{ObjectMeta: metav1.ObjectMeta{Name: "missing-tasks", Namespace: ns}}
+		Expect(k8sClient.Create(ctx, pipeline, client.DryRunAll)).NotTo(Succeed())
+	})
+
 	It("rejects a dependency outside the pipeline", func() {
 		pipeline := validPipeline("unknown-dependency")
-		pipeline.Spec.Tasks[1].DependsOn = []string{"missing"}
+		pipeline.Spec.Tasks[1].DependsOn = []kelos.PipelineDependency{{Name: "missing"}}
 		Expect(k8sClient.Create(ctx, pipeline, client.DryRunAll)).NotTo(Succeed())
 	})
 
 	It("rejects a self dependency", func() {
 		pipeline := validPipeline("self-dependency")
-		pipeline.Spec.Tasks[0].DependsOn = []string{"plan"}
+		pipeline.Spec.Tasks[0].DependsOn = []kelos.PipelineDependency{{Name: "plan"}}
 		Expect(k8sClient.Create(ctx, pipeline, client.DryRunAll)).NotTo(Succeed())
 	})
 
 	It("rejects an empty matrix parameter", func() {
 		pipeline := validPipeline("empty-matrix")
 		pipeline.Spec.Tasks[0].Matrix = &kelos.PipelineMatrix{
-			Parameters: map[string][]string{"service": {}},
+			Parameters: []kelos.PipelineMatrixParameter{{Name: "service"}},
 		}
 		Expect(k8sClient.Create(ctx, pipeline, client.DryRunAll)).NotTo(Succeed())
 	})
@@ -72,5 +77,12 @@ var _ = Describe("TaskPipeline API validation", func() {
 		pipeline := validPipeline("multiple-execution-sources")
 		pipeline.Spec.Tasks[0].TaskTemplate.WorkerPoolRef = &kelos.WorkerPoolReference{Name: "workers"}
 		Expect(k8sClient.Create(ctx, pipeline, client.DryRunAll)).NotTo(Succeed())
+	})
+
+	It("rejects task graph updates", func() {
+		pipeline := validPipeline("immutable-tasks")
+		Expect(k8sClient.Create(ctx, pipeline)).To(Succeed())
+		pipeline.Spec.Tasks[0].TaskTemplate.Prompt = "Replace the plan"
+		Expect(k8sClient.Update(ctx, pipeline)).NotTo(Succeed())
 	})
 })

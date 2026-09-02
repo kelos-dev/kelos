@@ -56,40 +56,66 @@ spec:
                   description: PipelineNode is one named node in a TaskPipeline DAG.
                   properties:
                     dependsOn:
-                      description: DependsOn lists node names that must succeed before
+                      description: DependsOn lists nodes that must succeed before
                         this node starts.
                       items:
-                        type: string
+                        description: PipelineDependency identifies a node that must
+                          succeed before another node starts.
+                        properties:
+                          name:
+                            description: Name identifies a node in this pipeline.
+                            maxLength: 63
+                            minLength: 1
+                            pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                            type: string
+                        required:
+                        - name
+                        type: object
                       maxItems: 64
                       type: array
-                      x-kubernetes-list-type: set
+                      x-kubernetes-list-map-keys:
+                      - name
+                      x-kubernetes-list-type: map
                     matrix:
                       description: Matrix expands the node into parallel Tasks.
                       properties:
                         parameters:
-                          additionalProperties:
-                            items:
-                              type: string
-                            type: array
                           description: |-
-                            Parameters maps each template variable to its possible values. The
-                            Cartesian product of these lists determines the Tasks created for the node.
-                          maxProperties: 16
-                          minProperties: 1
-                          type: object
+                            Parameters defines the matrix dimensions. Their Cartesian product
+                            determines the Tasks created for the node.
+                          items:
+                            description: PipelineMatrixParameter defines one dimension
+                              of a matrix expansion.
+                            properties:
+                              name:
+                                description: Name is the key exposed under .Matrix
+                                  in the node's templates.
+                                maxLength: 64
+                                minLength: 1
+                                pattern: ^[a-zA-Z_][a-zA-Z0-9_]*$
+                                type: string
+                              values:
+                                description: Values contains the values to expand
+                                  for this parameter.
+                                items:
+                                  type: string
+                                maxItems: 64
+                                minItems: 1
+                                type: array
+                                x-kubernetes-list-type: set
+                            required:
+                            - name
+                            - values
+                            type: object
+                          maxItems: 16
+                          minItems: 1
+                          type: array
+                          x-kubernetes-list-map-keys:
+                          - name
+                          x-kubernetes-list-type: map
                       required:
                       - parameters
                       type: object
-                      x-kubernetes-validations:
-                      - message: matrix parameter names must be valid template identifiers
-                        rule: self.parameters.all(name, name.matches('^[a-zA-Z_][a-zA-Z0-9_]*$'))
-                      - message: matrix parameters must each contain at least one
-                          value
-                        rule: self.parameters.all(name, size(self.parameters[name])
-                          > 0)
-                      - message: matrix parameters may each contain at most 64 values
-                        rule: self.parameters.all(name, size(self.parameters[name])
-                          <= 64)
                     name:
                       description: Name identifies this node within the pipeline.
                       maxLength: 63
@@ -104,121 +130,10 @@ spec:
                           description: Branch is the optional template rendered into
                             the child Task branch.
                           type: string
-                        podFailurePolicy:
-                          description: PodFailurePolicy is copied to the child Task's
-                            backing Job.
-                          properties:
-                            rules:
-                              description: |-
-                                A list of pod failure policy rules. The rules are evaluated in order.
-                                Once a rule matches a Pod failure, the remaining of the rules are ignored.
-                                When no rule matches the Pod failure, the default handling applies - the
-                                counter of pod failures is incremented and it is checked against
-                                the backoffLimit. At most 20 elements are allowed.
-                              items:
-                                description: |-
-                                  PodFailurePolicyRule describes how a pod failure is handled when the requirements are met.
-                                  One of onExitCodes and onPodConditions, but not both, can be used in each rule.
-                                properties:
-                                  action:
-                                    description: |-
-                                      Specifies the action taken on a pod failure when the requirements are satisfied.
-                                      Possible values are:
-
-                                      - FailJob: indicates that the pod's job is marked as Failed and all
-                                        running pods are terminated.
-                                      - FailIndex: indicates that the pod's index is marked as Failed and will
-                                        not be restarted.
-                                      - Ignore: indicates that the counter towards the .backoffLimit is not
-                                        incremented and a replacement pod is created.
-                                      - Count: indicates that the pod is handled in the default way - the
-                                        counter towards the .backoffLimit is incremented.
-                                      Additional values are considered to be added in the future. Clients should
-                                      react to an unknown action by skipping the rule.
-                                    type: string
-                                  onExitCodes:
-                                    description: Represents the requirement on the
-                                      container exit codes.
-                                    properties:
-                                      containerName:
-                                        description: |-
-                                          Restricts the check for exit codes to the container with the
-                                          specified name. When null, the rule applies to all containers.
-                                          When specified, it should match one the container or initContainer
-                                          names in the pod template.
-                                        type: string
-                                      operator:
-                                        description: |-
-                                          Represents the relationship between the container exit code(s) and the
-                                          specified values. Containers completed with success (exit code 0) are
-                                          excluded from the requirement check. Possible values are:
-
-                                          - In: the requirement is satisfied if at least one container exit code
-                                            (might be multiple if there are multiple containers not restricted
-                                            by the 'containerName' field) is in the set of specified values.
-                                          - NotIn: the requirement is satisfied if at least one container exit code
-                                            (might be multiple if there are multiple containers not restricted
-                                            by the 'containerName' field) is not in the set of specified values.
-                                          Additional values are considered to be added in the future. Clients should
-                                          react to an unknown operator by assuming the requirement is not satisfied.
-                                        type: string
-                                      values:
-                                        description: |-
-                                          Specifies the set of values. Each returned container exit code (might be
-                                          multiple in case of multiple containers) is checked against this set of
-                                          values with respect to the operator. The list of values must be ordered
-                                          and must not contain duplicates. Value '0' cannot be used for the In operator.
-                                          At least one element is required. At most 255 elements are allowed.
-                                        items:
-                                          format: int32
-                                          type: integer
-                                        type: array
-                                        x-kubernetes-list-type: set
-                                    required:
-                                    - operator
-                                    - values
-                                    type: object
-                                  onPodConditions:
-                                    description: |-
-                                      Represents the requirement on the pod conditions. The requirement is represented
-                                      as a list of pod condition patterns. The requirement is satisfied if at
-                                      least one pattern matches an actual pod condition. At most 20 elements are allowed.
-                                    items:
-                                      description: |-
-                                        PodFailurePolicyOnPodConditionsPattern describes a pattern for matching
-                                        an actual pod condition type.
-                                      properties:
-                                        status:
-                                          description: |-
-                                            Specifies the required Pod condition status. To match a pod condition
-                                            it is required that the specified status equals the pod condition status.
-                                            Defaults to True.
-                                          type: string
-                                        type:
-                                          description: |-
-                                            Specifies the required Pod condition type. To match a pod condition
-                                            it is required that specified type equals the pod condition type.
-                                          type: string
-                                      required:
-                                      - type
-                                      type: object
-                                    type: array
-                                    x-kubernetes-list-type: atomic
-                                required:
-                                - action
-                                type: object
-                              type: array
-                              x-kubernetes-list-type: atomic
-                          required:
-                          - rules
-                          type: object
                         prompt:
                           description: Prompt is the template rendered into the child
                             Task prompt.
                           minLength: 1
-                          type: string
-                        upstreamRepo:
-                          description: UpstreamRepo is copied to the child Task.
                           type: string
                         worker:
                           description: Worker defines the execution environment for
@@ -7291,8 +7206,6 @@ spec:
                       - message: branch is not supported with workerPoolRef
                         rule: '!has(self.workerPoolRef) || !has(self.branch) || size(self.branch)
                           == 0'
-                      - message: podFailurePolicy is not supported with workerPoolRef
-                        rule: '!has(self.workerPoolRef) || !has(self.podFailurePolicy)'
                   required:
                   - name
                   - taskTemplate
@@ -7307,25 +7220,77 @@ spec:
             - tasks
             type: object
             x-kubernetes-validations:
-            - message: TaskPipeline spec is immutable after creation
-              rule: self == oldSelf
             - message: a pipeline node cannot depend on itself
               rule: self.tasks.all(task, !has(task.dependsOn) || task.dependsOn.all(dependency,
-                dependency != task.name))
+                dependency.name != task.name))
             - message: dependsOn must reference another node in this pipeline
               rule: self.tasks.all(task, !has(task.dependsOn) || task.dependsOn.all(dependency,
-                self.tasks.exists(candidate, candidate.name == dependency)))
+                self.tasks.exists(candidate, candidate.name == dependency.name)))
+            - message: TaskPipeline tasks are immutable after creation
+              rule: self.tasks == oldSelf.tasks
           status:
             description: TaskPipelineStatus defines the observed state of a TaskPipeline.
             properties:
-              completionTime:
-                description: CompletionTime is when the pipeline reached a terminal
-                  phase.
-                format: date-time
-                type: string
-              message:
-                description: Message provides additional information about the pipeline.
-                type: string
+              conditions:
+                description: Conditions provides detailed status information.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
               nodeStatuses:
                 description: NodeStatuses contains aggregate status for every pipeline
                   node.
@@ -7333,76 +7298,34 @@ spec:
                   description: PipelineNodeStatus summarizes the Tasks created for
                     one pipeline node.
                   properties:
+                    active:
+                      description: Active is the number of Tasks that have not reached
+                        a terminal phase.
+                      format: int32
+                      type: integer
                     failed:
                       description: Failed is the number of failed Tasks.
                       format: int32
                       type: integer
-                    message:
-                      description: Message provides additional information about this
-                        node.
-                      type: string
                     name:
                       description: Name identifies the pipeline node.
                       type: string
                     phase:
                       description: Phase is the aggregate phase of this node's Tasks.
                       type: string
-                    running:
-                      description: Running is the number of Tasks that have not reached
-                        a terminal phase.
-                      format: int32
-                      type: integer
                     succeeded:
                       description: Succeeded is the number of successful Tasks.
                       format: int32
                       type: integer
-                    taskNames:
-                      description: TaskNames lists child Tasks in matrix expansion
-                        order.
-                      items:
-                        type: string
-                      type: array
-                    taskResults:
-                      description: TaskResults aggregates captured outputs from terminal
-                        child Tasks.
-                      items:
-                        description: PipelineTaskResult contains one child Task's
-                          outputs and matrix parameters.
-                        properties:
-                          matrix:
-                            additionalProperties:
-                              type: string
-                            description: Matrix contains the parameters used to render
-                              this Task.
-                            type: object
-                          name:
-                            description: Name is the child Task name.
-                            type: string
-                          outputs:
-                            description: Outputs contains the child Task's raw captured
-                              outputs.
-                            items:
-                              type: string
-                            type: array
-                          results:
-                            additionalProperties:
-                              type: string
-                            description: Results contains the child Task's structured
-                              key-value results.
-                            type: object
-                        required:
-                        - name
-                        type: object
-                      type: array
                     total:
                       description: Total is the number of Tasks expected after matrix
                         expansion.
                       format: int32
                       type: integer
                   required:
+                  - active
                   - failed
                   - name
-                  - running
                   - succeeded
                   - total
                   type: object
@@ -7418,11 +7341,9 @@ spec:
               phase:
                 description: Phase represents the current phase of the pipeline.
                 type: string
-              startTime:
-                description: StartTime is when the first child Task was created.
-                format: date-time
-                type: string
             type: object
+        required:
+        - spec
         type: object
     served: true
     storage: true

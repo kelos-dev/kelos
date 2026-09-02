@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	apiMeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -20,9 +21,9 @@ import (
 func TestTaskPipelineReconcileCreatesMatrixTasks(t *testing.T) {
 	pipeline := testTaskPipeline("security-scan", []kelos.PipelineNode{{
 		Name: "scan",
-		Matrix: &kelos.PipelineMatrix{Parameters: map[string][]string{
-			"env":     {"staging", "production"},
-			"service": {"auth", "billing"},
+		Matrix: &kelos.PipelineMatrix{Parameters: []kelos.PipelineMatrixParameter{
+			{Name: "env", Values: []string{"staging", "production"}},
+			{Name: "service", Values: []string{"auth", "billing"}},
 		}},
 		TaskTemplate: testPipelineTaskTemplate("Scan {{index .Matrix \"service\"}} in {{.Matrix.env}}"),
 	}})
@@ -66,32 +67,29 @@ func TestTaskPipelineReconcileCreatesMatrixTasks(t *testing.T) {
 	if updated.Status.Phase != kelos.TaskPipelinePhaseRunning {
 		t.Fatalf("pipeline phase = %q, want %q", updated.Status.Phase, kelos.TaskPipelinePhaseRunning)
 	}
-	if updated.Status.StartTime == nil {
-		t.Fatal("pipeline startTime is nil")
-	}
 	if len(updated.Status.NodeStatuses) != 1 {
 		t.Fatalf("node statuses = %d, want 1", len(updated.Status.NodeStatuses))
 	}
 	status := updated.Status.NodeStatuses[0]
-	if status.Total != 4 || status.Running != 4 || len(status.TaskNames) != 4 {
+	if status.Total != 4 || status.Active != 4 {
 		t.Fatalf("node status = %#v", status)
 	}
 }
 
-func TestTaskPipelineReconcilePassesAggregatedResults(t *testing.T) {
+func TestTaskPipelineReconcilePassesDependencyResults(t *testing.T) {
 	pipeline := testTaskPipeline("aggregate", []kelos.PipelineNode{
 		{
 			Name: "scan",
-			Matrix: &kelos.PipelineMatrix{Parameters: map[string][]string{
-				"service": {"auth", "billing"},
+			Matrix: &kelos.PipelineMatrix{Parameters: []kelos.PipelineMatrixParameter{
+				{Name: "service", Values: []string{"auth", "billing"}},
 			}},
 			TaskTemplate: testPipelineTaskTemplate("Scan {{index .Matrix \"service\"}}"),
 		},
 		{
 			Name:      "report",
-			DependsOn: []string{"scan"},
+			DependsOn: []kelos.PipelineDependency{{Name: "scan"}},
 			TaskTemplate: testPipelineTaskTemplate(
-				`{{range index .Tasks "scan"}}{{index .Matrix "service"}}={{index .Results "severity"}};{{end}}`,
+				`{{range index .Deps "scan"}}{{index .Matrix "service"}}={{index .Results "severity"}};{{end}}`,
 			),
 		},
 	})
@@ -139,11 +137,8 @@ func TestTaskPipelineReconcilePassesAggregatedResults(t *testing.T) {
 
 	updated := getTaskPipeline(t, k8sClient, pipeline.Name)
 	scanStatus := updated.Status.NodeStatuses[0]
-	if scanStatus.Phase != kelos.TaskPhaseSucceeded || scanStatus.Succeeded != 2 || len(scanStatus.TaskResults) != 2 {
+	if scanStatus.Phase != kelos.TaskPhaseSucceeded || scanStatus.Succeeded != 2 {
 		t.Fatalf("scan node status = %#v", scanStatus)
-	}
-	if scanStatus.TaskResults[0].Matrix["service"] != "auth" || scanStatus.TaskResults[0].Results["severity"] != "high" {
-		t.Fatalf("first aggregated result = %#v", scanStatus.TaskResults[0])
 	}
 	report.Status.Phase = kelos.TaskPhaseSucceeded
 	report.Status.Results = map[string]string{"summary": "complete"}
@@ -152,8 +147,12 @@ func TestTaskPipelineReconcilePassesAggregatedResults(t *testing.T) {
 	}
 	reconcileTaskPipeline(t, reconciler, pipeline)
 	updated = getTaskPipeline(t, k8sClient, pipeline.Name)
-	if updated.Status.Phase != kelos.TaskPipelinePhaseSucceeded || updated.Status.CompletionTime == nil {
+	if updated.Status.Phase != kelos.TaskPipelinePhaseSucceeded {
 		t.Fatalf("completed pipeline status = %#v", updated.Status)
+	}
+	ready := apiMeta.FindStatusCondition(updated.Status.Conditions, kelos.TaskPipelineConditionReady)
+	if ready == nil || ready.Status != metav1.ConditionTrue {
+		t.Fatalf("Ready condition = %#v, want True", ready)
 	}
 }
 
@@ -162,8 +161,8 @@ func TestTaskPipelineReconcileFailsOnMissingResult(t *testing.T) {
 		{Name: "plan", TaskTemplate: testPipelineTaskTemplate("Plan the work")},
 		{
 			Name:         "implement",
-			DependsOn:    []string{"plan"},
-			TaskTemplate: testPipelineTaskTemplate(`Implement {{index .Tasks "plan" 0 "Results" "branch"}}`),
+			DependsOn:    []kelos.PipelineDependency{{Name: "plan"}},
+			TaskTemplate: testPipelineTaskTemplate(`Implement {{index .Deps "plan" 0 "Results" "branch"}}`),
 		},
 	})
 	reconciler, k8sClient := testTaskPipelineReconciler(t, pipeline)
@@ -195,11 +194,9 @@ func TestTaskPipelineReconcileFailsOnMissingResult(t *testing.T) {
 	if updated.Status.Phase != kelos.TaskPipelinePhaseFailed {
 		t.Fatalf("pipeline phase = %q, want %q", updated.Status.Phase, kelos.TaskPipelinePhaseFailed)
 	}
-	if !strings.Contains(updated.Status.Message, `key "branch" is not present`) {
-		t.Fatalf("pipeline message = %q", updated.Status.Message)
-	}
-	if updated.Status.CompletionTime == nil {
-		t.Fatal("pipeline completionTime is nil")
+	ready := apiMeta.FindStatusCondition(updated.Status.Conditions, kelos.TaskPipelineConditionReady)
+	if ready == nil || !strings.Contains(ready.Message, `key "branch" is not present`) {
+		t.Fatalf("Ready condition = %#v", ready)
 	}
 }
 
@@ -208,8 +205,8 @@ func TestTaskPipelineReconcileWaitsForDependencyOutputCapture(t *testing.T) {
 		{Name: "plan", TaskTemplate: testPipelineTaskTemplate("Plan the work")},
 		{
 			Name:         "implement",
-			DependsOn:    []string{"plan"},
-			TaskTemplate: testPipelineTaskTemplate(`Implement {{index .Tasks "plan" 0 "Results" "branch"}}`),
+			DependsOn:    []kelos.PipelineDependency{{Name: "plan"}},
+			TaskTemplate: testPipelineTaskTemplate(`Implement {{index .Deps "plan" 0 "Results" "branch"}}`),
 		},
 	})
 	reconciler, k8sClient := testTaskPipelineReconciler(t, pipeline)
@@ -341,8 +338,8 @@ func TestTaskPipelineReconcileWaitsForEarlierPipelineTasks(t *testing.T) {
 
 func TestValidateTaskPipelineRejectsCycle(t *testing.T) {
 	pipeline := testTaskPipeline("cycle", []kelos.PipelineNode{
-		{Name: "a", DependsOn: []string{"b"}, TaskTemplate: testPipelineTaskTemplate("A")},
-		{Name: "b", DependsOn: []string{"a"}, TaskTemplate: testPipelineTaskTemplate("B")},
+		{Name: "a", DependsOn: []kelos.PipelineDependency{{Name: "b"}}, TaskTemplate: testPipelineTaskTemplate("A")},
+		{Name: "b", DependsOn: []kelos.PipelineDependency{{Name: "a"}}, TaskTemplate: testPipelineTaskTemplate("B")},
 	})
 	if err := validateTaskPipeline(pipeline); err == nil || !strings.Contains(err.Error(), "cycle") {
 		t.Fatalf("validateTaskPipeline() error = %v, want cycle error", err)

@@ -6,8 +6,8 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 type WebhookGatewayPhase string
 
 const (
-	// WebhookGatewayPhaseAuthenticated means inbound deliveries are HMAC-verified
-	// against the gateway's secret.
+	// WebhookGatewayPhaseAuthenticated means inbound deliveries are cryptographically
+	// verified against the gateway's secret (HMAC for GitHub/Linear, token equality for GitLab).
 	WebhookGatewayPhaseAuthenticated WebhookGatewayPhase = "Authenticated"
 	// WebhookGatewayPhaseSecretMissing means a required Secret is not configured
 	// or not yet present.

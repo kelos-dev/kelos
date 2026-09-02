@@ -36,7 +36,8 @@ func ValidateLinearSignature(payload []byte, signature string, secret []byte) er
 
 // ValidateGitLabToken validates a GitLab webhook delivery. GitLab does not sign
 // payloads; it sends the configured secret verbatim in the X-Gitlab-Token
-// header, so the check is a constant-time equality against the stored secret.
+// header, so the check is constant-time equality for equal-length inputs
+// (hmac.Equal returns immediately if lengths differ).
 func ValidateGitLabToken(token string, secret []byte) error {
 	if token == "" {
 		return fmt.Errorf("missing token")

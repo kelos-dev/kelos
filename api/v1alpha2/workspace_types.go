@@ -59,9 +59,10 @@ type WorkspaceSpec struct {
 	// +optional
 	Provider string `json:"provider,omitempty"`
 
-	// SecretRef references a Secret containing the Provider's token key
-	// (GITHUB_TOKEN for github, GITLAB_TOKEN for gitlab) for git
-	// authentication and CLI operations.
+	// SecretRef references a Secret containing credentials for the Provider.
+	// For github (or when Provider is omitted), it must contain GITHUB_TOKEN
+	// or GitHub App keys (appID, installationID, privateKey).
+	// For gitlab, it must contain GITLAB_TOKEN.
 	// +optional
 	SecretRef *SecretReference `json:"secretRef,omitempty"`
 

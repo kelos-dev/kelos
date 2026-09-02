@@ -31,7 +31,7 @@ RUN ARCH=$(dpkg --print-architecture) \
     && DEB="glab_${GLAB_VERSION}_linux_${ARCH}.deb" \
     && curl -fsSL -o "/tmp/${DEB}" "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/${DEB}" \
     && curl -fsSL -o /tmp/glab-checksums.txt "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/checksums.txt" \
-    && (cd /tmp && sha256sum --ignore-missing -c glab-checksums.txt) \
+    && (cd /tmp && grep "${DEB}" glab-checksums.txt | sha256sum -c -) \
     && dpkg -i "/tmp/${DEB}" \
     && rm "/tmp/${DEB}" /tmp/glab-checksums.txt
 

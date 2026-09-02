@@ -15,8 +15,14 @@ spec:
       # TODO: Replace with your project path
       project: group/repo
       filters:
-        # A "/kelos fix" comment on a merge request or issue.
+        # A "/kelos fix" comment on a merge request or issue. Notes on commits
+        # and snippets carry neither a branch nor a number and are excluded so
+        # the branch template below never renders "kelos-issue-".
         - event: note
+          noteOn: MergeRequest
+          bodyPattern: '^/kelos fix'
+        - event: note
+          noteOn: Issue
           bodyPattern: '^/kelos fix'
         # A merge request pipeline failed.
         - event: pipeline

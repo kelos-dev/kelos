@@ -737,6 +737,7 @@ func TestParseGitLabRepo(t *testing.T) {
 		{"https://oauth2@gitlab.example.com/group/repo", "https://gitlab.example.com", "group/repo"},
 		{"http://gitlab-webservice-default.gitlab.svc:8181/group/repo.git", "http://gitlab-webservice-default.gitlab.svc:8181", "group/repo"},
 		{"git@gitlab.example.com:group/sub/repo.git", "https://gitlab.example.com", "group/sub/repo"},
+		{"git://gitlab.example.com/group/repo.git", "https://gitlab.example.com", "group/repo"},
 		{"group/repo", "", "group/repo"},
 	}
 	for _, tt := range tests {
@@ -784,6 +785,42 @@ func TestDeploymentBuilder_GitLab(t *testing.T) {
 	ref := spawner.Env[0].ValueFrom.SecretKeyRef
 	if ref.Name != "gitlab-token" || ref.Key != "GITLAB_TOKEN" {
 		t.Errorf("unexpected secret key ref: %+v", ref)
+	}
+}
+
+func TestGitLabSourceArgsRelativeURLRoot(t *testing.T) {
+	tests := []struct {
+		name string
+		gl   kelos.GitLab
+		repo string
+		want []string
+	}{
+		{
+			name: "base url path is stripped from the derived project",
+			gl:   kelos.GitLab{BaseURL: "https://example.com/gitlab"},
+			repo: "https://example.com/gitlab/group/repo.git",
+			want: []string{"--gitlab-base-url=https://example.com/gitlab", "--gitlab-project=group/repo"},
+		},
+		{
+			name: "explicit project wins over derivation",
+			gl:   kelos.GitLab{BaseURL: "https://example.com/gitlab/", Project: "other/repo"},
+			repo: "https://example.com/gitlab/group/repo.git",
+			want: []string{"--gitlab-base-url=https://example.com/gitlab/", "--gitlab-project=other/repo"},
+		},
+		{
+			name: "base url without path leaves the project untouched",
+			gl:   kelos.GitLab{BaseURL: "http://gitlab.svc:8181"},
+			repo: "https://example.com/group/repo.git",
+			want: []string{"--gitlab-base-url=http://gitlab.svc:8181", "--gitlab-project=group/repo"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := gitLabSourceArgs(&tt.gl, tt.repo)
+			if strings.Join(got, " ") != strings.Join(tt.want, " ") {
+				t.Errorf("gitLabSourceArgs() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

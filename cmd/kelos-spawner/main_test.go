@@ -2079,7 +2079,7 @@ func TestSourceAnnotations_GitLab(t *testing.T) {
 			When: kelos.When{
 				GitLab: &kelos.GitLab{
 					Reporting: &kelos.GitLabReporting{
-						Comments: &kelos.GitLabCommentsReporting{Mode: kelos.GitHubCommentModeSticky},
+						Comments: &kelos.GitLabCommentsReporting{Mode: kelos.CommentModeSticky},
 					},
 				},
 			},
@@ -2093,7 +2093,7 @@ func TestSourceAnnotations_GitLab(t *testing.T) {
 	if issue[reporting.AnnotationGitHubReporting] != "enabled" {
 		t.Errorf("Expected reporting enabled annotation, got %v", issue)
 	}
-	if issue[reporting.AnnotationGitHubCommentMode] != string(kelos.GitHubCommentModeSticky) {
+	if issue[reporting.AnnotationGitHubCommentMode] != string(kelos.CommentModeSticky) {
 		t.Errorf("Expected sticky comment mode, got %q", issue[reporting.AnnotationGitHubCommentMode])
 	}
 
@@ -2435,7 +2435,7 @@ func TestReportingEnabled_GitLab(t *testing.T) {
 	if !reportingEnabled(enabled) {
 		t.Error("Expected reporting to be enabled for GitLab comments reporting")
 	}
-	if got := resolvedCommentMode(enabled); got != kelos.GitHubCommentModePerTask {
+	if got := resolvedCommentMode(enabled); got != kelos.CommentModePerTask {
 		t.Errorf("resolvedCommentMode = %q, want PerTask default", got)
 	}
 }
@@ -2566,7 +2566,7 @@ func TestSourceAnnotations_StickyComments(t *testing.T) {
 			When: kelos.When{
 				GitHubPullRequests: &kelos.GitHubPullRequests{
 					Reporting: &kelos.GitHubReporting{
-						Comments: &kelos.GitHubCommentsReporting{Mode: kelos.GitHubCommentModeSticky},
+						Comments: &kelos.GitHubCommentsReporting{Mode: kelos.CommentModeSticky},
 					},
 				},
 			},
@@ -2577,7 +2577,7 @@ func TestSourceAnnotations_StickyComments(t *testing.T) {
 	if annotations[reporting.AnnotationGitHubReporting] != "enabled" {
 		t.Errorf("Expected github-reporting 'enabled', got %q", annotations[reporting.AnnotationGitHubReporting])
 	}
-	if annotations[reporting.AnnotationGitHubCommentMode] != string(kelos.GitHubCommentModeSticky) {
+	if annotations[reporting.AnnotationGitHubCommentMode] != string(kelos.CommentModeSticky) {
 		t.Errorf("Expected Sticky comment mode, got %q", annotations[reporting.AnnotationGitHubCommentMode])
 	}
 }

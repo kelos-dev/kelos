@@ -5,29 +5,50 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
 // gitlabFixture holds the data served by newGitLabTestServer for project
-// "group/sub/repo". Merge request details (including head_pipeline) come from
-// mrs; notes, reviewers, and approvals are keyed by "<resource>/<iid>".
+// "group/sub/repo". Merge request details (including head_pipeline and
+// detailed_merge_status) come from mrs; notes are keyed by
+// "<resource>/<iid>" and approvals by merge request iid.
 type gitlabFixture struct {
 	issues    []gitlabItem
 	mrs       []gitlabItem
 	notes     map[string][]gitlabNote
-	reviewers map[int][]gitlabReviewer
 	approvals map[int]gitlabApprovals
 }
 
-func newGitLabTestServer(t *testing.T, fx gitlabFixture, seen *[]*http.Request) *httptest.Server {
+// requestLog records requests from the server goroutine for inspection after
+// Discover returns.
+type requestLog struct {
+	mu   sync.Mutex
+	reqs []*http.Request
+}
+
+func (l *requestLog) add(r *http.Request) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.reqs = append(l.reqs, r)
+}
+
+func (l *requestLog) all() []*http.Request {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]*http.Request(nil), l.reqs...)
+}
+
+func newGitLabTestServer(t *testing.T, fx gitlabFixture, seen *requestLog) *httptest.Server {
 	t.Helper()
 	const prefix = "/api/v4/projects/group%2Fsub%2Frepo/"
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if seen != nil {
-			*seen = append(*seen, r)
+			seen.add(r)
 		}
 		path := r.URL.EscapedPath()
 		if !strings.HasPrefix(path, prefix) {
@@ -52,10 +73,12 @@ func newGitLabTestServer(t *testing.T, fx gitlabFixture, seen *[]*http.Request) 
 			}
 			w.WriteHeader(http.StatusNotFound)
 		case len(parts) == 3 && parts[2] == "notes":
-			json.NewEncoder(w).Encode(fx.notes[parts[0]+"/"+parts[1]])
-		case len(parts) == 3 && parts[2] == "reviewers":
-			iid, _ := strconv.Atoi(parts[1])
-			json.NewEncoder(w).Encode(fx.reviewers[iid])
+			// Fixtures list notes chronologically; honour sort=desc like GitLab.
+			notes := slices.Clone(fx.notes[parts[0]+"/"+parts[1]])
+			if r.URL.Query().Get("sort") == "desc" {
+				slices.Reverse(notes)
+			}
+			json.NewEncoder(w).Encode(notes)
 		case len(parts) == 3 && parts[2] == "approvals":
 			iid, _ := strconv.Atoi(parts[1])
 			json.NewEncoder(w).Encode(fx.approvals[iid])
@@ -80,8 +103,8 @@ func TestGitLabDiscoverIssues(t *testing.T) {
 			},
 		},
 	}
-	var seen []*http.Request
-	server := newGitLabTestServer(t, fx, &seen)
+	var log requestLog
+	server := newGitLabTestServer(t, fx, &log)
 	defer server.Close()
 
 	s := &GitLabSource{
@@ -110,6 +133,7 @@ func TestGitLabDiscoverIssues(t *testing.T) {
 		t.Errorf("expected system notes dropped from comments, got %q", got.Comments)
 	}
 
+	seen := log.all()
 	list := seen[0]
 	if list.Header.Get("PRIVATE-TOKEN") != "glpat-secret" {
 		t.Errorf("expected PRIVATE-TOKEN header, got %q", list.Header.Get("PRIVATE-TOKEN"))
@@ -119,7 +143,12 @@ func TestGitLabDiscoverIssues(t *testing.T) {
 		t.Errorf("unexpected list query: %v", q)
 	}
 	if len(seen) != 2 || !strings.HasSuffix(seen[1].URL.EscapedPath(), "/issues/1/notes") {
-		t.Errorf("expected exactly list + notes requests for issues, got %d requests", len(seen))
+		t.Fatalf("expected exactly list + notes requests for issues, got %d requests", len(seen))
+	}
+	// Newest-first paging keeps recent trigger notes inside the page cap;
+	// Comments above proves the result is still chronological.
+	if q := seen[1].URL.Query(); q.Get("sort") != "desc" || q.Get("order_by") != "created_at" {
+		t.Errorf("expected notes requested newest first, got %v", q)
 	}
 }
 
@@ -136,11 +165,12 @@ func TestGitLabDiscoverMergeRequests(t *testing.T) {
 				{Body: "looks good overall", Author: gitlabUser{Username: "bob"}},
 				{Body: "rename this", Type: "DiffNote", Author: gitlabUser{Username: "bob"}, Position: &gitlabNotePosition{NewPath: "main.go", NewLine: 12}},
 				{Body: "deleted line comment", Type: "DiffNote", Author: gitlabUser{Username: "bob"}, Position: &gitlabNotePosition{OldPath: "old.go", OldLine: 3}},
+				{Body: "removed in place", Type: "DiffNote", Author: gitlabUser{Username: "bob"}, Position: &gitlabNotePosition{NewPath: "main.go", OldPath: "main.go", OldLine: 8}},
 			},
 		},
 	}
-	var seen []*http.Request
-	server := newGitLabTestServer(t, fx, &seen)
+	var log requestLog
+	server := newGitLabTestServer(t, fx, &log)
 	defer server.Close()
 
 	s := &GitLabSource{BaseURL: server.URL, Project: "group/sub/repo", Types: []string{"mergeRequests"}}
@@ -165,16 +195,41 @@ func TestGitLabDiscoverMergeRequests(t *testing.T) {
 	if got.Comments != "looks good overall" {
 		t.Errorf("expected diff notes excluded from comments, got %q", got.Comments)
 	}
-	if got.ReviewComments != "main.go:12\nrename this\n---\nold.go:3\ndeleted line comment" {
+	if got.ReviewComments != "main.go:12\nrename this\n---\nold.go:3\ndeleted line comment\n---\nmain.go:8\nremoved in place" {
 		t.Errorf("unexpected review comments %q", got.ReviewComments)
 	}
 	if got.ReviewState != "" || !got.TriggerTime.IsZero() {
 		t.Errorf("expected no review state or trigger time without gates, got %+v", got)
 	}
-	for _, r := range seen {
-		if strings.HasSuffix(r.URL.Path, "/approvals") || strings.HasSuffix(r.URL.Path, "/reviewers") {
+	for _, r := range log.all() {
+		if strings.HasSuffix(r.URL.Path, "/approvals") {
 			t.Errorf("review endpoints must not be fetched without a reviewState gate: %s", r.URL.Path)
 		}
+	}
+}
+
+func TestGitLabDiscoverDuplicateTypesPollOnce(t *testing.T) {
+	fx := gitlabFixture{issues: []gitlabItem{{IID: 1, Title: "Issue 1"}}}
+	var log requestLog
+	server := newGitLabTestServer(t, fx, &log)
+	defer server.Close()
+
+	s := &GitLabSource{BaseURL: server.URL, Project: "group/sub/repo", Types: []string{"issues", "issues"}}
+	items, err := s.Discover(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected duplicate types to yield one item, got %+v", items)
+	}
+	lists := 0
+	for _, r := range log.all() {
+		if strings.HasSuffix(r.URL.EscapedPath(), "/issues") {
+			lists++
+		}
+	}
+	if lists != 1 {
+		t.Errorf("expected one issues list request, got %d", lists)
 	}
 }
 
@@ -207,12 +262,9 @@ func TestGitLabDiscoverPipelineStatusGate(t *testing.T) {
 func TestGitLabDiscoverReviewStateGate(t *testing.T) {
 	fx := gitlabFixture{
 		mrs: []gitlabItem{
-			{IID: 1, Title: "approved"},
-			{IID: 2, Title: "changes requested"},
-			{IID: 3, Title: "unreviewed"},
-		},
-		reviewers: map[int][]gitlabReviewer{
-			2: {{State: "reviewed"}, {State: "requested_changes"}},
+			{IID: 1, Title: "approved", DetailedMergeStatus: "mergeable"},
+			{IID: 2, Title: "changes requested", DetailedMergeStatus: "requested_changes"},
+			{IID: 3, Title: "unreviewed", DetailedMergeStatus: "not_approved"},
 		},
 		approvals: map[int]gitlabApprovals{
 			1: {Approved: true},
@@ -331,6 +383,7 @@ func TestGitLabDiscoverPipelineAndCommentTriggerTimes(t *testing.T) {
 }
 
 func TestGitLabDiscoverPagination(t *testing.T) {
+	var mu sync.Mutex
 	var pages []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/notes") {
@@ -338,7 +391,9 @@ func TestGitLabDiscoverPagination(t *testing.T) {
 			return
 		}
 		page := r.URL.Query().Get("page")
+		mu.Lock()
 		pages = append(pages, page)
+		mu.Unlock()
 		switch page {
 		case "1":
 			w.Header().Set("X-Next-Page", "2")
@@ -360,6 +415,8 @@ func TestGitLabDiscoverPagination(t *testing.T) {
 	if len(items) != 2 {
 		t.Errorf("expected 2 items across pages, got %d", len(items))
 	}
+	mu.Lock()
+	defer mu.Unlock()
 	if len(pages) != 2 || pages[0] != "1" || pages[1] != "2" {
 		t.Errorf("expected pages [1 2], got %v", pages)
 	}

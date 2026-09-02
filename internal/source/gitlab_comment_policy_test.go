@@ -69,6 +69,12 @@ func TestEvaluateGitLabCommentPolicy(t *testing.T) {
 			wantAllowed: false,
 		},
 		{
+			name:        "allowlist of blank entries fails closed",
+			policy:      gitlabCommentPolicy{TriggerComment: trigger, AllowedUsers: []string{" ", "@"}},
+			notes:       []gitlabNote{gitlabTestNote(trigger, "alice", t1)},
+			wantAllowed: false,
+		},
+		{
 			name:        "unauthorized description author is ignored",
 			policy:      gitlabCommentPolicy{TriggerComment: trigger, AllowedUsers: []string{"alice"}},
 			description: trigger,

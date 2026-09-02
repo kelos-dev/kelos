@@ -16,6 +16,7 @@ import (
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/githubapp"
 	"github.com/kelos-dev/kelos/internal/reporting"
+	"github.com/kelos-dev/kelos/internal/webhook"
 )
 
 // reportingConfig holds the configuration for the reporting reconciler.
@@ -25,14 +26,22 @@ import (
 // resolver covers all supported credential paths (PAT, GitHub App, token
 // file, env), shared with the webhook handler for consistency.
 type reportingConfig struct {
+	// Source is the provider served in per-source mode. Tasks stamped for
+	// another provider are left to that provider's server.
+	Source           webhook.WebhookSource
 	TokenResolver    func(context.Context) (string, error)
 	GitHubAPIBaseURL string
 	GitHubAppID      string
-	// GitLabToken authenticates status notes in --source=gitlab mode. Gateway
-	// mode resolves the token from the gateway's credentialsRef instead.
-	GitLabToken string
-	GatewayMode bool
+	// GitLabToken and GitLabBaseURL configure status notes in --source=gitlab
+	// mode. Gateway mode resolves both from the WebhookGateway instead. The
+	// instance URL is never taken from the webhook payload, which would let a
+	// forged delivery redirect the token to an attacker-controlled host.
+	GitLabToken   string
+	GitLabBaseURL string
+	GatewayMode   bool
 }
+
+const defaultGitLabBaseURL = "https://gitlab.com"
 
 // reportingReconciler watches Tasks with GitHub reporting annotations
 // and reports their status back to GitHub.
@@ -69,7 +78,12 @@ func (r *reportingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, nil
 	}
 
-	if task.Annotations[reporting.AnnotationSourceProvider] == reporting.SourceProviderGitLab {
+	isGitLab := task.Annotations[reporting.AnnotationSourceProvider] == reporting.SourceProviderGitLab
+	if !r.config.GatewayMode && isGitLab != (r.config.Source == webhook.GitLabSource) {
+		log.V(1).Info("Skipping reporting: task belongs to another provider's server", "task", task.Name, "source", r.config.Source)
+		return ctrl.Result{}, nil
+	}
+	if isGitLab {
 		return r.reportGitLab(ctx, &task)
 	}
 
@@ -124,25 +138,21 @@ func (r *reportingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 }
 
 // reportGitLab posts status notes for a Task created from a GitLab webhook.
-// The project path and instance URL come from Task annotations; the token
-// comes from the bound gateway's credentialsRef or the server's GitLab token.
+// The project path comes from a Task annotation; the token and instance URL
+// come from the bound gateway or the server configuration.
 func (r *reportingReconciler) reportGitLab(ctx context.Context, task *kelos.Task) (ctrl.Result, error) {
 	log := ctrl.Log.WithName("reporting")
 
 	project := task.Annotations[reporting.AnnotationSourceRepo]
-	baseURL := task.Annotations[reporting.AnnotationSourceBaseURL]
-	if project == "" || baseURL == "" {
-		log.Info("Skipping reporting: missing source project/base-url annotation", "task", task.Name)
+	if project == "" {
+		log.Info("Skipping reporting: missing source project annotation", "task", task.Name)
 		return ctrl.Result{}, nil
 	}
 
-	token, apiBaseURL, err := r.resolveGitLabReportingCreds(ctx, task)
+	token, baseURL, err := r.resolveGitLabReportingCreds(ctx, task)
 	if err != nil {
 		log.Error(err, "Resolving GitLab credentials for reporting", "task", task.Name)
 		return ctrl.Result{}, fmt.Errorf("resolving reporting credentials: %w", err)
-	}
-	if apiBaseURL != "" {
-		baseURL = apiBaseURL
 	}
 
 	reporter := &reporting.TaskReporter{
@@ -161,15 +171,17 @@ func (r *reportingReconciler) reportGitLab(ctx context.Context, task *kelos.Task
 	return ctrl.Result{}, nil
 }
 
-// resolveGitLabReportingCreds returns the GitLab token and, for gateway-owned
-// Tasks, the gateway's API base URL override (empty when not configured).
+// resolveGitLabReportingCreds returns the GitLab token and instance URL for
+// the Task: the bound gateway's credentialsRef and apiBaseURL for
+// gateway-owned Tasks, otherwise the server configuration. An unset instance
+// URL means gitlab.com.
 func (r *reportingReconciler) resolveGitLabReportingCreds(ctx context.Context, task *kelos.Task) (string, string, error) {
 	gwName := task.Annotations[reporting.AnnotationWebhookGateway]
 	if gwName == "" {
 		if r.config.GitLabToken == "" {
 			return "", "", fmt.Errorf("no GitLab token configured for reporting")
 		}
-		return r.config.GitLabToken, "", nil
+		return r.config.GitLabToken, gitLabBaseURLOrDefault(r.config.GitLabBaseURL), nil
 	}
 
 	var gw kelos.WebhookGateway
@@ -187,7 +199,14 @@ func (r *reportingReconciler) resolveGitLabReportingCreds(ctx context.Context, t
 	if token == "" {
 		return "", "", fmt.Errorf("webhook gateway %s credentials contain no GITLAB_TOKEN", gwName)
 	}
-	return token, gw.Spec.GitLab.APIBaseURL, nil
+	return token, gitLabBaseURLOrDefault(gw.Spec.GitLab.APIBaseURL), nil
+}
+
+func gitLabBaseURLOrDefault(baseURL string) string {
+	if baseURL == "" {
+		return defaultGitLabBaseURL
+	}
+	return baseURL
 }
 
 // resolveReportingCreds returns the GitHub token resolver, API base URL, and

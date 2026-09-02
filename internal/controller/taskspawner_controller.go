@@ -243,7 +243,7 @@ func (r *TaskSpawnerReconciler) resolveTaskSpawnerWorkspace(ctx context.Context,
 			return nil, workspaceRef, false, ctrl.Result{}, err
 		} else {
 			secretData = secret.Data
-			isGitHubApp = githubapp.IsGitHubApp(secret.Data)
+			isGitHubApp = workspaceProviderFor(workspace).name == kelos.WorkspaceProviderGitHub && githubapp.IsGitHubApp(secret.Data)
 			if isGitHubApp {
 				logger.Info("Detected GitHub App secret for TaskSpawner", "secret", workspace.SecretRef.Name)
 			}

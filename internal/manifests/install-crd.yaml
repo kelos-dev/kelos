@@ -60490,6 +60490,9 @@ spec:
                           BaseURL overrides the GitLab instance URL used for API calls (for
                           example "https://gitlab.example.com" or an in-cluster service URL).
                           When empty, the scheme and host of the workspace repo URL are used.
+                          Set it for a GitLab served under a relative URL root
+                          ("https://example.com/gitlab"); the path is then excluded from the
+                          project path derived from the workspace repo URL.
                         pattern: ^https?://.+
                         type: string
                       commentPolicy:
@@ -60604,6 +60607,9 @@ spec:
                           Types specifies which item types to discover: "issues",
                           "mergeRequests", or both.
                         items:
+                          enum:
+                          - issues
+                          - mergeRequests
                           type: string
                         type: array
                     type: object
@@ -60617,6 +60623,13 @@ spec:
                           payload object_kind: "issue", "merge_request", "note", "pipeline",
                           "push", or "tag_push".
                         items:
+                          enum:
+                          - issue
+                          - merge_request
+                          - note
+                          - pipeline
+                          - push
+                          - tag_push
                           type: string
                         minItems: 1
                         type: array
@@ -61284,7 +61297,7 @@ spec:
                     description: |-
                       APIBaseURL is the GitLab instance URL used for status reporting (for
                       example "https://gitlab.example.com" or an in-cluster service URL). When
-                      empty, the instance URL is taken from the originating webhook payload.
+                      empty, "https://gitlab.com" is used.
                     pattern: ^https?://.+
                     type: string
                   credentialsRef:
@@ -68894,9 +68907,10 @@ spec:
                 type: string
               secretRef:
                 description: |-
-                  SecretRef references a Secret containing the Provider's token key
-                  (GITHUB_TOKEN for github, GITLAB_TOKEN for gitlab) for git
-                  authentication and CLI operations.
+                  SecretRef references a Secret containing credentials for the Provider.
+                  For github (or when Provider is omitted), it must contain GITHUB_TOKEN
+                  or GitHub App keys (appID, installationID, privateKey).
+                  For gitlab, it must contain GITLAB_TOKEN.
                 properties:
                   name:
                     description: Name is the name of the secret.

@@ -15,10 +15,13 @@
 
 set -u
 
-if [ -n "${KELOS_GITLAB_TOKEN_FILE:-}" ] && [ -r "${KELOS_GITLAB_TOKEN_FILE}" ]; then
-  GITLAB_TOKEN=$(cat "${KELOS_GITLAB_TOKEN_FILE}")
+# The startup token stays in place unless the file yields a non-empty value,
+# so a Secret volume mid-rotation cannot blank the credential.
+if [ -n "${KELOS_GITLAB_TOKEN_FILE:-}" ] && __kelos_token=$(cat "${KELOS_GITLAB_TOKEN_FILE}" 2>/dev/null) && [ -n "${__kelos_token}" ]; then
+  GITLAB_TOKEN=${__kelos_token}
   export GITLAB_TOKEN
 fi
+unset __kelos_token
 
 __kelos_marker="${GLAB_CONFIG_DIR:-}/.kelos-host-configured"
 if [ -n "${GITLAB_HOST:-}" ] && [ -n "${GLAB_CONFIG_DIR:-}" ] && [ -n "${GITLAB_TOKEN:-}" ] && [ ! -f "${__kelos_marker}" ]; then

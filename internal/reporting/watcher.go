@@ -45,8 +45,9 @@ const (
 	AnnotationSourceProvider = "kelos.dev/source-provider"
 
 	// AnnotationSourceBaseURL records the instance URL of the tracker the event
-	// came from (e.g. "https://gitlab.example.com"), so reporting can target
-	// self-hosted instances without server-side configuration. For GitLab,
+	// came from (e.g. "https://gitlab.example.com"). It is informational:
+	// reporting resolves the instance URL from server or gateway configuration
+	// because the payload is attacker-controllable. For GitLab,
 	// AnnotationSourceRepo holds the full project path.
 	AnnotationSourceBaseURL = "kelos.dev/source-base-url"
 
@@ -312,7 +313,7 @@ func (tr *TaskReporter) reportViaComment(ctx context.Context, task *kelos.Task) 
 		body = FormatFailedComment(task.Name)
 	}
 
-	if annotations[AnnotationGitHubCommentMode] == string(kelos.GitHubCommentModeSticky) {
+	if annotations[AnnotationGitHubCommentMode] == string(kelos.CommentModeSticky) {
 		marker, err := stickyCommentMarker(task)
 		if err != nil {
 			return err

@@ -1715,6 +1715,55 @@ func TestPrepareSessionWorkspaceInitRefreshesCredentials(t *testing.T) {
 	}
 }
 
+func TestSessionPodUsesGitLabWorkspaceCredentials(t *testing.T) {
+	t.Parallel()
+	session := testSession("gitlab-session", "codex")
+	session.Spec.Worker.WorkspaceRef = &kelos.WorkspaceReference{Name: "workspace"}
+	workspace := &kelos.WorkspaceSpec{
+		Repo:      "https://gitlab.example.com/group/repo.git",
+		Provider:  kelos.WorkspaceProviderGitLab,
+		SecretRef: &kelos.SecretReference{Name: "gitlab-token"},
+	}
+
+	statefulSet, _, err := testSessionReconciler(nil, nil).buildSessionStatefulSet(session, workspace, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	podSpec := statefulSet.Spec.Template.Spec
+
+	tokenFile := GitLabTokenMountPath + "/" + GitLabTokenSecretKey
+	var gitClone *corev1.Container
+	for i := range podSpec.InitContainers {
+		if podSpec.InitContainers[i].Name == "git-clone" {
+			gitClone = &podSpec.InitContainers[i]
+		}
+	}
+	if gitClone == nil {
+		t.Fatalf("Session Pod has no git-clone init container: %v", podSpec.InitContainers)
+	}
+	script := strings.Join(gitClone.Command, " ")
+	if !strings.Contains(script, "config credential.username "+gitLabCredentialUsername) {
+		t.Errorf("git-clone must pin credential.username to %q for GitLab tokens: %q", gitLabCredentialUsername, script)
+	}
+	if !strings.Contains(script, tokenFile) {
+		t.Errorf("git-clone credential helper must read the GitLab token file %q: %q", tokenFile, script)
+	}
+	if strings.Contains(script, GitHubTokenMountPath) {
+		t.Errorf("git-clone must not reference the GitHub token file: %q", script)
+	}
+
+	mainEnv := map[string]string{}
+	for _, env := range podSpec.Containers[0].Env {
+		mainEnv[env.Name] = env.Value
+	}
+	if mainEnv["KELOS_GITLAB_TOKEN_FILE"] != tokenFile {
+		t.Errorf("KELOS_GITLAB_TOKEN_FILE = %q, want %q", mainEnv["KELOS_GITLAB_TOKEN_FILE"], tokenFile)
+	}
+	if _, found := mainEnv["KELOS_GITHUB_TOKEN_FILE"]; found {
+		t.Error("KELOS_GITHUB_TOKEN_FILE must not be set for a GitLab workspace")
+	}
+}
+
 func TestSessionPluginConfigMapUsesSessionIdentity(t *testing.T) {
 	t.Parallel()
 	session := testSession("shared-name", "claude-code")

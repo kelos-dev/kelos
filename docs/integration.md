@@ -370,7 +370,7 @@ Then add a project or group webhook in GitLab (Settings → Webhooks) pointing t
 
 **GitLab-specific variables:** `{{.Event}}`, `{{.Action}}`, `{{.Sender}}`, `{{.Repository}}`, `{{.Kind}}` (`Issue`, `MR`, or `webhook`), `{{.Number}}`, `{{.Branch}}`, `{{.State}}`, `{{.Labels}}`, `{{.HeadSHA}}`, `{{.NoteOn}}`, `{{.CommentBody}}`, `{{.CommentURL}}`, `{{.PipelineStatus}}`, `{{.PipelineURL}}`, `{{.Payload}}`. Notes and pipelines attached to a merge request carry that merge request's `{{.ID}}` (`mr-<iid>`), `{{.Number}}`, and `{{.Branch}}`.
 
-**Status notes:** set `reporting.comments.mode` (`PerTask` or `Sticky`) on the spawner to post Task status notes on the originating issue or merge request. The per-source server reads its token from `webhookServer.sources.gitlab.tokenSecretName` (a Secret with a `GITLAB_TOKEN` key); gateway-bound spawners use the gateway's `spec.gitlab.credentialsRef` and optional `spec.gitlab.apiBaseURL`.
+**Status notes:** set `reporting.comments.mode` (`PerTask` or `Sticky`) on the spawner to post Task status notes on the originating issue or merge request. The per-source server reads its token from `webhookServer.sources.gitlab.tokenSecretName` (a Secret with a `GITLAB_TOKEN` key) and posts to `webhookServer.sources.gitlab.baseUrl` (default `https://gitlab.com`); gateway-bound spawners use the gateway's `spec.gitlab.credentialsRef` and `spec.gitlab.apiBaseURL`. The instance URL always comes from configuration, never from the webhook payload.
 
 ### Generic Webhooks
 

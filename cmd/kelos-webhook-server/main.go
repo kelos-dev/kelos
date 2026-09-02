@@ -50,6 +50,7 @@ func main() {
 		githubAPIBaseURL        string
 		githubTokenFile         string
 		gitlabToken             string
+		gitlabBaseURL           string
 	)
 
 	flag.StringVar(&source, "source", "", "Webhook source type (github, linear, gitlab, or generic). Ignored when --gateway-mode is set.")
@@ -65,6 +66,7 @@ func main() {
 	flag.StringVar(&githubAPIBaseURL, "github-api-base-url", "", "GitHub API base URL for enterprise servers (env: GITHUB_API_BASE_URL)")
 	flag.StringVar(&githubTokenFile, "github-token-file", "", "Path to file containing GitHub token for reporting.")
 	flag.StringVar(&gitlabToken, "gitlab-token", "", "GitLab access token for status notes in --source=gitlab mode (env: GITLAB_TOKEN)")
+	flag.StringVar(&gitlabBaseURL, "gitlab-base-url", "", "GitLab instance URL for status notes in --source=gitlab mode, e.g. https://gitlab.example.com (env: GITLAB_BASE_URL; default https://gitlab.com)")
 
 	opts, applyVerbosity := logging.SetupZapOptions(flag.CommandLine)
 	flag.Parse()
@@ -82,6 +84,9 @@ func main() {
 	}
 	if gitlabToken == "" {
 		gitlabToken = os.Getenv("GITLAB_TOKEN")
+	}
+	if gitlabBaseURL == "" {
+		gitlabBaseURL = os.Getenv("GITLAB_BASE_URL")
 	}
 	if githubAppID == "" {
 		githubAppID = os.Getenv("GITHUB_APP_ID")
@@ -248,10 +253,12 @@ func main() {
 		reportingReconciler := &reportingReconciler{
 			Client: mgr.GetClient(),
 			config: reportingConfig{
+				Source:           webhookSource,
 				TokenResolver:    tokenResolver,
 				GitHubAPIBaseURL: githubAPIBaseURL,
 				GitHubAppID:      reportingGitHubAppID,
 				GitLabToken:      gitlabToken,
+				GitLabBaseURL:    gitlabBaseURL,
 				GatewayMode:      gatewayMode,
 			},
 		}

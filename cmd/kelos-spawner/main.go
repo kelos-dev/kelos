@@ -683,8 +683,8 @@ func reportingEnabled(ts *kelos.TaskSpawner) bool {
 
 // resolvedCommentMode returns the configured comment mode. The deprecated
 // Enabled field and an empty Comments configuration retain PerTask behavior.
-func resolvedCommentMode(ts *kelos.TaskSpawner) kelos.GitHubCommentMode {
-	var mode kelos.GitHubCommentMode
+func resolvedCommentMode(ts *kelos.TaskSpawner) kelos.CommentMode {
+	var mode kelos.CommentMode
 	switch {
 	case ts.Spec.When.GitHubIssues != nil && ts.Spec.When.GitHubIssues.Reporting != nil && ts.Spec.When.GitHubIssues.Reporting.Comments != nil:
 		mode = ts.Spec.When.GitHubIssues.Reporting.Comments.Mode
@@ -696,7 +696,7 @@ func resolvedCommentMode(ts *kelos.TaskSpawner) kelos.GitHubCommentMode {
 	if mode != "" {
 		return mode
 	}
-	return kelos.GitHubCommentModePerTask
+	return kelos.CommentModePerTask
 }
 
 // checksReportingEnabled returns true when GitHub Checks API reporting is

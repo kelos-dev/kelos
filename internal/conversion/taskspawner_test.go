@@ -509,7 +509,7 @@ func TestTaskSpawnerConvert_GitHubCommentsReportingRoundTrips(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			hub := &v1alpha2.TaskSpawner{ObjectMeta: metav1.ObjectMeta{Name: "reporter", Namespace: "default"}}
 			tt.configureHub(&hub.Spec.When, &v1alpha2.GitHubReporting{
-				Comments: &v1alpha2.GitHubCommentsReporting{Mode: v1alpha2.GitHubCommentModeSticky},
+				Comments: &v1alpha2.GitHubCommentsReporting{Mode: v1alpha2.CommentModeSticky},
 			})
 
 			spoke := &v1alpha1.TaskSpawner{}
@@ -528,7 +528,7 @@ func TestTaskSpawnerConvert_GitHubCommentsReportingRoundTrips(t *testing.T) {
 				t.Fatalf("taskSpawnerToHub() error = %v", err)
 			}
 			reporting := tt.roundTripReporting(&back.Spec.When)
-			if reporting.Comments == nil || reporting.Comments.Mode != v1alpha2.GitHubCommentModeSticky {
+			if reporting.Comments == nil || reporting.Comments.Mode != v1alpha2.CommentModeSticky {
 				t.Fatalf("round-tripped comments = %#v, want Sticky", reporting.Comments)
 			}
 			if reporting.Enabled {
@@ -548,7 +548,7 @@ func TestTaskSpawnerConvert_V1Alpha1CanDisablePreservedCommentsReporting(t *test
 			When: v1alpha2.When{
 				GitHubWebhook: &v1alpha2.GitHubWebhook{
 					Reporting: &v1alpha2.GitHubReporting{
-						Comments: &v1alpha2.GitHubCommentsReporting{Mode: v1alpha2.GitHubCommentModeSticky},
+						Comments: &v1alpha2.GitHubCommentsReporting{Mode: v1alpha2.CommentModeSticky},
 					},
 				},
 			},
@@ -853,6 +853,28 @@ func TestTaskSpawnerToHub_EditedV1Alpha1SourceReplacesPreservedGitLab(t *testing
 	}
 	if back.Spec.When.Cron == nil || back.Spec.When.Cron.Schedule != "@hourly" {
 		t.Fatalf("expected cron source to survive, got %+v", back.Spec.When.Cron)
+	}
+}
+
+func TestTaskSpawnerToHub_MalformedGitLabAnnotationDoesNotBlockConversion(t *testing.T) {
+	spoke := &v1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+			preservedGitLabSourcesAnnotation: `{"gitlab":`,
+		}},
+		Spec: v1alpha1.TaskSpawnerSpec{When: v1alpha1.When{Cron: &v1alpha1.Cron{Schedule: "@hourly"}}},
+	}
+	hub := &v1alpha2.TaskSpawner{}
+	if err := taskSpawnerToHub(context.Background(), spoke, hub); err != nil {
+		t.Fatalf("taskSpawnerToHub() error = %v, want malformed preservation data ignored", err)
+	}
+	if hub.Spec.When.GitLab != nil || hub.Spec.When.GitLabWebhook != nil {
+		t.Fatalf("GitLab sources should not be restored from a malformed annotation, got %+v", hub.Spec.When)
+	}
+	if hub.Spec.When.Cron == nil {
+		t.Fatal("expected cron source to survive")
+	}
+	if _, ok := hub.Annotations[preservedGitLabSourcesAnnotation]; ok {
+		t.Fatal("malformed preservation annotation leaked onto hub object")
 	}
 }
 

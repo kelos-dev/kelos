@@ -2651,7 +2651,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 
 			created := &kelos.TaskSpawner{}
 			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(ts), created)).Should(Succeed())
-			Expect(created.Spec.When.GitHubIssues.Reporting.Comments.Mode).To(Equal(kelos.GitHubCommentModePerTask))
+			Expect(created.Spec.When.GitHubIssues.Reporting.Comments.Mode).To(Equal(kelos.CommentModePerTask))
 		})
 
 		It("Should reject an unsupported comment mode", func() {

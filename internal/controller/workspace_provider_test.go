@@ -130,13 +130,21 @@ func TestWorkspaceSecretTokenError(t *testing.T) {
 	github := workspaceProviderFor(&kelos.WorkspaceSpec{})
 	gitlab := workspaceProviderFor(&kelos.WorkspaceSpec{Provider: kelos.WorkspaceProviderGitLab})
 
-	if err := workspaceSecretTokenError(github, "app", map[string][]byte{"appID": []byte("1")}); err != nil {
-		t.Errorf("github secrets are exempt from the token check, got %v", err)
+	githubApp := map[string][]byte{"appID": []byte("1"), "installationID": []byte("2"), "privateKey": []byte("key")}
+	if err := workspaceSecretTokenError(github, "app", githubApp); err != nil {
+		t.Errorf("github app secrets satisfy the provider without a token key, got %v", err)
+	}
+	if err := workspaceSecretTokenError(github, "gh", map[string][]byte{"GITHUB_TOKEN": []byte("ghp")}); err != nil {
+		t.Errorf("unexpected error for a valid github token secret: %v", err)
+	}
+	err := workspaceSecretTokenError(github, "partial", map[string][]byte{"appID": []byte("1")})
+	if err == nil || !strings.Contains(err.Error(), `secret "partial" has no GITHUB_TOKEN key`) {
+		t.Errorf("a partial GitHub App secret must not pass as a token secret, got %v", err)
 	}
 	if err := workspaceSecretTokenError(gitlab, "gl", map[string][]byte{"GITLAB_TOKEN": []byte("glpat")}); err != nil {
 		t.Errorf("unexpected error for a valid gitlab secret: %v", err)
 	}
-	err := workspaceSecretTokenError(gitlab, "gl", map[string][]byte{"GITHUB_TOKEN": []byte("glpat")})
+	err = workspaceSecretTokenError(gitlab, "gl", map[string][]byte{"GITHUB_TOKEN": []byte("glpat")})
 	if err == nil || !strings.Contains(err.Error(), `secret "gl" has no GITLAB_TOKEN key`) {
 		t.Errorf("GITHUB_TOKEN must not stand in for GITLAB_TOKEN, got %v", err)
 	}
@@ -160,7 +168,8 @@ func TestValidateTaskSpawnerWorkspace(t *testing.T) {
 		{name: "gitlab source with gitlab workspace", when: kelos.When{GitLab: &kelos.GitLab{}}, workspace: gitlabWS, data: gitlabData},
 		{name: "gitlab webhook with gitlab workspace", when: kelos.When{GitLabWebhook: &kelos.GitLabWebhook{}}, workspace: gitlabWS, data: gitlabData},
 		{name: "github issues with github workspace", when: kelos.When{GitHubIssues: &kelos.GitHubIssues{}}, workspace: githubWS, data: map[string][]byte{"GITHUB_TOKEN": []byte("ghp")}},
-		{name: "github app secret without token key", when: kelos.When{GitHubIssues: &kelos.GitHubIssues{}}, workspace: githubWS, data: map[string][]byte{"appID": []byte("1")}},
+		{name: "github app secret without token key", when: kelos.When{GitHubIssues: &kelos.GitHubIssues{}}, workspace: githubWS, data: map[string][]byte{"appID": []byte("1"), "installationID": []byte("2"), "privateKey": []byte("key")}},
+		{name: "github secret with neither app keys nor token", when: kelos.When{GitHubIssues: &kelos.GitHubIssues{}}, workspace: githubWS, data: map[string][]byte{"appID": []byte("1")}, wantErr: `secret "gh" has no GITHUB_TOKEN key`},
 		{name: "cron works with any provider", when: kelos.When{Cron: &kelos.Cron{Schedule: "@hourly"}}, workspace: gitlabWS, data: gitlabData},
 		{name: "jira with gitlab workspace missing token", when: kelos.When{Jira: &kelos.Jira{}}, workspace: gitlabWS, data: map[string][]byte{}, wantErr: "has no GITLAB_TOKEN key"},
 		{name: "gitlab source with github workspace", when: kelos.When{GitLab: &kelos.GitLab{}}, workspace: githubWS, data: map[string][]byte{"GITHUB_TOKEN": []byte("glpat")}, wantErr: "requires a Workspace with provider gitlab, but the Workspace provider is github"},

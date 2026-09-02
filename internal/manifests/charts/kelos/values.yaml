@@ -129,6 +129,10 @@ webhookServer:
       # scope). Enables status notes on the originating issue or merge request
       # for spawners that set gitlabWebhook.reporting.
       tokenSecretName: ""
+      # GitLab instance URL that status notes are posted to (for example
+      # https://gitlab.example.com or an in-cluster Service URL). Defaults to
+      # https://gitlab.com. The URL is never taken from webhook payloads.
+      baseUrl: ""
       service:
         # Service type for the webhook endpoint.
         # Allowed values: ClusterIP, LoadBalancer, NodePort.

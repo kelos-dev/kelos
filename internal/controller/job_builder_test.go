@@ -924,7 +924,7 @@ func TestBuildClaudeCodeJob_GitLabWorkspaceUsesGitLabCredentials(t *testing.T) {
 			t.Errorf("GitHub token volume must not be mounted for a GitLab workspace")
 		}
 	}
-	if tokenVolume == nil || tokenVolume.Secret == nil || tokenVolume.Secret.SecretName != "gitlab-token" || tokenVolume.Secret.Items[0].Key != GitLabTokenSecretKey {
+	if tokenVolume == nil || tokenVolume.Secret == nil || tokenVolume.Secret.SecretName != "gitlab-token" || len(tokenVolume.Secret.Items) != 1 || tokenVolume.Secret.Items[0].Key != GitLabTokenSecretKey {
 		t.Fatalf("expected GitLab token volume projecting GITLAB_TOKEN, got %+v", tokenVolume)
 	}
 	if !containsVolumeMount(mainContainer.VolumeMounts, GitLabTokenVolumeName, GitLabTokenMountPath) {

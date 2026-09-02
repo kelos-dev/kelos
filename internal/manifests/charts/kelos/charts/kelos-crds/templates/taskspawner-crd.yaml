@@ -23187,6 +23187,9 @@ spec:
                           BaseURL overrides the GitLab instance URL used for API calls (for
                           example "https://gitlab.example.com" or an in-cluster service URL).
                           When empty, the scheme and host of the workspace repo URL are used.
+                          Set it for a GitLab served under a relative URL root
+                          ("https://example.com/gitlab"); the path is then excluded from the
+                          project path derived from the workspace repo URL.
                         pattern: ^https?://.+
                         type: string
                       commentPolicy:
@@ -23301,6 +23304,9 @@ spec:
                           Types specifies which item types to discover: "issues",
                           "mergeRequests", or both.
                         items:
+                          enum:
+                          - issues
+                          - mergeRequests
                           type: string
                         type: array
                     type: object
@@ -23314,6 +23320,13 @@ spec:
                           payload object_kind: "issue", "merge_request", "note", "pipeline",
                           "push", or "tag_push".
                         items:
+                          enum:
+                          - issue
+                          - merge_request
+                          - note
+                          - pipeline
+                          - push
+                          - tag_push
                           type: string
                         minItems: 1
                         type: array

@@ -293,11 +293,14 @@ spec:
             - --webhook-bind-address=:8443
             - --metrics-bind-address=:8080
             - --health-probe-bind-address=:8081
+            {{- if .Values.webhookServer.sources.gitlab.baseUrl }}
+            - --gitlab-base-url={{ .Values.webhookServer.sources.gitlab.baseUrl }}
+            {{- end }}
           env:
             - name: WEBHOOK_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.webhookServer.sources.gitlab.secretName }}
+                  name: {{ required "webhookServer.sources.gitlab.secretName must be set when webhookServer.sources.gitlab.enabled is true" .Values.webhookServer.sources.gitlab.secretName }}
                   key: WEBHOOK_SECRET
             {{- if .Values.webhookServer.sources.gitlab.tokenSecretName }}
             - name: GITLAB_TOKEN

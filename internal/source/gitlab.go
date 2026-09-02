@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,12 @@ const (
 
 	pipelineStatusAny = "any"
 )
+
+// gitlabResourceByType maps the API-facing type names to GitLab REST resources.
+var gitlabResourceByType = map[string]string{
+	"issues":        gitlabResourceIssues,
+	"mergeRequests": gitlabResourceMergeRequests,
+}
 
 // GitLabSource discovers issues and merge requests from a GitLab project.
 type GitLabSource struct {
@@ -44,8 +51,9 @@ type GitLabSource struct {
 }
 
 // gitlabItem is the shared subset of the GitLab issue and merge request
-// representations. SourceBranch, SHA, and HeadPipeline are only populated for
-// merge requests; HeadPipeline only on the single merge request endpoint.
+// representations. SourceBranch, SHA, DetailedMergeStatus, and HeadPipeline
+// are only populated for merge requests; HeadPipeline only on the single
+// merge request endpoint.
 type gitlabItem struct {
 	IID          int             `json:"iid"`
 	Title        string          `json:"title"`
@@ -56,6 +64,9 @@ type gitlabItem struct {
 	SourceBranch string          `json:"source_branch"`
 	SHA          string          `json:"sha"`
 	HeadPipeline *gitlabPipeline `json:"head_pipeline"`
+	// DetailedMergeStatus is "requested_changes" while any reviewer has
+	// requested changes.
+	DetailedMergeStatus string `json:"detailed_merge_status"`
 }
 
 type gitlabPipeline struct {
@@ -90,10 +101,6 @@ type gitlabNotePosition struct {
 
 type gitlabApprovals struct {
 	Approved bool `json:"approved"`
-}
-
-type gitlabReviewer struct {
-	State string `json:"state"`
 }
 
 func (s *GitLabSource) baseURL() string {
@@ -223,7 +230,7 @@ func (s *GitLabSource) enrichMergeRequest(ctx context.Context, iid int, item *Wo
 	}
 
 	if desired := s.resolvedReviewState(); desired != reviewStateAny {
-		reviewState, err := s.fetchReviewState(ctx, iid)
+		reviewState, err := s.fetchReviewState(ctx, iid, detail.DetailedMergeStatus)
 		if err != nil {
 			return false, time.Time{}, err
 		}
@@ -245,25 +252,17 @@ func (p *gitlabPipeline) finishedTime() time.Time {
 	return time.Time{}
 }
 
-// fetchReviewState aggregates GitLab approvals and reviewer states into the
+// fetchReviewState maps GitLab's detailed merge status and approvals onto the
 // GitHub-style review states: "changes_requested" when any reviewer requested
 // changes, "approved" when the merge request has the required approvals, and
 // "" otherwise.
-func (s *GitLabSource) fetchReviewState(ctx context.Context, iid int) (string, error) {
-	mrURL := fmt.Sprintf("%s/%s/%d", s.projectURL(), gitlabResourceMergeRequests, iid)
-
-	var reviewers []gitlabReviewer
-	if err := s.getJSON(ctx, mrURL+"/reviewers", nil, &reviewers); err != nil {
-		return "", fmt.Errorf("fetching reviewers for merge request !%d: %w", iid, err)
-	}
-	for _, r := range reviewers {
-		if r.State == "requested_changes" {
-			return reviewStateChangesRequested, nil
-		}
+func (s *GitLabSource) fetchReviewState(ctx context.Context, iid int, detailedMergeStatus string) (string, error) {
+	if detailedMergeStatus == "requested_changes" {
+		return reviewStateChangesRequested, nil
 	}
 
 	var approvals gitlabApprovals
-	if err := s.getJSON(ctx, mrURL+"/approvals", nil, &approvals); err != nil {
+	if err := s.getJSON(ctx, fmt.Sprintf("%s/%s/%d/approvals", s.projectURL(), gitlabResourceMergeRequests, iid), nil, &approvals); err != nil {
 		return "", fmt.Errorf("fetching approvals for merge request !%d: %w", iid, err)
 	}
 	if approvals.Approved {
@@ -286,19 +285,21 @@ func (s *GitLabSource) resolvedPipelineStatus() string {
 	return strings.ToLower(s.PipelineStatus)
 }
 
-// resolvedResources maps the API-facing type names to GitLab REST resources.
+// resolvedResources returns the GitLab REST resources to poll, in the order
+// first listed in Types and without duplicates.
 func (s *GitLabSource) resolvedResources() []string {
 	if len(s.Types) == 0 {
 		return []string{gitlabResourceIssues}
 	}
 	var resources []string
+	seen := map[string]bool{}
 	for _, t := range s.Types {
-		switch t {
-		case "issues":
-			resources = append(resources, gitlabResourceIssues)
-		case "mergeRequests":
-			resources = append(resources, gitlabResourceMergeRequests)
+		resource := gitlabResourceByType[t]
+		if resource == "" || seen[resource] {
+			continue
 		}
+		seen[resource] = true
+		resources = append(resources, resource)
 	}
 	return resources
 }
@@ -327,7 +328,9 @@ func concatGitLabDiffNotes(notes []gitlabNote) string {
 		if n.Position != nil {
 			location := n.Position.NewPath
 			line := n.Position.NewLine
-			if location == "" {
+			// Notes on deleted lines carry new_path but no new_line; the
+			// old side is the only location that exists.
+			if location == "" || line <= 0 {
 				location = n.Position.OldPath
 				line = n.Position.OldLine
 			}
@@ -371,10 +374,13 @@ func (s *GitLabSource) fetchAllItems(ctx context.Context, resource string) ([]gi
 	return all, err
 }
 
+// fetchNotes returns an item's notes oldest first. They are requested newest
+// first so that the maxPages cap truncates the oldest notes, never a recent
+// trigger command.
 func (s *GitLabSource) fetchNotes(ctx context.Context, resource string, iid int) ([]gitlabNote, error) {
 	params := url.Values{}
 	params.Set("per_page", "100")
-	params.Set("sort", "asc")
+	params.Set("sort", "desc")
 	params.Set("order_by", "created_at")
 
 	var all []gitlabNote
@@ -386,6 +392,7 @@ func (s *GitLabSource) fetchNotes(ctx context.Context, resource string, iid int)
 		all = append(all, page...)
 		return len(page), nil
 	})
+	slices.Reverse(all)
 	return all, err
 }
 

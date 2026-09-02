@@ -104,17 +104,17 @@ type GitHubReporting struct {
 	Checks *GitHubChecksReporting `json:"checks,omitempty"`
 }
 
-// GitHubCommentMode controls how task status comments are reused.
-type GitHubCommentMode string
+// CommentMode controls how task status comments are reused.
+type CommentMode string
 
 const (
-	// GitHubCommentModePerTask creates one status comment for each Task and
+	// CommentModePerTask creates one status comment for each Task and
 	// updates it as that Task's phase changes.
-	GitHubCommentModePerTask GitHubCommentMode = "PerTask"
+	CommentModePerTask CommentMode = "PerTask"
 
-	// GitHubCommentModeSticky maintains one status comment per TaskSpawner and
+	// CommentModeSticky maintains one status comment per TaskSpawner and
 	// originating issue or pull request, updating it across Tasks.
-	GitHubCommentModeSticky GitHubCommentMode = "Sticky"
+	CommentModeSticky CommentMode = "Sticky"
 )
 
 // GitHubCommentsReporting configures GitHub task status comment reporting.
@@ -125,7 +125,7 @@ type GitHubCommentsReporting struct {
 	// +optional
 	// +kubebuilder:default=PerTask
 	// +kubebuilder:validation:Enum=PerTask;Sticky
-	Mode GitHubCommentMode `json:"mode,omitempty"`
+	Mode CommentMode `json:"mode,omitempty"`
 }
 
 // GitHubChecksReporting configures GitHub Check Run reporting for pull
@@ -429,7 +429,7 @@ type GitLabCommentsReporting struct {
 	// +optional
 	// +kubebuilder:default=PerTask
 	// +kubebuilder:validation:Enum=PerTask;Sticky
-	Mode GitHubCommentMode `json:"mode,omitempty"`
+	Mode CommentMode `json:"mode,omitempty"`
 }
 
 // GitLab discovers issues and merge requests from a GitLab project.
@@ -442,6 +442,9 @@ type GitLab struct {
 	// BaseURL overrides the GitLab instance URL used for API calls (for
 	// example "https://gitlab.example.com" or an in-cluster service URL).
 	// When empty, the scheme and host of the workspace repo URL are used.
+	// Set it for a GitLab served under a relative URL root
+	// ("https://example.com/gitlab"); the path is then excluded from the
+	// project path derived from the workspace repo URL.
 	// +kubebuilder:validation:Pattern="^https?://.+"
 	// +optional
 	BaseURL string `json:"baseUrl,omitempty"`
@@ -454,7 +457,7 @@ type GitLab struct {
 
 	// Types specifies which item types to discover: "issues",
 	// "mergeRequests", or both.
-	// +kubebuilder:validation:Items:Enum=issues;mergeRequests
+	// +kubebuilder:validation:items:Enum=issues;mergeRequests
 	// +kubebuilder:default={"issues"}
 	// +optional
 	Types []string `json:"types,omitempty"`
@@ -708,7 +711,7 @@ type GitLabWebhook struct {
 	// "push", or "tag_push".
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:Items:Enum=issue;merge_request;note;pipeline;push;tag_push
+	// +kubebuilder:validation:items:Enum=issue;merge_request;note;pipeline;push;tag_push
 	Events []string `json:"events"`
 
 	// GatewayRef binds this source to a WebhookGateway in the same namespace whose

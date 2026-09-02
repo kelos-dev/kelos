@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -25,6 +26,7 @@ import (
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/reporting"
+	"github.com/kelos-dev/kelos/internal/webhook"
 )
 
 func newReportingTestScheme(t *testing.T) *runtime.Scheme {
@@ -44,6 +46,8 @@ func TestReportingReconcilerSkipsTasksOwnedByOtherServerMode(t *testing.T) {
 		name        string
 		gatewayMode bool
 		gatewayName string
+		source      webhook.WebhookSource
+		provider    string
 		resolver    func(context.Context) (string, error)
 	}{
 		{name: "gateway server skips source-specific task", gatewayMode: true},
@@ -52,6 +56,11 @@ func TestReportingReconcilerSkipsTasksOwnedByOtherServerMode(t *testing.T) {
 			gatewayName: "github",
 			resolver:    func(context.Context) (string, error) { return "token", nil },
 		},
+		// Per-source servers of different providers watch the same Tasks; each
+		// must leave the other provider's Tasks alone instead of failing on
+		// credentials it does not have.
+		{name: "github server skips gitlab task", source: webhook.GitHubSource, provider: reporting.SourceProviderGitLab},
+		{name: "gitlab server skips github task", source: webhook.GitLabSource},
 	}
 
 	for _, tt := range tests {
@@ -65,12 +74,13 @@ func TestReportingReconcilerSkipsTasksOwnedByOtherServerMode(t *testing.T) {
 						reporting.AnnotationSourceOwner:     "owner",
 						reporting.AnnotationSourceRepo:      "repo",
 						reporting.AnnotationWebhookGateway:  tt.gatewayName,
+						reporting.AnnotationSourceProvider:  tt.provider,
 					},
 				},
 			}
 			reconciler := &reportingReconciler{
 				Client: fake.NewClientBuilder().WithScheme(newReportingTestScheme(t)).WithObjects(task).Build(),
-				config: reportingConfig{GatewayMode: tt.gatewayMode, TokenResolver: tt.resolver},
+				config: reportingConfig{GatewayMode: tt.gatewayMode, Source: tt.source, TokenResolver: tt.resolver},
 			}
 
 			result, err := reconciler.Reconcile(context.Background(), ctrl.Request{
@@ -128,10 +138,13 @@ func TestResolveReportingCredsFromGateway(t *testing.T) {
 }
 
 func TestReportingReconcilerPostsGitLabNote(t *testing.T) {
+	var mu sync.Mutex
 	var gotPath, gotToken string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		gotPath = r.URL.EscapedPath()
 		gotToken = r.Header.Get("PRIVATE-TOKEN")
+		mu.Unlock()
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]int64{"id": 77})
 	}))
@@ -146,11 +159,11 @@ func TestReportingReconcilerPostsGitLabNote(t *testing.T) {
 		wantToken   string
 	}{
 		{
-			name: "per-source server uses the configured GitLab token and the payload instance URL",
+			name: "per-source server uses the configured GitLab token and instance URL, never the payload's",
 			annotations: map[string]string{
-				reporting.AnnotationSourceBaseURL: server.URL,
+				reporting.AnnotationSourceBaseURL: "https://attacker.example",
 			},
-			config:    reportingConfig{GitLabToken: "server-token"},
+			config:    reportingConfig{Source: webhook.GitLabSource, GitLabToken: "server-token", GitLabBaseURL: server.URL},
 			wantToken: "server-token",
 		},
 		{
@@ -171,7 +184,7 @@ func TestReportingReconcilerPostsGitLabNote(t *testing.T) {
 				},
 			},
 			annotations: map[string]string{
-				reporting.AnnotationSourceBaseURL:  "https://gitlab.external.example",
+				reporting.AnnotationSourceBaseURL:  "https://attacker.example",
 				reporting.AnnotationWebhookGateway: "gl",
 			},
 			config:    reportingConfig{GatewayMode: true},
@@ -181,10 +194,12 @@ func TestReportingReconcilerPostsGitLabNote(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			mu.Lock()
 			gotPath, gotToken = "", ""
+			mu.Unlock()
 			annotations := map[string]string{
 				reporting.AnnotationGitHubReporting:   "enabled",
-				reporting.AnnotationGitHubCommentMode: string(kelos.GitHubCommentModePerTask),
+				reporting.AnnotationGitHubCommentMode: string(kelos.CommentModePerTask),
 				reporting.AnnotationSourceProvider:    reporting.SourceProviderGitLab,
 				reporting.AnnotationSourceKind:        reporting.SourceKindMergeRequest,
 				reporting.AnnotationSourceNumber:      "7",
@@ -209,11 +224,14 @@ func TestReportingReconcilerPostsGitLabNote(t *testing.T) {
 			}); err != nil {
 				t.Fatalf("Reconcile() error = %v", err)
 			}
-			if gotPath != "/api/v4/projects/group%2Fsub%2Frepo/merge_requests/7/notes" {
-				t.Errorf("note posted to %q", gotPath)
+			mu.Lock()
+			path, token := gotPath, gotToken
+			mu.Unlock()
+			if path != "/api/v4/projects/group%2Fsub%2Frepo/merge_requests/7/notes" {
+				t.Errorf("note posted to %q", path)
 			}
-			if gotToken != tt.wantToken {
-				t.Errorf("PRIVATE-TOKEN = %q, want %q", gotToken, tt.wantToken)
+			if token != tt.wantToken {
+				t.Errorf("PRIVATE-TOKEN = %q, want %q", token, tt.wantToken)
 			}
 
 			var updated kelos.Task
@@ -328,7 +346,7 @@ func TestReportingReconcilerUsesGatewayGitHubAppIdentityForStickyComments(t *tes
 			Labels:    map[string]string{"kelos.dev/taskspawner": "reviewer"},
 			Annotations: map[string]string{
 				reporting.AnnotationGitHubReporting:   "enabled",
-				reporting.AnnotationGitHubCommentMode: string(kelos.GitHubCommentModeSticky),
+				reporting.AnnotationGitHubCommentMode: string(kelos.CommentModeSticky),
 				reporting.AnnotationSourceOwner:       "owner",
 				reporting.AnnotationSourceRepo:        "repo",
 				reporting.AnnotationSourceNumber:      "42",

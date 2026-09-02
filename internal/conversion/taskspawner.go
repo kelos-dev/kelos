@@ -3,7 +3,6 @@ package conversion
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 
 	v1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 	v1alpha2 "github.com/kelos-dev/kelos/api/v1alpha2"
@@ -88,9 +87,7 @@ func taskSpawnerToHub(_ context.Context, src *v1alpha1.TaskSpawner, dst *v1alpha
 	deleteAnnotation(dst.Annotations, preservedGitHubCommentsReportingAnnotation)
 	restorePreservedWebhookGatewayRefs(src.Annotations, &dst.Spec.When)
 	deleteAnnotation(dst.Annotations, preservedWebhookGatewayRefsAnnotation)
-	if err := restorePreservedGitLabSources(src.Annotations, &dst.Spec.When); err != nil {
-		return err
-	}
+	restorePreservedGitLabSources(src.Annotations, &dst.Spec.When)
 	deleteAnnotation(dst.Annotations, preservedGitLabSourcesAnnotation)
 	return nil
 }
@@ -185,18 +182,19 @@ func setPreservedGitLabSources(dst *v1alpha1.TaskSpawner, when v1alpha2.When) er
 	return nil
 }
 
-func restorePreservedGitLabSources(annotations map[string]string, when *v1alpha2.When) error {
+func restorePreservedGitLabSources(annotations map[string]string, when *v1alpha2.When) {
 	raw, ok := annotations[preservedGitLabSourcesAnnotation]
 	if !ok || raw == "" || whenHasSource(*when) {
-		return nil
+		return
 	}
 	var preserved preservedGitLabSources
 	if err := json.Unmarshal([]byte(raw), &preserved); err != nil {
-		return fmt.Errorf("decoding %s annotation: %w", preservedGitLabSourcesAnnotation, err)
+		// The annotation is best-effort preservation data and can be set by
+		// users; malformed data must not block API version conversion.
+		return
 	}
 	when.GitLab = preserved.GitLab
 	when.GitLabWebhook = preserved.GitLabWebhook
-	return nil
 }
 
 func whenHasSource(when v1alpha2.When) bool {

@@ -337,6 +337,7 @@ func (r *TaskReconciler) createJob(ctx context.Context, task *kelos.Task) (ctrl.
 				r.recordEvent(task, corev1.EventTypeWarning, "WorkspaceTokenMissing", "%s", err.Error())
 				if updateErr := r.failTaskBeforeJob(ctx, task, err.Error()); updateErr != nil {
 					logger.Error(updateErr, "Unable to update Task status")
+					return ctrl.Result{}, updateErr
 				}
 				return ctrl.Result{}, nil
 			}

@@ -224,7 +224,7 @@ func TestReportTaskStatus_StickyCommentReusedAcrossTasks(t *testing.T) {
 	annotations := func() map[string]string {
 		return map[string]string{
 			AnnotationGitHubReporting:   "enabled",
-			AnnotationGitHubCommentMode: string(kelos.GitHubCommentModeSticky),
+			AnnotationGitHubCommentMode: string(kelos.CommentModeSticky),
 			AnnotationSourceNumber:      "42",
 			AnnotationSourceKind:        "issue",
 		}
@@ -274,7 +274,7 @@ func TestReportTaskStatus_StickyCommentsScopedByTaskSpawner(t *testing.T) {
 	annotations := func() map[string]string {
 		return map[string]string{
 			AnnotationGitHubReporting:   "enabled",
-			AnnotationGitHubCommentMode: string(kelos.GitHubCommentModeSticky),
+			AnnotationGitHubCommentMode: string(kelos.CommentModeSticky),
 			AnnotationSourceNumber:      "42",
 			AnnotationSourceKind:        "issue",
 		}

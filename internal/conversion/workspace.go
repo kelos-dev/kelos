@@ -18,8 +18,10 @@ func workspaceToHub(_ context.Context, src *v1alpha1.Workspace, dst *v1alpha2.Wo
 	if err := convertViaJSON(&src.Spec, &dst.Spec); err != nil {
 		return err
 	}
-	if provider := src.Annotations[preservedWorkspaceProviderAnnotation]; provider != "" {
-		dst.Spec.Provider = provider
+	// Only the non-default provider is restored; anything else (github, or an
+	// edited value) leaves the field empty so the v1alpha2 default applies.
+	if src.Annotations[preservedWorkspaceProviderAnnotation] == v1alpha2.WorkspaceProviderGitLab {
+		dst.Spec.Provider = v1alpha2.WorkspaceProviderGitLab
 	}
 	deleteAnnotation(dst.Annotations, preservedWorkspaceProviderAnnotation)
 	return nil

@@ -7,6 +7,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
+	"github.com/kelos-dev/kelos/internal/githubapp"
 )
 
 const (
@@ -167,10 +168,10 @@ func (p workspaceProvider) tokenVolumeMount() corev1.VolumeMount {
 }
 
 // workspaceSecretTokenError reports a workspace Secret that lacks the token
-// key its provider requires. GitHub is exempt because GitHub App secrets
-// legitimately carry appID/installationID/privateKey instead of a token.
+// key its provider requires. A GitHub App secret (appID/installationID/
+// privateKey) satisfies the GitHub provider without a token key.
 func workspaceSecretTokenError(p workspaceProvider, secretName string, data map[string][]byte) error {
-	if p.name == kelos.WorkspaceProviderGitHub {
+	if p.name == kelos.WorkspaceProviderGitHub && githubapp.IsGitHubApp(data) {
 		return nil
 	}
 	if len(bytes.TrimSpace(data[p.secretKey])) == 0 {

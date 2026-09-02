@@ -379,11 +379,18 @@ func taskSpawnerNeedsWorkspaceToken(ts *kelos.TaskSpawner, ghProxyConfigured boo
 
 // gitLabSourceArgs returns the spawner flags for a GitLab source. The
 // instance URL and project path default to the workspace repo URL and are
-// individually overridable from the source spec.
+// individually overridable from the source spec. A BaseURL carrying a path
+// (a GitLab under a relative URL root) marks that path as instance prefix
+// rather than project path.
 func gitLabSourceArgs(gl *kelos.GitLab, workspaceRepo string) []string {
 	baseURL, project := parseGitLabRepo(workspaceRepo)
 	if gl.BaseURL != "" {
 		baseURL = gl.BaseURL
+		if u, err := url.Parse(gl.BaseURL); err == nil {
+			if prefix := strings.Trim(u.Path, "/"); prefix != "" {
+				project = strings.TrimPrefix(project, prefix+"/")
+			}
+		}
 	}
 	if gl.Project != "" {
 		project = gl.Project
@@ -396,9 +403,9 @@ func gitLabSourceArgs(gl *kelos.GitLab, workspaceRepo string) []string {
 
 // parseGitLabRepo splits a GitLab repository URL into the instance base URL
 // and the full project path, e.g. https://gitlab.example.com/group/sub/repo.git
-// yields ("https://gitlab.example.com", "group/sub/repo"). SSH URLs
-// (git@host:group/repo.git) map to an https base URL. Any username in the URL
-// is dropped.
+// yields ("https://gitlab.example.com", "group/sub/repo"). SSH (git@host:...)
+// and git:// URLs map to an https base URL because the API is only reachable
+// over HTTP. Any username in the URL is dropped.
 func parseGitLabRepo(repoURL string) (baseURL, project string) {
 	repoURL = strings.TrimSuffix(strings.TrimSuffix(strings.TrimSpace(repoURL), "/"), ".git")
 
@@ -412,7 +419,11 @@ func parseGitLabRepo(repoURL string) (baseURL, project string) {
 	if err != nil || parsed.Host == "" {
 		return "", strings.Trim(repoURL, "/")
 	}
-	return (&url.URL{Scheme: parsed.Scheme, Host: parsed.Host}).String(), strings.Trim(parsed.Path, "/")
+	scheme := parsed.Scheme
+	if scheme != "http" && scheme != "https" {
+		scheme = "https"
+	}
+	return (&url.URL{Scheme: scheme, Host: parsed.Host}).String(), strings.Trim(parsed.Path, "/")
 }
 
 func gitHubReportingNeedsToken(reporting *kelos.GitHubReporting) bool {

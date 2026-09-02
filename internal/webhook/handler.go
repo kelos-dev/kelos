@@ -781,7 +781,7 @@ func (h *WebhookHandler) createTask(ctx context.Context, spawner *kelos.TaskSpaw
 		}
 		if commentReportingEnabled {
 			task.Annotations[reporting.AnnotationGitHubReporting] = "enabled"
-			commentMode := kelos.GitHubCommentModePerTask
+			commentMode := kelos.CommentModePerTask
 			if rep.Comments != nil && rep.Comments.Mode != "" {
 				commentMode = rep.Comments.Mode
 			}
@@ -813,12 +813,12 @@ func (h *WebhookHandler) createTask(ctx context.Context, spawner *kelos.TaskSpaw
 		task.Annotations[reporting.AnnotationSourceKind] = kind
 		task.Annotations[reporting.AnnotationSourceNumber] = strconv.Itoa(parsed.GitLab.Number)
 		task.Annotations[reporting.AnnotationSourceRepo] = parsed.GitLab.Project
-		task.Annotations[reporting.AnnotationSourceBaseURL] = gitlabInstanceURL(parsed.GitLab.ProjectURL)
+		task.Annotations[reporting.AnnotationSourceBaseURL] = gitlabInstanceURL(parsed.GitLab.ProjectURL, parsed.GitLab.Project)
 		if h.gatewayName != "" {
 			task.Annotations[reporting.AnnotationWebhookGateway] = h.gatewayName
 		}
 		task.Annotations[reporting.AnnotationGitHubReporting] = "enabled"
-		commentMode := kelos.GitHubCommentModePerTask
+		commentMode := kelos.CommentModePerTask
 		if mode := spawner.Spec.When.GitLabWebhook.Reporting.Comments.Mode; mode != "" {
 			commentMode = mode
 		}

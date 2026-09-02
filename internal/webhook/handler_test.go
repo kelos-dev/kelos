@@ -652,7 +652,7 @@ func TestServeHTTP_StampsStickyCommentReportingAnnotations(t *testing.T) {
 				GitHubWebhook: &kelos.GitHubWebhook{
 					Events: []string{"issues"},
 					Reporting: &kelos.GitHubReporting{
-						Comments: &kelos.GitHubCommentsReporting{Mode: kelos.GitHubCommentModeSticky},
+						Comments: &kelos.GitHubCommentsReporting{Mode: kelos.CommentModeSticky},
 					},
 				},
 			},
@@ -698,7 +698,7 @@ func TestServeHTTP_StampsStickyCommentReportingAnnotations(t *testing.T) {
 	if task.Annotations[reporting.AnnotationGitHubReporting] != "enabled" {
 		t.Errorf("Expected github-reporting 'enabled', got %q", task.Annotations[reporting.AnnotationGitHubReporting])
 	}
-	if task.Annotations[reporting.AnnotationGitHubCommentMode] != string(kelos.GitHubCommentModeSticky) {
+	if task.Annotations[reporting.AnnotationGitHubCommentMode] != string(kelos.CommentModeSticky) {
 		t.Errorf("Expected Sticky comment mode, got %q", task.Annotations[reporting.AnnotationGitHubCommentMode])
 	}
 	if task.Annotations[reporting.AnnotationSourceKind] != "issue" {
@@ -1489,7 +1489,7 @@ func TestGitLabServeHTTP_StampsReportingAnnotations(t *testing.T) {
 			When: kelos.When{
 				GitLabWebhook: &kelos.GitLabWebhook{
 					Events:    []string{"note"},
-					Reporting: &kelos.GitLabReporting{Comments: &kelos.GitLabCommentsReporting{Mode: kelos.GitHubCommentModeSticky}},
+					Reporting: &kelos.GitLabReporting{Comments: &kelos.GitLabCommentsReporting{Mode: kelos.CommentModeSticky}},
 				},
 			},
 			TaskTemplate: kelos.TaskTemplate{
@@ -1527,7 +1527,7 @@ func TestGitLabServeHTTP_StampsReportingAnnotations(t *testing.T) {
 		reporting.AnnotationSourceBaseURL:     "https://gitlab.example.com",
 		reporting.AnnotationWebhookGateway:    "gl-gateway",
 		reporting.AnnotationGitHubReporting:   "enabled",
-		reporting.AnnotationGitHubCommentMode: string(kelos.GitHubCommentModeSticky),
+		reporting.AnnotationGitHubCommentMode: string(kelos.CommentModeSticky),
 	}
 	for k, v := range want {
 		if got[k] != v {

@@ -44,13 +44,18 @@ func TestWorkspaceConvert_ProviderRoundTrips(t *testing.T) {
 
 func TestWorkspaceFromHub_GitHubProviderOmitsAnnotation(t *testing.T) {
 	for _, provider := range []string{"", v1alpha2.WorkspaceProviderGitHub} {
-		hub := &v1alpha2.Workspace{Spec: v1alpha2.WorkspaceSpec{
-			Repo:     "https://github.com/org/repo.git",
-			Provider: provider,
-		}}
-		spoke := &v1alpha1.Workspace{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
-			preservedWorkspaceProviderAnnotation: "gitlab",
-		}}}
+		// A stale annotation on the hub (left by an earlier gitlab round-trip)
+		// is copied onto the spoke before the provider is inspected.
+		hub := &v1alpha2.Workspace{
+			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+				preservedWorkspaceProviderAnnotation: "gitlab",
+			}},
+			Spec: v1alpha2.WorkspaceSpec{
+				Repo:     "https://github.com/org/repo.git",
+				Provider: provider,
+			},
+		}
+		spoke := &v1alpha1.Workspace{}
 		if err := workspaceFromHub(context.Background(), hub, spoke); err != nil {
 			t.Fatalf("workspaceFromHub() error = %v", err)
 		}
@@ -68,5 +73,24 @@ func TestWorkspaceToHub_WithoutAnnotationLeavesProviderEmpty(t *testing.T) {
 	}
 	if hub.Spec.Provider != "" {
 		t.Fatalf("provider = %q, want empty so the CRD default applies", hub.Spec.Provider)
+	}
+}
+
+func TestWorkspaceToHub_IgnoresUnsupportedAnnotationValues(t *testing.T) {
+	for _, value := range []string{v1alpha2.WorkspaceProviderGitHub, "bitbucket", " "} {
+		spoke := &v1alpha1.Workspace{
+			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{preservedWorkspaceProviderAnnotation: value}},
+			Spec:       v1alpha1.WorkspaceSpec{Repo: "https://github.com/org/repo.git"},
+		}
+		hub := &v1alpha2.Workspace{}
+		if err := workspaceToHub(context.Background(), spoke, hub); err != nil {
+			t.Fatalf("workspaceToHub() error = %v", err)
+		}
+		if hub.Spec.Provider != "" {
+			t.Fatalf("annotation %q set provider = %q, want empty so the CRD default applies", value, hub.Spec.Provider)
+		}
+		if _, ok := hub.Annotations[preservedWorkspaceProviderAnnotation]; ok {
+			t.Fatalf("annotation %q remained on hub", value)
+		}
 	}
 }

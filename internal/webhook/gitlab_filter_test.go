@@ -151,7 +151,9 @@ func TestParseGitLabWebhook_Pipeline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if data.Event != "pipeline" || data.PipelineStatus != "failed" || data.ID != "pipeline-555" {
+	// A pipeline attached to a merge request shares the merge request's ID so
+	// pipeline and note deliveries for one MR dedupe onto the same Task.
+	if data.Event != "pipeline" || data.PipelineStatus != "failed" || data.ID != "mr-7" {
 		t.Errorf("unexpected pipeline identity: %+v", data)
 	}
 	if data.PipelineURL != "https://gitlab.example.com/group/sub/repo/-/pipelines/555" {
@@ -237,15 +239,17 @@ func TestMatchesGitLabEvent(t *testing.T) {
 }
 
 func TestGitLabInstanceURL(t *testing.T) {
-	tests := map[string]string{
-		"https://gitlab.example.com/group/sub/repo":         "https://gitlab.example.com",
-		"http://gitlab-webservice.gitlab.svc:8181/grp/repo": "http://gitlab-webservice.gitlab.svc:8181",
-		"":          "",
-		"not a url": "",
+	tests := []struct{ projectURL, project, want string }{
+		{"https://gitlab.example.com/group/sub/repo", "group/sub/repo", "https://gitlab.example.com"},
+		{"http://gitlab-webservice.gitlab.svc:8181/grp/repo", "grp/repo", "http://gitlab-webservice.gitlab.svc:8181"},
+		{"https://example.com/gitlab/group/repo", "group/repo", "https://example.com/gitlab"},
+		{"https://example.com/gitlab/group/repo/", "group/repo", "https://example.com/gitlab"},
+		{"", "group/repo", ""},
+		{"not a url", "group/repo", ""},
 	}
-	for in, want := range tests {
-		if got := gitlabInstanceURL(in); got != want {
-			t.Errorf("gitlabInstanceURL(%q) = %q, want %q", in, got, want)
+	for _, tt := range tests {
+		if got := gitlabInstanceURL(tt.projectURL, tt.project); got != tt.want {
+			t.Errorf("gitlabInstanceURL(%q, %q) = %q, want %q", tt.projectURL, tt.project, got, tt.want)
 		}
 	}
 }

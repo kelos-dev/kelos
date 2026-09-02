@@ -79,7 +79,7 @@ type GitLabGateway struct {
 
 	// APIBaseURL is the GitLab instance URL used for status reporting (for
 	// example "https://gitlab.example.com" or an in-cluster service URL). When
-	// empty, the instance URL is taken from the originating webhook payload.
+	// empty, "https://gitlab.com" is used.
 	// +kubebuilder:validation:Pattern="^https?://.+"
 	// +optional
 	APIBaseURL string `json:"apiBaseURL,omitempty"`

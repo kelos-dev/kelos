@@ -335,14 +335,17 @@ func matchesGitLabFilter(filter *kelos.GitLabWebhookFilter, eventData *GitLabEve
 	return true, nil
 }
 
-// gitlabInstanceURL reduces a project web URL to the instance URL
-// (scheme and host), which is the API base for that GitLab.
-func gitlabInstanceURL(projectURL string) string {
+// gitlabInstanceURL reduces a project web URL to the instance URL by
+// removing the project path, so a GitLab served under a relative URL root
+// (https://host/gitlab/group/repo) keeps its prefix.
+func gitlabInstanceURL(projectURL, project string) string {
 	parsed, err := url.Parse(projectURL)
 	if err != nil || parsed.Host == "" {
 		return ""
 	}
-	return (&url.URL{Scheme: parsed.Scheme, Host: parsed.Host}).String()
+	parsed.Path = strings.TrimSuffix(strings.TrimSuffix(parsed.Path, "/"), "/"+strings.Trim(project, "/"))
+	parsed.RawQuery, parsed.Fragment = "", ""
+	return strings.TrimSuffix(parsed.String(), "/")
 }
 
 func containsFold(list []string, value string) bool {

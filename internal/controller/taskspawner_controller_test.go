@@ -419,9 +419,16 @@ func TestReconcileDeploymentGitLabWorkspaceInjectsGitLabToken(t *testing.T) {
 			SecretRef: &kelos.SecretReference{Name: "gitlab-token"},
 		},
 	}
+	// GitHub App keys alongside the token must not switch the spawner to the
+	// GitHub App credential branch: only the provider decides.
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: "gitlab-token", Namespace: "default"},
-		Data:       map[string][]byte{"GITLAB_TOKEN": []byte("glpat")},
+		Data: map[string][]byte{
+			"GITLAB_TOKEN":   []byte("glpat"),
+			"appID":          []byte("1"),
+			"installationID": []byte("2"),
+			"privateKey":     []byte("key"),
+		},
 	}
 
 	cl := fake.NewClientBuilder().

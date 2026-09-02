@@ -1,11 +1,14 @@
 ---
 name: kelos
 description: >-
-  Author, debug, and operate Kelos resources (Task, Session, Workspace,
-  AgentConfig, TaskSpawner) on Kubernetes. Use for Kelos CRDs, resource
-  manifests, the kelos CLI, or live cluster operations. Do not use for ordinary
-  Kelos repo code edits, tests, reviews, build/CI, or git tasks unless they
-  involve those resources.
+  Install and configure Kelos; author, document, inspect, troubleshoot, and
+  operate its Kubernetes custom resources and CRD schemas in the kelos.dev API
+  group using manifests, kubectl, or the kelos CLI. Use when a request names
+  Kelos or a distinctive Kelos kind such as AgentConfig or TaskSpawner and
+  concerns an installation, CLI command, API or CRD schema, manifest or example,
+  resource-field documentation, or live custom resource. Do not use for ordinary
+  code, test, build, review, CI, or Git work, even in the Kelos repository or on
+  a service hosted under kelos.dev.
 ---
 
 # Kelos Skill

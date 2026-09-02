@@ -389,6 +389,103 @@ func TestBuildSource_Jira(t *testing.T) {
 	}
 }
 
+func TestBuildSource_GitLab(t *testing.T) {
+	ts := &kelos.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{Name: "spawner", Namespace: "default"},
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitLab: &kelos.GitLab{
+					Types:          []string{"issues", "mergeRequests"},
+					Labels:         []string{"kelos"},
+					ExcludeLabels:  []string{"wontfix"},
+					State:          "all",
+					ReviewState:    "changes_requested",
+					PipelineStatus: "failed",
+					CommentPolicy: &kelos.GitLabCommentPolicy{
+						TriggerComment:  "/kelos fix",
+						ExcludeComments: []string{"/kelos stop"},
+						AllowedUsers:    []string{"alice"},
+					},
+				},
+			},
+			TaskTemplate: kelos.TaskTemplate{
+				Type:         "claude-code",
+				WorkspaceRef: &kelos.WorkspaceReference{Name: "ws"},
+				Credentials: &kelos.Credentials{
+					Type:      kelos.CredentialTypeOAuth,
+					SecretRef: &kelos.SecretReference{Name: "creds"},
+				},
+			},
+		},
+	}
+
+	t.Setenv("GITLAB_TOKEN", "glpat-token")
+	// A GitHub token resolver must never leak into the GitLab source.
+	githubToken := func(context.Context) (string, error) { return "ghp-token", nil }
+	src, err := buildSourceWithProxy(context.Background(), ts, "", "", "", "", githubToken, "", "", "", "https://gitlab.example.com", "group/sub/repo", nil)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	glSrc, ok := src.(*source.GitLabSource)
+	if !ok {
+		t.Fatalf("Expected *source.GitLabSource, got %T", src)
+	}
+	if glSrc.BaseURL != "https://gitlab.example.com" || glSrc.Project != "group/sub/repo" {
+		t.Errorf("BaseURL/Project = %q/%q, want flags passed through", glSrc.BaseURL, glSrc.Project)
+	}
+	if glSrc.Token != "glpat-token" {
+		t.Errorf("Token = %q, want token from GITLAB_TOKEN", glSrc.Token)
+	}
+	if len(glSrc.Types) != 2 || glSrc.State != "all" {
+		t.Errorf("Types/State = %v/%q, want spec values", glSrc.Types, glSrc.State)
+	}
+	if glSrc.ReviewState != "changes_requested" || glSrc.PipelineStatus != "failed" {
+		t.Errorf("ReviewState/PipelineStatus = %q/%q, want spec values", glSrc.ReviewState, glSrc.PipelineStatus)
+	}
+	if len(glSrc.Labels) != 1 || glSrc.Labels[0] != "kelos" || len(glSrc.ExcludeLabels) != 1 || glSrc.ExcludeLabels[0] != "wontfix" {
+		t.Errorf("Labels/ExcludeLabels = %v/%v", glSrc.Labels, glSrc.ExcludeLabels)
+	}
+	if glSrc.TriggerComment != "/kelos fix" || len(glSrc.ExcludeComments) != 1 || len(glSrc.AllowedUsers) != 1 || glSrc.AllowedUsers[0] != "alice" {
+		t.Errorf("comment policy not propagated: %+v", glSrc)
+	}
+}
+
+func TestBuildSource_GitLabWithoutToken(t *testing.T) {
+	t.Setenv("GITLAB_TOKEN", "")
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{GitLab: &kelos.GitLab{}},
+		},
+	}
+	// Even a GitHub token resolver does not stand in for the missing GitLab token.
+	githubToken := func(context.Context) (string, error) { return "ghp-token", nil }
+	_, err := buildSourceWithProxy(context.Background(), ts, "", "", "", "", githubToken, "", "", "", "https://gitlab.example.com", "group/repo", nil)
+	if err == nil || !strings.Contains(err.Error(), "GITLAB_TOKEN is not set") {
+		t.Fatalf("expected missing GITLAB_TOKEN error, got %v", err)
+	}
+}
+
+func TestBuildSource_GitLabEmptySpec(t *testing.T) {
+	t.Setenv("GITLAB_TOKEN", "glpat-token")
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{GitLab: &kelos.GitLab{}},
+		},
+	}
+	src, err := buildSourceWithProxy(context.Background(), ts, "", "", "", "", nil, "", "", "", "https://gitlab.example.com", "group/repo", nil)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	glSrc := src.(*source.GitLabSource)
+	if glSrc.Token != "glpat-token" {
+		t.Errorf("Token = %q, want GITLAB_TOKEN value", glSrc.Token)
+	}
+	if len(glSrc.Types) != 0 || glSrc.TriggerComment != "" {
+		t.Errorf("expected zero-value source for empty spec, got %+v", glSrc)
+	}
+}
+
 func TestRunCycleWithSource_NoMaxConcurrency(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 	cl, key := setupTest(t, ts)
@@ -1976,6 +2073,54 @@ func TestSourceAnnotations_GitHubPR(t *testing.T) {
 	}
 }
 
+func TestSourceAnnotations_GitLab(t *testing.T) {
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitLab: &kelos.GitLab{
+					Reporting: &kelos.GitLabReporting{
+						Comments: &kelos.GitLabCommentsReporting{Mode: kelos.GitHubCommentModeSticky},
+					},
+				},
+			},
+		},
+	}
+
+	issue := sourceAnnotations(ts, source.WorkItem{ID: "42", Number: 42, Kind: "Issue"})
+	if issue[reporting.AnnotationSourceKind] != "issue" || issue[reporting.AnnotationSourceNumber] != "42" {
+		t.Errorf("unexpected issue annotations: %v", issue)
+	}
+	if issue[reporting.AnnotationGitHubReporting] != "enabled" {
+		t.Errorf("Expected reporting enabled annotation, got %v", issue)
+	}
+	if issue[reporting.AnnotationGitHubCommentMode] != string(kelos.GitHubCommentModeSticky) {
+		t.Errorf("Expected sticky comment mode, got %q", issue[reporting.AnnotationGitHubCommentMode])
+	}
+
+	mr := sourceAnnotations(ts, source.WorkItem{ID: "mr-7", Number: 7, Kind: "MR", HeadSHA: "abc"})
+	if mr[reporting.AnnotationSourceKind] != reporting.SourceKindMergeRequest || mr[reporting.AnnotationSourceNumber] != "7" {
+		t.Errorf("unexpected merge request annotations: %v", mr)
+	}
+	if _, ok := mr[reporting.AnnotationGitHubChecks]; ok {
+		t.Error("Expected no checks annotation for GitLab source")
+	}
+}
+
+func TestSourceAnnotations_GitLabReportingDisabled(t *testing.T) {
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{GitLab: &kelos.GitLab{Reporting: &kelos.GitLabReporting{}}},
+		},
+	}
+	annotations := sourceAnnotations(ts, source.WorkItem{ID: "1", Number: 1, Kind: "Issue"})
+	if annotations[reporting.AnnotationSourceNumber] != "1" {
+		t.Errorf("Expected source annotations even without reporting, got %v", annotations)
+	}
+	if _, ok := annotations[reporting.AnnotationGitHubReporting]; ok {
+		t.Error("Expected no reporting annotation when comments reporting is not configured")
+	}
+}
+
 func TestSourceAnnotations_ReportingEnabled(t *testing.T) {
 	ts := &kelos.TaskSpawner{
 		Spec: kelos.TaskSpawnerSpec{
@@ -2272,6 +2417,26 @@ func TestReportingEnabled_Jira(t *testing.T) {
 	}
 	if reportingEnabled(ts) {
 		t.Error("Expected reporting to be disabled for Jira source")
+	}
+}
+
+func TestReportingEnabled_GitLab(t *testing.T) {
+	disabled := &kelos.TaskSpawner{Spec: kelos.TaskSpawnerSpec{When: kelos.When{GitLab: &kelos.GitLab{}}}}
+	if reportingEnabled(disabled) {
+		t.Error("Expected reporting to be disabled for GitLab source without reporting")
+	}
+	if checksReportingEnabled(disabled) {
+		t.Error("Expected checks reporting to be unsupported for GitLab source")
+	}
+
+	enabled := &kelos.TaskSpawner{Spec: kelos.TaskSpawnerSpec{When: kelos.When{GitLab: &kelos.GitLab{
+		Reporting: &kelos.GitLabReporting{Comments: &kelos.GitLabCommentsReporting{}},
+	}}}}
+	if !reportingEnabled(enabled) {
+		t.Error("Expected reporting to be enabled for GitLab comments reporting")
+	}
+	if got := resolvedCommentMode(enabled); got != kelos.GitHubCommentModePerTask {
+		t.Errorf("resolvedCommentMode = %q, want PerTask default", got)
 	}
 }
 
@@ -2658,6 +2823,33 @@ func TestRunOnce_ErrorsWhenReportingEnabledWithoutTokenResolver(t *testing.T) {
 	}
 }
 
+func TestRunOnce_GitLabReportingUsesGitLabTokenResolver(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	ts.Spec.Suspend = boolPtr(true)
+	ts.Spec.When = kelos.When{GitLab: &kelos.GitLab{
+		Reporting: &kelos.GitLabReporting{Comments: &kelos.GitLabCommentsReporting{}},
+	}}
+
+	cl, key := setupTest(t, ts)
+	t.Setenv("GITLAB_TOKEN", "glpat-token")
+
+	if _, err := runOnce(context.Background(), cl, key, spawnerRuntimeConfig{
+		GitLabBaseURL: "https://gitlab.example.com",
+		GitLabProject: "group/repo",
+		TokenResolver: newGitLabTokenResolver(""),
+	}); err == nil || !strings.Contains(err.Error(), "no token resolver") {
+		t.Fatalf("expected missing token resolver error without GITLAB_TOKEN, got %v", err)
+	}
+
+	if _, err := runOnce(context.Background(), cl, key, spawnerRuntimeConfig{
+		GitLabBaseURL: "https://gitlab.example.com",
+		GitLabProject: "group/repo",
+		TokenResolver: newGitLabTokenResolver("glpat-token"),
+	}); err != nil {
+		t.Fatalf("unexpected error with GITLAB_TOKEN resolver: %v", err)
+	}
+}
+
 func TestSpawnerReconcilerTaskSpawnerPredicate(t *testing.T) {
 	key := types.NamespacedName{Name: "spawner", Namespace: "default"}
 	r := &spawnerReconciler{Key: key}
@@ -2822,6 +3014,17 @@ func TestResolvedPollInterval_JiraSourceOverride(t *testing.T) {
 	got := resolvedPollInterval(ts)
 	if got != 1*time.Minute {
 		t.Fatalf("resolvedPollInterval = %v, want %v", got, 1*time.Minute)
+	}
+}
+
+func TestResolvedPollInterval_GitLabSourceOverride(t *testing.T) {
+	ts := &kelos.TaskSpawner{
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{GitLab: &kelos.GitLab{PollInterval: "90s"}},
+		},
+	}
+	if got := resolvedPollInterval(ts); got != 90*time.Second {
+		t.Fatalf("resolvedPollInterval = %v, want %v", got, 90*time.Second)
 	}
 }
 

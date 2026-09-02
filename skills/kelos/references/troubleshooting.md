@@ -40,7 +40,7 @@ failure state.
 - Check whether `maxTotalTasks` is reached.
 - Check whether `spec.suspend: true` is set.
 - For source polling, check the source-specific `pollInterval` under
-  `spec.when.githubIssues`, `spec.when.githubPullRequests`, or `spec.when.jira`.
+  `spec.when.githubIssues`, `spec.when.githubPullRequests`, `spec.when.jira`, or `spec.when.gitlab`.
 - For comment-controlled sources, check whether the latest authorized command
   includes or excludes the item.
 
@@ -55,7 +55,9 @@ failure state.
 ## Agent Cannot Push Or Create PRs
 
 - Ensure the Workspace Secret contains a valid `GITHUB_TOKEN` or GitHub App
-  credentials.
+  credentials. For `provider: gitlab` Workspaces the Secret must hold a
+  `GITLAB_TOKEN` key with the `api` scope; a Task or TaskSpawner whose Secret
+  lacks it is marked `Failed` with the missing key in its status message.
 - Verify token permissions include repository write access.
 - For workflow edits, verify the credential includes workflow permissions.
 - For GitHub Apps, check that `appID`, `installationID`, and `privateKey` are

@@ -208,6 +208,17 @@ spec:
                 description: GHProxy configures and enables the workspace-scoped ghproxy
                   when set.
                 type: object
+              provider:
+                default: github
+                description: |-
+                  Provider selects the git hosting provider. It determines the key read
+                  from the SecretRef Secret (GITHUB_TOKEN for github, GITLAB_TOKEN for
+                  gitlab), the credentials exported to agent containers, and which CLI
+                  (gh or glab) is preconfigured.
+                enum:
+                - github
+                - gitlab
+                type: string
               ref:
                 description: |-
                   Ref is the git reference to checkout (branch, tag, or commit SHA).
@@ -246,8 +257,9 @@ spec:
                 type: string
               secretRef:
                 description: |-
-                  SecretRef references a Secret containing a GITHUB_TOKEN key for git
-                  authentication and GitHub CLI (gh) operations.
+                  SecretRef references a Secret containing the Provider's token key
+                  (GITHUB_TOKEN for github, GITLAB_TOKEN for gitlab) for git
+                  authentication and CLI operations.
                 properties:
                   name:
                     description: Name is the name of the secret.
@@ -280,6 +292,10 @@ spec:
             required:
             - repo
             type: object
+            x-kubernetes-validations:
+            - message: ghproxy is only supported when provider is github
+              rule: '!has(self.ghproxy) || !has(self.provider) || self.provider ==
+                ''github'''
         type: object
     served: true
     storage: true

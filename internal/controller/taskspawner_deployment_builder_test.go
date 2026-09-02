@@ -726,6 +726,96 @@ func TestDeploymentBuilder_PAT(t *testing.T) {
 	}
 }
 
+func TestParseGitLabRepo(t *testing.T) {
+	tests := []struct {
+		repoURL     string
+		wantBaseURL string
+		wantProject string
+	}{
+		{"https://gitlab.com/group/repo.git", "https://gitlab.com", "group/repo"},
+		{"https://gitlab.example.com/group/sub/repo.git", "https://gitlab.example.com", "group/sub/repo"},
+		{"https://oauth2@gitlab.example.com/group/repo", "https://gitlab.example.com", "group/repo"},
+		{"http://gitlab-webservice-default.gitlab.svc:8181/group/repo.git", "http://gitlab-webservice-default.gitlab.svc:8181", "group/repo"},
+		{"git@gitlab.example.com:group/sub/repo.git", "https://gitlab.example.com", "group/sub/repo"},
+		{"group/repo", "", "group/repo"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.repoURL, func(t *testing.T) {
+			baseURL, project := parseGitLabRepo(tt.repoURL)
+			if baseURL != tt.wantBaseURL || project != tt.wantProject {
+				t.Errorf("parseGitLabRepo(%q) = (%q, %q), want (%q, %q)", tt.repoURL, baseURL, project, tt.wantBaseURL, tt.wantProject)
+			}
+		})
+	}
+}
+
+func TestDeploymentBuilder_GitLab(t *testing.T) {
+	builder := NewDeploymentBuilder()
+	ts := &kelos.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-spawner", Namespace: "default"},
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{GitLab: &kelos.GitLab{}},
+			TaskTemplate: kelos.TaskTemplate{
+				Type:         "claude-code",
+				WorkspaceRef: &kelos.WorkspaceReference{Name: "ws"},
+			},
+		},
+	}
+	workspace := &kelos.WorkspaceSpec{
+		Repo:      "https://gitlab.example.com/group/sub/repo.git",
+		Provider:  kelos.WorkspaceProviderGitLab,
+		SecretRef: &kelos.SecretReference{Name: "gitlab-token"},
+	}
+
+	deploy := builder.Build(ts, workspace, false)
+	spawner := deploy.Spec.Template.Spec.Containers[0]
+
+	args := strings.Join(spawner.Args, " ")
+	if !strings.Contains(args, "--gitlab-base-url=https://gitlab.example.com") || !strings.Contains(args, "--gitlab-project=group/sub/repo") {
+		t.Errorf("expected gitlab args derived from workspace repo, got %v", spawner.Args)
+	}
+	if strings.Contains(args, "--github-owner") || strings.Contains(args, "--github-api-base-url") {
+		t.Errorf("expected no GitHub args for a GitLab source, got %v", spawner.Args)
+	}
+
+	if len(spawner.Env) != 1 || spawner.Env[0].Name != "GITLAB_TOKEN" {
+		t.Fatalf("expected GITLAB_TOKEN env from workspace secret, got %v", spawner.Env)
+	}
+	ref := spawner.Env[0].ValueFrom.SecretKeyRef
+	if ref.Name != "gitlab-token" || ref.Key != "GITLAB_TOKEN" {
+		t.Errorf("unexpected secret key ref: %+v", ref)
+	}
+}
+
+func TestDeploymentBuilder_GitLabOverrides(t *testing.T) {
+	builder := NewDeploymentBuilder()
+	ts := &kelos.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-spawner", Namespace: "default"},
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{GitLab: &kelos.GitLab{
+				BaseURL: "http://gitlab-webservice-default.gitlab.svc:8181",
+				Project: "upstream/repo",
+			}},
+			TaskTemplate: kelos.TaskTemplate{
+				Type:         "claude-code",
+				WorkspaceRef: &kelos.WorkspaceReference{Name: "ws"},
+			},
+		},
+	}
+	workspace := &kelos.WorkspaceSpec{Repo: "https://gitlab.example.com/fork/repo.git"}
+
+	deploy := builder.Build(ts, workspace, false)
+	spawner := deploy.Spec.Template.Spec.Containers[0]
+
+	args := strings.Join(spawner.Args, " ")
+	if !strings.Contains(args, "--gitlab-base-url=http://gitlab-webservice-default.gitlab.svc:8181") || !strings.Contains(args, "--gitlab-project=upstream/repo") {
+		t.Errorf("expected explicit overrides in args, got %v", spawner.Args)
+	}
+	if len(spawner.Env) != 0 {
+		t.Errorf("expected no env without a workspace secret, got %v", spawner.Env)
+	}
+}
+
 func TestDeploymentBuilder_Jira(t *testing.T) {
 	builder := NewDeploymentBuilder()
 	ts := &kelos.TaskSpawner{

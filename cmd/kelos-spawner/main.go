@@ -54,6 +54,8 @@ func main() {
 	var jiraBaseURL string
 	var jiraProject string
 	var jiraJQL string
+	var gitlabBaseURL string
+	var gitlabProject string
 	var oneShot bool
 
 	flag.StringVar(&name, "taskspawner-name", "", "Name of the TaskSpawner to manage")
@@ -69,6 +71,8 @@ func main() {
 	flag.StringVar(&jiraBaseURL, "jira-base-url", "", "Jira instance base URL (e.g. https://mycompany.atlassian.net)")
 	flag.StringVar(&jiraProject, "jira-project", "", "Jira project key")
 	flag.StringVar(&jiraJQL, "jira-jql", "", "Optional JQL filter for Jira issues")
+	flag.StringVar(&gitlabBaseURL, "gitlab-base-url", "", "GitLab instance base URL (e.g. https://gitlab.example.com)")
+	flag.StringVar(&gitlabProject, "gitlab-project", "", "GitLab project path (e.g. group/subgroup/project)")
 	flag.BoolVar(&oneShot, "one-shot", false, "Run a single discovery cycle and exit (used by CronJob)")
 
 	opts, applyVerbosity := logging.SetupZapOptions(flag.CommandLine)
@@ -122,6 +126,9 @@ func main() {
 	httpClient := &http.Client{Transport: source.NewMetricsTransport(http.DefaultTransport)}
 
 	tokenResolver := newGitHubTokenResolver(githubToken, githubAppID, githubAppInstallationID, githubAppPrivateKey, githubAPIBaseURL)
+	if gitlabProject != "" {
+		tokenResolver = newGitLabTokenResolver(os.Getenv("GITLAB_TOKEN"))
+	}
 	reportingGitHubAppID := ""
 	if githubToken == "" && githubAppID != "" && githubAppInstallationID != "" && githubAppPrivateKey != "" {
 		reportingGitHubAppID = githubAppID
@@ -137,6 +144,8 @@ func main() {
 		JiraBaseURL:      jiraBaseURL,
 		JiraProject:      jiraProject,
 		JiraJQL:          jiraJQL,
+		GitLabBaseURL:    gitlabBaseURL,
+		GitLabProject:    gitlabProject,
 		HTTPClient:       httpClient,
 	}
 
@@ -205,12 +214,12 @@ func taskNameForWorkItem(taskSpawnerName, workItemID string) string {
 }
 
 func runCycle(ctx context.Context, cl client.Client, key types.NamespacedName, githubOwner, githubRepo, githubAPIBaseURL string, tokenResolver func(context.Context) (string, error), jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) error {
-	return runCycleWithProxy(ctx, cl, key, githubOwner, githubRepo, "", githubAPIBaseURL, tokenResolver, jiraBaseURL, jiraProject, jiraJQL, httpClient)
+	return runCycleWithProxy(ctx, cl, key, githubOwner, githubRepo, "", githubAPIBaseURL, tokenResolver, jiraBaseURL, jiraProject, jiraJQL, "", "", httpClient)
 }
 
-func runCycleWithProxy(ctx context.Context, cl client.Client, key types.NamespacedName, githubOwner, githubRepo, ghProxyURL, githubAPIBaseURL string, tokenResolver func(context.Context) (string, error), jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) error {
+func runCycleWithProxy(ctx context.Context, cl client.Client, key types.NamespacedName, githubOwner, githubRepo, ghProxyURL, githubAPIBaseURL string, tokenResolver func(context.Context) (string, error), jiraBaseURL, jiraProject, jiraJQL, gitlabBaseURL, gitlabProject string, httpClient *http.Client) error {
 	start := time.Now()
-	err := runCycleCore(ctx, cl, key, githubOwner, githubRepo, ghProxyURL, githubAPIBaseURL, tokenResolver, jiraBaseURL, jiraProject, jiraJQL, httpClient)
+	err := runCycleCore(ctx, cl, key, githubOwner, githubRepo, ghProxyURL, githubAPIBaseURL, tokenResolver, jiraBaseURL, jiraProject, jiraJQL, gitlabBaseURL, gitlabProject, httpClient)
 	discoveryDurationSeconds.Observe(time.Since(start).Seconds())
 	if err != nil {
 		discoveryErrorsTotal.Inc()
@@ -218,13 +227,13 @@ func runCycleWithProxy(ctx context.Context, cl client.Client, key types.Namespac
 	return err
 }
 
-func runCycleCore(ctx context.Context, cl client.Client, key types.NamespacedName, githubOwner, githubRepo, ghProxyURL, githubAPIBaseURL string, tokenResolver func(context.Context) (string, error), jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) error {
+func runCycleCore(ctx context.Context, cl client.Client, key types.NamespacedName, githubOwner, githubRepo, ghProxyURL, githubAPIBaseURL string, tokenResolver func(context.Context) (string, error), jiraBaseURL, jiraProject, jiraJQL, gitlabBaseURL, gitlabProject string, httpClient *http.Client) error {
 	var ts kelos.TaskSpawner
 	if err := cl.Get(ctx, key, &ts); err != nil {
 		return fmt.Errorf("fetching TaskSpawner: %w", err)
 	}
 
-	src, err := buildSourceWithProxy(ctx, &ts, githubOwner, githubRepo, ghProxyURL, githubAPIBaseURL, tokenResolver, jiraBaseURL, jiraProject, jiraJQL, httpClient)
+	src, err := buildSourceWithProxy(ctx, &ts, githubOwner, githubRepo, ghProxyURL, githubAPIBaseURL, tokenResolver, jiraBaseURL, jiraProject, jiraJQL, gitlabBaseURL, gitlabProject, httpClient)
 	if err != nil {
 		return fmt.Errorf("building source: %w", err)
 	}
@@ -613,17 +622,21 @@ func recordCycleFailure(ctx context.Context, cl client.Client, key types.Namespa
 	return cycleErr
 }
 
-// sourceAnnotations returns annotations that stamp GitHub source metadata
-// onto a spawned Task. These annotations enable downstream consumers (such
-// as the reporting watcher) to identify the originating issue or PR.
+// sourceAnnotations returns annotations that stamp GitHub or GitLab source
+// metadata onto a spawned Task. These annotations enable downstream consumers
+// (such as the reporting watcher) to identify the originating issue, pull
+// request, or merge request.
 func sourceAnnotations(ts *kelos.TaskSpawner, item source.WorkItem) map[string]string {
-	if ts.Spec.When.GitHubIssues == nil && ts.Spec.When.GitHubPullRequests == nil {
+	if ts.Spec.When.GitHubIssues == nil && ts.Spec.When.GitHubPullRequests == nil && ts.Spec.When.GitLab == nil {
 		return nil
 	}
 
 	kind := "issue"
-	if item.Kind == "PR" {
+	switch item.Kind {
+	case "PR":
 		kind = "pull-request"
+	case "MR":
+		kind = reporting.SourceKindMergeRequest
 	}
 
 	annotations := map[string]string{
@@ -649,10 +662,10 @@ func sourceAnnotations(ts *kelos.TaskSpawner, item source.WorkItem) map[string]s
 	return annotations
 }
 
-// reportingEnabled returns true when GitHub comment reporting is configured
-// and enabled on the TaskSpawner. This only covers polling-based sources
-// (Issues, PRs); webhook-based reporting is handled by the webhook server
-// and its handler.
+// reportingEnabled returns true when GitHub or GitLab comment reporting is
+// configured and enabled on the TaskSpawner. This only covers polling-based
+// sources; webhook-based reporting is handled by the webhook server and its
+// handler.
 func reportingEnabled(ts *kelos.TaskSpawner) bool {
 	if ts.Spec.When.GitHubIssues != nil && ts.Spec.When.GitHubIssues.Reporting != nil {
 		rep := ts.Spec.When.GitHubIssues.Reporting
@@ -662,20 +675,26 @@ func reportingEnabled(ts *kelos.TaskSpawner) bool {
 		rep := ts.Spec.When.GitHubPullRequests.Reporting
 		return rep.Enabled || rep.Comments != nil
 	}
+	if ts.Spec.When.GitLab != nil && ts.Spec.When.GitLab.Reporting != nil {
+		return ts.Spec.When.GitLab.Reporting.Comments != nil
+	}
 	return false
 }
 
 // resolvedCommentMode returns the configured comment mode. The deprecated
 // Enabled field and an empty Comments configuration retain PerTask behavior.
 func resolvedCommentMode(ts *kelos.TaskSpawner) kelos.GitHubCommentMode {
-	var rep *kelos.GitHubReporting
-	if ts.Spec.When.GitHubIssues != nil {
-		rep = ts.Spec.When.GitHubIssues.Reporting
-	} else if ts.Spec.When.GitHubPullRequests != nil {
-		rep = ts.Spec.When.GitHubPullRequests.Reporting
+	var mode kelos.GitHubCommentMode
+	switch {
+	case ts.Spec.When.GitHubIssues != nil && ts.Spec.When.GitHubIssues.Reporting != nil && ts.Spec.When.GitHubIssues.Reporting.Comments != nil:
+		mode = ts.Spec.When.GitHubIssues.Reporting.Comments.Mode
+	case ts.Spec.When.GitHubPullRequests != nil && ts.Spec.When.GitHubPullRequests.Reporting != nil && ts.Spec.When.GitHubPullRequests.Reporting.Comments != nil:
+		mode = ts.Spec.When.GitHubPullRequests.Reporting.Comments.Mode
+	case ts.Spec.When.GitLab != nil && ts.Spec.When.GitLab.Reporting != nil && ts.Spec.When.GitLab.Reporting.Comments != nil:
+		mode = ts.Spec.When.GitLab.Reporting.Comments.Mode
 	}
-	if rep != nil && rep.Comments != nil && rep.Comments.Mode != "" {
-		return rep.Comments.Mode
+	if mode != "" {
+		return mode
 	}
 	return kelos.GitHubCommentModePerTask
 }
@@ -733,10 +752,10 @@ func resolveGitHubCommentPolicy(policy *kelos.GitHubCommentPolicy) resolvedGitHu
 }
 
 func buildSource(ctx context.Context, ts *kelos.TaskSpawner, owner, repo, apiBaseURL string, tokenResolver func(context.Context) (string, error), jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) (source.Source, error) {
-	return buildSourceWithProxy(ctx, ts, owner, repo, "", apiBaseURL, tokenResolver, jiraBaseURL, jiraProject, jiraJQL, httpClient)
+	return buildSourceWithProxy(ctx, ts, owner, repo, "", apiBaseURL, tokenResolver, jiraBaseURL, jiraProject, jiraJQL, "", "", httpClient)
 }
 
-func buildSourceWithProxy(ctx context.Context, ts *kelos.TaskSpawner, owner, repo, ghProxyURL, apiBaseURL string, tokenResolver func(context.Context) (string, error), jiraBaseURL, jiraProject, jiraJQL string, httpClient *http.Client) (source.Source, error) {
+func buildSourceWithProxy(ctx context.Context, ts *kelos.TaskSpawner, owner, repo, ghProxyURL, apiBaseURL string, tokenResolver func(context.Context) (string, error), jiraBaseURL, jiraProject, jiraJQL, gitlabBaseURL, gitlabProject string, httpClient *http.Client) (source.Source, error) {
 	if ts.Spec.When.GitHubIssues != nil {
 		gh := ts.Spec.When.GitHubIssues
 		commentPolicy := resolveGitHubCommentPolicy(gh.CommentPolicy)
@@ -828,6 +847,35 @@ func buildSourceWithProxy(ctx context.Context, ts *kelos.TaskSpawner, owner, rep
 		}, nil
 	}
 
+	if ts.Spec.When.GitLab != nil {
+		gl := ts.Spec.When.GitLab
+		// GITLAB_TOKEN is injected from the Workspace secret's GITLAB_TOKEN key
+		// by the TaskSpawner controller; polling unauthenticated is not
+		// supported.
+		token := os.Getenv("GITLAB_TOKEN")
+		if token == "" {
+			return nil, fmt.Errorf("GITLAB_TOKEN is not set; the Workspace secret must provide a GITLAB_TOKEN key")
+		}
+		src := &source.GitLabSource{
+			BaseURL:        gitlabBaseURL,
+			Project:        gitlabProject,
+			Types:          gl.Types,
+			Labels:         gl.Labels,
+			ExcludeLabels:  gl.ExcludeLabels,
+			State:          gl.State,
+			ReviewState:    gl.ReviewState,
+			PipelineStatus: gl.PipelineStatus,
+			Token:          token,
+			Client:         httpClient,
+		}
+		if gl.CommentPolicy != nil {
+			src.TriggerComment = gl.CommentPolicy.TriggerComment
+			src.ExcludeComments = gl.CommentPolicy.ExcludeComments
+			src.AllowedUsers = gl.CommentPolicy.AllowedUsers
+		}
+		return src, nil
+	}
+
 	if ts.Spec.When.Cron != nil {
 		var lastDiscovery time.Time
 		if ts.Status.LastDiscoveryTime != nil {
@@ -869,6 +917,16 @@ func newGitHubTokenResolver(token, appID, installID, privateKey, apiBaseURL stri
 		tc.BaseURL = apiBaseURL
 	}
 	return githubapp.NewTokenProvider(tc, creds).Token
+}
+
+// newGitLabTokenResolver returns a resolver for the static GITLAB_TOKEN that
+// GitLab note reporting uses. It is nil when the token is unset so reporting
+// fails fast instead of posting unauthenticated.
+func newGitLabTokenResolver(token string) func(context.Context) (string, error) {
+	if token == "" {
+		return nil
+	}
+	return func(context.Context) (string, error) { return token, nil }
 }
 
 func priorityLabelsForTaskSpawner(ts *kelos.TaskSpawner) []string {

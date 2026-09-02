@@ -1372,6 +1372,205 @@ const linearIssuePayload = `{
 	}
 }`
 
+// newGitLabTestHandler creates a WebhookHandler for GitLab backed by a fake client.
+func newGitLabTestHandler(t *testing.T, objs ...client.Object) *WebhookHandler {
+	t.Helper()
+	handler := newLinearTestHandler(t, objs...)
+	handler.source = GitLabSource
+	return handler
+}
+
+func TestGitLabServeHTTP_RejectsInvalidToken(t *testing.T) {
+	handler := newGitLabTestHandler(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader([]byte(gitlabMergeRequestPayload)))
+	req.Header.Set(GitLabTokenHeader, "wrong")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("Expected %d, got %d", http.StatusUnauthorized, rr.Code)
+	}
+}
+
+func TestGitLabServeHTTP_RejectsMissingToken(t *testing.T) {
+	handler := newGitLabTestHandler(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader([]byte(gitlabMergeRequestPayload)))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("Expected %d, got %d", http.StatusUnauthorized, rr.Code)
+	}
+}
+
+func TestGitLabServeHTTP_CreatesTaskForMatchingSpawner(t *testing.T) {
+	spawner := &kelos.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{Name: "gitlab-spawner", Namespace: "default", UID: "gitlab-uid-123"},
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitLabWebhook: &kelos.GitLabWebhook{
+					Events:  []string{"merge_request"},
+					Project: "group/sub/repo",
+					Filters: []kelos.GitLabWebhookFilter{{Event: "merge_request", Action: "open", Labels: []string{"kelos"}}},
+				},
+			},
+			TaskTemplate: kelos.TaskTemplate{
+				Type:           "claude-code",
+				Credentials:    &kelos.Credentials{Type: "api-key"},
+				WorkspaceRef:   &kelos.WorkspaceReference{Name: "test-workspace"},
+				PromptTemplate: "{{.Kind}} !{{.Number}} {{.Title}} on {{.Branch}}",
+			},
+		},
+	}
+	ignored := &kelos.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{Name: "issues-only", Namespace: "default", UID: "gitlab-uid-456"},
+		Spec: kelos.TaskSpawnerSpec{
+			When:         kelos.When{GitLabWebhook: &kelos.GitLabWebhook{Events: []string{"issue"}}},
+			TaskTemplate: spawner.Spec.TaskTemplate,
+		},
+	}
+	handler := newGitLabTestHandler(t, spawner, ignored)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader([]byte(gitlabMergeRequestPayload)))
+	req.Header.Set(GitLabTokenHeader, testSecret)
+	req.Header.Set(GitLabEventHeader, "Merge Request Hook")
+	req.Header.Set(GitLabIdempotencyHeader, "idem-1")
+	req.Header.Set(GitLabDeliveryHeader, "uuid-1")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	var taskList kelos.TaskList
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task, got %d", len(taskList.Items))
+	}
+	task := taskList.Items[0]
+	if task.Labels["kelos.dev/taskspawner"] != "gitlab-spawner" {
+		t.Errorf("Expected taskspawner label 'gitlab-spawner', got %q", task.Labels["kelos.dev/taskspawner"])
+	}
+	if task.Spec.Prompt != "MR !7 Add feature on feature-x" {
+		t.Errorf("Unexpected prompt %q", task.Spec.Prompt)
+	}
+	if !strings.Contains(task.Name, "merge-request") {
+		t.Errorf("Expected task name to carry the object_kind, got %q", task.Name)
+	}
+
+	// A retry with the same Idempotency-Key is deduplicated even though GitLab
+	// assigns retries a fresh event UUID.
+	req = httptest.NewRequest(http.MethodPost, "/", bytes.NewReader([]byte(gitlabMergeRequestPayload)))
+	req.Header.Set(GitLabTokenHeader, testSecret)
+	req.Header.Set(GitLabIdempotencyHeader, "idem-1")
+	req.Header.Set(GitLabDeliveryHeader, "uuid-2")
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected %d on redelivery, got %d", http.StatusOK, rr.Code)
+	}
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Errorf("Expected redelivery to be deduplicated, got %d tasks", len(taskList.Items))
+	}
+}
+
+func TestGitLabServeHTTP_StampsReportingAnnotations(t *testing.T) {
+	spawner := &kelos.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{Name: "gitlab-reporter", Namespace: "default", UID: "gitlab-uid-789"},
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{
+				GitLabWebhook: &kelos.GitLabWebhook{
+					Events:    []string{"note"},
+					Reporting: &kelos.GitLabReporting{Comments: &kelos.GitLabCommentsReporting{Mode: kelos.GitHubCommentModeSticky}},
+				},
+			},
+			TaskTemplate: kelos.TaskTemplate{
+				Type:           "claude-code",
+				Credentials:    &kelos.Credentials{Type: "api-key"},
+				WorkspaceRef:   &kelos.WorkspaceReference{Name: "test-workspace"},
+				PromptTemplate: "{{.CommentBody}}",
+			},
+		},
+	}
+	handler := newGitLabTestHandler(t, spawner)
+	handler.gatewayName = "gl-gateway"
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader([]byte(gitlabNotePayload)))
+	req.Header.Set(GitLabTokenHeader, testSecret)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	var taskList kelos.TaskList
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task, got %d", len(taskList.Items))
+	}
+	got := taskList.Items[0].Annotations
+	want := map[string]string{
+		reporting.AnnotationSourceProvider:    reporting.SourceProviderGitLab,
+		reporting.AnnotationSourceKind:        reporting.SourceKindMergeRequest,
+		reporting.AnnotationSourceNumber:      "7",
+		reporting.AnnotationSourceRepo:        "group/sub/repo",
+		reporting.AnnotationSourceBaseURL:     "https://gitlab.example.com",
+		reporting.AnnotationWebhookGateway:    "gl-gateway",
+		reporting.AnnotationGitHubReporting:   "enabled",
+		reporting.AnnotationGitHubCommentMode: string(kelos.GitHubCommentModeSticky),
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("annotation %s = %q, want %q", k, got[k], v)
+		}
+	}
+}
+
+func TestGitLabServeHTTP_NoReportingAnnotationsWithoutReporting(t *testing.T) {
+	spawner := &kelos.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{Name: "gitlab-plain", Namespace: "default", UID: "gitlab-uid-790"},
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{GitLabWebhook: &kelos.GitLabWebhook{Events: []string{"merge_request"}}},
+			TaskTemplate: kelos.TaskTemplate{
+				Type:           "claude-code",
+				Credentials:    &kelos.Credentials{Type: "api-key"},
+				WorkspaceRef:   &kelos.WorkspaceReference{Name: "test-workspace"},
+				PromptTemplate: "{{.Title}}",
+			},
+		},
+	}
+	handler := newGitLabTestHandler(t, spawner)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader([]byte(gitlabMergeRequestPayload)))
+	req.Header.Set(GitLabTokenHeader, testSecret)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	var taskList kelos.TaskList
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task, got %d", len(taskList.Items))
+	}
+	if _, ok := taskList.Items[0].Annotations[reporting.AnnotationGitHubReporting]; ok {
+		t.Error("Expected no reporting annotation when gitlabWebhook.reporting is unset")
+	}
+}
+
 func TestLinearServeHTTP_RejectsInvalidSignature(t *testing.T) {
 	handler := newLinearTestHandler(t)
 

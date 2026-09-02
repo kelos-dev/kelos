@@ -1,0 +1,56 @@
+# Real-time alternative to polling: requires the GitLab webhook server
+# (webhookServer.sources.gitlab.enabled in Helm) and a project webhook in GitLab
+# pointing at /webhook/gitlab with the same secret token as
+# gitlab-webhook-secret.yaml.
+apiVersion: kelos.dev/v1alpha2
+kind: TaskSpawner
+metadata:
+  name: gitlab-webhook-fixer
+spec:
+  when:
+    gitlabWebhook:
+      events:
+        - note
+        - pipeline
+      # TODO: Replace with your project path
+      project: group/repo
+      filters:
+        # A "/kelos fix" comment on a merge request or issue.
+        - event: note
+          bodyPattern: '^/kelos fix'
+        # A merge request pipeline failed.
+        - event: pipeline
+          status: failed
+      # Status notes need webhookServer.sources.gitlab.tokenSecretName.
+      reporting:
+        comments:
+          mode: Sticky
+  taskTemplate:
+    type: claude-code
+    workspaceRef:
+      name: my-gitlab-workspace
+    credentials:
+      type: oauth
+      secretRef:
+        name: claude-oauth-token
+    # Merge requests (and pipelines/notes on them) set {{.Branch}} to the source
+    # branch; notes on issues get a fresh branch.
+    branch: "{{if .Branch}}{{.Branch}}{{else}}kelos-issue-{{.Number}}{{end}}"
+    # One Task per merge request or issue: a second delivery for the same item
+    # reuses the existing Task instead of creating a duplicate.
+    nameTemplate: "gitlab-webhook-fixer-{{.ID}}"
+    promptTemplate: |
+      GitLab {{.Event}} on {{.Kind}} #{{.Number}}: {{.Title}}
+      {{.URL}}
+      {{- if .CommentBody}}
+
+      Comment from {{.Sender}}:
+      {{.CommentBody}}
+      {{- end}}
+      {{- if .PipelineStatus}}
+
+      Pipeline {{.PipelineStatus}}: {{.PipelineURL}}
+      Inspect the failure, fix it on the current branch, and push.
+      {{- end}}
+    ttlSecondsAfterFinished: 3600
+  maxConcurrency: 3

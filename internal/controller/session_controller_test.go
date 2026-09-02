@@ -1670,7 +1670,7 @@ func TestPrepareSessionWorkspaceInitPreservesCloneCommands(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			containers := []corev1.Container{tt.container}
-			if err := prepareSessionWorkspaceInit(containers, ""); err != nil {
+			if err := prepareSessionWorkspaceInit(containers, "", gitCredentialDefaultUsername); err != nil {
 				t.Fatal(err)
 			}
 			script := ""
@@ -1693,14 +1693,14 @@ func TestPrepareSessionWorkspaceInitPreservesCloneCommands(t *testing.T) {
 }
 
 func TestPrepareSessionWorkspaceInitRefreshesCredentials(t *testing.T) {
-	credentialHelper := gitCredentialHelperForTokenFile("/test/GITHUB_TOKEN")
+	credentialHelper := gitCredentialHelperForTokenFile("/test/GITHUB_TOKEN", "GITHUB_TOKEN")
 	containers := []corev1.Container{{
 		Name:    "git-clone",
 		Command: []string{"sh", "-c", `git -c credential.helper= "$@"`},
 		Args:    []string{"--", "clone", "repo", "/workspace/repo"},
 	}}
 
-	if err := prepareSessionWorkspaceInit(containers, credentialHelper); err != nil {
+	if err := prepareSessionWorkspaceInit(containers, credentialHelper, gitCredentialDefaultUsername); err != nil {
 		t.Fatal(err)
 	}
 	script := containers[0].Command[2]

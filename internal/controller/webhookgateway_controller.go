@@ -110,10 +110,21 @@ func (r *WebhookGatewayReconciler) evaluate(ctx context.Context, gw *kelos.Webho
 		}
 		return kelos.WebhookGatewayPhaseAuthenticated, "", false, nil
 
+	case gw.Spec.GitLab != nil:
+		if phase, msg, requeue, err := r.checkSecret(ctx, gw.Namespace, gw.Spec.GitLab.SecretRef.Name, "webhook token secret"); err != nil || phase != "" {
+			return phase, msg, requeue, err
+		}
+		if gw.Spec.GitLab.CredentialsRef != nil {
+			if phase, msg, requeue, err := r.checkSecret(ctx, gw.Namespace, gw.Spec.GitLab.CredentialsRef.Name, "credentials secret"); err != nil || phase != "" {
+				return phase, msg, requeue, err
+			}
+		}
+		return kelos.WebhookGatewayPhaseAuthenticated, "", false, nil
+
 	default:
 		// The CEL "exactly one of" rule should prevent reaching here.
 		return kelos.WebhookGatewayPhaseSecretMissing,
-			"no source configured: exactly one of github, linear, or generic is required", false, nil
+			"no source configured: exactly one of github, linear, gitlab, or generic is required", false, nil
 	}
 }
 
@@ -175,7 +186,8 @@ func (r *WebhookGatewayReconciler) findGatewaysForSecret(ctx context.Context, ob
 }
 
 // gatewayReferencesSecret reports whether the gateway references the named
-// Secret — the inbound HMAC secret or, for github, the outbound credentials.
+// Secret — the inbound HMAC secret or token, or the outbound credentials for
+// github and gitlab.
 func gatewayReferencesSecret(gw *kelos.WebhookGateway, name string) bool {
 	switch {
 	case gw.Spec.GitHub != nil:
@@ -183,6 +195,9 @@ func gatewayReferencesSecret(gw *kelos.WebhookGateway, name string) bool {
 			(gw.Spec.GitHub.CredentialsRef != nil && gw.Spec.GitHub.CredentialsRef.Name == name)
 	case gw.Spec.Linear != nil:
 		return gw.Spec.Linear.SecretRef.Name == name
+	case gw.Spec.GitLab != nil:
+		return gw.Spec.GitLab.SecretRef.Name == name ||
+			(gw.Spec.GitLab.CredentialsRef != nil && gw.Spec.GitLab.CredentialsRef.Name == name)
 	default:
 		return false
 	}

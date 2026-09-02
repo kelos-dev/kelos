@@ -28,7 +28,10 @@ type reportingConfig struct {
 	TokenResolver    func(context.Context) (string, error)
 	GitHubAPIBaseURL string
 	GitHubAppID      string
-	GatewayMode      bool
+	// GitLabToken authenticates status notes in --source=gitlab mode. Gateway
+	// mode resolves the token from the gateway's credentialsRef instead.
+	GitLabToken string
+	GatewayMode bool
 }
 
 // reportingReconciler watches Tasks with GitHub reporting annotations
@@ -64,6 +67,10 @@ func (r *reportingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	if !r.config.GatewayMode && gatewayName != "" {
 		log.V(1).Info("Skipping reporting: task is owned by a webhook gateway", "task", task.Name, "gateway", gatewayName)
 		return ctrl.Result{}, nil
+	}
+
+	if task.Annotations[reporting.AnnotationSourceProvider] == reporting.SourceProviderGitLab {
+		return r.reportGitLab(ctx, &task)
 	}
 
 	owner := task.Annotations[reporting.AnnotationSourceOwner]
@@ -114,6 +121,73 @@ func (r *reportingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// reportGitLab posts status notes for a Task created from a GitLab webhook.
+// The project path and instance URL come from Task annotations; the token
+// comes from the bound gateway's credentialsRef or the server's GitLab token.
+func (r *reportingReconciler) reportGitLab(ctx context.Context, task *kelos.Task) (ctrl.Result, error) {
+	log := ctrl.Log.WithName("reporting")
+
+	project := task.Annotations[reporting.AnnotationSourceRepo]
+	baseURL := task.Annotations[reporting.AnnotationSourceBaseURL]
+	if project == "" || baseURL == "" {
+		log.Info("Skipping reporting: missing source project/base-url annotation", "task", task.Name)
+		return ctrl.Result{}, nil
+	}
+
+	token, apiBaseURL, err := r.resolveGitLabReportingCreds(ctx, task)
+	if err != nil {
+		log.Error(err, "Resolving GitLab credentials for reporting", "task", task.Name)
+		return ctrl.Result{}, fmt.Errorf("resolving reporting credentials: %w", err)
+	}
+	if apiBaseURL != "" {
+		baseURL = apiBaseURL
+	}
+
+	reporter := &reporting.TaskReporter{
+		Client: r.Client,
+		Reporter: &reporting.GitLabReporter{
+			BaseURL: baseURL,
+			Project: project,
+			Token:   token,
+		},
+		Cache: r.cache,
+	}
+	if err := reporter.ReportTaskStatus(ctx, task); err != nil {
+		log.Error(err, "Reporting task status", "task", task.Name)
+		return ctrl.Result{}, fmt.Errorf("reporting task status: %w", err)
+	}
+	return ctrl.Result{}, nil
+}
+
+// resolveGitLabReportingCreds returns the GitLab token and, for gateway-owned
+// Tasks, the gateway's API base URL override (empty when not configured).
+func (r *reportingReconciler) resolveGitLabReportingCreds(ctx context.Context, task *kelos.Task) (string, string, error) {
+	gwName := task.Annotations[reporting.AnnotationWebhookGateway]
+	if gwName == "" {
+		if r.config.GitLabToken == "" {
+			return "", "", fmt.Errorf("no GitLab token configured for reporting")
+		}
+		return r.config.GitLabToken, "", nil
+	}
+
+	var gw kelos.WebhookGateway
+	if err := r.Get(ctx, types.NamespacedName{Namespace: task.Namespace, Name: gwName}, &gw); err != nil {
+		return "", "", fmt.Errorf("fetching webhook gateway %s: %w", gwName, err)
+	}
+	if gw.Spec.GitLab == nil || gw.Spec.GitLab.CredentialsRef == nil {
+		return "", "", fmt.Errorf("webhook gateway %s has no gitlab.credentialsRef for reporting", gwName)
+	}
+	var secret corev1.Secret
+	if err := r.Get(ctx, types.NamespacedName{Namespace: task.Namespace, Name: gw.Spec.GitLab.CredentialsRef.Name}, &secret); err != nil {
+		return "", "", fmt.Errorf("fetching webhook gateway credentials %s: %w", gw.Spec.GitLab.CredentialsRef.Name, err)
+	}
+	token := strings.TrimSpace(string(secret.Data["GITLAB_TOKEN"]))
+	if token == "" {
+		return "", "", fmt.Errorf("webhook gateway %s credentials contain no GITLAB_TOKEN", gwName)
+	}
+	return token, gw.Spec.GitLab.APIBaseURL, nil
 }
 
 // resolveReportingCreds returns the GitHub token resolver, API base URL, and

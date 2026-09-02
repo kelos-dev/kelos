@@ -1,0 +1,40 @@
+apiVersion: kelos.dev/v1alpha2
+kind: TaskSpawner
+metadata:
+  name: gitlab-ci-fixer
+spec:
+  when:
+    gitlab:
+      types:
+        - mergeRequests
+      # Only merge requests whose head pipeline failed. A newer failing pipeline
+      # on the same merge request retriggers a finished Task.
+      pipelineStatus: failed
+      excludeLabels:
+        - no-kelos
+      reporting:
+        comments:
+          mode: Sticky
+      pollInterval: 2m
+  taskTemplate:
+    type: claude-code
+    workspaceRef:
+      name: my-gitlab-workspace
+    credentials:
+      type: oauth
+      secretRef:
+        name: claude-oauth-token
+    branch: "{{.Branch}}"
+    promptTemplate: |
+      The CI pipeline for merge request !{{.Number}} ({{.Title}}) failed.
+      Pipeline: {{.PipelineURL}}
+
+      Inspect the failure, fix the code or tests on the current branch, and push.
+      Do not disable or skip tests to make the pipeline green.
+      {{- if .ReviewComments}}
+
+      Open review comments:
+      {{.ReviewComments}}
+      {{- end}}
+    ttlSecondsAfterFinished: 3600
+  maxConcurrency: 2

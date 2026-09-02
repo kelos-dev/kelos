@@ -1,0 +1,14 @@
+apiVersion: kelos.dev/v1alpha2
+kind: Workspace
+metadata:
+  name: my-gitlab-workspace
+spec:
+  # TODO: Replace with your GitLab repository URL. For an in-cluster GitLab use
+  # the Service URL, e.g. http://gitlab-webservice-default.gitlab.svc:8181/group/repo.git
+  repo: https://gitlab.example.com/group/repo.git
+  ref: main
+  # Reads GITLAB_TOKEN from the secret, authenticates git as oauth2, and
+  # preconfigures glab in the agent container.
+  provider: gitlab
+  secretRef:
+    name: gitlab-token

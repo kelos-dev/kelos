@@ -130,6 +130,64 @@ func TestWebhookGatewayReconciler_LinearAuthenticated(t *testing.T) {
 	}
 }
 
+func TestWebhookGatewayReconciler_GitLabAuthenticated(t *testing.T) {
+	gw := &kelos.WebhookGateway{
+		ObjectMeta: metav1.ObjectMeta{Name: "gl", Namespace: "default"},
+		Spec: kelos.WebhookGatewaySpec{
+			GitLab: &kelos.GitLabGateway{
+				SecretRef: kelos.SecretReference{Name: "gl-secret"},
+			},
+		},
+	}
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "gl-secret", Namespace: "default"}}
+	got, _ := reconcileGateway(t, gw, secret)
+	if got.Status.Phase != kelos.WebhookGatewayPhaseAuthenticated {
+		t.Errorf("phase = %q, want Authenticated", got.Status.Phase)
+	}
+	if !gatewayReferencesSecret(gw, "gl-secret") || gatewayReferencesSecret(gw, "other") {
+		t.Error("expected gateway to reference only its token secret")
+	}
+}
+
+func TestWebhookGatewayReconciler_GitLabCredentialsAbsent(t *testing.T) {
+	gw := &kelos.WebhookGateway{
+		ObjectMeta: metav1.ObjectMeta{Name: "gl", Namespace: "default"},
+		Spec: kelos.WebhookGatewaySpec{
+			GitLab: &kelos.GitLabGateway{
+				SecretRef:      kelos.SecretReference{Name: "gl-secret"},
+				CredentialsRef: &kelos.SecretReference{Name: "absent-creds"},
+			},
+		},
+	}
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "gl-secret", Namespace: "default"}}
+	got, res := reconcileGateway(t, gw, secret)
+	if got.Status.Phase != kelos.WebhookGatewayPhaseSecretMissing {
+		t.Errorf("phase = %q, want SecretMissing for absent credentials", got.Status.Phase)
+	}
+	if res.RequeueAfter == 0 {
+		t.Error("expected requeue while the credentials secret is absent")
+	}
+	if !gatewayReferencesSecret(gw, "absent-creds") {
+		t.Error("expected gateway to reference its credentials secret")
+	}
+}
+
+func TestWebhookGatewayReconciler_GitLabSecretAbsentRequeues(t *testing.T) {
+	gw := &kelos.WebhookGateway{
+		ObjectMeta: metav1.ObjectMeta{Name: "gl", Namespace: "default"},
+		Spec: kelos.WebhookGatewaySpec{
+			GitLab: &kelos.GitLabGateway{SecretRef: kelos.SecretReference{Name: "absent"}},
+		},
+	}
+	got, res := reconcileGateway(t, gw)
+	if got.Status.Phase != kelos.WebhookGatewayPhaseSecretMissing {
+		t.Errorf("phase = %q, want SecretMissing", got.Status.Phase)
+	}
+	if res.RequeueAfter == 0 {
+		t.Error("expected requeue while the token secret is absent")
+	}
+}
+
 func TestWebhookGatewayReconciler_GitHubCredentialsAbsent(t *testing.T) {
 	gw := &kelos.WebhookGateway{
 		ObjectMeta: metav1.ObjectMeta{Name: "gh", Namespace: "default"},

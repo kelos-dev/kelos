@@ -861,6 +861,93 @@ func TestBuildClaudeCodeJob_WorkspaceWithSecretRefMountsTokenVolume(t *testing.T
 	}
 }
 
+func TestBuildClaudeCodeJob_GitLabWorkspaceUsesGitLabCredentials(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-gitlab", Namespace: "default"},
+		Spec: kelos.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix the code",
+			Credentials: &kelos.Credentials{
+				Type:      kelos.CredentialTypeAPIKey,
+				SecretRef: &kelos.SecretReference{Name: "my-secret"},
+			},
+			Branch: "feature-x",
+		},
+	}
+	workspace := &kelos.WorkspaceSpec{
+		Repo:      "http://gitlab-webservice-default.gitlab.svc:8181/group/repo.git",
+		Ref:       "main",
+		Provider:  kelos.WorkspaceProviderGitLab,
+		SecretRef: &kelos.SecretReference{Name: "gitlab-token"},
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+	mainContainer := job.Spec.Template.Spec.Containers[0]
+	envMap := map[string]corev1.EnvVar{}
+	for _, env := range mainContainer.Env {
+		envMap[env.Name] = env
+	}
+
+	token, ok := envMap["GITLAB_TOKEN"]
+	if !ok || token.ValueFrom == nil || token.ValueFrom.SecretKeyRef == nil {
+		t.Fatalf("expected GITLAB_TOKEN from the workspace secret, got %+v", mainContainer.Env)
+	}
+	if token.ValueFrom.SecretKeyRef.Name != "gitlab-token" || token.ValueFrom.SecretKeyRef.Key != "GITLAB_TOKEN" {
+		t.Errorf("GITLAB_TOKEN secretKeyRef = %+v, want gitlab-token/GITLAB_TOKEN", token.ValueFrom.SecretKeyRef)
+	}
+	if envMap["GITLAB_HOST"].Value != "http://gitlab-webservice-default.gitlab.svc:8181" {
+		t.Errorf("GITLAB_HOST = %q, want the instance URL from the repo", envMap["GITLAB_HOST"].Value)
+	}
+	if envMap["GLAB_CONFIG_DIR"].Value != GlabConfigDir || envMap["GLAB_NO_PROMPT"].Value != "true" {
+		t.Errorf("glab config env missing, got %+v", mainContainer.Env)
+	}
+	wantTokenFile := GitLabTokenMountPath + "/" + GitLabTokenSecretKey
+	if envMap["KELOS_GITLAB_TOKEN_FILE"].Value != wantTokenFile {
+		t.Errorf("KELOS_GITLAB_TOKEN_FILE = %q, want %q", envMap["KELOS_GITLAB_TOKEN_FILE"].Value, wantTokenFile)
+	}
+	for _, name := range []string{"GITHUB_TOKEN", "GH_TOKEN", "GH_ENTERPRISE_TOKEN", "GH_HOST", "GH_CONFIG_DIR", "KELOS_GITHUB_TOKEN_FILE"} {
+		if _, present := envMap[name]; present {
+			t.Errorf("%s must not be set for a GitLab workspace", name)
+		}
+	}
+
+	var tokenVolume *corev1.Volume
+	for i := range job.Spec.Template.Spec.Volumes {
+		if job.Spec.Template.Spec.Volumes[i].Name == GitLabTokenVolumeName {
+			tokenVolume = &job.Spec.Template.Spec.Volumes[i]
+		}
+		if job.Spec.Template.Spec.Volumes[i].Name == GitHubTokenVolumeName {
+			t.Errorf("GitHub token volume must not be mounted for a GitLab workspace")
+		}
+	}
+	if tokenVolume == nil || tokenVolume.Secret == nil || tokenVolume.Secret.SecretName != "gitlab-token" || tokenVolume.Secret.Items[0].Key != GitLabTokenSecretKey {
+		t.Fatalf("expected GitLab token volume projecting GITLAB_TOKEN, got %+v", tokenVolume)
+	}
+	if !containsVolumeMount(mainContainer.VolumeMounts, GitLabTokenVolumeName, GitLabTokenMountPath) {
+		t.Errorf("main container missing GitLab token mount; mounts: %+v", mainContainer.VolumeMounts)
+	}
+
+	for _, ic := range job.Spec.Template.Spec.InitContainers {
+		if ic.Name != "git-clone" && ic.Name != "branch-setup" {
+			continue
+		}
+		script := strings.Join(ic.Command, " ")
+		if !strings.Contains(script, "credential.username=oauth2") {
+			t.Errorf("init container %q must use the oauth2 git username, got %q", ic.Name, script)
+		}
+		if !strings.Contains(script, wantTokenFile) || !strings.Contains(script, `password=$GITLAB_TOKEN`) {
+			t.Errorf("init container %q credential helper must read the GitLab token, got %q", ic.Name, script)
+		}
+		if strings.Contains(script, "GITHUB_TOKEN") || strings.Contains(script, gitCredentialDefaultUsername) {
+			t.Errorf("init container %q must not reference GitHub credentials, got %q", ic.Name, script)
+		}
+	}
+}
+
 func TestBuildClaudeCodeJob_WorkspaceWithoutSecretRefDoesNotMountTokenVolume(t *testing.T) {
 	builder := NewJobBuilder()
 	task := &kelos.Task{
@@ -993,7 +1080,7 @@ func TestGitCredentialHelperUsername(t *testing.T) {
 				args = append(args, "-c", "credential.username="+tt.configuredUsername)
 			}
 			args = append(args,
-				"-c", "credential.helper="+gitCredentialHelperForTokenFile(tokenFile),
+				"-c", "credential.helper="+gitCredentialHelperForTokenFile(tokenFile, "GITHUB_TOKEN"),
 				"-c", "credential.username="+gitCredentialDefaultUsername,
 				"credential", "fill",
 			)

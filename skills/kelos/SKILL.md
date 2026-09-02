@@ -50,7 +50,7 @@ Kelos resources use `apiVersion: kelos.dev/v1alpha2`.
 | `Session` | Persistent interactive agent conversation | `spec.worker`, `spec.volumeClaimTemplate` |
 | `Workspace` | Git repository for the agent | `spec.repo`, `spec.ref`, `spec.secretRef`, `spec.remotes`, `spec.files` |
 | `AgentConfig` | Reusable instructions and tools | `spec.agentsMD`, `spec.plugins`, `spec.skills`, `spec.mcpServers` |
-| `TaskSpawner` | Creates Tasks from external sources | `spec.when.githubIssues`, `spec.when.githubPullRequests`, `spec.when.cron`, `spec.when.jira`, per-source `pollInterval`, `spec.taskTemplate`, `spec.maxConcurrency`, `spec.maxTotalTasks`, `spec.suspend` |
+| `TaskSpawner` | Creates Tasks from external sources | `spec.when.githubIssues`, `spec.when.githubPullRequests`, `spec.when.cron`, `spec.when.jira`, `spec.when.gitlab`, per-source `pollInterval`, `spec.taskTemplate`, `spec.maxConcurrency`, `spec.maxTotalTasks`, `spec.suspend` |
 
 Task phases are `Pending`, `Waiting`, `Running`, `Succeeded`, and `Failed`.
 Session phases are `Pending`, `Ready`, and `Failed`.

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -64,7 +65,7 @@ func isCronBased(ts *kelos.TaskSpawner) bool {
 // Slack uses Socket Mode (outbound WebSocket) handled by the centralized
 // kelos-slack-server, so it follows the same no-deployment pattern.
 func isWebhookBased(ts *kelos.TaskSpawner) bool {
-	return ts.Spec.When.GitHubWebhook != nil || ts.Spec.When.LinearWebhook != nil || ts.Spec.When.GenericWebhook != nil || ts.Spec.When.Slack != nil
+	return ts.Spec.When.GitHubWebhook != nil || ts.Spec.When.LinearWebhook != nil || ts.Spec.When.GitLabWebhook != nil || ts.Spec.When.GenericWebhook != nil || ts.Spec.When.Slack != nil
 }
 
 // Reconcile handles TaskSpawner reconciliation.
@@ -127,6 +128,18 @@ func (r *TaskSpawnerReconciler) reconcileWebhook(ctx context.Context, req ctrl.R
 	}
 	if err := r.deleteStaleResource(ctx, req.NamespacedName, &batchv1.CronJob{}, "CronJob"); err != nil {
 		return ctrl.Result{}, err
+	}
+
+	// Webhook spawners create Tasks on delivery, so a Workspace that cannot
+	// serve the source must fail the spawner here rather than every Task.
+	if _, _, _, result, err := r.resolveTaskSpawnerWorkspace(ctx, ts); err != nil {
+		var invalid *workspaceValidationError
+		if errors.As(err, &invalid) {
+			return r.failInvalidWorkspace(ctx, req, ts, invalid)
+		}
+		return ctrl.Result{}, err
+	} else if result != (ctrl.Result{}) {
+		return result, nil
 	}
 
 	// Determine the desired phase for webhook TaskSpawners
@@ -214,6 +227,7 @@ func (r *TaskSpawnerReconciler) resolveTaskSpawnerWorkspace(ctx context.Context,
 
 	workspace := &ws.Spec
 	isGitHubApp := false
+	var secretData map[string][]byte
 	if workspace.SecretRef != nil {
 		var secret corev1.Secret
 		if err := r.Get(ctx, client.ObjectKey{
@@ -228,6 +242,7 @@ func (r *TaskSpawnerReconciler) resolveTaskSpawnerWorkspace(ctx context.Context,
 			logger.Error(err, "Unable to fetch workspace secret", "secret", workspace.SecretRef.Name)
 			return nil, workspaceRef, false, ctrl.Result{}, err
 		} else {
+			secretData = secret.Data
 			isGitHubApp = githubapp.IsGitHubApp(secret.Data)
 			if isGitHubApp {
 				logger.Info("Detected GitHub App secret for TaskSpawner", "secret", workspace.SecretRef.Name)
@@ -235,7 +250,34 @@ func (r *TaskSpawnerReconciler) resolveTaskSpawnerWorkspace(ctx context.Context,
 		}
 	}
 
+	if err := validateTaskSpawnerWorkspace(ts, workspace, secretData); err != nil {
+		return nil, workspaceRef, false, ctrl.Result{}, err
+	}
+
 	return workspace, workspaceRef, isGitHubApp, ctrl.Result{}, nil
+}
+
+// failInvalidWorkspace marks a TaskSpawner Failed because its Workspace cannot
+// serve the configured source, so the operator sees the reason in status
+// instead of a crash-looping spawner. Any workload created for an earlier,
+// valid configuration is deleted by the caller.
+func (r *TaskSpawnerReconciler) failInvalidWorkspace(ctx context.Context, req ctrl.Request, ts *kelos.TaskSpawner, invalid *workspaceValidationError) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	r.recordEvent(ts, corev1.EventTypeWarning, "InvalidWorkspace", "%s", invalid.Error())
+	if statusErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		if getErr := r.Get(ctx, req.NamespacedName, ts); getErr != nil {
+			return getErr
+		}
+		ts.Status.Phase = kelos.TaskSpawnerPhaseFailed
+		ts.Status.Message = invalid.Error()
+		ts.Status.DeploymentName = ""
+		ts.Status.CronJobName = ""
+		return r.Status().Update(ctx, ts)
+	}); statusErr != nil {
+		logger.Error(statusErr, "Unable to update TaskSpawner status for invalid workspace")
+		return ctrl.Result{}, statusErr
+	}
+	return ctrl.Result{}, nil
 }
 
 func (r *TaskSpawnerReconciler) resolveTaskSpawnerWorkspaceRef(ctx context.Context, ts *kelos.TaskSpawner) (*kelos.WorkspaceReference, ctrl.Result, error) {
@@ -317,6 +359,16 @@ func (r *TaskSpawnerReconciler) reconcileDeployment(ctx context.Context, req ctr
 
 	workspace, workspaceRef, isGitHubApp, result, err := r.resolveTaskSpawnerWorkspace(ctx, ts)
 	if err != nil {
+		var invalid *workspaceValidationError
+		if errors.As(err, &invalid) {
+			if deployExists {
+				if deleteErr := r.Delete(ctx, &deploy); deleteErr != nil && !apierrors.IsNotFound(deleteErr) {
+					logger.Error(deleteErr, "Unable to delete Deployment for invalid workspace", "deployment", deploy.Name)
+					return ctrl.Result{}, deleteErr
+				}
+			}
+			return r.failInvalidWorkspace(ctx, req, ts, invalid)
+		}
 		return ctrl.Result{}, err
 	}
 	if result != (ctrl.Result{}) {
@@ -425,6 +477,16 @@ func (r *TaskSpawnerReconciler) reconcileCronJob(ctx context.Context, req ctrl.R
 
 	workspace, workspaceRef, isGitHubApp, result, err := r.resolveTaskSpawnerWorkspace(ctx, ts)
 	if err != nil {
+		var invalid *workspaceValidationError
+		if errors.As(err, &invalid) {
+			if cronJobExists {
+				if deleteErr := r.Delete(ctx, &cronJob); deleteErr != nil && !apierrors.IsNotFound(deleteErr) {
+					logger.Error(deleteErr, "Unable to delete CronJob for invalid workspace", "cronJob", cronJob.Name)
+					return ctrl.Result{}, deleteErr
+				}
+			}
+			return r.failInvalidWorkspace(ctx, req, ts, invalid)
+		}
 		return ctrl.Result{}, err
 	}
 	if result != (ctrl.Result{}) {

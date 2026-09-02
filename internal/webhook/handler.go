@@ -33,7 +33,15 @@ type WebhookSource string
 const (
 	GitHubSource  WebhookSource = "github"
 	LinearSource  WebhookSource = "linear"
+	GitLabSource  WebhookSource = "gitlab"
 	GenericSource WebhookSource = "generic"
+
+	// GitLab webhook headers. Idempotency-Key is stable across retries of one
+	// delivery; X-Gitlab-Event-UUID identifies the event that triggered it.
+	GitLabEventHeader       = "X-Gitlab-Event"
+	GitLabTokenHeader       = "X-Gitlab-Token"
+	GitLabIdempotencyHeader = "Idempotency-Key"
+	GitLabDeliveryHeader    = "X-Gitlab-Event-UUID"
 
 	// GitHub webhook headers
 	GitHubEventHeader     = "X-GitHub-Event"
@@ -45,10 +53,11 @@ const (
 	LinearDeliveryHeader  = "Linear-Delivery"
 )
 
-// ParsedWebhook holds parsed webhook data for GitHub, Linear, or generic sources.
+// ParsedWebhook holds parsed webhook data for GitHub, Linear, GitLab, or generic sources.
 type ParsedWebhook struct {
 	GitHub  *GitHubEventData
 	Linear  *LinearEventData
+	GitLab  *GitLabEventData
 	Generic *GenericEventData
 	// Common fields for logging and task naming
 	ID    string
@@ -236,6 +245,21 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+	case GitLabSource:
+		// The header carries a display name ("Merge Request Hook"); the
+		// payload object_kind is the canonical event type and is applied in
+		// processWebhook.
+		eventType = "gitlab"
+		deliveryID = gitlabRequestDeliveryID(r, body)
+
+		log.Info("Processing GitLab webhook", "event", r.Header.Get(GitLabEventHeader), "deliveryID", deliveryID, "payloadSize", len(body))
+
+		if err := ValidateGitLabToken(r.Header.Get(GitLabTokenHeader), h.secret); err != nil {
+			log.Error(err, "GitLab token validation failed", "deliveryID", deliveryID)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
 	case GenericSource:
 		sourceName, sourceErr := extractSourceFromPath(r.URL.Path)
 		if sourceErr != nil {
@@ -302,6 +326,26 @@ func githubDeliveryID(body []byte) string {
 	return "github-" + hex.EncodeToString(sum[:])
 }
 
+// gitlabRequestDeliveryID picks the delivery identifier for a GitLab request:
+// the retry-stable Idempotency-Key, then the event UUID, then a body hash for
+// GitLab versions that send neither.
+func gitlabRequestDeliveryID(r *http.Request, body []byte) string {
+	if id := r.Header.Get(GitLabIdempotencyHeader); id != "" {
+		return "gitlab-" + id
+	}
+	if id := r.Header.Get(GitLabDeliveryHeader); id != "" {
+		return "gitlab-" + id
+	}
+	return gitlabDeliveryID(body)
+}
+
+// gitlabDeliveryID derives a delivery identifier from the body for GitLab
+// versions that send no delivery headers.
+func gitlabDeliveryID(body []byte) string {
+	sum := sha256.Sum256(body)
+	return "gitlab-" + hex.EncodeToString(sum[:])
+}
+
 // processWebhook processes a validated payload with optional
 // pre-scoped TaskSpawners and SessionSpawners. A non-nil slice, including an
 // empty one, prevents a cluster-wide list for that resource type.
@@ -346,6 +390,25 @@ func (h *WebhookHandler) processWebhook(ctx context.Context, eventType string, p
 			if parsed.Title != "" {
 				log = log.WithValues("linearTitle", parsed.Title)
 			}
+		}
+
+	case GitLabSource:
+		eventData, err := ParseGitLabWebhook(payload)
+		if err != nil {
+			return false, fmt.Errorf("failed to parse %s webhook: %w", h.source, err)
+		}
+		parsed.GitLab = eventData
+		parsed.ID = eventData.ID
+		parsed.Title = eventData.Title
+		// Use the payload object_kind (e.g. "merge_request", "note") as the
+		// event type so Task names identify the event.
+		if eventData.Event != "" {
+			eventType = eventData.Event
+		} else {
+			log.Info("GitLab webhook payload has no 'object_kind' field, will not match any Events filter")
+		}
+		if parsed.ID != "" {
+			log = log.WithValues("gitlabID", parsed.ID)
 		}
 
 	case GenericSource:
@@ -507,6 +570,10 @@ func (h *WebhookHandler) getMatchingSpawners(ctx context.Context) ([]*kelos.Task
 			if spawner.Spec.When.LinearWebhook != nil && spawner.Spec.When.LinearWebhook.GatewayRef == nil {
 				matching = append(matching, spawner)
 			}
+		case GitLabSource:
+			if spawner.Spec.When.GitLabWebhook != nil && spawner.Spec.When.GitLabWebhook.GatewayRef == nil {
+				matching = append(matching, spawner)
+			}
 		case GenericSource:
 			if spawner.Spec.When.GenericWebhook != nil && spawner.Spec.When.GenericWebhook.GatewayRef == nil {
 				matching = append(matching, spawner)
@@ -552,6 +619,12 @@ func (h *WebhookHandler) matchesSpawner(ctx context.Context, spawner *kelos.Task
 			return false, nil
 		}
 		return MatchesLinearEvent(spawner.Spec.When.LinearWebhook, parsed.Linear)
+
+	case GitLabSource:
+		if spawner.Spec.When.GitLabWebhook == nil {
+			return false, nil
+		}
+		return MatchesGitLabEvent(spawner.Spec.When.GitLabWebhook, parsed.GitLab)
 
 	case GenericSource:
 		if spawner.Spec.When.GenericWebhook == nil {
@@ -600,6 +673,9 @@ func (h *WebhookHandler) createTask(ctx context.Context, spawner *kelos.TaskSpaw
 
 	case LinearSource:
 		templateVars = ExtractLinearWorkItem(parsed.Linear)
+
+	case GitLabSource:
+		templateVars = ExtractGitLabWorkItem(parsed.GitLab)
 
 	case GenericSource:
 		templateVars = ExtractGenericWorkItem(parsed.Generic)
@@ -718,6 +794,35 @@ func (h *WebhookHandler) createTask(ctx context.Context, spawner *kelos.TaskSpaw
 				task.Annotations[reporting.AnnotationGitHubCheckName] = rep.Checks.Name
 			}
 		}
+	}
+
+	// Stamp reporting annotations for GitLab webhook sources when notes
+	// reporting is configured and the event maps to an issue or merge request.
+	if h.source == GitLabSource && parsed.GitLab != nil && parsed.GitLab.Number > 0 &&
+		spawner.Spec.When.GitLabWebhook != nil &&
+		spawner.Spec.When.GitLabWebhook.Reporting != nil &&
+		spawner.Spec.When.GitLabWebhook.Reporting.Comments != nil {
+		if task.Annotations == nil {
+			task.Annotations = make(map[string]string)
+		}
+		kind := "issue"
+		if parsed.GitLab.Kind == "MR" {
+			kind = reporting.SourceKindMergeRequest
+		}
+		task.Annotations[reporting.AnnotationSourceProvider] = reporting.SourceProviderGitLab
+		task.Annotations[reporting.AnnotationSourceKind] = kind
+		task.Annotations[reporting.AnnotationSourceNumber] = strconv.Itoa(parsed.GitLab.Number)
+		task.Annotations[reporting.AnnotationSourceRepo] = parsed.GitLab.Project
+		task.Annotations[reporting.AnnotationSourceBaseURL] = gitlabInstanceURL(parsed.GitLab.ProjectURL)
+		if h.gatewayName != "" {
+			task.Annotations[reporting.AnnotationWebhookGateway] = h.gatewayName
+		}
+		task.Annotations[reporting.AnnotationGitHubReporting] = "enabled"
+		commentMode := kelos.GitHubCommentModePerTask
+		if mode := spawner.Spec.When.GitLabWebhook.Reporting.Comments.Mode; mode != "" {
+			commentMode = mode
+		}
+		task.Annotations[reporting.AnnotationGitHubCommentMode] = string(commentMode)
 	}
 
 	if err := h.client.Create(ctx, task); err != nil {

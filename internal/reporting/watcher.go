@@ -40,6 +40,19 @@ const (
 	// from. Pairs with AnnotationSourceOwner.
 	AnnotationSourceRepo = "kelos.dev/source-repo"
 
+	// AnnotationSourceProvider records the tracker that owns the source item
+	// when it is not GitHub. Webhook reporting reads it to pick the reporter.
+	AnnotationSourceProvider = "kelos.dev/source-provider"
+
+	// AnnotationSourceBaseURL records the instance URL of the tracker the event
+	// came from (e.g. "https://gitlab.example.com"), so reporting can target
+	// self-hosted instances without server-side configuration. For GitLab,
+	// AnnotationSourceRepo holds the full project path.
+	AnnotationSourceBaseURL = "kelos.dev/source-base-url"
+
+	// SourceProviderGitLab is the AnnotationSourceProvider value for GitLab.
+	SourceProviderGitLab = "gitlab"
+
 	// AnnotationWebhookGateway records the name of the WebhookGateway (in the
 	// Task's namespace) that created the Task. The reporting reconciler uses it
 	// to resolve per-gateway GitHub credentials and API base URL, so reporting
@@ -100,10 +113,29 @@ const (
 	LabelSlackReporting = "kelos.dev/slack-reporting"
 )
 
-// TaskReporter watches Tasks and reports status changes to GitHub.
+// CommentTarget identifies the issue, pull request, or merge request a
+// status comment belongs to. Kind carries the AnnotationSourceKind value;
+// GitLab needs it to pick the notes endpoint, GitHub ignores it.
+type CommentTarget struct {
+	Kind   string
+	Number int
+}
+
+// CommentReporter creates and updates task status comments on an external
+// tracker such as GitHub or GitLab.
+type CommentReporter interface {
+	// FindCommentByMarker returns the newest comment authored by the reporter's
+	// identity that contains marker, or zero when none exists.
+	FindCommentByMarker(ctx context.Context, target CommentTarget, marker string) (int64, error)
+	CreateComment(ctx context.Context, target CommentTarget, body string) (int64, error)
+	UpdateComment(ctx context.Context, target CommentTarget, commentID int64, body string) error
+}
+
+// TaskReporter watches Tasks and reports status changes as tracker comments
+// and, for GitHub, Check Runs.
 type TaskReporter struct {
 	Client         client.Client
-	Reporter       *GitHubReporter
+	Reporter       CommentReporter
 	ChecksReporter *ChecksReporter
 	// Cache backstops AnnotationGitHubCommentID and AnnotationGitHubReportPhase
 	// when the persisted Update has not yet propagated to the controller-runtime
@@ -217,6 +249,7 @@ func (tr *TaskReporter) reportViaComment(ctx context.Context, task *kelos.Task) 
 	if err != nil {
 		return fmt.Errorf("parsing source number %q: %w", numberStr, err)
 	}
+	target := CommentTarget{Kind: annotations[AnnotationSourceKind], Number: number}
 
 	var desiredPhase string
 	switch task.Status.Phase {
@@ -286,24 +319,24 @@ func (tr *TaskReporter) reportViaComment(ctx context.Context, task *kelos.Task) 
 		}
 		body += "\n\n" + marker
 		if commentID == 0 {
-			commentID, err = tr.Reporter.FindCommentByMarker(ctx, number, marker)
+			commentID, err = tr.Reporter.FindCommentByMarker(ctx, target, marker)
 			if err != nil {
-				return fmt.Errorf("finding sticky GitHub comment for task %s: %w", task.Name, err)
+				return fmt.Errorf("finding sticky status comment for task %s: %w", task.Name, err)
 			}
 		}
 	}
 
 	if commentID == 0 {
-		log.Info("Creating GitHub status comment", "task", task.Name, "number", number, "phase", desiredPhase)
-		newID, err := tr.Reporter.CreateComment(ctx, number, body)
+		log.Info("Creating status comment", "task", task.Name, "number", number, "phase", desiredPhase)
+		newID, err := tr.Reporter.CreateComment(ctx, target, body)
 		if err != nil {
-			return fmt.Errorf("creating GitHub comment for task %s: %w", task.Name, err)
+			return fmt.Errorf("creating status comment for task %s: %w", task.Name, err)
 		}
 		commentID = newID
 	} else {
-		log.Info("Updating GitHub status comment", "task", task.Name, "number", number, "phase", desiredPhase, "commentID", commentID)
-		if err := tr.Reporter.UpdateComment(ctx, commentID, body); err != nil {
-			return fmt.Errorf("updating GitHub comment %d for task %s: %w", commentID, task.Name, err)
+		log.Info("Updating status comment", "task", task.Name, "number", number, "phase", desiredPhase, "commentID", commentID)
+		if err := tr.Reporter.UpdateComment(ctx, target, commentID, body); err != nil {
+			return fmt.Errorf("updating status comment %d for task %s: %w", commentID, task.Name, err)
 		}
 	}
 
@@ -318,7 +351,7 @@ func (tr *TaskReporter) reportViaComment(ctx context.Context, task *kelos.Task) 
 func stickyCommentMarker(task *kelos.Task) (string, error) {
 	spawnerName := task.Labels["kelos.dev/taskspawner"]
 	if spawnerName == "" {
-		return "", fmt.Errorf("sticky GitHub comment for task %s requires kelos.dev/taskspawner label", task.Name)
+		return "", fmt.Errorf("sticky status comment for task %s requires kelos.dev/taskspawner label", task.Name)
 	}
 	return fmt.Sprintf("<!-- kelos.dev/github-status-comment:%s/%s -->", task.Namespace, spawnerName), nil
 }

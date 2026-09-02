@@ -25,6 +25,19 @@ spec:
   secretRef:
     name: github-app-creds
 ---
+# GitLab workspace (gitlab.com, self-hosted, or in-cluster). The secret holds a
+# GITLAB_TOKEN key; git authenticates as oauth2 and glab is preconfigured.
+apiVersion: kelos.dev/v1alpha2
+kind: Workspace
+metadata:
+  name: my-gitlab-workspace
+spec:
+  repo: https://gitlab.example.com/group/repo.git
+  ref: main
+  provider: gitlab
+  secretRef:
+    name: gitlab-token
+---
 # Fork workflow — workspace points to fork, with upstream remote
 apiVersion: kelos.dev/v1alpha2
 kind: Workspace

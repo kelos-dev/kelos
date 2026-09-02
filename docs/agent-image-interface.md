@@ -79,11 +79,16 @@ Kelos sets the following reserved environment variables on agent containers:
 | `OPENCODE_API_KEY` | API key for OpenCode (`opencode` agent, api-key or oauth credential type). The OpenCode entrypoint maps this for supported provider prefixes, including `ZHIPU_API_KEY` for `zai/*` models. | When agent type is `opencode` |
 | `CURSOR_API_KEY` | API key for Cursor CLI (`cursor` agent, api-key or oauth credential type) | When agent type is `cursor` |
 | `CLAUDE_CODE_OAUTH_TOKEN` | OAuth token (`claude-code` agent, oauth credential type) | When credential type is `oauth` and agent type is `claude-code` |
-| `GITHUB_TOKEN` | GitHub token for workspace access. **Captured at pod start and not refreshed in-process — custom images should read `KELOS_GITHUB_TOKEN_FILE` instead (see [GitHub token freshness](#github-token-freshness)).** | When workspace has a `secretRef` |
-| `GH_TOKEN` | GitHub token for `gh` CLI (github.com). Same freshness caveat as `GITHUB_TOKEN`; the bundled `gh` wrapper in reference images overrides it from the token file on each call. | When workspace has a `secretRef` and repo is on github.com |
-| `GH_ENTERPRISE_TOKEN` | GitHub token for `gh` CLI (GitHub Enterprise). Same freshness caveat as `GH_TOKEN`. | When workspace has a `secretRef` and repo is on a GitHub Enterprise host |
-| `GH_HOST` | Hostname for GitHub Enterprise | When repo is on a GitHub Enterprise host |
-| `KELOS_GITHUB_TOKEN_FILE` | Path to a file containing the current GitHub token. The file is kubelet-synced from the underlying Secret, so re-reading it on each GitHub call picks up refreshed installation tokens without a pod restart. **Recommended source of truth for custom agent images.** | When workspace has a `secretRef` |
+| `GITHUB_TOKEN` | GitHub token for workspace access. **Captured at pod start and not refreshed in-process — custom images should read `KELOS_GITHUB_TOKEN_FILE` instead (see [GitHub token freshness](#github-token-freshness)).** | When a `github` workspace has a `secretRef` |
+| `GH_TOKEN` | GitHub token for `gh` CLI (github.com). Same freshness caveat as `GITHUB_TOKEN`; the bundled `gh` wrapper in reference images overrides it from the token file on each call. | When a `github` workspace has a `secretRef` and repo is on github.com |
+| `GH_ENTERPRISE_TOKEN` | GitHub token for `gh` CLI (GitHub Enterprise). Same freshness caveat as `GH_TOKEN`. | When a `github` workspace has a `secretRef` and repo is on a GitHub Enterprise host |
+| `GH_HOST` | Hostname for GitHub Enterprise | When a `github` workspace repo is on a GitHub Enterprise host |
+| `GH_CONFIG_DIR` | Clean `gh` configuration directory on the workspace volume | When a `github` workspace has a `secretRef` |
+| `KELOS_GITHUB_TOKEN_FILE` | Path to a file containing the current GitHub token. The file is kubelet-synced from the underlying Secret, so re-reading it on each GitHub call picks up refreshed installation tokens without a pod restart. **Recommended source of truth for custom agent images.** | When a `github` workspace has a `secretRef` |
+| `GITLAB_TOKEN` | GitLab access token for workspace access and the `glab` CLI. Captured at pod start; the bundled `glab` wrapper in reference images re-reads `KELOS_GITLAB_TOKEN_FILE` on each call. | When a `gitlab` workspace has a `secretRef` |
+| `GITLAB_HOST` | GitLab instance URL (scheme, host, and port) derived from the workspace repo, so `glab` targets self-hosted and in-cluster instances | When the workspace provider is `gitlab` |
+| `GLAB_CONFIG_DIR`, `GLAB_NO_PROMPT`, `GLAB_CHECK_UPDATE`, `GLAB_SEND_TELEMETRY` | Clean `glab` configuration directory on the workspace volume, prompts disabled, update checks and telemetry off | When a `gitlab` workspace has a `secretRef` |
+| `KELOS_GITLAB_TOKEN_FILE` | Path to a kubelet-synced file containing the current GitLab token. **Recommended source of truth for custom agent images.** | When a `gitlab` workspace has a `secretRef` |
 | `KELOS_AGENT_TYPE` | The agent type (`claude-code`, `codex`, `gemini`, `opencode`, `cursor`) | Always |
 | `KELOS_TASK_NAME` | The name of the Task being run, so an image can correlate its run with the Task that launched it (progress streaming, steering, cancellation against an external control plane). Set by the worker-runner on each Task a pooled worker executes. The worker pod is long-lived and serves many Tasks, so read this at agent start rather than caching it per pod. Job-backed Tasks can supply the same information themselves through `podOverrides.env`, which pooled Tasks cannot use. | Worker pool Tasks |
 | `KELOS_BASE_BRANCH` | The base branch (workspace `ref`) for the task | When workspace has a non-empty `ref` |
@@ -197,6 +202,15 @@ Two concrete recommendations:
 `git` is handled automatically: the credential helper Kelos injects
 already reads the file on each invocation, with the `$GITHUB_TOKEN` env
 var as a fallback for images that have not adopted the file.
+
+GitLab workspaces (`Workspace.spec.provider: gitlab`) follow the same
+pattern with `$KELOS_GITLAB_TOKEN_FILE`, `$GITLAB_TOKEN`, and the `glab`
+CLI. The reference images install
+[`hack/agent-glab-wrapper.sh`](../hack/agent-glab-wrapper.sh) at
+`/usr/local/bin/glab`, which exports `GITLAB_TOKEN` from the file before
+each invocation and, on first use, registers the `GITLAB_HOST` instance in
+`GLAB_CONFIG_DIR` so API and git calls use the host's scheme and port
+(plain-http and non-standard-port instances work without `glab auth login`).
 
 ## Output Capture
 

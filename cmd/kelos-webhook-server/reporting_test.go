@@ -127,6 +127,145 @@ func TestResolveReportingCredsFromGateway(t *testing.T) {
 	}
 }
 
+func TestReportingReconcilerPostsGitLabNote(t *testing.T) {
+	var gotPath, gotToken string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.EscapedPath()
+		gotToken = r.Header.Get("PRIVATE-TOKEN")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]int64{"id": 77})
+	}))
+	defer server.Close()
+
+	tests := []struct {
+		name        string
+		gatewayMode bool
+		objects     []client.Object
+		annotations map[string]string
+		config      reportingConfig
+		wantToken   string
+	}{
+		{
+			name: "per-source server uses the configured GitLab token and the payload instance URL",
+			annotations: map[string]string{
+				reporting.AnnotationSourceBaseURL: server.URL,
+			},
+			config:    reportingConfig{GitLabToken: "server-token"},
+			wantToken: "server-token",
+		},
+		{
+			name:        "gateway server uses the gateway credentials and API base URL override",
+			gatewayMode: true,
+			objects: []client.Object{
+				&kelos.WebhookGateway{
+					ObjectMeta: metav1.ObjectMeta{Name: "gl", Namespace: "default"},
+					Spec: kelos.WebhookGatewaySpec{GitLab: &kelos.GitLabGateway{
+						SecretRef:      kelos.SecretReference{Name: "webhook-secret"},
+						APIBaseURL:     server.URL,
+						CredentialsRef: &kelos.SecretReference{Name: "gitlab-credentials"},
+					}},
+				},
+				&corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{Name: "gitlab-credentials", Namespace: "default"},
+					Data:       map[string][]byte{"GITLAB_TOKEN": []byte("gateway-token")},
+				},
+			},
+			annotations: map[string]string{
+				reporting.AnnotationSourceBaseURL:  "https://gitlab.external.example",
+				reporting.AnnotationWebhookGateway: "gl",
+			},
+			config:    reportingConfig{GatewayMode: true},
+			wantToken: "gateway-token",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotPath, gotToken = "", ""
+			annotations := map[string]string{
+				reporting.AnnotationGitHubReporting:   "enabled",
+				reporting.AnnotationGitHubCommentMode: string(kelos.GitHubCommentModePerTask),
+				reporting.AnnotationSourceProvider:    reporting.SourceProviderGitLab,
+				reporting.AnnotationSourceKind:        reporting.SourceKindMergeRequest,
+				reporting.AnnotationSourceNumber:      "7",
+				reporting.AnnotationSourceRepo:        "group/sub/repo",
+			}
+			for k, v := range tt.annotations {
+				annotations[k] = v
+			}
+			task := &kelos.Task{
+				ObjectMeta: metav1.ObjectMeta{Name: "task", Namespace: "default", Annotations: annotations},
+				Status:     kelos.TaskStatus{Phase: kelos.TaskPhasePending},
+			}
+			objects := append([]client.Object{task}, tt.objects...)
+			reconciler := &reportingReconciler{
+				Client: fake.NewClientBuilder().WithScheme(newReportingTestScheme(t)).WithObjects(objects...).Build(),
+				config: tt.config,
+				cache:  reporting.NewReportStateCache(),
+			}
+
+			if _, err := reconciler.Reconcile(context.Background(), ctrl.Request{
+				NamespacedName: types.NamespacedName{Namespace: "default", Name: "task"},
+			}); err != nil {
+				t.Fatalf("Reconcile() error = %v", err)
+			}
+			if gotPath != "/api/v4/projects/group%2Fsub%2Frepo/merge_requests/7/notes" {
+				t.Errorf("note posted to %q", gotPath)
+			}
+			if gotToken != tt.wantToken {
+				t.Errorf("PRIVATE-TOKEN = %q, want %q", gotToken, tt.wantToken)
+			}
+
+			var updated kelos.Task
+			if err := reconciler.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "task"}, &updated); err != nil {
+				t.Fatal(err)
+			}
+			if updated.Annotations[reporting.AnnotationGitHubCommentID] != "77" {
+				t.Errorf("expected note id persisted, got %q", updated.Annotations[reporting.AnnotationGitHubCommentID])
+			}
+		})
+	}
+}
+
+func TestResolveGitLabReportingCredsErrors(t *testing.T) {
+	gateway := &kelos.WebhookGateway{
+		ObjectMeta: metav1.ObjectMeta{Name: "gl", Namespace: "default"},
+		Spec:       kelos.WebhookGatewaySpec{GitLab: &kelos.GitLabGateway{SecretRef: kelos.SecretReference{Name: "webhook-secret"}}},
+	}
+	reconciler := &reportingReconciler{Client: fake.NewClientBuilder().WithScheme(newReportingTestScheme(t)).WithObjects(gateway).Build()}
+
+	noToken := &kelos.Task{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Annotations: map[string]string{}}}
+	if _, _, err := reconciler.resolveGitLabReportingCreds(context.Background(), noToken); err == nil || !strings.Contains(err.Error(), "no GitLab token") {
+		t.Errorf("expected missing server token error, got %v", err)
+	}
+
+	noCreds := &kelos.Task{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Annotations: map[string]string{reporting.AnnotationWebhookGateway: "gl"}}}
+	if _, _, err := reconciler.resolveGitLabReportingCreds(context.Background(), noCreds); err == nil || !strings.Contains(err.Error(), "credentialsRef") {
+		t.Errorf("expected missing credentialsRef error, got %v", err)
+	}
+}
+
+func TestResolveGitLabReportingCredsRejectsGitHubTokenKey(t *testing.T) {
+	gateway := &kelos.WebhookGateway{
+		ObjectMeta: metav1.ObjectMeta{Name: "gl", Namespace: "default"},
+		Spec: kelos.WebhookGatewaySpec{GitLab: &kelos.GitLabGateway{
+			SecretRef:      kelos.SecretReference{Name: "webhook-secret"},
+			CredentialsRef: &kelos.SecretReference{Name: "gitlab-credentials"},
+		}},
+	}
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "gitlab-credentials", Namespace: "default"},
+		Data:       map[string][]byte{"GITHUB_TOKEN": []byte("not-a-gitlab-key")},
+	}
+	reconciler := &reportingReconciler{Client: fake.NewClientBuilder().WithScheme(newReportingTestScheme(t)).WithObjects(gateway, secret).Build()}
+
+	task := &kelos.Task{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Annotations: map[string]string{reporting.AnnotationWebhookGateway: "gl"}}}
+	_, _, err := reconciler.resolveGitLabReportingCreds(context.Background(), task)
+	if err == nil || !strings.Contains(err.Error(), "no GITLAB_TOKEN") {
+		t.Fatalf("expected GITLAB_TOKEN-only credentials error, got %v", err)
+	}
+}
+
 func TestReportingReconcilerUsesGatewayGitHubAppIdentityForStickyComments(t *testing.T) {
 	var userRequests atomic.Int32
 	var tokenRequests atomic.Int32

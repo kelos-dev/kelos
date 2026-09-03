@@ -1186,6 +1186,15 @@ func containerByName(containers []corev1.Container, name string) *corev1.Contain
 	return nil
 }
 
+func envVarByName(env []corev1.EnvVar, name string) (corev1.EnvVar, bool) {
+	for _, item := range env {
+		if item.Name == name {
+			return item, true
+		}
+	}
+	return corev1.EnvVar{}, false
+}
+
 func waitForPodDeletion(f *framework.Framework, namespace, name string) {
 	Eventually(func() bool {
 		_, err := f.Clientset.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})

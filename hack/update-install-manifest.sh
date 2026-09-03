@@ -211,10 +211,9 @@ write_chart_crd_template() {
 
 # inject_kelos_conversion adds the conversion webhook config and the
 # cert-manager CA-injection annotation to kelos.dev CRDs that serve multiple
-# versions. CRDs with a single version (e.g. WorkerPool, TaskBudget,
-# TaskRecord) are left as-is since no conversion is needed. controller-gen does
-# not emit spec.conversion, so it is injected here, before the chart templates
-# are derived from this file.
+# versions. Single-version CRDs are left as-is. controller-gen does not emit
+# spec.conversion, so it is injected here before the chart templates are
+# derived from this file.
 inject_kelos_conversion() {
   local file="$1"
   local tmp="${file}.conv.tmp"
@@ -225,7 +224,7 @@ function flush(  i, isKelos, versionCount) {
   versionCount = 0
   for (i = 1; i <= n; i++) {
     if (buf[i] ~ /^  name: [a-z]+\.kelos\.dev[[:space:]]*$/) { isKelos = 1 }
-    if (buf[i] ~ /^  (  |- )name: v1alpha/) { versionCount++ }
+    if (buf[i] ~ /^  (  |- )name: v[[:alnum:]]+[[:space:]]*$/) { versionCount++ }
   }
   for (i = 1; i <= n; i++) {
     print buf[i]
@@ -256,24 +255,20 @@ END { flush() }
 }
 
 # verify_kelos_conversion fails fast if inject_kelos_conversion did not wire
-# multi-version kelos CRDs. Single-version CRDs (like WorkerPool, TaskBudget,
-# TaskRecord) correctly skip conversion. The CA annotation is injected into an
-# existing annotations: block, so a change in controller-gen output shape could
-# silently drop it; this guard catches that instead of shipping CRDs that fail
-# conversion.
+# every multi-version Kelos CRD. The CA annotation is injected into an existing
+# annotations block, so this guard catches incompatible controller-gen output.
 verify_kelos_conversion() {
   local file="$1"
   local multi_version anno conv
-  # Count CRDs that serve both v1alpha1 and v1alpha2 (need conversion).
   multi_version="$(awk '
     /^  name: [a-z]+\.kelos\.dev/ { v=0 }
-    /^  (  |- )name: v1alpha/ { v++ }
+    /^  (  |- )name: v[[:alnum:]]+[[:space:]]*$/ { v++ }
     /^---/ { if (v > 1) count++; v=0 }
     END { if (v > 1) count++; print count+0 }
   ' "${file}")"
-  anno="$(grep -cF 'cert-manager.io/inject-ca-from: kelos-system/kelos-serving-cert' "${file}")"
-  conv="$(grep -cE '^    strategy: Webhook[[:space:]]*$' "${file}")"
-  if [[ "${multi_version}" -lt 1 || "${anno}" -ne "${multi_version}" || "${conv}" -ne "${multi_version}" ]]; then
+  anno="$(grep -cF 'cert-manager.io/inject-ca-from: kelos-system/kelos-serving-cert' "${file}" || true)"
+  conv="$(grep -cE '^    strategy: Webhook[[:space:]]*$' "${file}" || true)"
+  if [[ "${anno}" -ne "${multi_version}" || "${conv}" -ne "${multi_version}" ]]; then
     echo "ERROR: kelos CRD conversion wiring incomplete in ${file}: multi_version=${multi_version} ca-annotations=${anno} conversion-blocks=${conv}" >&2
     exit 1
   fi

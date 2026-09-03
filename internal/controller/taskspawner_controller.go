@@ -15,6 +15,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
@@ -722,7 +723,8 @@ func (r *TaskSpawnerReconciler) deleteStaleResource(ctx context.Context, key typ
 	ownerRefs := obj.GetOwnerReferences()
 	isOwnedByTaskSpawner := false
 	for _, ref := range ownerRefs {
-		if (ref.APIVersion == "kelos.dev/v1alpha1" || ref.APIVersion == "kelos.dev/v1alpha2") && ref.Kind == "TaskSpawner" && ref.Controller != nil && *ref.Controller {
+		ownerGroupVersion, err := schema.ParseGroupVersion(ref.APIVersion)
+		if err == nil && ownerGroupVersion.Group == kelos.GroupVersion.Group && ref.Kind == "TaskSpawner" && ref.Controller != nil && *ref.Controller {
 			isOwnedByTaskSpawner = true
 			break
 		}

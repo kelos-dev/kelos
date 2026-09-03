@@ -1408,7 +1408,10 @@ func buildSkillsInstallScript(skills []kelos.SkillsShSpec, authEnvs []skillsAuth
 	}
 	lines = append(lines,
 		fmt.Sprintf("if [ -d %s ]; then", shellQuote(installDir)),
-		fmt.Sprintf("  find %s -mindepth 1 -maxdepth 1 -exec mv {} %s/ \\;", shellQuote(installDir), shellQuote(pluginSkillsDir)),
+		fmt.Sprintf("  for skill_path in %s/*; do", shellQuote(installDir)),
+		"    [ -e \"$skill_path\" ] || continue",
+		fmt.Sprintf("    mv \"$skill_path\" %s/", shellQuote(pluginSkillsDir)),
+		"  done",
 		"fi",
 		fmt.Sprintf("rm -rf %s %s", shellQuote(path.Join(PluginMountPath, ".agents")), shellQuote(path.Join(PluginMountPath, ".npm"))),
 		fmt.Sprintf("chown -R %d:%d %s", AgentUID, AgentUID, shellQuote(PluginMountPath)),

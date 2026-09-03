@@ -26,7 +26,7 @@ Every self-development Task, TaskSpawner, Session, and SessionSpawner in this
 directory and its nested Agora, Kanon, and Open Actions directories references
 [`base-agent.yaml`](base-agent.yaml), which copies
 [`gjkim42/kanon-repo`'s `instructions/AGENTS.md`](https://github.com/gjkim42/kanon-repo/blob/main/instructions/AGENTS.md)
-and installs all skills from that repository through `spec.skills`.
+and installs its selected shared skills individually through `spec.skills`.
 Tasks and TaskSpawners add a second role-specific AgentConfig when they need
 local identity, conventions, or workflow instructions. The issue and PR
 pick-up SessionSpawners for Kelos, Agora, Kanon, and Open Actions, plus

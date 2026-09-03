@@ -84,7 +84,25 @@ var _ = Describe("TaskPipeline API validation", func() {
 	It("rejects stage updates", func() {
 		pipeline := validPipeline("immutable-stages")
 		Expect(k8sClient.Create(ctx, pipeline)).To(Succeed())
-		pipeline.Spec.Stages[0].TaskTemplate.Prompt = "Replace the plan"
-		Expect(k8sClient.Update(ctx, pipeline)).NotTo(Succeed())
+		DeferCleanup(func() {
+			Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, pipeline))).To(Succeed())
+			Expect(k8sClient.DeleteAllOf(ctx, &kelos.Task{},
+				client.InNamespace(ns),
+				client.MatchingLabels{"kelos.dev/taskpipeline": pipeline.Name},
+			)).To(Succeed())
+		})
+
+		Eventually(func() string {
+			var current kelos.TaskPipeline
+			if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(pipeline), &current); err != nil {
+				return err.Error()
+			}
+			current.Spec.Stages[0].TaskTemplate.Prompt = "Replace the plan"
+			err := k8sClient.Update(ctx, &current, client.DryRunAll)
+			if err == nil {
+				return ""
+			}
+			return err.Error()
+		}, controllerSettleTimeout).Should(ContainSubstring("TaskPipeline stages are immutable after creation"))
 	})
 })

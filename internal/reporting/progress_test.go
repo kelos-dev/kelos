@@ -172,6 +172,20 @@ func TestExtractLatestAssistantText_OpenCode(t *testing.T) {
 	}
 }
 
+func TestExtractLatestAssistantText_OpenCodeNestedText(t *testing.T) {
+	logs := strings.Join([]string{
+		`{"type":"text","part":{"type":"text","text":"Checking the diff..."}}`,
+		`{"type":"tool_use","part":{"type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"git diff"},"output":"diff output"}}}`,
+		`{"type":"text","part":{"type":"text","text":"Found the issue."}}`,
+	}, "\n")
+
+	got := ExtractLatestAssistantText(strings.NewReader(logs), "opencode")
+	want := "Found the issue."
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
 func TestExtractLatestAssistantText_WhitespaceOnly(t *testing.T) {
 	logs := `{"type":"assistant","message":{"content":[{"type":"text","text":"   \n  "}]}}`
 

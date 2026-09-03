@@ -98,6 +98,17 @@ func TestStreamUsage(t *testing.T) {
 			},
 		},
 		{
+			name:      "gemini result with total stats",
+			agentType: "gemini",
+			content: `{"type":"progress","message":"working..."}
+{"type":"result","stats":{"totalInputTokens":1000,"totalOutputTokens":250,"totalCalls":3}}
+`,
+			want: map[string]string{
+				"input-tokens":  "1000",
+				"output-tokens": "250",
+			},
+		},
+		{
 			name:      "gemini captures response from last assistant message",
 			agentType: "gemini",
 			content: `{"type":"message","role":"assistant","delta":true,"content":"partial"}
@@ -138,6 +149,21 @@ func TestStreamUsage(t *testing.T) {
 				"input-tokens":  "800",
 				"output-tokens": "300",
 				"response":      "Rml4ZWQgdGhlIGJ1Zy4=", // base64("Fixed the bug.")
+			},
+		},
+		{
+			name:      "opencode captures response from nested text event",
+			agentType: "opencode",
+			content: `{"type":"step_start"}
+{"type":"text","part":{"type":"text","text":"Checking the change."}}
+{"type":"tool_use","part":{"type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"git diff"},"output":"diff output"}}}
+{"type":"text","part":{"type":"text","text":"Fixed the parser."}}
+{"type":"step_finish","part":{"tokens":{"input":100,"output":25}}}
+`,
+			want: map[string]string{
+				"input-tokens":  "100",
+				"output-tokens": "25",
+				"response":      "Rml4ZWQgdGhlIHBhcnNlci4=", // base64("Fixed the parser.")
 			},
 		},
 		{

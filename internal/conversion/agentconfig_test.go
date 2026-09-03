@@ -158,6 +158,55 @@ func TestAgentConfigRoundTrip_PreservesSkillsSecretRef(t *testing.T) {
 	}
 }
 
+func TestAgentConfigRoundTrip_PreservesOptionalSkill(t *testing.T) {
+	src := &v1alpha2.AgentConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: "cfg", Namespace: "default"},
+		Spec: v1alpha2.AgentConfigSpec{
+			Skills: []v1alpha2.SkillsShSpec{{Source: "owner/optional", Optional: true}},
+		},
+	}
+
+	spoke := &v1alpha1.AgentConfig{}
+	if err := agentConfigFromHub(context.Background(), src, spoke); err != nil {
+		t.Fatalf("agentConfigFromHub() error = %v", err)
+	}
+	hub := &v1alpha2.AgentConfig{}
+	if err := agentConfigToHub(context.Background(), spoke, hub); err != nil {
+		t.Fatalf("agentConfigToHub() error = %v", err)
+	}
+
+	if len(hub.Spec.Skills) != 1 || !hub.Spec.Skills[0].Optional {
+		t.Fatalf("Skills = %#v, want one optional skill", hub.Spec.Skills)
+	}
+}
+
+func TestAgentConfigRoundTrip_DoesNotRestoreReorderedDuplicateOptionalSkill(t *testing.T) {
+	spoke := &v1alpha1.AgentConfig{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{
+				preservedSkillsOptionalAnnotation: `[{"index":2,"source":"owner/optional","skill":"deploy"}]`,
+			},
+		},
+		Spec: v1alpha1.AgentConfigSpec{
+			Skills: []v1alpha1.SkillsShSpec{
+				{Source: "owner/optional", Skill: "deploy"},
+				{Source: "owner/optional", Skill: "deploy"},
+			},
+		},
+	}
+
+	hub := &v1alpha2.AgentConfig{}
+	if err := agentConfigToHub(context.Background(), spoke, hub); err != nil {
+		t.Fatalf("agentConfigToHub() error = %v", err)
+	}
+
+	for i, skill := range hub.Spec.Skills {
+		if skill.Optional {
+			t.Errorf("skill %d Optional = true, want no ambiguous restore", i)
+		}
+	}
+}
+
 func TestAgentConfigRoundTrip_DoesNotRestoreReorderedDuplicateSkill(t *testing.T) {
 	spoke := &v1alpha1.AgentConfig{
 		ObjectMeta: metav1.ObjectMeta{

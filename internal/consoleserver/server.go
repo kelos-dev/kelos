@@ -618,10 +618,10 @@ func consoleResourceRelationships(objects []consoleResourceObject) ([]consoleRes
 				add(source, consoleReferenceFor("tasks", dependency), "spawned Tasks depend on", false)
 			}
 		case *kelos.TaskPipeline:
-			for _, node := range value.Spec.Tasks {
-				consoleWorkerRelationships(source, node.TaskTemplate.Worker, add)
-				if node.TaskTemplate.WorkerPoolRef != nil {
-					add(source, consoleReferenceFor("workerpools", node.TaskTemplate.WorkerPoolRef.Name), "runs Tasks on", false)
+			for _, stage := range value.Spec.Stages {
+				consoleWorkerRelationships(source, stage.TaskTemplate.Worker, add)
+				if stage.TaskTemplate.WorkerPoolRef != nil {
+					add(source, consoleReferenceFor("workerpools", stage.TaskTemplate.WorkerPoolRef.Name), "runs Tasks on", false)
 				}
 			}
 		case *kelos.SessionSpawner:

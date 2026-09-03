@@ -27,13 +27,13 @@ import (
 
 const (
 	taskPipelineLabel      = "kelos.dev/taskpipeline"
-	pipelineNodeLabel      = "kelos.dev/pipeline-node"
+	pipelineStageLabel     = "kelos.dev/pipeline-stage"
 	pipelineTaskIndexLabel = "kelos.dev/pipeline-index"
-	maxPipelineMatrixTasks = 256
+	maxPipelineStageTasks  = 256
 	pipelineCollisionWait  = 2 * time.Second
 )
 
-// TaskPipelineReconciler creates and observes the Tasks in a TaskPipeline DAG.
+// TaskPipelineReconciler creates and observes the Tasks in a TaskPipeline.
 type TaskPipelineReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -43,7 +43,7 @@ type TaskPipelineReconciler struct {
 // +kubebuilder:rbac:groups=kelos.dev,resources=taskpipelines/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=kelos.dev,resources=tasks,verbs=create;get;list;watch
 
-// Reconcile creates ready pipeline nodes and aggregates their child Task status.
+// Reconcile creates the next pipeline stage and aggregates child Task status.
 func (r *TaskPipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
@@ -56,7 +56,7 @@ func (r *TaskPipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, r.failInvalidPipeline(ctx, &pipeline, err)
 	}
 
-	tasksByNode, err := r.listPipelineTasks(ctx, &pipeline)
+	tasksByStage, err := r.listPipelineTasks(ctx, &pipeline)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -64,33 +64,32 @@ func (r *TaskPipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
-	nodeStatuses := summarizePipelineNodes(&pipeline, tasksByNode, nil)
-	hasFailure := firstPipelineFailure(nodeStatuses, tasksByNode, nil) != ""
-	nodeErrors := make(map[string]string)
+	stageStatuses := summarizePipelineStages(&pipeline, tasksByStage, nil)
+	hasFailure := firstPipelineFailure(stageStatuses, tasksByStage, nil) != ""
+	stageErrors := make(map[string]string)
 	var requeueAfter time.Duration
 
 	if !hasFailure {
-		statusByName := pipelineNodeStatusMap(nodeStatuses)
-		for i := range pipeline.Spec.Tasks {
-			node := &pipeline.Spec.Tasks[i]
-			if !pipelineDependenciesSucceeded(node, statusByName) {
-				continue
+		for i := range pipeline.Spec.Stages {
+			stage := &pipeline.Spec.Stages[i]
+			if i > 0 && stageStatuses[i-1].Phase != kelos.TaskPhaseSucceeded {
+				break
 			}
 
-			matrixValues, _ := expandPipelineMatrix(node.Matrix)
-			existing := pipelineTasksByIndex(tasksByNode[node.Name])
+			matrixValues, _ := expandPipelineMatrix(stage.Matrix)
+			existing := pipelineTasksByIndex(tasksByStage[stage.Name])
 			for index, matrix := range matrixValues {
 				if _, ok := existing[index]; ok {
 					continue
 				}
 
-				task, buildErr := buildPipelineTask(&pipeline, node, index, len(matrixValues), matrix, tasksByNode)
+				task, buildErr := buildPipelineTask(&pipeline, stage, index, len(matrixValues), matrix, tasksByStage)
 				if buildErr != nil {
-					if wait := pipelineResultRetryAfter(node, tasksByNode, time.Now()); wait > 0 {
+					if wait := pipelineResultRetryAfter(&pipeline, i, tasksByStage, time.Now()); wait > 0 {
 						requeueAfter = minimumPositiveDuration(requeueAfter, wait)
 						break
 					}
-					nodeErrors[node.Name] = buildErr.Error()
+					stageErrors[stage.Name] = buildErr.Error()
 					break
 				}
 				if err := controllerutil.SetControllerReference(&pipeline, task, r.Scheme); err != nil {
@@ -107,12 +106,12 @@ func (r *TaskPipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request
 						case getErr != nil:
 							return ctrl.Result{}, fmt.Errorf("getting existing Task %q for TaskPipeline %q: %w", task.Name, pipeline.Name, getErr)
 						case metav1.IsControlledBy(&existingTask, &pipeline):
-							tasksByNode[node.Name] = append(tasksByNode[node.Name], &existingTask)
+							tasksByStage[stage.Name] = append(tasksByStage[stage.Name], &existingTask)
 							existing[index] = &existingTask
 						case taskOwnedByEarlierPipeline(&existingTask, &pipeline):
 							requeueAfter = minimumPositiveDuration(requeueAfter, pipelineCollisionWait)
 						default:
-							nodeErrors[node.Name] = fmt.Sprintf("Task name %q is already in use", task.Name)
+							stageErrors[stage.Name] = fmt.Sprintf("Task name %q is already in use", task.Name)
 						}
 						if _, ok := existing[index]; !ok {
 							break
@@ -122,18 +121,18 @@ func (r *TaskPipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request
 					return ctrl.Result{}, fmt.Errorf("creating Task %q for TaskPipeline %q: %w", task.Name, pipeline.Name, err)
 				}
 
-				logger.Info("Created pipeline Task", "taskPipeline", pipeline.Name, "node", node.Name, "task", task.Name)
-				tasksByNode[node.Name] = append(tasksByNode[node.Name], task)
+				logger.Info("Created pipeline Task", "taskPipeline", pipeline.Name, "stage", stage.Name, "task", task.Name)
+				tasksByStage[stage.Name] = append(tasksByStage[stage.Name], task)
 			}
-			if len(nodeErrors) > 0 {
+			if len(stageErrors) > 0 {
 				break
 			}
 		}
 	}
 
-	nodeStatuses = summarizePipelineNodes(&pipeline, tasksByNode, nodeErrors)
-	failure := firstPipelineFailure(nodeStatuses, tasksByNode, nodeErrors)
-	if err := r.updateTaskPipelineStatus(ctx, &pipeline, nodeStatuses, failure); err != nil {
+	stageStatuses = summarizePipelineStages(&pipeline, tasksByStage, stageErrors)
+	failure := firstPipelineFailure(stageStatuses, tasksByStage, stageErrors)
+	if err := r.updateTaskPipelineStatus(ctx, &pipeline, stageStatuses, failure); err != nil {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil
@@ -162,93 +161,56 @@ func (r *TaskPipelineReconciler) listPipelineTasks(ctx context.Context, pipeline
 		return nil, fmt.Errorf("listing Tasks for TaskPipeline %q: %w", pipeline.Name, err)
 	}
 
-	tasksByNode := make(map[string][]*kelos.Task, len(pipeline.Spec.Tasks))
+	tasksByStage := make(map[string][]*kelos.Task, len(pipeline.Spec.Stages))
 	for i := range taskList.Items {
 		task := &taskList.Items[i]
 		if !metav1.IsControlledBy(task, pipeline) {
 			continue
 		}
-		nodeName := task.Labels[pipelineNodeLabel]
-		if nodeName == "" {
-			return nil, fmt.Errorf("Task %q owned by TaskPipeline %q has no %s label", task.Name, pipeline.Name, pipelineNodeLabel)
+		stageName := task.Labels[pipelineStageLabel]
+		if stageName == "" {
+			return nil, fmt.Errorf("Task %q owned by TaskPipeline %q has no %s label", task.Name, pipeline.Name, pipelineStageLabel)
 		}
-		tasksByNode[nodeName] = append(tasksByNode[nodeName], task)
+		tasksByStage[stageName] = append(tasksByStage[stageName], task)
 	}
-	for nodeName := range tasksByNode {
-		sort.Slice(tasksByNode[nodeName], func(i, j int) bool {
-			return pipelineTaskIndex(tasksByNode[nodeName][i]) < pipelineTaskIndex(tasksByNode[nodeName][j])
+	for stageName := range tasksByStage {
+		sort.Slice(tasksByStage[stageName], func(i, j int) bool {
+			return pipelineTaskIndex(tasksByStage[stageName][i]) < pipelineTaskIndex(tasksByStage[stageName][j])
 		})
 	}
-	return tasksByNode, nil
+	return tasksByStage, nil
 }
 
 func validateTaskPipeline(pipeline *kelos.TaskPipeline) error {
-	if len(pipeline.Spec.Tasks) == 0 {
-		return errors.New("pipeline must contain at least one node")
+	if len(pipeline.Spec.Stages) == 0 {
+		return errors.New("pipeline must contain at least one stage")
 	}
 
-	nodes := make(map[string]*kelos.PipelineNode, len(pipeline.Spec.Tasks))
-	for i := range pipeline.Spec.Tasks {
-		node := &pipeline.Spec.Tasks[i]
-		if errs := validation.IsDNS1123Label(node.Name); len(errs) > 0 {
-			return fmt.Errorf("node name %q is invalid: %s", node.Name, strings.Join(errs, "; "))
+	stageNames := make(map[string]struct{}, len(pipeline.Spec.Stages))
+	for i := range pipeline.Spec.Stages {
+		stage := &pipeline.Spec.Stages[i]
+		if errs := validation.IsDNS1123Label(stage.Name); len(errs) > 0 {
+			return fmt.Errorf("stage name %q is invalid: %s", stage.Name, strings.Join(errs, "; "))
 		}
-		if _, exists := nodes[node.Name]; exists {
-			return fmt.Errorf("node name %q is duplicated", node.Name)
+		if _, exists := stageNames[stage.Name]; exists {
+			return fmt.Errorf("stage name %q is duplicated", stage.Name)
 		}
-		nodes[node.Name] = node
+		stageNames[stage.Name] = struct{}{}
 
-		matrixValues, err := expandPipelineMatrix(node.Matrix)
+		matrixValues, err := expandPipelineMatrix(stage.Matrix)
 		if err != nil {
-			return fmt.Errorf("node %q: %w", node.Name, err)
+			return fmt.Errorf("stage %q: %w", stage.Name, err)
 		}
-		if len(matrixValues) > maxPipelineMatrixTasks {
-			return fmt.Errorf("node %q matrix expands to %d Tasks; maximum is %d", node.Name, len(matrixValues), maxPipelineMatrixTasks)
+		if len(matrixValues) > maxPipelineStageTasks {
+			return fmt.Errorf("stage %q matrix expands to %d Tasks; maximum is %d", stage.Name, len(matrixValues), maxPipelineStageTasks)
 		}
-		if err := parsePipelineTemplate(node.Name+" prompt", node.TaskTemplate.Prompt); err != nil {
-			return fmt.Errorf("node %q prompt: %w", node.Name, err)
+		if err := parsePipelineTemplate(stage.Name+" prompt", stage.TaskTemplate.Prompt); err != nil {
+			return fmt.Errorf("stage %q prompt: %w", stage.Name, err)
 		}
-		if node.TaskTemplate.Branch != "" {
-			if err := parsePipelineTemplate(node.Name+" branch", node.TaskTemplate.Branch); err != nil {
-				return fmt.Errorf("node %q branch: %w", node.Name, err)
+		if stage.TaskTemplate.Branch != "" {
+			if err := parsePipelineTemplate(stage.Name+" branch", stage.TaskTemplate.Branch); err != nil {
+				return fmt.Errorf("stage %q branch: %w", stage.Name, err)
 			}
-		}
-	}
-
-	for _, node := range pipeline.Spec.Tasks {
-		for _, dependency := range node.DependsOn {
-			if dependency.Name == node.Name {
-				return fmt.Errorf("node %q cannot depend on itself", node.Name)
-			}
-			if nodes[dependency.Name] == nil {
-				return fmt.Errorf("node %q depends on unknown node %q", node.Name, dependency.Name)
-			}
-		}
-	}
-
-	visiting := make(map[string]bool, len(nodes))
-	visited := make(map[string]bool, len(nodes))
-	var visit func(string) error
-	visit = func(name string) error {
-		if visiting[name] {
-			return fmt.Errorf("pipeline graph contains a cycle involving node %q", name)
-		}
-		if visited[name] {
-			return nil
-		}
-		visiting[name] = true
-		for _, dependency := range nodes[name].DependsOn {
-			if err := visit(dependency.Name); err != nil {
-				return err
-			}
-		}
-		visiting[name] = false
-		visited[name] = true
-		return nil
-	}
-	for name := range nodes {
-		if err := visit(name); err != nil {
-			return err
 		}
 	}
 	return nil
@@ -294,7 +256,7 @@ func expandPipelineMatrix(matrix *kelos.PipelineMatrix) ([]map[string]string, er
 			}
 		}
 		combinations = next
-		if len(combinations) > maxPipelineMatrixTasks {
+		if len(combinations) > maxPipelineStageTasks {
 			return combinations, nil
 		}
 	}
@@ -395,35 +357,35 @@ func templateIndexInteger(value interface{}) (int, bool) {
 
 func buildPipelineTask(
 	pipeline *kelos.TaskPipeline,
-	node *kelos.PipelineNode,
+	stage *kelos.PipelineStage,
 	index, total int,
 	matrix map[string]string,
-	tasksByNode map[string][]*kelos.Task,
+	tasksByStage map[string][]*kelos.Task,
 ) (*kelos.Task, error) {
 	templateData := map[string]interface{}{
 		"Matrix": matrix,
-		"Deps":   pipelineDependencyTemplateData(pipeline, node, tasksByNode),
+		"Stages": pipelineStageTemplateData(pipeline, stage, tasksByStage),
 	}
-	prompt, err := renderPipelineTemplate(node.Name+" prompt", node.TaskTemplate.Prompt, templateData)
+	prompt, err := renderPipelineTemplate(stage.Name+" prompt", stage.TaskTemplate.Prompt, templateData)
 	if err != nil {
 		return nil, fmt.Errorf("rendering prompt: %w", err)
 	}
-	branch := node.TaskTemplate.Branch
+	branch := stage.TaskTemplate.Branch
 	if branch != "" {
-		branch, err = renderPipelineTemplate(node.Name+" branch", branch, templateData)
+		branch, err = renderPipelineTemplate(stage.Name+" branch", branch, templateData)
 		if err != nil {
 			return nil, fmt.Errorf("rendering branch: %w", err)
 		}
 	}
 
-	name := pipelineChildTaskName(pipeline.Name, node.Name, index, total)
+	name := pipelineChildTaskName(pipeline.Name, stage.Name, index, total)
 	task := &kelos.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: pipeline.Namespace,
 			Labels: map[string]string{
 				taskPipelineLabel:      pipelineLabelValue(pipeline.Name),
-				pipelineNodeLabel:      node.Name,
+				pipelineStageLabel:     stage.Name,
 				pipelineTaskIndexLabel: strconv.Itoa(index),
 			},
 		},
@@ -432,21 +394,26 @@ func buildPipelineTask(
 			Branch: branch,
 		},
 	}
-	if node.TaskTemplate.Worker != nil {
-		task.Spec.Worker = node.TaskTemplate.Worker.DeepCopy()
+	if stage.TaskTemplate.Worker != nil {
+		task.Spec.Worker = stage.TaskTemplate.Worker.DeepCopy()
 	}
-	if node.TaskTemplate.WorkerPoolRef != nil {
-		task.Spec.WorkerPoolRef = node.TaskTemplate.WorkerPoolRef.DeepCopy()
+	if stage.TaskTemplate.WorkerPoolRef != nil {
+		task.Spec.WorkerPoolRef = stage.TaskTemplate.WorkerPoolRef.DeepCopy()
 	}
 	return task, nil
 }
 
 // pipelineResultRetryAfter keeps a missing template value retryable while a
-// completed dependency is still within the Task controller's output capture window.
-func pipelineResultRetryAfter(node *kelos.PipelineNode, tasksByNode map[string][]*kelos.Task, now time.Time) time.Duration {
+// completed earlier stage is still within the Task controller's output capture window.
+func pipelineResultRetryAfter(
+	pipeline *kelos.TaskPipeline,
+	stageIndex int,
+	tasksByStage map[string][]*kelos.Task,
+	now time.Time,
+) time.Duration {
 	var retryAfter time.Duration
-	for _, dependency := range node.DependsOn {
-		for _, task := range tasksByNode[dependency.Name] {
+	for i := 0; i < stageIndex; i++ {
+		for _, task := range tasksByStage[pipeline.Spec.Stages[i].Name] {
 			if task.Status.Phase != kelos.TaskPhaseSucceeded || task.Status.CompletionTime == nil {
 				continue
 			}
@@ -469,21 +436,19 @@ func minimumPositiveDuration(current, candidate time.Duration) time.Duration {
 	return current
 }
 
-func pipelineDependencyTemplateData(
+func pipelineStageTemplateData(
 	pipeline *kelos.TaskPipeline,
-	node *kelos.PipelineNode,
-	tasksByNode map[string][]*kelos.Task,
+	stage *kelos.PipelineStage,
+	tasksByStage map[string][]*kelos.Task,
 ) map[string]interface{} {
-	data := make(map[string]interface{}, len(node.DependsOn))
-	for _, dependency := range node.DependsOn {
-		tasks := append([]*kelos.Task(nil), tasksByNode[dependency.Name]...)
-		var combinations []map[string]string
-		for i := range pipeline.Spec.Tasks {
-			if pipeline.Spec.Tasks[i].Name == dependency.Name {
-				combinations, _ = expandPipelineMatrix(pipeline.Spec.Tasks[i].Matrix)
-				break
-			}
+	data := make(map[string]interface{})
+	for i := range pipeline.Spec.Stages {
+		completedStage := &pipeline.Spec.Stages[i]
+		if completedStage.Name == stage.Name {
+			break
 		}
+		tasks := append([]*kelos.Task(nil), tasksByStage[completedStage.Name]...)
+		combinations, _ := expandPipelineMatrix(completedStage.Matrix)
 		sort.Slice(tasks, func(i, j int) bool {
 			return pipelineTaskIndex(tasks[i]) < pipelineTaskIndex(tasks[j])
 		})
@@ -501,13 +466,13 @@ func pipelineDependencyTemplateData(
 				"Results": task.Status.Results,
 			})
 		}
-		data[dependency.Name] = results
+		data[completedStage.Name] = results
 	}
 	return data
 }
 
-func pipelineChildTaskName(pipelineName, nodeName string, index, total int) string {
-	name := pipelineName + "-" + nodeName
+func pipelineChildTaskName(pipelineName, stageName string, index, total int) string {
+	name := pipelineName + "-" + stageName
 	if total > 1 {
 		name += "-" + strconv.Itoa(index)
 	}
@@ -557,21 +522,21 @@ func pipelineTaskIndex(task *kelos.Task) int {
 	return index
 }
 
-func summarizePipelineNodes(
+func summarizePipelineStages(
 	pipeline *kelos.TaskPipeline,
-	tasksByNode map[string][]*kelos.Task,
-	nodeErrors map[string]string,
-) []kelos.PipelineNodeStatus {
-	statuses := make([]kelos.PipelineNodeStatus, 0, len(pipeline.Spec.Tasks))
-	for i := range pipeline.Spec.Tasks {
-		node := &pipeline.Spec.Tasks[i]
-		combinations, _ := expandPipelineMatrix(node.Matrix)
-		tasks := append([]*kelos.Task(nil), tasksByNode[node.Name]...)
+	tasksByStage map[string][]*kelos.Task,
+	stageErrors map[string]string,
+) []kelos.PipelineStageStatus {
+	statuses := make([]kelos.PipelineStageStatus, 0, len(pipeline.Spec.Stages))
+	for i := range pipeline.Spec.Stages {
+		stage := &pipeline.Spec.Stages[i]
+		combinations, _ := expandPipelineMatrix(stage.Matrix)
+		tasks := append([]*kelos.Task(nil), tasksByStage[stage.Name]...)
 		sort.Slice(tasks, func(i, j int) bool {
 			return pipelineTaskIndex(tasks[i]) < pipelineTaskIndex(tasks[j])
 		})
 
-		status := kelos.PipelineNodeStatus{Name: node.Name, Total: int32(len(combinations))}
+		status := kelos.PipelineStageStatus{Name: stage.Name, Total: int32(len(combinations))}
 		for _, task := range tasks {
 			switch task.Status.Phase {
 			case kelos.TaskPhaseSucceeded:
@@ -584,7 +549,7 @@ func summarizePipelineNodes(
 		}
 
 		switch {
-		case nodeErrors[node.Name] != "":
+		case stageErrors[stage.Name] != "":
 			status.Phase = kelos.TaskPhaseFailed
 		case status.Failed > 0:
 			status.Phase = kelos.TaskPhaseFailed
@@ -592,7 +557,7 @@ func summarizePipelineNodes(
 			status.Phase = kelos.TaskPhaseSucceeded
 		case len(tasks) > 0:
 			status.Phase = kelos.TaskPhaseRunning
-		case len(node.DependsOn) > 0:
+		case i > 0 && statuses[i-1].Phase != kelos.TaskPhaseSucceeded:
 			status.Phase = kelos.TaskPhaseWaiting
 		default:
 			status.Phase = kelos.TaskPhasePending
@@ -602,44 +567,27 @@ func summarizePipelineNodes(
 	return statuses
 }
 
-func pipelineNodeStatusMap(statuses []kelos.PipelineNodeStatus) map[string]kelos.PipelineNodeStatus {
-	result := make(map[string]kelos.PipelineNodeStatus, len(statuses))
-	for _, status := range statuses {
-		result[status.Name] = status
-	}
-	return result
-}
-
-func pipelineDependenciesSucceeded(node *kelos.PipelineNode, statuses map[string]kelos.PipelineNodeStatus) bool {
-	for _, dependency := range node.DependsOn {
-		if statuses[dependency.Name].Phase != kelos.TaskPhaseSucceeded {
-			return false
-		}
-	}
-	return true
-}
-
 func firstPipelineFailure(
-	statuses []kelos.PipelineNodeStatus,
-	tasksByNode map[string][]*kelos.Task,
-	nodeErrors map[string]string,
+	statuses []kelos.PipelineStageStatus,
+	tasksByStage map[string][]*kelos.Task,
+	stageErrors map[string]string,
 ) string {
 	for _, status := range statuses {
 		if status.Phase == kelos.TaskPhaseFailed {
-			if nodeErrors[status.Name] != "" {
-				return fmt.Sprintf("Node %q failed: %s", status.Name, nodeErrors[status.Name])
+			if stageErrors[status.Name] != "" {
+				return fmt.Sprintf("Stage %q failed: %s", status.Name, stageErrors[status.Name])
 			}
-			for _, task := range tasksByNode[status.Name] {
+			for _, task := range tasksByStage[status.Name] {
 				if task.Status.Phase != kelos.TaskPhaseFailed {
 					continue
 				}
-				message := fmt.Sprintf("Node %q failed because Task %q failed", status.Name, task.Name)
+				message := fmt.Sprintf("Stage %q failed because Task %q failed", status.Name, task.Name)
 				if task.Status.Message != "" {
 					message += ": " + task.Status.Message
 				}
 				return message
 			}
-			return fmt.Sprintf("Node %q failed", status.Name)
+			return fmt.Sprintf("Stage %q failed", status.Name)
 		}
 	}
 	return ""
@@ -648,17 +596,17 @@ func firstPipelineFailure(
 func (r *TaskPipelineReconciler) updateTaskPipelineStatus(
 	ctx context.Context,
 	pipeline *kelos.TaskPipeline,
-	nodeStatuses []kelos.PipelineNodeStatus,
+	stageStatuses []kelos.PipelineStageStatus,
 	failure string,
 ) error {
 	original := pipeline.DeepCopy()
 	pipeline.Status.ObservedGeneration = pipeline.Generation
-	pipeline.Status.NodeStatuses = nodeStatuses
+	pipeline.Status.StageStatuses = stageStatuses
 
 	var active int32
 	var observed int32
-	allSucceeded := len(nodeStatuses) > 0
-	for _, status := range nodeStatuses {
+	allSucceeded := len(stageStatuses) > 0
+	for _, status := range stageStatuses {
 		active += status.Active
 		observed += status.Active + status.Succeeded + status.Failed
 		if status.Phase != kelos.TaskPhaseSucceeded {
@@ -668,7 +616,7 @@ func (r *TaskPipelineReconciler) updateTaskPipelineStatus(
 	switch {
 	case allSucceeded:
 		pipeline.Status.Phase = kelos.TaskPipelinePhaseSucceeded
-		setTaskPipelineReadyCondition(pipeline, metav1.ConditionTrue, "Succeeded", "All pipeline nodes succeeded")
+		setTaskPipelineReadyCondition(pipeline, metav1.ConditionTrue, "Succeeded", "All pipeline stages succeeded")
 	case failure != "" && active == 0:
 		pipeline.Status.Phase = kelos.TaskPipelinePhaseFailed
 		setTaskPipelineReadyCondition(pipeline, metav1.ConditionFalse, "Failed", failure)

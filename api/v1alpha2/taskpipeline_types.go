@@ -12,20 +12,20 @@ const (
 	TaskPipelinePhasePending TaskPipelinePhase = "Pending"
 	// TaskPipelinePhaseRunning means at least one pipeline Task has started.
 	TaskPipelinePhaseRunning TaskPipelinePhase = "Running"
-	// TaskPipelinePhaseSucceeded means every node completed successfully.
+	// TaskPipelinePhaseSucceeded means every stage completed successfully.
 	TaskPipelinePhaseSucceeded TaskPipelinePhase = "Succeeded"
 	// TaskPipelinePhaseFailed means the pipeline cannot complete successfully.
 	TaskPipelinePhaseFailed TaskPipelinePhase = "Failed"
 )
 
 const (
-	// TaskPipelineConditionReady reports whether every pipeline node succeeded.
+	// TaskPipelineConditionReady reports whether every pipeline stage succeeded.
 	TaskPipelineConditionReady = "Ready"
 )
 
 // PipelineMatrixParameter defines one dimension of a matrix expansion.
 type PipelineMatrixParameter struct {
-	// Name is the key exposed under .Matrix in the node's templates.
+	// Name is the key exposed under .Matrix in the stage's templates.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=64
 	// +kubebuilder:validation:Pattern=`^[a-zA-Z_][a-zA-Z0-9_]*$`
@@ -38,10 +38,10 @@ type PipelineMatrixParameter struct {
 	Values []string `json:"values"`
 }
 
-// PipelineMatrix expands a node into one Task for each combination of parameter values.
+// PipelineMatrix expands a stage into one Task for each combination of parameter values.
 type PipelineMatrix struct {
 	// Parameters defines the matrix dimensions. Their Cartesian product
-	// determines the Tasks created for the node.
+	// determines the Tasks created for the stage.
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=16
 	// +listType=map
@@ -49,10 +49,10 @@ type PipelineMatrix struct {
 	Parameters []PipelineMatrixParameter `json:"parameters"`
 }
 
-// PipelineTaskTemplate defines a Task created for a pipeline node.
+// PipelineTaskTemplate defines Tasks created for a pipeline stage.
 // Prompt and branch support Go text/template expressions. The current matrix
-// values are available as .Matrix. Results from declared dependencies are
-// available as .Deps, keyed by node name.
+// values are available as .Matrix. Results from completed stages are available
+// as .Stages, keyed by stage name.
 //
 // +kubebuilder:validation:XValidation:rule="has(self.workerPoolRef) || (has(self.worker) && has(self.worker.type) && size(self.worker.type) > 0)",message="either workerPoolRef or worker with type is required"
 // +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.worker)",message="workerPoolRef is mutually exclusive with worker"
@@ -76,62 +76,44 @@ type PipelineTaskTemplate struct {
 	Branch string `json:"branch,omitempty"`
 }
 
-// PipelineDependency identifies a node that must succeed before another node starts.
-type PipelineDependency struct {
-	// Name identifies a node in this pipeline.
-	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=63
-	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
-	Name string `json:"name"`
-}
-
-// PipelineNode is one named node in a TaskPipeline DAG.
-type PipelineNode struct {
-	// Name identifies this node within the pipeline.
+// PipelineStage defines one step in a TaskPipeline.
+type PipelineStage struct {
+	// Name identifies this stage within the pipeline.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	Name string `json:"name"`
 
-	// DependsOn lists nodes that must succeed before this node starts.
-	// +optional
-	// +kubebuilder:validation:MaxItems=64
-	// +listType=map
-	// +listMapKey=name
-	DependsOn []PipelineDependency `json:"dependsOn,omitempty"`
-
-	// TaskTemplate defines the Task created for this node.
+	// TaskTemplate defines the Tasks created for this stage.
 	TaskTemplate PipelineTaskTemplate `json:"taskTemplate"`
 
-	// Matrix expands the node into parallel Tasks.
+	// Matrix expands the stage into parallel Tasks.
 	// +optional
 	Matrix *PipelineMatrix `json:"matrix,omitempty"`
 }
 
-// TaskPipelineSpec defines a DAG of Task templates.
+// TaskPipelineSpec defines an ordered sequence of stages.
 //
-// +kubebuilder:validation:XValidation:rule="self.tasks.all(task, !has(task.dependsOn) || task.dependsOn.all(dependency, dependency.name != task.name))",message="a pipeline node cannot depend on itself"
-// +kubebuilder:validation:XValidation:rule="self.tasks.all(task, !has(task.dependsOn) || task.dependsOn.all(dependency, self.tasks.exists(candidate, candidate.name == dependency.name)))",message="dependsOn must reference another node in this pipeline"
-// +kubebuilder:validation:XValidation:rule="self.tasks == oldSelf.tasks",message="TaskPipeline tasks are immutable after creation"
+// +kubebuilder:validation:XValidation:rule="self.stages.all(stage, self.stages.exists_one(candidate, candidate.name == stage.name))",message="stage names must be unique"
+// +kubebuilder:validation:XValidation:rule="self.stages == oldSelf.stages",message="TaskPipeline stages are immutable after creation"
 type TaskPipelineSpec struct {
-	// Tasks contains the named nodes in the pipeline DAG.
+	// Stages execute in order. Tasks within a matrix stage execute in parallel.
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=64
-	// +listType=map
-	// +listMapKey=name
-	Tasks []PipelineNode `json:"tasks"`
+	// +listType=atomic
+	Stages []PipelineStage `json:"stages"`
 }
 
-// PipelineNodeStatus summarizes the Tasks created for one pipeline node.
-type PipelineNodeStatus struct {
-	// Name identifies the pipeline node.
+// PipelineStageStatus summarizes the Tasks created for one pipeline stage.
+type PipelineStageStatus struct {
+	// Name identifies the pipeline stage.
 	Name string `json:"name"`
 
-	// Phase is the aggregate phase of this node's Tasks.
+	// Phase is the aggregate phase of this stage's Tasks.
 	// +optional
 	Phase TaskPhase `json:"phase,omitempty"`
 
-	// Total is the number of Tasks expected after matrix expansion.
+	// Total is the number of Tasks expected for this stage.
 	Total int32 `json:"total"`
 
 	// Succeeded is the number of successful Tasks.
@@ -154,11 +136,11 @@ type TaskPipelineStatus struct {
 	// +optional
 	Phase TaskPipelinePhase `json:"phase,omitempty"`
 
-	// NodeStatuses contains aggregate status for every pipeline node.
+	// StageStatuses contains aggregate status for every pipeline stage.
 	// +optional
 	// +listType=map
 	// +listMapKey=name
-	NodeStatuses []PipelineNodeStatus `json:"nodeStatuses,omitempty"`
+	StageStatuses []PipelineStageStatus `json:"stageStatuses,omitempty"`
 
 	// Conditions provides detailed status information.
 	// +optional
@@ -177,7 +159,7 @@ type TaskPipelineStatus struct {
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// TaskPipeline orchestrates a DAG of Tasks as one managed resource.
+// TaskPipeline orchestrates an ordered sequence of Task stages as one managed resource.
 type TaskPipeline struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

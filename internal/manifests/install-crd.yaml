@@ -37167,7 +37167,8 @@ spec:
     name: v1alpha2
     schema:
       openAPIV3Schema:
-        description: TaskPipeline orchestrates a DAG of Tasks as one managed resource.
+        description: TaskPipeline orchestrates an ordered sequence of Task stages
+          as one managed resource.
         properties:
           apiVersion:
             description: |-
@@ -37187,48 +37188,28 @@ spec:
           metadata:
             type: object
           spec:
-            description: TaskPipelineSpec defines a DAG of Task templates.
+            description: TaskPipelineSpec defines an ordered sequence of stages.
             properties:
-              tasks:
-                description: Tasks contains the named nodes in the pipeline DAG.
+              stages:
+                description: Stages execute in order. Tasks within a matrix stage
+                  execute in parallel.
                 items:
-                  description: PipelineNode is one named node in a TaskPipeline DAG.
+                  description: PipelineStage defines one step in a TaskPipeline.
                   properties:
-                    dependsOn:
-                      description: DependsOn lists nodes that must succeed before
-                        this node starts.
-                      items:
-                        description: PipelineDependency identifies a node that must
-                          succeed before another node starts.
-                        properties:
-                          name:
-                            description: Name identifies a node in this pipeline.
-                            maxLength: 63
-                            minLength: 1
-                            pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
-                            type: string
-                        required:
-                        - name
-                        type: object
-                      maxItems: 64
-                      type: array
-                      x-kubernetes-list-map-keys:
-                      - name
-                      x-kubernetes-list-type: map
                     matrix:
-                      description: Matrix expands the node into parallel Tasks.
+                      description: Matrix expands the stage into parallel Tasks.
                       properties:
                         parameters:
                           description: |-
                             Parameters defines the matrix dimensions. Their Cartesian product
-                            determines the Tasks created for the node.
+                            determines the Tasks created for the stage.
                           items:
                             description: PipelineMatrixParameter defines one dimension
                               of a matrix expansion.
                             properties:
                               name:
                                 description: Name is the key exposed under .Matrix
-                                  in the node's templates.
+                                  in the stage's templates.
                                 maxLength: 64
                                 minLength: 1
                                 pattern: ^[a-zA-Z_][a-zA-Z0-9_]*$
@@ -37256,14 +37237,14 @@ spec:
                       - parameters
                       type: object
                     name:
-                      description: Name identifies this node within the pipeline.
+                      description: Name identifies this stage within the pipeline.
                       maxLength: 63
                       minLength: 1
                       pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                       type: string
                     taskTemplate:
-                      description: TaskTemplate defines the Task created for this
-                        node.
+                      description: TaskTemplate defines the Tasks created for this
+                        stage.
                       properties:
                         branch:
                           description: Branch is the optional template rendered into
@@ -44352,21 +44333,16 @@ spec:
                 maxItems: 64
                 minItems: 1
                 type: array
-                x-kubernetes-list-map-keys:
-                - name
-                x-kubernetes-list-type: map
+                x-kubernetes-list-type: atomic
             required:
-            - tasks
+            - stages
             type: object
             x-kubernetes-validations:
-            - message: a pipeline node cannot depend on itself
-              rule: self.tasks.all(task, !has(task.dependsOn) || task.dependsOn.all(dependency,
-                dependency.name != task.name))
-            - message: dependsOn must reference another node in this pipeline
-              rule: self.tasks.all(task, !has(task.dependsOn) || task.dependsOn.all(dependency,
-                self.tasks.exists(candidate, candidate.name == dependency.name)))
-            - message: TaskPipeline tasks are immutable after creation
-              rule: self.tasks == oldSelf.tasks
+            - message: stage names must be unique
+              rule: self.stages.all(stage, self.stages.exists_one(candidate, candidate.name
+                == stage.name))
+            - message: TaskPipeline stages are immutable after creation
+              rule: self.stages == oldSelf.stages
           status:
             description: TaskPipelineStatus defines the observed state of a TaskPipeline.
             properties:
@@ -44430,12 +44406,20 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              nodeStatuses:
-                description: NodeStatuses contains aggregate status for every pipeline
-                  node.
+              observedGeneration:
+                description: ObservedGeneration is the most recent generation processed
+                  by the controller.
+                format: int64
+                type: integer
+              phase:
+                description: Phase represents the current phase of the pipeline.
+                type: string
+              stageStatuses:
+                description: StageStatuses contains aggregate status for every pipeline
+                  stage.
                 items:
-                  description: PipelineNodeStatus summarizes the Tasks created for
-                    one pipeline node.
+                  description: PipelineStageStatus summarizes the Tasks created for
+                    one pipeline stage.
                   properties:
                     active:
                       description: Active is the number of Tasks that have not reached
@@ -44447,18 +44431,18 @@ spec:
                       format: int32
                       type: integer
                     name:
-                      description: Name identifies the pipeline node.
+                      description: Name identifies the pipeline stage.
                       type: string
                     phase:
-                      description: Phase is the aggregate phase of this node's Tasks.
+                      description: Phase is the aggregate phase of this stage's Tasks.
                       type: string
                     succeeded:
                       description: Succeeded is the number of successful Tasks.
                       format: int32
                       type: integer
                     total:
-                      description: Total is the number of Tasks expected after matrix
-                        expansion.
+                      description: Total is the number of Tasks expected for this
+                        stage.
                       format: int32
                       type: integer
                   required:
@@ -44472,14 +44456,6 @@ spec:
                 x-kubernetes-list-map-keys:
                 - name
                 x-kubernetes-list-type: map
-              observedGeneration:
-                description: ObservedGeneration is the most recent generation processed
-                  by the controller.
-                format: int64
-                type: integer
-              phase:
-                description: Phase represents the current phase of the pipeline.
-                type: string
             type: object
         required:
         - spec

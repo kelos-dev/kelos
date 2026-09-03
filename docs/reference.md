@@ -194,29 +194,29 @@ the refreshed value on their next sync and are not supported.
 
 ## TaskPipeline
 
-A TaskPipeline manages a directed acyclic graph (DAG) of named Task templates.
-Root nodes start immediately. Every other node starts after all nodes named in
-its `dependsOn` list have succeeded. The task graph is immutable after creation.
+A TaskPipeline manages an ordered sequence of named stages. The first stage
+starts immediately, and each later stage starts after the preceding stage has
+succeeded. A stage can create one Task or fan out into parallel Tasks with a
+matrix. The stage list is immutable after creation.
 
 TaskPipeline is available only in `kelos.dev/v1alpha2`.
 
 | Field | Description | Required |
 |-------|-------------|----------|
-| `spec.tasks` | Pipeline nodes (1–64). Node names must be unique | Yes |
-| `spec.tasks[].name` | DNS-label name that identifies the node within the pipeline | Yes |
-| `spec.tasks[].dependsOn[].name` | Name of a node that must succeed first | No |
-| `spec.tasks[].taskTemplate.worker` | Inline execution environment; uses the same `WorkerSpec` as Task | One of worker or workerPoolRef |
-| `spec.tasks[].taskTemplate.workerPoolRef.name` | WorkerPool used for the node's child Tasks | One of worker or workerPoolRef |
-| `spec.tasks[].taskTemplate.prompt` | Go template rendered into each child Task's prompt | Yes |
-| `spec.tasks[].taskTemplate.branch` | Optional Go template rendered into each child Task's branch. Not supported with workerPoolRef | No |
-| `spec.tasks[].matrix.parameters[].name` | Name exposed under `.Matrix` in templates | Yes when matrix is set |
-| `spec.tasks[].matrix.parameters[].values` | Static values expanded for the parameter | Yes when matrix is set |
+| `spec.stages` | Ordered pipeline stages (1–64). Stage names must be unique | Yes |
+| `spec.stages[].name` | DNS-label name that identifies the stage within the pipeline | Yes |
+| `spec.stages[].taskTemplate.worker` | Inline execution environment; uses the same `WorkerSpec` as Task | One of worker or workerPoolRef |
+| `spec.stages[].taskTemplate.workerPoolRef.name` | WorkerPool used for the stage's Tasks | One of worker or workerPoolRef |
+| `spec.stages[].taskTemplate.prompt` | Go template rendered into each stage Task's prompt | Yes |
+| `spec.stages[].taskTemplate.branch` | Optional Go template rendered into each stage Task's branch. Not supported with workerPoolRef | No |
+| `spec.stages[].matrix.parameters[].name` | Name exposed under `.Matrix` in templates | Yes when matrix is set |
+| `spec.stages[].matrix.parameters[].values` | Static values expanded for the parameter | Yes when matrix is set |
 
-Deleting a TaskPipeline deletes its owned child Tasks. A node without a matrix
-creates one Task. A matrix node creates one Task for each parameter combination,
-up to 256 Tasks per node. Parameter names are sorted to make expansion and child
+Deleting a TaskPipeline deletes its owned child Tasks. A stage without a matrix
+creates one Task. A matrix stage creates one Task for each parameter combination,
+up to 256 Tasks per stage. Parameter names are sorted to make expansion and child
 Task names deterministic; values are sorted as well. Child Task names
-use `<pipeline>-<node>` for a single Task and `<pipeline>-<node>-<index>` for a
+use `<pipeline>-<stage>` for a single Task and `<pipeline>-<stage>-<index>` for a
 matrix, with a stable hash suffix when truncation is required.
 
 ### Pipeline Templates and Results
@@ -225,19 +225,19 @@ matrix, with a stable hash suffix when truncation is required.
 
 | Variable | Type | Description |
 |----------|------|-------------|
-| `.Matrix` | `map[string]string` | Parameter values for the current child Task; empty for a node without a matrix |
-| `.Deps` | `map[string][]object` | Results from directly declared dependency nodes, keyed by node name |
-| `.Deps.<node>[].Name` | string | Child Task name |
-| `.Deps.<node>[].Matrix` | `map[string]string` | Matrix values used by the dependency Task |
-| `.Deps.<node>[].Results` | `map[string]string` | Structured dependency results |
-| `.Deps.<node>[].Outputs` | `[]string` | Raw dependency outputs |
+| `.Matrix` | `map[string]string` | Parameter values for the current stage Task; empty for a stage without a matrix |
+| `.Stages` | `map[string][]object` | Results from completed earlier stages, keyed by stage name |
+| `.Stages.<stage>[].Name` | string | Child Task name |
+| `.Stages.<stage>[].Matrix` | `map[string]string` | Matrix values used by the stage Task |
+| `.Stages.<stage>[].Results` | `map[string]string` | Structured Task results |
+| `.Stages.<stage>[].Outputs` | `[]string` | Raw Task outputs |
 
-Use `index` when a node or result key contains characters that cannot be used in
+Use `index` when a stage or result key contains characters that cannot be used in
 Go template dot notation. TaskPipeline's `index` is strict: a missing map key or
-an out-of-range list index fails the node and records the rendering error in
+an out-of-range list index fails the stage and records the rendering error in
 pipeline status. The controller validates every template's syntax before
-starting the pipeline. It renders a dependent node only after its dependencies
-succeed, when their result keys are known.
+starting the pipeline. It renders a stage only after the preceding stage
+succeeds, when its result keys are known.
 
 Example — fan out a scan across two services, then aggregate the results:
 
@@ -247,7 +247,7 @@ kind: TaskPipeline
 metadata:
   name: security-scan
 spec:
-  tasks:
+  stages:
     - name: scan
       matrix:
         parameters:
@@ -263,8 +263,6 @@ spec:
         prompt: |
           Scan {{index .Matrix "service"}} and report a severity result.
     - name: report
-      dependsOn:
-        - name: scan
       taskTemplate:
         worker:
           type: codex
@@ -274,16 +272,16 @@ spec:
               name: codex-credentials
         prompt: |
           Summarize these scan results:
-          {{range index .Deps "scan" -}}
+          {{range index .Stages "scan" -}}
           - {{index .Matrix "service"}}: {{index .Results "severity"}}
           {{end}}
 ```
 
-`status.nodeStatuses` reports expected, active, successful, and failed Task
-counts for each node. Child Task names, outputs, and structured results remain
+`status.stageStatuses` reports expected, active, successful, and failed Task
+counts for each stage. Child Task names, outputs, and structured results remain
 on the owned Task resources and are not copied into TaskPipeline status. The
 `Ready` condition reports pipeline progress and failure details. Any failed
-child Task prevents new nodes from starting. Child Tasks that are already
+child Task prevents later stages from starting. Child Tasks that are already
 active finish before the TaskPipeline enters `Failed`.
 
 ## Session

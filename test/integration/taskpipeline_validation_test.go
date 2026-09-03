@@ -21,9 +21,12 @@ var _ = Describe("TaskPipeline API validation", func() {
 	validPipeline := func(name string) *kelos.TaskPipeline {
 		return &kelos.TaskPipeline{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
-			Spec: kelos.TaskPipelineSpec{Tasks: []kelos.PipelineNode{
+			Spec: kelos.TaskPipelineSpec{Stages: []kelos.PipelineStage{
 				{
 					Name: "plan",
+					Matrix: &kelos.PipelineMatrix{Parameters: []kelos.PipelineMatrixParameter{
+						{Name: "component", Values: []string{"api", "controller"}},
+					}},
 					TaskTemplate: kelos.PipelineTaskTemplate{
 						Worker: &kelos.WorkerSpec{
 							Type:        "codex",
@@ -33,41 +36,40 @@ var _ = Describe("TaskPipeline API validation", func() {
 					},
 				},
 				{
-					Name:      "implement",
-					DependsOn: []kelos.PipelineDependency{{Name: "plan"}},
+					Name: "implement",
 					TaskTemplate: kelos.PipelineTaskTemplate{
 						WorkerPoolRef: &kelos.WorkerPoolReference{Name: "workers"},
-						Prompt:        `Implement {{index .Deps "plan" 0 "Results" "plan"}}`,
+						Prompt:        `Implement {{index .Stages "plan" 0 "Results" "plan"}}`,
 					},
 				},
 			}},
 		}
 	}
 
-	It("accepts a well-formed DAG", func() {
+	It("accepts ordered stages with matrix fan-out", func() {
 		Expect(k8sClient.Create(ctx, validPipeline("valid"), client.DryRunAll)).To(Succeed())
 	})
 
-	It("rejects a missing task graph", func() {
-		pipeline := &kelos.TaskPipeline{ObjectMeta: metav1.ObjectMeta{Name: "missing-tasks", Namespace: ns}}
+	It("rejects missing stages", func() {
+		pipeline := &kelos.TaskPipeline{ObjectMeta: metav1.ObjectMeta{Name: "missing-stages", Namespace: ns}}
 		Expect(k8sClient.Create(ctx, pipeline, client.DryRunAll)).NotTo(Succeed())
 	})
 
-	It("rejects a dependency outside the pipeline", func() {
-		pipeline := validPipeline("unknown-dependency")
-		pipeline.Spec.Tasks[1].DependsOn = []kelos.PipelineDependency{{Name: "missing"}}
+	It("rejects duplicate stage names", func() {
+		pipeline := validPipeline("duplicate-stages")
+		pipeline.Spec.Stages[1].Name = pipeline.Spec.Stages[0].Name
 		Expect(k8sClient.Create(ctx, pipeline, client.DryRunAll)).NotTo(Succeed())
 	})
 
-	It("rejects a self dependency", func() {
-		pipeline := validPipeline("self-dependency")
-		pipeline.Spec.Tasks[0].DependsOn = []kelos.PipelineDependency{{Name: "plan"}}
+	It("rejects an invalid stage name", func() {
+		pipeline := validPipeline("invalid-stage-name")
+		pipeline.Spec.Stages[0].Name = "Not DNS"
 		Expect(k8sClient.Create(ctx, pipeline, client.DryRunAll)).NotTo(Succeed())
 	})
 
 	It("rejects an empty matrix parameter", func() {
 		pipeline := validPipeline("empty-matrix")
-		pipeline.Spec.Tasks[0].Matrix = &kelos.PipelineMatrix{
+		pipeline.Spec.Stages[0].Matrix = &kelos.PipelineMatrix{
 			Parameters: []kelos.PipelineMatrixParameter{{Name: "service"}},
 		}
 		Expect(k8sClient.Create(ctx, pipeline, client.DryRunAll)).NotTo(Succeed())
@@ -75,14 +77,14 @@ var _ = Describe("TaskPipeline API validation", func() {
 
 	It("rejects multiple execution sources", func() {
 		pipeline := validPipeline("multiple-execution-sources")
-		pipeline.Spec.Tasks[0].TaskTemplate.WorkerPoolRef = &kelos.WorkerPoolReference{Name: "workers"}
+		pipeline.Spec.Stages[0].TaskTemplate.WorkerPoolRef = &kelos.WorkerPoolReference{Name: "workers"}
 		Expect(k8sClient.Create(ctx, pipeline, client.DryRunAll)).NotTo(Succeed())
 	})
 
-	It("rejects task graph updates", func() {
-		pipeline := validPipeline("immutable-tasks")
+	It("rejects stage updates", func() {
+		pipeline := validPipeline("immutable-stages")
 		Expect(k8sClient.Create(ctx, pipeline)).To(Succeed())
-		pipeline.Spec.Tasks[0].TaskTemplate.Prompt = "Replace the plan"
+		pipeline.Spec.Stages[0].TaskTemplate.Prompt = "Replace the plan"
 		Expect(k8sClient.Update(ctx, pipeline)).NotTo(Succeed())
 	})
 })

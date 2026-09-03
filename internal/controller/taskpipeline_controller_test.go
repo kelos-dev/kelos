@@ -19,7 +19,7 @@ import (
 )
 
 func TestTaskPipelineReconcileCreatesMatrixTasks(t *testing.T) {
-	pipeline := testTaskPipeline("security-scan", []kelos.PipelineNode{{
+	pipeline := testTaskPipeline("security-scan", []kelos.PipelineStage{{
 		Name: "scan",
 		Matrix: &kelos.PipelineMatrix{Parameters: []kelos.PipelineMatrixParameter{
 			{Name: "env", Values: []string{"staging", "production"}},
@@ -52,7 +52,7 @@ func TestTaskPipelineReconcileCreatesMatrixTasks(t *testing.T) {
 		if !metav1.IsControlledBy(task, pipeline) {
 			t.Errorf("Task %q is not controlled by TaskPipeline", task.Name)
 		}
-		if task.Labels[taskPipelineLabel] != pipeline.Name || task.Labels[pipelineNodeLabel] != "scan" {
+		if task.Labels[taskPipelineLabel] != pipeline.Name || task.Labels[pipelineStageLabel] != "scan" {
 			t.Errorf("Task %q labels = %#v", task.Name, task.Labels)
 		}
 	}
@@ -67,17 +67,17 @@ func TestTaskPipelineReconcileCreatesMatrixTasks(t *testing.T) {
 	if updated.Status.Phase != kelos.TaskPipelinePhaseRunning {
 		t.Fatalf("pipeline phase = %q, want %q", updated.Status.Phase, kelos.TaskPipelinePhaseRunning)
 	}
-	if len(updated.Status.NodeStatuses) != 1 {
-		t.Fatalf("node statuses = %d, want 1", len(updated.Status.NodeStatuses))
+	if len(updated.Status.StageStatuses) != 1 {
+		t.Fatalf("stage statuses = %d, want 1", len(updated.Status.StageStatuses))
 	}
-	status := updated.Status.NodeStatuses[0]
+	status := updated.Status.StageStatuses[0]
 	if status.Total != 4 || status.Active != 4 {
-		t.Fatalf("node status = %#v", status)
+		t.Fatalf("stage status = %#v", status)
 	}
 }
 
-func TestTaskPipelineReconcilePassesDependencyResults(t *testing.T) {
-	pipeline := testTaskPipeline("aggregate", []kelos.PipelineNode{
+func TestTaskPipelineReconcilePassesStageResults(t *testing.T) {
+	pipeline := testTaskPipeline("aggregate", []kelos.PipelineStage{
 		{
 			Name: "scan",
 			Matrix: &kelos.PipelineMatrix{Parameters: []kelos.PipelineMatrixParameter{
@@ -86,10 +86,9 @@ func TestTaskPipelineReconcilePassesDependencyResults(t *testing.T) {
 			TaskTemplate: testPipelineTaskTemplate("Scan {{index .Matrix \"service\"}}"),
 		},
 		{
-			Name:      "report",
-			DependsOn: []kelos.PipelineDependency{{Name: "scan"}},
+			Name: "report",
 			TaskTemplate: testPipelineTaskTemplate(
-				`{{range index .Deps "scan"}}{{index .Matrix "service"}}={{index .Results "severity"}};{{end}}`,
+				`{{range index .Stages "scan"}}{{index .Matrix "service"}}={{index .Results "severity"}};{{end}}`,
 			),
 		},
 	})
@@ -99,6 +98,9 @@ func TestTaskPipelineReconcilePassesDependencyResults(t *testing.T) {
 	var tasks kelos.TaskList
 	if err := k8sClient.List(context.Background(), &tasks, client.InNamespace("default")); err != nil {
 		t.Fatal(err)
+	}
+	if len(tasks.Items) != 2 {
+		t.Fatalf("created Tasks before scan stage completion = %d, want 2", len(tasks.Items))
 	}
 	for i := range tasks.Items {
 		tasks.Items[i].Status.Phase = kelos.TaskPhaseSucceeded
@@ -124,7 +126,7 @@ func TestTaskPipelineReconcilePassesDependencyResults(t *testing.T) {
 	}
 	var report *kelos.Task
 	for i := range tasks.Items {
-		if tasks.Items[i].Labels[pipelineNodeLabel] == "report" {
+		if tasks.Items[i].Labels[pipelineStageLabel] == "report" {
 			report = &tasks.Items[i]
 		}
 	}
@@ -136,9 +138,9 @@ func TestTaskPipelineReconcilePassesDependencyResults(t *testing.T) {
 	}
 
 	updated := getTaskPipeline(t, k8sClient, pipeline.Name)
-	scanStatus := updated.Status.NodeStatuses[0]
+	scanStatus := updated.Status.StageStatuses[0]
 	if scanStatus.Phase != kelos.TaskPhaseSucceeded || scanStatus.Succeeded != 2 {
-		t.Fatalf("scan node status = %#v", scanStatus)
+		t.Fatalf("scan stage status = %#v", scanStatus)
 	}
 	report.Status.Phase = kelos.TaskPhaseSucceeded
 	report.Status.Results = map[string]string{"summary": "complete"}
@@ -157,12 +159,11 @@ func TestTaskPipelineReconcilePassesDependencyResults(t *testing.T) {
 }
 
 func TestTaskPipelineReconcileFailsOnMissingResult(t *testing.T) {
-	pipeline := testTaskPipeline("missing-result", []kelos.PipelineNode{
+	pipeline := testTaskPipeline("missing-result", []kelos.PipelineStage{
 		{Name: "plan", TaskTemplate: testPipelineTaskTemplate("Plan the work")},
 		{
 			Name:         "implement",
-			DependsOn:    []kelos.PipelineDependency{{Name: "plan"}},
-			TaskTemplate: testPipelineTaskTemplate(`Implement {{index .Deps "plan" 0 "Results" "branch"}}`),
+			TaskTemplate: testPipelineTaskTemplate(`Implement {{index .Stages "plan" 0 "Results" "branch"}}`),
 		},
 	})
 	reconciler, k8sClient := testTaskPipelineReconciler(t, pipeline)
@@ -200,13 +201,12 @@ func TestTaskPipelineReconcileFailsOnMissingResult(t *testing.T) {
 	}
 }
 
-func TestTaskPipelineReconcileWaitsForDependencyOutputCapture(t *testing.T) {
-	pipeline := testTaskPipeline("capture-retry", []kelos.PipelineNode{
+func TestTaskPipelineReconcileWaitsForStageOutputCapture(t *testing.T) {
+	pipeline := testTaskPipeline("capture-retry", []kelos.PipelineStage{
 		{Name: "plan", TaskTemplate: testPipelineTaskTemplate("Plan the work")},
 		{
 			Name:         "implement",
-			DependsOn:    []kelos.PipelineDependency{{Name: "plan"}},
-			TaskTemplate: testPipelineTaskTemplate(`Implement {{index .Deps "plan" 0 "Results" "branch"}}`),
+			TaskTemplate: testPipelineTaskTemplate(`Implement {{index .Stages "plan" 0 "Results" "branch"}}`),
 		},
 	})
 	reconciler, k8sClient := testTaskPipelineReconciler(t, pipeline)
@@ -253,7 +253,7 @@ func TestTaskPipelineReconcileWaitsForDependencyOutputCapture(t *testing.T) {
 }
 
 func TestTaskPipelineReconcileDoesNotRerunTerminalPipeline(t *testing.T) {
-	pipeline := testTaskPipeline("terminal", []kelos.PipelineNode{{
+	pipeline := testTaskPipeline("terminal", []kelos.PipelineStage{{
 		Name:         "work",
 		TaskTemplate: testPipelineTaskTemplate("Do the work"),
 	}})
@@ -289,7 +289,7 @@ func TestTaskPipelineReconcileDoesNotRerunTerminalPipeline(t *testing.T) {
 }
 
 func TestTaskPipelineReconcileWaitsForEarlierPipelineTasks(t *testing.T) {
-	pipeline := testTaskPipeline("recreated", []kelos.PipelineNode{{
+	pipeline := testTaskPipeline("recreated", []kelos.PipelineStage{{
 		Name:         "work",
 		TaskTemplate: testPipelineTaskTemplate("Do the work"),
 	}})
@@ -299,7 +299,7 @@ func TestTaskPipelineReconcileWaitsForEarlierPipelineTasks(t *testing.T) {
 		Namespace: "default",
 		Labels: map[string]string{
 			taskPipelineLabel:      pipeline.Name,
-			pipelineNodeLabel:      "work",
+			pipelineStageLabel:     "work",
 			pipelineTaskIndexLabel: "0",
 		},
 		OwnerReferences: []metav1.OwnerReference{{
@@ -336,22 +336,22 @@ func TestTaskPipelineReconcileWaitsForEarlierPipelineTasks(t *testing.T) {
 	}
 }
 
-func TestValidateTaskPipelineRejectsCycle(t *testing.T) {
-	pipeline := testTaskPipeline("cycle", []kelos.PipelineNode{
-		{Name: "a", DependsOn: []kelos.PipelineDependency{{Name: "b"}}, TaskTemplate: testPipelineTaskTemplate("A")},
-		{Name: "b", DependsOn: []kelos.PipelineDependency{{Name: "a"}}, TaskTemplate: testPipelineTaskTemplate("B")},
+func TestValidateTaskPipelineRejectsDuplicateStageName(t *testing.T) {
+	pipeline := testTaskPipeline("duplicate-stage", []kelos.PipelineStage{
+		{Name: "work", TaskTemplate: testPipelineTaskTemplate("A")},
+		{Name: "work", TaskTemplate: testPipelineTaskTemplate("B")},
 	})
-	if err := validateTaskPipeline(pipeline); err == nil || !strings.Contains(err.Error(), "cycle") {
-		t.Fatalf("validateTaskPipeline() error = %v, want cycle error", err)
+	if err := validateTaskPipeline(pipeline); err == nil || !strings.Contains(err.Error(), "duplicated") {
+		t.Fatalf("validateTaskPipeline() error = %v, want duplicate stage error", err)
 	}
 }
 
 func TestPipelineChildTaskNameIsStableAndBounded(t *testing.T) {
-	got := pipelineChildTaskName(strings.Repeat("pipeline", 20), strings.Repeat("node", 20), 123, 200)
+	got := pipelineChildTaskName(strings.Repeat("pipeline", 20), strings.Repeat("stage", 20), 123, 200)
 	if len(got) > 63 {
 		t.Fatalf("child Task name length = %d, want at most 63", len(got))
 	}
-	if got != pipelineChildTaskName(strings.Repeat("pipeline", 20), strings.Repeat("node", 20), 123, 200) {
+	if got != pipelineChildTaskName(strings.Repeat("pipeline", 20), strings.Repeat("stage", 20), 123, 200) {
 		t.Fatal("child Task name is not stable")
 	}
 	label := pipelineLabelValue(strings.Repeat("pipeline", 20))
@@ -360,7 +360,7 @@ func TestPipelineChildTaskNameIsStableAndBounded(t *testing.T) {
 	}
 }
 
-func testTaskPipeline(name string, nodes []kelos.PipelineNode) *kelos.TaskPipeline {
+func testTaskPipeline(name string, stages []kelos.PipelineStage) *kelos.TaskPipeline {
 	return &kelos.TaskPipeline{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       name,
@@ -368,7 +368,7 @@ func testTaskPipeline(name string, nodes []kelos.PipelineNode) *kelos.TaskPipeli
 			UID:        types.UID(name + "-uid"),
 			Generation: 1,
 		},
-		Spec: kelos.TaskPipelineSpec{Tasks: nodes},
+		Spec: kelos.TaskPipelineSpec{Stages: stages},
 	}
 }
 

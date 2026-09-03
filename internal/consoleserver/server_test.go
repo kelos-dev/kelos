@@ -254,7 +254,7 @@ func TestConsoleResourceRelationships(t *testing.T) {
 		},
 		&kelos.TaskPipeline{
 			ObjectMeta: metav1.ObjectMeta{Name: "release", Namespace: "team-a", UID: "pipeline-uid"},
-			Spec: kelos.TaskPipelineSpec{Tasks: []kelos.PipelineNode{{
+			Spec: kelos.TaskPipelineSpec{Stages: []kelos.PipelineStage{{
 				Name: "verify",
 				TaskTemplate: kelos.PipelineTaskTemplate{Worker: &kelos.WorkerSpec{
 					WorkspaceRef:    &kelos.WorkspaceReference{Name: "repository"},

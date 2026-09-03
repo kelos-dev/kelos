@@ -194,6 +194,10 @@ spec:
         only the bare value — these often pass vacuously when the value
         also appears in the resource's `Name` or other fixture context.
         Require the full `"label: value"` substring (or a regex). P2.
+      - When a PR adds or changes a user-visible resource field, check every
+        applicable CLI detail printer for the configured value. Compare
+        sibling source or provider branches and require a full `label: value`
+        assertion for each field. P2/P3 depending on operator impact.
 
       **Project conventions**:
       - Logging: messages start with capital letters, do not end with punctuation

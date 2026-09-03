@@ -611,6 +611,11 @@ spec:
                 items:
                   description: SkillsShSpec defines a skills.sh package reference.
                   properties:
+                    optional:
+                      description: |-
+                        Optional allows agent startup to continue when this package cannot be
+                        installed. Required packages remain fail-fast.
+                      type: boolean
                     secretRef:
                       description: |-
                         SecretRef references a Secret containing a GITHUB_TOKEN key for HTTPS

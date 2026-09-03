@@ -10,21 +10,37 @@ spec:
   when:
     gitlabWebhook:
       events:
+        - issue
         - note
         - pipeline
       # TODO: Replace with your project path
       project: group/repo
       filters:
+        # An issue labeled "kelos" is opened or relabeled. `labels` requires
+        # every listed label, `excludeLabels` rejects any listed label; both
+        # match case-insensitively. Omit `action` to match every action.
+        - event: issue
+          action: open
+          labels: [kelos]
+          excludeLabels: [wontfix]
+        - event: issue
+          action: update
+          labels: [kelos]
+          excludeLabels: [wontfix]
         # A "/kelos fix" comment on a merge request or issue. Notes on commits
         # and snippets carry neither a branch nor a number and are excluded so
-        # the branch template below never renders "kelos-issue-".
+        # the branch template below never renders "kelos-issue-". Label filters
+        # on notes apply to the commented merge request or issue.
         - event: note
           noteOn: MergeRequest
           bodyPattern: '^/kelos fix'
+          excludeLabels: [wontfix]
         - event: note
           noteOn: Issue
           bodyPattern: '^/kelos fix'
-        # A merge request pipeline failed.
+          excludeLabels: [wontfix]
+        # A merge request pipeline failed. Pipeline and push events carry no
+        # labels, so label filters never match on them.
         - event: pipeline
           status: failed
       # Status notes need webhookServer.sources.gitlab.tokenSecretName.

@@ -76,7 +76,7 @@ Kelos sets the following reserved environment variables on agent containers:
 | `CODEX_API_KEY` | API key for OpenAI Codex (`codex` agent, `api-key` credential type) | When credential type is `api-key` and agent type is `codex` |
 | `CODEX_AUTH_JSON` | Contents of `~/.codex/auth.json` (`codex` agent, `oauth` credential type) | When credential type is `oauth` and agent type is `codex` |
 | `GEMINI_API_KEY` | API key for Google Gemini (`gemini` agent, api-key or oauth credential type) | When agent type is `gemini` |
-| `OPENCODE_API_KEY` | API key for OpenCode (`opencode` agent, api-key or oauth credential type). The OpenCode entrypoint maps this for supported provider prefixes, including `ZHIPU_API_KEY` for `zai/*` models. | When agent type is `opencode` |
+| `OPENCODE_API_KEY` | API key for OpenCode (`opencode` agent, api-key or oauth credential type). The OpenCode entrypoint maps this for supported provider prefixes, including `ZHIPU_API_KEY` for `zai/*` models and `OPENROUTER_API_KEY` for `openrouter/*` models. | When agent type is `opencode` |
 | `CURSOR_API_KEY` | API key for Cursor CLI (`cursor` agent, api-key or oauth credential type) | When agent type is `cursor` |
 | `CLAUDE_CODE_OAUTH_TOKEN` | OAuth token (`claude-code` agent, oauth credential type) | When credential type is `oauth` and agent type is `claude-code` |
 | `GITHUB_TOKEN` | GitHub token for workspace access. **Captured at pod start and not refreshed in-process — custom images should read `KELOS_GITHUB_TOKEN_FILE` instead (see [GitHub token freshness](#github-token-freshness)).** | When a `github` workspace has a `secretRef` |

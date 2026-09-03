@@ -107,8 +107,10 @@ interval. It needs the GitLab webhook server: set
 values (see [`examples/helm-values-webhook.yaml`](../helm-values-webhook.yaml)),
 then add a project webhook in GitLab (Settings → Webhooks) with the URL
 `https://<webhook-host>/webhook/gitlab`, the token from
-`gitlab-webhook-secret.yaml`, and the **Comments** and **Pipeline events**
-triggers enabled. For an in-cluster GitLab, point the webhook at the
+`gitlab-webhook-secret.yaml`, and the **Issues events**, **Comments** and
+**Pipeline events** triggers enabled. Filters accept `labels` (all required)
+and `excludeLabels` (any rejects) on `issue`, `merge_request` and `note`
+events; note filters use the labels of the commented issue or merge request. For an in-cluster GitLab, point the webhook at the
 `kelos-webhook-gitlab` Service and allow local network requests in the GitLab
 admin settings (Admin → Settings → Network → Outbound requests). To get status
 notes from webhook-created Tasks, also set

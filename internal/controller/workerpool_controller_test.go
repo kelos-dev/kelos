@@ -597,17 +597,38 @@ func TestWorkerPoolReconciler_TaskCompletionSucceeded(t *testing.T) {
 		Build()
 
 	r := newWorkerPoolReconciler(cl, scheme)
+	reads := 0
+	r.podOutputReader = func(context.Context, string, string, string) ([]string, map[string]string) {
+		reads++
+		if reads == 1 {
+			return nil, nil
+		}
+		return []string{"branch: feature/test"}, map[string]string{"branch": "feature/test"}
+	}
 
-	_, err := r.Reconcile(context.Background(), ctrl.Request{
+	result, err := r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Name: "test-task", Namespace: "default"},
 	})
 	require.NoError(t, err)
+	assert.Equal(t, outputRetryInterval, result.RequeueAfter)
 
 	var updatedTask kelos.Task
 	err = cl.Get(context.Background(), types.NamespacedName{Name: "test-task", Namespace: "default"}, &updatedTask)
 	require.NoError(t, err)
 	assert.Equal(t, kelos.TaskPhaseSucceeded, updatedTask.Status.Phase)
 	assert.NotNil(t, updatedTask.Status.CompletionTime)
+	assert.Empty(t, updatedTask.Status.Results)
+
+	result, err = r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "test-task", Namespace: "default"},
+	})
+	require.NoError(t, err)
+	assert.Zero(t, result.RequeueAfter)
+
+	err = cl.Get(context.Background(), types.NamespacedName{Name: "test-task", Namespace: "default"}, &updatedTask)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"branch": "feature/test"}, updatedTask.Status.Results)
+	assert.Equal(t, 2, reads)
 }
 
 func TestWorkerPoolReconciler_TaskCompletionFailed(t *testing.T) {

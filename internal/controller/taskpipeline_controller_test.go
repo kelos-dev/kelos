@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -343,6 +344,28 @@ func TestValidateTaskPipelineRejectsDuplicateStageName(t *testing.T) {
 	})
 	if err := validateTaskPipeline(pipeline); err == nil || !strings.Contains(err.Error(), "duplicated") {
 		t.Fatalf("validateTaskPipeline() error = %v, want duplicate stage error", err)
+	}
+}
+
+func TestExpandPipelineMatrixRejectsTooManyTasks(t *testing.T) {
+	values := func(count int) []string {
+		result := make([]string, count)
+		for i := range result {
+			result[i] = strconv.Itoa(i)
+		}
+		return result
+	}
+	matrix := &kelos.PipelineMatrix{Parameters: []kelos.PipelineMatrixParameter{
+		{Name: "component", Values: values(17)},
+		{Name: "environment", Values: values(16)},
+	}}
+
+	combinations, err := expandPipelineMatrix(matrix)
+	if err == nil || !strings.Contains(err.Error(), "maximum of 256 Tasks") {
+		t.Fatalf("expandPipelineMatrix() error = %v, want matrix size error", err)
+	}
+	if combinations != nil {
+		t.Fatalf("expandPipelineMatrix() returned %d combinations on error, want nil", len(combinations))
 	}
 }
 

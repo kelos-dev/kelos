@@ -197,12 +197,9 @@ func validateTaskPipeline(pipeline *kelos.TaskPipeline) error {
 		}
 		stageNames[stage.Name] = struct{}{}
 
-		matrixValues, err := expandPipelineMatrix(stage.Matrix)
+		_, err := expandPipelineMatrix(stage.Matrix)
 		if err != nil {
 			return fmt.Errorf("stage %q: %w", stage.Name, err)
-		}
-		if len(matrixValues) > maxPipelineStageTasks {
-			return fmt.Errorf("stage %q matrix expands to %d Tasks; maximum is %d", stage.Name, len(matrixValues), maxPipelineStageTasks)
 		}
 		if err := parsePipelineTemplate(stage.Name+" prompt", stage.TaskTemplate.Prompt); err != nil {
 			return fmt.Errorf("stage %q prompt: %w", stage.Name, err)
@@ -244,9 +241,16 @@ func expandPipelineMatrix(matrix *kelos.PipelineMatrix) ([]map[string]string, er
 
 	combinations := []map[string]string{{}}
 	for _, parameter := range parameters {
-		next := make([]map[string]string, 0, len(combinations)*len(parameter.Values))
+		capacity := len(combinations) * len(parameter.Values)
+		if capacity > maxPipelineStageTasks {
+			capacity = maxPipelineStageTasks
+		}
+		next := make([]map[string]string, 0, capacity)
 		for _, combination := range combinations {
 			for _, value := range parameter.Values {
+				if len(next) == maxPipelineStageTasks {
+					return nil, fmt.Errorf("matrix expands beyond the maximum of %d Tasks", maxPipelineStageTasks)
+				}
 				expanded := make(map[string]string, len(combination)+1)
 				for existingKey, existingValue := range combination {
 					expanded[existingKey] = existingValue
@@ -256,9 +260,6 @@ func expandPipelineMatrix(matrix *kelos.PipelineMatrix) ([]map[string]string, er
 			}
 		}
 		combinations = next
-		if len(combinations) > maxPipelineStageTasks {
-			return combinations, nil
-		}
 	}
 	return combinations, nil
 }

@@ -215,9 +215,11 @@ TaskPipeline is available only in `kelos.dev/v1alpha2`.
 Deleting a TaskPipeline deletes its owned child Tasks. A stage without a matrix
 creates one Task. A matrix stage creates one Task for each parameter combination,
 up to 256 Tasks per stage. Parameter names are sorted to make expansion and child
-Task names deterministic; values are sorted as well. Child Task names
-use `<pipeline>-<stage>` for a single Task and `<pipeline>-<stage>-<index>` for a
-matrix, with a stable hash suffix when truncation is required.
+Task names deterministic; values are sorted as well. Child Task names use
+`<pipeline>-<stage>` when expansion produces one Task, including a matrix with
+one combination. Matrix stages with multiple combinations use
+`<pipeline>-<stage>-<index>`. A stable hash suffix is added when truncation is
+required.
 
 ### Pipeline Templates and Results
 
@@ -261,7 +263,8 @@ spec:
             secretRef:
               name: codex-credentials
         prompt: |
-          Scan {{index .Matrix "service"}} and report a severity result.
+          Scan {{index .Matrix "service"}} and report the severity on its own line:
+          severity: <low|medium|high|critical>
     - name: report
       taskTemplate:
         worker:

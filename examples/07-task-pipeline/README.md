@@ -62,11 +62,16 @@ by the preceding stage when the next Task starts.
 kubectl apply -f examples/07-task-pipeline/
 ```
 
-4. Watch the pipeline and its child Tasks:
+4. Watch the pipeline in one terminal:
 
 ```bash
 kubectl get taskpipeline auth-feature -w
-kubectl get tasks -l kelos.dev/taskpipeline=auth-feature
+```
+
+   Watch its child Tasks in a second terminal:
+
+```bash
+kubectl get tasks -l kelos.dev/taskpipeline=auth-feature -w
 ```
 
 5. View stage progress and child Task results:

@@ -20,10 +20,8 @@ import "slices"
 
 // The classification of GitHubWebhookFilter criteria that the excludeFilters
 // CEL rules on GitHubWebhook encode, named by JSON tag. These lists are the
-// single source of truth: the CEL markers, the conversion restore path (which
-// re-validates a user-writable preservation annotation the API server never
-// checks), and the tests that pin both are all derived from or checked against
-// them. Adding a criterion to GitHubWebhookFilter without classifying it here
+// source of truth used by tests that keep the filter fields and CEL markers in
+// sync. Adding a criterion to GitHubWebhookFilter without classifying it here
 // fails the API package's validation tests.
 //
 // They are unexported and reached through the accessors below, which return
@@ -61,18 +59,17 @@ var (
 	}
 
 	// Allowed values for the criteria that declare an Enum marker, keyed by JSON
-	// tag. The restore path checks these because an out-of-enum value is not
-	// merely invalid: the matcher switches on the value and treats an unknown
-	// one as satisfied, so a rule carrying it rejects every event of that type.
+	// tag. An out-of-enum value is not merely invalid: the matcher switches on
+	// the value and treats an unknown one as satisfied, so a rule carrying it
+	// rejects every event of that type.
 	gitHubWebhookFilterCriterionEnums = map[string][]string{
 		"commentOn":  {CommentOnIssue, CommentOnPullRequest, ""},
 		"conclusion": {"success", "failure", "cancelled", "timed_out", "action_required", "neutral", "skipped", "stale"},
 	}
 )
 
-// Bounds the conversion restore path mirrors from the kubebuilder markers, kept
-// here so there is one home for everything that path re-checks. The API
-// package's validation tests assert each against its marker.
+// Bounds mirrored from the kubebuilder markers. The API package's validation
+// tests assert each against its marker.
 const (
 	// GitHubWebhookFiltersMaxItems bounds spec.when.githubWebhook.filters.
 	GitHubWebhookFiltersMaxItems = 50

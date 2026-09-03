@@ -478,10 +478,7 @@ type GitHubWebhookFilter struct {
 	// BodyContains filters by case-sensitive substring match on the
 	// comment/review body. When both BodyContains and BodyPattern are set,
 	// the body must contain the substring AND match the pattern.
-	// Deprecated: use BodyPattern instead, which supports regex. This field
-	// is retained because v1alpha1 allows it alongside BodyPattern with AND
-	// semantics that a single regex cannot express; it cannot be removed
-	// until that combination is disallowed.
+	// Deprecated: use BodyPattern instead, which supports regex.
 	// +optional
 	// +kubebuilder:validation:MaxLength=1024
 	BodyContains string `json:"bodyContains,omitempty"`
@@ -736,10 +733,6 @@ type Slack struct {
 	// ExcludePatterns — the exclusion also covers slash commands. A criterion
 	// the event does not carry never matches, so it does not reject the event.
 	//
-	// The rules are only guaranteed while the object is managed through
-	// v1alpha2. This field does not exist in v1alpha1; it survives a v1alpha1
-	// round-trip through a preservation annotation, so a v1alpha1 client that
-	// drops unknown annotations drops the exclusions with them.
 	// +optional
 	// +kubebuilder:validation:MaxItems=20
 	ExcludeFilters []SlackFilter `json:"excludeFilters,omitempty"`

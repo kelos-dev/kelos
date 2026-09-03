@@ -18,6 +18,14 @@ type skillsScriptResult struct {
 }
 
 func runSkillsInstallScript(t *testing.T, skills []kelos.SkillsShSpec) skillsScriptResult {
+	return runSkillsInstallScriptWithSetup(t, skills, nil)
+}
+
+func runSkillsInstallScriptWithSetup(
+	t *testing.T,
+	skills []kelos.SkillsShSpec,
+	setup func(root string),
+) skillsScriptResult {
 	t.Helper()
 
 	root := t.TempDir()
@@ -41,6 +49,9 @@ esac
 mkdir -p "$HOME/.agents/skills/working"
 printf '# working\n' > "$HOME/.agents/skills/working/SKILL.md"
 `)
+	if setup != nil {
+		setup(root)
+	}
 
 	script, err := buildSkillsInstallScript(skills, nil)
 	if err != nil {
@@ -61,6 +72,25 @@ printf '# working\n' > "$HOME/.agents/skills/working/SKILL.md"
 		calls:  string(called),
 		root:   root,
 		err:    runErr,
+	}
+}
+
+func TestBuildSkillsInstallScript_RequiredRelocationFailureStops(t *testing.T) {
+	result := runSkillsInstallScriptWithSetup(t,
+		[]kelos.SkillsShSpec{{Source: "working/package"}},
+		func(root string) {
+			conflictingDir := filepath.Join(root, SkillsShPluginName, "skills", "working")
+			if err := os.MkdirAll(conflictingDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(conflictingDir, "existing.md"), []byte("existing\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		},
+	)
+
+	if result.err == nil {
+		t.Fatalf("script succeeded despite relocation conflict\n%s", result.output)
 	}
 }
 

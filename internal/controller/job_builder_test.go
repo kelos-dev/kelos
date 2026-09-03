@@ -3199,7 +3199,8 @@ func TestBuildJob_AgentConfigSkills(t *testing.T) {
 	}
 	installDir := PluginMountPath + "/.agents/skills"
 	pluginSkillsDir := PluginMountPath + "/" + SkillsShPluginName + "/skills"
-	if !strings.Contains(script, fmt.Sprintf("find '%s' -mindepth 1 -maxdepth 1 -exec mv {} '%s'/", installDir, pluginSkillsDir)) {
+	if !strings.Contains(script, fmt.Sprintf("for skill_path in '%s'/*; do", installDir)) ||
+		!strings.Contains(script, fmt.Sprintf("mv \"$skill_path\" '%s'/", pluginSkillsDir)) {
 		t.Errorf("Expected script to move installed skills into the plugin layout, got: %s", script)
 	}
 	if !strings.Contains(script, fmt.Sprintf("[ -d '%s' ] ||", installDir)) {

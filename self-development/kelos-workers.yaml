@@ -1,12 +1,10 @@
-apiVersion: kelos.dev/v1alpha2
-kind: SessionSpawner
+apiVersion: kelos.dev/v1alpha1
+kind: TaskSpawner
 metadata:
   name: kelos-workers
 spec:
   when:
     githubWebhook:
-      gatewayRef:
-        name: kelos
       repository: kelos-dev/kelos
       excludeAuthors:
         - kelos-bot[bot]
@@ -15,47 +13,90 @@ spec:
       filters:
         - event: issue_comment
           action: created
-          bodyPattern: '(?m)^/kelos pick-up[ \t]*\r?$'
+          bodyContains: /kelos pick-up
           commentOn: Issue
           state: open
           author: gjkim42
-  sessionTemplate:
-    initialBranch: "kelos-task-{{.Number}}"
-    initialPrompt: |
-      Let's address {{.URL}}
-      Find the best way to address it.
-    volumeClaimTemplate:
-      accessModes:
-        - ReadWriteOnce
+      reporting:
+        enabled: true
+  maxConcurrency: 3
+  taskTemplate:
+    workspaceRef:
+      name: kelos-agent
+    model: opus
+    type: claude-code
+    ttlSecondsAfterFinished: 864000
+    credentials:
+      type: oauth
+      secretRef:
+        name: kelos-credentials
+    podOverrides:
       resources:
         requests:
-          storage: 10Gi
-    worker:
-      workspaceRef:
-        name: kelos-session-agent
-      model: gpt-5.6-sol
-      effort: xhigh
-      type: codex
-      credentials:
-        type: oauth
-        secretRef:
-          name: kelos-credentials
-      podOverrides:
-        resources:
-          requests:
-            cpu: "250m"
-            memory: "512Mi"
-            ephemeral-storage: "20Gi"
-          limits:
-            ephemeral-storage: "20Gi"
-        env:
-          - name: GIT_AUTHOR_NAME
-            value: "Gunju Kim"
-          - name: GIT_AUTHOR_EMAIL
-            value: "gjkim042@gmail.com"
-          - name: GIT_COMMITTER_NAME
-            value: "Gunju Kim"
-          - name: GIT_COMMITTER_EMAIL
-            value: "gjkim042@gmail.com"
-      agentConfigRefs:
-        - name: base-agent
+          cpu: "250m"
+          memory: "1Gi"
+          ephemeral-storage: "4Gi"
+        limits:
+          ephemeral-storage: "4Gi"
+      env:
+        - name: GIT_AUTHOR_NAME
+          value: "Gunju Kim"
+        - name: GIT_AUTHOR_EMAIL
+          value: "gjkim042@gmail.com"
+        - name: GIT_COMMITTER_NAME
+          value: "Gunju Kim"
+        - name: GIT_COMMITTER_EMAIL
+          value: "gjkim042@gmail.com"
+    branch: "kelos-task-{{.Number}}"
+    agentConfigRef:
+      name: kelos-workers-agent
+    promptTemplate: |
+      You are a coding agent. You either
+      - create a PR to fix the issue
+      - update an existing PR to fix the issue
+      - comment on the issue or the PR if you cannot fix it
+
+      Webhook:
+      - Event: {{.Event}}
+      - Action: {{.Action}}
+      - Sender: {{.Sender}}
+      - URL: {{.URL}}
+
+      Task:
+      - 0. Refresh the latest issue state:
+        - Re-read the issue and all comments: `gh issue view {{.Number}} --comments`
+      - 1. Set up your working branch. Run this exactly:
+        ```
+        git fetch --unshallow || true; git fetch origin main; git rebase origin/main
+        ```
+      - 2. Check if a PR already exists for branch kelos-task-{{.Number}}.
+
+      If a PR already exists:
+      - 3a. Read ALL review comments and conversation on the PR (gh pr view, gh api for review comments).
+        - Also read ALL comments on the linked issue (gh issue view {{.Number}} --comments), not just the PR.
+      - 4a. Read the existing diff (git diff main...HEAD) to understand what has already been done. Do NOT start over or rewrite from scratch.
+      - 5a. Make only the incremental changes needed to address review feedback or remaining issues. Preserve existing work.
+      - 6a. Commit and push your changes to origin kelos-task-{{.Number}}.
+      - 7a. /review the PR to verify your changes address the feedback. If changes are needed, make them, run `make verify` and `make test`, commit and push, then /review again. Repeat until the review passes.
+      - 8a. Update the PR title and description to reflect the final diff. The PR body MUST contain a standard closing keyword reference on its own line (e.g., `Fixes #{{.Number}}` or `Closes #{{.Number}}`). Do not embed the issue number in natural language. Ensure the PR has labels "generated-by-kelos" and "ok-to-test" (use `gh pr edit kelos-task-{{.Number}} --add-label generated-by-kelos --add-label ok-to-test` if missing).
+      - 9a. After pushing, actively check CI status with `gh pr checks`. If any checks fail, investigate the failures, fix them, commit and push, then check again. Do not request review until CI passes.
+
+      If no PR exists:
+      - 3b. Investigate the issue #{{.Number}}.
+        - Read ALL comments on the issue (gh issue view {{.Number}} --comments), including maintainer feedback and linked issues/PRs.
+        - If previous PRs for this issue were closed, read their reviews to understand why before choosing your approach.
+        - Search the codebase for existing constants, types, and patterns before creating new ones. Do not duplicate definitions.
+        - Only implement what the issue explicitly asks for. If you discover related improvements, create separate issues for them.
+      - 4b. Create a commit that fixes the issue.
+      - 5b. Push your branch to origin kelos-task-{{.Number}}.
+      - 6b. Create a PR with labels "generated-by-kelos" and "ok-to-test" (use `gh pr create --label generated-by-kelos --label ok-to-test`), then /review it. If changes are needed, make them, run `make verify` and `make test`, commit and push, then /review again. Repeat until the review passes.
+      - 7b. Update the PR title and description to reflect the final diff. The PR body MUST contain a standard closing keyword reference on its own line (e.g., `Fixes #{{.Number}}` or `Closes #{{.Number}}`). Do not embed the issue number in natural language.
+      - 8b. After pushing, actively check CI status with `gh pr checks`. If any checks fail, investigate the failures, fix them, commit and push, then check again. Do not request review until CI passes.
+
+      Post-checklist:
+      - Post a plain-English status comment on the issue (`gh issue comment {{.Number}} --body "..."`) for any of the following situations, explaining what happened:
+        - The PR is ready for review.
+        - You commented on the issue or the PR for more information.
+        - You cannot make any progress on the issue, explain why.
+      - If you find anything worth considering (e.g. bugs, improvements, follow-up work), create a new issue:
+        - gh issue create --title "<title>" --body "<description>" --label generated-by-kelos

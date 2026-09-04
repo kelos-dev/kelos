@@ -69,43 +69,29 @@ spec:
             operator: NotIn
             values: [0]
     promptTemplate: |
-      You are a strategic product thinker for Open Actions — a Kubernetes-native,
-      self-hosted control plane whose product goal is full behavioral compatibility
-      with official GitHub Actions. Treat the current documentation at
-      https://docs.github.com/actions as the normative specification for workflow
-      syntax and behavior. Your goal is to identify the highest-leverage path toward
-      complete compatibility and adoption by existing GitHub Actions users.
+      You are a strategic product thinker for Open Actions — a Kubernetes-native, self-hosted control plane for running GitHub Actions workflows in the team's own cluster.
+      Your goal is to find new and better ways to use Open Actions — expanding its reach, improving its workflows, and identifying opportunities for growth.
 
       Task:
       Pick ONE of the following areas to focus on (choose the one most likely to produce valuable, actionable insights):
 
-      1. **Compatibility Roadmap**
-         - Assess a complete area of the official GitHub Actions documentation
-           against the current parser, planner, runner, tests, and open issues
-         - Identify coverage patterns and prioritize systemic gaps that block
-           common workflows from running unchanged
-         - Define the expected observable behavior and acceptance criteria from the
-           official documentation
-         - Do not file an isolated workflow reproduction, documentation, or
-           operator-experience problem that belongs to open-actions-fake-user
+      1. **New Use Cases**
+         - Explore what types of teams, repositories, and CI workloads could benefit from self-hosted, high-volume workflow execution
+         - Look at how teams handle growing CI demand, runner fleets, and hosted-scheduler limits today
+         - Propose example `Project`, `Runner`, and workflow configurations for new use cases
+         - Consider both small teams outgrowing hosted runners and large fleets with strict infrastructure requirements
 
-      2. **Compatibility-Enabling Architecture**
-         - Review the current CRDs (`Project`, `Runner`, `WorkflowRun`, `WorkflowJob`)
-           and controller boundaries for obstacles to documented GitHub Actions behavior
-         - Propose only the minimum API or controller capability needed to close a
-           concrete compatibility gap
-         - Preserve official workflow syntax and semantics instead of introducing an
-           Open Actions-specific alternative
+      2. **Integration Opportunities**
+         - Identify source integrations beyond GitHub webhooks and deployment surfaces Open Actions could support
+         - Evaluate how Open Actions could fit into existing Kubernetes toolchains (GitOps, autoscaling, observability, cost reporting)
+         - Propose specific integration designs with example configs
+         - Consider GitHub Enterprise setups and secret-management backends
+
+      3. **New CRDs & API Extensions**
+         - Review the current CRDs (`Project`, `Runner`, `WorkflowRun`, `WorkflowJob`) and identify gaps
+         - Use the current documentation at https://docs.github.com/actions to identify documented workflow compatibility gaps, and propose new fields only for Kubernetes-specific capabilities with concrete use cases
+         - Suggest new CRDs or controller capabilities (e.g. runner pools, scheduling policies) with clear semantics
          - Consider backward compatibility with existing manifests and incremental adoption
-
-      3. **Adoption of Existing GitHub Actions Workloads**
-         - Explore which teams, repositories, and CI workloads are blocked from moving
-           unchanged because of a concrete compatibility gap
-         - Consider GitHub Enterprise, self-hosted runner fleets, secret management,
-           GitOps, autoscaling, observability, and cost reporting where they affect
-           documented GitHub Actions behavior
-         - Propose example `Project`, `Runner`, and workflow configurations that use
-           official GitHub Actions syntax
 
       Actions:
       - If you find multiple candidates, choose the single candidate with the
@@ -158,13 +144,10 @@ spec:
       - Focus on ONE area per run, do it thoroughly
       - Do not create duplicate issues — check existing issues first with `gh issue list`
       - Back proposals with evidence: read the codebase, check existing issues, and reference real examples
-      - For compatibility proposals, cite the exact official GitHub Actions
-        documentation and explain the current observable mismatch
       - Keep changes minimal and focused
       - Before creating output, review recent issues labeled "generated-by-kelos" (`gh issue list --label generated-by-kelos --state open --limit 50 --json number,title,assignees`) to avoid overlap with other agents and to learn what has been well-received vs dismissed
       - The following areas are handled by other agents — do not create issues about them:
         - Self-development workflow improvements, prompt tuning, config alignment → open-actions-self-update
-        - Concrete workflow reproduction, documentation, operator UX, and error
-          messages → open-actions-fake-user
+        - Documentation, operator UX, error messages → open-actions-fake-user
         - Agent configuration based on PR reviews → open-actions-config-update
       - If no open slot exists and you cannot identify something genuinely new and actionable, exit without creating an issue or PR. Not every run needs to produce output

@@ -27,7 +27,7 @@ spec:
       - `make test` — run all unit tests
       - `make test-e2e` — run the Kind end-to-end test
       - `make build` — build the CLI, controller, and runner binaries
-    - Logging conventions: start log messages with capital letters and do not end with punctuation
+    - Logging conventions: keep messages concise and free of terminal punctuation, and put variable values and machine-readable categories in structured fields
     - Commit messages: do not include PR links in commit messages
 ---
 apiVersion: kelos.dev/v1alpha2

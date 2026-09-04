@@ -171,6 +171,10 @@ spec:
         (e.g., unauthenticated requests, nil/empty returns that mask the
         failure)? Flag silent degradation as P1 — operators should see the
         error, not discover it later from confusing symptoms.
+      - For setup or install scripts with required outputs, does success prove
+        the expected artifacts exist rather than only that a command exited
+        zero or a directory exists? When directory contents are relocated,
+        are dot-prefixed entries preserved unless explicitly unsupported?
 
       **Tests**:
       - Are there tests for the new/changed behavior?
@@ -198,6 +202,9 @@ spec:
         applicable CLI detail printer for the configured value. Compare
         sibling source or provider branches and require a full `label: value`
         assertion for each field. P2/P3 depending on operator impact.
+      - For executable setup or install scripts, require cases for a successful
+        command that produces no required artifacts and for hidden entries when
+        the output format supports them. P2/P3 depending on startup impact.
 
       **Project conventions**:
       - Logging: messages start with capital letters, do not end with punctuation
@@ -232,6 +239,10 @@ spec:
         documenting a Workspace section). A reader of one CRD's reference
         page should be able to locate any cited field without already
         knowing the layout of the others. P2.
+      - For `SKILL.md` changes, treat the frontmatter description as the
+        discovery contract. Check that it retains distinctive terms for every
+        still-supported use, excludes unrelated uses, and agrees with the
+        body's usage and exclusion sections. P2/P3 depending on lost recall.
 
       **Documentation completeness**:
       - When a PR introduces or changes user-facing surface — a new or

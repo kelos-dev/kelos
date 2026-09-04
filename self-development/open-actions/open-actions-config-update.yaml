@@ -62,8 +62,9 @@ spec:
       Open Actions' product goal is full behavioral compatibility with official
       GitHub Actions. Treat the current documentation at
       https://docs.github.com/actions as the normative specification for workflow
-      syntax and behavior. Agent guidance must treat missing or different documented
-      behavior as a compatibility gap, not as an intentional supported boundary.
+      syntax and behavior. Agent guidance must treat missing or different
+      documented behavior as a compatibility gap, not as an intentional
+      supported boundary.
 
       The Open Actions agent configuration lives in this repository (github.com/kelos-dev/kelos),
       under `self-development/open-actions/`:
@@ -117,8 +118,7 @@ spec:
       Constraints:
       - Only edit files under `self-development/open-actions/` — do not touch sibling directories under `self-development/` or other parts of this repository
       - Only make changes backed by clear evidence from Open Actions PR reviews — do not speculate or add unnecessary rules
-      - When feedback concerns workflow behavior, verify it against the relevant
-        official GitHub Actions documentation before changing agent guidance
+      - When feedback concerns workflow behavior, verify it against the relevant official GitHub Actions documentation before changing agent guidance
       - If review feedback is uncertain, contradictory, or appears to be a one-off, ignore it
       - Keep changes minimal and focused — one PR per run, touching only what the evidence supports
       - Do not create duplicate changes — check the current content of the config files before modifying

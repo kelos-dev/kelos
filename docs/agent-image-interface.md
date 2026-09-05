@@ -266,6 +266,13 @@ entrypoint preserves Claude Code's own non-zero exit code when present;
 otherwise, it propagates the capture failure so the Task is not reported as
 successful.
 
+A run that terminates cleanly but returns a final message too short to be an
+answer after many turns is also treated as a failure, since Claude Code reports
+such a run as a success. `kelos-capture` emits `degenerate: true` alongside the
+usual outputs in that case and returns non-zero, so the Job's retry reruns the
+agent. The `response` output is still captured on the failing attempt, so the
+agent's final message is recorded in the Task's results either way.
+
 Also use `set -uo pipefail` (without `-e`) so the capture step runs even if
 the agent exits non-zero.
 

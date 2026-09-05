@@ -20,7 +20,8 @@ const (
 
 // Run streams the agent's JSON output from stdin to stdout, accumulating
 // per-agent token usage in memory, then emits deterministic outputs
-// (branch, commit, PRs, token usage) between markers on stdout. It is
+// (branch, commit, PRs, token usage, and a degenerate marker when Claude
+// Code returned an unusable final message) between markers on stdout. It is
 // intended to be the right-hand side of a pipe from the agent process so
 // that no on-disk copy of the stream is required. It returns non-zero when
 // the stream cannot be processed or Claude Code reports an incomplete result.
@@ -95,7 +96,7 @@ func captureOutputs(r runner, usage map[string]string) []string {
 		}
 	}
 
-	for _, key := range []string{"cost-usd", "input-tokens", "output-tokens", "response"} {
+	for _, key := range []string{"cost-usd", "input-tokens", "output-tokens", "response", "degenerate"} {
 		if v, ok := usage[key]; ok {
 			outputs = append(outputs, key+": "+v)
 		}

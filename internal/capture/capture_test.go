@@ -285,18 +285,36 @@ func TestRunClaudeCodeResultStatus(t *testing.T) {
 		input      string
 		wantCode   int
 		wantStderr string
+		// wantOutputs are additional captured output lines the marker
+		// block must contain.
+		wantOutputs []string
+		// unwantOutputs are captured output keys the marker block must
+		// not contain.
+		unwantOutputs []string
 	}{
 		{
-			name:       "completed result",
-			input:      `{"type":"result","subtype":"success","is_error":false,"stop_reason":"end_turn","terminal_reason":"completed","total_cost_usd":0.01}` + "\n",
-			wantCode:   0,
-			wantStderr: "",
+			name:          "completed result",
+			input:         `{"type":"result","subtype":"success","is_error":false,"stop_reason":"end_turn","terminal_reason":"completed","total_cost_usd":0.01}` + "\n",
+			wantCode:      0,
+			wantStderr:    "",
+			unwantOutputs: []string{"degenerate: "},
 		},
 		{
-			name:       "incomplete result",
-			input:      `{"type":"result","subtype":"success","is_error":false,"stop_reason":"tool_use","result":"Starting the next tool","total_cost_usd":0.01}` + "\n",
-			wantCode:   1,
-			wantStderr: "kelos-capture: Claude Code run incomplete (stop_reason=tool_use)\n",
+			name:          "incomplete result",
+			input:         `{"type":"result","subtype":"success","is_error":false,"stop_reason":"tool_use","result":"Starting the next tool","total_cost_usd":0.01}` + "\n",
+			wantCode:      1,
+			wantStderr:    "kelos-capture: Claude Code run incomplete (stop_reason=tool_use)\n",
+			unwantOutputs: []string{"degenerate: "},
+		},
+		{
+			// The degenerate marker and the response are both emitted
+			// on the failing attempt so downstream consumers can tell
+			// this failure apart from any other.
+			name:        "degenerate result",
+			input:       `{"type":"result","subtype":"success","is_error":false,"stop_reason":"end_turn","terminal_reason":"completed","num_turns":41,"result":"` + garbledResultJSON + `","total_cost_usd":0.01}` + "\n",
+			wantCode:    1,
+			wantStderr:  "kelos-capture: Claude Code returned a degenerate final message (degenerate_output=turns=41,chars=44)\n",
+			wantOutputs: []string{"degenerate: true\n", "response: "},
 		},
 	}
 
@@ -321,6 +339,16 @@ func TestRunClaudeCodeResultStatus(t *testing.T) {
 				!strings.Contains(stdout.String(), "cost-usd: 0.01\n") ||
 				!strings.Contains(stdout.String(), markerEnd+"\n") {
 				t.Fatalf("stdout is missing captured outputs: %q", stdout.String())
+			}
+			for _, want := range tt.wantOutputs {
+				if !strings.Contains(stdout.String(), want) {
+					t.Fatalf("stdout is missing %q: %q", want, stdout.String())
+				}
+			}
+			for _, unwant := range tt.unwantOutputs {
+				if strings.Contains(stdout.String(), unwant) {
+					t.Fatalf("stdout unexpectedly contains %q: %q", unwant, stdout.String())
+				}
 			}
 		})
 	}

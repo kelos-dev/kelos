@@ -2,6 +2,7 @@ package capture
 
 import (
 	"bytes"
+	"encoding/base64"
 	"errors"
 	"strings"
 	"testing"
@@ -183,6 +184,30 @@ func TestStreamUsage(t *testing.T) {
 			},
 		},
 		{
+			name:      "claude-code brief answer after few turns is not degenerate",
+			agentType: "claude-code",
+			content: `{"type":"result","subtype":"success","is_error":false,"num_turns":2,"total_cost_usd":0.01,"result":"Fixed in v0.472.","usage":{"input_tokens":100,"output_tokens":20}}
+`,
+			want: map[string]string{
+				"cost-usd":      "0.01",
+				"input-tokens":  "100",
+				"output-tokens": "20",
+				"response":      "Rml4ZWQgaW4gdjAuNDcyLg==", // base64("Fixed in v0.472.")
+			},
+		},
+		{
+			name:      "claude-code long answer after many turns is not degenerate",
+			agentType: "claude-code",
+			content: `{"type":"result","subtype":"success","is_error":false,"num_turns":41,"total_cost_usd":0.5,"result":"` + strings.Repeat("a", 400) + `","usage":{"input_tokens":100,"output_tokens":20}}
+`,
+			want: map[string]string{
+				"cost-usd":      "0.5",
+				"input-tokens":  "100",
+				"output-tokens": "20",
+				"response":      base64.StdEncoding.EncodeToString([]byte(strings.Repeat("a", 400))),
+			},
+		},
+		{
 			name:      "claude-code no result lines returns nil",
 			agentType: "claude-code",
 			content:   `{"type":"assistant","message":"done"}` + "\n",
@@ -216,6 +241,70 @@ func TestStreamUsageRejectsIncompleteClaudeCodeResult(t *testing.T) {
 	}
 	if out.String() != in {
 		t.Fatalf("forwarded output = %q, want %q", out.String(), in)
+	}
+}
+
+// garbledResultJSON is the JSON-escaped form of the final message from a real
+// degenerate run: markup fragments emitted in place of an answer.
+const garbledResultJSON = "`stale=False</li>\\n</ul>\\n</section\\n</section>"
+
+// TestStreamUsageFlagsDegenerateClaudeCodeResult covers the incident case: a
+// run that did substantial work, terminated cleanly, and returned fragments.
+// It must fail (so the Job's backoffLimit reruns it) while still recording the
+// response and a "degenerate" marker for downstream consumers.
+func TestStreamUsageFlagsDegenerateClaudeCodeResult(t *testing.T) {
+	in := `{"type":"result","subtype":"success","is_error":false,"stop_reason":"end_turn","terminal_reason":"completed","num_turns":41,"total_cost_usd":0.42,"result":"` + garbledResultJSON + `","usage":{"input_tokens":150000,"output_tokens":4821}}` + "\n"
+	var out bytes.Buffer
+	usage, err := StreamUsage("claude-code", strings.NewReader(in), &out)
+	want := "Claude Code returned a degenerate final message (degenerate_output=turns=41,chars=44)"
+	if err == nil || err.Error() != want {
+		t.Fatalf("StreamUsage() error = %v, want %q", err, want)
+	}
+	if usage["degenerate"] != "true" {
+		t.Fatalf("degenerate = %q, want %q", usage["degenerate"], "true")
+	}
+	// The response is still recorded so the failed path can show the user
+	// whatever the agent produced.
+	if usage["response"] == "" {
+		t.Fatal("response is empty, want the agent output recorded")
+	}
+	if usage["cost-usd"] != "0.42" {
+		t.Fatalf("cost-usd = %q, want %q", usage["cost-usd"], "0.42")
+	}
+	if out.String() != in {
+		t.Fatalf("forwarded output = %q, want %q", out.String(), in)
+	}
+}
+
+// TestStreamUsageIgnoresMissingNumTurns pins backward compatibility with
+// Claude Code versions that omit num_turns: a short final message must not be
+// classified degenerate when the turn count is unknown.
+func TestStreamUsageIgnoresMissingNumTurns(t *testing.T) {
+	in := `{"type":"result","subtype":"success","is_error":false,"stop_reason":"end_turn","terminal_reason":"completed","total_cost_usd":0.42,"result":"` + garbledResultJSON + `"}` + "\n"
+	var out bytes.Buffer
+	usage, err := StreamUsage("claude-code", strings.NewReader(in), &out)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := usage["degenerate"]; ok {
+		t.Fatal("degenerate key set without num_turns")
+	}
+}
+
+// TestStreamUsageOmitsDegenerateOnErrorResult pins that the marker tracks the
+// degenerate classification rather than the length floor alone. An explicit
+// error result is a different failure, so labelling it degenerate would hide
+// the real reason from downstream consumers.
+func TestStreamUsageOmitsDegenerateOnErrorResult(t *testing.T) {
+	in := `{"type":"result","subtype":"error_max_turns","is_error":true,"num_turns":41,"total_cost_usd":0.42,"result":"Reached max turns"}` + "\n"
+	var out bytes.Buffer
+	usage, err := StreamUsage("claude-code", strings.NewReader(in), &out)
+	want := "Claude Code returned an unsuccessful result (subtype=error_max_turns, is_error=true)"
+	if err == nil || err.Error() != want {
+		t.Fatalf("StreamUsage() error = %v, want %q", err, want)
+	}
+	if _, ok := usage["degenerate"]; ok {
+		t.Fatalf("degenerate key set on an error result: %v", usage)
 	}
 }
 

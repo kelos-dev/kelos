@@ -68,7 +68,7 @@ spec:
     worker:
       workspaceRef:
         name: agora-agent
-      model: gpt-5.6-sol
+      model: gpt-6-astra
       effort: xhigh
       type: codex
       credentials:

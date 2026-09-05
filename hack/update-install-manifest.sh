@@ -212,7 +212,7 @@ write_chart_crd_template() {
 # inject_kelos_conversion adds the conversion webhook config and the
 # cert-manager CA-injection annotation to kelos.dev CRDs that serve multiple
 # versions. CRDs with a single version (e.g. WorkerPool, TaskBudget,
-# TaskRecord) are left as-is since no conversion is needed. controller-gen does
+# TaskPipeline, TaskRecord) are left as-is since no conversion is needed. controller-gen does
 # not emit spec.conversion, so it is injected here, before the chart templates
 # are derived from this file.
 inject_kelos_conversion() {
@@ -257,7 +257,7 @@ END { flush() }
 
 # verify_kelos_conversion fails fast if inject_kelos_conversion did not wire
 # multi-version kelos CRDs. Single-version CRDs (like WorkerPool, TaskBudget,
-# TaskRecord) correctly skip conversion. The CA annotation is injected into an
+# TaskPipeline, TaskRecord) correctly skip conversion. The CA annotation is injected into an
 # existing annotations: block, so a change in controller-gen output shape could
 # silently drop it; this guard catches that instead of shipping CRDs that fail
 # conversion.
@@ -288,6 +288,7 @@ generate_chart_crd_templates() {
   write_chart_crd_template "${source}" "CustomResourceDefinition" "sessions.kelos.dev" "${CHART_CRD_DIR}/session-crd.yaml"
   write_chart_crd_template "${source}" "CustomResourceDefinition" "sessionspawners.kelos.dev" "${CHART_CRD_DIR}/sessionspawner-crd.yaml"
   write_chart_crd_template "${source}" "CustomResourceDefinition" "taskbudgets.kelos.dev" "${CHART_CRD_DIR}/taskbudget-crd.yaml"
+  write_chart_crd_template "${source}" "CustomResourceDefinition" "taskpipelines.kelos.dev" "${CHART_CRD_DIR}/taskpipeline-crd.yaml"
   write_chart_crd_template "${source}" "CustomResourceDefinition" "taskrecords.kelos.dev" "${CHART_CRD_DIR}/taskrecord-crd.yaml"
   write_chart_crd_template "${source}" "CustomResourceDefinition" "tasks.kelos.dev" "${CHART_CRD_DIR}/task-crd.yaml"
   write_chart_crd_template "${source}" "CustomResourceDefinition" "taskspawners.kelos.dev" "${CHART_CRD_DIR}/taskspawner-crd.yaml"

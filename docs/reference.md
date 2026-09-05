@@ -192,6 +192,101 @@ the refreshed value on their next sync and are not supported.
 | `worker.agentConfigRefs[].name` | Ordered AgentConfig resources. Configs are merged in order | No |
 | `worker.podOverrides` | Pod customization (same fields as the legacy `spec.podOverrides`) | No |
 
+## TaskPipeline
+
+A TaskPipeline manages an ordered sequence of named stages. The first stage
+starts immediately, and each later stage starts after the preceding stage has
+succeeded. A stage can create one Task or fan out into parallel Tasks with a
+matrix. The stage list is immutable after creation.
+
+TaskPipeline is available only in `kelos.dev/v1alpha2`.
+
+| Field | Description | Required |
+|-------|-------------|----------|
+| `spec.stages` | Ordered pipeline stages (1–64). Stage names must be unique | Yes |
+| `spec.stages[].name` | DNS-label name that identifies the stage within the pipeline | Yes |
+| `spec.stages[].taskTemplate.worker` | Inline execution environment; uses the same `WorkerSpec` as Task | One of worker or workerPoolRef |
+| `spec.stages[].taskTemplate.workerPoolRef.name` | WorkerPool used for the stage's Tasks | One of worker or workerPoolRef |
+| `spec.stages[].taskTemplate.prompt` | Go template rendered into each stage Task's prompt | Yes |
+| `spec.stages[].taskTemplate.branch` | Optional Go template rendered into each stage Task's branch. Not supported with workerPoolRef | No |
+| `spec.stages[].matrix.items` | Ordered value maps (1–256). Each item contains 1–16 string values, creates one Task, and defines the same keys as every other item | Yes when matrix is set |
+
+Deleting a TaskPipeline deletes its owned child Tasks. A stage without a matrix
+creates one Task. A matrix stage creates one Task for each item, up to 256 Tasks
+per stage. Declaration order determines child Task indexes and the order exposed
+to later stages through `.Stages`. Child Task names use `<pipeline>-<stage>` when
+the stage creates one Task, including a matrix with one item. Matrix stages with
+multiple items use `<pipeline>-<stage>-<index>`. A stable hash suffix is added
+when truncation is required.
+
+### Pipeline Templates and Results
+
+`taskTemplate.prompt` and `taskTemplate.branch` receive these variables:
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `.Matrix` | `map[string]string` | Values from the current matrix item; empty for a stage without a matrix |
+| `.Stages` | `map[string][]object` | Results from completed earlier stages, keyed by stage name |
+| `.Stages.<stage>[].Name` | string | Child Task name |
+| `.Stages.<stage>[].Matrix` | `map[string]string` | Matrix values used by the stage Task |
+| `.Stages.<stage>[].Results` | `map[string]string` | Structured Task results |
+| `.Stages.<stage>[].Outputs` | `[]string` | Raw Task outputs |
+
+Use `index` when a stage or result key contains characters that cannot be used in
+Go template dot notation. TaskPipeline's `index` is strict: a missing map key or
+an out-of-range list index fails the stage and records the rendering error in
+pipeline status. The controller validates every template's syntax before
+starting the pipeline. It renders a stage only after the preceding stage
+succeeds, when its result keys are known.
+
+Example — fan out a scan across two services, then aggregate the results:
+
+```yaml
+apiVersion: kelos.dev/v1alpha2
+kind: TaskPipeline
+metadata:
+  name: security-scan
+spec:
+  stages:
+    - name: scan
+      matrix:
+        items:
+          - service: auth
+          - service: billing
+      taskTemplate:
+        worker:
+          type: codex
+          credentials:
+            type: oauth
+            secretRef:
+              name: codex-credentials
+        prompt: |
+          Scan {{index .Matrix "service"}} and return a concise severity assessment.
+    - name: report
+      taskTemplate:
+        worker:
+          type: codex
+          credentials:
+            type: oauth
+            secretRef:
+              name: codex-credentials
+        prompt: |
+          These scan responses are base64-encoded. Decode and summarize them:
+          {{range index .Stages "scan" -}}
+          - {{index .Matrix "service"}}: {{index .Results "response"}}
+          {{end}}
+```
+
+Agent final responses are stored in `Task.status.results.response` as base64.
+Downstream agents that consume this result should decode it before use.
+
+`status.stageStatuses` reports expected, active, successful, and failed Task
+counts for each stage. Child Task names, outputs, and structured results remain
+on the owned Task resources and are not copied into TaskPipeline status. The
+`Ready` condition reports pipeline progress and failure details. Any failed
+child Task prevents later stages from starting. Child Tasks that are already
+active finish before the TaskPipeline enters `Failed`.
+
 ## Session
 
 A Session is one interactive Claude Code, Codex, or OpenCode conversation that

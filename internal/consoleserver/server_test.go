@@ -252,6 +252,21 @@ func TestConsoleResourceRelationships(t *testing.T) {
 				WorkerPoolRef: &kelos.WorkerPoolReference{Name: "pool"},
 			}},
 		},
+		&kelos.TaskPipeline{
+			ObjectMeta: metav1.ObjectMeta{Name: "release", Namespace: "team-a", UID: "pipeline-uid"},
+			Spec: kelos.TaskPipelineSpec{Stages: []kelos.PipelineStage{{
+				Name: "verify",
+				TaskTemplate: kelos.PipelineTaskTemplate{
+					Worker: &kelos.WorkerSpec{
+						Type:            "codex",
+						Credentials:     &kelos.Credentials{Type: kelos.CredentialTypeNone},
+						WorkspaceRef:    &kelos.WorkspaceReference{Name: "repository"},
+						AgentConfigRefs: []kelos.AgentConfigReference{{Name: "reviewer"}},
+					},
+					Prompt: "Verify the release",
+				},
+			}}},
+		},
 		&kelos.TaskSpawner{
 			ObjectMeta: metav1.ObjectMeta{Name: "automation", Namespace: "team-a"},
 			Spec: kelos.TaskSpawnerSpec{TaskTemplate: kelos.TaskTemplate{
@@ -286,6 +301,17 @@ func TestConsoleResourceRelationships(t *testing.T) {
 			Spec: kelos.TaskSpec{WorkerPoolRef: &kelos.WorkerPoolReference{Name: "pool"}},
 		},
 		&kelos.Task{ObjectMeta: metav1.ObjectMeta{Name: "prerequisite", Namespace: "team-a"}},
+		&kelos.Task{ObjectMeta: metav1.ObjectMeta{
+			Name:      "pipeline-task",
+			Namespace: "team-a",
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: kelos.GroupVersion.String(),
+				Kind:       "TaskPipeline",
+				Name:       "release",
+				UID:        "pipeline-uid",
+				Controller: &controller,
+			}},
+		}},
 		&kelos.Task{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "legacy-task",
@@ -351,6 +377,9 @@ func TestConsoleResourceRelationships(t *testing.T) {
 		actual[key] = relationship.Inferred
 	}
 	expected := map[string]bool{
+		"taskpipelines/release creates tasks/pipeline-task":                      false,
+		"taskpipelines/release uses agentconfigs/reviewer":                       false,
+		"taskpipelines/release uses workspaces/repository":                       false,
 		"taskspawners/automation spawned Tasks depend on tasks/prerequisite":     false,
 		"taskspawners/automation uses agentconfigs/reviewer":                     false,
 		"taskspawners/automation uses workspaces/repository":                     false,

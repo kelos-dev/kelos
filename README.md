@@ -52,6 +52,7 @@ The controller turns Kelos resources into Pods, Jobs, and StatefulSets.
 | Resource | Purpose |
 | --- | --- |
 | `Task` | Run one agent job |
+| `TaskPipeline` | Manage a DAG of dependent and parallel Tasks |
 | `Session` | Keep an interactive agent conversation running |
 | `Workspace` | Give agents a Git repository |
 | `AgentConfig` | Share instructions, skills, plugins, and MCP servers |

@@ -105,6 +105,7 @@ rules:
   - agentconfigs
   - sessionspawners
   - taskbudgets
+  - taskpipelines
   - webhookgateways
   - workspaces
   verbs:
@@ -127,6 +128,7 @@ rules:
   - sessions/status
   - sessionspawners/status
   - taskbudgets/status
+  - taskpipelines/status
   - tasks/status
   - taskspawners/status
   - webhookgateways/status
@@ -275,6 +277,7 @@ rules:
       - sessions
       - sessionspawners
       - taskbudgets
+      - taskpipelines
       - taskrecords
       - tasks
       - taskspawners

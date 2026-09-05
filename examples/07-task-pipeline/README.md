@@ -1,15 +1,14 @@
 # 07 — Task Pipeline
 
-A multi-step pipeline that chains Tasks using `dependsOn` and passes results
-between stages. One agent scaffolds a feature, a second writes tests on the
-same branch, and a third opens a PR.
+Managed multi-step workflows. The sequential example scaffolds a feature,
+writes tests, and opens a pull request. The matrix example fans out a review
+across components and focus areas, then consolidates the findings.
 
 ## Use Case
 
-Break complex work into specialized steps. Each agent focuses on one job and
-hands off structured results (branch name, commit SHA) to the next stage. The
-controller ensures ordering, detects cycles, and fails fast if an upstream
-stage fails.
+Break complex work into named stages while managing the workflow as one
+resource. Stages run in order, and each stage can fan out into parallel Tasks.
+The pipeline status summarizes progress with bounded per-stage counts.
 
 ## Resources
 
@@ -18,117 +17,135 @@ stage fails.
 | `credentials-secret.yaml` | Secret | Claude OAuth token for the agent |
 | `github-token-secret.yaml` | Secret | GitHub token for cloning and PR creation |
 | `workspace.yaml` | Workspace | Git repository to clone |
-| `pipeline.yaml` | Task (x3) | Three chained Tasks forming a pipeline |
+| `pipeline.yaml` | TaskPipeline | Three-stage feature development workflow |
+| `matrix-pipeline.yaml` | TaskPipeline | Matrix fan-out followed by a summary stage |
 
-## How It Works
+## Sequential Pipeline
 
-```
-scaffold (Task)
+```text
+scaffold
     │  creates branch, writes code
-    │  outputs: branch, commit
-    │
+    │  results: branch, commit
     ▼
-write-tests (Task, dependsOn: [scaffold])
-    │  checks out the same branch
-    │  reads scaffold's branch via {{.Deps.scaffold.Results.branch}}
-    │  outputs: branch, commit
-    │
+write-tests
+    │  reads scaffold's result from .Stages
+    │  results: branch, commit
     ▼
-open-pr (Task, dependsOn: [write-tests])
-    │  reads branch from write-tests results
-    │  opens a pull request
-    │  outputs: pr URL
+open-pr
+       opens a pull request
 ```
 
-## Key Concepts
+The controller creates one owned Task for each stage after the preceding stage
+has succeeded. This example's child Task names are `auth-feature-scaffold`,
+`auth-feature-write-tests`, and `auth-feature-open-pr`.
 
-- **`dependsOn`** — a Task lists the names of Tasks that must succeed before
-  it starts. The controller moves the Task to `Waiting` phase until all
-  dependencies reach `Succeeded`. If any dependency fails, the downstream
-  Task fails immediately.
+Downstream prompt templates receive earlier results under `.Stages`, keyed by
+stage name. Each value is a list because a matrix stage can create more
+than one Task:
 
-- **Result passing** — when a Task completes, the controller captures
-  structured key-value outputs (branch, commit, PR URL, etc.) into
-  `status.results`. Downstream Tasks can reference these in their prompt
-  using Go template syntax:
+```text
+{{index .Stages "scaffold" 0 "Results" "branch"}}
+```
 
-  ```
-  {{index .Deps "scaffold" "Results" "branch"}}
-  ```
+Missing template keys fail the stage and pipeline. The failure is reported by
+the TaskPipeline `Ready` condition; Kelos does not pass the unrendered template
+to an agent.
 
-  The `.Deps` map is keyed by dependency Task name and contains `Results`
-  (the key-value map) and `Outputs` (raw output lines).
+All stages use the same branch, so the Workspace contains the commits produced
+by the preceding stage when the next Task starts.
 
-- **Branch serialization** — Tasks sharing the same `branch` value are
-  serialized automatically. Only one runs at a time, so the second Task
-  always sees the first Task's commits.
+## Matrix Fan-Out Pipeline
 
-- **Cycle detection** — the controller detects circular dependencies via DFS
-  and fails the Task immediately.
+```text
+review(api, correctness) ───────┐
+review(api, tests) ─────────────┤
+review(controller, correctness) ├──▶ summarize
+review(controller, tests) ──────┘
+```
+
+The `review` stage defines four ordered matrix items. Kelos creates one parallel
+Task for each item, for a total of four Tasks. The
+`summarize` stage starts after all four succeed and iterates over their matrix
+values and captured `response` results through `.Stages`. Agent responses are
+base64-encoded in Task results, so the summary prompt tells the agent to decode
+them before producing the report.
 
 ## Steps
 
-1. **Edit the secrets** — replace placeholders in `credentials-secret.yaml`
-   and `github-token-secret.yaml`.
-
-2. **Edit `workspace.yaml`** — set your repository URL.
-
-3. **Apply the resources:**
+1. Edit the secrets and replace the placeholder values.
+2. Edit `workspace.yaml` and set your repository URL.
+3. Apply the shared resources:
 
 ```bash
-kubectl apply -f examples/07-task-pipeline/
+kubectl apply -f examples/07-task-pipeline/credentials-secret.yaml
+kubectl apply -f examples/07-task-pipeline/github-token-secret.yaml
+kubectl apply -f examples/07-task-pipeline/workspace.yaml
 ```
 
-4. **Watch the pipeline progress:**
+4. Apply the sequential pipeline:
 
 ```bash
-kubectl get tasks -w
+kubectl apply -f examples/07-task-pipeline/pipeline.yaml
 ```
 
-You should see `scaffold` run first, then `write-tests` move from `Waiting`
-to `Running`, and finally `open-pr`.
-
-5. **View results from a completed Task:**
+5. Watch the pipeline in one terminal:
 
 ```bash
-kelos get task scaffold -o yaml | grep -A 10 results:
+kubectl get taskpipeline auth-feature -w
 ```
 
-6. **Stream logs from any stage:**
+   Watch its child Tasks in a second terminal:
 
 ```bash
-kelos logs scaffold -f
-kelos logs write-tests -f
-kelos logs open-pr -f
+kubectl get tasks -l kelos.dev/taskpipeline=auth-feature -w
 ```
 
-7. **Cleanup:**
+6. View stage progress and child Task results:
 
 ```bash
-kubectl delete -f examples/07-task-pipeline/
+kubectl get taskpipeline auth-feature -o yaml
+kubectl get tasks -l kelos.dev/taskpipeline=auth-feature -o yaml
 ```
 
-## CLI Equivalent
-
-You can create the same pipeline with the CLI:
+7. Stream logs from a stage's child Task:
 
 ```bash
-kelos run -p "Scaffold a user authentication module" \
-  --name scaffold --branch feature/auth --workspace my-workspace -w
+kelos logs auth-feature-scaffold -f
+kelos logs auth-feature-write-tests -f
+kelos logs auth-feature-open-pr -f
+```
 
-kelos run -p 'Write tests for the auth module on branch {{index .Deps "scaffold" "Results" "branch"}}' \
-  --name write-tests --depends-on scaffold --branch feature/auth --workspace my-workspace -w
+## Run the Matrix Example
 
-kelos run -p 'Open a PR for branch {{index .Deps "write-tests" "Results" "branch"}}' \
-  --name open-pr --depends-on write-tests --branch feature/auth --workspace my-workspace -w
+After applying the secrets and Workspace from step 3, apply the matrix pipeline
+instead of the sequential pipeline in step 4, or run both alongside each other:
+
+```bash
+kubectl apply -f examples/07-task-pipeline/matrix-pipeline.yaml
+kubectl get taskpipeline matrix-review -w
+```
+
+Watch the four review Tasks run in parallel, followed by the summary Task:
+
+```bash
+kubectl get tasks -l kelos.dev/taskpipeline=matrix-review -w
+```
+
+## Cleanup
+
+Delete both examples and all owned Tasks. Resources that were not applied are
+ignored:
+
+```bash
+kubectl delete --ignore-not-found -f examples/07-task-pipeline/
 ```
 
 ## Notes
 
-- All three Tasks share the same `branch` value. This means even without
-  `dependsOn`, the branch lock would serialize them. Adding `dependsOn`
-  ensures strict ordering and enables result passing.
-- If `scaffold` fails, both `write-tests` and `open-pr` fail immediately
-  with a "dependency failed" message.
-- Set `ttlSecondsAfterFinished` on each Task if you want automatic cleanup
-  after the pipeline completes.
+- A failed child Task prevents later stages from starting. Child Tasks that are
+  already active are allowed to finish before the pipeline becomes `Failed`.
+- `TaskPipeline.spec.stages` is immutable. Delete and recreate the resource to
+  run a modified workflow.
+- Matrix item order determines child Task indexes and the order exposed to later
+  stages. The full matrix API and template context are covered in the
+  [TaskPipeline reference](../../docs/reference.md#taskpipeline).

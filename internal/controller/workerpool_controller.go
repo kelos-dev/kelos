@@ -98,6 +98,8 @@ type WorkerPoolReconciler struct {
 	// NowFunc returns the current time. Defaults to time.Now.
 	// Overridable in tests for deterministic behavior.
 	NowFunc func() time.Time
+
+	podOutputReader func(context.Context, string, string, string) ([]string, map[string]string)
 }
 
 // now returns the current time, using NowFunc if set for testability.
@@ -1127,6 +1129,10 @@ func (r *WorkerPoolReconciler) reconcileTask(ctx context.Context, task *kelos.Ta
 
 	switch task.Status.Phase {
 	case kelos.TaskPhaseSucceeded, kelos.TaskPhaseFailed:
+		outputResult, err := r.retryWorkerTaskOutputs(ctx, task)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
 		// completeTask writes the terminal phase before creating the TaskRecord, so
 		// a transient createTaskRecord failure leaves the task terminal with no
 		// record. Retry here so budget usage is not undercounted. Also clear any
@@ -1138,7 +1144,7 @@ func (r *WorkerPoolReconciler) reconcileTask(ctx context.Context, task *kelos.Ta
 		if err := r.clearTaskPodAssignmentIfStillAssigned(ctx, task); err != nil {
 			return ctrl.Result{}, err
 		}
-		return ctrl.Result{}, recordErr
+		return outputResult, recordErr
 	case kelos.TaskPhaseRunning, kelos.TaskPhasePending:
 		if task.Status.PodName != "" {
 			return r.monitorTaskCompletion(ctx, task)
@@ -1259,7 +1265,7 @@ func (r *WorkerPoolReconciler) monitorTaskCompletion(ctx context.Context, task *
 		if err := r.clearPodAssignment(ctx, &pod); err != nil {
 			logger.Error(err, "Failed to clear pod assignment after task success", "pod", pod.Name)
 		}
-		return ctrl.Result{}, recordErr
+		return ctrl.Result{RequeueAfter: workerTaskOutputRetryAfter(task, r.now())}, recordErr
 
 	case "failed":
 		reason := pod.Annotations[kelos.AnnotationWorkerTaskFailReason]
@@ -1321,6 +1327,59 @@ func (r *WorkerPoolReconciler) completeTask(ctx context.Context, task *kelos.Tas
 	return nil
 }
 
+func (r *WorkerPoolReconciler) retryWorkerTaskOutputs(ctx context.Context, task *kelos.Task) (ctrl.Result, error) {
+	retryAfter := workerTaskOutputRetryAfter(task, r.now())
+	if retryAfter <= 0 {
+		return ctrl.Result{}, nil
+	}
+
+	outputs, results := r.readPodOutputs(ctx, task.Namespace, task.Status.PodName, task.Name)
+	if outputs == nil && results == nil {
+		return ctrl.Result{RequeueAfter: retryAfter}, nil
+	}
+
+	captured := false
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		captured = false
+		if err := r.Get(ctx, client.ObjectKeyFromObject(task), task); err != nil {
+			return err
+		}
+		if task.Status.Phase != kelos.TaskPhaseSucceeded || len(task.Status.Outputs) > 0 || len(task.Status.Results) > 0 {
+			return nil
+		}
+		task.Status.Outputs = outputs
+		task.Status.Results = results
+		task.Status.Usage = usageFromResults(results)
+		if err := r.Status().Update(ctx, task); err != nil {
+			return err
+		}
+		captured = true
+		return nil
+	}); err != nil {
+		return ctrl.Result{}, err
+	}
+	if captured && results != nil {
+		RecordCostTokenMetrics(task, results)
+	}
+	return ctrl.Result{}, nil
+}
+
+func workerTaskOutputRetryAfter(task *kelos.Task, now time.Time) time.Duration {
+	if task.Status.Phase != kelos.TaskPhaseSucceeded ||
+		len(task.Status.Outputs) > 0 || len(task.Status.Results) > 0 ||
+		task.Status.CompletionTime == nil {
+		return 0
+	}
+	remaining := task.Status.CompletionTime.Add(outputRetryWindow).Sub(now)
+	if remaining <= 0 {
+		return 0
+	}
+	if remaining < outputRetryInterval {
+		return remaining
+	}
+	return outputRetryInterval
+}
+
 func (r *WorkerPoolReconciler) createWorkerTaskRecord(ctx context.Context, task *kelos.Task) error {
 	if task.Status.Usage != nil {
 		if err := r.budget().createTaskRecord(ctx, task); err != nil {
@@ -1349,6 +1408,9 @@ func (r *WorkerPoolReconciler) clearTaskPodAssignmentIfStillAssigned(ctx context
 }
 
 func (r *WorkerPoolReconciler) readPodOutputs(ctx context.Context, namespace, podName, taskName string) ([]string, map[string]string) {
+	if r.podOutputReader != nil {
+		return r.podOutputReader(ctx, namespace, podName, taskName)
+	}
 	if r.Clientset == nil || podName == "" {
 		return nil, nil
 	}

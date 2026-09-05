@@ -428,6 +428,8 @@ function testSectionActionOpensTouchEditorForTargetSession() {
   state.sessionActionTrigger = new TestNode('button');
   elements.sessionActionsMenu.hidden = false;
   global.selectSession = session => { state.selected = session; };
+  let pickerOpenCount = 0;
+  elements.sectionChoice.showPicker = () => { pickerOpenCount++; };
 
   openSessionSectionEditor(target);
 
@@ -435,6 +437,7 @@ function testSectionActionOpensTouchEditorForTargetSession() {
   assert.equal(elements.sessionActionsMenu.hidden, true);
   assert.equal(elements.sectionForm.classList.contains('mobile-open'), true);
   assert.equal(document.activeElement, elements.sectionChoice);
+  assert.equal(pickerOpenCount, 1);
 
   closeSessionSectionEditor();
   assert.equal(elements.sectionForm.classList.contains('mobile-open'), false);

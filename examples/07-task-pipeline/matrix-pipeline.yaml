@@ -1,0 +1,46 @@
+apiVersion: kelos.dev/v1alpha2
+kind: TaskPipeline
+metadata:
+  name: matrix-review
+spec:
+  stages:
+    - name: review
+      matrix:
+        parameters:
+          - name: component
+            values: [api, controller]
+          - name: focus
+            values: [correctness, tests]
+      taskTemplate:
+        worker:
+          type: claude-code
+          credentials:
+            type: oauth
+            secretRef:
+              name: claude-credentials
+          workspaceRef:
+            name: my-workspace
+        prompt: |
+          Review the {{index .Matrix "component"}} component, focusing on {{index .Matrix "focus"}}.
+          Do not modify the repository. Identify the most important actionable finding.
+
+          Finish by reporting this structured result on its own line:
+          finding: <one-line finding>
+
+    - name: summarize
+      taskTemplate:
+        worker:
+          type: claude-code
+          credentials:
+            type: oauth
+            secretRef:
+              name: claude-credentials
+          workspaceRef:
+            name: my-workspace
+        prompt: |
+          Consolidate these review findings into a prioritized report:
+          {{range index .Stages "review" -}}
+          - {{index .Matrix "component"}} / {{index .Matrix "focus"}}: {{index .Results "finding"}}
+          {{end}}
+
+          Group related findings, remove duplicates, and recommend the next actions.

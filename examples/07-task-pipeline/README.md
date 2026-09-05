@@ -1,7 +1,8 @@
 # 07 — Task Pipeline
 
-A managed multi-step workflow. One agent scaffolds a feature, a second writes
-tests on the same branch, and a third opens a pull request.
+Managed multi-step workflows. The sequential example scaffolds a feature,
+writes tests, and opens a pull request. The matrix example fans out a review
+across components and focus areas, then consolidates the findings.
 
 ## Use Case
 
@@ -17,8 +18,9 @@ The pipeline status summarizes progress with bounded per-stage counts.
 | `github-token-secret.yaml` | Secret | GitHub token for cloning and PR creation |
 | `workspace.yaml` | Workspace | Git repository to clone |
 | `pipeline.yaml` | TaskPipeline | Three-stage feature development workflow |
+| `matrix-pipeline.yaml` | TaskPipeline | Matrix fan-out followed by a summary stage |
 
-## How It Works
+## Sequential Pipeline
 
 ```text
 scaffold
@@ -52,17 +54,39 @@ to an agent.
 All stages use the same branch, so the Workspace contains the commits produced
 by the preceding stage when the next Task starts.
 
+## Matrix Fan-Out Pipeline
+
+```text
+review(api, correctness) ───────┐
+review(api, tests) ─────────────┤
+review(controller, correctness) ├──▶ summarize
+review(controller, tests) ──────┘
+```
+
+The `review` stage defines `component` and `focus` matrix parameters. Kelos
+creates one parallel Task for each combination, for a total of four Tasks. The
+`summarize` stage starts after all four succeed and iterates over their matrix
+values and structured `finding` results through `.Stages`.
+
 ## Steps
 
 1. Edit the secrets and replace the placeholder values.
 2. Edit `workspace.yaml` and set your repository URL.
-3. Apply the resources:
+3. Apply the shared resources:
 
 ```bash
-kubectl apply -f examples/07-task-pipeline/
+kubectl apply -f examples/07-task-pipeline/credentials-secret.yaml
+kubectl apply -f examples/07-task-pipeline/github-token-secret.yaml
+kubectl apply -f examples/07-task-pipeline/workspace.yaml
 ```
 
-4. Watch the pipeline in one terminal:
+4. Apply the sequential pipeline:
+
+```bash
+kubectl apply -f examples/07-task-pipeline/pipeline.yaml
+```
+
+5. Watch the pipeline in one terminal:
 
 ```bash
 kubectl get taskpipeline auth-feature -w
@@ -74,14 +98,14 @@ kubectl get taskpipeline auth-feature -w
 kubectl get tasks -l kelos.dev/taskpipeline=auth-feature -w
 ```
 
-5. View stage progress and child Task results:
+6. View stage progress and child Task results:
 
 ```bash
 kubectl get taskpipeline auth-feature -o yaml
 kubectl get tasks -l kelos.dev/taskpipeline=auth-feature -o yaml
 ```
 
-6. Stream logs from a stage's child Task:
+7. Stream logs from a stage's child Task:
 
 ```bash
 kelos logs auth-feature-scaffold -f
@@ -89,10 +113,29 @@ kelos logs auth-feature-write-tests -f
 kelos logs auth-feature-open-pr -f
 ```
 
-7. Delete the pipeline and all owned Tasks:
+## Run the Matrix Example
+
+After applying the secrets and Workspace from step 3, apply the matrix pipeline
+instead of the sequential pipeline in step 4, or run both alongside each other:
 
 ```bash
-kubectl delete -f examples/07-task-pipeline/
+kubectl apply -f examples/07-task-pipeline/matrix-pipeline.yaml
+kubectl get taskpipeline matrix-review -w
+```
+
+Watch the four review Tasks run in parallel, followed by the summary Task:
+
+```bash
+kubectl get tasks -l kelos.dev/taskpipeline=matrix-review -w
+```
+
+## Cleanup
+
+Delete both examples and all owned Tasks. Resources that were not applied are
+ignored:
+
+```bash
+kubectl delete --ignore-not-found -f examples/07-task-pipeline/
 ```
 
 ## Notes
@@ -101,5 +144,6 @@ kubectl delete -f examples/07-task-pipeline/
   already active are allowed to finish before the pipeline becomes `Failed`.
 - `TaskPipeline.spec.stages` is immutable. Delete and recreate the resource to
   run a modified workflow.
-- Matrix fan-out and aggregate result templates are covered in the
+- Matrix parameters form a Cartesian product. The full matrix API and template
+  context are covered in the
   [TaskPipeline reference](../../docs/reference.md#taskpipeline).

@@ -1479,13 +1479,15 @@ The Kelos controller and spawner pods expose Prometheus metrics on their `/metri
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `kelos_task_created_total` | Counter | namespace, type | Total Tasks for which a Job was created |
-| `kelos_task_completed_total` | Counter | namespace, type, phase | Total Tasks that reached a terminal phase |
-| `kelos_task_duration_seconds` | Histogram | namespace, type, phase | Duration of Task execution from start to completion |
+| `kelos_task_created_total` | Counter | namespace, type, spawner | Total Tasks for which a Job was created |
+| `kelos_task_completed_total` | Counter | namespace, type, spawner, phase | Total Tasks that reached a terminal phase |
+| `kelos_task_duration_seconds` | Histogram | namespace, type, spawner, phase | Duration of Task execution from start to completion |
 | `kelos_task_cost_usd_total` | Counter | namespace, type, spawner, model | Cumulative cost in USD of completed Tasks |
 | `kelos_task_input_tokens_total` | Counter | namespace, type, spawner, model | Cumulative input tokens consumed by completed Tasks |
 | `kelos_task_output_tokens_total` | Counter | namespace, type, spawner, model | Cumulative output tokens consumed by completed Tasks |
 | `kelos_reconcile_errors_total` | Counter | controller | Reconciliation errors |
+
+`kelos_task_created_total` counts only Tasks that run as a Job; Tasks executed by a WorkerPool are not counted. `kelos_task_completed_total` and `kelos_task_duration_seconds` cover both. Comparing created against completed for a given `spawner` is therefore only meaningful for spawners that do not route to a WorkerPool.
 
 ### Spawner Metrics
 

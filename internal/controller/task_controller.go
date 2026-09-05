@@ -454,7 +454,7 @@ func (r *TaskReconciler) createJob(ctx context.Context, task *kelos.Task) (ctrl.
 
 	logger.Info("created Job", "job", job.Name)
 	r.recordEvent(task, corev1.EventTypeNormal, "TaskCreated", "Created Job %s for task", job.Name)
-	taskCreatedTotal.WithLabelValues(task.Namespace, resolveTaskType(task)).Inc()
+	taskCreatedTotal.WithLabelValues(task.Namespace, resolveTaskType(task), resolveTaskSpawner(task)).Inc()
 
 	// Update status
 	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
@@ -881,7 +881,7 @@ func (r *TaskReconciler) updateStatus(ctx context.Context, task *kelos.Task, job
 			newMessage = "Task completed successfully"
 			setCompletionTime = true
 			r.recordEvent(task, corev1.EventTypeNormal, "TaskSucceeded", "Task completed successfully")
-			taskCompletedTotal.WithLabelValues(task.Namespace, resolveTaskType(task), string(kelos.TaskPhaseSucceeded)).Inc()
+			recordTaskCompleted(task, kelos.TaskPhaseSucceeded)
 		}
 	} else if isJobFailed(job) {
 		if task.Status.Phase != kelos.TaskPhaseFailed {
@@ -889,7 +889,7 @@ func (r *TaskReconciler) updateStatus(ctx context.Context, task *kelos.Task, job
 			newMessage = "Task failed"
 			setCompletionTime = true
 			r.recordEvent(task, corev1.EventTypeWarning, "TaskFailed", "Task failed")
-			taskCompletedTotal.WithLabelValues(task.Namespace, resolveTaskType(task), string(kelos.TaskPhaseFailed)).Inc()
+			recordTaskCompleted(task, kelos.TaskPhaseFailed)
 		}
 	}
 
@@ -971,7 +971,7 @@ func (r *TaskReconciler) updateStatus(ctx context.Context, task *kelos.Task, job
 	// Record task duration when completion time is set and we have a start time
 	if setCompletionTime && task.Status.StartTime != nil {
 		duration := task.Status.CompletionTime.Time.Sub(task.Status.StartTime.Time).Seconds()
-		taskDurationSeconds.WithLabelValues(task.Namespace, resolveTaskType(task), string(newPhase)).Observe(duration)
+		observeTaskDuration(task, newPhase, duration)
 	}
 
 	// Record cost and token metrics when results are available
@@ -1142,7 +1142,7 @@ func (r *TaskReconciler) checkDependencies(ctx context.Context, task *kelos.Task
 				logger.Error(updateErr, "Unable to update Task status")
 			}
 			r.recordEvent(task, corev1.EventTypeWarning, "DependencyFailed", "Dependency %q failed", depName)
-			taskCompletedTotal.WithLabelValues(task.Namespace, resolveTaskType(task), string(kelos.TaskPhaseFailed)).Inc()
+			recordTaskCompleted(task, kelos.TaskPhaseFailed)
 			return false, ctrl.Result{}, nil
 		}
 
@@ -1293,9 +1293,8 @@ func (r *TaskReconciler) resolvePromptTemplate(ctx context.Context, task *kelos.
 // RecordCostTokenMetrics emits Prometheus counters for cost and token usage
 // extracted from Task results.
 func RecordCostTokenMetrics(task *kelos.Task, results map[string]string) {
-	spawner := task.Labels["kelos.dev/taskspawner"]
 	model := resolveTaskModel(task)
-	labels := []string{task.Namespace, resolveTaskType(task), spawner, model}
+	labels := []string{task.Namespace, resolveTaskType(task), resolveTaskSpawner(task), model}
 
 	if costStr, ok := results["cost-usd"]; ok {
 		if cost, err := strconv.ParseFloat(costStr, 64); err == nil && cost > 0 {

@@ -725,6 +725,7 @@ to receive refreshed credentials during long-running work.
 | `spec.skills[].source` | skills.sh package in `owner/repo` format for github.com (e.g., `vercel-labs/agent-skills`) or a full HTTPS git URL for private/GitHub Enterprise Server repositories (e.g., `https://ghe.example.com/org/private-skills.git`). Installed skills are exposed to the agent as a plugin named `skills-sh`; when `AgentConfig.spec.skills` is set, that name is reserved and must not be used in `AgentConfig.spec.plugins[].name` | Yes (per skill) |
 | `spec.skills[].skill` | Specific skill name from the package (installs all if omitted) | No |
 | `spec.skills[].secretRef.name` | Secret in the Task namespace containing a `GITHUB_TOKEN` key for HTTPS token auth when installing private skills.sh packages. Missing Secrets, missing `GITHUB_TOKEN`, or empty tokens fail the Task before Job creation. SSH deploy keys are not supported by this field | No |
+| `spec.skills[].optional` | Continue agent startup when this package cannot be installed. The init-container log names the failed package. Defaults to `false`, which keeps installation fail-fast | No |
 | `spec.mcpServers[].name` | MCP server name (used as key in agent config) | Yes (per server) |
 | `spec.mcpServers[].type` | Transport type: `stdio`, `http`, or `sse` | Yes (per server) |
 | `spec.mcpServers[].command` | Executable to run (stdio only) | No |

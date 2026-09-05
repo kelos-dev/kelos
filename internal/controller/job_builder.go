@@ -1349,6 +1349,7 @@ func buildSkillsInstallScript(skills []kelos.SkillsShSpec, authEnvs []skillsAuth
 		"apk add --no-cache git >/dev/null 2>&1",
 	}
 	authEnvBySecret := skillsAuthEnvMap(authEnvs)
+	hasRequiredSkills := false
 	if len(authEnvBySecret) > 0 {
 		lines = append(lines,
 			"cat > /tmp/kelos-skills-askpass <<'EOF'",
@@ -1382,6 +1383,15 @@ func buildSkillsInstallScript(skills []kelos.SkillsShSpec, authEnvs []skillsAuth
 			}
 			args = authenticatedSkillsInstallCommand(s.Source, tokenEnvName, args)
 		}
+		if s.Optional {
+			lines = append(lines,
+				fmt.Sprintf("if ! %s; then", args),
+				fmt.Sprintf("  printf \"Optional skills.sh package '%%s' failed to install; continuing\\\\n\" %s >&2", shellQuote(s.Source)),
+				"fi",
+			)
+			continue
+		}
+		hasRequiredSkills = true
 		lines = append(lines, args)
 	}
 
@@ -1390,10 +1400,19 @@ func buildSkillsInstallScript(skills []kelos.SkillsShSpec, authEnvs []skillsAuth
 	// the plugin layout and drop the installer's leftover state.
 	installDir := path.Join(PluginMountPath, ".agents", "skills")
 	pluginSkillsDir := path.Join(PluginMountPath, SkillsShPluginName, "skills")
+	lines = append(lines, fmt.Sprintf("mkdir -p %s", shellQuote(pluginSkillsDir)))
+	if hasRequiredSkills {
+		lines = append(lines,
+			fmt.Sprintf("[ -d %s ] || { echo 'No skills.sh skills were installed' >&2; exit 1; }", shellQuote(installDir)),
+		)
+	}
 	lines = append(lines,
-		fmt.Sprintf("[ -d %s ] || { echo 'No skills.sh skills were installed' >&2; exit 1; }", shellQuote(installDir)),
-		fmt.Sprintf("mkdir -p %s", shellQuote(pluginSkillsDir)),
-		fmt.Sprintf("mv %s/* %s/", shellQuote(installDir), shellQuote(pluginSkillsDir)),
+		fmt.Sprintf("if [ -d %s ]; then", shellQuote(installDir)),
+		fmt.Sprintf("  for skill_path in %s/*; do", shellQuote(installDir)),
+		"    [ -e \"$skill_path\" ] || continue",
+		fmt.Sprintf("    mv \"$skill_path\" %s/", shellQuote(pluginSkillsDir)),
+		"  done",
+		"fi",
 		fmt.Sprintf("rm -rf %s %s", shellQuote(path.Join(PluginMountPath, ".agents")), shellQuote(path.Join(PluginMountPath, ".npm"))),
 		fmt.Sprintf("chown -R %d:%d %s", AgentUID, AgentUID, shellQuote(PluginMountPath)),
 	)

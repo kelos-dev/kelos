@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -66,11 +67,23 @@ var _ = Describe("AgentConfig conversion webhook", Ordered, func() {
 	})
 
 	AfterAll(func() {
-		// Remove the AgentConfig objects created here so later install/uninstall
-		// specs that delete the agentconfigs CRD are not left with instances.
+		// Remove the objects created here so specs that delete a kelos CRD are
+		// not left with instances. envtest runs no namespace controller, so the
+		// namespaces themselves cannot be cleaned up this way — the instances
+		// have to go individually.
 		for _, ns := range []string{"test-conv-up", "test-conv-down"} {
 			_ = k8sClient.Delete(ctx, &kelos.AgentConfig{
 				ObjectMeta: metav1.ObjectMeta{Name: "cfg", Namespace: ns},
+			})
+		}
+		// TaskSpawners carry a controller finalizer, so leaving them behind
+		// would keep instances of the taskspawners CRD alive indefinitely.
+		for _, ts := range []types.NamespacedName{
+			{Name: "ts", Namespace: "test-conv-ts"},
+			{Name: "ts-slack", Namespace: "test-conv-ts-slack"},
+		} {
+			_ = k8sClient.Delete(ctx, &kelos.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{Name: ts.Name, Namespace: ts.Namespace},
 			})
 		}
 	})
@@ -171,5 +184,61 @@ var _ = Describe("AgentConfig conversion webhook", Ordered, func() {
 		Expect(gi.PollInterval).To(Equal("9m"))
 		Expect(gi.CommentPolicy).NotTo(BeNil())
 		Expect(gi.CommentPolicy.TriggerComment).To(Equal("/kelos go"))
+	})
+
+	It("preserves TaskSpawner slack excludeChannels across a v1alpha1 round-trip", func() {
+		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test-conv-ts-slack"}}
+		Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+		key := types.NamespacedName{Name: "ts-slack", Namespace: ns.Name}
+
+		By("Creating a v1alpha2 TaskSpawner with slack channels and excludeChannels")
+		v2 := &kelos.TaskSpawner{
+			ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace},
+			Spec: kelos.TaskSpawnerSpec{
+				When: kelos.When{
+					Slack: &kelos.Slack{
+						Channels:        []string{"C0123456789"},
+						ExcludeChannels: []string{"C9876543210", "D0123456789"},
+					},
+				},
+				TaskTemplate: kelos.TaskTemplate{
+					Type:         "claude-code",
+					Credentials:  &kelos.Credentials{Type: kelos.CredentialTypeNone},
+					WorkspaceRef: &kelos.WorkspaceReference{Name: "ws"},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, v2)).To(Succeed())
+
+		By("Reading it back as v1alpha1 and asserting the field survives in the preservation annotation")
+		down := &kelosv1alpha1.TaskSpawner{}
+		Expect(k8sClient.Get(ctx, key, down)).To(Succeed())
+		Expect(down.Spec.When.Slack).NotTo(BeNil())
+		Expect(down.Spec.When.Slack.Channels).To(Equal([]string{"C0123456789"}))
+		Expect(down.Annotations).To(HaveKeyWithValue(
+			"kelos.dev/v1alpha2-slack-exclude-channels", `["C9876543210","D0123456789"]`))
+
+		By("Writing the object back through v1alpha1")
+		// The TaskSpawner controller reconciles this object concurrently, so the
+		// read-modify-write has to tolerate a conflict on a stale resourceVersion.
+		Eventually(func() error {
+			current := &kelosv1alpha1.TaskSpawner{}
+			if err := k8sClient.Get(ctx, key, current); err != nil {
+				return err
+			}
+			if current.Spec.When.Slack == nil {
+				return fmt.Errorf("slack config missing on the v1alpha1 read")
+			}
+			current.Spec.When.Slack.Channels = []string{"C0123456789", "C1122334455"}
+			return k8sClient.Update(ctx, current)
+		}, 10*time.Second, 100*time.Millisecond).Should(Succeed())
+
+		By("Reading it as v1alpha2 and asserting excludeChannels was restored")
+		got := &kelos.TaskSpawner{}
+		Expect(k8sClient.Get(ctx, key, got)).To(Succeed())
+		Expect(got.Spec.When.Slack).NotTo(BeNil())
+		Expect(got.Spec.When.Slack.Channels).To(Equal([]string{"C0123456789", "C1122334455"}))
+		Expect(got.Spec.When.Slack.ExcludeChannels).To(Equal([]string{"C9876543210", "D0123456789"}))
+		Expect(got.Annotations).NotTo(HaveKey("kelos.dev/v1alpha2-slack-exclude-channels"))
 	})
 })

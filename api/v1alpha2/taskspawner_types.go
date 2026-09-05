@@ -649,7 +649,11 @@ type GenericWebhookFilter struct {
 // are configured on the server, not per-TaskSpawner.
 //
 // The bot must be invited to each channel it should listen in; the Channels
-// field is a post-delivery filter, not a privacy scope.
+// and ExcludeChannels fields are post-delivery filters, not a privacy scope.
+// The server has already received the message — and, for a thread reply, has
+// already fetched the thread history — before either field is consulted, and
+// the bot stays in an excluded channel and still greets it on join. Remove the
+// bot from a channel to stop delivery itself.
 //
 // Bot mention (@bot) is implicitly required by default. The handler knows its
 // own bot user ID from the Slack auth response. When Triggers are configured,
@@ -664,6 +668,25 @@ type Slack struct {
 	// +kubebuilder:validation:MaxItems=64
 	// +kubebuilder:validation:items:Pattern=`^[CG][A-Z0-9]{8,}$`
 	Channels []string `json:"channels,omitempty"`
+
+	// ExcludeChannels rejects Slack events from the given channels regardless
+	// of the Channels allowlist — an excluded channel is never matched, even
+	// when Channels is empty (all channels) or names the same channel.
+	// Unlike ExcludePatterns, this also applies to slash commands.
+	//
+	// Values are channel IDs. Direct-message IDs ("D0123456789") are accepted
+	// here even though Channels does not accept them, so a spawner that
+	// listens in every channel can still be kept out of DMs.
+	//
+	// The exclusion is only guaranteed while the object is managed through
+	// v1alpha2. This field does not exist in v1alpha1; it survives a v1alpha1
+	// round-trip through a preservation annotation, so a v1alpha1 client that
+	// drops unknown annotations drops the exclusion with them.
+	// +optional
+	// +listType=set
+	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:Pattern=`^[CGD][A-Z0-9]{8,}$`
+	ExcludeChannels []string `json:"excludeChannels,omitempty"`
 
 	// BotMessages controls whether bot-originated messages can trigger this
 	// spawner. Accepting bot messages carries loop risk — especially "All"

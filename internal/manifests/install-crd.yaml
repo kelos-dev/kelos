@@ -60620,6 +60620,27 @@ spec:
                           type: string
                         maxItems: 64
                         type: array
+                      excludeChannels:
+                        description: |-
+                          ExcludeChannels rejects Slack events from the given channels regardless
+                          of the Channels allowlist — an excluded channel is never matched, even
+                          when Channels is empty (all channels) or names the same channel.
+                          Unlike ExcludePatterns, this also applies to slash commands.
+
+                          Values are channel IDs. Direct-message IDs ("D0123456789") are accepted
+                          here even though Channels does not accept them, so a spawner that
+                          listens in every channel can still be kept out of DMs.
+
+                          The exclusion is only guaranteed while the object is managed through
+                          v1alpha2. This field does not exist in v1alpha1; it survives a v1alpha1
+                          round-trip through a preservation annotation, so a v1alpha1 client that
+                          drops unknown annotations drops the exclusion with them.
+                        items:
+                          pattern: ^[CGD][A-Z0-9]{8,}$
+                          type: string
+                        maxItems: 64
+                        type: array
+                        x-kubernetes-list-type: set
                       excludePatterns:
                         description: |-
                           ExcludePatterns rejects messages whose text matches any of the given

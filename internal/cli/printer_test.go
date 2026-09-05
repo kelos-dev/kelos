@@ -447,7 +447,8 @@ func TestPrintTaskSpawnerDetailSlack(t *testing.T) {
 		Spec: kelos.TaskSpawnerSpec{
 			When: kelos.When{
 				Slack: &kelos.Slack{
-					Channels: []string{"C0123456789", "C9876543210"},
+					Channels:        []string{"C0123456789", "C9876543210"},
+					ExcludeChannels: []string{"C1122334455"},
 					Triggers: []kelos.SlackTrigger{
 						{Pattern: "deploy"},
 						{Pattern: "rollback"},
@@ -473,6 +474,7 @@ func TestPrintTaskSpawnerDetailSlack(t *testing.T) {
 	for _, expected := range []string{
 		"Source:             Slack",
 		"Channels:           [C0123456789 C9876543210]",
+		"Exclude Channels:   [C1122334455]",
 		"Triggers:           [deploy rollback]",
 		"Exclude Patterns:   [^ignore]",
 	} {

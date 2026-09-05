@@ -2,6 +2,8 @@ package conversion
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -259,6 +261,191 @@ func TestTaskSpawnerConvert_ModernFieldsRoundTrip(t *testing.T) {
 	gi := back.Spec.When.GitHubIssues
 	if gi.PollInterval != "5m" || gi.CommentPolicy == nil || gi.CommentPolicy.TriggerComment != "/go" || gi.CommentPolicy.MinimumPermission != "write" {
 		t.Errorf("modern fields not preserved: %#v", gi)
+	}
+}
+
+// TestTaskSpawnerConvert_SlackExcludeChannelsRoundTrip verifies that the
+// v1alpha2-only slack excludeChannels field survives a v1alpha1 round-trip via
+// its preservation annotation while shared Slack fields are carried directly.
+func TestTaskSpawnerConvert_SlackExcludeChannelsRoundTrip(t *testing.T) {
+	src := &v1alpha2.TaskSpawner{
+		Spec: v1alpha2.TaskSpawnerSpec{
+			When: v1alpha2.When{
+				Slack: &v1alpha2.Slack{
+					Channels:        []string{"C0123456789"},
+					ExcludeChannels: []string{"C9876543210", "D0123456789"},
+				},
+			},
+		},
+	}
+
+	down := &v1alpha1.TaskSpawner{}
+	if err := taskSpawnerFromHub(context.Background(), src, down); err != nil {
+		t.Fatalf("taskSpawnerFromHub() error = %v", err)
+	}
+	if down.Spec.When.Slack == nil {
+		t.Fatal("expected slack config after down-conversion")
+	}
+	if len(down.Spec.When.Slack.Channels) != 1 || down.Spec.When.Slack.Channels[0] != "C0123456789" {
+		t.Errorf("shared channels not preserved: %#v", down.Spec.When.Slack.Channels)
+	}
+	// v1alpha1 cannot represent excludeChannels — it survives only via the
+	// preservation annotation.
+	if raw, ok := down.Annotations[preservedSlackExcludeChannelsAnnotation]; !ok || raw != `["C9876543210","D0123456789"]` {
+		t.Errorf("preservation annotation = %q, want the excludeChannels JSON", raw)
+	}
+
+	up := &v1alpha2.TaskSpawner{}
+	if err := taskSpawnerToHub(context.Background(), down, up); err != nil {
+		t.Fatalf("taskSpawnerToHub() error = %v", err)
+	}
+	if up.Spec.When.Slack == nil {
+		t.Fatal("expected slack config after up-conversion")
+	}
+	got := up.Spec.When.Slack.ExcludeChannels
+	if len(got) != 2 || got[0] != "C9876543210" || got[1] != "D0123456789" {
+		t.Errorf("excludeChannels not restored: %#v", got)
+	}
+	if _, ok := up.Annotations[preservedSlackExcludeChannelsAnnotation]; ok {
+		t.Error("preservation annotation not cleaned up after restore")
+	}
+}
+
+func TestTaskSpawnerToHub_MalformedSlackExcludeChannelsAnnotationIgnored(t *testing.T) {
+	// The preservation annotation is user-editable; a malformed value must not
+	// block conversion to the storage version. It is treated as absent and
+	// stripped from the hub object so the internal key does not leak into the
+	// v1alpha2 view.
+	spoke := &v1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chat",
+			Namespace: "default",
+			Annotations: map[string]string{
+				preservedSlackExcludeChannelsAnnotation: "[not valid json",
+			},
+		},
+		Spec: v1alpha1.TaskSpawnerSpec{
+			When: v1alpha1.When{Slack: &v1alpha1.Slack{Channels: []string{"C0123456789"}}},
+		},
+	}
+
+	hub := &v1alpha2.TaskSpawner{}
+	if err := taskSpawnerToHub(context.Background(), spoke, hub); err != nil {
+		t.Fatalf("taskSpawnerToHub() error = %v", err)
+	}
+	if hub.Spec.When.Slack == nil {
+		t.Fatal("expected slack config after up-conversion")
+	}
+	if got := hub.Spec.When.Slack.ExcludeChannels; len(got) != 0 {
+		t.Errorf("excludeChannels = %#v, want none from a malformed annotation", got)
+	}
+	if _, ok := hub.Annotations[preservedSlackExcludeChannelsAnnotation]; ok {
+		t.Error("malformed preservation annotation should still be stripped from the hub object")
+	}
+}
+
+// marshalChannelIDs returns a JSON array of n unique, well-formed Slack channel
+// IDs, for exercising the maxItems boundary of the preservation annotation.
+func marshalChannelIDs(t *testing.T, n int) string {
+	t.Helper()
+	ids := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		ids = append(ids, fmt.Sprintf("C%09d", i))
+	}
+	raw, err := json.Marshal(ids)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	return string(raw)
+}
+
+func TestTaskSpawnerToHub_InvalidSlackExcludeChannelsAnnotationIgnored(t *testing.T) {
+	// The API server does not re-validate conversion output, so annotation data
+	// that violates the v1alpha2 constraints must not be restored — otherwise a
+	// v1alpha1 write could plant values the v1alpha2 schema would have rejected.
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{"channel id that fails the item pattern", `["c0123456789"]`},
+		{"channel id that is too short", `["C123"]`},
+		{"more entries than maxItems allows", marshalChannelIDs(t, slackExcludeChannelsMaxItems+1)},
+		{"duplicate entries in a set", `["C0123456789","C0123456789"]`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spoke := &v1alpha1.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "chat",
+					Namespace:   "default",
+					Annotations: map[string]string{preservedSlackExcludeChannelsAnnotation: tt.raw},
+				},
+				Spec: v1alpha1.TaskSpawnerSpec{
+					When: v1alpha1.When{Slack: &v1alpha1.Slack{Channels: []string{"C0123456789"}}},
+				},
+			}
+
+			hub := &v1alpha2.TaskSpawner{}
+			if err := taskSpawnerToHub(context.Background(), spoke, hub); err != nil {
+				t.Fatalf("taskSpawnerToHub() error = %v", err)
+			}
+			if hub.Spec.When.Slack == nil {
+				t.Fatal("expected slack config after up-conversion")
+			}
+			if got := hub.Spec.When.Slack.ExcludeChannels; len(got) != 0 {
+				t.Errorf("excludeChannels = %#v, want none from annotation data that violates the field constraints", got)
+			}
+			if _, ok := hub.Annotations[preservedSlackExcludeChannelsAnnotation]; ok {
+				t.Error("invalid preservation annotation should still be stripped from the hub object")
+			}
+		})
+	}
+}
+
+func TestTaskSpawnerToHub_MaxSlackExcludeChannelsAnnotationRestored(t *testing.T) {
+	// The boundary case must still restore: exactly maxItems valid, unique IDs.
+	spoke := &v1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chat",
+			Namespace: "default",
+			Annotations: map[string]string{
+				preservedSlackExcludeChannelsAnnotation: marshalChannelIDs(t, slackExcludeChannelsMaxItems),
+			},
+		},
+		Spec: v1alpha1.TaskSpawnerSpec{
+			When: v1alpha1.When{Slack: &v1alpha1.Slack{}},
+		},
+	}
+
+	hub := &v1alpha2.TaskSpawner{}
+	if err := taskSpawnerToHub(context.Background(), spoke, hub); err != nil {
+		t.Fatalf("taskSpawnerToHub() error = %v", err)
+	}
+	if got := hub.Spec.When.Slack.ExcludeChannels; len(got) != slackExcludeChannelsMaxItems {
+		t.Errorf("excludeChannels length = %d, want %d", len(got), slackExcludeChannelsMaxItems)
+	}
+}
+
+func TestTaskSpawnerFromHub_NoSlackExcludeChannelsOmitsAnnotation(t *testing.T) {
+	hub := &v1alpha2.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chat",
+			Namespace: "default",
+			Annotations: map[string]string{
+				preservedSlackExcludeChannelsAnnotation: `["C9876543210"]`,
+			},
+		},
+		Spec: v1alpha2.TaskSpawnerSpec{
+			When: v1alpha2.When{Slack: &v1alpha2.Slack{Channels: []string{"C0123456789"}}},
+		},
+	}
+	spoke := &v1alpha1.TaskSpawner{}
+	if err := taskSpawnerFromHub(context.Background(), hub, spoke); err != nil {
+		t.Fatalf("taskSpawnerFromHub() error = %v", err)
+	}
+	if _, ok := spoke.Annotations[preservedSlackExcludeChannelsAnnotation]; ok {
+		t.Error("annotation should be cleared when excludeChannels is empty")
 	}
 }
 

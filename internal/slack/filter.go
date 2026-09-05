@@ -67,13 +67,15 @@ func getOrCompileRegexp(pattern string) (*regexp.Regexp, error) {
 }
 
 // MatchesSpawner checks whether a Slack message matches the given TaskSpawner's
-// Slack configuration (channels, bot mention, trigger patterns, exclude
-// patterns, and bot message policy).
+// Slack configuration (channels, excluded channels, bot mention, trigger
+// patterns, exclude patterns, and bot message policy). Excluded channels are
+// rejected before every other check, so — unlike exclude patterns — the
+// exclusion also covers slash commands.
 func MatchesSpawner(slackCfg *kelos.Slack, msg *SlackMessageData, botUserID string) bool {
 	if slackCfg == nil {
 		return false
 	}
-	if !matchesChannel(msg.ChannelID, slackCfg.Channels) {
+	if !matchesChannel(msg.ChannelID, slackCfg.Channels, slackCfg.ExcludeChannels) {
 		return false
 	}
 	// Slash commands bypass mention, trigger, and exclude filters.
@@ -132,9 +134,16 @@ func ExtractSlackWorkItem(msg *SlackMessageData) map[string]interface{} {
 	}
 }
 
-// matchesChannel returns true if channelID is in the allowed list,
-// or if the allowed list is empty (all channels permitted).
-func matchesChannel(channelID string, allowed []string) bool {
+// matchesChannel returns false if channelID is in the excluded list,
+// otherwise true if channelID is in the allowed list, or if the allowed
+// list is empty (all channels permitted). Exclusion always wins over the
+// allowlist.
+func matchesChannel(channelID string, allowed, excluded []string) bool {
+	for _, id := range excluded {
+		if id == channelID {
+			return false
+		}
+	}
 	if len(allowed) == 0 {
 		return true
 	}

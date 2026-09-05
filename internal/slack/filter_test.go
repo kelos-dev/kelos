@@ -56,6 +56,64 @@ func TestMatchesSpawner(t *testing.T) {
 			want:      false,
 		},
 		{
+			name: "excluded channel rejects even with bot mention",
+			slackCfg: &kelos.Slack{
+				ExcludeChannels: []string{"C1", "C2"},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> hi"},
+			botUserID: "UBOT1",
+			want:      false,
+		},
+		{
+			name: "excluded channel rejects even with matching trigger",
+			slackCfg: &kelos.Slack{
+				ExcludeChannels: []string{"C1"},
+				Triggers: []kelos.SlackTrigger{
+					{Pattern: "fix.*bug", MentionOptional: boolPtr(true)},
+				},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "fix the bug"},
+			botUserID: "UBOT1",
+			want:      false,
+		},
+		{
+			name: "excluded channel rejects even when allowed list empty",
+			slackCfg: &kelos.Slack{
+				ExcludeChannels: []string{"C1"},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> hi"},
+			botUserID: "UBOT1",
+			want:      false,
+		},
+		{
+			name: "excluded channel rejects slash command",
+			slackCfg: &kelos.Slack{
+				ExcludeChannels: []string{"C1"},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "/triage something", IsSlashCommand: true},
+			botUserID: "UBOT1",
+			want:      false,
+		},
+		{
+			name: "excluded direct message rejects",
+			slackCfg: &kelos.Slack{
+				ExcludeChannels: []string{"D0123456789"},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "D0123456789", Text: "<@UBOT1> hi"},
+			botUserID: "UBOT1",
+			want:      false,
+		},
+		{
+			name: "non-excluded channel still matches",
+			slackCfg: &kelos.Slack{
+				Channels:        []string{"C2", "C3"},
+				ExcludeChannels: []string{"C1"},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C3", Text: "<@UBOT1> hi"},
+			botUserID: "UBOT1",
+			want:      true,
+		},
+		{
 			name: "trigger with pattern and mention matches",
 			slackCfg: &kelos.Slack{
 				Triggers: []kelos.SlackTrigger{
@@ -487,16 +545,23 @@ func TestMatchesChannel(t *testing.T) {
 		name      string
 		channelID string
 		allowed   []string
+		excluded  []string
 		want      bool
 	}{
-		{"empty allowed list matches all", "C1", nil, true},
-		{"in allowed list", "C1", []string{"C1", "C2"}, true},
-		{"not in allowed list", "C3", []string{"C1", "C2"}, false},
+		{"empty allowed list matches all", "C1", nil, nil, true},
+		{"in allowed list", "C1", []string{"C1", "C2"}, nil, true},
+		{"not in allowed list", "C3", []string{"C1", "C2"}, nil, false},
+		{"excluded channel rejects", "C1", nil, []string{"C1"}, false},
+		{"excluded channel rejects even when allowed", "C1", []string{"C1"}, []string{"C1"}, false},
+		{"excluded channel rejects even when allowed empty", "C1", nil, []string{"C1", "C2"}, false},
+		{"non-excluded channel matches when allowed empty", "C3", nil, []string{"C1", "C2"}, true},
+		{"non-excluded allowed channel matches", "C2", []string{"C1", "C2"}, []string{"C0"}, true},
+		{"excluded direct message rejects", "D1", nil, []string{"D1"}, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := matchesChannel(tt.channelID, tt.allowed); got != tt.want {
+			if got := matchesChannel(tt.channelID, tt.allowed, tt.excluded); got != tt.want {
 				t.Errorf("matchesChannel() = %v, want %v", got, tt.want)
 			}
 		})

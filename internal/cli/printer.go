@@ -324,6 +324,9 @@ func printTaskSpawnerDetail(w io.Writer, ts *kelos.TaskSpawner) {
 		if len(sl.Channels) > 0 {
 			printField(w, "Channels", fmt.Sprintf("%v", sl.Channels))
 		}
+		if len(sl.ExcludeChannels) > 0 {
+			printField(w, "Exclude Channels", fmt.Sprintf("%v", sl.ExcludeChannels))
+		}
 		if len(sl.Triggers) > 0 {
 			patterns := make([]string, len(sl.Triggers))
 			for i, tr := range sl.Triggers {

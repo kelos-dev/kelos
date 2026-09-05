@@ -36,6 +36,17 @@ const preservedGitHubCommentsReportingAnnotation = "kelos.dev/v1alpha2-github-co
 // across a v1alpha1 round-trip without exposing the capability in v1alpha1.
 const preservedWebhookGatewayRefsAnnotation = "kelos.dev/v1alpha2-webhook-gateway-refs"
 
+// preservedGitLabSourcesAnnotation carries spec.when.gitlab and
+// spec.when.gitlabWebhook (v1alpha2-only sources) across a v1alpha1
+// round-trip. They are restored only when the v1alpha1 spec selects no other
+// source, so a client that deliberately switches source wins.
+const preservedGitLabSourcesAnnotation = "kelos.dev/v1alpha2-gitlab-sources"
+
+type preservedGitLabSources struct {
+	GitLab        *v1alpha2.GitLab        `json:"gitlab,omitempty"`
+	GitLabWebhook *v1alpha2.GitLabWebhook `json:"gitlabWebhook,omitempty"`
+}
+
 type preservedWebhookGatewayRefs struct {
 	GitHub  *v1alpha2.GatewayReference `json:"github,omitempty"`
 	Linear  *v1alpha2.GatewayReference `json:"linear,omitempty"`
@@ -49,8 +60,8 @@ type preservedGitHubCommentsReporting struct {
 }
 
 type preservedGitHubCommentsSource struct {
-	Enabled  bool                             `json:"enabled,omitempty"`
-	Comments v1alpha2.GitHubCommentsReporting `json:"comments"`
+	Enabled  bool                       `json:"enabled,omitempty"`
+	Comments v1alpha2.CommentsReporting `json:"comments"`
 }
 
 func taskSpawnerToHub(_ context.Context, src *v1alpha1.TaskSpawner, dst *v1alpha2.TaskSpawner) error {
@@ -76,6 +87,8 @@ func taskSpawnerToHub(_ context.Context, src *v1alpha1.TaskSpawner, dst *v1alpha
 	deleteAnnotation(dst.Annotations, preservedGitHubCommentsReportingAnnotation)
 	restorePreservedWebhookGatewayRefs(src.Annotations, &dst.Spec.When)
 	deleteAnnotation(dst.Annotations, preservedWebhookGatewayRefsAnnotation)
+	restorePreservedGitLabSources(src.Annotations, &dst.Spec.When)
+	deleteAnnotation(dst.Annotations, preservedGitLabSourcesAnnotation)
 	return nil
 }
 
@@ -99,6 +112,9 @@ func taskSpawnerFromHub(_ context.Context, src *v1alpha2.TaskSpawner, dst *v1alp
 		return err
 	}
 	if err := setPreservedWebhookGatewayRefs(dst, src.Spec.When); err != nil {
+		return err
+	}
+	if err := setPreservedGitLabSources(dst, src.Spec.When); err != nil {
 		return err
 	}
 	return convertViaJSON(&src.Status, &dst.Status)
@@ -148,6 +164,44 @@ func restorePreservedWebhookGatewayRefs(annotations map[string]string, when *v1a
 	if when.GenericWebhook != nil && when.GenericWebhook.GatewayRef == nil {
 		when.GenericWebhook.GatewayRef = preserved.Generic
 	}
+}
+
+func setPreservedGitLabSources(dst *v1alpha1.TaskSpawner, when v1alpha2.When) error {
+	if when.GitLab == nil && when.GitLabWebhook == nil {
+		deleteAnnotation(dst.Annotations, preservedGitLabSourcesAnnotation)
+		return nil
+	}
+	data, err := json.Marshal(preservedGitLabSources{GitLab: when.GitLab, GitLabWebhook: when.GitLabWebhook})
+	if err != nil {
+		return err
+	}
+	if dst.Annotations == nil {
+		dst.Annotations = map[string]string{}
+	}
+	dst.Annotations[preservedGitLabSourcesAnnotation] = string(data)
+	return nil
+}
+
+func restorePreservedGitLabSources(annotations map[string]string, when *v1alpha2.When) {
+	raw, ok := annotations[preservedGitLabSourcesAnnotation]
+	if !ok || raw == "" || whenHasSource(*when) {
+		return
+	}
+	var preserved preservedGitLabSources
+	if err := json.Unmarshal([]byte(raw), &preserved); err != nil {
+		// The annotation is best-effort preservation data and can be set by
+		// users; malformed data must not block API version conversion.
+		return
+	}
+	when.GitLab = preserved.GitLab
+	when.GitLabWebhook = preserved.GitLabWebhook
+}
+
+func whenHasSource(when v1alpha2.When) bool {
+	return when.GitHubIssues != nil || when.GitHubPullRequests != nil || when.Cron != nil ||
+		when.Jira != nil || when.GitLab != nil || when.GitHubWebhook != nil ||
+		when.LinearWebhook != nil || when.GitLabWebhook != nil || when.GenericWebhook != nil ||
+		when.Slack != nil
 }
 
 func setPreservedNameTemplateAnnotation(dst *v1alpha1.TaskSpawner, nameTemplate string) {

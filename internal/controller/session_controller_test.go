@@ -1670,7 +1670,7 @@ func TestPrepareSessionWorkspaceInitPreservesCloneCommands(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			containers := []corev1.Container{tt.container}
-			if err := prepareSessionWorkspaceInit(containers, ""); err != nil {
+			if err := prepareSessionWorkspaceInit(containers, "", gitCredentialDefaultUsername); err != nil {
 				t.Fatal(err)
 			}
 			script := ""
@@ -1693,14 +1693,14 @@ func TestPrepareSessionWorkspaceInitPreservesCloneCommands(t *testing.T) {
 }
 
 func TestPrepareSessionWorkspaceInitRefreshesCredentials(t *testing.T) {
-	credentialHelper := gitCredentialHelperForTokenFile("/test/GITHUB_TOKEN")
+	credentialHelper := gitCredentialHelperForTokenFile("/test/GITHUB_TOKEN", "GITHUB_TOKEN")
 	containers := []corev1.Container{{
 		Name:    "git-clone",
 		Command: []string{"sh", "-c", `git -c credential.helper= "$@"`},
 		Args:    []string{"--", "clone", "repo", "/workspace/repo"},
 	}}
 
-	if err := prepareSessionWorkspaceInit(containers, credentialHelper); err != nil {
+	if err := prepareSessionWorkspaceInit(containers, credentialHelper, gitCredentialDefaultUsername); err != nil {
 		t.Fatal(err)
 	}
 	script := containers[0].Command[2]
@@ -1712,6 +1712,55 @@ func TestPrepareSessionWorkspaceInitRefreshesCredentials(t *testing.T) {
 	}
 	if !strings.Contains(script, credentialHelper) {
 		t.Fatal("prepared command does not persist the credential helper")
+	}
+}
+
+func TestSessionPodUsesGitLabWorkspaceCredentials(t *testing.T) {
+	t.Parallel()
+	session := testSession("gitlab-session", "codex")
+	session.Spec.Worker.WorkspaceRef = &kelos.WorkspaceReference{Name: "workspace"}
+	workspace := &kelos.WorkspaceSpec{
+		Repo:      "https://gitlab.example.com/group/repo.git",
+		Provider:  kelos.WorkspaceProviderGitLab,
+		SecretRef: &kelos.SecretReference{Name: "gitlab-token"},
+	}
+
+	statefulSet, _, err := testSessionReconciler(nil, nil).buildSessionStatefulSet(session, workspace, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	podSpec := statefulSet.Spec.Template.Spec
+
+	tokenFile := GitLabTokenMountPath + "/" + GitLabTokenSecretKey
+	var gitClone *corev1.Container
+	for i := range podSpec.InitContainers {
+		if podSpec.InitContainers[i].Name == "git-clone" {
+			gitClone = &podSpec.InitContainers[i]
+		}
+	}
+	if gitClone == nil {
+		t.Fatalf("Session Pod has no git-clone init container: %v", podSpec.InitContainers)
+	}
+	script := strings.Join(gitClone.Command, " ")
+	if !strings.Contains(script, "config credential.username "+gitLabCredentialUsername) {
+		t.Errorf("git-clone must pin credential.username to %q for GitLab tokens: %q", gitLabCredentialUsername, script)
+	}
+	if !strings.Contains(script, tokenFile) {
+		t.Errorf("git-clone credential helper must read the GitLab token file %q: %q", tokenFile, script)
+	}
+	if strings.Contains(script, GitHubTokenMountPath) {
+		t.Errorf("git-clone must not reference the GitHub token file: %q", script)
+	}
+
+	mainEnv := map[string]string{}
+	for _, env := range podSpec.Containers[0].Env {
+		mainEnv[env.Name] = env.Value
+	}
+	if mainEnv["KELOS_GITLAB_TOKEN_FILE"] != tokenFile {
+		t.Errorf("KELOS_GITLAB_TOKEN_FILE = %q, want %q", mainEnv["KELOS_GITLAB_TOKEN_FILE"], tokenFile)
+	}
+	if _, found := mainEnv["KELOS_GITHUB_TOKEN_FILE"]; found {
+		t.Error("KELOS_GITHUB_TOKEN_FILE must not be set for a GitLab workspace")
 	}
 }
 

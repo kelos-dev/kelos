@@ -27,6 +27,7 @@ if [ -n "${OPENCODE_API_KEY:-}" ] && [ -n "${KELOS_MODEL:-}" ]; then
     google) export GEMINI_API_KEY="$OPENCODE_API_KEY" ;;
     groq) export GROQ_API_KEY="$OPENCODE_API_KEY" ;;
     xai) export XAI_API_KEY="$OPENCODE_API_KEY" ;;
+    openrouter) export OPENROUTER_API_KEY="$OPENCODE_API_KEY" ;;
     zai | zai-coding-plan) export ZHIPU_API_KEY="$OPENCODE_API_KEY" ;;
     opencode | zen)
       # Zen/OpenCode models: no provider-specific key mapping needed.

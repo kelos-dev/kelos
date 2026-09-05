@@ -27,6 +27,10 @@ type githubCommentPolicy struct {
 	MinimumPermission string
 }
 
+func (p githubCommentPolicy) commands() commentCommands {
+	return commentCommands{Trigger: p.TriggerComment, Excludes: p.ExcludeComments}
+}
+
 type githubTeamRef struct {
 	Org  string
 	Slug string
@@ -34,13 +38,6 @@ type githubTeamRef struct {
 
 type githubAuthorizationDecision struct {
 	authorized bool
-}
-
-type githubCommentMatch struct {
-	found   bool
-	hasTime bool
-	time    time.Time
-	index   int
 }
 
 type githubCommentAuthorizer struct {
@@ -113,11 +110,7 @@ func (a *githubCommentAuthorizer) authorizationConfigured() bool {
 	return len(a.allowedUsers) > 0 || len(a.allowedTeams) > 0 || a.minimumPermission != ""
 }
 
-func (a *githubCommentAuthorizer) isAuthorized(ctx context.Context, actor githubUser) (bool, error) {
-	return a.isAuthorizedLogin(ctx, actor.Login)
-}
-
-func (a *githubCommentAuthorizer) isAuthorizedLogin(ctx context.Context, login string) (bool, error) {
+func (a *githubCommentAuthorizer) isAuthorized(ctx context.Context, login string) (bool, error) {
 	if a == nil || !a.authorizationConfigured() {
 		return true, nil
 	}
@@ -258,131 +251,15 @@ func (a *githubCommentAuthorizer) getJSON(ctx context.Context, path string, out 
 }
 
 func evaluateGitHubCommentPolicy(ctx context.Context, body string, bodyActor githubUser, comments []githubComment, policy githubCommentPolicy, authorizer *githubCommentAuthorizer) (bool, time.Time, error) {
-	if policy.TriggerComment == "" && len(policy.ExcludeComments) == 0 {
-		return true, time.Time{}, nil
-	}
-
-	bodyHasTrigger := policy.TriggerComment != "" && containsCommand(body, policy.TriggerComment)
-	bodyHasExclude := len(policy.ExcludeComments) > 0 && containsAnyCommand(body, policy.ExcludeComments)
-	bodyMatchesTrigger := false
-	bodyMatchesExclude := false
-	if bodyHasTrigger || bodyHasExclude {
-		authorized, err := authorizer.isAuthorized(ctx, bodyActor)
-		if err != nil {
-			return false, time.Time{}, err
-		}
-		if authorized {
-			bodyMatchesTrigger = bodyHasTrigger
-			bodyMatchesExclude = bodyHasExclude
-		}
-	}
-
-	var triggerMatch githubCommentMatch
-	var err error
-	if policy.TriggerComment != "" {
-		triggerMatch, err = latestAuthorizedCommentMatch(ctx, comments, []string{policy.TriggerComment}, authorizer)
-		if err != nil {
-			return false, time.Time{}, err
-		}
-	}
-
-	var excludeMatch githubCommentMatch
-	if len(policy.ExcludeComments) > 0 {
-		excludeMatch, err = latestAuthorizedCommentMatch(ctx, comments, policy.ExcludeComments, authorizer)
-		if err != nil {
-			return false, time.Time{}, err
-		}
-	}
-
-	if policy.TriggerComment != "" && len(policy.ExcludeComments) == 0 {
-		if triggerMatch.found {
-			return true, triggerMatch.time, nil
-		}
-		return bodyMatchesTrigger, time.Time{}, nil
-	}
-
-	if len(policy.ExcludeComments) > 0 && policy.TriggerComment == "" {
-		if excludeMatch.found || bodyMatchesExclude {
-			return false, time.Time{}, nil
-		}
-		return true, time.Time{}, nil
-	}
-
-	switch compareGitHubCommentMatches(triggerMatch, excludeMatch) {
-	case 1:
-		return true, triggerMatch.time, nil
-	case -1:
-		return false, time.Time{}, nil
-	}
-	if bodyMatchesExclude {
-		return false, time.Time{}, nil
-	}
-	if bodyMatchesTrigger {
-		return true, time.Time{}, nil
-	}
-	return false, time.Time{}, nil
+	return evaluateCommentPolicy(ctx, policy.commands(), body, bodyActor.Login, githubCommentEntries(comments), authorizer)
 }
 
-func latestAuthorizedCommentMatch(ctx context.Context, comments []githubComment, commands []string, authorizer *githubCommentAuthorizer) (githubCommentMatch, error) {
-	match := githubCommentMatch{index: -1}
-
-	for i, comment := range comments {
-		if !containsAnyCommand(comment.Body, commands) {
-			continue
-		}
-
-		authorized, err := authorizer.isAuthorized(ctx, comment.User)
-		if err != nil {
-			return githubCommentMatch{}, err
-		}
-		if !authorized {
-			continue
-		}
-
-		match.found = true
-		createdAt, err := time.Parse(time.RFC3339, comment.CreatedAt)
-		if err != nil {
-			if !match.hasTime {
-				match.index = i
-			}
-			continue
-		}
-		if !match.hasTime || createdAt.After(match.time) || (createdAt.Equal(match.time) && i > match.index) {
-			match.hasTime = true
-			match.time = createdAt
-			match.index = i
-		}
+func githubCommentEntries(comments []githubComment) []commentEntry {
+	entries := make([]commentEntry, len(comments))
+	for i, c := range comments {
+		entries[i] = commentEntry{Body: c.Body, Author: c.User.Login, CreatedAt: c.CreatedAt}
 	}
-
-	return match, nil
-}
-
-func compareGitHubCommentMatches(left, right githubCommentMatch) int {
-	switch {
-	case left.found && right.found:
-		if left.hasTime && right.hasTime {
-			switch {
-			case left.time.After(right.time):
-				return 1
-			case right.time.After(left.time):
-				return -1
-			}
-		}
-		switch {
-		case left.index > right.index:
-			return 1
-		case right.index > left.index:
-			return -1
-		default:
-			return 0
-		}
-	case left.found:
-		return 1
-	case right.found:
-		return -1
-	default:
-		return 0
-	}
+	return entries
 }
 
 func normalizeGitHubLogin(login string) string {

@@ -161,6 +161,15 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+	case GitLabSource:
+		eventType = "gitlab"
+		deliveryID = gatewayFallbackDeliveryID(namespace, name, gitlabRequestDeliveryID(r, body))
+		if err := ValidateGitLabToken(r.Header.Get(GitLabTokenHeader), secret); err != nil {
+			log.Error(err, "GitLab token validation failed", "deliveryID", deliveryID)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
 	case GenericSource:
 		// No verification scheme is configured for generic gateways yet. Accept
 		// the delivery but log loudly so the lack of authentication is visible
@@ -274,25 +283,13 @@ func (g *GatewayHandler) listGatewayScopedSpawners(ctx context.Context, namespac
 		return nil, fmt.Errorf("listing TaskSpawners in namespace %s: %w", namespace, err)
 	}
 
+	provider, err := providerFor(source)
+	if err != nil {
+		return nil, err
+	}
 	spawners := make([]*kelos.TaskSpawner, 0)
 	for i := range spawnerList.Items {
-		when := &spawnerList.Items[i].Spec.When
-		var ref *kelos.GatewayReference
-		switch source {
-		case GitHubSource:
-			if when.GitHubWebhook != nil {
-				ref = when.GitHubWebhook.GatewayRef
-			}
-		case LinearSource:
-			if when.LinearWebhook != nil {
-				ref = when.LinearWebhook.GatewayRef
-			}
-		case GenericSource:
-			if when.GenericWebhook != nil {
-				ref = when.GenericWebhook.GatewayRef
-			}
-		}
-		if ref != nil && ref.Name == name {
+		if ref, _ := provider.gatewayRef(&spawnerList.Items[i]); ref != nil && ref.Name == name {
 			spawners = append(spawners, &spawnerList.Items[i])
 		}
 	}
@@ -359,21 +356,25 @@ func gatewaySource(spec *kelos.WebhookGatewaySpec) (WebhookSource, error) {
 		return GitHubSource, nil
 	case spec.Linear != nil:
 		return LinearSource, nil
+	case spec.GitLab != nil:
+		return GitLabSource, nil
 	case spec.Generic != nil:
 		return GenericSource, nil
 	default:
-		return "", fmt.Errorf("no source configured: exactly one of github, linear, or generic is required")
+		return "", fmt.Errorf("no source configured: exactly one of github, linear, gitlab, or generic is required")
 	}
 }
 
-// gatewaySecretRef returns the inbound HMAC secretRef for the gateway's source,
-// or nil for generic gateways.
+// gatewaySecretRef returns the inbound secretRef (HMAC secret or GitLab token)
+// for the gateway's source, or nil for generic gateways.
 func gatewaySecretRef(spec *kelos.WebhookGatewaySpec) *kelos.SecretReference {
 	switch {
 	case spec.GitHub != nil:
 		return &spec.GitHub.SecretRef
 	case spec.Linear != nil:
 		return &spec.Linear.SecretRef
+	case spec.GitLab != nil:
+		return &spec.GitLab.SecretRef
 	default:
 		return nil
 	}

@@ -624,8 +624,9 @@ keep repository access without restarting (see [Workspace authentication](#works
 |-------|-------------|----------|
 | `spec.repo` | Git repository URL to clone (HTTPS, git://, or SSH) | Yes |
 | `spec.ref` | Branch, tag, or commit SHA to checkout (defaults to repo's default branch) | No |
-| `spec.secretRef.name` | Secret containing credentials for git auth and `gh` CLI (see [authentication methods](#workspace-authentication) below) | No |
-| `spec.ghproxy` | Enables the workspace-scoped ghproxy when set to `{}`; omitted or `null` disables it | No |
+| `spec.provider` | Git hosting provider: `github` (default) or `gitlab`. Selects the Secret key read from `spec.secretRef` (`GITHUB_TOKEN` or `GITLAB_TOKEN`), the credentials exported to agent containers, and which CLI (`gh` or `glab`) is preconfigured. A TaskSpawner whose source does not match the provider of its Workspace is marked `Failed` (see [authentication methods](#workspace-authentication) below) | No |
+| `spec.secretRef.name` | Secret containing the provider's token for git auth and the provider CLI (see [authentication methods](#workspace-authentication) below) | No |
+| `spec.ghproxy` | Enables the workspace-scoped ghproxy when set to `{}`; omitted or `null` disables it. Only valid with `provider: github` (CEL-enforced) | No |
 | `spec.remotes[].name` | Git remote name to add after cloning (must not be `"origin"`) | Yes (per remote) |
 | `spec.remotes[].url` | Git remote URL | Yes (per remote) |
 | `spec.files[].path` | Relative file path inside the repository (e.g., `CLAUDE.md`) | Yes (per file) |
@@ -658,7 +659,7 @@ Notes:
 
 ### Workspace Authentication
 
-The workspace secret referenced by `spec.secretRef.name` supports two authentication methods:
+The workspace secret referenced by `spec.secretRef.name` is interpreted according to `spec.provider`. For the default `github` provider it supports two authentication methods:
 
 **Personal Access Token (PAT):**
 
@@ -686,6 +687,34 @@ spec:
 Kelos preserves a username included in the repository URL. When the URL omits
 the username, Kelos uses `x-access-token`, which is compatible with GitHub PATs
 and GitHub App installation tokens.
+
+**GitLab (`provider: gitlab`):**
+
+Set `spec.provider: gitlab` and store a GitLab personal, group, or project
+access token with the `api` scope under the `GITLAB_TOKEN` key:
+
+```bash
+kubectl create secret generic gitlab-token \
+  --from-literal=GITLAB_TOKEN=<your-token>
+```
+
+```yaml
+spec:
+  repo: http://gitlab-webservice-default.gitlab.svc:8181/group/repo.git
+  provider: gitlab
+  secretRef:
+    name: gitlab-token
+```
+
+Git authenticates with username `oauth2` and the token as password. Agent
+containers receive `GITLAB_TOKEN`, `GITLAB_HOST` (the instance URL derived
+from `spec.repo`, so self-hosted and in-cluster instances work unchanged),
+`KELOS_GITLAB_TOKEN_FILE`, and a `glab` CLI preconfigured through
+`GLAB_CONFIG_DIR` and `GLAB_NO_PROMPT`; no `gh` variables are set. The
+`gitlab` and `gitlabWebhook` TaskSpawner sources require a `gitlab`
+Workspace and use the same token for API calls. A Secret that lacks the
+`GITLAB_TOKEN` key fails the Task or TaskSpawner immediately; a `GITHUB_TOKEN`
+key is never used for a GitLab workspace.
 
 **GitHub App (recommended for production/org use):**
 
@@ -742,7 +771,7 @@ to receive refreshed credentials during long-running work.
 
 | Field | Description | Required |
 |-------|-------------|----------|
-| `spec.taskTemplate.workspaceRef.name` | Workspace resource (repo URL, auth, and clone target for spawned Tasks) | Yes (when using `githubIssues`, `githubPullRequests`, `githubWebhook`, `linearWebhook`, or `webhook`) |
+| `spec.taskTemplate.workspaceRef.name` | Workspace resource (repo URL, auth, and clone target for spawned Tasks) | Yes (when using `githubIssues`, `githubPullRequests`, `githubWebhook`, `linearWebhook`, `gitlab`, `gitlabWebhook`, or `webhook`) |
 | `spec.when.githubIssues.repo` | Override repository to poll for issues (in `owner/repo` format or full URL); defaults to workspace repo URL | No |
 | `spec.when.githubIssues.labels` | Filter issues by labels | No |
 | `spec.when.githubIssues.excludeLabels` | Exclude issues with these labels | No |
@@ -812,6 +841,24 @@ to receive refreshed credentials during long-running work.
 | `spec.when.linearWebhook.filters[].labels` | Require the issue to have all of these labels | No |
 | `spec.when.linearWebhook.filters[].excludeLabels` | Exclude issues with any of these labels | No |
 | `spec.when.linearWebhook.gatewayRef.name` | Bind this source to a [WebhookGateway](#webhookgateway) in the same namespace whose `spec.linear` field is set. The per-source webhook server ignores this spawner when the reference is present | No |
+| `spec.when.gitlabWebhook.events` | GitLab event kinds to listen for, matching the payload `object_kind`: `issue`, `merge_request`, `note`, `pipeline`, `push`, `tag_push` | Yes (when using gitlabWebhook) |
+| `spec.when.gitlabWebhook.project` | Restrict deliveries to one project by full path (`group/subgroup/project`); if empty, events from any project are accepted | No |
+| `spec.when.gitlabWebhook.excludeAuthors` | Exclude events triggered by any of these GitLab usernames; applied before filter evaluation | No |
+| `spec.when.gitlabWebhook.filters[].event` | GitLab event kind this filter applies to. An event kind with no filter of its own is accepted as listed in `events` | Yes (per filter) |
+| `spec.when.gitlabWebhook.filters[].action` | Filter `issue` and `merge_request` events by payload action (e.g., `open`, `update`, `close`, `reopen`, `approved`, `unapproved`, `merge`) | No |
+| `spec.when.gitlabWebhook.filters[].labels` | Require the issue or merge request to have all of these labels. For `note` events the commented item's labels are used | No |
+| `spec.when.gitlabWebhook.filters[].excludeLabels` | Exclude issues or merge requests with any of these labels | No |
+| `spec.when.gitlabWebhook.filters[].state` | Filter `issue` and `merge_request` events by state (`opened`, `closed`, `merged`, `locked`) | No |
+| `spec.when.gitlabWebhook.filters[].branch` | Filter `merge_request` events by source branch and `push`/`pipeline` events by branch (exact match or glob) | No |
+| `spec.when.gitlabWebhook.filters[].status` | Filter `pipeline` events by status (e.g., `success`, `failed`, `canceled`, `running`, `pending`) | No |
+| `spec.when.gitlabWebhook.filters[].noteOn` | Scope `note` events to comments on `Issue`, `MergeRequest`, `Commit`, or `Snippet`. Omit to match any subject | No |
+| `spec.when.gitlabWebhook.filters[].bodyPattern` | Require the note body to match a Go re2 regular expression | No |
+| `spec.when.gitlabWebhook.filters[].excludeBodyPatterns` | Exclude `note` events whose body matches any of these Go re2 regular expressions (OR semantics) | No |
+| `spec.when.gitlabWebhook.filters[].draft` | Filter `merge_request` events by draft status | No |
+| `spec.when.gitlabWebhook.filters[].author` | Filter by the username of the user who triggered the event | No |
+| `spec.when.gitlabWebhook.filters[].excludeAuthors` | Exclude events triggered by any of these usernames | No |
+| `spec.when.gitlabWebhook.reporting.comments.mode` | Enables status notes on the originating GitLab issue or merge request (`issue`, `merge_request`, `note`, and merge-request `pipeline` events). `PerTask` (default) creates one note for each Task; `Sticky` maintains one note per TaskSpawner and item across Tasks. Requires a GitLab token: `webhookServer.sources.gitlab.tokenSecretName` on the per-source server (with `webhookServer.sources.gitlab.baseUrl` for self-hosted instances; defaults to `https://gitlab.com`), or `spec.gitlab.credentialsRef` and `spec.gitlab.apiBaseURL` on the bound [WebhookGateway](#webhookgateway) | No |
+| `spec.when.gitlabWebhook.gatewayRef.name` | Bind this source to a [WebhookGateway](#webhookgateway) in the same namespace whose `spec.gitlab` field is set. The per-source webhook server ignores this spawner when the reference is present | No |
 | `spec.when.slack.channels` | Restrict which Slack channels the bot listens in (channel IDs like `"C0123456789"`); when empty, listens in all invited channels | No |
 | `spec.when.slack.botMessagePolicy` | Controls whether bot-originated messages can trigger this spawner: `None` (default) rejects all bot messages, `All` allows all including self, `OthersOnly` allows other bots but rejects the bot's own output to prevent self-trigger loops | No |
 | `spec.when.slack.triggers[].pattern` | RE2 regex matched against message text (unanchored); leading `<@USER_ID>` mentions are stripped before matching; bot mention required unless `mentionOptional` is set; multiple triggers use OR semantics; when empty, every bot mention fires | No |
@@ -827,6 +874,19 @@ to receive refreshed credentials during long-running work.
 | `spec.when.webhook.excludeFilters[].pattern` | Exclude the delivery on a regex match against the extracted field value (mutually exclusive with `value`) | Conditional |
 | `spec.when.webhook.gatewayRef.name` | Bind this source to a [WebhookGateway](#webhookgateway) in the same namespace whose `spec.generic` field is set. Generic gateway deliveries remain unauthenticated, and the per-source server ignores this spawner when the reference is present | No |
 | `spec.when.jira.pollInterval` | Per-source poll interval (e.g., `"30s"`, `"5m"`). Defaults to `5m` when omitted | No |
+| `spec.when.gitlab.baseUrl` | GitLab instance URL for API calls (e.g., `https://gitlab.example.com` or an in-cluster service URL). Defaults to the scheme and host of the workspace repo URL. Required for a GitLab under a relative URL root (`https://example.com/gitlab`): its path is then excluded from the project path derived from the workspace repo URL | No |
+| `spec.when.gitlab.project` | Full project path to poll (`group/subgroup/project`). Defaults to the path of the workspace repo URL | No |
+| `spec.when.gitlab.types` | Item types to discover: `issues`, `mergeRequests`, or both (default: `issues`). Merge request work items get an `mr-` ID prefix so they never collide with issues of the same number | No |
+| `spec.when.gitlab.labels` | Filter items by labels; an item must carry all of them | No |
+| `spec.when.gitlab.excludeLabels` | Exclude items with any of these labels (client-side) | No |
+| `spec.when.gitlab.state` | Filter by state: `opened`, `closed`, `all` (default: `opened`) | No |
+| `spec.when.gitlab.reviewState` | Filter merge requests by review outcome: `approved` (has the required approvals), `changes_requested` (a reviewer requested changes; wins over approvals), `any` (default). Issues are unaffected | No |
+| `spec.when.gitlab.pipelineStatus` | Filter merge requests by head pipeline status: `success`, `failed`, `running`, `pending`, `canceled`, `any` (default). A newer pipeline finishing in the selected status retriggers a completed Task. Issues are unaffected | No |
+| `spec.when.gitlab.commentPolicy.triggerComment` | Requires a matching command in the item description or a note to include the item. A newer trigger note retriggers a completed Task | No |
+| `spec.when.gitlab.commentPolicy.excludeComments` | Blocks items whose most recent matching command is an exclude comment | No |
+| `spec.when.gitlab.commentPolicy.allowedUsers` | Restrict comment control to specific GitLab usernames. When empty, any user's command is honored | No |
+| `spec.when.gitlab.reporting.comments.mode` | Enables status notes on the originating GitLab issue or merge request. `PerTask` (default) creates one note for each Task; `Sticky` maintains one note per TaskSpawner and item across Tasks | No |
+| `spec.when.gitlab.pollInterval` | Per-source poll interval (e.g., `"30s"`, `"5m"`). Defaults to `5m` when omitted | No |
 | `spec.when.cron.schedule` | Cron schedule expression (e.g., `"0 * * * *"`) | Yes (when using cron) |
 | `spec.credentials[].name` | Unique name for a credential distributed by this TaskSpawner. The name is recorded in the `kelos.dev/spawner-credential` label on generated Tasks | Yes when `spec.credentials` is set |
 | `spec.credentials[].type` | Credential type (`api-key` or `oauth`) | Yes when `spec.credentials` is set |
@@ -893,7 +953,7 @@ spec:
 
 ### Generated Task Names
 
-For `githubIssues`, `githubPullRequests`, `jira`, and `cron` sources, Kelos first
+For `githubIssues`, `githubPullRequests`, `jira`, `gitlab`, and `cron` sources, Kelos first
 lowercases the work item ID when forming the Task name:
 `<TaskSpawner name>-<lowercase work item ID>`.
 
@@ -1003,6 +1063,10 @@ The `promptTemplate` field uses Go `text/template` syntax. Available variables d
 | `{{.Time}}` | Trigger time (RFC3339) | Empty | Empty | Empty | Empty | Empty | Empty | Cron tick time (e.g., `"2026-02-07T09:00:00Z"`) |
 | `{{.Schedule}}` | Cron schedule expression | Empty | Empty | Empty | Empty | Empty | Empty | Schedule string (e.g., `"0 * * * *"`) |
 
+> **GitLab webhook:** the `gitlabWebhook` source exposes `{{.Event}}` (`object_kind`), `{{.Action}}`, `{{.Sender}}`, `{{.Repository}}` (project path), `{{.RepositoryURL}}`, `{{.ID}}`, `{{.Number}}`, `{{.Title}}`, `{{.Body}}`, `{{.URL}}`, `{{.Kind}}` (`"Issue"`, `"MR"`, or `"webhook"`), `{{.Branch}}`, `{{.Ref}}`, `{{.State}}`, `{{.Labels}}`, `{{.HeadSHA}}`, `{{.NoteOn}}`, `{{.CommentBody}}`, `{{.CommentURL}}` (`note` events), `{{.PipelineStatus}}`, `{{.PipelineURL}}` (`pipeline` events), and `{{.Payload}}`. Every variable is always defined; fields that do not apply to the event are empty. Notes and pipelines attached to a merge request carry that merge request's identity (`{{.ID}}` is `mr-<iid>`, `{{.Branch}}` is its source branch).
+
+> **GitLab:** the `gitlab` source exposes the same variables as GitHub Issues: `{{.ID}}` (issue IID as a string, or `mr-<IID>` for merge requests), `{{.Number}}` (IID), `{{.Title}}`, `{{.Body}}` (description), `{{.URL}}`, `{{.Labels}}`, `{{.Comments}}` (non-system discussion notes; inline diff notes are excluded), and `{{.Kind}}` (`"Issue"` or `"MR"`). Merge requests additionally set `{{.Branch}}` (source branch), `{{.PipelineStatus}}` and `{{.PipelineURL}}` (head pipeline), `{{.ReviewComments}}` (inline diff notes as `path:line` blocks), and `{{.ReviewState}}` (`approved`, `changes_requested`, or empty; populated only when `reviewState` is set).
+
 > **Generic Webhook only:** any additional keys declared in `spec.when.webhook.fieldMapping` are also exposed as top-level template variables (e.g., `fieldMapping: {severity: "$.level"}` makes `{{.severity}}` available).
 
 > **`{{.ChangedFiles}}` and `filePatterns`:** For pull request webhook events, the changed-file list is fetched lazily and only when a filter's `filePatterns` needs it to decide a match. As a result, `{{.ChangedFiles}}` is populated for PR events **only when the matching filter declares `filePatterns`**; without it, `{{.ChangedFiles}}` renders as an empty list. Push events populate `{{.ChangedFiles}}` from the payload regardless.
@@ -1095,23 +1159,26 @@ Example — fetch a GitHub API resource authenticated with a GitHub App installa
 A `WebhookGateway` is a per-channel authentication and routing boundary for
 webhook-driven TaskSpawners and SessionSpawners. It owns one inbound path,
 `/webhook/<namespace>/<name>` (surfaced in `status.path`), verifies inbound
-deliveries against its own secret (github/linear), and fans out only to
+deliveries against its own secret (github/linear/gitlab), and fans out only to
 spawners in its own namespace that reference it via `gatewayRef`. This
 enables per-tenant secrets and multiple GitHub instances (github.com plus GitHub
 Enterprise) without a per-instance Deployment. Enable the gateway server with
 `webhookServer.gatewayServer.enabled` in the Helm chart. See
 [example 18](../examples/18-webhookgateway).
 
-Exactly one provider sub-struct (`spec.github`, `spec.linear`, or `spec.generic`)
-must be set; the one that is present selects the source.
+Exactly one provider sub-struct (`spec.github`, `spec.linear`, `spec.gitlab`, or
+`spec.generic`) must be set; the one that is present selects the source.
 
 | Field | Description | Required |
 | --- | --- | --- |
-| `spec.github` | GitHub gateway configuration (see below). Set exactly one of `github`/`linear`/`generic` | Conditional |
+| `spec.github` | GitHub gateway configuration (see below). Set exactly one of `github`/`linear`/`gitlab`/`generic` | Conditional |
 | `spec.github.secretRef.name` | Secret holding the inbound HMAC secret (under a `webhook-secret` key) | Yes (for github) |
 | `spec.github.apiBaseURL` | GitHub API base URL for outbound calls (PR-file enrichment, status reporting, and GitHub App token minting), e.g. `https://ghe.example.com/api/v3`. Defaults to `https://api.github.com` | No |
 | `spec.github.credentialsRef.name` | Secret holding outbound GitHub API credentials — a `GITHUB_TOKEN` key (PAT) or GitHub App keys (`appID`, `installationID`, `privateKey`) | No |
 | `spec.linear.secretRef.name` | Secret holding the inbound HMAC secret (under a `webhook-secret` key) | Yes (for linear) |
+| `spec.gitlab.secretRef.name` | Secret holding the GitLab webhook secret token (under a `webhook-secret` key). GitLab sends the token verbatim in `X-Gitlab-Token`; deliveries whose header does not equal the stored value are rejected | Yes (for gitlab) |
+| `spec.gitlab.apiBaseURL` | GitLab instance URL used for status notes (e.g. `https://gitlab.example.com` or an in-cluster Service URL). Defaults to `https://gitlab.com`. The URL is never taken from the webhook payload | No |
+| `spec.gitlab.credentialsRef.name` | Secret holding a GitLab access token with the `api` scope under a `GITLAB_TOKEN` key. Required for `gitlabWebhook.reporting` on spawners bound to this gateway | No |
 | `spec.generic` | Generic gateway configuration (no fields yet; deliveries are accepted without verification) | Conditional |
 | `status.path` | Derived inbound path, `/webhook/<namespace>/<name>`, relative to the configured webhook host | — |
 | `status.phase` | `Authenticated`, `SecretMissing`, or `Unauthenticated` (generic gateways are `Unauthenticated`) | — |
@@ -1119,7 +1186,7 @@ must be set; the one that is present selects the source.
 > `generic` gateways are accepted but **not** signature-verified;
 > restrict access at the network layer. Task execution (clone/push) credentials
 > come from the Workspace's `secretRef`, separate from a gateway's
-> `github.credentialsRef`.
+> `github.credentialsRef` or `gitlab.credentialsRef`.
 
 ### "Gateway" terminology
 

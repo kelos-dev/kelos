@@ -1282,17 +1282,29 @@ func TestDiscoverPullRequestsNoFileFetchWithoutFilter(t *testing.T) {
 	}
 }
 
+// TestResolvePullRequestTriggerTime checks the trigger-time merge through the
+// shared pipeline: a review gate's time wins when it is newer than the
+// trigger comment, and without a gate the comment time stands.
 func TestResolvePullRequestTriggerTime(t *testing.T) {
 	reviewTime := time.Date(2026, 1, 5, 12, 0, 0, 0, time.UTC)
 	commentTime := time.Date(2026, 1, 4, 12, 0, 0, 0, time.UTC)
+	thread := []commentEntry{{Body: "/kelos fix", Author: "alice", CreatedAt: commentTime.Format(time.RFC3339)}}
 
-	s := &GitHubPullRequestSource{ReviewState: "changes_requested"}
-	if got := s.resolveTriggerTime(reviewTime, commentTime); !got.Equal(reviewTime) {
-		t.Errorf("resolveTriggerTime() = %v, want %v", got, reviewTime)
+	gated := stubPoller{gateTime: reviewTime, thread: thread, trigger: "/kelos fix"}
+	items, err := discoverTracker(context.Background(), gated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || !items[0].TriggerTime.Equal(reviewTime) {
+		t.Errorf("TriggerTime with review gate = %+v, want %v", items, reviewTime)
 	}
 
-	s = &GitHubPullRequestSource{ReviewState: "any"}
-	if got := s.resolveTriggerTime(reviewTime, commentTime); !got.Equal(commentTime) {
-		t.Errorf("resolveTriggerTime() with reviewState=any = %v, want %v", got, commentTime)
+	ungated := stubPoller{thread: thread, trigger: "/kelos fix"}
+	items, err = discoverTracker(context.Background(), ungated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || !items[0].TriggerTime.Equal(commentTime) {
+		t.Errorf("TriggerTime with reviewState=any = %+v, want %v", items, commentTime)
 	}
 }

@@ -47,6 +47,8 @@ func WorkItemToTemplateVars(item WorkItem) map[string]interface{} {
 		"Branch":         item.Branch,
 		"ReviewState":    item.ReviewState,
 		"ReviewComments": item.ReviewComments,
+		"PipelineStatus": item.PipelineStatus,
+		"PipelineURL":    item.PipelineURL,
 		"Time":           item.Time,
 		"Schedule":       item.Schedule,
 	}
@@ -58,7 +60,8 @@ func WorkItemToTemplateVars(item WorkItem) map[string]interface{} {
 //
 // Available variables (all sources): {{.ID}}, {{.Title}}, {{.Kind}}
 // GitHub issue/Jira sources: {{.Number}}, {{.Body}}, {{.URL}}, {{.Labels}}, {{.Comments}}
-// GitHub pull request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}
+// GitHub pull request and GitLab merge request sources additionally expose: {{.Branch}}, {{.ReviewState}}, {{.ReviewComments}}
+// GitLab merge request sources also expose: {{.PipelineStatus}}, {{.PipelineURL}}
 // Cron sources: {{.Time}}, {{.Schedule}}
 func RenderTemplate(tmplStr string, item WorkItem) (string, error) {
 	tmpl, err := template.New("tmpl").Parse(tmplStr)
@@ -83,6 +86,8 @@ func RenderTemplate(tmplStr string, item WorkItem) (string, error) {
 		Branch         string
 		ReviewState    string
 		ReviewComments string
+		PipelineStatus string
+		PipelineURL    string
 		Time           string
 		Schedule       string
 	}{
@@ -97,6 +102,8 @@ func RenderTemplate(tmplStr string, item WorkItem) (string, error) {
 		Branch:         item.Branch,
 		ReviewState:    item.ReviewState,
 		ReviewComments: item.ReviewComments,
+		PipelineStatus: item.PipelineStatus,
+		PipelineURL:    item.PipelineURL,
 		Time:           item.Time,
 		Schedule:       item.Schedule,
 	}

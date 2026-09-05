@@ -60,32 +60,36 @@ func (b *DeploymentBuilder) buildPodParts(ts *kelos.TaskSpawner, workspace *kelo
 	var envVars []corev1.EnvVar
 
 	if workspace != nil {
-		host, owner, repo := parseGitHubRepo(workspace.Repo)
+		if tracker, _ := ts.Spec.When.Tracker(); tracker.Provider == kelos.WorkspaceProviderGitLab {
+			args = append(args, gitLabSourceArgs(ts.Spec.When.GitLab, workspace.Repo)...)
+		} else {
+			host, owner, repo := parseGitHubRepo(workspace.Repo)
 
-		// Override with an explicit GitHub source repo if set (fork workflow).
-		if repoOverride := githubSourceRepoOverride(ts); repoOverride != "" {
-			overrideHost, overrideOwner, overrideRepo := parseGitHubRepo(repoOverride)
-			owner = overrideOwner
-			repo = overrideRepo
-			// Only override the host when the override itself provides one.
-			// Shorthand "owner/repo" returns an empty host from parseGitHubRepo;
-			// in that case keep the workspace host so GHES API URLs are preserved.
-			if overrideHost != "" {
-				host = overrideHost
+			// Override with an explicit GitHub source repo if set (fork workflow).
+			if repoOverride := githubSourceRepoOverride(ts); repoOverride != "" {
+				overrideHost, overrideOwner, overrideRepo := parseGitHubRepo(repoOverride)
+				owner = overrideOwner
+				repo = overrideRepo
+				// Only override the host when the override itself provides one.
+				// Shorthand "owner/repo" returns an empty host from parseGitHubRepo;
+				// in that case keep the workspace host so GHES API URLs are preserved.
+				if overrideHost != "" {
+					host = overrideHost
+				}
+			}
+
+			args = append(args,
+				"--github-owner="+owner,
+				"--github-repo="+repo,
+			)
+			if workspaceUsesGHProxy(workspace) && ts.Spec.TaskTemplate.WorkspaceRef != nil {
+				args = append(args, "--gh-proxy-url="+WorkspaceGHProxyServiceURL(ts.Namespace, ts.Spec.TaskTemplate.WorkspaceRef.Name))
+			}
+			if apiBaseURL := gitHubAPIBaseURL(host); apiBaseURL != "" {
+				args = append(args, "--github-api-base-url="+apiBaseURL)
 			}
 		}
-
-		args = append(args,
-			"--github-owner="+owner,
-			"--github-repo="+repo,
-		)
-		if workspaceUsesGHProxy(workspace) && ts.Spec.TaskTemplate.WorkspaceRef != nil {
-			args = append(args, "--gh-proxy-url="+WorkspaceGHProxyServiceURL(ts.Namespace, ts.Spec.TaskTemplate.WorkspaceRef.Name))
-		}
-		if apiBaseURL := gitHubAPIBaseURL(host); apiBaseURL != "" {
-			args = append(args, "--github-api-base-url="+apiBaseURL)
-		}
-		if workspace.SecretRef != nil && taskSpawnerNeedsGitHubToken(ts, workspaceUsesGHProxy(workspace)) {
+		if workspace.SecretRef != nil && taskSpawnerNeedsWorkspaceToken(ts, workspaceUsesGHProxy(workspace)) {
 			if isGitHubApp {
 				// GitHub App: inject credentials as env vars for in-process token generation
 				envVars = append(envVars,
@@ -124,15 +128,16 @@ func (b *DeploymentBuilder) buildPodParts(ts *kelos.TaskSpawner, workspace *kelo
 					},
 				)
 			} else {
-				// PAT: inject GITHUB_TOKEN from secret
+				// PAT: inject the provider's token from the workspace secret
+				provider := workspaceProviderFor(workspace)
 				envVars = append(envVars, corev1.EnvVar{
-					Name: "GITHUB_TOKEN",
+					Name: provider.tokenEnv,
 					ValueFrom: &corev1.EnvVarSource{
 						SecretKeyRef: &corev1.SecretKeySelector{
 							LocalObjectReference: corev1.LocalObjectReference{
 								Name: workspace.SecretRef.Name,
 							},
-							Key: "GITHUB_TOKEN",
+							Key: provider.secretKey,
 						},
 					},
 				})
@@ -349,28 +354,77 @@ func parseGitHubOwnerRepo(repoURL string) (owner, repo string) {
 	return owner, repo
 }
 
+// githubSourceRepoOverride returns the repository a GitHub polling source
+// polls instead of the Workspace repository, or "".
 func githubSourceRepoOverride(ts *kelos.TaskSpawner) string {
-	if ts.Spec.When.GitHubIssues != nil && ts.Spec.When.GitHubIssues.Repo != "" {
-		return ts.Spec.When.GitHubIssues.Repo
+	tracker, _ := ts.Spec.When.Tracker()
+	if tracker.Provider != kelos.WorkspaceProviderGitHub || tracker.Webhook {
+		return ""
 	}
-	if ts.Spec.When.GitHubPullRequests != nil && ts.Spec.When.GitHubPullRequests.Repo != "" {
-		return ts.Spec.When.GitHubPullRequests.Repo
-	}
-	return ""
+	return tracker.Repo
 }
 
-func taskSpawnerNeedsGitHubToken(ts *kelos.TaskSpawner, ghProxyConfigured bool) bool {
-	if ts.Spec.When.GitHubIssues != nil {
-		return !ghProxyConfigured || gitHubReportingNeedsToken(ts.Spec.When.GitHubIssues.Reporting)
+// taskSpawnerNeedsWorkspaceToken reports whether the spawner needs the
+// workspace token for API calls: GitHub sources unless a ghproxy fronts them
+// (reporting still needs it), and GitLab sources always.
+func taskSpawnerNeedsWorkspaceToken(ts *kelos.TaskSpawner, ghProxyConfigured bool) bool {
+	tracker, ok := ts.Spec.When.Tracker()
+	if !ok || tracker.Webhook {
+		return false
 	}
-	if ts.Spec.When.GitHubPullRequests != nil {
-		return !ghProxyConfigured || gitHubReportingNeedsToken(ts.Spec.When.GitHubPullRequests.Reporting)
+	if tracker.Provider == kelos.WorkspaceProviderGitHub {
+		return !ghProxyConfigured || tracker.Comments != nil || tracker.Checks != nil
 	}
-	return false
+	return true
 }
 
-func gitHubReportingNeedsToken(reporting *kelos.GitHubReporting) bool {
-	return reporting != nil && (reporting.Enabled || reporting.Comments != nil || reporting.Checks != nil)
+// gitLabSourceArgs returns the spawner flags for a GitLab source. The
+// instance URL and project path default to the workspace repo URL and are
+// individually overridable from the source spec. A BaseURL carrying a path
+// (a GitLab under a relative URL root) marks that path as instance prefix
+// rather than project path.
+func gitLabSourceArgs(gl *kelos.GitLab, workspaceRepo string) []string {
+	baseURL, project := parseGitLabRepo(workspaceRepo)
+	if gl.BaseURL != "" {
+		baseURL = gl.BaseURL
+		if u, err := url.Parse(gl.BaseURL); err == nil {
+			if prefix := strings.Trim(u.Path, "/"); prefix != "" {
+				project = strings.TrimPrefix(project, prefix+"/")
+			}
+		}
+	}
+	if gl.Project != "" {
+		project = gl.Project
+	}
+	return []string{
+		"--gitlab-base-url=" + baseURL,
+		"--gitlab-project=" + project,
+	}
+}
+
+// parseGitLabRepo splits a GitLab repository URL into the instance base URL
+// and the full project path, e.g. https://gitlab.example.com/group/sub/repo.git
+// yields ("https://gitlab.example.com", "group/sub/repo"). SSH (git@host:...)
+// and git:// URLs map to an https base URL because the API is only reachable
+// over HTTP. Any username in the URL is dropped.
+func parseGitLabRepo(repoURL string) (baseURL, project string) {
+	repoURL = strings.TrimSuffix(strings.TrimSuffix(strings.TrimSpace(repoURL), "/"), ".git")
+
+	if strings.HasPrefix(repoURL, "git@") {
+		hostAndPath := strings.TrimPrefix(repoURL, "git@")
+		host, path, _ := strings.Cut(hostAndPath, ":")
+		return "https://" + host, strings.Trim(path, "/")
+	}
+
+	parsed, err := url.Parse(repoURL)
+	if err != nil || parsed.Host == "" {
+		return "", strings.Trim(repoURL, "/")
+	}
+	scheme := parsed.Scheme
+	if scheme != "http" && scheme != "https" {
+		scheme = "https"
+	}
+	return (&url.URL{Scheme: scheme, Host: parsed.Host}).String(), strings.Trim(parsed.Path, "/")
 }
 
 func workspaceUsesGHProxy(workspace *kelos.WorkspaceSpec) bool {

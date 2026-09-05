@@ -376,7 +376,7 @@ subjects:
   - kind: ServiceAccount
     name: kelos-controller
     namespace: kelos-system
-{{- $sourceWebhooksEnabled := or .Values.webhookServer.sources.github.enabled .Values.webhookServer.sources.linear.enabled .Values.webhookServer.sources.generic.enabled }}
+{{- $sourceWebhooksEnabled := or .Values.webhookServer.sources.github.enabled .Values.webhookServer.sources.linear.enabled .Values.webhookServer.sources.gitlab.enabled .Values.webhookServer.sources.generic.enabled }}
 {{- $gatewayServerEnabled := .Values.webhookServer.gatewayServer.enabled }}
 {{- $gatewayServiceAccountName := .Values.webhookServer.gatewayServer.serviceAccountName }}
 {{- if or $sourceWebhooksEnabled $gatewayServerEnabled }}

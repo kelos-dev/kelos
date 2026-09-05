@@ -26,6 +26,15 @@ RUN ARCH=$(dpkg --print-architecture) \
     && tar -C /usr/local -xzf "/tmp/${TARBALL}" \
     && rm "/tmp/${TARBALL}" "/tmp/${TARBALL}.sha256"
 
+ARG GLAB_VERSION=1.116.0
+RUN ARCH=$(dpkg --print-architecture) \
+    && DEB="glab_${GLAB_VERSION}_linux_${ARCH}.deb" \
+    && curl -fsSL -o "/tmp/${DEB}" "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/${DEB}" \
+    && curl -fsSL -o /tmp/glab-checksums.txt "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/checksums.txt" \
+    && (cd /tmp && sha256sum --ignore-missing -c glab-checksums.txt) \
+    && dpkg -i "/tmp/${DEB}" \
+    && rm "/tmp/${DEB}" /tmp/glab-checksums.txt
+
 ENV PATH="/usr/local/go/bin:${PATH}"
 
 ARG CLAUDE_CODE_VERSION=2.1.261
@@ -36,6 +45,9 @@ RUN chmod +x /kelos_entrypoint.sh
 
 COPY hack/agent-gh-wrapper.sh /usr/local/bin/gh
 RUN chmod +x /usr/local/bin/gh
+
+COPY hack/agent-glab-wrapper.sh /usr/local/bin/glab
+RUN chmod +x /usr/local/bin/glab
 
 ARG TARGETARCH
 COPY bin/kelos-capture-linux-${TARGETARCH} /kelos/kelos-capture

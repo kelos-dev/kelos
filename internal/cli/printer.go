@@ -217,6 +217,8 @@ func printTaskSpawnerTable(w io.Writer, spawners []kelos.TaskSpawner, allNamespa
 			source = "GitHub Pull Requests"
 		} else if s.Spec.When.Jira != nil {
 			source = s.Spec.When.Jira.Project
+		} else if s.Spec.When.GitLab != nil {
+			source = "GitLab"
 		} else if s.Spec.When.Cron != nil {
 			source = "cron: " + s.Spec.When.Cron.Schedule
 		} else if s.Spec.When.GitHubWebhook != nil {
@@ -226,6 +228,11 @@ func printTaskSpawnerTable(w io.Writer, spawners []kelos.TaskSpawner, allNamespa
 			}
 		} else if s.Spec.When.LinearWebhook != nil {
 			source = "Linear Webhook"
+		} else if s.Spec.When.GitLabWebhook != nil {
+			source = "GitLab Webhook"
+			if s.Spec.When.GitLabWebhook.Project != "" {
+				source += " (" + s.Spec.When.GitLabWebhook.Project + ")"
+			}
 		} else if s.Spec.When.GenericWebhook != nil {
 			source = "Generic Webhook (" + s.Spec.When.GenericWebhook.Source + ")"
 		} else if s.Spec.When.Slack != nil {
@@ -248,13 +255,8 @@ func printTaskSpawnerTable(w io.Writer, spawners []kelos.TaskSpawner, allNamespa
 // uses, mirroring the resolution in cmd/kelos-spawner: the active source's
 // pollInterval takes precedence over the default interval.
 func effectivePollInterval(ts *kelos.TaskSpawner) string {
-	switch {
-	case ts.Spec.When.GitHubIssues != nil && ts.Spec.When.GitHubIssues.PollInterval != "":
-		return ts.Spec.When.GitHubIssues.PollInterval
-	case ts.Spec.When.GitHubPullRequests != nil && ts.Spec.When.GitHubPullRequests.PollInterval != "":
-		return ts.Spec.When.GitHubPullRequests.PollInterval
-	case ts.Spec.When.Jira != nil && ts.Spec.When.Jira.PollInterval != "":
-		return ts.Spec.When.Jira.PollInterval
+	if interval := ts.Spec.When.PollInterval(); interval != "" {
+		return interval
 	}
 	return "5m"
 }
@@ -297,6 +299,27 @@ func printTaskSpawnerDetail(w io.Writer, ts *kelos.TaskSpawner) {
 		if jira.JQL != "" {
 			printField(w, "JQL", jira.JQL)
 		}
+	} else if ts.Spec.When.GitLab != nil {
+		gl := ts.Spec.When.GitLab
+		printField(w, "Source", "GitLab")
+		if gl.Project != "" {
+			printField(w, "Project", gl.Project)
+		}
+		if len(gl.Types) > 0 {
+			printField(w, "Types", fmt.Sprintf("%v", gl.Types))
+		}
+		if gl.State != "" {
+			printField(w, "State", gl.State)
+		}
+		if len(gl.Labels) > 0 {
+			printField(w, "Labels", fmt.Sprintf("%v", gl.Labels))
+		}
+		if gl.ReviewState != "" {
+			printField(w, "Review State", gl.ReviewState)
+		}
+		if gl.PipelineStatus != "" {
+			printField(w, "Pipeline Status", gl.PipelineStatus)
+		}
 	} else if ts.Spec.When.Cron != nil {
 		printField(w, "Source", "Cron")
 		printField(w, "Schedule", ts.Spec.When.Cron.Schedule)
@@ -314,6 +337,16 @@ func printTaskSpawnerDetail(w io.Writer, ts *kelos.TaskSpawner) {
 		lw := ts.Spec.When.LinearWebhook
 		printField(w, "Source", "Linear Webhook")
 		printField(w, "Types", fmt.Sprintf("%v", lw.Types))
+	} else if ts.Spec.When.GitLabWebhook != nil {
+		gl := ts.Spec.When.GitLabWebhook
+		printField(w, "Source", "GitLab Webhook")
+		printField(w, "Events", fmt.Sprintf("%v", gl.Events))
+		if gl.Project != "" {
+			printField(w, "Project", gl.Project)
+		}
+		if len(gl.ExcludeAuthors) > 0 {
+			printField(w, "Exclude Authors", fmt.Sprintf("%v", gl.ExcludeAuthors))
+		}
 	} else if ts.Spec.When.GenericWebhook != nil {
 		gw := ts.Spec.When.GenericWebhook
 		printField(w, "Source", "Generic Webhook")

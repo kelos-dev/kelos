@@ -233,6 +233,158 @@ var _ = Describe("TaskSpawner Controller", func() {
 		})
 	})
 
+	Context("When creating a TaskSpawner with a GitLab workspace", func() {
+		It("Should create a Deployment with GITLAB_TOKEN env var", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-taskspawner-gitlab",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with a GitLab token")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "gitlab-token",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"GITLAB_TOKEN": "glpat-test",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+			By("Creating a GitLab Workspace")
+			ws := &kelos.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace-gitlab",
+					Namespace: ns.Name,
+				},
+				Spec: kelos.WorkspaceSpec{
+					Repo:      "https://gitlab.example.com/group/repo.git",
+					Ref:       "main",
+					Provider:  kelos.WorkspaceProviderGitLab,
+					SecretRef: &kelos.SecretReference{Name: "gitlab-token"},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
+
+			By("Creating a TaskSpawner with a gitlab source")
+			ts := &kelos.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-spawner-gitlab",
+					Namespace: ns.Name,
+				},
+				Spec: kelos.TaskSpawnerSpec{
+					When: kelos.When{
+						GitLab: &kelos.GitLab{Labels: []string{"kelos"}},
+					},
+					TaskTemplate: kelos.TaskTemplate{
+						Type: "claude-code",
+						Credentials: &kelos.Credentials{
+							Type:      kelos.CredentialTypeOAuth,
+							SecretRef: &kelos.SecretReference{Name: "claude-credentials"},
+						},
+						WorkspaceRef: &kelos.WorkspaceReference{Name: "test-workspace-gitlab"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ts)).Should(Succeed())
+
+			By("Verifying a Deployment is created")
+			deployLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
+			createdDeploy := &appsv1.Deployment{}
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, deployLookupKey, createdDeploy)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Verifying the Deployment has GITLAB_TOKEN env var and GitLab args")
+			Expect(createdDeploy.Spec.Template.Spec.Containers).To(HaveLen(1))
+			container := createdDeploy.Spec.Template.Spec.Containers[0]
+			Expect(container.Env).To(HaveLen(1))
+			Expect(container.Env[0].Name).To(Equal("GITLAB_TOKEN"))
+			Expect(container.Env[0].ValueFrom.SecretKeyRef.Name).To(Equal("gitlab-token"))
+			Expect(container.Env[0].ValueFrom.SecretKeyRef.Key).To(Equal("GITLAB_TOKEN"))
+			Expect(container.Args).To(ContainElement("--gitlab-base-url=https://gitlab.example.com"))
+			Expect(container.Args).To(ContainElement("--gitlab-project=group/repo"))
+		})
+
+		It("Should mark the TaskSpawner Failed when the workspace provider does not match", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-taskspawner-gitlab-mismatch",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a GitHub-style Secret")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "github-token",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"GITHUB_TOKEN": "glpat-under-the-wrong-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+			By("Creating a default (github) Workspace pointing at GitLab")
+			ws := &kelos.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace-github",
+					Namespace: ns.Name,
+				},
+				Spec: kelos.WorkspaceSpec{
+					Repo:      "https://gitlab.example.com/group/repo.git",
+					SecretRef: &kelos.SecretReference{Name: "github-token"},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
+
+			By("Creating a TaskSpawner with a gitlab source")
+			ts := &kelos.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-spawner-gitlab-mismatch",
+					Namespace: ns.Name,
+				},
+				Spec: kelos.TaskSpawnerSpec{
+					When: kelos.When{GitLab: &kelos.GitLab{}},
+					TaskTemplate: kelos.TaskTemplate{
+						Type: "claude-code",
+						Credentials: &kelos.Credentials{
+							Type:      kelos.CredentialTypeOAuth,
+							SecretRef: &kelos.SecretReference{Name: "claude-credentials"},
+						},
+						WorkspaceRef: &kelos.WorkspaceReference{Name: "test-workspace-github"},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ts)).Should(Succeed())
+
+			By("Verifying the TaskSpawner is marked Failed with the provider mismatch")
+			tsLookupKey := types.NamespacedName{Name: ts.Name, Namespace: ns.Name}
+			createdTS := &kelos.TaskSpawner{}
+			Eventually(func() kelos.TaskSpawnerPhase {
+				if err := k8sClient.Get(ctx, tsLookupKey, createdTS); err != nil {
+					return ""
+				}
+				return createdTS.Status.Phase
+			}, timeout, interval).Should(Equal(kelos.TaskSpawnerPhaseFailed))
+			Expect(createdTS.Status.Message).To(ContainSubstring("requires a Workspace with provider gitlab"))
+
+			By("Verifying no Deployment was created")
+			deploy := &appsv1.Deployment{}
+			Consistently(func() bool {
+				err := k8sClient.Get(ctx, tsLookupKey, deploy)
+				return apierrors.IsNotFound(err)
+			}, "2s", interval).Should(BeTrue())
+		})
+	})
+
 	Context("When deleting a TaskSpawner", func() {
 		It("Should clean up and remove the finalizer", func() {
 			By("Creating a namespace")
@@ -2480,7 +2632,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					When: kelos.When{GitHubIssues: &kelos.GitHubIssues{
 						Repo: "kelos-dev/kelos",
 						Reporting: &kelos.GitHubReporting{
-							Comments: &kelos.GitHubCommentsReporting{},
+							Comments: &kelos.CommentsReporting{},
 						},
 					}},
 					TaskTemplate: kelos.TaskTemplate{
@@ -2499,7 +2651,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 
 			created := &kelos.TaskSpawner{}
 			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(ts), created)).Should(Succeed())
-			Expect(created.Spec.When.GitHubIssues.Reporting.Comments.Mode).To(Equal(kelos.GitHubCommentModePerTask))
+			Expect(created.Spec.When.GitHubIssues.Reporting.Comments.Mode).To(Equal(kelos.CommentModePerTask))
 		})
 
 		It("Should reject an unsupported comment mode", func() {
@@ -2512,7 +2664,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 					When: kelos.When{GitHubIssues: &kelos.GitHubIssues{
 						Repo: "kelos-dev/kelos",
 						Reporting: &kelos.GitHubReporting{
-							Comments: &kelos.GitHubCommentsReporting{Mode: "Unsupported"},
+							Comments: &kelos.CommentsReporting{Mode: "Unsupported"},
 						},
 					}},
 					TaskTemplate: kelos.TaskTemplate{

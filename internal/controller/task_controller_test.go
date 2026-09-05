@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -23,6 +24,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
@@ -941,6 +943,133 @@ func TestValidateSkillsAuthSecrets(t *testing.T) {
 				t.Errorf("error = %q, want it to mention source %q", err, tt.skills[0].Source)
 			}
 		})
+	}
+}
+
+func TestReconcile_WorkspaceTokenPreflight(t *testing.T) {
+	tests := []struct {
+		name        string
+		secretData  map[string][]byte
+		wantJob     bool
+		wantMessage string
+	}{
+		{name: "valid token creates the Job", secretData: map[string][]byte{"GITLAB_TOKEN": []byte("glpat")}, wantJob: true},
+		{name: "missing token key fails the Task", secretData: map[string][]byte{"GITHUB_TOKEN": []byte("glpat")}, wantMessage: `secret "gitlab-token" has no GITLAB_TOKEN key`},
+		{name: "blank token fails the Task", secretData: map[string][]byte{"GITLAB_TOKEN": []byte(" \n")}, wantMessage: `secret "gitlab-token" has no GITLAB_TOKEN key`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scheme := runtime.NewScheme()
+			utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+			utilruntime.Must(kelos.AddToScheme(scheme))
+
+			task := &kelos.Task{
+				ObjectMeta: metav1.ObjectMeta{Name: "gl-task", Namespace: "default", Finalizers: []string{taskFinalizer}},
+				Spec: kelos.TaskSpec{
+					Type:         AgentTypeCodex,
+					Prompt:       "test",
+					Credentials:  &kelos.Credentials{Type: kelos.CredentialTypeNone},
+					WorkspaceRef: &kelos.WorkspaceReference{Name: "workspace"},
+				},
+			}
+			workspace := &kelos.Workspace{
+				ObjectMeta: metav1.ObjectMeta{Name: "workspace", Namespace: "default"},
+				Spec: kelos.WorkspaceSpec{
+					Repo:      "https://gitlab.example.com/group/repo.git",
+					Provider:  kelos.WorkspaceProviderGitLab,
+					SecretRef: &kelos.SecretReference{Name: "gitlab-token"},
+				},
+			}
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "gitlab-token", Namespace: "default"},
+				Data:       tt.secretData,
+			}
+			cl := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithStatusSubresource(task).
+				WithObjects(task, workspace, secret).
+				Build()
+			builder := NewJobBuilder()
+			builder.CodexImage = "codex:test"
+			r := &TaskReconciler{Client: cl, Scheme: scheme, JobBuilder: builder}
+
+			if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(task)}); err != nil {
+				t.Fatalf("Reconcile() error: %v", err)
+			}
+
+			var jobs batchv1.JobList
+			if err := cl.List(context.Background(), &jobs, client.InNamespace(task.Namespace)); err != nil {
+				t.Fatalf("listing Jobs: %v", err)
+			}
+			if (len(jobs.Items) > 0) != tt.wantJob {
+				t.Fatalf("Jobs = %d, want job created = %v", len(jobs.Items), tt.wantJob)
+			}
+
+			updated := &kelos.Task{}
+			if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), updated); err != nil {
+				t.Fatalf("getting updated task: %v", err)
+			}
+			if tt.wantJob {
+				if updated.Status.Phase == kelos.TaskPhaseFailed {
+					t.Fatalf("task unexpectedly failed: %s", updated.Status.Message)
+				}
+				return
+			}
+			if updated.Status.Phase != kelos.TaskPhaseFailed {
+				t.Fatalf("task phase = %q, want %q", updated.Status.Phase, kelos.TaskPhaseFailed)
+			}
+			if !strings.Contains(updated.Status.Message, tt.wantMessage) {
+				t.Fatalf("task message = %q, want containing %q", updated.Status.Message, tt.wantMessage)
+			}
+		})
+	}
+}
+
+func TestReconcile_WorkspaceTokenPreflightRetriesFailedStatusUpdate(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
+
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "gl-task", Namespace: "default", Finalizers: []string{taskFinalizer}},
+		Spec: kelos.TaskSpec{
+			Type:         AgentTypeCodex,
+			Prompt:       "test",
+			WorkspaceRef: &kelos.WorkspaceReference{Name: "workspace"},
+		},
+	}
+	workspace := &kelos.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "workspace", Namespace: "default"},
+		Spec: kelos.WorkspaceSpec{
+			Repo:      "https://gitlab.example.com/group/repo.git",
+			Provider:  kelos.WorkspaceProviderGitLab,
+			SecretRef: &kelos.SecretReference{Name: "gitlab-token"},
+		},
+	}
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "gitlab-token", Namespace: "default"}}
+	statusErr := errors.New("status update failed")
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(task).
+		WithObjects(task, workspace, secret).
+		WithInterceptorFuncs(interceptor.Funcs{
+			SubResourceUpdate: func(context.Context, client.Client, string, client.Object, ...client.SubResourceUpdateOption) error {
+				return statusErr
+			},
+		}).
+		Build()
+	r := &TaskReconciler{Client: cl, Scheme: scheme}
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(task)})
+	if !errors.Is(err, statusErr) {
+		t.Fatalf("Reconcile() error = %v, want the status update error so the reconcile is retried", err)
+	}
+	var jobs batchv1.JobList
+	if err := cl.List(context.Background(), &jobs, client.InNamespace(task.Namespace)); err != nil {
+		t.Fatalf("listing Jobs: %v", err)
+	}
+	if len(jobs.Items) != 0 {
+		t.Fatalf("Jobs = %d, want none", len(jobs.Items))
 	}
 }
 

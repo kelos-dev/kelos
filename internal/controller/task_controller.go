@@ -331,6 +331,18 @@ func (r *TaskReconciler) createJob(ctx context.Context, task *kelos.Task) (ctrl.
 		}
 		workspace = &ws.Spec
 
+		if workspace.SecretRef != nil {
+			if err := r.validateWorkspaceToken(ctx, task, workspace); err != nil {
+				logger.Error(err, "Workspace secret is missing the provider token")
+				r.recordEvent(task, corev1.EventTypeWarning, "WorkspaceTokenMissing", "%s", err.Error())
+				if updateErr := r.failTaskBeforeJob(ctx, task, err.Error()); updateErr != nil {
+					logger.Error(updateErr, "Unable to update Task status")
+					return ctrl.Result{}, updateErr
+				}
+				return ctrl.Result{}, nil
+			}
+		}
+
 		// Handle GitHub App authentication
 		if workspace.SecretRef != nil {
 			resolvedWorkspace, err := r.resolveGitHubAppToken(ctx, task, workspace)
@@ -526,6 +538,25 @@ func (r *TaskReconciler) validateSkillsAuthSecrets(ctx context.Context, namespac
 		}
 	}
 	return nil
+}
+
+// validateWorkspaceToken fails fast when a non-GitHub workspace secret lacks
+// the token key its provider requires, instead of letting the clone fail in
+// the pod. GitHub secrets are exempt because GitHub App credentials carry no
+// token key; resolveGitHubAppToken handles them.
+func (r *TaskReconciler) validateWorkspaceToken(ctx context.Context, task *kelos.Task, workspace *kelos.WorkspaceSpec) error {
+	provider := workspaceProviderFor(workspace)
+	if provider.name == kelos.WorkspaceProviderGitHub {
+		return nil
+	}
+	var secret corev1.Secret
+	if err := r.Get(ctx, client.ObjectKey{
+		Namespace: task.Namespace,
+		Name:      workspace.SecretRef.Name,
+	}, &secret); err != nil {
+		return fmt.Errorf("fetching workspace secret %q: %w", workspace.SecretRef.Name, err)
+	}
+	return workspaceSecretTokenError(provider, workspace.SecretRef.Name, secret.Data)
 }
 
 // resolveGitHubAppToken checks if the workspace secret is a GitHub App secret,

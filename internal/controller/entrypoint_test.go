@@ -287,6 +287,30 @@ func TestOpenCodeEntrypointMapsZAIProviderKey(t *testing.T) {
 	}
 }
 
+func TestOpenCodeEntrypointMapsOpenRouterProviderKey(t *testing.T) {
+	tmp := t.TempDir()
+	section := extractEntrypointSection(t, "../..//opencode/kelos_entrypoint.sh", "# Map OPENCODE_API_KEY to the correct provider environment variable", "if [ -n \"${KELOS_EFFORT:-}\" ]; then")
+	script := filepath.Join(tmp, "map-opencode-key.sh")
+	writeFile(t, script, "#!/usr/bin/env bash\nset -euo pipefail\n"+section+"\nprintf '%s|%s' \"${OPENROUTER_API_KEY:-}\" \"${ANTHROPIC_API_KEY:-}\"\n")
+	if err := os.Chmod(script, 0o755); err != nil {
+		t.Fatalf("chmod script: %v", err)
+	}
+
+	cmd := exec.Command("bash", script)
+	cmd.Env = append(os.Environ(),
+		"KELOS_MODEL=openrouter/qwen/qwen3-coder",
+		"OPENCODE_API_KEY=test-openrouter-key",
+		"ANTHROPIC_API_KEY=",
+	)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("running OpenCode provider key mapping: %v\n%s", err, output)
+	}
+	if got := string(output); got != "test-openrouter-key|" {
+		t.Fatalf("OPENROUTER_API_KEY|ANTHROPIC_API_KEY = %q, want test-openrouter-key|", got)
+	}
+}
+
 func TestAgentEntrypointsPreserveSkillReferenceFiles(t *testing.T) {
 	tests := []struct {
 		name       string

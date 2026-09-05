@@ -20,7 +20,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	kelosv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/admission"
 	"github.com/kelos-dev/kelos/internal/controller"
@@ -38,7 +37,6 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(kelosv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(kelos.AddToScheme(scheme))
 }
 
@@ -383,9 +381,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Serve the conversion webhooks (v1alpha1 <-> v1alpha2). The builder
-	// registers the single /convert handler and dispatches by GVK to the
-	// matching internal hub/spoke converter.
+	// Conversion registrations share the /convert endpoint and dispatch by GVK.
 	for _, registration := range conversion.WebhookRegistrations() {
 		if err := ctrl.NewWebhookManagedBy(mgr, registration.Object).
 			WithConverter(registration.Converter).

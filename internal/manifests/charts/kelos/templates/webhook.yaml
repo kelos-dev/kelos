@@ -11,10 +11,8 @@ metadata:
 spec:
   selfSigned: {}
 ---
-# Serving certificate for the kelos CRD conversion webhook (shared by all
-# kelos CRDs). cert-manager stores it in the kelos-webhook-server-cert Secret
-# and, via the cert-manager.io/inject-ca-from annotation on each kelos CRD,
-# injects the CA bundle into the CRD's conversion clientConfig.
+# Serving certificate for Kelos admission webhooks and conversion webhooks when
+# configured. cert-manager stores it in the kelos-webhook-server-cert Secret.
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -32,7 +30,7 @@ spec:
     name: kelos-selfsigned-issuer
   secretName: kelos-webhook-server-cert
 ---
-# Service the API server uses to reach the conversion webhook on the controller.
+# Service the API server uses to reach webhooks on the controller.
 apiVersion: v1
 kind: Service
 metadata:
@@ -45,9 +43,7 @@ spec:
   selector:
     app.kubernetes.io/name: kelos
     app.kubernetes.io/component: manager
-    # Only pods that actually serve the webhook on 9443 carry this label, so an
-    # old controller pod lingering during a rolling upgrade is never selected.
-    kelos.dev/conversion-webhook: "true"
+    kelos.dev/webhook-server: "true"
   ports:
     - name: webhook
       port: 443

@@ -48,14 +48,8 @@ var kelosCRDNames = []string{
 	"taskbudgets.kelos.dev",
 	"taskrecords.kelos.dev",
 	"taskspawners.kelos.dev",
+	"webhookgateways.kelos.dev",
 	"workerpools.kelos.dev",
-	"workspaces.kelos.dev",
-}
-
-var kelosConversionCRDNames = []string{
-	"agentconfigs.kelos.dev",
-	"tasks.kelos.dev",
-	"taskspawners.kelos.dev",
 	"workspaces.kelos.dev",
 }
 
@@ -152,9 +146,8 @@ func newInstallCommand(cfg *ClientConfig) *cobra.Command {
 			}
 
 			if dryRun {
-				// Real installs apply CRDs after the controller resources,
-				// certificate, and conversion webhook are ready; a single
-				// manifest stream cannot model that staging safely.
+				// Real installs stage CRDs and webhook resources according to the
+				// live API versions, which a single manifest stream cannot model.
 				_, err := os.Stdout.Write(controllerManifest)
 				return err
 			}
@@ -174,6 +167,10 @@ func newInstallCommand(cfg *ClientConfig) *cobra.Command {
 			}
 
 			ctx := cmd.Context()
+			definitions, err := parseKelosCRDDefinitions(manifests.InstallCRD)
+			if err != nil {
+				return err
+			}
 
 			if err := requireCertManager(dc); err != nil {
 				return err
@@ -188,6 +185,27 @@ func newInstallCommand(cfg *ClientConfig) *cobra.Command {
 				return err
 			}
 
+			crdsInstalled := false
+			if upgradingCRDs {
+				removingVersions, err := kelosCRDVersionsWillBeRemoved(ctx, dyn, definitions)
+				if err != nil {
+					return err
+				}
+				if removingVersions {
+					fmt.Fprintln(os.Stdout, "Migrating Kelos resource storage")
+					result, err := migrateKelosStorage(ctx, dyn, definitions)
+					if err != nil {
+						return fmt.Errorf("migrating Kelos resource storage: %w", err)
+					}
+					fmt.Fprintf(os.Stdout, "Migrated %d resources across %d CRDs\n", result.resourcesUpdated, result.crdsUpdated)
+					fmt.Fprintln(os.Stdout, "Installing kelos CRDs")
+					if err := applyManifests(ctx, dc, dyn, manifests.InstallCRD); err != nil {
+						return fmt.Errorf("installing CRDs: %w", err)
+					}
+					crdsInstalled = true
+				}
+			}
+
 			fmt.Fprintf(os.Stdout, "Installing kelos controller resources (version: %s)\n", installVersion)
 			if err := applyManifests(ctx, dc, dyn, controllerManifest); err != nil {
 				return fmt.Errorf("installing controller: %w", err)
@@ -197,29 +215,34 @@ func newInstallCommand(cfg *ClientConfig) *cobra.Command {
 			if err := waitForKelosWebhookCertificate(ctx, dyn); err != nil {
 				return err
 			}
-			if upgradingCRDs {
+			if upgradingCRDs && !crdsInstalled {
 				if len(missingCRDs) > 0 {
 					fmt.Fprintf(os.Stdout, "Installing missing kelos CRDs\n")
 					if err := applyKelosCRDs(ctx, dc, dyn, missingCRDs); err != nil {
 						return fmt.Errorf("installing missing CRDs: %w", err)
 					}
 				}
-				fmt.Fprintf(os.Stdout, "Waiting for kelos conversion webhook\n")
+				fmt.Fprintln(os.Stdout, "Waiting for kelos webhook")
 				if err := waitForKelosWebhookReady(ctx, dyn); err != nil {
 					return err
 				}
 			}
 
-			fmt.Fprintf(os.Stdout, "Installing kelos CRDs\n")
-			if err := applyManifests(ctx, dc, dyn, manifests.InstallCRD); err != nil {
-				return fmt.Errorf("installing CRDs: %w", err)
+			if !crdsInstalled {
+				fmt.Fprintln(os.Stdout, "Installing kelos CRDs")
+				if err := applyManifests(ctx, dc, dyn, manifests.InstallCRD); err != nil {
+					return fmt.Errorf("installing CRDs: %w", err)
+				}
 			}
 
-			fmt.Fprintf(os.Stdout, "Waiting for kelos CRD conversion CA bundles\n")
-			if err := waitForKelosCRDConversionCABundles(ctx, dyn); err != nil {
-				return err
+			conversionCRDs := conversionCRDNames(definitions)
+			if len(conversionCRDs) > 0 {
+				fmt.Fprintln(os.Stdout, "Waiting for kelos CRD conversion CA bundles")
+				if err := waitForKelosCRDConversionCABundles(ctx, dyn, conversionCRDs); err != nil {
+					return err
+				}
 			}
-			fmt.Fprintf(os.Stdout, "Waiting for kelos conversion webhook\n")
+			fmt.Fprintln(os.Stdout, "Waiting for kelos webhook")
 			if err := waitForKelosWebhookReady(ctx, dyn); err != nil {
 				return err
 			}
@@ -601,12 +624,15 @@ func waitForKelosWebhookReady(ctx context.Context, dyn dynamic.Interface) error 
 		}
 		return endpointSlicesReady(endpointSlices), nil
 	}); err != nil {
-		return fmt.Errorf("waiting for kelos conversion webhook: %w", err)
+		return fmt.Errorf("waiting for kelos webhook: %w", err)
 	}
 	return nil
 }
 
-func waitForKelosCRDConversionCABundles(ctx context.Context, dyn dynamic.Interface) error {
+func waitForKelosCRDConversionCABundles(ctx context.Context, dyn dynamic.Interface, crdNames []string) error {
+	if len(crdNames) == 0 {
+		return nil
+	}
 	if err := wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, installWaitTimeout, true, func(ctx context.Context) (bool, error) {
 		secret, err := dyn.Resource(secretGVR).Namespace("kelos-system").Get(ctx, "kelos-webhook-server-cert", metav1.GetOptions{})
 		if err != nil {
@@ -619,7 +645,7 @@ func waitForKelosCRDConversionCABundles(ctx context.Context, dyn dynamic.Interfa
 		if !ok {
 			return false, nil
 		}
-		for _, name := range kelosConversionCRDNames {
+		for _, name := range crdNames {
 			crd, err := dyn.Resource(crdGVR).Get(ctx, name, metav1.GetOptions{})
 			if err != nil {
 				if errors.IsNotFound(err) {
@@ -808,7 +834,7 @@ func secretDataValue(secret *unstructured.Unstructured, key string) (string, boo
 }
 
 var errCertManagerRequired = fmt.Errorf("cert-manager is required but was not found in the cluster\n" +
-	"kelos issues the conversion webhook's serving certificate with cert-manager, so it must be installed first:\n" +
+	"kelos issues its webhook serving certificate with cert-manager, so it must be installed first:\n" +
 	"  kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml\n" +
 	"Wait for the cert-manager pods to become ready, then re-run 'kelos install'")
 
@@ -818,30 +844,18 @@ var errCertManagerRequired = fmt.Errorf("cert-manager is required but was not fo
 // still running so it can process the finalizer removal.
 var kelosCRResources = []string{"tasks", "taskspawners", "sessionspawners", "sessions", "workspaces", "agentconfigs"}
 
-// kelosCRVersions are the served API versions to try for each resource, in
-// order. The v1alpha2 storage version is tried first so the common case needs
-// no conversion; v1alpha1 is a fallback so a newer CLI can still clean up a
-// cluster whose CRDs predate v1alpha2. Cleanup runs while the controller is
-// still up, so the conversion webhook remains available for any objects still
-// stored under the non-listed version.
-var kelosCRVersions = []string{"v1alpha2", "v1alpha1"}
-
-// listKelosResource lists a kelos custom resource across all namespaces using
-// the first served version from kelosCRVersions. ok is false when no candidate
-// version is served (the CRD is absent for all of them).
+// listKelosResource lists a Kelos custom resource across all namespaces.
+// ok is false when the resource is not installed.
 func listKelosResource(ctx context.Context, dyn dynamic.Interface, resource string, limit int64) (schema.GroupVersionResource, *unstructured.UnstructuredList, bool, error) {
-	for _, version := range kelosCRVersions {
-		gvr := schema.GroupVersionResource{Group: "kelos.dev", Version: version, Resource: resource}
-		list, err := dyn.Resource(gvr).Namespace("").List(ctx, metav1.ListOptions{Limit: limit})
-		if err != nil {
-			if errors.IsNotFound(err) || meta.IsNoMatchError(err) {
-				continue
-			}
-			return gvr, nil, false, fmt.Errorf("listing %s: %w", resource, err)
+	gvr := schema.GroupVersionResource{Group: "kelos.dev", Version: "v1alpha2", Resource: resource}
+	list, err := dyn.Resource(gvr).Namespace("").List(ctx, metav1.ListOptions{Limit: limit})
+	if err != nil {
+		if errors.IsNotFound(err) || meta.IsNoMatchError(err) {
+			return gvr, nil, false, nil
 		}
-		return gvr, list, true, nil
+		return gvr, nil, false, fmt.Errorf("listing %s: %w", resource, err)
 	}
-	return schema.GroupVersionResource{}, nil, false, nil
+	return gvr, list, true, nil
 }
 
 // crDeletionTimeout is the maximum time to wait for all custom resources

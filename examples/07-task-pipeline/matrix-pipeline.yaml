@@ -6,11 +6,15 @@ spec:
   stages:
     - name: review
       matrix:
-        parameters:
-          - name: component
-            values: [api, controller]
-          - name: focus
-            values: [correctness, tests]
+        items:
+          - component: api
+            focus: correctness
+          - component: api
+            focus: tests
+          - component: controller
+            focus: correctness
+          - component: controller
+            focus: tests
       taskTemplate:
         worker:
           type: claude-code

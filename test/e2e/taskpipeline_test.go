@@ -45,8 +45,9 @@ var _ = Describe("TaskPipeline", func() {
 			Spec: kelos.TaskPipelineSpec{Stages: []kelos.PipelineStage{
 				{
 					Name: "review",
-					Matrix: &kelos.PipelineMatrix{Parameters: []kelos.PipelineMatrixParameter{
-						{Name: "value", Values: []string{"alpha", "beta"}},
+					Matrix: &kelos.PipelineMatrix{Items: []map[string]string{
+						{"value": "alpha"},
+						{"value": "beta"},
 					}},
 					TaskTemplate: kelos.PipelineTaskTemplate{
 						Worker: worker(),

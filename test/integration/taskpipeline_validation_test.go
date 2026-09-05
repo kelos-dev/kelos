@@ -24,8 +24,9 @@ var _ = Describe("TaskPipeline API validation", func() {
 			Spec: kelos.TaskPipelineSpec{Stages: []kelos.PipelineStage{
 				{
 					Name: "plan",
-					Matrix: &kelos.PipelineMatrix{Parameters: []kelos.PipelineMatrixParameter{
-						{Name: "component", Values: []string{"api", "controller"}},
+					Matrix: &kelos.PipelineMatrix{Items: []map[string]string{
+						{"component": "api"},
+						{"component": "controller"},
 					}},
 					TaskTemplate: kelos.PipelineTaskTemplate{
 						Worker: &kelos.WorkerSpec{
@@ -67,11 +68,20 @@ var _ = Describe("TaskPipeline API validation", func() {
 		Expect(k8sClient.Create(ctx, pipeline, client.DryRunAll)).NotTo(Succeed())
 	})
 
-	It("rejects an empty matrix parameter", func() {
+	It("rejects an empty matrix item", func() {
 		pipeline := validPipeline("empty-matrix")
 		pipeline.Spec.Stages[0].Matrix = &kelos.PipelineMatrix{
-			Parameters: []kelos.PipelineMatrixParameter{{Name: "service"}},
+			Items: []map[string]string{{}},
 		}
+		Expect(k8sClient.Create(ctx, pipeline, client.DryRunAll)).NotTo(Succeed())
+	})
+
+	It("rejects matrix items with different keys", func() {
+		pipeline := validPipeline("different-matrix-keys")
+		pipeline.Spec.Stages[0].Matrix = &kelos.PipelineMatrix{Items: []map[string]string{
+			{"component": "api"},
+			{"focus": "tests"},
+		}}
 		Expect(k8sClient.Create(ctx, pipeline, client.DryRunAll)).NotTo(Succeed())
 	})
 

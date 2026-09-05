@@ -76,14 +76,14 @@ func (r *TaskPipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				break
 			}
 
-			matrixValues, _ := expandPipelineMatrix(stage.Matrix)
+			matrixItems, _ := pipelineMatrixItems(stage.Matrix)
 			existing := pipelineTasksByIndex(tasksByStage[stage.Name])
-			for index, matrix := range matrixValues {
+			for index, matrix := range matrixItems {
 				if _, ok := existing[index]; ok {
 					continue
 				}
 
-				task, buildErr := buildPipelineTask(&pipeline, stage, index, len(matrixValues), matrix, tasksByStage)
+				task, buildErr := buildPipelineTask(&pipeline, stage, index, len(matrixItems), matrix, tasksByStage)
 				if buildErr != nil {
 					if wait := pipelineResultRetryAfter(&pipeline, i, tasksByStage, time.Now()); wait > 0 {
 						requeueAfter = minimumPositiveDuration(requeueAfter, wait)
@@ -197,7 +197,7 @@ func validateTaskPipeline(pipeline *kelos.TaskPipeline) error {
 		}
 		stageNames[stage.Name] = struct{}{}
 
-		_, err := expandPipelineMatrix(stage.Matrix)
+		_, err := pipelineMatrixItems(stage.Matrix)
 		if err != nil {
 			return fmt.Errorf("stage %q: %w", stage.Name, err)
 		}
@@ -213,55 +213,32 @@ func validateTaskPipeline(pipeline *kelos.TaskPipeline) error {
 	return nil
 }
 
-func expandPipelineMatrix(matrix *kelos.PipelineMatrix) ([]map[string]string, error) {
+func pipelineMatrixItems(matrix *kelos.PipelineMatrix) ([]map[string]string, error) {
 	if matrix == nil {
 		return []map[string]string{{}}, nil
 	}
-	if len(matrix.Parameters) == 0 {
-		return nil, errors.New("matrix must contain at least one parameter")
+	if len(matrix.Items) == 0 {
+		return nil, errors.New("matrix must contain at least one item")
+	}
+	if len(matrix.Items) > maxPipelineStageTasks {
+		return nil, fmt.Errorf("matrix contains more than the maximum of %d items", maxPipelineStageTasks)
 	}
 
-	parameters := append([]kelos.PipelineMatrixParameter(nil), matrix.Parameters...)
-	sort.Slice(parameters, func(i, j int) bool {
-		return parameters[i].Name < parameters[j].Name
-	})
-	for i := range parameters {
-		if parameters[i].Name == "" {
-			return nil, errors.New("matrix parameter name must not be empty")
+	keys := matrix.Items[0]
+	for index, item := range matrix.Items {
+		if len(item) == 0 {
+			return nil, fmt.Errorf("matrix item %d must not be empty", index)
 		}
-		if i > 0 && parameters[i-1].Name == parameters[i].Name {
-			return nil, fmt.Errorf("matrix parameter %q is duplicated", parameters[i].Name)
+		if len(item) != len(keys) {
+			return nil, fmt.Errorf("matrix item %d must define the same keys as item 0", index)
 		}
-		if len(parameters[i].Values) == 0 {
-			return nil, fmt.Errorf("matrix parameter %q must contain at least one value", parameters[i].Name)
-		}
-		parameters[i].Values = append([]string(nil), parameters[i].Values...)
-		sort.Strings(parameters[i].Values)
-	}
-
-	combinations := []map[string]string{{}}
-	for _, parameter := range parameters {
-		capacity := len(combinations) * len(parameter.Values)
-		if capacity > maxPipelineStageTasks {
-			capacity = maxPipelineStageTasks
-		}
-		next := make([]map[string]string, 0, capacity)
-		for _, combination := range combinations {
-			for _, value := range parameter.Values {
-				if len(next) == maxPipelineStageTasks {
-					return nil, fmt.Errorf("matrix expands beyond the maximum of %d Tasks", maxPipelineStageTasks)
-				}
-				expanded := make(map[string]string, len(combination)+1)
-				for existingKey, existingValue := range combination {
-					expanded[existingKey] = existingValue
-				}
-				expanded[parameter.Name] = value
-				next = append(next, expanded)
+		for key := range keys {
+			if _, ok := item[key]; !ok {
+				return nil, fmt.Errorf("matrix item %d must define the same keys as item 0", index)
 			}
 		}
-		combinations = next
 	}
-	return combinations, nil
+	return matrix.Items, nil
 }
 
 func parsePipelineTemplate(name, source string) error {
@@ -449,7 +426,7 @@ func pipelineStageTemplateData(
 			break
 		}
 		tasks := append([]*kelos.Task(nil), tasksByStage[completedStage.Name]...)
-		combinations, _ := expandPipelineMatrix(completedStage.Matrix)
+		matrixItems, _ := pipelineMatrixItems(completedStage.Matrix)
 		sort.Slice(tasks, func(i, j int) bool {
 			return pipelineTaskIndex(tasks[i]) < pipelineTaskIndex(tasks[j])
 		})
@@ -457,8 +434,8 @@ func pipelineStageTemplateData(
 		for _, task := range tasks {
 			index := pipelineTaskIndex(task)
 			var matrix map[string]string
-			if index >= 0 && index < len(combinations) {
-				matrix = combinations[index]
+			if index >= 0 && index < len(matrixItems) {
+				matrix = matrixItems[index]
 			}
 			results = append(results, map[string]interface{}{
 				"Name":    task.Name,
@@ -531,13 +508,13 @@ func summarizePipelineStages(
 	statuses := make([]kelos.PipelineStageStatus, 0, len(pipeline.Spec.Stages))
 	for i := range pipeline.Spec.Stages {
 		stage := &pipeline.Spec.Stages[i]
-		combinations, _ := expandPipelineMatrix(stage.Matrix)
+		matrixItems, _ := pipelineMatrixItems(stage.Matrix)
 		tasks := append([]*kelos.Task(nil), tasksByStage[stage.Name]...)
 		sort.Slice(tasks, func(i, j int) bool {
 			return pipelineTaskIndex(tasks[i]) < pipelineTaskIndex(tasks[j])
 		})
 
-		status := kelos.PipelineStageStatus{Name: stage.Name, Total: int32(len(combinations))}
+		status := kelos.PipelineStageStatus{Name: stage.Name, Total: int32(len(matrixItems))}
 		for _, task := range tasks {
 			switch task.Status.Phase {
 			case kelos.TaskPhaseSucceeded:

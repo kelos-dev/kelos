@@ -37199,42 +37199,26 @@ spec:
                     matrix:
                       description: Matrix expands the stage into parallel Tasks.
                       properties:
-                        parameters:
+                        items:
                           description: |-
-                            Parameters defines the matrix dimensions. Their Cartesian product
-                            determines the Tasks created for the stage.
+                            Items contains the values exposed under .Matrix for each Task. Each item
+                            creates one Task, and item order determines child Task indexes.
                           items:
-                            description: PipelineMatrixParameter defines one dimension
-                              of a matrix expansion.
-                            properties:
-                              name:
-                                description: Name is the key exposed under .Matrix
-                                  in the stage's templates.
-                                maxLength: 64
-                                minLength: 1
-                                pattern: ^[a-zA-Z_][a-zA-Z0-9_]*$
-                                type: string
-                              values:
-                                description: Values contains the values to expand
-                                  for this parameter.
-                                items:
-                                  type: string
-                                maxItems: 64
-                                minItems: 1
-                                type: array
-                                x-kubernetes-list-type: set
-                            required:
-                            - name
-                            - values
+                            additionalProperties:
+                              type: string
+                            maxProperties: 16
+                            minProperties: 1
                             type: object
-                          maxItems: 16
+                          maxItems: 256
                           minItems: 1
                           type: array
-                          x-kubernetes-list-map-keys:
-                          - name
-                          x-kubernetes-list-type: map
+                          x-kubernetes-list-type: atomic
+                          x-kubernetes-validations:
+                          - message: matrix items must define the same keys
+                            rule: self.all(item, size(item) == size(self[0]) && item.all(key,
+                              key in self[0]))
                       required:
-                      - parameters
+                      - items
                       type: object
                     name:
                       description: Name identifies this stage within the pipeline.

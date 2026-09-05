@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"sort"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -22,9 +21,11 @@ import (
 func TestTaskPipelineReconcileCreatesMatrixTasks(t *testing.T) {
 	pipeline := testTaskPipeline("security-scan", []kelos.PipelineStage{{
 		Name: "scan",
-		Matrix: &kelos.PipelineMatrix{Parameters: []kelos.PipelineMatrixParameter{
-			{Name: "env", Values: []string{"staging", "production"}},
-			{Name: "service", Values: []string{"auth", "billing"}},
+		Matrix: &kelos.PipelineMatrix{Items: []map[string]string{
+			{"env": "staging", "service": "billing"},
+			{"env": "production", "service": "auth"},
+			{"env": "production", "service": "billing"},
+			{"env": "staging", "service": "auth"},
 		}},
 		TaskTemplate: testPipelineTaskTemplate("Scan {{index .Matrix \"service\"}} in {{.Matrix.env}}"),
 	}})
@@ -39,17 +40,22 @@ func TestTaskPipelineReconcileCreatesMatrixTasks(t *testing.T) {
 	if len(tasks.Items) != 4 {
 		t.Fatalf("created Tasks = %d, want 4", len(tasks.Items))
 	}
-	sort.Slice(tasks.Items, func(i, j int) bool { return tasks.Items[i].Name < tasks.Items[j].Name })
+	sort.Slice(tasks.Items, func(i, j int) bool {
+		return pipelineTaskIndex(&tasks.Items[i]) < pipelineTaskIndex(&tasks.Items[j])
+	})
 	wantPrompts := []string{
-		"Scan auth in production",
-		"Scan auth in staging",
-		"Scan billing in production",
 		"Scan billing in staging",
+		"Scan auth in production",
+		"Scan billing in production",
+		"Scan auth in staging",
 	}
 	gotPrompts := make([]string, 0, len(tasks.Items))
 	for i := range tasks.Items {
 		task := &tasks.Items[i]
 		gotPrompts = append(gotPrompts, task.Spec.Prompt)
+		if pipelineTaskIndex(task) != i {
+			t.Errorf("Task %q matrix index = %d, want %d", task.Name, pipelineTaskIndex(task), i)
+		}
 		if !metav1.IsControlledBy(task, pipeline) {
 			t.Errorf("Task %q is not controlled by TaskPipeline", task.Name)
 		}
@@ -57,7 +63,6 @@ func TestTaskPipelineReconcileCreatesMatrixTasks(t *testing.T) {
 			t.Errorf("Task %q labels = %#v", task.Name, task.Labels)
 		}
 	}
-	sort.Strings(gotPrompts)
 	for i := range wantPrompts {
 		if gotPrompts[i] != wantPrompts[i] {
 			t.Errorf("rendered prompt %d = %q, want %q", i, gotPrompts[i], wantPrompts[i])
@@ -81,8 +86,9 @@ func TestTaskPipelineReconcilePassesStageResults(t *testing.T) {
 	pipeline := testTaskPipeline("aggregate", []kelos.PipelineStage{
 		{
 			Name: "scan",
-			Matrix: &kelos.PipelineMatrix{Parameters: []kelos.PipelineMatrixParameter{
-				{Name: "service", Values: []string{"auth", "billing"}},
+			Matrix: &kelos.PipelineMatrix{Items: []map[string]string{
+				{"service": "auth"},
+				{"service": "billing"},
 			}},
 			TaskTemplate: testPipelineTaskTemplate("Scan {{index .Matrix \"service\"}}"),
 		},
@@ -347,25 +353,34 @@ func TestValidateTaskPipelineRejectsDuplicateStageName(t *testing.T) {
 	}
 }
 
-func TestExpandPipelineMatrixRejectsTooManyTasks(t *testing.T) {
-	values := func(count int) []string {
-		result := make([]string, count)
-		for i := range result {
-			result[i] = strconv.Itoa(i)
-		}
-		return result
+func TestPipelineMatrixItemsRejectsTooManyTasks(t *testing.T) {
+	items := make([]map[string]string, maxPipelineStageTasks+1)
+	for i := range items {
+		items[i] = map[string]string{"value": "same"}
 	}
-	matrix := &kelos.PipelineMatrix{Parameters: []kelos.PipelineMatrixParameter{
-		{Name: "component", Values: values(17)},
-		{Name: "environment", Values: values(16)},
+	matrix := &kelos.PipelineMatrix{Items: items}
+
+	got, err := pipelineMatrixItems(matrix)
+	if err == nil || !strings.Contains(err.Error(), "maximum of 256 items") {
+		t.Fatalf("pipelineMatrixItems() error = %v, want matrix size error", err)
+	}
+	if got != nil {
+		t.Fatalf("pipelineMatrixItems() returned %d items on error, want nil", len(got))
+	}
+}
+
+func TestPipelineMatrixItemsRejectsDifferentKeys(t *testing.T) {
+	matrix := &kelos.PipelineMatrix{Items: []map[string]string{
+		{"component": "api", "focus": "correctness"},
+		{"component": "controller", "priority": "high"},
 	}}
 
-	combinations, err := expandPipelineMatrix(matrix)
-	if err == nil || !strings.Contains(err.Error(), "maximum of 256 Tasks") {
-		t.Fatalf("expandPipelineMatrix() error = %v, want matrix size error", err)
+	got, err := pipelineMatrixItems(matrix)
+	if err == nil || !strings.Contains(err.Error(), "same keys") {
+		t.Fatalf("pipelineMatrixItems() error = %v, want key mismatch error", err)
 	}
-	if combinations != nil {
-		t.Fatalf("expandPipelineMatrix() returned %d combinations on error, want nil", len(combinations))
+	if got != nil {
+		t.Fatalf("pipelineMatrixItems() returned %d items on error, want nil", len(got))
 	}
 }
 

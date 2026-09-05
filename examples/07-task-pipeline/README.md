@@ -63,8 +63,8 @@ review(controller, correctness) ├──▶ summarize
 review(controller, tests) ──────┘
 ```
 
-The `review` stage defines `component` and `focus` matrix parameters. Kelos
-creates one parallel Task for each combination, for a total of four Tasks. The
+The `review` stage defines four ordered matrix items. Kelos creates one parallel
+Task for each item, for a total of four Tasks. The
 `summarize` stage starts after all four succeed and iterates over their matrix
 values and captured `response` results through `.Stages`. Agent responses are
 base64-encoded in Task results, so the summary prompt tells the agent to decode
@@ -146,6 +146,6 @@ kubectl delete --ignore-not-found -f examples/07-task-pipeline/
   already active are allowed to finish before the pipeline becomes `Failed`.
 - `TaskPipeline.spec.stages` is immutable. Delete and recreate the resource to
   run a modified workflow.
-- Matrix parameters form a Cartesian product. The full matrix API and template
-  context are covered in the
+- Matrix item order determines child Task indexes and the order exposed to later
+  stages. The full matrix API and template context are covered in the
   [TaskPipeline reference](../../docs/reference.md#taskpipeline).

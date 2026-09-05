@@ -209,17 +209,15 @@ TaskPipeline is available only in `kelos.dev/v1alpha2`.
 | `spec.stages[].taskTemplate.workerPoolRef.name` | WorkerPool used for the stage's Tasks | One of worker or workerPoolRef |
 | `spec.stages[].taskTemplate.prompt` | Go template rendered into each stage Task's prompt | Yes |
 | `spec.stages[].taskTemplate.branch` | Optional Go template rendered into each stage Task's branch. Not supported with workerPoolRef | No |
-| `spec.stages[].matrix.parameters[].name` | Name exposed under `.Matrix` in templates | Yes when matrix is set |
-| `spec.stages[].matrix.parameters[].values` | Static values expanded for the parameter | Yes when matrix is set |
+| `spec.stages[].matrix.items` | Ordered value maps (1–256). Each item contains 1–16 string values, creates one Task, and defines the same keys as every other item | Yes when matrix is set |
 
 Deleting a TaskPipeline deletes its owned child Tasks. A stage without a matrix
-creates one Task. A matrix stage creates one Task for each parameter combination,
-up to 256 Tasks per stage. Parameter names are sorted to make expansion and child
-Task names deterministic; values are sorted as well. Child Task names use
-`<pipeline>-<stage>` when expansion produces one Task, including a matrix with
-one combination. Matrix stages with multiple combinations use
-`<pipeline>-<stage>-<index>`. A stable hash suffix is added when truncation is
-required.
+creates one Task. A matrix stage creates one Task for each item, up to 256 Tasks
+per stage. Declaration order determines child Task indexes and the order exposed
+to later stages through `.Stages`. Child Task names use `<pipeline>-<stage>` when
+the stage creates one Task, including a matrix with one item. Matrix stages with
+multiple items use `<pipeline>-<stage>-<index>`. A stable hash suffix is added
+when truncation is required.
 
 ### Pipeline Templates and Results
 
@@ -227,7 +225,7 @@ required.
 
 | Variable | Type | Description |
 |----------|------|-------------|
-| `.Matrix` | `map[string]string` | Parameter values for the current stage Task; empty for a stage without a matrix |
+| `.Matrix` | `map[string]string` | Values from the current matrix item; empty for a stage without a matrix |
 | `.Stages` | `map[string][]object` | Results from completed earlier stages, keyed by stage name |
 | `.Stages.<stage>[].Name` | string | Child Task name |
 | `.Stages.<stage>[].Matrix` | `map[string]string` | Matrix values used by the stage Task |
@@ -252,9 +250,9 @@ spec:
   stages:
     - name: scan
       matrix:
-        parameters:
-          - name: service
-            values: [auth, billing]
+        items:
+          - service: auth
+          - service: billing
       taskTemplate:
         worker:
           type: codex

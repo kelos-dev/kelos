@@ -23,30 +23,17 @@ const (
 	TaskPipelineConditionReady = "Ready"
 )
 
-// PipelineMatrixParameter defines one dimension of a matrix expansion.
-type PipelineMatrixParameter struct {
-	// Name is the key exposed under .Matrix in the stage's templates.
-	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=64
-	// +kubebuilder:validation:Pattern=`^[a-zA-Z_][a-zA-Z0-9_]*$`
-	Name string `json:"name"`
-
-	// Values contains the values to expand for this parameter.
-	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:MaxItems=64
-	// +listType=set
-	Values []string `json:"values"`
-}
-
-// PipelineMatrix expands a stage into one Task for each combination of parameter values.
+// PipelineMatrix defines an ordered set of values used to create stage Tasks.
 type PipelineMatrix struct {
-	// Parameters defines the matrix dimensions. Their Cartesian product
-	// determines the Tasks created for the stage.
+	// Items contains the values exposed under .Matrix for each Task. Each item
+	// creates one Task, and item order determines child Task indexes.
 	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:MaxItems=16
-	// +listType=map
-	// +listMapKey=name
-	Parameters []PipelineMatrixParameter `json:"parameters"`
+	// +kubebuilder:validation:MaxItems=256
+	// +kubebuilder:validation:items:MinProperties=1
+	// +kubebuilder:validation:items:MaxProperties=16
+	// +kubebuilder:validation:XValidation:rule="self.all(item, size(item) == size(self[0]) && item.all(key, key in self[0]))",message="matrix items must define the same keys"
+	// +listType=atomic
+	Items []map[string]string `json:"items"`
 }
 
 // PipelineTaskTemplate defines Tasks created for a pipeline stage.

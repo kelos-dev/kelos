@@ -59,3 +59,9 @@ spec:
     initialPrompt: |
       Let's address {{.URL}}
       Find the best way to address it.
+      When behavior differs by command, flag, scope, or guard outcome, test each
+      affected path directly instead of relying on coverage through another path.
+      When code consumes external repositories or credential-bearing URLs, trace
+      untrusted values through command arguments, filesystem reads, error output,
+      and persistent caches. Terminate option parsing, reject symlink escapes, and
+      keep credentials out of both output and disk.

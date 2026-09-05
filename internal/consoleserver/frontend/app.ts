@@ -25,6 +25,7 @@ type ConsoleElement = HTMLElement & {
   elements: NamedFormControls;
   open: boolean;
   showModal(): void;
+  showPicker?(): void;
   close(): void;
   reportValidity(): boolean;
   reset(): void;
@@ -5074,6 +5075,11 @@ function openSessionSectionEditor(session: SessionSummary) {
   if (!state.selected || sessionKey(state.selected) !== sessionKey(session)) selectSession(session);
   elements.sectionForm.classList.add('mobile-open');
   elements.sectionChoice.focus();
+  try {
+    elements.sectionChoice.showPicker?.();
+  } catch (_) {
+    // Keep the focused select usable when the browser refuses to open its picker.
+  }
 }
 
 function renderSelectedSessionSection(session: SessionSummary | null, preserveEditing = true) {

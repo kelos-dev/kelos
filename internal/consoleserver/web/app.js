@@ -4781,6 +4781,12 @@ spec:
             selectSession(session);
         elements.sectionForm.classList.add('mobile-open');
         elements.sectionChoice.focus();
+        try {
+            elements.sectionChoice.showPicker?.();
+        }
+        catch (_) {
+            // Keep the focused select usable when the browser refuses to open its picker.
+        }
     }
     function renderSelectedSessionSection(session, preserveEditing = true) {
         elements.sectionForm.hidden = !session;

@@ -27,7 +27,7 @@ spec:
       - `make test` — run all unit tests
       - `make test-e2e` — run the Kind end-to-end test
       - `make build` — build the CLI, controller, and runner binaries
-    - Logging conventions: start log messages with capital letters and do not end with punctuation
+    - Logging conventions: keep messages concise and free of terminal punctuation, and put variable values and machine-readable categories in structured fields
     - Commit messages: do not include PR links in commit messages
 ---
 apiVersion: kelos.dev/v1alpha2
@@ -103,9 +103,6 @@ spec:
     branch: '{{with index . "Branch"}}{{.}}{{else}}main{{end}}'
     promptTemplate: |
       You are a code review agent for the Open Actions project (github.com/kelos-dev/open-actions).
-      Open Actions' product goal is full behavioral compatibility with official GitHub
-      Actions. Treat the current documentation at https://docs.github.com/actions as
-      the normative specification for workflow syntax and behavior.
       Your job is to thoroughly review a pull request and publish a structured
       sticky PR comment. You do NOT write code, push changes, or modify any files.
 
@@ -172,25 +169,20 @@ spec:
       - Are concurrent operations safe (locks, channels, context cancellation)?
       - Are webhook delivery, workflow planning, Job creation, cancellation,
         and status updates idempotent under retries and reconciliation?
+      - For workflow syntax or behavior, use the current documentation at
+        https://docs.github.com/actions as the normative specification and
+        require conformance tests. Flag missing or different documented behavior
+        as a compatibility gap, not an intentional support boundary, and ensure
+        Kubernetes-specific features preserve valid workflow semantics and
+        security boundaries.
+      - Does workflow planning explicitly reject behavior that is not yet
+        implemented, document and track the compatibility gap, and avoid silently
+        ignoring fields or actions?
       - Does the code fail fast on invalid configuration / missing
         credentials, or does it silently fall back to degraded behavior
         (e.g., unauthenticated requests, nil/empty returns that mask the
         failure)? Flag silent degradation as P1 — operators should see the
         error, not discover it later from confusing symptoms.
-
-      **GitHub Actions compatibility**:
-      - For changes that touch workflow syntax or execution, read the relevant
-        official GitHub Actions documentation and compare the implementation's
-        observable behavior with it.
-      - Flag any documented syntax or behavior that the change rejects, ignores,
-        or implements differently. Do not accept "unsupported" as justification
-        for divergence from documented GitHub Actions behavior.
-      - Check documented defaults, evaluation order, expressions, contexts,
-        matrices, dependencies, conditions, environment propagation,
-        cancellation, and status behavior when they are relevant to the diff.
-      - Require tests that identify the official documented behavior they cover
-        and exercise the same user-visible result. Invalid or undocumented
-        syntax must produce an explicit error rather than being silently ignored.
 
       **Tests**:
       - Are there tests for the new/changed behavior?
@@ -216,7 +208,7 @@ spec:
         Require the full `"label: value"` substring (or a regex). P2.
 
       **Project conventions**:
-      - Logging: messages start with capital letters, do not end with punctuation
+      - Logging: messages are concise and free of terminal punctuation; variable values and machine-readable categories use structured fields
       - Generated files: if API types or CRDs changed, were
         `api/v1alpha1/zz_generated.deepcopy.go` and `config/crd/bases/`
         updated through `make update`?
@@ -254,7 +246,7 @@ spec:
       **Documentation completeness**:
       - When a PR introduces or changes a CRD field, validation, default,
         label, annotation, command-line flag, configuration value, webhook
-        contract, or GitHub Actions-compatible workflow behavior, require matching updates to
+        contract, or supported workflow behavior, require matching updates to
         generated CRDs, `config/samples/`, schema tests, or `README.md` as
         applicable. Flag a user-facing change that ships with no
         documentation update as P2.

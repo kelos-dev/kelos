@@ -265,6 +265,13 @@ spec:
 
       ### 5. Write findings
 
+      Before reporting a defect that depends on an external API or CLI contract,
+      verify the exact endpoint, response fields, and accepted input forms against
+      official documentation or upstream implementation for the relevant version.
+      Do not assume list and detail endpoints return the same fields or that
+      different clients accept the same URL form. Link the supporting source in
+      the finding; omit claims whose external contract you cannot verify.
+
       **Which issues to flag.** Flag an issue only if all of these apply:
       - It meaningfully impacts correctness, performance, security, or maintainability.
       - It is discrete and actionable — not a vague or compound issue.

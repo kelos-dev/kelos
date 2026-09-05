@@ -14,7 +14,7 @@ spec:
       # learning from the kelos-dev/kanon repository's recent activity.
       workspaceRef:
         name: kelos-agent
-      model: gpt-5.6-sol
+      model: gpt-6-astra
       effort: xhigh
       type: codex
       credentials:

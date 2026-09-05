@@ -662,12 +662,12 @@ To adapt these examples for your own repository:
    spec:
      taskTemplate:
        worker:
-         model: gpt-5.6-sol
+         model: gpt-6-astra
          effort: xhigh
    ```
 
-   The checked-in spawners use `gpt-5.6-sol` for the tasks that previously used
-   Opus, and `gpt-5.4-mini` for the tasks that previously used Sonnet.
+   The checked-in spawners use `gpt-6-astra` for high-capability tasks and
+   `gpt-5.4-mini` for lower-cost routine tasks.
    They set `effort` by role: `xhigh` for complex planning, coding, strategy,
    review, PR update, and configuration update workflows; `high` for triage;
    and `medium` for routine image, fake-user, and squash workflows.

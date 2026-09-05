@@ -3,6 +3,7 @@ package conversion
 import (
 	"context"
 	"encoding/json"
+	"unicode/utf8"
 
 	v1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 	v1alpha2 "github.com/kelos-dev/kelos/api/v1alpha2"
@@ -35,6 +36,25 @@ const preservedGitHubCommentsReportingAnnotation = "kelos.dev/v1alpha2-github-co
 // preservedWebhookGatewayRefsAnnotation carries v1alpha2 gateway references
 // across a v1alpha1 round-trip without exposing the capability in v1alpha1.
 const preservedWebhookGatewayRefsAnnotation = "kelos.dev/v1alpha2-webhook-gateway-refs"
+
+// preservedGitHubWebhookExcludePullRequestAuthorsAnnotation carries
+// spec.when.githubWebhook.excludePullRequestAuthors (a v1alpha2-only field)
+// across a v1alpha1 round-trip. Silently dropping an exclusion list re-admits
+// the events it suppressed, so the value survives here even though v1alpha1
+// does not gain the capability.
+const preservedGitHubWebhookExcludePullRequestAuthorsAnnotation = "kelos.dev/v1alpha2-github-webhook-exclude-pull-request-authors"
+
+// Constraints mirroring the +kubebuilder:validation markers on
+// GitHubWebhook.ExcludePullRequestAuthors. The API server does not re-validate
+// the output of a conversion webhook, and the preservation annotation is
+// user-writable, so the restore path has to enforce them itself or conversion
+// could emit a v1alpha2 object that violates the field's own schema. Keep these
+// in sync with the markers.
+const (
+	excludePullRequestAuthorsMaxItems      = 50
+	excludePullRequestAuthorsMinItemLength = 1
+	excludePullRequestAuthorsMaxItemLength = 64
+)
 
 type preservedWebhookGatewayRefs struct {
 	GitHub  *v1alpha2.GatewayReference `json:"github,omitempty"`
@@ -76,6 +96,8 @@ func taskSpawnerToHub(_ context.Context, src *v1alpha1.TaskSpawner, dst *v1alpha
 	deleteAnnotation(dst.Annotations, preservedGitHubCommentsReportingAnnotation)
 	restorePreservedWebhookGatewayRefs(src.Annotations, &dst.Spec.When)
 	deleteAnnotation(dst.Annotations, preservedWebhookGatewayRefsAnnotation)
+	restorePreservedGitHubWebhookExcludePullRequestAuthors(src.Annotations, dst.Spec.When.GitHubWebhook)
+	deleteAnnotation(dst.Annotations, preservedGitHubWebhookExcludePullRequestAuthorsAnnotation)
 	return nil
 }
 
@@ -101,7 +123,70 @@ func taskSpawnerFromHub(_ context.Context, src *v1alpha2.TaskSpawner, dst *v1alp
 	if err := setPreservedWebhookGatewayRefs(dst, src.Spec.When); err != nil {
 		return err
 	}
+	if err := setPreservedGitHubWebhookExcludePullRequestAuthors(dst, src.Spec.When.GitHubWebhook); err != nil {
+		return err
+	}
 	return convertViaJSON(&src.Status, &dst.Status)
+}
+
+// setPreservedGitHubWebhookExcludePullRequestAuthors records
+// spec.when.githubWebhook.excludePullRequestAuthors in an annotation so a
+// v1alpha1 client that writes the object back does not drop it.
+func setPreservedGitHubWebhookExcludePullRequestAuthors(dst *v1alpha1.TaskSpawner, webhook *v1alpha2.GitHubWebhook) error {
+	if webhook == nil || len(webhook.ExcludePullRequestAuthors) == 0 {
+		deleteAnnotation(dst.Annotations, preservedGitHubWebhookExcludePullRequestAuthorsAnnotation)
+		return nil
+	}
+	data, err := json.Marshal(webhook.ExcludePullRequestAuthors)
+	if err != nil {
+		return err
+	}
+	if dst.Annotations == nil {
+		dst.Annotations = map[string]string{}
+	}
+	dst.Annotations[preservedGitHubWebhookExcludePullRequestAuthorsAnnotation] = string(data)
+	return nil
+}
+
+// restorePreservedGitHubWebhookExcludePullRequestAuthors restores
+// excludePullRequestAuthors dropped by a v1alpha1 round-trip.
+func restorePreservedGitHubWebhookExcludePullRequestAuthors(annotations map[string]string, webhook *v1alpha2.GitHubWebhook) {
+	if webhook == nil || len(webhook.ExcludePullRequestAuthors) > 0 {
+		return
+	}
+	raw, ok := annotations[preservedGitHubWebhookExcludePullRequestAuthorsAnnotation]
+	if !ok || raw == "" {
+		return
+	}
+	var excludePullRequestAuthors []string
+	if err := json.Unmarshal([]byte(raw), &excludePullRequestAuthors); err != nil || len(excludePullRequestAuthors) == 0 {
+		// The annotation is best-effort preservation data and can be set by
+		// users; malformed data must not block API version conversion.
+		return
+	}
+	if !validExcludePullRequestAuthors(excludePullRequestAuthors) {
+		// Restoring an out-of-schema list would either emit an invalid v1alpha2
+		// object or make an otherwise valid v1alpha1 write fail. Ignore the
+		// annotation wholesale rather than applying part of it.
+		return
+	}
+	webhook.ExcludePullRequestAuthors = excludePullRequestAuthors
+}
+
+// validExcludePullRequestAuthors reports whether a restored list satisfies the
+// same constraints the CRD enforces on the field. Lengths are counted in runes,
+// matching how the API server evaluates OpenAPI maxLength.
+func validExcludePullRequestAuthors(authors []string) bool {
+	if len(authors) > excludePullRequestAuthorsMaxItems {
+		return false
+	}
+	for _, author := range authors {
+		n := utf8.RuneCountInString(author)
+		if n < excludePullRequestAuthorsMinItemLength || n > excludePullRequestAuthorsMaxItemLength {
+			return false
+		}
+	}
+	return true
 }
 
 func setPreservedWebhookGatewayRefs(dst *v1alpha1.TaskSpawner, when v1alpha2.When) error {

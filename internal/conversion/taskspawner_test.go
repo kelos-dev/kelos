@@ -2,6 +2,9 @@ package conversion
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -795,5 +798,205 @@ func TestTaskSpawnerFromHub_NoNameTemplateOmitsAnnotation(t *testing.T) {
 	}
 	if _, ok := spoke.Annotations[preservedNameTemplateAnnotation]; ok {
 		t.Error("annotation should not be set when nameTemplate is empty")
+	}
+}
+
+func TestTaskSpawnerConvert_GitHubWebhookExcludePullRequestAuthorsRoundTrip(t *testing.T) {
+	src := &v1alpha2.TaskSpawner{
+		Spec: v1alpha2.TaskSpawnerSpec{
+			When: v1alpha2.When{
+				GitHubWebhook: &v1alpha2.GitHubWebhook{
+					Events:                    []string{"pull_request"},
+					ExcludeAuthors:            []string{"bot-user"},
+					ExcludePullRequestAuthors: []string{"bot-user", "dependabot[bot]"},
+					Filters: []v1alpha2.GitHubWebhookFilter{
+						{
+							Event:  "pull_request",
+							Action: "ready_for_review",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	down := &v1alpha1.TaskSpawner{}
+	if err := taskSpawnerFromHub(context.Background(), src, down); err != nil {
+		t.Fatalf("taskSpawnerFromHub() error = %v", err)
+	}
+	if down.Spec.When.GitHubWebhook == nil {
+		t.Fatal("expected githubWebhook config after down-conversion")
+	}
+	// Shared fields survive the down-conversion directly.
+	if got := down.Spec.When.GitHubWebhook.ExcludeAuthors; len(got) != 1 || got[0] != "bot-user" {
+		t.Errorf("shared excludeAuthors not preserved: %#v", got)
+	}
+	// v1alpha1 cannot represent excludePullRequestAuthors — the top-level list survives
+	// only via the preservation annotation.
+	raw, ok := down.Annotations[preservedGitHubWebhookExcludePullRequestAuthorsAnnotation]
+	if !ok || raw != `["bot-user","dependabot[bot]"]` {
+		t.Errorf("preservation annotation = %q, want the excludePullRequestAuthors JSON", raw)
+	}
+
+	up := &v1alpha2.TaskSpawner{}
+	if err := taskSpawnerToHub(context.Background(), down, up); err != nil {
+		t.Fatalf("taskSpawnerToHub() error = %v", err)
+	}
+	if up.Spec.When.GitHubWebhook == nil {
+		t.Fatal("expected githubWebhook config after up-conversion")
+	}
+	got := up.Spec.When.GitHubWebhook.ExcludePullRequestAuthors
+	if len(got) != 2 || got[0] != "bot-user" || got[1] != "dependabot[bot]" {
+		t.Errorf("excludePullRequestAuthors not restored: %#v", got)
+	}
+	if _, ok := up.Annotations[preservedGitHubWebhookExcludePullRequestAuthorsAnnotation]; ok {
+		t.Error("preservation annotation not cleaned up after restore")
+	}
+	// The filter's own fields survive the round-trip alongside the restored list.
+	if len(up.Spec.When.GitHubWebhook.Filters) != 1 {
+		t.Fatalf("expected 1 filter after round-trip, got %d", len(up.Spec.When.GitHubWebhook.Filters))
+	}
+	if filter := up.Spec.When.GitHubWebhook.Filters[0]; filter.Action != "ready_for_review" {
+		t.Errorf("filter action = %q, want ready_for_review", filter.Action)
+	}
+}
+
+func TestTaskSpawnerFromHub_NoExcludePullRequestAuthorsOmitsAnnotation(t *testing.T) {
+	src := &v1alpha2.TaskSpawner{
+		Spec: v1alpha2.TaskSpawnerSpec{
+			When: v1alpha2.When{
+				GitHubWebhook: &v1alpha2.GitHubWebhook{
+					Events: []string{"pull_request"},
+				},
+			},
+		},
+	}
+
+	down := &v1alpha1.TaskSpawner{}
+	if err := taskSpawnerFromHub(context.Background(), src, down); err != nil {
+		t.Fatalf("taskSpawnerFromHub() error = %v", err)
+	}
+	if _, ok := down.Annotations[preservedGitHubWebhookExcludePullRequestAuthorsAnnotation]; ok {
+		t.Error("expected no preservation annotation when excludePullRequestAuthors is unset")
+	}
+}
+
+func TestTaskSpawnerToHub_MalformedExcludePullRequestAuthorsAnnotationIgnored(t *testing.T) {
+	src := &v1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{
+				preservedGitHubWebhookExcludePullRequestAuthorsAnnotation: "{not-json",
+			},
+		},
+		Spec: v1alpha1.TaskSpawnerSpec{
+			When: v1alpha1.When{
+				GitHubWebhook: &v1alpha1.GitHubWebhook{
+					Events: []string{"pull_request"},
+				},
+			},
+		},
+	}
+
+	up := &v1alpha2.TaskSpawner{}
+	if err := taskSpawnerToHub(context.Background(), src, up); err != nil {
+		t.Fatalf("taskSpawnerToHub() error = %v", err)
+	}
+	if up.Spec.When.GitHubWebhook == nil {
+		t.Fatal("expected githubWebhook config after up-conversion")
+	}
+	if got := up.Spec.When.GitHubWebhook.ExcludePullRequestAuthors; len(got) != 0 {
+		t.Errorf("excludePullRequestAuthors = %#v, want empty from malformed annotation", got)
+	}
+}
+
+// TestTaskSpawnerToHub_OutOfSchemaExcludePullRequestAuthorsAnnotationIgnored
+// covers a v1alpha1 object carrying a syntactically valid preservation
+// annotation whose contents violate the field's own CRD constraints. The API
+// server does not re-validate conversion webhook output, so the restore path
+// must reject it rather than emit an invalid v1alpha2 object.
+func TestTaskSpawnerToHub_OutOfSchemaExcludePullRequestAuthorsAnnotationIgnored(t *testing.T) {
+	tooManyItems, _ := json.Marshal(make([]string, excludePullRequestAuthorsMaxItems+1))
+	overLongItem, _ := json.Marshal([]string{strings.Repeat("a", excludePullRequestAuthorsMaxItemLength+1)})
+
+	tests := []struct {
+		name       string
+		annotation string
+	}{
+		{name: "more items than MaxItems", annotation: string(tooManyItems)},
+		{name: "item longer than MaxLength", annotation: string(overLongItem)},
+		{name: "empty item violates MinLength", annotation: `["bot-user",""]`},
+		{name: "not a JSON array", annotation: `{"bot-user":true}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := &v1alpha1.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						preservedGitHubWebhookExcludePullRequestAuthorsAnnotation: tt.annotation,
+					},
+				},
+				Spec: v1alpha1.TaskSpawnerSpec{
+					When: v1alpha1.When{
+						GitHubWebhook: &v1alpha1.GitHubWebhook{
+							Events: []string{"pull_request"},
+						},
+					},
+				},
+			}
+
+			up := &v1alpha2.TaskSpawner{}
+			if err := taskSpawnerToHub(context.Background(), src, up); err != nil {
+				t.Fatalf("taskSpawnerToHub() error = %v", err)
+			}
+			if up.Spec.When.GitHubWebhook == nil {
+				t.Fatal("expected githubWebhook config after up-conversion")
+			}
+			if got := up.Spec.When.GitHubWebhook.ExcludePullRequestAuthors; len(got) != 0 {
+				t.Errorf("excludePullRequestAuthors = %#v, want empty from out-of-schema annotation", got)
+			}
+		})
+	}
+}
+
+// TestTaskSpawnerToHub_ExcludePullRequestAuthorsAtSchemaLimits verifies the
+// validation rejects only what the CRD would: a list exactly at MaxItems whose
+// longest entry is exactly MaxLength still restores.
+func TestTaskSpawnerToHub_ExcludePullRequestAuthorsAtSchemaLimits(t *testing.T) {
+	authors := make([]string, excludePullRequestAuthorsMaxItems)
+	for i := range authors {
+		authors[i] = fmt.Sprintf("bot-%d", i)
+	}
+	authors[0] = strings.Repeat("a", excludePullRequestAuthorsMaxItemLength)
+	raw, err := json.Marshal(authors)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	src := &v1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{
+				preservedGitHubWebhookExcludePullRequestAuthorsAnnotation: string(raw),
+			},
+		},
+		Spec: v1alpha1.TaskSpawnerSpec{
+			When: v1alpha1.When{
+				GitHubWebhook: &v1alpha1.GitHubWebhook{
+					Events: []string{"pull_request"},
+				},
+			},
+		},
+	}
+
+	up := &v1alpha2.TaskSpawner{}
+	if err := taskSpawnerToHub(context.Background(), src, up); err != nil {
+		t.Fatalf("taskSpawnerToHub() error = %v", err)
+	}
+	got := up.Spec.When.GitHubWebhook.ExcludePullRequestAuthors
+	if len(got) != excludePullRequestAuthorsMaxItems {
+		t.Fatalf("restored %d authors, want %d", len(got), excludePullRequestAuthorsMaxItems)
+	}
+	if got[0] != authors[0] {
+		t.Errorf("longest entry not restored intact: %q", got[0])
 	}
 }

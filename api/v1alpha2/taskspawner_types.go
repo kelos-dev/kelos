@@ -409,6 +409,26 @@ type GitHubWebhook struct {
 	// +optional
 	ExcludeAuthors []string `json:"excludeAuthors,omitempty"`
 
+	// ExcludePullRequestAuthors excludes webhook events whose pull request was
+	// opened by any of these usernames, regardless of who sent the event.
+	// ExcludeAuthors cannot express this: it matches only the sender, so any
+	// human interaction with a bot's pull request (taking it out of draft,
+	// reopening it, commenting) re-admits the event.
+	// A pull-request author is available for pull-request-bearing events,
+	// including pull_request, pull_request_target, pull_request_review,
+	// pull_request_review_comment, pull_request_review_thread, and issue_comment
+	// events posted on a pull request. Events that carry no pull-request author
+	// (push, issues, create, release, check_run) are never excluded by this
+	// field.
+	// Matching is exact and case-sensitive, like ExcludeAuthors.
+	// This is applied before filter evaluation and takes precedence over
+	// filter-level Author matches.
+	// +optional
+	// +kubebuilder:validation:MaxItems=50
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=64
+	ExcludePullRequestAuthors []string `json:"excludePullRequestAuthors,omitempty"`
+
 	// Filters refine which events match. If multiple filters apply to the same
 	// event type, any matching filter accepts the event (OR semantics).
 	// If empty, all events in the Events list match.

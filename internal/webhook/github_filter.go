@@ -61,6 +61,15 @@ type GitHubEventData struct {
 	// with an issue_comment event. It is extracted from issue.pull_request.url
 	// and used to lazily fetch the PR's head branch when needed.
 	PullRequestAPIURL string
+	// PullRequestAuthor is the login of the user who opened the pull request the
+	// event is about, which is not the same as Sender: a human can act on a
+	// bot-authored PR. Populated for pull-request-bearing events, including
+	// pull_request, pull_request_target, pull_request_review,
+	// pull_request_review_comment, pull_request_review_thread, and issue_comment
+	// events on a pull request. Empty for every other event, including issues,
+	// push, create, release, and check_run (GitHub's check_run.pull_requests
+	// entries carry no user). Used by ExcludePullRequestAuthors filtering.
+	PullRequestAuthor string
 }
 
 // ParseGitHubWebhook parses a GitHub webhook payload using the go-github SDK.
@@ -157,6 +166,7 @@ func ParseGitHubWebhook(eventType string, payload []byte) (*GitHubEventData, err
 			data.Number = pr.GetNumber()
 			data.Body = pr.GetBody()
 			data.URL = pr.GetHTMLURL()
+			data.PullRequestAuthor = pr.GetUser().GetLogin()
 			if head := pr.GetHead(); head != nil {
 				data.Branch = head.GetRef()
 				data.HeadSHA = head.GetSHA()
@@ -182,6 +192,8 @@ func ParseGitHubWebhook(eventType string, payload []byte) (*GitHubEventData, err
 				if links := issue.GetPullRequestLinks(); links != nil {
 					data.PullRequestAPIURL = links.GetURL()
 				}
+				// For a comment on a PR, the issue author is the PR author.
+				data.PullRequestAuthor = issue.GetUser().GetLogin()
 			}
 		}
 
@@ -198,6 +210,7 @@ func ParseGitHubWebhook(eventType string, payload []byte) (*GitHubEventData, err
 			data.Number = pr.GetNumber()
 			data.Body = pr.GetBody()
 			data.URL = pr.GetHTMLURL()
+			data.PullRequestAuthor = pr.GetUser().GetLogin()
 			if head := pr.GetHead(); head != nil {
 				data.Branch = head.GetRef()
 				data.HeadSHA = head.GetSHA()
@@ -217,6 +230,7 @@ func ParseGitHubWebhook(eventType string, payload []byte) (*GitHubEventData, err
 			data.Number = pr.GetNumber()
 			data.Body = pr.GetBody()
 			data.URL = pr.GetHTMLURL()
+			data.PullRequestAuthor = pr.GetUser().GetLogin()
 			if head := pr.GetHead(); head != nil {
 				data.Branch = head.GetRef()
 				data.HeadSHA = head.GetSHA()
@@ -292,6 +306,21 @@ func ParseGitHubWebhook(eventType string, payload []byte) (*GitHubEventData, err
 			if action, ok := raw["action"].(string); ok {
 				data.Action = action
 			}
+			// Recover the pull request author for ExcludePullRequestAuthors
+			// filtering. Of the event types that carry a top-level
+			// pull_request object, pull_request_target and
+			// pull_request_review_thread have no case arm above and land here.
+			// The extraction stays keyed on the payload rather than on an event
+			// allowlist so a PR-bearing event GitHub adds later is covered
+			// without a code change; pull_request.user is the PR author
+			// throughout GitHub's webhook schema.
+			if pr, ok := raw["pull_request"].(map[string]interface{}); ok {
+				if user, ok := pr["user"].(map[string]interface{}); ok {
+					if login, ok := user["login"].(string); ok {
+						data.PullRequestAuthor = login
+					}
+				}
+			}
 		}
 	}
 
@@ -343,6 +372,16 @@ func githubWebhookAllowsEvent(spawner *kelos.GitHubWebhook, eventType string, ev
 	if len(spawner.ExcludeAuthors) > 0 && eventData.Sender != "" {
 		for _, excluded := range spawner.ExcludeAuthors {
 			if excluded == eventData.Sender {
+				return false
+			}
+		}
+	}
+
+	// An event carrying no pull-request author is never excluded here, so a
+	// spawner that also listens for push or issues keeps matching those.
+	if len(spawner.ExcludePullRequestAuthors) > 0 && eventData.PullRequestAuthor != "" {
+		for _, excluded := range spawner.ExcludePullRequestAuthors {
+			if excluded == eventData.PullRequestAuthor {
 				return false
 			}
 		}

@@ -310,6 +310,9 @@ func printTaskSpawnerDetail(w io.Writer, ts *kelos.TaskSpawner) {
 		if len(gh.ExcludeAuthors) > 0 {
 			printField(w, "Exclude Authors", fmt.Sprintf("%v", gh.ExcludeAuthors))
 		}
+		if len(gh.ExcludePullRequestAuthors) > 0 {
+			printField(w, "Exclude PR Authors", fmt.Sprintf("%v", gh.ExcludePullRequestAuthors))
+		}
 	} else if ts.Spec.When.LinearWebhook != nil {
 		lw := ts.Spec.When.LinearWebhook
 		printField(w, "Source", "Linear Webhook")

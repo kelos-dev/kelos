@@ -67,7 +67,10 @@ In addition to the standard webhook variables, `check_run` events expose:
   app (e.g. `github-actions[bot]`), not the PR author, and spawner-level
   `excludeAuthors` is applied *before* the conclusion/checkName filters — so
   excluding bot senders would drop every check run. Scope the workflow with the
-  `conclusion` and `checkName` filters instead.
+  `conclusion` and `checkName` filters instead. `excludePullRequestAuthors` does
+  not help here either: GitHub's `check_run.pull_requests[]` entries carry no
+  `user`, so a `check_run` event has no pull-request author to match against and
+  is never excluded by that field.
 - **Check runs without a linked PR:** a `check_run` is not always associated with
   a pull request (checks on pushes to `main`, tags, or some fork PRs). In those
   cases `Branch` and `Number` are absent. The manifest renders PR-dependent

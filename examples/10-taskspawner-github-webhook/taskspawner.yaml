@@ -20,6 +20,15 @@ spec:
         - "dependabot[bot]"
         - "renovate[bot]"
 
+      # Optional: exclude events whose pull request was opened by these
+      # usernames, no matter who sent the event. excludeAuthors above only
+      # matches the sender, so a human taking a bot's PR out of draft or
+      # commenting on it would otherwise re-admit the event. Events with no
+      # pull-request author (issues, push) are unaffected.
+      excludePullRequestAuthors:
+        - "dependabot[bot]"
+        - "renovate[bot]"
+
       # Optional filters to refine which events trigger tasks
       # Multiple filters use OR semantics within the same event type
       filters:

@@ -145,6 +145,8 @@ React to GitHub webhook events in real time — issues, pull requests, pushes, r
 
 All event types support the `author` and `excludeAuthors` filter fields, and expose `{{.Event}}`, `{{.Action}}`, `{{.Sender}}`, `{{.Repository}}`, `{{.RepositoryOwner}}`, `{{.RepositoryName}}`, and `{{.Payload}}` template variables.
 
+`author` and `excludeAuthors` match the **event sender** — the account that produced the delivery. They do not match the pull request author, so a human acting on a bot-authored PR (taking it out of draft, reopening it, commenting) produces an event that `excludeAuthors` admits. Use `excludePullRequestAuthors` to exclude by pull-request author instead. It applies to pull-request-bearing events, including `pull_request`, `pull_request_target`, `pull_request_review`, `pull_request_review_comment`, `pull_request_review_thread`, and `issue_comment` on a pull request. Events that carry no pull-request author are never excluded by it. Like `excludeAuthors`, matching is exact and case-sensitive. Note that on the polling sources `githubIssues` and `githubPullRequests`, the identically named `excludeAuthors` field matches the issue or PR author rather than a sender.
+
 Events not in this list can still be specified in `events` — they will be parsed with best-effort field extraction (sender, action) from the raw JSON payload but will not have structured filter support.
 
 ```yaml
@@ -160,6 +162,9 @@ spec:
         - "pull_request"
         - "issue_comment"
       excludeAuthors:
+        - "dependabot[bot]"
+      # Ignore events on pull requests this bot opened, whoever sent them
+      excludePullRequestAuthors:
         - "dependabot[bot]"
       filters:
         - event: "issues"
@@ -189,7 +194,7 @@ spec:
 
 **Setup:** Configure your GitHub repository to send webhooks to your Kelos instance and create a secret with the webhook signing secret. See [example 10](../examples/10-taskspawner-github-webhook/) for full setup instructions.
 
-**Filtering options:** `events` (required), `repository`, `excludeAuthors`, and per-filter fields: `action`, `labels`, `excludeLabels`, `state`, `branch`, `draft`, `author`, `bodyPattern`, `excludeBodyPatterns`, `commentOn` (scopes `issue_comment` events to `"Issue"` or `"PullRequest"`). The legacy `bodyContains` substring filter is **deprecated** — use `bodyPattern` (Go re2 regular expression) instead.
+**Filtering options:** `events` (required), `repository`, `excludeAuthors`, `excludePullRequestAuthors`, and per-filter fields: `action`, `labels`, `excludeLabels`, `state`, `branch`, `draft`, `author`, `bodyPattern`, `excludeBodyPatterns`, `commentOn` (scopes `issue_comment` events to `"Issue"` or `"PullRequest"`). The legacy `bodyContains` substring filter is **deprecated** — use `bodyPattern` (Go re2 regular expression) instead.
 
 **Status reporting:** Like `githubPullRequests`, the webhook source supports `reporting.comments` (status comments back to the originating issue or PR) and `reporting.checks.name` (GitHub Check Runs for branch protection). Comment mode defaults to `PerTask`; `Sticky` maintains one comment per TaskSpawner and originating issue or PR across Tasks. Check Runs require `events` to include at least one pull-request event type (`pull_request`, `pull_request_review`, `pull_request_review_comment`, or `pull_request_target`), or to include `issue_comment` with at least one matching filter and every `issue_comment` filter set to `commentOn: PullRequest`. Other configurations are rejected at admission. An `issue_comment` Check Run is associated with the pull request's current head SHA, which Kelos fetches from GitHub before creating the Task.
 

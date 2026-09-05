@@ -642,9 +642,10 @@ func TestPrintTaskSpawnerDetailGitHubWebhook(t *testing.T) {
 		Spec: kelos.TaskSpawnerSpec{
 			When: kelos.When{
 				GitHubWebhook: &kelos.GitHubWebhook{
-					Events:         []string{"issue_comment", "push"},
-					Repository:     "org/repo",
-					ExcludeAuthors: []string{"bot-user"},
+					Events:                    []string{"issue_comment", "push"},
+					Repository:                "org/repo",
+					ExcludeAuthors:            []string{"bot-user"},
+					ExcludePullRequestAuthors: []string{"pr-bot-user"},
 				},
 			},
 			TaskTemplate: kelos.TaskTemplate{
@@ -663,10 +664,11 @@ func TestPrintTaskSpawnerDetailGitHubWebhook(t *testing.T) {
 	output := buf.String()
 
 	for _, expected := range []string{
-		"Source:", "GitHub Webhook",
-		"Events:", "[issue_comment push]",
-		"Repository:", "org/repo",
-		"Exclude Authors:", "[bot-user]",
+		"Source:             GitHub Webhook",
+		"Events:             [issue_comment push]",
+		"Repository:         org/repo",
+		"Exclude Authors:    [bot-user]",
+		"Exclude PR Authors: [pr-bot-user]",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Errorf("expected %q in detail output, got %q", expected, output)

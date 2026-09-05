@@ -513,6 +513,7 @@ webhook-driven TaskSpawner.
 | `spec.when.githubWebhook.repository` | Repository filter in `owner/repo` format; omit to accept any repository | No |
 | `spec.when.githubWebhook.gatewayRef.name` | Bind this source to a [WebhookGateway](#webhookgateway) in the same namespace whose `spec.github` field is set. The per-source webhook server ignores this spawner when the reference is present | No |
 | `spec.when.githubWebhook.excludeAuthors` | GitHub senders ignored before filter evaluation | No |
+| `spec.when.githubWebhook.excludePullRequestAuthors` | GitHub pull-request authors whose events are ignored before filter evaluation, using the same semantics as TaskSpawner | No |
 | `spec.when.githubWebhook.filters` | GitHub webhook filters using the same fields and OR semantics as TaskSpawner | No |
 | `spec.credentials[].name` | Unique name for a credential distributed by this SessionSpawner. The name is recorded in the `kelos.dev/spawner-credential` label on generated Sessions | Yes when `spec.credentials` is set |
 | `spec.credentials[].type` | Credential type (`api-key` or `oauth`) | Yes when `spec.credentials` is set |
@@ -771,7 +772,7 @@ to receive refreshed credentials during long-running work.
 | `spec.when.githubPullRequests.commentPolicy.allowedTeams` | Restrict comment control to specific GitHub teams in `org/team-slug` format | No |
 | `spec.when.githubPullRequests.commentPolicy.minimumPermission` | Minimum repo permission required for comment control: `read`, `triage`, `write`, `maintain`, or `admin` | No |
 | `spec.when.githubPullRequests.author` | Filter by PR author username | No |
-| `spec.when.githubPullRequests.excludeAuthors` | Exclude PRs opened by any of these usernames (client-side) | No |
+| `spec.when.githubPullRequests.excludeAuthors` | Exclude PRs **opened by** any of these usernames (client-side). Note this matches the PR author, whereas `githubWebhook.excludeAuthors` matches the event sender | No |
 | `spec.when.githubPullRequests.draft` | Filter by draft state | No |
 | `spec.when.githubPullRequests.priorityLabels` | Priority-order labels for task selection when `maxConcurrency` is set; index 0 is highest priority | No |
 | `spec.when.githubPullRequests.reporting.enabled` | **Deprecated:** use `reporting.comments`. Posts status comments back to the GitHub pull request using `PerTask` mode | No |
@@ -782,7 +783,8 @@ to receive refreshed credentials during long-running work.
 | `spec.when.githubPullRequests.pollInterval` | Per-source poll interval (e.g., `"30s"`, `"5m"`). Defaults to `5m` when omitted | No |
 | `spec.when.githubWebhook.events` | GitHub event types to listen for (e.g., `"issues"`, `"pull_request"`, `"push"`, `"issue_comment"`) | Yes (when using githubWebhook) |
 | `spec.when.githubWebhook.repository` | Restrict webhooks to a specific repository (`owner/repo` format); if empty, webhooks from any repository are accepted | No |
-| `spec.when.githubWebhook.excludeAuthors` | Exclude webhook events sent by any of these usernames; applied before filter evaluation | No |
+| `spec.when.githubWebhook.excludeAuthors` | Exclude webhook events **sent by** any of these usernames; applied before filter evaluation. Matches the event sender, not the pull request author — unlike the same-named field on `githubIssues` and `githubPullRequests`. Use `excludePullRequestAuthors` for the latter | No |
+| `spec.when.githubWebhook.excludePullRequestAuthors` | Exclude webhook events whose **pull request was opened by** any of these usernames, whoever sent the event. Applies to pull-request-bearing events, including `pull_request`, `pull_request_target`, `pull_request_review`, `pull_request_review_comment`, `pull_request_review_thread`, and `issue_comment` on a pull request; events carrying no pull-request author (`push`, `issues`, `create`, `release`, `check_run`) are never excluded by it. Matching is exact and case-sensitive, so the value must match the GitHub login exactly. Applied before filter evaluation and takes precedence over filter-level `author` matches. Max 50 entries | No |
 | `spec.when.githubWebhook.filters[].event` | GitHub event type this filter applies to | Yes (per filter) |
 | `spec.when.githubWebhook.filters[].action` | Filter by webhook action (e.g., `"opened"`, `"created"`, `"submitted"`) | No |
 | `spec.when.githubWebhook.filters[].labels` | Require the issue/PR to have all of these labels | No |

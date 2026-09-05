@@ -582,6 +582,11 @@ func (in *GitHubWebhook) DeepCopyInto(out *GitHubWebhook) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.ExcludePullRequestAuthors != nil {
+		in, out := &in.ExcludePullRequestAuthors, &out.ExcludePullRequestAuthors
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Filters != nil {
 		in, out := &in.Filters, &out.Filters
 		*out = make([]GitHubWebhookFilter, len(*in))

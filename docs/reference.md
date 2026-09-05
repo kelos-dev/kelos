@@ -263,8 +263,7 @@ spec:
             secretRef:
               name: codex-credentials
         prompt: |
-          Scan {{index .Matrix "service"}} and report the severity on its own line:
-          severity: <low|medium|high|critical>
+          Scan {{index .Matrix "service"}} and return a concise severity assessment.
     - name: report
       taskTemplate:
         worker:
@@ -274,11 +273,14 @@ spec:
             secretRef:
               name: codex-credentials
         prompt: |
-          Summarize these scan results:
+          These scan responses are base64-encoded. Decode and summarize them:
           {{range index .Stages "scan" -}}
-          - {{index .Matrix "service"}}: {{index .Results "severity"}}
+          - {{index .Matrix "service"}}: {{index .Results "response"}}
           {{end}}
 ```
+
+Agent final responses are stored in `Task.status.results.response` as base64.
+Downstream agents that consume this result should decode it before use.
 
 `status.stageStatuses` reports expected, active, successful, and failed Task
 counts for each stage. Child Task names, outputs, and structured results remain

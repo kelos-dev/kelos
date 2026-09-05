@@ -145,6 +145,14 @@ func (f *Framework) collectDebugInfo() {
 		}
 	}
 
+	// List taskpipelines
+	pipelines, err := f.KelosClientset.ApiV1alpha2().TaskPipelines(f.Namespace).List(ctx, metav1.ListOptions{})
+	if err == nil {
+		for _, p := range pipelines.Items {
+			fmt.Fprintf(GinkgoWriter, "TaskPipeline %s: phase=%s\n", p.Name, p.Status.Phase)
+		}
+	}
+
 	sessionSpawners, err := f.KelosClientset.ApiV1alpha2().SessionSpawners(f.Namespace).List(ctx, metav1.ListOptions{})
 	if err == nil {
 		for _, spawner := range sessionSpawners.Items {
@@ -243,6 +251,15 @@ func (f *Framework) CreateTask(task *kelos.Task) {
 	}
 	_, err := f.KelosClientset.ApiV1alpha2().Tasks(task.Namespace).Create(context.TODO(), task, metav1.CreateOptions{})
 	Expect(err).NotTo(HaveOccurred(), "Failed to create task %s", task.Name)
+}
+
+// CreateTaskPipeline creates a TaskPipeline in the test namespace.
+func (f *Framework) CreateTaskPipeline(pipeline *kelos.TaskPipeline) {
+	if pipeline.Namespace == "" {
+		pipeline.Namespace = f.Namespace
+	}
+	_, err := f.KelosClientset.ApiV1alpha2().TaskPipelines(pipeline.Namespace).Create(context.TODO(), pipeline, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred(), "Failed to create taskpipeline %s", pipeline.Name)
 }
 
 // CreateWorkspace creates a Workspace in the test namespace using the kelos clientset.
@@ -437,6 +454,17 @@ func (f *Framework) WaitForTaskPhase(name, phase string) {
 		}
 		return string(task.Status.Phase)
 	}, 2*time.Minute, time.Second).Should(Equal(phase), "Task %s did not reach phase %s", name, phase)
+}
+
+// WaitForTaskPipelinePhase waits for a TaskPipeline's status.phase to reach the expected value.
+func (f *Framework) WaitForTaskPipelinePhase(name, phase string) {
+	Eventually(func() string {
+		pipeline, err := f.KelosClientset.ApiV1alpha2().TaskPipelines(f.Namespace).Get(context.TODO(), name, metav1.GetOptions{})
+		if err != nil {
+			return ""
+		}
+		return string(pipeline.Status.Phase)
+	}, 5*time.Minute, time.Second).Should(Equal(phase), "TaskPipeline %s did not reach phase %s", name, phase)
 }
 
 // GetTaskOutputs returns the outputs of a Task as a joined string.

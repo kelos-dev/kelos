@@ -23,9 +23,7 @@ spec:
         prompt: |
           Review the {{index .Matrix "component"}} component, focusing on {{index .Matrix "focus"}}.
           Do not modify the repository. Identify the most important actionable finding.
-
-          Finish by reporting this structured result on its own line:
-          finding: <one-line finding>
+          Return a concise one-line finding as your final response.
 
     - name: summarize
       taskTemplate:
@@ -38,9 +36,10 @@ spec:
           workspaceRef:
             name: my-workspace
         prompt: |
-          Consolidate these review findings into a prioritized report:
+          The review responses below are base64-encoded. Decode each response,
+          then consolidate the findings into a prioritized report:
           {{range index .Stages "review" -}}
-          - {{index .Matrix "component"}} / {{index .Matrix "focus"}}: {{index .Results "finding"}}
+          - {{index .Matrix "component"}} / {{index .Matrix "focus"}}: {{index .Results "response"}}
           {{end}}
 
           Group related findings, remove duplicates, and recommend the next actions.

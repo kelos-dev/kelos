@@ -66,7 +66,9 @@ review(controller, tests) ──────┘
 The `review` stage defines `component` and `focus` matrix parameters. Kelos
 creates one parallel Task for each combination, for a total of four Tasks. The
 `summarize` stage starts after all four succeed and iterates over their matrix
-values and structured `finding` results through `.Stages`.
+values and captured `response` results through `.Stages`. Agent responses are
+base64-encoded in Task results, so the summary prompt tells the agent to decode
+them before producing the report.
 
 ## Steps
 

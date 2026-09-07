@@ -217,6 +217,15 @@ var _ = Describe("Session remote control", func() {
 		})
 		waitForTurnCompletion(connection, "completed")
 
+		By("uploading and downloading a large attachment")
+		largeData := bytes.Repeat([]byte("attachment data\n"), 1024*1024)
+		largeAttachment := uploadSessionAttachment(webClient, baseURL, f.Namespace, sessionName, "large-attachment.txt", largeData)
+		Expect(largeAttachment.SizeBytes).To(Equal(int64(len(largeData))))
+		largeStatus, largeHeaders, largeDownloaded := downloadSessionAttachment(webClient, baseURL, f.Namespace, sessionName, largeAttachment.ID)
+		Expect(largeStatus).To(Equal(http.StatusOK))
+		Expect(largeHeaders.Get("Content-Length")).To(Equal(fmt.Sprint(len(largeData))))
+		Expect(bytes.Equal(largeDownloaded, largeData)).To(BeTrue(), "Downloaded attachment contents differ")
+
 		By("uploading an attachment before Session Pod recovery")
 		attachmentData := []byte("web attachment persisted across recovery\n")
 		attachment := uploadSessionAttachment(webClient, baseURL, f.Namespace, sessionName, "web-attachment.txt", attachmentData)

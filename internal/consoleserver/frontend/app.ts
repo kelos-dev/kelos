@@ -4720,8 +4720,8 @@ function stageAttachments(fileList: FileList | null) {
   const existing = currentAttachmentFiles();
   const accepted: File[] = [];
   for (const file of incoming) {
-    if (file.size > 10 * 1024 * 1024) {
-      showToast(`${file.name} exceeds the 10 MiB attachment limit`);
+    if (file.size > 100 * 1024 * 1024) {
+      showToast(`${file.name} exceeds the 100 MiB attachment limit`);
       continue;
     }
     if (existing.length + accepted.length >= 8) {

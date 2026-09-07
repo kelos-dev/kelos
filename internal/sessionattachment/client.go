@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -24,8 +25,9 @@ const runtimeExecutable = "/kelos/bin/kelos-session-runtime"
 
 // Client transfers attachments through the Session Pod exec subresource.
 type Client struct {
-	clientset  kubernetes.Interface
-	restConfig *rest.Config
+	clientset   kubernetes.Interface
+	restConfig  *rest.Config
+	newExecutor func(*rest.Config, string, *url.URL) (remotecommand.Executor, error)
 }
 
 // New creates a Session attachment client.
@@ -37,7 +39,7 @@ func New(restConfig *rest.Config) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("creating Kubernetes client: %w", err)
 	}
-	return &Client{clientset: clientset, restConfig: restConfig}, nil
+	return &Client{clientset: clientset, restConfig: restConfig, newExecutor: remotecommand.NewSPDYExecutor}, nil
 }
 
 // Upload stores one attachment in a Session Pod.
@@ -57,29 +59,41 @@ func (c *Client) Upload(ctx context.Context, namespace, podName, name string, so
 	return attachment, nil
 }
 
-// Download loads one attachment and its metadata from a Session Pod.
-func (c *Client) Download(ctx context.Context, namespace, podName, id string) (sessionruntime.Attachment, []byte, error) {
-	var stdout bytes.Buffer
-	if err := c.stream(ctx, namespace, podName, []string{runtimeExecutable, "attachment", "get", id}, nil, &stdout); err != nil {
-		return sessionruntime.Attachment{}, nil, err
-	}
-	reader := bufio.NewReader(&stdout)
-	metadata, err := reader.ReadBytes('\n')
+// Download opens an attachment stream from a Session Pod. The caller must close it.
+func (c *Client) Download(ctx context.Context, namespace, podName, id string) (sessionruntime.Attachment, io.ReadCloser, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	stdout, writer := io.Pipe()
+	go func() {
+		err := c.stream(ctx, namespace, podName, []string{runtimeExecutable, "attachment", "get", id}, nil, writer)
+		_ = writer.CloseWithError(err)
+	}()
+	data := &attachmentStream{Reader: bufio.NewReader(stdout), pipe: stdout, cancel: cancel}
+	metadata, err := data.ReadSlice('\n')
 	if err != nil {
+		_ = data.Close()
 		return sessionruntime.Attachment{}, nil, fmt.Errorf("reading Session attachment metadata: %w", err)
 	}
 	var attachment sessionruntime.Attachment
 	if err := json.Unmarshal(metadata, &attachment); err != nil {
+		_ = data.Close()
 		return sessionruntime.Attachment{}, nil, fmt.Errorf("decoding Session attachment metadata: %w", err)
 	}
-	data, err := io.ReadAll(io.LimitReader(reader, sessionruntime.MaxAttachmentBytes+1))
-	if err != nil {
-		return sessionruntime.Attachment{}, nil, fmt.Errorf("reading Session attachment data: %w", err)
-	}
-	if attachment.ID != id || int64(len(data)) != attachment.SizeBytes || int64(len(data)) > sessionruntime.MaxAttachmentBytes {
-		return sessionruntime.Attachment{}, nil, errors.New("Session attachment data is invalid")
+	if attachment.ID != id || attachment.SizeBytes < 0 || attachment.SizeBytes > sessionruntime.MaxAttachmentBytes {
+		_ = data.Close()
+		return sessionruntime.Attachment{}, nil, errors.New("Session attachment metadata is invalid")
 	}
 	return attachment, data, nil
+}
+
+type attachmentStream struct {
+	*bufio.Reader
+	pipe   *io.PipeReader
+	cancel context.CancelFunc
+}
+
+func (s *attachmentStream) Close() error {
+	s.cancel()
+	return s.pipe.Close()
 }
 
 func (c *Client) stream(ctx context.Context, namespace, podName string, command []string, stdin io.Reader, stdout io.Writer) error {
@@ -96,7 +110,7 @@ func (c *Client) stream(ctx context.Context, namespace, podName string, command 
 		Stderr:    true,
 		TTY:       false,
 	}, clientgoscheme.ParameterCodec)
-	executor, err := remotecommand.NewSPDYExecutor(c.restConfig, "POST", request.URL())
+	executor, err := c.newExecutor(c.restConfig, "POST", request.URL())
 	if err != nil {
 		return fmt.Errorf("creating Session attachment exec connection: %w", err)
 	}

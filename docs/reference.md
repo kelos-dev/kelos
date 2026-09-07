@@ -258,9 +258,10 @@ files. In the interactive terminal UI, dragging a file into a terminal that
 supports bracketed paste stages the file directly. Use `/send` in the plain
 terminal to send staged files without message text. The web composer accepts
 files from its attachment button or by drag and drop. Each message supports up
-to eight files of 10 MiB each. A Session retains up to 128 attachments and 100
-MiB of attachment data. Attachments share the Session workspace lifecycle, so
-they survive Pod replacement only when `spec.volumeClaimTemplate` is configured
+to eight files of 100 MiB each. A Session retains up to 128 attachments and 1
+GiB of attachment data. The console allows up to 15 minutes to receive each
+uploaded file. Attachments share the Session workspace lifecycle, so they
+survive Pod replacement only when `spec.volumeClaimTemplate` is configured
 and are removed by Session reset or deletion. Retained messages show attachment
 names, and the web client provides authenticated previews or downloads while
 the Session is ready.

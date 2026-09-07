@@ -17,6 +17,7 @@ import (
 	"mime"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -57,6 +58,7 @@ const (
 	maxSessionSectionLength      = 64
 	requestBodyLimit             = 1024 * 1024
 	attachmentRequestLimit       = sessionruntime.MaxAttachmentBytes + 1024*1024
+	attachmentUploadTimeout      = 15 * time.Minute
 	taskLogTailLineLimit         = 2000
 	taskLogTailByteLimit         = 2 * 1024 * 1024
 	taskLogScannerMaxTokenSize   = 10 * 1024 * 1024
@@ -98,7 +100,7 @@ type Server struct {
 
 type sessionAttachmentTransfer interface {
 	Upload(context.Context, string, string, string, io.Reader) (sessionruntime.Attachment, error)
-	Download(context.Context, string, string, string) (sessionruntime.Attachment, []byte, error)
+	Download(context.Context, string, string, string) (sessionruntime.Attachment, io.ReadCloser, error)
 }
 
 type sessionSocket struct {
@@ -1497,6 +1499,10 @@ func sessionActivityTime(session *kelos.Session) time.Time {
 }
 
 func (s *Server) uploadSessionAttachment(writer http.ResponseWriter, request *http.Request, namespace, name string) {
+	if err := http.NewResponseController(writer).SetReadDeadline(time.Now().Add(attachmentUploadTimeout)); err != nil {
+		writeError(writer, http.StatusInternalServerError, fmt.Sprintf("setting upload deadline for Session %q: %v", name, err))
+		return
+	}
 	session, ok := s.readySession(writer, request, namespace, name)
 	if !ok {
 		return
@@ -1547,15 +1553,20 @@ func (s *Server) downloadSessionAttachment(writer http.ResponseWriter, request *
 		writeError(writer, status, fmt.Sprintf("downloading attachment from Session %q: %v", name, err))
 		return
 	}
+	defer data.Close()
 	disposition := "attachment"
 	if strings.HasPrefix(attachment.MediaType, "image/") {
 		disposition = "inline"
 	}
 	writer.Header().Set("Cache-Control", "private, no-store")
 	writer.Header().Set("Content-Type", attachment.MediaType)
+	writer.Header().Set("Content-Length", strconv.FormatInt(attachment.SizeBytes, 10))
 	writer.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": attachment.Name}))
 	writer.WriteHeader(http.StatusOK)
-	_, _ = writer.Write(data)
+	written, err := io.Copy(writer, io.LimitReader(data, attachment.SizeBytes+1))
+	if err != nil || written != attachment.SizeBytes {
+		panic(http.ErrAbortHandler)
+	}
 }
 
 func attachmentUploadStatus(err error) int {

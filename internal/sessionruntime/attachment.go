@@ -18,9 +18,9 @@ import (
 )
 
 const (
-	MaxAttachmentBytes         int64 = 10 * 1024 * 1024
+	MaxAttachmentBytes         int64 = 100 * 1024 * 1024
 	MaxAttachmentsPerMessage         = 8
-	maxSessionAttachmentBytes  int64 = 100 * 1024 * 1024
+	maxSessionAttachmentBytes  int64 = 1024 * 1024 * 1024
 	maxSessionAttachmentCount        = 128
 	attachmentDirectoryName          = "attachments"
 	attachmentDataFileName           = "data"

@@ -47,6 +47,37 @@ func TestAttachmentStorePutOpenAndResolve(t *testing.T) {
 	}
 }
 
+func TestAttachmentStoreAcceptsMaximumSizeFiles(t *testing.T) {
+	store, err := NewAttachmentStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 2; index++ {
+		attachment, err := store.Put(fmt.Sprintf("file-%d.bin", index), io.LimitReader(zeroReader{}, MaxAttachmentBytes))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if attachment.SizeBytes != MaxAttachmentBytes {
+			t.Fatalf("attachment size = %d, want %d", attachment.SizeBytes, MaxAttachmentBytes)
+		}
+		opened, data, err := store.Open(attachment.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		readBytes, readErr := io.Copy(io.Discard, data)
+		closeErr := data.Close()
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if closeErr != nil {
+			t.Fatal(closeErr)
+		}
+		if opened != attachment || readBytes != MaxAttachmentBytes {
+			t.Fatalf("opened attachment = %#v, read %d bytes, want %#v and %d bytes", opened, readBytes, attachment, MaxAttachmentBytes)
+		}
+	}
+}
+
 func TestAttachmentStoreRejectsOversizedInputAndCleansTemporaryData(t *testing.T) {
 	stateDir := t.TempDir()
 	store, err := NewAttachmentStore(stateDir)

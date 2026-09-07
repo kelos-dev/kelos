@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/iotest"
 	"time"
 	"unicode/utf8"
 
@@ -40,10 +41,30 @@ import (
 )
 
 type fakeSessionAttachmentTransfer struct {
-	uploadedName string
-	uploadedData []byte
-	attachment   sessionruntime.Attachment
-	downloadData []byte
+	uploadedName   string
+	uploadedData   []byte
+	attachment     sessionruntime.Attachment
+	downloadStream io.ReadCloser
+}
+
+type attachmentResponseRecorder struct {
+	*httptest.ResponseRecorder
+	readDeadline time.Time
+}
+
+func (r *attachmentResponseRecorder) SetReadDeadline(deadline time.Time) error {
+	r.readDeadline = deadline
+	return nil
+}
+
+type attachmentReadCloser struct {
+	io.Reader
+	closed bool
+}
+
+func (r *attachmentReadCloser) Close() error {
+	r.closed = true
+	return nil
 }
 
 type patchErrorClient struct {
@@ -61,8 +82,8 @@ func (f *fakeSessionAttachmentTransfer) Upload(_ context.Context, _, _, name str
 	return f.attachment, nil
 }
 
-func (f *fakeSessionAttachmentTransfer) Download(_ context.Context, _, _, _ string) (sessionruntime.Attachment, []byte, error) {
-	return f.attachment, f.downloadData, nil
+func (f *fakeSessionAttachmentTransfer) Download(_ context.Context, _, _, _ string) (sessionruntime.Attachment, io.ReadCloser, error) {
+	return f.attachment, f.downloadStream, nil
 }
 
 func TestAuthenticationProtectsApplicationAndAPI(t *testing.T) {
@@ -2778,9 +2799,10 @@ func TestSessionAttachmentUploadAndDownload(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	download := &attachmentReadCloser{Reader: strings.NewReader("content")}
 	transfer := &fakeSessionAttachmentTransfer{
-		attachment:   sessionruntime.Attachment{ID: "attachment-id", Name: "screen.png", MediaType: "image/png", SizeBytes: 7},
-		downloadData: []byte("content"),
+		attachment:     sessionruntime.Attachment{ID: "attachment-id", Name: "screen.png", MediaType: "image/png", SizeBytes: 7},
+		downloadStream: download,
 	}
 	server.attachments = transfer
 
@@ -2798,7 +2820,12 @@ func TestSessionAttachmentUploadAndDownload(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer secret-token")
 	request.Header.Set("Content-Type", multipartWriter.FormDataContentType())
 	response := httptest.NewRecorder()
-	server.ServeHTTP(response, request)
+	uploadResponse := &attachmentResponseRecorder{ResponseRecorder: response}
+	started := time.Now()
+	server.ServeHTTP(uploadResponse, request)
+	if uploadResponse.readDeadline.Before(started.Add(attachmentUploadTimeout)) || uploadResponse.readDeadline.After(time.Now().Add(attachmentUploadTimeout)) {
+		t.Fatalf("upload read deadline = %v, want %v from request start", uploadResponse.readDeadline, attachmentUploadTimeout)
+	}
 	if response.Code != http.StatusCreated || transfer.uploadedName != "screen.png" || string(transfer.uploadedData) != "content" {
 		t.Fatalf("upload status = %d name = %q data = %q body = %s", response.Code, transfer.uploadedName, transfer.uploadedData, response.Body.String())
 	}
@@ -2812,6 +2839,48 @@ func TestSessionAttachmentUploadAndDownload(t *testing.T) {
 	}
 	if !strings.Contains(response.Header().Get("Content-Disposition"), "inline") || !strings.Contains(response.Header().Get("Content-Disposition"), "screen.png") {
 		t.Fatalf("download content disposition = %q", response.Header().Get("Content-Disposition"))
+	}
+	if response.Header().Get("Content-Length") != "7" || !download.closed {
+		t.Fatalf("download content length = %q, stream closed = %v", response.Header().Get("Content-Length"), download.closed)
+	}
+}
+
+func TestSessionAttachmentDownloadAbortsIncompleteTransfers(t *testing.T) {
+	server := testServer(t)
+	if err := server.client.Create(t.Context(), &kelos.Session{
+		ObjectMeta: metav1.ObjectMeta{Name: "chat", Namespace: "team-a"},
+		Status:     kelos.SessionStatus{Phase: kelos.SessionPhaseReady, PodName: "chat-pod"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name string
+		data io.Reader
+	}{
+		{name: "short body", data: strings.NewReader("short")},
+		{name: "long body", data: strings.NewReader("too long")},
+		{name: "stream error", data: io.MultiReader(strings.NewReader("content"), iotest.ErrReader(errors.New("transfer failed")))},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			stream := &attachmentReadCloser{Reader: tt.data}
+			server.attachments = &fakeSessionAttachmentTransfer{
+				attachment:     sessionruntime.Attachment{ID: "attachment-id", Name: "file.txt", MediaType: "text/plain", SizeBytes: 7},
+				downloadStream: stream,
+			}
+			request := httptest.NewRequest(http.MethodGet, "/api/sessions/team-a/chat/attachments/attachment-id", nil)
+			request.Header.Set("Authorization", "Bearer secret-token")
+			func() {
+				defer func() {
+					if got := recover(); got != http.ErrAbortHandler {
+						t.Errorf("download panic = %v, want http.ErrAbortHandler", got)
+					}
+				}()
+				server.ServeHTTP(httptest.NewRecorder(), request)
+			}()
+			if !stream.closed {
+				t.Fatal("download stream was not closed")
+			}
+		})
 	}
 }
 

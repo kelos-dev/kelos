@@ -3,6 +3,8 @@ package controller
 import (
 	"github.com/prometheus/client_golang/prometheus"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
+
+	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 )
 
 var (
@@ -12,7 +14,7 @@ var (
 			Name: "kelos_task_created_total",
 			Help: "Total number of Tasks for which a Job was created",
 		},
-		[]string{"namespace", "type"},
+		[]string{"namespace", "type", "spawner"},
 	)
 
 	// taskCompletedTotal counts the total number of Tasks that reached a terminal phase.
@@ -21,7 +23,7 @@ var (
 			Name: "kelos_task_completed_total",
 			Help: "Total number of Tasks that reached a terminal phase",
 		},
-		[]string{"namespace", "type", "phase"},
+		[]string{"namespace", "type", "spawner", "phase"},
 	)
 
 	// taskDurationSeconds records the duration of Task execution.
@@ -31,7 +33,7 @@ var (
 			Help:    "Duration of Task execution from start to completion",
 			Buckets: []float64{30, 60, 120, 300, 600, 1200, 1800, 3600},
 		},
-		[]string{"namespace", "type", "phase"},
+		[]string{"namespace", "type", "spawner", "phase"},
 	)
 
 	// reconcileErrorsTotal counts the total number of reconciliation errors.
@@ -70,6 +72,23 @@ var (
 		[]string{"namespace", "type", "spawner", "model"},
 	)
 )
+
+// recordTaskCompleted increments taskCompletedTotal for a Task that has just
+// reached a terminal phase. Callers are responsible for the transition guard;
+// this only owns the label tuple.
+//
+// taskCompletedTotal and taskDurationSeconds use positional label values, so a
+// reordering of their label slices above would silently mislabel every series
+// if the tuple were respelled at each call site. Both are built here instead.
+func recordTaskCompleted(task *kelos.Task, phase kelos.TaskPhase) {
+	taskCompletedTotal.WithLabelValues(task.Namespace, resolveTaskType(task), resolveTaskSpawner(task), string(phase)).Inc()
+}
+
+// observeTaskDuration records the execution duration of a Task that reached the
+// given terminal phase.
+func observeTaskDuration(task *kelos.Task, phase kelos.TaskPhase, seconds float64) {
+	taskDurationSeconds.WithLabelValues(task.Namespace, resolveTaskType(task), resolveTaskSpawner(task), string(phase)).Observe(seconds)
+}
 
 func init() {
 	metrics.Registry.MustRegister(

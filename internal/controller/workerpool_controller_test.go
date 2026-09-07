@@ -14,6 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
@@ -33,6 +36,7 @@ import (
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/githubapp"
+	"github.com/kelos-dev/kelos/internal/taskbuilder"
 )
 
 func newWorkerPoolTestScheme() *runtime.Scheme {
@@ -667,6 +671,117 @@ func TestWorkerPoolReconciler_TaskCompletionFailed(t *testing.T) {
 	assert.Equal(t, kelos.TaskPhaseFailed, updatedTask.Status.Phase)
 	assert.Equal(t, "OOM killed", updatedTask.Status.Message)
 	assert.NotNil(t, updatedTask.Status.CompletionTime)
+}
+
+// durationSampleCount returns the number of observations recorded by
+// taskDurationSeconds for the given label values.
+func durationSampleCount(t *testing.T, labels ...string) uint64 {
+	t.Helper()
+	observer, err := taskDurationSeconds.GetMetricWithLabelValues(labels...)
+	require.NoError(t, err)
+	var pb dto.Metric
+	require.NoError(t, observer.(prometheus.Metric).Write(&pb))
+	return pb.GetHistogram().GetSampleCount()
+}
+
+// TestWorkerPoolReconciler_CompleteTaskRecordsCompletionMetrics covers the
+// WorkerPool completion path, which previously set the terminal phase without
+// ever incrementing taskCompletedTotal or observing taskDurationSeconds, so
+// every Task served by a WorkerPool was absent from both metrics.
+func TestWorkerPoolReconciler_CompleteTaskRecordsCompletionMetrics(t *testing.T) {
+	scheme := newWorkerPoolTestScheme()
+
+	startTime := metav1.NewTime(time.Now().Add(-90 * time.Second))
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-task",
+			Namespace: "default",
+			Labels:    map[string]string{taskbuilder.SpawnerLabel: "wp-spawner"},
+		},
+		Spec: kelos.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Do something",
+			WorkerPoolRef: &kelos.WorkerPoolReference{
+				Name: "my-pool",
+			},
+		},
+		Status: kelos.TaskStatus{
+			Phase:     kelos.TaskPhaseRunning,
+			PodName:   "wp-my-pool-0",
+			StartTime: &startTime,
+		},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&kelos.Task{}).
+		WithObjects(task).
+		Build()
+
+	r := newWorkerPoolReconciler(cl, scheme)
+
+	labels := []string{"default", AgentTypeClaudeCode, "wp-spawner", string(kelos.TaskPhaseSucceeded)}
+	completedBefore := testutil.ToFloat64(taskCompletedTotal.WithLabelValues(labels...))
+	durationBefore := durationSampleCount(t, labels...)
+
+	require.NoError(t, r.completeTask(context.Background(), task, kelos.TaskPhaseSucceeded, ""))
+
+	assert.Equal(t, completedBefore+1, testutil.ToFloat64(taskCompletedTotal.WithLabelValues(labels...)),
+		"expected taskCompletedTotal to increment once on the transition to a terminal phase")
+	assert.Equal(t, durationBefore+1, durationSampleCount(t, labels...),
+		"expected taskDurationSeconds to record one observation")
+
+	// completeTask is reachable again on a re-reconcile of an already-terminal
+	// Task; it must not double-count.
+	require.NoError(t, r.completeTask(context.Background(), task, kelos.TaskPhaseSucceeded, ""))
+
+	assert.Equal(t, completedBefore+1, testutil.ToFloat64(taskCompletedTotal.WithLabelValues(labels...)),
+		"expected no further taskCompletedTotal increment for an already-terminal Task")
+	assert.Equal(t, durationBefore+1, durationSampleCount(t, labels...),
+		"expected no further taskDurationSeconds observation for an already-terminal Task")
+}
+
+// TestWorkerPoolReconciler_CompleteTaskSkipsDurationWithoutStartTime ensures a
+// Task that never recorded a start time still counts as completed.
+func TestWorkerPoolReconciler_CompleteTaskSkipsDurationWithoutStartTime(t *testing.T) {
+	scheme := newWorkerPoolTestScheme()
+
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "no-start-task",
+			Namespace: "default",
+			Labels:    map[string]string{taskbuilder.SpawnerLabel: "no-start-spawner"},
+		},
+		Spec: kelos.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Do something",
+			WorkerPoolRef: &kelos.WorkerPoolReference{
+				Name: "my-pool",
+			},
+		},
+		Status: kelos.TaskStatus{
+			Phase:   kelos.TaskPhasePending,
+			PodName: "wp-my-pool-0",
+		},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&kelos.Task{}).
+		WithObjects(task).
+		Build()
+
+	r := newWorkerPoolReconciler(cl, scheme)
+
+	labels := []string{"default", AgentTypeClaudeCode, "no-start-spawner", string(kelos.TaskPhaseFailed)}
+	completedBefore := testutil.ToFloat64(taskCompletedTotal.WithLabelValues(labels...))
+	durationBefore := durationSampleCount(t, labels...)
+
+	require.NoError(t, r.completeTask(context.Background(), task, kelos.TaskPhaseFailed, "Worker pod was deleted"))
+
+	assert.Equal(t, completedBefore+1, testutil.ToFloat64(taskCompletedTotal.WithLabelValues(labels...)))
+	assert.Equal(t, durationBefore, durationSampleCount(t, labels...),
+		"expected no duration observation when StartTime is nil")
 }
 
 func TestRequestWorkerPodTaskCancellationMarksAssignedTask(t *testing.T) {

@@ -13,6 +13,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
+	"github.com/kelos-dev/kelos/internal/taskbuilder"
 )
 
 const (
@@ -162,6 +163,14 @@ func resolveTaskType(task *kelos.Task) string {
 		return task.Spec.Worker.Type
 	}
 	return task.Spec.Type
+}
+
+// resolveTaskSpawner returns the name of the TaskSpawner that created a Task,
+// or the empty string for Tasks that were not created by a spawner. The label
+// is written by taskbuilder, so the key is sourced from there rather than
+// respelled here.
+func resolveTaskSpawner(task *kelos.Task) string {
+	return task.Labels[taskbuilder.SpawnerLabel]
 }
 
 // resolveTaskWorkspaceRef returns the effective workspace reference for a Task,
@@ -382,7 +391,7 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 		Value: agentType,
 	})
 
-	if spawner := task.Labels["kelos.dev/taskspawner"]; spawner != "" {
+	if spawner := resolveTaskSpawner(task); spawner != "" {
 		envVars = append(envVars, corev1.EnvVar{
 			Name:  "KELOS_TASKSPAWNER",
 			Value: spawner,

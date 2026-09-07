@@ -38,31 +38,31 @@ func TestMetricsRegistered(t *testing.T) {
 }
 
 func TestTaskCreatedTotalCounter(t *testing.T) {
-	taskCreatedTotal.WithLabelValues("default", "claude-code").Add(0)
-	before := testutil.ToFloat64(taskCreatedTotal.WithLabelValues("default", "claude-code"))
+	taskCreatedTotal.WithLabelValues("default", "claude-code", "slack-general").Add(0)
+	before := testutil.ToFloat64(taskCreatedTotal.WithLabelValues("default", "claude-code", "slack-general"))
 
-	taskCreatedTotal.WithLabelValues("default", "claude-code").Inc()
+	taskCreatedTotal.WithLabelValues("default", "claude-code", "slack-general").Inc()
 
-	after := testutil.ToFloat64(taskCreatedTotal.WithLabelValues("default", "claude-code"))
+	after := testutil.ToFloat64(taskCreatedTotal.WithLabelValues("default", "claude-code", "slack-general"))
 	if after != before+1 {
 		t.Errorf("expected taskCreatedTotal to increment by 1, got delta %f", after-before)
 	}
 }
 
 func TestTaskCompletedTotalCounter(t *testing.T) {
-	taskCompletedTotal.WithLabelValues("default", "claude-code", "Succeeded").Add(0)
-	before := testutil.ToFloat64(taskCompletedTotal.WithLabelValues("default", "claude-code", "Succeeded"))
+	taskCompletedTotal.WithLabelValues("default", "claude-code", "slack-general", "Succeeded").Add(0)
+	before := testutil.ToFloat64(taskCompletedTotal.WithLabelValues("default", "claude-code", "slack-general", "Succeeded"))
 
-	taskCompletedTotal.WithLabelValues("default", "claude-code", "Succeeded").Inc()
+	taskCompletedTotal.WithLabelValues("default", "claude-code", "slack-general", "Succeeded").Inc()
 
-	after := testutil.ToFloat64(taskCompletedTotal.WithLabelValues("default", "claude-code", "Succeeded"))
+	after := testutil.ToFloat64(taskCompletedTotal.WithLabelValues("default", "claude-code", "slack-general", "Succeeded"))
 	if after != before+1 {
 		t.Errorf("expected taskCompletedTotal to increment by 1, got delta %f", after-before)
 	}
 }
 
 func TestTaskDurationSecondsHistogram(t *testing.T) {
-	taskDurationSeconds.WithLabelValues("test-ns", "claude-code", "Succeeded").Observe(120.5)
+	taskDurationSeconds.WithLabelValues("test-ns", "claude-code", "slack-general", "Succeeded").Observe(120.5)
 
 	// Verify the histogram was observed by checking the underlying collector
 	count := testutil.CollectAndCount(taskDurationSeconds)

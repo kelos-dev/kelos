@@ -1295,10 +1295,23 @@ func (r *WorkerPoolReconciler) monitorTaskCompletion(ctx context.Context, task *
 
 func (r *WorkerPoolReconciler) completeTask(ctx context.Context, task *kelos.Task, phase kelos.TaskPhase, message string) error {
 	outputs, results := r.readPodOutputs(ctx, task.Namespace, task.Status.PodName, task.Name)
+	// completeTask can run for a Task that is already terminal: the phase switch
+	// in Reconcile routes on a possibly-stale cached copy, while the Get below
+	// refreshes from the API server. Capture the phase actually found there so
+	// completion metrics are only emitted on the transition into a terminal
+	// phase. Assigning inside the retry closure keeps the value consistent with
+	// the attempt that persisted the update.
+	//
+	// This guards on any terminal phase, deliberately broader than the
+	// TaskReconciler's per-phase guards: a Succeeded -> Failed correction records
+	// nothing here, keeping one completion count per Task rather than inflating
+	// the totals a success rate is computed from.
+	var alreadyTerminal bool
 	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		if err := r.Get(ctx, client.ObjectKeyFromObject(task), task); err != nil {
 			return err
 		}
+		alreadyTerminal = isTerminalTaskPhase(task.Status.Phase)
 		task.Status.Phase = phase
 		task.Status.Message = message
 		now := metav1.Now()
@@ -1313,6 +1326,13 @@ func (r *WorkerPoolReconciler) completeTask(ctx context.Context, task *kelos.Tas
 		return r.Status().Update(ctx, task)
 	}); err != nil {
 		return err
+	}
+
+	if !alreadyTerminal {
+		recordTaskCompleted(task, phase)
+		if task.Status.StartTime != nil {
+			observeTaskDuration(task, phase, task.Status.CompletionTime.Time.Sub(task.Status.StartTime.Time).Seconds())
+		}
 	}
 
 	if results != nil {

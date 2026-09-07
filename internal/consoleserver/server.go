@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"embed"
@@ -16,6 +17,7 @@ import (
 	"io/fs"
 	"mime"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -94,6 +96,7 @@ type Server struct {
 	handler          http.Handler
 	upgrader         websocket.Upgrader
 	bridge           func(context.Context, *sessionSocket, string, string, func() error) error
+	terminalExecutor func(*rest.Config, string, *url.URL) (remotecommand.Executor, error)
 	attachments      sessionAttachmentTransfer
 	taskLogStream    func(context.Context, *kelos.Task, int64) (io.ReadCloser, error)
 }
@@ -295,6 +298,7 @@ func New(config Config) (*Server, error) {
 		},
 	}
 	server.bridge = server.bridgeExec
+	server.terminalExecutor = remotecommand.NewSPDYExecutor
 	server.taskLogStream = server.openTaskLogStream
 	server.handler = server.routes()
 	return server, nil
@@ -434,6 +438,10 @@ func (s *Server) api(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	namespace, name := parts[1], parts[2]
+	if len(parts) == 4 && parts[3] == "exec" && request.Method == http.MethodGet {
+		s.execSession(writer, request, namespace, name)
+		return
+	}
 	if len(parts) == 4 && parts[3] == "connect" && request.Method == http.MethodGet {
 		s.connectSession(writer, request, namespace, name)
 		return
@@ -1828,7 +1836,17 @@ func writeKubernetesError(writer http.ResponseWriter, operation string, err erro
 }
 
 func (s *Server) index(writer http.ResponseWriter, request *http.Request) {
-	serveEmbedded(writer, "web/index.html", "text/html; charset=utf-8")
+	data, err := webFiles.ReadFile("web/index.html")
+	if err != nil {
+		writeError(writer, http.StatusInternalServerError, "reading Console page")
+		return
+	}
+	nonce := rand.Text()
+	policy := writer.Header().Get("Content-Security-Policy")
+	writer.Header().Set("Content-Security-Policy", strings.Replace(policy, "style-src 'self'", "style-src 'self' 'nonce-"+nonce+"'", 1))
+	writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+	writer.Header().Set("Cache-Control", "no-store")
+	_, _ = writer.Write(bytes.ReplaceAll(data, []byte("{{STYLE_NONCE}}"), []byte(nonce)))
 }
 
 func (s *Server) loginPage(writer http.ResponseWriter, request *http.Request) {

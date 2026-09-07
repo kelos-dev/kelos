@@ -11,5 +11,5 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "files": ["app.ts", "login.ts"]
+  "files": ["app.ts", "login.ts", "terminal.ts"]
 }

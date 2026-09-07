@@ -483,6 +483,13 @@ connect to Sessions across namespaces while operating on one active namespace
 at a time. Users can switch the active namespace live from the sidebar.
 `consoleServer.defaultNamespace` sets its initial value, and resource inventory,
 Session form options, and credential options are loaded only from the active namespace.
+Select a Ready Session and click **Terminal** to open an interactive `/bin/sh`
+shell in its agent container. The shell uses the agent container's workspace
+and permissions. It supports terminal resizing and keyboard input,
+including Ctrl+C. Closing the terminal disconnects the shell stream; the Session
+conversation continues independently. Suspended, resetting, and unready Sessions
+cannot open a terminal. After a disconnect or shell exit, close and reopen the
+terminal to start another shell.
 The Resources page shows the incoming and outgoing relationships for one
 selected object, with a searchable inventory for inspecting the full namespace.
 Selecting a Task from either resource view shows its agent container logs and

@@ -32,6 +32,12 @@ GENERATED_FILES=(
   api/v1alpha2/zz_generated.deepcopy.go
   internal/consoleserver/web/app.js
   internal/consoleserver/web/login.js
+  internal/consoleserver/web/terminal.js
+  internal/consoleserver/web/xterm.js
+  internal/consoleserver/web/xterm.css
+  internal/consoleserver/web/xterm-LICENSE.txt
+  internal/consoleserver/web/xterm-addon-fit.js
+  internal/consoleserver/web/xterm-addon-fit-LICENSE.txt
 )
 
 TMPDIR="$(mktemp -d)"

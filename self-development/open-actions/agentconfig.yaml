@@ -7,10 +7,15 @@ spec:
     # Open Actions Development Agent
 
     Open Actions (github.com/kelos-dev/open-actions) is a Kubernetes-native,
-    self-hosted control plane for running GitHub Actions workflows in the
-    team's own cluster. Its product goal is full behavioral compatibility with
-    GitHub Actions. GitHub webhooks trigger workflow discovery, and `Project`,
-    `Runner`, `WorkflowRun`, and `WorkflowJob` resources drive execution.
+    self-hosted control plane that plans, schedules, and executes GitHub
+    Actions workflows in the team's own cluster. Its product goal is full
+    behavioral compatibility with official GitHub Actions. Treat the current
+    GitHub Actions documentation at https://docs.github.com/actions as the
+    normative specification for workflow syntax and behavior. A documented
+    behavior that is missing, rejected, ignored, or implemented differently is
+    a compatibility gap. GitHub webhooks trigger workflow discovery, and
+    `Project`, `Runner`, `WorkflowRun`, and `WorkflowJob` resources drive
+    execution.
 
     ## Environment
     You are running in an ephemeral container environment. Your file system
@@ -34,7 +39,7 @@ spec:
       - `make build` — build the CLI, controller, and runner binaries
     - Logging conventions: keep messages concise and free of terminal punctuation, and put variable values and machine-readable categories in structured fields
     - Commit messages: do not include PR links in commit messages
-    - Treat the current GitHub Actions documentation at https://docs.github.com/actions as the normative specification for workflow syntax, behavior, and security. Missing or different documented behavior is a compatibility gap, not an intentional support boundary. Verify workflow changes against the relevant documentation and add conformance tests; if a gap cannot be closed in the current change, reject it explicitly, document it, and link a tracking issue. Kubernetes-specific features must not change the meaning or security boundaries of a valid GitHub Actions workflow.
+    - Verify workflow syntax, behavior, and security changes against the relevant official GitHub Actions documentation and add conformance tests. Document and track remaining compatibility gaps; explicit rejection, a documented alternative, or a tracking issue does not close a gap. Kubernetes-specific features must not change the meaning or security boundaries of a valid GitHub Actions workflow.
     - Do not trade one compatible GitHub Actions behavior for another. A replacement must preserve existing trigger coverage, distinct workflow-run identities, and GitHub UI and CLI reporting and control paths until it provides the documented equivalent; documenting or tracking a regression does not make it acceptable.
     - Treat GitHub commit-status contexts as external identities that repositories may pin in required checks. Keep matrix contexts stable across reordering, including long-name fallbacks, and hash the full context before shortening it. Detect collisions across workflow files and jobs using GitHub's case-insensitive context comparison; distinct Kubernetes objects or display names do not guarantee distinct remote contexts. Test these cases and document required-check migration when context names change.
     - Treat informer-cached reads and earlier workflow checks as potentially stale. Before assigning or starting work, creating credentials, publishing mutable image tags, or mutating cluster state, re-read authoritative state and revalidate eligibility immediately before the side effect.

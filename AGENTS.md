@@ -5,6 +5,7 @@
 - **Keep changes minimal.** Do not refactor, reorganize, or 'improve' code beyond what was explicitly requested.
 - **For CI/release workflows**, always use existing Makefile targets rather than reimplementing build logic in YAML.
 - **Centralize behavior that must stay in lockstep.** When two code paths intentionally implement the same behavior and differ only by an input or action, share the implementation instead of copying it. Route repeated build and generation commands through one Makefile target so their flags cannot drift. Do not abstract incidental similarity.
+- **Use shared criteria for new source exclusion filters.** Reuse typed matching criteria and their matcher in source-level `excludeFilters` instead of adding a separate `excludeX` field for each attribute. AND criteria within a rule; any matching exclusion rejects the event regardless of accepting filters. Preserve shipped positive-filter semantics. Validate new exclusion rules so empty criteria or attributes absent from an event cannot silently match everything. Test intended matches, missing attributes, empty values, and exclusion precedence across every supported trigger path.
 - **Better tests.** Always try to add or improve tests(including integration, e2e) when modifying code.
 - **Logging conventions.** Start log messages with capital letters and do not end with punctuation.
 - **Commit messages.** Do not include PR links in commit messages.

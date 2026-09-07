@@ -186,6 +186,11 @@ spec:
         GitHub Actions syntax or semantics already express the same behavior.
       - Require tests that connect the API design to the documented workflow
         behavior it enables.
+      - For reporting or rerun contracts, compare trigger coverage, distinct
+        workflow-run and job reports, Checks-tab visibility, and GitHub UI/CLI
+        rerun controls with the official documentation. Do not dismiss a
+        compatibility gap introduced or widened by the change because it is
+        intentional, documented, or tracked in an issue.
 
       **Kubernetes API conventions** (ref: https://github.com/kubernetes/community/blob/main/contributors/devel/sig-architecture/api-conventions.md):
       - Are field names camelCase in Go and camelCase in JSON tags?

@@ -1532,6 +1532,7 @@ func TestSessionUIAdaptsToPhoneViewport(t *testing.T) {
 		"Android keyboard resizing":     `interactive-widget=resizes-content`,
 		"dismissible sidebar backdrop":  `id="sidebar-scrim"`,
 		"compact session list header":   `class="session-sidebar-header"`,
+		"mobile session view picker":    `id="session-view-choice" aria-label="Session view" disabled`,
 	} {
 		if !strings.Contains(string(index), expected) {
 			t.Errorf("Session page is missing %s: %s", description, expected)
@@ -1569,10 +1570,10 @@ func TestSessionUIAdaptsToPhoneViewport(t *testing.T) {
 		"phone create touch target":          `.new-session-button { min-height: 44px; margin-top: 4px; padding: 8px 10px; }`,
 		"fixed new Session action":           `.new-session-button { flex: none;`,
 		"section reorder touch target":       `.session-section-order-button { width: 44px; height: 44px; }`,
-		"single-row phone header":            `grid-template-areas: "menu heading actions"`,
+		"single-row phone header":            `grid-template-areas: "menu heading actions";`,
 		"phone lifecycle actions in sidebar": `.session-lifecycle-action, #reset-session, #delete-session { display: none !important; }`,
 		"44-pixel touch targets":             `.icon-button { width: 44px; height: 44px; }`,
-		"44-pixel view tabs":                 `.view-tabs button { min-height: 44px; padding: 5px 8px; }`,
+		"44-pixel view picker":               `.session-view-picker { position: relative; width: 44px; height: 44px;`,
 		"Session action touch target":        `.session-item-actions { top: 5px; right: 1px; width: 44px; height: 44px; }`,
 		"phone safe-area padding":            `env(safe-area-inset-bottom)`,
 		"non-zooming form fields":            `.composer textarea, .pending-message-input, .yaml-panel textarea, .form-grid input`,

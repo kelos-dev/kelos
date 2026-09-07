@@ -330,7 +330,6 @@ const elements = requireElements({
   title: document.querySelector('#session-title'),
   meta: document.querySelector('#session-meta'),
   displayNameButton: document.querySelector('#session-display-name'),
-  terminalButton: document.querySelector('#open-terminal'),
   displayNameDialog: document.querySelector('#display-name-dialog'),
   displayNameForm: document.querySelector('#display-name-form'),
   displayNameDialogDescription: document.querySelector('#display-name-dialog-description'),
@@ -397,6 +396,11 @@ const elements = requireElements({
   viewTabs: document.querySelector('.view-tabs'),
   conversationTab: document.querySelector('#conversation-tab'),
   changesTab: document.querySelector('#changes-tab'),
+  terminalTab: document.querySelector('#terminal-tab'),
+  terminalView: document.querySelector('#terminal-view'),
+  viewPicker: document.querySelector('#session-view-picker'),
+  viewChoice: document.querySelector('#session-view-choice'),
+  terminalChoice: document.querySelector('#terminal-view-choice'),
   welcome: document.querySelector('#welcome'),
   composerWrap: document.querySelector('.composer-wrap'),
   composer: document.querySelector('#composer'),
@@ -2729,8 +2733,11 @@ function createWelcome() {
 
 function renderHeader() {
   const session = state.selected;
-  elements.terminalButton.disabled = !sessionTerminal.available(session);
+  elements.terminalTab.disabled = !sessionTerminal.available(session);
+  elements.viewChoice.disabled = !session;
+  elements.terminalChoice.disabled = elements.terminalTab.disabled;
   sessionTerminal.sync(session);
+  if (elements.terminalTab.disabled && !elements.terminalView.hidden) setActiveView('conversation');
   elements.displayNameButton.hidden = !session;
   elements.displayNameButton.disabled = !session;
   renderSelectedSessionSection(session);
@@ -2873,7 +2880,7 @@ function connectSocket() {
     setComposer(true);
     updateComposerAction();
     renderHistoryControl();
-    elements.input.focus();
+    if (!elements.messages.hidden) elements.input.focus();
   });
   socket.addEventListener('message', event => {
     if (generation !== state.socketGeneration) return;
@@ -4578,20 +4585,27 @@ function renderDiffLines(diff) {
 }
 
 function setActiveView(view) {
+  elements.viewChoice.value = view;
+  elements.viewPicker.dataset.view = view;
+  const conversationActive = view === 'conversation';
   const changesActive = view === 'changes';
-  elements.messages.hidden = changesActive;
-  elements.composerWrap.hidden = changesActive;
+  const terminalActive = view === 'terminal';
+  elements.messages.hidden = !conversationActive;
+  elements.composerWrap.hidden = !conversationActive;
   elements.changes.hidden = !changesActive;
-  elements.conversationTab.setAttribute('aria-selected', String(!changesActive));
-  elements.changesTab.setAttribute('aria-selected', String(changesActive));
-  elements.conversationTab.tabIndex = changesActive ? -1 : 0;
-  elements.changesTab.tabIndex = changesActive ? 0 : -1;
-  if (changesActive) hideCurrentRequest();
-  else updateCurrentRequest();
+  elements.terminalView.hidden = !terminalActive;
+  for (const [tab, active] of [[elements.conversationTab, conversationActive],
+    [elements.changesTab, changesActive], [elements.terminalTab, terminalActive]] as const) {
+    tab.setAttribute('aria-selected', String(active));
+    tab.tabIndex = active ? 0 : -1;
+  }
+  if (conversationActive) updateCurrentRequest();
+  else hideCurrentRequest();
+  if (terminalActive) sessionTerminal.show(state.selected);
 }
 
 function handleViewTabKeydown(event) {
-  const tabs = [elements.conversationTab, elements.changesTab].filter(tab => !tab.disabled);
+  const tabs = [elements.conversationTab, elements.changesTab, elements.terminalTab].filter(tab => !tab.disabled);
   const current = tabs.indexOf(event.target);
   if (current < 0) return;
 
@@ -5206,7 +5220,6 @@ async function resetSession(session: SessionSummary | null) {
 elements.resumeButton.addEventListener('click', resumeSelectedSession);
 elements.suspendButton.addEventListener('click', suspendSelectedSession);
 elements.deleteButton.addEventListener('click', () => deleteSession(state.selected));
-elements.terminalButton.addEventListener('click', () => sessionTerminal.open(state.selected));
 elements.resetButton.addEventListener('click', () => resetSession(state.selected));
 elements.sessionActionRename.addEventListener('click', () => {
   const session = sessionActionsTarget();
@@ -5242,9 +5255,16 @@ elements.sessionActionsMenu.addEventListener('keydown', event => {
 elements.sessionActionsMenu.addEventListener('focusout', handleSessionActionsFocusOut);
 elements.conversationTab.addEventListener('click', () => setActiveView('conversation'));
 elements.changesTab.addEventListener('click', () => setActiveView('changes'));
+elements.terminalTab.addEventListener('click', () => setActiveView('terminal'));
+elements.viewChoice.addEventListener('change', () => setActiveView(elements.viewChoice.value));
 elements.viewTabs.addEventListener('keydown', handleViewTabKeydown);
 elements.currentRequestButton.addEventListener('click', jumpToCurrentRequest);
 elements.messages.addEventListener('scroll', scheduleCurrentRequestUpdate);
+
+window.addEventListener('pagehide', () => {
+  sessionTerminal.close();
+  if (!elements.terminalView.hidden) setActiveView('conversation');
+});
 
 function interruptActiveTurn() {
   if (!state.socket || state.socket.readyState !== WebSocket.OPEN || !state.activeTurn || state.interrupting) return;

@@ -32,7 +32,7 @@ func (s *Server) execSession(writer http.ResponseWriter, request *http.Request, 
 		Resource("pods").Namespace(namespace).Name(session.Status.PodName).SubResource("exec")
 	execRequest.VersionedParams(&corev1.PodExecOptions{
 		Container: kelos.AgentContainerName,
-		Command:   []string{"/bin/sh", "-c", "export TERM=xterm-256color; exec /bin/sh -i"},
+		Command:   []string{"/bin/sh", "-c", "export TERM=xterm-256color; if [ -x /bin/bash ]; then exec /bin/bash -i; fi; exec /bin/sh -i"},
 		Stdin:     true,
 		Stdout:    true,
 		TTY:       true,

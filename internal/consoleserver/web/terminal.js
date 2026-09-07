@@ -1,9 +1,8 @@
 "use strict";
 const sessionTerminal = (() => {
-    const dialog = document.querySelector('#terminal-dialog');
     const container = document.querySelector('#terminal-container');
-    const title = document.querySelector('#terminal-title');
     const status = document.querySelector('#terminal-status');
+    const reconnect = document.querySelector('#reconnect-terminal');
     let active = null;
     function available(session) {
         return Boolean(session && session.phase === 'Ready' && !session.resetting && !session.userSuspended);
@@ -11,22 +10,24 @@ const sessionTerminal = (() => {
     function close() {
         active?.dispose();
         active = null;
-        if (dialog.open)
-            dialog.close();
         container.replaceChildren();
+        reconnect.disabled = true;
     }
     function sync(session) {
         if (active && (!available(session) || session?.namespace !== active.session.namespace ||
             session?.name !== active.session.name || session?.uid !== active.session.uid))
             close();
     }
-    function open(session) {
+    function show(session) {
+        sync(session);
         if (!session || !available(session))
             return;
-        close();
-        title.textContent = `Terminal · ${session.namespace}/${session.name}`;
+        if (active) {
+            active.focus();
+            return;
+        }
         status.textContent = 'Connecting…';
-        dialog.showModal();
+        reconnect.disabled = true;
         const nonce = document.querySelector('meta[name="terminal-style-nonce"]').content;
         const terminal = new Terminal({
             cursorBlink: true,
@@ -52,12 +53,18 @@ const sessionTerminal = (() => {
         finally {
             document.createElement = createElement;
         }
-        fit.fit();
         const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
         const socket = new WebSocket(`${protocol}//${location.host}/api/sessions/${encodeURIComponent(session.namespace)}/${encodeURIComponent(session.name)}/exec`);
         socket.binaryType = 'arraybuffer';
         let disposed = false;
         let finished = false;
+        const visible = () => !disposed && container.clientWidth > 0 && container.clientHeight > 0;
+        const focus = () => {
+            if (!visible())
+                return;
+            fit.fit();
+            terminal.focus();
+        };
         const send = (data) => {
             if (disposed || finished || socket.readyState !== WebSocket.OPEN)
                 return;
@@ -74,7 +81,7 @@ const sessionTerminal = (() => {
         const binary = terminal.onBinary(data => send(Uint8Array.from(data, character => character.charCodeAt(0))));
         const resize = terminal.onResize(sendResize);
         const observer = new ResizeObserver(() => {
-            if (!disposed)
+            if (visible())
                 fit.fit();
         });
         observer.observe(container);
@@ -82,13 +89,14 @@ const sessionTerminal = (() => {
             finished = true;
             status.textContent = message;
             terminal.options.disableStdin = true;
+            reconnect.disabled = false;
         };
         socket.addEventListener('open', () => {
             if (disposed)
                 return;
             status.textContent = 'Connected';
             sendResize();
-            terminal.focus();
+            focus();
         });
         socket.addEventListener('message', event => {
             if (disposed)
@@ -106,13 +114,13 @@ const sessionTerminal = (() => {
         });
         socket.addEventListener('error', () => {
             if (!disposed && !finished)
-                finish('Could not connect to the session terminal. Close and reopen to try again.');
+                finish('Could not connect to the session terminal. Reconnect to try again.');
         });
         socket.addEventListener('close', () => {
             if (!disposed && !finished)
-                finish('Disconnected. Close and reopen to start a shell.');
+                finish('Disconnected. Reconnect to start a shell.');
         });
-        active = { session, dispose: () => {
+        active = { session, focus, dispose: () => {
                 disposed = true;
                 observer.disconnect();
                 input.dispose();
@@ -121,14 +129,14 @@ const sessionTerminal = (() => {
                 socket.close();
                 terminal.dispose();
             } };
+        focus();
     }
-    document.querySelector('#close-terminal').addEventListener('click', close);
-    dialog.addEventListener('close', () => {
-        if (!dialog.open)
-            close();
+    reconnect.addEventListener('click', () => {
+        if (!active || reconnect.disabled)
+            return;
+        const session = active.session;
+        close();
+        show(session);
     });
-    // Escape is input for terminal applications; the Close button ends the connection.
-    dialog.addEventListener('cancel', event => event.preventDefault());
-    window.addEventListener('pagehide', close);
-    return { available, open, sync, close };
+    return { available, show, sync, close };
 })();

@@ -195,7 +195,10 @@ function resetHarness() {
     runtimeStatus: new TestNode('div'),
     sidebar: new TestNode('aside'),
     displayNameButton: new TestNode('button'),
-    terminalButton: new TestNode('button'),
+    terminalTab: new TestNode('button'),
+    terminalView: new TestNode('section'),
+    viewChoice: new TestNode('select'),
+    terminalChoice: new TestNode('option'),
     suspendButton: new TestNode('button'),
     resumeButton: new TestNode('button'),
     resetButton: new TestNode('button'),
@@ -208,6 +211,7 @@ function resetHarness() {
     welcome: null,
   };
   elements.currentRequest.hidden = true;
+  elements.terminalView.hidden = true;
   elements.connection.append(new TestNode('span'), new TestNode('span'));
   global.state = {
     sessions: [],
@@ -474,6 +478,42 @@ function testFailedSessionComposerRejectsDraft() {
   assert.equal(elements.input.disabled, true);
   assert.equal(elements.attachFiles.disabled, true);
   assert.equal(elements.send.disabled, true);
+}
+
+function testSessionViewPickerAvailability() {
+  for (const phase of ['Ready', 'Pending', 'Suspended', 'Failed']) {
+    resetHarness();
+    state.selected = {namespace: 'default', name: 'one', uid: 'uid-one', provider: 'codex', phase};
+    renderSessionHeader();
+    assert.equal(elements.viewChoice.disabled, false);
+    assert.equal(elements.terminalChoice.disabled, phase !== 'Ready');
+  }
+  state.selected = null;
+  renderSessionHeader();
+  assert.equal(elements.viewChoice.disabled, true);
+  assert.equal(elements.terminalChoice.disabled, true);
+}
+
+function testUnavailableSessionLeavesTerminalView() {
+  const setView = global.setActiveView;
+  try {
+    for (const change of [{phase: 'Pending'}, {phase: 'Suspended'}, {phase: 'Failed'}, {resetting: true}, {userSuspended: true}]) {
+      resetHarness();
+      state.selected = {namespace: 'default', name: 'one', uid: 'uid-one', provider: 'codex', phase: 'Ready'};
+      elements.terminalView.hidden = false;
+      const views = [];
+      global.setActiveView = view => views.push(view);
+      renderSessionHeader();
+      assert.deepEqual(views, []);
+      Object.assign(state.selected, change);
+      renderSessionHeader();
+      assert.deepEqual(views, ['conversation']);
+      assert.equal(elements.terminalTab.disabled, true);
+      assert.equal(elements.terminalChoice.disabled, true);
+    }
+  } finally {
+    global.setActiveView = setView;
+  }
 }
 
 async function testReadySessionDisconnectsWhenItBecomesPending() {
@@ -1056,6 +1096,8 @@ testComposerInterruptsWhileInputIsDisabled();
 testComposerLabelsPendingSubmission();
 testPendingSessionComposerAllowsDraft();
 testFailedSessionComposerRejectsDraft();
+testSessionViewPickerAvailability();
+testUnavailableSessionLeavesTerminalView();
 testSessionProgressSurvivesCachedViewSwitch();
 testSessionProgressElapsedFormatting();
 testRuntimeStatusLifecycle();

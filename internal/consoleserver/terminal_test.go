@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"os/exec"
 	"reflect"
 	"regexp"
@@ -78,7 +79,7 @@ func dialTerminal(t *testing.T, server *Server) *websocket.Conn {
 
 func TestSessionTerminalStreamsInputOutputAndResize(t *testing.T) {
 	s := terminalTestServer(t, terminalTestSession())
-	input := "echo héllo\r\x03"
+	input := "echo héllo\t\r\x03"
 	output := []byte("\x1b[32mhéllo\x1b[0m\r\n")
 	s.terminalExecutor = func(config *rest.Config, method string, target *url.URL) (remotecommand.Executor, error) {
 		if config != s.restConfig || method != http.MethodPost || target.Path != "/api/v1/namespaces/team-a/pods/chat-pod/exec" {
@@ -89,7 +90,7 @@ func TestSessionTerminalStreamsInputOutputAndResize(t *testing.T) {
 			query.Get("stdout") != "true" || query.Get("tty") != "true" || query.Get("stderr") == "true" {
 			t.Errorf("exec options = %v", query)
 		}
-		if !reflect.DeepEqual(query["command"], []string{"/bin/sh", "-c", "export TERM=xterm-256color; exec /bin/sh -i"}) {
+		if !reflect.DeepEqual(query["command"], []string{"/bin/sh", "-c", "export TERM=xterm-256color; if [ -x /bin/bash ]; then exec /bin/bash -i; fi; exec /bin/sh -i"}) {
 			t.Errorf("command = %v", query["command"])
 		}
 		return terminalTestExecutor{stream: func(ctx context.Context, options remotecommand.StreamOptions) error {
@@ -407,6 +408,38 @@ func TestApplicationTerminalBehavior(t *testing.T) {
 	}
 	if output, err := exec.Command(node, "testdata/terminal_test.js").CombinedOutput(); err != nil {
 		t.Fatalf("terminal behavior: %v\n%s", err, output)
+	}
+}
+
+func TestSessionTerminalShellCompletion(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 is not installed")
+	}
+	if _, err := os.Stat("/bin/bash"); err != nil {
+		t.Skip("/bin/bash is not installed")
+	}
+	s := terminalTestServer(t, terminalTestSession())
+	var command []string
+	s.terminalExecutor = func(_ *rest.Config, _ string, target *url.URL) (remotecommand.Executor, error) {
+		command = target.Query()["command"]
+		return nil, errors.New("capture shell command")
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/sessions/team-a/chat/exec", nil)
+	request.Header.Set("Authorization", "Bearer secret-token")
+	s.ServeHTTP(httptest.NewRecorder(), request)
+	if len(command) == 0 {
+		t.Fatal("Session terminal did not request a shell")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	args := append([]string{"testdata/terminal_shell_test.py"}, command...)
+	if output, err := exec.CommandContext(ctx, python, args...).CombinedOutput(); err != nil {
+		t.Fatalf("shell completion: %v\n%s", err, output)
+	}
+	output, err := exec.CommandContext(ctx, python, "testdata/terminal_shell_test.py", "/bin/sh", "-c", "printf 'startup failed\\n'; exit 1").CombinedOutput()
+	if err == nil || !strings.Contains(string(output), "Shell exited before its prompt: b'startup failed\\r\\n'") {
+		t.Fatalf("shell exit diagnostics: %v\n%s", err, output)
 	}
 }
 

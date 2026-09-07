@@ -159,11 +159,21 @@
           </form>
         </div>
         <div class="header-actions">
-          <button class="secondary-button" id="open-terminal" type="button" title="Open a shell in the session" disabled>Terminal</button>
           <div class="view-tabs" role="tablist" aria-label="Session view">
             <button id="conversation-tab" type="button" role="tab" aria-selected="true" aria-controls="messages" tabindex="0" disabled>Conversation</button>
             <button id="changes-tab" type="button" role="tab" aria-selected="false" aria-controls="changes-view" tabindex="-1" disabled>Changes <span id="changes-count">0</span></button>
+            <button id="terminal-tab" type="button" role="tab" aria-selected="false" aria-controls="terminal-view" tabindex="-1" disabled>Terminal</button>
           </div>
+          <label class="session-view-picker" id="session-view-picker" data-view="conversation" title="Session view">
+            <svg class="conversation-view-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 4V6a2 2 0 0 1 2-2Z"/></svg>
+            <svg class="changes-view-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8ZM14 2v6h6M8 12h8M8 16h8"/></svg>
+            <svg class="terminal-view-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 6 6 6-6 6m9 0h7"/></svg>
+            <select id="session-view-choice" aria-label="Session view" disabled>
+              <option value="conversation">Conversation</option>
+              <option value="changes">Changes</option>
+              <option value="terminal" id="terminal-view-choice" disabled>Terminal</option>
+            </select>
+          </label>
           <span class="connection-pill" id="connection-pill" data-state="idle"><span></span>Not connected</span>
           <button class="icon-button session-lifecycle-action" id="suspend-session" aria-label="Suspend session" title="Suspend session" disabled hidden>⏸</button>
           <button class="icon-button session-lifecycle-action" id="resume-session" aria-label="Resume session" title="Resume session" disabled hidden>▶</button>
@@ -199,6 +209,14 @@
         <div class="changes-list" id="changes-list" aria-live="polite">
           <div class="changes-empty">No file changes yet.</div>
         </div>
+      </section>
+
+      <section class="terminal-view" id="terminal-view" role="tabpanel" aria-labelledby="terminal-tab" hidden>
+        <header class="terminal-header">
+          <span id="terminal-status" role="status">Connecting…</span>
+          <button class="secondary-button" id="reconnect-terminal" type="button" disabled>Reconnect</button>
+        </header>
+        <div id="terminal-container"></div>
       </section>
 
       <footer class="composer-wrap">
@@ -413,17 +431,6 @@
         <button class="secondary-button close-resource-detail" type="button">Close</button>
       </div>
     </div>
-  </dialog>
-
-  <dialog class="session-dialog terminal-dialog" id="terminal-dialog" aria-labelledby="terminal-title" aria-describedby="terminal-status">
-    <div class="dialog-header">
-      <div>
-        <h2 id="terminal-title">Terminal</h2>
-        <p id="terminal-status" role="status">Connecting…</p>
-      </div>
-      <button class="secondary-button" id="close-terminal" type="button">Close</button>
-    </div>
-    <div id="terminal-container"></div>
   </dialog>
 
   <div class="session-actions-menu" id="session-actions-menu" role="menu" hidden>

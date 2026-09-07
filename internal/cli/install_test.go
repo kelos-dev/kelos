@@ -1096,22 +1096,17 @@ func TestKelosCRDsExist(t *testing.T) {
 }
 
 func TestKelosCRDNameSets(t *testing.T) {
-	for _, name := range []string{
-		"sessions.kelos.dev",
-		"taskbudgets.kelos.dev",
-		"taskrecords.kelos.dev",
-		"workerpools.kelos.dev",
-	} {
+	definitions, err := parseKelosCRDDefinitions(manifests.InstallCRD)
+	if err != nil {
+		t.Fatalf("parseKelosCRDDefinitions() error = %v", err)
+	}
+	if names := conversionCRDNames(definitions); len(names) != 0 {
+		t.Fatalf("expected no active conversion CRDs, got %v", names)
+	}
+	for _, definition := range definitions {
+		name := definition.name
 		if !slices.Contains(kelosCRDNames, name) {
 			t.Fatalf("expected %s to be staged during install upgrades", name)
-		}
-		if slices.Contains(kelosConversionCRDNames, name) {
-			t.Fatalf("did not expect single-version CRD %s in conversion CA wait list", name)
-		}
-	}
-	for _, name := range kelosConversionCRDNames {
-		if !slices.Contains(kelosCRDNames, name) {
-			t.Fatalf("conversion CRD %s must also be in staged CRD list", name)
 		}
 	}
 }

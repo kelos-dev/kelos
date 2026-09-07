@@ -2,9 +2,6 @@ package install
 
 import (
 	"context"
-	"encoding/base64"
-	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"time"
@@ -31,45 +28,20 @@ import (
 )
 
 // controllerSettleTimeout bounds Eventually blocks that wait for the in-process
-// controller to reconcile after install re-applies the CRDs and re-points their
-// conversion config. The informers re-establish their watches, so reconciles
-// need more headroom than a stable resource would.
+// controller to reconcile after install reapplies the CRDs.
 const controllerSettleTimeout = 60 * time.Second
 
-// kelosCRDNames are the kelos CRDs that serve two versions with a conversion
-// webhook.
 var kelosCRDNames = []string{
 	"agentconfigs.kelos.dev",
+	"sessions.kelos.dev",
+	"sessionspawners.kelos.dev",
 	"tasks.kelos.dev",
+	"taskbudgets.kelos.dev",
+	"taskrecords.kelos.dev",
 	"taskspawners.kelos.dev",
+	"webhookgateways.kelos.dev",
+	"workerpools.kelos.dev",
 	"workspaces.kelos.dev",
-}
-
-// pointConversionToEnvtest rewrites every kelos CRD conversion to the local
-// webhook envtest serves, so conversion works regardless of any service-based
-// config left by install.
-func pointConversionToEnvtest() {
-	crdGVK := schema.GroupVersionKind{Group: "apiextensions.k8s.io", Version: "v1", Kind: "CustomResourceDefinition"}
-	url := fmt.Sprintf("https://%s/convert", net.JoinHostPort(webhookHost, fmt.Sprintf("%d", webhookPort)))
-	conversion := map[string]interface{}{
-		"strategy": "Webhook",
-		"webhook": map[string]interface{}{
-			"conversionReviewVersions": []interface{}{"v1"},
-			"clientConfig": map[string]interface{}{
-				"url":      url,
-				"caBundle": base64.StdEncoding.EncodeToString(webhookCA),
-			},
-		},
-	}
-	for _, name := range kelosCRDNames {
-		crd := &unstructured.Unstructured{}
-		crd.SetGroupVersionKind(crdGVK)
-		if err := k8sClient.Get(ctx, types.NamespacedName{Name: name}, crd); err != nil {
-			continue
-		}
-		Expect(unstructured.SetNestedMap(crd.Object, conversion, "spec", "conversion")).To(Succeed())
-		_ = k8sClient.Update(ctx, crd)
-	}
 }
 
 // clearNamespaceFinalizers removes finalizers from the kelos-system namespace
@@ -209,7 +181,6 @@ func ensureKelosWebhookFixtureState() {
 	ensureKelosWebhookCertificateSecret()
 	ensureKelosControllerDeploymentAvailable()
 	ensureKelosWebhookEndpointSlices()
-	injectKelosCRDConversionCABundles()
 }
 
 func ensureKelosWebhookCertificateSecret() {
@@ -305,58 +276,6 @@ func ensureKelosWebhookEndpointSlices() {
 	_ = k8sClient.Update(ctx, current)
 }
 
-func injectKelosCRDConversionCABundles() {
-	crdGVK := schema.GroupVersionKind{Group: "apiextensions.k8s.io", Version: "v1", Kind: "CustomResourceDefinition"}
-	caBundle := base64.StdEncoding.EncodeToString(webhookFixtureCAData())
-	for _, name := range kelosCRDNames {
-		crd := &unstructured.Unstructured{}
-		crd.SetGroupVersionKind(crdGVK)
-		if err := k8sClient.Get(ctx, types.NamespacedName{Name: name}, crd); err != nil {
-			continue
-		}
-		if err := unstructured.SetNestedField(crd.Object, caBundle, "spec", "conversion", "webhook", "clientConfig", "caBundle"); err != nil {
-			continue
-		}
-		_ = k8sClient.Update(ctx, crd)
-	}
-}
-
-// normalizeKelosConversion rewrites every live kelos CRD conversion to the
-// service-based form that `kelos install` applies, clearing any url that
-// envtest's WebhookInstallOptions injected. Without this, install's server-side
-// apply (which sets clientConfig.service) leaves the envtest-injected
-// clientConfig.url in place, and the API server rejects the CRD because exactly
-// one of url or service is allowed. This is an envtest-only concern: a real
-// cluster never has the local url. No-op for CRDs that do not exist yet.
-func normalizeKelosConversion() {
-	crdGVK := schema.GroupVersionKind{Group: "apiextensions.k8s.io", Version: "v1", Kind: "CustomResourceDefinition"}
-	conversion := map[string]interface{}{
-		"strategy": "Webhook",
-		"webhook": map[string]interface{}{
-			"conversionReviewVersions": []interface{}{"v1"},
-			"clientConfig": map[string]interface{}{
-				"service": map[string]interface{}{
-					"name":      "kelos-webhook",
-					"namespace": "kelos-system",
-					"path":      "/convert",
-					"port":      int64(443),
-				},
-			},
-		},
-	}
-	for _, name := range kelosCRDNames {
-		crd := &unstructured.Unstructured{}
-		crd.SetGroupVersionKind(crdGVK)
-		if err := k8sClient.Get(ctx, types.NamespacedName{Name: name}, crd); err != nil {
-			continue
-		}
-		if err := unstructured.SetNestedMap(crd.Object, conversion, "spec", "conversion"); err != nil {
-			continue
-		}
-		_ = k8sClient.Update(ctx, crd)
-	}
-}
-
 // restoreCRDs re-applies CRDs by running install followed by cleanup of
 // non-CRD resources. This restores the envtest environment after uninstall
 // removes CRDs that were originally loaded by the BeforeSuite.
@@ -384,9 +303,6 @@ func restoreCRDs(kubeconfigPath string) {
 	reinstall := cli.NewRootCommand()
 	reinstall.SetArgs([]string{"install", "--kubeconfig", kubeconfigPath})
 	Expect(reinstall.Execute()).To(Succeed())
-	// Leave conversion pointing at the envtest webhook so the controller can
-	// reconcile converted resources in subsequent specs.
-	pointConversionToEnvtest()
 
 	// Wait for all CRDs to be fully established before subsequent tests
 	// can create custom resources. We verify by attempting to list each type.
@@ -438,15 +354,11 @@ var _ = Describe("Install/Uninstall", Ordered, func() {
 		kubeconfigPath = writeEnvtestKubeconfig()
 		ensureCertManagerReadyFixture()
 		startKelosWebhookReadinessFixture()
-		// Reconcile each kelos CRD conversion with what install applies so
-		// server-side apply does not collide with envtest's injected url.
-		normalizeKelosConversion()
 	})
 
 	Context("kelos install", func() {
 		AfterEach(func() {
 			deleteControllerResources()
-			pointConversionToEnvtest()
 		})
 
 		It("Should create kelos-system namespace and controller resources", func() {
@@ -712,9 +624,6 @@ var _ = Describe("Install/Uninstall", Ordered, func() {
 			root := cli.NewRootCommand()
 			root.SetArgs([]string{"install", "--kubeconfig", kubeconfigPath})
 			Expect(root.Execute()).To(Succeed())
-			// Restore reachable (envtest) conversion so the controller can
-			// process custom-resource finalizers during uninstall.
-			pointConversionToEnvtest()
 
 			By("Uninstalling")
 			root2 := cli.NewRootCommand()
@@ -754,9 +663,6 @@ var _ = Describe("Install/Uninstall", Ordered, func() {
 			root := cli.NewRootCommand()
 			root.SetArgs([]string{"install", "--kubeconfig", kubeconfigPath})
 			Expect(root.Execute()).To(Succeed())
-			// Restore reachable (envtest) conversion so the controller can
-			// process custom-resource finalizers during uninstall.
-			pointConversionToEnvtest()
 
 			By("Creating a Task with required fields")
 			task := &kelos.Task{

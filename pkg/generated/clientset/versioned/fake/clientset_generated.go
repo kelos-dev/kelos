@@ -20,8 +20,6 @@ package fake
 
 import (
 	clientset "github.com/kelos-dev/kelos/pkg/generated/clientset/versioned"
-	apiv1alpha1 "github.com/kelos-dev/kelos/pkg/generated/clientset/versioned/typed/api/v1alpha1"
-	fakeapiv1alpha1 "github.com/kelos-dev/kelos/pkg/generated/clientset/versioned/typed/api/v1alpha1/fake"
 	apiv1alpha2 "github.com/kelos-dev/kelos/pkg/generated/clientset/versioned/typed/api/v1alpha2"
 	fakeapiv1alpha2 "github.com/kelos-dev/kelos/pkg/generated/clientset/versioned/typed/api/v1alpha2/fake"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -100,11 +98,6 @@ var (
 	_ clientset.Interface = &Clientset{}
 	_ testing.FakeClient  = &Clientset{}
 )
-
-// ApiV1alpha1 retrieves the ApiV1alpha1Client
-func (c *Clientset) ApiV1alpha1() apiv1alpha1.ApiV1alpha1Interface {
-	return &fakeapiv1alpha1.FakeApiV1alpha1{Fake: &c.Fake}
-}
 
 // ApiV1alpha2 retrieves the ApiV1alpha2Client
 func (c *Clientset) ApiV1alpha2() apiv1alpha2.ApiV1alpha2Interface {

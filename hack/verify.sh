@@ -28,7 +28,6 @@ GENERATED_FILES=(
   internal/manifests/charts/kelos/charts/kelos-crds/templates/workspace-crd.yaml
   internal/manifests/charts/kelos/templates/rbac.yaml
   internal/manifests/charts/kelos/templates/validating-webhook.yaml
-  api/v1alpha1/zz_generated.deepcopy.go
   api/v1alpha2/zz_generated.deepcopy.go
   internal/consoleserver/web/app.js
   internal/consoleserver/web/login.js

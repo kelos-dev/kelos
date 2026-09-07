@@ -441,10 +441,7 @@ type GitHubWebhookFilter struct {
 	// BodyContains filters by case-sensitive substring match on the
 	// comment/review body. When both BodyContains and BodyPattern are set,
 	// the body must contain the substring AND match the pattern.
-	// Deprecated: use BodyPattern instead, which supports regex. This field
-	// is retained because v1alpha1 allows it alongside BodyPattern with AND
-	// semantics that a single regex cannot express; it cannot be removed
-	// until that combination is disallowed.
+	// Deprecated: use BodyPattern instead, which supports regex.
 	// +optional
 	// +kubebuilder:validation:MaxLength=1024
 	BodyContains string `json:"bodyContains,omitempty"`

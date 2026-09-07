@@ -330,6 +330,7 @@ const elements = requireElements({
   title: document.querySelector('#session-title'),
   meta: document.querySelector('#session-meta'),
   displayNameButton: document.querySelector('#session-display-name'),
+  terminalButton: document.querySelector('#open-terminal'),
   displayNameDialog: document.querySelector('#display-name-dialog'),
   displayNameForm: document.querySelector('#display-name-form'),
   displayNameDialogDescription: document.querySelector('#display-name-dialog-description'),
@@ -2728,6 +2729,8 @@ function createWelcome() {
 
 function renderHeader() {
   const session = state.selected;
+  elements.terminalButton.disabled = !sessionTerminal.available(session);
+  sessionTerminal.sync(session);
   elements.displayNameButton.hidden = !session;
   elements.displayNameButton.disabled = !session;
   renderSelectedSessionSection(session);
@@ -5203,6 +5206,7 @@ async function resetSession(session: SessionSummary | null) {
 elements.resumeButton.addEventListener('click', resumeSelectedSession);
 elements.suspendButton.addEventListener('click', suspendSelectedSession);
 elements.deleteButton.addEventListener('click', () => deleteSession(state.selected));
+elements.terminalButton.addEventListener('click', () => sessionTerminal.open(state.selected));
 elements.resetButton.addEventListener('click', () => resetSession(state.selected));
 elements.sessionActionRename.addEventListener('click', () => {
   const session = sessionActionsTarget();

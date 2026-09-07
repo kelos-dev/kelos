@@ -171,6 +171,7 @@ global.window = {
   },
 };
 global.WebSocket = {OPEN: 1};
+global.sessionTerminal = {available: session => session?.phase === 'Ready' && !session.resetting && !session.userSuspended, sync() {}};
 
 function resetHarness() {
   global.elements = {
@@ -194,6 +195,7 @@ function resetHarness() {
     runtimeStatus: new TestNode('div'),
     sidebar: new TestNode('aside'),
     displayNameButton: new TestNode('button'),
+    terminalButton: new TestNode('button'),
     suspendButton: new TestNode('button'),
     resumeButton: new TestNode('button'),
     resetButton: new TestNode('button'),

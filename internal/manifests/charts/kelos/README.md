@@ -232,7 +232,9 @@ kubectl port-forward -n kelos-system service/kelos-console-server 8080:80
 
 Then open `http://localhost:8080` and enter the token. The token represents one
 shared user that can inspect Kelos resources and create, reset, delete, and
-connect to Sessions in any namespace. Treat it as a credential. For access
+connect to Sessions in any namespace. It also grants interactive shell access
+to Ready Sessions' agent containers, including their workspaces and mounted
+credentials. Treat it as a credential. For access
 beyond a local port-forward,
 terminate TLS at a trusted proxy, set `consoleServer.secureCookie=true`, and
 restrict access to the endpoint at the network or proxy layer. The Console does

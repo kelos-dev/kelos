@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="color-scheme" content="light dark">
   <title>Kelos Console</title>
+  <meta name="terminal-style-nonce" content="{{STYLE_NONCE}}">
+  <link rel="stylesheet" href="/assets/xterm.css">
   <link rel="stylesheet" href="/assets/styles.css">
 </head>
 <body>
@@ -157,6 +159,7 @@
           </form>
         </div>
         <div class="header-actions">
+          <button class="secondary-button" id="open-terminal" type="button" title="Open a shell in the session" disabled>Terminal</button>
           <div class="view-tabs" role="tablist" aria-label="Session view">
             <button id="conversation-tab" type="button" role="tab" aria-selected="true" aria-controls="messages" tabindex="0" disabled>Conversation</button>
             <button id="changes-tab" type="button" role="tab" aria-selected="false" aria-controls="changes-view" tabindex="-1" disabled>Changes <span id="changes-count">0</span></button>
@@ -412,6 +415,17 @@
     </div>
   </dialog>
 
+  <dialog class="session-dialog terminal-dialog" id="terminal-dialog" aria-labelledby="terminal-title" aria-describedby="terminal-status">
+    <div class="dialog-header">
+      <div>
+        <h2 id="terminal-title">Terminal</h2>
+        <p id="terminal-status" role="status">Connecting…</p>
+      </div>
+      <button class="secondary-button" id="close-terminal" type="button">Close</button>
+    </div>
+    <div id="terminal-container"></div>
+  </dialog>
+
   <div class="session-actions-menu" id="session-actions-menu" role="menu" hidden>
     <button id="session-action-rename" type="button" role="menuitem">Rename</button>
     <button id="session-action-section" type="button" role="menuitem">Move to section…</button>
@@ -422,6 +436,9 @@
   </div>
 
   <div class="toast" id="toast" role="status"></div>
+  <script src="/assets/xterm.js" defer></script>
+  <script src="/assets/xterm-addon-fit.js" defer></script>
+  <script src="/assets/terminal.js" defer></script>
   <script src="/assets/app.js" defer></script>
 </body>
 </html>

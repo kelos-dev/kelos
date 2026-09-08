@@ -1,0 +1,78 @@
+# Real-time alternative to polling: requires the GitLab webhook server
+# (webhookServer.sources.gitlab.enabled in Helm) and a project webhook in GitLab
+# pointing at /webhook/gitlab with the same secret token as
+# gitlab-webhook-secret.yaml.
+apiVersion: kelos.dev/v1alpha2
+kind: TaskSpawner
+metadata:
+  name: gitlab-webhook-fixer
+spec:
+  when:
+    gitlabWebhook:
+      events:
+        - issue
+        - note
+        - pipeline
+      # TODO: Replace with your project path
+      project: group/repo
+      filters:
+        # An issue labeled "kelos" is opened or relabeled. `labels` requires
+        # every listed label, `excludeLabels` rejects any listed label; both
+        # match case-insensitively. Omit `action` to match every action.
+        - event: issue
+          action: open
+          labels: [kelos]
+          excludeLabels: [wontfix]
+        - event: issue
+          action: update
+          labels: [kelos]
+          excludeLabels: [wontfix]
+        # A "/kelos fix" comment on a merge request or issue. Notes on commits
+        # and snippets carry neither a branch nor a number and are excluded so
+        # the branch template below never renders "kelos-issue-". Label filters
+        # on notes apply to the commented merge request or issue.
+        - event: note
+          noteOn: MergeRequest
+          bodyPattern: '^/kelos fix'
+          excludeLabels: [wontfix]
+        - event: note
+          noteOn: Issue
+          bodyPattern: '^/kelos fix'
+          excludeLabels: [wontfix]
+        # A merge request pipeline failed. Pipeline and push events carry no
+        # labels, so label filters never match on them.
+        - event: pipeline
+          status: failed
+      # Status notes need webhookServer.sources.gitlab.tokenSecretName.
+      reporting:
+        comments:
+          mode: Sticky
+  taskTemplate:
+    type: claude-code
+    workspaceRef:
+      name: my-gitlab-workspace
+    credentials:
+      type: oauth
+      secretRef:
+        name: claude-oauth-token
+    # Merge requests (and pipelines/notes on them) set {{.Branch}} to the source
+    # branch; notes on issues get a fresh branch.
+    branch: "{{if .Branch}}{{.Branch}}{{else}}kelos-issue-{{.Number}}{{end}}"
+    # One Task per merge request or issue: a second delivery for the same item
+    # reuses the existing Task instead of creating a duplicate.
+    nameTemplate: "gitlab-webhook-fixer-{{.ID}}"
+    promptTemplate: |
+      GitLab {{.Event}} on {{.Kind}} #{{.Number}}: {{.Title}}
+      {{.URL}}
+      {{- if .CommentBody}}
+
+      Comment from {{.Sender}}:
+      {{.CommentBody}}
+      {{- end}}
+      {{- if .PipelineStatus}}
+
+      Pipeline {{.PipelineStatus}}: {{.PipelineURL}}
+      Inspect the failure, fix it on the current branch, and push.
+      {{- end}}
+    ttlSecondsAfterFinished: 3600
+  maxConcurrency: 3

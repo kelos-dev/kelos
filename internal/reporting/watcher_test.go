@@ -171,9 +171,9 @@ func TestReportTaskStatus_CreatesCommentOnPending(t *testing.T) {
 	defer server.Close()
 
 	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
-		AnnotationGitHubReporting: "enabled",
-		AnnotationSourceNumber:    "42",
-		AnnotationSourceKind:      "issue",
+		AnnotationCommentReporting: "enabled",
+		AnnotationSourceNumber:     "42",
+		AnnotationSourceKind:       "issue",
 	})
 
 	cl := fake.NewClientBuilder().
@@ -209,10 +209,10 @@ func TestReportTaskStatus_CreatesCommentOnPending(t *testing.T) {
 	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
 		t.Fatalf("Getting updated task: %v", err)
 	}
-	if updated.Annotations[AnnotationGitHubReportPhase] != "accepted" {
-		t.Errorf("Expected report phase 'accepted', got %q", updated.Annotations[AnnotationGitHubReportPhase])
+	if updated.Annotations[AnnotationCommentReportPhase] != "accepted" {
+		t.Errorf("Expected report phase 'accepted', got %q", updated.Annotations[AnnotationCommentReportPhase])
 	}
-	if updated.Annotations[AnnotationGitHubCommentID] == "" {
+	if updated.Annotations[AnnotationCommentID] == "" {
 		t.Error("Expected comment ID to be set")
 	}
 }
@@ -223,10 +223,10 @@ func TestReportTaskStatus_StickyCommentReusedAcrossTasks(t *testing.T) {
 
 	annotations := func() map[string]string {
 		return map[string]string{
-			AnnotationGitHubReporting:   "enabled",
-			AnnotationGitHubCommentMode: string(kelos.GitHubCommentModeSticky),
-			AnnotationSourceNumber:      "42",
-			AnnotationSourceKind:        "issue",
+			AnnotationCommentReporting: "enabled",
+			AnnotationCommentMode:      string(kelos.CommentModeSticky),
+			AnnotationSourceNumber:     "42",
+			AnnotationSourceKind:       "issue",
 		}
 	}
 	first := newTaskWithAnnotations("first-task", "default", kelos.TaskPhasePending, annotations())
@@ -273,10 +273,10 @@ func TestReportTaskStatus_StickyCommentsScopedByTaskSpawner(t *testing.T) {
 
 	annotations := func() map[string]string {
 		return map[string]string{
-			AnnotationGitHubReporting:   "enabled",
-			AnnotationGitHubCommentMode: string(kelos.GitHubCommentModeSticky),
-			AnnotationSourceNumber:      "42",
-			AnnotationSourceKind:        "issue",
+			AnnotationCommentReporting: "enabled",
+			AnnotationCommentMode:      string(kelos.CommentModeSticky),
+			AnnotationSourceNumber:     "42",
+			AnnotationSourceKind:       "issue",
 		}
 	}
 	first := newTaskWithAnnotations("first-task", "default", kelos.TaskPhasePending, annotations())
@@ -321,11 +321,11 @@ func TestReportTaskStatus_UpdatesCommentOnSucceeded(t *testing.T) {
 	defer server.Close()
 
 	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhaseSucceeded, map[string]string{
-		AnnotationGitHubReporting:   "enabled",
-		AnnotationSourceNumber:      "42",
-		AnnotationSourceKind:        "issue",
-		AnnotationGitHubCommentID:   "5555",
-		AnnotationGitHubReportPhase: "accepted",
+		AnnotationCommentReporting:   "enabled",
+		AnnotationSourceNumber:       "42",
+		AnnotationSourceKind:         "issue",
+		AnnotationCommentID:          "5555",
+		AnnotationCommentReportPhase: "accepted",
 	})
 
 	cl := fake.NewClientBuilder().
@@ -360,8 +360,8 @@ func TestReportTaskStatus_UpdatesCommentOnSucceeded(t *testing.T) {
 	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
 		t.Fatalf("Getting updated task: %v", err)
 	}
-	if updated.Annotations[AnnotationGitHubReportPhase] != "succeeded" {
-		t.Errorf("Expected report phase 'succeeded', got %q", updated.Annotations[AnnotationGitHubReportPhase])
+	if updated.Annotations[AnnotationCommentReportPhase] != "succeeded" {
+		t.Errorf("Expected report phase 'succeeded', got %q", updated.Annotations[AnnotationCommentReportPhase])
 	}
 }
 
@@ -370,11 +370,11 @@ func TestReportTaskStatus_UpdatesCommentOnFailed(t *testing.T) {
 	defer server.Close()
 
 	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhaseFailed, map[string]string{
-		AnnotationGitHubReporting:   "enabled",
-		AnnotationSourceNumber:      "42",
-		AnnotationSourceKind:        "issue",
-		AnnotationGitHubCommentID:   "5555",
-		AnnotationGitHubReportPhase: "accepted",
+		AnnotationCommentReporting:   "enabled",
+		AnnotationSourceNumber:       "42",
+		AnnotationSourceKind:         "issue",
+		AnnotationCommentID:          "5555",
+		AnnotationCommentReportPhase: "accepted",
 	})
 
 	cl := fake.NewClientBuilder().
@@ -406,8 +406,8 @@ func TestReportTaskStatus_UpdatesCommentOnFailed(t *testing.T) {
 	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
 		t.Fatalf("Getting updated task: %v", err)
 	}
-	if updated.Annotations[AnnotationGitHubReportPhase] != "failed" {
-		t.Errorf("Expected report phase 'failed', got %q", updated.Annotations[AnnotationGitHubReportPhase])
+	if updated.Annotations[AnnotationCommentReportPhase] != "failed" {
+		t.Errorf("Expected report phase 'failed', got %q", updated.Annotations[AnnotationCommentReportPhase])
 	}
 }
 
@@ -416,11 +416,11 @@ func TestReportTaskStatus_SkipsDuplicateReport(t *testing.T) {
 	defer server.Close()
 
 	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
-		AnnotationGitHubReporting:   "enabled",
-		AnnotationSourceNumber:      "42",
-		AnnotationSourceKind:        "issue",
-		AnnotationGitHubCommentID:   "5555",
-		AnnotationGitHubReportPhase: "accepted", // Already reported
+		AnnotationCommentReporting:   "enabled",
+		AnnotationSourceNumber:       "42",
+		AnnotationSourceKind:         "issue",
+		AnnotationCommentID:          "5555",
+		AnnotationCommentReportPhase: "accepted", // Already reported
 	})
 
 	cl := fake.NewClientBuilder().
@@ -457,7 +457,7 @@ func TestReportTaskStatus_SkipsWithoutReportingAnnotation(t *testing.T) {
 	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
 		AnnotationSourceNumber: "42",
 		AnnotationSourceKind:   "issue",
-		// No AnnotationGitHubReporting
+		// No AnnotationCommentReporting
 	})
 
 	cl := fake.NewClientBuilder().
@@ -491,9 +491,9 @@ func TestReportTaskStatus_SkipsEmptyPhase(t *testing.T) {
 	defer server.Close()
 
 	task := newTaskWithAnnotations("test-task", "default", "", map[string]string{
-		AnnotationGitHubReporting: "enabled",
-		AnnotationSourceNumber:    "42",
-		AnnotationSourceKind:      "issue",
+		AnnotationCommentReporting: "enabled",
+		AnnotationSourceNumber:     "42",
+		AnnotationSourceKind:       "issue",
 	})
 
 	cl := fake.NewClientBuilder().
@@ -527,9 +527,9 @@ func TestReportTaskStatus_RunningMapsToAccepted(t *testing.T) {
 	defer server.Close()
 
 	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhaseRunning, map[string]string{
-		AnnotationGitHubReporting: "enabled",
-		AnnotationSourceNumber:    "42",
-		AnnotationSourceKind:      "issue",
+		AnnotationCommentReporting: "enabled",
+		AnnotationSourceNumber:     "42",
+		AnnotationSourceKind:       "issue",
 	})
 
 	cl := fake.NewClientBuilder().
@@ -561,8 +561,8 @@ func TestReportTaskStatus_RunningMapsToAccepted(t *testing.T) {
 	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
 		t.Fatalf("Getting updated task: %v", err)
 	}
-	if updated.Annotations[AnnotationGitHubReportPhase] != "accepted" {
-		t.Errorf("Expected report phase 'accepted' for Running task, got %q", updated.Annotations[AnnotationGitHubReportPhase])
+	if updated.Annotations[AnnotationCommentReportPhase] != "accepted" {
+		t.Errorf("Expected report phase 'accepted' for Running task, got %q", updated.Annotations[AnnotationCommentReportPhase])
 	}
 }
 
@@ -572,9 +572,9 @@ func TestReportTaskStatus_CreatesNewCommentWhenNoCommentID(t *testing.T) {
 
 	// Task with succeeded phase but no comment ID (e.g. short-lived task)
 	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhaseSucceeded, map[string]string{
-		AnnotationGitHubReporting: "enabled",
-		AnnotationSourceNumber:    "42",
-		AnnotationSourceKind:      "issue",
+		AnnotationCommentReporting: "enabled",
+		AnnotationSourceNumber:     "42",
+		AnnotationSourceKind:       "issue",
 	})
 
 	cl := fake.NewClientBuilder().
@@ -610,9 +610,9 @@ func TestReportTaskStatus_CreatesNewCommentWhenNoCommentID(t *testing.T) {
 	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
 		t.Fatalf("Getting updated task: %v", err)
 	}
-	commentID, err := strconv.ParseInt(updated.Annotations[AnnotationGitHubCommentID], 10, 64)
+	commentID, err := strconv.ParseInt(updated.Annotations[AnnotationCommentID], 10, 64)
 	if err != nil || commentID == 0 {
-		t.Errorf("Expected valid comment ID, got %q", updated.Annotations[AnnotationGitHubCommentID])
+		t.Errorf("Expected valid comment ID, got %q", updated.Annotations[AnnotationCommentID])
 	}
 }
 
@@ -621,9 +621,9 @@ func TestReportTaskStatus_RetriesAnnotationPersistenceOnConflict(t *testing.T) {
 	defer server.Close()
 
 	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
-		AnnotationGitHubReporting: "enabled",
-		AnnotationSourceNumber:    "42",
-		AnnotationSourceKind:      "issue",
+		AnnotationCommentReporting: "enabled",
+		AnnotationSourceNumber:     "42",
+		AnnotationSourceKind:       "issue",
 	})
 
 	baseClient := fake.NewClientBuilder().
@@ -663,20 +663,20 @@ func TestReportTaskStatus_RetriesAnnotationPersistenceOnConflict(t *testing.T) {
 	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
 		t.Fatalf("Getting updated task: %v", err)
 	}
-	if updated.Annotations[AnnotationGitHubReportPhase] != "accepted" {
-		t.Errorf("Expected report phase 'accepted', got %q", updated.Annotations[AnnotationGitHubReportPhase])
+	if updated.Annotations[AnnotationCommentReportPhase] != "accepted" {
+		t.Errorf("Expected report phase 'accepted', got %q", updated.Annotations[AnnotationCommentReportPhase])
 	}
-	if updated.Annotations[AnnotationGitHubCommentID] == "" {
+	if updated.Annotations[AnnotationCommentID] == "" {
 		t.Error("Expected comment ID to be set")
 	}
 }
 
 func TestReportTaskStatus_CorruptedCommentIDReturnsError(t *testing.T) {
 	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
-		AnnotationGitHubReporting: "enabled",
-		AnnotationSourceNumber:    "42",
-		AnnotationSourceKind:      "issue",
-		AnnotationGitHubCommentID: "not-a-number",
+		AnnotationCommentReporting: "enabled",
+		AnnotationSourceNumber:     "42",
+		AnnotationSourceKind:       "issue",
+		AnnotationCommentID:        "not-a-number",
 	})
 
 	cl := fake.NewClientBuilder().
@@ -698,9 +698,9 @@ func TestReportTaskStatus_CachePopulatedAfterCreate(t *testing.T) {
 	defer server.Close()
 
 	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
-		AnnotationGitHubReporting: "enabled",
-		AnnotationSourceNumber:    "42",
-		AnnotationSourceKind:      "issue",
+		AnnotationCommentReporting: "enabled",
+		AnnotationSourceNumber:     "42",
+		AnnotationSourceKind:       "issue",
 	})
 	task.UID = types.UID("uid-create")
 
@@ -739,9 +739,9 @@ func TestReportTaskStatus_CacheFallbackUpdatesExistingComment(t *testing.T) {
 	defer server.Close()
 
 	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhaseSucceeded, map[string]string{
-		AnnotationGitHubReporting: "enabled",
-		AnnotationSourceNumber:    "42",
-		AnnotationSourceKind:      "issue",
+		AnnotationCommentReporting: "enabled",
+		AnnotationSourceNumber:     "42",
+		AnnotationSourceKind:       "issue",
 	})
 	task.UID = types.UID("uid-fallback")
 
@@ -771,19 +771,69 @@ func TestReportTaskStatus_CacheFallbackUpdatesExistingComment(t *testing.T) {
 	}
 }
 
+// TestReportTaskStatus_LegacyAnnotationKeysUpdateExistingComment covers a
+// Task stamped before the annotation keys lost their "github-" prefix: the
+// reporter must find the existing comment through the legacy keys and update
+// it instead of posting a duplicate.
+func TestReportTaskStatus_LegacyAnnotationKeysUpdateExistingComment(t *testing.T) {
+	server, records := newTestServer(t)
+	defer server.Close()
+
+	task := newTaskWithAnnotations("legacy-task", "default", kelos.TaskPhaseSucceeded, map[string]string{
+		"kelos.dev/github-reporting":    "enabled",
+		"kelos.dev/github-comment-id":   "4242",
+		"kelos.dev/github-report-phase": "accepted",
+		AnnotationSourceNumber:          "42",
+		AnnotationSourceKind:            "issue",
+	})
+	cl := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(task).Build()
+	tr := &TaskReporter{
+		Client:   cl,
+		Reporter: &GitHubReporter{Owner: "owner", Repo: "repo", Token: "token", BaseURL: server.URL},
+	}
+
+	if err := tr.ReportTaskStatus(context.Background(), task); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if len(*records) != 1 || (*records)[0].method != "update" || (*records)[0].id != 4242 {
+		t.Fatalf("expected one update of comment 4242, got %+v", *records)
+	}
+
+	updated := &kelos.Task{}
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.Annotations[AnnotationCommentID] != "4242" || updated.Annotations[AnnotationCommentReportPhase] != "succeeded" {
+		t.Errorf("expected state persisted under the current keys, got %v", updated.Annotations)
+	}
+}
+
+func TestReadAnnotationPrefersCurrentKey(t *testing.T) {
+	both := map[string]string{AnnotationCommentID: "1", "kelos.dev/github-comment-id": "2"}
+	if got := ReadAnnotation(both, AnnotationCommentID); got != "1" {
+		t.Errorf("ReadAnnotation() = %q, want current key to win", got)
+	}
+	if got := ReadAnnotation(map[string]string{"kelos.dev/github-check-name": "ci"}, AnnotationCheckName); got != "ci" {
+		t.Errorf("ReadAnnotation() = %q, want legacy fallback", got)
+	}
+	if got := ReadAnnotation(nil, AnnotationSourceKind); got != "" {
+		t.Errorf("ReadAnnotation() on nil = %q, want empty", got)
+	}
+}
+
 // TestReportTaskStatus_CacheShortCircuitsDuplicateReport simulates two
 // reconciles firing for the same phase before the annotation Update has
 // propagated to the cached read. The first call posts the comment; the second
 // must not post a duplicate even though the Task object it sees still has no
-// AnnotationGitHubReportPhase.
+// AnnotationCommentReportPhase.
 func TestReportTaskStatus_CacheShortCircuitsDuplicateReport(t *testing.T) {
 	server, records := newTestServer(t)
 	defer server.Close()
 
 	annotations := map[string]string{
-		AnnotationGitHubReporting: "enabled",
-		AnnotationSourceNumber:    "42",
-		AnnotationSourceKind:      "issue",
+		AnnotationCommentReporting: "enabled",
+		AnnotationSourceNumber:     "42",
+		AnnotationSourceKind:       "issue",
 	}
 
 	first := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, annotations)
@@ -807,9 +857,9 @@ func TestReportTaskStatus_CacheShortCircuitsDuplicateReport(t *testing.T) {
 	// Simulate a stale cached read: a second copy of the Task that has not yet
 	// observed the annotation Update from the first reconcile.
 	stale := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
-		AnnotationGitHubReporting: "enabled",
-		AnnotationSourceNumber:    "42",
-		AnnotationSourceKind:      "issue",
+		AnnotationCommentReporting: "enabled",
+		AnnotationSourceNumber:     "42",
+		AnnotationSourceKind:       "issue",
 	})
 	stale.UID = types.UID("uid-shortcircuit")
 
@@ -834,11 +884,11 @@ func TestReportTaskStatus_SkipsRepeatedNoOpPersist(t *testing.T) {
 	defer server.Close()
 
 	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
-		AnnotationGitHubReporting:   "enabled",
-		AnnotationSourceNumber:      "42",
-		AnnotationSourceKind:        "issue",
-		AnnotationGitHubCommentID:   "9999",
-		AnnotationGitHubReportPhase: "accepted",
+		AnnotationCommentReporting:   "enabled",
+		AnnotationSourceNumber:       "42",
+		AnnotationSourceKind:         "issue",
+		AnnotationCommentID:          "9999",
+		AnnotationCommentReportPhase: "accepted",
 	})
 	task.UID = types.UID("uid-noop")
 
@@ -872,9 +922,9 @@ func TestReportTaskStatus_NilCache(t *testing.T) {
 	defer server.Close()
 
 	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
-		AnnotationGitHubReporting: "enabled",
-		AnnotationSourceNumber:    "42",
-		AnnotationSourceKind:      "issue",
+		AnnotationCommentReporting: "enabled",
+		AnnotationSourceNumber:     "42",
+		AnnotationSourceKind:       "issue",
 	})
 
 	tr := &TaskReporter{
@@ -956,9 +1006,9 @@ func TestReportTaskStatus_CreatesCheckRunOnPending(t *testing.T) {
 	defer server.Close()
 
 	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
-		AnnotationGitHubChecks:    "enabled",
-		AnnotationSourceSHA:       "abc123def",
-		AnnotationGitHubCheckName: "Kelos: my-spawner",
+		AnnotationCheckReporting: "enabled",
+		AnnotationSourceSHA:      "abc123def",
+		AnnotationCheckName:      "Kelos: my-spawner",
 	})
 	task.Labels = map[string]string{"kelos.dev/taskspawner": "my-spawner"}
 
@@ -1004,10 +1054,10 @@ func TestReportTaskStatus_CreatesCheckRunOnPending(t *testing.T) {
 	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
 		t.Fatalf("Getting updated task: %v", err)
 	}
-	if updated.Annotations[AnnotationGitHubCheckReportPhase] != "in_progress" {
-		t.Errorf("Expected check report phase 'in_progress', got %q", updated.Annotations[AnnotationGitHubCheckReportPhase])
+	if updated.Annotations[AnnotationCheckReportPhase] != "in_progress" {
+		t.Errorf("Expected check report phase 'in_progress', got %q", updated.Annotations[AnnotationCheckReportPhase])
 	}
-	if updated.Annotations[AnnotationGitHubCheckRunID] == "" {
+	if updated.Annotations[AnnotationCheckRunID] == "" {
 		t.Error("Expected check run ID to be set")
 	}
 }
@@ -1017,11 +1067,11 @@ func TestReportTaskStatus_UpdatesCheckRunOnSucceeded(t *testing.T) {
 	defer server.Close()
 
 	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhaseSucceeded, map[string]string{
-		AnnotationGitHubChecks:           "enabled",
-		AnnotationSourceSHA:              "abc123def",
-		AnnotationGitHubCheckName:        "Kelos: my-spawner",
-		AnnotationGitHubCheckRunID:       "5001",
-		AnnotationGitHubCheckReportPhase: "in_progress",
+		AnnotationCheckReporting:   "enabled",
+		AnnotationSourceSHA:        "abc123def",
+		AnnotationCheckName:        "Kelos: my-spawner",
+		AnnotationCheckRunID:       "5001",
+		AnnotationCheckReportPhase: "in_progress",
 	})
 	task.Labels = map[string]string{"kelos.dev/taskspawner": "my-spawner"}
 
@@ -1064,8 +1114,8 @@ func TestReportTaskStatus_UpdatesCheckRunOnSucceeded(t *testing.T) {
 	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
 		t.Fatalf("Getting updated task: %v", err)
 	}
-	if updated.Annotations[AnnotationGitHubCheckReportPhase] != "succeeded" {
-		t.Errorf("Expected check report phase 'succeeded', got %q", updated.Annotations[AnnotationGitHubCheckReportPhase])
+	if updated.Annotations[AnnotationCheckReportPhase] != "succeeded" {
+		t.Errorf("Expected check report phase 'succeeded', got %q", updated.Annotations[AnnotationCheckReportPhase])
 	}
 }
 
@@ -1074,11 +1124,11 @@ func TestReportTaskStatus_UpdatesCheckRunOnFailed(t *testing.T) {
 	defer server.Close()
 
 	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhaseFailed, map[string]string{
-		AnnotationGitHubChecks:           "enabled",
-		AnnotationSourceSHA:              "abc123def",
-		AnnotationGitHubCheckName:        "Kelos: my-spawner",
-		AnnotationGitHubCheckRunID:       "5001",
-		AnnotationGitHubCheckReportPhase: "in_progress",
+		AnnotationCheckReporting:   "enabled",
+		AnnotationSourceSHA:        "abc123def",
+		AnnotationCheckName:        "Kelos: my-spawner",
+		AnnotationCheckRunID:       "5001",
+		AnnotationCheckReportPhase: "in_progress",
 	})
 	task.Labels = map[string]string{"kelos.dev/taskspawner": "my-spawner"}
 
@@ -1115,8 +1165,8 @@ func TestReportTaskStatus_UpdatesCheckRunOnFailed(t *testing.T) {
 	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &updated); err != nil {
 		t.Fatalf("Getting updated task: %v", err)
 	}
-	if updated.Annotations[AnnotationGitHubCheckReportPhase] != "failed" {
-		t.Errorf("Expected check report phase 'failed', got %q", updated.Annotations[AnnotationGitHubCheckReportPhase])
+	if updated.Annotations[AnnotationCheckReportPhase] != "failed" {
+		t.Errorf("Expected check report phase 'failed', got %q", updated.Annotations[AnnotationCheckReportPhase])
 	}
 }
 
@@ -1125,10 +1175,10 @@ func TestReportTaskStatus_SkipsDuplicateCheckReport(t *testing.T) {
 	defer server.Close()
 
 	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
-		AnnotationGitHubChecks:           "enabled",
-		AnnotationSourceSHA:              "abc123def",
-		AnnotationGitHubCheckRunID:       "5001",
-		AnnotationGitHubCheckReportPhase: "in_progress",
+		AnnotationCheckReporting:   "enabled",
+		AnnotationSourceSHA:        "abc123def",
+		AnnotationCheckRunID:       "5001",
+		AnnotationCheckReportPhase: "in_progress",
 	})
 
 	cl := fake.NewClientBuilder().
@@ -1163,7 +1213,7 @@ func TestReportTaskStatus_ChecksSkipsWithoutSHA(t *testing.T) {
 	defer server.Close()
 
 	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
-		AnnotationGitHubChecks: "enabled",
+		AnnotationCheckReporting: "enabled",
 		// No AnnotationSourceSHA
 	})
 
@@ -1202,12 +1252,12 @@ func TestReportTaskStatus_BothCommentAndChecks(t *testing.T) {
 	defer checksServer.Close()
 
 	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
-		AnnotationGitHubReporting: "enabled",
-		AnnotationGitHubChecks:    "enabled",
-		AnnotationSourceNumber:    "42",
-		AnnotationSourceKind:      "pull-request",
-		AnnotationSourceSHA:       "abc123def",
-		AnnotationGitHubCheckName: "Kelos: my-spawner",
+		AnnotationCommentReporting: "enabled",
+		AnnotationCheckReporting:   "enabled",
+		AnnotationSourceNumber:     "42",
+		AnnotationSourceKind:       "pull-request",
+		AnnotationSourceSHA:        "abc123def",
+		AnnotationCheckName:        "Kelos: my-spawner",
 	})
 	task.Labels = map[string]string{"kelos.dev/taskspawner": "my-spawner"}
 
@@ -1249,9 +1299,9 @@ func TestReportTaskStatus_ChecksFallbackName(t *testing.T) {
 	defer server.Close()
 
 	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
-		AnnotationGitHubChecks: "enabled",
-		AnnotationSourceSHA:    "abc123def",
-		// No AnnotationGitHubCheckName — should fall back to label
+		AnnotationCheckReporting: "enabled",
+		AnnotationSourceSHA:      "abc123def",
+		// No AnnotationCheckName — should fall back to label
 	})
 	task.Labels = map[string]string{"kelos.dev/taskspawner": "fallback-spawner"}
 
@@ -1283,9 +1333,9 @@ func TestReportTaskStatus_CheckRunCachePopulatedAfterCreate(t *testing.T) {
 	defer server.Close()
 
 	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
-		AnnotationGitHubChecks:    "enabled",
-		AnnotationSourceSHA:       "abc123def",
-		AnnotationGitHubCheckName: "Kelos: my-spawner",
+		AnnotationCheckReporting: "enabled",
+		AnnotationSourceSHA:      "abc123def",
+		AnnotationCheckName:      "Kelos: my-spawner",
 	})
 	task.UID = types.UID("uid-check-create")
 
@@ -1322,9 +1372,9 @@ func TestReportTaskStatus_CheckRunCacheFallbackUpdatesExisting(t *testing.T) {
 	defer server.Close()
 
 	task := newTaskWithAnnotations("test-task", "default", kelos.TaskPhaseSucceeded, map[string]string{
-		AnnotationGitHubChecks:    "enabled",
-		AnnotationSourceSHA:       "abc123def",
-		AnnotationGitHubCheckName: "Kelos: my-spawner",
+		AnnotationCheckReporting: "enabled",
+		AnnotationSourceSHA:      "abc123def",
+		AnnotationCheckName:      "Kelos: my-spawner",
 	})
 	task.UID = types.UID("uid-check-fallback")
 
@@ -1359,9 +1409,9 @@ func TestReportTaskStatus_CheckRunCacheShortCircuitsDuplicate(t *testing.T) {
 	defer server.Close()
 
 	annotations := map[string]string{
-		AnnotationGitHubChecks:    "enabled",
-		AnnotationSourceSHA:       "abc123def",
-		AnnotationGitHubCheckName: "Kelos: my-spawner",
+		AnnotationCheckReporting: "enabled",
+		AnnotationSourceSHA:      "abc123def",
+		AnnotationCheckName:      "Kelos: my-spawner",
 	}
 
 	first := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, annotations)
@@ -1384,9 +1434,9 @@ func TestReportTaskStatus_CheckRunCacheShortCircuitsDuplicate(t *testing.T) {
 	// Simulate a stale cached read: a second copy of the Task that has not yet
 	// observed the annotation Update from the first reconcile.
 	stale := newTaskWithAnnotations("test-task", "default", kelos.TaskPhasePending, map[string]string{
-		AnnotationGitHubChecks:    "enabled",
-		AnnotationSourceSHA:       "abc123def",
-		AnnotationGitHubCheckName: "Kelos: my-spawner",
+		AnnotationCheckReporting: "enabled",
+		AnnotationSourceSHA:      "abc123def",
+		AnnotationCheckName:      "Kelos: my-spawner",
 	})
 	stale.UID = types.UID("uid-check-shortcircuit")
 

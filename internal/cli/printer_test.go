@@ -542,6 +542,70 @@ func TestPrintTaskSpawnerTableJira(t *testing.T) {
 	}
 }
 
+func TestPrintTaskSpawnerTableGitLabWebhook(t *testing.T) {
+	spawners := []kelos.TaskSpawner{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "gitlab-webhook-spawner",
+				CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
+			},
+			Spec: kelos.TaskSpawnerSpec{
+				When: kelos.When{GitLabWebhook: &kelos.GitLabWebhook{Events: []string{"merge_request"}, Project: "group/repo"}},
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	printTaskSpawnerTable(&buf, spawners, false)
+	if output := buf.String(); !strings.Contains(output, "GitLab Webhook (group/repo)") {
+		t.Errorf("expected GitLab Webhook source with project in output, got %q", output)
+	}
+
+	buf.Reset()
+	printTaskSpawnerDetail(&buf, &spawners[0])
+	detail := buf.String()
+	for _, want := range []string{`Source:\s+GitLab Webhook`, `Events:\s+\[merge_request\]`, `Project:\s+group/repo`} {
+		if !regexp.MustCompile(want).MatchString(detail) {
+			t.Errorf("expected %s in detail output, got %q", want, detail)
+		}
+	}
+}
+
+func TestPrintTaskSpawnerTableGitLab(t *testing.T) {
+	spawners := []kelos.TaskSpawner{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "gitlab-spawner",
+				CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
+			},
+			Spec: kelos.TaskSpawnerSpec{
+				When: kelos.When{GitLab: &kelos.GitLab{PollInterval: "2m"}},
+			},
+			Status: kelos.TaskSpawnerStatus{Phase: kelos.TaskSpawnerPhaseRunning},
+		},
+	}
+
+	var buf bytes.Buffer
+	printTaskSpawnerTable(&buf, spawners, false)
+	if output := buf.String(); !strings.Contains(output, "GitLab") {
+		t.Errorf("expected GitLab as source in output, got %q", output)
+	}
+
+	if got := effectivePollInterval(&spawners[0]); got != "2m" {
+		t.Errorf("effectivePollInterval = %q, want %q", got, "2m")
+	}
+
+	buf.Reset()
+	spawners[0].Spec.When.GitLab.Project = "group/repo"
+	printTaskSpawnerDetail(&buf, &spawners[0])
+	detail := buf.String()
+	for _, want := range []string{`Source:\s+GitLab`, `Project:\s+group/repo`} {
+		if !regexp.MustCompile(want).MatchString(detail) {
+			t.Errorf("expected %s in detail output, got %q", want, detail)
+		}
+	}
+}
+
 func TestPrintTaskSpawnerTableGitHubWebhook(t *testing.T) {
 	spawners := []kelos.TaskSpawner{
 		{

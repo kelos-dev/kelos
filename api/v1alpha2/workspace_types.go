@@ -31,7 +31,14 @@ type WorkspaceFile struct {
 // WorkspaceGHProxy configures the workspace-scoped ghproxy.
 type WorkspaceGHProxy struct{}
 
+// Supported values of WorkspaceSpec.Provider.
+const (
+	WorkspaceProviderGitHub = "github"
+	WorkspaceProviderGitLab = "gitlab"
+)
+
 // WorkspaceSpec defines the desired state of Workspace.
+// +kubebuilder:validation:XValidation:rule="!has(self.ghproxy) || !has(self.provider) || self.provider == 'github'",message="ghproxy is only supported when provider is github"
 type WorkspaceSpec struct {
 	// Repo is the git repository URL to clone.
 	// +kubebuilder:validation:Required
@@ -43,8 +50,19 @@ type WorkspaceSpec struct {
 	// +optional
 	Ref string `json:"ref,omitempty"`
 
-	// SecretRef references a Secret containing a GITHUB_TOKEN key for git
-	// authentication and GitHub CLI (gh) operations.
+	// Provider selects the git hosting provider. It determines the key read
+	// from the SecretRef Secret (GITHUB_TOKEN for github, GITLAB_TOKEN for
+	// gitlab), the credentials exported to agent containers, and which CLI
+	// (gh or glab) is preconfigured.
+	// +kubebuilder:validation:Enum=github;gitlab
+	// +kubebuilder:default=github
+	// +optional
+	Provider string `json:"provider,omitempty"`
+
+	// SecretRef references a Secret containing credentials for the Provider.
+	// For github (or when Provider is omitted), it must contain GITHUB_TOKEN
+	// or GitHub App keys (appID, installationID, privateKey).
+	// For gitlab, it must contain GITLAB_TOKEN.
 	// +optional
 	SecretRef *SecretReference `json:"secretRef,omitempty"`
 

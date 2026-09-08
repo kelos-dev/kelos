@@ -38,6 +38,10 @@ type When struct {
 	// +optional
 	Jira *Jira `json:"jira,omitempty"`
 
+	// GitLab discovers issues and merge requests from a GitLab project.
+	// +optional
+	GitLab *GitLab `json:"gitlab,omitempty"`
+
 	// GitHubWebhook triggers task spawning on GitHub webhook events.
 	// +optional
 	GitHubWebhook *GitHubWebhook `json:"githubWebhook,omitempty"`
@@ -45,6 +49,10 @@ type When struct {
 	// LinearWebhook triggers task spawning on Linear webhook events.
 	// +optional
 	LinearWebhook *LinearWebhook `json:"linearWebhook,omitempty"`
+
+	// GitLabWebhook triggers task spawning on GitLab webhook events.
+	// +optional
+	GitLabWebhook *GitLabWebhook `json:"gitlabWebhook,omitempty"`
 
 	// GenericWebhook triggers task spawning from arbitrary HTTP POST payloads.
 	// Any system that can send an HTTP POST with a JSON body can trigger
@@ -86,7 +94,7 @@ type GitHubReporting struct {
 	// or pull request. When nil, no comments are posted unless the deprecated
 	// Enabled field is true.
 	// +optional
-	Comments *GitHubCommentsReporting `json:"comments,omitempty"`
+	Comments *CommentsReporting `json:"comments,omitempty"`
 
 	// Checks creates GitHub Check Runs for pull request tasks. When nil,
 	// no Check Runs are created. Supported for githubPullRequests and
@@ -96,28 +104,29 @@ type GitHubReporting struct {
 	Checks *GitHubChecksReporting `json:"checks,omitempty"`
 }
 
-// GitHubCommentMode controls how task status comments are reused.
-type GitHubCommentMode string
+// CommentMode controls how task status comments are reused.
+type CommentMode string
 
 const (
-	// GitHubCommentModePerTask creates one status comment for each Task and
+	// CommentModePerTask creates one status comment for each Task and
 	// updates it as that Task's phase changes.
-	GitHubCommentModePerTask GitHubCommentMode = "PerTask"
+	CommentModePerTask CommentMode = "PerTask"
 
-	// GitHubCommentModeSticky maintains one status comment per TaskSpawner and
+	// CommentModeSticky maintains one status comment per TaskSpawner and
 	// originating issue or pull request, updating it across Tasks.
-	GitHubCommentModeSticky GitHubCommentMode = "Sticky"
+	CommentModeSticky CommentMode = "Sticky"
 )
 
-// GitHubCommentsReporting configures GitHub task status comment reporting.
-type GitHubCommentsReporting struct {
+// CommentsReporting configures task status comment reporting on the
+// originating issue, pull request, or merge request.
+type CommentsReporting struct {
 	// Mode controls whether comments are created per Task or reused across
-	// Tasks from the same TaskSpawner and originating issue or pull request.
+	// Tasks from the same TaskSpawner and originating item.
 	// Defaults to PerTask.
 	// +optional
 	// +kubebuilder:default=PerTask
 	// +kubebuilder:validation:Enum=PerTask;Sticky
-	Mode GitHubCommentMode `json:"mode,omitempty"`
+	Mode CommentMode `json:"mode,omitempty"`
 }
 
 // GitHubChecksReporting configures GitHub Check Run reporting for pull
@@ -383,6 +392,112 @@ type Jira struct {
 	PollInterval string `json:"pollInterval,omitempty"`
 }
 
+// GitLabCommentPolicy configures comment-based workflow control on GitLab
+// issues and merge requests. Commands are matched against the item
+// description and its notes; the most recent matching command wins.
+type GitLabCommentPolicy struct {
+	// TriggerComment requires a matching command for the item to be included.
+	// When set alone, only items with a matching command are discovered.
+	// +optional
+	TriggerComment string `json:"triggerComment,omitempty"`
+
+	// ExcludeComments blocks items whose most recent matching command is an
+	// exclude command. When combined with TriggerComment, the most recent
+	// matching command wins.
+	// +optional
+	ExcludeComments []string `json:"excludeComments,omitempty"`
+
+	// AllowedUsers restricts comment control to specific GitLab usernames.
+	// When empty, commands from any user are honored.
+	// +optional
+	AllowedUsers []string `json:"allowedUsers,omitempty"`
+}
+
+// GitLabReporting configures status reporting back to the originating GitLab
+// issue or merge request.
+type GitLabReporting struct {
+	// Comments configures task status notes on the originating issue or
+	// merge request. When nil, no notes are posted.
+	// +optional
+	Comments *CommentsReporting `json:"comments,omitempty"`
+}
+
+// GitLab discovers issues and merge requests from a GitLab project.
+// By default the GitLab instance URL and project path are derived from the
+// workspace repo URL in taskTemplate.workspaceRef; set BaseURL or Project to
+// override them. The Workspace must set provider: gitlab; its secret's
+// GITLAB_TOKEN key is used as the GitLab access token for API calls, the same
+// token that authenticates the git clone.
+type GitLab struct {
+	// BaseURL overrides the GitLab instance URL used for API calls (for
+	// example "https://gitlab.example.com" or an in-cluster service URL).
+	// When empty, the scheme and host of the workspace repo URL are used.
+	// Set it for a GitLab served under a relative URL root
+	// ("https://example.com/gitlab"); the path is then excluded from the
+	// project path derived from the workspace repo URL.
+	// +kubebuilder:validation:Pattern="^https?://.+"
+	// +optional
+	BaseURL string `json:"baseUrl,omitempty"`
+
+	// Project overrides the project to poll as a full path
+	// ("group/subgroup/project"). When empty, the project path is derived
+	// from the workspace repo URL.
+	// +optional
+	Project string `json:"project,omitempty"`
+
+	// Types specifies which item types to discover: "issues",
+	// "mergeRequests", or both.
+	// +kubebuilder:validation:items:Enum=issues;mergeRequests
+	// +kubebuilder:default={"issues"}
+	// +optional
+	Types []string `json:"types,omitempty"`
+
+	// Labels filters items by labels; an item must carry all of them.
+	// +optional
+	Labels []string `json:"labels,omitempty"`
+
+	// ExcludeLabels filters out items that have any of these labels (client-side).
+	// +optional
+	ExcludeLabels []string `json:"excludeLabels,omitempty"`
+
+	// State filters items by state (opened, closed, all). Defaults to opened.
+	// +kubebuilder:validation:Enum=opened;closed;all
+	// +kubebuilder:default=opened
+	// +optional
+	State string `json:"state,omitempty"`
+
+	// ReviewState filters merge requests by review outcome: "approved" keeps
+	// merge requests with at least one approval, "changes_requested" keeps
+	// merge requests where a reviewer requested changes, and "any" does not
+	// gate discovery. Issues are not affected.
+	// +kubebuilder:validation:Enum=approved;changes_requested;any
+	// +kubebuilder:default=any
+	// +optional
+	ReviewState string `json:"reviewState,omitempty"`
+
+	// PipelineStatus filters merge requests by the status of their head
+	// pipeline. A newer pipeline finishing in the selected status retriggers
+	// completed Tasks. "any" does not gate discovery. Issues are not affected.
+	// +kubebuilder:validation:Enum=success;failed;running;pending;canceled;any
+	// +kubebuilder:default=any
+	// +optional
+	PipelineStatus string `json:"pipelineStatus,omitempty"`
+
+	// CommentPolicy configures comment-based workflow control.
+	// +optional
+	CommentPolicy *GitLabCommentPolicy `json:"commentPolicy,omitempty"`
+
+	// Reporting configures status reporting back to the originating GitLab
+	// issue or merge request.
+	// +optional
+	Reporting *GitLabReporting `json:"reporting,omitempty"`
+
+	// PollInterval is how often this source is polled (e.g., "30s", "5m").
+	// When empty, a default of 5m is used.
+	// +optional
+	PollInterval string `json:"pollInterval,omitempty"`
+}
+
 // GitHubWebhook configures matching for GitHub webhook events.
 // +kubebuilder:validation:XValidation:rule="!has(self.reporting) || !has(self.reporting.checks) || self.events.exists(e, e in ['pull_request', 'pull_request_review', 'pull_request_review_comment', 'pull_request_target']) || (self.events.exists(e, e == 'issue_comment') && has(self.filters) && self.filters.exists(f, f.event == 'issue_comment') && self.filters.all(f, f.event != 'issue_comment' || (has(f.commentOn) && f.commentOn == 'PullRequest')))",message="checks reporting requires a pull-request event type or PR-scoped issue_comment filters"
 type GitHubWebhook struct {
@@ -575,6 +690,110 @@ type LinearWebhookFilter struct {
 	// ExcludeLabels excludes issues with any of these labels.
 	// +optional
 	ExcludeLabels []string `json:"excludeLabels,omitempty"`
+}
+
+// GitLabWebhook configures webhook-driven task spawning from GitLab events.
+// Deliveries are authenticated by comparing the X-Gitlab-Token header with the
+// configured webhook secret.
+type GitLabWebhook struct {
+	// Events is the list of GitLab event kinds to listen for, matching the
+	// payload object_kind: "issue", "merge_request", "note", "pipeline",
+	// "push", or "tag_push".
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:items:Enum=issue;merge_request;note;pipeline;push;tag_push
+	Events []string `json:"events"`
+
+	// GatewayRef binds this source to a WebhookGateway in the same namespace whose
+	// spec.gitlab field is set. The per-source webhook server ignores this spawner.
+	// +optional
+	GatewayRef *GatewayReference `json:"gatewayRef,omitempty"`
+
+	// Project restricts deliveries to one project by its full path
+	// ("group/subgroup/project"). When empty, events from any project are accepted.
+	// +optional
+	Project string `json:"project,omitempty"`
+
+	// ExcludeAuthors excludes events triggered by any of these GitLab usernames.
+	// This is applied before filter evaluation.
+	// +optional
+	ExcludeAuthors []string `json:"excludeAuthors,omitempty"`
+
+	// Filters refine which events match. If multiple filters apply to the same
+	// event kind, any matching filter accepts the event (OR semantics).
+	// If empty, all events in the Events list match.
+	// +optional
+	Filters []GitLabWebhookFilter `json:"filters,omitempty"`
+
+	// Reporting configures status notes on the originating GitLab issue or
+	// merge request. Requires a GitLab token on the webhook server
+	// (GITLAB_TOKEN) or on the bound WebhookGateway (spec.gitlab.credentialsRef).
+	// +optional
+	Reporting *GitLabReporting `json:"reporting,omitempty"`
+}
+
+// GitLabWebhookFilter defines filtering criteria for a GitLab webhook event kind.
+type GitLabWebhookFilter struct {
+	// Event is the GitLab event kind this filter applies to.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Enum=issue;merge_request;note;pipeline;push;tag_push
+	Event string `json:"event"`
+
+	// Action filters issue and merge_request events by the payload action
+	// (e.g., "open", "update", "close", "reopen", "approved", "unapproved", "merge").
+	// +optional
+	Action string `json:"action,omitempty"`
+
+	// Labels requires the issue or merge request to have all of these labels.
+	// For note events the labels of the commented issue or merge request are used.
+	// +optional
+	Labels []string `json:"labels,omitempty"`
+
+	// ExcludeLabels excludes issues or merge requests with any of these labels.
+	// +optional
+	ExcludeLabels []string `json:"excludeLabels,omitempty"`
+
+	// State filters issue and merge_request events by state
+	// ("opened", "closed", "merged", "locked").
+	// +optional
+	State string `json:"state,omitempty"`
+
+	// Branch filters merge_request events by source branch, and push and
+	// pipeline events by branch name (exact match or glob).
+	// +optional
+	Branch string `json:"branch,omitempty"`
+
+	// Status filters pipeline events by pipeline status
+	// (e.g., "success", "failed", "canceled", "running", "pending").
+	// +optional
+	Status string `json:"status,omitempty"`
+
+	// NoteOn scopes note events to comments on a specific subject. Omit to
+	// match notes on any subject.
+	// +kubebuilder:validation:Enum=Issue;MergeRequest;Commit;Snippet
+	// +optional
+	NoteOn string `json:"noteOn,omitempty"`
+
+	// BodyPattern requires the note body to match a Go re2 regular expression.
+	// +optional
+	BodyPattern string `json:"bodyPattern,omitempty"`
+
+	// ExcludeBodyPatterns excludes note events whose body matches any of these
+	// Go re2 regular expressions.
+	// +optional
+	ExcludeBodyPatterns []string `json:"excludeBodyPatterns,omitempty"`
+
+	// Draft filters merge_request events by draft status.
+	// +optional
+	Draft *bool `json:"draft,omitempty"`
+
+	// Author filters by the username of the user who triggered the event.
+	// +optional
+	Author string `json:"author,omitempty"`
+
+	// ExcludeAuthors excludes events triggered by any of these usernames.
+	// +optional
+	ExcludeAuthors []string `json:"excludeAuthors,omitempty"`
 }
 
 // GenericWebhook configures webhook-driven task spawning from arbitrary HTTP
@@ -1105,7 +1324,7 @@ type TaskTemplate struct {
 }
 
 // TaskSpawnerSpec defines the desired state of TaskSpawner.
-// +kubebuilder:validation:XValidation:rule="!(has(self.when.githubIssues) || has(self.when.githubPullRequests) || has(self.when.githubWebhook) || has(self.when.linearWebhook)) || has(self.taskTemplate.workspaceRef) || (has(self.taskTemplate.worker) && has(self.taskTemplate.worker.workspaceRef)) || has(self.taskTemplate.workerPoolRef)",message="a workspace source is required when using githubIssues, githubPullRequests, githubWebhook, or linearWebhook source (set taskTemplate.workspaceRef, taskTemplate.worker.workspaceRef, or taskTemplate.workerPoolRef — a pool satisfies this because it carries its own workspace)"
+// +kubebuilder:validation:XValidation:rule="!(has(self.when.githubIssues) || has(self.when.githubPullRequests) || has(self.when.githubWebhook) || has(self.when.linearWebhook) || has(self.when.gitlab) || has(self.when.gitlabWebhook)) || has(self.taskTemplate.workspaceRef) || (has(self.taskTemplate.worker) && has(self.taskTemplate.worker.workspaceRef)) || has(self.taskTemplate.workerPoolRef)",message="a workspace source is required when using githubIssues, githubPullRequests, githubWebhook, linearWebhook, gitlab, or gitlabWebhook source (set taskTemplate.workspaceRef, taskTemplate.worker.workspaceRef, or taskTemplate.workerPoolRef — a pool satisfies this because it carries its own workspace)"
 // +kubebuilder:validation:XValidation:rule="has(self.taskTemplate.workerPoolRef) || (has(self.taskTemplate.worker) && (has(self.taskTemplate.worker.credentials) || has(self.credentials))) || (has(self.taskTemplate.type) && (has(self.taskTemplate.credentials) || has(self.credentials)))",message="inline task templates require taskTemplate credentials or spec.credentials"
 // +kubebuilder:validation:XValidation:rule="!has(self.credentials) || (!has(self.taskTemplate.workerPoolRef) && !has(self.taskTemplate.credentials) && (!has(self.taskTemplate.worker) || !has(self.taskTemplate.worker.credentials)))",message="spec.credentials is mutually exclusive with taskTemplate credentials and workerPoolRef"
 type TaskSpawnerSpec struct {

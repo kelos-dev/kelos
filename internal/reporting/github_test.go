@@ -42,7 +42,7 @@ func TestCreateComment(t *testing.T) {
 		BaseURL: server.URL,
 	}
 
-	commentID, err := reporter.CreateComment(context.Background(), 42, "Test comment body")
+	commentID, err := reporter.CreateComment(context.Background(), CommentTarget{Kind: "issue", Number: 42}, "Test comment body")
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestCreateCommentError(t *testing.T) {
 		BaseURL: server.URL,
 	}
 
-	_, err := reporter.CreateComment(context.Background(), 1, "body")
+	_, err := reporter.CreateComment(context.Background(), CommentTarget{Kind: "issue", Number: 1}, "body")
 	if err == nil {
 		t.Fatal("Expected error, got nil")
 	}
@@ -117,7 +117,7 @@ func TestUpdateComment(t *testing.T) {
 		BaseURL: server.URL,
 	}
 
-	err := reporter.UpdateComment(context.Background(), 12345, "Updated body")
+	err := reporter.UpdateComment(context.Background(), CommentTarget{Kind: "issue", Number: 42}, 12345, "Updated body")
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestUpdateCommentError(t *testing.T) {
 		BaseURL: server.URL,
 	}
 
-	err := reporter.UpdateComment(context.Background(), 99999, "body")
+	err := reporter.UpdateComment(context.Background(), CommentTarget{Kind: "issue", Number: 1}, 99999, "body")
 	if err == nil {
 		t.Fatal("Expected error, got nil")
 	}
@@ -177,7 +177,7 @@ func TestFindCommentByMarker(t *testing.T) {
 	defer server.Close()
 
 	reporter := &GitHubReporter{Owner: "owner", Repo: "repo", Token: "token", BaseURL: server.URL}
-	commentID, err := reporter.FindCommentByMarker(context.Background(), 42, marker)
+	commentID, err := reporter.FindCommentByMarker(context.Background(), CommentTarget{Kind: "issue", Number: 42}, marker)
 	if err != nil {
 		t.Fatalf("FindCommentByMarker() error = %v", err)
 	}
@@ -203,7 +203,7 @@ func TestFindCommentByMarkerForGitHubApp(t *testing.T) {
 	reporter := &GitHubReporter{
 		Owner: "owner", Repo: "repo", Token: "token", GitHubAppID: "123", BaseURL: server.URL,
 	}
-	commentID, err := reporter.FindCommentByMarker(context.Background(), 42, marker)
+	commentID, err := reporter.FindCommentByMarker(context.Background(), CommentTarget{Kind: "issue", Number: 42}, marker)
 	if err != nil {
 		t.Fatalf("FindCommentByMarker() error = %v", err)
 	}
@@ -220,7 +220,7 @@ func TestFindCommentByMarkerError(t *testing.T) {
 	defer server.Close()
 
 	reporter := &GitHubReporter{Owner: "owner", Repo: "repo", Token: "token", BaseURL: server.URL}
-	if _, err := reporter.FindCommentByMarker(context.Background(), 42, "marker"); err == nil {
+	if _, err := reporter.FindCommentByMarker(context.Background(), CommentTarget{Kind: "issue", Number: 42}, "marker"); err == nil {
 		t.Fatal("FindCommentByMarker() error = nil, want an error")
 	}
 }
@@ -241,7 +241,7 @@ func TestCreateCommentNoToken(t *testing.T) {
 		BaseURL: server.URL,
 	}
 
-	_, err := reporter.CreateComment(context.Background(), 1, "body")
+	_, err := reporter.CreateComment(context.Background(), CommentTarget{Kind: "issue", Number: 1}, "body")
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -307,7 +307,7 @@ func TestCreateComment_UsesTokenFunc(t *testing.T) {
 		BaseURL:   server.URL,
 	}
 
-	_, err := reporter.CreateComment(context.Background(), 1, "body")
+	_, err := reporter.CreateComment(context.Background(), CommentTarget{Kind: "issue", Number: 1}, "body")
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}

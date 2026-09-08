@@ -6,8 +6,8 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 type WebhookGatewayPhase string
 
 const (
-	// WebhookGatewayPhaseAuthenticated means inbound deliveries are HMAC-verified
-	// against the gateway's secret.
+	// WebhookGatewayPhaseAuthenticated means inbound deliveries are cryptographically
+	// verified against the gateway's secret (HMAC for GitHub/Linear, token equality for GitLab).
 	WebhookGatewayPhaseAuthenticated WebhookGatewayPhase = "Authenticated"
 	// WebhookGatewayPhaseSecretMissing means a required Secret is not configured
 	// or not yet present.
@@ -19,9 +19,9 @@ const (
 )
 
 // WebhookGatewaySpec defines the desired state of a WebhookGateway. Exactly one
-// of GitHub, Linear, or Generic must be set; the field that is present selects
-// the webhook source and carries its provider-specific configuration.
-// +kubebuilder:validation:XValidation:rule="(has(self.github)?1:0)+(has(self.linear)?1:0)+(has(self.generic)?1:0) == 1",message="exactly one of github, linear, or generic must be set"
+// of GitHub, Linear, GitLab, or Generic must be set; the field that is present
+// selects the webhook source and carries its provider-specific configuration.
+// +kubebuilder:validation:XValidation:rule="(has(self.github)?1:0)+(has(self.linear)?1:0)+(has(self.gitlab)?1:0)+(has(self.generic)?1:0) == 1",message="exactly one of github, linear, gitlab, or generic must be set"
 type WebhookGatewaySpec struct {
 	// GitHub configures a gateway for GitHub webhook deliveries.
 	// +optional
@@ -30,6 +30,10 @@ type WebhookGatewaySpec struct {
 	// Linear configures a gateway for Linear webhook deliveries.
 	// +optional
 	Linear *LinearGateway `json:"linear,omitempty"`
+
+	// GitLab configures a gateway for GitLab webhook deliveries.
+	// +optional
+	GitLab *GitLabGateway `json:"gitlab,omitempty"`
 
 	// Generic configures a gateway for arbitrary HTTP POST deliveries.
 	// +optional
@@ -62,6 +66,29 @@ type LinearGateway struct {
 	// "webhook-secret" key.
 	// +kubebuilder:validation:Required
 	SecretRef SecretReference `json:"secretRef"`
+}
+
+// GitLabGateway configures a GitLab WebhookGateway. GitLab authenticates
+// deliveries with a shared secret token sent in the X-Gitlab-Token header
+// rather than an HMAC signature.
+type GitLabGateway struct {
+	// SecretRef references a Secret holding the webhook secret token under the
+	// "webhook-secret" key.
+	// +kubebuilder:validation:Required
+	SecretRef SecretReference `json:"secretRef"`
+
+	// APIBaseURL is the GitLab instance URL used for status reporting (for
+	// example "https://gitlab.example.com" or an in-cluster service URL). When
+	// empty, "https://gitlab.com" is used.
+	// +kubebuilder:validation:Pattern="^https?://.+"
+	// +optional
+	APIBaseURL string `json:"apiBaseURL,omitempty"`
+
+	// CredentialsRef references a Secret holding a GitLab access token under
+	// the GITLAB_TOKEN key. Required for status reporting on Tasks created
+	// through this gateway.
+	// +optional
+	CredentialsRef *SecretReference `json:"credentialsRef,omitempty"`
 }
 
 // GenericGateway configures a generic WebhookGateway. Generic deliveries are

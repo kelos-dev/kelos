@@ -54,8 +54,8 @@ spec:
           spec:
             description: |-
               WebhookGatewaySpec defines the desired state of a WebhookGateway. Exactly one
-              of GitHub, Linear, or Generic must be set; the field that is present selects
-              the webhook source and carries its provider-specific configuration.
+              of GitHub, Linear, GitLab, or Generic must be set; the field that is present
+              selects the webhook source and carries its provider-specific configuration.
             properties:
               generic:
                 description: Generic configures a gateway for arbitrary HTTP POST
@@ -97,6 +97,44 @@ spec:
                 required:
                 - secretRef
                 type: object
+              gitlab:
+                description: GitLab configures a gateway for GitLab webhook deliveries.
+                properties:
+                  apiBaseURL:
+                    description: |-
+                      APIBaseURL is the GitLab instance URL used for status reporting (for
+                      example "https://gitlab.example.com" or an in-cluster service URL). When
+                      empty, "https://gitlab.com" is used.
+                    pattern: ^https?://.+
+                    type: string
+                  credentialsRef:
+                    description: |-
+                      CredentialsRef references a Secret holding a GitLab access token under
+                      the GITLAB_TOKEN key. Required for status reporting on Tasks created
+                      through this gateway.
+                    properties:
+                      name:
+                        description: Name is the name of the secret.
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  secretRef:
+                    description: |-
+                      SecretRef references a Secret holding the webhook secret token under the
+                      "webhook-secret" key.
+                    properties:
+                      name:
+                        description: Name is the name of the secret.
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
+                required:
+                - secretRef
+                type: object
               linear:
                 description: Linear configures a gateway for Linear webhook deliveries.
                 properties:
@@ -117,8 +155,8 @@ spec:
                 type: object
             type: object
             x-kubernetes-validations:
-            - message: exactly one of github, linear, or generic must be set
-              rule: (has(self.github)?1:0)+(has(self.linear)?1:0)+(has(self.generic)?1:0)
+            - message: exactly one of github, linear, gitlab, or generic must be set
+              rule: (has(self.github)?1:0)+(has(self.linear)?1:0)+(has(self.gitlab)?1:0)+(has(self.generic)?1:0)
                 == 1
           status:
             description: WebhookGatewayStatus defines the observed state of a WebhookGateway.

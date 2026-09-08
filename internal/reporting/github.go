@@ -75,7 +75,7 @@ func (o commentOwner) owns(comment commentResponse) bool {
 
 // FindCommentByMarker returns the newest comment containing marker, or zero
 // when no matching comment exists.
-func (r *GitHubReporter) FindCommentByMarker(ctx context.Context, number int, marker string) (int64, error) {
+func (r *GitHubReporter) FindCommentByMarker(ctx context.Context, target CommentTarget, marker string) (int64, error) {
 	owner, err := r.commentOwner(ctx)
 	if err != nil {
 		return 0, err
@@ -83,7 +83,7 @@ func (r *GitHubReporter) FindCommentByMarker(ctx context.Context, number int, ma
 
 	var foundID int64
 	for page := 1; ; page++ {
-		url := fmt.Sprintf("%s/repos/%s/%s/issues/%d/comments?per_page=100&page=%d", r.baseURL(), r.Owner, r.Repo, number, page)
+		url := fmt.Sprintf("%s/repos/%s/%s/issues/%d/comments?per_page=100&page=%d", r.baseURL(), r.Owner, r.Repo, target.Number, page)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
 			return 0, fmt.Errorf("creating request: %w", err)
@@ -156,8 +156,8 @@ func (r *GitHubReporter) commentOwner(ctx context.Context) (commentOwner, error)
 
 // CreateComment creates a comment on a GitHub issue or pull request and returns
 // the comment ID.
-func (r *GitHubReporter) CreateComment(ctx context.Context, number int, body string) (int64, error) {
-	url := fmt.Sprintf("%s/repos/%s/%s/issues/%d/comments", r.baseURL(), r.Owner, r.Repo, number)
+func (r *GitHubReporter) CreateComment(ctx context.Context, target CommentTarget, body string) (int64, error) {
+	url := fmt.Sprintf("%s/repos/%s/%s/issues/%d/comments", r.baseURL(), r.Owner, r.Repo, target.Number)
 
 	payload, err := json.Marshal(createCommentRequest{Body: body})
 	if err != nil {
@@ -190,7 +190,7 @@ func (r *GitHubReporter) CreateComment(ctx context.Context, number int, body str
 }
 
 // UpdateComment updates an existing GitHub comment by its ID.
-func (r *GitHubReporter) UpdateComment(ctx context.Context, commentID int64, body string) error {
+func (r *GitHubReporter) UpdateComment(ctx context.Context, _ CommentTarget, commentID int64, body string) error {
 	url := fmt.Sprintf("%s/repos/%s/%s/issues/comments/%s", r.baseURL(), r.Owner, r.Repo, strconv.FormatInt(commentID, 10))
 
 	payload, err := json.Marshal(createCommentRequest{Body: body})

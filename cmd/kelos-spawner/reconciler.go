@@ -31,6 +31,8 @@ type spawnerRuntimeConfig struct {
 	JiraBaseURL      string
 	JiraProject      string
 	JiraJQL          string
+	GitLabBaseURL    string
+	GitLabProject    string
 	HTTPClient       *http.Client
 }
 
@@ -70,7 +72,7 @@ func (r *spawnerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 func runOnce(ctx context.Context, cl client.Client, key types.NamespacedName, cfg spawnerRuntimeConfig) (time.Duration, error) {
-	if err := runCycleWithProxy(ctx, cl, key, cfg.GitHubOwner, cfg.GitHubRepo, cfg.GHProxyURL, cfg.GitHubAPIBaseURL, cfg.TokenResolver, cfg.JiraBaseURL, cfg.JiraProject, cfg.JiraJQL, cfg.HTTPClient); err != nil {
+	if err := runCycleWithProxy(ctx, cl, key, cfg.GitHubOwner, cfg.GitHubRepo, cfg.GHProxyURL, cfg.GitHubAPIBaseURL, cfg.TokenResolver, cfg.JiraBaseURL, cfg.JiraProject, cfg.JiraJQL, cfg.GitLabBaseURL, cfg.GitLabProject, cfg.HTTPClient); err != nil {
 		return 0, err
 	}
 
@@ -81,28 +83,35 @@ func runOnce(ctx context.Context, cl client.Client, key types.NamespacedName, cf
 
 	if reportingEnabled(&ts) || checksReportingEnabled(&ts) {
 		if cfg.TokenResolver == nil {
-			return 0, fmt.Errorf("GitHub reporting is enabled but no token resolver is configured")
+			return 0, fmt.Errorf("reporting is enabled but no token resolver is configured")
 		}
 		resolve := cfg.TokenResolver
 		tokenFunc := func() string {
 			token, err := resolve(ctx)
 			if err != nil {
-				ctrl.Log.WithName("spawner").Error(err, "Resolving GitHub token for reporting")
+				ctrl.Log.WithName("spawner").Error(err, "Resolving token for reporting")
 				return ""
 			}
 			return token
 		}
 		// Reporting always uses the direct API base URL (writes bypass the proxy).
-		reporter := &reporting.TaskReporter{
-			Client: cl,
-			Reporter: &reporting.GitHubReporter{
+		reporter := &reporting.TaskReporter{Client: cl}
+		if tracker, _ := ts.Spec.When.Tracker(); tracker.Provider == kelos.WorkspaceProviderGitLab {
+			reporter.Reporter = &reporting.GitLabReporter{
+				BaseURL:   cfg.GitLabBaseURL,
+				Project:   cfg.GitLabProject,
+				TokenFunc: tokenFunc,
+				Client:    cfg.HTTPClient,
+			}
+		} else {
+			reporter.Reporter = &reporting.GitHubReporter{
 				Owner:       cfg.GitHubOwner,
 				Repo:        cfg.GitHubRepo,
 				TokenFunc:   tokenFunc,
 				GitHubAppID: cfg.GitHubAppID,
 				BaseURL:     cfg.GitHubAPIBaseURL,
 				Client:      cfg.HTTPClient,
-			},
+			}
 		}
 		if checksReportingEnabled(&ts) {
 			reporter.ChecksReporter = &reporting.ChecksReporter{
@@ -121,22 +130,10 @@ func runOnce(ctx context.Context, cl client.Client, key types.NamespacedName, cf
 	return resolvedPollInterval(&ts), nil
 }
 
-// resolvedPollInterval returns the effective poll interval for the TaskSpawner.
-// It checks the active source's PollInterval first, falling back to the default.
+// resolvedPollInterval returns the effective poll interval for the TaskSpawner:
+// the active source's PollInterval, falling back to the default.
 func resolvedPollInterval(ts *kelos.TaskSpawner) time.Duration {
-	var sourceInterval string
-	switch {
-	case ts.Spec.When.GitHubIssues != nil:
-		sourceInterval = ts.Spec.When.GitHubIssues.PollInterval
-	case ts.Spec.When.GitHubPullRequests != nil:
-		sourceInterval = ts.Spec.When.GitHubPullRequests.PollInterval
-	case ts.Spec.When.Jira != nil:
-		sourceInterval = ts.Spec.When.Jira.PollInterval
-	}
-	if sourceInterval != "" {
-		return parsePollInterval(sourceInterval)
-	}
-	return parsePollInterval("")
+	return parsePollInterval(ts.Spec.When.PollInterval())
 }
 
 func (r *spawnerReconciler) requestsForTask(_ context.Context, obj client.Object) []reconcile.Request {

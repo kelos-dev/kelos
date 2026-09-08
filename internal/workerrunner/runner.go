@@ -434,10 +434,13 @@ func taskAgentEnv(base []string, task *kelos.Task) []string {
 	// git call; this covers tools that read GITHUB_TOKEN/GH_TOKEN directly.
 	// Only env vars already present are overridden, matching whichever the
 	// pod set (GH_TOKEN for github.com, GH_ENTERPRISE_TOKEN for GHE).
-	if token := currentGitHubToken(); token != "" {
+	if token := currentToken("KELOS_GITHUB_TOKEN_FILE"); token != "" {
 		env = overrideEnvIfPresent(env, "GITHUB_TOKEN", token)
 		env = overrideEnvIfPresent(env, "GH_TOKEN", token)
 		env = overrideEnvIfPresent(env, "GH_ENTERPRISE_TOKEN", token)
+	}
+	if token := currentToken("KELOS_GITLAB_TOKEN_FILE"); token != "" {
+		env = overrideEnvIfPresent(env, "GITLAB_TOKEN", token)
 	}
 
 	// Agent images that talk back to an external control plane (progress
@@ -462,12 +465,13 @@ func taskAgentEnv(base []string, task *kelos.Task) []string {
 	return env
 }
 
-// currentGitHubToken reads the current GitHub token from the file named by
-// KELOS_GITHUB_TOKEN_FILE, returning "" when the env var is unset or the file
-// is missing/unreadable/empty. The file is a kubelet-synced secret volume, so
-// it reflects controller-side token refreshes within the kubelet sync period.
-func currentGitHubToken() string {
-	tokenFile := os.Getenv("KELOS_GITHUB_TOKEN_FILE")
+// currentToken reads the current workspace token from the file named by the
+// given env var (KELOS_GITHUB_TOKEN_FILE or KELOS_GITLAB_TOKEN_FILE), returning
+// "" when the env var is unset or the file is missing/unreadable/empty. The
+// file is a kubelet-synced secret volume, so it reflects controller-side token
+// refreshes within the kubelet sync period.
+func currentToken(fileEnv string) string {
+	tokenFile := os.Getenv(fileEnv)
 	if tokenFile == "" {
 		return ""
 	}

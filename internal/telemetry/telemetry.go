@@ -276,6 +276,9 @@ func collect(ctx context.Context, c client.Client, clientset kubernetes.Interfac
 		if s.Spec.When.Jira != nil {
 			sourceTypes["jira"] = struct{}{}
 		}
+		if s.Spec.When.GitLab != nil {
+			sourceTypes["gitlab"] = struct{}{}
+		}
 	}
 	for st := range sourceTypes {
 		report.Features.SourceTypes = append(report.Features.SourceTypes, st)
@@ -385,12 +388,16 @@ func taskSpawnerSource(when kelos.When) string {
 		return "github_webhook"
 	case when.LinearWebhook != nil:
 		return "linear_webhook"
+	case when.GitLabWebhook != nil:
+		return "gitlab_webhook"
 	case when.GenericWebhook != nil:
 		return "generic_webhook"
 	case when.Cron != nil:
 		return "cron"
 	case when.Jira != nil:
 		return "jira"
+	case when.GitLab != nil:
+		return "gitlab"
 	case when.Slack != nil:
 		return "slack"
 	default:

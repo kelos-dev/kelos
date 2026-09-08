@@ -671,6 +671,18 @@ func TestSourceTypeExtraction(t *testing.T) {
 				When: kelos.When{GitHubIssues: &kelos.GitHubIssues{}},
 			},
 		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "s10", Namespace: "ns"},
+			Spec: kelos.TaskSpawnerSpec{
+				When: kelos.When{GitLab: &kelos.GitLab{}},
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "s11", Namespace: "ns"},
+			Spec: kelos.TaskSpawnerSpec{
+				When: kelos.When{GitLabWebhook: &kelos.GitLabWebhook{}},
+			},
+		},
 	}
 
 	objs := make([]runtime.Object, 0)
@@ -691,7 +703,7 @@ func TestSourceTypeExtraction(t *testing.T) {
 	}
 
 	sort.Strings(report.Features.SourceTypes)
-	expected := []string{"cron", "github", "jira"}
+	expected := []string{"cron", "github", "gitlab", "jira"}
 	if len(report.Features.SourceTypes) != len(expected) {
 		t.Fatalf("SourceTypes length = %d, want %d", len(report.Features.SourceTypes), len(expected))
 	}
@@ -710,6 +722,8 @@ func TestSourceTypeExtraction(t *testing.T) {
 		"cron":                 1,
 		"jira":                 1,
 		"slack":                1,
+		"gitlab":               1,
+		"gitlab_webhook":       1,
 	}
 	for source, count := range expectedBySource {
 		if report.TaskSpawners.BySource[source] != count {

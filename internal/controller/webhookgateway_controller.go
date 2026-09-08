@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"time"
@@ -18,6 +19,10 @@ import (
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 )
+
+// gatewayWebhookSecretKey is the Secret data key the webhook server reads the
+// inbound verification secret from.
+const gatewayWebhookSecretKey = "webhook-secret"
 
 // WebhookGatewayReconciler reconciles WebhookGateway status. It derives the
 // inbound URL and reflects the authentication state based on the gateway type
@@ -94,53 +99,58 @@ func (r *WebhookGatewayReconciler) evaluate(ctx context.Context, gw *kelos.Webho
 
 	case gw.Spec.GitHub != nil:
 		// Inbound HMAC secret, then optionally the outbound API credentials.
-		if phase, msg, requeue, err := r.checkSecret(ctx, gw.Namespace, gw.Spec.GitHub.SecretRef.Name, "HMAC secret"); err != nil || phase != "" {
+		if phase, msg, requeue, err := r.checkSecret(ctx, gw.Namespace, gw.Spec.GitHub.SecretRef.Name, "HMAC secret", ""); err != nil || phase != "" {
 			return phase, msg, requeue, err
 		}
 		if gw.Spec.GitHub.CredentialsRef != nil {
-			if phase, msg, requeue, err := r.checkSecret(ctx, gw.Namespace, gw.Spec.GitHub.CredentialsRef.Name, "credentials secret"); err != nil || phase != "" {
+			if phase, msg, requeue, err := r.checkSecret(ctx, gw.Namespace, gw.Spec.GitHub.CredentialsRef.Name, "credentials secret", ""); err != nil || phase != "" {
 				return phase, msg, requeue, err
 			}
 		}
 		return kelos.WebhookGatewayPhaseAuthenticated, "", false, nil
 
 	case gw.Spec.Linear != nil:
-		if phase, msg, requeue, err := r.checkSecret(ctx, gw.Namespace, gw.Spec.Linear.SecretRef.Name, "HMAC secret"); err != nil || phase != "" {
+		if phase, msg, requeue, err := r.checkSecret(ctx, gw.Namespace, gw.Spec.Linear.SecretRef.Name, "HMAC secret", ""); err != nil || phase != "" {
 			return phase, msg, requeue, err
+		}
+		return kelos.WebhookGatewayPhaseAuthenticated, "", false, nil
+
+	case gw.Spec.GitLab != nil:
+		if phase, msg, requeue, err := r.checkSecret(ctx, gw.Namespace, gw.Spec.GitLab.SecretRef.Name, "webhook token secret", gatewayWebhookSecretKey); err != nil || phase != "" {
+			return phase, msg, requeue, err
+		}
+		if gw.Spec.GitLab.CredentialsRef != nil {
+			if phase, msg, requeue, err := r.checkSecret(ctx, gw.Namespace, gw.Spec.GitLab.CredentialsRef.Name, "credentials secret", GitLabTokenSecretKey); err != nil || phase != "" {
+				return phase, msg, requeue, err
+			}
 		}
 		return kelos.WebhookGatewayPhaseAuthenticated, "", false, nil
 
 	default:
 		// The CEL "exactly one of" rule should prevent reaching here.
 		return kelos.WebhookGatewayPhaseSecretMissing,
-			"no source configured: exactly one of github, linear, or generic is required", false, nil
+			"no source configured: exactly one of github, linear, gitlab, or generic is required", false, nil
 	}
 }
 
 // checkSecret returns a SecretMissing phase (with a requeue) when the named
-// Secret is absent, or an empty phase when it is present.
-func (r *WebhookGatewayReconciler) checkSecret(ctx context.Context, namespace, name, kind string) (kelos.WebhookGatewayPhase, string, bool, error) {
-	missing, err := r.secretMissing(ctx, namespace, name)
-	if err != nil {
-		return "", "", false, err
-	}
-	if missing {
-		return kelos.WebhookGatewayPhaseSecretMissing,
-			fmt.Sprintf("%s %q not found", kind, name), true, nil
-	}
-	return "", "", false, nil
-}
-
-func (r *WebhookGatewayReconciler) secretMissing(ctx context.Context, namespace, name string) (bool, error) {
+// Secret is absent or, when key is set, lacks a non-blank value under that
+// key. An empty phase means the Secret is usable.
+func (r *WebhookGatewayReconciler) checkSecret(ctx context.Context, namespace, name, kind, key string) (kelos.WebhookGatewayPhase, string, bool, error) {
 	var secret corev1.Secret
 	err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &secret)
 	if apierrors.IsNotFound(err) {
-		return true, nil
+		return kelos.WebhookGatewayPhaseSecretMissing,
+			fmt.Sprintf("%s %q not found", kind, name), true, nil
 	}
 	if err != nil {
-		return false, err
+		return "", "", false, err
 	}
-	return false, nil
+	if key != "" && len(bytes.TrimSpace(secret.Data[key])) == 0 {
+		return kelos.WebhookGatewayPhaseSecretMissing,
+			fmt.Sprintf("%s %q has no %s key", kind, name, key), true, nil
+	}
+	return "", "", false, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -175,7 +185,8 @@ func (r *WebhookGatewayReconciler) findGatewaysForSecret(ctx context.Context, ob
 }
 
 // gatewayReferencesSecret reports whether the gateway references the named
-// Secret — the inbound HMAC secret or, for github, the outbound credentials.
+// Secret — the inbound HMAC secret or token, or the outbound credentials for
+// github and gitlab.
 func gatewayReferencesSecret(gw *kelos.WebhookGateway, name string) bool {
 	switch {
 	case gw.Spec.GitHub != nil:
@@ -183,6 +194,9 @@ func gatewayReferencesSecret(gw *kelos.WebhookGateway, name string) bool {
 			(gw.Spec.GitHub.CredentialsRef != nil && gw.Spec.GitHub.CredentialsRef.Name == name)
 	case gw.Spec.Linear != nil:
 		return gw.Spec.Linear.SecretRef.Name == name
+	case gw.Spec.GitLab != nil:
+		return gw.Spec.GitLab.SecretRef.Name == name ||
+			(gw.Spec.GitLab.CredentialsRef != nil && gw.Spec.GitLab.CredentialsRef.Name == name)
 	default:
 		return false
 	}

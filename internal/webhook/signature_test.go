@@ -97,3 +97,25 @@ func TestValidateLinearSignature(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateGitLabToken(t *testing.T) {
+	secret := []byte("gitlab-secret-token")
+	tests := []struct {
+		name    string
+		token   string
+		wantErr bool
+	}{
+		{"matching token", "gitlab-secret-token", false},
+		{"wrong token", "other", true},
+		{"prefix of secret", "gitlab-secret", true},
+		{"missing token", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateGitLabToken(tt.token, secret)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateGitLabToken() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}

@@ -131,17 +131,31 @@ func TestRenderPromptAllVariables(t *testing.T) {
 		Branch:         "kelos-task-99",
 		ReviewState:    "changes_requested",
 		ReviewComments: "foo.go:10\nHandle the error",
+		PipelineStatus: "failed",
+		PipelineURL:    "https://gitlab.example.com/g/r/-/pipelines/1",
 	}
 
-	tmpl := "{{.ID}} {{.Number}} {{.Title}} {{.Body}} {{.URL}} {{.Labels}} {{.Comments}} {{.Kind}} {{.Branch}} {{.ReviewState}} {{.ReviewComments}}"
+	tmpl := "{{.ID}} {{.Number}} {{.Title}} {{.Body}} {{.URL}} {{.Labels}} {{.Comments}} {{.Kind}} {{.Branch}} {{.ReviewState}} {{.ReviewComments}} {{.PipelineStatus}} {{.PipelineURL}}"
 	result, err := RenderPrompt(tmpl, item)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	expected := "99 99 T B U a, b C PR kelos-task-99 changes_requested foo.go:10\nHandle the error"
+	expected := "99 99 T B U a, b C PR kelos-task-99 changes_requested foo.go:10\nHandle the error failed https://gitlab.example.com/g/r/-/pipelines/1"
 	if result != expected {
 		t.Errorf("expected %q, got %q", expected, result)
+	}
+
+	// The map used by webhook-style rendering must expose the same variables
+	// as the struct path.
+	vars := WorkItemToTemplateVars(item)
+	for _, key := range []string{"ID", "Number", "Title", "Body", "URL", "Labels", "Comments", "Kind", "Branch", "ReviewState", "ReviewComments", "PipelineStatus", "PipelineURL", "Time", "Schedule"} {
+		if _, ok := vars[key]; !ok {
+			t.Errorf("WorkItemToTemplateVars missing %q", key)
+		}
+	}
+	if vars["PipelineStatus"] != "failed" || vars["PipelineURL"] != item.PipelineURL || vars["Labels"] != "a, b" {
+		t.Errorf("unexpected template vars: %+v", vars)
 	}
 }
 

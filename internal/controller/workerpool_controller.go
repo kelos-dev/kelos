@@ -577,16 +577,11 @@ func (r *WorkerPoolReconciler) buildStatefulSet(pool *kelos.WorkerPool, stsName,
 
 	// Workspace env vars for init containers and main container
 	var workspaceEnvVars []corev1.EnvVar
-	var isEnterprise bool
+	provider := workspaceProviderFor(workspace)
 	if workspace != nil {
-		host, _, _ := parseGitHubRepo(workspace.Repo)
-		isEnterprise = host != "" && host != "github.com"
-
-		if isEnterprise {
-			ghHostEnv := corev1.EnvVar{Name: "GH_HOST", Value: host}
-			envVars = append(envVars, ghHostEnv)
-			workspaceEnvVars = append(workspaceEnvVars, ghHostEnv)
-		}
+		hostEnv := provider.hostEnv(workspace.Repo)
+		envVars = append(envVars, hostEnv...)
+		workspaceEnvVars = append(workspaceEnvVars, hostEnv...)
 
 		if workspace.Ref != "" {
 			envVars = append(envVars, corev1.EnvVar{
@@ -607,47 +602,13 @@ func (r *WorkerPoolReconciler) buildStatefulSet(pool *kelos.WorkerPool, stsName,
 	}
 
 	if workspace != nil && workspace.SecretRef != nil {
-		secretKeyRef := &corev1.SecretKeySelector{
-			LocalObjectReference: corev1.LocalObjectReference{
-				Name: workspace.SecretRef.Name,
-			},
-			Key: "GITHUB_TOKEN",
-		}
-		githubTokenEnv := corev1.EnvVar{
-			Name:      "GITHUB_TOKEN",
-			ValueFrom: &corev1.EnvVarSource{SecretKeyRef: secretKeyRef},
-		}
-		envVars = append(envVars, githubTokenEnv)
-		workspaceEnvVars = append(workspaceEnvVars, githubTokenEnv)
-
-		ghTokenName := "GH_TOKEN"
-		if isEnterprise {
-			ghTokenName = "GH_ENTERPRISE_TOKEN"
-		}
-		ghTokenEnv := corev1.EnvVar{
-			Name:      ghTokenName,
-			ValueFrom: &corev1.EnvVarSource{SecretKeyRef: secretKeyRef},
-		}
-		envVars = append(envVars, ghTokenEnv)
-		workspaceEnvVars = append(workspaceEnvVars, ghTokenEnv)
-
-		// Point gh CLI at a clean config directory on the workspace volume
-		envVars = append(envVars, corev1.EnvVar{
-			Name:  "GH_CONFIG_DIR",
-			Value: GHConfigDir,
-		})
-
-		// Expose the mounted token file path so the worker runner can re-read
-		// the token on every task, picking up controller-side refreshes without
-		// a pod restart. The secret-backed GITHUB_TOKEN / GH_TOKEN env vars
-		// above are frozen at pod start, so the file is the source of truth for
-		// long-lived pools. Only the main container runs the worker runner; the
-		// init-container credential helper hardcodes the mount path via
-		// gitCredentialHelper(), so it does not need this env var.
-		envVars = append(envVars, corev1.EnvVar{
-			Name:  "KELOS_GITHUB_TOKEN_FILE",
-			Value: GitHubTokenMountPath + "/" + GitHubTokenSecretKey,
-		})
+		// The Secret-backed token env vars are frozen at pod start, so the
+		// token file is the source of truth for long-lived pools: the worker
+		// runner re-reads it on every task.
+		shared, agentOnly := provider.tokenEnvVars(workspace.Repo, workspace.SecretRef.Name)
+		envVars = append(envVars, shared...)
+		envVars = append(envVars, agentOnly...)
+		workspaceEnvVars = append(workspaceEnvVars, shared...)
 	}
 
 	workerRunnerVolumeName := "worker-runner"
@@ -691,23 +652,8 @@ func (r *WorkerPoolReconciler) buildStatefulSet(pool *kelos.WorkerPool, stsName,
 	// secret-volume updates into the running pod, so a controller-side token
 	// refresh propagates without a pod restart.
 	if workspace != nil && workspace.SecretRef != nil {
-		volumes = append(volumes, corev1.Volume{
-			Name: GitHubTokenVolumeName,
-			VolumeSource: corev1.VolumeSource{
-				Secret: &corev1.SecretVolumeSource{
-					SecretName: workspace.SecretRef.Name,
-					Items: []corev1.KeyToPath{
-						{Key: GitHubTokenSecretKey, Path: GitHubTokenSecretKey},
-					},
-					Optional: ptr.To(true),
-				},
-			},
-		})
-		mainContainer.VolumeMounts = append(mainContainer.VolumeMounts, corev1.VolumeMount{
-			Name:      GitHubTokenVolumeName,
-			MountPath: GitHubTokenMountPath,
-			ReadOnly:  true,
-		})
+		volumes = append(volumes, provider.tokenVolume(workspace.SecretRef.Name))
+		mainContainer.VolumeMounts = append(mainContainer.VolumeMounts, provider.tokenVolumeMount())
 	}
 
 	// Build workspace init containers (git-clone, remote-setup, workspace-files)
@@ -721,11 +667,7 @@ func (r *WorkerPoolReconciler) buildStatefulSet(pool *kelos.WorkerPool, stsName,
 		// configured, the auto-syncing token file used by the credential helper.
 		workspaceVolumeMounts := []corev1.VolumeMount{volumeMount}
 		if workspace.SecretRef != nil {
-			workspaceVolumeMounts = append(workspaceVolumeMounts, corev1.VolumeMount{
-				Name:      GitHubTokenVolumeName,
-				MountPath: GitHubTokenMountPath,
-				ReadOnly:  true,
-			})
+			workspaceVolumeMounts = append(workspaceVolumeMounts, provider.tokenVolumeMount())
 		}
 
 		targetPath := WorkspaceMountPath + "/repo"
@@ -752,8 +694,8 @@ func (r *WorkerPoolReconciler) buildStatefulSet(pool *kelos.WorkerPool, stsName,
 		credentialHelper := ""
 		credentialConfig := ""
 		if workspace.SecretRef != nil {
-			credentialHelper = gitCredentialHelper()
-			credentialConfig = workspaceGitCredentialConfigScript(credentialHelper)
+			credentialHelper = gitCredentialHelper(provider)
+			credentialConfig = workspaceGitCredentialConfigScript(credentialHelper, provider.gitUsername)
 		}
 
 		if commitRef {
@@ -763,7 +705,7 @@ func (r *WorkerPoolReconciler) buildStatefulSet(pool *kelos.WorkerPool, stsName,
 			}
 			gitClone.Command = []string{"sh", "-c",
 				fmt.Sprintf("if [ -d '%s/repo/.git' ]; then echo 'Workspace exists, skipping clone'; %s; fi; %s",
-					WorkspaceMountPath, existingRepoAction, buildCommitRefCheckoutScript(credentialHelper)),
+					WorkspaceMountPath, existingRepoAction, buildCommitRefCheckoutScript(credentialHelper, provider.gitUsername)),
 			}
 			gitClone.Args = []string{"--", workspace.Repo, targetPath, workspace.Ref}
 		} else if workspace.SecretRef != nil {
@@ -771,7 +713,7 @@ func (r *WorkerPoolReconciler) buildStatefulSet(pool *kelos.WorkerPool, stsName,
 			innerCmd := fmt.Sprintf(
 				`git -c credential.helper= -c credential.helper='%s' -c credential.username=%s "$@" && { `+
 					`%s; }`,
-				credentialHelper, gitCredentialDefaultUsername, credentialConfig,
+				credentialHelper, provider.gitUsername, credentialConfig,
 			)
 			// Wrap with exists check so it skips if workspace already exists on PVC
 			gitClone.Command = []string{"sh", "-c",

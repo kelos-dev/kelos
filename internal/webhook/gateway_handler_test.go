@@ -76,6 +76,36 @@ func linearGateway(name, namespace, secretName string) *kelos.WebhookGateway {
 	}
 }
 
+func gitlabGateway(name, namespace, secretName string) *kelos.WebhookGateway {
+	return &kelos.WebhookGateway{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Spec: kelos.WebhookGatewaySpec{
+			GitLab: &kelos.GitLabGateway{
+				SecretRef: kelos.SecretReference{Name: secretName},
+			},
+		},
+	}
+}
+
+func gitlabSpawner(name, namespace, gatewayRef string) *kelos.TaskSpawner {
+	glw := &kelos.GitLabWebhook{Events: []string{"merge_request"}}
+	if gatewayRef != "" {
+		glw.GatewayRef = &kelos.GatewayReference{Name: gatewayRef}
+	}
+	return &kelos.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, UID: types.UID(name)},
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{GitLabWebhook: glw},
+			TaskTemplate: kelos.TaskTemplate{
+				Type:           "claude-code",
+				Credentials:    &kelos.Credentials{Type: "api-key"},
+				WorkspaceRef:   &kelos.WorkspaceReference{Name: "test-workspace"},
+				PromptTemplate: "Handle merge request {{.ID}}",
+			},
+		},
+	}
+}
+
 func hmacSecret(name, namespace, value string) *corev1.Secret {
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
@@ -167,6 +197,52 @@ func TestGatewayServeHTTP_UnknownPath404(t *testing.T) {
 	g.ServeHTTP(rr, req)
 	if rr.Code != http.StatusNotFound {
 		t.Errorf("Expected 404 for unknown gateway, got %d", rr.Code)
+	}
+}
+
+func TestGatewayServeHTTP_GitLabValidTokenCreatesTask(t *testing.T) {
+	g := newTestGatewayHandler(t,
+		gitlabGateway("gl", "default", "gl-secret"),
+		hmacSecret("gl-secret", "default", testSecret),
+		gitlabSpawner("gitlab-a", "default", "gl"),
+		gitlabSpawner("gitlab-unbound", "default", ""),
+	)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook/default/gl", bytes.NewReader([]byte(gitlabMergeRequestPayload)))
+	req.Header.Set(GitLabTokenHeader, testSecret)
+	req.Header.Set(GitLabDeliveryHeader, "uuid-gl-1")
+	rr := httptest.NewRecorder()
+	g.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", rr.Code)
+	}
+	var taskList kelos.TaskList
+	if err := g.client.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatal(err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Fatalf("Expected 1 task for the gateway-bound spawner only, got %d", len(taskList.Items))
+	}
+	if got := taskList.Items[0].Labels["kelos.dev/taskspawner"]; got != "gitlab-a" {
+		t.Errorf("Expected task owned by gitlab-a, got %q", got)
+	}
+}
+
+func TestGatewayServeHTTP_GitLabInvalidTokenRejected(t *testing.T) {
+	g := newTestGatewayHandler(t,
+		gitlabGateway("gl", "default", "gl-secret"),
+		hmacSecret("gl-secret", "default", testSecret),
+		gitlabSpawner("gitlab-a", "default", "gl"),
+	)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook/default/gl", bytes.NewReader([]byte(gitlabMergeRequestPayload)))
+	req.Header.Set(GitLabTokenHeader, "wrong")
+	rr := httptest.NewRecorder()
+	g.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("Expected 401, got %d", rr.Code)
 	}
 }
 

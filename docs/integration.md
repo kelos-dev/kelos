@@ -308,6 +308,70 @@ Then configure a webhook in Linear (Settings → API → Webhooks) pointing to `
 
 **Linear-specific variables:** `{{.Type}}` (resource type), `{{.State}}` (workflow state), `{{.Action}}` (webhook action), `{{.IssueID}}` (parent issue ID for Comment events), `{{.Labels}}`, `{{.Payload}}` (full payload access).
 
+### GitLab Webhooks
+
+React to GitLab events in real time from gitlab.com, a self-hosted instance, or a GitLab running inside the cluster: merge requests, issues, notes (comments), pipelines, and pushes. The webhook server authenticates deliveries by comparing the `X-Gitlab-Token` header with the configured secret.
+
+```yaml
+apiVersion: kelos.dev/v1alpha2
+kind: TaskSpawner
+metadata:
+  name: gitlab-responder
+spec:
+  when:
+    gitlabWebhook:
+      events:
+        - note
+        - pipeline
+      project: group/repo
+      filters:
+        # Someone typed "/kelos fix" on a merge request.
+        - event: note
+          noteOn: MergeRequest
+          bodyPattern: '^/kelos fix'
+        # A pipeline on a merge request failed.
+        - event: pipeline
+          status: failed
+  taskTemplate:
+    type: claude-code
+    workspaceRef:
+      name: my-gitlab-workspace
+    credentials:
+      type: oauth
+      secretRef:
+        name: claude-oauth-token
+    branch: "{{.Branch}}"
+    promptTemplate: |
+      GitLab {{.Event}} on {{.Kind}} !{{.Number}}: {{.Title}}
+      {{.URL}}
+      {{- if .CommentBody}}
+
+      Comment: {{.CommentBody}}
+      {{- end}}
+      {{- if .PipelineStatus}}
+
+      Pipeline {{.PipelineStatus}}: {{.PipelineURL}}
+      {{- end}}
+  maxConcurrency: 3
+```
+
+**Workspace:** `my-gitlab-workspace` must set `spec.provider: gitlab` and reference a Secret with a `GITLAB_TOKEN` key; the controller marks the TaskSpawner `Failed` otherwise. See [Workspace Authentication](reference.md#workspace-authentication).
+
+**Setup:** Enable the GitLab webhook server in your Helm values (`webhookServer.sources.gitlab.enabled: true`) and create the secret token:
+
+```bash
+kubectl create secret generic gitlab-webhook-secret \
+  --from-literal=WEBHOOK_SECRET=your-gitlab-webhook-token
+```
+
+Then add a project or group webhook in GitLab (Settings → Webhooks) pointing to `https://your-webhook-domain/webhook/gitlab`, paste the same value in **Secret token**, and enable the triggers you listed in `events` (Issues, Merge request, Comments, Pipeline, Push). For an in-cluster GitLab the URL can be the webhook Service, e.g. `http://kelos-webhook-gitlab.kelos-system.svc:8443/`; allow requests to the local network in GitLab's outbound request settings. Per-tenant secrets and multiple GitLab instances go through a [WebhookGateway](reference.md#webhookgateway) with `spec.gitlab`.
+
+**Filtering options:** `events` (required — `issue`, `merge_request`, `note`, `pipeline`, `push`, `tag_push`), `project`, `excludeAuthors`, and per-filter fields: `action`, `labels`, `excludeLabels`, `state`, `branch`, `status` (pipelines), `noteOn`, `bodyPattern`, `excludeBodyPatterns`, `draft`, `author`, `excludeAuthors`.
+
+**GitLab-specific variables:** `{{.Event}}`, `{{.Action}}`, `{{.Sender}}`, `{{.Repository}}`, `{{.Kind}}` (`Issue`, `MR`, or `webhook`), `{{.Number}}`, `{{.Branch}}`, `{{.State}}`, `{{.Labels}}`, `{{.HeadSHA}}`, `{{.NoteOn}}`, `{{.CommentBody}}`, `{{.CommentURL}}`, `{{.PipelineStatus}}`, `{{.PipelineURL}}`, `{{.Payload}}`. Notes and pipelines attached to a merge request carry that merge request's `{{.ID}}` (`mr-<iid>`), `{{.Number}}`, and `{{.Branch}}`.
+
+**Status notes:** set `reporting.comments.mode` (`PerTask` or `Sticky`) on the spawner to post Task status notes on the originating issue or merge request. The per-source server reads its token from `webhookServer.sources.gitlab.tokenSecretName` (a Secret with a `GITLAB_TOKEN` key) and posts to `webhookServer.sources.gitlab.baseUrl` (default `https://gitlab.com`); gateway-bound spawners use the gateway's `spec.gitlab.credentialsRef` and `spec.gitlab.apiBaseURL`. The instance URL always comes from configuration, never from the webhook payload.
+
 ### Generic Webhooks
 
 React to arbitrary HTTP POST events from any system that can deliver a JSON payload — Sentry, Notion, Slack, Drata, PagerDuty, internal services, or anything else. Unlike the GitHub and Linear webhook sources, the generic webhook source has no built-in knowledge of any particular schema; you describe how to extract fields and what to filter on using JSONPath expressions.

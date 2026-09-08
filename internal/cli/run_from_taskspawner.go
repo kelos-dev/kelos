@@ -223,13 +223,11 @@ func taskSpawnerHTTPClient(configured *http.Client) *http.Client {
 }
 
 func taskSpawnerUpstreamRepo(spawner *kelos.TaskSpawner) string {
-	var repo string
-	if spawner.Spec.When.GitHubIssues != nil {
-		repo = spawner.Spec.When.GitHubIssues.Repo
-	} else if spawner.Spec.When.GitHubPullRequests != nil {
-		repo = spawner.Spec.When.GitHubPullRequests.Repo
+	tracker, _ := spawner.Spec.When.Tracker()
+	if tracker.Provider != kelos.WorkspaceProviderGitHub || tracker.Webhook {
+		return ""
 	}
-	return source.GitHubRepositoryName(repo)
+	return source.GitHubRepositoryName(tracker.Repo)
 }
 
 func manualTaskName(spawnerName, suffix string) string {

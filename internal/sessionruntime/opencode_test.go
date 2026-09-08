@@ -325,6 +325,7 @@ func TestOpenCodeCommandEnvironmentMapsProviderKey(t *testing.T) {
 		{model: "openai/gpt-5", name: "OPENAI_API_KEY"},
 		{model: "google/gemini", name: "GEMINI_API_KEY"},
 		{model: "zai/glm", name: "ZHIPU_API_KEY"},
+		{model: "openrouter/qwen/qwen3-coder", name: "OPENROUTER_API_KEY"},
 	}
 	for _, test := range tests {
 		t.Run(test.model, func(t *testing.T) {

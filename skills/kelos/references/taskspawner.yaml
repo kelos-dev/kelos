@@ -156,6 +156,39 @@ spec:
       {{.Body}}
   maxConcurrency: 2
 ---
+# TaskSpawner with GitLab source (instance URL and project derive from the Workspace repo;
+# the Workspace must set provider: gitlab and its secret's GITLAB_TOKEN key holds the token)
+apiVersion: kelos.dev/v1alpha2
+kind: TaskSpawner
+metadata:
+  name: gitlab-worker
+spec:
+  when:
+    gitlab:
+      types: ["issues", "mergeRequests"]
+      labels: ["kelos"]
+      commentPolicy:
+        triggerComment: "/kelos fix"
+        allowedUsers: ["alice"]
+      reporting:
+        comments:
+          mode: Sticky
+      pollInterval: 2m
+  taskTemplate:
+    type: claude-code
+    workspaceRef:
+      name: my-gitlab-workspace
+    credentials:
+      type: oauth
+      secretRef:
+        name: claude-oauth-token
+    branch: "{{if .Branch}}{{.Branch}}{{else}}kelos-issue-{{.Number}}{{end}}"
+    promptTemplate: |
+      Work on GitLab {{.Kind}} #{{.Number}}: {{.Title}}
+
+      {{.Body}}
+  maxConcurrency: 2
+---
 # TaskSpawner distributing generated Tasks across multiple agent accounts
 apiVersion: kelos.dev/v1alpha2
 kind: TaskSpawner

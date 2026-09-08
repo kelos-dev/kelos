@@ -1,9 +1,10 @@
 {{- if .Values.webhookServer.gateway.enabled }}
 {{- $githubEnabled := .Values.webhookServer.sources.github.enabled }}
 {{- $linearEnabled := .Values.webhookServer.sources.linear.enabled }}
+{{- $gitlabEnabled := .Values.webhookServer.sources.gitlab.enabled }}
 {{- $genericEnabled := .Values.webhookServer.sources.generic.enabled }}
 {{- $gatewayServerEnabled := .Values.webhookServer.gatewayServer.enabled }}
-{{- if or $githubEnabled $linearEnabled $genericEnabled $gatewayServerEnabled }}
+{{- if or $githubEnabled $linearEnabled $gitlabEnabled $genericEnabled $gatewayServerEnabled }}
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
@@ -84,13 +85,23 @@ spec:
         - name: kelos-webhook-linear
           port: 8443
     {{- end }}
+    {{- if $gitlabEnabled }}
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /webhook/gitlab
+      backendRefs:
+        - name: kelos-webhook-gitlab
+          port: 8443
+    {{- end }}
     {{- /*
       The gateway server (/webhook/<ns>/<name>) and the per-source generic server
       (/webhook/<source>) both live under the /webhook/ prefix, so a single
       PathPrefix cannot route to both. When the gateway server is enabled it
       takes /webhook/, making the per-source generic server unreachable via this
-      route. The github/linear servers use the more specific /webhook/github and
-      /webhook/linear prefixes and remain reachable.
+      route. The github/linear/gitlab servers use the more specific
+      /webhook/github, /webhook/linear, and /webhook/gitlab prefixes and remain
+      reachable.
     */}}
     {{- if $gatewayServerEnabled }}
     - matches:

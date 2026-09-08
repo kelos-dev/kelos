@@ -17,13 +17,13 @@ import (
 )
 
 const (
-	// AnnotationGitHubReporting indicates that GitHub comment reporting is
-	// enabled for this Task.
-	AnnotationGitHubReporting = "kelos.dev/github-reporting"
+	// AnnotationCommentReporting indicates that status-comment reporting is
+	// enabled for this Task, whichever tracker the comment is posted to.
+	AnnotationCommentReporting = "kelos.dev/comment-reporting"
 
-	// AnnotationGitHubCommentMode records whether the reporter creates a
+	// AnnotationCommentMode records whether the reporter creates a
 	// comment per Task or reuses a sticky comment across Tasks.
-	AnnotationGitHubCommentMode = "kelos.dev/github-comment-mode"
+	AnnotationCommentMode = "kelos.dev/comment-mode"
 
 	// AnnotationSourceKind records whether the source item is an issue or pull-request.
 	AnnotationSourceKind = "kelos.dev/source-kind"
@@ -40,6 +40,20 @@ const (
 	// from. Pairs with AnnotationSourceOwner.
 	AnnotationSourceRepo = "kelos.dev/source-repo"
 
+	// AnnotationSourceProvider records the tracker that owns the source item
+	// when it is not GitHub. Webhook reporting reads it to pick the reporter.
+	AnnotationSourceProvider = "kelos.dev/source-provider"
+
+	// AnnotationSourceBaseURL records the instance URL of the tracker the event
+	// came from (e.g. "https://gitlab.example.com"). It is informational:
+	// reporting resolves the instance URL from server or gateway configuration
+	// because the payload is attacker-controllable. For GitLab,
+	// AnnotationSourceRepo holds the full project path.
+	AnnotationSourceBaseURL = "kelos.dev/source-base-url"
+
+	// SourceProviderGitLab is the AnnotationSourceProvider value for GitLab.
+	SourceProviderGitLab = "gitlab"
+
 	// AnnotationWebhookGateway records the name of the WebhookGateway (in the
 	// Task's namespace) that created the Task. The reporting reconciler uses it
 	// to resolve per-gateway GitHub credentials and API base URL, so reporting
@@ -47,33 +61,32 @@ const (
 	// server). Source-specific webhook handlers leave it unset.
 	AnnotationWebhookGateway = "kelos.dev/webhook-gateway"
 
-	// AnnotationGitHubCommentID stores the GitHub comment ID for the status
-	// comment created by the reporter so subsequent updates edit the same
-	// comment.
-	AnnotationGitHubCommentID = "kelos.dev/github-comment-id"
+	// AnnotationCommentID stores the tracker's ID of the status comment
+	// created by the reporter so subsequent updates edit the same comment.
+	AnnotationCommentID = "kelos.dev/comment-id"
 
-	// AnnotationGitHubReportPhase records the last Task phase that was
-	// reported to GitHub, preventing duplicate API calls on re-list.
-	AnnotationGitHubReportPhase = "kelos.dev/github-report-phase"
+	// AnnotationCommentReportPhase records the last Task phase that was
+	// reported as a comment, preventing duplicate API calls on re-list.
+	AnnotationCommentReportPhase = "kelos.dev/comment-report-phase"
 
-	// AnnotationGitHubChecks indicates that GitHub Check Run reporting is
-	// enabled for this Task.
-	AnnotationGitHubChecks = "kelos.dev/github-checks"
+	// AnnotationCheckReporting indicates that commit-check reporting (GitHub
+	// Check Runs) is enabled for this Task.
+	AnnotationCheckReporting = "kelos.dev/check-reporting"
 
-	// AnnotationGitHubCheckRunID stores the GitHub Check Run ID so
-	// subsequent updates target the same check run.
-	AnnotationGitHubCheckRunID = "kelos.dev/github-check-run-id"
+	// AnnotationCheckRunID stores the tracker's ID of the check so
+	// subsequent updates target the same one.
+	AnnotationCheckRunID = "kelos.dev/check-run-id"
 
-	// AnnotationGitHubCheckReportPhase records the last Task phase that was
-	// reported via the Checks API.
-	AnnotationGitHubCheckReportPhase = "kelos.dev/github-check-report-phase"
+	// AnnotationCheckReportPhase records the last Task phase that was
+	// reported as a commit check.
+	AnnotationCheckReportPhase = "kelos.dev/check-report-phase"
 
 	// AnnotationSourceSHA records the head commit SHA for pull request sources.
 	AnnotationSourceSHA = "kelos.dev/source-sha"
 
-	// AnnotationGitHubCheckName stores the Check Run name configured on the
+	// AnnotationCheckName stores the check name configured on the
 	// TaskSpawner so the reporter can use it without access to the spec.
-	AnnotationGitHubCheckName = "kelos.dev/github-check-name"
+	AnnotationCheckName = "kelos.dev/check-name"
 
 	// AnnotationSlackReporting indicates that Slack reporting is enabled
 	// for this Task.
@@ -100,12 +113,56 @@ const (
 	LabelSlackReporting = "kelos.dev/slack-reporting"
 )
 
-// TaskReporter watches Tasks and reports status changes to GitHub.
+// legacyAnnotationKeys maps the comment and check annotation keys to the
+// "github-" keys they carried when GitHub was the only tracker. Tasks stamped
+// with the old keys keep reporting to the same comment or check across an
+// upgrade; writes always use the current keys.
+var legacyAnnotationKeys = map[string]string{
+	AnnotationCommentReporting:   "kelos.dev/github-reporting",
+	AnnotationCommentMode:        "kelos.dev/github-comment-mode",
+	AnnotationCommentID:          "kelos.dev/github-comment-id",
+	AnnotationCommentReportPhase: "kelos.dev/github-report-phase",
+	AnnotationCheckReporting:     "kelos.dev/github-checks",
+	AnnotationCheckRunID:         "kelos.dev/github-check-run-id",
+	AnnotationCheckReportPhase:   "kelos.dev/github-check-report-phase",
+	AnnotationCheckName:          "kelos.dev/github-check-name",
+}
+
+// ReadAnnotation returns the value under key, falling back to the key's
+// legacy "github-" form. Use it for every read of a comment or check
+// annotation; plain map access misses Tasks created before the rename.
+func ReadAnnotation(annotations map[string]string, key string) string {
+	if v, ok := annotations[key]; ok {
+		return v
+	}
+	return annotations[legacyAnnotationKeys[key]]
+}
+
+// CommentTarget identifies the issue, pull request, or merge request a
+// status comment belongs to. Kind carries the AnnotationSourceKind value;
+// GitLab needs it to pick the notes endpoint, GitHub ignores it.
+type CommentTarget struct {
+	Kind   string
+	Number int
+}
+
+// CommentReporter creates and updates task status comments on an external
+// tracker such as GitHub or GitLab.
+type CommentReporter interface {
+	// FindCommentByMarker returns the newest comment authored by the reporter's
+	// identity that contains marker, or zero when none exists.
+	FindCommentByMarker(ctx context.Context, target CommentTarget, marker string) (int64, error)
+	CreateComment(ctx context.Context, target CommentTarget, body string) (int64, error)
+	UpdateComment(ctx context.Context, target CommentTarget, commentID int64, body string) error
+}
+
+// TaskReporter watches Tasks and reports status changes as tracker comments
+// and, for GitHub, Check Runs.
 type TaskReporter struct {
 	Client         client.Client
-	Reporter       *GitHubReporter
+	Reporter       CommentReporter
 	ChecksReporter *ChecksReporter
-	// Cache backstops AnnotationGitHubCommentID and AnnotationGitHubReportPhase
+	// Cache backstops AnnotationCommentID and AnnotationCommentReportPhase
 	// when the persisted Update has not yet propagated to the controller-runtime
 	// cache the caller reads from. Optional; when nil, the reporter relies on
 	// annotations alone (which is sufficient for poll-driven callers).
@@ -180,8 +237,8 @@ func (tr *TaskReporter) ReportTaskStatus(ctx context.Context, task *kelos.Task) 
 		return nil
 	}
 
-	commentEnabled := annotations[AnnotationGitHubReporting] == "enabled"
-	checksEnabled := annotations[AnnotationGitHubChecks] == "enabled"
+	commentEnabled := ReadAnnotation(annotations, AnnotationCommentReporting) == "enabled"
+	checksEnabled := ReadAnnotation(annotations, AnnotationCheckReporting) == "enabled"
 
 	if !commentEnabled && !checksEnabled {
 		return nil
@@ -217,6 +274,7 @@ func (tr *TaskReporter) reportViaComment(ctx context.Context, task *kelos.Task) 
 	if err != nil {
 		return fmt.Errorf("parsing source number %q: %w", numberStr, err)
 	}
+	target := CommentTarget{Kind: annotations[AnnotationSourceKind], Number: number}
 
 	var desiredPhase string
 	switch task.Status.Phase {
@@ -244,11 +302,11 @@ func (tr *TaskReporter) reportViaComment(ctx context.Context, task *kelos.Task) 
 		lastReportedPhase = cached.phase
 		commentID = cached.commentID
 	} else {
-		lastReportedPhase = annotations[AnnotationGitHubReportPhase]
-		if idStr, ok := annotations[AnnotationGitHubCommentID]; ok {
+		lastReportedPhase = ReadAnnotation(annotations, AnnotationCommentReportPhase)
+		if idStr := ReadAnnotation(annotations, AnnotationCommentID); idStr != "" {
 			parsed, err := strconv.ParseInt(idStr, 10, 64)
 			if err != nil {
-				return fmt.Errorf("parsing %s annotation %q: %w", AnnotationGitHubCommentID, idStr, err)
+				return fmt.Errorf("parsing %s annotation %q: %w", AnnotationCommentID, idStr, err)
 			}
 			commentID = parsed
 		}
@@ -262,8 +320,8 @@ func (tr *TaskReporter) reportViaComment(ctx context.Context, task *kelos.Task) 
 		// Cache says we already reported. If the annotation also matches,
 		// nothing to do; otherwise it lags (e.g., previous persist failed)
 		// and we re-attempt persistence so the comment side stays untouched.
-		if annotations[AnnotationGitHubReportPhase] == desiredPhase &&
-			annotations[AnnotationGitHubCommentID] == strconv.FormatInt(commentID, 10) {
+		if ReadAnnotation(annotations, AnnotationCommentReportPhase) == desiredPhase &&
+			ReadAnnotation(annotations, AnnotationCommentID) == strconv.FormatInt(commentID, 10) {
 			return nil
 		}
 		return tr.persistReportingState(ctx, task, commentID, desiredPhase)
@@ -279,31 +337,31 @@ func (tr *TaskReporter) reportViaComment(ctx context.Context, task *kelos.Task) 
 		body = FormatFailedComment(task.Name)
 	}
 
-	if annotations[AnnotationGitHubCommentMode] == string(kelos.GitHubCommentModeSticky) {
+	if ReadAnnotation(annotations, AnnotationCommentMode) == string(kelos.CommentModeSticky) {
 		marker, err := stickyCommentMarker(task)
 		if err != nil {
 			return err
 		}
 		body += "\n\n" + marker
 		if commentID == 0 {
-			commentID, err = tr.Reporter.FindCommentByMarker(ctx, number, marker)
+			commentID, err = tr.Reporter.FindCommentByMarker(ctx, target, marker)
 			if err != nil {
-				return fmt.Errorf("finding sticky GitHub comment for task %s: %w", task.Name, err)
+				return fmt.Errorf("finding sticky status comment for task %s: %w", task.Name, err)
 			}
 		}
 	}
 
 	if commentID == 0 {
-		log.Info("Creating GitHub status comment", "task", task.Name, "number", number, "phase", desiredPhase)
-		newID, err := tr.Reporter.CreateComment(ctx, number, body)
+		log.Info("Creating status comment", "task", task.Name, "number", number, "phase", desiredPhase)
+		newID, err := tr.Reporter.CreateComment(ctx, target, body)
 		if err != nil {
-			return fmt.Errorf("creating GitHub comment for task %s: %w", task.Name, err)
+			return fmt.Errorf("creating status comment for task %s: %w", task.Name, err)
 		}
 		commentID = newID
 	} else {
-		log.Info("Updating GitHub status comment", "task", task.Name, "number", number, "phase", desiredPhase, "commentID", commentID)
-		if err := tr.Reporter.UpdateComment(ctx, commentID, body); err != nil {
-			return fmt.Errorf("updating GitHub comment %d for task %s: %w", commentID, task.Name, err)
+		log.Info("Updating status comment", "task", task.Name, "number", number, "phase", desiredPhase, "commentID", commentID)
+		if err := tr.Reporter.UpdateComment(ctx, target, commentID, body); err != nil {
+			return fmt.Errorf("updating status comment %d for task %s: %w", commentID, task.Name, err)
 		}
 	}
 
@@ -318,7 +376,7 @@ func (tr *TaskReporter) reportViaComment(ctx context.Context, task *kelos.Task) 
 func stickyCommentMarker(task *kelos.Task) (string, error) {
 	spawnerName := task.Labels["kelos.dev/taskspawner"]
 	if spawnerName == "" {
-		return "", fmt.Errorf("sticky GitHub comment for task %s requires kelos.dev/taskspawner label", task.Name)
+		return "", fmt.Errorf("sticky status comment for task %s requires kelos.dev/taskspawner label", task.Name)
 	}
 	return fmt.Sprintf("<!-- kelos.dev/github-status-comment:%s/%s -->", task.Namespace, spawnerName), nil
 }
@@ -334,7 +392,7 @@ func (tr *TaskReporter) reportViaCheckRun(ctx context.Context, task *kelos.Task)
 		return nil
 	}
 
-	checkName := annotations[AnnotationGitHubCheckName]
+	checkName := ReadAnnotation(annotations, AnnotationCheckName)
 	if checkName == "" {
 		spawnerName := task.Labels["kelos.dev/taskspawner"]
 		if spawnerName == "" {
@@ -386,12 +444,12 @@ func (tr *TaskReporter) reportViaCheckRun(ctx context.Context, task *kelos.Task)
 		lastCheckPhase = cached.checkPhase
 		checkRunID = cached.checkRunID
 	} else {
-		lastCheckPhase = annotations[AnnotationGitHubCheckReportPhase]
-		if idStr, ok := annotations[AnnotationGitHubCheckRunID]; ok {
+		lastCheckPhase = ReadAnnotation(annotations, AnnotationCheckReportPhase)
+		if idStr := ReadAnnotation(annotations, AnnotationCheckRunID); idStr != "" {
 			var err error
 			checkRunID, err = strconv.ParseInt(idStr, 10, 64)
 			if err != nil {
-				return fmt.Errorf("parsing %s annotation %q: %w", AnnotationGitHubCheckRunID, idStr, err)
+				return fmt.Errorf("parsing %s annotation %q: %w", AnnotationCheckRunID, idStr, err)
 			}
 		}
 	}
@@ -400,8 +458,8 @@ func (tr *TaskReporter) reportViaCheckRun(ctx context.Context, task *kelos.Task)
 		if !hasCached || cached.checkRunID == 0 {
 			return nil
 		}
-		if annotations[AnnotationGitHubCheckReportPhase] == desiredPhase &&
-			annotations[AnnotationGitHubCheckRunID] == strconv.FormatInt(checkRunID, 10) {
+		if ReadAnnotation(annotations, AnnotationCheckReportPhase) == desiredPhase &&
+			ReadAnnotation(annotations, AnnotationCheckRunID) == strconv.FormatInt(checkRunID, 10) {
 			return nil
 		}
 		return tr.persistCheckRunState(ctx, task, checkRunID, desiredPhase)
@@ -431,15 +489,15 @@ func (tr *TaskReporter) reportViaCheckRun(ctx context.Context, task *kelos.Task)
 
 func (tr *TaskReporter) persistReportingState(ctx context.Context, task *kelos.Task, commentID int64, desiredPhase string) error {
 	return tr.persistAnnotations(ctx, task, map[string]string{
-		AnnotationGitHubCommentID:   strconv.FormatInt(commentID, 10),
-		AnnotationGitHubReportPhase: desiredPhase,
+		AnnotationCommentID:          strconv.FormatInt(commentID, 10),
+		AnnotationCommentReportPhase: desiredPhase,
 	})
 }
 
 func (tr *TaskReporter) persistCheckRunState(ctx context.Context, task *kelos.Task, checkRunID int64, desiredPhase string) error {
 	return tr.persistAnnotations(ctx, task, map[string]string{
-		AnnotationGitHubCheckRunID:       strconv.FormatInt(checkRunID, 10),
-		AnnotationGitHubCheckReportPhase: desiredPhase,
+		AnnotationCheckRunID:       strconv.FormatInt(checkRunID, 10),
+		AnnotationCheckReportPhase: desiredPhase,
 	})
 }
 

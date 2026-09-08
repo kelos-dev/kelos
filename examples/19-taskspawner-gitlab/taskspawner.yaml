@@ -1,0 +1,52 @@
+apiVersion: kelos.dev/v1alpha2
+kind: TaskSpawner
+metadata:
+  name: gitlab-fixer
+spec:
+  when:
+    gitlab:
+      # Instance URL and project path default to the Workspace repo URL.
+      # Uncomment to reach the API on a different address than the clone URL.
+      # baseUrl: http://gitlab-webservice-default.gitlab.svc:8181
+      # project: group/repo
+      types:
+        - issues
+        - mergeRequests
+      labels:
+        - kelos
+      state: opened
+      commentPolicy:
+        triggerComment: "/kelos fix"
+        # Optional: only honor commands from these GitLab usernames
+        # allowedUsers:
+        #   - alice
+        excludeComments:
+          - "/kelos stop"
+      reporting:
+        comments:
+          mode: PerTask
+      pollInterval: 2m
+  taskTemplate:
+    type: claude-code
+    workspaceRef:
+      name: my-gitlab-workspace
+    credentials:
+      type: oauth
+      secretRef:
+        name: claude-oauth-token
+    # Merge requests set {{.Branch}} to their source branch; issues get a fresh branch.
+    branch: "{{if .Branch}}{{.Branch}}{{else}}kelos-issue-{{.Number}}{{end}}"
+    promptTemplate: |
+      Work on the following GitLab {{.Kind}} and push your changes to the current branch.
+
+      {{.Kind}} #{{.Number}}: {{.Title}}
+      {{.URL}}
+
+      {{.Body}}
+      {{- if .Comments}}
+
+      Discussion:
+      {{.Comments}}
+      {{- end}}
+    ttlSecondsAfterFinished: 3600
+  maxConcurrency: 3

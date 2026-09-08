@@ -252,6 +252,27 @@ func TestTaskAgentEnvRefreshesGitHubTokenFromFile(t *testing.T) {
 	}
 }
 
+func TestTaskAgentEnvRefreshesGitLabTokenFromFile(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("glpat_fresh_token\n"), 0o600); err != nil {
+		t.Fatalf("writing token file: %v", err)
+	}
+	t.Setenv("KELOS_GITHUB_TOKEN_FILE", "")
+	t.Setenv("KELOS_GITLAB_TOKEN_FILE", tokenFile)
+
+	task := &kelos.Task{Spec: kelos.TaskSpec{Prompt: "Fix the bug"}}
+	env := taskAgentEnv([]string{"GITLAB_TOKEN=stale", "OTHER=value"}, task)
+
+	if got := lastEnvValue(env, "GITLAB_TOKEN"); got != "glpat_fresh_token" {
+		t.Errorf("GITLAB_TOKEN = %q, want refreshed token", got)
+	}
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "GITHUB_TOKEN=") || strings.HasPrefix(kv, "GH_TOKEN=") {
+			t.Errorf("GitHub token unexpectedly set for a GitLab workspace: %q", kv)
+		}
+	}
+}
+
 func TestTaskAgentEnvNoTokenFileLeavesEnvUnchanged(t *testing.T) {
 	t.Setenv("KELOS_GITHUB_TOKEN_FILE", "")
 

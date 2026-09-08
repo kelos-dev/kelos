@@ -2,9 +2,7 @@ package source
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -132,17 +130,23 @@ type githubPullRequestComment struct {
 }
 
 func (s *GitHubPullRequestSource) Discover(ctx context.Context) ([]WorkItem, error) {
+	return discoverTracker(ctx, s)
+}
+
+func (s *GitHubPullRequestSource) rest() restClient {
+	return githubREST(s.Token, s.Client)
+}
+
+func (s *GitHubPullRequestSource) list(ctx context.Context) ([]trackerItem, error) {
 	pullRequests, err := s.fetchAllPullRequests(ctx)
 	if err != nil {
 		return nil, err
 	}
-
 	pullRequests = s.filterPullRequests(pullRequests)
 
 	// File-pattern filtering runs after cheap label/author/draft filters
 	// but before expensive per-PR review and comment fetches.
-	hasFileFilter := len(s.FileInclude) > 0 || len(s.FileExclude) > 0
-	if hasFileFilter {
+	if len(s.FileInclude) > 0 || len(s.FileExclude) > 0 {
 		var fileFiltered []githubPullRequest
 		for _, pr := range pullRequests {
 			files, err := s.fetchPRFiles(ctx, pr.Number)
@@ -156,6 +160,60 @@ func (s *GitHubPullRequestSource) Discover(ctx context.Context) ([]WorkItem, err
 		pullRequests = fileFiltered
 	}
 
+	items := make([]trackerItem, 0, len(pullRequests))
+	for _, pr := range pullRequests {
+		items = append(items, trackerItem{
+			WorkItem: WorkItem{
+				ID:      strconv.Itoa(pr.Number),
+				Number:  pr.Number,
+				Title:   pr.Title,
+				Body:    pr.Body,
+				URL:     pr.HTMLURL,
+				Labels:  githubLabelNames(pr.Labels),
+				Kind:    "PR",
+				Branch:  pr.Head.Ref,
+				HeadSHA: pr.Head.SHA,
+			},
+			Author: pr.User.Login,
+		})
+	}
+	return items, nil
+}
+
+// enrich gates on the aggregated review state before fetching comments, so a
+// pull request that fails the gate costs one call. The policy thread covers
+// conversation comments, inline review comments, and review bodies; the
+// review comments exposed to templates are limited to the head commit.
+func (s *GitHubPullRequestSource) enrich(ctx context.Context, item *trackerItem) (bool, []commentEntry, time.Time, error) {
+	reviews, err := s.fetchPullRequestReviews(ctx, item.Number)
+	if err != nil {
+		return false, nil, time.Time{}, fmt.Errorf("fetching reviews for pull request #%d: %w", item.Number, err)
+	}
+	reviewState, reviewTime := aggregatePullRequestReviewState(reviews, item.HeadSHA)
+	if !matchesDesiredReviewState(s.resolvedReviewState(), reviewState) {
+		return false, nil, time.Time{}, nil
+	}
+	item.ReviewState = reviewState
+
+	conversation, err := fetchGitHubIssueComments(ctx, s.rest(), s.baseURL(), s.Owner, s.Repo, item.Number)
+	if err != nil {
+		return false, nil, time.Time{}, fmt.Errorf("fetching comments for pull request #%d: %w", item.Number, err)
+	}
+	reviewComments, err := s.fetchPullRequestComments(ctx, item.Number)
+	if err != nil {
+		return false, nil, time.Time{}, fmt.Errorf("fetching review comments for pull request #%d: %w", item.Number, err)
+	}
+	item.Comments = concatCommentBodies(conversation)
+	item.ReviewComments = concatPullRequestReviewComments(filterPullRequestCommentsForCommit(reviewComments, item.HeadSHA))
+
+	thread := githubCommentEntries(appendReviewBodies(mergeComments(conversation, reviewComments), reviews))
+	if s.resolvedReviewState() == reviewStateAny {
+		reviewTime = time.Time{}
+	}
+	return true, thread, reviewTime, nil
+}
+
+func (s *GitHubPullRequestSource) commentPolicy(context.Context) (commentCommands, commentAuthorizer, error) {
 	policy := githubCommentPolicy{
 		TriggerComment:    s.TriggerComment,
 		ExcludeComments:   s.ExcludeComments,
@@ -163,87 +221,7 @@ func (s *GitHubPullRequestSource) Discover(ctx context.Context) ([]WorkItem, err
 		AllowedTeams:      s.AllowedTeams,
 		MinimumPermission: s.MinimumPermission,
 	}
-	needsCommentFilter := s.TriggerComment != "" || len(s.ExcludeComments) > 0
-	var authorizer *githubCommentAuthorizer
-	if needsCommentFilter {
-		authorizer, err = newGitHubCommentAuthorizer(s.Owner, s.Repo, s.baseURL(), s.Token, s.httpClient(), policy)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	issueSource := &GitHubSource{
-		Owner:   s.Owner,
-		Repo:    s.Repo,
-		Token:   s.Token,
-		BaseURL: s.BaseURL,
-		Client:  s.Client,
-	}
-
-	var items []WorkItem
-	for _, pr := range pullRequests {
-		reviews, err := s.fetchPullRequestReviews(ctx, pr.Number)
-		if err != nil {
-			return nil, fmt.Errorf("fetching reviews for pull request #%d: %w", pr.Number, err)
-		}
-
-		reviewState, triggerTime := aggregatePullRequestReviewState(reviews, pr.Head.SHA)
-		if !matchesDesiredReviewState(s.resolvedReviewState(), reviewState) {
-			continue
-		}
-
-		conversationComments, err := issueSource.fetchComments(ctx, pr.Number)
-		if err != nil {
-			return nil, fmt.Errorf("fetching comments for pull request #%d: %w", pr.Number, err)
-		}
-
-		reviewComments, err := s.fetchPullRequestComments(ctx, pr.Number)
-		if err != nil {
-			return nil, fmt.Errorf("fetching review comments for pull request #%d: %w", pr.Number, err)
-		}
-
-		allComments := mergeComments(conversationComments, reviewComments)
-		allComments = appendReviewBodies(allComments, reviews)
-		commentTriggerTime := time.Time{}
-		if needsCommentFilter {
-			commentAllowed, resolvedTriggerTime, err := evaluateGitHubCommentPolicy(ctx, pr.Body, pr.User, allComments, policy, authorizer)
-			if err != nil {
-				return nil, fmt.Errorf("evaluating comment policy for pull request #%d: %w", pr.Number, err)
-			}
-			if !commentAllowed {
-				continue
-			}
-			commentTriggerTime = resolvedTriggerTime
-		}
-
-		reviewComments = filterPullRequestCommentsForCommit(reviewComments, pr.Head.SHA)
-
-		labels := make([]string, 0, len(pr.Labels))
-		for _, l := range pr.Labels {
-			labels = append(labels, l.Name)
-		}
-
-		item := WorkItem{
-			ID:             strconv.Itoa(pr.Number),
-			Number:         pr.Number,
-			Title:          pr.Title,
-			Body:           pr.Body,
-			URL:            pr.HTMLURL,
-			Labels:         labels,
-			Comments:       concatCommentBodies(conversationComments),
-			Kind:           "PR",
-			Branch:         pr.Head.Ref,
-			HeadSHA:        pr.Head.SHA,
-			ReviewState:    reviewState,
-			ReviewComments: concatPullRequestReviewComments(reviewComments),
-		}
-
-		item.TriggerTime = s.resolveTriggerTime(triggerTime, commentTriggerTime)
-
-		items = append(items, item)
-	}
-
-	return items, nil
+	return githubCommentPolicyAuthorizer(s.Owner, s.Repo, s.baseURL(), s.Token, s.httpClient(), policy)
 }
 
 func (s *GitHubPullRequestSource) resolvedReviewState() string {
@@ -318,20 +296,11 @@ func (s *GitHubPullRequestSource) filterPullRequests(pullRequests []githubPullRe
 }
 
 func (s *GitHubPullRequestSource) fetchAllPullRequests(ctx context.Context) ([]githubPullRequest, error) {
-	var allPullRequests []githubPullRequest
-
-	pageURL := s.buildPullRequestsURL()
-
-	for page := 0; pageURL != "" && page < maxPages; page++ {
-		pullRequests, nextURL, err := s.fetchPullRequestsPage(ctx, pageURL)
-		if err != nil {
-			return nil, err
-		}
-		allPullRequests = append(allPullRequests, pullRequests...)
-		pageURL = nextURL
+	pullRequests, _, err := fetchAllPages[githubPullRequest](ctx, s.rest(), s.buildPullRequestsURL())
+	if err != nil {
+		return nil, fmt.Errorf("fetching pull requests: %w", err)
 	}
-
-	return allPullRequests, nil
+	return pullRequests, nil
 }
 
 func (s *GitHubPullRequestSource) buildPullRequestsURL() string {
@@ -351,51 +320,24 @@ func (s *GitHubPullRequestSource) buildPullRequestsURL() string {
 	return u + "?" + params.Encode()
 }
 
-func (s *GitHubPullRequestSource) fetchPullRequestsPage(ctx context.Context, pageURL string) ([]githubPullRequest, string, error) {
-	var pullRequests []githubPullRequest
-	nextURL, err := s.fetchGitHubPage(ctx, pageURL, &pullRequests)
-	if err != nil {
-		return nil, "", fmt.Errorf("fetching pull requests: %w", err)
-	}
-	return pullRequests, nextURL, nil
+func (s *GitHubPullRequestSource) pullRequestURL(number int, resource string) string {
+	return fmt.Sprintf("%s/repos/%s/%s/pulls/%d/%s?per_page=100", s.baseURL(), s.Owner, s.Repo, number, resource)
 }
 
 func (s *GitHubPullRequestSource) fetchPullRequestReviews(ctx context.Context, number int) ([]githubPullRequestReview, error) {
-	var allReviews []githubPullRequestReview
-
-	pageURL := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews?per_page=100",
-		s.baseURL(), s.Owner, s.Repo, number)
-
-	for page := 0; pageURL != "" && page < maxPages; page++ {
-		var reviews []githubPullRequestReview
-		nextURL, err := s.fetchGitHubPage(ctx, pageURL, &reviews)
-		if err != nil {
-			return nil, fmt.Errorf("fetching reviews: %w", err)
-		}
-		allReviews = append(allReviews, reviews...)
-		pageURL = nextURL
+	reviews, _, err := fetchAllPages[githubPullRequestReview](ctx, s.rest(), s.pullRequestURL(number, "reviews"))
+	if err != nil {
+		return nil, fmt.Errorf("fetching reviews: %w", err)
 	}
-
-	return allReviews, nil
+	return reviews, nil
 }
 
 func (s *GitHubPullRequestSource) fetchPullRequestComments(ctx context.Context, number int) ([]githubPullRequestComment, error) {
-	var allComments []githubPullRequestComment
-
-	pageURL := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/comments?per_page=100",
-		s.baseURL(), s.Owner, s.Repo, number)
-
-	for page := 0; pageURL != "" && page < maxPages; page++ {
-		var comments []githubPullRequestComment
-		nextURL, err := s.fetchGitHubPage(ctx, pageURL, &comments)
-		if err != nil {
-			return nil, fmt.Errorf("fetching review comments: %w", err)
-		}
-		allComments = append(allComments, comments...)
-		pageURL = nextURL
+	comments, _, err := fetchAllPages[githubPullRequestComment](ctx, s.rest(), s.pullRequestURL(number, "comments"))
+	if err != nil {
+		return nil, fmt.Errorf("fetching review comments: %w", err)
 	}
-
-	return allComments, nil
+	return comments, nil
 }
 
 type githubPullRequestFile struct {
@@ -403,61 +345,20 @@ type githubPullRequestFile struct {
 }
 
 func (s *GitHubPullRequestSource) fetchPRFiles(ctx context.Context, number int) ([]string, error) {
-	var allFiles []githubPullRequestFile
-
-	pageURL := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/files?per_page=100",
-		s.baseURL(), s.Owner, s.Repo, number)
-
-	var page int
-	for page = 0; pageURL != "" && page < maxPages; page++ {
-		var files []githubPullRequestFile
-		nextURL, err := s.fetchGitHubPage(ctx, pageURL, &files)
-		if err != nil {
-			return nil, fmt.Errorf("fetching PR files: %w", err)
-		}
-		allFiles = append(allFiles, files...)
-		pageURL = nextURL
+	files, complete, err := fetchAllPages[githubPullRequestFile](ctx, s.rest(), s.pullRequestURL(number, "files"))
+	if err != nil {
+		return nil, fmt.Errorf("fetching PR files: %w", err)
 	}
-
 	// A partial file list is not safe for include/exclude decisions.
-	if pageURL != "" && page >= maxPages {
+	if !complete {
 		return nil, fmt.Errorf("PR #%d has more than %d pages of changed files; file list truncated, refusing to evaluate filters on incomplete data", number, maxPages)
 	}
 
-	paths := make([]string, len(allFiles))
-	for i, f := range allFiles {
+	paths := make([]string, len(files))
+	for i, f := range files {
 		paths[i] = f.Filename
 	}
 	return paths, nil
-}
-
-func (s *GitHubPullRequestSource) fetchGitHubPage(ctx context.Context, pageURL string, out interface{}) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, pageURL, nil)
-	if err != nil {
-		return "", fmt.Errorf("creating request: %w", err)
-	}
-
-	if s.Token != "" {
-		req.Header.Set("Authorization", "token "+s.Token)
-	}
-	req.Header.Set("Accept", "application/vnd.github.v3+json")
-
-	resp, err := s.httpClient().Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return "", fmt.Errorf("GitHub API returned status %d: %s", resp.StatusCode, string(body))
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return "", fmt.Errorf("decoding response: %w", err)
-	}
-
-	return parseNextLink(resp.Header.Get("Link")), nil
 }
 
 func (s *GitHubPullRequestSource) baseURL() string {
@@ -539,14 +440,6 @@ func normalizePullRequestReviewState(state string) string {
 	default:
 		return ""
 	}
-}
-
-func (s *GitHubPullRequestSource) resolveTriggerTime(reviewTriggerTime, commentTriggerTime time.Time) time.Time {
-	triggerTime := commentTriggerTime
-	if s.resolvedReviewState() != reviewStateAny && reviewTriggerTime.After(triggerTime) {
-		triggerTime = reviewTriggerTime
-	}
-	return triggerTime
 }
 
 // appendReviewBodies appends review body text from pull request reviews to the

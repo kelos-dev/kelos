@@ -1132,6 +1132,8 @@ func openCodeCommandEnvironment(current []string, model string) []string {
 		name = "GROQ_API_KEY"
 	case "xai":
 		name = "XAI_API_KEY"
+	case "openrouter":
+		name = "OPENROUTER_API_KEY"
 	case "zai", "zai-coding-plan":
 		name = "ZHIPU_API_KEY"
 	case "opencode", "zen":

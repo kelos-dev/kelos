@@ -7515,7 +7515,7 @@ spec:
                                 default: PerTask
                                 description: |-
                                   Mode controls whether comments are created per Task or reused across
-                                  Tasks from the same TaskSpawner and originating issue or pull request.
+                                  Tasks from the same TaskSpawner and originating item.
                                   Defaults to PerTask.
                                 enum:
                                 - PerTask

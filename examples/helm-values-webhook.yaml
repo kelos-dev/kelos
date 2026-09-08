@@ -15,6 +15,13 @@ webhookServer:
       replicas: 1
       secretName: linear-webhook-secret # Must contain WEBHOOK_SECRET key
 
+    # Enable GitLab webhook server (served at /webhook/gitlab)
+    gitlab:
+      enabled: true
+      replicas: 1
+      secretName: gitlab-webhook-secret # Must contain WEBHOOK_SECRET key (the X-Gitlab-Token value)
+      # tokenSecretName: gitlab-api-token # Optional: GITLAB_TOKEN key, enables status notes
+
   # Enable ingress for external webhook access (traditional Ingress API)
   ingress:
     enabled: true

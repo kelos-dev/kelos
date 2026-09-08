@@ -270,6 +270,188 @@ func TestReconcileDeploymentRequeuesWhenWorkspaceSecretMissing(t *testing.T) {
 	assert.True(t, apierrors.IsNotFound(err), "expected no Deployment while workspace secret is missing")
 }
 
+func TestReconcileDeploymentFailsOnInvalidWorkspace(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, kelos.AddToScheme(scheme))
+	require.NoError(t, appsv1.AddToScheme(scheme))
+	require.NoError(t, batchv1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	tests := []struct {
+		name        string
+		when        kelos.When
+		workspace   kelos.WorkspaceSpec
+		secret      *corev1.Secret
+		wantMessage string
+	}{
+		{
+			name:        "gitlab source with github workspace",
+			when:        kelos.When{GitLab: &kelos.GitLab{}},
+			workspace:   kelos.WorkspaceSpec{Repo: "https://gitlab.example.com/group/repo.git", SecretRef: &kelos.SecretReference{Name: "token"}},
+			secret:      &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "token", Namespace: "default"}, Data: map[string][]byte{"GITHUB_TOKEN": []byte("glpat")}},
+			wantMessage: "requires a Workspace with provider gitlab",
+		},
+		{
+			name:        "gitlab workspace secret without GITLAB_TOKEN",
+			when:        kelos.When{GitLab: &kelos.GitLab{}},
+			workspace:   kelos.WorkspaceSpec{Repo: "https://gitlab.example.com/group/repo.git", Provider: kelos.WorkspaceProviderGitLab, SecretRef: &kelos.SecretReference{Name: "token"}},
+			secret:      &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "token", Namespace: "default"}, Data: map[string][]byte{"GITHUB_TOKEN": []byte("glpat")}},
+			wantMessage: `secret "token" has no GITLAB_TOKEN key`,
+		},
+		{
+			name:        "github source with gitlab workspace",
+			when:        kelos.When{GitHubIssues: &kelos.GitHubIssues{}},
+			workspace:   kelos.WorkspaceSpec{Repo: "https://gitlab.example.com/group/repo.git", Provider: kelos.WorkspaceProviderGitLab, SecretRef: &kelos.SecretReference{Name: "token"}},
+			secret:      &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "token", Namespace: "default"}, Data: map[string][]byte{"GITLAB_TOKEN": []byte("glpat")}},
+			wantMessage: "requires a Workspace with provider github",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := &kelos.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{Name: "spawner", Namespace: "default"},
+				Spec: kelos.TaskSpawnerSpec{
+					When:         tt.when,
+					TaskTemplate: kelos.TaskTemplate{WorkspaceRef: &kelos.WorkspaceReference{Name: "workspace"}},
+				},
+			}
+			ws := &kelos.Workspace{
+				ObjectMeta: metav1.ObjectMeta{Name: "workspace", Namespace: "default"},
+				Spec:       tt.workspace,
+			}
+			// A Deployment left over from an earlier, valid configuration must
+			// be removed so the stale spawner stops polling.
+			staleDeploy := &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{Name: "spawner", Namespace: "default"},
+				Spec: appsv1.DeploymentSpec{
+					Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"kelos.dev/taskspawner": "spawner"}},
+				},
+			}
+
+			cl := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithStatusSubresource(&kelos.TaskSpawner{}).
+				WithObjects(ts, ws, tt.secret, staleDeploy).
+				Build()
+			r := &TaskSpawnerReconciler{
+				Client:            cl,
+				Scheme:            scheme,
+				DeploymentBuilder: NewDeploymentBuilder(),
+			}
+
+			result, err := r.reconcileDeployment(context.Background(), ctrl.Request{
+				NamespacedName: types.NamespacedName{Name: "spawner", Namespace: "default"},
+			}, ts, false)
+			require.NoError(t, err)
+			assert.Equal(t, ctrl.Result{}, result, "invalid workspace must not be requeued")
+
+			var updated kelos.TaskSpawner
+			require.NoError(t, cl.Get(context.Background(), types.NamespacedName{Name: "spawner", Namespace: "default"}, &updated))
+			assert.Equal(t, kelos.TaskSpawnerPhaseFailed, updated.Status.Phase)
+			assert.Contains(t, updated.Status.Message, tt.wantMessage)
+
+			var deploy appsv1.Deployment
+			err = cl.Get(context.Background(), types.NamespacedName{Name: "spawner", Namespace: "default"}, &deploy)
+			assert.True(t, apierrors.IsNotFound(err), "expected the stale Deployment to be deleted")
+		})
+	}
+}
+
+func TestReconcileWebhookFailsOnInvalidWorkspace(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, kelos.AddToScheme(scheme))
+	require.NoError(t, appsv1.AddToScheme(scheme))
+	require.NoError(t, batchv1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	ts := &kelos.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{Name: "spawner", Namespace: "default"},
+		Spec: kelos.TaskSpawnerSpec{
+			When:         kelos.When{GitLabWebhook: &kelos.GitLabWebhook{Events: []string{"note"}}},
+			TaskTemplate: kelos.TaskTemplate{WorkspaceRef: &kelos.WorkspaceReference{Name: "workspace"}},
+		},
+	}
+	ws := &kelos.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "workspace", Namespace: "default"},
+		Spec:       kelos.WorkspaceSpec{Repo: "https://gitlab.example.com/group/repo.git", SecretRef: &kelos.SecretReference{Name: "token"}},
+	}
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "token", Namespace: "default"}, Data: map[string][]byte{"GITHUB_TOKEN": []byte("glpat")}}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&kelos.TaskSpawner{}).
+		WithObjects(ts, ws, secret).
+		Build()
+	r := &TaskSpawnerReconciler{Client: cl, Scheme: scheme, DeploymentBuilder: NewDeploymentBuilder()}
+
+	result, err := r.reconcileWebhook(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "spawner", Namespace: "default"},
+	}, ts, false)
+	require.NoError(t, err)
+	assert.Equal(t, ctrl.Result{}, result, "invalid workspace must not be requeued")
+
+	var updated kelos.TaskSpawner
+	require.NoError(t, cl.Get(context.Background(), types.NamespacedName{Name: "spawner", Namespace: "default"}, &updated))
+	assert.Equal(t, kelos.TaskSpawnerPhaseFailed, updated.Status.Phase)
+	assert.Contains(t, updated.Status.Message, "requires a Workspace with provider gitlab")
+}
+
+func TestReconcileDeploymentGitLabWorkspaceInjectsGitLabToken(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, kelos.AddToScheme(scheme))
+	require.NoError(t, appsv1.AddToScheme(scheme))
+	require.NoError(t, batchv1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
+
+	ts := &kelos.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{Name: "spawner", Namespace: "default"},
+		Spec: kelos.TaskSpawnerSpec{
+			When:         kelos.When{GitLab: &kelos.GitLab{}},
+			TaskTemplate: kelos.TaskTemplate{WorkspaceRef: &kelos.WorkspaceReference{Name: "workspace"}},
+		},
+	}
+	ws := &kelos.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "workspace", Namespace: "default"},
+		Spec: kelos.WorkspaceSpec{
+			Repo:      "https://gitlab.example.com/group/repo.git",
+			Provider:  kelos.WorkspaceProviderGitLab,
+			SecretRef: &kelos.SecretReference{Name: "gitlab-token"},
+		},
+	}
+	// GitHub App keys alongside the token must not switch the spawner to the
+	// GitHub App credential branch: only the provider decides.
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "gitlab-token", Namespace: "default"},
+		Data: map[string][]byte{
+			"GITLAB_TOKEN":   []byte("glpat"),
+			"appID":          []byte("1"),
+			"installationID": []byte("2"),
+			"privateKey":     []byte("key"),
+		},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&kelos.TaskSpawner{}).
+		WithObjects(ts, ws, secret).
+		Build()
+	r := &TaskSpawnerReconciler{Client: cl, Scheme: scheme, DeploymentBuilder: NewDeploymentBuilder()}
+
+	_, err := r.reconcileDeployment(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "spawner", Namespace: "default"},
+	}, ts, false)
+	require.NoError(t, err)
+
+	var deploy appsv1.Deployment
+	require.NoError(t, cl.Get(context.Background(), types.NamespacedName{Name: "spawner", Namespace: "default"}, &deploy))
+	env := deploy.Spec.Template.Spec.Containers[0].Env
+	require.Len(t, env, 1)
+	assert.Equal(t, "GITLAB_TOKEN", env[0].Name)
+	assert.Equal(t, "gitlab-token", env[0].ValueFrom.SecretKeyRef.Name)
+	assert.Equal(t, "GITLAB_TOKEN", env[0].ValueFrom.SecretKeyRef.Key)
+}
+
 func TestReconcileWebhook(t *testing.T) {
 	scheme := runtime.NewScheme()
 	require.NoError(t, kelos.AddToScheme(scheme))

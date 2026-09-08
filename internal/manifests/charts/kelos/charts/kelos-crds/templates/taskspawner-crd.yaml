@@ -22709,7 +22709,7 @@ spec:
                                 default: PerTask
                                 description: |-
                                   Mode controls whether comments are created per Task or reused across
-                                  Tasks from the same TaskSpawner and originating issue or pull request.
+                                  Tasks from the same TaskSpawner and originating item.
                                   Defaults to PerTask.
                                 enum:
                                 - PerTask
@@ -22900,7 +22900,7 @@ spec:
                                 default: PerTask
                                 description: |-
                                   Mode controls whether comments are created per Task or reused across
-                                  Tasks from the same TaskSpawner and originating issue or pull request.
+                                  Tasks from the same TaskSpawner and originating item.
                                   Defaults to PerTask.
                                 enum:
                                 - PerTask
@@ -23146,7 +23146,7 @@ spec:
                                 default: PerTask
                                 description: |-
                                   Mode controls whether comments are created per Task or reused across
-                                  Tasks from the same TaskSpawner and originating issue or pull request.
+                                  Tasks from the same TaskSpawner and originating item.
                                   Defaults to PerTask.
                                 enum:
                                 - PerTask
@@ -23178,6 +23178,300 @@ spec:
                         && self.filters.exists(f, f.event == ''issue_comment'') &&
                         self.filters.all(f, f.event != ''issue_comment'' || (has(f.commentOn)
                         && f.commentOn == ''PullRequest'')))'
+                  gitlab:
+                    description: GitLab discovers issues and merge requests from a
+                      GitLab project.
+                    properties:
+                      baseUrl:
+                        description: |-
+                          BaseURL overrides the GitLab instance URL used for API calls (for
+                          example "https://gitlab.example.com" or an in-cluster service URL).
+                          When empty, the scheme and host of the workspace repo URL are used.
+                          Set it for a GitLab served under a relative URL root
+                          ("https://example.com/gitlab"); the path is then excluded from the
+                          project path derived from the workspace repo URL.
+                        pattern: ^https?://.+
+                        type: string
+                      commentPolicy:
+                        description: CommentPolicy configures comment-based workflow
+                          control.
+                        properties:
+                          allowedUsers:
+                            description: |-
+                              AllowedUsers restricts comment control to specific GitLab usernames.
+                              When empty, commands from any user are honored.
+                            items:
+                              type: string
+                            type: array
+                          excludeComments:
+                            description: |-
+                              ExcludeComments blocks items whose most recent matching command is an
+                              exclude command. When combined with TriggerComment, the most recent
+                              matching command wins.
+                            items:
+                              type: string
+                            type: array
+                          triggerComment:
+                            description: |-
+                              TriggerComment requires a matching command for the item to be included.
+                              When set alone, only items with a matching command are discovered.
+                            type: string
+                        type: object
+                      excludeLabels:
+                        description: ExcludeLabels filters out items that have any
+                          of these labels (client-side).
+                        items:
+                          type: string
+                        type: array
+                      labels:
+                        description: Labels filters items by labels; an item must
+                          carry all of them.
+                        items:
+                          type: string
+                        type: array
+                      pipelineStatus:
+                        default: any
+                        description: |-
+                          PipelineStatus filters merge requests by the status of their head
+                          pipeline. A newer pipeline finishing in the selected status retriggers
+                          completed Tasks. "any" does not gate discovery. Issues are not affected.
+                        enum:
+                        - success
+                        - failed
+                        - running
+                        - pending
+                        - canceled
+                        - any
+                        type: string
+                      pollInterval:
+                        description: |-
+                          PollInterval is how often this source is polled (e.g., "30s", "5m").
+                          When empty, a default of 5m is used.
+                        type: string
+                      project:
+                        description: |-
+                          Project overrides the project to poll as a full path
+                          ("group/subgroup/project"). When empty, the project path is derived
+                          from the workspace repo URL.
+                        type: string
+                      reporting:
+                        description: |-
+                          Reporting configures status reporting back to the originating GitLab
+                          issue or merge request.
+                        properties:
+                          comments:
+                            description: |-
+                              Comments configures task status notes on the originating issue or
+                              merge request. When nil, no notes are posted.
+                            properties:
+                              mode:
+                                default: PerTask
+                                description: |-
+                                  Mode controls whether comments are created per Task or reused across
+                                  Tasks from the same TaskSpawner and originating item.
+                                  Defaults to PerTask.
+                                enum:
+                                - PerTask
+                                - Sticky
+                                type: string
+                            type: object
+                        type: object
+                      reviewState:
+                        default: any
+                        description: |-
+                          ReviewState filters merge requests by review outcome: "approved" keeps
+                          merge requests with at least one approval, "changes_requested" keeps
+                          merge requests where a reviewer requested changes, and "any" does not
+                          gate discovery. Issues are not affected.
+                        enum:
+                        - approved
+                        - changes_requested
+                        - any
+                        type: string
+                      state:
+                        default: opened
+                        description: State filters items by state (opened, closed,
+                          all). Defaults to opened.
+                        enum:
+                        - opened
+                        - closed
+                        - all
+                        type: string
+                      types:
+                        default:
+                        - issues
+                        description: |-
+                          Types specifies which item types to discover: "issues",
+                          "mergeRequests", or both.
+                        items:
+                          enum:
+                          - issues
+                          - mergeRequests
+                          type: string
+                        type: array
+                    type: object
+                  gitlabWebhook:
+                    description: GitLabWebhook triggers task spawning on GitLab webhook
+                      events.
+                    properties:
+                      events:
+                        description: |-
+                          Events is the list of GitLab event kinds to listen for, matching the
+                          payload object_kind: "issue", "merge_request", "note", "pipeline",
+                          "push", or "tag_push".
+                        items:
+                          enum:
+                          - issue
+                          - merge_request
+                          - note
+                          - pipeline
+                          - push
+                          - tag_push
+                          type: string
+                        minItems: 1
+                        type: array
+                      excludeAuthors:
+                        description: |-
+                          ExcludeAuthors excludes events triggered by any of these GitLab usernames.
+                          This is applied before filter evaluation.
+                        items:
+                          type: string
+                        type: array
+                      filters:
+                        description: |-
+                          Filters refine which events match. If multiple filters apply to the same
+                          event kind, any matching filter accepts the event (OR semantics).
+                          If empty, all events in the Events list match.
+                        items:
+                          description: GitLabWebhookFilter defines filtering criteria
+                            for a GitLab webhook event kind.
+                          properties:
+                            action:
+                              description: |-
+                                Action filters issue and merge_request events by the payload action
+                                (e.g., "open", "update", "close", "reopen", "approved", "unapproved", "merge").
+                              type: string
+                            author:
+                              description: Author filters by the username of the user
+                                who triggered the event.
+                              type: string
+                            bodyPattern:
+                              description: BodyPattern requires the note body to match
+                                a Go re2 regular expression.
+                              type: string
+                            branch:
+                              description: |-
+                                Branch filters merge_request events by source branch, and push and
+                                pipeline events by branch name (exact match or glob).
+                              type: string
+                            draft:
+                              description: Draft filters merge_request events by draft
+                                status.
+                              type: boolean
+                            event:
+                              description: Event is the GitLab event kind this filter
+                                applies to.
+                              enum:
+                              - issue
+                              - merge_request
+                              - note
+                              - pipeline
+                              - push
+                              - tag_push
+                              type: string
+                            excludeAuthors:
+                              description: ExcludeAuthors excludes events triggered
+                                by any of these usernames.
+                              items:
+                                type: string
+                              type: array
+                            excludeBodyPatterns:
+                              description: |-
+                                ExcludeBodyPatterns excludes note events whose body matches any of these
+                                Go re2 regular expressions.
+                              items:
+                                type: string
+                              type: array
+                            excludeLabels:
+                              description: ExcludeLabels excludes issues or merge
+                                requests with any of these labels.
+                              items:
+                                type: string
+                              type: array
+                            labels:
+                              description: |-
+                                Labels requires the issue or merge request to have all of these labels.
+                                For note events the labels of the commented issue or merge request are used.
+                              items:
+                                type: string
+                              type: array
+                            noteOn:
+                              description: |-
+                                NoteOn scopes note events to comments on a specific subject. Omit to
+                                match notes on any subject.
+                              enum:
+                              - Issue
+                              - MergeRequest
+                              - Commit
+                              - Snippet
+                              type: string
+                            state:
+                              description: |-
+                                State filters issue and merge_request events by state
+                                ("opened", "closed", "merged", "locked").
+                              type: string
+                            status:
+                              description: |-
+                                Status filters pipeline events by pipeline status
+                                (e.g., "success", "failed", "canceled", "running", "pending").
+                              type: string
+                          required:
+                          - event
+                          type: object
+                        type: array
+                      gatewayRef:
+                        description: |-
+                          GatewayRef binds this source to a WebhookGateway in the same namespace whose
+                          spec.gitlab field is set. The per-source webhook server ignores this spawner.
+                        properties:
+                          name:
+                            description: Name is the name of the WebhookGateway resource.
+                            minLength: 1
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      project:
+                        description: |-
+                          Project restricts deliveries to one project by its full path
+                          ("group/subgroup/project"). When empty, events from any project are accepted.
+                        type: string
+                      reporting:
+                        description: |-
+                          Reporting configures status notes on the originating GitLab issue or
+                          merge request. Requires a GitLab token on the webhook server
+                          (GITLAB_TOKEN) or on the bound WebhookGateway (spec.gitlab.credentialsRef).
+                        properties:
+                          comments:
+                            description: |-
+                              Comments configures task status notes on the originating issue or
+                              merge request. When nil, no notes are posted.
+                            properties:
+                              mode:
+                                default: PerTask
+                                description: |-
+                                  Mode controls whether comments are created per Task or reused across
+                                  Tasks from the same TaskSpawner and originating item.
+                                  Defaults to PerTask.
+                                enum:
+                                - PerTask
+                                - Sticky
+                                type: string
+                            type: object
+                        type: object
+                    required:
+                    - events
+                    type: object
                   jira:
                     description: Jira discovers issues from a Jira project.
                     properties:
@@ -23478,13 +23772,14 @@ spec:
             type: object
             x-kubernetes-validations:
             - message: a workspace source is required when using githubIssues, githubPullRequests,
-                githubWebhook, or linearWebhook source (set taskTemplate.workspaceRef,
-                taskTemplate.worker.workspaceRef, or taskTemplate.workerPoolRef —
-                a pool satisfies this because it carries its own workspace)
+                githubWebhook, linearWebhook, gitlab, or gitlabWebhook source (set
+                taskTemplate.workspaceRef, taskTemplate.worker.workspaceRef, or taskTemplate.workerPoolRef
+                — a pool satisfies this because it carries its own workspace)
               rule: '!(has(self.when.githubIssues) || has(self.when.githubPullRequests)
-                || has(self.when.githubWebhook) || has(self.when.linearWebhook)) ||
-                has(self.taskTemplate.workspaceRef) || (has(self.taskTemplate.worker)
-                && has(self.taskTemplate.worker.workspaceRef)) || has(self.taskTemplate.workerPoolRef)'
+                || has(self.when.githubWebhook) || has(self.when.linearWebhook) ||
+                has(self.when.gitlab) || has(self.when.gitlabWebhook)) || has(self.taskTemplate.workspaceRef)
+                || (has(self.taskTemplate.worker) && has(self.taskTemplate.worker.workspaceRef))
+                || has(self.taskTemplate.workerPoolRef)'
             - message: inline task templates require taskTemplate credentials or spec.credentials
               rule: has(self.taskTemplate.workerPoolRef) || (has(self.taskTemplate.worker)
                 && (has(self.taskTemplate.worker.credentials) || has(self.credentials)))

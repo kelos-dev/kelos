@@ -119,6 +119,29 @@ webhookServer:
         # to avoid externally publishing the metrics endpoint; scrape metrics
         # via a PodMonitor or a separate ClusterIP Service in that case.
         type: ClusterIP
+    gitlab:
+      enabled: false
+      replicas: 1
+      # Secret with a WEBHOOK_SECRET key holding the GitLab webhook secret token
+      # (sent by GitLab in the X-Gitlab-Token header).
+      secretName: ""
+      # Optional Secret with a GITLAB_TOKEN key (access token with the api
+      # scope). Enables status notes on the originating issue or merge request
+      # for spawners that set gitlabWebhook.reporting.
+      tokenSecretName: ""
+      # GitLab instance URL that status notes are posted to (for example
+      # https://gitlab.example.com or an in-cluster Service URL). Defaults to
+      # https://gitlab.com. The URL is never taken from webhook payloads.
+      baseUrl: ""
+      service:
+        # Service type for the webhook endpoint.
+        # Allowed values: ClusterIP, LoadBalancer, NodePort.
+        # When type is ClusterIP, the Service also exposes the unauthenticated
+        # metrics port (8080) for in-cluster scraping. When type is
+        # LoadBalancer or NodePort, only the webhook port (8443) is exposed
+        # to avoid externally publishing the metrics endpoint; scrape metrics
+        # via a PodMonitor or a separate ClusterIP Service in that case.
+        type: ClusterIP
     generic:
       enabled: false
       replicas: 1
@@ -140,8 +163,8 @@ webhookServer:
   # carries its own HMAC secret and (for github) API base URL and credentials,
   # so one deployment can serve github.com plus multiple GitHub Enterprise
   # instances. It serves TaskSpawners and SessionSpawners that reference a
-  # WebhookGateway. The github/linear per-source servers can run alongside it
-  # because they use more specific Gateway-API paths. The gateway server and
+  # WebhookGateway. The github/linear/gitlab per-source servers can run
+  # alongside it because they use more specific Gateway-API paths. The gateway server and
   # generic per-source server both use the /webhook/ prefix, so the generated
   # Gateway API route can expose only one of them.
   gatewayServer:

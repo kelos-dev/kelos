@@ -210,7 +210,9 @@ func (p *CodexProvider) openThread(ctx context.Context) error {
 			if id == "" {
 				return fmt.Errorf("resuming Codex thread %q: response did not include a thread ID", threadID)
 			}
+			p.activeMu.Lock()
 			p.threadID = id
+			p.activeMu.Unlock()
 			p.statusMu.Lock()
 			p.model = codexThreadModel(result)
 			p.effort = codexThreadEffort(result)
@@ -229,7 +231,9 @@ func (p *CodexProvider) startThread(ctx context.Context, statePath string) error
 	if err != nil {
 		return fmt.Errorf("starting Codex thread: %w", err)
 	}
+	p.activeMu.Lock()
 	p.threadID = codexThreadID(result)
+	p.activeMu.Unlock()
 	if p.threadID == "" {
 		return errors.New("starting Codex thread: response did not include a thread ID")
 	}
@@ -777,11 +781,21 @@ func (p *CodexProvider) readLoop(reader io.Reader) {
 }
 
 func (p *CodexProvider) handleNotification(method string, params json.RawMessage) {
+	// The app-server also emits notifications for native subagents. This
+	// provider owns only its root thread; a child's failure or completion must
+	// not complete the root interaction or overwrite its runtime status.
+	var scope struct {
+		ThreadID string `json:"threadId"`
+	}
 	p.activeMu.Lock()
+	threadID := p.threadID
 	sink := p.activeSink
 	done := p.turnDone
 	kind := p.interactionKind
 	p.activeMu.Unlock()
+	if json.Unmarshal(params, &scope) == nil && scope.ThreadID != "" && scope.ThreadID != threadID {
+		return
+	}
 
 	switch method {
 	case "thread/goal/updated":

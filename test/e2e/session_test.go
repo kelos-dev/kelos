@@ -167,6 +167,15 @@ var _ = Describe("Session remote control", func() {
 		Expect(seenFirstTurn).To(BeTrue())
 		Expect(seenSecondTurn).To(BeTrue())
 
+		By("retrieving prompts from earlier terminal connections through the Console")
+		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "prompts", RequestID: "prompts-e2e"})
+		promptPage := waitForSessionEvent(connection, func(event sessionruntime.Event) bool {
+			return event.Type == sessionruntime.EventPrompts && event.RequestID == "prompts-e2e"
+		})
+		Expect(promptPage.Prompts).To(HaveLen(2))
+		Expect(promptPage.Prompts[0].Text).To(Equal("terminal-one"))
+		Expect(promptPage.Prompts[1].Text).To(Equal("terminal-two"))
+
 		By("continuing the terminal conversation through web chat")
 		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "message", Text: "web"})
 		waitForSessionEvent(connection, func(event sessionruntime.Event) bool {

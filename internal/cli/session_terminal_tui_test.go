@@ -1224,7 +1224,7 @@ func TestSessionTUIUpdatesPendingMessage(t *testing.T) {
 	}
 }
 
-func TestSessionTUIEditsPendingMessageWithUpArrow(t *testing.T) {
+func TestSessionTUIEditsPendingMessageWithAltUp(t *testing.T) {
 	model, requests := newSessionTUITestModel()
 	model.ready = true
 	model.applyEvent(sessionruntime.Event{
@@ -1235,7 +1235,7 @@ func TestSessionTUIEditsPendingMessageWithUpArrow(t *testing.T) {
 		Attachments: []sessionruntime.Attachment{{ID: "attachment-1", Name: "notes.txt"}},
 	})
 
-	model.Update(tea.KeyMsg{Type: tea.KeyUp})
+	model.Update(tea.KeyMsg{Type: tea.KeyUp, Alt: true})
 	if model.input.Value() != "original\nmessage" {
 		t.Fatalf("recalled input = %q", model.input.Value())
 	}
@@ -1263,7 +1263,7 @@ func TestSessionTUIRemovesPendingMessageWithEmptyEdit(t *testing.T) {
 	model, requests := newSessionTUITestModel()
 	model.ready = true
 	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventUserMessage, TurnID: "turn-2", Text: "remove this", Revision: 3})
-	model.Update(tea.KeyMsg{Type: tea.KeyUp})
+	model.Update(tea.KeyMsg{Type: tea.KeyUp, Alt: true})
 	model.input.Reset()
 	if cmd := model.submitInput(); cmd != nil {
 		t.Fatal("submitInput() returned a command")
@@ -1474,17 +1474,17 @@ func TestSessionTUIJournalResetClearsActiveTurn(t *testing.T) {
 }
 
 func TestSessionTUIInputHistoryRestoresDraft(t *testing.T) {
-	model, _ := newSessionTUITestModel()
+	model, requests := newSessionTUITestModel()
 	model.ready = true
-	for _, value := range []string{"first", "second"} {
-		model.input.SetValue(value)
-		if cmd := model.submitInput(); cmd != nil {
-			t.Fatalf("submitInput(%q) returned a command", value)
-		}
-	}
+	model.connectionStatus = ""
 	model.input.SetValue("draft")
 
 	model.Update(tea.KeyMsg{Type: tea.KeyUp})
+	request := readSessionTUIPromptRequest(t, requests)
+	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventPrompts, RequestID: request.RequestID, Prompts: []sessionruntime.Prompt{
+		{ID: 1, Text: "first"},
+		{ID: 2, Text: "second"},
+	}})
 	if got := model.input.Value(); got != "second" {
 		t.Fatalf("first history value = %q, want second", got)
 	}
@@ -1502,6 +1502,7 @@ func TestSessionTUIInputHistoryRestoresDraft(t *testing.T) {
 func TestSessionTUIInputHistoryDoesNotRetainAnswers(t *testing.T) {
 	model, requests := newSessionTUITestModel()
 	model.ready = true
+	model.connectionStatus = ""
 	model.input.SetValue("/answer input-1 question-1 secret")
 	if cmd := model.submitInput(); cmd != nil {
 		t.Fatal("submitInput() returned a command")
@@ -1514,6 +1515,8 @@ func TestSessionTUIInputHistoryDoesNotRetainAnswers(t *testing.T) {
 		t.Fatalf("submitted request type = %q, want input", request.Type)
 	}
 	model.Update(tea.KeyMsg{Type: tea.KeyUp})
+	request = readSessionTUIPromptRequest(t, requests)
+	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventPrompts, RequestID: request.RequestID})
 	if got := model.input.Value(); got != "" {
 		t.Fatalf("input history restored secret answer %q", got)
 	}

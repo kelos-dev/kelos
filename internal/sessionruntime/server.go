@@ -1719,6 +1719,19 @@ func (s *Server) handleConnection(ctx context.Context, connection net.Conn) {
 			if !sent {
 				return
 			}
+		case "prompts":
+			event, err := s.loadPrompts(request.RequestID, request.HistoryCursor)
+			if err != nil {
+				event = Event{Type: EventError, RequestID: request.RequestID, Text: err.Error(), Status: "rejected"}
+			}
+			writeMu.Lock()
+			select {
+			case out <- event:
+			case <-connectionCtx.Done():
+				writeMu.Unlock()
+				return
+			}
+			writeMu.Unlock()
 		case "message":
 			subscribe(0, "", false, 0, 0)
 			if err := s.submitClientMessage(ctx, request.Text, request.RequestID, request.AttachmentIDs...); err != nil {

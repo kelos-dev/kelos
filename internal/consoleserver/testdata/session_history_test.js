@@ -116,6 +116,11 @@ class TestNode {
     this.listeners.set(name, listener);
   }
 
+  showModal() { this.open = true; }
+  close() { this.open = false; }
+  focus() { this.focused = true; }
+  select() { this.selected = true; }
+
   getBoundingClientRect() {
     return this.bounds;
   }
@@ -146,6 +151,7 @@ global.document = {
   createElement: (tag) => new TestNode(tag),
   createTextNode: (value) => new TestNode('#text', value),
   createDocumentFragment: () => new TestNode('#fragment'),
+  body: new TestNode('body'),
 };
 
 let bottomAnchors;
@@ -187,6 +193,12 @@ function resetHarness() {
     composerHint: new TestNode('span'),
     input: new TestNode('textarea'),
     attachFiles: new TestNode('button'),
+    promptsButton: new TestNode('button'),
+    promptsDialog: new TestNode('dialog'),
+    promptsTitle: new TestNode('h2'),
+    promptsList: new TestNode('div'),
+    promptsStatus: new TestNode('p'),
+    promptsMore: new TestNode('button'),
     pendingAttachments: new TestNode('div'),
     send: new TestNode('button'),
     progress: new TestNode('div'),
@@ -241,6 +253,8 @@ function resetHarness() {
     historyCursor: '',
     historyLastEventID: 0,
     historyPageLoading: false,
+    promptsRequestID: '',
+    promptsCursor: '',
     historyPageReading: false,
     historyPageCursor: '',
     historyPageEvents: [],
@@ -271,6 +285,7 @@ global.restorePromptDraft = () => {};
 global.closeSocket = () => {
   closeSocketRequests++;
   state.socket = null;
+  closePromptHistory();
 };
 global.setActiveView = () => {};
 global.renderSessions = () => {};
@@ -314,6 +329,7 @@ const renderSessionHeader = vm.runInThisContext(
   {filename: 'app.js'},
 );
 vm.runInThisContext(applicationSlice('function ensureConversation', 'function trimURLSuffix'), {filename: 'app.js'});
+vm.runInThisContext(applicationSlice('async function writeClipboardText', 'async function copyCodeBlock'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function completedAssistantText', 'function handleEvent'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function handleEvent', 'function renderUser'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function renderUser', 'function renderTool'), {filename: 'app.js'});
@@ -321,6 +337,125 @@ vm.runInThisContext(applicationSlice('function renderTool', 'function renderInpu
 vm.runInThisContext(applicationSlice('function renderDiff', 'function setActiveView'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function renderError', 'function scrollToBottom'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function currentAttachmentFiles', "elements.composer.addEventListener('submit'"), {filename: 'app.js'});
+
+async function testPromptHistoryBrowseAndReuse() {
+  resetHarness();
+  state.selected = {namespace: 'default', name: 'one', uid: 'uid-one'};
+  const sent = [];
+  state.socket = {readyState: WebSocket.OPEN, send: payload => sent.push(JSON.parse(payload))};
+  state.activeTurn = true;
+  state.lastEventID = 50;
+  state.historyCursor = 'transcript-cursor';
+  elements.input.value = 'unsent draft';
+  openPromptHistory();
+  requestPromptHistory();
+  assert.equal(elements.promptsDialog.open, true);
+  assert.equal(elements.promptsTitle.textContent, 'Prompts · one');
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].type, 'prompts');
+  assert.equal(sent[0].historyCursor, '');
+  assert.ok(sent[0].requestId);
+
+  handleEvent({type: 'prompts', requestId: 'stale', prompts: [{id: 0, text: 'wrong session'}]});
+  assert.equal(elements.promptsList.hasChildNodes(), false);
+  handleEvent({type: 'prompts', requestId: sent[0].requestId, historyCursor: 'earlier-prompts', prompts: [
+    {id: 3, text: 'first\nrequest'},
+    {id: 5, text: '<script>plain text</script>', attachments: [{id: 'file-1', name: 'notes.txt'}]},
+  ]});
+  let items = elements.promptsList.querySelectorAll('.prompt-history-item');
+  assert.equal(items.length, 2);
+  assert.equal(items[0].querySelector('pre').textContent, '<script>plain text</script>');
+  assert.equal(items[0].querySelector('p').textContent, 'Attachments: notes.txt');
+  assert.equal(items[1].querySelector('pre').textContent, 'first\nrequest');
+  assert.equal(elements.promptsMore.hidden, false);
+
+  requestPromptHistory();
+  assert.equal(sent[1].type, 'prompts');
+  assert.equal(sent[1].historyCursor, 'earlier-prompts');
+  handleEvent({type: 'prompts', requestId: sent[1].requestId, prompts: [{id: 1, text: 'earliest request'}]});
+  items = elements.promptsList.querySelectorAll('.prompt-history-item');
+  assert.equal(items[2].querySelector('pre').textContent, 'earliest request');
+  assert.equal(elements.promptsMore.hidden, true);
+  assert.equal(elements.promptsStatus.textContent, 'All retained prompts are loaded.');
+  assert.equal(state.lastEventID, 50);
+  assert.equal(state.historyCursor, 'transcript-cursor');
+  assert.equal(state.activeTurn, true);
+  assert.equal(elements.messages.hasChildNodes(), false);
+
+  for (const clipboard of [undefined, {writeText: async () => { throw new Error('denied'); }}]) {
+    Object.defineProperty(global, 'navigator', {configurable: true, value: {clipboard}});
+    let copied;
+    document.execCommand = command => {
+      assert.equal(command, 'copy');
+      assert.equal(elements.promptsDialog.open, true);
+      const textarea = elements.promptsDialog.querySelector('textarea');
+      assert.ok(textarea, 'clipboard fallback must be inside the open dialog');
+      assert.equal(textarea.selected, true);
+      copied = textarea.value;
+      return true;
+    };
+    await items[1].querySelectorAll('button')[0].listeners.get('click')();
+    assert.equal(copied, 'first\nrequest');
+    assert.equal(toasts.at(-1), 'Prompt copied');
+    assert.equal(elements.promptsDialog.querySelector('textarea'), null);
+    assert.equal(document.body.hasChildNodes(), false);
+  }
+  items[1].querySelectorAll('button')[1].listeners.get('click')();
+  assert.equal(elements.input.value, 'unsent draft\n\nfirst\nrequest');
+  assert.equal(state.promptDrafts.get(sessionKey(state.selected)), elements.input.value);
+  assert.equal(elements.input.focused, true);
+  assert.equal(elements.promptsDialog.open, false);
+  assert.equal(sent.length, 2);
+}
+
+function testPromptHistoryErrorEmptyAndSessionSwitch() {
+  resetHarness();
+  const session = {namespace: 'default', name: 'one', uid: 'uid-one', phase: 'Ready'};
+  state.selected = session;
+  const sent = [];
+  state.socket = {readyState: WebSocket.OPEN, send: payload => sent.push(JSON.parse(payload))};
+  openPromptHistory();
+  handleEvent({type: 'error', requestId: sent[0].requestId, text: 'Could not load prompts'});
+  assert.equal(elements.promptsStatus.textContent, 'Could not load prompts');
+  assert.equal(elements.promptsMore.textContent, 'Reload prompts');
+  assert.equal(elements.promptsMore.disabled, false);
+  assert.equal(elements.messages.hasChildNodes(), false);
+  requestPromptHistory();
+  handleEvent({type: 'prompts', requestId: sent[1].requestId});
+  assert.equal(elements.promptsStatus.textContent, 'No retained prompts.');
+  assert.equal(elements.promptsMore.hidden, true);
+
+  openPromptHistory();
+  selectSession({namespace: 'default', name: 'two', uid: 'uid-two', phase: 'Pending'});
+  handleEvent({type: 'prompts', requestId: sent[2].requestId, prompts: [{id: 1, text: 'from session one'}]});
+  assert.equal(elements.promptsDialog.open, false);
+  assert.equal(elements.promptsList.hasChildNodes(), false);
+  assert.equal(state.promptsRequestID, '');
+  const transcript = elements.messages.textContent;
+  handleEvent({type: 'error', requestId: sent[2].requestId, status: 'rejected', text: 'expired cursor'});
+  assert.equal(elements.messages.textContent, transcript);
+}
+
+function testPromptHistoryReloadsAfterPageError() {
+  resetHarness();
+  state.selected = {namespace: 'default', name: 'one', uid: 'uid-one', phase: 'Ready'};
+  const sent = [];
+  state.socket = {readyState: WebSocket.OPEN, send: payload => sent.push(JSON.parse(payload))};
+  openPromptHistory();
+  assert.match(sent[0].requestId, /^prompts-/);
+  handleEvent({type: 'prompts', requestId: sent[0].requestId, historyCursor: 'expired', prompts: [{id: 1, text: 'retained prompt'}]});
+  requestPromptHistory();
+  assert.equal(sent[1].historyCursor, 'expired');
+  handleEvent({type: 'error', requestId: sent[1].requestId, text: 'Session prompt history cursor expired; reload prompts'});
+  assert.equal(elements.promptsList.hasChildNodes(), false);
+  assert.equal(elements.promptsMore.textContent, 'Reload prompts');
+  requestPromptHistory();
+  assert.equal(sent[2].historyCursor, '');
+  handleEvent({type: 'prompts', requestId: sent[2].requestId, prompts: [{id: 2, text: 'current prompt'}]});
+  assert.equal(elements.promptsList.querySelectorAll('.prompt-history-item').length, 1);
+  assert.equal(elements.promptsList.querySelector('pre').textContent, 'current prompt');
+  assert.equal(elements.messages.hasChildNodes(), false);
+}
 
 function testSessionViewSaveAndRestore() {
   resetHarness();
@@ -1125,8 +1260,11 @@ testCurrentRequestScrollUpdatesAreThrottled();
 testPendingMessageEditing();
 testPendingMessageRemoval();
 testPendingMessageSurvivesCompletedHistoryReplay();
+testPromptHistoryErrorEmptyAndSessionSwitch();
+testPromptHistoryReloadsAfterPageError();
 testReadySessionDisconnectsWhenItBecomesPending()
   .then(testComposerIgnoresReentrantSubmission)
+  .then(testPromptHistoryBrowseAndReuse)
   .then(() => process.stdout.write('Session history tests passed\n'))
   .catch(error => {
     process.stderr.write(`${error.stack}\n`);

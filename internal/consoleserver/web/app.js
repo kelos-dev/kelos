@@ -98,6 +98,13 @@
         input: document.querySelector('#message-input'),
         attachmentInput: document.querySelector('#attachment-input'),
         attachFiles: document.querySelector('#attach-files'),
+        promptsButton: document.querySelector('#session-prompts'),
+        promptsDialog: document.querySelector('#prompts-dialog'),
+        promptsTitle: document.querySelector('#prompts-title'),
+        promptsList: document.querySelector('#prompts-list'),
+        promptsStatus: document.querySelector('#prompts-status'),
+        promptsMore: document.querySelector('#prompts-more'),
+        promptsClose: document.querySelector('#prompts-close'),
         pendingAttachments: document.querySelector('#pending-attachments'),
         send: document.querySelector('#send-message'),
         composerHint: document.querySelector('#composer-hint'),
@@ -176,6 +183,8 @@
         historyCursor: '',
         historyLastEventID: 0,
         historyPageLoading: false,
+        promptsRequestID: '',
+        promptsCursor: '',
         historyPageReading: false,
         historyPageCursor: '',
         historyPageEvents: [],
@@ -949,6 +958,7 @@
             state.sessionViews.delete(sessionViewKey(session));
     }
     function resetCurrentSessionView() {
+        closePromptHistory();
         const view = state.currentView;
         state.lastEventID = 0;
         state.assistantSegmentByTurn = new Map();
@@ -2504,6 +2514,7 @@ spec:
     }
     function updateComposerAction() {
         const connected = state.socket && state.socket.readyState === WebSocket.OPEN;
+        elements.promptsButton.disabled = !connected;
         const interrupt = composerInterruptAction();
         const goalControl = state.activeTurn && /^\/goal(?:\s|$)/.test(elements.input.value.trim());
         let action = 'send';
@@ -2526,6 +2537,7 @@ spec:
                 : `Enter to ${action} · Shift+Enter for a new line · !COMMAND · /goal`);
     }
     function closeSocket() {
+        closePromptHistory();
         state.socketGeneration += 1;
         if (state.reconnectTimer !== null)
             window.clearTimeout(state.reconnectTimer);
@@ -2591,6 +2603,7 @@ spec:
             if (generation !== state.socketGeneration || !state.selected)
                 return;
             state.socket = null;
+            closePromptHistory();
             cancelOlderHistoryPage();
             setConnection('error', 'Reconnecting');
             setComposer(false);
@@ -2652,7 +2665,7 @@ spec:
         parent.append(link);
         return true;
     }
-    async function writeClipboardText(text) {
+    async function writeClipboardText(text, container = document.body) {
         if (globalThis.navigator?.clipboard?.writeText) {
             try {
                 await globalThis.navigator.clipboard.writeText(text);
@@ -2668,7 +2681,7 @@ spec:
         textarea.style.position = 'fixed';
         textarea.style.opacity = '0';
         textarea.style.pointerEvents = 'none';
-        document.body.append(textarea);
+        container.append(textarea);
         textarea.select();
         let copied = false;
         try {
@@ -3244,7 +3257,7 @@ spec:
     }
     function sessionRequestID(prefix) {
         if (globalThis.crypto?.randomUUID)
-            return globalThis.crypto.randomUUID();
+            return `${prefix}-${globalThis.crypto.randomUUID()}`;
         return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     }
     function sessionHistoryRequestID() {
@@ -3430,7 +3443,106 @@ spec:
         state.pinHistoryToBottom = false;
         updateCurrentRequest();
     }
+    function openPromptHistory() {
+        if (!state.selected || !state.socket || state.socket.readyState !== WebSocket.OPEN)
+            return;
+        state.promptsCursor = '';
+        state.promptsRequestID = '';
+        elements.promptsTitle.textContent = `Prompts · ${sessionDisplayName(state.selected)}`;
+        elements.promptsList.replaceChildren();
+        elements.promptsDialog.showModal();
+        requestPromptHistory();
+    }
+    function closePromptHistory() {
+        state.promptsRequestID = '';
+        state.promptsCursor = '';
+        elements.promptsDialog.close();
+        elements.promptsList.replaceChildren();
+    }
+    function requestPromptHistory() {
+        if (state.promptsRequestID || !state.socket || state.socket.readyState !== WebSocket.OPEN)
+            return;
+        state.promptsRequestID = sessionRequestID('prompts');
+        elements.promptsStatus.textContent = 'Loading prompts…';
+        elements.promptsMore.disabled = true;
+        elements.promptsMore.hidden = false;
+        try {
+            state.socket.send(JSON.stringify({ type: 'prompts', requestId: state.promptsRequestID, historyCursor: state.promptsCursor }));
+        }
+        catch (error) {
+            receivePromptHistory({ type: 'error', requestId: state.promptsRequestID, text: errorMessage(error) });
+        }
+    }
+    function receivePromptHistory(event) {
+        if (!state.promptsRequestID || event.requestId !== state.promptsRequestID)
+            return;
+        state.promptsRequestID = '';
+        elements.promptsMore.disabled = false;
+        if (event.type === 'error') {
+            state.promptsCursor = '';
+            elements.promptsList.replaceChildren();
+            elements.promptsStatus.textContent = event.text || 'Could not load prompts';
+            elements.promptsMore.textContent = 'Reload prompts';
+            return;
+        }
+        state.promptsCursor = event.historyCursor || '';
+        for (const prompt of [...(event.prompts || [])].reverse()) {
+            const item = document.createElement('article');
+            item.className = 'prompt-history-item';
+            const heading = document.createElement('div');
+            heading.className = 'prompt-history-heading';
+            const label = document.createElement('span');
+            label.textContent = `Prompt ${prompt.id}${prompt.timestamp ? ` · ${new Date(prompt.timestamp).toLocaleString()}` : ''}`;
+            heading.append(label);
+            const text = document.createElement('pre');
+            text.textContent = prompt.text;
+            item.append(heading, text);
+            if (prompt.attachments?.length) {
+                const attachments = document.createElement('p');
+                attachments.textContent = `Attachments: ${prompt.attachments.map(attachment => attachment.name).join(', ')}`;
+                item.append(attachments);
+            }
+            if (prompt.text) {
+                const copy = document.createElement('button');
+                copy.type = 'button';
+                copy.className = 'secondary-button';
+                copy.textContent = 'Copy text';
+                copy.addEventListener('click', async () => {
+                    try {
+                        await writeClipboardText(prompt.text, elements.promptsDialog);
+                        showToast('Prompt copied');
+                    }
+                    catch (error) {
+                        showToast(errorMessage(error));
+                    }
+                });
+                const reuse = document.createElement('button');
+                reuse.type = 'button';
+                reuse.className = 'secondary-button';
+                reuse.textContent = 'Use text';
+                reuse.addEventListener('click', () => {
+                    elements.input.value += `${elements.input.value ? '\n\n' : ''}${prompt.text}`;
+                    savePromptDraft(state.selected);
+                    resizeComposer();
+                    updateComposerAction();
+                    closePromptHistory();
+                    elements.input.focus();
+                });
+                heading.append(copy, reuse);
+            }
+            elements.promptsList.append(item);
+        }
+        elements.promptsMore.textContent = 'Load earlier prompts';
+        elements.promptsMore.hidden = !state.promptsCursor;
+        elements.promptsStatus.textContent = !elements.promptsList.hasChildNodes()
+            ? 'No retained prompts.'
+            : (state.promptsCursor ? '' : 'All retained prompts are loaded.');
+    }
     function handleEvent(event) {
+        if (event.type === 'prompts' || (event.type === 'error' && event.requestId?.startsWith('prompts-'))) {
+            receivePromptHistory(event);
+            return;
+        }
         if (state.historyPageReading) {
             if (event.type === 'history.end' && event.historyPage) {
                 finishOlderHistoryPage(event);
@@ -4511,6 +4623,10 @@ spec:
         void submitComposer();
     });
     elements.attachFiles.addEventListener('click', () => elements.attachmentInput.click());
+    elements.promptsButton.addEventListener('click', openPromptHistory);
+    elements.promptsMore.addEventListener('click', requestPromptHistory);
+    elements.promptsClose.addEventListener('click', closePromptHistory);
+    elements.promptsDialog.addEventListener('cancel', closePromptHistory);
     elements.attachmentInput.addEventListener('change', () => {
         stageAttachments(elements.attachmentInput.files);
         elements.attachmentInput.value = '';

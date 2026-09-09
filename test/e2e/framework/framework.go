@@ -473,18 +473,24 @@ func (f *Framework) ListTaskNames(labelSelector string) []string {
 	return names
 }
 
-// GetJobLogs returns the logs of a Job's pod.
+// GetJobLogs returns a Job's pod logs, preferring a successful attempt.
 func (f *Framework) GetJobLogs(name string) string {
 	ctx := context.TODO()
 
-	// Find the pod for this job
 	pods, err := f.Clientset.CoreV1().Pods(f.Namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: "job-name=" + name,
 	})
 	Expect(err).NotTo(HaveOccurred(), "Failed to list pods for job %s", name)
 	Expect(pods.Items).NotTo(BeEmpty(), "No pods found for job %s", name)
 
-	req := f.Clientset.CoreV1().Pods(f.Namespace).GetLogs(pods.Items[0].Name, &corev1.PodLogOptions{})
+	podName := pods.Items[0].Name
+	for _, pod := range pods.Items {
+		if pod.Status.Phase == corev1.PodSucceeded {
+			podName = pod.Name
+			break
+		}
+	}
+	req := f.Clientset.CoreV1().Pods(f.Namespace).GetLogs(podName, &corev1.PodLogOptions{})
 	stream, err := req.Stream(ctx)
 	Expect(err).NotTo(HaveOccurred(), "Failed to get logs for job %s", name)
 	defer stream.Close()

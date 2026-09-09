@@ -13,6 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -130,6 +131,12 @@ func TestOpenTaskLogStreamRetriesWhilePodIsStarting(t *testing.T) {
 			streamErr: apierrors.NewBadRequest(`container "kelos-agent" in pod "task-pod" is not available`),
 		},
 		{
+			name:      "scheduled pod log endpoint not available",
+			nodeName:  "worker-1",
+			podStatus: corev1.PodStatus{Phase: corev1.PodPending},
+			streamErr: apierrors.NewNotFound(schema.GroupResource{Resource: "pods/log"}, "task-pod"),
+		},
+		{
 			name:     "initializing container",
 			nodeName: "worker-1",
 			podStatus: corev1.PodStatus{
@@ -203,6 +210,26 @@ func TestOpenTaskLogStreamRetriesWhilePodIsStarting(t *testing.T) {
 				t.Fatalf("stream attempts = %d, want 2", attempts)
 			}
 		})
+	}
+}
+
+func TestOpenTaskLogStreamStopsForMissingPod(t *testing.T) {
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "task-1", Namespace: "default"},
+		Status:     kelos.TaskStatus{Phase: kelos.TaskPhaseRunning},
+	}
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(task).Build()
+	attempts := 0
+	_, err := openTaskLogStream(context.Background(), cl, "default", task.Name, "task-pod", "kelos-agent", true, 0,
+		func(context.Context) (io.ReadCloser, error) {
+			attempts++
+			return nil, apierrors.NewNotFound(schema.GroupResource{Resource: "pods/log"}, "task-pod")
+		})
+	if !apierrors.IsNotFound(err) || !strings.Contains(err.Error(), `task "task-1"`) {
+		t.Fatalf("openTaskLogStream() error = %v, want missing pod error naming the task", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("stream attempts = %d, want 1", attempts)
 	}
 }
 

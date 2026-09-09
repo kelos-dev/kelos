@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -2616,6 +2617,159 @@ var _ = Describe("TaskSpawner Controller", func() {
 				Expect(apierrors.IsInvalid(err)).To(BeTrue(), "case %s: %v", tt.name, err)
 				Expect(err.Error()).To(ContainSubstring("PR-scoped issue_comment filters"))
 			}
+		})
+	})
+	Context("When creating a TaskSpawner with githubWebhook excludeFilters", func() {
+		// These rules are CEL, so only a real API server can confirm they
+		// compile, stay inside the cost budget, and reject what they should.
+		newSpawner := func(namespace, name string, webhook *kelos.GitHubWebhook) *kelos.TaskSpawner {
+			return &kelos.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+				Spec: kelos.TaskSpawnerSpec{
+					When: kelos.When{GitHubWebhook: webhook},
+					TaskTemplate: kelos.TaskTemplate{
+						Type: "claude-code",
+						Credentials: &kelos.Credentials{
+							Type:      kelos.CredentialTypeOAuth,
+							SecretRef: &kelos.SecretReference{Name: "claude-credentials"},
+						},
+						WorkspaceRef: &kelos.WorkspaceReference{Name: "test-workspace-exclude-filters"},
+					},
+				},
+			}
+		}
+
+		It("Should accept an unscoped pullRequestAuthor rule and reject invalid ones", func() {
+			By("Creating a namespace and workspace")
+			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test-taskspawner-exclude-filters"}}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+			ws := &kelos.Workspace{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-workspace-exclude-filters", Namespace: ns.Name},
+				Spec: kelos.WorkspaceSpec{
+					Repo: "https://github.com/example/repo.git",
+					Ref:  "main",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
+
+			By("Accepting a rule that omits event so it spans every subscribed event")
+			valid := newSpawner(ns.Name, "exclude-filters-valid", &kelos.GitHubWebhook{
+				Events: []string{"pull_request", "issue_comment"},
+				ExcludeFilters: []kelos.GitHubWebhookFilter{
+					{PullRequestAuthor: "dependabot[bot]"},
+				},
+			})
+			Expect(k8sClient.Create(ctx, valid)).Should(Succeed())
+
+			By("Round-tripping the stored rule")
+			stored := &kelos.TaskSpawner{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: valid.Name, Namespace: ns.Name}, stored)).Should(Succeed())
+			Expect(stored.Spec.When.GitHubWebhook.ExcludeFilters).To(HaveLen(1))
+			Expect(stored.Spec.When.GitHubWebhook.ExcludeFilters[0].PullRequestAuthor).To(Equal("dependabot[bot]"))
+			Expect(stored.Spec.When.GitHubWebhook.ExcludeFilters[0].Event).To(BeEmpty())
+
+			By("Rejecting an accepting filter that omits event")
+			noEvent := newSpawner(ns.Name, "exclude-filters-no-event", &kelos.GitHubWebhook{
+				Events:  []string{"pull_request"},
+				Filters: []kelos.GitHubWebhookFilter{{Action: "opened"}},
+			})
+			err := k8sClient.Create(ctx, noEvent)
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsInvalid(err)).To(BeTrue(), "%v", err)
+			Expect(err.Error()).To(ContainSubstring("filters[].event is required"))
+
+			By("Rejecting an exclusion rule with no criteria, which would exclude everything")
+			empty := newSpawner(ns.Name, "exclude-filters-empty", &kelos.GitHubWebhook{
+				Events:         []string{"pull_request"},
+				ExcludeFilters: []kelos.GitHubWebhookFilter{{}},
+			})
+			err = k8sClient.Create(ctx, empty)
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsInvalid(err)).To(BeTrue(), "%v", err)
+			Expect(err.Error()).To(ContainSubstring("at least one non-empty matching criterion"))
+
+			By("Rejecting an unscoped rule using a criterion that only applies to some events")
+			unscopedTypeSpecific := newSpawner(ns.Name, "exclude-filters-unscoped-typed", &kelos.GitHubWebhook{
+				Events:         []string{"pull_request", "push"},
+				ExcludeFilters: []kelos.GitHubWebhookFilter{{Labels: []string{"wip"}}},
+			})
+			err = k8sClient.Create(ctx, unscopedTypeSpecific)
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsInvalid(err)).To(BeTrue(), "%v", err)
+			Expect(err.Error()).To(ContainSubstring("must set event"))
+
+			By("Accepting the same criterion once it is scoped to an event type")
+			scopedTypeSpecific := newSpawner(ns.Name, "exclude-filters-scoped-typed", &kelos.GitHubWebhook{
+				Events: []string{"pull_request", "push"},
+				ExcludeFilters: []kelos.GitHubWebhookFilter{
+					{Event: "pull_request", Labels: []string{"wip"}},
+				},
+			})
+			Expect(k8sClient.Create(ctx, scopedTypeSpecific)).Should(Succeed())
+
+			By("Rejecting a rule built from a negative criterion, which would invert")
+			negative := newSpawner(ns.Name, "exclude-filters-negative", &kelos.GitHubWebhook{
+				Events:         []string{"pull_request"},
+				ExcludeFilters: []kelos.GitHubWebhookFilter{{ExcludeAuthors: []string{"dependabot[bot]"}}},
+			})
+			err = k8sClient.Create(ctx, negative)
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsInvalid(err)).To(BeTrue(), "%v", err)
+			Expect(err.Error()).To(ContainSubstring("exclude*"))
+
+			By("Rejecting a rule whose only criterion is an empty event")
+			emptyEvent := newSpawner(ns.Name, "exclude-filters-empty-event", &kelos.GitHubWebhook{
+				Events:         []string{"pull_request"},
+				ExcludeFilters: []kelos.GitHubWebhookFilter{{Event: ""}},
+			})
+			err = k8sClient.Create(ctx, emptyEvent)
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsInvalid(err)).To(BeTrue(), "%v", err)
+			Expect(err.Error()).To(ContainSubstring("at least one non-empty matching criterion"))
+
+			By("Rejecting more accepting filters than the cap allows")
+			over := make([]kelos.GitHubWebhookFilter, kelos.GitHubWebhookFiltersMaxItems+1)
+			for i := range over {
+				over[i] = kelos.GitHubWebhookFilter{Event: "pull_request", Action: fmt.Sprintf("a%d", i)}
+			}
+			tooManyFilters := newSpawner(ns.Name, "exclude-filters-too-many", &kelos.GitHubWebhook{
+				Events:  []string{"pull_request"},
+				Filters: over,
+			})
+			err = k8sClient.Create(ctx, tooManyFilters)
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsInvalid(err)).To(BeTrue(), "%v", err)
+			Expect(err.Error()).To(ContainSubstring("must have at most 50 items"))
+
+			By("Reporting only the clear message when an accepting filter omits event")
+			// The pre-existing checks-reporting rule reads f.event without a
+			// has() guard, on a field that is no longer schema-required. Pin
+			// that this does not surface a second, confusing error next to the
+			// actionable one.
+			noEventWithChecks := newSpawner(ns.Name, "exclude-filters-no-event-checks", &kelos.GitHubWebhook{
+				Events:    []string{"pull_request"},
+				Filters:   []kelos.GitHubWebhookFilter{{Action: "opened"}},
+				Reporting: &kelos.GitHubReporting{Checks: &kelos.GitHubChecksReporting{Name: "kelos"}},
+			})
+			err = k8sClient.Create(ctx, noEventWithChecks)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("filters[].event is required"))
+			Expect(err.Error()).NotTo(ContainSubstring("no such key"))
+
+			By("Rejecting an exclusion rule that uses filePatterns")
+			withFilePatterns := newSpawner(ns.Name, "exclude-filters-file-patterns", &kelos.GitHubWebhook{
+				Events: []string{"pull_request"},
+				ExcludeFilters: []kelos.GitHubWebhookFilter{
+					{
+						PullRequestAuthor: "dependabot[bot]",
+						FilePatterns:      &kelos.FilePatterns{Include: []string{"**/*.go"}},
+					},
+				},
+			})
+			err = k8sClient.Create(ctx, withFilePatterns)
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsInvalid(err)).To(BeTrue(), "%v", err)
+			Expect(err.Error()).To(ContainSubstring("filePatterns"))
 		})
 	})
 })

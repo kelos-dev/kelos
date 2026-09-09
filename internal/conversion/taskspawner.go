@@ -3,6 +3,10 @@ package conversion
 import (
 	"context"
 	"encoding/json"
+	"reflect"
+	"slices"
+	"strings"
+	"unicode/utf8"
 
 	v1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 	v1alpha2 "github.com/kelos-dev/kelos/api/v1alpha2"
@@ -35,6 +39,13 @@ const preservedGitHubCommentsReportingAnnotation = "kelos.dev/v1alpha2-github-co
 // preservedWebhookGatewayRefsAnnotation carries v1alpha2 gateway references
 // across a v1alpha1 round-trip without exposing the capability in v1alpha1.
 const preservedWebhookGatewayRefsAnnotation = "kelos.dev/v1alpha2-webhook-gateway-refs"
+
+// preservedGitHubWebhookExcludeFiltersAnnotation carries
+// spec.when.githubWebhook.excludeFilters (a v1alpha2-only field) across a
+// v1alpha1 round-trip. Silently dropping an exclusion rule re-admits the events
+// it suppressed, so the value survives here even though v1alpha1 does not gain
+// the capability.
+const preservedGitHubWebhookExcludeFiltersAnnotation = "kelos.dev/v1alpha2-github-webhook-exclude-filters"
 
 type preservedWebhookGatewayRefs struct {
 	GitHub  *v1alpha2.GatewayReference `json:"github,omitempty"`
@@ -76,6 +87,8 @@ func taskSpawnerToHub(_ context.Context, src *v1alpha1.TaskSpawner, dst *v1alpha
 	deleteAnnotation(dst.Annotations, preservedGitHubCommentsReportingAnnotation)
 	restorePreservedWebhookGatewayRefs(src.Annotations, &dst.Spec.When)
 	deleteAnnotation(dst.Annotations, preservedWebhookGatewayRefsAnnotation)
+	restorePreservedGitHubWebhookExcludeFilters(src.Annotations, dst.Spec.When.GitHubWebhook)
+	deleteAnnotation(dst.Annotations, preservedGitHubWebhookExcludeFiltersAnnotation)
 	return nil
 }
 
@@ -101,7 +114,192 @@ func taskSpawnerFromHub(_ context.Context, src *v1alpha2.TaskSpawner, dst *v1alp
 	if err := setPreservedWebhookGatewayRefs(dst, src.Spec.When); err != nil {
 		return err
 	}
+	if err := setPreservedGitHubWebhookExcludeFilters(dst, src.Spec.When.GitHubWebhook); err != nil {
+		return err
+	}
 	return convertViaJSON(&src.Status, &dst.Status)
+}
+
+// setPreservedGitHubWebhookExcludeFilters records
+// spec.when.githubWebhook.excludeFilters in an annotation so a v1alpha1 client
+// that writes the object back does not drop it.
+func setPreservedGitHubWebhookExcludeFilters(dst *v1alpha1.TaskSpawner, webhook *v1alpha2.GitHubWebhook) error {
+	if webhook == nil || len(webhook.ExcludeFilters) == 0 {
+		deleteAnnotation(dst.Annotations, preservedGitHubWebhookExcludeFiltersAnnotation)
+		return nil
+	}
+	data, err := json.Marshal(webhook.ExcludeFilters)
+	if err != nil {
+		return err
+	}
+	if dst.Annotations == nil {
+		dst.Annotations = map[string]string{}
+	}
+	dst.Annotations[preservedGitHubWebhookExcludeFiltersAnnotation] = string(data)
+	return nil
+}
+
+// restorePreservedGitHubWebhookExcludeFilters restores excludeFilters dropped by
+// a v1alpha1 round-trip.
+func restorePreservedGitHubWebhookExcludeFilters(annotations map[string]string, webhook *v1alpha2.GitHubWebhook) {
+	if webhook == nil || len(webhook.ExcludeFilters) > 0 {
+		return
+	}
+	raw, ok := annotations[preservedGitHubWebhookExcludeFiltersAnnotation]
+	if !ok || raw == "" {
+		return
+	}
+	var excludeFilters []v1alpha2.GitHubWebhookFilter
+	if err := json.Unmarshal([]byte(raw), &excludeFilters); err != nil || len(excludeFilters) == 0 {
+		// The annotation is best-effort preservation data and can be set by
+		// users; malformed data must not block API version conversion.
+		return
+	}
+	if !validGitHubWebhookExcludeFilters(excludeFilters) {
+		// Restoring an out-of-schema rule would either emit an invalid v1alpha2
+		// object or make an otherwise valid v1alpha1 write fail. Ignore the
+		// annotation wholesale rather than applying part of it.
+		return
+	}
+	webhook.ExcludeFilters = excludeFilters
+}
+
+// validGitHubWebhookExcludeFilters reports whether restored exclusion rules can
+// be applied safely. It re-checks the constraints whose violation would make a
+// rule match more than it should: the list bound, the pullRequestAuthor length,
+// the rejected criteria, the at-least-one-criterion requirement, the event scope
+// on criteria that only apply to certain event types, and the enum values.
+//
+// All of them matter here because the preservation annotation is user-writable
+// and the API server does not re-validate the output of a conversion webhook.
+// An unchecked restore of, say, [{"draft":true}] would produce a rule that
+// matches every delivery — draft is skipped, and so satisfied, outside the
+// pull-request arm of the matcher — silently stopping the spawner from firing.
+// An out-of-enum value inverts the same way: the matcher switches on it and
+// treats an unrecognized value as satisfied.
+//
+// It deliberately does not re-check bounds whose violation only makes a rule
+// *less* likely to match — an over-long bodyPattern, an over-full labels list.
+// Those are rejected the next time the object is written through v1alpha2 and
+// cannot silently disable a spawner in the meantime, so mirroring them here
+// would be upkeep without a failure mode to prevent.
+//
+// The criteria buckets, enum values, and bounds come from the API package
+// rather than being re-listed here, so this check and the markers cannot drift
+// apart. Lengths are counted in runes, matching how the API server evaluates
+// OpenAPI maxLength.
+func validGitHubWebhookExcludeFilters(filters []v1alpha2.GitHubWebhookFilter) bool {
+	if len(filters) > v1alpha2.GitHubWebhookExcludeFiltersMaxItems {
+		return false
+	}
+	for i := range filters {
+		if !validGitHubWebhookExcludeFilter(filters[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func validGitHubWebhookExcludeFilter(filter v1alpha2.GitHubWebhookFilter) bool {
+	if utf8.RuneCountInString(filter.PullRequestAuthor) > v1alpha2.GitHubWebhookFilterPullRequestAuthorMaxLength {
+		return false
+	}
+
+	set := setGitHubWebhookCriteria(filter)
+	for _, criterion := range v1alpha2.GitHubWebhookExcludeFilterRejectedCriteria() {
+		if set[criterion] {
+			return false
+		}
+	}
+
+	// A rule whose only criterion is the event scope, or which sets nothing at
+	// all, would reject every event.
+	criteria := 0
+	for criterion := range set {
+		if criterion != "event" {
+			criteria++
+		}
+	}
+	if criteria == 0 {
+		return false
+	}
+
+	if filter.Event == "" {
+		for _, criterion := range v1alpha2.GitHubWebhookExcludeFilterEventScopedCriteria() {
+			if set[criterion] {
+				return false
+			}
+		}
+	}
+
+	return validGitHubWebhookFilterEnums(filter)
+}
+
+// validGitHubWebhookFilterEnums reports whether every criterion that constrains
+// its values holds one of them. An unrecognized value is worse than invalid:
+// the matcher switches on it, no arm matches, and the criterion is left
+// satisfied, so a rule carrying it rejects every event of that type.
+func validGitHubWebhookFilterEnums(filter v1alpha2.GitHubWebhookFilter) bool {
+	values := map[string]string{
+		"commentOn":  filter.CommentOn,
+		"conclusion": filter.Conclusion,
+	}
+	for _, criterion := range v1alpha2.GitHubWebhookFilterEnumCriteria() {
+		value, known := values[criterion]
+		if !known {
+			// A criterion gained an enum without this switch learning about it.
+			// The API package's tests fail on that, but refuse the annotation
+			// rather than restore a value nothing checked.
+			return false
+		}
+		if value == "" {
+			// Unset. The criterion is optional, and the matcher skips it, so
+			// there is nothing to constrain — an enum that spells out "" as a
+			// member accepts it either way.
+			continue
+		}
+		allowed, _ := v1alpha2.GitHubWebhookFilterCriterionEnum(criterion)
+		if !slices.Contains(allowed, value) {
+			return false
+		}
+	}
+	return true
+}
+
+// setGitHubWebhookCriteria returns the JSON tags of the filter's criteria that
+// carry a value, so the checks above can be driven by the API package's
+// criteria buckets instead of a parallel list of field accesses.
+func setGitHubWebhookCriteria(filter v1alpha2.GitHubWebhookFilter) map[string]bool {
+	set := map[string]bool{}
+	value := reflect.ValueOf(filter)
+	typ := value.Type()
+	for i := 0; i < typ.NumField(); i++ {
+		tag := strings.Split(typ.Field(i).Tag.Get("json"), ",")[0]
+		if tag == "" || tag == "-" {
+			continue
+		}
+		if criterionCarriesValue(value.Field(i)) {
+			set[tag] = true
+		}
+	}
+	return set
+}
+
+// criterionCarriesValue reports whether a criterion field holds a value the
+// matcher would actually act on. An empty but non-nil list or string does not
+// count: reflect.Value.IsZero is false for []string{}, while the matcher skips a
+// criterion whose list is empty, so counting it would let a rule that matches
+// everything pass the at-least-one-criterion check. The CEL rules draw the same
+// line with size(...) > 0.
+func criterionCarriesValue(field reflect.Value) bool {
+	switch field.Kind() {
+	case reflect.Slice, reflect.Map, reflect.String:
+		return field.Len() > 0
+	case reflect.Ptr, reflect.Interface:
+		return !field.IsNil()
+	default:
+		return !field.IsZero()
+	}
 }
 
 func setPreservedWebhookGatewayRefs(dst *v1alpha1.TaskSpawner, when v1alpha2.When) error {

@@ -353,8 +353,8 @@ func openTaskLogStream(
 			}
 			continue
 		}
-		if !follow || !apierrors.IsBadRequest(err) {
-			return nil, fmt.Errorf("streaming logs: %w", err)
+		if !follow || (!apierrors.IsBadRequest(err) && !apierrors.IsNotFound(err)) {
+			return nil, fmt.Errorf("streaming task %q logs: %w", taskName, err)
 		}
 
 		retryMode, retryErr := taskLogStreamRetryMode(ctx, cl, namespace, taskName, podName, container)
@@ -363,10 +363,10 @@ func openTaskLogStream(
 		}
 		switch retryMode {
 		case noLogStreamRetry:
-			return nil, fmt.Errorf("streaming logs: %w", err)
+			return nil, fmt.Errorf("streaming task %q logs: %w", taskName, err)
 		case immediateLogStreamRetry:
 			if immediateRetryUsed {
-				return nil, fmt.Errorf("streaming logs: %w", err)
+				return nil, fmt.Errorf("streaming task %q logs: %w", taskName, err)
 			}
 			immediateRetryUsed = true
 			continue

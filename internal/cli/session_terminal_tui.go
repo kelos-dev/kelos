@@ -155,6 +155,8 @@ type sessionTUIModel struct {
 	history            []string
 	historyAt          int
 	draft              string
+	promptCursor       string
+	promptRequestID    string
 	err                error
 	refreshScheduled   bool
 	activeView         string
@@ -383,6 +385,9 @@ func (m *sessionTUIModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if m.quitRequested {
 			return m, nil
 		}
+		if (message.Type != tea.KeyUp && message.Type != tea.KeyDown) || message.Alt || message.Paste {
+			m.promptRequestID = ""
+		}
 		if message.Paste && m.ready {
 			if path, ok := sessionTerminalDroppedFile(string(message.Runes)); ok {
 				return m, m.attachFile(path)
@@ -414,28 +419,32 @@ func (m *sessionTUIModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case tea.KeyUp:
-			if m.ready && !strings.Contains(m.input.Value(), "\n") {
-				if m.recallPendingTurn() {
-					return m, nil
-				}
-				if m.pendingEditTurnID == "" {
-					m.previousInput()
-					return m, nil
-				}
+			if m.ready && message.Alt && m.recallPendingTurn() {
+				return m, nil
+			}
+			if m.ready && !message.Alt && m.pendingEditTurnID == "" && (m.historyAt >= 0 || (m.input.Line() == 0 && m.input.LineInfo().RowOffset == 0)) {
+				return m, m.previousInput()
 			}
 		case tea.KeyDown:
-			if m.ready && m.pendingEditTurnID == "" && !strings.Contains(m.input.Value(), "\n") {
+			if m.ready && !message.Alt && m.pendingEditTurnID == "" && (m.historyAt >= 0 || m.promptRequestID != "") {
+				m.promptRequestID = ""
 				m.nextInput()
 				return m, nil
 			}
 		}
+		m.promptRequestID = ""
 	}
 
 	if !m.ready || m.quitRequested {
 		return m, nil
 	}
 	var cmd tea.Cmd
+	previousValue := m.input.Value()
 	m.input, cmd = m.input.Update(message)
+	if m.input.Value() != previousValue {
+		m.promptRequestID = ""
+		m.historyAt = -1
+	}
 	m.resizeComposer()
 	return m, cmd
 }
@@ -460,6 +469,7 @@ func (m *sessionTUIModel) readEvent() tea.Cmd {
 }
 
 func (m *sessionTUIModel) submitInput() tea.Cmd {
+	m.promptRequestID = ""
 	line := m.input.Value()
 	if m.pendingEditTurnID != "" {
 		request := sessionruntime.ClientRequest{
@@ -512,9 +522,6 @@ func (m *sessionTUIModel) submitInput() tea.Cmd {
 		m.err = err
 		return m.quit()
 	}
-	if request.Type != "input" {
-		m.history = append(m.history, line)
-	}
 	if request.Type == "message" {
 		m.pendingAttachments = nil
 	}
@@ -561,26 +568,12 @@ func sessionTerminalDroppedFile(value string) (string, bool) {
 	return value, true
 }
 
-func (m *sessionTUIModel) previousInput() {
-	if len(m.history) == 0 {
-		return
-	}
-	if m.historyAt == -1 {
-		m.draft = m.input.Value()
-		m.historyAt = len(m.history) - 1
-	} else if m.historyAt > 0 {
-		m.historyAt--
-	}
-	m.input.SetValue(m.history[m.historyAt])
-	m.input.CursorEnd()
-	m.resizeComposer()
-}
-
 func (m *sessionTUIModel) recallPendingTurn() bool {
 	if m.pendingTurnID == "" || m.input.Value() != "" || m.historyAt != -1 || len(m.pendingAttachments) > 0 {
 		return false
 	}
 	m.pendingEditTurnID = m.pendingTurnID
+	m.promptRequestID = ""
 	m.pendingEditRev = m.pendingRevision
 	m.input.SetValue(m.pendingTurnInput)
 	m.input.CursorEnd()
@@ -605,6 +598,9 @@ func (m *sessionTUIModel) nextInput() {
 
 func (m *sessionTUIModel) applyEvent(event sessionruntime.Event) sessionTUICommands {
 	var commands sessionTUICommands
+	if event.Type == sessionruntime.EventPrompts || (event.Type == sessionruntime.EventError && strings.HasPrefix(event.RequestID, sessionPromptRequestPrefix)) {
+		return m.receivePromptHistory(event)
+	}
 	if m.historyPageReading {
 		if event.Type == sessionruntime.EventHistoryEnd && event.HistoryPage {
 			return m.finishOlderHistoryPage()
@@ -639,6 +635,7 @@ func (m *sessionTUIModel) applyEvent(event sessionruntime.Event) sessionTUIComma
 			m.appendBlock(sessionTUIBlockNotice, "Earlier Session history is available. Use /history or Page Up to load the previous page.")
 		}
 		if event.Reset {
+			m.resetPromptHistory()
 			m.cancelOlderHistoryPage()
 			m.turnActive = false
 			m.activeTurnID = ""
@@ -656,7 +653,7 @@ func (m *sessionTUIModel) applyEvent(event sessionruntime.Event) sessionTUIComma
 		// A terminal-height transcript in both the managed view and native scrollback
 		// makes Bubble Tea move the smaller footer to the top when the copy is removed.
 		m.hideNextHistory = !m.ready
-		m.appendBlock(sessionTUIBlockNotice, "Connected. Enter sends, Ctrl+J inserts a newline, Ctrl+C or Esc interrupts active work, Page Up loads earlier history, and dragging a file attaches it (or use /attach PATH). Press Up on an empty composer to edit pending work. Use !COMMAND, /goal, /answer INPUT QUESTION VALUE, or /quit.")
+		m.appendBlock(sessionTUIBlockNotice, "Connected. Enter sends, Ctrl+J inserts a newline, Up/Down browses prompts, Ctrl+C or Esc interrupts active work, Page Up loads earlier history, and dragging a file attaches it (or use /attach PATH). Press Alt+Up on an empty composer to edit pending work. Use !COMMAND, /goal, /answer INPUT QUESTION VALUE, or /quit.")
 		m.ready = true
 		m.connectionStatus = ""
 		commands.ui = tea.Batch(m.input.Focus(), m.scheduleProgress())
@@ -669,6 +666,7 @@ func (m *sessionTUIModel) applyEvent(event sessionruntime.Event) sessionTUIComma
 		}
 		switch event.Status {
 		case sessionTerminalStatusConnecting, sessionTerminalStatusReconnecting:
+			m.resetPromptHistory()
 			m.cancelOlderHistoryPage()
 			if m.connectionStatus != event.Status {
 				m.connectionStarted = m.now()

@@ -8,6 +8,7 @@ import (
 const (
 	EventHistoryStart       = "history.start"
 	EventHistoryEnd         = "history.end"
+	EventPrompts            = "prompts"
 	EventRuntimeStatus      = "runtime.status"
 	EventRequestAccepted    = "request.accepted"
 	EventRuntimeRecovered   = "runtime.recovered"
@@ -61,6 +62,15 @@ type Event struct {
 	Runtime        *RuntimeStatus  `json:"runtime,omitempty"`
 	Goal           *Goal           `json:"goal,omitempty"`
 	Attachments    []Attachment    `json:"attachments,omitempty"`
+	Prompts        []Prompt        `json:"prompts,omitempty"`
+}
+
+// Prompt is a retained user submission, with its latest accepted text.
+type Prompt struct {
+	ID          int64        `json:"id"`
+	Text        string       `json:"text"`
+	Timestamp   *time.Time   `json:"timestamp,omitempty"`
+	Attachments []Attachment `json:"attachments,omitempty"`
 }
 
 // Goal describes the persisted objective owned by a Codex Session.

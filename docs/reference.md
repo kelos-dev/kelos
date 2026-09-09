@@ -253,6 +253,24 @@ interrupt an active turn. Ctrl+C exits the terminal client when no turn is
 active. `/quit` and `/exit` detach the terminal client without interrupting work
 that is still running. The terminal initially loads a bounded page of recent
 transcript items. Use `/history` or Page Up to load the previous page.
+Press Up to recall earlier prompts from the Session, including earlier
+connections, and Down to move forward and restore your unsent draft. In a
+multiline draft, move to the first displayed line before pressing Up to start
+browsing; recalled multiline prompts can be browsed with Up/Down directly.
+
+In a connected console Session, select **Prompts** below the composer to browse
+prompts newest first and load earlier pages. **Copy text** copies a prompt;
+**Use text** adds it to your draft without sending it or attaching the original
+files. Both interfaces include prompts from earlier connections, with the
+latest accepted edits to pending messages, and omit removed messages. History
+is limited to prompts in the retained Session journal (up to 4,096 events,
+including agent and tool events); prompts that have already left that journal
+cannot be retrieved.
+Journal persistence follows the Session workspace lifecycle, and resetting a
+Session clears its prompt history.
+
+![Console prompt history with copy and reuse controls](images/kelos-console-prompts-after.png)
+
 Attach a local file with `/attach PATH`; the next message includes all staged
 files. In the interactive terminal UI, dragging a file into a terminal that
 supports bracketed paste stages the file directly. Use `/send` in the plain
@@ -319,7 +337,7 @@ user-input requests, and interrupt active work without ending the provider
 conversation. While a turn is active, new submissions are combined into one
 pending message that runs next. In the web client, use **Edit** to revise its
 text before it starts or **Remove** to discard it; existing attachments remain
-on the message when it is edited. In the terminal UI, press **Up** on an empty
+on the message when it is edited. In the terminal UI, press **Alt+Up** on an empty
 composer to edit the pending message. Submitting the edit with no text removes
 the pending message. Kelos first
 asks the provider to interrupt gracefully, including

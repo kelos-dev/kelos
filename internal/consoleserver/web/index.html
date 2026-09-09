@@ -234,10 +234,26 @@
           <button class="send-button" id="send-message" type="submit" aria-label="Send message" data-action="send" disabled>↑</button>
         </form>
         <div class="session-runtime-status" id="session-runtime-status" role="status" aria-live="polite" hidden></div>
-        <div class="composer-hint" id="composer-hint">Enter to send · Shift+Enter for a new line · !COMMAND · /goal</div>
+        <div class="composer-tools">
+          <div class="composer-hint" id="composer-hint">Enter to send · Shift+Enter for a new line · !COMMAND · /goal</div>
+          <button class="prompt-history-button" id="session-prompts" type="button" disabled>Prompts</button>
+        </div>
       </footer>
     </main>
   </div>
+
+  <dialog class="session-dialog prompt-history-dialog" id="prompts-dialog" aria-labelledby="prompts-title">
+    <div class="dialog-header">
+      <div>
+        <h2 id="prompts-title">Prompts</h2>
+        <p>Retained prompts, newest first. Use text adds it to your draft.</p>
+      </div>
+      <button class="icon-button" id="prompts-close" type="button" aria-label="Close prompts">×</button>
+    </div>
+    <div id="prompts-list"></div>
+    <p id="prompts-status" role="status"></p>
+    <button class="secondary-button" id="prompts-more" type="button">Load earlier prompts</button>
+  </dialog>
 
   <dialog class="session-dialog" id="session-dialog">
     <form method="dialog" id="session-form">

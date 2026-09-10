@@ -428,14 +428,15 @@ button { color: inherit; }
 .pending-attachments[hidden] { display: none; }
 .pending-attachment { display: inline-flex; max-width: 220px; align-items: center; gap: 5px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--accent-soft); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pending-attachment button { flex: none; padding: 0; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
-.composer { display: flex; align-items: flex-end; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 26px; background: var(--card); box-shadow: 0 4px 18px rgba(0,0,0,.08); transition: border .15s, box-shadow .15s; }
+.composer { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 26px; background: var(--card); box-shadow: 0 4px 18px rgba(0,0,0,.08); transition: border .15s, box-shadow .15s; }
 .composer:focus-within { border-color: #c5c5c5; box-shadow: 0 4px 20px rgba(0,0,0,.1); }
-.composer textarea { flex: 1; min-height: 36px; max-height: 160px; resize: none; border: 0; outline: 0; padding: 8px 2px; background: transparent; color: var(--ink); font-size: 15px; line-height: 20px; }
+.composer textarea { width: 100%; min-height: 36px; max-height: 160px; resize: none; border: 0; outline: 0; padding: 8px; background: transparent; color: var(--ink); font-size: 15px; line-height: 20px; }
 .composer textarea::placeholder { color: var(--faint); }
+.composer-actions { display: flex; align-items: center; gap: 8px; }
 .attach-button { flex: none; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ink); font-size: 22px; cursor: pointer; }
 .attach-button:hover:not(:disabled) { background: var(--line-soft); }
 .attach-button:disabled { color: var(--faint); cursor: default; }
-.send-button { flex: 0 0 auto; width: 36px; height: 36px; border: 0; border-radius: 50%; background: var(--accent); color: white; font-size: 20px; font-weight: 500; cursor: pointer; }
+.send-button { flex: 0 0 auto; width: 36px; height: 36px; margin-left: auto; border: 0; border-radius: 50%; background: var(--accent); color: white; font-size: 20px; font-weight: 500; cursor: pointer; }
 .send-button[data-action="interrupt"] { background: var(--warning); font-size: 11px; }
 .send-button:disabled { background: var(--line); color: var(--faint); cursor: default; }
 .session-runtime-status { padding-top: 8px; overflow: hidden; color: var(--muted); font: 10px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
@@ -447,8 +448,8 @@ button { color: inherit; }
 .secondary-button { border: 1px solid var(--line); background: var(--card); }
 .session-dialog { width: min(94vw, 610px); max-height: calc(100dvh - 32px); overflow-y: auto; padding: 0; border: 1px solid var(--line); border-radius: 16px; background: var(--card); color: var(--ink); box-shadow: 0 24px 70px rgba(0,0,0,.2); }
 .session-dialog::backdrop { background: rgba(0,0,0,.36); backdrop-filter: blur(3px); }
-.composer-tools { display: flex; align-items: center; justify-content: center; gap: 12px; }
-.prompt-history-button { flex: none; padding: 4px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; }
+.prompt-history-button { flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 18px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 500; cursor: pointer; }
+.prompt-history-button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .prompt-history-button:hover:not(:disabled) { background: var(--line-soft); color: var(--ink); }
 .prompt-history-button:disabled { color: var(--faint); cursor: default; }
 .prompt-history-dialog { padding: 23px; }
@@ -615,7 +616,7 @@ button { color: inherit; }
   .composer-wrap { padding: 8px calc(8px + env(safe-area-inset-right)) calc(7px + env(safe-area-inset-bottom)) calc(8px + env(safe-area-inset-left)); }
   .composer { padding: 8px; }
   .composer textarea, .pending-message-input, .yaml-panel textarea, .form-grid input, .form-grid select, .source-picker select, .section-field input, .session-section-control input, .session-section-control select, .namespace-form input, .input-other { font-size: 16px; }
-  .composer textarea { min-height: 44px; padding: 10px 2px; line-height: 24px; }
+  .composer textarea { min-height: 44px; padding: 10px 8px; line-height: 24px; }
   .attach-button, .send-button { width: 44px; height: 44px; }
   .message-bubble, .user-message { max-width: 92%; }
   .assistant .message-bubble { max-width: calc(100% - 40px); }

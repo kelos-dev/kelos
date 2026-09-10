@@ -1547,6 +1547,17 @@ func TestSessionUIAdaptsToPhoneViewport(t *testing.T) {
 	if newSessionAction < 0 || newSessionAction >= scrollStart {
 		t.Fatal("Session page does not pin the new Session action above the scrolling sidebar content")
 	}
+	composerStart := bytes.Index(index, []byte(`<form class="composer"`))
+	if composerStart < 0 {
+		t.Fatal("Session page is missing the composer form")
+	}
+	composerEnd := bytes.Index(index[composerStart:], []byte(`</form>`))
+	if composerEnd < 0 {
+		t.Fatal("Session page does not close the composer form")
+	}
+	if !bytes.Contains(index[composerStart:composerStart+composerEnd], []byte(`id="session-prompts"`)) {
+		t.Fatal("Session page does not place prompt history inside the composer")
+	}
 	scrollContent := string(index[scrollStart:scrollEnd])
 	for description, expected := range map[string]string{
 		"namespace switcher":    `id="namespace-form"`,
@@ -1575,10 +1586,11 @@ func TestSessionUIAdaptsToPhoneViewport(t *testing.T) {
 		"44-pixel touch targets":             `.icon-button { width: 44px; height: 44px; }`,
 		"44-pixel view picker":               `.session-view-picker { position: relative; width: 44px; height: 44px;`,
 		"Session action touch target":        `.session-item-actions { top: 5px; right: 1px; width: 44px; height: 44px; }`,
+		"phone prompt history touch target":  `.prompt-history-button, .prompt-history-heading button, #prompts-more { min-height: 44px;`,
 		"phone safe-area padding":            `env(safe-area-inset-bottom)`,
 		"non-zooming form fields":            `.composer textarea, .pending-message-input, .yaml-panel textarea, .form-grid input`,
-		"desktop composer alignment":         `.composer textarea { flex: 1; min-height: 36px;`,
-		"mobile composer alignment":          `.composer textarea { min-height: 44px; padding: 10px 2px; line-height: 24px; }`,
+		"desktop composer alignment":         `.composer textarea { width: 100%; min-height: 36px;`,
+		"mobile composer alignment":          `.composer textarea { min-height: 44px; padding: 10px 8px; line-height: 24px; }`,
 		"phone-sized dialog":                 `max-height: calc(100dvh - 16px`,
 		"scrolling sidebar controls":         `.sidebar-scroll { flex: 1; min-height: 0; overflow-y: auto;`,
 	} {

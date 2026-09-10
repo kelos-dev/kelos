@@ -280,6 +280,13 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "Task")
 		os.Exit(1)
 	}
+	if err = (&controller.TaskPipelineReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Unable to create controller", "controller", "TaskPipeline")
+		os.Exit(1)
+	}
 	if err = (&controller.SessionReconciler{
 		Client:                        mgr.GetClient(),
 		Scheme:                        mgr.GetScheme(),

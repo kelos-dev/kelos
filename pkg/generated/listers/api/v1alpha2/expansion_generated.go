@@ -58,6 +58,14 @@ type TaskBudgetListerExpansion interface{}
 // TaskBudgetNamespaceLister.
 type TaskBudgetNamespaceListerExpansion interface{}
 
+// TaskPipelineListerExpansion allows custom methods to be added to
+// TaskPipelineLister.
+type TaskPipelineListerExpansion interface{}
+
+// TaskPipelineNamespaceListerExpansion allows custom methods to be added to
+// TaskPipelineNamespaceLister.
+type TaskPipelineNamespaceListerExpansion interface{}
+
 // TaskRecordListerExpansion allows custom methods to be added to
 // TaskRecordLister.
 type TaskRecordListerExpansion interface{}

@@ -48,6 +48,10 @@ func (c *FakeApiV1alpha2) TaskBudgets(namespace string) v1alpha2.TaskBudgetInter
 	return newFakeTaskBudgets(c, namespace)
 }
 
+func (c *FakeApiV1alpha2) TaskPipelines(namespace string) v1alpha2.TaskPipelineInterface {
+	return newFakeTaskPipelines(c, namespace)
+}
+
 func (c *FakeApiV1alpha2) TaskRecords(namespace string) v1alpha2.TaskRecordInterface {
 	return newFakeTaskRecords(c, namespace)
 }

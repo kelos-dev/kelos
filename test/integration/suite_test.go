@@ -152,6 +152,12 @@ var _ = BeforeSuite(func() {
 	}).SetupWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 
+	err = (&controller.TaskPipelineReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr)
+	Expect(err).NotTo(HaveOccurred())
+
 	err = (&controller.SessionReconciler{
 		Client:                        mgr.GetClient(),
 		Scheme:                        mgr.GetScheme(),
@@ -214,6 +220,9 @@ var _ = BeforeSuite(func() {
 	// Verify all CRDs are fully established by attempting to list each custom resource type
 	Eventually(func() error {
 		return k8sClient.List(ctx, &kelos.TaskList{})
+	}, 30*time.Second, 100*time.Millisecond).Should(Succeed())
+	Eventually(func() error {
+		return k8sClient.List(ctx, &kelos.TaskPipelineList{})
 	}, 30*time.Second, 100*time.Millisecond).Should(Succeed())
 	Eventually(func() error {
 		return k8sClient.List(ctx, &kelos.TaskSpawnerList{})

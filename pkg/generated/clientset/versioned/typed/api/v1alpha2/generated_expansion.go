@@ -28,6 +28,8 @@ type TaskExpansion interface{}
 
 type TaskBudgetExpansion interface{}
 
+type TaskPipelineExpansion interface{}
+
 type TaskRecordExpansion interface{}
 
 type TaskSpawnerExpansion interface{}

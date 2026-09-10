@@ -260,6 +260,9 @@ browsing; recalled multiline prompts can be browsed with Up/Down directly.
 
 In a connected console Session, select **Prompt history** beside the attachment
 button inside the composer to browse prompts newest first and load earlier pages.
+**Jump to message** navigates to that prompt in the conversation, loading earlier
+messages as needed. Pending prompts navigate to their queued message. Closing
+Prompt history cancels navigation while messages are loading.
 **Copy text** copies a prompt;
 **Use text** adds it to your draft without sending it or attaching the original
 files. Both interfaces include prompts from earlier connections, with the

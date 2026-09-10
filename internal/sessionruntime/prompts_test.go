@@ -79,7 +79,7 @@ func TestPromptHistoryPreservesLatestTextAndAttachments(t *testing.T) {
 func TestServerReturnsPromptPagesWithoutSubscribing(t *testing.T) {
 	journal := NewJournal()
 	for index := 0; index < DefaultHistoryItemLimit+3; index++ {
-		if err := journal.Append(Event{Type: EventUserMessage, Text: fmt.Sprintf("prompt %d", index)}); err != nil {
+		if err := journal.Append(Event{Type: EventUserMessage, TurnID: fmt.Sprintf("turn-%d", index), Text: fmt.Sprintf("prompt %d", index)}); err != nil {
 			t.Fatal(err)
 		}
 		if err := journal.Append(Event{Type: EventToolCompleted, Output: "tool output"}); err != nil {
@@ -113,7 +113,7 @@ func TestServerReturnsPromptPagesWithoutSubscribing(t *testing.T) {
 			first = 0
 		}
 		for index, prompt := range event.Prompts {
-			if prompt.Text != fmt.Sprintf("prompt %d", first+index) {
+			if prompt.ID != int64((first+index)*2+1) || prompt.TurnID != fmt.Sprintf("turn-%d", first+index) || prompt.Text != fmt.Sprintf("prompt %d", first+index) {
 				t.Fatalf("prompt %d = %#v", index, prompt)
 			}
 		}

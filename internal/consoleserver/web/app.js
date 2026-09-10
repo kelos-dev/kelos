@@ -185,6 +185,7 @@
         historyPageLoading: false,
         promptsRequestID: '',
         promptsCursor: '',
+        promptJumpTarget: null,
         historyPageReading: false,
         historyPageCursor: '',
         historyPageEvents: [],
@@ -3286,6 +3287,8 @@ spec:
         elements.messages.prepend(control);
     }
     function cancelOlderHistoryPage() {
+        if (state.promptJumpTarget)
+            stopPromptJump('Could not load messages for this prompt; try again');
         state.historyPageLoading = false;
         state.historyPageReading = false;
         state.historyPageCursor = '';
@@ -3424,6 +3427,7 @@ spec:
         if (state.currentView)
             state.currentView.historyCursor = state.historyCursor;
         replayOlderHistoryPage(events);
+        continuePromptJump();
     }
     function finishHistoryReplay(historyState) {
         const pinToBottom = state.pinHistoryToBottom;
@@ -3442,10 +3446,12 @@ spec:
             scheduleBottomAnchor();
         state.pinHistoryToBottom = false;
         updateCurrentRequest();
+        continuePromptJump();
     }
     function openPromptHistory() {
         if (!state.selected || !state.socket || state.socket.readyState !== WebSocket.OPEN)
             return;
+        state.promptJumpTarget = null;
         state.promptsCursor = '';
         state.promptsRequestID = '';
         elements.promptsTitle.textContent = `Prompt history · ${sessionDisplayName(state.selected)}`;
@@ -3454,13 +3460,57 @@ spec:
         requestPromptHistory();
     }
     function closePromptHistory() {
+        state.promptJumpTarget = null;
         state.promptsRequestID = '';
         state.promptsCursor = '';
         elements.promptsDialog.close();
         elements.promptsList.replaceChildren();
     }
+    function stopPromptJump(message) {
+        state.promptJumpTarget = null;
+        elements.promptsStatus.textContent = message;
+        elements.promptsMore.disabled = false;
+    }
+    function jumpToPrompt(prompt) {
+        state.promptJumpTarget = prompt;
+        state.pinHistoryToBottom = false;
+        elements.promptsStatus.textContent = `Loading messages for prompt ${prompt.id}…`;
+        elements.promptsMore.disabled = true;
+        continuePromptJump();
+    }
+    function continuePromptJump() {
+        const prompt = state.promptJumpTarget;
+        if (!prompt || state.replayingHistory || state.historyPageLoading)
+            return;
+        const row = [...elements.messages.querySelectorAll('.event-row.user')].find(row => row.dataset.eventId === String(prompt.id) || (prompt.turnId && row.dataset.turnId === prompt.turnId));
+        const pending = state.pendingMessage;
+        const target = row || (pending && (pending.event.id === prompt.id || (prompt.turnId && pending.event.turnId === prompt.turnId))
+            ? pending.item : null);
+        if (target) {
+            closePromptHistory();
+            setActiveView('conversation');
+            hideCurrentRequest();
+            if (state.bottomScrollFrame !== null) {
+                window.cancelAnimationFrame(state.bottomScrollFrame);
+                state.bottomScrollFrame = null;
+            }
+            target.tabIndex = -1;
+            target.focus({ preventScroll: true });
+            target.scrollIntoView({ behavior: 'instant', block: 'start' });
+            return;
+        }
+        if (!state.historyCursor) {
+            stopPromptJump('This prompt is no longer available in the conversation');
+            return;
+        }
+        if (!state.socket || state.socket.readyState !== WebSocket.OPEN) {
+            stopPromptJump('Session is disconnected');
+            return;
+        }
+        requestOlderHistory();
+    }
     function requestPromptHistory() {
-        if (state.promptsRequestID || !state.socket || state.socket.readyState !== WebSocket.OPEN)
+        if (state.promptJumpTarget || state.promptsRequestID || !state.socket || state.socket.readyState !== WebSocket.OPEN)
             return;
         state.promptsRequestID = sessionRequestID('prompts');
         elements.promptsStatus.textContent = 'Loading prompts…';
@@ -3479,6 +3529,7 @@ spec:
         state.promptsRequestID = '';
         elements.promptsMore.disabled = false;
         if (event.type === 'error') {
+            state.promptJumpTarget = null;
             state.promptsCursor = '';
             elements.promptsList.replaceChildren();
             elements.promptsStatus.textContent = event.text || 'Could not load prompts';
@@ -3494,6 +3545,12 @@ spec:
             const label = document.createElement('span');
             label.textContent = `Prompt ${prompt.id}${prompt.timestamp ? ` · ${new Date(prompt.timestamp).toLocaleString()}` : ''}`;
             heading.append(label);
+            const jump = document.createElement('button');
+            jump.type = 'button';
+            jump.className = 'secondary-button';
+            jump.textContent = 'Jump to message';
+            jump.addEventListener('click', () => jumpToPrompt(prompt));
+            heading.append(jump);
             const text = document.createElement('pre');
             text.textContent = prompt.text;
             item.append(heading, text);
@@ -3537,6 +3594,10 @@ spec:
         elements.promptsStatus.textContent = !elements.promptsList.hasChildNodes()
             ? 'No retained prompts.'
             : (state.promptsCursor ? '' : 'All retained prompts are loaded.');
+        if (state.promptJumpTarget) {
+            elements.promptsStatus.textContent = `Loading messages for prompt ${state.promptJumpTarget.id}…`;
+            elements.promptsMore.disabled = true;
+        }
     }
     function handleEvent(event) {
         if (event.type === 'prompts' || (event.type === 'error' && event.requestId?.startsWith('prompts-'))) {
@@ -3746,6 +3807,10 @@ spec:
         ensureConversation();
         const row = document.createElement('div');
         row.className = 'event-row user';
+        if (event.id)
+            row.dataset.eventId = String(event.id);
+        if (event.turnId)
+            row.dataset.turnId = event.turnId;
         row.dataset.requestText = event.text || (event.attachments || []).map(attachment => attachment.name).join(', ');
         const message = document.createElement('div');
         message.className = 'user-message';

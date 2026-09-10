@@ -19,7 +19,7 @@ func (s *Server) loadPrompts(requestID, value string) (Event, error) {
 	page, beforeEventID := historyItemsPage(promptHistoryItems(events), cursor.BeforeEventID, cursor.ItemLimit, cursor.ByteLimit)
 	prompts := make([]Prompt, 0, len(page))
 	for _, event := range page {
-		prompts = append(prompts, Prompt{ID: event.ID, Text: event.Text, Timestamp: event.Timestamp, Attachments: event.Attachments})
+		prompts = append(prompts, Prompt{ID: event.ID, TurnID: event.TurnID, Text: event.Text, Timestamp: event.Timestamp, Attachments: event.Attachments})
 	}
 	nextCursor := ""
 	if beforeEventID > 0 {

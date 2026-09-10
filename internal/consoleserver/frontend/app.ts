@@ -3767,7 +3767,7 @@ function openPromptHistory() {
   if (!state.selected || !state.socket || state.socket.readyState !== WebSocket.OPEN) return;
   state.promptsCursor = '';
   state.promptsRequestID = '';
-  elements.promptsTitle.textContent = `Prompts · ${sessionDisplayName(state.selected)}`;
+  elements.promptsTitle.textContent = `Prompt history · ${sessionDisplayName(state.selected)}`;
   elements.promptsList.replaceChildren();
   elements.promptsDialog.showModal();
   requestPromptHistory();

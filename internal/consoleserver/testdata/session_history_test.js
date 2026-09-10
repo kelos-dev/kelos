@@ -350,7 +350,7 @@ async function testPromptHistoryBrowseAndReuse() {
   openPromptHistory();
   requestPromptHistory();
   assert.equal(elements.promptsDialog.open, true);
-  assert.equal(elements.promptsTitle.textContent, 'Prompts · one');
+  assert.equal(elements.promptsTitle.textContent, 'Prompt history · one');
   assert.equal(sent.length, 1);
   assert.equal(sent[0].type, 'prompts');
   assert.equal(sent[0].historyCursor, '');

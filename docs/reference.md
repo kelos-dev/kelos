@@ -258,8 +258,9 @@ connections, and Down to move forward and restore your unsent draft. In a
 multiline draft, move to the first displayed line before pressing Up to start
 browsing; recalled multiline prompts can be browsed with Up/Down directly.
 
-In a connected console Session, select **Prompts** below the composer to browse
-prompts newest first and load earlier pages. **Copy text** copies a prompt;
+In a connected console Session, select **Prompt history** beside the attachment
+button inside the composer to browse prompts newest first and load earlier pages.
+**Copy text** copies a prompt;
 **Use text** adds it to your draft without sending it or attaching the original
 files. Both interfaces include prompts from earlier connections, with the
 latest accepted edits to pending messages, and omit removed messages. History
@@ -269,7 +270,7 @@ cannot be retrieved.
 Journal persistence follows the Session workspace lifecycle, and resetting a
 Session clears its prompt history.
 
-![Console prompt history with copy and reuse controls](images/kelos-console-prompts-after.png)
+On phones, Prompt history keeps its text label and a 44-pixel touch target.
 
 Attach a local file with `/attach PATH`; the next message includes all staged
 files. In the interactive terminal UI, dragging a file into a terminal that

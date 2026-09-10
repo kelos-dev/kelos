@@ -118,7 +118,7 @@ class TestNode {
 
   showModal() { this.open = true; }
   close() { this.open = false; }
-  focus() { this.focused = true; }
+  focus(options) { this.focused = true; this.focusOptions = options; }
   select() { this.selected = true; }
 
   getBoundingClientRect() {
@@ -163,6 +163,7 @@ let toasts;
 let closeSocketRequests;
 
 global.window = {
+  cancelAnimationFrame: frame => { animationFrames[frame - 1] = () => {}; },
   clearInterval: (timer) => progressTimers.delete(timer),
   confirm: () => true,
   matchMedia: () => ({matches: false}),
@@ -231,6 +232,7 @@ function resetHarness() {
     currentView: null,
     sessionViews: new Map(),
     socket: null,
+    bottomScrollFrame: null,
     promptDrafts: new Map(),
     attachmentDrafts: new Map(),
     sendingMessage: false,
@@ -255,6 +257,7 @@ function resetHarness() {
     historyPageLoading: false,
     promptsRequestID: '',
     promptsCursor: '',
+    promptJumpTarget: null,
     historyPageReading: false,
     historyPageCursor: '',
     historyPageEvents: [],
@@ -317,6 +320,7 @@ function applicationSlice(start, end) {
   return application.slice(startIndex, endIndex);
 }
 
+vm.runInThisContext(applicationSlice('function errorMessage', 'function requireElements'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function sessionKey', 'function savePromptDraft'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function savePromptDraft', 'function providerLabel'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function providerLabel', 'function parseSessionTimestamp'), {filename: 'app.js'});
@@ -394,13 +398,13 @@ async function testPromptHistoryBrowseAndReuse() {
       copied = textarea.value;
       return true;
     };
-    await items[1].querySelectorAll('button')[0].listeners.get('click')();
+    await items[1].querySelectorAll('button').find(button => button.textContent === 'Copy text').listeners.get('click')();
     assert.equal(copied, 'first\nrequest');
     assert.equal(toasts.at(-1), 'Prompt copied');
     assert.equal(elements.promptsDialog.querySelector('textarea'), null);
     assert.equal(document.body.hasChildNodes(), false);
   }
-  items[1].querySelectorAll('button')[1].listeners.get('click')();
+  items[1].querySelectorAll('button').find(button => button.textContent === 'Use text').listeners.get('click')();
   assert.equal(elements.input.value, 'unsent draft\n\nfirst\nrequest');
   assert.equal(state.promptDrafts.get(sessionKey(state.selected)), elements.input.value);
   assert.equal(elements.input.focused, true);
@@ -455,6 +459,165 @@ function testPromptHistoryReloadsAfterPageError() {
   assert.equal(elements.promptsList.querySelectorAll('.prompt-history-item').length, 1);
   assert.equal(elements.promptsList.querySelector('pre').textContent, 'current prompt');
   assert.equal(elements.messages.hasChildNodes(), false);
+}
+
+function openPromptNavigation(prompts) {
+  state.selected = {namespace: 'default', name: 'one', uid: 'uid-one', phase: 'Ready'};
+  const sent = [];
+  state.socket = {readyState: WebSocket.OPEN, send: payload => sent.push(JSON.parse(payload))};
+  openPromptHistory();
+  handleEvent({type: 'prompts', requestId: sent[0].requestId, prompts});
+  return sent;
+}
+
+function clickPromptJump() {
+  elements.promptsList.querySelectorAll('button').find(button => button.textContent === 'Jump to message').listeners.get('click')();
+}
+
+function receiveTranscriptPage(request, events, historyCursor = '') {
+  handleEvent({type: 'history.start', historyPage: true, requestId: request.requestId, historyCursor});
+  for (const event of events) handleEvent(event);
+  handleEvent({type: 'history.end', historyPage: true, requestId: request.requestId});
+}
+
+function testPromptJumpToLoadedMessage() {
+  for (const prompt of [{id: 7, text: 'repeated text'}, {id: 7, text: '', attachments: [{id: 'file-1', name: 'notes.txt'}]}]) {
+    resetHarness();
+    const sent = openPromptNavigation([prompt]);
+    elements.input.value = 'unsent draft';
+    renderAcceptedUser({...prompt, id: 2});
+    renderAcceptedUser(prompt);
+    const rows = elements.messages.querySelectorAll('.event-row.user');
+    state.bottomScrollFrame = window.requestAnimationFrame(() => assert.fail('Jump must cancel bottom anchoring'));
+
+    clickPromptJump();
+
+    assert.equal(rows[0].scrollIntoViewOptions, null);
+    assert.deepEqual(rows[1].scrollIntoViewOptions, {behavior: 'instant', block: 'start'});
+    assert.equal(rows[1].focused, true);
+    assert.deepEqual(rows[1].focusOptions, {preventScroll: true});
+    assert.equal(rows[1].tabIndex, -1);
+    assert.equal(elements.promptsDialog.open, false);
+    assert.equal(state.promptJumpTarget, null);
+    assert.equal(elements.input.value, 'unsent draft');
+    assert.equal(sent.length, 1);
+    assert.equal(state.bottomScrollFrame, null);
+    animationFrames.forEach(callback => callback());
+  }
+}
+
+function testPromptJumpLoadsEarlierPages() {
+  resetHarness();
+  const sent = openPromptNavigation([{id: 5, text: 'earliest prompt'}]);
+  state.historyCursor = 'recent-cursor';
+  state.activeTurn = true;
+  state.activeTurnID = 'live-turn';
+  state.lastEventID = 100;
+  renderAcceptedUser({id: 90, text: 'recent prompt'});
+  requestOlderHistory();
+
+  clickPromptJump();
+
+  assert.equal(sent.length, 2, 'An in-flight page must be reused');
+  assert.equal(elements.promptsDialog.open, true);
+  assert.equal(elements.promptsStatus.textContent, 'Loading messages for prompt 5…');
+  assert.equal(elements.promptsMore.disabled, true);
+  requestPromptHistory();
+  assert.equal(sent.length, 2);
+  receiveTranscriptPage(sent[1], [{type: 'user.message', id: 50, text: 'middle prompt'}], 'older-cursor');
+  assert.equal(sent.length, 3);
+  assert.equal(sent[2].type, 'history');
+  assert.equal(sent[2].historyCursor, 'older-cursor');
+  receiveTranscriptPage(sent[2], [{type: 'user.message', id: 5, text: 'earliest prompt'}], 'more-cursor');
+
+  const rows = elements.messages.querySelectorAll('.event-row.user');
+  assert.deepEqual(rows.map(row => row.dataset.eventId), ['5', '50', '90']);
+  assert.deepEqual(rows[0].scrollIntoViewOptions, {behavior: 'instant', block: 'start'});
+  assert.equal(rows[1].scrollIntoViewOptions, null);
+  assert.equal(rows[2].scrollIntoViewOptions, null);
+  assert.equal(elements.promptsDialog.open, false);
+  assert.equal(state.activeTurn, true);
+  assert.equal(state.activeTurnID, 'live-turn');
+  assert.equal(state.lastEventID, 100);
+  assert.equal(state.historyCursor, 'more-cursor');
+  assert.equal(sent.length, 3, 'Stop loading as soon as the target is found');
+}
+
+function testPromptJumpToEditedPendingMessage() {
+  for (const accepted of [false, true]) {
+    resetHarness();
+    const sent = openPromptNavigation([{id: 5, turnId: 'queued-turn', text: 'draft'}]);
+    applyHistoryState({pendingTurn: {turnId: 'queued-turn', text: 'draft', revision: 1}});
+    handleEvent({type: 'user.message.updated', id: 8, turnId: 'queued-turn', text: 'edited draft', revision: 2});
+    if (accepted) handleEvent({type: 'turn.started', id: 9, turnId: 'queued-turn'});
+    const target = accepted ? elements.messages.querySelectorAll('.event-row.user')[0] : state.pendingMessage.item;
+
+    clickPromptJump();
+
+    assert.deepEqual(target.scrollIntoViewOptions, {behavior: 'instant', block: 'start'});
+    assert.equal(target.focused, true);
+    assert.match(target.textContent, /edited draft/);
+    assert.equal(elements.promptsDialog.open, false);
+    assert.equal(sent.length, 1);
+  }
+}
+
+function testPromptJumpWaitsForInitialHistory() {
+  resetHarness();
+  handleEvent({type: 'history.start', historyCursor: 'older-cursor', lastEventId: 10});
+  const sent = openPromptNavigation([{id: 5, text: 'prompt'}]);
+  clickPromptJump();
+  assert.equal(sent.length, 1);
+  handleEvent({type: 'user.message', id: 5, text: 'prompt'});
+  handleEvent({type: 'history.end', historyState: {}});
+  assert.equal(elements.promptsDialog.open, false);
+  assert.equal(elements.messages.querySelectorAll('.event-row.user')[0].focused, true);
+  assert.equal(sent.length, 1);
+}
+
+function testPromptJumpCancellation() {
+  for (const cancel of [
+    closePromptHistory,
+    () => selectSession({namespace: 'default', name: 'two', uid: 'uid-two', phase: 'Pending'}),
+    resetCurrentSessionView,
+    closeSocket,
+  ]) {
+    resetHarness();
+    const sent = openPromptNavigation([{id: 5, text: 'prompt'}]);
+    state.historyCursor = 'older-cursor';
+    clickPromptJump();
+    assert.equal(sent.length, 2);
+    cancel();
+    assert.equal(state.promptJumpTarget, null);
+    receiveTranscriptPage(sent[1], [{type: 'user.message', id: 5, text: 'prompt'}], 'more-cursor');
+    assert.equal(sent.length, 2);
+    assert.equal(elements.promptsDialog.open, false);
+    for (const row of elements.messages.querySelectorAll('.event-row.user')) assert.equal(row.scrollIntoViewOptions, null);
+  }
+}
+
+function testPromptJumpUnavailableAndPageError() {
+  for (const failure of ['unavailable', 'page-error', 'send-error']) {
+    resetHarness();
+    const sent = openPromptNavigation([{id: 5, text: 'prompt'}]);
+    state.historyCursor = 'older-cursor';
+    if (failure === 'send-error') state.socket.send = () => { throw new Error('connection lost'); };
+    clickPromptJump();
+    if (failure === 'unavailable') receiveTranscriptPage(sent[1], []);
+    if (failure === 'page-error') handleEvent({type: 'error', requestId: sent[1].requestId, text: 'Cursor expired'});
+
+    assert.equal(state.promptJumpTarget, null);
+    assert.equal(state.historyPageLoading, false);
+    assert.equal(elements.promptsDialog.open, true);
+    assert.equal(elements.promptsMore.disabled, false);
+    assert.equal(elements.promptsStatus.textContent, failure === 'unavailable'
+      ? 'This prompt is no longer available in the conversation'
+      : 'Could not load messages for this prompt; try again');
+    renderAcceptedUser({id: 5, text: 'prompt'});
+    clickPromptJump();
+    assert.equal(elements.promptsDialog.open, false);
+    assert.equal(elements.messages.querySelectorAll('.event-row.user')[0].focused, true);
+  }
 }
 
 function testSessionViewSaveAndRestore() {
@@ -1262,6 +1425,12 @@ testPendingMessageRemoval();
 testPendingMessageSurvivesCompletedHistoryReplay();
 testPromptHistoryErrorEmptyAndSessionSwitch();
 testPromptHistoryReloadsAfterPageError();
+testPromptJumpToLoadedMessage();
+testPromptJumpLoadsEarlierPages();
+testPromptJumpToEditedPendingMessage();
+testPromptJumpWaitsForInitialHistory();
+testPromptJumpCancellation();
+testPromptJumpUnavailableAndPageError();
 testReadySessionDisconnectsWhenItBecomesPending()
   .then(testComposerIgnoresReentrantSubmission)
   .then(testPromptHistoryBrowseAndReuse)

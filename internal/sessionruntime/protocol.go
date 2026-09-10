@@ -68,6 +68,7 @@ type Event struct {
 // Prompt is a retained user submission, with its latest accepted text.
 type Prompt struct {
 	ID          int64        `json:"id"`
+	TurnID      string       `json:"turnId,omitempty"`
 	Text        string       `json:"text"`
 	Timestamp   *time.Time   `json:"timestamp,omitempty"`
 	Attachments []Attachment `json:"attachments,omitempty"`

@@ -153,14 +153,24 @@ var _ = Describe("Session remote control", func() {
 
 		connection := connectSessionWebSocket(webClient, baseURL, f.Namespace, sessionName)
 		DeferCleanup(func() { _ = connection.Close() })
-		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "subscribe"})
+		sendSessionRequest(connection, sessionruntime.ClientRequest{
+			Type:          "subscribe",
+			HistoryBounds: true,
+			HistoryItems:  sessionruntime.DefaultHistoryItemLimit,
+			HistoryBytes:  sessionruntime.DefaultHistoryByteLimit,
+		})
 		seenFirstTurn := false
 		seenSecondTurn := false
+		retainedPrompts := make(map[int64]string)
 		for {
 			event := readSessionEvent(connection)
+			if event.Type == sessionruntime.EventUserMessage {
+				retainedPrompts[event.ID] = event.Text
+			}
 			seenFirstTurn = seenFirstTurn || strings.Contains(event.Text, "turn 1: terminal-one")
 			seenSecondTurn = seenSecondTurn || strings.Contains(event.Text, "turn 2: terminal-two")
 			if event.Type == sessionruntime.EventHistoryEnd {
+				Expect(event.HistoryState).NotTo(BeNil())
 				break
 			}
 		}
@@ -175,6 +185,10 @@ var _ = Describe("Session remote control", func() {
 		Expect(promptPage.Prompts).To(HaveLen(2))
 		Expect(promptPage.Prompts[0].Text).To(Equal("terminal-one"))
 		Expect(promptPage.Prompts[1].Text).To(Equal("terminal-two"))
+		for _, prompt := range promptPage.Prompts {
+			Expect(retainedPrompts).To(HaveKeyWithValue(prompt.ID, prompt.Text))
+			Expect(prompt.TurnID).NotTo(BeEmpty())
+		}
 
 		By("continuing the terminal conversation through web chat")
 		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "message", Text: "web"})

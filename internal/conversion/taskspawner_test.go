@@ -266,6 +266,222 @@ func TestTaskSpawnerConvert_ModernFieldsRoundTrip(t *testing.T) {
 	}
 }
 
+// TestTaskSpawnerConvert_SlackExcludeFiltersRoundTrip verifies that the
+// v1alpha2-only slack excludeFilters field survives a v1alpha1 round-trip via
+// its preservation annotation while shared Slack fields are carried directly.
+func TestTaskSpawnerConvert_SlackExcludeFiltersRoundTrip(t *testing.T) {
+	src := &v1alpha2.TaskSpawner{
+		Spec: v1alpha2.TaskSpawnerSpec{
+			When: v1alpha2.When{
+				Slack: &v1alpha2.Slack{
+					Channels:       []string{"C0123456789"},
+					ExcludeFilters: []v1alpha2.SlackFilter{{Channels: []string{"C9876543210", "D0123456789"}}},
+				},
+			},
+		},
+	}
+
+	down := &v1alpha1.TaskSpawner{}
+	if err := taskSpawnerFromHub(context.Background(), src, down); err != nil {
+		t.Fatalf("taskSpawnerFromHub() error = %v", err)
+	}
+	if down.Spec.When.Slack == nil {
+		t.Fatal("expected slack config after down-conversion")
+	}
+	if len(down.Spec.When.Slack.Channels) != 1 || down.Spec.When.Slack.Channels[0] != "C0123456789" {
+		t.Errorf("shared channels not preserved: %#v", down.Spec.When.Slack.Channels)
+	}
+	// v1alpha1 cannot represent excludeFilters — the rules survive only via the
+	// preservation annotation.
+	if raw, ok := down.Annotations[preservedSlackExcludeFiltersAnnotation]; !ok ||
+		raw != `[{"channels":["C9876543210","D0123456789"]}]` {
+		t.Errorf("preservation annotation = %q, want the excludeFilters JSON", raw)
+	}
+
+	up := &v1alpha2.TaskSpawner{}
+	if err := taskSpawnerToHub(context.Background(), down, up); err != nil {
+		t.Fatalf("taskSpawnerToHub() error = %v", err)
+	}
+	if up.Spec.When.Slack == nil {
+		t.Fatal("expected slack config after up-conversion")
+	}
+	got := up.Spec.When.Slack.ExcludeFilters
+	if len(got) != 1 {
+		t.Fatalf("restored %d exclusion rules, want 1: %#v", len(got), got)
+	}
+	if channels := got[0].Channels; len(channels) != 2 ||
+		channels[0] != "C9876543210" || channels[1] != "D0123456789" {
+		t.Errorf("exclusion rule not restored intact: %#v", got[0])
+	}
+	if _, ok := up.Annotations[preservedSlackExcludeFiltersAnnotation]; ok {
+		t.Error("preservation annotation not cleaned up after restore")
+	}
+}
+
+func TestTaskSpawnerToHub_MalformedSlackExcludeFiltersAnnotationIgnored(t *testing.T) {
+	// The preservation annotation is user-editable; a malformed value must not
+	// block conversion to the storage version. It is treated as absent and
+	// stripped from the hub object so the internal key does not leak into the
+	// v1alpha2 view.
+	spoke := &v1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chat",
+			Namespace: "default",
+			Annotations: map[string]string{
+				preservedSlackExcludeFiltersAnnotation: "[not valid json",
+			},
+		},
+		Spec: v1alpha1.TaskSpawnerSpec{
+			When: v1alpha1.When{Slack: &v1alpha1.Slack{Channels: []string{"C0123456789"}}},
+		},
+	}
+
+	hub := &v1alpha2.TaskSpawner{}
+	if err := taskSpawnerToHub(context.Background(), spoke, hub); err != nil {
+		t.Fatalf("taskSpawnerToHub() error = %v", err)
+	}
+	if hub.Spec.When.Slack == nil {
+		t.Fatal("expected slack config after up-conversion")
+	}
+	if got := hub.Spec.When.Slack.ExcludeFilters; len(got) != 0 {
+		t.Errorf("excludeFilters = %#v, want none from a malformed annotation", got)
+	}
+	if _, ok := hub.Annotations[preservedSlackExcludeFiltersAnnotation]; ok {
+		t.Error("malformed preservation annotation should still be stripped from the hub object")
+	}
+}
+
+// marshalChannelRule builds one exclusion rule carrying n unique, well-formed
+// Slack channel IDs, for exercising the per-rule maxItems boundary.
+func marshalChannelRule(t *testing.T, n int) string {
+	t.Helper()
+	ids := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		ids = append(ids, fmt.Sprintf("C%09d", i))
+	}
+	return marshalSlackRules(t, []v1alpha2.SlackFilter{{Channels: ids}})
+}
+
+// marshalChannelRules builds n exclusion rules, each carrying one channel ID,
+// for exercising the rule-count maxItems boundary.
+func marshalChannelRules(t *testing.T, n int) string {
+	t.Helper()
+	rules := make([]v1alpha2.SlackFilter, 0, n)
+	for i := 0; i < n; i++ {
+		rules = append(rules, v1alpha2.SlackFilter{Channels: []string{fmt.Sprintf("C%09d", i)}})
+	}
+	return marshalSlackRules(t, rules)
+}
+
+func marshalSlackRules(t *testing.T, rules []v1alpha2.SlackFilter) string {
+	t.Helper()
+	raw, err := json.Marshal(rules)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	return string(raw)
+}
+
+func TestTaskSpawnerToHub_InvalidSlackExcludeFiltersAnnotationIgnored(t *testing.T) {
+	// The API server does not re-validate conversion output, so annotation data
+	// that violates the v1alpha2 constraints must not be restored — otherwise a
+	// v1alpha1 write could plant values the v1alpha2 schema would have rejected.
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{"channel id that fails the item pattern", `[{"channels":["c0123456789"]}]`},
+		{"channel id that is too short", `[{"channels":["C123"]}]`},
+		{"more channels than maxItems allows", marshalChannelRule(t, v1alpha2.SlackFilterChannelsMaxItems+1)},
+		{"more rules than maxItems allows", marshalChannelRules(t, v1alpha2.SlackExcludeFiltersMaxItems+1)},
+		{"duplicate channels in a set", `[{"channels":["C0123456789","C0123456789"]}]`},
+		// A rule with no criteria matches every message, so restoring one would
+		// silently stop the spawner from firing anywhere.
+		{"rule with no criteria", `[{}]`},
+		{"rule with an empty channel list", `[{"channels":[]}]`},
+		{"a bare channel list rather than rules", `["C0123456789"]`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spoke := &v1alpha1.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "chat",
+					Namespace:   "default",
+					Annotations: map[string]string{preservedSlackExcludeFiltersAnnotation: tt.raw},
+				},
+				Spec: v1alpha1.TaskSpawnerSpec{
+					When: v1alpha1.When{Slack: &v1alpha1.Slack{Channels: []string{"C0123456789"}}},
+				},
+			}
+
+			hub := &v1alpha2.TaskSpawner{}
+			if err := taskSpawnerToHub(context.Background(), spoke, hub); err != nil {
+				t.Fatalf("taskSpawnerToHub() error = %v", err)
+			}
+			if hub.Spec.When.Slack == nil {
+				t.Fatal("expected slack config after up-conversion")
+			}
+			if got := hub.Spec.When.Slack.ExcludeFilters; len(got) != 0 {
+				t.Errorf("excludeFilters = %#v, want none from annotation data that violates the field constraints", got)
+			}
+			if _, ok := hub.Annotations[preservedSlackExcludeFiltersAnnotation]; ok {
+				t.Error("invalid preservation annotation should still be stripped from the hub object")
+			}
+		})
+	}
+}
+
+func TestTaskSpawnerToHub_MaxSlackExcludeFiltersAnnotationRestored(t *testing.T) {
+	// The boundary case must still restore: exactly maxItems valid, unique IDs.
+	spoke := &v1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chat",
+			Namespace: "default",
+			Annotations: map[string]string{
+				preservedSlackExcludeFiltersAnnotation: marshalChannelRule(t, v1alpha2.SlackFilterChannelsMaxItems),
+			},
+		},
+		Spec: v1alpha1.TaskSpawnerSpec{
+			When: v1alpha1.When{Slack: &v1alpha1.Slack{}},
+		},
+	}
+
+	hub := &v1alpha2.TaskSpawner{}
+	if err := taskSpawnerToHub(context.Background(), spoke, hub); err != nil {
+		t.Fatalf("taskSpawnerToHub() error = %v", err)
+	}
+	got := hub.Spec.When.Slack.ExcludeFilters
+	if len(got) != 1 {
+		t.Fatalf("restored %d exclusion rules, want 1", len(got))
+	}
+	if len(got[0].Channels) != v1alpha2.SlackFilterChannelsMaxItems {
+		t.Errorf("restored %d channels, want %d", len(got[0].Channels), v1alpha2.SlackFilterChannelsMaxItems)
+	}
+}
+
+func TestTaskSpawnerFromHub_NoSlackExcludeFiltersOmitsAnnotation(t *testing.T) {
+	hub := &v1alpha2.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chat",
+			Namespace: "default",
+			Annotations: map[string]string{
+				preservedSlackExcludeFiltersAnnotation: `[{"channels":["C9876543210"]}]`,
+			},
+		},
+		Spec: v1alpha2.TaskSpawnerSpec{
+			When: v1alpha2.When{Slack: &v1alpha2.Slack{Channels: []string{"C0123456789"}}},
+		},
+	}
+	spoke := &v1alpha1.TaskSpawner{}
+	if err := taskSpawnerFromHub(context.Background(), hub, spoke); err != nil {
+		t.Fatalf("taskSpawnerFromHub() error = %v", err)
+	}
+	if _, ok := spoke.Annotations[preservedSlackExcludeFiltersAnnotation]; ok {
+		t.Error("annotation should be cleared when excludeFilters is empty")
+	}
+}
+
 // TestTaskSpawnerConvert_CheckRunFilterFieldsDownConvert verifies that the
 // v1alpha2-only check_run filter fields (Conclusion, CheckName) convert down to
 // v1alpha1 without error. v1alpha1 has no equivalent fields, so they are dropped

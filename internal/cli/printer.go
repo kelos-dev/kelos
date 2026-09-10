@@ -330,6 +330,12 @@ func printTaskSpawnerDetail(w io.Writer, ts *kelos.TaskSpawner) {
 		if len(sl.Channels) > 0 {
 			printField(w, "Channels", fmt.Sprintf("%v", sl.Channels))
 		}
+		// Exclusion rules are why a spawner can look correctly configured and
+		// still not fire, so surface that they exist. The detail view prints
+		// scalars only; use -o yaml for the rules themselves.
+		if len(sl.ExcludeFilters) > 0 {
+			printField(w, "Exclude Filters", fmt.Sprintf("%d", len(sl.ExcludeFilters)))
+		}
 		if len(sl.Triggers) > 0 {
 			patterns := make([]string, len(sl.Triggers))
 			for i, tr := range sl.Triggers {

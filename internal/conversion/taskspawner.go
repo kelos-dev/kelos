@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -53,6 +54,16 @@ type preservedWebhookGatewayRefs struct {
 	Generic *v1alpha2.GatewayReference `json:"generic,omitempty"`
 }
 
+// preservedSlackExcludeFiltersAnnotation carries spec.when.slack.excludeFilters
+// (a v1alpha2-only field) across a v1alpha1 round-trip so a client that reads
+// and writes the object through v1alpha1 does not silently drop it. v1alpha1
+// does not gain the capability — the value only survives in this annotation.
+// Silently dropping an exclusion re-admits the events it suppressed, which is
+// why the value is preserved rather than left to fall away.
+const preservedSlackExcludeFiltersAnnotation = "kelos.dev/v1alpha2-slack-exclude-filters"
+
+var slackFilterChannelIDPattern = regexp.MustCompile(v1alpha2.SlackFilterChannelIDPattern)
+
 type preservedGitHubCommentsReporting struct {
 	GitHubIssues       *preservedGitHubCommentsSource `json:"githubIssues,omitempty"`
 	GitHubPullRequests *preservedGitHubCommentsSource `json:"githubPullRequests,omitempty"`
@@ -89,6 +100,8 @@ func taskSpawnerToHub(_ context.Context, src *v1alpha1.TaskSpawner, dst *v1alpha
 	deleteAnnotation(dst.Annotations, preservedWebhookGatewayRefsAnnotation)
 	restorePreservedGitHubWebhookExcludeFilters(src.Annotations, dst.Spec.When.GitHubWebhook)
 	deleteAnnotation(dst.Annotations, preservedGitHubWebhookExcludeFiltersAnnotation)
+	restorePreservedSlackExcludeFilters(src.Annotations, dst.Spec.When.Slack)
+	deleteAnnotation(dst.Annotations, preservedSlackExcludeFiltersAnnotation)
 	return nil
 }
 
@@ -115,6 +128,9 @@ func taskSpawnerFromHub(_ context.Context, src *v1alpha2.TaskSpawner, dst *v1alp
 		return err
 	}
 	if err := setPreservedGitHubWebhookExcludeFilters(dst, src.Spec.When.GitHubWebhook); err != nil {
+		return err
+	}
+	if err := setPreservedSlackExcludeFilters(dst, src.Spec.When.Slack); err != nil {
 		return err
 	}
 	return convertViaJSON(&src.Status, &dst.Status)
@@ -205,7 +221,7 @@ func validGitHubWebhookExcludeFilter(filter v1alpha2.GitHubWebhookFilter) bool {
 		return false
 	}
 
-	set := setGitHubWebhookCriteria(filter)
+	set := criteriaWithValues(filter)
 	for _, criterion := range v1alpha2.GitHubWebhookExcludeFilterRejectedCriteria() {
 		if set[criterion] {
 			return false
@@ -266,10 +282,11 @@ func validGitHubWebhookFilterEnums(filter v1alpha2.GitHubWebhookFilter) bool {
 	return true
 }
 
-// setGitHubWebhookCriteria returns the JSON tags of the filter's criteria that
-// carry a value, so the checks above can be driven by the API package's
-// criteria buckets instead of a parallel list of field accesses.
-func setGitHubWebhookCriteria(filter v1alpha2.GitHubWebhookFilter) map[string]bool {
+// criteriaWithValues returns the JSON tags of a filter's criteria that carry a
+// value, so the exclusion checks can be driven by the API package's criteria
+// lists instead of a parallel set of field accesses. It serves every source's
+// filter type: the shape of the walk is the same, only the struct differs.
+func criteriaWithValues(filter any) map[string]bool {
 	set := map[string]bool{}
 	value := reflect.ValueOf(filter)
 	typ := value.Type()
@@ -366,6 +383,103 @@ func restorePreservedNameTemplate(annotations map[string]string, dst *v1alpha2.T
 	if v, ok := annotations[preservedNameTemplateAnnotation]; ok {
 		dst.NameTemplate = v
 	}
+}
+
+// setPreservedSlackExcludeFilters records spec.when.slack.excludeFilters in an
+// annotation on the v1alpha1 object so the rules survive a v1alpha1 round-trip.
+// The annotation is cleared when there is nothing to preserve.
+func setPreservedSlackExcludeFilters(dst *v1alpha1.TaskSpawner, slack *v1alpha2.Slack) error {
+	if slack == nil || len(slack.ExcludeFilters) == 0 {
+		deleteAnnotation(dst.Annotations, preservedSlackExcludeFiltersAnnotation)
+		return nil
+	}
+	data, err := json.Marshal(slack.ExcludeFilters)
+	if err != nil {
+		return err
+	}
+	if dst.Annotations == nil {
+		dst.Annotations = map[string]string{}
+	}
+	dst.Annotations[preservedSlackExcludeFiltersAnnotation] = string(data)
+	return nil
+}
+
+// restorePreservedSlackExcludeFilters restores excludeFilters dropped by a
+// v1alpha1 round-trip, unless the v1alpha2 object already carries the field.
+func restorePreservedSlackExcludeFilters(annotations map[string]string, slack *v1alpha2.Slack) {
+	if slack == nil || len(slack.ExcludeFilters) > 0 {
+		return
+	}
+	raw, ok := annotations[preservedSlackExcludeFiltersAnnotation]
+	if !ok || raw == "" {
+		return
+	}
+	var excludeFilters []v1alpha2.SlackFilter
+	if err := json.Unmarshal([]byte(raw), &excludeFilters); err != nil || len(excludeFilters) == 0 {
+		// The annotation is best-effort preservation data and can be set by
+		// users; malformed data must not block API version conversion.
+		return
+	}
+	if !validSlackExcludeFilters(excludeFilters) {
+		return
+	}
+	slack.ExcludeFilters = excludeFilters
+}
+
+// validSlackExcludeFilters reports whether restored annotation data satisfies
+// every constraint declared on v1alpha2 Slack.ExcludeFilters: a bounded list of
+// rules, each rule setting at least one non-empty criterion, and each channel
+// list bounded, well-formed, and duplicate-free (the field is a set). Data that
+// fails any of these is treated the same as malformed JSON — ignored entirely
+// rather than partially applied — so conversion can never produce a hub object
+// that a v1alpha2 write would have rejected.
+//
+// The at-least-one-criterion check matters most: a rule with no criteria set
+// matches every message, so restoring one would silently stop the spawner from
+// firing anywhere. That is the inversion the CEL rule exists to prevent, so the
+// restore path has to prevent it too.
+func validSlackExcludeFilters(excludeFilters []v1alpha2.SlackFilter) bool {
+	if len(excludeFilters) > v1alpha2.SlackExcludeFiltersMaxItems {
+		return false
+	}
+	for _, filter := range excludeFilters {
+		if !validSlackExcludeFilter(filter) {
+			return false
+		}
+	}
+	return true
+}
+
+func validSlackExcludeFilter(filter v1alpha2.SlackFilter) bool {
+	if !validSlackFilterChannels(filter.Channels) {
+		return false
+	}
+	// Driven by the API package's criteria list so this check and the CEL rule
+	// cannot drift apart as criteria are added.
+	set := criteriaWithValues(filter)
+	for _, criterion := range v1alpha2.SlackFilterMatchCriteria() {
+		if set[criterion] {
+			return true
+		}
+	}
+	return false
+}
+
+func validSlackFilterChannels(channels []string) bool {
+	if len(channels) > v1alpha2.SlackFilterChannelsMaxItems {
+		return false
+	}
+	seen := make(map[string]struct{}, len(channels))
+	for _, id := range channels {
+		if !slackFilterChannelIDPattern.MatchString(id) {
+			return false
+		}
+		if _, dup := seen[id]; dup {
+			return false
+		}
+		seen[id] = struct{}{}
+	}
+	return true
 }
 
 // setPreservedContextGitHubAppAuth records the githubAppAuth block of each

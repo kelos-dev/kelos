@@ -68382,6 +68382,46 @@ spec:
                           type: string
                         maxItems: 64
                         type: array
+                      excludeFilters:
+                        description: |-
+                          ExcludeFilters reject a Slack event when ANY entry matches (OR semantics
+                          across entries, AND semantics for the criteria within one entry). They are
+                          an additional gate on the existing matching, evaluated before everything
+                          else, so a matching Trigger cannot override an exclusion and — unlike
+                          ExcludePatterns — the exclusion also covers slash commands. A criterion
+                          the event does not carry never matches, so it does not reject the event.
+
+                          The rules are only guaranteed while the object is managed through
+                          v1alpha2. This field does not exist in v1alpha1; it survives a v1alpha1
+                          round-trip through a preservation annotation, so a v1alpha1 client that
+                          drops unknown annotations drops the exclusions with them.
+                        items:
+                          description: |-
+                            SlackFilter is a set of matching criteria for a Slack event. Every criterion
+                            that is set must match; a criterion the event does not carry never matches.
+                            The criteria serve both inclusion and exclusion, so one definition and one
+                            matcher back either direction.
+                          properties:
+                            channels:
+                              description: |-
+                                Channels matches events posted in any of the given channel IDs (OR
+                                semantics within the list). Values are channel IDs (e.g. "C0123456789").
+                                Direct-message IDs ("D0123456789") are accepted here even though
+                                Slack.Channels does not accept them, so a spawner that listens in every
+                                channel can still be kept out of DMs.
+                              items:
+                                pattern: ^[CGD][A-Z0-9]{8,}$
+                                type: string
+                              maxItems: 64
+                              type: array
+                              x-kubernetes-list-type: set
+                          type: object
+                          x-kubernetes-validations:
+                          - message: a Slack filter must set at least one non-empty
+                              matching criterion
+                            rule: has(self.channels) && size(self.channels) > 0
+                        maxItems: 20
+                        type: array
                       excludePatterns:
                         description: |-
                           ExcludePatterns rejects messages whose text matches any of the given

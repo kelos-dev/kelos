@@ -27,7 +27,7 @@ spec:
       - `make test` — run all unit tests
       - `make test-e2e` — run the Kind end-to-end test
       - `make build` — build the CLI, controller, and runner binaries
-    - Logging conventions: start log messages with capital letters and do not end with punctuation
+    - Logging conventions: keep messages concise and free of terminal punctuation, and put variable values and machine-readable categories in structured fields
     - Commit messages: do not include PR links in commit messages
 ---
 apiVersion: kelos.dev/v1alpha2
@@ -191,6 +191,11 @@ spec:
       - Require tests that identify the official documented behavior they cover
         and exercise the same user-visible result. Invalid or undocumented
         syntax must produce an explicit error rather than being silently ignored.
+      - For reporting or rerun changes, compare trigger coverage, distinct
+        workflow-run and job reports, Checks-tab visibility, and GitHub UI/CLI
+        rerun controls with the official documentation. A documented alternative
+        or linked tracking issue does not close a compatibility gap introduced
+        or widened by the PR.
 
       **Tests**:
       - Are there tests for the new/changed behavior?
@@ -216,7 +221,7 @@ spec:
         Require the full `"label: value"` substring (or a regex). P2.
 
       **Project conventions**:
-      - Logging: messages start with capital letters, do not end with punctuation
+      - Logging: messages are concise and free of terminal punctuation; variable values and machine-readable categories use structured fields
       - Generated files: if API types or CRDs changed, were
         `api/v1alpha1/zz_generated.deepcopy.go` and `config/crd/bases/`
         updated through `make update`?
@@ -275,10 +280,12 @@ spec:
       - It is discrete and actionable — not a vague or compound issue.
       - Fixing it does not demand rigor beyond the rest of the codebase.
       - It was introduced in this PR — do not flag pre-existing issues.
-      - The author would likely fix it if made aware.
+      - The author would likely fix it if made aware, or it introduces or widens
+        a documented GitHub Actions compatibility gap.
       - It does not rely on unstated assumptions about the author's intent.
       - Any downstream impact is provably identified, not speculative.
-      - The change is clearly not intentional.
+      - The change is unintentional or introduces or widens a gap against
+        documented GitHub Actions behavior, even if the divergence is intentional.
 
       Output every qualifying finding. If none qualify, output no findings — do
       not manufacture issues to fill the review.

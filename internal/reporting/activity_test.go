@@ -240,6 +240,28 @@ func TestExtractOpenCodeActivity(t *testing.T) {
 			want:  "",
 		},
 		{
+			name:  "bash tool event",
+			input: `{"type":"tool_use","part":{"type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"git diff --stat"}}}}`,
+			want:  "Running `git diff --stat`...",
+		},
+		{
+			name:  "read tool event",
+			input: `{"type":"tool_use","part":{"type":"tool","tool":"read","state":{"status":"completed","input":{"filePath":"/workspace/repo/internal/cli/logs.go"}}}}`,
+			want:  "Reading `cli/logs.go`...",
+		},
+		{
+			name:  "grep tool event",
+			input: `{"type":"tool_use","part":{"type":"tool","tool":"grep","state":{"status":"completed","input":{"path":"/workspace/repo","pattern":"ParseAndFormat"}}}}`,
+			want:  "Searching for `ParseAndFormat`...",
+		},
+		{
+			name: "last opencode tool wins",
+			input: `{"type":"step_start"}
+{"type":"tool_use","part":{"type":"tool","tool":"read","state":{"status":"completed","input":{"filePath":"/workspace/repo/a.go"}}}}
+{"type":"tool_use","part":{"type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"make test"}}}}`,
+			want: "Running `make test`...",
+		},
+		{
 			name:  "empty input",
 			input: "",
 			want:  "",

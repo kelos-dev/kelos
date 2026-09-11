@@ -83,6 +83,13 @@ type SkillsShSpec struct {
 	// token authentication when installing a private skills.sh package.
 	// +optional
 	SecretRef *SecretReference `json:"secretRef,omitempty"`
+
+	// Optional, when true, logs an installation failure for this package and
+	// continues installing the remaining packages instead of failing the Task.
+	// Defaults to false. SecretRef validation is not affected: a missing or
+	// invalid Secret still fails the Task before the Job is created.
+	// +optional
+	Optional bool `json:"optional,omitempty"`
 }
 
 // MCPServerSpec defines an MCP server configuration.

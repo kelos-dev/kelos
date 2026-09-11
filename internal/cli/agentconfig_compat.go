@@ -69,7 +69,7 @@ func createAgentConfig(ctx context.Context, cl client.Client, ac *kelos.AgentCon
 	}
 
 	if !agentConfigFitsV1alpha1(ac) {
-		return fmt.Errorf("creating agentconfig %q requires kelos.dev/v1alpha2 CRDs because MCP env valueFrom or skills secretRef is not supported by v1alpha1; run 'kelos install' to upgrade the CRDs", ac.Name)
+		return fmt.Errorf("creating agentconfig %q requires kelos.dev/v1alpha2 CRDs because MCP env valueFrom, skills secretRef, or skills optional is not supported by v1alpha1; run 'kelos install' to upgrade the CRDs", ac.Name)
 	}
 	v1 := &kelosv1alpha1.AgentConfig{}
 	if err := conversion.AgentConfigFromV1alpha2(ctx, ac, v1); err != nil {
@@ -97,7 +97,7 @@ func deleteAgentConfig(ctx context.Context, cl client.Client, name, namespace st
 
 func agentConfigFitsV1alpha1(ac *kelos.AgentConfig) bool {
 	for _, skill := range ac.Spec.Skills {
-		if skill.SecretRef != nil {
+		if skill.SecretRef != nil || skill.Optional {
 			return false
 		}
 	}

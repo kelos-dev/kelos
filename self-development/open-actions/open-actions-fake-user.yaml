@@ -57,7 +57,7 @@ spec:
       agentConfigRefs:
         - name: base-agent
         - name: open-actions-fake-user-agent
-    ttlSecondsAfterFinished: 864000
+    ttlSecondsAfterFinished: 86400
     podFailurePolicy:
       rules:
         - action: Ignore

@@ -67,7 +67,7 @@ spec:
       agentConfigRefs:
         - name: base-agent
         - name: agora-planner-agent
-    ttlSecondsAfterFinished: 864000
+    ttlSecondsAfterFinished: 86400
     podFailurePolicy:
       rules:
         - action: Ignore

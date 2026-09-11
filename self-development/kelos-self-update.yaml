@@ -61,7 +61,7 @@ spec:
       agentConfigRefs:
         - name: base-agent
         - name: kelos-self-update-agent
-    ttlSecondsAfterFinished: 864000
+    ttlSecondsAfterFinished: 86400
     podFailurePolicy:
       rules:
         - action: Ignore

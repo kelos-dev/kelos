@@ -86,7 +86,7 @@ spec:
       agentConfigRefs:
         - name: base-agent
         - name: agora-reviewer-agent
-    ttlSecondsAfterFinished: 864000
+    ttlSecondsAfterFinished: 86400
     podFailurePolicy:
       rules:
         - action: Ignore

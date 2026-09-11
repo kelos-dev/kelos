@@ -26,7 +26,7 @@ spec:
           ephemeral-storage: "10Gi"
         limits:
           ephemeral-storage: "10Gi"
-  ttlSecondsAfterFinished: 864000
+  ttlSecondsAfterFinished: 86400
   podFailurePolicy:
     rules:
       - action: Ignore

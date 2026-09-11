@@ -609,6 +609,17 @@ connect to Sessions across namespaces while operating on one active namespace
 at a time. Users can switch the active namespace live from the sidebar.
 `consoleServer.defaultNamespace` sets its initial value, and resource inventory,
 Session form options, and credential options are loaded only from the active namespace.
+Select **Browser alerts: Off** in the sidebar to opt in to browser notifications.
+Alerts cover input requests and completed or failed work in the connected Session
+when you are away from its conversation, including in another console view,
+browser tab, or application. Clicking an alert opens that Session if it is still
+available in the active namespace. Alerts are dismissed when the console detects
+that a Session was removed or replaced. The setting is saved in this browser;
+notifications require browser permission, a secure connection (HTTPS or localhost),
+and support for notifications from an open page. Most mobile browsers do not support
+these page notifications.
+Keep the console tab open and connected: other Sessions and events replayed after
+a reconnect do not produce alerts. Interrupted work does not produce an alert.
 Sessions open in the **Conversation** view. Select the **Terminal** tab alongside
 **Conversation** and **Changes** on a Ready Session to start an interactive shell
 in its agent container. The shell uses the agent container's workspace and

@@ -467,6 +467,8 @@ const elements = requireElements({
   openSidebar: document.querySelector('#open-sidebar'),
   closeSidebar: document.querySelector('#close-sidebar'),
   sidebarScrim: document.querySelector('#sidebar-scrim'),
+  browserAlerts: document.querySelector('#browser-alerts'),
+  browserAlertsStatus: document.querySelector('#browser-alerts-status'),
   toast: document.querySelector('#toast'),
 });
 
@@ -541,6 +543,9 @@ const state = {
   sectionAssignments: new Set<string>(),
   sectionOrders: new Map<string, string[]>(),
   sidebarDrag: null as SidebarDrag | null,
+  browserAlertsEnabled: false,
+  browserAlertsPending: false,
+  browserAlertsUnavailable: '',
 };
 
 const customOption = '__custom__';
@@ -592,6 +597,136 @@ function showToast(message: string) {
   elements.toast.classList.add('show');
   window.clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => elements.toast.classList.remove('show'), 3200);
+}
+
+const browserAlertsStorageKey = 'kelos-console-browser-alerts';
+const browserNotifications = new Map<string, Notification>();
+
+function browserAlertSupportError() {
+  if (!window.isSecureContext) return 'Browser alerts require HTTPS or localhost.';
+  if (typeof window.Notification !== 'function') return 'This browser does not support browser alerts.';
+  return state.browserAlertsUnavailable;
+}
+
+function renderBrowserAlerts() {
+  const unavailable = browserAlertSupportError();
+  const blocked = !unavailable && Notification.permission === 'denied';
+  const enabled = !unavailable && state.browserAlertsEnabled && Notification.permission === 'granted';
+  elements.browserAlerts.disabled = Boolean(unavailable || blocked || state.browserAlertsPending);
+  elements.browserAlerts.setAttribute('aria-pressed', String(Boolean(enabled)));
+  elements.browserAlerts.textContent = `Browser alerts: ${unavailable ? 'Unavailable' : blocked ? 'Blocked' : state.browserAlertsPending ? 'Enabling…' : enabled ? 'On' : 'Off'}`;
+  elements.browserAlertsStatus.textContent = unavailable || (blocked
+    ? 'Allow notifications in your browser’s site settings to enable alerts.'
+    : 'Notify when the connected Session needs input or finishes while you’re away. Keep this tab open.');
+}
+
+function closeBrowserNotifications() {
+  for (const notification of browserNotifications.values()) notification.close();
+  browserNotifications.clear();
+}
+
+function pruneBrowserNotifications(sessions: SessionSummary[]) {
+  const current = new Set(sessions.map(sessionViewKey));
+  for (const [key, notification] of browserNotifications) {
+    if (current.has(key)) continue;
+    notification.close();
+    browserNotifications.delete(key);
+  }
+}
+
+function loadBrowserAlertPreference() {
+  try {
+    state.browserAlertsEnabled = window.localStorage.getItem(browserAlertsStorageKey) === 'true';
+  } catch (_) {
+    state.browserAlertsEnabled = false;
+  }
+  if (!state.browserAlertsEnabled) closeBrowserNotifications();
+  renderBrowserAlerts();
+}
+
+async function toggleBrowserAlerts() {
+  if (state.browserAlertsPending || browserAlertSupportError()) return;
+  if (state.browserAlertsEnabled && Notification.permission === 'granted') {
+    state.browserAlertsEnabled = false;
+    closeBrowserNotifications();
+  } else {
+    state.browserAlertsPending = true;
+    renderBrowserAlerts();
+    try {
+      const permission = Notification.permission === 'default'
+        ? await Notification.requestPermission()
+        : Notification.permission;
+      state.browserAlertsEnabled = permission === 'granted';
+      if (!state.browserAlertsEnabled) {
+        showToast(permission === 'denied'
+          ? 'Browser alerts are blocked in your browser’s site settings'
+          : 'Browser alerts were not enabled');
+      }
+    } catch (error) {
+      state.browserAlertsEnabled = false;
+      showToast(`Could not enable browser alerts: ${errorMessage(error)}`);
+    } finally {
+      state.browserAlertsPending = false;
+    }
+  }
+  try {
+    window.localStorage.setItem(browserAlertsStorageKey, String(state.browserAlertsEnabled));
+  } catch (_) {
+    showToast('Browser alert preference applies to this tab only because it could not be saved');
+  }
+  renderBrowserAlerts();
+}
+
+function notifySessionEvent(event: ConsoleEvent) {
+  if (!state.selected || state.replayingHistory || (event.id && event.id <= state.lastEventID)) return;
+  let title: string;
+  let body: string;
+  if (event.type === 'input.requested') {
+    title = 'Input needed';
+    body = 'Your Session is waiting for an answer.';
+  } else if (event.type === 'turn.completed' && event.status === 'completed') {
+    title = 'Work completed';
+    body = 'Your Session has finished its work.';
+  } else if (event.type === 'turn.completed' && event.status === 'failed') {
+    title = 'Work failed';
+    body = 'Open the conversation to see the error.';
+  } else {
+    return;
+  }
+  if (!state.browserAlertsEnabled || browserAlertSupportError() || Notification.permission !== 'granted') return;
+  if (document.visibilityState === 'visible' && document.hasFocus()
+      && state.consoleView === 'sessions' && !elements.messages.hidden) return;
+
+  const session = state.selected;
+  const key = sessionViewKey(session);
+  try {
+    browserNotifications.get(key)?.close();
+    const notification = new Notification(`${title} · ${sessionDisplayName(session)}`, {
+      body: `${session.namespace} · ${body}`,
+      tag: `kelos-session-${key}`,
+    });
+    browserNotifications.set(key, notification);
+    notification.addEventListener('close', () => {
+      if (browserNotifications.get(key) === notification) browserNotifications.delete(key);
+    });
+    notification.addEventListener('click', () => {
+      notification.close();
+      window.focus();
+      if (session.namespace !== state.namespace) return;
+      const current = state.sessions.find(item => sessionViewKey(item) === key);
+      if (!current) {
+        showToast(`Session ${session.name} is no longer available`);
+        return;
+      }
+      selectSession(current);
+      setConsoleView('sessions');
+    });
+  } catch (error) {
+    state.browserAlertsUnavailable = 'This browser could not display alerts from the console.';
+    closeBrowserNotifications();
+    renderBrowserAlerts();
+    showToast(`Could not display browser alert: ${errorMessage(error)}`);
+  }
 }
 
 const allResourceKind = '__all__';
@@ -2168,6 +2303,7 @@ async function loadSessions({quiet = false} = {}) {
     const sessions = await api<SessionSummary[]>(`/api/sessions?namespace=${encodeURIComponent(namespace)}`);
     if (generation !== state.namespaceGeneration || listGeneration !== state.sessionListGeneration) return;
     state.sessions = sessions;
+    pruneBrowserNotifications(sessions);
     renderSectionOptions();
     if (state.selected) {
       const selected = state.selected;
@@ -2282,6 +2418,7 @@ function resetNamespaceReferences() {
 async function switchNamespace(namespace) {
   namespace = namespace.trim();
   if (!namespace || namespace === state.namespace) return;
+  closeBrowserNotifications();
   const hadLoadedSource = Boolean(state.loadedSource);
   state.namespace = namespace;
   state.namespaceGeneration += 1;
@@ -3940,6 +4077,7 @@ function handleEvent(event) {
       return;
     }
   }
+  notifySessionEvent(event);
   if (event.id) state.lastEventID = Math.max(state.lastEventID, event.id);
   const recoveredCompletion = state.runtimeRecoveryActive && event.type === 'turn.completed' && event.status === 'interrupted';
   if (state.runtimeRecoveryActive && !isRuntimeRecoveryEvent(event)) state.runtimeRecoveryActive = false;
@@ -5485,6 +5623,7 @@ requiredElement('#refresh-console').addEventListener('click', () => {
   void refreshConsole();
 });
 requiredElement('#logout').addEventListener('click', async () => {
+  closeBrowserNotifications();
   await api<void>('/api/logout', {method: 'POST'}).catch(() => {});
   window.location.replace('/login');
 });
@@ -5519,6 +5658,14 @@ document.addEventListener('keydown', event => {
   }
   if (event.key === 'Escape' && elements.sidebar.classList.contains('open')) setSidebarOpen(false);
 });
+
+elements.browserAlerts.addEventListener('click', toggleBrowserAlerts);
+window.addEventListener('focus', renderBrowserAlerts);
+window.addEventListener('pagehide', closeBrowserNotifications);
+window.addEventListener('storage', event => {
+  if (event.key === browserAlertsStorageKey || event.key === null) loadBrowserAlertPreference();
+});
+loadBrowserAlertPreference();
 
 const configReady = loadConfig();
 configReady.then(() => Promise.all([loadOptions(), loadSessions(), loadResources()])).then(() => {

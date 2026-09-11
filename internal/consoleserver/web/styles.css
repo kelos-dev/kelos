@@ -120,6 +120,10 @@ button { color: inherit; }
 .session-model { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-empty { padding: 14px 10px; color: var(--faint); font-size: 12px; line-height: 1.5; }
 .sidebar-footer { display: flex; justify-content: space-between; gap: 8px; margin-top: auto; padding: 7px 3px 0; border-top: 1px solid var(--line); }
+.browser-alert-settings { flex: none; padding: 7px 3px; border-top: 1px solid var(--line); }
+.browser-alert-settings button { width: 100%; text-align: left; }
+.browser-alert-settings button:disabled { cursor: default; color: var(--faint); }
+.browser-alert-settings small { display: block; padding: 0 8px 5px; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .sidebar-scrim { display: none; }
 .quiet-button { min-height: 36px; padding: 7px 8px; border: 0; border-radius: 8px; background: none; color: var(--muted); font-size: 12px; font-weight: 500; cursor: pointer; }
 .quiet-button:hover { background: var(--line-soft); color: var(--ink); }
@@ -550,7 +554,7 @@ button { color: inherit; }
   .session-item-meta, .session-item-branch { margin-top: 2px; }
   .session-item-pull-request { margin-bottom: 6px; }
   .sidebar-footer { padding: 5px 3px 0; }
-  .sidebar-footer .quiet-button { min-height: 44px; }
+  .sidebar-footer .quiet-button, .browser-alert-settings .quiet-button { min-height: 44px; }
   .console-page { height: 100%; height: 100dvh; }
   .console-page-header { min-height: calc(58px + env(safe-area-inset-top)); padding: calc(7px + env(safe-area-inset-top)) calc(10px + env(safe-area-inset-right)) 7px calc(10px + env(safe-area-inset-left)); }
   .console-page-header h1 { font-size: 18px; }

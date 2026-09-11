@@ -793,7 +793,7 @@ func (p *CodexProvider) handleNotification(method string, params json.RawMessage
 	done := p.turnDone
 	kind := p.interactionKind
 	p.activeMu.Unlock()
-	if json.Unmarshal(params, &scope) == nil && scope.ThreadID != "" && scope.ThreadID != threadID {
+	if threadID != "" && json.Unmarshal(params, &scope) == nil && scope.ThreadID != "" && scope.ThreadID != threadID {
 		return
 	}
 

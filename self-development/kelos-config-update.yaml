@@ -56,7 +56,7 @@ spec:
 
       Agent configuration includes:
       - `AGENTS.md` — project-level conventions and instructions for all agents
-      - `self-development/base-agent.yaml` — checked-in copy of `gjkim42/kanon-repo` instructions and shared skills
+      - `self-development/base-agent.yaml` — checked-in copy of `gjkim42/kanon-repo` instructions and selected shared skills
       - `self-development/agentconfig.yaml` — Kelos-specific AgentConfig used by general-purpose TaskSpawners
       - `self-development/*.yaml` — TaskSpawner and SessionSpawner prompt templates that guide each agent's behavior
 
@@ -84,7 +84,7 @@ spec:
          **Project-level changes** (affect all agents):
          - Update `AGENTS.md` if the feedback is about general project conventions
          - Update the applicable role-specific AgentConfig for shared TaskSpawner behavior
-         - Only update `self-development/base-agent.yaml` to synchronize changes from its upstream `gjkim42/kanon-repo` sources
+         - Only update `self-development/base-agent.yaml` to synchronize upstream instructions or its individually selected shared skills from `gjkim42/kanon-repo`
 
          **Task-specific changes** (affect a specific agent):
          - Update the relevant spawner prompt in `self-development/*.yaml`

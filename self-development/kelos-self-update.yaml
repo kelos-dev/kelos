@@ -94,7 +94,7 @@ spec:
          - Check that resource requests/limits, models, TTLs, and other settings are appropriate
          - Verify that webhook repositories, events, labels, excludeLabels, and filters are correct and consistent
          - Ensure every root spawner references `base-agent` first, with role-specific AgentConfigs after it
-         - Ensure `base-agent.yaml` matches `gjkim42/kanon-repo`'s `instructions/AGENTS.md` and shared skills package
+         - Ensure `base-agent.yaml` matches `gjkim42/kanon-repo`'s `instructions/AGENTS.md` and lists each intended shared skill individually
          - Look for inconsistencies between spawners that should share the same configuration
 
       3. **Workflow Completeness**

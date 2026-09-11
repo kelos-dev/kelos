@@ -183,9 +183,14 @@ func startKelosWebhookReadinessFixture() {
 	ensureKelosWebhookFixtureState()
 
 	fixtureCtx, stop := context.WithCancel(ctx)
-	DeferCleanup(stop)
+	done := make(chan struct{})
+	DeferCleanup(func() {
+		stop()
+		<-done
+	})
 
 	go func() {
+		defer close(done)
 		ticker := time.NewTicker(100 * time.Millisecond)
 		defer ticker.Stop()
 		for {

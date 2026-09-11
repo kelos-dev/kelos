@@ -178,6 +178,12 @@ func TestAgentConfigRoundTrip_PreservesOptionalSkill(t *testing.T) {
 	if len(hub.Spec.Skills) != 1 || !hub.Spec.Skills[0].Optional {
 		t.Fatalf("Skills = %#v, want one optional skill", hub.Spec.Skills)
 	}
+	if _, ok := hub.Annotations[preservedSkillsOptionalAnnotation]; ok {
+		t.Errorf("hub annotation %q should be removed after restore", preservedSkillsOptionalAnnotation)
+	}
+	if spoke.Annotations[preservedSkillsOptionalAnnotation] == "" {
+		t.Errorf("source spoke annotation %q should not be mutated during restore", preservedSkillsOptionalAnnotation)
+	}
 }
 
 func TestAgentConfigRoundTrip_DoesNotRestoreReorderedDuplicateOptionalSkill(t *testing.T) {

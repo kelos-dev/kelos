@@ -142,3 +142,44 @@ func TestBuildSkillsInstallScript_AllOptionalFailuresAllowEmptyPluginDir(t *test
 		t.Fatalf("plugin skills directory %s was not created: %v", pluginSkillsDir, err)
 	}
 }
+
+func TestBuildSkillsInstallScript_RequiredPackageInstallingNothingFails(t *testing.T) {
+	result := runSkillsInstallScriptWithSetup(t,
+		[]kelos.SkillsShSpec{{Source: "silent/package"}},
+		func(root string) {
+			writeStubNpx(t, root, "exit 0\n")
+		},
+	)
+
+	if result.err == nil {
+		t.Fatalf("script succeeded despite installing no skills\n%s", result.output)
+	}
+	if !strings.Contains(result.output, "No skills.sh skills were installed") {
+		t.Fatalf("output = %q, want missing-skills error", result.output)
+	}
+}
+
+func TestBuildSkillsInstallScript_RelocatesHiddenSkillEntries(t *testing.T) {
+	result := runSkillsInstallScriptWithSetup(t,
+		[]kelos.SkillsShSpec{{Source: "hidden/package"}},
+		func(root string) {
+			writeStubNpx(t, root,
+				"mkdir -p \"$HOME/.agents/skills/.hidden\"\nprintf '# hidden\\n' > \"$HOME/.agents/skills/.hidden/SKILL.md\"\n")
+		},
+	)
+
+	if result.err != nil {
+		t.Fatalf("script failed: %v\n%s", result.err, result.output)
+	}
+	installed := filepath.Join(result.root, SkillsShPluginName, "skills", ".hidden", "SKILL.md")
+	if _, err := os.Stat(installed); err != nil {
+		t.Fatalf("hidden skill %s was not relocated: %v", installed, err)
+	}
+}
+
+func writeStubNpx(t *testing.T, root, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, "bin", "npx"), []byte("#!/bin/sh\n"+body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}

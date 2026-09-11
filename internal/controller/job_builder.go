@@ -1410,18 +1410,28 @@ func buildSkillsInstallScript(skills []kelos.SkillsShSpec, authEnvs []skillsAuth
 	installDir := path.Join(PluginMountPath, ".agents", "skills")
 	pluginSkillsDir := path.Join(PluginMountPath, SkillsShPluginName, "skills")
 	lines = append(lines, fmt.Sprintf("mkdir -p %s", shellQuote(pluginSkillsDir)))
+	quotedInstallDir := shellQuote(installDir)
+	lines = append(lines,
+		"moved_skills=0",
+		fmt.Sprintf("if [ -d %s ]; then", quotedInstallDir),
+		// A bare "*" skips hidden entries, which the "rm -rf" below would then
+		// delete, so match dot entries explicitly as well.
+		fmt.Sprintf("  for skill_path in %s/* %s/.[!.]* %s/..?*; do", quotedInstallDir, quotedInstallDir, quotedInstallDir),
+		"    [ -e \"$skill_path\" ] || continue",
+		fmt.Sprintf("    mv \"$skill_path\" %s/", shellQuote(pluginSkillsDir)),
+		"    moved_skills=$((moved_skills + 1))",
+		"  done",
+		"fi",
+	)
+	// Counting relocated entries rather than testing for the install directory
+	// catches a required package whose installer exits 0 without writing a
+	// skill.
 	if hasRequiredSkills {
 		lines = append(lines,
-			fmt.Sprintf("[ -d %s ] || { echo 'No skills.sh skills were installed' >&2; exit 1; }", shellQuote(installDir)),
+			"[ \"$moved_skills\" -gt 0 ] || { echo 'No skills.sh skills were installed' >&2; exit 1; }",
 		)
 	}
 	lines = append(lines,
-		fmt.Sprintf("if [ -d %s ]; then", shellQuote(installDir)),
-		fmt.Sprintf("  for skill_path in %s/*; do", shellQuote(installDir)),
-		"    [ -e \"$skill_path\" ] || continue",
-		fmt.Sprintf("    mv \"$skill_path\" %s/", shellQuote(pluginSkillsDir)),
-		"  done",
-		"fi",
 		fmt.Sprintf("rm -rf %s %s", shellQuote(path.Join(PluginMountPath, ".agents")), shellQuote(path.Join(PluginMountPath, ".npm"))),
 		fmt.Sprintf("chown -R %d:%d %s", AgentUID, AgentUID, shellQuote(PluginMountPath)),
 	)

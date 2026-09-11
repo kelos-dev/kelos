@@ -308,6 +308,8 @@ global.resolveInputCard = () => {};
 global.scrollToBottom = () => {};
 global.interruptActiveTurn = () => { interruptRequests++; };
 global.showToast = (message) => { toasts.push(message); };
+global.notifySessionEvent = () => {};
+global.pruneBrowserNotifications = () => {};
 global.closeSessionSectionEditor = () => {};
 
 const application = fs.readFileSync(path.join(__dirname, '..', 'web', 'app.js'), 'utf8');

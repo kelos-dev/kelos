@@ -1036,6 +1036,17 @@ func TestApplicationConsoleResourcesBehavior(t *testing.T) {
 	}
 }
 
+func TestApplicationBrowserAlertsBehavior(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node.js is not installed")
+	}
+	command := exec.Command(node, "testdata/browser_alerts_test.js")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("running browser alert tests: %v\n%s", err, output)
+	}
+}
+
 func TestApplicationMarkdownBehavior(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {

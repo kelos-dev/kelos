@@ -349,10 +349,65 @@ func extractOpenCodeActivity(r io.Reader) string {
 			lastActivity = "Working..."
 		case "text":
 			lastActivity = ""
+		case "tool_use":
+			if event.Part != nil && event.Part.Type == "tool" {
+				if s := openCodeToolActivity(event.Part.Tool, event.Part.Input()); s != "" {
+					lastActivity = s
+				}
+			}
 		}
 	}
 
 	return lastActivity
+}
+
+func openCodeToolActivity(toolName string, raw json.RawMessage) string {
+	var input map[string]interface{}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &input); err != nil {
+			input = nil
+		}
+	}
+
+	switch strings.ToLower(toolName) {
+	case "bash", "shell":
+		if cmd := activityStringField(input, "command"); cmd != "" {
+			return fmt.Sprintf("Running `%s`...", truncateActivity(cmd, 50))
+		}
+		return "Running command..."
+	case "read":
+		if p := activityFirstStringField(input, "filePath", "file_path", "path"); p != "" {
+			return fmt.Sprintf("Reading `%s`...", shortenPath(p))
+		}
+		return "Reading file..."
+	case "write":
+		if p := activityFirstStringField(input, "filePath", "file_path", "path"); p != "" {
+			return fmt.Sprintf("Writing `%s`...", shortenPath(p))
+		}
+		return "Writing file..."
+	case "edit":
+		if p := activityFirstStringField(input, "filePath", "file_path", "path"); p != "" {
+			return fmt.Sprintf("Editing `%s`...", shortenPath(p))
+		}
+		return "Editing file..."
+	case "grep", "glob":
+		if p := activityStringField(input, "pattern"); p != "" {
+			return fmt.Sprintf("Searching for `%s`...", truncateActivity(p, 50))
+		}
+		return "Searching..."
+	case "webfetch":
+		return "Fetching web page..."
+	case "websearch":
+		if q := activityStringField(input, "query"); q != "" {
+			return fmt.Sprintf("Searching `%s`...", truncateActivity(q, 50))
+		}
+		return "Searching the web..."
+	default:
+		if toolName != "" {
+			return fmt.Sprintf("Using %s...", toolName)
+		}
+		return ""
+	}
 }
 
 // shortenPath returns the last two path components (dir/file) for brevity.
@@ -394,6 +449,15 @@ func activityStringField(m map[string]interface{}, key string) string {
 	return s
 }
 
+func activityFirstStringField(m map[string]interface{}, keys ...string) string {
+	for _, key := range keys {
+		if value := activityStringField(m, key); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 // Minimal NDJSON structs for activity parsing.
 
 type claudeActivityEvent struct {
@@ -430,5 +494,23 @@ type geminiActivityEvent struct {
 }
 
 type openCodeActivityEvent struct {
-	Type string `json:"type"`
+	Type string                `json:"type"`
+	Part *openCodeActivityPart `json:"part,omitempty"`
+}
+
+type openCodeActivityPart struct {
+	Type  string                 `json:"type,omitempty"`
+	Tool  string                 `json:"tool,omitempty"`
+	State *openCodeActivityState `json:"state,omitempty"`
+}
+
+func (p *openCodeActivityPart) Input() json.RawMessage {
+	if p.State == nil {
+		return nil
+	}
+	return p.State.Input
+}
+
+type openCodeActivityState struct {
+	Input json.RawMessage `json:"input,omitempty"`
 }

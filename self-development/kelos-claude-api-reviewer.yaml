@@ -206,6 +206,10 @@ spec:
       **CRD and validation**:
       - Are kubebuilder validation markers correct and complete?
       - Are enum validations up to date with all valid values?
+      - For list fields with documented allowed values, does the generated CRD
+        place the enum under `items`, and are duplicates rejected when they
+        have no semantic meaning? Verify the generated YAML, not only the Go
+        markers.
       - Do enum docstrings match the `+kubebuilder:validation:Enum` marker?
         Flag when the godoc invites a value (e.g. "empty matches both") that
         the marker would then reject — either extend the enum to include

@@ -14,6 +14,7 @@ import (
 const (
 	preservedMCPValueFromEnvAnnotation = "kelos.dev/v1alpha2-mcp-value-from-env"
 	preservedSkillsSecretRefAnnotation = "kelos.dev/v1alpha2-skills-secret-ref"
+	preservedSkillsOptionalAnnotation  = "kelos.dev/v1alpha2-skills-optional"
 )
 
 type preservedMCPValueFromEnv struct {
@@ -27,6 +28,12 @@ type preservedSkillsSecretRef struct {
 	Source    string                   `json:"source"`
 	Skill     string                   `json:"skill,omitempty"`
 	SecretRef v1alpha2.SecretReference `json:"secretRef"`
+}
+
+type preservedSkillsOptional struct {
+	Index  int    `json:"index"`
+	Source string `json:"source"`
+	Skill  string `json:"skill,omitempty"`
 }
 
 func AgentConfigToV1alpha2(ctx context.Context, src *v1alpha1.AgentConfig, dst *v1alpha2.AgentConfig) error {
@@ -49,8 +56,12 @@ func agentConfigToHub(_ context.Context, src *v1alpha1.AgentConfig, dst *v1alpha
 	if err := restorePreservedSkillsSecretRefs(src.Annotations, dst.Spec.Skills); err != nil {
 		return err
 	}
+	if err := restorePreservedSkillsOptional(src.Annotations, dst.Spec.Skills); err != nil {
+		return err
+	}
 	deleteAnnotation(dst.Annotations, preservedMCPValueFromEnvAnnotation)
 	deleteAnnotation(dst.Annotations, preservedSkillsSecretRefAnnotation)
+	deleteAnnotation(dst.Annotations, preservedSkillsOptionalAnnotation)
 	return nil
 }
 
@@ -63,7 +74,10 @@ func agentConfigFromHub(_ context.Context, src *v1alpha2.AgentConfig, dst *v1alp
 	if err := setPreservedMCPValueFromEnvAnnotation(dst, src.Spec.MCPServers); err != nil {
 		return err
 	}
-	return setPreservedSkillsSecretRefAnnotation(dst, src.Spec.Skills)
+	if err := setPreservedSkillsSecretRefAnnotation(dst, src.Spec.Skills); err != nil {
+		return err
+	}
+	return setPreservedSkillsOptionalAnnotation(dst, src.Spec.Skills)
 }
 
 func mcpServersToV1alpha2(in []v1alpha1.MCPServerSpec) []v1alpha2.MCPServerSpec {
@@ -282,7 +296,7 @@ func restorePreservedSkillsSecretRefs(annotations map[string]string, skills []v1
 		return nil
 	}
 	for _, item := range preserved {
-		index, ok := preservedSkillIndex(skills, item)
+		index, ok := preservedSkillIndex(skills, item.Index, item.Source, item.Skill)
 		if !ok {
 			continue
 		}
@@ -294,14 +308,60 @@ func restorePreservedSkillsSecretRefs(annotations map[string]string, skills []v1
 	return nil
 }
 
-func preservedSkillIndex(skills []v1alpha2.SkillsShSpec, item preservedSkillsSecretRef) (int, bool) {
+func setPreservedSkillsOptionalAnnotation(dst *v1alpha1.AgentConfig, skills []v1alpha2.SkillsShSpec) error {
+	var preserved []preservedSkillsOptional
+	for i, skill := range skills {
+		if !skill.Optional {
+			continue
+		}
+		preserved = append(preserved, preservedSkillsOptional{
+			Index:  i,
+			Source: skill.Source,
+			Skill:  skill.Skill,
+		})
+	}
+	if len(preserved) == 0 {
+		deleteAnnotation(dst.Annotations, preservedSkillsOptionalAnnotation)
+		return nil
+	}
+	data, err := json.Marshal(preserved)
+	if err != nil {
+		return err
+	}
+	if dst.Annotations == nil {
+		dst.Annotations = map[string]string{}
+	}
+	dst.Annotations[preservedSkillsOptionalAnnotation] = string(data)
+	return nil
+}
+
+func restorePreservedSkillsOptional(annotations map[string]string, skills []v1alpha2.SkillsShSpec) error {
+	raw := annotations[preservedSkillsOptionalAnnotation]
+	if raw == "" {
+		return nil
+	}
+	var preserved []preservedSkillsOptional
+	if err := json.Unmarshal([]byte(raw), &preserved); err != nil {
+		// Conversion must not be blocked by malformed preservation metadata.
+		return nil
+	}
+	for _, item := range preserved {
+		index, ok := preservedSkillIndex(skills, item.Index, item.Source, item.Skill)
+		if ok {
+			skills[index].Optional = true
+		}
+	}
+	return nil
+}
+
+func preservedSkillIndex(skills []v1alpha2.SkillsShSpec, itemIndex int, itemSource, itemSkill string) (int, bool) {
 	matches := func(skill v1alpha2.SkillsShSpec) bool {
-		return skill.Source == item.Source && skill.Skill == item.Skill
+		return skill.Source == itemSource && skill.Skill == itemSkill
 	}
-	if item.Index >= 0 && item.Index < len(skills) && matches(skills[item.Index]) {
-		return item.Index, true
+	if itemIndex >= 0 && itemIndex < len(skills) && matches(skills[itemIndex]) {
+		return itemIndex, true
 	}
-	if item.Source == "" {
+	if itemSource == "" {
 		return 0, false
 	}
 	var found int

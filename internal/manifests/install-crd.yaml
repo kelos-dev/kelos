@@ -609,6 +609,13 @@ spec:
                 items:
                   description: SkillsShSpec defines a skills.sh package reference.
                   properties:
+                    optional:
+                      description: |-
+                        Optional, when true, logs an installation failure for this package and
+                        continues installing the remaining packages instead of failing the Task.
+                        Defaults to false. SecretRef validation is not affected: a missing or
+                        invalid Secret still fails the Task before the Job is created.
+                      type: boolean
                     secretRef:
                       description: |-
                         SecretRef references a Secret containing a GITHUB_TOKEN key for HTTPS

@@ -21,6 +21,10 @@ import (
 
 const privateSkillsMarker = "KELOS_E2E_PRIVATE_SKILL_MARKER_q4m8n2"
 
+// unreachableSkillsSource is a repository that does not exist, so "npx skills
+// add" always fails for it.
+const unreachableSkillsSource = "kelos-dev/e2e-skills-does-not-exist"
+
 type githubContentResponse struct {
 	Content  string `json:"content"`
 	Encoding string `json:"encoding"`
@@ -219,6 +223,145 @@ var _ = Describe("Task with skills.sh AgentConfig", func() {
 		logs := f.GetJobLogs("private-skills-task")
 		GinkgoWriter.Printf("Job logs:\n%s\n", logs)
 		Expect(logs).To(ContainSubstring(privateSkillsMarker))
+	})
+
+	It("should run a Task when an optional skills.sh package fails to install", func() {
+		By("creating OAuth credentials secret")
+		f.CreateSecret("claude-credentials",
+			"CLAUDE_CODE_OAUTH_TOKEN="+oauthToken)
+
+		By("creating an AgentConfig with an unreachable optional package ahead of the fixture package")
+		// --skills-sh cannot set optional, so this AgentConfig is created
+		// through the typed client. The unreachable package is listed first so
+		// a regression that aborts the init container also skips the fixture
+		// package and fails the marker assertion below.
+		_, err := f.KelosClientset.ApiV1alpha2().AgentConfigs(f.Namespace).Create(
+			context.TODO(),
+			&kelos.AgentConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "optional-skills-ac",
+					Namespace: f.Namespace,
+				},
+				Spec: kelos.AgentConfigSpec{
+					Skills: []kelos.SkillsShSpec{
+						{Source: unreachableSkillsSource, Optional: true},
+						{Source: "kelos-dev/e2e-skills", Skill: "kelos-e2e"},
+					},
+				},
+			},
+			metav1.CreateOptions{},
+		)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("creating a Task referencing the AgentConfig")
+		f.CreateTask(&kelos.Task{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "optional-skills-task",
+			},
+			Spec: kelos.TaskSpec{
+				Type:   "claude-code",
+				Model:  claudeCodeModel,
+				Prompt: "Use the kelos-e2e skill and show its output.",
+				Credentials: &kelos.Credentials{
+					Type:      kelos.CredentialTypeOAuth,
+					SecretRef: &kelos.SecretReference{Name: "claude-credentials"},
+				},
+				AgentConfigRefs: []kelos.AgentConfigReference{{Name: "optional-skills-ac"}},
+				PodOverrides: &kelos.PodOverrides{
+					ExtraInitContainers: []corev1.Container{{
+						Name:    "verify-skills-install",
+						Image:   "busybox:1.37",
+						Command: []string{"sh", "-c", "test -f /kelos/plugin/skills-sh/skills/kelos-e2e/SKILL.md"},
+						VolumeMounts: []corev1.VolumeMount{{
+							Name:      "kelos-plugin",
+							MountPath: "/kelos/plugin",
+						}},
+					}},
+				},
+			},
+		})
+
+		By("waiting for Job to be created")
+		f.WaitForJobCreation("optional-skills-task")
+
+		By("waiting for Job to complete")
+		f.WaitForJobCompletion("optional-skills-task")
+
+		By("verifying Task status is Succeeded")
+		f.WaitForTaskPhase("optional-skills-task", "Succeeded")
+
+		By("verifying the agent used the required skill installed after the optional failure")
+		logs := f.GetJobLogs("optional-skills-task")
+		GinkgoWriter.Printf("Job logs:\n%s\n", logs)
+		Expect(logs).To(ContainSubstring("KELOS_E2E_SKILL_MARKER_x7k2p9"))
+	})
+
+	It("should run a Task when every skills.sh package is optional and fails", func() {
+		By("creating OAuth credentials secret")
+		f.CreateSecret("claude-credentials",
+			"CLAUDE_CODE_OAUTH_TOKEN="+oauthToken)
+
+		By("creating an AgentConfig whose only package is optional and unreachable")
+		_, err := f.KelosClientset.ApiV1alpha2().AgentConfigs(f.Namespace).Create(
+			context.TODO(),
+			&kelos.AgentConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "all-optional-skills-ac",
+					Namespace: f.Namespace,
+				},
+				Spec: kelos.AgentConfigSpec{
+					Skills: []kelos.SkillsShSpec{
+						{Source: unreachableSkillsSource, Optional: true},
+					},
+				},
+			},
+			metav1.CreateOptions{},
+		)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("creating a Task referencing the AgentConfig")
+		f.CreateTask(&kelos.Task{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "all-optional-skills-task",
+			},
+			Spec: kelos.TaskSpec{
+				Type:   "claude-code",
+				Model:  claudeCodeModel,
+				Prompt: "Print 'hello from an agent with no skills' to stdout.",
+				Credentials: &kelos.Credentials{
+					Type:      kelos.CredentialTypeOAuth,
+					SecretRef: &kelos.SecretReference{Name: "claude-credentials"},
+				},
+				AgentConfigRefs: []kelos.AgentConfigReference{{Name: "all-optional-skills-ac"}},
+				PodOverrides: &kelos.PodOverrides{
+					// The plugin skills directory must exist and be empty: the
+					// entrypoints have to tolerate a plugin that installed
+					// nothing, which is what lets the agent start at all.
+					ExtraInitContainers: []corev1.Container{{
+						Name:  "verify-empty-skills-install",
+						Image: "busybox:1.37",
+						Command: []string{"sh", "-c",
+							"test -d /kelos/plugin/skills-sh/skills && [ -z \"$(ls -A /kelos/plugin/skills-sh/skills)\" ]"},
+						VolumeMounts: []corev1.VolumeMount{{
+							Name:      "kelos-plugin",
+							MountPath: "/kelos/plugin",
+						}},
+					}},
+				},
+			},
+		})
+
+		By("waiting for Job to be created")
+		f.WaitForJobCreation("all-optional-skills-task")
+
+		By("waiting for Job to complete")
+		f.WaitForJobCompletion("all-optional-skills-task")
+
+		By("verifying Task status is Succeeded")
+		f.WaitForTaskPhase("all-optional-skills-task", "Succeeded")
+
+		logs := f.GetJobLogs("all-optional-skills-task")
+		GinkgoWriter.Printf("Job logs:\n%s\n", logs)
 	})
 })
 

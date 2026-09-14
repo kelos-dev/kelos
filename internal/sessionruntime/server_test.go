@@ -3169,6 +3169,39 @@ func TestClaudeInterruptUsesControlProtocol(t *testing.T) {
 	}
 }
 
+func TestCodexChildNotificationsDoNotAffectParent(t *testing.T) {
+	sink := &collectingSink{}
+	done := make(chan codexTurnResult, 1)
+	provider := &CodexProvider{threadID: "parent", activeTurn: "parent-turn", activeSink: sink, turnDone: done}
+	for _, notification := range []struct{ method, params string }{
+		{"turn/started", `{"threadId":"child","turn":{"id":"child-turn"}}`},
+		{"item/agentMessage/delta", `{"threadId":"child","delta":"child output"}`},
+		{"error", `{"threadId":"child","willRetry":false,"error":{"message":"invalid_encrypted_content"}}`},
+		{"turn/completed", `{"threadId":"child","turn":{"status":"failed","error":{"message":"failed child"}}}`},
+	} {
+		provider.handleNotification(notification.method, json.RawMessage(notification.params))
+	}
+	if len(sink.events) != 0 || provider.activeTurn != "parent-turn" {
+		t.Fatalf("Child changed parent: events=%v activeTurn=%q", sink.events, provider.activeTurn)
+	}
+	select {
+	case result := <-done:
+		t.Fatalf("Child completed parent: %#v", result)
+	default:
+	}
+	provider.handleNotification("item/agentMessage/delta", json.RawMessage(`{"threadId":"parent","delta":"parent output"}`))
+	provider.handleNotification("turn/completed", json.RawMessage(`{"threadId":"parent","turn":{"status":"completed"}}`))
+	assertEventTypes(t, sink.events, EventAssistantDelta)
+	select {
+	case result := <-done:
+		if result.status != "completed" {
+			t.Fatalf("Parent result = %#v", result)
+		}
+	default:
+		t.Fatal("Parent completion was not delivered")
+	}
+}
+
 func TestCodexEventMapping(t *testing.T) {
 	sink := &collectingSink{}
 	done := make(chan codexTurnResult, 1)

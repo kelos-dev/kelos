@@ -1,0 +1,52 @@
+# Both spawners are OnDemand: they do not listen to Slack themselves, so the
+# router decides which one handles a message. Drop triggerMode to let a spawner
+# keep its own source as well — a request can then reach it both ways.
+apiVersion: kelos.dev/v1alpha2
+kind: TaskSpawner
+metadata:
+  name: docs-agent
+  namespace: default
+spec:
+  triggerMode: OnDemand
+  taskTemplate:
+    worker:
+      type: claude-code
+      credentials:
+        type: oauth
+        secretRef:
+          name: claude-credentials
+      workspaceRef:
+        name: docs-workspace
+    promptTemplate: |
+      A documentation request came in from Slack:
+
+      {{.Title}}
+
+      {{.Body}}
+
+      Make the change and open a pull request.
+---
+apiVersion: kelos.dev/v1alpha2
+kind: TaskSpawner
+metadata:
+  name: code-agent
+  namespace: default
+spec:
+  triggerMode: OnDemand
+  taskTemplate:
+    worker:
+      type: claude-code
+      credentials:
+        type: oauth
+        secretRef:
+          name: claude-credentials
+      workspaceRef:
+        name: code-workspace
+    promptTemplate: |
+      A bug report came in from Slack:
+
+      {{.Title}}
+
+      {{.Body}}
+
+      Investigate, fix it, and open a pull request.

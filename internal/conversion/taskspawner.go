@@ -19,6 +19,13 @@ import (
 // not gain the capability — the value only survives in this annotation.
 const preservedNameTemplateAnnotation = "kelos.dev/v1alpha2-name-template"
 
+// preservedTriggerModeAnnotation carries spec.triggerMode (a v1alpha2-only
+// field) across a v1alpha1 round-trip. v1alpha1 has no way to express that a
+// spawner has opted out of its own source, so without this a client that reads
+// and writes the object through v1alpha1 would silently turn an OnDemand
+// spawner back into a source-triggered one.
+const preservedTriggerModeAnnotation = "kelos.dev/v1alpha2-trigger-mode"
+
 // preservedContextGitHubAppAuthAnnotation carries the githubAppAuth blocks of
 // taskTemplate.contextSources (a v1alpha2-only field) across a v1alpha1
 // round-trip, keyed by context source name. Without it a client that reads and
@@ -86,6 +93,8 @@ func taskSpawnerToHub(_ context.Context, src *v1alpha1.TaskSpawner, dst *v1alpha
 	foldTaskSpawnerForward(&src.Spec, &dst.Spec)
 	restorePreservedNameTemplate(src.Annotations, &dst.Spec.TaskTemplate)
 	deleteAnnotation(dst.Annotations, preservedNameTemplateAnnotation)
+	restorePreservedTriggerMode(src.Annotations, &dst.Spec)
+	deleteAnnotation(dst.Annotations, preservedTriggerModeAnnotation)
 	if err := restorePreservedContextGitHubAppAuth(src.Annotations, &dst.Spec.TaskTemplate); err != nil {
 		return err
 	}
@@ -115,6 +124,7 @@ func taskSpawnerFromHub(_ context.Context, src *v1alpha2.TaskSpawner, dst *v1alp
 	}
 	backfillTaskSpawnerLegacy(&dst.Spec)
 	setPreservedNameTemplateAnnotation(dst, src.Spec.TaskTemplate.NameTemplate)
+	setPreservedTriggerModeAnnotation(dst, src.Spec.TriggerMode)
 	if err := setPreservedContextGitHubAppAuth(dst, src.Spec.TaskTemplate); err != nil {
 		return err
 	}
@@ -374,6 +384,29 @@ func setPreservedNameTemplateAnnotation(dst *v1alpha1.TaskSpawner, nameTemplate 
 		dst.Annotations = map[string]string{}
 	}
 	dst.Annotations[preservedNameTemplateAnnotation] = nameTemplate
+}
+
+// setPreservedTriggerModeAnnotation records a non-default spec.triggerMode so
+// it survives a v1alpha1 round-trip. Source is the API default, so it needs no
+// annotation and an existing one is cleared.
+func setPreservedTriggerModeAnnotation(dst *v1alpha1.TaskSpawner, mode v1alpha2.TriggerMode) {
+	if mode != v1alpha2.TriggerModeOnDemand {
+		deleteAnnotation(dst.Annotations, preservedTriggerModeAnnotation)
+		return
+	}
+	if dst.Annotations == nil {
+		dst.Annotations = map[string]string{}
+	}
+	dst.Annotations[preservedTriggerModeAnnotation] = string(mode)
+}
+
+func restorePreservedTriggerMode(annotations map[string]string, dst *v1alpha2.TaskSpawnerSpec) {
+	if dst.TriggerMode != "" {
+		return
+	}
+	if v, ok := annotations[preservedTriggerModeAnnotation]; ok && v == string(v1alpha2.TriggerModeOnDemand) {
+		dst.TriggerMode = v1alpha2.TriggerModeOnDemand
+	}
 }
 
 func restorePreservedNameTemplate(annotations map[string]string, dst *v1alpha2.TaskTemplate) {

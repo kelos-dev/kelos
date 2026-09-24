@@ -236,6 +236,45 @@ func TestTaskSpawnerConvert_WebhookFilterFieldsPreserved(t *testing.T) {
 	}
 }
 
+func TestTaskSpawnerConvert_TriggerModeSurvivesRoundTrip(t *testing.T) {
+	src := &v1alpha2.TaskSpawner{
+		Spec: v1alpha2.TaskSpawnerSpec{TriggerMode: v1alpha2.TriggerModeOnDemand},
+	}
+
+	down := &v1alpha1.TaskSpawner{}
+	if err := taskSpawnerFromHub(context.Background(), src, down); err != nil {
+		t.Fatalf("taskSpawnerFromHub() error = %v", err)
+	}
+	if got := down.Annotations[preservedTriggerModeAnnotation]; got != string(v1alpha2.TriggerModeOnDemand) {
+		t.Errorf("preserved annotation = %q, want OnDemand", got)
+	}
+
+	back := &v1alpha2.TaskSpawner{}
+	if err := taskSpawnerToHub(context.Background(), down, back); err != nil {
+		t.Fatalf("taskSpawnerToHub() error = %v", err)
+	}
+	if back.Spec.TriggerMode != v1alpha2.TriggerModeOnDemand {
+		t.Errorf("triggerMode = %q, want it restored as OnDemand", back.Spec.TriggerMode)
+	}
+	if _, ok := back.Annotations[preservedTriggerModeAnnotation]; ok {
+		t.Error("the preservation annotation should be cleared on the way back up")
+	}
+}
+
+func TestTaskSpawnerConvert_SourceTriggerModeNeedsNoAnnotation(t *testing.T) {
+	src := &v1alpha2.TaskSpawner{
+		Spec: v1alpha2.TaskSpawnerSpec{TriggerMode: v1alpha2.TriggerModeSource},
+	}
+
+	down := &v1alpha1.TaskSpawner{}
+	if err := taskSpawnerFromHub(context.Background(), src, down); err != nil {
+		t.Fatalf("taskSpawnerFromHub() error = %v", err)
+	}
+	if _, ok := down.Annotations[preservedTriggerModeAnnotation]; ok {
+		t.Error("Source is the default and needs no preservation annotation")
+	}
+}
+
 func TestTaskSpawnerConvert_ModernFieldsRoundTrip(t *testing.T) {
 	optional := "5m"
 	src := &v1alpha1.TaskSpawner{

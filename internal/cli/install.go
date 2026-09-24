@@ -48,6 +48,7 @@ var kelosCRDNames = []string{
 	"taskbudgets.kelos.dev",
 	"taskpipelines.kelos.dev",
 	"taskrecords.kelos.dev",
+	"taskrouters.kelos.dev",
 	"taskspawners.kelos.dev",
 	"workerpools.kelos.dev",
 	"workspaces.kelos.dev",

@@ -1,0 +1,50 @@
+apiVersion: kelos.dev/v1alpha2
+kind: TaskRouter
+metadata:
+  name: support-router
+  namespace: default
+spec:
+  # Requests arrive from Slack, through the same source machinery a TaskSpawner
+  # uses. The router needs the bot in the channel; tokens live on
+  # kelos-slack-server, not here.
+  when:
+    slack:
+      channels:
+        - C0123456789
+
+  # The router's own agent. Any WorkerSpec field works here, including
+  # podOverrides.env — the decision runs as a short-lived Task.
+  decision:
+    worker:
+      type: claude-code
+      model: claude-opus-5
+      credentials:
+        type: oauth
+        secretRef:
+          name: claude-credentials
+    timeoutSeconds: 180
+
+  prompt: |
+    You are the front door for an engineering team's Slack channel.
+    Read the request and decide which team should handle it.
+
+  # The decision picks one of these names and nothing else.
+  routes:
+    - name: docs
+      description: >-
+        Documentation questions, and requests to change anything under docs/.
+      targetRef:
+        kind: TaskSpawner
+        name: docs-agent
+    - name: code
+      description: >-
+        Bug reports, stack traces, and requests to change application code.
+      targetRef:
+        kind: TaskSpawner
+        name: code-agent
+
+  # When nothing fits, answer in the thread instead of guessing a route.
+  fallback:
+    action: Reply
+
+  maxConcurrency: 5

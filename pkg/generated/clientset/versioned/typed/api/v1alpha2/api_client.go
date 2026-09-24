@@ -35,6 +35,7 @@ type ApiV1alpha2Interface interface {
 	TaskBudgetsGetter
 	TaskPipelinesGetter
 	TaskRecordsGetter
+	TaskRoutersGetter
 	TaskSpawnersGetter
 	WebhookGatewaysGetter
 	WorkerPoolsGetter
@@ -72,6 +73,10 @@ func (c *ApiV1alpha2Client) TaskPipelines(namespace string) TaskPipelineInterfac
 
 func (c *ApiV1alpha2Client) TaskRecords(namespace string) TaskRecordInterface {
 	return newTaskRecords(c, namespace)
+}
+
+func (c *ApiV1alpha2Client) TaskRouters(namespace string) TaskRouterInterface {
+	return newTaskRouters(c, namespace)
 }
 
 func (c *ApiV1alpha2Client) TaskSpawners(namespace string) TaskSpawnerInterface {

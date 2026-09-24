@@ -281,6 +281,12 @@ func runCycleWithSourceCore(ctx context.Context, cl client.Client, key types.Nam
 		return nil
 	}
 
+	// A spawner that has opted out of its own source never polls it.
+	if ts.Spec.IsOnDemand() {
+		log.Info("TaskSpawner is OnDemand, skipping cycle")
+		return nil
+	}
+
 	items, err := src.Discover(ctx)
 	if err != nil {
 		return fmt.Errorf("discovering items: %w", err)

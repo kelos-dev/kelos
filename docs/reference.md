@@ -296,6 +296,74 @@ on the owned Task resources and are not copied into TaskPipeline status. The
 child Task prevents later stages from starting. Child Tasks that are already
 active finish before the TaskPipeline enters `Failed`.
 
+## TaskRouter
+
+A TaskRouter chooses which of several TaskSpawners should handle an incoming
+request. It runs its own agent against a routing prompt and a menu of named
+routes, then builds the Task the selected route's TaskSpawner would have built.
+The routed Task carries the initiator's reporting metadata, so status and
+results come back to the Slack thread the request came from.
+
+TaskRouter is available only in `kelos.dev/v1alpha2`.
+
+| Field | Description | Required |
+|-------|-------------|----------|
+| `spec.when.slack` | Slack source, configured the same way as `TaskSpawner.spec.when.slack`. Slack is the only source a router accepts today, because it is the only one that creates routing decisions | Yes |
+| `spec.decision.worker` | Inline execution environment for the routing decision; the same `WorkerSpec` a Task uses, including `Task.spec.podOverrides.env` and the rest of `podOverrides` | One of worker or workerPoolRef |
+| `spec.decision.workerPoolRef.name` | WorkerPool that runs the decision, avoiding a cold pod start. `podOverrides` does not apply to a pooled decision | One of worker or workerPoolRef |
+| `spec.decision.timeoutSeconds` | Bound on one inline decision, applied as the decision pod's `activeDeadlineSeconds` when `worker.podOverrides` sets none of its own. Defaults to 300. Rejected with `workerPoolRef`, where the pool owns the pod — bound those on the WorkerPool | No |
+| `spec.decision.ttlSecondsAfterHandled` | How long a decision is kept after the router acts on it, at least 1 second. Defaults to 86400 (one day). A decision the router has not acted on is never collected, however old | No |
+| `spec.prompt` | Routing instruction, rendered with the request and the route menu | Yes |
+| `spec.routes` | Dispatch candidates (1–32). Names must be unique | Yes |
+| `spec.routes[].name` | DNS-label name the decision selects by | Yes |
+| `spec.routes[].description` | What belongs on this route. The only per-route text the decision sees | Yes |
+| `spec.routes[].targetRef` | Target to dispatch to. `kind` must be `TaskSpawner`; the target is resolved in the router's own namespace | Yes |
+| `spec.fallback.action` | `Route`, `Reply`, or `Fail` when no route is selected. Omitting `spec.fallback` fails the request | Yes when fallback is set |
+| `spec.fallback.route` | Route to dispatch to. Required when action is `Route`, and rejected otherwise. Must name a listed route | Conditional |
+| `spec.maxConcurrency` | Maximum decisions in flight at once. Unset or zero means no limit | No |
+| `spec.suspend` | Stops the router consuming requests. Work already dispatched is unaffected | No |
+
+A request produces one decision Task, named from the request, so a redelivery
+decides once. The decision is asked for a route name and nothing else: it cannot
+name a target, and a name that is not listed in `spec.routes` counts as no
+route. Request text is untrusted input, so assume any listed route is reachable
+by any request.
+
+`fallback` covers the ways a decision can fail to pick a route — no route fits,
+a name that is not listed, or a decision that fails, which for an inline
+decision includes exceeding `spec.decision.timeoutSeconds`. A decision that
+never finishes at all leaves the request unrouted rather than falling back.
+
+- `Route` dispatches to `fallback.route`.
+- `Reply` dispatches nothing and answers the initiator with the decision's own
+  explanation, in the thread the request came from. A request made with a slash
+  command has no thread to answer in, so nothing is posted.
+- `Fail` dispatches nothing, posts nothing, and records the failure on status.
+
+A decision never narrates itself while it runs, and posts only when it answered
+instead of dispatching — that is, under `Reply` and only when no route was
+selected. A request that routes is reported by the Task it dispatched and
+nothing else, whatever `fallback` is set to.
+
+When a route's target TaskSpawner still acts on its own source, one request can
+reach it twice — once dispatched, once matched directly. The dispatched Task is
+named the way that spawner would have named it, so the two collapse into one
+Task. Set `TaskSpawner.spec.triggerMode` to `OnDemand` on the target to stop it
+firing on its own source at all.
+
+| Status field | Description |
+|--------------|-------------|
+| `status.phase` | `Running`, `Suspended`, or `Failed`. `Failed` means the router can dispatch nowhere — no route target resolves, or the last dispatch failed. A router whose other routes resolve stays `Running` and reports the rest on `RoutesResolved`, because requests selecting a working route still dispatch |
+| `status.recordedDecisions` | Routing decisions this router currently retains. A live count of the decision Tasks it owns, not a cumulative total — deleting those Tasks lowers it |
+| `status.dispatchedDecisions` | How many of those retained decisions dispatched work |
+| `status.lastDecision.route` | Route the most recent handled decision was acted on with, which is the fallback route when the decision selected none. Always a name listed in `spec.routes` |
+| `status.lastDecision.dispatchedTask` | Name of the Task that decision created, empty when it dispatched nothing |
+| `status.conditions` | `RoutesResolved`, checked on every reconcile, goes False and names every route that cannot be dispatched to — for example one pointing at a TaskSpawner that does not exist. `DispatchSucceeded` goes False when the most recent dispatch attempt failed, so a create conflict is not reported as a missing route |
+
+Deleting a TaskRouter deletes its decision Tasks. Tasks it dispatched belong to
+their target TaskSpawner and are not deleted with the router, and collecting an
+expired decision does not touch the work it dispatched.
+
 ## Session
 
 A Session is one interactive Claude Code, Codex, or OpenCode conversation that
@@ -903,6 +971,8 @@ to receive refreshed credentials during long-running work.
 
 | Field | Description | Required |
 |-------|-------------|----------|
+| `spec.triggerMode` | `Source` (default) lets the spawner act on `spec.when`. `OnDemand` stops it acting on its own source, leaving it reachable only by explicit dispatch — a TaskRouter, or `kelos run --from taskspawner/<name>`. Unlike `spec.suspend`, which stops the spawner producing work at all, an `OnDemand` spawner still produces work when dispatched | No |
+| `spec.when` | Request source. Required unless `spec.triggerMode` is `OnDemand`, where the spawner has no source of its own | Conditional |
 | `spec.taskTemplate.workspaceRef.name` | Workspace resource (repo URL, auth, and clone target for spawned Tasks) | Yes (when using `githubIssues`, `githubPullRequests`, `githubWebhook`, `linearWebhook`, or `webhook`) |
 | `spec.when.githubIssues.repo` | Override repository to poll for issues (in `owner/repo` format or full URL); defaults to workspace repo URL | No |
 | `spec.when.githubIssues.labels` | Filter issues by labels | No |

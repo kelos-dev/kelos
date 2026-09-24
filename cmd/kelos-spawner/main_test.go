@@ -909,6 +909,51 @@ func TestRunCycleWithSource_SuspendFalseRunsNormally(t *testing.T) {
 	}
 }
 
+func TestRunCycleWithSource_OnDemandDoesNotPoll(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	ts.Spec.TriggerMode = kelos.TriggerModeOnDemand
+	cl, key := setupTest(t, ts)
+
+	src := &fakeSource{
+		items: []source.WorkItem{
+			{ID: "1", Title: "Item 1"},
+			{ID: "2", Title: "Item 2"},
+		},
+	}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var taskList kelos.TaskList
+	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatalf("Listing tasks: %v", err)
+	}
+	if len(taskList.Items) != 0 {
+		t.Errorf("Expected 0 tasks for an OnDemand spawner, got %d", len(taskList.Items))
+	}
+}
+
+func TestRunCycleWithSource_SourceModeStillPolls(t *testing.T) {
+	ts := newTaskSpawner("spawner", "default", nil)
+	ts.Spec.TriggerMode = kelos.TriggerModeSource
+	cl, key := setupTest(t, ts)
+
+	src := &fakeSource{items: []source.WorkItem{{ID: "1", Title: "Item 1"}}}
+
+	if err := runCycleWithSource(context.Background(), cl, key, src); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var taskList kelos.TaskList
+	if err := cl.List(context.Background(), &taskList, client.InNamespace("default")); err != nil {
+		t.Fatalf("Listing tasks: %v", err)
+	}
+	if len(taskList.Items) != 1 {
+		t.Errorf("Expected 1 task for a Source spawner, got %d", len(taskList.Items))
+	}
+}
+
 func TestRunCycleWithSource_SuspendedIdempotent(t *testing.T) {
 	ts := newTaskSpawner("spawner", "default", nil)
 	ts.Spec.Suspend = boolPtr(true)

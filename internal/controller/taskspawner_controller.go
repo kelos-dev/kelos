@@ -104,6 +104,12 @@ func (r *TaskSpawnerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	isSuspended := ts.Spec.Suspend != nil && *ts.Spec.Suspend
 
+	// An OnDemand TaskSpawner has no source of its own, so it needs no workload
+	// whatever its when block says.
+	if ts.Spec.IsOnDemand() {
+		return r.reconcileWithoutWorkload(ctx, req, &ts, isSuspended)
+	}
+
 	// Cron-based TaskSpawners use a CronJob instead of a Deployment.
 	if isCronBased(&ts) {
 		return r.reconcileCronJob(ctx, req, &ts, isSuspended)
@@ -111,14 +117,17 @@ func (r *TaskSpawnerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	// Webhook-based TaskSpawners don't need deployments or cronjobs.
 	if isWebhookBased(&ts) {
-		return r.reconcileWebhook(ctx, req, &ts, isSuspended)
+		return r.reconcileWithoutWorkload(ctx, req, &ts, isSuspended)
 	}
 
 	return r.reconcileDeployment(ctx, req, &ts, isSuspended)
 }
 
-// reconcileWebhook handles webhook-based TaskSpawners by cleaning up any stale resources.
-func (r *TaskSpawnerReconciler) reconcileWebhook(ctx context.Context, req ctrl.Request, ts *kelos.TaskSpawner, isSuspended bool) (ctrl.Result, error) {
+// reconcileWithoutWorkload handles the TaskSpawners that need no Deployment or
+// CronJob — webhook and Slack sources, which the shared servers drive, and
+// OnDemand spawners, which nothing polls — by cleaning up any stale resources
+// and settling their status.
+func (r *TaskSpawnerReconciler) reconcileWithoutWorkload(ctx context.Context, req ctrl.Request, ts *kelos.TaskSpawner, isSuspended bool) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	// Clean up any stale Deployment or CronJob from previous configurations
@@ -132,6 +141,10 @@ func (r *TaskSpawnerReconciler) reconcileWebhook(ctx context.Context, req ctrl.R
 	// Determine the desired phase for webhook TaskSpawners
 	desiredPhase := kelos.TaskSpawnerPhaseRunning
 	desiredMessage := "Webhook-driven TaskSpawner ready"
+	if ts.Spec.IsOnDemand() {
+		desiredPhase = kelos.TaskSpawnerPhaseOnDemand
+		desiredMessage = "Awaiting dispatch"
+	}
 	if isSuspended {
 		desiredPhase = kelos.TaskSpawnerPhaseSuspended
 		desiredMessage = "Suspended by user"

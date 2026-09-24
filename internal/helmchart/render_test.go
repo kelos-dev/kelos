@@ -309,7 +309,7 @@ func TestRender_ConsoleServer(t *testing.T) {
 		"name: kelos-console-server",
 		"secretName: console-auth",
 		"resources:\n      - pods\n    verbs:\n      - get\n  - apiGroups:\n      - \"\"\n    resources:\n      - pods/log\n    verbs:\n      - get\n  - apiGroups:\n      - \"\"\n    resources:\n      - pods/exec",
-		"resources:\n      - agentconfigs\n      - sessions\n      - sessionspawners\n      - taskbudgets\n      - taskpipelines\n      - taskrecords\n      - tasks\n      - taskspawners\n      - workerpools\n      - workspaces\n    verbs:\n      - get\n      - list",
+		"resources:\n      - agentconfigs\n      - sessions\n      - sessionspawners\n      - taskbudgets\n      - taskpipelines\n      - taskrecords\n      - taskrouters\n      - tasks\n      - taskspawners\n      - workerpools\n      - workspaces\n    verbs:\n      - get\n      - list",
 		"resources:\n      - sessions\n    verbs:\n      - create\n      - delete\n      - patch\n      - watch",
 		"--token-file=/var/run/secrets/kelos-console/token",
 		"--default-namespace=team-a",
@@ -319,6 +319,40 @@ func TestRender_ConsoleServer(t *testing.T) {
 	} {
 		if !strings.Contains(output, expected) {
 			t.Errorf("expected Console server render to contain %q", expected)
+		}
+	}
+}
+
+// TestRender_SlackServerRole pins the Slack server's ClusterRole to what the
+// server actually reads. It lists TaskRouters on every inbound message, so a
+// missing rule makes every router silently inert on a chart install while the
+// admin-credentialled test suites keep passing.
+func TestRender_SlackServerRole(t *testing.T) {
+	data, err := Render(manifests.ChartFS, map[string]interface{}{
+		"slackServer": map[string]interface{}{
+			"enabled": true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("rendering chart: %v", err)
+	}
+	output := string(data)
+
+	start := strings.Index(output, "name: kelos-slack-server-role")
+	if start == -1 {
+		t.Fatal("kelos-slack-server-role is not rendered")
+	}
+	role := output[start:]
+	if end := strings.Index(role, "\n---\n"); end != -1 {
+		role = role[:end]
+	}
+
+	for _, expected := range []string{
+		"resources:\n      - taskspawners\n    verbs:\n      - get\n      - list\n      - watch",
+		"resources:\n      - taskrouters\n    verbs:\n      - get\n      - list\n      - watch",
+	} {
+		if !strings.Contains(role, expected) {
+			t.Errorf("expected Slack server role to contain %q", expected)
 		}
 	}
 }

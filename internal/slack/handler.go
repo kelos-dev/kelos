@@ -279,8 +279,11 @@ func (h *SlackHandler) handleSlashCommand(ctx context.Context, evt socketmode.Ev
 	h.routeMessage(ctx, msg)
 }
 
-// routeMessage finds all matching TaskSpawners and creates tasks for each.
+// routeMessage finds all matching TaskSpawners and creates tasks for each, and
+// hands the message to any matching TaskRouter to decide where it belongs.
 func (h *SlackHandler) routeMessage(ctx context.Context, msg *SlackMessageData) {
+	h.routeToRouters(ctx, msg)
+
 	spawners, err := h.getMatchingSpawners(ctx)
 	if err != nil {
 		h.log.Error(err, "Failed to get matching spawners")
@@ -298,6 +301,13 @@ func (h *SlackHandler) routeMessage(ctx context.Context, msg *SlackMessageData) 
 		// Check if suspended
 		if spawner.Spec.Suspend != nil && *spawner.Spec.Suspend {
 			spawnerLog.V(1).Info("Skipping suspended TaskSpawner")
+			continue
+		}
+
+		// A spawner that has opted out of its own source is reachable only by
+		// explicit dispatch.
+		if spawner.Spec.IsOnDemand() {
+			spawnerLog.V(1).Info("Skipping OnDemand TaskSpawner")
 			continue
 		}
 

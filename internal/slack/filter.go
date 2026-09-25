@@ -32,6 +32,10 @@ type SlackMessageData struct {
 	// HasThreadContext indicates that Body contains full thread context
 	// rather than the raw message text.
 	HasThreadContext bool
+	// AttachmentText is the rendered text of the message's attachments, such as
+	// forwarded messages and link unfurls. It is already folded into Body, and
+	// is kept separately for callers that use Text rather than Body.
+	AttachmentText string
 	// IsSlashCommand indicates this came from a slash command rather than a message event.
 	IsSlashCommand bool
 	// SlashCommandID is the composite ID for slash commands (channelID:command:triggerID).

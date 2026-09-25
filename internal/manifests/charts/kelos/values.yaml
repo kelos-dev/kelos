@@ -195,6 +195,12 @@ slackServer:
   joinMessage: ""
   # Deny service to externally shared (Slack Connect) channels.
   denySlackConnectChannels: false
+  # How long one Slack-driven Session conversation turn may run before it is
+  # abandoned. Leave null for the server default (60m).
+  sessionTurnTimeout: null
+  # How many Slack messages may wait for one thread's Session turn before
+  # further messages are dropped. Leave null for the server default (8).
+  sessionMaxQueuedTurns: null
   resources:
     limits:
       cpu: 500m

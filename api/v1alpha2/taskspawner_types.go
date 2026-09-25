@@ -692,11 +692,11 @@ type GenericWebhookFilter struct {
 	Pattern string `json:"pattern,omitempty"`
 }
 
-// Slack triggers task spawning from Slack messages via the centralized
+// Slack triggers spawning from Slack messages via the centralized
 // kelos-slack-server. The server connects to Slack via Socket Mode (outbound
-// WebSocket — no ingress required) and routes messages to matching
-// TaskSpawners. Authentication tokens (SLACK_BOT_TOKEN, SLACK_APP_TOKEN)
-// are configured on the server, not per-TaskSpawner.
+// WebSocket — no ingress required) and routes messages to matching TaskSpawners
+// and SessionSpawners. Authentication tokens (SLACK_BOT_TOKEN, SLACK_APP_TOKEN)
+// are configured on the server, not per-spawner.
 //
 // The bot must be invited to each channel it should listen in; the Channels
 // and ExcludeFilters fields are post-delivery filters, not a privacy scope.
@@ -726,15 +726,17 @@ type Slack struct {
 	// ExcludePatterns — the exclusion also covers slash commands. A criterion
 	// the event does not carry never matches, so it does not reject the event.
 	//
-	// The rules are only guaranteed while the object is managed through
-	// v1alpha2. This field does not exist in v1alpha1; it survives a v1alpha1
-	// round-trip through a preservation annotation, so a v1alpha1 client that
-	// drops unknown annotations drops the exclusions with them.
+	// On a TaskSpawner, the rules are only guaranteed while the object is managed
+	// through v1alpha2: this field does not exist in the v1alpha1 TaskSpawner, and
+	// it survives a v1alpha1 round-trip through a preservation annotation, so a
+	// v1alpha1 client that drops unknown annotations drops the exclusions with
+	// them. SessionSpawner has no v1alpha1 version, so the caveat does not apply
+	// there.
 	// +optional
 	// +kubebuilder:validation:MaxItems=20
 	ExcludeFilters []SlackFilter `json:"excludeFilters,omitempty"`
 
-	// BotMessages controls whether bot-originated messages can trigger this
+	// BotMessagePolicy controls whether bot-originated messages can trigger this
 	// spawner. Accepting bot messages carries loop risk — especially "All"
 	// which includes the bot's own output. Use ExcludePatterns or Triggers
 	// to guard against runaway self-triggering.

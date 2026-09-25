@@ -23523,7 +23523,7 @@ spec:
                     properties:
                       botMessagePolicy:
                         description: |-
-                          BotMessages controls whether bot-originated messages can trigger this
+                          BotMessagePolicy controls whether bot-originated messages can trigger this
                           spawner. Accepting bot messages carries loop risk — especially "All"
                           which includes the bot's own output. Use ExcludePatterns or Triggers
                           to guard against runaway self-triggering.
@@ -23551,10 +23551,12 @@ spec:
                           ExcludePatterns — the exclusion also covers slash commands. A criterion
                           the event does not carry never matches, so it does not reject the event.
 
-                          The rules are only guaranteed while the object is managed through
-                          v1alpha2. This field does not exist in v1alpha1; it survives a v1alpha1
-                          round-trip through a preservation annotation, so a v1alpha1 client that
-                          drops unknown annotations drops the exclusions with them.
+                          On a TaskSpawner, the rules are only guaranteed while the object is managed
+                          through v1alpha2: this field does not exist in the v1alpha1 TaskSpawner, and
+                          it survives a v1alpha1 round-trip through a preservation annotation, so a
+                          v1alpha1 client that drops unknown annotations drops the exclusions with
+                          them. SessionSpawner has no v1alpha1 version, so the caveat does not apply
+                          there.
                         items:
                           description: |-
                             SlackFilter is a set of matching criteria for a Slack event. Every criterion

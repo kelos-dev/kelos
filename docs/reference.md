@@ -661,10 +661,15 @@ manifest may include labels, annotations, `initialBranch`, `initialPrompt`, the 
 
 ## SessionSpawner
 
-A SessionSpawner turns matching GitHub webhooks into durable Session
-conversations. Each matching webhook delivery attempts to create one Session from
+A SessionSpawner turns matching GitHub webhooks or Slack messages into durable
+Session conversations. Set exactly one of `spec.when.githubWebhook` and
+`spec.when.slack`.
+
+A GitHub source creates one Session per matching webhook delivery from
 `spec.sessionTemplate`, using the same event and filter mechanism as a
-webhook-driven TaskSpawner.
+webhook-driven TaskSpawner. A Slack source creates one Session per Slack thread
+and reuses it for every later message in that thread, so the conversation keeps
+its history — see [Slack Threads](#slack-threads).
 
 | Field | Description | Required |
 |-------|-------------|----------|
@@ -674,29 +679,56 @@ webhook-driven TaskSpawner.
 | `spec.when.githubWebhook.excludeAuthors` | GitHub senders ignored before filter evaluation | No |
 | `spec.when.githubWebhook.excludeFilters` | Reject an event when **any** entry matches (OR across entries; the criteria within one entry are ANDed). Evaluated outside `filters`, so a matching exclusion rejects the event regardless of which `filters` entry would have accepted it. Entries use the same fields as `filters[]`, except that `event` may be omitted and that `filePatterns`, the deprecated `bodyContains`, and `excludeAuthors` / `excludeLabels` / `excludeBodyPatterns` are rejected — a negative criterion inverts inside an exclusion rule, so a rule built from one rejects every event that does *not* match it. Only `action`, `author`, `pullRequestAuthor`, `branch`, and `tag` are safe in a rule that omits `event`: for those, a value the event does not carry never matches. Every other criterion is evaluated only for the event types that carry it and is otherwise skipped and treated as satisfied, so a rule using one must set `event` (enforced by CEL validation). Scoping to an event type that still does not carry the criterion leaves it satisfied — `draft` under `event: issue_comment` rejects every comment. An entry must set at least one non-empty criterion besides `event`. Max 20 entries | No |
 | `spec.when.githubWebhook.filters` | GitHub webhook filters using the same fields and OR semantics as TaskSpawner. Max 50 entries | No |
+| `spec.when.slack.channels` | Restrict which Slack channels drive Sessions (channel IDs like `"C0123456789"`); when empty, every invited channel drives them | No |
+| `spec.when.slack.excludeFilters` | Exclusion rules using the same fields and semantics as `TaskSpawner.spec.when.slack.excludeFilters`. SessionSpawner has no `v1alpha1` version, so that field's round-trip caveat does not apply here | No |
+| `spec.when.slack.botMessagePolicy` | Whether bot-originated messages drive a Session turn, using the same values as `TaskSpawner.spec.when.slack.botMessagePolicy`. Defaults to `None` | No |
+| `spec.when.slack.triggers[].pattern` | RE2 regex matched against message text, using the same semantics as `TaskSpawner.spec.when.slack.triggers[].pattern` | No |
+| `spec.when.slack.triggers[].mentionOptional` | When `true`, fire on pattern match alone without requiring a bot @-mention | No |
+| `spec.when.slack.excludePatterns` | RE2 regex patterns that reject messages when any pattern matches | No |
 | `spec.credentials[].name` | Unique name for a credential distributed by this SessionSpawner. The name is recorded in the `kelos.dev/spawner-credential` label on generated Sessions | Yes when `spec.credentials` is set |
 | `spec.credentials[].type` | Credential type (`api-key` or `oauth`) | Yes when `spec.credentials` is set |
 | `spec.credentials[].secretRef.name` | Secret containing the agent credential | Yes when `spec.credentials` is set |
 | `spec.sessionTemplate.worker` | Worker configuration copied to each Session | Yes |
 | `spec.sessionTemplate.worker.workspaceRef.name` | Workspace cloned into each Session | Yes |
 | `spec.sessionTemplate.initialBranch` | Go text/template rendered for the Session's initial branch | No |
-| `spec.sessionTemplate.initialPrompt` | Go text/template submitted when the created Session starts | Yes |
-| `spec.sessionTemplate.suspend` | Whether each created Session starts suspended (defaults to `false`) | No |
+| `spec.sessionTemplate.initialPrompt` | Go text/template submitted when the created Session starts. Rejected for `when.slack` | Yes for `when.githubWebhook` |
+| `spec.sessionTemplate.suspend` | Whether each created Session starts suspended (defaults to `false`). Rejected for `when.slack`, because a suspended Session cannot answer the thread that created it | No |
 | `spec.sessionTemplate.volumeClaimTemplate` | Persistent workspace for each Session; recommended so conversation history survives Pod replacement | No |
-| `spec.sessionTemplate.idlePolicy.suspendAfterSeconds` | Applied to each created Session as `Session.spec.idlePolicy.suspendAfterSeconds`: automatically stop its runtime after this much continuous idleness without changing `Session.spec.suspend`. When deletion is also configured, this value must be less than `deleteAfterSeconds` | No |
+| `spec.sessionTemplate.idlePolicy.suspendAfterSeconds` | Applied to each created Session as `Session.spec.idlePolicy.suspendAfterSeconds`: automatically stop its runtime after this much continuous idleness without changing `Session.spec.suspend`. A later matching message in the Slack thread resumes it. When deletion is also configured, this value must be less than `deleteAfterSeconds` | No |
 | `spec.sessionTemplate.idlePolicy.deleteAfterSeconds` | Applied to each created Session as `Session.spec.idlePolicy.deleteAfterSeconds`: automatically delete the Session once it has been continuously idle for this many seconds, which removes its workspace storage. Omit to never delete; zero deletes as soon as it goes idle. When suspension is also configured, this value must be greater than `suspendAfterSeconds` | No |
 | `status.observedGeneration` | Most recent generation observed by the controller | Output |
-| `status.totalSessions` | Current number of Sessions associated with this spawner | Output |
-| `status.lastSessionName` | Session most recently created or confirmed to exist | Output |
-| `status.lastDeliveryTime` | Time of the most recently attempted matching delivery | Output |
-| `status.conditions[type=LastDeliverySucceeded]` | Result of the most recent attempted matching delivery; absent until one is attempted | Output |
+| `status.totalSessions` | Current number of Sessions associated with this spawner. Maintained for both sources | Output |
+| `status.lastSessionName` | Session most recently created or confirmed to exist. Set only for `when.githubWebhook` | Output |
+| `status.lastDeliveryTime` | Time of the most recently attempted matching webhook delivery. Set only for `when.githubWebhook` | Output |
+| `status.conditions[type=LastDeliverySucceeded]` | Result of the most recent attempted matching webhook delivery; absent until one is attempted. Set only for `when.githubWebhook` | Output |
 
-`initialPrompt` and `initialBranch` support the same GitHub webhook template
-values as TaskSpawner `promptTemplate` and `branch`. Templates use strict
-missing-key handling; use `{{with index . "Branch"}}{{.}}{{else}}main{{end}}`
-when an event may not provide `Branch`.
+A Slack spawner does not currently set `lastSessionName`, `lastDeliveryTime` or
+the `LastDeliverySucceeded` condition: the Slack bridge reports a failure into
+the thread that caused it rather than onto the spawner, so an empty status does
+not mean no message matched. Use `status.totalSessions`, or list the Sessions it
+owns, to confirm a Slack spawner is working.
 
-Session names use the same deterministic naming behavior as webhook-driven
+For `when.githubWebhook`, `initialPrompt` and `initialBranch` support the same
+GitHub webhook template values as TaskSpawner `promptTemplate` and `branch`.
+Templates use strict missing-key handling; use
+`{{with index . "Branch"}}{{.}}{{else}}main{{end}}` when an event may not
+provide `Branch`.
+
+For `when.slack`, `initialBranch` renders against the Slack message that opened
+the thread, with the variables a Slack TaskSpawner `promptTemplate` receives:
+`{{.ID}}` (the message timestamp), `{{.Title}}` (its first line), `{{.Body}}`
+(the message, or the thread context when the bot was mentioned in an existing
+thread), `{{.URL}}` (its permalink) and `{{.Kind}}` (always `SlackMessage`).
+Strict missing-key handling applies here too.
+
+`initialPrompt` is rejected for a Slack source. The bridge already submits the
+opening message as the thread's first turn, so an initial prompt would run as an
+extra turn whose reply nothing posts, delaying the message that actually asked
+for something — and `{{.Body}}` would send that message twice. Put standing
+instructions in an [AgentConfig](#agentconfig) `spec.agentsMD` instead.
+
+For `when.githubWebhook`, Session names use the same deterministic naming
+behavior as webhook-driven
 TaskSpawners: the SessionSpawner name, event type, and delivery-ID hash are
 combined and then truncated to the Kubernetes 63-character limit. A redelivery
 therefore attempts to create the same Session and is treated as already
@@ -704,7 +736,8 @@ processed. If a long SessionSpawner name causes the delivery hash to be
 truncated, distinct deliveries can resolve to the same name and the later
 delivery is also treated as already processed. Use a shorter SessionSpawner
 name until [collision-safe truncation](https://github.com/kelos-dev/kelos/issues/1527)
-is implemented.
+is implemented. A `when.slack` spawner names Sessions after the thread instead —
+see [Slack Threads](#slack-threads).
 Created Sessions have a `kelos.dev/sessionspawner` label whose value is the
 SessionSpawner UID, a `kelos.dev/sessionspawner-name` annotation for the
 human-readable name, and a controller owner reference to the SessionSpawner.
@@ -739,16 +772,106 @@ spec:
 `spec.credentials` is mutually exclusive with
 `spec.sessionTemplate.worker.credentials`.
 
-Before the first matching delivery, the SessionSpawner
-`LastDeliverySucceeded` condition is absent. A creation failure returns an
-error to the webhook sender so it can retry and sets the condition to `False`
-with an actionable reason and message. Successful creation sets it to `True`;
-an individual Session's runtime health is reported on that Session.
+For a `when.githubWebhook` spawner, the `LastDeliverySucceeded` condition is
+absent before the first matching delivery. A creation failure returns an error
+to the webhook sender so it can retry and sets the condition to `False` with an
+actionable reason and message. Successful creation sets it to `True`; an
+individual Session's runtime health is reported on that Session. A `when.slack`
+spawner reports the equivalent failures into the Slack thread instead, and
+leaves this condition absent.
 
 An `emptyDir` Session remains supported for development, but its conversation
 history is lost on Pod replacement. Use
 `spec.sessionTemplate.volumeClaimTemplate` for SessionSpawner workflows that
 must retain a conversation across Pod recovery.
+
+### Slack Threads
+
+A SessionSpawner with `spec.when.slack` gives each Slack thread its own Session.
+The first matching message in a thread creates the Session; every later matching
+message in the same thread runs as another conversation turn in it, so the agent
+keeps what it has already been told.
+
+What the Session sees is the thread as it stood when the first turn ran, plus
+each later message that matched. A reply that does not match — by default, any
+that does not @-mention the bot — never reaches the Session, so a side
+conversation in the thread is invisible to the agent.
+
+Matching uses the same channel, trigger, exclusion, and bot-message rules as a
+Slack TaskSpawner. Slash commands never drive a Session, because they have no
+thread to hold one. A TaskSpawner and a SessionSpawner that both match a message
+each act on it, so scope them to different channels or triggers to avoid two
+replies.
+
+While a turn runs, the bot posts a "Working on your request..." reply into the
+thread and edits it in place once the turn finishes. A reply too long for one
+Slack message continues in further thread replies. A turn that fails, is
+interrupted, or whose Session never becomes ready reports the reason in the same
+place.
+
+An agent that asks a question mid-turn — Claude Code's `AskUserQuestion`, or the
+equivalent in Codex and OpenCode — is told the question was cancelled, because a
+thread has no way to answer one while the turn is running. The agent continues
+and normally says what it assumed. Ask for a decision in the message itself
+rather than relying on the agent to prompt for one.
+
+A turn does not survive a restart of the Slack server. On shutdown the bot
+replaces the running turn's reply with a note saying so, and tells any queued
+thread its message was dropped; send another message to continue, since the
+Session and its history are unaffected. If the process is killed outright rather
+than asked to stop, those notices are not sent and the thread is left showing
+"Working on your request..." until the next message.
+
+Messages that arrive in a thread while its turn is still running are queued and
+run in order, one at a time. Up to eight messages may wait; beyond that the bot
+says so in the thread and drops the message. A turn is abandoned after 60
+minutes, and a Session that does not become ready within 10 minutes reports a
+failure. Both the queue bound and the turn timeout are Slack server flags —
+`--session-max-queued-turns` and `--session-turn-timeout`, set through the
+`slackServer.sessionMaxQueuedTurns` and `slackServer.sessionTurnTimeout` Helm
+values.
+
+Each thread's Session is named `<spawner>-slack-<hash>`, where the hash covers
+the spawner's name and UID along with the channel ID and thread timestamp, so
+redelivery of the same message resolves to the same Session while two spawners
+never resolve one thread to the same name. A SessionSpawner deleted and
+recreated under the same name has a new UID, so its threads get new Sessions
+rather than inheriting ones it does not own; the old spawner's Sessions are
+garbage-collected with it. Created Sessions carry `kelos.dev/slack-channel`,
+`kelos.dev/slack-thread-ts`, and `kelos.dev/slack-user-id` annotations recording
+the thread they serve, alongside the labels and owner reference every generated
+Session gets.
+
+Every thread that matches gets a Pod and, when `volumeClaimTemplate` is set, a
+persistent volume, and those outlive the conversation. Set
+`spec.sessionTemplate.idlePolicy.suspendAfterSeconds` and
+`deleteAfterSeconds` before the first deploy so idle threads release their
+compute and, eventually, their storage. An idle-suspended Session is resumed
+automatically when its thread receives another message; a Session suspended
+through `spec.suspend` is not, and the thread is told the Session is suspended.
+
+The first turn to reach a thread's Session carries the thread's context as it
+stood at that point. Later turns send only the new message, because the Session
+retains the rest. Until a turn is known to have landed — after a first turn lost
+to a cold start, say — every turn resends the context, so a thread is never left
+talking to a Session that never heard its opening request. The Slack server
+tracks this on the Session itself; it is internal state, not something to set by
+hand.
+
+`spec.sessionTemplate.suspend` is also rejected for a Slack source, because a
+suspended Session cannot answer the thread that created it.
+
+The Kelos Slack server drives these turns by exec-ing into the Session Pod, so
+it needs `create` on `pods/exec`, `get`/`list`/`watch` on `sessionspawners`, and
+`create`, `get`, `list`, `watch` and `patch` on `sessions`. `patch` is not
+optional: resuming an idle-suspended Session, acknowledging that resume, and
+recording that a thread's context has landed all patch the Session. The bundled
+Helm chart grants these; a hand-written Role must too, or idle threads will fail
+to wake.
+
+The chart grants `pods/exec` cluster-wide. The Slack server acts on input from
+any channel it has been invited to, so scoping that grant to the namespaces
+holding Sessions is worth doing in a deployment that can.
 
 ## WorkerPool
 

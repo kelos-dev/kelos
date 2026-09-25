@@ -497,12 +497,36 @@ rules:
   - apiGroups:
       - kelos.dev
     resources:
+      - sessionspawners
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - kelos.dev
+    resources:
+      - sessions
+    verbs:
+      - create
+      - get
+      - list
+      - patch
+      - watch
+  - apiGroups:
+      - kelos.dev
+    resources:
       - agentconfigs
       - workspaces
     verbs:
       - get
       - list
       - watch
+  - apiGroups:
+      - ""
+    resources:
+      - pods/exec
+    verbs:
+      - create
   - apiGroups:
       - coordination.k8s.io
     resources:

@@ -29,6 +29,7 @@ Ready-to-use patterns and YAML manifests for orchestrating AI agents with Kelos.
 | [16-session](16-session/) | Keep one interactive Claude Code, Codex, or OpenCode conversation across web and terminal chat |
 | [17-taskspawner-ci-remediation](17-taskspawner-ci-remediation/) | Auto-fix failing CI checks via `check_run` webhooks, filtered by conclusion and check name |
 | [18-webhookgateway](18-webhookgateway/) | Authenticate and route webhook deliveries through named gateways, including multiple GitHub instances |
+| [19-sessionspawner-slack](19-sessionspawner-slack/) | Give each Slack thread its own persistent Session so the agent keeps the thread's context between messages |
 
 ## Additional Guides
 

@@ -106,7 +106,99 @@ var _ = Describe("SessionSpawner", func() {
 		err := k8sClient.Create(ctx, spawner)
 		Expect(apierrors.IsInvalid(err)).To(BeTrue(), "error: %v", err)
 	})
+
+	It("accepts a Slack source without an initialPrompt", func() {
+		spawner := validSlackSessionSpawner(namespace, "slack-thread")
+		Expect(k8sClient.Create(ctx, spawner)).To(Succeed())
+
+		Eventually(func(g Gomega) {
+			var current kelos.SessionSpawner
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(spawner), &current)).To(Succeed())
+			g.Expect(current.Status.ObservedGeneration).To(Equal(current.Generation))
+		}, 10*time.Second, 100*time.Millisecond).Should(Succeed())
+	})
+
+	It("accepts a Slack source with triggers and exclusions", func() {
+		spawner := validSlackSessionSpawner(namespace, "slack-filtered")
+		mentionOptional := true
+		spawner.Spec.When.Slack.Triggers = []kelos.SlackTrigger{
+			{Pattern: "^gravity ", MentionOptional: &mentionOptional},
+		}
+		spawner.Spec.When.Slack.ExcludeFilters = []kelos.SlackFilter{
+			{Channels: []string{"D0123456789"}},
+		}
+		spawner.Spec.When.Slack.BotMessagePolicy = kelos.BotMessagePolicyOthersOnly
+		Expect(k8sClient.Create(ctx, spawner)).To(Succeed())
+	})
+
+	It("rejects a spawner with neither a GitHub webhook nor a Slack source", func() {
+		spawner := validSlackSessionSpawner(namespace, "no-source")
+		spawner.Spec.When.Slack = nil
+		err := k8sClient.Create(ctx, spawner)
+		Expect(apierrors.IsInvalid(err)).To(BeTrue(), "error: %v", err)
+	})
+
+	It("rejects a spawner with both a GitHub webhook and a Slack source", func() {
+		spawner := validSessionSpawner(namespace, "two-sources")
+		spawner.Spec.When.Slack = &kelos.Slack{}
+		err := k8sClient.Create(ctx, spawner)
+		Expect(apierrors.IsInvalid(err)).To(BeTrue(), "error: %v", err)
+	})
+
+	It("rejects an initialPrompt for a Slack source", func() {
+		spawner := validSlackSessionSpawner(namespace, "slack-initial-prompt")
+		spawner.Spec.SessionTemplate.InitialPrompt = "Prime the Session"
+		err := k8sClient.Create(ctx, spawner)
+		Expect(apierrors.IsInvalid(err)).To(BeTrue(), "error: %v", err)
+		Expect(err.Error()).To(ContainSubstring("initialPrompt is not supported for when.slack"))
+	})
+
+	It("accepts an empty initialPrompt for a Slack source", func() {
+		spawner := validSlackSessionSpawner(namespace, "slack-empty-prompt")
+		spawner.Spec.SessionTemplate.InitialPrompt = ""
+		Expect(k8sClient.Create(ctx, spawner)).To(Succeed())
+	})
+
+	It("rejects a suspended template for a Slack source", func() {
+		spawner := validSlackSessionSpawner(namespace, "slack-suspended")
+		suspend := true
+		spawner.Spec.SessionTemplate.Suspend = &suspend
+		err := k8sClient.Create(ctx, spawner)
+		Expect(apierrors.IsInvalid(err)).To(BeTrue(), "error: %v", err)
+		Expect(err.Error()).To(ContainSubstring("suspend is not supported for when.slack"))
+	})
+
+	It("accepts an unsuspended template for a Slack source", func() {
+		spawner := validSlackSessionSpawner(namespace, "slack-unsuspended")
+		suspend := false
+		spawner.Spec.SessionTemplate.Suspend = &suspend
+		Expect(k8sClient.Create(ctx, spawner)).To(Succeed())
+	})
+
+	It("still allows an initialPrompt for a GitHub webhook source", func() {
+		spawner := validSessionSpawner(namespace, "webhook-prompt")
+		Expect(k8sClient.Create(ctx, spawner)).To(Succeed())
+	})
+
+	It("still requires a workspace reference for a Slack source", func() {
+		spawner := validSlackSessionSpawner(namespace, "slack-missing-workspace")
+		spawner.Spec.SessionTemplate.Worker.WorkspaceRef.Name = ""
+		err := k8sClient.Create(ctx, spawner)
+		Expect(apierrors.IsInvalid(err)).To(BeTrue(), "error: %v", err)
+	})
 })
+
+// validSlackSessionSpawner returns a SessionSpawner driven by Slack threads,
+// which needs no initialPrompt because every thread message is its own turn.
+func validSlackSessionSpawner(namespace, name string) *kelos.SessionSpawner {
+	spawner := validSessionSpawner(namespace, name)
+	spawner.Spec.When = kelos.SessionSpawnerWhen{Slack: &kelos.Slack{
+		Channels: []string{"C0123456789"},
+	}}
+	spawner.Spec.SessionTemplate.InitialBranch = ""
+	spawner.Spec.SessionTemplate.InitialPrompt = ""
+	return spawner
+}
 
 func validSessionSpawner(namespace, name string) *kelos.SessionSpawner {
 	return &kelos.SessionSpawner{

@@ -726,8 +726,9 @@ spec:
                     description: |-
                       SuspendAfterSeconds stops the Session runtime once it has been continuously
                       idle for the given number of seconds without changing Session.spec.suspend.
-                      Selecting the Session in the web interface or starting a terminal connection
-                      resumes it. If this field is unset, the Session is never suspended for
+                      Selecting the Session in the web interface, starting a terminal connection,
+                      or — for a Session backing a Slack thread — a later matching message in
+                      that thread, resumes it. If this field is unset, the Session is never suspended for
                       idleness. If it is set to zero, the Session is eligible for suspension as
                       soon as it goes idle. When DeleteAfterSeconds is also set,
                       SuspendAfterSeconds must be less than DeleteAfterSeconds.
@@ -8069,8 +8070,9 @@ spec:
     name: v1alpha2
     schema:
       openAPIV3Schema:
-        description: SessionSpawner creates Sessions from matching GitHub webhook
-          deliveries.
+        description: |-
+          SessionSpawner creates Sessions from matching GitHub webhook deliveries or
+          Slack messages.
         properties:
           apiVersion:
             description: |-
@@ -8138,9 +8140,17 @@ spec:
                 x-kubernetes-list-type: map
               sessionTemplate:
                 description: |-
-                  SessionTemplate defines Sessions created for matching webhook deliveries.
-                  The initialPrompt and initialBranch fields are Go text/templates rendered
-                  with the matching GitHub webhook context.
+                  SessionTemplate defines Sessions created for matching deliveries. The
+                  initialBranch field is a Go text/template rendered with the matching
+                  GitHub webhook or Slack message context; initialPrompt is the same for a
+                  GitHub webhook source, and is rejected for a Slack one.
+
+                  A Slack spawner drives every matching thread message as its own
+                  conversation turn, so an initialPrompt would run as an extra first turn
+                  whose reply nothing posts, delaying the message that actually asked for
+                  something. Put standing instructions in an AgentConfig instead. A Slack
+                  spawner also rejects suspend, because a suspended Session cannot answer
+                  the thread that created it.
                 properties:
                   idlePolicy:
                     description: |-
@@ -8164,8 +8174,9 @@ spec:
                         description: |-
                           SuspendAfterSeconds stops the Session runtime once it has been continuously
                           idle for the given number of seconds without changing Session.spec.suspend.
-                          Selecting the Session in the web interface or starting a terminal connection
-                          resumes it. If this field is unset, the Session is never suspended for
+                          Selecting the Session in the web interface, starting a terminal connection,
+                          or — for a Session backing a Slack thread — a later matching message in
+                          that thread, resumes it. If this field is unset, the Session is never suspended for
                           idleness. If it is set to zero, the Session is eligible for suspension as
                           soon as it goes idle. When DeleteAfterSeconds is also set,
                           SuspendAfterSeconds must be less than DeleteAfterSeconds.
@@ -15339,7 +15350,9 @@ spec:
                   rule: '!has(self.initialBranch) || size(self.initialBranch) == 0
                     || has(self.worker.workspaceRef)'
               when:
-                description: When defines the GitHub webhook source and filters.
+                description: |-
+                  When defines the event source and filters. Exactly one of githubWebhook
+                  or slack must be set.
                 properties:
                   githubWebhook:
                     description: |-
@@ -15809,22 +15822,138 @@ spec:
                         && self.filters.exists(f, f.event == ''issue_comment'') &&
                         self.filters.all(f, f.event != ''issue_comment'' || (has(f.commentOn)
                         && f.commentOn == ''PullRequest'')))'
+                  slack:
+                    description: |-
+                      Slack receives Slack messages whose matching deliveries create Sessions.
+                      One Session is created per Slack thread and reused for every later matching
+                      message in that thread, so the conversation retains its history. The reply
+                      is posted back into the thread.
+                    properties:
+                      botMessagePolicy:
+                        description: |-
+                          BotMessagePolicy controls whether bot-originated messages can trigger this
+                          spawner. Accepting bot messages carries loop risk — especially "All"
+                          which includes the bot's own output. Use ExcludePatterns or Triggers
+                          to guard against runaway self-triggering.
+                        enum:
+                        - None
+                        - All
+                        - OthersOnly
+                        type: string
+                      channels:
+                        description: |-
+                          Channels optionally restricts which Slack channels the bot listens in.
+                          Values are channel IDs (e.g., "C0123456789"). When empty, the bot
+                          listens in every channel it has been invited to.
+                        items:
+                          pattern: ^[CG][A-Z0-9]{8,}$
+                          type: string
+                        maxItems: 64
+                        type: array
+                      excludeFilters:
+                        description: |-
+                          ExcludeFilters reject a Slack event when ANY entry matches (OR semantics
+                          across entries, AND semantics for the criteria within one entry). They are
+                          an additional gate on the existing matching, evaluated before everything
+                          else, so a matching Trigger cannot override an exclusion and — unlike
+                          ExcludePatterns — the exclusion also covers slash commands. A criterion
+                          the event does not carry never matches, so it does not reject the event.
+
+                          On a TaskSpawner, the rules are only guaranteed while the object is managed
+                          through v1alpha2: this field does not exist in the v1alpha1 TaskSpawner, and
+                          it survives a v1alpha1 round-trip through a preservation annotation, so a
+                          v1alpha1 client that drops unknown annotations drops the exclusions with
+                          them. SessionSpawner has no v1alpha1 version, so the caveat does not apply
+                          there.
+                        items:
+                          description: |-
+                            SlackFilter is a set of matching criteria for a Slack event. Every criterion
+                            that is set must match; a criterion the event does not carry never matches.
+                            The criteria serve both inclusion and exclusion, so one definition and one
+                            matcher back either direction.
+                          properties:
+                            channels:
+                              description: |-
+                                Channels matches events posted in any of the given channel IDs (OR
+                                semantics within the list). Values are channel IDs (e.g. "C0123456789").
+                                Direct-message IDs ("D0123456789") are accepted here even though
+                                Slack.Channels does not accept them, so a spawner that listens in every
+                                channel can still be kept out of DMs.
+                              items:
+                                pattern: ^[CGD][A-Z0-9]{8,}$
+                                type: string
+                              maxItems: 64
+                              type: array
+                              x-kubernetes-list-type: set
+                          type: object
+                          x-kubernetes-validations:
+                          - message: a Slack filter must set at least one non-empty
+                              matching criterion
+                            rule: has(self.channels) && size(self.channels) > 0
+                        maxItems: 20
+                        type: array
+                      excludePatterns:
+                        description: |-
+                          ExcludePatterns rejects messages whose text matches any of the given
+                          regular expressions. Each entry is checked independently — the message
+                          is excluded if the text matches ANY entry. Patterns use Go regexp
+                          syntax (RE2, unanchored). Leading @-mentions are stripped before
+                          matching so patterns target semantic content. Does NOT apply to
+                          slash commands.
+                        items:
+                          maxLength: 256
+                          minLength: 1
+                          type: string
+                        maxItems: 10
+                        type: array
+                      triggers:
+                        description: |-
+                          Triggers define regex patterns that must match the message text.
+                          Bot mention is implicitly required unless MentionOptional is set.
+                          Multiple triggers use OR semantics. When empty, every bot mention fires.
+                        items:
+                          description: SlackTrigger defines a regex pattern trigger
+                            for Slack messages.
+                          properties:
+                            mentionOptional:
+                              description: |-
+                                MentionOptional, when true, fires the trigger on pattern match alone
+                                without requiring a bot @-mention.
+                              type: boolean
+                            pattern:
+                              description: |-
+                                Pattern is a Go RE2 regex matched against message text (unanchored).
+                                Leading @-mentions are stripped before matching so patterns target
+                                semantic content.
+                              maxLength: 256
+                              type: string
+                          type: object
+                        maxItems: 8
+                        type: array
+                    type: object
                 type: object
             required:
             - sessionTemplate
             - when
             type: object
             x-kubernetes-validations:
-            - message: when.githubWebhook is required
-              rule: has(self.when.githubWebhook)
+            - message: exactly one of when.githubWebhook or when.slack must be set
+              rule: '[has(self.when.githubWebhook), has(self.when.slack)].filter(source,
+                source).size() == 1'
             - message: when.githubWebhook.reporting is not supported
-              rule: '!has(self.when.githubWebhook.reporting)'
+              rule: '!has(self.when.githubWebhook) || !has(self.when.githubWebhook.reporting)'
             - message: sessionTemplate.worker.workspaceRef.name is required
               rule: has(self.sessionTemplate.worker.workspaceRef) && size(self.sessionTemplate.worker.workspaceRef.name)
                 > 0
-            - message: sessionTemplate.initialPrompt is required
-              rule: has(self.sessionTemplate.initialPrompt) && size(self.sessionTemplate.initialPrompt)
-                > 0
+            - message: sessionTemplate.initialPrompt is required for when.githubWebhook
+              rule: '!has(self.when.githubWebhook) || (has(self.sessionTemplate.initialPrompt)
+                && size(self.sessionTemplate.initialPrompt) > 0)'
+            - message: sessionTemplate.initialPrompt is not supported for when.slack
+              rule: '!has(self.when.slack) || !has(self.sessionTemplate.initialPrompt)
+                || size(self.sessionTemplate.initialPrompt) == 0'
+            - message: sessionTemplate.suspend is not supported for when.slack
+              rule: '!has(self.when.slack) || !has(self.sessionTemplate.suspend) ||
+                !self.sessionTemplate.suspend'
             - message: sessionTemplate.worker.credentials or spec.credentials is required
               rule: has(self.sessionTemplate.worker.credentials) || has(self.credentials)
             - message: spec.credentials is mutually exclusive with sessionTemplate.worker.credentials
@@ -15833,8 +15962,11 @@ spec:
             description: SessionSpawnerStatus defines the observed state of a SessionSpawner.
             properties:
               conditions:
-                description: Conditions report the result of processing matching webhook
-                  deliveries.
+                description: |-
+                  Conditions report the result of processing matching GitHub webhook deliveries. A spawner
+                  with when.slack does not currently set them, because the Slack bridge reports a failed turn
+                  into the thread that caused it rather than onto the spawner. Use status.totalSessions, which
+                  both sources maintain, to see whether a Slack spawner is producing Sessions.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -15894,13 +16026,15 @@ spec:
                 - type
                 x-kubernetes-list-type: map
               lastDeliveryTime:
-                description: LastDeliveryTime is when a matching webhook was most
-                  recently attempted.
+                description: |-
+                  LastDeliveryTime is when a matching GitHub webhook delivery was most recently attempted.
+                  Only a spawner with when.githubWebhook currently sets it; see Conditions.
                 format: date-time
                 type: string
               lastSessionName:
-                description: LastSessionName identifies the Session most recently
-                  created or confirmed to exist.
+                description: |-
+                  LastSessionName identifies the Session most recently created or confirmed to exist.
+                  Only a spawner with when.githubWebhook currently sets it; see Conditions.
                 type: string
               observedGeneration:
                 description: ObservedGeneration is the most recent generation observed
@@ -68370,7 +68504,7 @@ spec:
                     properties:
                       botMessagePolicy:
                         description: |-
-                          BotMessages controls whether bot-originated messages can trigger this
+                          BotMessagePolicy controls whether bot-originated messages can trigger this
                           spawner. Accepting bot messages carries loop risk — especially "All"
                           which includes the bot's own output. Use ExcludePatterns or Triggers
                           to guard against runaway self-triggering.
@@ -68398,10 +68532,12 @@ spec:
                           ExcludePatterns — the exclusion also covers slash commands. A criterion
                           the event does not carry never matches, so it does not reject the event.
 
-                          The rules are only guaranteed while the object is managed through
-                          v1alpha2. This field does not exist in v1alpha1; it survives a v1alpha1
-                          round-trip through a preservation annotation, so a v1alpha1 client that
-                          drops unknown annotations drops the exclusions with them.
+                          On a TaskSpawner, the rules are only guaranteed while the object is managed
+                          through v1alpha2: this field does not exist in the v1alpha1 TaskSpawner, and
+                          it survives a v1alpha1 round-trip through a preservation annotation, so a
+                          v1alpha1 client that drops unknown annotations drops the exclusions with
+                          them. SessionSpawner has no v1alpha1 version, so the caveat does not apply
+                          there.
                         items:
                           description: |-
                             SlackFilter is a set of matching criteria for a Slack event. Every criterion

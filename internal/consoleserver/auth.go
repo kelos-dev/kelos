@@ -163,7 +163,7 @@ func (s *Server) allowed(request *http.Request, attributes authorizationv1.Resou
 	}
 	s.oidc.Logger.InfoContext(request.Context(), "Console access reviewed",
 		"username", identity.username, "groups", identity.groups, "action", attributes.Verb,
-		"decision", decision, "namespace", attributes.Namespace, "resource", attributes.Resource,
+		"decision", decision, "namespace", attributes.Namespace, "apiGroup", attributes.Group, "resource", attributes.Resource,
 		"subresource", attributes.Subresource, "name", attributes.Name)
 	return allowed, err
 }

@@ -453,6 +453,10 @@ func (s *Server) api(writer http.ResponseWriter, request *http.Request) {
 	}
 
 	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if parts[0] == "admin" {
+		s.admin(writer, request, parts[1:])
+		return
+	}
 	if len(parts) == 1 && parts[0] == "resources" && request.Method == http.MethodGet {
 		s.listConsoleResources(writer, request)
 		return

@@ -3,6 +3,7 @@ package helmchart
 import (
 	"bytes"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -38,7 +39,7 @@ func TestRenderConsoleOIDC(t *testing.T) {
 	var deployment appsv1.Deployment
 	var service corev1.Service
 	var headers corev1.ConfigMap
-	var userRole, serverRole rbacv1.ClusterRole
+	var userRole, adminRole, serverRole rbacv1.ClusterRole
 	for {
 		var object unstructured.Unstructured
 		if err := decoder.Decode(&object); err == io.EOF {
@@ -56,6 +57,8 @@ func TestRenderConsoleOIDC(t *testing.T) {
 			target = &headers
 		case "ClusterRole/kelos-console-user":
 			target = &userRole
+		case "ClusterRole/kelos-console-admin":
+			target = &adminRole
 		case "ClusterRole/kelos-console-server-role":
 			target = &serverRole
 		}
@@ -66,7 +69,7 @@ func TestRenderConsoleOIDC(t *testing.T) {
 		}
 		if object.GetKind() == "RoleBinding" || object.GetKind() == "ClusterRoleBinding" {
 			name, _, _ := unstructured.NestedString(object.Object, "roleRef", "name")
-			if name == "kelos-console-user" {
+			if name == "kelos-console-user" || name == "kelos-console-admin" {
 				t.Fatal("chart must not bind human access")
 			}
 		}
@@ -186,6 +189,36 @@ func TestRenderConsoleOIDC(t *testing.T) {
 	if len(userRole.Rules) == 0 {
 		t.Fatal("missing user role")
 	}
+	for _, userRule := range userRole.Rules {
+		found := false
+		for _, adminRule := range adminRole.Rules {
+			if reflect.DeepEqual(userRule, adminRule) {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("Admin role does not include user rule %#v", userRule)
+		}
+	}
+	for _, role := range []rbacv1.ClusterRole{adminRole, serverRole} {
+		foundBind, foundBindings := false, false
+		for _, rule := range role.Rules {
+			if !containsArgument(rule.APIGroups, rbacv1.GroupName) {
+				continue
+			}
+			switch {
+			case reflect.DeepEqual(rule.Resources, []string{"clusterroles"}):
+				foundBind = containsArgument(rule.Verbs, "bind") && reflect.DeepEqual(rule.ResourceNames, []string{"kelos-console-user", "kelos-console-admin"})
+			case reflect.DeepEqual(rule.Resources, []string{"rolebindings"}):
+				foundBindings = reflect.DeepEqual(rule.Verbs, []string{"get", "list", "create", "delete"})
+			default:
+				t.Fatalf("unexpected RBAC access in %s: %#v", role.Name, rule)
+			}
+		}
+		if !foundBind || !foundBindings {
+			t.Fatalf("missing constrained role management permissions in %s", role.Name)
+		}
+	}
 	for _, rule := range userRole.Rules {
 		for _, group := range rule.APIGroups {
 			if group != "kelos.dev" {
@@ -201,6 +234,24 @@ func TestRenderConsoleOIDC(t *testing.T) {
 	}
 	if !foundReview {
 		t.Fatal("missing access review permission")
+	}
+	for _, resource := range []string{"workspaces", "agentconfigs", "workerpools"} {
+		for _, verb := range []string{"create", "update", "delete"} {
+			found := false
+			for _, rule := range serverRole.Rules {
+				if containsArgument(rule.Resources, resource) && containsArgument(rule.Verbs, verb) {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("server role lacks %s on %s", verb, resource)
+			}
+			for _, rule := range userRole.Rules {
+				if containsArgument(rule.Resources, resource) && containsArgument(rule.Verbs, verb) {
+					t.Errorf("user role grants administrative %s on %s", verb, resource)
+				}
+			}
+		}
 	}
 }
 

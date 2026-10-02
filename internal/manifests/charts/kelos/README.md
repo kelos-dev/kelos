@@ -231,7 +231,8 @@ kubectl port-forward -n kelos-system service/kelos-console-server 8080:80
 ```
 
 Then open `http://localhost:8080` and enter the token. The token represents one
-shared user that can inspect Kelos resources and create, reset, delete, and
+shared user that can inspect Kelos resources, manage Workspaces, AgentConfigs,
+and WorkerPools through the Admin page, and create, reset, delete, and
 connect to Sessions in any namespace. It also grants interactive shell access
 to Ready Sessions' agent containers, including their workspaces and mounted
 credentials. Treat it as a credential. For access
@@ -301,8 +302,8 @@ supported and must be mapped to identifiers at the IdP. Kelos accepts at most
 for the subject. Empty, repeated, or malformed identity headers are rejected;
 a user may have no groups and receive permissions through a User RoleBinding.
 
-The chart creates the unbound `kelos-console-user` ClusterRole. To grant its
-full Console access in one namespace:
+The chart creates unbound `kelos-console-user` and `kelos-console-admin`
+ClusterRoles. To grant Session access and resource inspection in one namespace:
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -324,6 +325,40 @@ Use narrower Roles for read-only or limited access. The permission table and
 limitations are in [the Console authentication reference](../../../../docs/reference.md#console-authentication-and-authorization).
 The generated user role grants no Pod permissions. The Console ServiceAccount
 performs the underlying Pod operations after checking the caller's permissions.
+
+The Admin page uses the same namespace RoleBindings. To bootstrap an
+administrator who can manage configuration and assign User or Admin roles,
+bind `kelos-console-admin` in the namespace:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kelos-console-administrators
+  namespace: team-frontend
+subjects:
+  - kind: Group
+    name: oidc:example:frontend-administrators
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: kelos-console-admin
+  apiGroup: rbac.authorization.k8s.io
+```
+
+In **Admin → User roles**, enter an OIDC subject ID and select **User** or
+**Admin**. The Console adds the configured username prefix and creates an
+individual RoleBinding in the active namespace. User grants Session access and
+resource inspection; Admin also grants configuration and user-role management.
+Role grants require both permission to create RoleBindings and explicit `bind`
+permission for the selected Console ClusterRole.
+
+The page lists direct user assignments to these roles, including read-only
+assignments managed outside the Console. It does not query the identity provider
+for users or group memberships. Removing a Console-created assignment does not
+remove access from other bindings or groups. Roles are additive: remove an Admin
+assignment to downgrade a user, and manage external bindings and groups separately.
+Role management requires OIDC; it is unavailable with a shared static token.
 
 `secretName`, `tokenKey`, and `secureCookie` at the `consoleServer` level belong
 to static-token mode; do not combine static settings with OIDC. OIDC cookies

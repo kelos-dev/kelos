@@ -26,10 +26,12 @@ function testReturningToSessionsRefreshesCurrentRequest() {
     overviewView: {hidden: false},
     sessionsView: {hidden: true},
     resourcesView: {hidden: true},
+    adminView: {hidden: true},
     sessionSidebar: {hidden: true},
     overviewButton: navigationButton(),
     sessionsButton: navigationButton(),
     resourcesButton: navigationButton(),
+    adminButton: navigationButton(),
   };
   global.updateCurrentRequest = () => { updates++; };
   global.setSidebarOpen = () => {};

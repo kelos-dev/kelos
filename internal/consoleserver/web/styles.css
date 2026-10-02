@@ -142,6 +142,37 @@ button { color: inherit; }
 .console-page-header h1 { margin: 1px 0 0; font-size: 22px; font-weight: 600; line-height: 1.25; letter-spacing: -.02em; }
 .console-page-header p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
 .console-page-body { min-height: 0; overflow-y: auto; padding: 24px max(24px, calc((100% - 1080px) / 2)) 48px; }
+.admin-intro { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.admin-intro h2 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.02em; }
+.admin-intro p { max-width: 620px; margin: 8px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.admin-intro > button { flex: none; }
+.admin-status { color: var(--muted); font-size: 13px; }
+.admin-card { margin-top: 22px; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+.admin-card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 20px; background: var(--panel); border-bottom: 1px solid var(--line); }
+.admin-card-header h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.admin-card-header p { margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.admin-card-header button { flex: none; }
+.admin-resource-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; padding: 16px 20px; }
+.admin-resource-row + .admin-resource-row { border-top: 1px solid var(--line-soft); }
+.admin-resource-name { overflow-wrap: anywhere; font-size: 13px; font-weight: 600; }
+.admin-resource-status { margin-top: 4px; color: var(--muted); font-size: 12px; }
+.admin-resource-actions { display: flex; gap: 8px; }
+.admin-resource-actions button { min-height: 38px; }
+.admin-resource-actions .danger { color: var(--danger); }
+.admin-card .resource-empty { min-height: 110px; }
+.admin-role-status { margin: 16px 20px; color: var(--muted); font-size: 13px; }
+.admin-role-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: end; gap: 12px; padding: 20px; border-bottom: 1px solid var(--line); }
+.admin-role-form[hidden] { display: none; }
+.admin-role-form label { display: grid; gap: 8px; font-size: 12px; font-weight: 600; }
+.admin-role-form input, .admin-role-form select { width: 100%; min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--card); font-size: 13px; }
+.admin-role-form p { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.admin-role-badge { display: inline-flex; align-items: center; padding: 6px 10px; border-radius: 8px; background: var(--panel); font-size: 12px; font-weight: 600; }
+.session-dialog.admin-editor { width: min(94vw, 800px); }
+.admin-editor .dialog-header { margin-bottom: 20px; }
+.admin-editor label { display: block; margin-bottom: 8px; font-size: 12px; font-weight: 600; }
+.admin-editor textarea { width: 100%; min-height: 330px; max-height: 55dvh; resize: vertical; padding: 14px; border: 1px solid var(--line); border-radius: 10px; color: var(--code-ink); background: var(--code-bg); font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; tab-size: 2; }
+.admin-editor-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.admin-error { color: var(--danger); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .resource-summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
 .resource-summary-card { min-width: 0; display: grid; gap: 10px; padding: 17px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); text-align: left; cursor: pointer; transition: background .15s, border-color .15s; }
 .resource-summary-card:hover { border-color: #c9c9c9; background: var(--panel); }
@@ -543,6 +574,9 @@ button { color: inherit; }
 .mobile-only { display: none; }
 
 @media (max-width: 800px), (max-height: 500px) and (pointer: coarse) {
+  .admin-role-form { grid-template-columns: minmax(0, 1fr); }
+  .admin-role-form input, .admin-role-form select, .admin-editor textarea { font-size: 16px; }
+  .admin-role-form button { min-height: 44px; }
   .app-shell { display: block; }
   .sidebar { position: fixed; inset: 0 auto 0 0; width: min(88vw, 320px); padding: calc(8px + env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom)) calc(8px + env(safe-area-inset-left)); visibility: hidden; transform: translateX(-103%); transition: transform .22s ease, visibility 0s linear .22s; box-shadow: 16px 0 48px rgba(0,0,0,.16); }
   .sidebar.open { visibility: visible; transform: translateX(0); transition-delay: 0s; }

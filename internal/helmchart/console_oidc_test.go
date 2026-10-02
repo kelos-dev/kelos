@@ -202,6 +202,24 @@ func TestRenderConsoleOIDC(t *testing.T) {
 	if !foundReview {
 		t.Fatal("missing access review permission")
 	}
+	for _, resource := range []string{"workspaces", "agentconfigs", "workerpools"} {
+		for _, verb := range []string{"create", "update", "delete"} {
+			found := false
+			for _, rule := range serverRole.Rules {
+				if containsArgument(rule.Resources, resource) && containsArgument(rule.Verbs, verb) {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("server role lacks %s on %s", verb, resource)
+			}
+			for _, rule := range userRole.Rules {
+				if containsArgument(rule.Resources, resource) && containsArgument(rule.Verbs, verb) {
+					t.Errorf("user role grants administrative %s on %s", verb, resource)
+				}
+			}
+		}
+	}
 }
 
 func containsArgument(values []string, expected string) bool {

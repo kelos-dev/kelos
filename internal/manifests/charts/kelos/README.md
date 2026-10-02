@@ -231,7 +231,8 @@ kubectl port-forward -n kelos-system service/kelos-console-server 8080:80
 ```
 
 Then open `http://localhost:8080` and enter the token. The token represents one
-shared user that can inspect Kelos resources and create, reset, delete, and
+shared user that can inspect Kelos resources, manage Workspaces, AgentConfigs,
+and WorkerPools through the Admin page, and create, reset, delete, and
 connect to Sessions in any namespace. It also grants interactive shell access
 to Ready Sessions' agent containers, including their workspaces and mounted
 credentials. Treat it as a credential. For access
@@ -324,6 +325,20 @@ Use narrower Roles for read-only or limited access. The permission table and
 limitations are in [the Console authentication reference](../../../../docs/reference.md#console-authentication-and-authorization).
 The generated user role grants no Pod permissions. The Console ServiceAccount
 performs the underlying Pod operations after checking the caller's permissions.
+
+The Admin page uses the same namespace RoleBindings. The `kelos-console-user`
+role allows viewing Workspaces, AgentConfigs, and WorkerPools. To allow a group
+to manage them, bind an additional Role in that namespace with these rules:
+
+```yaml
+rules:
+  - apiGroups: [kelos.dev]
+    resources: [workspaces, agentconfigs, workerpools]
+    verbs: [get, list, create, update, delete]
+```
+
+Only grant these permissions to users who should configure agent instructions,
+repository setup, and worker execution environments.
 
 `secretName`, `tokenKey`, and `secureCookie` at the `consoleServer` level belong
 to static-token mode; do not combine static settings with OIDC. OIDC cookies

@@ -18,6 +18,7 @@ type ConsoleElement = HTMLElement & {
   selectedIndex: number;
   disabled: boolean;
   required: boolean;
+  readOnly: boolean;
   type: string;
   name: string;
   placeholder: string;
@@ -32,6 +33,7 @@ type ConsoleElement = HTMLElement & {
   requestSubmit(): void;
   setCustomValidity(message: string): void;
   select(): void;
+  setSelectionRange(start: number, end: number): void;
 };
 
 type RequiredElements<T> = {
@@ -123,6 +125,17 @@ interface ResourceRelationship {
 interface ResourceInventory {
   groups?: ResourceGroup[];
   relationships?: ResourceRelationship[];
+}
+
+interface AdminResourceItem extends ResourceSummary {
+  canGet: boolean;
+  canUpdate: boolean;
+  canDelete: boolean;
+}
+
+interface AdminResourceCollection extends ResourceDescriptor {
+  canCreate: boolean;
+  items: AdminResourceItem[];
 }
 
 interface WorkerCredentials {
@@ -362,6 +375,17 @@ const elements = requireElements({
   overviewButton: document.querySelector('#console-overview'),
   sessionsButton: document.querySelector('#console-sessions'),
   resourcesButton: document.querySelector('#console-resources'),
+  adminButton: document.querySelector('#console-admin'),
+  adminView: document.querySelector('#admin-view'),
+  adminCollections: document.querySelector('#admin-collections'),
+  adminStatus: document.querySelector('#admin-status'),
+  adminEditor: document.querySelector('#admin-editor'),
+  adminEditorTitle: document.querySelector('#admin-editor-title'),
+  adminEditorDescription: document.querySelector('#admin-editor-description'),
+  adminEditorError: document.querySelector('#admin-editor-error'),
+  adminForm: document.querySelector('#admin-form'),
+  adminYAML: document.querySelector('#admin-yaml'),
+  adminSave: document.querySelector('#save-admin-resource'),
   overviewView: document.querySelector('#overview-view'),
   sessionsView: document.querySelector('#sessions-view'),
   resourcesView: document.querySelector('#resources-view'),
@@ -539,6 +563,10 @@ const state = {
   suspendingSession: false,
   resumingSession: false,
   consoleView: 'overview',
+  adminGeneration: 0,
+  adminEditorGeneration: 0,
+  adminEditing: null as {resource: string; namespace: string; name?: string} | null,
+  adminSaving: false,
   resourceGroups: [] as ResourceGroup[],
   resourceRelationships: [] as ResourceRelationship[],
   resourceListGeneration: 0,
@@ -768,21 +796,24 @@ function resourceCollections() {
 }
 
 function setConsoleView(view: string) {
-  state.consoleView = ['overview', 'sessions', 'resources'].includes(view) ? view : 'overview';
+  state.consoleView = ['overview', 'sessions', 'resources', 'admin'].includes(view) ? view : 'overview';
   elements.overviewView.hidden = state.consoleView !== 'overview';
   elements.sessionsView.hidden = state.consoleView !== 'sessions';
   elements.resourcesView.hidden = state.consoleView !== 'resources';
+  elements.adminView.hidden = state.consoleView !== 'admin';
   elements.sessionSidebar.hidden = state.consoleView !== 'sessions';
   for (const [button, name] of [
     [elements.overviewButton, 'overview'],
     [elements.sessionsButton, 'sessions'],
     [elements.resourcesButton, 'resources'],
+    [elements.adminButton, 'admin'],
   ] as Array<[ConsoleElement, string]>) {
     if (name === state.consoleView) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
   }
   if (state.consoleView === 'sessions' && !state.selected && state.sessions.length) selectSession(state.sessions[0]);
   if (state.consoleView === 'sessions') updateCurrentRequest();
+  if (state.consoleView === 'admin') void loadAdmin();
   setSidebarOpen(false);
 }
 
@@ -1207,6 +1238,200 @@ function renderResources() {
   elements.resourceList.replaceChildren(createResourceTable(filteredEntries, emptyMessage));
 }
 
+function adminResourcePath(resource: string, namespace: string, name?: string) {
+  const path = `/api/admin/${encodeURIComponent(resource)}/${encodeURIComponent(namespace)}`;
+  return name ? `${path}/${encodeURIComponent(name)}` : path;
+}
+
+async function loadAdmin() {
+  const namespace = state.namespace;
+  const generation = ++state.adminGeneration;
+  elements.adminStatus.hidden = false;
+  elements.adminStatus.textContent = 'Loading configuration…';
+  elements.adminCollections.replaceChildren();
+  try {
+    const collections = await api<AdminResourceCollection[]>(`/api/admin?namespace=${encodeURIComponent(namespace)}`);
+    if (generation !== state.adminGeneration || namespace !== state.namespace) return;
+    elements.adminStatus.hidden = collections.length > 0;
+    elements.adminStatus.textContent = 'You do not have permission to list configuration resources in this namespace.';
+    for (const collection of collections) {
+      const card = document.createElement('section');
+      card.className = 'admin-card';
+      const header = document.createElement('div');
+      header.className = 'admin-card-header';
+      const heading = document.createElement('div');
+      const title = document.createElement('h2');
+      title.textContent = `${collection.label} · ${collection.items.length}`;
+      const description = document.createElement('p');
+      description.textContent = resourceDescriptions[collection.resource];
+      heading.append(title, description);
+      header.append(heading);
+      if (collection.canCreate) {
+        const create = document.createElement('button');
+        create.type = 'button';
+        create.className = 'secondary-button';
+        create.textContent = 'Create';
+        create.setAttribute('aria-label', `Create ${collection.kind}`);
+        create.addEventListener('click', () => { void openAdminEditor(collection); });
+        header.append(create);
+      }
+      card.append(header);
+      for (const item of collection.items) {
+        const row = document.createElement('div');
+        row.className = 'admin-resource-row';
+        const info = document.createElement('div');
+        const name = document.createElement('div');
+        name.className = 'admin-resource-name';
+        name.textContent = item.name;
+        const status = document.createElement('div');
+        status.className = 'admin-resource-status';
+        status.textContent = resourceStatus(item);
+        info.append(name, status);
+        const actions = document.createElement('div');
+        actions.className = 'admin-resource-actions';
+        if (item.canGet) {
+          const edit = document.createElement('button');
+          edit.type = 'button';
+          edit.className = 'secondary-button';
+          edit.textContent = item.canUpdate ? 'Edit YAML' : 'View YAML';
+          edit.setAttribute('aria-label', `${edit.textContent} for ${collection.kind} ${item.name}`);
+          edit.addEventListener('click', () => { void openAdminEditor(collection, item); });
+          actions.append(edit);
+        }
+        if (item.canDelete) {
+          const remove = document.createElement('button');
+          remove.type = 'button';
+          remove.className = 'secondary-button danger';
+          remove.textContent = 'Delete';
+          remove.setAttribute('aria-label', `Delete ${collection.kind} ${item.name}`);
+          remove.addEventListener('click', () => { void deleteAdminResource(collection, item, remove); });
+          actions.append(remove);
+        }
+        row.append(info, actions);
+        card.append(row);
+      }
+      if (!collection.items.length) {
+        const empty = document.createElement('div');
+        empty.className = 'resource-empty';
+        empty.textContent = `No ${collection.label.toLowerCase()} in ${namespace}.`;
+        card.append(empty);
+      }
+      elements.adminCollections.append(card);
+    }
+  } catch (error) {
+    if (generation !== state.adminGeneration || namespace !== state.namespace) return;
+    elements.adminStatus.textContent = `Unable to load configuration: ${errorMessage(error)}`;
+  }
+}
+
+function defaultAdminYAML(collection: ResourceDescriptor) {
+  const specs: Record<string, string> = {
+    workspaces: '  repo: https://github.com/your-org/your-repo\n',
+    agentconfigs: '  agentsMD: |\n    Describe the shared instructions for your agents.\n',
+    workerpools: `  replicas: 1
+  worker:
+    type: codex
+    credentials:
+      type: api-key
+      secretRef:
+        name: codex-credentials
+    workspaceRef:
+      name: my-workspace
+  volumeClaimTemplate:
+    accessModes: [ReadWriteOnce]
+    resources:
+      requests:
+        storage: 10Gi
+`,
+  };
+  return `apiVersion: kelos.dev/v1alpha2
+kind: ${collection.kind}
+metadata:
+  name: my-${collection.kind.toLowerCase()}
+  namespace: ${JSON.stringify(state.namespace)}
+spec:
+${specs[collection.resource]}`;
+}
+
+async function openAdminEditor(collection: AdminResourceCollection, item?: AdminResourceItem) {
+  const generation = ++state.adminEditorGeneration;
+  const namespace = state.namespace;
+  const editable = item ? item.canUpdate : collection.canCreate;
+  state.adminEditing = null;
+  elements.adminEditorTitle.textContent = item ? `${editable ? 'Edit' : 'View'} ${collection.kind} ${item.name}` : `Create ${collection.kind}`;
+  elements.adminEditorDescription.textContent = `Namespace: ${namespace}. ${editable ? 'Edit the manifest, then save to the cluster.' : 'You have read-only access to this resource.'}`;
+  elements.adminEditorError.hidden = true;
+  elements.adminYAML.value = '';
+  elements.adminYAML.disabled = true;
+  elements.adminSave.hidden = !editable;
+  elements.adminSave.disabled = true;
+  elements.adminSave.textContent = item ? 'Save changes' : 'Create resource';
+  elements.adminEditor.showModal();
+  try {
+    const yaml = item
+      ? (await api<{yaml: string}>(adminResourcePath(collection.resource, namespace, item.name))).yaml
+      : defaultAdminYAML(collection);
+    if (generation !== state.adminEditorGeneration || namespace !== state.namespace) return;
+    elements.adminYAML.value = yaml;
+    elements.adminYAML.disabled = false;
+    elements.adminYAML.readOnly = !editable;
+    elements.adminSave.disabled = !editable || state.adminSaving;
+    if (editable) state.adminEditing = {resource: collection.resource, namespace, name: item?.name};
+    elements.adminYAML.focus();
+    elements.adminYAML.setSelectionRange(0, 0);
+    elements.adminYAML.scrollTop = 0;
+  } catch (error) {
+    if (generation !== state.adminEditorGeneration) return;
+    elements.adminEditorError.textContent = errorMessage(error);
+    elements.adminEditorError.hidden = false;
+  }
+}
+
+async function saveAdminResource() {
+  const editing = state.adminEditing;
+  if (!editing || state.adminSaving) return;
+  const generation = state.adminEditorGeneration;
+  state.adminSaving = true;
+  elements.adminSave.disabled = true;
+  elements.adminEditorError.hidden = true;
+  try {
+    const saved = await api<{name: string}>(adminResourcePath(editing.resource, editing.namespace, editing.name), {
+      method: editing.name ? 'PUT' : 'POST',
+      headers: {'Content-Type': 'application/yaml'},
+      body: elements.adminYAML.value,
+    });
+    if (generation === state.adminEditorGeneration) elements.adminEditor.close();
+    showToast(`Resource ${saved.name} saved in ${editing.namespace}.`);
+    if (editing.namespace === state.namespace) {
+      await Promise.all([loadAdmin(), loadResources(), loadOptions().catch(error => showToast(errorMessage(error)))]);
+    }
+  } catch (error) {
+    if (generation !== state.adminEditorGeneration) return;
+    elements.adminEditorError.textContent = errorMessage(error);
+    elements.adminEditorError.hidden = false;
+  } finally {
+    state.adminSaving = false;
+    elements.adminSave.disabled = !state.adminEditing;
+  }
+}
+
+async function deleteAdminResource(collection: AdminResourceCollection, item: AdminResourceItem, button: HTMLButtonElement) {
+  const namespace = state.namespace;
+  if (!window.confirm(`Delete ${collection.kind} "${item.name}" in ${namespace}? Resources that use it may stop working. This cannot be undone.`)) return;
+  button.disabled = true;
+  try {
+    await api(adminResourcePath(collection.resource, namespace, item.name), {method: 'DELETE'});
+    showToast(`${collection.kind} ${item.name} deleted from ${namespace}.`);
+    if (namespace === state.namespace) {
+      await Promise.all([loadAdmin(), loadResources(), loadOptions().catch(error => showToast(errorMessage(error)))]);
+    }
+  } catch (error) {
+    showToast(errorMessage(error));
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function loadResources({quiet = false} = {}) {
   const namespace = state.namespace;
   const generation = state.namespaceGeneration;
@@ -1226,6 +1451,7 @@ async function loadResources({quiet = false} = {}) {
 
 async function refreshConsole() {
   try {
+    if (state.consoleView === 'admin') await loadAdmin();
     await Promise.all([loadSessions(), loadOptions(), loadResources()]);
   } catch (error) {
     showToast(errorMessage(error));
@@ -2478,6 +2704,12 @@ async function switchNamespace(namespace) {
   const hadLoadedSource = Boolean(state.loadedSource);
   state.namespace = namespace;
   state.namespaceGeneration += 1;
+  state.adminGeneration += 1;
+  state.adminEditorGeneration += 1;
+  state.adminEditing = null;
+  elements.adminEditor.close();
+  elements.adminCollections.replaceChildren();
+  if (state.consoleView === 'admin') void loadAdmin();
   state.sessions = [];
   state.resourceGroups = [];
   state.resourceRelationships = [];
@@ -5753,6 +5985,19 @@ function interruptActiveTurn() {
 elements.overviewButton.addEventListener('click', () => setConsoleView('overview'));
 elements.sessionsButton.addEventListener('click', () => setConsoleView('sessions'));
 elements.resourcesButton.addEventListener('click', () => setConsoleView('resources'));
+elements.adminButton.addEventListener('click', () => setConsoleView('admin'));
+requiredElement('#refresh-admin').addEventListener('click', () => { void loadAdmin(); });
+elements.adminForm.addEventListener('submit', event => {
+  event.preventDefault();
+  void saveAdminResource();
+});
+document.querySelectorAll('.close-admin-editor').forEach(button => {
+  button.addEventListener('click', () => elements.adminEditor.close());
+});
+elements.adminEditor.addEventListener('close', () => {
+  state.adminEditorGeneration += 1;
+  state.adminEditing = null;
+});
 elements.resourceDiagramTab.addEventListener('click', () => setResourceView('diagram'));
 elements.resourceInventoryTab.addEventListener('click', () => setResourceView('inventory'));
 requiredElement('.resource-view-tabs').addEventListener('keydown', event => handleResourceViewTabKeydown(event as KeyboardEvent));

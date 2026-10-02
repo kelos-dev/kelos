@@ -295,6 +295,16 @@ rules:
       - delete
       - patch
       - watch
+  - apiGroups:
+      - kelos.dev
+    resources:
+      - workspaces
+      - agentconfigs
+      - workerpools
+    verbs:
+      - create
+      - update
+      - delete
   {{- if eq .Values.consoleServer.auth.mode "oidc" }}
   - apiGroups:
       - authorization.k8s.io

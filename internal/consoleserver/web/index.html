@@ -35,6 +35,7 @@
           <button id="console-overview" type="button" aria-current="page"><span aria-hidden="true">⌂</span> Overview</button>
           <button id="console-sessions" type="button"><span aria-hidden="true">◌</span> Sessions</button>
           <button id="console-resources" type="button"><span aria-hidden="true">◇</span> Resources</button>
+          <button id="console-admin" type="button"><span aria-hidden="true">⚙</span> Admin</button>
         </nav>
         <div class="session-sidebar" id="session-sidebar" hidden>
           <div class="session-sidebar-header">
@@ -149,6 +150,27 @@
       </section>
     </main>
 
+    <main class="console-page" id="admin-view" hidden>
+      <header class="console-page-header">
+        <button class="icon-button mobile-only open-sidebar-button" type="button" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false">☰</button>
+        <div>
+          <h1>Admin</h1>
+          <p>Manage configuration in <span class="console-namespace">default</span></p>
+        </div>
+      </header>
+      <section class="console-page-body">
+        <div class="admin-intro">
+          <div>
+            <h2>Workspace administration</h2>
+            <p>Configure repository sources, shared agent instructions, and worker capacity. Available actions follow your Kubernetes permissions.</p>
+          </div>
+          <button class="secondary-button" id="refresh-admin" type="button">Refresh</button>
+        </div>
+        <p class="admin-status" id="admin-status" role="status">Loading configuration…</p>
+        <div id="admin-collections"></div>
+      </section>
+    </main>
+
     <main class="conversation" id="sessions-view" hidden>
       <header class="conversation-header">
         <button class="icon-button mobile-only open-sidebar-button" id="open-sidebar" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false">☰</button>
@@ -257,6 +279,25 @@
       </footer>
     </main>
   </div>
+
+  <dialog class="session-dialog admin-editor" id="admin-editor" aria-labelledby="admin-editor-title">
+    <form id="admin-form">
+      <div class="dialog-header">
+        <div>
+          <h2 id="admin-editor-title">Edit resource</h2>
+          <p id="admin-editor-description"></p>
+        </div>
+        <button class="icon-button close-admin-editor" type="button" aria-label="Close editor">×</button>
+      </div>
+      <label for="admin-yaml">Manifest YAML</label>
+      <textarea id="admin-yaml" spellcheck="false" required aria-describedby="admin-editor-description"></textarea>
+      <p class="admin-error" id="admin-editor-error" role="alert" hidden></p>
+      <div class="admin-editor-actions">
+        <button class="secondary-button close-admin-editor" type="button">Cancel</button>
+        <button class="primary-button" id="save-admin-resource" type="submit">Save changes</button>
+      </div>
+    </form>
+  </dialog>
 
   <dialog class="session-dialog prompt-history-dialog" id="prompts-dialog" aria-labelledby="prompts-title">
     <div class="dialog-header">

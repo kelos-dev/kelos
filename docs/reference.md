@@ -712,6 +712,17 @@ and can be refreshed while the Task is running. WorkerPool-backed Task views
 include only the selected Task's segment from the recent shared worker Pod log.
 The Console reports that the segment is unavailable when its markers are
 outside the bounded log window.
+
+The **Admin** page lists Workspaces, AgentConfigs, and WorkerPools in the active
+namespace. Use **Create** or **Edit YAML** to save one `kelos.dev/v1alpha2` manifest,
+or **Delete** to remove a resource after confirmation. The editor supports the
+spec, labels, and annotations. Updates must preserve the name and resource version;
+if the resource changes while you edit, reopen it and reapply your changes.
+Actions follow Kubernetes permissions in OIDC mode, with **View YAML** for resources
+you can read but cannot update. The `kelos-console-user` role grants read access
+to these resources; administrators need additional `create`, `update`, and `delete`
+permissions. Changing or deleting configuration can affect workloads that use it.
+
 Selecting an existing Session as a source populates both the form fields and the
 editable YAML manifest. Settings that the form cannot represent remain editable
 in YAML mode.
@@ -743,6 +754,11 @@ namespace. Named reads and actions are checked against the exact resource name.
 | Console operation | Required permissions |
 | --- | --- |
 | Inventory and relationship graph | `list` each displayed resource kind |
+| Admin inventory | `list` each displayed resource kind |
+| Admin manifest | `get` the named Workspace, AgentConfig, or WorkerPool |
+| Admin create | `create` the resource kind |
+| Admin update | `get` and `update` the named resource |
+| Admin delete | `delete` the named resource |
 | Resource YAML | `get` the resource |
 | Task logs | `get tasks` and `get tasks/logs` |
 | Session list | `list sessions` |

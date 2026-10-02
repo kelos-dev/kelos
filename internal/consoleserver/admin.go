@@ -50,6 +50,10 @@ func adminResource(resource string) bool {
 }
 
 func (s *Server) admin(writer http.ResponseWriter, request *http.Request, parts []string) {
+	if len(parts) > 0 && parts[0] == "roles" {
+		s.adminRoles(writer, request, parts[1:])
+		return
+	}
 	if len(parts) == 0 && request.Method == http.MethodGet {
 		s.listAdminResources(writer, request)
 		return

@@ -155,17 +155,38 @@
         <button class="icon-button mobile-only open-sidebar-button" type="button" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false">☰</button>
         <div>
           <h1>Admin</h1>
-          <p>Manage configuration in <span class="console-namespace">default</span></p>
+          <p>Manage users and configuration in <span class="console-namespace">default</span></p>
         </div>
       </header>
       <section class="console-page-body">
         <div class="admin-intro">
           <div>
-            <h2>Workspace administration</h2>
-            <p>Configure repository sources, shared agent instructions, and worker capacity. Available actions follow your Kubernetes permissions.</p>
+            <h2>Administration</h2>
+            <p>Manage user roles, repository sources, agent instructions, and worker capacity. Available actions follow your Kubernetes permissions.</p>
           </div>
           <button class="secondary-button" id="refresh-admin" type="button">Refresh</button>
         </div>
+        <section class="admin-card" aria-labelledby="admin-roles-title">
+          <div class="admin-card-header">
+            <div>
+              <h2 id="admin-roles-title">User roles</h2>
+              <p>Assign Console roles in this namespace. Group memberships and other role bindings may grant additional access.</p>
+            </div>
+          </div>
+          <p class="admin-role-status" id="admin-role-status" role="status">Loading user roles…</p>
+          <form id="admin-role-form" class="admin-role-form" hidden>
+            <label for="admin-role-subject">OIDC user ID
+              <input id="admin-role-subject" required maxlength="1024" autocomplete="off" placeholder="Subject from your identity provider" aria-describedby="admin-role-help">
+            </label>
+            <label for="admin-role-choice">Role
+              <select id="admin-role-choice" required></select>
+            </label>
+            <button id="assign-admin-role" class="primary-button" type="submit">Assign role</button>
+            <p id="admin-role-help"></p>
+          </form>
+          <p class="admin-error admin-role-status" id="admin-role-error" role="alert" hidden></p>
+          <div id="admin-role-list"></div>
+        </section>
         <p class="admin-status" id="admin-status" role="status">Loading configuration…</p>
         <div id="admin-collections"></div>
       </section>

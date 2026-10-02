@@ -47,6 +47,14 @@
         adminForm: document.querySelector('#admin-form'),
         adminYAML: document.querySelector('#admin-yaml'),
         adminSave: document.querySelector('#save-admin-resource'),
+        adminRoleStatus: document.querySelector('#admin-role-status'),
+        adminRoleForm: document.querySelector('#admin-role-form'),
+        adminRoleSubject: document.querySelector('#admin-role-subject'),
+        adminRoleChoice: document.querySelector('#admin-role-choice'),
+        adminRoleHelp: document.querySelector('#admin-role-help'),
+        adminRoleError: document.querySelector('#admin-role-error'),
+        adminRoleList: document.querySelector('#admin-role-list'),
+        adminRoleAssign: document.querySelector('#assign-admin-role'),
         overviewView: document.querySelector('#overview-view'),
         sessionsView: document.querySelector('#sessions-view'),
         resourcesView: document.querySelector('#resources-view'),
@@ -224,6 +232,9 @@
         resumingSession: false,
         consoleView: 'overview',
         adminGeneration: 0,
+        adminRoleGeneration: 0,
+        adminRoleSaving: false,
+        adminRoleInventory: null,
         adminEditorGeneration: 0,
         adminEditing: null,
         adminSaving: false,
@@ -894,11 +905,143 @@
             : `No ${collection?.label.toLowerCase() || 'resources'} in ${state.namespace}.`;
         elements.resourceList.replaceChildren(createResourceTable(filteredEntries, emptyMessage));
     }
+    async function loadAdminRoles() {
+        const namespace = state.namespace;
+        const generation = ++state.adminRoleGeneration;
+        state.adminRoleInventory = null;
+        elements.adminRoleStatus.hidden = false;
+        elements.adminRoleStatus.textContent = 'Loading user roles…';
+        elements.adminRoleForm.hidden = true;
+        elements.adminRoleList.replaceChildren();
+        try {
+            const inventory = await api(`/api/admin/roles?namespace=${encodeURIComponent(namespace)}`);
+            if (generation !== state.adminRoleGeneration || namespace !== state.namespace)
+                return;
+            if (!inventory.enabled) {
+                elements.adminRoleStatus.textContent = 'User roles require OIDC sign-in. Static-token mode uses one shared identity.';
+                return;
+            }
+            state.adminRoleInventory = inventory;
+            elements.adminRoleStatus.hidden = true;
+            elements.adminRoleChoice.replaceChildren();
+            for (const role of inventory.roles.filter(role => role.canAssign)) {
+                const option = document.createElement('option');
+                option.value = role.name;
+                option.textContent = `${role.label} — ${role.description}`;
+                elements.adminRoleChoice.append(option);
+            }
+            elements.adminRoleForm.hidden = !inventory.roles.some(role => role.canAssign);
+            elements.adminRoleAssign.disabled = state.adminRoleSaving;
+            elements.adminRoleHelp.textContent = `Use the identity provider's subject ID, not an email or display name. The Console adds the prefix “${inventory.usernamePrefix}”. Roles are additive; remove an Admin assignment to downgrade a user.`;
+            if (!inventory.assignments.length) {
+                const empty = document.createElement('div');
+                empty.className = 'resource-empty';
+                empty.textContent = 'No direct Console user roles in this namespace.';
+                elements.adminRoleList.append(empty);
+            }
+            for (const assignment of inventory.assignments) {
+                const row = document.createElement('div');
+                row.className = 'admin-resource-row';
+                const info = document.createElement('div');
+                const name = document.createElement('div');
+                name.className = 'admin-resource-name';
+                name.textContent = assignment.username + (assignment.username === inventory.currentUser ? ' (you)' : '');
+                info.append(name);
+                if (!assignment.managed) {
+                    const source = document.createElement('div');
+                    source.className = 'admin-resource-status';
+                    source.textContent = 'Managed outside Console';
+                    info.append(source);
+                }
+                const actions = document.createElement('div');
+                actions.className = 'admin-resource-actions';
+                const badge = document.createElement('span');
+                badge.className = 'admin-role-badge';
+                badge.textContent = inventory.roles.find(role => role.name === assignment.role)?.label || assignment.role;
+                actions.append(badge);
+                if (assignment.canRemove) {
+                    const remove = document.createElement('button');
+                    remove.type = 'button';
+                    remove.className = 'secondary-button danger';
+                    remove.textContent = 'Remove role';
+                    remove.setAttribute('aria-label', `Remove ${badge.textContent} role from ${assignment.username}`);
+                    remove.addEventListener('click', () => { void removeAdminRole(assignment, namespace, remove); });
+                    actions.append(remove);
+                }
+                row.append(info, actions);
+                elements.adminRoleList.append(row);
+            }
+        }
+        catch (error) {
+            if (generation !== state.adminRoleGeneration || namespace !== state.namespace)
+                return;
+            elements.adminRoleStatus.textContent = `Unable to load user roles: ${errorMessage(error)}`;
+        }
+    }
+    async function assignAdminRole() {
+        if (state.adminRoleSaving || !state.adminRoleInventory?.enabled)
+            return;
+        const namespace = state.namespace;
+        const subject = elements.adminRoleSubject.value.trim();
+        const role = elements.adminRoleChoice.value;
+        if (!subject || !state.adminRoleInventory.roles.some(option => option.name === role && option.canAssign))
+            return;
+        state.adminRoleSaving = true;
+        elements.adminRoleAssign.disabled = true;
+        elements.adminRoleError.hidden = true;
+        try {
+            const assignment = await api(`/api/admin/roles?namespace=${encodeURIComponent(namespace)}`, {
+                method: 'POST', body: JSON.stringify({ subject, role }),
+            });
+            showToast(`${role === 'admin' ? 'Admin' : 'User'} role assigned to ${assignment.username} in ${namespace}.`);
+            if (namespace === state.namespace) {
+                elements.adminRoleSubject.value = '';
+                await loadAdminRoles();
+            }
+        }
+        catch (error) {
+            if (namespace !== state.namespace)
+                return;
+            elements.adminRoleError.textContent = errorMessage(error);
+            elements.adminRoleError.hidden = false;
+        }
+        finally {
+            state.adminRoleSaving = false;
+            elements.adminRoleAssign.disabled = false;
+        }
+    }
+    async function removeAdminRole(assignment, namespace, button) {
+        const role = assignment.role === 'admin' ? 'Admin' : 'User';
+        const ownRole = assignment.username === state.adminRoleInventory?.currentUser;
+        const message = `Remove the ${role} role from ${assignment.username} in ${namespace}?${ownRole ? ' This may remove your access to this namespace.' : ''} Other role assignments and group access still apply.`;
+        if (!window.confirm(message))
+            return;
+        button.disabled = true;
+        elements.adminRoleError.hidden = true;
+        try {
+            await api(`/api/admin/roles/${encodeURIComponent(namespace)}/${encodeURIComponent(assignment.binding)}?resourceVersion=${encodeURIComponent(assignment.resourceVersion)}`, { method: 'DELETE' });
+            showToast(`${role} role removed from ${assignment.username} in ${namespace}.`);
+            if (namespace === state.namespace)
+                await loadAdminRoles();
+        }
+        catch (error) {
+            if (namespace !== state.namespace)
+                return;
+            elements.adminRoleError.textContent = errorMessage(error);
+            elements.adminRoleError.hidden = false;
+        }
+        finally {
+            button.disabled = false;
+        }
+    }
     function adminResourcePath(resource, namespace, name) {
         const path = `/api/admin/${encodeURIComponent(resource)}/${encodeURIComponent(namespace)}`;
         return name ? `${path}/${encodeURIComponent(name)}` : path;
     }
     async function loadAdmin() {
+        await Promise.all([loadAdminRoles(), loadAdminResources()]);
+    }
+    async function loadAdminResources() {
         const namespace = state.namespace;
         const generation = ++state.adminGeneration;
         elements.adminStatus.hidden = false;
@@ -2387,6 +2530,12 @@ spec:
         state.namespace = namespace;
         state.namespaceGeneration += 1;
         state.adminGeneration += 1;
+        state.adminRoleGeneration += 1;
+        state.adminRoleInventory = null;
+        elements.adminRoleForm.hidden = true;
+        elements.adminRoleSubject.value = '';
+        elements.adminRoleList.replaceChildren();
+        elements.adminRoleError.hidden = true;
         state.adminEditorGeneration += 1;
         state.adminEditing = null;
         elements.adminEditor.close();
@@ -5703,6 +5852,10 @@ spec:
     elements.sessionsButton.addEventListener('click', () => setConsoleView('sessions'));
     elements.resourcesButton.addEventListener('click', () => setConsoleView('resources'));
     elements.adminButton.addEventListener('click', () => setConsoleView('admin'));
+    elements.adminRoleForm.addEventListener('submit', event => {
+        event.preventDefault();
+        void assignAdminRole();
+    });
     requiredElement('#refresh-admin').addEventListener('click', () => { void loadAdmin(); });
     elements.adminForm.addEventListener('submit', event => {
         event.preventDefault();

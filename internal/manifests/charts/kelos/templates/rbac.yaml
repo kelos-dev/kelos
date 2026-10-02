@@ -306,6 +306,13 @@ rules:
       - update
       - delete
   {{- if eq .Values.consoleServer.auth.mode "oidc" }}
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [rolebindings]
+    verbs: [get, list, create, delete]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [clusterroles]
+    resourceNames: [kelos-console-user, kelos-console-admin]
+    verbs: [get, bind]
   - apiGroups:
       - authorization.k8s.io
     resources:

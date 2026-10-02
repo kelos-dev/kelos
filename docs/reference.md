@@ -713,8 +713,8 @@ include only the selected Task's segment from the recent shared worker Pod log.
 The Console reports that the segment is unavailable when its markers are
 outside the bounded log window.
 
-The **Admin** page lists Workspaces, AgentConfigs, and WorkerPools in the active
-namespace. Use **Create** or **Edit YAML** to save one `kelos.dev/v1alpha2` manifest,
+The **Admin** page manages user roles and lists Workspaces, AgentConfigs, and
+WorkerPools in the active namespace. Use **Create** or **Edit YAML** to save one `kelos.dev/v1alpha2` manifest,
 or **Delete** to remove a resource after confirmation. The editor supports the
 spec, labels, and annotations. Updates must preserve the name and resource version;
 if the resource changes while you edit, reopen it and reapply your changes.
@@ -722,6 +722,21 @@ Actions follow Kubernetes permissions in OIDC mode, with **View YAML** for resou
 you can read but cannot update. The `kelos-console-user` role grants read access
 to these resources; administrators need additional `create`, `update`, and `delete`
 permissions. Changing or deleting configuration can affect workloads that use it.
+
+With OIDC sign-in, **User roles** lists direct User and Admin assignments in the
+active namespace. **User** grants the permissions of `kelos-console-user`;
+**Admin** also grants configuration management and Console role administration.
+Enter the identity provider's subject ID to assign a role. The configured username
+prefix is added automatically; email addresses and display names are not looked up.
+The Console does not list the identity provider's user directory.
+
+Roles are additive. To downgrade a user, remove their Admin assignment with
+**Remove role**. Assignments created outside the Console are shown as read-only.
+Group memberships, other RoleBindings, and ClusterRoleBindings can grant additional
+access and must be managed separately. Removing your own role can remove your
+access. Role management is unavailable in static-token mode. A cluster administrator
+must bind the first Console administrator; see the
+[Console setup guide](../internal/manifests/charts/kelos/README.md#console-oidc-authentication).
 
 Selecting an existing Session as a source populates both the form fields and the
 editable YAML manifest. Settings that the form cannot represent remain editable
@@ -774,6 +789,18 @@ namespace. Named reads and actions are checked against the exact resource name.
 | Chat or terminal connection | `get sessions` and `create sessions/connect` |
 | Upload an attachment | `get sessions` and `create sessions/attachments` |
 | Download an attachment | `get sessions` and `get sessions/attachments` |
+
+User-role administration uses the `rbac.authorization.k8s.io` API group in the
+active namespace:
+
+| Console operation | Required permissions |
+| --- | --- |
+| List direct Console role assignments | `list rolebindings` |
+| Assign User or Admin | `create rolebindings` and `bind clusterroles` for `kelos-console-user` or `kelos-console-admin`, respectively |
+| Remove a Console-created assignment | `get` and `delete` the named RoleBinding |
+
+Only the two Console roles can be assigned. Removing an assignment requires its
+resource version; concurrent changes return a conflict and require refreshing.
 
 The slash-separated permissions are authorization subresources; they are not
 served CRD endpoints. Human users do not need `pods/log` or `pods/exec`.

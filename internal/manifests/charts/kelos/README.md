@@ -302,8 +302,8 @@ supported and must be mapped to identifiers at the IdP. Kelos accepts at most
 for the subject. Empty, repeated, or malformed identity headers are rejected;
 a user may have no groups and receive permissions through a User RoleBinding.
 
-The chart creates the unbound `kelos-console-user` ClusterRole. To grant its
-full Console access in one namespace:
+The chart creates unbound `kelos-console-user` and `kelos-console-admin`
+ClusterRoles. To grant Session access and resource inspection in one namespace:
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -326,19 +326,39 @@ limitations are in [the Console authentication reference](../../../../docs/refer
 The generated user role grants no Pod permissions. The Console ServiceAccount
 performs the underlying Pod operations after checking the caller's permissions.
 
-The Admin page uses the same namespace RoleBindings. The `kelos-console-user`
-role allows viewing Workspaces, AgentConfigs, and WorkerPools. To allow a group
-to manage them, bind an additional Role in that namespace with these rules:
+The Admin page uses the same namespace RoleBindings. To bootstrap an
+administrator who can manage configuration and assign User or Admin roles,
+bind `kelos-console-admin` in the namespace:
 
 ```yaml
-rules:
-  - apiGroups: [kelos.dev]
-    resources: [workspaces, agentconfigs, workerpools]
-    verbs: [get, list, create, update, delete]
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kelos-console-administrators
+  namespace: team-frontend
+subjects:
+  - kind: Group
+    name: oidc:example:frontend-administrators
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: kelos-console-admin
+  apiGroup: rbac.authorization.k8s.io
 ```
 
-Only grant these permissions to users who should configure agent instructions,
-repository setup, and worker execution environments.
+In **Admin → User roles**, enter an OIDC subject ID and select **User** or
+**Admin**. The Console adds the configured username prefix and creates an
+individual RoleBinding in the active namespace. User grants Session access and
+resource inspection; Admin also grants configuration and user-role management.
+Role grants require both permission to create RoleBindings and explicit `bind`
+permission for the selected Console ClusterRole.
+
+The page lists direct user assignments to these roles, including read-only
+assignments managed outside the Console. It does not query the identity provider
+for users or group memberships. Removing a Console-created assignment does not
+remove access from other bindings or groups. Roles are additive: remove an Admin
+assignment to downgrade a user, and manage external bindings and groups separately.
+Role management requires OIDC; it is unavailable with a shared static token.
 
 `secretName`, `tokenKey`, and `secureCookie` at the `consoleServer` level belong
 to static-token mode; do not combine static settings with OIDC. OIDC cookies

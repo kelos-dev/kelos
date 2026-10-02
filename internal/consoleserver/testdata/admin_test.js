@@ -29,6 +29,7 @@ function reset() {
   global.showToast = () => {};
   global.loadResources = async () => {};
   global.loadOptions = async () => {};
+  global.loadAdminRoles = async () => {};
 }
 
 function deferred() {

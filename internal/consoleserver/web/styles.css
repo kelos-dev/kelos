@@ -160,6 +160,13 @@ button { color: inherit; }
 .admin-resource-actions button { min-height: 38px; }
 .admin-resource-actions .danger { color: var(--danger); }
 .admin-card .resource-empty { min-height: 110px; }
+.admin-role-status { margin: 16px 20px; color: var(--muted); font-size: 13px; }
+.admin-role-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: end; gap: 12px; padding: 20px; border-bottom: 1px solid var(--line); }
+.admin-role-form[hidden] { display: none; }
+.admin-role-form label { display: grid; gap: 8px; font-size: 12px; font-weight: 600; }
+.admin-role-form input, .admin-role-form select { width: 100%; min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--card); font-size: 13px; }
+.admin-role-form p { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.admin-role-badge { display: inline-flex; align-items: center; padding: 6px 10px; border-radius: 8px; background: var(--panel); font-size: 12px; font-weight: 600; }
 .session-dialog.admin-editor { width: min(94vw, 800px); }
 .admin-editor .dialog-header { margin-bottom: 20px; }
 .admin-editor label { display: block; margin-bottom: 8px; font-size: 12px; font-weight: 600; }
@@ -567,6 +574,9 @@ button { color: inherit; }
 .mobile-only { display: none; }
 
 @media (max-width: 800px), (max-height: 500px) and (pointer: coarse) {
+  .admin-role-form { grid-template-columns: minmax(0, 1fr); }
+  .admin-role-form input, .admin-role-form select, .admin-editor textarea { font-size: 16px; }
+  .admin-role-form button { min-height: 44px; }
   .app-shell { display: block; }
   .sidebar { position: fixed; inset: 0 auto 0 0; width: min(88vw, 320px); padding: calc(8px + env(safe-area-inset-top)) 8px calc(8px + env(safe-area-inset-bottom)) calc(8px + env(safe-area-inset-left)); visibility: hidden; transform: translateX(-103%); transition: transform .22s ease, visibility 0s linear .22s; box-shadow: 16px 0 48px rgba(0,0,0,.16); }
   .sidebar.open { visibility: visible; transform: translateX(0); transition-delay: 0s; }
@@ -656,7 +666,7 @@ button { color: inherit; }
   .changes-view { padding: 20px calc(12px + env(safe-area-inset-right)) 32px calc(12px + env(safe-area-inset-left)); overscroll-behavior: contain; }
   .composer-wrap { padding: 8px calc(8px + env(safe-area-inset-right)) calc(7px + env(safe-area-inset-bottom)) calc(8px + env(safe-area-inset-left)); }
   .composer { padding: 8px; }
-  .composer textarea, .pending-message-input, .yaml-panel textarea, .admin-editor textarea, .form-grid input, .form-grid select, .source-picker select, .section-field input, .session-section-control input, .session-section-control select, .namespace-form input, .input-other { font-size: 16px; }
+  .composer textarea, .pending-message-input, .yaml-panel textarea, .form-grid input, .form-grid select, .source-picker select, .section-field input, .session-section-control input, .session-section-control select, .namespace-form input, .input-other { font-size: 16px; }
   .composer textarea { min-height: 44px; padding: 10px 8px; line-height: 24px; }
   .attach-button, .send-button { width: 44px; height: 44px; }
   .message-bubble, .user-message { max-width: 92%; }

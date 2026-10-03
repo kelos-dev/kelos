@@ -17,7 +17,28 @@ const (
 	TaskSpawnerPhaseFailed TaskSpawnerPhase = "Failed"
 	// TaskSpawnerPhaseSuspended means the spawner is paused by the user.
 	TaskSpawnerPhaseSuspended TaskSpawnerPhase = "Suspended"
+	// TaskSpawnerPhaseOnDemand means the spawner does not act on a source of
+	// its own and is available for explicit dispatch.
+	TaskSpawnerPhaseOnDemand TaskSpawnerPhase = "OnDemand"
 )
+
+// TriggerMode controls what may start Tasks from a TaskSpawner.
+type TriggerMode string
+
+const (
+	// TriggerModeSource lets the spawner act on its own spec.when source.
+	TriggerModeSource TriggerMode = "Source"
+	// TriggerModeOnDemand stops the spawner acting on its own source. Tasks are
+	// started only by an explicit dispatch.
+	TriggerModeOnDemand TriggerMode = "OnDemand"
+)
+
+// IsOnDemand reports whether this spawner has opted out of acting on its own
+// source. An empty TriggerMode means Source, which is what the API server
+// defaults an unset field to.
+func (s *TaskSpawnerSpec) IsOnDemand() bool {
+	return s.TriggerMode == TriggerModeOnDemand
+}
 
 // When defines the conditions that trigger task spawning.
 // Exactly one field must be set.
@@ -726,10 +747,11 @@ type Slack struct {
 	// ExcludePatterns — the exclusion also covers slash commands. A criterion
 	// the event does not carry never matches, so it does not reject the event.
 	//
-	// The rules are only guaranteed while the object is managed through
-	// v1alpha2. This field does not exist in v1alpha1; it survives a v1alpha1
-	// round-trip through a preservation annotation, so a v1alpha1 client that
-	// drops unknown annotations drops the exclusions with them.
+	// On TaskSpawner, the rules are only guaranteed while the object is managed
+	// through v1alpha2: this field does not exist there in v1alpha1, and it
+	// survives a v1alpha1 round-trip through a preservation annotation, so a
+	// v1alpha1 client that drops unknown annotations drops the exclusions with
+	// them. TaskRouter, which reuses this type, has no v1alpha1 to convert to.
 	// +optional
 	// +kubebuilder:validation:MaxItems=20
 	ExcludeFilters []SlackFilter `json:"excludeFilters,omitempty"`
@@ -1192,13 +1214,35 @@ type TaskTemplate struct {
 }
 
 // TaskSpawnerSpec defines the desired state of TaskSpawner.
-// +kubebuilder:validation:XValidation:rule="!(has(self.when.githubIssues) || has(self.when.githubPullRequests) || has(self.when.githubWebhook) || has(self.when.linearWebhook)) || has(self.taskTemplate.workspaceRef) || (has(self.taskTemplate.worker) && has(self.taskTemplate.worker.workspaceRef)) || has(self.taskTemplate.workerPoolRef)",message="a workspace source is required when using githubIssues, githubPullRequests, githubWebhook, or linearWebhook source (set taskTemplate.workspaceRef, taskTemplate.worker.workspaceRef, or taskTemplate.workerPoolRef — a pool satisfies this because it carries its own workspace)"
+// +kubebuilder:validation:XValidation:rule="has(self.when) || self.triggerMode == 'OnDemand'",message="when is required unless triggerMode is OnDemand"
+// +kubebuilder:validation:XValidation:rule="!has(self.when) || !(has(self.when.githubIssues) || has(self.when.githubPullRequests) || has(self.when.githubWebhook) || has(self.when.linearWebhook)) || has(self.taskTemplate.workspaceRef) || (has(self.taskTemplate.worker) && has(self.taskTemplate.worker.workspaceRef)) || has(self.taskTemplate.workerPoolRef)",message="a workspace source is required when using githubIssues, githubPullRequests, githubWebhook, or linearWebhook source (set taskTemplate.workspaceRef, taskTemplate.worker.workspaceRef, or taskTemplate.workerPoolRef — a pool satisfies this because it carries its own workspace)"
 // +kubebuilder:validation:XValidation:rule="has(self.taskTemplate.workerPoolRef) || (has(self.taskTemplate.worker) && (has(self.taskTemplate.worker.credentials) || has(self.credentials))) || (has(self.taskTemplate.type) && (has(self.taskTemplate.credentials) || has(self.credentials)))",message="inline task templates require taskTemplate credentials or spec.credentials"
 // +kubebuilder:validation:XValidation:rule="!has(self.credentials) || (!has(self.taskTemplate.workerPoolRef) && !has(self.taskTemplate.credentials) && (!has(self.taskTemplate.worker) || !has(self.taskTemplate.worker.credentials)))",message="spec.credentials is mutually exclusive with taskTemplate credentials and workerPoolRef"
 type TaskSpawnerSpec struct {
-	// When defines the conditions that trigger task spawning.
-	// +kubebuilder:validation:Required
-	When When `json:"when"`
+	// When defines the conditions that trigger task spawning. It is required
+	// unless triggerMode is OnDemand, where the spawner has no source of its
+	// own and serves only as a template for explicit dispatch.
+	//
+	// omitempty is a no-op on a struct value, so a Go client always sends
+	// when: {} and only a manifest can express the absence the CEL rule allows.
+	// Treating a When with no source set as "no source" is what makes both
+	// spellings behave the same.
+	// +optional
+	When When `json:"when,omitempty"`
+
+	// TriggerMode controls what may start Tasks from this spawner.
+	//
+	// Source (the default) keeps the spawner acting on spec.when. OnDemand
+	// stops the spawner acting on its own source, so Tasks are started only by
+	// an explicit dispatch — a TaskRouter, or "kelos run --from
+	// taskspawner/<name>".
+	//
+	// This is not spec.suspend. Suspend stops the spawner producing work at
+	// all; OnDemand only stops its own source from firing.
+	// +optional
+	// +kubebuilder:default=Source
+	// +kubebuilder:validation:Enum=Source;OnDemand
+	TriggerMode TriggerMode `json:"triggerMode,omitempty"`
 
 	// TaskTemplate defines the template for spawned Tasks. Inline worker and
 	// legacy type templates may use TaskSpawner.spec.credentials instead of

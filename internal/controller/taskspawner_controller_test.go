@@ -10,6 +10,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -270,6 +271,52 @@ func TestReconcileDeploymentRequeuesWhenWorkspaceSecretMissing(t *testing.T) {
 	assert.True(t, apierrors.IsNotFound(err), "expected no Deployment while workspace secret is missing")
 }
 
+// TestReconcileOnDemandCreatesNoWorkload covers the routing in Reconcile: a
+// polling source that would otherwise get a Deployment gets nothing once the
+// spawner has opted out of its own source.
+func TestReconcileOnDemandCreatesNoWorkload(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, kelos.AddToScheme(scheme))
+	require.NoError(t, appsv1.AddToScheme(scheme))
+	require.NoError(t, batchv1.AddToScheme(scheme))
+	require.NoError(t, corev1.AddToScheme(scheme))
+	require.NoError(t, rbacv1.AddToScheme(scheme))
+
+	ts := &kelos.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{Name: "ondemand-polling", Namespace: "default"},
+		Spec: kelos.TaskSpawnerSpec{
+			TriggerMode: kelos.TriggerModeOnDemand,
+			When:        kelos.When{GitHubIssues: &kelos.GitHubIssues{Labels: []string{"bug"}}},
+			TaskTemplate: kelos.TaskTemplate{
+				Type:        "claude-code",
+				Credentials: &kelos.Credentials{Type: kelos.CredentialTypeNone},
+			},
+		},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(ts).
+		WithStatusSubresource(&kelos.TaskSpawner{}).
+		Build()
+	reconciler := &TaskSpawnerReconciler{Client: cl, Scheme: scheme}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: ts.Name, Namespace: ts.Namespace}}
+
+	// The first pass adds the finalizer and requeues; the second does the work.
+	_, err := reconciler.Reconcile(context.Background(), req)
+	require.NoError(t, err)
+	_, err = reconciler.Reconcile(context.Background(), req)
+	require.NoError(t, err)
+
+	var deployment appsv1.Deployment
+	assert.True(t, apierrors.IsNotFound(cl.Get(context.Background(), req.NamespacedName, &deployment)),
+		"an OnDemand spawner must not get a Deployment")
+
+	var final kelos.TaskSpawner
+	require.NoError(t, cl.Get(context.Background(), req.NamespacedName, &final))
+	assert.Equal(t, kelos.TaskSpawnerPhaseOnDemand, final.Status.Phase)
+}
+
 func TestReconcileWebhook(t *testing.T) {
 	scheme := runtime.NewScheme()
 	require.NoError(t, kelos.AddToScheme(scheme))
@@ -304,6 +351,21 @@ func TestReconcileWebhook(t *testing.T) {
 			isSuspended: false,
 			wantPhase:   kelos.TaskSpawnerPhaseRunning,
 			wantMessage: "Webhook-driven TaskSpawner ready",
+		},
+		{
+			name: "OnDemand TaskSpawner",
+			ts: &kelos.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-ondemand",
+					Namespace: "default",
+				},
+				Spec: kelos.TaskSpawnerSpec{
+					TriggerMode: kelos.TriggerModeOnDemand,
+				},
+			},
+			isSuspended: false,
+			wantPhase:   kelos.TaskSpawnerPhaseOnDemand,
+			wantMessage: "Awaiting dispatch",
 		},
 		{
 			name: "suspended GitHub webhook TaskSpawner",
@@ -444,7 +506,7 @@ func TestReconcileWebhook(t *testing.T) {
 				},
 			}
 
-			_, err := reconciler.reconcileWebhook(context.Background(), req, tt.ts, tt.isSuspended)
+			_, err := reconciler.reconcileWithoutWorkload(context.Background(), req, tt.ts, tt.isSuspended)
 			require.NoError(t, err)
 
 			// Check final TaskSpawner status

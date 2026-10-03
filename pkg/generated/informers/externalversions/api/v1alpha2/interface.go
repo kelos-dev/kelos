@@ -38,6 +38,8 @@ type Interface interface {
 	TaskPipelines() TaskPipelineInformer
 	// TaskRecords returns a TaskRecordInformer.
 	TaskRecords() TaskRecordInformer
+	// TaskRouters returns a TaskRouterInformer.
+	TaskRouters() TaskRouterInformer
 	// TaskSpawners returns a TaskSpawnerInformer.
 	TaskSpawners() TaskSpawnerInformer
 	// WebhookGateways returns a WebhookGatewayInformer.
@@ -92,6 +94,11 @@ func (v *version) TaskPipelines() TaskPipelineInformer {
 // TaskRecords returns a TaskRecordInformer.
 func (v *version) TaskRecords() TaskRecordInformer {
 	return &taskRecordInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
+// TaskRouters returns a TaskRouterInformer.
+func (v *version) TaskRouters() TaskRouterInformer {
+	return &taskRouterInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }
 
 // TaskSpawners returns a TaskSpawnerInformer.

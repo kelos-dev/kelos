@@ -32,6 +32,8 @@ type TaskPipelineExpansion interface{}
 
 type TaskRecordExpansion interface{}
 
+type TaskRouterExpansion interface{}
+
 type TaskSpawnerExpansion interface{}
 
 type WebhookGatewayExpansion interface{}

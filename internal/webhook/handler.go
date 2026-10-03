@@ -411,6 +411,13 @@ func (h *WebhookHandler) processWebhook(ctx context.Context, eventType string, p
 			continue
 		}
 
+		// A spawner that has opted out of its own source is reachable only by
+		// explicit dispatch.
+		if spawner.Spec.IsOnDemand() {
+			spawnerLog.V(1).Info("Skipping OnDemand spawner")
+			continue
+		}
+
 		// Check max concurrency
 		// Note: For webhook TaskSpawners, activeTasks is updated by the kelos-controller
 		// when Tasks change status. This provides eventually consistent rate limiting.

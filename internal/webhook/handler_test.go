@@ -976,6 +976,57 @@ func TestServeHTTP_SkipsNonMatchingSpawner(t *testing.T) {
 	}
 }
 
+func TestServeHTTP_SkipsOnDemandSpawner(t *testing.T) {
+	spawner := &kelos.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ondemand-spawner",
+			Namespace: "default",
+			UID:       "test-uid-790",
+		},
+		Spec: kelos.TaskSpawnerSpec{
+			TriggerMode: kelos.TriggerModeOnDemand,
+			When: kelos.When{
+				GitHubWebhook: &kelos.GitHubWebhook{
+					Events: []string{"issues"},
+				},
+			},
+			TaskTemplate: kelos.TaskTemplate{
+				Type: "claude-code",
+				Credentials: &kelos.Credentials{
+					Type: "api-key",
+				},
+				WorkspaceRef: &kelos.WorkspaceReference{
+					Name: "test-workspace",
+				},
+			},
+		},
+	}
+
+	handler := newTestHandler(t, spawner)
+
+	payload := []byte(issuesPayload)
+	sig := signPayload(payload, []byte(testSecret))
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(payload))
+	req.Header.Set(GitHubEventHeader, "issues")
+	req.Header.Set(GitHubSignatureHeader, sig)
+	req.Header.Set(GitHubDeliveryHeader, "ondemand-delivery")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected %d, got %d", http.StatusOK, rr.Code)
+	}
+
+	var taskList kelos.TaskList
+	if err := handler.client.List(context.Background(), &taskList); err != nil {
+		t.Fatal(err)
+	}
+	if len(taskList.Items) != 0 {
+		t.Errorf("Expected 0 tasks for an OnDemand spawner, got %d", len(taskList.Items))
+	}
+}
+
 func TestServeHTTP_SkipsSuspendedSpawner(t *testing.T) {
 	suspended := true
 	spawner := &kelos.TaskSpawner{

@@ -572,7 +572,7 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 		if workspace.Ref != "" && !commitRef {
 			cloneArgs = append(cloneArgs, "--branch", workspace.Ref)
 		}
-		cloneArgs = append(cloneArgs, "--no-single-branch", "--depth", "1", "--", workspace.Repo, targetPath)
+		cloneArgs = append(cloneArgs, workspaceCloneBranchesFlag(workspace), "--depth", "1", "--", workspace.Repo, targetPath)
 
 		initContainer := corev1.Container{
 			Name:         "git-clone",
@@ -653,16 +653,26 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 			if workspace.SecretRef != nil && !workspacePersistsGitCredentialHelper(workspace) {
 				localGit = remoteGit
 			}
+			// A clone of selected branches configures origin to fetch only
+			// those. When the Task branch exists on origin, track it too so
+			// later fetches and pushes keep origin/$KELOS_BRANCH current. A
+			// branch that does not exist yet is not tracked: git fetch fails
+			// on a tracked branch that is missing from the remote, so a plain
+			// git fetch would fail until the branch is first pushed.
+			trackBranch := ""
+			if workspaceClonesSelectedBranches(workspace) && !commitRef {
+				trackBranch = "  git remote set-branches --add origin \"$KELOS_BRANCH\"\n"
+			}
 			branchSetupScript := fmt.Sprintf(
 				`set -e
 cd %[1]s/repo
 remote_status=0
 %[2]s ls-remote --exit-code --heads origin "refs/heads/$KELOS_BRANCH" >/dev/null || remote_status=$?
 if [ "$remote_status" -eq 0 ]; then
-  %[2]s fetch origin "refs/heads/$KELOS_BRANCH"
+%[4]s  %[2]s fetch --depth 1 origin "+refs/heads/$KELOS_BRANCH:refs/remotes/origin/$KELOS_BRANCH"
   if git show-ref --verify --quiet "refs/heads/$KELOS_BRANCH"; then
     %[3]s checkout "$KELOS_BRANCH"
-    %[3]s merge --ff-only FETCH_HEAD
+    %[3]s reset --hard FETCH_HEAD
   else
     %[3]s checkout -b "$KELOS_BRANCH" FETCH_HEAD
   fi
@@ -675,7 +685,7 @@ elif [ "$remote_status" -eq 2 ]; then
 else
   exit "$remote_status"
 fi`,
-				WorkspaceMountPath, remoteGit, localGit,
+				WorkspaceMountPath, remoteGit, localGit, trackBranch,
 			)
 			branchEnv := make([]corev1.EnvVar, len(workspaceEnvVars), len(workspaceEnvVars)+1)
 			copy(branchEnv, workspaceEnvVars)
@@ -1069,6 +1079,40 @@ func validatePodFailurePolicy(policy *batchv1.PodFailurePolicy) error {
 	return nil
 }
 
+// workspaceCloneBranchPolicy returns the workspace's clone branch policy,
+// defaulting to All.
+func workspaceCloneBranchPolicy(workspace *kelos.WorkspaceSpec) kelos.WorkspaceCloneBranchPolicy {
+	if workspace.Clone == nil || workspace.Clone.BranchPolicy == "" {
+		return kelos.WorkspaceCloneBranchPolicyAll
+	}
+	return workspace.Clone.BranchPolicy
+}
+
+// workspaceClonesSelectedBranches reports whether the workspace clone
+// fetches only the branches its branch policy selects rather than every
+// branch.
+func workspaceClonesSelectedBranches(workspace *kelos.WorkspaceSpec) bool {
+	return workspaceCloneBranchPolicy(workspace) != kelos.WorkspaceCloneBranchPolicyAll
+}
+
+// workspaceCloneBranchesFlag returns the git clone flag that selects which
+// branches the workspace clone fetches.
+func workspaceCloneBranchesFlag(workspace *kelos.WorkspaceSpec) string {
+	if workspaceClonesSelectedBranches(workspace) {
+		return "--single-branch"
+	}
+	return "--no-single-branch"
+}
+
+// workspaceFetchesDefaultBranch reports whether the clone must fetch the
+// remote's default branch after cloning spec.ref. Without spec.ref the clone
+// already fetches the default branch, and a commit SHA ref is fetched on its
+// own.
+func workspaceFetchesDefaultBranch(workspace *kelos.WorkspaceSpec) bool {
+	return workspaceCloneBranchPolicy(workspace) == kelos.WorkspaceCloneBranchPolicyRefAndDefault &&
+		workspace.Ref != "" && !isFullGitCommitSHA(workspace.Ref)
+}
+
 func isFullGitCommitSHA(ref string) bool {
 	if len(ref) != 40 {
 		return false
@@ -1177,12 +1221,16 @@ type workspaceCheckout struct {
 	sparsePatterns []string
 	// removeGitDir deletes .git once the checkout is complete.
 	removeGitDir bool
+	// fetchDefaultBranch fetches the remote's default branch after the
+	// clone and adds it to the branches origin tracks.
+	fetchDefaultBranch bool
 }
 
 func workspaceCheckoutFor(workspace *kelos.WorkspaceSpec) workspaceCheckout {
 	checkout := workspaceCheckout{
 		persistCredentialHelper: workspacePersistsGitCredentialHelper(workspace),
 		removeGitDir:            workspaceRemovesGitDir(workspace),
+		fetchDefaultBranch:      workspaceFetchesDefaultBranch(workspace),
 	}
 	if workspace.SecretRef != nil {
 		checkout.credentialHelper = gitCredentialHelper()
@@ -1200,7 +1248,7 @@ func workspaceCheckoutFor(workspace *kelos.WorkspaceSpec) workspaceCheckout {
 // restricted reports whether the checkout differs from a plain clone that
 // persists the credential helper, and so needs the scripted clone.
 func (c workspaceCheckout) restricted() bool {
-	return len(c.sparsePatterns) > 0 || c.removeGitDir ||
+	return len(c.sparsePatterns) > 0 || c.removeGitDir || c.fetchDefaultBranch ||
 		(c.credentialHelper != "" && !c.persistCredentialHelper)
 }
 
@@ -1224,6 +1272,23 @@ func (c workspaceCheckout) sparseCheckoutSetLine(dir string) string {
 		quoted = append(quoted, shellQuote(pattern))
 	}
 	return fmt.Sprintf("git -C %s sparse-checkout set --no-cone -- %s", dir, strings.Join(quoted, " "))
+}
+
+// fetchDefaultBranchLines returns shell lines that read the remote's default
+// branch from origin and, unless the clone already fetched it, add it to the
+// branches origin tracks and fetch its tip. The lines exit 1 when a git
+// command fails or origin does not report a default branch, without relying
+// on set -e, which a shell ignores when the lines run on the left of ||.
+func (c workspaceCheckout) fetchDefaultBranchLines(dir string) []string {
+	return []string{
+		fmt.Sprintf(`head_ref=$(%s ls-remote --symref origin HEAD) || exit 1`, c.remoteGit(dir)),
+		`default_branch=$(printf '%s\n' "$head_ref" | awk '$1 == "ref:" && $3 == "HEAD" { sub("^refs/heads/", "", $2); print $2; exit }')`,
+		`if [ -z "$default_branch" ]; then echo "Remote origin did not report a default branch, which clone.branchPolicy RefAndDefault needs" >&2; exit 1; fi`,
+		fmt.Sprintf(`if ! git -C %s rev-parse --verify --quiet "refs/remotes/origin/$default_branch" >/dev/null; then`, dir),
+		fmt.Sprintf(`  git -C %s remote set-branches --add origin "$default_branch" || exit 1`, dir),
+		fmt.Sprintf(`  %s fetch --depth 1 origin "+refs/heads/$default_branch:refs/remotes/origin/$default_branch" || exit 1`, c.remoteGit(dir)),
+		`fi`,
+	}
 }
 
 func (c workspaceCheckout) finishLines(dir string) []string {
@@ -1251,6 +1316,9 @@ func buildWorkspaceCloneScript(c workspaceCheckout) string {
 	lines := []string{
 		"set -eu",
 		c.remoteGit("") + ` "$@"`,
+	}
+	if c.fetchDefaultBranch {
+		lines = append(lines, c.fetchDefaultBranchLines(dir)...)
 	}
 	if len(c.sparsePatterns) > 0 {
 		lines = append(lines,

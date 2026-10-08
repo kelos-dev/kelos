@@ -31,6 +31,20 @@ type WorkspaceFile struct {
 // WorkspaceGHProxy configures the workspace-scoped ghproxy.
 type WorkspaceGHProxy struct{}
 
+// WorkspaceCloneBranchPolicy selects which branches a Workspace clone fetches.
+// +kubebuilder:validation:Enum=All;Ref;RefAndDefault
+type WorkspaceCloneBranchPolicy string
+
+const (
+	// WorkspaceCloneBranchPolicyAll fetches every branch.
+	WorkspaceCloneBranchPolicyAll WorkspaceCloneBranchPolicy = "All"
+	// WorkspaceCloneBranchPolicyRef fetches only the ref being checked out.
+	WorkspaceCloneBranchPolicyRef WorkspaceCloneBranchPolicy = "Ref"
+	// WorkspaceCloneBranchPolicyRefAndDefault fetches the ref being checked
+	// out and the remote's default branch.
+	WorkspaceCloneBranchPolicyRefAndDefault WorkspaceCloneBranchPolicy = "RefAndDefault"
+)
+
 // WorkspaceClone configures how a Workspace repository is cloned.
 type WorkspaceClone struct {
 	// Paths limits the checkout to these repository paths. Each entry is a
@@ -70,6 +84,33 @@ type WorkspaceClone struct {
 	// Omit to use Keep.
 	// +optional
 	GitDir WorkspaceGitDir `json:"gitDir,omitempty"`
+
+	// BranchPolicy selects which branches the clone fetches. All fetches the
+	// tip of every branch. Ref fetches only spec.ref (a branch or tag), or
+	// the remote's default branch when spec.ref is empty. RefAndDefault
+	// fetches spec.ref and the remote's default branch, which is read from
+	// the remote rather than assumed; the clone fails if the remote does not
+	// report one. With Ref and RefAndDefault, origin is set up to track only
+	// the fetched branches, so a plain `git fetch origin` does not pick up
+	// others. A Task's spec.branch or a Session's spec.initialBranch is still
+	// checked out. When it exists on origin, it is fetched and added to the
+	// branches origin tracks. Otherwise it is created from the cloned ref and
+	// not tracked, because git fetch fails on a tracked branch that origin
+	// does not have. Pushing a branch that was not on origin at clone time,
+	// including one the agent creates, does not create origin/<branch>, so
+	// tools that look for it, such as `gh pr create` without --head, treat
+	// the branch as not pushed. After the first push, run
+	// `git remote set-branches --add origin <branch>` and then
+	// `git fetch origin <branch>` to track it, or pass
+	// `gh pr create --head <branch>`. Omit --depth from that fetch: the
+	// commits are already local, and --depth 1 would cut the local branch's
+	// history at its tip. To use another branch, run
+	// `git remote set-branches --add origin <branch>` and then
+	// `git fetch --depth 1 origin <branch>`; without `--depth 1` the fetch
+	// can download most of that branch's history. Has no effect when
+	// spec.ref is a full commit SHA. Omit to use All.
+	// +optional
+	BranchPolicy WorkspaceCloneBranchPolicy `json:"branchPolicy,omitempty"`
 }
 
 // WorkspaceGitDir selects what happens to a Workspace repository's .git

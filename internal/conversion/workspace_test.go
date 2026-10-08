@@ -22,8 +22,9 @@ func TestWorkspaceRoundTrip_PreservesCheckoutRestrictions(t *testing.T) {
 			Ref:       "main",
 			SecretRef: &v1alpha2.SecretReference{Name: "gh"},
 			Clone: &v1alpha2.WorkspaceClone{
-				Paths:  []string{"docs", "www/app"},
-				GitDir: v1alpha2.WorkspaceGitDirRemove,
+				Paths:        []string{"docs", "www/app"},
+				GitDir:       v1alpha2.WorkspaceGitDirRemove,
+				BranchPolicy: v1alpha2.WorkspaceCloneBranchPolicyRefAndDefault,
 			},
 			AgentGitHubToken: v1alpha2.WorkspaceAgentGitHubTokenNone,
 		},
@@ -95,6 +96,7 @@ func TestWorkspaceToHub_RejectsUnknownCheckoutEnumValues(t *testing.T) {
 	}{
 		{name: "lowercase agentGitHubToken", annotation: `{"agentGitHubToken":"none"}`, wantErr: `unsupported agentGitHubToken "none"`},
 		{name: "lowercase gitDir", annotation: `{"clone":{"gitDir":"remove"}}`, wantErr: `unsupported clone.gitDir "remove"`},
+		{name: "lowercase branchPolicy", annotation: `{"clone":{"branchPolicy":"ref"}}`, wantErr: `unsupported clone.branchPolicy "ref"`},
 		{name: "empty clone paths", annotation: `{"clone":{"paths":[]}}`, wantErr: "clone.paths must have at least 1 entry"},
 		{name: "too many clone paths", annotation: clonePathsAnnotation(65, "p"), wantErr: "clone.paths has 65 entries, more than the limit of 64"},
 		{name: "clone path too long", annotation: `{"clone":{"paths":["` + strings.Repeat("é", 257) + `"]}}`, wantErr: "must be 1 to 256 characters"},

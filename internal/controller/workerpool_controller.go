@@ -756,7 +756,7 @@ func (r *WorkerPoolReconciler) buildStatefulSet(pool *kelos.WorkerPool, stsName,
 		if workspace.Ref != "" && !commitRef {
 			cloneArgs = append(cloneArgs, "--branch", workspace.Ref)
 		}
-		cloneArgs = append(cloneArgs, "--no-single-branch", "--depth", "1", "--", workspace.Repo, targetPath)
+		cloneArgs = append(cloneArgs, workspaceCloneBranchesFlag(workspace), "--depth", "1", "--", workspace.Repo, targetPath)
 
 		gitClone := corev1.Container{
 			Name:         "git-clone",
@@ -775,6 +775,15 @@ func (r *WorkerPoolReconciler) buildStatefulSet(pool *kelos.WorkerPool, stsName,
 			credentialHelper = gitCredentialHelper()
 			credentialConfig = workspaceGitCredentialConfigScript(credentialHelper)
 		}
+		// Fetch the default branch after a fresh clone. If that fails, remove
+		// the clone so the restarted init container clones again instead of
+		// skipping the existing repository.
+		fetchDefaultBranch := ""
+		if workspaceFetchesDefaultBranch(workspace) {
+			lines := workspaceCheckout{credentialHelper: credentialHelper}.fetchDefaultBranchLines(targetPath)
+			fetchDefaultBranch = fmt.Sprintf(" && { (\n%s\n) || { rm -rf '%s'; exit 1; }; }",
+				strings.Join(lines, "\n"), targetPath)
+		}
 
 		if commitRef {
 			existingRepoAction := "exit 0"
@@ -790,8 +799,8 @@ func (r *WorkerPoolReconciler) buildStatefulSet(pool *kelos.WorkerPool, stsName,
 			// Build the inner clone command with credential helper
 			innerCmd := fmt.Sprintf(
 				`git -c credential.helper= -c credential.helper='%s' -c credential.username=%s "$@" && { `+
-					`%s; }`,
-				credentialHelper, gitCredentialDefaultUsername, credentialConfig,
+					`%s; }%s`,
+				credentialHelper, gitCredentialDefaultUsername, credentialConfig, fetchDefaultBranch,
 			)
 			// Wrap with exists check so it skips if workspace already exists on PVC
 			gitClone.Command = []string{"sh", "-c",
@@ -801,9 +810,13 @@ func (r *WorkerPoolReconciler) buildStatefulSet(pool *kelos.WorkerPool, stsName,
 			gitClone.Args = append([]string{"--"}, cloneArgs...)
 		} else {
 			// Wrap with exists check for non-secret clones
+			cloneCmd := `exec git "$@"`
+			if fetchDefaultBranch != "" {
+				cloneCmd = `git "$@"` + fetchDefaultBranch
+			}
 			gitClone.Command = []string{"sh", "-c",
-				fmt.Sprintf("if [ -d '%s/repo/.git' ]; then echo 'Workspace exists, skipping clone'; exit 0; fi; exec git \"$@\"",
-					WorkspaceMountPath),
+				fmt.Sprintf("if [ -d '%s/repo/.git' ]; then echo 'Workspace exists, skipping clone'; exit 0; fi; %s",
+					WorkspaceMountPath, cloneCmd),
 			}
 			gitClone.Args = append([]string{"--"}, cloneArgs...)
 		}

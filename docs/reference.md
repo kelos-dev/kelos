@@ -1011,6 +1011,7 @@ keep repository access without restarting (see [Workspace authentication](#works
 |-------|-------------|----------|
 | `spec.repo` | Git repository URL to clone (HTTPS, git://, or SSH) | Yes |
 | `spec.ref` | Branch, tag, or commit SHA to checkout (defaults to repo's default branch) | No |
+| `spec.clone.branches` | Which branches the clone fetches: `All` (default) fetches the tip of every branch. `Single` fetches only `spec.ref` (or the default branch when `spec.ref` is empty) and sets up `origin` to track only that ref, so a plain `git fetch origin` does not pick up other branches. `Task.spec.branch` and `Session.spec.initialBranch` are still checked out: fetched when the branch exists on `origin`, otherwise created from the cloned ref, and in either case added to the branches `origin` tracks. To use another branch, run `git remote set-branches --add origin <branch>`, then `git fetch --depth 1 origin <branch>`; without `--depth 1` the fetch can download most of the branch's history. No effect when `spec.ref` is a commit SHA | No |
 | `spec.secretRef.name` | Secret containing credentials for git auth and `gh` CLI (see [authentication methods](#workspace-authentication) below) | No |
 | `spec.ghproxy` | Enables the workspace-scoped ghproxy when set to `{}`; omitted or `null` disables it | No |
 | `spec.remotes[].name` | Git remote name to add after cloning (must not be `"origin"`) | Yes (per remote) |

@@ -179,6 +179,28 @@ spec:
           spec:
             description: WorkspaceSpec defines the desired state of Workspace.
             properties:
+              clone:
+                description: Clone configures how the repository is cloned.
+                properties:
+                  branches:
+                    description: |-
+                      Branches selects which branches the clone fetches. All fetches the
+                      tip of every branch. Single fetches only spec.ref (a branch or tag),
+                      or the remote's default branch when spec.ref is empty, and sets up
+                      origin to track only that ref, so a plain `git fetch origin` does
+                      not pick up other branches. A Task's spec.branch or a Session's
+                      spec.initialBranch is still checked out: it is fetched when it exists
+                      on origin and otherwise created from the cloned ref, and in either
+                      case added to the branches origin tracks. To use another branch, run
+                      `git remote set-branches --add origin <branch>` and then
+                      `git fetch --depth 1 origin <branch>`; without `--depth 1` the fetch
+                      can download most of that branch's history. Has no effect when
+                      spec.ref is a full commit SHA. Omit to use All.
+                    enum:
+                    - All
+                    - Single
+                    type: string
+                type: object
               files:
                 description: |-
                   Files are written into the cloned repository before the agent starts.

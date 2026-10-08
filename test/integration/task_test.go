@@ -1207,6 +1207,107 @@ var _ = Describe("Task Controller", func() {
 		})
 	})
 
+	Context("When creating a Task with a workspace that clones only its ref", func() {
+		It("Should clone a single branch and shallow-fetch the task branch", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-task-workspace-clone-single",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			By("Creating a Secret with API key")
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+
+			By("Rejecting a Workspace with an unknown clone.branches value")
+			invalidWs := &kelos.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace-invalid",
+					Namespace: ns.Name,
+				},
+				Spec: kelos.WorkspaceSpec{
+					Repo:  "https://github.com/example/single-branch-repo.git",
+					Clone: &kelos.WorkspaceClone{Branches: "Ref"},
+				},
+			}
+			err := k8sClient.Create(ctx, invalidWs)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("spec.clone.branches"))
+
+			By("Creating a Workspace with clone.branches Single")
+			ws := &kelos.Workspace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace",
+					Namespace: ns.Name,
+				},
+				Spec: kelos.WorkspaceSpec{
+					Repo:  "https://github.com/example/single-branch-repo.git",
+					Ref:   "main",
+					Clone: &kelos.WorkspaceClone{Branches: kelos.WorkspaceCloneBranchesSingle},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
+
+			By("Creating a Task with a branch")
+			task := &kelos.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-workspace-clone-single",
+					Namespace: ns.Name,
+				},
+				Spec: kelos.TaskSpec{
+					Type:   "claude-code",
+					Prompt: "Fix the bug",
+					Branch: "single-branch-feature",
+					Credentials: &kelos.Credentials{
+						Type: kelos.CredentialTypeAPIKey,
+						SecretRef: &kelos.SecretReference{
+							Name: "anthropic-api-key",
+						},
+					},
+					WorkspaceRef: &kelos.WorkspaceReference{
+						Name: "test-workspace",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, task)).Should(Succeed())
+
+			By("Verifying a Job is created")
+			jobLookupKey := types.NamespacedName{Name: task.Name, Namespace: ns.Name}
+			createdJob := &batchv1.Job{}
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, jobLookupKey, createdJob)
+				return err == nil
+			}, timeout, interval).Should(BeTrue())
+
+			By("Verifying the git-clone init container clones a single branch")
+			initContainers := createdJob.Spec.Template.Spec.InitContainers
+			Expect(initContainers).To(HaveLen(2))
+			Expect(initContainers[0].Name).To(Equal("git-clone"))
+			Expect(initContainers[0].Args).To(Equal([]string{
+				"clone", "--branch", "main", "--single-branch", "--depth", "1",
+				"--", "https://github.com/example/single-branch-repo.git", "/workspace/repo",
+			}))
+
+			By("Verifying the branch-setup init container fetches the task branch shallowly")
+			Expect(initContainers[1].Name).To(Equal("branch-setup"))
+			Expect(initContainers[1].Command).To(HaveLen(3))
+			Expect(initContainers[1].Command[2]).To(ContainSubstring(
+				`git remote set-branches --add origin "$KELOS_BRANCH"`))
+			Expect(initContainers[1].Command[2]).To(ContainSubstring(
+				`git fetch --depth 1 origin "+refs/heads/$KELOS_BRANCH:refs/remotes/origin/$KELOS_BRANCH"`))
+		})
+	})
+
 	Context("When creating a Task with workspace and ref", func() {
 		It("Should create a Job with init container and workspace volume", func() {
 			By("Creating a namespace")

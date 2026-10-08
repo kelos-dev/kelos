@@ -550,7 +550,7 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 		if workspace.Ref != "" && !commitRef {
 			cloneArgs = append(cloneArgs, "--branch", workspace.Ref)
 		}
-		cloneArgs = append(cloneArgs, "--no-single-branch", "--depth", "1", "--", workspace.Repo, targetPath)
+		cloneArgs = append(cloneArgs, workspaceCloneBranchesFlag(workspace), "--depth", "1", "--", workspace.Repo, targetPath)
 
 		initContainer := corev1.Container{
 			Name:         "git-clone",
@@ -625,16 +625,23 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 					credHelper, gitCredentialDefaultUsername,
 				)
 			}
+			// A single-branch clone configures origin to fetch only the
+			// cloned ref; track the Task branch too so later fetches and
+			// pushes keep origin/$KELOS_BRANCH current.
+			trackBranch := ""
+			if workspaceClonesSingleBranch(workspace) && !commitRef {
+				trackBranch = "git remote set-branches --add origin \"$KELOS_BRANCH\"\n"
+			}
 			branchSetupScript := fmt.Sprintf(
 				`set -e
 cd %s/repo
-remote_status=0
+%sremote_status=0
 %s ls-remote --exit-code --heads origin "refs/heads/$KELOS_BRANCH" >/dev/null || remote_status=$?
 if [ "$remote_status" -eq 0 ]; then
-  %s fetch origin "refs/heads/$KELOS_BRANCH"
+  %s fetch --depth 1 origin "+refs/heads/$KELOS_BRANCH:refs/remotes/origin/$KELOS_BRANCH"
   if git show-ref --verify --quiet "refs/heads/$KELOS_BRANCH"; then
     git checkout "$KELOS_BRANCH"
-    git merge --ff-only FETCH_HEAD
+    git reset --hard FETCH_HEAD
   else
     git checkout -b "$KELOS_BRANCH" FETCH_HEAD
   fi
@@ -647,7 +654,7 @@ elif [ "$remote_status" -eq 2 ]; then
 else
   exit "$remote_status"
 fi`,
-				WorkspaceMountPath, remoteGit, remoteGit,
+				WorkspaceMountPath, trackBranch, remoteGit, remoteGit,
 			)
 			branchEnv := make([]corev1.EnvVar, len(workspaceEnvVars), len(workspaceEnvVars)+1)
 			copy(branchEnv, workspaceEnvVars)
@@ -1029,6 +1036,21 @@ func validatePodFailurePolicy(policy *batchv1.PodFailurePolicy) error {
 		}
 	}
 	return nil
+}
+
+// workspaceClonesSingleBranch reports whether the workspace clone fetches
+// only the ref being checked out.
+func workspaceClonesSingleBranch(workspace *kelos.WorkspaceSpec) bool {
+	return workspace.Clone != nil && workspace.Clone.Branches == kelos.WorkspaceCloneBranchesSingle
+}
+
+// workspaceCloneBranchesFlag returns the git clone flag that selects which
+// branches the workspace clone fetches.
+func workspaceCloneBranchesFlag(workspace *kelos.WorkspaceSpec) string {
+	if workspaceClonesSingleBranch(workspace) {
+		return "--single-branch"
+	}
+	return "--no-single-branch"
 }
 
 func isFullGitCommitSHA(ref string) bool {

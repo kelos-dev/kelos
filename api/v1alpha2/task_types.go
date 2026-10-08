@@ -52,10 +52,24 @@ const (
 	TaskPhaseSucceeded TaskPhase = "Succeeded"
 	// TaskPhaseFailed means the Task has failed.
 	TaskPhaseFailed TaskPhase = "Failed"
-	// TaskPhaseWaiting means the Task is waiting for dependencies, branch lock,
+	// TaskPhaseWaiting means the Task is waiting for dependencies, its concurrency group,
 	// or budget admission.
 	TaskPhaseWaiting TaskPhase = "Waiting"
 )
+
+// TaskConcurrencyGroupMaxLength bounds TaskConcurrency.Group, in runes. It
+// mirrors the MaxLength marker on Group; this package's tests assert they match.
+const TaskConcurrencyGroupMaxLength = 256
+
+// TaskConcurrency controls which Tasks run one at a time.
+type TaskConcurrency struct {
+	// Group names the concurrency group. At most one Task per group runs
+	// at a time within a namespace; other Tasks in the group wait in
+	// creation order.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=256
+	Group string `json:"group"`
+}
 
 // SecretReference refers to a Secret containing credentials.
 type SecretReference struct {
@@ -274,6 +288,7 @@ type WorkerSpec struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.agentConfigRefs) || size(self.agentConfigRefs) == 0",message="agentConfigRefs is not supported with workerPoolRef"
 // +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.dependsOn) || size(self.dependsOn) == 0",message="dependsOn is not supported with workerPoolRef"
 // +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.branch) || size(self.branch) == 0",message="branch is not supported with workerPoolRef"
+// +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.concurrency)",message="concurrency is not supported with workerPoolRef"
 // +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.ttlSecondsAfterFinished)",message="ttlSecondsAfterFinished is not supported with workerPoolRef"
 // +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.podFailurePolicy)",message="podFailurePolicy is not supported with workerPoolRef"
 // +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.podOverrides)",message="podOverrides is not supported with workerPoolRef"
@@ -286,7 +301,7 @@ type TaskSpec struct {
 	// WorkerPoolRef references a WorkerPool resource for persistent execution.
 	// When set, the Task is dispatched to a pre-warmed worker pod instead of
 	// creating a one-shot Job. Mutually exclusive with worker, type/credentials,
-	// image, workspaceRef, agentConfigRefs, branch, dependsOn,
+	// image, workspaceRef, agentConfigRefs, branch, concurrency, dependsOn,
 	// ttlSecondsAfterFinished, podFailurePolicy, and podOverrides.
 	// +optional
 	WorkerPoolRef *WorkerPoolReference `json:"workerPoolRef,omitempty"`
@@ -351,11 +366,23 @@ type TaskSpec struct {
 	DependsOn []string `json:"dependsOn,omitempty"`
 
 	// Branch is the git branch this Task works on. When set, an init
-	// container checks out this branch before the agent starts. The
-	// controller ensures only one Task with the same Branch value
-	// runs at a time for the same workspace.
+	// container checks out this branch before the agent starts. Unless
+	// Concurrency is set, the Task joins the concurrency group
+	// "<workspace>:<branch>", so only one such Task runs at a time for the
+	// same workspace and Branch.
 	// +optional
 	Branch string `json:"branch,omitempty"`
+
+	// Concurrency puts this Task in a concurrency group. At most one Task
+	// per group runs at a time within a namespace; the others wait in
+	// creation order. Omit to use the default group "<workspace>:<branch>"
+	// when Branch is set, or no group when it is not. Setting a group
+	// replaces the default, so a Task that only reads the branch can use a
+	// group of its own to neither wait for nor block Tasks that push to it.
+	// An explicit group equal to a default group, such as
+	// "my-workspace:main", shares that branch's lock.
+	// +optional
+	Concurrency *TaskConcurrency `json:"concurrency,omitempty"`
 
 	// UpstreamRepo is the upstream repository in "owner/repo" format.
 	// When set, the KELOS_UPSTREAM_REPO environment variable is injected

@@ -28,6 +28,11 @@ spec:
     workspaceRef:
       name: my-workspace
     branch: "{{.Branch}}"
+    # The reviewer only reads the PR branch, so it uses its own concurrency
+    # group instead of the default branch group. It neither waits for nor
+    # blocks Tasks that push to the branch, and runs one review per PR at a time.
+    concurrency:
+      group: "pr-{{.Number}}-go-code-reviewer"
     promptTemplate: |
       Review PR #{{.Number}}: {{.Title}}
 
@@ -67,6 +72,11 @@ spec:
     workspaceRef:
       name: my-workspace
     branch: "{{.Branch}}"
+    # The reviewer only reads the PR branch, so it uses its own concurrency
+    # group instead of the default branch group. It neither waits for nor
+    # blocks Tasks that push to the branch, and runs one review per PR at a time.
+    concurrency:
+      group: "pr-{{.Number}}-code-reviewer-skip-docs"
     promptTemplate: |
       Review PR #{{.Number}}: {{.Title}}
 

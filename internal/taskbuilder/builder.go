@@ -6,6 +6,7 @@ import (
 	"strings"
 	"text/template"
 	"text/template/parse"
+	"unicode/utf8"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -111,6 +112,23 @@ func (tb *TaskBuilder) BuildTask(
 		}
 	}
 
+	// Render the concurrency group template
+	var concurrency *kelos.TaskConcurrency
+	if taskTemplate.Concurrency != nil {
+		group, err := renderTemplate("concurrency group", taskTemplate.Concurrency.Group, templateVars)
+		if err != nil {
+			return nil, fmt.Errorf("failed to render concurrency group template: %w", err)
+		}
+		if group == "" {
+			return nil, fmt.Errorf("concurrency group template %q rendered empty", taskTemplate.Concurrency.Group)
+		}
+		if utf8.RuneCountInString(group) > kelos.TaskConcurrencyGroupMaxLength {
+			return nil, fmt.Errorf("concurrency group template %q rendered %d characters, more than the maximum of %d",
+				taskTemplate.Concurrency.Group, utf8.RuneCountInString(group), kelos.TaskConcurrencyGroupMaxLength)
+		}
+		concurrency = &kelos.TaskConcurrency{Group: group}
+	}
+
 	// Create the Task
 	task := &kelos.Task{
 		ObjectMeta: metav1.ObjectMeta{
@@ -145,6 +163,9 @@ func (tb *TaskBuilder) BuildTask(
 	}
 	if branch != "" {
 		task.Spec.Branch = branch
+	}
+	if concurrency != nil {
+		task.Spec.Concurrency = concurrency
 	}
 	if taskTemplate.TTLSecondsAfterFinished != nil {
 		task.Spec.TTLSecondsAfterFinished = taskTemplate.TTLSecondsAfterFinished

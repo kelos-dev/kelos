@@ -23127,10 +23127,33 @@ spec:
               branch:
                 description: |-
                   Branch is the git branch this Task works on. When set, an init
-                  container checks out this branch before the agent starts. The
-                  controller ensures only one Task with the same Branch value
-                  runs at a time for the same workspace.
+                  container checks out this branch before the agent starts. Unless
+                  Concurrency is set, the Task joins the concurrency group
+                  "<workspace>:<branch>", so only one such Task runs at a time for the
+                  same workspace and Branch.
                 type: string
+              concurrency:
+                description: |-
+                  Concurrency puts this Task in a concurrency group. At most one Task
+                  per group runs at a time within a namespace; the others wait in
+                  creation order. Omit to use the default group "<workspace>:<branch>"
+                  when Branch is set, or no group when it is not. Setting a group
+                  replaces the default, so a Task that only reads the branch can use a
+                  group of its own to neither wait for nor block Tasks that push to it.
+                  An explicit group equal to a default group, such as
+                  "my-workspace:main", shares that branch's lock.
+                properties:
+                  group:
+                    description: |-
+                      Group names the concurrency group. At most one Task per group runs
+                      at a time within a namespace; other Tasks in the group wait in
+                      creation order.
+                    maxLength: 256
+                    minLength: 1
+                    type: string
+                required:
+                - group
+                type: object
               credentials:
                 description: |-
                   Credentials specifies how to authenticate with the agent.
@@ -37022,7 +37045,7 @@ spec:
                   WorkerPoolRef references a WorkerPool resource for persistent execution.
                   When set, the Task is dispatched to a pre-warmed worker pod instead of
                   creating a one-shot Job. Mutually exclusive with worker, type/credentials,
-                  image, workspaceRef, agentConfigRefs, branch, dependsOn,
+                  image, workspaceRef, agentConfigRefs, branch, concurrency, dependsOn,
                   ttlSecondsAfterFinished, podFailurePolicy, and podOverrides.
                 properties:
                   name:
@@ -37078,6 +37101,8 @@ spec:
             - message: branch is not supported with workerPoolRef
               rule: '!has(self.workerPoolRef) || !has(self.branch) || size(self.branch)
                 == 0'
+            - message: concurrency is not supported with workerPoolRef
+              rule: '!has(self.workerPoolRef) || !has(self.concurrency)'
             - message: ttlSecondsAfterFinished is not supported with workerPoolRef
               rule: '!has(self.workerPoolRef) || !has(self.ttlSecondsAfterFinished)'
             - message: podFailurePolicy is not supported with workerPoolRef
@@ -37590,6 +37615,24 @@ spec:
                           description: Branch is the optional template rendered into
                             the child Task branch.
                           type: string
+                        concurrency:
+                          description: |-
+                            Concurrency is copied to child Tasks as Task.spec.concurrency.
+                            Group is a Go template rendered with the same data as Branch. A group
+                            that renders empty or longer than 256 characters fails the stage. Omit
+                            to use the default group described on Task.spec.concurrency.
+                          properties:
+                            group:
+                              description: |-
+                                Group names the concurrency group. At most one Task per group runs
+                                at a time within a namespace; other Tasks in the group wait in
+                                creation order.
+                              maxLength: 256
+                              minLength: 1
+                              type: string
+                          required:
+                          - group
+                          type: object
                         prompt:
                           description: Prompt is the template rendered into the child
                             Task prompt.
@@ -44675,6 +44718,8 @@ spec:
                       - message: branch is not supported with workerPoolRef
                         rule: '!has(self.workerPoolRef) || !has(self.branch) || size(self.branch)
                           == 0'
+                      - message: concurrency is not supported with workerPoolRef
+                        rule: '!has(self.workerPoolRef) || !has(self.concurrency)'
                   required:
                   - name
                   - taskTemplate
@@ -53275,6 +53320,25 @@ spec:
                       Cron sources: {{.Time}}, {{.Schedule}}
                       When contextSources are configured: .Context.NAME for each source
                     type: string
+                  concurrency:
+                    description: |-
+                      Concurrency is copied to spawned Tasks as Task.spec.concurrency.
+                      Group is a Go text/template rendered with the same variables as
+                      Branch, for example "pr-{{.Number}}-review". A group that renders
+                      empty or longer than 256 characters fails Task creation. Omit to use
+                      the default group described on Task.spec.concurrency.
+                    properties:
+                      group:
+                        description: |-
+                          Group names the concurrency group. At most one Task per group runs
+                          at a time within a namespace; other Tasks in the group wait in
+                          creation order.
+                        maxLength: 256
+                        minLength: 1
+                        type: string
+                    required:
+                    - group
+                    type: object
                   contextSources:
                     description: |-
                       ContextSources declares external data sources to query before task
@@ -67496,7 +67560,7 @@ spec:
                       WorkerPoolRef references a WorkerPool for persistent execution.
                       When set, spawned Tasks execute on pre-warmed workers instead of
                       creating per-task Jobs. Mutually exclusive with inline type/credentials,
-                      image, workspaceRef, agentConfigRefs, branch, dependsOn,
+                      image, workspaceRef, agentConfigRefs, branch, concurrency, dependsOn,
                       ttlSecondsAfterFinished, podOverrides, and podFailurePolicy.
                     properties:
                       name:
@@ -67549,6 +67613,8 @@ spec:
                 - message: branch is not supported with workerPoolRef
                   rule: '!has(self.workerPoolRef) || !has(self.branch) || size(self.branch)
                     == 0'
+                - message: concurrency is not supported with workerPoolRef
+                  rule: '!has(self.workerPoolRef) || !has(self.concurrency)'
                 - message: ttlSecondsAfterFinished is not supported with workerPoolRef
                   rule: '!has(self.workerPoolRef) || !has(self.ttlSecondsAfterFinished)'
                 - message: podOverrides is not supported with workerPoolRef

@@ -521,6 +521,80 @@ func TestPipelineChildTaskNameIsStableAndBounded(t *testing.T) {
 	}
 }
 
+func TestTaskPipelineReconcileRendersConcurrencyGroup(t *testing.T) {
+	template := testPipelineTaskTemplate("Review {{.Matrix.service}}")
+	template.Branch = "review-{{.Matrix.service}}"
+	template.Concurrency = &kelos.TaskConcurrency{Group: "review-{{.Matrix.service}}-reader"}
+	pipeline := testTaskPipeline("review", []kelos.PipelineStage{{
+		Name:         "review",
+		Matrix:       &kelos.PipelineMatrix{Items: []map[string]string{{"service": "billing"}}},
+		TaskTemplate: template,
+	}})
+	reconciler, k8sClient := testTaskPipelineReconciler(t, pipeline)
+
+	reconcileTaskPipeline(t, reconciler, pipeline)
+
+	var tasks kelos.TaskList
+	if err := k8sClient.List(context.Background(), &tasks, client.InNamespace("default")); err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks.Items) != 1 {
+		t.Fatalf("created Tasks = %d, want 1", len(tasks.Items))
+	}
+	task := tasks.Items[0]
+	if task.Spec.Branch != "review-billing" {
+		t.Errorf("Task branch = %q, want %q", task.Spec.Branch, "review-billing")
+	}
+	if task.Spec.Concurrency == nil || task.Spec.Concurrency.Group != "review-billing-reader" {
+		t.Errorf("Task concurrency = %+v, want group %q", task.Spec.Concurrency, "review-billing-reader")
+	}
+}
+
+func TestTaskPipelineReconcileFailsOnInvalidRenderedConcurrencyGroup(t *testing.T) {
+	tests := []struct {
+		name    string
+		service string
+		wantErr string
+	}{
+		{name: "renders empty", service: "", wantErr: "rendered empty"},
+		{
+			name:    "renders too long",
+			service: strings.Repeat("a", kelos.TaskConcurrencyGroupMaxLength+1),
+			wantErr: "rendered 257 characters, more than the maximum of 256",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			template := testPipelineTaskTemplate("Review the service")
+			template.Concurrency = &kelos.TaskConcurrency{Group: "{{.Matrix.service}}"}
+			pipeline := testTaskPipeline("review", []kelos.PipelineStage{{
+				Name:         "review",
+				Matrix:       &kelos.PipelineMatrix{Items: []map[string]string{{"service": tt.service}}},
+				TaskTemplate: template,
+			}})
+			reconciler, k8sClient := testTaskPipelineReconciler(t, pipeline)
+
+			reconcileTaskPipeline(t, reconciler, pipeline)
+
+			var tasks kelos.TaskList
+			if err := k8sClient.List(context.Background(), &tasks, client.InNamespace("default")); err != nil {
+				t.Fatal(err)
+			}
+			if len(tasks.Items) != 0 {
+				t.Fatalf("created Tasks = %d, want 0", len(tasks.Items))
+			}
+			updated := getTaskPipeline(t, k8sClient, pipeline.Name)
+			if updated.Status.Phase != kelos.TaskPipelinePhaseFailed {
+				t.Fatalf("pipeline phase = %q, want %q", updated.Status.Phase, kelos.TaskPipelinePhaseFailed)
+			}
+			succeeded := apiMeta.FindStatusCondition(updated.Status.Conditions, kelos.TaskPipelineConditionSucceeded)
+			if succeeded == nil || !strings.Contains(succeeded.Message, "concurrency group template") || !strings.Contains(succeeded.Message, tt.wantErr) {
+				t.Fatalf("Succeeded condition = %#v", succeeded)
+			}
+		})
+	}
+}
+
 func testTaskPipeline(name string, stages []kelos.PipelineStage) *kelos.TaskPipeline {
 	return &kelos.TaskPipeline{
 		ObjectMeta: metav1.ObjectMeta{

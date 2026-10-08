@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
 
 	v1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
@@ -20,6 +21,15 @@ import (
 // writes the object through v1alpha1 does not silently drop it. v1alpha1 does
 // not gain the capability — the value only survives in this annotation.
 const preservedNameTemplateAnnotation = "kelos.dev/v1alpha2-name-template"
+
+// preservedConcurrencyGroupAnnotation carries the group of Task
+// spec.concurrency and TaskSpawner taskTemplate.concurrency (v1alpha2-only
+// fields) across a v1alpha1 round-trip so a client that reads and writes the
+// object through v1alpha1 does not silently move Tasks back into the default
+// branch group. For Tasks it also keeps such writes from failing the
+// immutable-spec rule. v1alpha1 does not gain the capability — the value only
+// survives in this annotation.
+const preservedConcurrencyGroupAnnotation = "kelos.dev/v1alpha2-concurrency-group"
 
 // preservedContextGitHubAppAuthAnnotation carries the githubAppAuth blocks of
 // taskTemplate.contextSources (a v1alpha2-only field) across a v1alpha1
@@ -93,6 +103,10 @@ func taskSpawnerToHub(_ context.Context, src *v1alpha1.TaskSpawner, dst *v1alpha
 	foldTaskSpawnerForward(&src.Spec, &dst.Spec)
 	restorePreservedNameTemplate(src.Annotations, &dst.Spec.TaskTemplate)
 	deleteAnnotation(dst.Annotations, preservedNameTemplateAnnotation)
+	if dst.Spec.TaskTemplate.Concurrency == nil {
+		dst.Spec.TaskTemplate.Concurrency = preservedConcurrency(src.Annotations)
+	}
+	deleteAnnotation(dst.Annotations, preservedConcurrencyGroupAnnotation)
 	if err := restorePreservedContextGitHubAppAuth(src.Annotations, &dst.Spec.TaskTemplate); err != nil {
 		return err
 	}
@@ -124,6 +138,7 @@ func taskSpawnerFromHub(_ context.Context, src *v1alpha2.TaskSpawner, dst *v1alp
 	}
 	backfillTaskSpawnerLegacy(&dst.Spec)
 	setPreservedNameTemplateAnnotation(dst, src.Spec.TaskTemplate.NameTemplate)
+	setPreservedConcurrencyAnnotation(&dst.ObjectMeta, src.Spec.TaskTemplate.Concurrency)
 	if err := setPreservedContextGitHubAppAuth(dst, src.Spec.TaskTemplate); err != nil {
 		return err
 	}
@@ -430,6 +445,31 @@ func restorePreservedNameTemplate(annotations map[string]string, dst *v1alpha2.T
 	if v, ok := annotations[preservedNameTemplateAnnotation]; ok {
 		dst.NameTemplate = v
 	}
+}
+
+// setPreservedConcurrencyAnnotation records the concurrency group on a
+// v1alpha1 object, clearing the annotation when there is nothing to preserve.
+func setPreservedConcurrencyAnnotation(dst *metav1.ObjectMeta, concurrency *v1alpha2.TaskConcurrency) {
+	if concurrency == nil || concurrency.Group == "" {
+		deleteAnnotation(dst.Annotations, preservedConcurrencyGroupAnnotation)
+		return
+	}
+	if dst.Annotations == nil {
+		dst.Annotations = map[string]string{}
+	}
+	dst.Annotations[preservedConcurrencyGroupAnnotation] = concurrency.Group
+}
+
+// preservedConcurrency returns the concurrency recorded in the preservation
+// annotation, or nil when absent. Values the v1alpha2 schema would reject are
+// ignored, because the annotation can be edited through v1alpha1 where that
+// validation is not enforced.
+func preservedConcurrency(annotations map[string]string) *v1alpha2.TaskConcurrency {
+	group := annotations[preservedConcurrencyGroupAnnotation]
+	if group == "" || utf8.RuneCountInString(group) > v1alpha2.TaskConcurrencyGroupMaxLength {
+		return nil
+	}
+	return &v1alpha2.TaskConcurrency{Group: group}
 }
 
 // setPreservedSlackExcludeFilters records spec.when.slack.excludeFilters in an

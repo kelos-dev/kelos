@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/kelos-icon.png" alt="Kelos icon" width="160" height="160" />
+</p>
+
 <h1 align="center">Kelos</h1>
 
 <p align="center"><strong>Run and orchestrate coding agents on Kubernetes.</strong></p>

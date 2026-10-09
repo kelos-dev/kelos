@@ -65,6 +65,11 @@ const (
 	githubAppSecretAnnotation = "kelos.dev/github-app-secret"
 )
 
+// podLogReadTimeout bounds reading a finished Pod's log tail. The log
+// request can hang without ever returning an error, which would block
+// the reconcile worker forever. It is a variable so tests can shorten it.
+var podLogReadTimeout = 15 * time.Second
+
 // TaskReconciler reconciles a Task object.
 type TaskReconciler struct {
 	client.Client
@@ -1056,6 +1061,9 @@ func (r *TaskReconciler) readOutputs(ctx context.Context, namespace, podName, co
 		return nil, nil
 	}
 	logger := log.FromContext(ctx)
+
+	ctx, cancel := context.WithTimeout(ctx, podLogReadTimeout)
+	defer cancel()
 
 	var tailLines int64 = 50
 	req := r.Clientset.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{

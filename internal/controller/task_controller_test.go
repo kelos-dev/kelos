@@ -9,6 +9,7 @@ import (
 	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +20,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -2150,5 +2153,73 @@ func TestCreateTaskRecord_NilUsageSkips(t *testing.T) {
 	}
 	if len(recordList.Items) != 0 {
 		t.Errorf("TaskRecord count = %d, want 0 (no record should be created for nil usage)", len(recordList.Items))
+	}
+}
+
+// newPodLogServer starts an API server stub that answers Pod log requests
+// with handler and returns a TaskReconciler whose clientset points at it.
+func newPodLogServer(t *testing.T, handler http.HandlerFunc) *TaskReconciler {
+	t.Helper()
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+	cs, err := kubernetes.NewForConfig(&rest.Config{Host: srv.URL})
+	if err != nil {
+		t.Fatalf("Creating clientset: %v", err)
+	}
+	return &TaskReconciler{Clientset: cs}
+}
+
+func TestReadOutputsParsesLogTail(t *testing.T) {
+	var gotPath, gotContainer, gotTail string
+	r := newPodLogServer(t, func(w http.ResponseWriter, req *http.Request) {
+		gotPath = req.URL.Path
+		gotContainer = req.URL.Query().Get("container")
+		gotTail = req.URL.Query().Get("tailLines")
+		_, _ = w.Write([]byte("noise\n" + outputStartMarker + "\nbranch: feature-x\n" + outputEndMarker + "\n"))
+	})
+
+	outputs, results := r.readOutputs(context.Background(), "ns", "pod-1", "agent")
+
+	if want := []string{"branch: feature-x"}; !reflect.DeepEqual(outputs, want) {
+		t.Errorf("Outputs = %v, want %v", outputs, want)
+	}
+	if want := map[string]string{"branch": "feature-x"}; !reflect.DeepEqual(results, want) {
+		t.Errorf("Results = %v, want %v", results, want)
+	}
+	if want := "/api/v1/namespaces/ns/pods/pod-1/log"; gotPath != want {
+		t.Errorf("Request path = %q, want %q", gotPath, want)
+	}
+	if gotContainer != "agent" {
+		t.Errorf("Container = %q, want %q", gotContainer, "agent")
+	}
+	if gotTail != "50" {
+		t.Errorf("TailLines = %q, want %q", gotTail, "50")
+	}
+}
+
+// TestReadOutputsTimesOutOnHungLogStream checks that a log request that never
+// gets a response does not block the reconcile worker.
+func TestReadOutputsTimesOutOnHungLogStream(t *testing.T) {
+	const testPodLogReadTimeout = 100 * time.Millisecond
+	orig := podLogReadTimeout
+	podLogReadTimeout = testPodLogReadTimeout
+	t.Cleanup(func() { podLogReadTimeout = orig })
+	const hangBudget = testPodLogReadTimeout + 5*time.Second
+	r := newPodLogServer(t, func(_ http.ResponseWriter, req *http.Request) {
+		select {
+		case <-req.Context().Done():
+		case <-time.After(hangBudget):
+			t.Errorf("Log request was not cancelled within %s", hangBudget)
+		}
+	})
+
+	start := time.Now()
+	outputs, results := r.readOutputs(context.Background(), "ns", "pod-1", "agent")
+
+	if elapsed := time.Since(start); elapsed >= hangBudget {
+		t.Errorf("readOutputs took %s, want under %s", elapsed, hangBudget)
+	}
+	if outputs != nil || results != nil {
+		t.Errorf("readOutputs = (%v, %v), want (nil, nil)", outputs, results)
 	}
 }

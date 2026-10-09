@@ -168,6 +168,16 @@ spec:
         (e.g., unauthenticated requests, nil/empty returns that mask the
         failure)? Flag silent degradation as P1 — operators should see the
         error, not discover it later from confusing symptoms.
+      - Conversely, can a failure in a best-effort enhancement (an added
+        lookup, a Git inspection behind an optional view, a heartbeat or
+        lease refresh) abort startup, tear down a healthy connection, or
+        discard a primary result that would otherwise succeed? Require
+        degrading only that enhancement with a logged, visible diagnostic
+        and a later retry. P2.
+      - For setup or install scripts with required outputs, does success prove
+        the expected artifacts exist rather than only that a command exited
+        zero or a directory exists? When directory contents are relocated,
+        are dot-prefixed entries preserved unless explicitly unsupported?
 
       **Tests**:
       - Are there tests for the new/changed behavior?
@@ -191,6 +201,13 @@ spec:
         only the bare value — these often pass vacuously when the value
         also appears in the resource's `Name` or other fixture context.
         Require the full `"label: value"` substring (or a regex). P2.
+      - When a PR adds or changes a user-visible resource field, check every
+        applicable CLI detail printer for the configured value. Compare
+        sibling source or provider branches and require a full `label: value`
+        assertion for each field. P2/P3 depending on operator impact.
+      - For executable setup or install scripts, require cases for a successful
+        command that produces no required artifacts and for hidden entries when
+        the output format supports them. P2/P3 depending on startup impact.
 
       **Project conventions**:
       - Logging: messages start with capital letters, do not end with punctuation
@@ -212,6 +229,12 @@ spec:
         default value — Go prints flag defaults in `--help` output, leaking
         the secret. Require an empty default and reading the env var after
         `flag.Parse()`. P1.
+      - Flag RBAC rules, ServiceAccount token mounts, and credential
+        environment variables that reach beyond the code that uses them:
+        verbs or resources the code never calls, cluster-wide Secret
+        `list`/`watch` where named `get` suffices, or a token inherited by a
+        sidecar or by a CI step that runs pull-request code. P1 when a
+        credential or Secret is exposed; P2 otherwise.
 
       **Documentation accuracy**:
       - Docs, READMEs, and code comments must describe what the code
@@ -225,6 +248,10 @@ spec:
         documenting a Workspace section). A reader of one CRD's reference
         page should be able to locate any cited field without already
         knowing the layout of the others. P2.
+      - For `SKILL.md` changes, treat the frontmatter description as the
+        discovery contract. Check that it retains distinctive terms for every
+        still-supported use, excludes unrelated uses, and agrees with the
+        body's usage and exclusion sections. P2/P3 depending on lost recall.
 
       **Documentation completeness**:
       - When a PR introduces or changes user-facing surface — a new or
@@ -249,6 +276,13 @@ spec:
         `errors.New("task failed")`. P2.
 
       ### 5. Write findings
+
+      Before reporting a defect that depends on an external API or CLI contract,
+      verify the exact endpoint, response fields, and accepted input forms against
+      official documentation or upstream implementation for the relevant version.
+      Do not assume list and detail endpoints return the same fields or that
+      different clients accept the same URL form. Link the supporting source in
+      the finding; omit claims whose external contract you cannot verify.
 
       **Which issues to flag.** Flag an issue only if all of these apply:
       - It meaningfully impacts correctness, performance, security, or maintainability.

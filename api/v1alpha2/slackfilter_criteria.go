@@ -50,7 +50,17 @@ const (
 	SlackExcludeFiltersMaxItems = 20
 	// SlackFilterChannelsMaxItems bounds a rule's channels list.
 	SlackFilterChannelsMaxItems = 64
+	// SlackTriggersMaxItems bounds spec.when.slack.triggers.
+	SlackTriggersMaxItems = 8
+	// SlackReactionMaxLength bounds spec.when.slack.triggers[].reaction.name.
+	SlackReactionMaxLength = 100
 )
+
+// SlackReactionPattern is the pattern applied to
+// spec.when.slack.triggers[].reaction.name: a lowercase emoji name without colons or
+// whitespace. Kept in sync with the kubebuilder marker by the API package's
+// validation tests.
+const SlackReactionPattern = `^[^:\sA-Z]+$`
 
 // SlackFilterChannelIDPattern is the item pattern applied to a SlackFilter's
 // channel IDs. It admits direct-message IDs, which Slack.Channels does not, so

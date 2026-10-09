@@ -1208,9 +1208,11 @@ to receive refreshed credentials during long-running work.
 | `spec.when.slack.excludeFilters` | Exclusion rules; a Slack event is rejected when **any** entry matches (OR across entries; the criteria within one entry are ANDed). Evaluated before `channels`, `triggers`, and `excludePatterns`, so a matching trigger cannot override an exclusion, and — unlike `excludePatterns` — it also applies to slash commands. A criterion the event does not carry never matches. Each entry must set at least one non-empty criterion. Filters after delivery, like `channels` — the bot stays in the channel. Stored only in `v1alpha2`; a client that writes the spawner through `v1alpha1` preserves the rules in an annotation, so stripping that annotation drops them. Max 20 entries | No |
 | `spec.when.slack.excludeFilters[].channels` | Match events posted in any of the given channel IDs. Exclusion wins over the `channels` allowlist, so a channel listed here is rejected even when `channels` is empty (all channels) or names the same channel. Direct-message IDs (`"D0123456789"`) are accepted here even though `channels` does not accept them, so a catch-all spawner can be kept out of DMs. Max 64 entries, no duplicates | No |
 | `spec.when.slack.botMessagePolicy` | Controls whether bot-originated messages can trigger this spawner: `None` (default) rejects all bot messages, `All` allows all including self, `OthersOnly` allows other bots but rejects the bot's own output to prevent self-trigger loops | No |
-| `spec.when.slack.triggers[].pattern` | RE2 regex matched against message text (unanchored); leading `<@USER_ID>` mentions are stripped before matching; bot mention required unless `mentionOptional` is set; multiple triggers use OR semantics; when empty, every bot mention fires | No |
+| `spec.when.slack.triggers[].pattern` | RE2 regex matched against message text (unanchored); leading `<@USER_ID>` mentions are stripped before matching; bot mention required unless `mentionOptional` is set; multiple triggers use OR semantics; when `triggers` is empty, every bot mention fires; when every trigger is a reaction trigger, bot mentions and slash commands do not fire the spawner, so adding any non-reaction trigger also makes the spawner fire on slash commands again (add an empty trigger `{}` to fire on every bot mention as well) | No |
 | `spec.when.slack.triggers[].mentionOptional` | When `true`, fire on pattern match alone without requiring a bot @-mention | No |
-| `spec.when.slack.excludePatterns` | RE2 regex patterns that reject messages when any pattern matches (OR semantics); leading `<@USER_ID>` mentions are stripped before matching; does not apply to slash commands | No |
+| `spec.when.slack.triggers[].reaction` | Fire when someone adds an emoji reaction to a message, instead of on a posted message. Cannot be combined with `pattern` or `mentionOptional`. `channels` and `excludeFilters` apply as they do to messages, and `excludePatterns` is matched against the reacted-to message's text. `botMessagePolicy` does not apply: reactions added by other bots fire the trigger, and only reactions the bot adds itself are ignored. Reactions on anything other than a message are ignored. Each message and emoji creates at most one Task per spawner while that Task exists, so the same emoji added by a second person does not create another (with `taskTemplate.nameTemplate` set, the rendered name decides instead). Stored only in `v1alpha2`; a client that writes the spawner through `v1alpha1` sees the triggers list without its reaction triggers and preserves them in an annotation, so stripping that annotation drops them. Through `v1alpha1`, reaction triggers cannot be removed: they are restored on every write while the annotation is present, even when the client writes empty `triggers`. Requires the Slack app setup described under [Slack reactions](#slack-reactions) | No |
+| `spec.when.slack.triggers[].reaction.name` | The emoji's canonical Slack name, lowercase and without colons (e.g. `gear`, or `+1` rather than its alias `thumbsup`). Slack reports reactions by canonical name, so an alias passes validation but never fires. A skin-tone variant matches its base name. Max 100 characters | Yes (when using `reaction`) |
+| `spec.when.slack.excludePatterns` | RE2 regex patterns that reject messages when any pattern matches (OR semantics); leading `<@USER_ID>` mentions are stripped before matching; for a reaction trigger, matched against the reacted-to message's text; does not apply to slash commands | No |
 | `spec.when.webhook.source` | Short identifier for the generic webhook source (lowercase alphanumeric with optional hyphens). On the per-source server it determines the URL path (`/webhook/<source>`); that endpoint is unauthenticated (see [#1040](https://github.com/kelos-dev/kelos/issues/1040)). Set `gatewayRef` to route through a [WebhookGateway](#webhookgateway) | Yes (when using webhook) |
 | `spec.when.webhook.fieldMapping` | Map of template variable name → JSONPath expression evaluated against the request body. Each key becomes a top-level template variable. Lowercase `id`, `title`, `body`, `url` are also exposed as `{{.ID}}`, `{{.Title}}`, `{{.Body}}`, `{{.URL}}`. The `id` key is required (used for delivery deduplication and Task naming) | Yes (when using webhook) |
 | `spec.when.webhook.filters[].field` | JSONPath expression selecting the payload field to match. A field missing from the payload fails the filter (the delivery is skipped); a malformed JSONPath expression skips the spawner for that delivery and logs an error | Yes (per filter) |
@@ -1354,6 +1356,55 @@ Configured `contextSources` are fetched after the values are resolved, matching
 automatic Task creation. `--dry-run` still connects to the cluster to read the
 TaskSpawner and any Secrets referenced by context sources.
 
+### Slack reactions
+
+A Slack trigger with `reaction` creates a Task when someone adds that emoji to a
+message:
+
+```yaml
+apiVersion: kelos.dev/v1alpha2
+kind: TaskSpawner
+metadata:
+  name: ledger-events
+spec:
+  when:
+    slack:
+      channels: ["C0123456789"]
+      triggers:
+        - reaction:
+            name: gear
+  taskTemplate:
+    # worker, credentials, and so on
+    promptTemplate: |
+      <@{{.ReactionUserID}}> reacted :{{.Reaction}}: to {{.URL}}
+      (channel {{.ChannelID}}, ts {{.MessageTS}}, thread {{.ThreadTS}}):
+
+      {{.Body}}
+```
+
+Because every trigger in this example is a reaction trigger, bot mentions and
+slash commands do not fire the spawner. Add pattern triggers, or an empty
+trigger (`{}`) for every bot mention, to fire on messages as well.
+
+The reaction event does not carry the message, so the Slack server reads it from
+the channel history, or from the thread when the message is a thread reply. If
+it cannot read the message, it creates no Task and logs the error. The Task
+reports into the thread of the reacted-to message, and its
+`kelos.dev/slack-user-id` annotation names the person who reacted.
+
+The Slack app needs two changes before reactions arrive: subscribe to the
+`reaction_added` bot event, and grant the `reactions:read` bot scope. Reading the
+message uses the same history scopes as thread context (`channels:history`,
+plus `groups:history` for private channels). Reinstall the app after changing
+scopes.
+
+Releases before reaction triggers read a reaction trigger as an empty trigger,
+which fires on every bot mention. The same applies to any client built against
+the older API types, such as an older `kelos` CLI or a GitOps controller: if it
+reads and writes back a TaskSpawner, it saves each reaction trigger as an empty
+trigger. Before downgrading Kelos, or managing these TaskSpawners with such a
+client, remove their reaction triggers.
+
 <a id="prompttemplate-variables"></a>
 
 ### promptTemplate Variables
@@ -1396,6 +1447,8 @@ The `promptTemplate` field uses Go `text/template` syntax. Available variables d
 | `{{.CheckApp}}` | Check app name | Empty | Empty | App that produced the check (`check_run` events, e.g. `"GitHub Actions"`) | Empty | Empty | Empty | Empty |
 | `{{.Time}}` | Trigger time (RFC3339) | Empty | Empty | Empty | Empty | Empty | Empty | Cron tick time (e.g., `"2026-02-07T09:00:00Z"`) |
 | `{{.Schedule}}` | Cron schedule expression | Empty | Empty | Empty | Empty | Empty | Empty | Schedule string (e.g., `"0 * * * *"`) |
+
+> **Slack:** `{{.ID}}` is the message timestamp (the composite command ID for a slash command), `{{.Title}}` its first line, `{{.Body}}` the message text with attachments (or the thread context when the message is a thread reply), `{{.URL}}` its permalink, and `{{.Kind}}` is `"SlackMessage"`, or `"SlackReaction"` for a Task created by a reaction trigger. `{{.ChannelID}}` is the channel ID, `{{.MessageTS}}` the message timestamp, and `{{.ThreadTS}}` the parent message timestamp when the message is a thread reply (empty otherwise). `{{.MessageTS}}` equals `{{.ID}}` except for a slash command, where it is empty: `{{.ID}}` identifies the work item, while `{{.MessageTS}}` is always a Slack message timestamp to pass to Slack APIs alongside `{{.ChannelID}}` and `{{.ThreadTS}}`. For a reaction, these describe the reacted-to message, `{{.Body}}` is that message's own text (not the thread), `{{.Reaction}}` is the emoji name without colons or skin tone, and `{{.ReactionUserID}}` is the Slack user ID of the person who added it. Both reaction variables are empty for messages and slash commands.
 
 > **Generic Webhook only:** any additional keys declared in `spec.when.webhook.fieldMapping` are also exposed as top-level template variables (e.g., `fieldMapping: {severity: "$.level"}` makes `{{.severity}}` available).
 

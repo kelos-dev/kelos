@@ -692,7 +692,7 @@ type GenericWebhookFilter struct {
 	Pattern string `json:"pattern,omitempty"`
 }
 
-// Slack triggers task spawning from Slack messages via the centralized
+// Slack triggers task spawning from Slack messages and emoji reactions via the centralized
 // kelos-slack-server. The server connects to Slack via Socket Mode (outbound
 // WebSocket — no ingress required) and routes messages to matching
 // TaskSpawners. Authentication tokens (SLACK_BOT_TOKEN, SLACK_APP_TOKEN)
@@ -707,9 +707,11 @@ type GenericWebhookFilter struct {
 //
 // Bot mention (@bot) is implicitly required by default. The handler knows its
 // own bot user ID from the Slack auth response. When Triggers are configured,
-// each trigger's regex pattern is AND'd with the implicit mention requirement
+// each pattern trigger's regex is AND'd with the implicit mention requirement
 // (unless MentionOptional is set). Multiple triggers use OR semantics.
-// Empty triggers = every bot mention fires.
+// Empty triggers = every bot mention fires. A trigger with Reaction fires on an
+// emoji reaction instead of a message and needs no mention; a spawner whose
+// triggers are all reaction triggers fires only on reactions.
 type Slack struct {
 	// Channels optionally restricts which Slack channels the bot listens in.
 	// Values are channel IDs (e.g., "C0123456789"). When empty, the bot
@@ -742,9 +744,16 @@ type Slack struct {
 	// +kubebuilder:validation:Enum=None;All;OthersOnly
 	BotMessagePolicy BotMessagePolicy `json:"botMessagePolicy,omitempty"`
 
-	// Triggers define regex patterns that must match the message text.
-	// Bot mention is implicitly required unless MentionOptional is set.
+	// Triggers define what fires the spawner: a regex Pattern that must match
+	// the message text, or a Reaction added to a message. Bot mention is
+	// implicitly required for a pattern trigger unless MentionOptional is set.
 	// Multiple triggers use OR semantics. When empty, every bot mention fires.
+	//
+	// When every trigger is a reaction trigger, the spawner fires only on
+	// reactions: bot mentions and slash commands do not fire it. Adding any
+	// non-reaction trigger also makes the spawner fire on slash commands again.
+	// To fire on reactions and on every bot mention, add an empty trigger ({})
+	// beside the reaction triggers.
 	// +optional
 	// +kubebuilder:validation:MaxItems=8
 	Triggers []SlackTrigger `json:"triggers,omitempty"`
@@ -753,8 +762,8 @@ type Slack struct {
 	// regular expressions. Each entry is checked independently — the message
 	// is excluded if the text matches ANY entry. Patterns use Go regexp
 	// syntax (RE2, unanchored). Leading @-mentions are stripped before
-	// matching so patterns target semantic content. Does NOT apply to
-	// slash commands.
+	// matching so patterns target semantic content. For a reaction trigger,
+	// the text is the reacted-to message's. Does NOT apply to slash commands.
 	// +optional
 	// +kubebuilder:validation:MaxItems=10
 	// +kubebuilder:validation:items:MinLength=1
@@ -780,7 +789,9 @@ type SlackFilter struct {
 	Channels []string `json:"channels,omitempty"`
 }
 
-// SlackTrigger defines a regex pattern trigger for Slack messages.
+// +kubebuilder:validation:XValidation:rule="!has(self.reaction) || (!has(self.pattern) && !has(self.mentionOptional))",message="a reaction trigger cannot set pattern or mentionOptional"
+// SlackTrigger defines what fires a Slack TaskSpawner: a regex pattern matched
+// against message text, or an emoji reaction added to a message.
 type SlackTrigger struct {
 	// Pattern is a Go RE2 regex matched against message text (unanchored).
 	// Leading @-mentions are stripped before matching so patterns target
@@ -793,6 +804,33 @@ type SlackTrigger struct {
 	// without requiring a bot @-mention.
 	// +optional
 	MentionOptional *bool `json:"mentionOptional,omitempty"`
+
+	// Reaction fires the trigger when someone adds an emoji reaction to a
+	// message, instead of on a posted message. Pattern and MentionOptional
+	// cannot be set with Reaction.
+	//
+	// Channels and ExcludeFilters apply as they do to messages, and
+	// ExcludePatterns is matched against the reacted-to message's text.
+	// BotMessagePolicy does not apply: reactions added by other bots fire the
+	// trigger, and only a reaction the bot adds itself never fires. The Slack
+	// app must subscribe to the reaction_added bot event, which needs the
+	// reactions:read scope.
+	// +optional
+	Reaction *SlackReactionTrigger `json:"reaction,omitempty"`
+}
+
+// SlackReactionTrigger fires a Slack TaskSpawner when someone adds an emoji
+// reaction to a message.
+type SlackReactionTrigger struct {
+	// Name is the emoji's canonical Slack name, lowercase and without colons
+	// (e.g. "gear", or "+1" rather than its alias "thumbsup"). Slack reports
+	// reactions by canonical name, so an alias never matches. A skin-tone
+	// variant such as "+1::skin-tone-2" matches its base name.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=100
+	// +kubebuilder:validation:Pattern=`^[^:\sA-Z]+$`
+	Name string `json:"name"`
 }
 
 // BotMessagePolicy controls whether bot-originated messages can trigger a spawner.

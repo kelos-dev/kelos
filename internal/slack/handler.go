@@ -142,6 +142,8 @@ func (h *SlackHandler) handleEventsAPI(ctx context.Context, evt socketmode.Event
 		h.handleMemberJoinedChannel(ctx, inner)
 	case *slackevents.MessageEvent:
 		h.handleMessageEvent(ctx, inner)
+	case *slackevents.ReactionAddedEvent:
+		h.handleReactionAdded(ctx, inner)
 	default:
 		return
 	}
@@ -246,6 +248,59 @@ func (h *SlackHandler) handleMessageEvent(ctx context.Context, innerEvent *slack
 		}
 	}
 
+	h.routeMessage(ctx, msg)
+}
+
+// handleReactionAdded creates a Task for every TaskSpawner with a reaction
+// trigger for the added emoji. The event carries only the
+// reacted-to message's channel and timestamp, so the message is fetched from
+// Slack before matching.
+func (h *SlackHandler) handleReactionAdded(ctx context.Context, evt *slackevents.ReactionAddedEvent) {
+	if evt.Item.Type != "message" {
+		h.log.V(1).Info("Ignoring reaction on a non-message item", "itemType", evt.Item.Type, "reaction", evt.Reaction)
+		return
+	}
+	if evt.User == "" || evt.User == h.botUserID {
+		return
+	}
+
+	reaction := reactionName(evt.Reaction)
+	spawners, err := h.getMatchingSpawners(ctx)
+	if err != nil {
+		h.log.Error(err, "Failed to get matching spawners")
+		return
+	}
+	if !wantsReaction(spawners, reaction, evt.Item.Channel) {
+		h.log.V(1).Info("No TaskSpawner lists reaction", "reaction", reaction, "channel", evt.Item.Channel)
+		return
+	}
+
+	message, err := fetchMessage(ctx, h.api, evt.Item.Channel, evt.Item.Timestamp)
+	if err != nil {
+		h.log.Error(err, "Failed to fetch reacted-to message, dropping reaction",
+			"channel", evt.Item.Channel, "ts", evt.Item.Timestamp, "reaction", reaction)
+		return
+	}
+
+	threadTS := message.ThreadTimestamp
+	if threadTS == message.Timestamp {
+		// A thread parent carries its own ts as thread_ts; only replies have a
+		// distinct parent.
+		threadTS = ""
+	}
+	msg := h.enrichMessage(ctx, &slackevents.MessageEvent{
+		User:            message.User,
+		BotID:           message.BotID,
+		Channel:         evt.Item.Channel,
+		Text:            message.Text,
+		TimeStamp:       message.Timestamp,
+		ThreadTimeStamp: threadTS,
+		Message:         &goslack.Msg{Attachments: message.Attachments},
+	})
+	msg.Reaction = reaction
+	msg.ReactionUserID = evt.User
+
+	h.log.Info("Routing Slack reaction", "reaction", reaction, "channel", msg.ChannelID, "ts", msg.Timestamp, "user", evt.User)
 	h.routeMessage(ctx, msg)
 }
 
@@ -357,6 +412,10 @@ func (h *SlackHandler) createTask(ctx context.Context, spawner *kelos.TaskSpawne
 	hashInput := fmt.Sprintf("%s-%s", msg.ChannelID, msg.Timestamp)
 	if msg.IsSlashCommand {
 		hashInput = msg.SlashCommandID
+	} else if msg.Reaction != "" {
+		// One Task per message and emoji: the same emoji added again by another
+		// user resolves to the same name and is treated as already processed.
+		hashInput = fmt.Sprintf("%s-%s-reaction-%s", msg.ChannelID, msg.Timestamp, msg.Reaction)
 	}
 	sum := sha256.Sum256([]byte(hashInput))
 	shortHash := hex.EncodeToString(sum[:])[:12]
@@ -400,7 +459,11 @@ func (h *SlackHandler) createTask(ctx context.Context, spawner *kelos.TaskSpawne
 	}
 	task.Annotations[reporting.AnnotationSlackReporting] = "enabled"
 	task.Annotations[reporting.AnnotationSlackChannel] = msg.ChannelID
-	task.Annotations[reporting.AnnotationSlackUserID] = msg.UserID
+	requester := msg.UserID
+	if msg.ReactionUserID != "" {
+		requester = msg.ReactionUserID
+	}
+	task.Annotations[reporting.AnnotationSlackUserID] = requester
 
 	// Only enable Slack reporting label and thread_ts for real message
 	// timestamps. Slash commands have no thread to reply to, so skip the

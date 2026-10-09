@@ -411,6 +411,145 @@ func TestMatchesSpawner(t *testing.T) {
 			botUserID: "UBOT1",
 			want:      true,
 		},
+		{
+			name: "listed reaction in allowed channel matches",
+			slackCfg: &kelos.Slack{
+				Channels: []string{"C1"},
+				Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear"}}},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "Acme went live today", Reaction: "gear", ReactionUserID: "U2"},
+			botUserID: "UBOT1",
+			want:      true,
+		},
+		{
+			name: "reaction matches any listed emoji",
+			slackCfg: &kelos.Slack{
+				Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "rocket"}}, {Reaction: &kelos.SlackReactionTrigger{Name: "gear"}}},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "Acme went live today", Reaction: "gear", ReactionUserID: "U2"},
+			botUserID: "UBOT1",
+			want:      true,
+		},
+		{
+			name: "unlisted reaction rejects",
+			slackCfg: &kelos.Slack{
+				Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear"}}},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "Acme went live today", Reaction: "eyes", ReactionUserID: "U2"},
+			botUserID: "UBOT1",
+			want:      false,
+		},
+		{
+			name: "reaction outside allowed channels rejects",
+			slackCfg: &kelos.Slack{
+				Channels: []string{"C2"},
+				Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear"}}},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "Acme went live today", Reaction: "gear", ReactionUserID: "U2"},
+			botUserID: "UBOT1",
+			want:      false,
+		},
+		{
+			name: "reaction in excluded channel rejects",
+			slackCfg: &kelos.Slack{
+				Triggers:       []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear"}}},
+				ExcludeFilters: []kelos.SlackFilter{{Channels: []string{"C1"}}},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "Acme went live today", Reaction: "gear", ReactionUserID: "U2"},
+			botUserID: "UBOT1",
+			want:      false,
+		},
+		{
+			name: "reaction on message matching exclude pattern rejects",
+			slackCfg: &kelos.Slack{
+				Triggers:        []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear"}}},
+				ExcludePatterns: []string{"^draft"},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "draft: Acme went live", Reaction: "gear", ReactionUserID: "U2"},
+			botUserID: "UBOT1",
+			want:      false,
+		},
+		{
+			name:      "spawner without triggers ignores reactions",
+			slackCfg:  &kelos.Slack{},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> Acme went live", Reaction: "gear", ReactionUserID: "U2"},
+			botUserID: "UBOT1",
+			want:      false,
+		},
+		{
+			name: "spawner without reaction triggers ignores reactions",
+			slackCfg: &kelos.Slack{
+				Triggers: []kelos.SlackTrigger{{Pattern: ".*", MentionOptional: boolPtr(true)}},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "Acme went live", Reaction: "gear", ReactionUserID: "U2"},
+			botUserID: "UBOT1",
+			want:      false,
+		},
+		{
+			name: "reaction-only spawner ignores bot mentions",
+			slackCfg: &kelos.Slack{
+				Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear"}}},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> help"},
+			botUserID: "UBOT1",
+			want:      false,
+		},
+		{
+			name: "reaction-only spawner ignores slash commands",
+			slackCfg: &kelos.Slack{
+				Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear"}}},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "do stuff", IsSlashCommand: true},
+			botUserID: "UBOT1",
+			want:      false,
+		},
+		{
+			name: "spawner with reaction and pattern triggers still fires on matching messages",
+			slackCfg: &kelos.Slack{
+				Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear"}}, {Pattern: "deploy"}},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> deploy"},
+			botUserID: "UBOT1",
+			want:      true,
+		},
+		{
+			// A reaction trigger has an empty pattern, which would match any
+			// text if it were treated as a message trigger.
+			name: "reaction trigger does not match a mention that no pattern trigger matches",
+			slackCfg: &kelos.Slack{
+				Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear"}}, {Pattern: "deploy"}},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> help"},
+			botUserID: "UBOT1",
+			want:      false,
+		},
+		{
+			name: "empty trigger beside a reaction trigger fires on every bot mention",
+			slackCfg: &kelos.Slack{
+				Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear"}}, {}},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> help"},
+			botUserID: "UBOT1",
+			want:      true,
+		},
+		{
+			name: "spawner with reaction and pattern triggers fires on slash commands",
+			slackCfg: &kelos.Slack{
+				Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear"}}, {Pattern: "deploy"}},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "do stuff", IsSlashCommand: true},
+			botUserID: "UBOT1",
+			want:      true,
+		},
+		{
+			name: "reaction does not fire a pattern trigger",
+			slackCfg: &kelos.Slack{
+				Triggers: []kelos.SlackTrigger{{Pattern: ".*", MentionOptional: boolPtr(true)}, {Reaction: &kelos.SlackReactionTrigger{Name: "rocket"}}},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "Acme went live", Reaction: "gear", ReactionUserID: "U2"},
+			botUserID: "UBOT1",
+			want:      false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -485,6 +624,69 @@ func TestExtractSlackWorkItem(t *testing.T) {
 			t.Errorf("Title = %v, want %v", vars["Title"], "fix the login page")
 		}
 	})
+}
+
+func TestExtractSlackWorkItemReaction(t *testing.T) {
+	msg := &SlackMessageData{
+		UserID:         "U1",
+		ChannelID:      "C1",
+		Text:           "Acme went live today\nPOC wrapped last week",
+		Body:           "Acme went live today\nPOC wrapped last week",
+		Timestamp:      "1234567890.123456",
+		ThreadTS:       "1234567000.000001",
+		Permalink:      "https://slack.com/archives/C1/p1234567890123456",
+		Reaction:       "gear",
+		ReactionUserID: "U2",
+	}
+
+	vars := ExtractSlackWorkItem(msg)
+
+	want := map[string]interface{}{
+		"ID":             "1234567890.123456",
+		"Title":          "Acme went live today",
+		"Body":           "Acme went live today\nPOC wrapped last week",
+		"URL":            "https://slack.com/archives/C1/p1234567890123456",
+		"Kind":           "SlackReaction",
+		"ChannelID":      "C1",
+		"MessageTS":      "1234567890.123456",
+		"ThreadTS":       "1234567000.000001",
+		"Reaction":       "gear",
+		"ReactionUserID": "U2",
+	}
+	for key, value := range want {
+		if vars[key] != value {
+			t.Errorf("%s = %v, want %v", key, vars[key], value)
+		}
+	}
+}
+
+func TestExtractSlackWorkItemMessageHasEmptyReactionVariables(t *testing.T) {
+	vars := ExtractSlackWorkItem(&SlackMessageData{ChannelID: "C1", Text: "hi", Timestamp: "1.1"})
+
+	// Present but empty, so a template that references them renders under
+	// missingkey=error for message-triggered Tasks too.
+	for _, key := range []string{"Reaction", "ReactionUserID", "ThreadTS"} {
+		value, ok := vars[key]
+		if !ok || value != "" {
+			t.Errorf("%s = %v (present %v), want empty string", key, value, ok)
+		}
+	}
+	if vars["ChannelID"] != "C1" || vars["MessageTS"] != "1.1" {
+		t.Errorf("ChannelID = %v, MessageTS = %v, want C1 and 1.1", vars["ChannelID"], vars["MessageTS"])
+	}
+}
+
+func TestReactionName(t *testing.T) {
+	tests := map[string]string{
+		"gear":            "gear",
+		"+1::skin-tone-2": "+1",
+		"":                "",
+	}
+	for in, want := range tests {
+		if got := reactionName(in); got != want {
+			t.Errorf("reactionName(%q) = %q, want %q", in, got, want)
+		}
+	}
 }
 
 func TestShouldProcess(t *testing.T) {

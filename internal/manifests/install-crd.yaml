@@ -68430,8 +68430,8 @@ spec:
                           regular expressions. Each entry is checked independently — the message
                           is excluded if the text matches ANY entry. Patterns use Go regexp
                           syntax (RE2, unanchored). Leading @-mentions are stripped before
-                          matching so patterns target semantic content. Does NOT apply to
-                          slash commands.
+                          matching so patterns target semantic content. For a reaction trigger,
+                          the text is the reacted-to message's. Does NOT apply to slash commands.
                         items:
                           maxLength: 256
                           minLength: 1
@@ -68440,12 +68440,20 @@ spec:
                         type: array
                       triggers:
                         description: |-
-                          Triggers define regex patterns that must match the message text.
-                          Bot mention is implicitly required unless MentionOptional is set.
+                          Triggers define what fires the spawner: a regex Pattern that must match
+                          the message text, or a Reaction added to a message. Bot mention is
+                          implicitly required for a pattern trigger unless MentionOptional is set.
                           Multiple triggers use OR semantics. When empty, every bot mention fires.
+
+                          When every trigger is a reaction trigger, the spawner fires only on
+                          reactions: bot mentions and slash commands do not fire it. Adding any
+                          non-reaction trigger also makes the spawner fire on slash commands again.
+                          To fire on reactions and on every bot mention, add an empty trigger ({})
+                          beside the reaction triggers.
                         items:
-                          description: SlackTrigger defines a regex pattern trigger
-                            for Slack messages.
+                          description: |-
+                            SlackTrigger defines what fires a Slack TaskSpawner: a regex pattern matched
+                            against message text, or an emoji reaction added to a message.
                           properties:
                             mentionOptional:
                               description: |-
@@ -68459,7 +68467,36 @@ spec:
                                 semantic content.
                               maxLength: 256
                               type: string
+                            reaction:
+                              description: |-
+                                Reaction fires the trigger when someone adds an emoji reaction to a
+                                message, instead of on a posted message. Pattern and MentionOptional
+                                cannot be set with Reaction.
+
+                                Channels and ExcludeFilters apply as they do to messages, and
+                                ExcludePatterns is matched against the reacted-to message's text.
+                                BotMessagePolicy does not apply: reactions added by other bots fire the
+                                trigger, and only a reaction the bot adds itself never fires. The Slack
+                                app must subscribe to the reaction_added bot event, which needs the
+                                reactions:read scope.
+                              properties:
+                                name:
+                                  description: |-
+                                    Name is the emoji's canonical Slack name, lowercase and without colons
+                                    (e.g. "gear", or "+1" rather than its alias "thumbsup"). Slack reports
+                                    reactions by canonical name, so an alias never matches. A skin-tone
+                                    variant such as "+1::skin-tone-2" matches its base name.
+                                  maxLength: 100
+                                  minLength: 1
+                                  pattern: ^[^:\sA-Z]+$
+                                  type: string
+                              required:
+                              - name
+                              type: object
                           type: object
+                          x-kubernetes-validations:
+                          - message: a reaction trigger cannot set pattern or mentionOptional
+                            rule: '!has(self.reaction) || (!has(self.pattern) && !has(self.mentionOptional))'
                         maxItems: 8
                         type: array
                     type: object

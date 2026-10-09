@@ -62,7 +62,18 @@ type preservedWebhookGatewayRefs struct {
 // why the value is preserved rather than left to fall away.
 const preservedSlackExcludeFiltersAnnotation = "kelos.dev/v1alpha2-slack-exclude-filters"
 
+// preservedSlackReactionTriggersAnnotation carries the reaction triggers in
+// spec.when.slack.triggers (spec.when.slack.triggers[].reaction is a
+// v1alpha2-only field) across a v1alpha1 round-trip so a client that reads and
+// writes the object through v1alpha1 does not silently drop them. v1alpha1
+// does not gain the capability — the reaction triggers are removed from the
+// v1alpha1 triggers list, where they would read as empty triggers that fire on
+// every bot mention, and survive only in this annotation.
+const preservedSlackReactionTriggersAnnotation = "kelos.dev/v1alpha2-slack-reaction-triggers"
+
 var slackFilterChannelIDPattern = regexp.MustCompile(v1alpha2.SlackFilterChannelIDPattern)
+
+var slackReactionPattern = regexp.MustCompile(v1alpha2.SlackReactionPattern)
 
 type preservedGitHubCommentsReporting struct {
 	GitHubIssues       *preservedGitHubCommentsSource `json:"githubIssues,omitempty"`
@@ -102,6 +113,8 @@ func taskSpawnerToHub(_ context.Context, src *v1alpha1.TaskSpawner, dst *v1alpha
 	deleteAnnotation(dst.Annotations, preservedGitHubWebhookExcludeFiltersAnnotation)
 	restorePreservedSlackExcludeFilters(src.Annotations, dst.Spec.When.Slack)
 	deleteAnnotation(dst.Annotations, preservedSlackExcludeFiltersAnnotation)
+	restorePreservedSlackReactionTriggers(src.Annotations, dst.Spec.When.Slack)
+	deleteAnnotation(dst.Annotations, preservedSlackReactionTriggersAnnotation)
 	return nil
 }
 
@@ -131,6 +144,9 @@ func taskSpawnerFromHub(_ context.Context, src *v1alpha2.TaskSpawner, dst *v1alp
 		return err
 	}
 	if err := setPreservedSlackExcludeFilters(dst, src.Spec.When.Slack); err != nil {
+		return err
+	}
+	if err := setPreservedSlackReactionTriggers(dst, src.Spec.When.Slack); err != nil {
 		return err
 	}
 	return convertViaJSON(&src.Status, &dst.Status)
@@ -478,6 +494,100 @@ func validSlackFilterChannels(channels []string) bool {
 			return false
 		}
 		seen[id] = struct{}{}
+	}
+	return true
+}
+
+// setPreservedSlackReactionTriggers removes the reaction triggers from the
+// v1alpha1 triggers list and records their reaction blocks in an annotation so
+// they survive a v1alpha1 round-trip. The annotation is cleared when there is
+// nothing to preserve.
+func setPreservedSlackReactionTriggers(dst *v1alpha1.TaskSpawner, slack *v1alpha2.Slack) error {
+	var reactions []v1alpha2.SlackReactionTrigger
+	if slack != nil {
+		for _, trigger := range slack.Triggers {
+			if trigger.Reaction != nil {
+				reactions = append(reactions, *trigger.Reaction)
+			}
+		}
+	}
+	if len(reactions) == 0 {
+		deleteAnnotation(dst.Annotations, preservedSlackReactionTriggersAnnotation)
+		return nil
+	}
+	// convertViaJSON keeps the list aligned with the hub's, with each reaction
+	// trigger reduced to an empty trigger, so drop them by index.
+	var triggers []v1alpha1.SlackTrigger
+	for i, trigger := range dst.Spec.When.Slack.Triggers {
+		if slack.Triggers[i].Reaction == nil {
+			triggers = append(triggers, trigger)
+		}
+	}
+	dst.Spec.When.Slack.Triggers = triggers
+	data, err := json.Marshal(reactions)
+	if err != nil {
+		return err
+	}
+	if dst.Annotations == nil {
+		dst.Annotations = map[string]string{}
+	}
+	dst.Annotations[preservedSlackReactionTriggersAnnotation] = string(data)
+	return nil
+}
+
+// restorePreservedSlackReactionTriggers appends the reaction triggers dropped
+// by a v1alpha1 round-trip, unless the v1alpha2 object already carries one.
+// Triggers use OR semantics, so appending rather than restoring the original
+// positions does not change what fires the spawner.
+//
+// Like the other preserved fields, the annotation wins over what the v1alpha1
+// client wrote: a v1alpha1 client that sets triggers to [] to mean "every bot
+// mention" gets the preserved reaction triggers back, making the spawner
+// reaction-only, unless it also drops the annotation.
+func restorePreservedSlackReactionTriggers(annotations map[string]string, slack *v1alpha2.Slack) {
+	if slack == nil {
+		return
+	}
+	for _, trigger := range slack.Triggers {
+		if trigger.Reaction != nil {
+			return
+		}
+	}
+	raw, ok := annotations[preservedSlackReactionTriggersAnnotation]
+	if !ok || raw == "" {
+		return
+	}
+	var reactions []v1alpha2.SlackReactionTrigger
+	if err := json.Unmarshal([]byte(raw), &reactions); err != nil || len(reactions) == 0 {
+		// The annotation is best-effort preservation data and can be set by
+		// users; malformed data must not block API version conversion.
+		return
+	}
+	if !validSlackReactionTriggers(reactions, len(slack.Triggers)) {
+		return
+	}
+	for _, reaction := range reactions {
+		slack.Triggers = append(slack.Triggers, v1alpha2.SlackTrigger{Reaction: &reaction})
+	}
+}
+
+// validSlackReactionTriggers reports whether restored annotation data satisfies
+// every constraint declared on v1alpha2 Slack.Triggers[].Reaction: each name
+// set, bounded, and matching the pattern, and the triggers list, with the
+// existing triggers, within its maxItems. Data that fails any of these is
+// ignored entirely rather than partially applied, so conversion can never
+// produce a hub object that a v1alpha2 write would have rejected.
+func validSlackReactionTriggers(reactions []v1alpha2.SlackReactionTrigger, existing int) bool {
+	if existing+len(reactions) > v1alpha2.SlackTriggersMaxItems {
+		return false
+	}
+	for _, reaction := range reactions {
+		if reaction.Name == "" || utf8.RuneCountInString(reaction.Name) > v1alpha2.SlackReactionMaxLength {
+			return false
+		}
+		if !slackReactionPattern.MatchString(reaction.Name) {
+			return false
+		}
 	}
 	return true
 }

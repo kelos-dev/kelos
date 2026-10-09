@@ -16,6 +16,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
@@ -2467,6 +2468,59 @@ var _ = Describe("TaskSpawner Controller", func() {
 			}
 			err := k8sClient.Create(ctx, ts)
 			Expect(apierrors.IsInvalid(err)).To(BeTrue(), "error: %v", err)
+		})
+	})
+
+	Context("When configuring Slack reaction triggers", func() {
+		slackTriggerSpawner := func(namespace, name string, triggers []kelos.SlackTrigger) *kelos.TaskSpawner {
+			return &kelos.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+				Spec: kelos.TaskSpawnerSpec{
+					When: kelos.When{Slack: &kelos.Slack{
+						Channels: []string{"C0123456789"},
+						Triggers: triggers,
+					}},
+					TaskTemplate: kelos.TaskTemplate{
+						Worker: &kelos.WorkerSpec{
+							Type: "claude-code",
+							Credentials: &kelos.Credentials{
+								Type:      kelos.CredentialTypeOAuth,
+								SecretRef: &kelos.SecretReference{Name: "claude-credentials"},
+							},
+							WorkspaceRef: &kelos.WorkspaceReference{Name: "workspace"},
+						},
+					},
+				},
+			}
+		}
+
+		It("Should accept reaction triggers beside pattern triggers", func() {
+			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test-taskspawner-slack-reactions"}}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			triggers := []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear"}}, {Reaction: &kelos.SlackReactionTrigger{Name: "+1"}}, {Pattern: "deploy"}}
+			ts := slackTriggerSpawner(ns.Name, "reactions", triggers)
+			Expect(k8sClient.Create(ctx, ts)).Should(Succeed())
+
+			created := &kelos.TaskSpawner{}
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(ts), created)).Should(Succeed())
+			Expect(created.Spec.When.Slack.Triggers).To(Equal(triggers))
+		})
+
+		It("Should reject invalid reaction triggers", func() {
+			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test-taskspawner-slack-reactions-invalid"}}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			for name, trigger := range map[string]kelos.SlackTrigger{
+				"empty-name":       {Reaction: &kelos.SlackReactionTrigger{}},
+				"colons":           {Reaction: &kelos.SlackReactionTrigger{Name: ":gear:"}},
+				"uppercase":        {Reaction: &kelos.SlackReactionTrigger{Name: "Gear"}},
+				"pattern":          {Reaction: &kelos.SlackReactionTrigger{Name: "gear"}, Pattern: "deploy"},
+				"mention-optional": {Reaction: &kelos.SlackReactionTrigger{Name: "gear"}, MentionOptional: ptr.To(true)},
+			} {
+				err := k8sClient.Create(ctx, slackTriggerSpawner(ns.Name, "reactions-"+name, []kelos.SlackTrigger{trigger}))
+				Expect(apierrors.IsInvalid(err)).To(BeTrue(), "%s: error: %v", name, err)
+			}
 		})
 	})
 

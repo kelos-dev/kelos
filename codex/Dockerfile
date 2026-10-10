@@ -29,7 +29,7 @@ RUN ARCH=$(dpkg --print-architecture) \
 
 ENV PATH="/usr/local/go/bin:${PATH}"
 
-ARG CODEX_VERSION=0.162.0
+ARG CODEX_VERSION=0.162.1
 RUN npm install -g @openai/codex@${CODEX_VERSION}
 RUN command -v bwrap
 

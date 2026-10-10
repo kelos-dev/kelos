@@ -1752,6 +1752,8 @@ The `kelos` CLI lets you manage the full lifecycle without writing YAML.
 
 `kelos logs <task-name> -f` waits while the task Pod is unscheduled, Pending, or initializing its target container, then streams logs once the container is available. If Kubernetes closes an empty agent log stream while the Task is still active, the command reconnects instead of reporting completion. Failed Tasks and non-transient container startup failures return an error instead of retrying indefinitely.
 
+`kelos logs` colors agent status and tool lines when stderr is a terminal. Use `--color=always` to force color or `--color=never` to disable it; `NO_COLOR` also disables automatic color. Agent text on stdout remains unchanged.
+
 ### `kelos install` Flags
 
 - `--values, -f`: Load Helm values from a YAML file; repeat to merge multiple files, or use `-` to read from stdin

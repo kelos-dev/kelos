@@ -22564,8 +22564,32 @@ spec:
                   rule: '!has(self.workerPoolRef) || !has(self.podOverrides)'
                 - message: podFailurePolicy is not supported with workerPoolRef
                   rule: '!has(self.workerPoolRef) || !has(self.podFailurePolicy)'
+              triggerMode:
+                default: Source
+                description: |-
+                  TriggerMode controls what may start Tasks from this spawner.
+
+                  Source (the default) keeps the spawner acting on spec.when. OnDemand
+                  stops the spawner acting on its own source, so Tasks are started only by
+                  an explicit dispatch — a TaskRouter, or "kelos run --from
+                  taskspawner/<name>".
+
+                  This is not spec.suspend. Suspend stops the spawner producing work at
+                  all; OnDemand only stops its own source from firing.
+                enum:
+                - Source
+                - OnDemand
+                type: string
               when:
-                description: When defines the conditions that trigger task spawning.
+                description: |-
+                  When defines the conditions that trigger task spawning. It is required
+                  unless triggerMode is OnDemand, where the spawner has no source of its
+                  own and serves only as a template for explicit dispatch.
+
+                  omitempty is a no-op on a struct value, so a Go client always sends
+                  when: {} and only a manifest can express the absence the CEL rule allows.
+                  Treating a When with no source set as "no source" is what makes both
+                  spellings behave the same.
                 properties:
                   cron:
                     description: Cron triggers task spawning on a cron schedule.
@@ -23551,10 +23575,11 @@ spec:
                           ExcludePatterns — the exclusion also covers slash commands. A criterion
                           the event does not carry never matches, so it does not reject the event.
 
-                          The rules are only guaranteed while the object is managed through
-                          v1alpha2. This field does not exist in v1alpha1; it survives a v1alpha1
-                          round-trip through a preservation annotation, so a v1alpha1 client that
-                          drops unknown annotations drops the exclusions with them.
+                          On TaskSpawner, the rules are only guaranteed while the object is managed
+                          through v1alpha2: this field does not exist there in v1alpha1, and it
+                          survives a v1alpha1 round-trip through a preservation annotation, so a
+                          v1alpha1 client that drops unknown annotations drops the exclusions with
+                          them. TaskRouter, which reuses this type, has no v1alpha1 to convert to.
                         items:
                           description: |-
                             SlackFilter is a set of matching criteria for a Slack event. Every criterion
@@ -23739,14 +23764,15 @@ spec:
                 type: object
             required:
             - taskTemplate
-            - when
             type: object
             x-kubernetes-validations:
+            - message: when is required unless triggerMode is OnDemand
+              rule: has(self.when) || self.triggerMode == 'OnDemand'
             - message: a workspace source is required when using githubIssues, githubPullRequests,
                 githubWebhook, or linearWebhook source (set taskTemplate.workspaceRef,
                 taskTemplate.worker.workspaceRef, or taskTemplate.workerPoolRef —
                 a pool satisfies this because it carries its own workspace)
-              rule: '!(has(self.when.githubIssues) || has(self.when.githubPullRequests)
+              rule: '!has(self.when) || !(has(self.when.githubIssues) || has(self.when.githubPullRequests)
                 || has(self.when.githubWebhook) || has(self.when.linearWebhook)) ||
                 has(self.taskTemplate.workspaceRef) || (has(self.taskTemplate.worker)
                 && has(self.taskTemplate.worker.workspaceRef)) || has(self.taskTemplate.workerPoolRef)'

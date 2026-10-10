@@ -27,6 +27,7 @@ import (
 	"github.com/kelos-dev/kelos/internal/conversion"
 	"github.com/kelos-dev/kelos/internal/githubapp"
 	"github.com/kelos-dev/kelos/internal/logging"
+	"github.com/kelos-dev/kelos/internal/taskbuilder"
 	"github.com/kelos-dev/kelos/internal/telemetry"
 	"github.com/kelos-dev/kelos/internal/version"
 )
@@ -285,6 +286,19 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Unable to create controller", "controller", "TaskPipeline")
+		os.Exit(1)
+	}
+	routerTaskBuilder, err := taskbuilder.NewTaskBuilder(mgr.GetClient())
+	if err != nil {
+		setupLog.Error(err, "Unable to create task builder", "controller", "TaskRouter")
+		os.Exit(1)
+	}
+	if err = (&controller.TaskRouterReconciler{
+		Client:      mgr.GetClient(),
+		Scheme:      mgr.GetScheme(),
+		TaskBuilder: routerTaskBuilder,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Unable to create controller", "controller", "TaskRouter")
 		os.Exit(1)
 	}
 	if err = (&controller.SessionReconciler{

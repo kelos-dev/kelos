@@ -106,6 +106,7 @@ rules:
   - sessionspawners
   - taskbudgets
   - taskpipelines
+  - taskrouters
   - webhookgateways
   - workspaces
   verbs:
@@ -129,6 +130,7 @@ rules:
   - sessionspawners/status
   - taskbudgets/status
   - taskpipelines/status
+  - taskrouters/status
   - tasks/status
   - taskspawners/status
   - webhookgateways/status
@@ -282,6 +284,7 @@ rules:
       - taskbudgets
       - taskpipelines
       - taskrecords
+      - taskrouters
       - tasks
       - taskspawners
       - workerpools
@@ -510,6 +513,14 @@ rules:
       - kelos.dev
     resources:
       - taskspawners
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - kelos.dev
+    resources:
+      - taskrouters
     verbs:
       - get
       - list

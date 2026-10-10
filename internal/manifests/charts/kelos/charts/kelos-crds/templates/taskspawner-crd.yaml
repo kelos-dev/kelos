@@ -8302,6 +8302,14 @@ spec:
                       Cron sources: {{ "{{.Time}}" }}, {{ "{{.Schedule}}" }}
                       When contextSources are configured: .Context.NAME for each source
                     type: string
+                  branchLock:
+                    description: |-
+                      BranchLock controls whether spawned Tasks take the branch lock.
+                      See Task.spec.branchLock. Omit for Exclusive.
+                    enum:
+                    - Exclusive
+                    - None
+                    type: string
                   contextSources:
                     description: |-
                       ContextSources declares external data sources to query before task
@@ -22505,7 +22513,7 @@ spec:
                       WorkerPoolRef references a WorkerPool for persistent execution.
                       When set, spawned Tasks execute on pre-warmed workers instead of
                       creating per-task Jobs. Mutually exclusive with inline type/credentials,
-                      image, workspaceRef, agentConfigRefs, branch, dependsOn,
+                      image, workspaceRef, agentConfigRefs, branch, branchLock, dependsOn,
                       ttlSecondsAfterFinished, podOverrides, and podFailurePolicy.
                     properties:
                       name:
@@ -22558,6 +22566,8 @@ spec:
                 - message: branch is not supported with workerPoolRef
                   rule: '!has(self.workerPoolRef) || !has(self.branch) || size(self.branch)
                     == 0'
+                - message: branchLock is not supported with workerPoolRef
+                  rule: '!has(self.workerPoolRef) || !has(self.branchLock)'
                 - message: ttlSecondsAfterFinished is not supported with workerPoolRef
                   rule: '!has(self.workerPoolRef) || !has(self.ttlSecondsAfterFinished)'
                 - message: podOverrides is not supported with workerPoolRef

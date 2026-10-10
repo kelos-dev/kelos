@@ -19,6 +19,14 @@ import (
 // not gain the capability — the value only survives in this annotation.
 const preservedNameTemplateAnnotation = "kelos.dev/v1alpha2-name-template"
 
+// preservedBranchLockAnnotation carries Task spec.branchLock and TaskSpawner
+// taskTemplate.branchLock (v1alpha2-only fields) across a v1alpha1 round-trip
+// so a client that reads and writes the object through v1alpha1 does not
+// silently put readers back under the branch lock. For Tasks it also keeps such
+// writes from failing the immutable-spec rule. v1alpha1 does not gain the
+// capability — the value only survives in this annotation.
+const preservedBranchLockAnnotation = "kelos.dev/v1alpha2-branch-lock"
+
 // preservedContextGitHubAppAuthAnnotation carries the githubAppAuth blocks of
 // taskTemplate.contextSources (a v1alpha2-only field) across a v1alpha1
 // round-trip, keyed by context source name. Without it a client that reads and
@@ -86,6 +94,8 @@ func taskSpawnerToHub(_ context.Context, src *v1alpha1.TaskSpawner, dst *v1alpha
 	foldTaskSpawnerForward(&src.Spec, &dst.Spec)
 	restorePreservedNameTemplate(src.Annotations, &dst.Spec.TaskTemplate)
 	deleteAnnotation(dst.Annotations, preservedNameTemplateAnnotation)
+	restorePreservedBranchLock(src.Annotations, &dst.Spec.TaskTemplate)
+	deleteAnnotation(dst.Annotations, preservedBranchLockAnnotation)
 	if err := restorePreservedContextGitHubAppAuth(src.Annotations, &dst.Spec.TaskTemplate); err != nil {
 		return err
 	}
@@ -115,6 +125,7 @@ func taskSpawnerFromHub(_ context.Context, src *v1alpha2.TaskSpawner, dst *v1alp
 	}
 	backfillTaskSpawnerLegacy(&dst.Spec)
 	setPreservedNameTemplateAnnotation(dst, src.Spec.TaskTemplate.NameTemplate)
+	setPreservedBranchLockAnnotation(dst, src.Spec.TaskTemplate.BranchLock)
 	if err := setPreservedContextGitHubAppAuth(dst, src.Spec.TaskTemplate); err != nil {
 		return err
 	}
@@ -383,6 +394,37 @@ func restorePreservedNameTemplate(annotations map[string]string, dst *v1alpha2.T
 	if v, ok := annotations[preservedNameTemplateAnnotation]; ok {
 		dst.NameTemplate = v
 	}
+}
+
+func setPreservedBranchLockAnnotation(dst *v1alpha1.TaskSpawner, branchLock v1alpha2.BranchLockPolicy) {
+	if branchLock == "" {
+		deleteAnnotation(dst.Annotations, preservedBranchLockAnnotation)
+		return
+	}
+	if dst.Annotations == nil {
+		dst.Annotations = map[string]string{}
+	}
+	dst.Annotations[preservedBranchLockAnnotation] = string(branchLock)
+}
+
+// restorePreservedBranchLock restores taskTemplate.branchLock from the
+// preservation annotation.
+func restorePreservedBranchLock(annotations map[string]string, dst *v1alpha2.TaskTemplate) {
+	if dst.BranchLock != "" {
+		return
+	}
+	dst.BranchLock = preservedBranchLock(annotations)
+}
+
+// preservedBranchLock returns the branchLock recorded in the preservation
+// annotation, or "" when absent. Only known values are returned, because the
+// annotation can be edited through v1alpha1 where the enum is not enforced.
+func preservedBranchLock(annotations map[string]string) v1alpha2.BranchLockPolicy {
+	switch v := v1alpha2.BranchLockPolicy(annotations[preservedBranchLockAnnotation]); v {
+	case v1alpha2.BranchLockExclusive, v1alpha2.BranchLockNone:
+		return v
+	}
+	return ""
 }
 
 // setPreservedSlackExcludeFilters records spec.when.slack.excludeFilters in an

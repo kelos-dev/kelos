@@ -80,6 +80,37 @@ func TestBuildTask_ForwardsEffort(t *testing.T) {
 	}
 }
 
+func TestBuildTask_ForwardsBranchLock(t *testing.T) {
+	tb := &TaskBuilder{}
+	template := &kelos.TaskTemplate{
+		Type: "codex",
+		Credentials: &kelos.Credentials{
+			Type: kelos.CredentialTypeAPIKey,
+			SecretRef: &kelos.SecretReference{
+				Name: "credentials",
+			},
+		},
+		Branch:         "{{.Branch}}",
+		BranchLock:     kelos.BranchLockNone,
+		PromptTemplate: "Review {{.Title}}",
+	}
+
+	task, err := tb.BuildTask("task-1", "default", template, map[string]interface{}{
+		"Title":  "the PR",
+		"Branch": "feature-1",
+	}, nil)
+	if err != nil {
+		t.Fatalf("BuildTask() returned error: %v", err)
+	}
+
+	if task.Spec.Branch != "feature-1" {
+		t.Fatalf("task.Spec.Branch = %q, want %q", task.Spec.Branch, "feature-1")
+	}
+	if task.Spec.BranchLock != kelos.BranchLockNone {
+		t.Fatalf("task.Spec.BranchLock = %q, want %q", task.Spec.BranchLock, kelos.BranchLockNone)
+	}
+}
+
 func TestBuildTask_RendersChangedFiles(t *testing.T) {
 	tb := &TaskBuilder{}
 	template := &kelos.TaskTemplate{

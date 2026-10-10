@@ -46,6 +46,7 @@ type PipelineMatrix struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.worker)",message="workerPoolRef is mutually exclusive with worker"
 // +kubebuilder:validation:XValidation:rule="!has(self.worker) || has(self.worker.credentials)",message="worker.credentials is required for inline execution"
 // +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.branch) || size(self.branch) == 0",message="branch is not supported with workerPoolRef"
+// +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.branchLock)",message="branchLock is not supported with workerPoolRef"
 type PipelineTaskTemplate struct {
 	// Worker defines the execution environment for inline Task execution.
 	// +optional
@@ -62,6 +63,12 @@ type PipelineTaskTemplate struct {
 	// Branch is the optional template rendered into the child Task branch.
 	// +optional
 	Branch string `json:"branch,omitempty"`
+
+	// BranchLock controls whether child Tasks take the branch lock.
+	// See Task.spec.branchLock. Omit for Exclusive.
+	// +optional
+	// +kubebuilder:validation:Enum=Exclusive;None
+	BranchLock BranchLockPolicy `json:"branchLock,omitempty"`
 }
 
 // PipelineStage defines one step in a TaskPipeline.

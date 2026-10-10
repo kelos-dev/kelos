@@ -168,11 +168,11 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			}
 		}
 
-		if task.Spec.Branch != "" {
-			if resolveTaskWorkspaceRef(&task) == nil {
-				logger.Info("Branch is set without workspaceRef, branch checkout will not happen", "task", task.Name, "branch", task.Spec.Branch)
-				r.recordEvent(&task, corev1.EventTypeWarning, "BranchWithoutWorkspace", "Branch %q is set but workspaceRef is not configured, branch checkout will be skipped", task.Spec.Branch)
-			}
+		if task.Spec.Branch != "" && resolveTaskWorkspaceRef(&task) == nil {
+			logger.Info("Branch is set without workspaceRef, branch checkout will not happen", "task", task.Name, "branch", task.Spec.Branch)
+			r.recordEvent(&task, corev1.EventTypeWarning, "BranchWithoutWorkspace", "Branch %q is set but workspaceRef is not configured, branch checkout will be skipped", task.Spec.Branch)
+		}
+		if usesBranchLock(&task) {
 			lockKey := branchLockKey(&task)
 			acquired, holder := r.BranchLocker.TryAcquire(lockKey, task.Name)
 			if !acquired {
@@ -194,7 +194,7 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 		admitted, result, err := r.checkBudgetAdmission(ctx, &task)
 		if err != nil || !admitted {
-			if task.Spec.Branch != "" {
+			if usesBranchLock(&task) {
 				r.BranchLocker.Release(branchLockKey(&task), task.Name)
 			}
 			return result, err
@@ -263,7 +263,7 @@ func (r *TaskReconciler) handleDeletion(ctx context.Context, task *kelos.Task) (
 
 	if controllerutil.ContainsFinalizer(task, taskFinalizer) {
 		// Release branch lock if held.
-		if task.Spec.Branch != "" {
+		if usesBranchLock(task) {
 			r.BranchLocker.Release(branchLockKey(task), task.Name)
 		}
 
@@ -495,7 +495,7 @@ func (r *TaskReconciler) failTaskBeforeJob(ctx context.Context, task *kelos.Task
 	}); err != nil {
 		return err
 	}
-	if task.Spec.Branch != "" && r.BranchLocker != nil {
+	if usesBranchLock(task) && r.BranchLocker != nil {
 		r.BranchLocker.Release(branchLockKey(task), task.Name)
 	}
 	return nil
@@ -969,7 +969,7 @@ func (r *TaskReconciler) updateStatus(ctx context.Context, task *kelos.Task, job
 	}
 
 	// Release branch lock when task reaches a terminal phase.
-	if setCompletionTime && task.Spec.Branch != "" {
+	if setCompletionTime && usesBranchLock(task) {
 		r.BranchLocker.Release(branchLockKey(task), task.Name)
 	}
 
@@ -1203,6 +1203,15 @@ func branchLockKey(task *kelos.Task) string {
 	return ws + ":" + task.Spec.Branch
 }
 
+// usesBranchLock reports whether the task takes part in branch locking,
+// either as a holder, a waiter, or a releaser. Tasks with branchLock None
+// still get the branch checked out but are invisible to the lock. They must
+// not release it either: lock owners are recorded by task name only, so a
+// None task could otherwise free a lock held by a same-named task elsewhere.
+func usesBranchLock(task *kelos.Task) bool {
+	return task.Spec.Branch != "" && task.Spec.BranchLock != kelos.BranchLockNone
+}
+
 // checkBranchLock checks if another task with the same workspace and branch is
 // active. Returns (locked, result, error). locked=true means another task holds
 // the branch. A task is considered to hold the lock if it is Running, Pending,
@@ -1220,7 +1229,7 @@ func (r *TaskReconciler) checkBranchLock(ctx context.Context, task *kelos.Task) 
 		if t.Name == task.Name {
 			continue
 		}
-		if t.Spec.Branch == "" || branchLockKey(&t) != key {
+		if !usesBranchLock(&t) || branchLockKey(&t) != key {
 			continue
 		}
 		switch t.Status.Phase {
@@ -1511,7 +1520,7 @@ func (r *TaskReconciler) enqueueDependentTasks(ctx context.Context, obj client.O
 			}
 		}
 		// Re-enqueue tasks waiting for the same workspace+branch
-		if !seen[t.Name] && task.Spec.Branch != "" && t.Spec.Branch != "" &&
+		if !seen[t.Name] && usesBranchLock(task) && usesBranchLock(&t) &&
 			branchLockKey(&t) == branchLockKey(task) &&
 			t.Status.Phase == kelos.TaskPhaseWaiting {
 			seen[t.Name] = true

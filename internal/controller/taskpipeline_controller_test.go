@@ -521,6 +521,35 @@ func TestPipelineChildTaskNameIsStableAndBounded(t *testing.T) {
 	}
 }
 
+func TestTaskPipelineReconcileForwardsBranchLock(t *testing.T) {
+	template := testPipelineTaskTemplate("Review {{.Matrix.service}}")
+	template.Branch = "review-{{.Matrix.service}}"
+	template.BranchLock = kelos.BranchLockNone
+	pipeline := testTaskPipeline("review", []kelos.PipelineStage{{
+		Name:         "review",
+		Matrix:       &kelos.PipelineMatrix{Items: []map[string]string{{"service": "billing"}}},
+		TaskTemplate: template,
+	}})
+	reconciler, k8sClient := testTaskPipelineReconciler(t, pipeline)
+
+	reconcileTaskPipeline(t, reconciler, pipeline)
+
+	var tasks kelos.TaskList
+	if err := k8sClient.List(context.Background(), &tasks, client.InNamespace("default")); err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks.Items) != 1 {
+		t.Fatalf("created Tasks = %d, want 1", len(tasks.Items))
+	}
+	task := tasks.Items[0]
+	if task.Spec.Branch != "review-billing" {
+		t.Errorf("Task branch = %q, want %q", task.Spec.Branch, "review-billing")
+	}
+	if task.Spec.BranchLock != kelos.BranchLockNone {
+		t.Errorf("Task branchLock = %q, want %q", task.Spec.BranchLock, kelos.BranchLockNone)
+	}
+}
+
 func testTaskPipeline(name string, stages []kelos.PipelineStage) *kelos.TaskPipeline {
 	return &kelos.TaskPipeline{
 		ObjectMeta: metav1.ObjectMeta{

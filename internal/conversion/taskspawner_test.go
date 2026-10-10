@@ -621,6 +621,62 @@ func TestTaskSpawnerConvert_NameTemplateRoundTrips(t *testing.T) {
 	}
 }
 
+func TestTaskSpawnerConvert_BranchLockRoundTrips(t *testing.T) {
+	hub := &v1alpha2.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{Name: "reviewer", Namespace: "default"},
+		Spec: v1alpha2.TaskSpawnerSpec{
+			When: v1alpha2.When{GitHubWebhook: &v1alpha2.GitHubWebhook{Events: []string{"pull_request"}}},
+			TaskTemplate: v1alpha2.TaskTemplate{
+				Branch:     "{{.Branch}}",
+				BranchLock: v1alpha2.BranchLockNone,
+			},
+		},
+	}
+
+	// hub -> spoke: v1alpha1 has no branchLock field, so it is preserved in an
+	// internal annotation rather than dropped.
+	spoke := &v1alpha1.TaskSpawner{}
+	if err := taskSpawnerFromHub(context.Background(), hub, spoke); err != nil {
+		t.Fatalf("taskSpawnerFromHub() error = %v", err)
+	}
+	if got := spoke.Annotations[preservedBranchLockAnnotation]; got != "None" {
+		t.Fatalf("preserved annotation = %q, want %q", got, "None")
+	}
+
+	// spoke -> hub: the field is restored and the internal annotation removed.
+	back := &v1alpha2.TaskSpawner{}
+	if err := taskSpawnerToHub(context.Background(), spoke, back); err != nil {
+		t.Fatalf("taskSpawnerToHub() error = %v", err)
+	}
+	if got := back.Spec.TaskTemplate.BranchLock; got != v1alpha2.BranchLockNone {
+		t.Errorf("round-tripped BranchLock = %q, want %q", got, v1alpha2.BranchLockNone)
+	}
+	if _, ok := back.Annotations[preservedBranchLockAnnotation]; ok {
+		t.Error("internal preservation annotation leaked onto hub object")
+	}
+}
+
+func TestTaskSpawnerToHub_IgnoresUnknownBranchLockAnnotation(t *testing.T) {
+	spoke := &v1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "reviewer",
+			Namespace:   "default",
+			Annotations: map[string]string{preservedBranchLockAnnotation: "Shared"},
+		},
+		Spec: v1alpha1.TaskSpawnerSpec{When: v1alpha1.When{Cron: &v1alpha1.Cron{Schedule: "0 9 * * 1"}}},
+	}
+	hub := &v1alpha2.TaskSpawner{}
+	if err := taskSpawnerToHub(context.Background(), spoke, hub); err != nil {
+		t.Fatalf("taskSpawnerToHub() error = %v", err)
+	}
+	if got := hub.Spec.TaskTemplate.BranchLock; got != "" {
+		t.Errorf("BranchLock = %q, want empty for an unknown annotation value", got)
+	}
+	if _, ok := hub.Annotations[preservedBranchLockAnnotation]; ok {
+		t.Error("internal preservation annotation leaked onto hub object")
+	}
+}
+
 func TestTaskSpawnerConvert_GatewayRefRoundTrips(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -1015,6 +1071,9 @@ func TestTaskSpawnerFromHub_NoNameTemplateOmitsAnnotation(t *testing.T) {
 	}
 	if _, ok := spoke.Annotations[preservedNameTemplateAnnotation]; ok {
 		t.Error("annotation should not be set when nameTemplate is empty")
+	}
+	if _, ok := spoke.Annotations[preservedBranchLockAnnotation]; ok {
+		t.Error("annotation should not be set when branchLock is empty")
 	}
 }
 

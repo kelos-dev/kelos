@@ -1012,6 +1012,7 @@ type TaskTemplateMetadata struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.agentConfigRefs) || size(self.agentConfigRefs) == 0",message="agentConfigRefs is not supported with workerPoolRef"
 // +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.dependsOn) || size(self.dependsOn) == 0",message="dependsOn is not supported with workerPoolRef"
 // +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.branch) || size(self.branch) == 0",message="branch is not supported with workerPoolRef"
+// +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.branchLock)",message="branchLock is not supported with workerPoolRef"
 // +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.ttlSecondsAfterFinished)",message="ttlSecondsAfterFinished is not supported with workerPoolRef"
 // +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.podOverrides)",message="podOverrides is not supported with workerPoolRef"
 // +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.podFailurePolicy)",message="podFailurePolicy is not supported with workerPoolRef"
@@ -1024,7 +1025,7 @@ type TaskTemplate struct {
 	// WorkerPoolRef references a WorkerPool for persistent execution.
 	// When set, spawned Tasks execute on pre-warmed workers instead of
 	// creating per-task Jobs. Mutually exclusive with inline type/credentials,
-	// image, workspaceRef, agentConfigRefs, branch, dependsOn,
+	// image, workspaceRef, agentConfigRefs, branch, branchLock, dependsOn,
 	// ttlSecondsAfterFinished, podOverrides, and podFailurePolicy.
 	// +optional
 	WorkerPoolRef *WorkerPoolReference `json:"workerPoolRef,omitempty"`
@@ -1099,6 +1100,12 @@ type TaskTemplate struct {
 	// When contextSources are configured: .Context.NAME for each source
 	// +optional
 	Branch string `json:"branch,omitempty"`
+
+	// BranchLock controls whether spawned Tasks take the branch lock.
+	// See Task.spec.branchLock. Omit for Exclusive.
+	// +optional
+	// +kubebuilder:validation:Enum=Exclusive;None
+	BranchLock BranchLockPolicy `json:"branchLock,omitempty"`
 
 	// PromptTemplate is a Go text/template for rendering the task prompt.
 	// Available variables (all sources): {{.ID}}, {{.Title}}, {{.Kind}}

@@ -146,6 +146,9 @@ func (tb *TaskBuilder) BuildTask(
 	if branch != "" {
 		task.Spec.Branch = branch
 	}
+	if taskTemplate.BranchLock != "" {
+		task.Spec.BranchLock = taskTemplate.BranchLock
+	}
 	if taskTemplate.TTLSecondsAfterFinished != nil {
 		task.Spec.TTLSecondsAfterFinished = taskTemplate.TTLSecondsAfterFinished
 	}

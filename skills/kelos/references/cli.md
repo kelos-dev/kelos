@@ -81,12 +81,18 @@ kelos get task my-task -o yaml
 kelos get session my-session -d
 kelos session connect my-session
 kelos logs my-task -f
+kelos logs my-task --pretty
 
 kelos suspend taskspawner my-spawner
 kelos resume taskspawner my-spawner
 kelos delete task my-task
 kelos delete session my-session
 ```
+
+`--pretty` gives Claude Code task logs a Claude Code-style layout with tool and
+diff previews. Other
+agent types use the existing plain log format; `--pretty` returns an error for
+them.
 
 ## Supported Agent Types
 

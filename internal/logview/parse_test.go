@@ -40,9 +40,17 @@ func TestParseClaudeAttributesPatchOnlyToSingleResult(t *testing.T) {
 	if got := collect(t, single); len(got) != 1 || len(got[0].(ToolResult).Diff) != 1 {
 		t.Errorf("single result: got %+v, want the patch attached", got)
 	}
-	for _, event := range collect(t, double) {
-		if diff := event.(ToolResult).Diff; diff != nil {
-			t.Errorf("two results: patch attached to %+v", event)
+	results := collect(t, double)
+	if len(results) != 2 {
+		t.Fatalf("two results: got %+v, want two tool results", results)
+	}
+	for _, event := range results {
+		result, ok := event.(ToolResult)
+		if !ok {
+			t.Fatalf("two results: got event %T, want ToolResult", event)
+		}
+		if result.Diff != nil {
+			t.Errorf("two results: patch attached to %+v", result)
 		}
 	}
 }

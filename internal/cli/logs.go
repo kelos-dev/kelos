@@ -100,6 +100,13 @@ func newLogsCommand(cfg *ClientConfig) *cobra.Command {
 				if err != nil {
 					return err
 				}
+				if out.pretty {
+					// waitForPod returned a fresh Task, so recheck its agent type.
+					agentType = resolveAgentType(ctx, cl, ns, task)
+					if err := out.validate(task.Name, agentType); err != nil {
+						return err
+					}
+				}
 				podName, err = resolveTaskPodName(ctx, cl, ns, task)
 				if err != nil {
 					return err

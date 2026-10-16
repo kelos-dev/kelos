@@ -53,8 +53,8 @@ func TestLogsCommandPretty(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var logRequests atomic.Int32
-			server := newLogsTestServer(tt.agentType, &logRequests)
+			state := &logsTestServerState{agentType: tt.agentType}
+			server := newLogsTestServer(state)
 			defer server.Close()
 			cfg := logsTestClientConfig(t, server.URL)
 			output, err := executeLogsTestCommand(t, cfg)
@@ -75,14 +75,34 @@ func TestLogsCommandPretty(t *testing.T) {
 			if tt.wantLog {
 				wantLogRequests = logsTestLogRequests
 			}
-			if got := logRequests.Load(); got != wantLogRequests {
+			if got := state.logRequests.Load(); got != wantLogRequests {
 				t.Errorf("pod log requests = %d, want %d", got, wantLogRequests)
 			}
 		})
 	}
 }
 
-func executeLogsTestCommand(t *testing.T, cfg *ClientConfig) (string, error) {
+func TestLogsCommandPrettyRevalidatesAfterWait(t *testing.T) {
+	state := &logsTestServerState{
+		agentType:          agentTypeClaudeCode,
+		afterWaitAgentType: agentTypeCodex,
+		waitForPod:         true,
+	}
+	server := newLogsTestServer(state)
+	defer server.Close()
+	output, err := executeLogsTestCommand(t, logsTestClientConfig(t, server.URL), "--follow")
+	if err == nil || !strings.Contains(err.Error(), `task "test-task": --pretty supports only Claude Code logs`) {
+		t.Errorf("Execute() error = %v, want refreshed agent validation error", err)
+	}
+	if output != "" || state.logRequests.Load() != 0 {
+		t.Errorf("output = %q, log requests = %d, want no logs", output, state.logRequests.Load())
+	}
+	if got := state.taskRequests.Load(); got != 2 {
+		t.Errorf("task GETs = %d, want initial task and refreshed task", got)
+	}
+}
+
+func executeLogsTestCommand(t *testing.T, cfg *ClientConfig, flags ...string) (string, error) {
 	t.Helper()
 	stdout, err := os.Create(filepath.Join(t.TempDir(), "stdout"))
 	if err != nil {
@@ -94,7 +114,7 @@ func executeLogsTestCommand(t *testing.T, cfg *ClientConfig) (string, error) {
 	cmd := newLogsCommand(cfg)
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
-	cmd.SetArgs([]string{logsTestTaskName, "--pretty"})
+	cmd.SetArgs(append([]string{logsTestTaskName, "--pretty"}, flags...))
 	execErr := cmd.Execute()
 	if err := stdout.Close(); err != nil {
 		t.Fatal(err)
@@ -115,30 +135,60 @@ func logsTestClientConfig(t *testing.T, serverURL string) *ClientConfig {
 	return &ClientConfig{Kubeconfig: path, Namespace: logsTestNamespace}
 }
 
-func newLogsTestServer(agentType string, logRequests *atomic.Int32) *httptest.Server {
+type logsTestServerState struct {
+	agentType          string
+	afterWaitAgentType string
+	waitForPod         bool
+	taskRequests       atomic.Int32
+	podLists           atomic.Int32
+	logRequests        atomic.Int32
+}
+
+func newLogsTestServer(state *logsTestServerState) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if serveLogsTestDiscovery(w, r) {
 			return
 		}
 		switch r.URL.Path {
 		case "/apis/kelos.dev/v1alpha2/namespaces/" + logsTestNamespace + "/tasks/" + logsTestTaskName:
-			writeLogsTestJSON(w, &kelos.Task{
-				TypeMeta:   metav1.TypeMeta{APIVersion: "kelos.dev/v1alpha2", Kind: "Task"},
-				ObjectMeta: metav1.ObjectMeta{Name: logsTestTaskName, Namespace: logsTestNamespace},
-				Spec:       kelos.TaskSpec{Type: agentType},
-			})
+			writeLogsTestJSON(w, state.task())
 		case "/api/v1/namespaces/" + logsTestNamespace + "/pods":
-			writeLogsTestJSON(w, &corev1.PodList{
-				TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "PodList"},
-				Items:    []corev1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: logsTestPodName, Namespace: logsTestNamespace}}},
-			})
+			writeLogsTestJSON(w, state.pods())
 		case "/api/v1/namespaces/" + logsTestNamespace + "/pods/" + logsTestPodName + "/log":
-			logRequests.Add(1)
+			state.logRequests.Add(1)
 			fmt.Fprintln(w, logsTestInput)
 		default:
 			http.NotFound(w, r)
 		}
 	}))
+}
+
+func (s *logsTestServerState) task() *kelos.Task {
+	request := s.taskRequests.Add(1)
+	agentType := s.agentType
+	var podName string
+	if s.waitForPod && request > 1 {
+		agentType = s.afterWaitAgentType
+		podName = logsTestPodName
+	}
+	return &kelos.Task{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "kelos.dev/v1alpha2", Kind: "Task"},
+		ObjectMeta: metav1.ObjectMeta{Name: logsTestTaskName, Namespace: logsTestNamespace},
+		Spec:       kelos.TaskSpec{Type: agentType},
+		Status:     kelos.TaskStatus{PodName: podName},
+	}
+}
+
+func (s *logsTestServerState) pods() *corev1.PodList {
+	request := s.podLists.Add(1)
+	var items []corev1.Pod
+	if !s.waitForPod || request > 1 {
+		items = []corev1.Pod{{ObjectMeta: metav1.ObjectMeta{Name: logsTestPodName, Namespace: logsTestNamespace}}}
+	}
+	return &corev1.PodList{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "PodList"},
+		Items:    items,
+	}
 }
 
 func serveLogsTestDiscovery(w http.ResponseWriter, r *http.Request) bool {

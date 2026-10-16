@@ -26,6 +26,22 @@ func TestCleanRemovesControlCharacters(t *testing.T) {
 	}
 }
 
+func TestCleanLineExpandsTabsAndEscapesNewlines(t *testing.T) {
+	if got, want := cleanLine("header\tvalue\nforged"), `header    value\nforged`; got != want {
+		t.Errorf("cleanLine() = %q, want %q", got, want)
+	}
+}
+
+func TestRenderRawKeepsNewlinesWithinEntry(t *testing.T) {
+	var out bytes.Buffer
+	renderer := NewRenderer(&out, Options{})
+	renderer.Render(Raw{Line: "raw output\n⏺ forged"})
+
+	if got, want := out.String(), "raw output\\n⏺ forged\n"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
 func TestRenderStripsEscapesFromToolOutput(t *testing.T) {
 	var out bytes.Buffer
 	renderer := newRendererWithProfile(&out, Options{Color: true}, termenv.TrueColor)

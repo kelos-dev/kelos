@@ -56,7 +56,7 @@ func assertGolden(t *testing.T, path, got string) {
 func renderDiff(profile termenv.Profile, width int) string {
 	var out bytes.Buffer
 	renderer := newRendererWithProfile(&out, Options{Color: true, Width: width}, profile)
-	renderer.Render(ToolCall{ID: "e", Name: "Update", Summary: "a.go", Diff: []Hunk{replacementHunk("x := 1", "\tx := 2")}})
+	renderer.Render(ToolCall{ID: "e", Name: "Update", Summary: "a.go", Diff: replacementHunks("x := 1", "\tx := 2")})
 	renderer.Render(ToolResult{ID: "e"})
 	return out.String()
 }

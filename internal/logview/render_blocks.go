@@ -19,7 +19,7 @@ const (
 	failureMark   = "✗ "
 	lineNumberFmt = "%5d "
 	noLineNumber  = "      "
-	// tabSpaces replaces tabs in diff lines so padding can be measured.
+	// tabSpaces replaces tabs in displayed lines so widths stay predictable.
 	tabSpaces = "    "
 )
 

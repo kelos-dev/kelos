@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestReplacementHunk(t *testing.T) {
+func TestReplacementHunks(t *testing.T) {
 	tests := []struct {
 		name     string
 		old, new string
@@ -43,7 +43,11 @@ func TestReplacementHunk(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := replacementHunk(tt.old, tt.new)
+			hunks := replacementHunks(tt.old, tt.new)
+			if len(hunks) != 1 {
+				t.Fatalf("hunks = %+v, want one hunk", hunks)
+			}
+			got := hunks[0]
 			if got.OldStart != 0 || got.NewStart != 0 {
 				t.Errorf("positions = %d,%d, want unknown", got.OldStart, got.NewStart)
 			}
@@ -51,6 +55,42 @@ func TestReplacementHunk(t *testing.T) {
 				t.Errorf("lines = %v, want %v", got.Lines, tt.want)
 			}
 		})
+	}
+}
+
+func TestReplacementHunksKeepsSharedMiddleLines(t *testing.T) {
+	hunks := replacementHunks("first\nshared one\nshared two\nlast", "FIRST\nshared one\nshared two\nLAST")
+	if len(hunks) != 1 {
+		t.Fatalf("hunks = %+v, want one hunk", hunks)
+	}
+	want := []DiffLine{
+		{DiffRemove, "first"}, {DiffAdd, "FIRST"},
+		{DiffContext, "shared one"}, {DiffContext, "shared two"},
+		{DiffRemove, "last"}, {DiffAdd, "LAST"},
+	}
+	if !reflect.DeepEqual(hunks[0].Lines, want) {
+		t.Errorf("lines = %+v, want %+v", hunks[0].Lines, want)
+	}
+	if added, removed := diffStats(hunks); added != 2 || removed != 2 {
+		t.Errorf("stats = %d additions, %d removals, want 2 each", added, removed)
+	}
+}
+
+func TestReplacementHunksNoChange(t *testing.T) {
+	if got := replacementHunks("same\nlines", "same\nlines"); got != nil {
+		t.Errorf("identical text produced hunks: %+v", got)
+	}
+}
+
+func TestReplacementHunksSeparateDistantEdits(t *testing.T) {
+	oldText := "first\n1\n2\n3\n4\n5\n6\n7\n8\nlast"
+	newText := "FIRST\n1\n2\n3\n4\n5\n6\n7\n8\nLAST"
+	hunks := replacementHunks(oldText, newText)
+	if len(hunks) != 2 {
+		t.Fatalf("hunks = %+v, want two separated hunks", hunks)
+	}
+	if added, removed := diffStats(hunks); added != 2 || removed != 2 {
+		t.Errorf("stats = %d additions, %d removals, want 2 each", added, removed)
 	}
 }
 

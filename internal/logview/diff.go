@@ -2,12 +2,23 @@ package logview
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
+
+	"github.com/pmezard/go-difflib/difflib"
 )
 
 // diffContextLines is how many unchanged lines are kept around a change
 // when a diff is computed from an edit's old and new text.
 const diffContextLines = 3
+
+// Opcode kinds returned by difflib's line matcher.
+const (
+	diffEqual   = 'e'
+	diffInsert  = 'i'
+	diffDelete  = 'd'
+	diffReplace = 'r'
+)
 
 // DiffOp is the kind of a diff line.
 type DiffOp byte
@@ -34,36 +45,42 @@ type DiffLine struct {
 	Text string
 }
 
-// replacementHunk builds a hunk for an edit that replaced oldText with
-// newText. Lines shared at both ends become context; everything between
-// them is shown as removed and then added.
-func replacementHunk(oldText, newText string) Hunk {
+// replacementHunks builds line-level hunks for an edit. Unchanged lines
+// between separate edits remain context instead of counting as changes.
+func replacementHunks(oldText, newText string) []Hunk {
 	oldLines := splitLines(oldText)
 	newLines := splitLines(newText)
-
-	prefix := 0
-	for prefix < len(oldLines) && prefix < len(newLines) && oldLines[prefix] == newLines[prefix] {
-		prefix++
-	}
-	suffix := 0
-	for suffix < len(oldLines)-prefix && suffix < len(newLines)-prefix &&
-		oldLines[len(oldLines)-1-suffix] == newLines[len(newLines)-1-suffix] {
-		suffix++
+	if slices.Equal(oldLines, newLines) {
+		return nil
 	}
 
+	groups := difflib.NewMatcher(oldLines, newLines).GetGroupedOpCodes(diffContextLines)
+	hunks := make([]Hunk, 0, len(groups))
+	for _, group := range groups {
+		hunks = append(hunks, replacementGroup(oldLines, newLines, group))
+	}
+	return hunks
+}
+
+func replacementGroup(oldLines, newLines []string, group []difflib.OpCode) Hunk {
 	var hunk Hunk
-	for _, line := range oldLines[max(0, prefix-diffContextLines):prefix] {
-		hunk.Lines = append(hunk.Lines, DiffLine{Op: DiffContext, Text: line})
-	}
-	for _, line := range oldLines[prefix : len(oldLines)-suffix] {
-		hunk.Lines = append(hunk.Lines, DiffLine{Op: DiffRemove, Text: line})
-	}
-	for _, line := range newLines[prefix : len(newLines)-suffix] {
-		hunk.Lines = append(hunk.Lines, DiffLine{Op: DiffAdd, Text: line})
-	}
-	tail := oldLines[len(oldLines)-suffix:]
-	for _, line := range tail[:min(len(tail), diffContextLines)] {
-		hunk.Lines = append(hunk.Lines, DiffLine{Op: DiffContext, Text: line})
+	for _, code := range group {
+		if code.Tag == diffEqual {
+			for _, line := range oldLines[code.I1:code.I2] {
+				hunk.Lines = append(hunk.Lines, DiffLine{Op: DiffContext, Text: line})
+			}
+			continue
+		}
+		if code.Tag == diffDelete || code.Tag == diffReplace {
+			for _, line := range oldLines[code.I1:code.I2] {
+				hunk.Lines = append(hunk.Lines, DiffLine{Op: DiffRemove, Text: line})
+			}
+		}
+		if code.Tag == diffInsert || code.Tag == diffReplace {
+			for _, line := range newLines[code.J1:code.J2] {
+				hunk.Lines = append(hunk.Lines, DiffLine{Op: DiffAdd, Text: line})
+			}
+		}
 	}
 	return hunk
 }

@@ -21,6 +21,8 @@ func TestNewToolCall(t *testing.T) {
 		{"write counts lines", "Write", `{"file_path":"/tmp/x","content":"1\n2\n"}`, "Write", "/tmp/x", 0, 2},
 		{"command keeps workspace path", "Bash", `{"command":"cd /workspace/repo/sub && pwd"}`, "Bash", "cd /workspace/repo/sub && pwd", 0, 0},
 		{"path strips only leading workspace root", "Read", `{"file_path":"/tmp//workspace/repo/a.go"}`, "Read", "/tmp//workspace/repo/a.go", 0, 0},
+		{"grep pattern precedes path", "Grep", `{"pattern":"TODO","path":"internal"}`, "Grep", "TODO", 0, 0},
+		{"glob pattern precedes path", "Glob", `{"pattern":"*.go","path":"internal"}`, "Glob", "*.go", 0, 0},
 		{"mcp name kept", "mcp__tracker__get", `{"id":1}`, "mcp__tracker__get", "", 0, 0},
 		{"no input", "Read", ``, "Read", "", 0, 0},
 	}

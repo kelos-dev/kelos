@@ -74,8 +74,10 @@ func newLogsCommand(cfg *ClientConfig) *cobra.Command {
 			if err := cl.Get(ctx, client.ObjectKey{Name: args[0], Namespace: ns}, task); err != nil {
 				return fmt.Errorf("getting task: %w", err)
 			}
+			var agentType string
 			if out.pretty {
-				if err := out.validate(task.Name, resolveAgentType(ctx, cl, ns, task)); err != nil {
+				agentType = resolveAgentType(ctx, cl, ns, task)
+				if err := out.validate(task.Name, agentType); err != nil {
 					return err
 				}
 			}
@@ -119,7 +121,9 @@ func newLogsCommand(cfg *ClientConfig) *cobra.Command {
 			if follow {
 				fmt.Fprintf(os.Stderr, "Streaming container (%s) logs...\n", containerName)
 			}
-			agentType := resolveAgentType(ctx, cl, ns, task)
+			if !out.pretty {
+				agentType = resolveAgentType(ctx, cl, ns, task)
+			}
 			if task.Spec.WorkerPoolRef != nil {
 				return streamWorkerPoolTaskAgentLogs(ctx, cl, cs, ns, podName, containerName, agentType, task.Name, follow, out)
 			}

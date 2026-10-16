@@ -40,7 +40,7 @@ func clean(text string) string {
 
 // cleanLine keeps untrusted metadata within its rendered entry.
 func cleanLine(text string) string {
-	return strings.ReplaceAll(clean(text), "\n", `\n`)
+	return strings.NewReplacer("\t", tabSpaces, "\n", `\n`).Replace(clean(text))
 }
 
 func cleanHunks(hunks []Hunk) []Hunk {
@@ -88,7 +88,7 @@ func sanitize(event Event) Event {
 		e.Detail, e.Message = cleanLine(e.Detail), cleanLine(e.Message)
 		return e
 	case Raw:
-		e.Line = clean(e.Line)
+		e.Line = cleanLine(e.Line)
 		return e
 	}
 	return event

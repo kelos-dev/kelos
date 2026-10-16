@@ -12,8 +12,8 @@ const workspaceRoot = "/workspace/repo/"
 // summaryKeys are the tool input fields that best describe a call, most
 // specific first.
 var summaryKeys = []string{
-	"file_path", "absolute_path", "notebook_path", "path",
-	"command", "pattern", "query", "url", "description", "prompt",
+	"file_path", "absolute_path", "notebook_path",
+	"command", "pattern", "query", "path", "url", "description", "prompt",
 }
 
 // newToolCall describes a tool invocation from its name and JSON input.
@@ -57,28 +57,28 @@ func inputSummary(fields map[string]any) string {
 // editHunks returns the diff of an edit-style tool input, which carries
 // the replaced text either directly or as a list of edits (MultiEdit).
 func editHunks(fields map[string]any) []Hunk {
-	if hunk, ok := replacement(fields); ok {
-		return []Hunk{hunk}
+	if hunks, ok := replacement(fields); ok {
+		return hunks
 	}
 	edits, _ := fields["edits"].([]any)
 	var hunks []Hunk
 	for _, edit := range edits {
 		if editFields, ok := edit.(map[string]any); ok {
-			if hunk, ok := replacement(editFields); ok {
-				hunks = append(hunks, hunk)
+			if editHunks, ok := replacement(editFields); ok {
+				hunks = append(hunks, editHunks...)
 			}
 		}
 	}
 	return hunks
 }
 
-func replacement(fields map[string]any) (Hunk, bool) {
+func replacement(fields map[string]any) ([]Hunk, bool) {
 	oldText, oldOK := fields["old_string"].(string)
 	newText, newOK := fields["new_string"].(string)
 	if oldOK && newOK {
-		return replacementHunk(oldText, newText), true
+		return replacementHunks(oldText, newText), true
 	}
-	return Hunk{}, false
+	return nil, false
 }
 
 // parseTodos reads a Claude Code TodoWrite input list.

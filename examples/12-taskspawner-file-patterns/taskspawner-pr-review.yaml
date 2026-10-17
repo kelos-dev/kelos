@@ -28,6 +28,9 @@ spec:
     workspaceRef:
       name: my-workspace
     branch: "{{.Branch}}"
+    # The reviewer only reads the PR branch, so it skips the branch lock and
+    # neither waits for nor blocks other Tasks on the same branch.
+    branchLock: None
     promptTemplate: |
       Review PR #{{.Number}}: {{.Title}}
 
@@ -67,6 +70,9 @@ spec:
     workspaceRef:
       name: my-workspace
     branch: "{{.Branch}}"
+    # The reviewer only reads the PR branch, so it skips the branch lock and
+    # neither waits for nor blocks other Tasks on the same branch.
+    branchLock: None
     promptTemplate: |
       Review PR #{{.Number}}: {{.Title}}
 

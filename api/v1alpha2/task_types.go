@@ -57,6 +57,18 @@ const (
 	TaskPhaseWaiting TaskPhase = "Waiting"
 )
 
+// BranchLockPolicy controls whether a Task takes the per-branch lock.
+type BranchLockPolicy string
+
+const (
+	// BranchLockExclusive runs the Task only when no other exclusive Task on
+	// the same workspace and branch is active.
+	BranchLockExclusive BranchLockPolicy = "Exclusive"
+	// BranchLockNone checks the branch out without taking the branch lock.
+	// The Task neither waits for the lock nor blocks other Tasks.
+	BranchLockNone BranchLockPolicy = "None"
+)
+
 // SecretReference refers to a Secret containing credentials.
 type SecretReference struct {
 	// Name is the name of the secret.
@@ -265,6 +277,7 @@ type WorkerSpec struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.agentConfigRefs) || size(self.agentConfigRefs) == 0",message="agentConfigRefs is not supported with workerPoolRef"
 // +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.dependsOn) || size(self.dependsOn) == 0",message="dependsOn is not supported with workerPoolRef"
 // +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.branch) || size(self.branch) == 0",message="branch is not supported with workerPoolRef"
+// +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.branchLock)",message="branchLock is not supported with workerPoolRef"
 // +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.ttlSecondsAfterFinished)",message="ttlSecondsAfterFinished is not supported with workerPoolRef"
 // +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.podFailurePolicy)",message="podFailurePolicy is not supported with workerPoolRef"
 // +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.podOverrides)",message="podOverrides is not supported with workerPoolRef"
@@ -277,7 +290,7 @@ type TaskSpec struct {
 	// WorkerPoolRef references a WorkerPool resource for persistent execution.
 	// When set, the Task is dispatched to a pre-warmed worker pod instead of
 	// creating a one-shot Job. Mutually exclusive with worker, type/credentials,
-	// image, workspaceRef, agentConfigRefs, branch, dependsOn,
+	// image, workspaceRef, agentConfigRefs, branch, branchLock, dependsOn,
 	// ttlSecondsAfterFinished, podFailurePolicy, and podOverrides.
 	// +optional
 	WorkerPoolRef *WorkerPoolReference `json:"workerPoolRef,omitempty"`
@@ -343,10 +356,21 @@ type TaskSpec struct {
 
 	// Branch is the git branch this Task works on. When set, an init
 	// container checks out this branch before the agent starts. The
-	// controller ensures only one Task with the same Branch value
-	// runs at a time for the same workspace.
+	// controller runs at most one lock-taking Task at a time for the same
+	// workspace and Branch. Tasks with BranchLock None are not serialized
+	// and may run alongside them.
 	// +optional
 	Branch string `json:"branch,omitempty"`
+
+	// BranchLock controls whether this Task takes the branch lock described
+	// on Branch. Exclusive waits until no other exclusive Task on the same
+	// workspace and branch is active. None still checks out the branch but
+	// never waits for the lock and never blocks other Tasks; use it for
+	// Tasks that do not push to the branch. Omit for Exclusive. Has no
+	// effect when Branch is empty.
+	// +optional
+	// +kubebuilder:validation:Enum=Exclusive;None
+	BranchLock BranchLockPolicy `json:"branchLock,omitempty"`
 
 	// UpstreamRepo is the upstream repository in "owner/repo" format.
 	// When set, the KELOS_UPSTREAM_REPO environment variable is injected

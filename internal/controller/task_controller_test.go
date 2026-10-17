@@ -1006,6 +1006,219 @@ func TestFailTaskBeforeJobReleasesBranchLock(t *testing.T) {
 	}
 }
 
+// TestFailTaskBeforeJobBranchLockNoneDoesNotRelease guards against a None task
+// freeing a lock it never took. Lock owners are recorded by task name only and
+// the key omits the namespace, so a same-named None task in another namespace
+// would otherwise clear an Exclusive holder's lock.
+func TestFailTaskBeforeJobBranchLockNoneDoesNotRelease(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
+
+	holder := newBranchLockTestTask("task-1", "", kelos.TaskPhaseRunning, time.Now())
+	holder.Namespace = "team-a"
+	reader := newBranchLockTestTask("task-1", kelos.BranchLockNone, "", time.Now())
+	reader.Namespace = "team-b"
+
+	locker := NewBranchLocker()
+	lockKey := branchLockKey(holder)
+	if branchLockKey(reader) != lockKey {
+		t.Fatalf("test setup: lock keys differ: %q vs %q", branchLockKey(reader), lockKey)
+	}
+	if ok, h := locker.TryAcquire(lockKey, holder.Name); !ok {
+		t.Fatalf("TryAcquire() failed, held by %q", h)
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&kelos.Task{}).
+		WithObjects(reader).
+		Build()
+	r := &TaskReconciler{Client: cl, Scheme: scheme, BranchLocker: locker}
+
+	if err := r.failTaskBeforeJob(context.Background(), reader, "validation failed"); err != nil {
+		t.Fatalf("failTaskBeforeJob() error = %v", err)
+	}
+	if got := locker.Holder(lockKey); got != holder.Name {
+		t.Fatalf("branch lock holder = %q, want %q still held", got, holder.Name)
+	}
+}
+
+func TestUsesBranchLock(t *testing.T) {
+	tests := []struct {
+		name       string
+		branch     string
+		branchLock kelos.BranchLockPolicy
+		want       bool
+	}{
+		{name: "no branch", branch: "", branchLock: "", want: false},
+		{name: "no branch with None", branch: "", branchLock: kelos.BranchLockNone, want: false},
+		{name: "branch with default", branch: "feature-1", branchLock: "", want: true},
+		{name: "branch with Exclusive", branch: "feature-1", branchLock: kelos.BranchLockExclusive, want: true},
+		{name: "branch with None", branch: "feature-1", branchLock: kelos.BranchLockNone, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := &kelos.Task{Spec: kelos.TaskSpec{Branch: tt.branch, BranchLock: tt.branchLock}}
+			if got := usesBranchLock(task); got != tt.want {
+				t.Errorf("usesBranchLock() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func newBranchLockTestTask(name string, branchLock kelos.BranchLockPolicy, phase kelos.TaskPhase, created time.Time) *kelos.Task {
+	return &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              name,
+			Namespace:         "default",
+			CreationTimestamp: metav1.NewTime(created),
+		},
+		Spec: kelos.TaskSpec{
+			Type:         "claude-code",
+			Prompt:       "test",
+			Branch:       "feature-1",
+			BranchLock:   branchLock,
+			WorkspaceRef: &kelos.WorkspaceReference{Name: "workspace-1"},
+		},
+		Status: kelos.TaskStatus{Phase: phase},
+	}
+}
+
+// TestCheckBranchLockIgnoresBranchLockNoneTasks covers the restart fallback:
+// with an empty in-memory BranchLocker, an active Task with branchLock None
+// must not block an Exclusive Task on the same branch, while an active
+// Exclusive Task still does.
+func TestCheckBranchLockIgnoresBranchLockNoneTasks(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
+
+	base := time.Now().Add(-time.Hour)
+	tests := []struct {
+		name       string
+		other      *kelos.Task
+		wantLocked bool
+	}{
+		{
+			name:       "running None task does not block",
+			other:      newBranchLockTestTask("reader", kelos.BranchLockNone, kelos.TaskPhaseRunning, base),
+			wantLocked: false,
+		},
+		{
+			name:       "pending None task does not block",
+			other:      newBranchLockTestTask("reader", kelos.BranchLockNone, kelos.TaskPhasePending, base),
+			wantLocked: false,
+		},
+		{
+			name:       "earlier waiting None task does not queue ahead",
+			other:      newBranchLockTestTask("reader", kelos.BranchLockNone, kelos.TaskPhaseWaiting, base),
+			wantLocked: false,
+		},
+		{
+			name:       "running Exclusive task blocks",
+			other:      newBranchLockTestTask("writer", kelos.BranchLockExclusive, kelos.TaskPhaseRunning, base),
+			wantLocked: true,
+		},
+		{
+			name:       "running default task blocks",
+			other:      newBranchLockTestTask("writer", "", kelos.TaskPhaseRunning, base),
+			wantLocked: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := newBranchLockTestTask("candidate", "", "", base.Add(time.Minute))
+			cl := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithStatusSubresource(&kelos.Task{}).
+				WithObjects(tt.other, task).
+				Build()
+			r := &TaskReconciler{Client: cl, Scheme: scheme, BranchLocker: NewBranchLocker()}
+
+			locked, _, err := r.checkBranchLock(context.Background(), task)
+			if err != nil {
+				t.Fatalf("checkBranchLock() error = %v", err)
+			}
+			if locked != tt.wantLocked {
+				t.Errorf("checkBranchLock() locked = %v, want %v", locked, tt.wantLocked)
+			}
+		})
+	}
+}
+
+func TestReconcile_BranchLockNoneTaskSkipsHeldLock(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(batchv1.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
+
+	base := time.Now().Add(-time.Hour)
+	writer := newBranchLockTestTask("writer", "", kelos.TaskPhaseRunning, base)
+	reader := newBranchLockTestTask("reader", kelos.BranchLockNone, "", base.Add(time.Minute))
+	reader.Finalizers = []string{taskFinalizer}
+	reader.Spec.Credentials = &kelos.Credentials{
+		Type:      kelos.CredentialTypeAPIKey,
+		SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
+	}
+	workspace := &kelos.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "workspace-1", Namespace: "default"},
+		Spec:       kelos.WorkspaceSpec{Repo: "https://github.com/example/repo.git"},
+	}
+
+	locker := NewBranchLocker()
+	lockKey := branchLockKey(writer)
+	if ok, holder := locker.TryAcquire(lockKey, writer.Name); !ok {
+		t.Fatalf("TryAcquire() failed, held by %q", holder)
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&kelos.Task{}).
+		WithObjects(writer, reader, workspace).
+		Build()
+	r := &TaskReconciler{
+		Client:       cl,
+		Scheme:       scheme,
+		JobBuilder:   NewJobBuilder(),
+		BranchLocker: locker,
+	}
+
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(reader)}); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+
+	var job batchv1.Job
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(reader), &job); err != nil {
+		t.Fatalf("expected Job for reader task while writer holds the lock: %v", err)
+	}
+	if holder := locker.Holder(lockKey); holder != writer.Name {
+		t.Errorf("branch lock holder = %q, want %q", holder, writer.Name)
+	}
+}
+
+func TestEnqueueDependentTasksSkipsBranchLockNoneTasks(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
+
+	base := time.Now().Add(-time.Hour)
+	finished := newBranchLockTestTask("finished", "", kelos.TaskPhaseSucceeded, base)
+	waitingWriter := newBranchLockTestTask("waiting-writer", "", kelos.TaskPhaseWaiting, base.Add(time.Minute))
+	waitingReader := newBranchLockTestTask("waiting-reader", kelos.BranchLockNone, kelos.TaskPhaseWaiting, base.Add(2*time.Minute))
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(finished, waitingWriter, waitingReader).
+		Build()
+	r := &TaskReconciler{Client: cl, Scheme: scheme}
+
+	requests := r.enqueueDependentTasks(context.Background(), finished)
+	if len(requests) != 1 || requests[0].Name != waitingWriter.Name {
+		t.Fatalf("enqueueDependentTasks() = %v, want only %q", requests, waitingWriter.Name)
+	}
+}
+
 func TestReconcile_PoolBackedTaskDeletionRequestsCancellation(t *testing.T) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))

@@ -3130,6 +3130,122 @@ var _ = Describe("Task Controller", func() {
 		})
 	})
 
+	Context("When creating Tasks with same branch and branchLock None", func() {
+		// The in-memory branch lock key is workspace:branch without the
+		// namespace, so each spec uses its own branch to stay independent of
+		// Tasks left behind by other specs.
+		newBranchTask := func(name, namespace, branch string, branchLock kelos.BranchLockPolicy) *kelos.Task {
+			return &kelos.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: namespace,
+				},
+				Spec: kelos.TaskSpec{
+					Type:       "claude-code",
+					Prompt:     name,
+					Branch:     branch,
+					BranchLock: branchLock,
+					Credentials: &kelos.Credentials{
+						Type:      kelos.CredentialTypeAPIKey,
+						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
+					},
+				},
+			}
+		}
+
+		createNamespaceWithSecret := func(name string) *corev1.Namespace {
+			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+			return ns
+		}
+
+		markJobRunning := func(key types.NamespacedName) {
+			var job batchv1.Job
+			Eventually(func() error {
+				if err := k8sClient.Get(ctx, key, &job); err != nil {
+					return err
+				}
+				job.Status.Active = 1
+				return k8sClient.Status().Update(ctx, &job)
+			}, timeout, interval).Should(Succeed())
+			Eventually(func() kelos.TaskPhase {
+				var t kelos.Task
+				if err := k8sClient.Get(ctx, key, &t); err != nil {
+					return ""
+				}
+				return t.Status.Phase
+			}, timeout, interval).Should(Equal(kelos.TaskPhaseRunning))
+		}
+
+		jobExists := func(key types.NamespacedName) func() bool {
+			return func() bool {
+				var job batchv1.Job
+				return k8sClient.Get(ctx, key, &job) == nil
+			}
+		}
+
+		It("Should run a None Task while an Exclusive Task holds the branch", func() {
+			ns := createNamespaceWithSecret("test-task-branch-lock-none-reader")
+			const branch = "branch-lock-none-reader"
+
+			By("Creating an Exclusive writer Task and simulating Running")
+			Expect(k8sClient.Create(ctx, newBranchTask("writer", ns.Name, branch, ""))).Should(Succeed())
+			writerKey := types.NamespacedName{Name: "writer", Namespace: ns.Name}
+			Eventually(jobExists(writerKey), timeout, interval).Should(BeTrue())
+			markJobRunning(writerKey)
+
+			By("Creating a None reader Task on the same branch")
+			Expect(k8sClient.Create(ctx, newBranchTask("reader", ns.Name, branch, kelos.BranchLockNone))).Should(Succeed())
+
+			By("Verifying the reader Job is created without waiting")
+			readerKey := types.NamespacedName{Name: "reader", Namespace: ns.Name}
+			Eventually(jobExists(readerKey), timeout, interval).Should(BeTrue())
+
+			By("Verifying a second Exclusive Task still waits behind the writer")
+			Expect(k8sClient.Create(ctx, newBranchTask("writer-2", ns.Name, branch, kelos.BranchLockExclusive))).Should(Succeed())
+			writer2Key := types.NamespacedName{Name: "writer-2", Namespace: ns.Name}
+			Eventually(func() string {
+				var t kelos.Task
+				if err := k8sClient.Get(ctx, writer2Key, &t); err != nil {
+					return ""
+				}
+				if t.Status.Phase != kelos.TaskPhaseWaiting {
+					return ""
+				}
+				return t.Status.Message
+			}, timeout, interval).Should(ContainSubstring("locked by writer"))
+			Consistently(jobExists(writer2Key), 2*time.Second, interval).Should(BeFalse())
+		})
+
+		It("Should not block an Exclusive Task behind a running None Task", func() {
+			ns := createNamespaceWithSecret("test-task-branch-lock-none-writer")
+			const branch = "branch-lock-none-writer"
+
+			By("Creating a None reader Task and simulating Running")
+			Expect(k8sClient.Create(ctx, newBranchTask("reader", ns.Name, branch, kelos.BranchLockNone))).Should(Succeed())
+			readerKey := types.NamespacedName{Name: "reader", Namespace: ns.Name}
+			Eventually(jobExists(readerKey), timeout, interval).Should(BeTrue())
+			markJobRunning(readerKey)
+
+			By("Creating an Exclusive writer Task on the same branch")
+			Expect(k8sClient.Create(ctx, newBranchTask("writer", ns.Name, branch, ""))).Should(Succeed())
+
+			By("Verifying the writer Job is created while the reader is Running")
+			writerKey := types.NamespacedName{Name: "writer", Namespace: ns.Name}
+			Eventually(jobExists(writerKey), timeout, interval).Should(BeTrue())
+		})
+	})
+
 	Context("When creating a Task with branch and workspace", func() {
 		It("Should create a Job with branch-setup init container", func() {
 			By("Creating a namespace")

@@ -20,6 +20,8 @@ import (
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 )
 
+const testNamespace = "kelos"
+
 // fakePostHogClient captures events for testing.
 type fakePostHogClient struct {
 	events     []posthog.Capture
@@ -214,7 +216,7 @@ func TestCollect(t *testing.T) {
 	}
 	// Pre-create the telemetry ConfigMap so we don't depend on Create.
 	objs = append(objs, &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: systemNamespace},
+		ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: testNamespace},
 		Data:       map[string]string{installationIDKey: "test-install-id"},
 	})
 
@@ -222,7 +224,7 @@ func TestCollect(t *testing.T) {
 
 	cs := fakeclientset.NewSimpleClientset()
 
-	report, err := collect(context.Background(), c, cs, "test")
+	report, err := collect(context.Background(), c, cs, "test", testNamespace)
 	if err != nil {
 		t.Fatalf("collect() error: %v", err)
 	}
@@ -360,13 +362,13 @@ func TestCollectEmpty(t *testing.T) {
 	// Only the telemetry ConfigMap, no resources.
 	c := fake.NewClientBuilder().WithScheme(s).WithRuntimeObjects(
 		&corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: systemNamespace},
+			ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: testNamespace},
 			Data:       map[string]string{installationIDKey: "empty-id"},
 		},
 	).Build()
 
 	cs := fakeclientset.NewSimpleClientset()
-	report, err := collect(context.Background(), c, cs, "test")
+	report, err := collect(context.Background(), c, cs, "test", testNamespace)
 	if err != nil {
 		t.Fatalf("collect() error: %v", err)
 	}
@@ -571,7 +573,7 @@ func TestGetOrCreateInstallationID(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(s).Build()
 
 	// First call should create the ConfigMap.
-	id1, err := getOrCreateInstallationID(context.Background(), c, systemNamespace)
+	id1, err := getOrCreateInstallationID(context.Background(), c, testNamespace)
 	if err != nil {
 		t.Fatalf("getOrCreateInstallationID() error: %v", err)
 	}
@@ -580,7 +582,7 @@ func TestGetOrCreateInstallationID(t *testing.T) {
 	}
 
 	// Second call should return the same ID.
-	id2, err := getOrCreateInstallationID(context.Background(), c, systemNamespace)
+	id2, err := getOrCreateInstallationID(context.Background(), c, testNamespace)
 	if err != nil {
 		t.Fatalf("getOrCreateInstallationID() second call error: %v", err)
 	}
@@ -593,12 +595,12 @@ func TestGetOrCreateInstallationIDExistingEmptyConfigMap(t *testing.T) {
 	s := newScheme(t)
 	c := fake.NewClientBuilder().WithScheme(s).WithRuntimeObjects(
 		&corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: systemNamespace},
+			ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: testNamespace},
 			Data:       map[string]string{},
 		},
 	).Build()
 
-	id, err := getOrCreateInstallationID(context.Background(), c, systemNamespace)
+	id, err := getOrCreateInstallationID(context.Background(), c, testNamespace)
 	if err != nil {
 		t.Fatalf("getOrCreateInstallationID() error: %v", err)
 	}
@@ -678,14 +680,14 @@ func TestSourceTypeExtraction(t *testing.T) {
 		objs = append(objs, &spawners[i])
 	}
 	objs = append(objs, &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: systemNamespace},
+		ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: testNamespace},
 		Data:       map[string]string{installationIDKey: "test-id"},
 	})
 
 	c := fake.NewClientBuilder().WithScheme(s).WithRuntimeObjects(objs...).Build()
 	cs := fakeclientset.NewSimpleClientset()
 
-	report, err := collect(context.Background(), c, cs, "test")
+	report, err := collect(context.Background(), c, cs, "test", testNamespace)
 	if err != nil {
 		t.Fatalf("collect() error: %v", err)
 	}
@@ -728,7 +730,7 @@ func TestCollectUsagePrefersTaskRecords(t *testing.T) {
 
 	c := fake.NewClientBuilder().WithScheme(s).WithRuntimeObjects(
 		&corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: systemNamespace},
+			ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: testNamespace},
 			Data:       map[string]string{installationIDKey: "usage-id"},
 		},
 		&kelos.Task{
@@ -771,7 +773,7 @@ func TestCollectUsagePrefersTaskRecords(t *testing.T) {
 		},
 	).Build()
 
-	report, err := collect(context.Background(), c, fakeclientset.NewSimpleClientset(), "test")
+	report, err := collect(context.Background(), c, fakeclientset.NewSimpleClientset(), "test", testNamespace)
 	if err != nil {
 		t.Fatalf("collect() error: %v", err)
 	}
@@ -792,7 +794,7 @@ func TestRun(t *testing.T) {
 
 	c := fake.NewClientBuilder().WithScheme(s).WithRuntimeObjects(
 		&corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: systemNamespace},
+			ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: testNamespace},
 			Data:       map[string]string{installationIDKey: "run-test-id"},
 		},
 		&kelos.Task{
@@ -805,7 +807,7 @@ func TestRun(t *testing.T) {
 	cs := fakeclientset.NewSimpleClientset()
 	phClient := &fakePostHogClient{}
 
-	err := Run(context.Background(), logr.Discard(), c, cs, phClient, "test")
+	err := Run(context.Background(), logr.Discard(), c, cs, phClient, "test", testNamespace)
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
@@ -832,7 +834,7 @@ func TestRunSendFailureNonFatal(t *testing.T) {
 
 	c := fake.NewClientBuilder().WithScheme(s).WithRuntimeObjects(
 		&corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: systemNamespace},
+			ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: testNamespace},
 			Data:       map[string]string{installationIDKey: "run-test-id"},
 		},
 	).Build()
@@ -843,7 +845,7 @@ func TestRunSendFailureNonFatal(t *testing.T) {
 	}
 
 	// Send failure should be non-fatal (Run returns nil).
-	err := Run(context.Background(), logr.Discard(), c, cs, phClient, "test")
+	err := Run(context.Background(), logr.Discard(), c, cs, phClient, "test", testNamespace)
 	if err != nil {
 		t.Fatalf("Run() should not return error on send failure, got: %v", err)
 	}

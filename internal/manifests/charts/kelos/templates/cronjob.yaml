@@ -4,7 +4,7 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: kelos-telemetry
-  namespace: kelos-system
+  namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: kelos
     app.kubernetes.io/component: telemetry
@@ -31,6 +31,7 @@ spec:
               {{- end }}
               args:
                 - --telemetry-report
+                - --telemetry-namespace={{ .Release.Namespace }}
               securityContext:
                 allowPrivilegeEscalation: false
                 capabilities:

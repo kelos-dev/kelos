@@ -30,8 +30,6 @@ const (
 	configMapName = "kelos-telemetry"
 	// installationIDKey is the key in the ConfigMap that stores the installation ID.
 	installationIDKey = "installationId"
-	// systemNamespace is the namespace where the telemetry ConfigMap is stored.
-	systemNamespace = "kelos-system"
 
 	posthogAPIKey = "phc_G9PwwTbT9r7eEGbsuuS3LyzolVGtBUxRNQqy0YMzKzF"
 
@@ -120,13 +118,14 @@ func NewPostHogClient(endpoint string) (PostHogClient, error) {
 	})
 }
 
-// Run collects anonymous aggregate telemetry and sends it to PostHog.
-func Run(ctx context.Context, log logr.Logger, c client.Client, clientset kubernetes.Interface, phClient PostHogClient, env string) error {
+// Run collects anonymous aggregate telemetry and sends it to PostHog. The
+// installation ID is stored in a ConfigMap in namespace.
+func Run(ctx context.Context, log logr.Logger, c client.Client, clientset kubernetes.Interface, phClient PostHogClient, env, namespace string) error {
 	log.Info("Collecting anonymous usage data (resource counts, task and Session breakdowns, TaskSpawner sources, WorkerPool scale, usage totals). " +
 		"No personal data is collected. " +
 		"To disable: kelos install --disable-heartbeat")
 
-	report, err := collect(ctx, c, clientset, env)
+	report, err := collect(ctx, c, clientset, env, namespace)
 	if err != nil {
 		return fmt.Errorf("collecting telemetry: %w", err)
 	}
@@ -146,7 +145,7 @@ func Run(ctx context.Context, log logr.Logger, c client.Client, clientset kubern
 	return nil
 }
 
-func collect(ctx context.Context, c client.Client, clientset kubernetes.Interface, env string) (*Report, error) {
+func collect(ctx context.Context, c client.Client, clientset kubernetes.Interface, env, namespace string) (*Report, error) {
 	report := &Report{
 		Version:     version.Version,
 		Environment: env,
@@ -171,7 +170,7 @@ func collect(ctx context.Context, c client.Client, clientset kubernetes.Interfac
 	}
 
 	// Get or create installation ID.
-	id, err := getOrCreateInstallationID(ctx, c, systemNamespace)
+	id, err := getOrCreateInstallationID(ctx, c, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("getting installation ID: %w", err)
 	}

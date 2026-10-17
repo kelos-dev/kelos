@@ -1,3 +1,10 @@
+{{- /*
+kelos-system releases own their namespace: `kelos install` creates it from this
+manifest, and Helm deletes an owned Namespace, with everything in it, once the
+chart stops rendering it. Other release namespaces come from
+`helm install --create-namespace` or the user.
+*/}}
+{{- if eq .Release.Namespace "kelos-system" }}
 ---
 apiVersion: v1
 kind: Namespace
@@ -6,3 +13,4 @@ metadata:
   labels:
     app.kubernetes.io/name: kelos
     app.kubernetes.io/component: manager
+{{- end }}

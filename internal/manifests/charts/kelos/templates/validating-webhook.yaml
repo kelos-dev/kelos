@@ -3,7 +3,7 @@ apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
   annotations:
-    cert-manager.io/inject-ca-from: kelos-system/kelos-serving-cert
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/kelos-serving-cert
   name: kelos-validating-webhook-configuration
 webhooks:
 - admissionReviewVersions:
@@ -11,7 +11,7 @@ webhooks:
   clientConfig:
     service:
       name: kelos-webhook
-      namespace: kelos-system
+      namespace: {{ .Release.Namespace }}
       path: /validate-kelos-dev-v1alpha2-taskbudget
       port: 443
   failurePolicy: Fail

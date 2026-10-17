@@ -1949,7 +1949,7 @@ Enable them via the `podMonitor` values:
 
 | Value | Default | Description |
 |-------|---------|-------------|
-| `podMonitor.enabled` | `false` | Ship a PodMonitor for the control-plane pods (controller manager, webhook servers, slack server). They all expose the `metrics` port (8080). Target discovery spans both `kelos-system` (where the controller manager runs) and the release namespace (where the webhook and slack servers run); under `kelos install` these are the same namespace. The Console server is not scraped — its 8080 port serves the web app, not metrics. |
+| `podMonitor.enabled` | `false` | Ship a PodMonitor for the control-plane pods (controller manager, webhook servers, slack server). They all run in the release namespace and expose the `metrics` port (8080). The Console server is not scraped — its 8080 port serves the web app, not metrics. |
 | `podMonitor.interval` | `30s` | Scrape interval. |
 | `podMonitor.scrapeTimeout` | `10s` | Per-scrape timeout. |
 | `podMonitor.honorLabels` | `false` | Keep target-exposed labels when they collide with labels Prometheus would add. |

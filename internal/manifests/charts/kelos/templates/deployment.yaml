@@ -3,7 +3,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: kelos-controller-manager
-  namespace: kelos-system
+  namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: kelos
     app.kubernetes.io/component: manager

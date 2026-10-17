@@ -5,10 +5,6 @@
 # expose the metrics port (8080). console-server is explicitly excluded: it
 # shares the app.kubernetes.io/name: kelos label but its 8080 port serves the
 # web app (named "http"), not Prometheus metrics.
-#
-# The controller manager always runs in the kelos-system namespace, while the
-# webhook and slack servers run in the release namespace, so target discovery
-# spans both. (Under `kelos install` these are the same namespace.)
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
@@ -27,10 +23,7 @@ metadata:
 spec:
   namespaceSelector:
     matchNames:
-      - kelos-system
-      {{- if ne .Release.Namespace "kelos-system" }}
       - {{ .Release.Namespace }}
-      {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/name: kelos

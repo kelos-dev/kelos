@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
@@ -40,6 +41,12 @@ type SlackMessageData struct {
 	IsBotMessage bool
 	// IsSelfMessage indicates the message was sent by the bot itself.
 	IsSelfMessage bool
+	// Reaction is the base emoji name (skin tone removed) of the reaction that
+	// produced this event. It is set only for reaction_added events, in which
+	// case the remaining fields describe the message that was reacted to.
+	Reaction string
+	// ReactionUserID is the Slack user ID of the person who added Reaction.
+	ReactionUserID string
 }
 
 var regexpCache sync.Map
@@ -81,6 +88,14 @@ func MatchesSpawner(slackCfg *kelos.Slack, msg *SlackMessageData, botUserID stri
 		return false
 	}
 	if !matchesChannel(msg.ChannelID, slackCfg.Channels) {
+		return false
+	}
+	if msg.Reaction != "" {
+		return matchesReaction(msg.Reaction, slackCfg.Triggers) &&
+			!matchesExcludePatterns(msg.Text, slackCfg.ExcludePatterns)
+	}
+	// A spawner whose triggers are all reaction triggers fires on reactions only.
+	if reactionOnly(slackCfg.Triggers) {
 		return false
 	}
 	// Slash commands bypass mention, trigger, and exclude filters.
@@ -130,13 +145,79 @@ func ExtractSlackWorkItem(msg *SlackMessageData) map[string]interface{} {
 		title = title[:idx]
 	}
 
-	return map[string]interface{}{
-		"ID":    id,
-		"Title": title,
-		"Body":  msg.Body,
-		"URL":   msg.Permalink,
-		"Kind":  "SlackMessage",
+	kind := "SlackMessage"
+	if msg.Reaction != "" {
+		kind = "SlackReaction"
 	}
+
+	return map[string]interface{}{
+		"ID":             id,
+		"Title":          title,
+		"Body":           msg.Body,
+		"URL":            msg.Permalink,
+		"Kind":           kind,
+		"ChannelID":      msg.ChannelID,
+		"MessageTS":      msg.Timestamp,
+		"ThreadTS":       msg.ThreadTS,
+		"Reaction":       msg.Reaction,
+		"ReactionUserID": msg.ReactionUserID,
+	}
+}
+
+// reactionName strips a skin-tone modifier from a Slack reaction name, so
+// "+1::skin-tone-2" becomes "+1".
+func reactionName(reaction string) string {
+	if idx := strings.Index(reaction, "::"); idx != -1 {
+		return reaction[:idx]
+	}
+	return reaction
+}
+
+// matchesReaction reports whether a reaction trigger lists reaction. A spawner
+// without reaction triggers ignores every reaction event.
+func matchesReaction(reaction string, triggers []kelos.SlackTrigger) bool {
+	if reaction == "" {
+		return false
+	}
+	return slices.ContainsFunc(triggers, func(t kelos.SlackTrigger) bool {
+		return t.Reaction != nil && t.Reaction.Name == reaction
+	})
+}
+
+// reactionOnly reports whether every trigger is a reaction trigger, in which
+// case the spawner fires on reactions only.
+func reactionOnly(triggers []kelos.SlackTrigger) bool {
+	if len(triggers) == 0 {
+		return false
+	}
+	for _, t := range triggers {
+		if t.Reaction == nil {
+			return false
+		}
+	}
+	return true
+}
+
+// wantsReaction reports whether any Slack TaskSpawner has a reaction trigger
+// for the reaction in the channel, after the channel allowlist and exclusion
+// rules. The handler checks this before fetching the reacted-to message from
+// Slack, so a reaction no spawner cares about costs no API calls. Exclusion
+// rules see only the channel here; a criterion the channel-only data does not
+// carry never matches, so the gate can let a reaction through that the full
+// match later rejects, but never drops one the full match would accept.
+func wantsReaction(spawners []*kelos.TaskSpawner, reaction, channelID string) bool {
+	channelOnly := &SlackMessageData{ChannelID: channelID}
+	for _, spawner := range spawners {
+		slackCfg := spawner.Spec.When.Slack
+		if slackCfg == nil || !matchesReaction(reaction, slackCfg.Triggers) {
+			continue
+		}
+		if matchesChannel(channelID, slackCfg.Channels) &&
+			!matchesAnySlackExcludeFilter(slackCfg.ExcludeFilters, channelOnly) {
+			return true
+		}
+	}
+	return false
 }
 
 // matchesChannel returns true if channelID is in the allowed list, or if the
@@ -237,6 +318,10 @@ func matchesTriggers(text string, triggers []kelos.SlackTrigger, botUserID strin
 	mentioned := hasBotMention(text, botUserID)
 	stripped := stripLeadingMentions(text)
 	for _, t := range triggers {
+		// A reaction trigger has no pattern and never fires on a message.
+		if t.Reaction != nil {
+			continue
+		}
 		re, err := getOrCompileRegexp(t.Pattern)
 		if err != nil {
 			continue

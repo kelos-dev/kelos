@@ -766,3 +766,286 @@ func TestDenySlackConnectLeaveFailureDoesNotPostJoinMessage(t *testing.T) {
 		t.Error("Join message should not be posted when channel is external, even if leave fails")
 	}
 }
+
+// fakeReactionSlack serves the Slack Web API calls a reaction makes: history
+// for a top-level message, replies for a thread reply, and the user and
+// permalink lookups enrichMessage performs. It counts every call so tests can
+// assert that an ignored reaction never reaches Slack.
+type fakeReactionSlack struct {
+	history string
+	replies string
+	calls   int
+}
+
+func (f *fakeReactionSlack) server(t *testing.T) *goslack.Client {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.calls++
+		switch {
+		case strings.Contains(r.URL.Path, "conversations.history"):
+			w.Write([]byte(f.history))
+		case strings.Contains(r.URL.Path, "conversations.replies"):
+			w.Write([]byte(f.replies))
+		case strings.Contains(r.URL.Path, "chat.getPermalink"):
+			w.Write([]byte(`{"ok":true,"channel":"C1","permalink":"https://example.slack.com/archives/C1/p2222222222222222"}`))
+		case strings.Contains(r.URL.Path, "users.info"):
+			w.Write([]byte(`{"ok":true,"user":{"id":"UAUTHOR","name":"author","real_name":"Ada Author"}}`))
+		default:
+			w.Write([]byte(`{"ok":false,"error":"unknown_method"}`))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return goslack.New("xoxb-test", goslack.OptionAPIURL(srv.URL+"/"))
+}
+
+func reactionSpawner(slackCfg *kelos.Slack) *kelos.TaskSpawner {
+	return &kelos.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ledger",
+			Namespace: "default",
+			UID:       "spawner-uid",
+		},
+		Spec: kelos.TaskSpawnerSpec{
+			When: kelos.When{Slack: slackCfg},
+			TaskTemplate: kelos.TaskTemplate{
+				Type:        "claude-code",
+				Credentials: &kelos.Credentials{Type: kelos.CredentialTypeNone},
+				PromptTemplate: "{{.Kind}} :{{.Reaction}}: by {{.ReactionUserID}} on {{.ChannelID}}/{{.MessageTS}}" +
+					" thread={{.ThreadTS}} url={{.URL}}\n{{.Body}}",
+			},
+		},
+	}
+}
+
+func TestHandleReactionAdded(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
+
+	const topLevelHistory = `{"ok":true,"messages":[{"type":"message","user":"UAUTHOR","text":"Acme went live today","ts":"2222222222.222222"}]}`
+
+	gearEvent := func() *slackevents.ReactionAddedEvent {
+		return &slackevents.ReactionAddedEvent{
+			Type:     "reaction_added",
+			User:     "UREACTOR",
+			Reaction: "gear",
+			ItemUser: "UAUTHOR",
+			Item:     slackevents.Item{Type: "message", Channel: "C1", Timestamp: "2222222222.222222"},
+		}
+	}
+
+	tests := []struct {
+		name       string
+		slackCfg   *kelos.Slack
+		event      func() *slackevents.ReactionAddedEvent
+		history    string
+		replies    string
+		wantPrompt string
+		wantThread string
+		wantNoAPI  bool
+	}{
+		{
+			name:     "listed emoji on a top-level message in an allowed channel creates a task",
+			slackCfg: &kelos.Slack{Channels: []string{"C1"}, Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear"}}}},
+			event:    gearEvent,
+			history:  topLevelHistory,
+			wantPrompt: "SlackReaction :gear: by UREACTOR on C1/2222222222.222222 thread=" +
+				" url=https://example.slack.com/archives/C1/p2222222222222222\nAcme went live today",
+			wantThread: "2222222222.222222",
+		},
+		{
+			name:     "skin-tone variant matches its base name",
+			slackCfg: &kelos.Slack{Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "+1"}}}},
+			event: func() *slackevents.ReactionAddedEvent {
+				e := gearEvent()
+				e.Reaction = "+1::skin-tone-3"
+				return e
+			},
+			history: topLevelHistory,
+			wantPrompt: "SlackReaction :+1: by UREACTOR on C1/2222222222.222222 thread=" +
+				" url=https://example.slack.com/archives/C1/p2222222222222222\nAcme went live today",
+			wantThread: "2222222222.222222",
+		},
+		{
+			name:     "thread reply is fetched from the thread and keeps its parent",
+			slackCfg: &kelos.Slack{Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear"}}}},
+			event:    gearEvent,
+			// History returns the nearest earlier top-level message, not the reply.
+			history: `{"ok":true,"messages":[{"type":"message","user":"UOTHER","text":"unrelated","ts":"1111111111.000000"}]}`,
+			replies: `{"ok":true,"messages":[` +
+				`{"type":"message","user":"UOTHER","text":"Acme status","ts":"1111111111.000000","thread_ts":"1111111111.000000"},` +
+				`{"type":"message","user":"UAUTHOR","text":"Acme went live today","ts":"2222222222.222222","thread_ts":"1111111111.000000"}]}`,
+			wantPrompt: "SlackReaction :gear: by UREACTOR on C1/2222222222.222222 thread=1111111111.000000" +
+				" url=https://example.slack.com/archives/C1/p2222222222222222\nAcme went live today",
+			wantThread: "1111111111.000000",
+		},
+		{
+			// A thread parent carries its own ts as thread_ts; it is not a reply,
+			// so ThreadTS stays empty and the Task reports into its thread.
+			name:     "thread parent keeps an empty ThreadTS",
+			slackCfg: &kelos.Slack{Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear"}}}},
+			event:    gearEvent,
+			history:  `{"ok":true,"messages":[{"type":"message","user":"UAUTHOR","text":"Acme went live today","ts":"2222222222.222222","thread_ts":"2222222222.222222","reply_count":2}]}`,
+			wantPrompt: "SlackReaction :gear: by UREACTOR on C1/2222222222.222222 thread=" +
+				" url=https://example.slack.com/archives/C1/p2222222222222222\nAcme went live today",
+			wantThread: "2222222222.222222",
+		},
+		{
+			name:      "unlisted emoji does not create a task or call Slack",
+			slackCfg:  &kelos.Slack{Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear"}}}},
+			event:     func() *slackevents.ReactionAddedEvent { e := gearEvent(); e.Reaction = "eyes"; return e },
+			history:   topLevelHistory,
+			wantNoAPI: true,
+		},
+		{
+			name:      "excluded channel does not create a task or call Slack",
+			slackCfg:  &kelos.Slack{Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear"}}}, ExcludeFilters: []kelos.SlackFilter{{Channels: []string{"C1"}}}},
+			event:     gearEvent,
+			history:   topLevelHistory,
+			wantNoAPI: true,
+		},
+		{
+			name:      "channel outside the allowlist does not create a task or call Slack",
+			slackCfg:  &kelos.Slack{Channels: []string{"C2"}, Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear"}}}},
+			event:     gearEvent,
+			history:   topLevelHistory,
+			wantNoAPI: true,
+		},
+		{
+			name:      "spawner without reaction triggers ignores the reaction",
+			slackCfg:  &kelos.Slack{Triggers: []kelos.SlackTrigger{{Pattern: ".*", MentionOptional: boolPtr(true)}}},
+			event:     gearEvent,
+			history:   topLevelHistory,
+			wantNoAPI: true,
+		},
+		{
+			name:      "reaction added by the bot itself is ignored",
+			slackCfg:  &kelos.Slack{Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear"}}}},
+			event:     func() *slackevents.ReactionAddedEvent { e := gearEvent(); e.User = "UBOT"; return e },
+			history:   topLevelHistory,
+			wantNoAPI: true,
+		},
+		{
+			name:     "reaction on a file is ignored",
+			slackCfg: &kelos.Slack{Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear"}}}},
+			event: func() *slackevents.ReactionAddedEvent {
+				e := gearEvent()
+				e.Item = slackevents.Item{Type: "file", Channel: "C1"}
+				return e
+			},
+			history:   topLevelHistory,
+			wantNoAPI: true,
+		},
+		{
+			name:     "message that cannot be found does not create a task",
+			slackCfg: &kelos.Slack{Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear"}}}},
+			event:    gearEvent,
+			history:  `{"ok":true,"messages":[]}`,
+			replies:  `{"ok":false,"error":"thread_not_found"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cl := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(reactionSpawner(tt.slackCfg)).
+				Build()
+			tb, err := taskbuilder.NewTaskBuilder(cl)
+			if err != nil {
+				t.Fatalf("NewTaskBuilder: %v", err)
+			}
+			slackAPI := &fakeReactionSlack{history: tt.history, replies: tt.replies}
+			h := &SlackHandler{
+				client:      cl,
+				log:         logr.Discard(),
+				taskBuilder: tb,
+				api:         slackAPI.server(t),
+				botUserID:   "UBOT",
+			}
+
+			h.handleReactionAdded(context.Background(), tt.event())
+
+			var tasks kelos.TaskList
+			if err := cl.List(context.Background(), &tasks); err != nil {
+				t.Fatalf("List tasks: %v", err)
+			}
+			if tt.wantNoAPI && slackAPI.calls != 0 {
+				t.Errorf("Slack API called %d times, want 0", slackAPI.calls)
+			}
+			if tt.wantPrompt == "" {
+				if len(tasks.Items) != 0 {
+					t.Fatalf("Expected no task, got %d", len(tasks.Items))
+				}
+				return
+			}
+			if len(tasks.Items) != 1 {
+				t.Fatalf("Expected 1 task, got %d", len(tasks.Items))
+			}
+			task := tasks.Items[0]
+			if task.Spec.Prompt != tt.wantPrompt {
+				t.Errorf("Task prompt = %q, want %q", task.Spec.Prompt, tt.wantPrompt)
+			}
+			if got := task.Annotations[reporting.AnnotationSlackUserID]; got != "UREACTOR" {
+				t.Errorf("Slack user annotation = %q, want the reactor UREACTOR", got)
+			}
+			if got := task.Annotations[reporting.AnnotationSlackChannel]; got != "C1" {
+				t.Errorf("Slack channel annotation = %q, want C1", got)
+			}
+			if got := task.Annotations[reporting.AnnotationSlackThreadTS]; got != tt.wantThread {
+				t.Errorf("Slack thread annotation = %q, want %q", got, tt.wantThread)
+			}
+		})
+	}
+}
+
+// TestHandleReactionAddedDeduplicatesPerMessageAndEmoji verifies that the same
+// emoji added by a second person resolves to the existing Task, while a
+// different listed emoji on the same message gets its own Task.
+func TestHandleReactionAddedDeduplicatesPerMessageAndEmoji(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(reactionSpawner(&kelos.Slack{Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear"}}, {Reaction: &kelos.SlackReactionTrigger{Name: "rocket"}}}})).
+		Build()
+	tb, err := taskbuilder.NewTaskBuilder(cl)
+	if err != nil {
+		t.Fatalf("NewTaskBuilder: %v", err)
+	}
+	slackAPI := &fakeReactionSlack{
+		history: `{"ok":true,"messages":[{"type":"message","user":"UAUTHOR","text":"Acme went live today","ts":"2222222222.222222"}]}`,
+	}
+	h := &SlackHandler{
+		client:      cl,
+		log:         logr.Discard(),
+		taskBuilder: tb,
+		api:         slackAPI.server(t),
+		botUserID:   "UBOT",
+	}
+
+	item := slackevents.Item{Type: "message", Channel: "C1", Timestamp: "2222222222.222222"}
+	h.handleReactionAdded(context.Background(), &slackevents.ReactionAddedEvent{User: "U1", Reaction: "gear", Item: item})
+	h.handleReactionAdded(context.Background(), &slackevents.ReactionAddedEvent{User: "U2", Reaction: "gear", Item: item})
+
+	var tasks kelos.TaskList
+	if err := cl.List(context.Background(), &tasks); err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	if len(tasks.Items) != 1 {
+		t.Fatalf("Expected 1 task after the same emoji twice, got %d", len(tasks.Items))
+	}
+	if got := tasks.Items[0].Annotations[reporting.AnnotationSlackUserID]; got != "U1" {
+		t.Errorf("Slack user annotation = %q, want the first reactor U1", got)
+	}
+
+	h.handleReactionAdded(context.Background(), &slackevents.ReactionAddedEvent{User: "U2", Reaction: "rocket", Item: item})
+	if err := cl.List(context.Background(), &tasks); err != nil {
+		t.Fatalf("List tasks: %v", err)
+	}
+	if len(tasks.Items) != 2 {
+		t.Fatalf("Expected 2 tasks after a second listed emoji, got %d", len(tasks.Items))
+	}
+}

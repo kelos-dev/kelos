@@ -1,0 +1,54 @@
+---KELOS_SETUP_COMMAND_START---
+
+model: claude-test
+
+✻ First thought
+  second
+  third
+  … +2 lines
+
+⏺ I'll fix the greeting.
+  Then run the tests.
+
+⏺ Bash(cd /workspace/repo && go test ./...)
+  ⎿  ok  example/a
+     ok  example/b
+     ok  example/c
+     … +2 lines
+
+⏺ Update(main.go)
+  ⎿  Updated main.go with 2 additions and 1 removal
+         4   func main() {
+         5 -     fmt.Println("hi")
+         5 +     fmt.Println("hello")
+         6 +     fmt.Println("world")
+         7   }
+
+⏺ Write(NOTES.md)
+  ⎿  Wrote 3 lines to NOTES.md
+
+⏺ Read(go.mod)
+
+⏺ Grep(TODO)
+
+⏺ Read(go.mod)
+  ⎿  module example
+
+⏺ Grep(TODO)
+  ⎿  Error: ripgrep failed
+     exit status 2
+
+⏺ TodoWrite
+  ⎿  ☒ Fix greeting
+     ☐ Run tests
+     ☐ Open PR
+
+⏺ Agent(Review the diff)
+  ⎿  Ship it.
+
+──────────
+✓ Completed · 7 turns · $0.1234 · 2.5k in (2.0k cached), 1.5k out · 1m5s
+
+---KELOS_OUTPUTS_START---
+branch: kelos/example
+---KELOS_OUTPUTS_END---

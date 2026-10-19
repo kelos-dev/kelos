@@ -199,6 +199,19 @@ func (r *WorkerPoolReconciler) reconcilePool(ctx context.Context, pool *kelos.Wo
 	}
 	workspace = &ws.Spec
 
+	// Reject Workspace settings worker pods do not implement before minting
+	// tokens or touching any pool resources. Retrying cannot help until the
+	// Workspace changes, and the Workspace watch re-enqueues the pool then.
+	if err := validateWorkerPoolWorkspace(workspace); err != nil {
+		logger.Info("Unsupported Workspace for WorkerPool", "workerpool", pool.Name, "workspace", ws.Name, "reason", err.Error())
+		r.recordEvent(pool, corev1.EventTypeWarning, "UnsupportedWorkspace", "Workspace %s: %v", ws.Name, err)
+		if err := r.setPoolFailed(ctx, pool, fmt.Sprintf("Workspace %s: %v", ws.Name, err)); err != nil {
+			logger.Error(err, "Unable to update WorkerPool status", "workerpool", pool.Name)
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+
 	// Resolve GitHub App-backed workspace secrets into a derived Secret
 	// holding a short-lived installation token, minting it on first use and
 	// re-minting it before expiry. PAT-style secrets are used as-is.
@@ -1101,6 +1114,24 @@ func (r *WorkerPoolReconciler) updatePoolStatus(ctx context.Context, pool *kelos
 	})
 }
 
+// setPoolFailed records a pool-level failure in the WorkerPool status. The
+// next successful reconcile replaces it through updatePoolStatus.
+func (r *WorkerPoolReconciler) setPoolFailed(ctx context.Context, pool *kelos.WorkerPool, message string) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		if err := r.Get(ctx, client.ObjectKeyFromObject(pool), pool); err != nil {
+			return err
+		}
+		if pool.Status.Phase == kelos.WorkerPoolPhaseFailed && pool.Status.Message == message &&
+			pool.Status.ObservedGeneration == pool.Generation {
+			return nil
+		}
+		pool.Status.ObservedGeneration = pool.Generation
+		pool.Status.Phase = kelos.WorkerPoolPhaseFailed
+		pool.Status.Message = message
+		return r.Status().Update(ctx, pool)
+	})
+}
+
 // reconcileTask handles Task assignment and completion monitoring for tasks
 // that reference a WorkerPool.
 func (r *WorkerPoolReconciler) reconcileTask(ctx context.Context, task *kelos.Task) (ctrl.Result, error) {
@@ -1159,6 +1190,22 @@ func (r *WorkerPoolReconciler) reconcileTask(ctx context.Context, task *kelos.Ta
 
 func (r *WorkerPoolReconciler) assignTask(ctx context.Context, task *kelos.Task, poolName string) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
+
+	// Worker pods built before the pool's Workspace was restricted still carry
+	// the full checkout and the GitHub token, so they must not take new Tasks.
+	reason, workspaceMissing, err := r.unsupportedPoolWorkspace(ctx, task.Namespace, poolName)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if workspaceMissing {
+		logger.Info("WorkerPool Workspace not found, requeuing", "workerpool", poolName, "task", task.Name)
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+	if reason != "" {
+		logger.Info("Refusing to assign task to a WorkerPool with an unsupported Workspace", "workerpool", poolName, "task", task.Name)
+		r.recordEvent(task, corev1.EventTypeWarning, "UnsupportedWorkspace", "%s", reason)
+		return ctrl.Result{}, r.completeTask(ctx, task, kelos.TaskPhaseFailed, reason)
+	}
 
 	// Enforce TaskBudgets before claiming a worker pod, so worker-pool Tasks are
 	// gated by the same admission policy as Job-backed Tasks. A blocked Task is
@@ -1931,4 +1978,52 @@ func truncateResourceNameTo(name string, maxLength int) string {
 	suffix := hex.EncodeToString(sum[:])[:8]
 	maxPrefixLen := maxLength - len(suffix) - 1
 	return name[:maxPrefixLen] + "-" + suffix
+}
+
+// unsupportedPoolWorkspace returns why the pool's Workspace cannot run Tasks
+// on worker pods, or "" when it can. workspaceMissing reports that the
+// referenced Workspace does not exist, in which case nothing is known about
+// what the worker pods carry. A missing pool returns neither: it has no pods
+// to assign.
+func (r *WorkerPoolReconciler) unsupportedPoolWorkspace(ctx context.Context, namespace, poolName string) (reason string, workspaceMissing bool, err error) {
+	var pool kelos.WorkerPool
+	if err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: poolName}, &pool); err != nil {
+		if apierrors.IsNotFound(err) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("workerpool %s: fetching WorkerPool: %w", poolName, err)
+	}
+	if pool.Spec.Worker.WorkspaceRef == nil {
+		return "", false, nil
+	}
+	var ws kelos.Workspace
+	if err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: pool.Spec.Worker.WorkspaceRef.Name}, &ws); err != nil {
+		if apierrors.IsNotFound(err) {
+			return "", true, nil
+		}
+		return "", false, fmt.Errorf("workerpool %s: fetching Workspace %q: %w", poolName, pool.Spec.Worker.WorkspaceRef.Name, err)
+	}
+	if err := validateWorkerPoolWorkspace(&ws.Spec); err != nil {
+		return fmt.Sprintf("WorkerPool %s cannot run Tasks: Workspace %s: %v", poolName, ws.Name, err), false, nil
+	}
+	return "", false, nil
+}
+
+// validateWorkerPoolWorkspace rejects Workspace settings that WorkerPool pods
+// do not implement, rather than building pods whose checkout or credentials
+// are less restricted than the Workspace asks for.
+func validateWorkerPoolWorkspace(workspace *kelos.WorkspaceSpec) error {
+	if workspace == nil {
+		return nil
+	}
+	if workspace.Clone != nil && len(workspace.Clone.Paths) > 0 {
+		return fmt.Errorf("workspace clone.paths is not supported by WorkerPools")
+	}
+	if workspaceRemovesGitDir(workspace) {
+		return fmt.Errorf("workspace clone.gitDir Remove is not supported by WorkerPools")
+	}
+	if workspace.AgentGitHubToken == kelos.WorkspaceAgentGitHubTokenNone {
+		return fmt.Errorf("workspace agentGitHubToken None is not supported by WorkerPools")
+	}
+	return nil
 }

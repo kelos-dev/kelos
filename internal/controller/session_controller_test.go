@@ -621,7 +621,7 @@ func TestSessionReconcilerUsesCurrentWorkspaceCredentialsWhenResuming(t *testing
 		t.Fatal(err)
 	}
 	if updated.Spec.Replicas == nil || *updated.Spec.Replicas != 1 {
-		t.Fatalf("StatefulSet replicas = %v, want 1", updated.Spec.Replicas)
+		t.Fatalf("StatefulSet replicas = %d, want 1", ptr.Deref(updated.Spec.Replicas, -1))
 	}
 	if sessionPodSpecUsesSecret(&updated.Spec.Template.Spec, tokenSecretName) {
 		t.Fatalf("StatefulSet still uses stale derived token Secret %q", tokenSecretName)
@@ -3907,4 +3907,188 @@ func findVolume(volumes []corev1.Volume, name string) *corev1.Volume {
 		}
 	}
 	return nil
+}
+
+func TestSessionPodRestrictedWorkspaceCheckout(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name             string
+		gitDir           kelos.WorkspaceGitDir
+		agentGitHubToken kelos.WorkspaceAgentGitHubToken
+		wantPersisted    bool
+	}{
+		{name: "default keeps re-persisting the credential helper", wantPersisted: true},
+		{name: "gitDir Remove has no .git to configure on restart", gitDir: kelos.WorkspaceGitDirRemove},
+		{name: "agentGitHubToken None leaves the helper out of .git/config", agentGitHubToken: kelos.WorkspaceAgentGitHubTokenNone},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			session := testSession("restricted", "codex")
+			session.Spec.Worker.WorkspaceRef = &kelos.WorkspaceReference{Name: "workspace"}
+			session.Spec.VolumeClaimTemplate = nil
+			workspace := &kelos.WorkspaceSpec{
+				Repo:             "https://github.com/kelos-dev/kelos.git",
+				Ref:              "main",
+				SecretRef:        &kelos.SecretReference{Name: "github-token"},
+				Clone:            &kelos.WorkspaceClone{Paths: []string{"docs"}, GitDir: tt.gitDir},
+				AgentGitHubToken: tt.agentGitHubToken,
+			}
+
+			statefulSet, _, err := testSessionReconciler(nil, nil).buildSessionStatefulSet(session, workspace, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var script string
+			for _, c := range statefulSet.Spec.Template.Spec.InitContainers {
+				if c.Name == "git-clone" {
+					script = c.Command[2]
+				}
+			}
+			if !strings.Contains(script, "sparse-checkout set --no-cone -- '/docs'") {
+				t.Fatalf("Session git-clone lost the sparse checkout: %q", script)
+			}
+			initialized := script[:strings.Index(script, "rm -rf -- /workspace/repo")]
+			if persisted := strings.Contains(initialized, "--add credential.helper"); persisted != tt.wantPersisted {
+				t.Errorf("Initialized-workspace branch persists the credential helper = %v, want %v: %q", persisted, tt.wantPersisted, initialized)
+			}
+		})
+	}
+}
+
+func TestSessionPodRejectsGitDirRemoveWithInitialBranch(t *testing.T) {
+	t.Parallel()
+	session := testSession("restricted-branch", "codex")
+	session.Spec.Worker.WorkspaceRef = &kelos.WorkspaceReference{Name: "workspace"}
+	session.Spec.VolumeClaimTemplate = nil
+	session.Spec.InitialBranch = "issue-42"
+	workspace := &kelos.WorkspaceSpec{
+		Repo:  "https://github.com/kelos-dev/kelos.git",
+		Clone: &kelos.WorkspaceClone{GitDir: kelos.WorkspaceGitDirRemove},
+	}
+
+	_, _, err := testSessionReconciler(nil, nil).buildSessionStatefulSet(session, workspace, nil)
+	if err == nil || !strings.Contains(err.Error(), `clone.gitDir Remove cannot be combined with branch "issue-42"`) {
+		t.Fatalf("Expected a gitDir Remove branch error, got %v", err)
+	}
+}
+
+func TestSessionReconcilerStopsRuntimeWhenWorkspaceCheckoutBecomesUnsupported(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		clone       *kelos.WorkspaceClone
+		wantStopped bool
+	}{
+		{name: "paths added to a persistent Session's Workspace", clone: &kelos.WorkspaceClone{Paths: []string{"docs"}}, wantStopped: true},
+		{name: "gitDir Remove added to a persistent Session's Workspace", clone: &kelos.WorkspaceClone{GitDir: kelos.WorkspaceGitDirRemove}, wantStopped: true},
+		{name: "gitDir Keep leaves the runtime running", clone: &kelos.WorkspaceClone{GitDir: kelos.WorkspaceGitDirKeep}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			scheme := runtime.NewScheme()
+			for _, add := range []func(*runtime.Scheme) error{appsv1.AddToScheme, corev1.AddToScheme, rbacv1.AddToScheme, kelos.AddToScheme} {
+				if err := add(scheme); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			session := testSession("restricted-later", "codex")
+			session.Spec.Worker.WorkspaceRef = &kelos.WorkspaceReference{Name: "workspace"}
+			workspace := &kelos.Workspace{
+				ObjectMeta: metav1.ObjectMeta{Name: "workspace", Namespace: session.Namespace},
+				Spec: kelos.WorkspaceSpec{
+					Repo:  "https://github.com/kelos-dev/kelos.git",
+					Clone: tt.clone,
+				},
+			}
+			statefulSet := testSessionStatefulSet(session)
+			statefulSet.Spec.Replicas = ptr.To(int32(1))
+			cl := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithStatusSubresource(&kelos.Session{}, &corev1.Pod{}, &appsv1.StatefulSet{}).
+				WithObjects(session, workspace, statefulSet).
+				Build()
+
+			_, err := testSessionReconciler(cl, scheme).Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(session)})
+
+			var updated appsv1.StatefulSet
+			if getErr := cl.Get(context.Background(), client.ObjectKeyFromObject(statefulSet), &updated); getErr != nil {
+				t.Fatal(getErr)
+			}
+			if !tt.wantStopped {
+				if err != nil {
+					t.Fatalf("Reconcile() error = %v", err)
+				}
+				if updated.Spec.Replicas == nil || *updated.Spec.Replicas != 1 {
+					t.Fatalf("StatefulSet replicas = %d, want 1", ptr.Deref(updated.Spec.Replicas, -1))
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("Reconcile() returned no error for an unsupported Workspace checkout")
+			}
+			if updated.Spec.Replicas == nil || *updated.Spec.Replicas != 0 {
+				t.Fatalf("StatefulSet replicas = %d, want 0 so the unrestricted runtime stops", ptr.Deref(updated.Spec.Replicas, -1))
+			}
+			var got kelos.Session
+			if getErr := cl.Get(context.Background(), client.ObjectKeyFromObject(session), &got); getErr != nil {
+				t.Fatal(getErr)
+			}
+			if got.Status.Phase != kelos.SessionPhaseFailed {
+				t.Fatalf("Session phase = %q, want %q", got.Status.Phase, kelos.SessionPhaseFailed)
+			}
+			want := "Failed to build Session StatefulSet: workspace clone.paths and clone.gitDir Remove are not supported for Sessions with a volumeClaimTemplate"
+			if got.Status.Message != want {
+				t.Fatalf("Session message = %q, want %q", got.Status.Message, want)
+			}
+		})
+	}
+}
+
+func TestSessionPodRestrictedCheckoutNeedsEphemeralStorage(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		persistent bool
+		workspace  kelos.WorkspaceSpec
+		wantErr    bool
+	}{
+		{name: "paths with persistent storage", persistent: true, workspace: kelos.WorkspaceSpec{Clone: &kelos.WorkspaceClone{Paths: []string{"docs"}}}, wantErr: true},
+		{name: "gitDir Remove with persistent storage", persistent: true, workspace: kelos.WorkspaceSpec{Clone: &kelos.WorkspaceClone{GitDir: kelos.WorkspaceGitDirRemove}}, wantErr: true},
+		{name: "agentGitHubToken None with persistent storage", persistent: true, workspace: kelos.WorkspaceSpec{
+			SecretRef:        &kelos.SecretReference{Name: "github-token"},
+			AgentGitHubToken: kelos.WorkspaceAgentGitHubTokenNone,
+		}},
+		{name: "empty clone settings with persistent storage", persistent: true, workspace: kelos.WorkspaceSpec{Clone: &kelos.WorkspaceClone{}}},
+		{name: "paths and gitDir Remove without persistent storage", workspace: kelos.WorkspaceSpec{Clone: &kelos.WorkspaceClone{Paths: []string{"docs"}, GitDir: kelos.WorkspaceGitDirRemove}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			session := testSession("restricted-storage", "codex")
+			session.Spec.Worker.WorkspaceRef = &kelos.WorkspaceReference{Name: "workspace"}
+			if !tt.persistent {
+				session.Spec.VolumeClaimTemplate = nil
+			}
+			workspace := tt.workspace
+			workspace.Repo = "https://github.com/kelos-dev/kelos.git"
+
+			statefulSet, _, err := testSessionReconciler(nil, nil).buildSessionStatefulSet(session, &workspace, nil)
+			if tt.wantErr {
+				want := "workspace clone.paths and clone.gitDir Remove are not supported for Sessions with a volumeClaimTemplate"
+				if err == nil || err.Error() != want {
+					t.Fatalf("Expected error %q, got %v", want, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("buildSessionStatefulSet() returned error: %v", err)
+			}
+			if statefulSet == nil {
+				t.Fatal("buildSessionStatefulSet() returned no StatefulSet")
+			}
+		})
+	}
 }

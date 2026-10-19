@@ -321,6 +321,15 @@ func (r *SessionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 	}
 	desiredStatefulSet, configMap, err := r.buildSessionStatefulSet(&session, workspace, agentConfig)
 	if err != nil {
+		// The running Pod was built from a checkout the Workspace no longer
+		// allows. Stop it instead of letting it keep serving that checkout;
+		// the next successful reconcile scales it back up.
+		var checkoutErr *workspaceCheckoutError
+		if errors.As(err, &checkoutErr) {
+			if scaleErr := r.setSessionReplicas(ctx, &statefulSet, 0); scaleErr != nil {
+				return ctrl.Result{}, scaleErr
+			}
+		}
 		message := fmt.Sprintf("Failed to build Session StatefulSet: %v", err)
 		_ = r.updateSessionStatus(ctx, &session, nil, kelos.SessionPhaseFailed, message, "StatefulSetBuildFailed")
 		return ctrl.Result{}, err
@@ -1616,6 +1625,9 @@ func sessionGitHubTokenSecretName(sessionName string) string {
 }
 
 func (r *SessionReconciler) buildSessionStatefulSet(session *kelos.Session, workspace *kelos.WorkspaceSpec, agentConfig *kelos.AgentConfigSpec) (*appsv1.StatefulSet, *corev1.ConfigMap, error) {
+	if err := validateSessionWorkspaceCheckout(session, workspace); err != nil {
+		return nil, nil, &workspaceCheckoutError{err: err}
+	}
 	worker := session.Spec.Worker.DeepCopy()
 	task := &kelos.Task{
 		ObjectMeta: metav1.ObjectMeta{Name: session.Name, Namespace: session.Namespace},
@@ -1744,7 +1756,7 @@ func (r *SessionReconciler) buildSessionStatefulSet(session *kelos.Session, work
 		}
 	}
 	credentialHelper := ""
-	if workspace != nil && workspace.SecretRef != nil {
+	if workspacePersistsGitCredentialHelper(workspace) {
 		credentialHelper = gitCredentialHelper()
 	}
 	if err := prepareSessionWorkspaceInit(podSpec.InitContainers, credentialHelper); err != nil {
@@ -1868,6 +1880,22 @@ func sessionSelectorLabels(session *kelos.Session) map[string]string {
 		"kelos.dev/component": "session",
 		"kelos.dev/session":   sessionLabelValue(session),
 	}
+}
+
+// validateSessionWorkspaceCheckout rejects checkout restrictions on a Session
+// with persistent storage. Its workspace keeps the checkout it was created
+// with, and the agent can write everywhere on that volume, so a restriction
+// added or changed later could not be applied or verified without deleting
+// the workspace. Sessions without persistent storage clone again on every Pod
+// start, so they always match the current Workspace.
+func validateSessionWorkspaceCheckout(session *kelos.Session, workspace *kelos.WorkspaceSpec) error {
+	if session.Spec.VolumeClaimTemplate == nil || workspace == nil || workspace.Clone == nil {
+		return nil
+	}
+	if len(workspace.Clone.Paths) > 0 || workspace.Clone.GitDir == kelos.WorkspaceGitDirRemove {
+		return fmt.Errorf("workspace clone.paths and clone.gitDir Remove are not supported for Sessions with a volumeClaimTemplate")
+	}
+	return nil
 }
 
 func prepareSessionWorkspaceInit(containers []corev1.Container, credentialHelper string) error {

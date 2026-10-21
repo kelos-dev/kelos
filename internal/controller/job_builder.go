@@ -439,7 +439,15 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 		}
 	}
 
+	if err := validateWorkspaceCheckout(task, workspace); err != nil {
+		return nil, err
+	}
+
 	if workspace != nil && workspace.SecretRef != nil {
+		// With AgentCredentials None the token reaches only the init
+		// containers that clone the repository and set up the branch.
+		agentToken := workspaceAgentGetsGitHubToken(workspace)
+
 		secretKeyRef := &corev1.SecretKeySelector{
 			LocalObjectReference: corev1.LocalObjectReference{
 				Name: workspace.SecretRef.Name,
@@ -450,7 +458,9 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 			Name:      "GITHUB_TOKEN",
 			ValueFrom: &corev1.EnvVarSource{SecretKeyRef: secretKeyRef},
 		}
-		envVars = append(envVars, githubTokenEnv)
+		if agentToken {
+			envVars = append(envVars, githubTokenEnv)
+		}
 		workspaceEnvVars = append(workspaceEnvVars, githubTokenEnv)
 
 		// gh CLI uses GH_TOKEN for github.com and GH_ENTERPRISE_TOKEN for
@@ -463,15 +473,19 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 			Name:      ghTokenName,
 			ValueFrom: &corev1.EnvVarSource{SecretKeyRef: secretKeyRef},
 		}
-		envVars = append(envVars, ghTokenEnv)
+		if agentToken {
+			envVars = append(envVars, ghTokenEnv)
+		}
 		workspaceEnvVars = append(workspaceEnvVars, ghTokenEnv)
 
 		// Point gh CLI at a clean config directory on the workspace volume
 		// so it does not read stale auth from the container image.
-		envVars = append(envVars, corev1.EnvVar{
-			Name:  "GH_CONFIG_DIR",
-			Value: GHConfigDir,
-		})
+		if agentToken {
+			envVars = append(envVars, corev1.EnvVar{
+				Name:  "GH_CONFIG_DIR",
+				Value: GHConfigDir,
+			})
+		}
 
 		// Expose the mounted token file path so the git credential
 		// helper and the gh wrapper script can re-read the token on
@@ -481,7 +495,9 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 			Name:  "KELOS_GITHUB_TOKEN_FILE",
 			Value: GitHubTokenMountPath + "/" + GitHubTokenSecretKey,
 		}
-		envVars = append(envVars, tokenFileEnv)
+		if agentToken {
+			envVars = append(envVars, tokenFileEnv)
+		}
 		workspaceEnvVars = append(workspaceEnvVars, tokenFileEnv)
 	}
 
@@ -546,7 +562,12 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 			})
 		}
 
+		checkout := workspaceCheckoutFor(workspace)
+
 		cloneArgs := []string{"clone"}
+		if len(checkout.sparsePatterns) > 0 {
+			cloneArgs = append(cloneArgs, "--filter=blob:none", "--no-checkout")
+		}
 		if workspace.Ref != "" && !commitRef {
 			cloneArgs = append(cloneArgs, "--branch", workspace.Ref)
 		}
@@ -564,12 +585,11 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 		}
 
 		if commitRef {
-			credentialHelper := ""
-			if workspace.SecretRef != nil {
-				credentialHelper = gitCredentialHelper()
-			}
-			initContainer.Command = []string{"sh", "-c", buildCommitRefCheckoutScript(credentialHelper)}
+			initContainer.Command = []string{"sh", "-c", buildWorkspaceCommitCheckoutScript(checkout)}
 			initContainer.Args = []string{"--", workspace.Repo, targetPath, workspace.Ref}
+		} else if checkout.restricted() {
+			initContainer.Command = []string{"sh", "-c", buildWorkspaceCloneScript(checkout)}
+			initContainer.Args = append([]string{"--"}, cloneArgs...)
 		} else if workspace.SecretRef != nil {
 			credentialHelper := gitCredentialHelper()
 			credentialConfig := workspaceGitCredentialConfigScript(credentialHelper)
@@ -625,29 +645,36 @@ func (b *JobBuilder) buildAgentJob(task *kelos.Task, workspace *kelos.WorkspaceS
 					credHelper, gitCredentialDefaultUsername,
 				)
 			}
+			// A partial clone fetches blobs during checkout, which reads the
+			// credential helper from .git/config. When the helper is not saved
+			// there (agentCredentials None), pass it to those commands too.
+			localGit := "git"
+			if workspace.SecretRef != nil && !workspacePersistsGitCredentialHelper(workspace) {
+				localGit = remoteGit
+			}
 			branchSetupScript := fmt.Sprintf(
 				`set -e
-cd %s/repo
+cd %[1]s/repo
 remote_status=0
-%s ls-remote --exit-code --heads origin "refs/heads/$KELOS_BRANCH" >/dev/null || remote_status=$?
+%[2]s ls-remote --exit-code --heads origin "refs/heads/$KELOS_BRANCH" >/dev/null || remote_status=$?
 if [ "$remote_status" -eq 0 ]; then
-  %s fetch origin "refs/heads/$KELOS_BRANCH"
+  %[2]s fetch origin "refs/heads/$KELOS_BRANCH"
   if git show-ref --verify --quiet "refs/heads/$KELOS_BRANCH"; then
-    git checkout "$KELOS_BRANCH"
-    git merge --ff-only FETCH_HEAD
+    %[3]s checkout "$KELOS_BRANCH"
+    %[3]s merge --ff-only FETCH_HEAD
   else
-    git checkout -b "$KELOS_BRANCH" FETCH_HEAD
+    %[3]s checkout -b "$KELOS_BRANCH" FETCH_HEAD
   fi
 elif [ "$remote_status" -eq 2 ]; then
   if git show-ref --verify --quiet "refs/heads/$KELOS_BRANCH"; then
-    git checkout "$KELOS_BRANCH"
+    %[3]s checkout "$KELOS_BRANCH"
   else
-    git checkout -b "$KELOS_BRANCH"
+    %[3]s checkout -b "$KELOS_BRANCH"
   fi
 else
   exit "$remote_status"
 fi`,
-				WorkspaceMountPath, remoteGit, remoteGit,
+				WorkspaceMountPath, remoteGit, localGit,
 			)
 			branchEnv := make([]corev1.EnvVar, len(workspaceEnvVars), len(workspaceEnvVars)+1)
 			copy(branchEnv, workspaceEnvVars)
@@ -697,7 +724,11 @@ fi`,
 			})
 		}
 
-		mainContainer.VolumeMounts = append([]corev1.VolumeMount(nil), workspaceVolumeMounts...)
+		if workspaceAgentGetsGitHubToken(workspace) {
+			mainContainer.VolumeMounts = append([]corev1.VolumeMount(nil), workspaceVolumeMounts...)
+		} else {
+			mainContainer.VolumeMounts = []corev1.VolumeMount{volumeMount}
+		}
 		mainContainer.WorkingDir = WorkspaceMountPath + "/repo"
 	}
 
@@ -1043,15 +1074,188 @@ func isFullGitCommitSHA(ref string) bool {
 	return true
 }
 
-func buildCommitRefCheckoutScript(credentialHelper string) string {
-	fetchCmd := `git -C "$target" fetch --depth 1 origin "$ref"`
-	if credentialHelper != "" {
-		fetchCmd = fmt.Sprintf(
-			`git -C "$target" -c credential.helper= -c credential.helper='%s' -c credential.username=%s fetch --depth 1 origin "$ref"`,
-			credentialHelper, gitCredentialDefaultUsername,
+// workspaceAgentGetsGitHubToken reports whether the agent container receives
+// the GitHub token from the workspace secretRef.
+func workspaceAgentGetsGitHubToken(workspace *kelos.WorkspaceSpec) bool {
+	return workspace != nil && workspace.SecretRef != nil &&
+		workspace.AgentCredentials != kelos.WorkspaceAgentCredentialsNone
+}
+
+// workspaceRemovesGitDir reports whether the clone deletes the repository's
+// .git directory.
+func workspaceRemovesGitDir(workspace *kelos.WorkspaceSpec) bool {
+	return workspace != nil && workspace.Clone != nil && workspace.Clone.RemoveGitDir
+}
+
+// workspacePersistsGitCredentialHelper reports whether the clone writes the
+// token-reading git credential helper into the repository's config. It is
+// only written when the agent receives the token and .git is kept.
+func workspacePersistsGitCredentialHelper(workspace *kelos.WorkspaceSpec) bool {
+	return workspaceAgentGetsGitHubToken(workspace) && !workspaceRemovesGitDir(workspace)
+}
+
+// validateWorkspaceCheckout rejects workspace clone settings that cannot
+// produce a working checkout for the task.
+func validateWorkspaceCheckout(task *kelos.Task, workspace *kelos.WorkspaceSpec) error {
+	if workspace == nil || workspace.Clone == nil {
+		return nil
+	}
+	for _, p := range workspace.Clone.Paths {
+		if _, err := sanitizeClonePath(p); err != nil {
+			return fmt.Errorf("invalid workspace clone path %q: %w", p, err)
+		}
+	}
+	if workspace.Clone.RemoveGitDir {
+		if len(workspace.Remotes) > 0 {
+			return fmt.Errorf("workspace clone.removeGitDir cannot be combined with remotes")
+		}
+		if task.Spec.Branch != "" {
+			return fmt.Errorf("workspace clone.removeGitDir cannot be combined with branch %q: setting up the branch needs the .git directory", task.Spec.Branch)
+		}
+	}
+	return nil
+}
+
+// sanitizeClonePath validates a Workspace clone path and returns it without
+// a trailing slash. It mirrors the API validation on spec.clone.paths and
+// additionally rejects anything git would read as a sparse-checkout pattern
+// rather than a literal path.
+func sanitizeClonePath(p string) (string, error) {
+	if p == "" {
+		return "", fmt.Errorf("path is empty")
+	}
+	if strings.HasPrefix(p, "/") {
+		return "", fmt.Errorf("absolute paths are not allowed")
+	}
+	for _, r := range p {
+		if r < 0x20 || r == 0x7f || strings.ContainsRune(`*?[\`, r) {
+			return "", fmt.Errorf("path must not contain control characters or any of *?[\\")
+		}
+	}
+	trimmed := strings.TrimSuffix(p, "/")
+	// Git drops an unescaped trailing space from a sparse-checkout pattern,
+	// so "data /" would select "data".
+	if strings.HasSuffix(trimmed, " ") {
+		return "", fmt.Errorf("path must not end with a space")
+	}
+	for _, segment := range strings.Split(trimmed, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return "", fmt.Errorf("path must not contain empty, '.' or '..' segments")
+		}
+	}
+	return trimmed, nil
+}
+
+// workspaceCheckout describes how the git-clone init container prepares the
+// repository.
+type workspaceCheckout struct {
+	// credentialHelper is the git credential helper used for clone and
+	// fetch, or empty when the workspace has no secretRef.
+	credentialHelper string
+	// persistCredentialHelper writes credentialHelper into the repository's
+	// git config so later git commands in the agent container authenticate.
+	persistCredentialHelper bool
+	// sparsePatterns are root-anchored, non-cone sparse-checkout patterns,
+	// one per clone path.
+	sparsePatterns []string
+	// removeGitDir deletes .git once the checkout is complete.
+	removeGitDir bool
+}
+
+func workspaceCheckoutFor(workspace *kelos.WorkspaceSpec) workspaceCheckout {
+	checkout := workspaceCheckout{
+		persistCredentialHelper: workspacePersistsGitCredentialHelper(workspace),
+		removeGitDir:            workspaceRemovesGitDir(workspace),
+	}
+	if workspace.SecretRef != nil {
+		checkout.credentialHelper = gitCredentialHelper()
+	}
+	if workspace.Clone != nil {
+		for _, p := range workspace.Clone.Paths {
+			// validateWorkspaceCheckout has already rejected invalid paths.
+			clean, _ := sanitizeClonePath(p)
+			checkout.sparsePatterns = append(checkout.sparsePatterns, "/"+clean)
+		}
+	}
+	return checkout
+}
+
+// restricted reports whether the checkout differs from a plain clone that
+// persists the credential helper, and so needs the scripted clone.
+func (c workspaceCheckout) restricted() bool {
+	return len(c.sparsePatterns) > 0 || c.removeGitDir ||
+		(c.credentialHelper != "" && !c.persistCredentialHelper)
+}
+
+// remoteGit returns the git command prefix for operations that contact the
+// remote, with the workspace credential helper when one is configured.
+func (c workspaceCheckout) remoteGit(dir string) string {
+	cmd := "git"
+	if dir != "" {
+		cmd += " -C " + dir
+	}
+	if c.credentialHelper == "" {
+		return cmd
+	}
+	return fmt.Sprintf(`%s -c credential.helper= -c credential.helper='%s' -c credential.username=%s`,
+		cmd, c.credentialHelper, gitCredentialDefaultUsername)
+}
+
+func (c workspaceCheckout) sparseCheckoutSetLine(dir string) string {
+	quoted := make([]string, 0, len(c.sparsePatterns))
+	for _, pattern := range c.sparsePatterns {
+		quoted = append(quoted, shellQuote(pattern))
+	}
+	return fmt.Sprintf("git -C %s sparse-checkout set --no-cone -- %s", dir, strings.Join(quoted, " "))
+}
+
+func (c workspaceCheckout) finishLines(dir string) []string {
+	var lines []string
+	if c.persistCredentialHelper {
+		lines = append(lines,
+			fmt.Sprintf(`git -C %s config --unset-all credential.helper 2>/dev/null || true`, dir),
+			fmt.Sprintf(`git -C %s config --add credential.helper '%s'`, dir, c.credentialHelper),
+			fmt.Sprintf(`git -C %s config credential.username %s`, dir, gitCredentialDefaultUsername),
 		)
 	}
+	if c.removeGitDir {
+		lines = append(lines, fmt.Sprintf("rm -rf %s/.git", dir))
+	}
+	return lines
+}
 
+// buildWorkspaceCloneScript returns the git-clone script for a branch or
+// default-branch checkout. The clone arguments are passed as "$@". With
+// sparse patterns the clone skips blobs and the checkout, the patterns are
+// applied, and the checkout then fetches only the blobs it needs, which is
+// why it runs with the credential helper.
+func buildWorkspaceCloneScript(c workspaceCheckout) string {
+	dir := WorkspaceMountPath + "/repo"
+	lines := []string{
+		"set -eu",
+		c.remoteGit("") + ` "$@"`,
+	}
+	if len(c.sparsePatterns) > 0 {
+		lines = append(lines,
+			c.sparseCheckoutSetLine(dir),
+			c.remoteGit(dir)+" checkout",
+		)
+	}
+	lines = append(lines, c.finishLines(dir)...)
+	return strings.Join(lines, "\n")
+}
+
+func buildCommitRefCheckoutScript(credentialHelper string) string {
+	return buildWorkspaceCommitCheckoutScript(workspaceCheckout{
+		credentialHelper:        credentialHelper,
+		persistCredentialHelper: credentialHelper != "",
+	})
+}
+
+// buildWorkspaceCommitCheckoutScript returns the git-clone script for a full
+// commit SHA ref, which is fetched directly because git clone cannot check
+// out an arbitrary commit.
+func buildWorkspaceCommitCheckoutScript(c workspaceCheckout) string {
 	lines := []string{
 		"set -eu",
 		"repo=$1",
@@ -1059,17 +1263,24 @@ func buildCommitRefCheckoutScript(credentialHelper string) string {
 		"ref=$3",
 		`git init "$target"`,
 		`git -C "$target" remote add origin "$repo"`,
-		fetchCmd,
-		`git -C "$target" checkout --detach FETCH_HEAD`,
 	}
 
-	if credentialHelper != "" {
+	fetchFlags := "--depth 1"
+	checkoutCmd := `git -C "$target" checkout --detach FETCH_HEAD`
+	if len(c.sparsePatterns) > 0 {
 		lines = append(lines,
-			`git -C "$target" config --unset-all credential.helper 2>/dev/null || true`,
-			fmt.Sprintf(`git -C "$target" config --add credential.helper '%s'`, credentialHelper),
-			fmt.Sprintf(`git -C "$target" config credential.username %s`, gitCredentialDefaultUsername),
+			`git -C "$target" config remote.origin.promisor true`,
+			`git -C "$target" config remote.origin.partialclonefilter blob:none`,
+			c.sparseCheckoutSetLine(`"$target"`),
 		)
+		fetchFlags = "--depth 1 --filter=blob:none"
+		checkoutCmd = c.remoteGit(`"$target"`) + " checkout --detach FETCH_HEAD"
 	}
+	lines = append(lines,
+		c.remoteGit(`"$target"`)+" fetch "+fetchFlags+` origin "$ref"`,
+		checkoutCmd,
+	)
+	lines = append(lines, c.finishLines(`"$target"`)...)
 
 	return strings.Join(lines, "\n")
 }

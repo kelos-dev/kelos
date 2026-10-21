@@ -1045,6 +1045,8 @@ the remaining count and accepts the next Task anyway, so cleanup is
 best-effort rather than guaranteed.
 
 A WorkerPool's Workspace may use either a PAT-style or a GitHub App secret.
+WorkerPools do not support the Workspace [restricted checkout](#workspace-restricted-checkout)
+fields.
 GitHub App credentials are refreshed before they expire, so long-lived workers
 keep repository access without restarting (see [Workspace authentication](#workspace-authentication)).
 
@@ -1067,7 +1069,10 @@ keep repository access without restarting (see [Workspace authentication](#works
 |-------|-------------|----------|
 | `spec.repo` | Git repository URL to clone (HTTPS, git://, or SSH) | Yes |
 | `spec.ref` | Branch, tag, or commit SHA to checkout (defaults to repo's default branch) | No |
+| `spec.clone.paths` | Repository paths (directories or files, relative to the repository root) to check out. Only these paths are written to disk, and blobs outside them are not downloaded. Entries are matched from the root exactly; root files are not included unless listed. Entries must not start with `/`, end with a space (ignoring a trailing slash), or contain empty, `.` or `..` segments, control characters, or any of `*`, `?`, `[`, `\`. Up to 64 entries of at most 256 characters each (see [Restricted Checkout](#workspace-restricted-checkout) below) | No |
+| `spec.clone.removeGitDir` | Delete `.git` after the clone, leaving only the checked-out files. Cannot be combined with `spec.remotes`; a Task with `spec.branch` or a Session with `spec.initialBranch` that uses this Workspace fails | No |
 | `spec.secretRef.name` | Secret containing credentials for git auth and `gh` CLI (see [authentication methods](#workspace-authentication) below) | No |
+| `spec.agentCredentials` | `Token` (default) or `None`. `None` uses the `spec.secretRef` token only to clone the repository and set up the Task or Session branch: the agent container gets no GitHub token environment variables, token file, or git credential helper from Kelos | No |
 | `spec.ghproxy` | Enables the workspace-scoped ghproxy when set to `{}`; omitted or `null` disables it | No |
 | `spec.remotes[].name` | Git remote name to add after cloning (must not be `"origin"`) | Yes (per remote) |
 | `spec.remotes[].url` | Git remote URL | Yes (per remote) |
@@ -1098,6 +1103,37 @@ Notes:
 - Runs before the agent process starts; if it exits non-zero, the agent never runs and the Task fails.
 - Executes in `/workspace/repo` as the agent UID (61100), with access to all built-in Kelos env vars and any `Task.spec.podOverrides.env` entries from the Task that references this Workspace.
 - The default form is exec-style; for shell pipelines, environment expansion, or multi-step scripts, wrap the command with `["sh", "-c", "<script>"]`.
+
+### Workspace Restricted Checkout
+
+Use `spec.clone.paths`, `spec.clone.removeGitDir`, and `spec.agentCredentials: None` together to give an agent part of a private repository that it cannot widen to the rest:
+
+```yaml
+apiVersion: kelos.dev/v1alpha2
+kind: Workspace
+metadata:
+  name: docs-only
+spec:
+  repo: https://github.com/your-org/your-repo.git
+  ref: main
+  secretRef:
+    name: github-app-creds
+  clone:
+    paths:
+      - docs
+      - api/openapi.yaml
+    removeGitDir: true
+  agentCredentials: None
+```
+
+Notes:
+
+- `spec.clone.paths` alone limits what is written to disk, but `.git` still records every path in the commit, so git in the agent container can fetch the rest (for example with `git sparse-checkout disable`) when it has credentials or the repository is public. Set `spec.clone.removeGitDir` to remove that route.
+- With `spec.clone.removeGitDir`, the agent cannot run git commands in the repository. `spec.remotes`, `Task.spec.branch`, and `Session.spec.initialBranch` need `.git` and are rejected: the Workspace is not admitted with `remotes`, and a Task or Session with a branch fails with a message naming the conflict.
+- `spec.agentCredentials: None` keeps the `spec.secretRef` token out of the agent container. Kelos still uses the token to clone and to set up the Task or Session branch. It does not restrict the agent's network access, and it does not cover what you add yourself: an environment variable or volume mount in `Task.spec.podOverrides` that references the token Secret still reaches the agent.
+- `spec.files` are still written after the checkout, so they can add files outside `spec.clone.paths`.
+- Sessions with `spec.volumeClaimTemplate` do not support `spec.clone.paths` or `spec.clone.removeGitDir`: a persistent workspace keeps the checkout it was created with, so a restriction added later could not take effect. Such a Session fails with a message naming the conflict. Sessions without persistent storage clone again whenever their Pod starts and support both fields. `spec.agentCredentials: None` works with either.
+- WorkerPools do not support `spec.clone.paths`, `spec.clone.removeGitDir`, or `spec.agentCredentials: None`. A WorkerPool that references such a Workspace is not reconciled: Kelos records an `UnsupportedWorkspace` Warning event on the WorkerPool and leaves existing worker pods in place, and Tasks sent to the pool fail without being assigned to a worker.
 
 ### Workspace Authentication
 

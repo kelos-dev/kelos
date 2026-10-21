@@ -77,6 +77,9 @@ var _ = Describe("AgentConfig conversion webhook", Ordered, func() {
 				ObjectMeta: metav1.ObjectMeta{Name: "cfg", Namespace: ns},
 			})
 		}
+		_ = k8sClient.Delete(ctx, &kelos.Workspace{
+			ObjectMeta: metav1.ObjectMeta{Name: "ws-restricted", Namespace: "test-conv-ws-restricted"},
+		})
 		// TaskSpawners carry a controller finalizer, so leaving them behind
 		// would keep instances of the taskspawners CRD alive indefinitely.
 		for _, ts := range []types.NamespacedName{
@@ -185,6 +188,42 @@ var _ = Describe("AgentConfig conversion webhook", Ordered, func() {
 		Expect(gi.PollInterval).To(Equal("9m"))
 		Expect(gi.CommentPolicy).NotTo(BeNil())
 		Expect(gi.CommentPolicy.TriggerComment).To(Equal("/kelos go"))
+	})
+
+	It("preserves Workspace checkout restrictions across a v1alpha1 round-trip", func() {
+		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test-conv-ws-restricted"}}
+		Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+		key := types.NamespacedName{Name: "ws-restricted", Namespace: ns.Name}
+
+		By("Creating a v1alpha2 Workspace with clone restrictions and agentCredentials None")
+		Expect(k8sClient.Create(ctx, &kelos.Workspace{
+			ObjectMeta: metav1.ObjectMeta{Name: key.Name, Namespace: key.Namespace},
+			Spec: kelos.WorkspaceSpec{
+				Repo:             "https://github.com/example/repo.git",
+				Ref:              "main",
+				SecretRef:        &kelos.SecretReference{Name: "github-token"},
+				Clone:            &kelos.WorkspaceClone{Paths: []string{"docs"}, RemoveGitDir: true},
+				AgentCredentials: kelos.WorkspaceAgentCredentialsNone,
+			},
+		})).To(Succeed())
+
+		By("Updating it through v1alpha1, which has no such fields")
+		Eventually(func() error {
+			current := &kelosv1alpha1.Workspace{}
+			if err := k8sClient.Get(ctx, key, current); err != nil {
+				return err
+			}
+			current.Spec.Ref = "release"
+			return k8sClient.Update(ctx, current)
+		}, 10*time.Second, 100*time.Millisecond).Should(Succeed())
+
+		By("Reading it as v1alpha2 and asserting the restrictions were restored")
+		got := &kelos.Workspace{}
+		Expect(k8sClient.Get(ctx, key, got)).To(Succeed())
+		Expect(got.Spec.Ref).To(Equal("release"))
+		Expect(got.Spec.Clone).To(Equal(&kelos.WorkspaceClone{Paths: []string{"docs"}, RemoveGitDir: true}))
+		Expect(got.Spec.AgentCredentials).To(Equal(kelos.WorkspaceAgentCredentialsNone))
+		Expect(got.Annotations).NotTo(HaveKey("kelos.dev/v1alpha2-workspace-checkout"))
 	})
 
 	It("preserves TaskSpawner slack excludeFilters across a v1alpha1 round-trip", func() {

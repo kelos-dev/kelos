@@ -3908,3 +3908,113 @@ func findVolume(volumes []corev1.Volume, name string) *corev1.Volume {
 	}
 	return nil
 }
+
+func TestSessionPodRestrictedWorkspaceCheckout(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name             string
+		removeGitDir     bool
+		agentCredentials kelos.WorkspaceAgentCredentials
+		wantPersisted    bool
+	}{
+		{name: "default keeps re-persisting the credential helper", wantPersisted: true},
+		{name: "removeGitDir has no .git to configure on restart", removeGitDir: true},
+		{name: "agentCredentials None leaves the helper out of .git/config", agentCredentials: kelos.WorkspaceAgentCredentialsNone},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			session := testSession("restricted", "codex")
+			session.Spec.Worker.WorkspaceRef = &kelos.WorkspaceReference{Name: "workspace"}
+			session.Spec.VolumeClaimTemplate = nil
+			workspace := &kelos.WorkspaceSpec{
+				Repo:             "https://github.com/kelos-dev/kelos.git",
+				Ref:              "main",
+				SecretRef:        &kelos.SecretReference{Name: "github-token"},
+				Clone:            &kelos.WorkspaceClone{Paths: []string{"docs"}, RemoveGitDir: tt.removeGitDir},
+				AgentCredentials: tt.agentCredentials,
+			}
+
+			statefulSet, _, err := testSessionReconciler(nil, nil).buildSessionStatefulSet(session, workspace, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var script string
+			for _, c := range statefulSet.Spec.Template.Spec.InitContainers {
+				if c.Name == "git-clone" {
+					script = c.Command[2]
+				}
+			}
+			if !strings.Contains(script, "sparse-checkout set --no-cone -- '/docs'") {
+				t.Fatalf("Session git-clone lost the sparse checkout: %q", script)
+			}
+			initialized := script[:strings.Index(script, "rm -rf -- /workspace/repo")]
+			if persisted := strings.Contains(initialized, "--add credential.helper"); persisted != tt.wantPersisted {
+				t.Errorf("Initialized-workspace branch persists the credential helper = %v, want %v: %q", persisted, tt.wantPersisted, initialized)
+			}
+		})
+	}
+}
+
+func TestSessionPodRejectsRemoveGitDirWithInitialBranch(t *testing.T) {
+	t.Parallel()
+	session := testSession("restricted-branch", "codex")
+	session.Spec.Worker.WorkspaceRef = &kelos.WorkspaceReference{Name: "workspace"}
+	session.Spec.VolumeClaimTemplate = nil
+	session.Spec.InitialBranch = "issue-42"
+	workspace := &kelos.WorkspaceSpec{
+		Repo:  "https://github.com/kelos-dev/kelos.git",
+		Clone: &kelos.WorkspaceClone{RemoveGitDir: true},
+	}
+
+	_, _, err := testSessionReconciler(nil, nil).buildSessionStatefulSet(session, workspace, nil)
+	if err == nil || !strings.Contains(err.Error(), `clone.removeGitDir cannot be combined with branch "issue-42"`) {
+		t.Fatalf("Expected a removeGitDir branch error, got %v", err)
+	}
+}
+
+func TestSessionPodRestrictedCheckoutNeedsEphemeralStorage(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		persistent bool
+		workspace  kelos.WorkspaceSpec
+		wantErr    bool
+	}{
+		{name: "paths with persistent storage", persistent: true, workspace: kelos.WorkspaceSpec{Clone: &kelos.WorkspaceClone{Paths: []string{"docs"}}}, wantErr: true},
+		{name: "removeGitDir with persistent storage", persistent: true, workspace: kelos.WorkspaceSpec{Clone: &kelos.WorkspaceClone{RemoveGitDir: true}}, wantErr: true},
+		{name: "agentCredentials None with persistent storage", persistent: true, workspace: kelos.WorkspaceSpec{
+			SecretRef:        &kelos.SecretReference{Name: "github-token"},
+			AgentCredentials: kelos.WorkspaceAgentCredentialsNone,
+		}},
+		{name: "empty clone settings with persistent storage", persistent: true, workspace: kelos.WorkspaceSpec{Clone: &kelos.WorkspaceClone{}}},
+		{name: "paths and removeGitDir without persistent storage", workspace: kelos.WorkspaceSpec{Clone: &kelos.WorkspaceClone{Paths: []string{"docs"}, RemoveGitDir: true}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			session := testSession("restricted-storage", "codex")
+			session.Spec.Worker.WorkspaceRef = &kelos.WorkspaceReference{Name: "workspace"}
+			if !tt.persistent {
+				session.Spec.VolumeClaimTemplate = nil
+			}
+			workspace := tt.workspace
+			workspace.Repo = "https://github.com/kelos-dev/kelos.git"
+
+			statefulSet, _, err := testSessionReconciler(nil, nil).buildSessionStatefulSet(session, &workspace, nil)
+			if tt.wantErr {
+				want := "workspace clone.paths and clone.removeGitDir are not supported for Sessions with a volumeClaimTemplate"
+				if err == nil || err.Error() != want {
+					t.Fatalf("Expected error %q, got %v", want, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("buildSessionStatefulSet() returned error: %v", err)
+			}
+			if statefulSet == nil {
+				t.Fatal("buildSessionStatefulSet() returned no StatefulSet")
+			}
+		})
+	}
+}

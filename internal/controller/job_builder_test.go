@@ -4,6 +4,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/cgi"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -6369,5 +6372,596 @@ func TestBuildJob_WorkerSpecOverridesLegacy(t *testing.T) {
 	if apiKeyEnv.ValueFrom.SecretKeyRef.LocalObjectReference.Name != "worker-secret" {
 		t.Errorf("CODEX_API_KEY secret name: expected %q, got %q",
 			"worker-secret", apiKeyEnv.ValueFrom.SecretKeyRef.LocalObjectReference.Name)
+	}
+}
+
+func restrictedCheckoutTask(branch string) *kelos.Task {
+	return &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "restricted", Namespace: "default"},
+		Spec: kelos.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Answer the question",
+			Credentials: &kelos.Credentials{
+				Type:      kelos.CredentialTypeAPIKey,
+				SecretRef: &kelos.SecretReference{Name: "my-secret"},
+			},
+			Branch: branch,
+		},
+	}
+}
+
+func initContainerByName(t *testing.T, job *batchv1.Job, name string) corev1.Container {
+	t.Helper()
+	for _, c := range job.Spec.Template.Spec.InitContainers {
+		if c.Name == name {
+			return c
+		}
+	}
+	t.Fatalf("Init container %q not found", name)
+	return corev1.Container{}
+}
+
+func gitCloneScript(t *testing.T, job *batchv1.Job) string {
+	t.Helper()
+	c := initContainerByName(t, job, "git-clone")
+	if len(c.Command) != 3 || c.Command[0] != "sh" || c.Command[1] != "-c" {
+		t.Fatalf("Expected git-clone command [sh -c ...], got %v", c.Command)
+	}
+	return c.Command[2]
+}
+
+func TestBuildJob_WorkspaceClonePathsAndRemoveGitDir(t *testing.T) {
+	const sha = "c44211cb54d861d9445de16a0e8ce96d7f29637d"
+	sparseSet := `sparse-checkout set --no-cone -- '/docs' '/www/app' '/Makefile'`
+	tests := []struct {
+		name         string
+		ref          string
+		secretRef    bool
+		clone        *kelos.WorkspaceClone
+		wantArgs     []string
+		wantInScript []string
+		notInScript  []string
+	}{
+		{
+			name:      "paths on a branch ref with a token",
+			ref:       "main",
+			secretRef: true,
+			clone:     &kelos.WorkspaceClone{Paths: []string{"docs", "www/app/", "Makefile"}},
+			wantArgs: []string{"--", "clone", "--filter=blob:none", "--no-checkout",
+				"--branch", "main", "--no-single-branch", "--depth", "1",
+				"--", "https://github.com/example/repo.git", WorkspaceMountPath + "/repo"},
+			wantInScript: []string{
+				"set -eu",
+				`-c credential.helper= -c credential.helper='` + gitCredentialHelper() + `' -c credential.username=x-access-token "$@"`,
+				"git -C /workspace/repo " + sparseSet,
+				"git -C /workspace/repo -c credential.helper= -c credential.helper='" + gitCredentialHelper() + "' -c credential.username=x-access-token checkout",
+				"git -C /workspace/repo config --add credential.helper '" + gitCredentialHelper() + "'",
+			},
+			notInScript: []string{"rm -rf"},
+		},
+		{
+			name:  "paths without a token",
+			clone: &kelos.WorkspaceClone{Paths: []string{"docs", "www/app", "Makefile"}},
+			wantArgs: []string{"--", "clone", "--filter=blob:none", "--no-checkout",
+				"--no-single-branch", "--depth", "1",
+				"--", "https://github.com/example/repo.git", WorkspaceMountPath + "/repo"},
+			wantInScript: []string{
+				"set -eu\ngit \"$@\"\n",
+				"git -C /workspace/repo " + sparseSet + "\ngit -C /workspace/repo checkout",
+			},
+			notInScript: []string{"credential.helper", "rm -rf"},
+		},
+		{
+			name:      "removeGitDir on a branch ref drops .git instead of persisting the helper",
+			ref:       "main",
+			secretRef: true,
+			clone:     &kelos.WorkspaceClone{RemoveGitDir: true},
+			wantArgs: []string{"--", "clone", "--branch", "main", "--no-single-branch", "--depth", "1",
+				"--", "https://github.com/example/repo.git", WorkspaceMountPath + "/repo"},
+			wantInScript: []string{`credential.username=x-access-token "$@"`, "\nrm -rf /workspace/repo/.git"},
+			notInScript:  []string{"sparse-checkout", "--add credential.helper"},
+		},
+		{
+			name:      "paths and removeGitDir on a commit ref",
+			ref:       sha,
+			secretRef: true,
+			clone:     &kelos.WorkspaceClone{Paths: []string{"docs", "www/app", "Makefile"}, RemoveGitDir: true},
+			wantArgs:  []string{"--", "https://github.com/example/repo.git", WorkspaceMountPath + "/repo", sha},
+			wantInScript: []string{
+				`git -C "$target" config remote.origin.promisor true`,
+				`git -C "$target" config remote.origin.partialclonefilter blob:none`,
+				`git -C "$target" ` + sparseSet,
+				`credential.username=x-access-token fetch --depth 1 --filter=blob:none origin "$ref"`,
+				`credential.username=x-access-token checkout --detach FETCH_HEAD`,
+				`rm -rf "$target"/.git`,
+			},
+			notInScript: []string{"--add credential.helper"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workspace := &kelos.WorkspaceSpec{
+				Repo:  "https://github.com/example/repo.git",
+				Ref:   tt.ref,
+				Clone: tt.clone,
+			}
+			if tt.secretRef {
+				workspace.SecretRef = &kelos.SecretReference{Name: "github-token"}
+			}
+			task := restrictedCheckoutTask("")
+
+			job, err := NewJobBuilder().Build(task, workspace, nil, task.Spec.Prompt)
+			if err != nil {
+				t.Fatalf("Build() returned error: %v", err)
+			}
+
+			gitClone := initContainerByName(t, job, "git-clone")
+			if strings.Join(gitClone.Args, " ") != strings.Join(tt.wantArgs, " ") {
+				t.Errorf("git-clone args:\n got %q\nwant %q", gitClone.Args, tt.wantArgs)
+			}
+			script := gitCloneScript(t, job)
+			for _, want := range tt.wantInScript {
+				if !strings.Contains(script, want) {
+					t.Errorf("Expected git-clone script to contain %q, got:\n%s", want, script)
+				}
+			}
+			for _, unwanted := range tt.notInScript {
+				if strings.Contains(script, unwanted) {
+					t.Errorf("Expected git-clone script not to contain %q, got:\n%s", unwanted, script)
+				}
+			}
+			// .git must be removed last, after the checkout and any config.
+			if tt.clone.RemoveGitDir && !strings.HasSuffix(script, "/.git") {
+				t.Errorf("Expected .git removal to be the last step, got:\n%s", script)
+			}
+		})
+	}
+}
+
+func TestBuildJob_WorkspaceWithoutCloneSettingsKeepsPlainClone(t *testing.T) {
+	for _, ref := range []string{"main", "c44211cb54d861d9445de16a0e8ce96d7f29637d"} {
+		workspace := &kelos.WorkspaceSpec{
+			Repo:      "https://github.com/example/repo.git",
+			Ref:       ref,
+			SecretRef: &kelos.SecretReference{Name: "github-token"},
+			Clone:     &kelos.WorkspaceClone{},
+		}
+		task := restrictedCheckoutTask("")
+		job, err := NewJobBuilder().Build(task, workspace, nil, task.Spec.Prompt)
+		if err != nil {
+			t.Fatalf("Build() returned error: %v", err)
+		}
+		gitClone := initContainerByName(t, job, "git-clone")
+		all := strings.Join(append(append([]string(nil), gitClone.Command...), gitClone.Args...), " ")
+		for _, unwanted := range []string{"--filter", "--no-checkout", "sparse-checkout", "rm -rf"} {
+			if strings.Contains(all, unwanted) {
+				t.Errorf("ref %s: expected no %q in a plain clone, got %q", ref, unwanted, all)
+			}
+		}
+		if !strings.Contains(all, "--add credential.helper") {
+			t.Errorf("ref %s: expected the credential helper to be persisted, got %q", ref, all)
+		}
+	}
+}
+
+func TestBuildJob_WorkspaceAgentCredentials(t *testing.T) {
+	tokenEnvNames := []string{"GITHUB_TOKEN", "GH_TOKEN", "GH_ENTERPRISE_TOKEN", "GH_CONFIG_DIR", "KELOS_GITHUB_TOKEN_FILE"}
+	tests := []struct {
+		name             string
+		repo             string
+		agentCredentials kelos.WorkspaceAgentCredentials
+		wantAgentToken   bool
+		wantAgentEnv     []string
+		wantInitEnv      []string
+	}{
+		{
+			name:           "omitted gives the agent the token",
+			repo:           "https://github.com/example/repo.git",
+			wantAgentToken: true,
+			wantAgentEnv:   []string{"GITHUB_TOKEN", "GH_TOKEN", "GH_CONFIG_DIR", "KELOS_GITHUB_TOKEN_FILE"},
+			wantInitEnv:    []string{"GITHUB_TOKEN", "GH_TOKEN", "KELOS_GITHUB_TOKEN_FILE"},
+		},
+		{
+			name:             "Token gives the agent the token",
+			repo:             "https://github.com/example/repo.git",
+			agentCredentials: kelos.WorkspaceAgentCredentialsToken,
+			wantAgentToken:   true,
+			wantAgentEnv:     []string{"GITHUB_TOKEN", "GH_TOKEN", "GH_CONFIG_DIR", "KELOS_GITHUB_TOKEN_FILE"},
+			wantInitEnv:      []string{"GITHUB_TOKEN", "GH_TOKEN", "KELOS_GITHUB_TOKEN_FILE"},
+		},
+		{
+			name:             "None keeps the token in the init containers",
+			repo:             "https://github.com/example/repo.git",
+			agentCredentials: kelos.WorkspaceAgentCredentialsNone,
+			wantInitEnv:      []string{"GITHUB_TOKEN", "GH_TOKEN", "KELOS_GITHUB_TOKEN_FILE"},
+		},
+		{
+			name:             "None on GitHub Enterprise",
+			repo:             "https://github.example.com/example/repo.git",
+			agentCredentials: kelos.WorkspaceAgentCredentialsNone,
+			wantInitEnv:      []string{"GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "KELOS_GITHUB_TOKEN_FILE"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workspace := &kelos.WorkspaceSpec{
+				Repo:             tt.repo,
+				Ref:              "main",
+				SecretRef:        &kelos.SecretReference{Name: "github-token"},
+				AgentCredentials: tt.agentCredentials,
+			}
+			task := restrictedCheckoutTask("feature-x")
+
+			job, err := NewJobBuilder().Build(task, workspace, nil, task.Spec.Prompt)
+			if err != nil {
+				t.Fatalf("Build() returned error: %v", err)
+			}
+
+			agent := job.Spec.Template.Spec.Containers[0]
+			agentEnv := envVarMap(agent.Env)
+			for _, name := range tokenEnvNames {
+				_, got := agentEnv[name]
+				want := false
+				for _, w := range tt.wantAgentEnv {
+					if w == name {
+						want = true
+					}
+				}
+				if got != want {
+					t.Errorf("Agent env %s present = %v, want %v", name, got, want)
+				}
+			}
+			if got := containsVolumeMount(agent.VolumeMounts, GitHubTokenVolumeName, GitHubTokenMountPath); got != tt.wantAgentToken {
+				t.Errorf("Agent token mount present = %v, want %v", got, tt.wantAgentToken)
+			}
+			if !containsVolumeMount(agent.VolumeMounts, WorkspaceVolumeName, WorkspaceMountPath) {
+				t.Errorf("Agent must keep the workspace mount, got %+v", agent.VolumeMounts)
+			}
+			if findVolume(job.Spec.Template.Spec.Volumes, GitHubTokenVolumeName) == nil {
+				t.Errorf("Pod must keep the token volume for the init containers")
+			}
+
+			for _, name := range []string{"git-clone", "branch-setup"} {
+				ic := initContainerByName(t, job, name)
+				icEnv := envVarMap(ic.Env)
+				for _, want := range tt.wantInitEnv {
+					if _, ok := icEnv[want]; !ok {
+						t.Errorf("%s: expected env %s", name, want)
+					}
+				}
+				if !containsVolumeMount(ic.VolumeMounts, GitHubTokenVolumeName, GitHubTokenMountPath) {
+					t.Errorf("%s: expected the token mount", name)
+				}
+				if !strings.Contains(ic.Command[2], "-c credential.helper='"+gitCredentialHelper()+"'") {
+					t.Errorf("%s: expected the credential helper for remote operations, got:\n%s", name, ic.Command[2])
+				}
+			}
+
+			script := gitCloneScript(t, job)
+			if persisted := strings.Contains(script, "--add credential.helper"); persisted != tt.wantAgentToken {
+				t.Errorf("Credential helper persisted into .git/config = %v, want %v; script:\n%s", persisted, tt.wantAgentToken, script)
+			}
+		})
+	}
+}
+
+func TestBuildJob_WorkspaceAgentCredentialsNoneLetsPodOverridesEnvThrough(t *testing.T) {
+	// Without the built-in token env, a user-supplied GITHUB_TOKEN is no
+	// longer shadowed; Kelos itself still adds no token.
+	workspace := &kelos.WorkspaceSpec{
+		Repo:             "https://github.com/example/repo.git",
+		SecretRef:        &kelos.SecretReference{Name: "github-token"},
+		AgentCredentials: kelos.WorkspaceAgentCredentialsNone,
+	}
+	task := restrictedCheckoutTask("")
+	job, err := NewJobBuilder().Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+	for _, env := range job.Spec.Template.Spec.Containers[0].Env {
+		if env.ValueFrom != nil && env.ValueFrom.SecretKeyRef != nil && env.ValueFrom.SecretKeyRef.Name == "github-token" {
+			t.Errorf("Agent env %s references the workspace token Secret", env.Name)
+		}
+	}
+}
+
+func TestBuildJob_WorkspaceCheckoutValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		branch    string
+		workspace kelos.WorkspaceSpec
+		wantErr   string
+	}{
+		{
+			name:      "removeGitDir with a task branch",
+			branch:    "feature-x",
+			workspace: kelos.WorkspaceSpec{Clone: &kelos.WorkspaceClone{RemoveGitDir: true}},
+			wantErr:   `workspace clone.removeGitDir cannot be combined with branch "feature-x"`,
+		},
+		{
+			name: "removeGitDir with remotes",
+			workspace: kelos.WorkspaceSpec{
+				Clone:   &kelos.WorkspaceClone{RemoveGitDir: true},
+				Remotes: []kelos.GitRemote{{Name: "upstream", URL: "https://github.com/upstream/repo.git"}},
+			},
+			wantErr: "workspace clone.removeGitDir cannot be combined with remotes",
+		},
+		{name: "absolute path", workspace: kelos.WorkspaceSpec{Clone: &kelos.WorkspaceClone{Paths: []string{"/docs"}}}, wantErr: "absolute paths are not allowed"},
+		{name: "parent segment", workspace: kelos.WorkspaceSpec{Clone: &kelos.WorkspaceClone{Paths: []string{"docs/../internal"}}}, wantErr: "'..' segments"},
+		{name: "leading parent", workspace: kelos.WorkspaceSpec{Clone: &kelos.WorkspaceClone{Paths: []string{"../x"}}}, wantErr: "'..' segments"},
+		{name: "current directory", workspace: kelos.WorkspaceSpec{Clone: &kelos.WorkspaceClone{Paths: []string{"."}}}, wantErr: "'.' or '..' segments"},
+		{name: "empty segment", workspace: kelos.WorkspaceSpec{Clone: &kelos.WorkspaceClone{Paths: []string{"docs//a"}}}, wantErr: "empty, '.' or '..' segments"},
+		{name: "empty path", workspace: kelos.WorkspaceSpec{Clone: &kelos.WorkspaceClone{Paths: []string{""}}}, wantErr: "path is empty"},
+		{name: "wildcard", workspace: kelos.WorkspaceSpec{Clone: &kelos.WorkspaceClone{Paths: []string{"docs/*"}}}, wantErr: "must not contain"},
+		{name: "newline", workspace: kelos.WorkspaceSpec{Clone: &kelos.WorkspaceClone{Paths: []string{"docs\n/*"}}}, wantErr: "control characters"},
+		{name: "trailing space", workspace: kelos.WorkspaceSpec{Clone: &kelos.WorkspaceClone{Paths: []string{"docs "}}}, wantErr: "end with a space"},
+		{name: "trailing space before a slash", workspace: kelos.WorkspaceSpec{Clone: &kelos.WorkspaceClone{Paths: []string{"data /"}}}, wantErr: "end with a space"},
+		{
+			name:      "removeGitDir without a branch or remotes",
+			workspace: kelos.WorkspaceSpec{Clone: &kelos.WorkspaceClone{RemoveGitDir: true, Paths: []string{"docs/", "cmd/main.go", "!literal", "#literal"}}},
+		},
+		{
+			name:      "paths with a task branch and remotes",
+			branch:    "feature-x",
+			workspace: kelos.WorkspaceSpec{Clone: &kelos.WorkspaceClone{Paths: []string{"docs"}}, Remotes: []kelos.GitRemote{{Name: "upstream", URL: "https://github.com/upstream/repo.git"}}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workspace := tt.workspace
+			workspace.Repo = "https://github.com/example/repo.git"
+			task := restrictedCheckoutTask(tt.branch)
+
+			job, err := NewJobBuilder().Build(task, &workspace, nil, task.Spec.Prompt)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Build() returned error: %v", err)
+				}
+				if job == nil {
+					t.Fatal("Build() returned no Job")
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("Expected an error containing %q", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("Expected error containing %q, got %q", tt.wantErr, err.Error())
+			}
+		})
+	}
+}
+
+// TestWorkspaceCloneScriptProducesRestrictedCheckout runs the rendered
+// git-clone command against a local repository and checks what lands on
+// disk.
+func TestWorkspaceCloneScriptProducesRestrictedCheckout(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not available")
+	}
+
+	src, sha := newLocalSourceRepo(t)
+
+	wantFiles := []string{"Makefile", "docs/guide.md", "docs/sub/deep.md", "www/app/view.py"}
+
+	tests := []struct {
+		name             string
+		ref              string
+		removeGitDir     bool
+		agentCredentials kelos.WorkspaceAgentCredentials
+	}{
+		{name: "branch ref, removeGitDir", ref: "main", removeGitDir: true, agentCredentials: kelos.WorkspaceAgentCredentialsNone},
+		{name: "commit ref, removeGitDir", ref: sha, removeGitDir: true, agentCredentials: kelos.WorkspaceAgentCredentialsNone},
+		{name: "branch ref, keeps .git without a credential helper", ref: "main", agentCredentials: kelos.WorkspaceAgentCredentialsNone},
+		{name: "commit ref, keeps .git with the default credential helper", ref: sha},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workspace := &kelos.WorkspaceSpec{
+				Repo:      "file://" + src,
+				Ref:       tt.ref,
+				SecretRef: &kelos.SecretReference{Name: "github-token"},
+				Clone: &kelos.WorkspaceClone{
+					Paths:        []string{"docs", "www/app/", "Makefile"},
+					RemoveGitDir: tt.removeGitDir,
+				},
+				AgentCredentials: tt.agentCredentials,
+			}
+			task := restrictedCheckoutTask("")
+			job, err := NewJobBuilder().Build(task, workspace, nil, task.Spec.Prompt)
+			if err != nil {
+				t.Fatalf("Build() returned error: %v", err)
+			}
+
+			workspaceDir := filepath.Join(t.TempDir(), "workspace")
+			if out, err := runInitContainerLocally(initContainerByName(t, job, "git-clone"), workspaceDir); err != nil {
+				t.Fatalf("git-clone script failed: %v\n%s", err, out)
+			}
+
+			repoDir := filepath.Join(workspaceDir, "repo")
+			var gotFiles []string
+			err = filepath.WalkDir(repoDir, func(p string, d os.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				rel, _ := filepath.Rel(repoDir, p)
+				if d.IsDir() && rel == ".git" {
+					return filepath.SkipDir
+				}
+				if !d.IsDir() {
+					gotFiles = append(gotFiles, filepath.ToSlash(rel))
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Join(gotFiles, ",") != strings.Join(wantFiles, ",") {
+				t.Errorf("Checked-out files = %v, want %v", gotFiles, wantFiles)
+			}
+
+			_, statErr := os.Stat(filepath.Join(repoDir, ".git"))
+			if tt.removeGitDir {
+				if !os.IsNotExist(statErr) {
+					t.Errorf("Expected .git to be removed, stat error: %v", statErr)
+				}
+				return
+			}
+			if statErr != nil {
+				t.Fatalf("Expected .git to be kept: %v", statErr)
+			}
+			cfg := exec.Command("git", "-C", repoDir, "config", "--get-all", "credential.helper")
+			cfg.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+			out, err := cfg.Output()
+			persisted := err == nil && strings.TrimSpace(string(out)) != ""
+			wantPersisted := tt.agentCredentials != kelos.WorkspaceAgentCredentialsNone
+			if persisted != wantPersisted {
+				t.Errorf("credential.helper in .git/config present = %v, want %v (%q)", persisted, wantPersisted, out)
+			}
+		})
+	}
+}
+
+// newLocalSourceRepo creates a git repository that serves partial clones and
+// fetches by SHA over file://, and returns its path and HEAD commit.
+func newLocalSourceRepo(t *testing.T) (string, string) {
+	t.Helper()
+	src := filepath.Join(t.TempDir(), "src")
+	runGit := func(args ...string) string {
+		t.Helper()
+		return runTestGit(t, src, args...)
+	}
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit("init", "-q", "-b", "main")
+	for name, content := range map[string]string{
+		"CLAUDE.md":        "root instructions",
+		"Makefile":         "all:",
+		"docs/guide.md":    "guide",
+		"docs/sub/deep.md": "deep",
+		"docsx/other.md":   "similar name",
+		"www/app/view.py":  "view",
+		"www/secret.py":    "secret",
+		"internal/tool.go": "tool",
+	} {
+		writeFile(t, filepath.Join(src, name), content)
+	}
+	runGit("add", "-A")
+	runGit("-c", "user.email=test@example.com", "-c", "user.name=test", "commit", "-q", "-m", "init")
+	runGit("config", "uploadpack.allowFilter", "true")
+	runGit("config", "uploadpack.allowAnySHA1InWant", "true")
+	return src, runGit("rev-parse", "HEAD")
+}
+
+// runInitContainerLocally runs an init container's sh -c command on this
+// machine, pointing it at workspaceDir instead of the pod's /workspace mount.
+// The container's literal env values are passed through, then extraEnv.
+func runInitContainerLocally(c corev1.Container, workspaceDir string, extraEnv ...string) ([]byte, error) {
+	relocate := func(s string) string { return strings.ReplaceAll(s, WorkspaceMountPath, workspaceDir) }
+	// The script is Command[2], or Args[0] when Command is just [sh -c].
+	scriptAndArgs := append(append([]string(nil), c.Command[2:]...), c.Args...)
+	args := []string{"-c"}
+	for _, a := range scriptAndArgs {
+		args = append(args, relocate(a))
+	}
+	cmd := exec.Command("sh", args...)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0", "GITHUB_TOKEN=")
+	for _, e := range c.Env {
+		if e.ValueFrom == nil {
+			cmd.Env = append(cmd.Env, e.Name+"="+relocate(e.Value))
+		}
+	}
+	cmd.Env = append(cmd.Env, extraEnv...)
+	return cmd.CombinedOutput()
+}
+
+func runTestGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// TestBranchSetupFetchesBlobsWithoutSavedCredentials serves a repository over
+// HTTP that requires the workspace token, clones it with clone.paths and
+// agentCredentials None, and checks out a Task branch whose changed files the
+// partial clone has not downloaded yet. The credential helper is not saved in
+// .git/config, so branch-setup has to pass it to the commands that fetch.
+func TestBranchSetupFetchesBlobsWithoutSavedCredentials(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not available")
+	}
+	backendPath := filepath.Join(runTestGit(t, ".", "--exec-path"), "git-http-backend")
+	if _, err := os.Stat(backendPath); err != nil {
+		t.Skipf("git-http-backend is not available: %v", err)
+	}
+
+	src, _ := newLocalSourceRepo(t)
+	runTestGit(t, src, "checkout", "-q", "-b", "feature-x")
+	writeFile(t, filepath.Join(src, "docs", "guide.md"), "guide from the branch")
+	writeFile(t, filepath.Join(src, "docs", "added.md"), "added on the branch")
+	writeFile(t, filepath.Join(src, "internal", "tool.go"), "changed outside the paths")
+	runTestGit(t, src, "add", "-A")
+	runTestGit(t, src, "-c", "user.email=test@example.com", "-c", "user.name=test", "commit", "-q", "-m", "branch")
+	runTestGit(t, src, "checkout", "-q", "main")
+
+	const token = "test-token"
+	backend := &cgi.Handler{
+		Path: backendPath,
+		Env:  []string{"GIT_PROJECT_ROOT=" + filepath.Dir(src), "GIT_HTTP_EXPORT_ALL=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1"},
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if user, password, ok := r.BasicAuth(); !ok || user != gitCredentialDefaultUsername || password != token {
+			w.Header().Set("WWW-Authenticate", `Basic realm="git"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		backend.ServeHTTP(w, r)
+	}))
+	defer server.Close()
+
+	workspace := &kelos.WorkspaceSpec{
+		Repo:             server.URL + "/src",
+		Ref:              "main",
+		SecretRef:        &kelos.SecretReference{Name: "github-token"},
+		Clone:            &kelos.WorkspaceClone{Paths: []string{"docs"}},
+		AgentCredentials: kelos.WorkspaceAgentCredentialsNone,
+	}
+	task := restrictedCheckoutTask("feature-x")
+	job, err := NewJobBuilder().Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	// The credential helper falls back to $GITHUB_TOKEN when the mounted
+	// token file is absent, as it is on this machine.
+	workspaceDir := filepath.Join(t.TempDir(), "workspace")
+	for _, name := range []string{"git-clone", "branch-setup"} {
+		if out, err := runInitContainerLocally(initContainerByName(t, job, name), workspaceDir, "GITHUB_TOKEN="+token); err != nil {
+			t.Fatalf("%s failed: %v\n%s", name, err, out)
+		}
+	}
+
+	repoDir := filepath.Join(workspaceDir, "repo")
+	assertFileContent(t, filepath.Join(repoDir, "docs", "guide.md"), "guide from the branch")
+	assertFileContent(t, filepath.Join(repoDir, "docs", "added.md"), "added on the branch")
+	assertPathMissing(t, filepath.Join(repoDir, "internal"))
+	if got := runTestGit(t, repoDir, "branch", "--show-current"); got != "feature-x" {
+		t.Errorf("Checked-out branch = %q, want feature-x", got)
+	}
+	cfg := exec.Command("git", "-C", repoDir, "config", "--get-all", "credential.helper")
+	cfg.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+	if out, err := cfg.Output(); err == nil && strings.TrimSpace(string(out)) != "" {
+		t.Errorf("Expected no credential.helper in .git/config, got %q", out)
 	}
 }

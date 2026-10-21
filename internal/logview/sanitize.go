@@ -43,7 +43,12 @@ func cleanLine(text string) string {
 	return strings.NewReplacer("\t", tabSpaces, "\n", `\n`).Replace(clean(text))
 }
 
+// cleanHunks keeps a nil diff nil, so a missing diff stays distinct from
+// an explicitly empty one.
 func cleanHunks(hunks []Hunk) []Hunk {
+	if hunks == nil {
+		return nil
+	}
 	cleaned := make([]Hunk, len(hunks))
 	for i, hunk := range hunks {
 		cleaned[i] = Hunk{OldStart: hunk.OldStart, NewStart: hunk.NewStart, Lines: make([]DiffLine, len(hunk.Lines))}

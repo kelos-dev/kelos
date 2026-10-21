@@ -107,4 +107,10 @@ func TestParseStructuredPatch(t *testing.T) {
 	if got := parseStructuredPatch(json.RawMessage(`"not a patch"`)); got != nil {
 		t.Errorf("malformed patch = %+v, want nil", got)
 	}
+	if got := parseStructuredPatch(json.RawMessage(`null`)); got != nil {
+		t.Errorf("null patch = %+v, want nil", got)
+	}
+	if got := parseStructuredPatch(json.RawMessage(`[]`)); got == nil || len(got) != 0 {
+		t.Errorf("empty patch = %#v, want empty non-nil slice", got)
+	}
 }

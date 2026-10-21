@@ -51,10 +51,26 @@ func TestLogOutputValidatesPrettyAgent(t *testing.T) {
 	}
 }
 
-func TestIsColorTerminalHonorsNoColor(t *testing.T) {
-	t.Setenv("NO_COLOR", "")
-	if isColorTerminal(os.Stdout) {
-		t.Error("isColorTerminal() = true with NO_COLOR set")
+func TestColorDisabledByEnv(t *testing.T) {
+	tests := []struct {
+		name    string
+		noColor string
+		term    string
+		want    bool
+	}{
+		{name: "color allowed", term: "xterm-256color"},
+		{name: "empty NO_COLOR keeps color", noColor: "", term: "xterm-256color"},
+		{name: "non-empty NO_COLOR disables color", noColor: "1", term: "xterm-256color", want: true},
+		{name: "dumb terminal disables color", term: "dumb", want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("NO_COLOR", tt.noColor)
+			t.Setenv("TERM", tt.term)
+			if got := colorDisabledByEnv(); got != tt.want {
+				t.Errorf("colorDisabledByEnv() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

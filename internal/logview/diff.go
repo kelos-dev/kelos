@@ -94,10 +94,11 @@ type structuredPatch struct {
 }
 
 // parseStructuredPatch converts Claude's structuredPatch into hunks. It
-// returns nil when raw is absent or malformed.
+// returns nil when raw is absent, null or malformed, and an empty slice
+// when Claude reported an empty patch.
 func parseStructuredPatch(raw json.RawMessage) []Hunk {
 	var patches []structuredPatch
-	if len(raw) == 0 || json.Unmarshal(raw, &patches) != nil {
+	if len(raw) == 0 || json.Unmarshal(raw, &patches) != nil || patches == nil {
 		return nil
 	}
 	hunks := make([]Hunk, 0, len(patches))

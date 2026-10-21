@@ -226,11 +226,39 @@ func TestRenderAcceptsPointerEvents(t *testing.T) {
 	}
 }
 
+func TestRenderToolResultDiffFallback(t *testing.T) {
+	callDiff := []Hunk{{OldStart: 1, NewStart: 1, Lines: []DiffLine{{DiffRemove, "old"}, {DiffAdd, "new"}}}}
+	tests := []struct {
+		name       string
+		resultDiff []Hunk
+		want       string
+		notWant    string
+	}{
+		{name: "missing result diff uses the call's", want: "+ new", notWant: "updated"},
+		{name: "empty result diff shows the output", resultDiff: []Hunk{}, want: "updated", notWant: "+ new"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out bytes.Buffer
+			renderer := NewRenderer(&out, Options{})
+			renderer.Render(ToolCall{ID: "a", Name: "Edit", Summary: "a.go", Diff: callDiff})
+			renderer.Render(ToolResult{ID: "a", Output: "updated", Diff: tt.resultDiff})
+			got := out.String()
+			if !strings.Contains(got, tt.want) || strings.Contains(got, tt.notWant) {
+				t.Errorf("got:\n%s\nwant %q and not %q", got, tt.want, tt.notWant)
+			}
+		})
+	}
+}
+
 func TestHumanCount(t *testing.T) {
 	tests := map[int]string{
 		0:         "0",
 		950:       "950",
+		1_000:     "1.0k",
 		18_456:    "18.5k",
+		999_949:   "999.9k",
+		999_950:   "1.00M",
 		2_374_433: "2.37M",
 	}
 	for n, want := range tests {

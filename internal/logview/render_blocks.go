@@ -25,6 +25,7 @@ const (
 
 // Number formats of the footer.
 const (
+	hundred      = 100
 	thousand     = 1_000
 	million      = 1_000_000
 	thousandsFmt = "%.1fk"
@@ -37,8 +38,10 @@ func (r *Renderer) renderToolResult(result ToolResult) {
 	delete(r.calls, result.ID)
 	r.resultHeader(result, call, known)
 
+	// An explicitly empty result diff means the tool reported no patch, so
+	// only a missing one falls back to the call's.
 	diff := result.Diff
-	if len(diff) == 0 {
+	if diff == nil {
 		diff = call.Diff
 	}
 	switch {
@@ -216,11 +219,14 @@ func resultFacts(result Result) string {
 
 // humanCount abbreviates a token count: 950, 18.5k, 2.37M.
 func humanCount(n int) string {
+	// thousandsFmt shows one decimal, so round to the hundred before
+	// choosing the unit: 999_950 is 1.00M, not 1000.0k.
+	rounded := (n + hundred/2) / hundred * hundred
 	switch {
-	case n >= million:
+	case rounded >= million:
 		return fmt.Sprintf(millionsFmt, float64(n)/million)
 	case n >= thousand:
-		return fmt.Sprintf(thousandsFmt, float64(n)/thousand)
+		return fmt.Sprintf(thousandsFmt, float64(rounded)/thousand)
 	default:
 		return fmt.Sprintf("%d", n)
 	}

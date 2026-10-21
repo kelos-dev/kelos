@@ -42,13 +42,15 @@ func (f *logOutputFlags) resolve(stdout *os.File) logOutput {
 	}
 }
 
-// isColorTerminal reports whether f is a terminal that accepts color, per
-// the NO_COLOR convention (https://no-color.org).
+// isColorTerminal reports whether f is a terminal that accepts color.
 func isColorTerminal(f *os.File) bool {
-	if _, disabled := os.LookupEnv("NO_COLOR"); disabled || os.Getenv("TERM") == "dumb" {
-		return false
-	}
-	return term.IsTerminal(int(f.Fd()))
+	return !colorDisabledByEnv() && term.IsTerminal(int(f.Fd()))
+}
+
+// colorDisabledByEnv reports whether the environment turns color off: a
+// non-empty NO_COLOR (https://no-color.org) or a dumb terminal.
+func colorDisabledByEnv() bool {
+	return os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb"
 }
 
 // terminalWidth returns f's width in columns, or 0 when f is not a

@@ -94,7 +94,7 @@ func terminalColorEnabled(mode string, output io.Writer) (bool, error) {
 	case "never":
 		return false, nil
 	case "auto":
-		if _, disabled := os.LookupEnv("NO_COLOR"); disabled || os.Getenv("TERM") == "dumb" {
+		if colorDisabledByEnv() {
 			return false, nil
 		}
 		file, ok := output.(*os.File)

@@ -1800,11 +1800,16 @@ The `kelos` CLI lets you manage the full lifecycle without writing YAML.
 | `kelos create agentconfig` | Create an AgentConfig resource |
 | `kelos get <resource> [name]` | List resources or view a specific resource (`tasks`, `sessions`, `taskspawners`, `workspaces`, `agentconfigs`, `workerpools`) |
 | `kelos delete <resource> [name]` | Delete a resource (`tasks`, `sessions`, `taskspawners`, `workspaces`, `agentconfigs`, `workerpools`) |
-| `kelos logs <task-name> [-f]` | View or stream logs from a task |
+| `kelos logs <task-name> [-f] [--pretty]` | View or stream logs from a task |
 | `kelos suspend taskspawner <name>` | Pause a TaskSpawner (stops polling, running tasks continue) |
 | `kelos resume taskspawner <name>` | Resume a paused TaskSpawner |
 
 `kelos logs <task-name> -f` waits while the task Pod is unscheduled, Pending, or initializing its target container, then streams logs once the container is available. If Kubernetes closes an empty agent log stream while the Task is still active, the command reconnects instead of reporting completion. Failed Tasks and non-transient container startup failures return an error instead of retrying indefinitely.
+
+For Claude Code tasks, `--pretty` renders output in a layout modeled on Claude Code: tool calls show an input summary and output preview, file edits show a diff when available, and todo lists show as checklists. The run footer includes the turns, cost, tokens and duration that Claude Code reports. `--pretty` returns an error for other agent types.
+
+- The default is the plain format: assistant text on stdout, and status and tool lines on stderr.
+- `--pretty` uses color when stdout is a terminal, `NO_COLOR` is unset or empty, and `TERM` is not `dumb`. It keeps the same layout without color otherwise.
 
 ### `kelos install` Flags
 

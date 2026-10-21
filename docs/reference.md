@@ -1528,7 +1528,7 @@ The `kelos` CLI lets you manage the full lifecycle without writing YAML.
 For Claude Code tasks, `--pretty` renders output in a layout modeled on Claude Code: tool calls show an input summary and output preview, file edits show a diff when available, and todo lists show as checklists. The run footer includes the turns, cost, tokens and duration that Claude Code reports. `--pretty` returns an error for other agent types.
 
 - The default is the plain format: assistant text on stdout, and status and tool lines on stderr.
-- `--pretty` uses color when stdout is a terminal, `NO_COLOR` is unset, and `TERM` is not `dumb`. It keeps the same layout without color otherwise.
+- `--pretty` uses color when stdout is a terminal, `NO_COLOR` is unset or empty, and `TERM` is not `dumb`. It keeps the same layout without color otherwise.
 
 ### `kelos install` Flags
 

@@ -31,6 +31,35 @@ type WorkspaceFile struct {
 // WorkspaceGHProxy configures the workspace-scoped ghproxy.
 type WorkspaceGHProxy struct{}
 
+// WorkspaceCloneBranches selects which branches a Workspace clone fetches.
+// +kubebuilder:validation:Enum=All;Single
+type WorkspaceCloneBranches string
+
+const (
+	// WorkspaceCloneBranchesAll fetches the tip of every branch.
+	WorkspaceCloneBranchesAll WorkspaceCloneBranches = "All"
+	// WorkspaceCloneBranchesSingle fetches only the ref being checked out.
+	WorkspaceCloneBranchesSingle WorkspaceCloneBranches = "Single"
+)
+
+// WorkspaceClone configures how a Workspace repository is cloned.
+type WorkspaceClone struct {
+	// Branches selects which branches the clone fetches. All fetches the
+	// tip of every branch. Single fetches only spec.ref (a branch or tag),
+	// or the remote's default branch when spec.ref is empty, and sets up
+	// origin to track only that ref, so a plain `git fetch origin` does
+	// not pick up other branches. A Task's spec.branch or a Session's
+	// spec.initialBranch is still checked out: it is fetched when it exists
+	// on origin and otherwise created from the cloned ref, and in either
+	// case added to the branches origin tracks. To use another branch, run
+	// `git remote set-branches --add origin <branch>` and then
+	// `git fetch --depth 1 origin <branch>`; without `--depth 1` the fetch
+	// can download most of that branch's history. Has no effect when
+	// spec.ref is a full commit SHA. Omit to use All.
+	// +optional
+	Branches WorkspaceCloneBranches `json:"branches,omitempty"`
+}
+
 // WorkspaceSpec defines the desired state of Workspace.
 type WorkspaceSpec struct {
 	// Repo is the git repository URL to clone.
@@ -42,6 +71,10 @@ type WorkspaceSpec struct {
 	// Defaults to the repository's default branch if not specified.
 	// +optional
 	Ref string `json:"ref,omitempty"`
+
+	// Clone configures how the repository is cloned.
+	// +optional
+	Clone *WorkspaceClone `json:"clone,omitempty"`
 
 	// SecretRef references a Secret containing a GITHUB_TOKEN key for git
 	// authentication and GitHub CLI (gh) operations.

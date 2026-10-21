@@ -8,23 +8,39 @@ import (
 )
 
 func taskToHub(_ context.Context, src *v1alpha1.Task, dst *v1alpha2.Task) error {
-	dst.ObjectMeta = src.ObjectMeta
+	src.ObjectMeta.DeepCopyInto(&dst.ObjectMeta)
 	if err := convertViaJSON(&src.Spec, &dst.Spec); err != nil {
 		return err
 	}
 	foldTaskAgentConfigRefForward(&src.Spec, &dst.Spec)
+	if dst.Spec.BranchLock == "" {
+		dst.Spec.BranchLock = preservedBranchLock(src.Annotations)
+	}
+	deleteAnnotation(dst.Annotations, preservedBranchLockAnnotation)
 	return convertViaJSON(&src.Status, &dst.Status)
 }
 
 func taskFromHub(_ context.Context, src *v1alpha2.Task, dst *v1alpha1.Task) error {
-	dst.ObjectMeta = src.ObjectMeta
+	src.ObjectMeta.DeepCopyInto(&dst.ObjectMeta)
 	if err := convertViaJSON(&src.Spec, &dst.Spec); err != nil {
 		return err
 	}
 	if err := backfillTaskLegacyWorkerFields(&src.Spec, &dst.Spec); err != nil {
 		return err
 	}
+	setPreservedTaskBranchLockAnnotation(dst, src.Spec.BranchLock)
 	return convertViaJSON(&src.Status, &dst.Status)
+}
+
+func setPreservedTaskBranchLockAnnotation(dst *v1alpha1.Task, branchLock v1alpha2.BranchLockPolicy) {
+	if branchLock == "" {
+		deleteAnnotation(dst.Annotations, preservedBranchLockAnnotation)
+		return
+	}
+	if dst.Annotations == nil {
+		dst.Annotations = map[string]string{}
+	}
+	dst.Annotations[preservedBranchLockAnnotation] = string(branchLock)
 }
 
 func foldTaskAgentConfigRefForward(src *v1alpha1.TaskSpec, dst *v1alpha2.TaskSpec) {

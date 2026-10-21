@@ -370,8 +370,9 @@ func buildPipelineTask(
 			},
 		},
 		Spec: kelos.TaskSpec{
-			Prompt: prompt,
-			Branch: branch,
+			Prompt:     prompt,
+			Branch:     branch,
+			BranchLock: stage.TaskTemplate.BranchLock,
 		},
 	}
 	if stage.TaskTemplate.Worker != nil {

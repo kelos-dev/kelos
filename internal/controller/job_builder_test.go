@@ -3936,6 +3936,55 @@ func TestBuildJob_BranchSetupInitContainer(t *testing.T) {
 	}
 }
 
+func TestBuildJob_BranchLockNoneKeepsBranchSetup(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-branch-reader",
+			Namespace: "default",
+		},
+		Spec: kelos.TaskSpec{
+			Type:       AgentTypeClaudeCode,
+			Prompt:     "Review feature",
+			Branch:     "feature-x",
+			BranchLock: kelos.BranchLockNone,
+			Credentials: &kelos.Credentials{
+				Type:      kelos.CredentialTypeAPIKey,
+				SecretRef: &kelos.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+	workspace := &kelos.WorkspaceSpec{
+		Repo: "https://github.com/example/repo.git",
+		Ref:  "main",
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	var branchSetup *corev1.Container
+	for i := range job.Spec.Template.Spec.InitContainers {
+		if job.Spec.Template.Spec.InitContainers[i].Name == "branch-setup" {
+			branchSetup = &job.Spec.Template.Spec.InitContainers[i]
+			break
+		}
+	}
+	if branchSetup == nil {
+		t.Fatal("Expected branch-setup init container for a branchLock None task")
+	}
+	var foundBranch bool
+	for _, env := range branchSetup.Env {
+		if env.Name == "KELOS_BRANCH" && env.Value == "feature-x" {
+			foundBranch = true
+		}
+	}
+	if !foundBranch {
+		t.Error("Expected KELOS_BRANCH=feature-x env var on branch-setup")
+	}
+}
+
 func TestBuildJob_BranchSetupWithSecretRefUsesCredentialHelper(t *testing.T) {
 	builder := NewJobBuilder()
 	task := &kelos.Task{

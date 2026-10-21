@@ -46,6 +46,90 @@ func TestTaskConvert_IdentityRoundTrip(t *testing.T) {
 	}
 }
 
+func TestTaskConvert_BranchLockRoundTrips(t *testing.T) {
+	hub := &v1alpha2.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "reviewer",
+			Namespace:   "ns",
+			Annotations: map[string]string{"team": "review"},
+		},
+		Spec: v1alpha2.TaskSpec{
+			Type:   "claude-code",
+			Prompt: "review",
+			Credentials: &v1alpha2.Credentials{
+				Type:      v1alpha2.CredentialTypeAPIKey,
+				SecretRef: &v1alpha2.SecretReference{Name: "creds"},
+			},
+			Branch:     "feature-1",
+			BranchLock: v1alpha2.BranchLockNone,
+		},
+	}
+
+	// hub -> spoke: v1alpha1 has no branchLock field, so it is preserved in an
+	// internal annotation rather than dropped.
+	spoke := &v1alpha1.Task{}
+	if err := taskFromHub(context.Background(), hub, spoke); err != nil {
+		t.Fatalf("taskFromHub() error = %v", err)
+	}
+	if got := spoke.Annotations[preservedBranchLockAnnotation]; got != "None" {
+		t.Fatalf("preserved annotation = %q, want %q", got, "None")
+	}
+	if _, ok := hub.Annotations[preservedBranchLockAnnotation]; ok {
+		t.Fatal("taskFromHub() mutated the hub object's annotations")
+	}
+
+	// spoke -> hub: the field is restored, so a v1alpha1 write-back leaves the
+	// immutable spec unchanged, and the internal annotation is removed.
+	back := &v1alpha2.Task{}
+	if err := taskToHub(context.Background(), spoke, back); err != nil {
+		t.Fatalf("taskToHub() error = %v", err)
+	}
+	if !reflect.DeepEqual(hub.Spec, back.Spec) {
+		t.Errorf("spec round-trip mismatch:\n orig=%#v\n back=%#v", hub.Spec, back.Spec)
+	}
+	if _, ok := back.Annotations[preservedBranchLockAnnotation]; ok {
+		t.Error("internal preservation annotation leaked onto hub object")
+	}
+	if got := back.Annotations["team"]; got != "review" {
+		t.Errorf("user annotation team = %q, want %q", got, "review")
+	}
+}
+
+func TestTaskConvert_NoBranchLockOmitsAnnotation(t *testing.T) {
+	hub := &v1alpha2.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "writer", Namespace: "ns"},
+		Spec:       v1alpha2.TaskSpec{Type: "claude-code", Prompt: "write", Branch: "feature-1"},
+	}
+	spoke := &v1alpha1.Task{}
+	if err := taskFromHub(context.Background(), hub, spoke); err != nil {
+		t.Fatalf("taskFromHub() error = %v", err)
+	}
+	if _, ok := spoke.Annotations[preservedBranchLockAnnotation]; ok {
+		t.Error("annotation should not be set when branchLock is empty")
+	}
+}
+
+func TestTaskToHub_IgnoresUnknownBranchLockAnnotation(t *testing.T) {
+	spoke := &v1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "reviewer",
+			Namespace:   "ns",
+			Annotations: map[string]string{preservedBranchLockAnnotation: "Shared"},
+		},
+		Spec: v1alpha1.TaskSpec{Type: "claude-code", Prompt: "review", Branch: "feature-1"},
+	}
+	hub := &v1alpha2.Task{}
+	if err := taskToHub(context.Background(), spoke, hub); err != nil {
+		t.Fatalf("taskToHub() error = %v", err)
+	}
+	if got := hub.Spec.BranchLock; got != "" {
+		t.Errorf("BranchLock = %q, want empty for an unknown annotation value", got)
+	}
+	if _, ok := hub.Annotations[preservedBranchLockAnnotation]; ok {
+		t.Error("internal preservation annotation leaked onto hub object")
+	}
+}
+
 func TestTaskToHub_FoldsAgentConfigRefIntoRefs(t *testing.T) {
 	src := &v1alpha1.Task{
 		ObjectMeta: metav1.ObjectMeta{Name: "t", Namespace: "ns"},

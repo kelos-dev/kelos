@@ -1577,8 +1577,8 @@ func TestSessionComposerAllowsMultilinePromptsOnTouchDevices(t *testing.T) {
 	javascript := string(source)
 	for description, expected := range map[string]string{
 		"touch device detection":  `window.matchMedia('(pointer: coarse)').matches`,
-		"touch composer hint":     "`Tap ${actionSymbol} to ${action} · Return for a new line · !COMMAND · /goal`",
-		"desktop composer hint":   "`Enter to ${action} · Shift+Enter for a new line · !COMMAND · /goal`",
+		"touch composer hint":     "`Tap ${actionSymbol} to ${action} · Return for a new line · !COMMAND · /goal · /loop`",
+		"desktop composer hint":   "`Enter to ${action} · Shift+Enter for a new line · !COMMAND · /goal · /loop`",
 		"disabled interrupt hint": "`Click ${actionSymbol} to interrupt`",
 		"desktop-only Enter send": `!event.isComposing && !usesTouchComposer()`,
 	} {

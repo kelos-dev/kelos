@@ -146,6 +146,22 @@ func TestProjectHistoryRetainsShellCompletionAndGoal(t *testing.T) {
 	}
 }
 
+func TestProjectHistoryRetainsLoopState(t *testing.T) {
+	loop := &Loop{Prompt: strings.Repeat("x", maxHistoryMessageBytes*2), Interval: "5m0s", Status: "active", NextRunAt: time.Now().UTC()}
+	items, _, _ := projectHistory([]Event{
+		{ID: 1, Type: EventLoopUpdated, Loop: loop, Status: "active"},
+		{ID: 2, Type: EventLoopUpdated, Status: "cleared"},
+	})
+	page, _ := historyItemsPage(items, 0, DefaultHistoryItemLimit, DefaultHistoryByteLimit)
+	assertEventTypes(t, page, EventLoopUpdated, EventLoopUpdated)
+	if page[0].Loop == nil || len(page[0].Loop.Prompt) > maxHistoryMessageBytes || page[0].Loop.Interval != loop.Interval || !page[0].Loop.NextRunAt.Equal(loop.NextRunAt) {
+		t.Fatalf("Retained loop = %#v", page[0].Loop)
+	}
+	if len(loop.Prompt) != maxHistoryMessageBytes*2 || page[1].Loop != nil || page[1].Status != "cleared" {
+		t.Fatal("Loop history changed the source or lost the clear event")
+	}
+}
+
 func TestProjectHistoryBoundsLargeMessages(t *testing.T) {
 	items, _, _ := projectHistory([]Event{{
 		ID:   1,

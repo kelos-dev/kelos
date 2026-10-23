@@ -887,7 +887,7 @@ func TestSubmitMessageRejectsGoalForOtherProviders(t *testing.T) {
 	server := NewServer(Config{}, journal, &fakeProvider{})
 
 	err := server.submitClientMessage(t.Context(), "/goal improve coverage", "request-goal")
-	if err == nil || !strings.Contains(err.Error(), "only in Codex Sessions") {
+	if err == nil || !strings.Contains(err.Error(), "only in Codex and Claude Code Sessions") {
 		t.Fatalf("submitMessage() error = %v", err)
 	}
 	if len(journal.Snapshot()) != 0 {
@@ -2018,7 +2018,7 @@ func TestServerPreservesPendingTurnAcrossForcedProviderRestart(t *testing.T) {
 		t.Fatalf("runtime update report = %#v, want Draining while pending work remains", report)
 	}
 
-	recovery, err := recoverJournal(server.journal)
+	recovery, err := recoverJournal(server.journal, "codex")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2160,7 +2160,7 @@ func TestServerRecoversActiveTurnAfterShutdown(t *testing.T) {
 		t.Fatal("active turn did not stop")
 	}
 
-	if _, err := recoverJournal(journal); err != nil {
+	if _, err := recoverJournal(journal, "codex"); err != nil {
 		t.Fatal(err)
 	}
 	recovered := journal.Snapshot()
@@ -2421,7 +2421,7 @@ func TestServerWithholdsIdleDrainAfterRecoveringInterruptedWork(t *testing.T) {
 	if err := journal.Append(Event{Type: EventTurnStarted, TurnID: "turn-1", Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
-	recovery, err := recoverJournal(journal)
+	recovery, err := recoverJournal(journal, "codex")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2480,7 +2480,7 @@ func TestServerWithholdsIdleDrainForUnpublishedCompletedTurn(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	recovery, err := recoverJournal(journal)
+	recovery, err := recoverJournal(journal, "codex")
 	if err != nil {
 		t.Fatal(err)
 	}

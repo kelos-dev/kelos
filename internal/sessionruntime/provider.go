@@ -78,6 +78,9 @@ func formatShellCommandRecord(record shellCommandRecord) string {
 
 type goalProvider interface {
 	StartGoal(context.Context, goalCommand) error
+}
+
+type goalControlProvider interface {
 	ControlGoal(context.Context, goalCommand, EventSink) error
 	ActiveGoal() *Goal
 }

@@ -103,6 +103,7 @@ func (s *Server) observeSessionUpdate(session *kelos.Session) error {
 	}
 	s.submitMu.Unlock()
 	if changed {
+		s.signalLoop()
 		s.signalSessionUpdateReport()
 	}
 	return nil
@@ -132,6 +133,7 @@ func (s *Server) finishTurn() {
 	}
 	shouldReport := (s.updateRequest != nil || s.idleDrainRequest != nil) && s.outstanding == 0
 	s.submitMu.Unlock()
+	s.signalLoop()
 	if shouldReport {
 		s.signalSessionUpdateReport()
 	}
@@ -207,9 +209,10 @@ func encodeDrainReport(report *sessionupdate.Report) (any, error) {
 // The Pod is replaced and recovers from the journal, so an unpublished activity
 // transition is not lost.
 //
-// An idle-drain report additionally requires reported background tasks to finish
-// and every queued activity status update to be durably published, because a
-// Drained idle report leads to suspension or deletion.
+// An idle-drain report additionally requires recurring prompts to be paused or
+// cleared, reported background tasks to finish, and every queued activity status
+// update to be durably published, because a Drained idle report leads to
+// suspension or deletion.
 // Gating idle drain on publication closes the window where a turn accepted just
 // before the drain finishes and reports Drained while its Active=True/Active=False
 // status updates are still retrying, which would let the controller delete the
@@ -219,7 +222,7 @@ func (s *Server) sessionDrainReports() (updateReport, idleDrainReport *sessionup
 	defer s.submitMu.Unlock()
 	turnsComplete := s.outstanding == 0
 	return s.drainReportLocked(s.updateRequest, turnsComplete),
-		s.drainReportLocked(s.idleDrainRequest, turnsComplete && !s.backgroundActive.Load() && !s.hasPendingStatusPublishes())
+		s.drainReportLocked(s.idleDrainRequest, turnsComplete && !s.backgroundActive.Load() && !s.loopActive.Load() && !s.hasPendingStatusPublishes())
 }
 
 // hasPendingStatusPublishes reports whether any observed activity status update

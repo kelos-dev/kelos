@@ -270,6 +270,12 @@ func projectHistory(source []Event) ([]historyItem, HistoryState, []Event) {
 				event.Goal.Objective = boundedHistoryText(event.Goal.Objective, maxHistoryMessageBytes)
 			}
 			addItem(event.ID, event.ID, normalizedHistoryEvent(event))
+		case EventLoopUpdated:
+			if event.Loop != nil {
+				event.Loop = cloneLoop(event.Loop)
+				event.Loop.Prompt = boundedHistoryText(event.Loop.Prompt, maxHistoryMessageBytes)
+			}
+			addItem(event.ID, event.ID, normalizedHistoryEvent(event))
 		case EventRuntimeRecovered, EventError, EventTurnInterrupting:
 			event.Text = boundedHistoryText(event.Text, maxHistoryNoticeBytes)
 			addItem(event.ID, event.ID, normalizedHistoryEvent(event))
@@ -434,6 +440,7 @@ func normalizedHistoryEvent(event Event) Event {
 	if event.Goal != nil {
 		event.Goal = cloneGoal(event.Goal)
 	}
+	event.Loop = cloneLoop(event.Loop)
 	event.ToolID = boundedHistoryText(event.ToolID, maxHistoryIdentifierBytes)
 	event.ToolName = boundedHistoryText(event.ToolName, maxHistoryIdentifierBytes)
 	event.InputID = boundedHistoryText(event.InputID, maxHistoryIdentifierBytes)

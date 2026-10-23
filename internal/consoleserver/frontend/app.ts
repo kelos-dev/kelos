@@ -3874,6 +3874,22 @@ function composerCommand() {
     action = state.activeTurn ? 'Queue command' : 'Run command';
     invalid = !text.slice(1).match(/[^\p{White_Space}]/u);
     detail = invalid ? 'Enter a command after !' : 'Runs directly in the Session workspace';
+  } else if (/^\/loop(?:\p{White_Space}|$)/u.test(text)) {
+    kind = 'loop';
+    prefix = '/loop';
+    const args = text.match(/[^\p{White_Space}]+/gu)!.slice(1);
+    action = args.length === 0 ? 'Show loop' : 'Start loop';
+    detail = 'Repeat a prompt when the Session is idle';
+    if (args.length === 1 && ['pause', 'resume', 'clear'].includes(args[0])) {
+      action = `${args[0][0].toUpperCase()}${args[0].slice(1)} loop`;
+      prefix = text;
+      detail = action === 'Pause loop' ? 'Finish the current run, then pause recurring prompts' : action === 'Resume loop' ? 'Resume recurring prompts' : 'Remove the recurring prompt';
+    } else if (args.length > 0) {
+      invalid = args.length < 2 || !validLoopInterval(args[0]);
+      if (invalid) detail = 'Use /loop INTERVAL PROMPT with an interval of at least 1s (for example 5m)';
+    } else {
+      detail = 'View the recurring prompt and status';
+    }
   } else if (/^\/goal(?:\p{White_Space}|$)/u.test(text)) {
     kind = 'goal';
     prefix = '/goal';
@@ -3897,20 +3913,39 @@ function composerCommand() {
       'Clear goal': 'Remove the current goal',
     };
     detail = invalid ? 'Enter an objective after /goal edit' : descriptions[action];
-    if (state.selected && state.selected.provider !== 'codex') {
+    if (state.selected?.provider === 'claude-code') {
+      invalid = false;
+      action = args.length === 0 ? 'Show goal' : args.length === 1 && ['clear', 'stop', 'off', 'reset', 'none', 'cancel'].includes(args[0].toLowerCase()) ? 'Clear goal' : 'Start goal';
+      prefix = action === 'Clear goal' ? text : '/goal';
+      detail = action === 'Start goal' ? "Sets or replaces Claude Code's completion condition" : descriptions[action];
+      if (state.activeTurn) detail = 'Queued until active work ends; use /interrupt to apply sooner';
+    } else if (state.selected && state.selected.provider !== 'codex') {
       invalid = true;
-      detail = '/goal is available only in Codex Sessions';
+      detail = '/goal is available only in Codex and Claude Code Sessions';
     }
   }
   if (kind !== 'message' && currentAttachmentFiles().length > 0) {
     invalid = true;
     detail = 'Remove attachments to use a command';
   }
-  if (state.pendingMessage && (kind === 'shell' || kind === 'goal' && !state.activeTurn)) {
+  if (state.pendingMessage && (kind === 'shell' || kind === 'goal' && (!state.activeTurn || state.selected?.provider === 'claude-code'))) {
     invalid = true;
     detail = 'Wait for pending work to start or remove it before submitting a command';
   }
   return {kind, prefix, action, detail, invalid};
+}
+
+function validLoopInterval(value: string) {
+  const units: Record<string, number> = {ns: 1e-9, us: 1e-6, 'µs': 1e-6, 'μs': 1e-6, ms: 1e-3, s: 1, m: 60, h: 3600};
+  let remaining = value.replace(/^\+/, '');
+  let seconds = 0;
+  while (remaining) {
+    const part = remaining.match(/^((?:\d+(?:\.\d*)?|\.\d+))(ns|us|µs|μs|ms|s|m|h)/);
+    if (!part) return false;
+    seconds += Number(part[1]) * units[part[2]];
+    remaining = remaining.slice(part[0].length);
+  }
+  return seconds >= 1 && seconds <= 9223372036.854775807;
 }
 
 function syncComposerHighlight() {
@@ -3925,7 +3960,7 @@ function renderComposerCommand(command: ReturnType<typeof composerCommand>, inte
   const changed = elements.composer.dataset.command !== kind;
   elements.composer.dataset.command = kind;
   elements.composer.dataset.invalid = String(command.invalid);
-  elements.input.setAttribute('aria-label', kind === 'shell' ? 'Shell command' : kind === 'goal' ? 'Goal command' : 'Message');
+  elements.input.setAttribute('aria-label', kind === 'shell' ? 'Shell command' : kind === 'goal' ? 'Goal command' : kind === 'loop' ? 'Loop command' : 'Message');
   elements.composerCommandHelp.hidden = kind === 'message';
   if (elements.composerCommandHelp.textContent !== command.detail) elements.composerCommandHelp.textContent = command.detail;
   elements.composerHighlight.hidden = kind === 'message';
@@ -3966,10 +4001,10 @@ function updateComposerAction() {
   elements.composerHint.textContent = !interrupt && command.invalid ? command.detail : usesTouchComposer()
     ? (!interrupt && command.kind !== 'message'
       ? `Tap ${command.action} · Return for a new line`
-      : `Tap ${actionSymbol} to ${action} · Return for a new line · !COMMAND · /goal`)
+      : `Tap ${actionSymbol} to ${action} · Return for a new line · !COMMAND · /goal · /loop`)
     : (interrupt && elements.input.disabled
       ? `Click ${actionSymbol} to interrupt`
-      : `Enter to ${action} · Shift+Enter for a new line · !COMMAND · /goal`);
+      : `Enter to ${action} · Shift+Enter for a new line · !COMMAND · /goal · /loop`);
 }
 
 function closeSocket() {
@@ -5186,6 +5221,10 @@ function handleEvent(event) {
       endAssistantSegment(event.turnId);
       renderGoal(event);
       break;
+    case 'loop.updated':
+      endAssistantSegment(event.turnId);
+      renderLoop(event);
+      break;
     case 'input.requested':
       endAssistantSegment(event.turnId);
       state.waitingForInput = true;
@@ -5660,6 +5699,23 @@ function renderGoal(event) {
     const objective = document.createElement('div');
     objective.textContent = goal.objective || '';
     card.append(status, objective);
+  }
+  elements.messages.append(card);
+  scrollToBottom();
+}
+
+function renderLoop(event) {
+  ensureConversation();
+  const card = document.createElement('div');
+  card.className = 'goal-card';
+  if (!event.loop) {
+    card.textContent = event.status === 'cleared' ? 'Loop cleared.' : 'No loop is currently set.';
+  } else {
+    const status = document.createElement('strong');
+    status.textContent = `Loop ${event.loop.status} · every ${event.loop.interval}`;
+    const prompt = document.createElement('div');
+    prompt.textContent = event.loop.prompt;
+    card.append(status, prompt);
   }
   elements.messages.append(card);
   scrollToBottom();

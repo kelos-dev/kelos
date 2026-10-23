@@ -137,6 +137,9 @@ type Server struct {
 	recoveredGoalTurn  *turnRequest
 	interruptTimeout   time.Duration
 	pendingInputCount  atomic.Int64
+	loopMu             sync.Mutex
+	loopWakeups        chan struct{}
+	loopActive         atomic.Bool
 
 	runtimeStatusMu             sync.RWMutex
 	runtimeStatus               RuntimeStatus
@@ -179,6 +182,7 @@ func NewServer(config Config, journal *Journal, provider Provider) *Server {
 		workspaceStatusRefreshes:             make(chan struct{}, 1),
 		sessionStatusPublishWakeups:          make(chan struct{}, 1),
 		providerStop:                         make(chan struct{}),
+		loopWakeups:                          make(chan struct{}, 1),
 		interruptTimeout:                     defaultInterruptTimeout,
 		workspaceStatusRefreshInterval:       defaultWorkspaceStatusRefreshInterval,
 		activeWorkspaceStatusRefreshInterval: defaultActiveWorkspaceStatusRefreshInterval,
@@ -231,7 +235,7 @@ func Run(ctx context.Context, config Config) error {
 		journal.Close()
 		return err
 	}
-	recovery, err := recoverJournal(journal)
+	recovery, err := recoverJournal(journal, config.AgentType)
 	if err != nil {
 		journal.Close()
 		return err
@@ -275,7 +279,7 @@ func Run(ctx context.Context, config Config) error {
 		journal.Close()
 		return err
 	}
-	if goalManager, ok := provider.(goalProvider); ok && goalManager.ActiveGoal() != nil {
+	if goalManager, ok := provider.(goalControlProvider); ok && goalManager.ActiveGoal() != nil {
 		turn := turnRequest{
 			id:       fmt.Sprintf("turn-%d", server.nextTurnID.Add(1)),
 			text:     "/goal resume",
@@ -376,6 +380,9 @@ func (s *Server) Serve(ctx context.Context) error {
 		s.journal.Close()
 		_ = os.Remove(s.config.SocketPath)
 	}()
+	if err := s.initializeLoop(); err != nil {
+		return err
+	}
 	if err := s.initializeSessionUpdate(serveCtx); err != nil {
 		return err
 	}
@@ -384,6 +391,7 @@ func (s *Server) Serve(ctx context.Context) error {
 		go s.runSessionUpdateReporter(serveCtx)
 	}
 	go s.runTurns(serveCtx)
+	go s.runLoop(serveCtx)
 	if err := s.deliverInitialPrompt(); err != nil {
 		return err
 	}
@@ -588,7 +596,7 @@ func (s *Server) queueSessionStatusPublish(force bool) {
 		return
 	}
 	s.activeMu.Lock()
-	active := s.activeTurn != "" || s.backgroundActive.Load()
+	active := s.activeTurn != "" || s.backgroundActive.Load() || s.loopActive.Load()
 	waitingForInput := s.pendingInputCount.Load() > 0
 	settledTurnID := s.completedTurnID.Load()
 	s.sessionStatusMu.Lock()
@@ -826,7 +834,7 @@ func (s *Server) runTurn(ctx context.Context, request turnRequest) {
 		if command.kind == sessionCommandGoal {
 			provider, ok := s.provider.(goalProvider)
 			if !ok {
-				startResult <- errors.New("/goal is available only in Codex Sessions")
+				startResult <- errors.New("/goal is available only in Codex and Claude Code Sessions")
 				return
 			}
 			startResult <- provider.StartGoal(turn.ctx, command.goal)
@@ -977,7 +985,7 @@ func (s *Server) submitParsedMessage(text, requestID string, command sessionComm
 	}
 	if command.kind == sessionCommandGoal {
 		if _, ok := s.provider.(goalProvider); !ok {
-			return errors.New("/goal is available only in Codex Sessions")
+			return errors.New("/goal is available only in Codex and Claude Code Sessions")
 		}
 	}
 	s.submitMu.Lock()
@@ -1020,6 +1028,10 @@ func (s *Server) submitParsedMessage(text, requestID string, command sessionComm
 		s.pendingTurn = &turn
 		return nil
 	}
+	return s.enqueueTurnLocked(text, requestID, command, attachments)
+}
+
+func (s *Server) enqueueTurnLocked(text, requestID string, command sessionCommand, attachments []Attachment) error {
 	turn := turnRequest{
 		id:          fmt.Sprintf("turn-%d", s.nextTurnID.Add(1)),
 		text:        text,
@@ -1045,16 +1057,19 @@ func (s *Server) submitParsedMessage(text, requestID string, command sessionComm
 }
 
 func (s *Server) submitClientMessage(ctx context.Context, text, requestID string, attachmentIDs ...string) error {
-	command, err := parseSessionCommand(text)
+	command, err := parseSessionCommand(text, s.config.AgentType)
 	if err != nil {
 		return err
 	}
 	if command.kind != sessionCommandMessage && len(attachmentIDs) > 0 {
 		return errors.New("Session commands do not accept attachments")
 	}
+	if command.kind == sessionCommandLoop {
+		return s.controlLoop(command.loop, text, requestID)
+	}
 	if command.kind == sessionCommandGoal {
 		if _, ok := s.provider.(goalProvider); !ok {
-			return errors.New("/goal is available only in Codex Sessions")
+			return errors.New("/goal is available only in Codex and Claude Code Sessions")
 		}
 	}
 	if command.kind == sessionCommandGoal {
@@ -1062,11 +1077,8 @@ func (s *Server) submitClientMessage(ctx context.Context, text, requestID string
 		turnID := s.activeTurn
 		activeKind := s.activeKind
 		s.activeMu.Unlock()
-		if turnID != "" && activeKind == sessionCommandGoal {
-			provider, ok := s.provider.(goalProvider)
-			if !ok {
-				return errors.New("/goal is available only in Codex Sessions")
-			}
+		provider, controlsGoal := s.provider.(goalControlProvider)
+		if turnID != "" && activeKind == sessionCommandGoal && controlsGoal {
 			if err := s.journal.Append(Event{Type: EventUserMessage, RequestID: requestID, Text: text, SessionCommand: true}); err != nil {
 				return fmt.Errorf("recording Session goal command: %w", err)
 			}
@@ -1105,16 +1117,19 @@ func (s *Server) editMessage(turnID, text string, expectedRevision int64, reques
 	if strings.TrimSpace(text) == "" && len(turn.attachments) == 0 {
 		return fmt.Errorf("editing Session turn %q: message must not be empty", turnID)
 	}
-	command, err := parseSessionCommand(text)
+	command, err := parseSessionCommand(text, s.config.AgentType)
 	if err != nil {
 		return err
+	}
+	if command.kind == sessionCommandLoop {
+		return errors.New("submit /loop commands directly instead of editing pending work")
 	}
 	if command.kind != sessionCommandMessage && len(turn.attachments) > 0 {
 		return errors.New("Session commands do not accept attachments")
 	}
 	if command.kind == sessionCommandGoal {
 		if _, ok := s.provider.(goalProvider); !ok {
-			return errors.New("/goal is available only in Codex Sessions")
+			return errors.New("/goal is available only in Codex and Claude Code Sessions")
 		}
 	}
 	turn.text = text
@@ -1178,6 +1193,7 @@ func (s *Server) removePendingMessage(turnID string, expectedRevision int64, req
 	s.submitMu.Unlock()
 
 	s.markTurnCompleted(turn.id)
+	s.signalLoop()
 	s.requestSessionStatusPublish()
 	if shouldReport {
 		s.signalSessionUpdateReport()
@@ -1240,7 +1256,7 @@ func (r journalRecovery) hasUnsettledActivity(settledTurnID int64) bool {
 	return r.nextTurnID > settledTurnID
 }
 
-func recoverJournal(journal *Journal) (journalRecovery, error) {
+func recoverJournal(journal *Journal, agentType string) (journalRecovery, error) {
 	events := journal.snapshotForRecovery()
 	if len(events) == 0 {
 		return journalRecovery{}, nil
@@ -1331,7 +1347,7 @@ func recoverJournal(journal *Journal) (journalRecovery, error) {
 			command := sessionCommand{kind: sessionCommandMessage, text: turn.text}
 			if turn.command {
 				var err error
-				command, err = parseSessionCommand(turn.text)
+				command, err = parseSessionCommand(turn.text, agentType)
 				if err != nil {
 					return recovery, fmt.Errorf("recovering Session command %q: %w", turn.id, err)
 				}

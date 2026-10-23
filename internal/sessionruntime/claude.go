@@ -196,6 +196,29 @@ func (p *ClaudeProvider) beginTurn(ctx context.Context) {
 
 // StartTurn submits a prompt; replies and completion arrive through the session sink.
 func (p *ClaudeProvider) StartTurn(ctx context.Context, input TurnInput) error {
+	return p.startMessage(ctx, input, true)
+}
+
+const claudeGoalUsage = "Claude Code supports /goal [<condition>|clear]; use /interrupt to stop active work"
+
+// StartGoal submits Claude Code's native goal command through its input stream.
+func (p *ClaudeProvider) StartGoal(ctx context.Context, command goalCommand) error {
+	text := "/goal"
+	switch command.action {
+	case goalCommandShow:
+	case goalCommandCreate:
+		text += " " + command.objective
+	case goalCommandClear:
+		text += " clear"
+	default:
+		return errors.New(claudeGoalUsage)
+	}
+	// Native commands must be the first input block. Shell results stay queued
+	// for the next ordinary prompt so they cannot hide the command prefix.
+	return p.startMessage(ctx, TurnInput{Text: text}, false)
+}
+
+func (p *ClaudeProvider) startMessage(ctx context.Context, input TurnInput, includeShellContext bool) error {
 	p.beginTurn(ctx)
 
 	p.sessionMu.Lock()
@@ -203,11 +226,13 @@ func (p *ClaudeProvider) StartTurn(ctx context.Context, input TurnInput) error {
 	p.sessionMu.Unlock()
 	p.shellContextMu.Lock()
 	content := make([]map[string]string, 0, len(p.pendingShellCommands)+1)
-	for _, record := range p.pendingShellCommands {
-		content = append(content, map[string]string{
-			"type": "text",
-			"text": formatShellCommandRecord(record),
-		})
+	if includeShellContext {
+		for _, record := range p.pendingShellCommands {
+			content = append(content, map[string]string{
+				"type": "text",
+				"text": formatShellCommandRecord(record),
+			})
+		}
 	}
 	content = append(content, map[string]string{
 		"type": "text",
@@ -233,7 +258,9 @@ func (p *ClaudeProvider) StartTurn(ctx context.Context, input TurnInput) error {
 		p.activeMu.Unlock()
 		return err
 	}
-	p.pendingShellCommands = nil
+	if includeShellContext {
+		p.pendingShellCommands = nil
+	}
 	p.shellContextMu.Unlock()
 
 	return nil
@@ -546,7 +573,7 @@ func (p *ClaudeProvider) recordClaudeUsage(raw json.RawMessage, sink EventSink) 
 		Model string       `json:"model"`
 		Usage *claudeUsage `json:"usage"`
 	}
-	if json.Unmarshal(raw, &message) != nil {
+	if json.Unmarshal(raw, &message) != nil || message.Model == "<synthetic>" {
 		return
 	}
 	changed := false

@@ -23,7 +23,8 @@ const (
 const (
 	// SessionConditionReady indicates whether the Session infrastructure is ready for clients.
 	SessionConditionReady = "Ready"
-	// SessionConditionActive indicates whether the Session runtime has an unfinished turn.
+	// SessionConditionActive indicates whether the Session runtime has an unfinished turn,
+	// reported background work, or an active recurring prompt.
 	SessionConditionActive = "Active"
 	// SessionReasonIdlePolicyTriggered identifies a Session suspended by its idle policy.
 	SessionReasonIdlePolicyTriggered = "IdlePolicyTriggered"

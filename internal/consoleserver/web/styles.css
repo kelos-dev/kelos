@@ -501,16 +501,17 @@ button { color: inherit; }
 .composer:focus-within { border-color: #c5c5c5; box-shadow: 0 4px 20px rgba(0,0,0,.1); }
 .composer[data-command="shell"] { --command-color: var(--shell-command); }
 .composer[data-command="goal"] { --command-color: var(--goal-command); }
-.composer:is([data-command="shell"], [data-command="goal"]) { border-color: var(--command-color); background: color-mix(in srgb, var(--command-color) 5%, var(--card)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--command-color) 12%, transparent); }
+.composer[data-command="loop"] { --command-color: var(--goal-command); }
+.composer:is([data-command="shell"], [data-command="goal"], [data-command="loop"]) { border-color: var(--command-color); background: color-mix(in srgb, var(--command-color) 5%, var(--card)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--command-color) 12%, transparent); }
 .composer-editor { position: relative; min-width: 0; }
 .composer textarea, .composer-highlight { width: 100%; min-height: 36px; max-height: 160px; border: 0; padding: 8px; font-size: 15px; line-height: 20px; white-space: pre-wrap; overflow-wrap: break-word; }
 .composer textarea { display: block; position: relative; resize: none; outline: 0; background: transparent; color: var(--ink); }
 .composer-highlight { position: absolute; inset: 0; overflow: hidden; pointer-events: none; color: var(--ink); }
 .composer-highlight[hidden] { display: none; }
 .composer-highlight mark { padding: 0; border-radius: 3px; background: color-mix(in srgb, var(--command-color) 18%, transparent); color: var(--command-color); text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
-.composer:is([data-command="shell"], [data-command="goal"]) :is(textarea, .composer-highlight) { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.composer:is([data-command="shell"], [data-command="goal"]) textarea { color: transparent; caret-color: var(--ink); }
-.composer:is([data-command="shell"], [data-command="goal"]) textarea::selection { background: color-mix(in srgb, var(--command-color) 25%, transparent); }
+.composer:is([data-command="shell"], [data-command="goal"], [data-command="loop"]) :is(textarea, .composer-highlight) { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.composer:is([data-command="shell"], [data-command="goal"], [data-command="loop"]) textarea { color: transparent; caret-color: var(--ink); }
+.composer:is([data-command="shell"], [data-command="goal"], [data-command="loop"]) textarea::selection { background: color-mix(in srgb, var(--command-color) 25%, transparent); }
 .composer-command-help { padding: 0 8px; color: var(--command-color); font-size: 11px; line-height: 1.5; }
 .composer-command-help[hidden] { display: none; }
 .composer[data-invalid="true"] .composer-command-help { color: var(--danger); }

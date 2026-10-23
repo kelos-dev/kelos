@@ -3,11 +3,193 @@ package sessionruntime
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestClaudeGoalCommandsUseNativeInput(t *testing.T) {
+	for _, test := range []struct {
+		command goalCommand
+		text    string
+	}{
+		{command: goalCommand{action: goalCommandShow}, text: "/goal"},
+		{command: goalCommand{action: goalCommandCreate, objective: "All tests pass"}, text: "/goal All tests pass"},
+		{command: goalCommand{action: goalCommandClear}, text: "/goal clear"},
+	} {
+		t.Run(test.text, func(t *testing.T) {
+			stdin := &channelWriteCloser{writes: make(chan []byte, 1)}
+			provider := &ClaudeProvider{ctx: t.Context(), stdin: stdin, sessionID: "session-1"}
+			if err := provider.StartGoal(t.Context(), test.command); err != nil {
+				t.Fatal(err)
+			}
+			var message struct {
+				SessionID string `json:"session_id"`
+				Message   struct {
+					Content []struct {
+						Text string `json:"text"`
+					} `json:"content"`
+				} `json:"message"`
+			}
+			if err := json.Unmarshal(<-stdin.writes, &message); err != nil {
+				t.Fatal(err)
+			}
+			if message.SessionID != "session-1" || len(message.Message.Content) != 1 || message.Message.Content[0].Text != test.text {
+				t.Fatalf("Native goal input = %#v", message)
+			}
+		})
+	}
+}
+
+func TestClaudeGoalCommandsPreservePendingShellContext(t *testing.T) {
+	stdin := &channelWriteCloser{writes: make(chan []byte, 2)}
+	provider := &ClaudeProvider{ctx: t.Context(), stdin: stdin, sessionID: "session-1"}
+	record := shellCommandRecord{command: "make test", output: "All tests pass"}
+	if err := provider.recordShellCommand(t.Context(), record); err != nil {
+		t.Fatal(err)
+	}
+	if err := provider.StartGoal(t.Context(), goalCommand{action: goalCommandCreate, objective: "All tests pass"}); err != nil {
+		t.Fatal(err)
+	}
+	var goal struct {
+		Message struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal(<-stdin.writes, &goal); err != nil {
+		t.Fatal(err)
+	}
+	if len(goal.Message.Content) != 1 || goal.Message.Content[0].Text != "/goal All tests pass" {
+		t.Fatalf("Native goal input = %#v", goal)
+	}
+	if err := provider.StartTurn(t.Context(), TurnInput{Text: "Continue"}); err != nil {
+		t.Fatal(err)
+	}
+	var ordinary struct {
+		Message struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal(<-stdin.writes, &ordinary); err != nil {
+		t.Fatal(err)
+	}
+	if len(ordinary.Message.Content) != 2 || ordinary.Message.Content[0].Text != formatShellCommandRecord(record) || ordinary.Message.Content[1].Text != "Continue" {
+		t.Fatalf("Ordinary prompt after native command = %#v", ordinary)
+	}
+}
+
+func TestClaudeGoalRejectsUnknownAction(t *testing.T) {
+	stdin := &channelWriteCloser{writes: make(chan []byte, 1)}
+	provider := &ClaudeProvider{ctx: t.Context(), stdin: stdin}
+	if err := provider.StartGoal(t.Context(), goalCommand{action: "unknown"}); err == nil || !strings.Contains(err.Error(), claudeGoalUsage) {
+		t.Fatalf("StartGoal(unknown) = %v", err)
+	}
+	if len(stdin.writes) != 0 || provider.active {
+		t.Fatal("Unknown goal action started work")
+	}
+}
+
+func TestClaudeNativeGoalStreamsAndQueuesControls(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	reader, writer := io.Pipe()
+	stdin := &channelWriteCloser{writes: make(chan []byte, 1)}
+	provider := &ClaudeProvider{ctx: ctx, config: ProviderConfig{StateDir: t.TempDir()}, stdin: stdin, sessionID: "session-1", done: make(chan struct{})}
+	journal := NewJournal()
+	defer journal.Close()
+	server := NewServer(Config{AgentType: "claude-code"}, journal, provider)
+	server.readWorkspaceDiff = func(context.Context, string) string { return "" }
+	go provider.readLoop(reader)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		server.runTurns(ctx)
+	}()
+	defer func() { cancel(); <-done; _ = writer.Close(); <-provider.done }()
+	if err := server.submitClientMessage(ctx, "/goal All tests pass", "create"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-stdin.writes:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Native goal was not submitted")
+	}
+	for _, line := range []string{
+		`{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"Goal set: All tests pass"}]},"local_command_run":{"command":"goal","args":"All tests pass"}}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"First attempt"}]}}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"Second attempt"}]}}`,
+	} {
+		if _, err := fmt.Fprintln(writer, line); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitForSessionEvent(t, journal, func(event Event) bool { return event.Type == EventAssistantMessage && event.Text == "Second attempt" })
+	if err := server.submitClientMessage(ctx, "/goal clear", "clear"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case data := <-stdin.writes:
+		t.Fatalf("Goal control ran during native goal work: %s", data)
+	default:
+	}
+	for _, event := range journal.Snapshot() {
+		if event.Type == EventTurnCompleted {
+			t.Fatal("Native goal completed before Claude's result")
+		}
+	}
+	if _, err := fmt.Fprintln(writer, `{"type":"result","subtype":"success"}`); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case data := <-stdin.writes:
+		if !strings.Contains(string(data), `"text":"/goal clear"`) {
+			t.Fatalf("Queued native goal input = %s", data)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Queued goal control did not run after Claude's result")
+	}
+	for _, line := range []string{
+		`{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"No goal set"}]},"local_command_run":{"command":"goal","args":"clear"}}`,
+		`{"type":"result","subtype":"success","local_command":"goal"}`,
+	} {
+		if _, err := fmt.Fprintln(writer, line); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitForSessionEvent(t, journal, func(event Event) bool { return event.Type == EventTurnCompleted && event.TurnID == "turn-2" })
+	completed := 0
+	for _, event := range journal.Snapshot() {
+		if event.Type == EventTurnCompleted {
+			completed++
+			if event.Status != "completed" {
+				t.Fatalf("Goal completion = %#v", event)
+			}
+		}
+	}
+	if completed != 2 {
+		t.Fatalf("Completed turns = %d, want 2", completed)
+	}
+}
+
+func TestClaudeNativeCommandPreservesRuntimeModelAndUsage(t *testing.T) {
+	provider := &ClaudeProvider{model: "claude-sonnet-4-6", usage: &RuntimeUsage{InputTokens: 100, OutputTokens: 20, TotalTokens: 120, ContextTokens: 120}}
+	sink := newProviderTestSink(nil)
+	_, err := provider.handleClaudeLine([]byte(`{"type":"assistant","message":{"id":"local-command","model":"<synthetic>","usage":{"input_tokens":0,"output_tokens":0},"content":[{"type":"text","text":"No goal set"}]}}`), sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := provider.runtimeStatusSnapshot()
+	if status.Model != "claude-sonnet-4-6" || status.Usage == nil || status.Usage.TotalTokens != 120 || status.Usage.ContextTokens != 120 {
+		t.Fatalf("Runtime status after native goal command = %#v", status)
+	}
+	assertEventTypes(t, sink.snapshot(), EventAssistantMessage)
+}
 
 type channelWriteCloser struct {
 	writes chan []byte

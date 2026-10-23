@@ -112,6 +112,7 @@ func (s *Server) updateProviderRuntimeStatus(update RuntimeStatus) {
 	s.broadcastRuntimeStatusLocked()
 	s.runtimeStatusMu.Unlock()
 	if backgroundChanged {
+		s.signalLoop()
 		s.requestSessionStatusPublish()
 		s.signalSessionUpdateReport()
 	}

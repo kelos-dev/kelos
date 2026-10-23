@@ -330,7 +330,7 @@ the Session resource and is visible through the Kubernetes API.
 | `status.lastNotification` | Latest input request or turn outcome needing attention, with an opaque non-empty `id`, `type` (`InputRequested`, `TurnCompleted`, or `TurnFailed`), and `eventTime`. Answered or cancelled requests are excluded without restoring older outcomes; if no pending request or later outcome remains, the field is cleared. An interrupted turn or removal from retained history also clears it | Output |
 | `status.model` | Model reported by the live Session runtime; empty when the runtime does not report a model | Output |
 | `status.conditions[type=Ready]` | Whether the Session infrastructure is ready for clients | Output |
-| `status.conditions[type=Active]` | Whether the runtime has an unfinished turn or reported unfinished Claude Code background work; `reason: WaitingForInput` means the turn is waiting for a user response, and `Unknown` means activity has not been reported | Output |
+| `status.conditions[type=Active]` | Whether the runtime has an unfinished turn, reported unfinished Claude Code background work, or an active loop; `reason: WaitingForInput` means the turn is waiting for a user response, and `Unknown` means activity has not been reported | Output |
 | `status.branch` | Currently checked-out git branch in the Session workspace | Output |
 | `status.pullRequest.url` | Web URL of the pull request associated with the current branch | Output |
 | `status.pullRequest.state` | Pull request state: `Draft`, `Open`, `Queued`, `Merged`, or `Closed`. `Queued` means the pull request is in a merge queue | Output |
@@ -397,12 +397,12 @@ and are removed by Session reset or deletion. Retained messages show attachment
 names, and the web client provides authenticated previews or downloads while
 the Session is ready.
 
-Both terminal and web chat recognize `!COMMAND` and `/goal` before ordinary
-messages are submitted. The web and interactive terminal composers identify
-shell and goal commands as you type and show the submit action.
-The web composer highlights the command prefix and uses distinct shell and goal
-styling. It labels the submit button; touch clients use this button and reserve
-Return for a new line. Both composers explain incomplete commands, unavailable
+Both terminal and web chat recognize `!COMMAND`, `/goal`, and `/loop` before
+ordinary messages are submitted. The web and interactive terminal composers identify
+shell, goal, and loop commands as you type and show the submit action.
+The web composer highlights the command prefix and styles shell commands
+separately from goals and loops. It labels the submit button; touch clients use
+this button and reserve Return for a new line. Both composers explain incomplete commands, unavailable
 goal commands, and commands blocked by staged attachments or pending work, and
 prevent their submission until the problem is resolved. Removing the command
 prefix restores the ordinary message composer.
@@ -416,8 +416,10 @@ prompt; Codex and OpenCode record them immediately. Live and retained command
 output appears as tool activity, and interrupting the Session turn stops the
 command.
 
-`/goal` is available only in Codex Sessions and uses the persisted goal owned by
-the Codex conversation:
+`/goal` uses the agent's native goal command in Codex and Claude Code Sessions.
+OpenCode Sessions do not support `/goal`.
+
+Codex supports these commands:
 
 | Command | Behavior |
 |---------|----------|
@@ -434,6 +436,47 @@ Interrupting active goal work pauses the goal before interrupting its current
 turn; detaching with `/quit` or `/exit` leaves it running. The goal and its
 accounting survive client reconnection and runtime container restart. They
 survive Pod replacement only when the Session workspace is persistent.
+
+Claude Code supports `/goal CONDITION` to set or replace a completion condition,
+`/goal` to show its native status, and `/goal clear` to remove it. Claude Code
+evaluates the condition after each model turn and continues until it is met,
+judged impossible, or stopped by a native error or continuation limit. Its
+native command output appears in the conversation. Goal commands submitted
+while Claude is working are queued until that work ends; use `/interrupt` to
+stop active work and let a queued command run sooner. Claude Code also accepts
+`stop`, `off`, `reset`, `none`, and `cancel` as aliases for `clear`. Other arguments
+are completion conditions, including words that Codex treats as controls such
+as `edit`, `pause`, and `resume`.
+
+Claude Code retains the goal with its conversation history. After runtime or
+Pod replacement, send a prompt to continue the resumed conversation and its
+retained goal; Pod replacement requires persistent workspace storage. Claude
+Code's native policy and settings can disable goal commands.
+
+`/loop` repeats a prompt in Claude Code, Codex, and OpenCode Sessions:
+
+| Command | Behavior |
+|---------|----------|
+| `/loop` | Show the recurring prompt, interval, and status |
+| `/loop INTERVAL PROMPT` | Schedule one recurring prompt, for example `/loop 5m Check CI and address failures` |
+| `/loop pause` | Stop scheduling runs; let an accepted run finish |
+| `/loop resume` | Resume scheduling, with the next run after one interval |
+| `/loop clear` | Remove the loop; let an accepted run finish |
+
+Intervals use duration units such as `s`, `m`, and `h`, and must be at least one
+second. Each Session supports one loop. Clear it before creating another.
+The first run starts after one interval. Runs wait for active turns, pending
+messages, and reported background tasks to finish. Overdue runs execute once
+when the Session becomes idle; missed intervals do not accumulate. Each accepted
+run schedules the next one relative to its submission time. The prompt is sent
+to the agent as a message, including when it starts with `!` or `/`.
+
+An active loop keeps the Session active between runs, preventing automatic idle
+suspension or deletion. Pause or clear it to allow idle reclamation. Runtime
+updates can proceed between runs. Detaching leaves the loop running;
+interrupting stops only the current turn. The schedule and paused state survive
+runtime restart and survive Pod replacement with persistent workspace storage.
+Manually suspending the Session stops scheduling until the runtime resumes.
 
 The terminal client shows live connecting, reconnecting, working,
 waiting-for-input, and interrupting progress with elapsed time. After a
@@ -626,9 +669,9 @@ not internal housekeeping. It does not indicate that the parent agent is blocked
 on a specific subtask. Providers that do not report a background-task count keep
 their usual turn progress indicator.
 
-`Active=True` means the runtime has an unfinished turn or Claude Code has
-reported unfinished background work. Its reason is `WaitingForInput` when the
-turn needs a user response and `TurnActive` while the agent is working.
+`Active=True` means the runtime has an unfinished turn, an active loop, or
+Claude Code has reported unfinished background work. Its reason is
+`WaitingForInput` when the turn needs a user response and `TurnActive` otherwise.
 `Active=False` means it is idle. Activity becomes `Unknown` when
 it cannot be reported, such as while the Session Pod is being replaced. Clients
 can use the `WaitingForInput` reason to highlight turns that need a response;

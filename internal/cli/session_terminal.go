@@ -315,7 +315,7 @@ func runSessionPlainTerminalWithWidth(ctx context.Context, input io.Reader, outp
 				if hasEarlierHistory {
 					write("\n%s\n", formatter.muted("Earlier Session history is available. Use /history to load the previous page."))
 				}
-				write("\n%s\n\n", formatter.muted("Connected. Type a message, !COMMAND, /goal, /attach PATH, /history, /interrupt, /answer INPUT QUESTION VALUE, or /quit."))
+				write("\n%s\n\n", formatter.muted("Connected. Type a message, !COMMAND, /goal, /loop, /attach PATH, /history, /interrupt, /answer INPUT QUESTION VALUE, or /quit."))
 			case sessionruntime.EventRuntimeRecovered:
 				if !pageEvent {
 					recoveryActive = true
@@ -380,6 +380,9 @@ func runSessionPlainTerminalWithWidth(ctx context.Context, input io.Reader, outp
 			case sessionruntime.EventGoalUpdated:
 				finishAssistant(assistant)
 				write("%s\n", formatter.muted(sessionGoalText(event.Goal, event.Status)))
+			case sessionruntime.EventLoopUpdated:
+				finishAssistant(assistant)
+				write("%s\n", formatter.muted(sessionLoopText(event.Loop, event.Status)))
 			case sessionruntime.EventInputRequested:
 				finishAssistant(assistant)
 				write("\n%s\n", formatter.inputHeading(fmt.Sprintf("Input %s requested:", event.InputID)))
@@ -613,6 +616,16 @@ func sessionGoalText(goal *sessionruntime.Goal, status string) string {
 		usage = fmt.Sprintf(" (%d tokens)", goal.TokensUsed)
 	}
 	return fmt.Sprintf("Goal %s%s: %s", goal.Status, usage, goal.Objective)
+}
+
+func sessionLoopText(loop *sessionruntime.Loop, status string) string {
+	if loop == nil {
+		if status == "cleared" {
+			return "Loop cleared."
+		}
+		return "No loop is currently set."
+	}
+	return fmt.Sprintf("Loop %s (every %s): %s", loop.Status, loop.Interval, loop.Prompt)
 }
 
 func sessionTerminalMessageText(text string, attachments []sessionruntime.Attachment) string {

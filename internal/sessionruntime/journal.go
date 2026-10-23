@@ -37,6 +37,7 @@ type Journal struct {
 	journalID   string
 	// unstartedTurns keeps accepted prompts durable after they leave replay history.
 	unstartedTurns map[string]Event
+	loopEvent      *Event
 	failure        chan struct{}
 	failureErr     error
 	failureOnce    sync.Once
@@ -217,7 +218,7 @@ func (j *Journal) load() (string, bool, error) {
 			event.JournalID = ""
 		}
 		j.nextID = event.ID + 1
-		j.updateUnstartedTurns(event)
+		j.updateRecoveryState(event)
 		j.appendRetained(event)
 		offset += int64(len(line))
 		total++
@@ -263,7 +264,7 @@ func (j *Journal) Append(event Event) error {
 		}
 	}
 	j.nextID++
-	j.updateUnstartedTurns(event)
+	j.updateRecoveryState(event)
 	compacted := j.appendRetained(event)
 	if compacted && j.file != nil {
 		if err := j.rewrite(); err != nil {
@@ -283,7 +284,12 @@ func (j *Journal) Append(event Event) error {
 	return nil
 }
 
-func (j *Journal) updateUnstartedTurns(event Event) {
+func (j *Journal) updateRecoveryState(event Event) {
+	if event.Type == EventLoopUpdated {
+		copy := event
+		copy.Loop = cloneLoop(event.Loop)
+		j.loopEvent = &copy
+	}
 	if event.TurnID == "" {
 		return
 	}
@@ -304,6 +310,11 @@ func (j *Journal) recoveryEvents() []Event {
 	for _, event := range j.unstartedTurns {
 		if _, exists := retained[event.ID]; !exists {
 			events = append(events, event)
+		}
+	}
+	if j.loopEvent != nil {
+		if _, exists := retained[j.loopEvent.ID]; !exists {
+			events = append(events, *j.loopEvent)
 		}
 	}
 	sort.Slice(events, func(i, k int) bool { return events[i].ID < events[k].ID })

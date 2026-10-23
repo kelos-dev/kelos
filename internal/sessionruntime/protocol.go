@@ -23,6 +23,7 @@ const (
 	EventToolDelta          = "tool.delta"
 	EventToolCompleted      = "tool.completed"
 	EventGoalUpdated        = "goal.updated"
+	EventLoopUpdated        = "loop.updated"
 	EventInputRequested     = "input.requested"
 	EventInputResolved      = "input.resolved"
 	EventFileDiff           = "file.diff"
@@ -64,6 +65,7 @@ type Event struct {
 	HistoryState   *HistoryState     `json:"historyState,omitempty"`
 	Runtime        *RuntimeStatus    `json:"runtime,omitempty"`
 	Goal           *Goal             `json:"goal,omitempty"`
+	Loop           *Loop             `json:"loop,omitempty"`
 	Attachments    []Attachment      `json:"attachments,omitempty"`
 	Prompts        []Prompt          `json:"prompts,omitempty"`
 	Changes        *WorkspaceChanges `json:"changes,omitempty"`
@@ -85,6 +87,14 @@ type Goal struct {
 	TokenBudget     *int64 `json:"tokenBudget,omitempty"`
 	TokensUsed      int64  `json:"tokensUsed,omitempty"`
 	TimeUsedSeconds int64  `json:"timeUsedSeconds,omitempty"`
+}
+
+// Loop describes a recurring prompt retained in the Session workspace.
+type Loop struct {
+	Prompt    string    `json:"prompt"`
+	Interval  string    `json:"interval"`
+	Status    string    `json:"status"`
+	NextRunAt time.Time `json:"nextRunAt"`
 }
 
 // HistoryState describes conversation state that is independent of transcript paging.

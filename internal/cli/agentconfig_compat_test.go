@@ -139,6 +139,19 @@ func TestCreateAgentConfigRejectsValueFromWithoutV1alpha2(t *testing.T) {
 	}
 }
 
+func TestCreateAgentConfigRejectsSkillFilesWithoutV1alpha2(t *testing.T) {
+	ac := &kelos.AgentConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: "bundled-skills", Namespace: "default"},
+		Spec: kelos.AgentConfigSpec{Plugins: []kelos.PluginSpec{{Name: "tools", Skills: []kelos.SkillDefinition{{
+			Name: "review", Content: "# Review", Files: []kelos.SkillFile{{Path: "reference.md", Content: "Checklist"}},
+		}}}}},
+	}
+	err := createAgentConfig(context.Background(), agentConfigV1alpha1OnlyClient(), ac)
+	if err == nil || !strings.Contains(err.Error(), "bundled-skills") || !strings.Contains(err.Error(), "requires kelos.dev/v1alpha2 CRDs") {
+		t.Fatalf("error = %v, want named v1alpha2 requirement error", err)
+	}
+}
+
 func TestCreateAgentConfigRejectsSkillsSecretRefWithoutV1alpha2(t *testing.T) {
 	ctx := context.Background()
 	cl := agentConfigV1alpha1OnlyClient()

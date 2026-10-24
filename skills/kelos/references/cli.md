@@ -59,7 +59,12 @@ kelos create agentconfig my-ac \
   --mcp github='{"type":"http","url":"https://api.githubcopilot.com/mcp/"}'
 
 kelos create agentconfig my-ac --skill review=@review.md --dry-run
+kelos create agentconfig my-ac --skill review=@./skills/review --dry-run
 ```
+
+For `--skill name=@directory`, the directory must contain `SKILL.md`. The
+manifest includes supporting UTF-8 text files recursively and preserves execute
+bits as `files[].executable`. Symbolic links and non-UTF-8 files are rejected.
 
 `kelos run --from taskspawner/NAME` creates a standalone Task from the
 spawner's template. Use `-f values.yaml` to expose the file's top-level YAML or

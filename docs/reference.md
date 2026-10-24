@@ -1169,6 +1169,10 @@ to receive refreshed credentials during long-running work.
 | `spec.plugins[].name` | Plugin name (used as directory name and namespace) | Yes (per plugin) |
 | `spec.plugins[].skills[].name` | Skill name (becomes `skills/<name>/SKILL.md`) | Yes (per skill) |
 | `spec.plugins[].skills[].content` | Skill content (markdown with frontmatter) | Yes (per skill) |
+| `spec.plugins[].skills[].files` | Supporting text files written alongside the skill's `SKILL.md` | No |
+| `spec.plugins[].skills[].files[].path` | Clean relative path inside the skill directory, using forward slashes (e.g., `references/checklist.md`). Absolute paths, traversal, duplicate paths, and file/directory conflicts including overwriting `SKILL.md` are rejected when the AgentConfig is consumed | Yes (per file) |
+| `spec.plugins[].skills[].files[].content` | UTF-8 file content, preserved verbatim | Yes (per file) |
+| `spec.plugins[].skills[].files[].executable` | Write the file with mode `0755` instead of `0644`. Defaults to `false` | No |
 | `spec.plugins[].agents[].name` | Agent name (becomes `agents/<name>.md`) | Yes (per agent) |
 | `spec.plugins[].agents[].content` | Agent content (markdown with frontmatter) | Yes (per agent) |
 | `spec.skills[].source` | skills.sh package in `owner/repo` format for github.com (e.g., `vercel-labs/agent-skills`) or a full HTTPS git URL for private/GitHub Enterprise Server repositories (e.g., `https://ghe.example.com/org/private-skills.git`). Installed skills are exposed to the agent as a plugin named `skills-sh`; when `AgentConfig.spec.skills` is set, that name is reserved and must not be used in `AgentConfig.spec.plugins[].name` | Yes (per skill) |
@@ -1187,6 +1191,36 @@ to receive refreshed credentials during long-running work.
 | `spec.mcpServers[].env[].valueFrom.configMapKeyRef` | ConfigMap key reference for an MCP env value. Set `name` and `key`; when `optional: true`, a missing ConfigMap or key omits the variable instead of failing the Task | No |
 | `spec.mcpServers[].env[].valueFrom` | Only `secretKeyRef` and `configMapKeyRef` are supported for MCP server env. Other Kubernetes `EnvVarSource` variants are rejected when a Task consumes the AgentConfig | No |
 | `spec.mcpServers[].envFrom.secretRef.name` | Secret whose data keys become stdio MCP environment variable names and values. Values from `envFrom` override inline `env` on key conflicts | No |
+
+### Bundling a skill directory
+
+Inline skills can include reference documents, scripts, and templates using
+`spec.plugins[].skills[].files`. Paths are relative to that skill's directory,
+so `SKILL.md` can refer to `references/checklist.md` or `scripts/check.sh`.
+
+To bundle a local directory into an AgentConfig manifest:
+
+```bash
+kelos create agentconfig reviewer \
+  --skill review=@./skills/review \
+  --dry-run
+```
+
+The directory must contain a root `SKILL.md`. Kelos recursively includes all
+regular UTF-8 text files, including hidden files, preserves their content and
+relative paths, and sets `executable: true` for supporting files with any execute
+bit set. Symbolic links and non-UTF-8 files are rejected. The generated manifest
+contains the files; the directory is not needed when a Task consumes the config.
+The existing `name=content` and `name=@file` forms still define only `SKILL.md`.
+
+All inline plugin content combined, including supporting files and agents, must
+fit within a 900 KiB budget per consumer. For larger bundles or binary assets,
+use Git-backed packages through `AgentConfig.spec.skills`.
+
+Supporting files require `kelos.dev/v1alpha2` CRDs. When a config is read through
+`v1alpha1`, files are preserved in conversion annotations so updates can retain
+them. Such updates are subject to Kubernetes' 256 KiB total annotation limit;
+use `v1alpha2` to edit larger bundles.
 
 ## TaskSpawner
 

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -412,14 +414,30 @@ func describePluginTaskTests(cfg agentTestConfig) {
 
 		BeforeEach(cfg.skipIfUnavailable)
 
-		It("should run a Task with an AgentConfig that has a plugin", func() {
+		It("should run a Task with a skill directory containing references and an executable script", func() {
 			By("creating credentials secret")
 			f.CreateSecret(cfg.SecretName, cfg.SecretKey+"="+*cfg.SecretValue)
 
-			By("creating an AgentConfig with a plugin (skill definition)")
+			By("bundling a local skill directory into an AgentConfig")
+			dir := GinkgoT().TempDir()
+			Expect(os.MkdirAll(filepath.Join(dir, "references"), 0o755)).To(Succeed())
+			Expect(os.MkdirAll(filepath.Join(dir, "scripts"), 0o755)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(`---
+name: hello
+description: Greet users by running the bundled greeting script.
+---
+Run scripts/greet.sh from this skill's directory and print its output.
+`), 0o644)).To(Succeed())
+			const marker = "KELOS_E2E_BUNDLE_MARKER_r7x9c1"
+			Expect(os.WriteFile(filepath.Join(dir, "references/greeting.txt"), []byte(marker+"\n"), 0o644)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(dir, "scripts/greet.sh"), []byte(`#!/bin/sh
+set -eu
+skill_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cat "$skill_dir/references/greeting.txt"
+`), 0o755)).To(Succeed())
 			framework.Kelos("create", "agentconfig", "plugin-ac",
 				"-n", f.Namespace,
-				"--skill", "hello=When asked to greet, print 'Hello from plugin skill'",
+				"--skill", "hello=@"+dir,
 			)
 
 			By("creating a Task referencing the AgentConfig")
@@ -430,12 +448,17 @@ func describePluginTaskTests(cfg agentTestConfig) {
 				Spec: kelos.TaskSpec{
 					Type:   cfg.AgentType,
 					Model:  cfg.Model,
-					Prompt: "Print 'Hello from plugin e2e test' to stdout",
+					Prompt: "Use the hello skill to greet me. Run its bundled script and show its output.",
 					Credentials: &kelos.Credentials{
 						Type:      cfg.CredentialType,
 						SecretRef: &kelos.SecretReference{Name: cfg.SecretName},
 					},
 					AgentConfigRefs: []kelos.AgentConfigReference{{Name: "plugin-ac"}},
+					PodOverrides: &kelos.PodOverrides{ExtraInitContainers: []corev1.Container{{
+						Name: "verify-skill-bundle", Image: "busybox:1.37",
+						Command:      []string{"sh", "-c", `test -x /kelos/plugin/kelos/skills/hello/scripts/greet.sh && test "$(/kelos/plugin/kelos/skills/hello/scripts/greet.sh)" = ` + marker},
+						VolumeMounts: []corev1.VolumeMount{{Name: "kelos-plugin", MountPath: "/kelos/plugin"}},
+					}}},
 				},
 			})
 
@@ -451,6 +474,7 @@ func describePluginTaskTests(cfg agentTestConfig) {
 			By("getting Job logs")
 			logs := f.GetJobLogs(taskName)
 			GinkgoWriter.Printf("Job logs:\n%s\n", logs)
+			Expect(logs).To(ContainSubstring(marker))
 		})
 	})
 }

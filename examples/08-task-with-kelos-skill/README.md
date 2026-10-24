@@ -49,6 +49,15 @@ kelos create agentconfig kelos-skill-agent \
   --skills-sh kelos-dev/kelos
 ```
 
-If you need a single-file inline skill, keep the condensed `content` in this
-example or write a self-contained skill body that does not refer to
-`skills/kelos/references/`.
+To embed the full skill in an AgentConfig manifest without fetching it at Task
+startup, bundle the local directory:
+
+```bash
+kelos create agentconfig kelos-skill-agent \
+  --skill kelos=@./skills/kelos --dry-run > kelos-skill-agent.yaml
+kubectl apply -f kelos-skill-agent.yaml
+```
+
+This writes `SKILL.md` to the skill's `content` and includes the reference files
+in `files`. A single-file inline skill can still use the condensed `content`
+in this example.

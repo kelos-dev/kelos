@@ -72,7 +72,7 @@ var _ = Describe("AgentConfig conversion webhook", Ordered, func() {
 		// not left with instances. envtest runs no namespace controller, so the
 		// namespaces themselves cannot be cleaned up this way — the instances
 		// have to go individually.
-		for _, ns := range []string{"test-conv-up", "test-conv-down"} {
+		for _, ns := range []string{"test-conv-up", "test-conv-down", "test-conv-skill-files"} {
 			_ = k8sClient.Delete(ctx, &kelos.AgentConfig{
 				ObjectMeta: metav1.ObjectMeta{Name: "cfg", Namespace: ns},
 			})
@@ -151,6 +151,32 @@ var _ = Describe("AgentConfig conversion webhook", Ordered, func() {
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "cfg", Namespace: ns.Name}, got)).To(Succeed())
 		Expect(got.Spec.MCPServers).To(HaveLen(1))
 		Expect(got.Spec.MCPServers[0].Env).To(Equal(map[string]string{"LITERAL": "x"}))
+	})
+
+	It("preserves inline skill files across a v1alpha1 update", func() {
+		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test-conv-skill-files"}}
+		Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+		files := []kelos.SkillFile{
+			{Path: "references/nested/checklist.md", Content: "Check compatibility\n"},
+			{Path: "scripts/check.sh", Content: "#!/bin/sh\nexit 0\n", Executable: true},
+		}
+		ac := &kelos.AgentConfig{
+			ObjectMeta: metav1.ObjectMeta{Name: "cfg", Namespace: ns.Name},
+			Spec: kelos.AgentConfigSpec{Plugins: []kelos.PluginSpec{{Name: "tools", Skills: []kelos.SkillDefinition{{
+				Name: "review", Content: "# Review", Files: files,
+			}}}}},
+		}
+		Expect(k8sClient.Create(ctx, ac)).To(Succeed())
+		key := types.NamespacedName{Name: ac.Name, Namespace: ac.Namespace}
+		spoke := &kelosv1alpha1.AgentConfig{}
+		Expect(k8sClient.Get(ctx, key, spoke)).To(Succeed())
+		spoke.Labels = map[string]string{"edited": "true"}
+		Expect(k8sClient.Update(ctx, spoke)).To(Succeed())
+		got := &kelos.AgentConfig{}
+		Expect(k8sClient.Get(ctx, key, got)).To(Succeed())
+		Expect(got.Spec.Plugins).To(HaveLen(1))
+		Expect(got.Spec.Plugins[0].Skills).To(HaveLen(1))
+		Expect(got.Spec.Plugins[0].Skills[0].Files).To(Equal(files))
 	})
 
 	It("folds TaskSpawner legacy comment + root pollInterval into v1alpha2", func() {

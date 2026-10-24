@@ -40,6 +40,68 @@ func TestAgentConfigToHub_EnvMapToSortedList(t *testing.T) {
 	}
 }
 
+func TestAgentConfigRoundTripPreservesSkillFiles(t *testing.T) {
+	files := []v1alpha2.SkillFile{
+		{Path: "references/check.md", Content: "Checklist\n"},
+		{Path: "scripts/check.sh", Content: "#!/bin/sh\nexit 0\n", Executable: true},
+	}
+	for _, edit := range []string{"unchanged", "reordered", "removed", "renamed", "malformed annotation"} {
+		t.Run(edit, func(t *testing.T) {
+			src := &v1alpha2.AgentConfig{Spec: v1alpha2.AgentConfigSpec{Plugins: []v1alpha2.PluginSpec{
+				{Name: "empty"},
+				{Name: "tools", Skills: []v1alpha2.SkillDefinition{{Name: "inline", Content: "Inline"}, {Name: "review", Content: "Review", Files: files}}},
+			}}}
+			spoke := &v1alpha1.AgentConfig{}
+			if err := agentConfigFromHub(context.Background(), src, spoke); err != nil {
+				t.Fatal(err)
+			}
+			if spoke.Annotations[preservedSkillFilesAnnotation] == "" {
+				t.Fatal("missing preservation annotation")
+			}
+			switch edit {
+			case "reordered":
+				spoke.Spec.Plugins[0], spoke.Spec.Plugins[1] = spoke.Spec.Plugins[1], spoke.Spec.Plugins[0]
+				spoke.Spec.Plugins[0].Skills[0], spoke.Spec.Plugins[0].Skills[1] = spoke.Spec.Plugins[0].Skills[1], spoke.Spec.Plugins[0].Skills[0]
+			case "removed":
+				spoke.Spec.Plugins[1].Skills = spoke.Spec.Plugins[1].Skills[:1]
+			case "renamed":
+				spoke.Spec.Plugins[1].Skills[1].Name = "another"
+			case "malformed annotation":
+				spoke.Annotations[preservedSkillFilesAnnotation] = "invalid JSON"
+			}
+			hub := &v1alpha2.AgentConfig{}
+			if err := agentConfigToHub(context.Background(), spoke, hub); err != nil {
+				t.Fatal(err)
+			}
+			var restored []v1alpha2.SkillFile
+			for _, plugin := range hub.Spec.Plugins {
+				for _, skill := range plugin.Skills {
+					if len(skill.Files) > 0 {
+						restored = skill.Files
+					}
+				}
+			}
+			if edit == "unchanged" || edit == "reordered" {
+				if !reflect.DeepEqual(restored, files) {
+					t.Fatalf("files = %#v, want %#v", restored, files)
+				}
+				restored[0].Content = "mutated"
+				if src.Spec.Plugins[1].Skills[1].Files[0].Content != "Checklist\n" {
+					t.Fatal("conversion mutated source files")
+				}
+			} else if len(restored) != 0 {
+				t.Fatalf("restored files onto an edited skill: %#v", restored)
+			}
+			if _, ok := hub.Annotations[preservedSkillFilesAnnotation]; ok {
+				t.Fatal("preservation annotation remains on hub")
+			}
+			if spoke.Annotations[preservedSkillFilesAnnotation] == "" {
+				t.Fatal("source annotation was mutated")
+			}
+		})
+	}
+}
+
 func TestAgentConfigFromHub_EnvListToMap_DropsValueFrom(t *testing.T) {
 	src := &v1alpha2.AgentConfig{
 		ObjectMeta: metav1.ObjectMeta{Name: "cfg", Namespace: "default"},

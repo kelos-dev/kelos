@@ -42,7 +42,7 @@ type PluginSpec struct {
 	Name string `json:"name"`
 
 	// Skills defines skills for this plugin.
-	// Each becomes skills/<name>/SKILL.md in the plugin directory.
+	// Each becomes a directory under skills/<name> in the plugin directory.
 	// +optional
 	Skills []SkillDefinition `json:"skills,omitempty"`
 
@@ -57,6 +57,28 @@ type SkillDefinition struct {
 	// +kubebuilder:validation:MinLength=1
 	Name    string `json:"name"`
 	Content string `json:"content"`
+
+	// Files are supporting text files written alongside SKILL.md.
+	// +optional
+	// +listType=map
+	// +listMapKey=path
+	Files []SkillFile `json:"files,omitempty"`
+}
+
+// SkillFile defines a supporting text file within a skill directory.
+type SkillFile struct {
+	// Path is relative to the skill directory, using forward slashes.
+	// It must be clean, must not escape the directory, and must not conflict
+	// with SKILL.md or another file. Paths are validated when consumed.
+	// +kubebuilder:validation:MinLength=1
+	Path string `json:"path"`
+
+	// Content is the UTF-8 file content.
+	Content string `json:"content"`
+
+	// Executable writes the file with mode 0755 instead of 0644.
+	// +optional
+	Executable bool `json:"executable,omitempty"`
 }
 
 // AgentDefinition defines a sub-agent within a plugin.

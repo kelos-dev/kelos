@@ -54,13 +54,11 @@ func newCreateAgentConfigCommand(cfg *ClientConfig) *cobra.Command {
 				plugin := kelos.PluginSpec{Name: "kelos"}
 
 				for _, s := range skillFlags {
-					sn, sc, err := parseNameContent(s, "skill")
+					skill, err := parseSkillFlag(s)
 					if err != nil {
-						return err
+						return fmt.Errorf("agentconfig %s: %w", name, err)
 					}
-					plugin.Skills = append(plugin.Skills, kelos.SkillDefinition{
-						Name: sn, Content: sc,
-					})
+					plugin.Skills = append(plugin.Skills, skill)
 				}
 
 				for _, a := range agentFlags {
@@ -126,7 +124,7 @@ func newCreateAgentConfigCommand(cfg *ClientConfig) *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&agentsMD, "agents-md", "", "agent instructions (content or @file path)")
-	cmd.Flags().StringArrayVar(&skillFlags, "skill", nil, "skill definition as name=content or name=@file")
+	cmd.Flags().StringArrayVar(&skillFlags, "skill", nil, "skill definition as name=content, name=@file, or name=@directory (bundles SKILL.md and supporting text files)")
 	cmd.Flags().StringArrayVar(&agentFlags, "agent", nil, "agent definition as name=content or name=@file")
 	cmd.Flags().StringArrayVar(&mcpFlags, "mcp", nil, "MCP server as name=JSON or name=@file (e.g. github='{\"type\":\"http\",\"url\":\"https://api.githubcopilot.com/mcp/\"}')")
 	cmd.Flags().StringArrayVar(&skillsShFlags, "skills-sh", nil, "skills.sh package as source or source:skill, including full git URLs (e.g. vercel-labs/agent-skills:deploy)")

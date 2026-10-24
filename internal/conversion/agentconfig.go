@@ -15,6 +15,7 @@ const (
 	preservedMCPValueFromEnvAnnotation = "kelos.dev/v1alpha2-mcp-value-from-env"
 	preservedSkillsSecretRefAnnotation = "kelos.dev/v1alpha2-skills-secret-ref"
 	preservedSkillsOptionalAnnotation  = "kelos.dev/v1alpha2-skills-optional"
+	preservedSkillFilesAnnotation      = "kelos.dev/v1alpha2-skill-files"
 )
 
 type preservedMCPValueFromEnv struct {
@@ -34,6 +35,14 @@ type preservedSkillsOptional struct {
 	Index  int    `json:"index"`
 	Source string `json:"source"`
 	Skill  string `json:"skill,omitempty"`
+}
+
+type preservedSkillFiles struct {
+	PluginIndex int                  `json:"pluginIndex"`
+	SkillIndex  int                  `json:"skillIndex"`
+	PluginName  string               `json:"pluginName"`
+	SkillName   string               `json:"skillName"`
+	Files       []v1alpha2.SkillFile `json:"files"`
 }
 
 func AgentConfigToV1alpha2(ctx context.Context, src *v1alpha1.AgentConfig, dst *v1alpha2.AgentConfig) error {
@@ -59,9 +68,11 @@ func agentConfigToHub(_ context.Context, src *v1alpha1.AgentConfig, dst *v1alpha
 	if err := restorePreservedSkillsOptional(src.Annotations, dst.Spec.Skills); err != nil {
 		return err
 	}
+	restorePreservedSkillFiles(src.Annotations, dst.Spec.Plugins)
 	deleteAnnotation(dst.Annotations, preservedMCPValueFromEnvAnnotation)
 	deleteAnnotation(dst.Annotations, preservedSkillsSecretRefAnnotation)
 	deleteAnnotation(dst.Annotations, preservedSkillsOptionalAnnotation)
+	deleteAnnotation(dst.Annotations, preservedSkillFilesAnnotation)
 	return nil
 }
 
@@ -77,7 +88,70 @@ func agentConfigFromHub(_ context.Context, src *v1alpha2.AgentConfig, dst *v1alp
 	if err := setPreservedSkillsSecretRefAnnotation(dst, src.Spec.Skills); err != nil {
 		return err
 	}
-	return setPreservedSkillsOptionalAnnotation(dst, src.Spec.Skills)
+	if err := setPreservedSkillsOptionalAnnotation(dst, src.Spec.Skills); err != nil {
+		return err
+	}
+	return setPreservedSkillFilesAnnotation(dst, src.Spec.Plugins)
+}
+
+func setPreservedSkillFilesAnnotation(dst *v1alpha1.AgentConfig, plugins []v1alpha2.PluginSpec) error {
+	var preserved []preservedSkillFiles
+	for i, plugin := range plugins {
+		for j, skill := range plugin.Skills {
+			if len(skill.Files) > 0 {
+				preserved = append(preserved, preservedSkillFiles{
+					PluginIndex: i, SkillIndex: j, PluginName: plugin.Name, SkillName: skill.Name, Files: skill.Files,
+				})
+			}
+		}
+	}
+	if len(preserved) == 0 {
+		deleteAnnotation(dst.Annotations, preservedSkillFilesAnnotation)
+		return nil
+	}
+	data, err := json.Marshal(preserved)
+	if err != nil {
+		return err
+	}
+	if dst.Annotations == nil {
+		dst.Annotations = map[string]string{}
+	}
+	dst.Annotations[preservedSkillFilesAnnotation] = string(data)
+	return nil
+}
+
+func restorePreservedSkillFiles(annotations map[string]string, plugins []v1alpha2.PluginSpec) {
+	var preserved []preservedSkillFiles
+	if err := json.Unmarshal([]byte(annotations[preservedSkillFilesAnnotation]), &preserved); err != nil {
+		return
+	}
+	for _, item := range preserved {
+		var match *v1alpha2.SkillDefinition
+		count := 0
+		for i, plugin := range plugins {
+			if plugin.Name != item.PluginName {
+				continue
+			}
+			for j, skill := range plugin.Skills {
+				if skill.Name == item.SkillName {
+					count++
+					match = &plugins[i].Skills[j]
+				}
+			}
+		}
+		if count != 1 {
+			if item.PluginIndex < 0 || item.PluginIndex >= len(plugins) {
+				continue
+			}
+			plugin := &plugins[item.PluginIndex]
+			if plugin.Name != item.PluginName || item.SkillIndex < 0 || item.SkillIndex >= len(plugin.Skills) ||
+				plugin.Skills[item.SkillIndex].Name != item.SkillName {
+				continue
+			}
+			match = &plugin.Skills[item.SkillIndex]
+		}
+		match.Files = append([]v1alpha2.SkillFile(nil), item.Files...)
+	}
 }
 
 func mcpServersToV1alpha2(in []v1alpha1.MCPServerSpec) []v1alpha2.MCPServerSpec {

@@ -582,12 +582,41 @@ spec:
                     skills:
                       description: |-
                         Skills defines skills for this plugin.
-                        Each becomes skills/<name>/SKILL.md in the plugin directory.
+                        Each becomes a directory under skills/<name> in the plugin directory.
                       items:
                         description: SkillDefinition defines a skill within a plugin.
                         properties:
                           content:
                             type: string
+                          files:
+                            description: Files are supporting text files written alongside
+                              SKILL.md.
+                            items:
+                              description: SkillFile defines a supporting text file
+                                within a skill directory.
+                              properties:
+                                content:
+                                  description: Content is the UTF-8 file content.
+                                  type: string
+                                executable:
+                                  description: Executable writes the file with mode
+                                    0755 instead of 0644.
+                                  type: boolean
+                                path:
+                                  description: |-
+                                    Path is relative to the skill directory, using forward slashes.
+                                    It must be clean, must not escape the directory, and must not conflict
+                                    with SKILL.md or another file. Paths are validated when consumed.
+                                  minLength: 1
+                                  type: string
+                              required:
+                              - content
+                              - path
+                              type: object
+                            type: array
+                            x-kubernetes-list-map-keys:
+                            - path
+                            x-kubernetes-list-type: map
                           name:
                             minLength: 1
                             type: string

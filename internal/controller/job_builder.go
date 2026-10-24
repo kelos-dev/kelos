@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"unicode/utf8"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -1198,9 +1199,8 @@ func sanitizeComponentName(name, kind string) error {
 }
 
 // pluginConfigMapMaxBytes caps the total plugin content placed in the
-// per-task plugin ConfigMap. Kubernetes rejects objects whose total size
-// exceeds 1MiB (the etcd request limit), so we stop a bit short of that to
-// leave headroom for keys, metadata, and the API server's JSON envelope.
+// per-task plugin ConfigMap. Kubernetes limits ConfigMap data to 1MiB, so
+// leave headroom for keys and payload growth.
 const pluginConfigMapMaxBytes = 900 * 1024
 
 // pluginSetupScript copies the staged plugin tree from the read-only
@@ -1223,13 +1223,11 @@ func PluginConfigMapName(taskName string) string {
 }
 
 // buildPluginConfigMapData validates plugin, skill, and agent names and
-// produces the plugin ConfigMap payload: a flat map of safe keys
-// ("p<i>-s<j>" for skills, "p<i>-a<j>" for agents; ConfigMap keys must
-// match [-._a-zA-Z0-9]+) to content blobs, plus the volume projection
-// items mapping each key to its nested path under the plugin directory
-// ("<plugin>/skills/<skill>/SKILL.md", "<plugin>/agents/<agent>.md").
+// produces content blobs with safe ConfigMap keys and volume projection
+// items mapping each key to its nested path under the plugin directory.
 func buildPluginConfigMapData(plugins []kelos.PluginSpec) (map[string]string, []corev1.KeyToPath, error) {
 	data := map[string]string{}
+	supportingPaths := map[string]bool{}
 	var items []corev1.KeyToPath
 	totalBytes := 0
 
@@ -1249,6 +1247,28 @@ func buildPluginConfigMapData(plugins []kelos.PluginSpec) (map[string]string, []
 				Key:  key,
 				Path: path.Join(plugin.Name, "skills", skill.Name, "SKILL.md"),
 			})
+			for k, file := range skill.Files {
+				if err := validateSkillFilePath(file.Path); err != nil {
+					return nil, nil, fmt.Errorf("plugin %q skill %q file %q: %w", plugin.Name, skill.Name, file.Path, err)
+				}
+				if !utf8.ValidString(file.Content) {
+					return nil, nil, fmt.Errorf("plugin %q skill %q file %q: content must be UTF-8 text", plugin.Name, skill.Name, file.Path)
+				}
+				key := fmt.Sprintf("p%d-s%d-f%d", i, j, k)
+				data[key] = file.Content
+				totalBytes += len(file.Content)
+				mode := int32(0o644)
+				if file.Executable {
+					mode = 0o755
+				}
+				filePath := path.Join(plugin.Name, "skills", skill.Name, file.Path)
+				supportingPaths[filePath] = true
+				items = append(items, corev1.KeyToPath{
+					Key:  key,
+					Path: filePath,
+					Mode: &mode,
+				})
+			}
 		}
 
 		for j, agent := range plugin.Agents {
@@ -1265,6 +1285,21 @@ func buildPluginConfigMapData(plugins []kelos.PluginSpec) (map[string]string, []
 		}
 	}
 
+	paths := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		if _, exists := paths[item.Path]; exists && supportingPaths[item.Path] {
+			return nil, nil, fmt.Errorf("plugin file path %q is duplicated", item.Path)
+		}
+		paths[item.Path] = struct{}{}
+	}
+	for _, item := range items {
+		for parent := path.Dir(item.Path); parent != "."; parent = path.Dir(parent) {
+			if _, exists := paths[parent]; exists && (supportingPaths[item.Path] || supportingPaths[parent]) {
+				return nil, nil, fmt.Errorf("plugin file path %q conflicts with file %q", item.Path, parent)
+			}
+		}
+	}
+
 	if totalBytes > pluginConfigMapMaxBytes {
 		return nil, nil, fmt.Errorf(
 			"plugin content totals %d bytes, exceeding the %d byte ConfigMap budget; reduce skill/agent content size",
@@ -1273,6 +1308,15 @@ func buildPluginConfigMapData(plugins []kelos.PluginSpec) (map[string]string, []
 	}
 
 	return data, items, nil
+}
+
+func validateSkillFilePath(filePath string) error {
+	if filePath == "" || filePath == "." || path.IsAbs(filePath) ||
+		path.Clean(filePath) != filePath || filePath == ".." || strings.HasPrefix(filePath, "../") ||
+		strings.ContainsAny(filePath, "\\\x00") {
+		return fmt.Errorf("path must be a clean relative path within the skill directory using forward slashes")
+	}
+	return nil
 }
 
 // buildPluginConfigMap produces the per-task ConfigMap that delivers plugin

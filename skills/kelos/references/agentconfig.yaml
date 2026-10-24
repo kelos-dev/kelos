@@ -16,7 +16,12 @@ spec:
           content: |
             Review the current PR diff for issues.
             Focus on: correctness, security, performance, readability.
+            Read references/checklist.md before posting the review.
             Post a summary as a PR comment using `gh pr comment`.
+          files:
+            - path: references/checklist.md
+              content: |
+                Check API compatibility and verify tests cover the primary action.
       agents:
         - name: security-checker
           content: |

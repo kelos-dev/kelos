@@ -195,6 +195,19 @@ END {
 ' "${file}"
 }
 
+# template_release_namespace points webhook Service and cert-manager CA
+# references at the Helm release namespace. Its inputs name kelos-system because
+# controller-gen markers and install-crd.yaml, which `kelos install` applies
+# as-is, cannot hold Helm expressions.
+template_release_namespace() {
+  local file="$1"
+
+  sed -E \
+    -e 's|^( +cert-manager\.io/inject-ca-from: )kelos-system/|\1{{ .Release.Namespace }}/|' \
+    -e 's|^( +namespace: )kelos-system$|\1{{ .Release.Namespace }}|' \
+    "${file}"
+}
+
 write_chart_crd_template() {
   local source="$1"
   local kind="$2"
@@ -202,11 +215,13 @@ write_chart_crd_template() {
   local dest="$4"
   local extracted="${TMPDIR}/$(basename "${dest}").extracted"
   local content="${TMPDIR}/$(basename "${dest}").content"
+  local templated="${TMPDIR}/$(basename "${dest}").templated"
 
   extract_resource_doc "${source}" "${kind}" "${name}" >"${extracted}"
   escape_helm_template_placeholders "${extracted}" >"${content}"
+  template_release_namespace "${content}" >"${templated}"
 
-  inject_chart_crd_keep_annotation "${content}" >"${dest}"
+  inject_chart_crd_keep_annotation "${templated}" >"${dest}"
 }
 
 # inject_kelos_conversion adds the conversion webhook config and the
@@ -309,7 +324,7 @@ BEGIN {
 /^metadata:[[:space:]]*$/ {
   print
   print "  annotations:"
-  print "    cert-manager.io/inject-ca-from: kelos-system/kelos-serving-cert"
+  print "    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/kelos-serving-cert"
   in_metadata = 1
   inserted = 1
   next
@@ -358,7 +373,8 @@ GOCACHE="${TMPDIR}/go-build-cache" "${CONTROLLER_GEN}" \
   webhook \
   paths="./..." \
   output:webhook:stdout >"${WEBHOOK_FILE}"
-inject_validating_webhook_ca_annotation "${WEBHOOK_FILE}" "${CHART_VALIDATING_WEBHOOK}"
+template_release_namespace "${WEBHOOK_FILE}" >"${TMPDIR}/validating-webhook.templated.yaml"
+inject_validating_webhook_ca_annotation "${TMPDIR}/validating-webhook.templated.yaml" "${CHART_VALIDATING_WEBHOOK}"
 
 # Splice generated RBAC into the chart's rbac.yaml template.
 awk -v start="${START_MARKER}" -v end="${END_MARKER}" -v rbac="${RBAC_FILE}" '

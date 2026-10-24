@@ -1,10 +1,12 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +16,10 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -29,6 +35,8 @@ import (
 	"github.com/kelos-dev/kelos/internal/controller"
 	"github.com/kelos-dev/kelos/internal/conversion"
 	"github.com/kelos-dev/kelos/internal/githubapp"
+	"github.com/kelos-dev/kelos/internal/helmchart"
+	"github.com/kelos-dev/kelos/internal/manifests"
 )
 
 var (
@@ -69,6 +77,8 @@ var _ = BeforeSuite(func() {
 	ctx, cancel = context.WithCancel(context.Background())
 
 	By("bootstrapping test environment")
+	validatingWebhooks, err := chartValidatingWebhooks()
+	Expect(err).NotTo(HaveOccurred())
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
 			filepath.Join("..", "..", "internal", "manifests"),
@@ -81,13 +91,10 @@ var _ = BeforeSuite(func() {
 		// Rewrite admission webhooks to the locally served endpoint.
 		WebhookInstallOptions: envtest.WebhookInstallOptions{
 			IgnoreSchemeConvertible: true,
-			Paths: []string{
-				filepath.Join("..", "..", "internal", "manifests", "charts", "kelos", "templates", "validating-webhook.yaml"),
-			},
+			ValidatingWebhooks:      validatingWebhooks,
 		},
 	}
 
-	var err error
 	cfg, err = testEnv.Start()
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
@@ -251,3 +258,32 @@ var _ = AfterSuite(func() {
 	err := testEnv.Stop()
 	Expect(err).NotTo(HaveOccurred())
 })
+
+// chartValidatingWebhooks returns the ValidatingWebhookConfigurations from the
+// rendered chart. The chart template itself is not plain YAML because it names
+// the release namespace with a Helm expression.
+func chartValidatingWebhooks() ([]*admissionregistrationv1.ValidatingWebhookConfiguration, error) {
+	data, err := helmchart.Render(manifests.ChartFS, nil)
+	if err != nil {
+		return nil, err
+	}
+	var webhooks []*admissionregistrationv1.ValidatingWebhookConfiguration
+	decoder := yamlutil.NewYAMLOrJSONDecoder(bytes.NewReader(data), 4096)
+	for {
+		var object unstructured.Unstructured
+		if err := decoder.Decode(&object); err == io.EOF {
+			break
+		} else if err != nil {
+			return nil, err
+		}
+		if object.GetKind() != "ValidatingWebhookConfiguration" {
+			continue
+		}
+		webhook := &admissionregistrationv1.ValidatingWebhookConfiguration{}
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(object.Object, webhook); err != nil {
+			return nil, err
+		}
+		webhooks = append(webhooks, webhook)
+	}
+	return webhooks, nil
+}

@@ -19,6 +19,53 @@ for the current recommended installation method.
 `kelos install` checks for cert-manager and fails fast with this guidance if it
 is missing.
 
+## Release Namespace
+
+The chart installs every namespaced resource, including the controller
+manager, into the Helm release namespace. When the release namespace is
+`kelos-system`, the namespace `kelos install` uses, the chart also renders that
+`Namespace`; any other release namespace must already exist or be created with
+`--create-namespace`.
+
+Kelos CRDs send conversion requests to the `kelos-webhook` Service in the
+namespace they name. CRDs rendered with `crds.install=true` name the release
+namespace, and CRDs installed by `kelos install` name `kelos-system`. With
+`crds.install=false`, Helm installs and upgrades fail if the existing
+`tasks.kelos.dev` CRD names a namespace other than the release namespace. This
+check reads the CRD, so the Helm identity needs `get` on
+`customresourcedefinitions`. Tools that render with `helm template`, such as
+Argo CD, skip it.
+
+### Releases That Own `kelos-system` From Another Namespace
+
+A release in another namespace that owns `Namespace/kelos-system` runs the
+controller manager there. Check with:
+
+```bash
+helm get manifest kelos -n <namespace> | grep -A2 '^kind: Namespace'
+```
+
+Upgrading such a release moves the controller manager, webhook Service,
+certificate, leader-election RBAC, and telemetry CronJob into the release
+namespace. Helm then deletes `Namespace/kelos-system` with everything in it, and
+the telemetry installation ID is regenerated. To keep the namespace, annotate
+it before upgrading:
+
+```bash
+kubectl annotate namespace kelos-system helm.sh/resource-policy=keep
+```
+
+The CRDs must point at the new webhook Service in the same upgrade, so do not
+use the two-phase flow from [Upgrades](#upgrades) for this upgrade:
+
+- If Helm owns the CRDs, upgrade once with `--set crds.install=true`.
+- If the CRDs are managed outside Helm, label and annotate them as in
+  [Option 2](#option-2-adopt-existing-crds-into-helm) with `NAMESPACE` set to
+  the release namespace, then upgrade once with `--set crds.install=true`.
+
+Conversion requests fail until the controller manager and its serving
+certificate are ready in the release namespace.
+
 ## First-Time Install
 
 For most first-time installs, use `kelos install`; it stages the controller,
@@ -78,6 +125,10 @@ With `crds.install=false`, Helm manages only the controller resources.
 The CRDs are packaged in a conditional subchart, so controller-only releases
 do not store the CRD payload in Helm's release Secret.
 
+CRDs installed by `kelos install` send conversion requests to `kelos-system`,
+so this option requires the release namespace `kelos-system`. See
+[Release Namespace](#release-namespace).
+
 ### Option 2: Adopt Existing CRDs Into Helm
 
 Use this if you want Helm to manage future Kelos CRD upgrades by default.
@@ -92,8 +143,10 @@ for crd in \
   sessionspawners.kelos.dev \
   tasks.kelos.dev \
   taskbudgets.kelos.dev \
+  taskpipelines.kelos.dev \
   taskrecords.kelos.dev \
   taskspawners.kelos.dev \
+  webhookgateways.kelos.dev \
   workerpools.kelos.dev \
   workspaces.kelos.dev
 do
@@ -143,7 +196,10 @@ Session workspaces survive the replacement, while `emptyDir` workspaces do
 not.
 
 If Helm owns the CRDs and the release includes CRD changes, upgrade in two
-phases so the new webhook is ready before Helm applies conversion-backed CRDs:
+phases so the new webhook is ready before Helm applies conversion-backed CRDs.
+A release that owns `kelos-system` from another namespace upgrades in one
+phase instead; see
+[Releases That Own `kelos-system` From Another Namespace](#releases-that-own-kelos-system-from-another-namespace).
 
 ```bash
 helm upgrade kelos oci://ghcr.io/kelos-dev/charts/kelos \

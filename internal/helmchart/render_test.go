@@ -6,7 +6,9 @@ import (
 	"compress/gzip"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -15,7 +17,12 @@ import (
 	"helm.sh/helm/v3/pkg/chartutil"
 	"helm.sh/helm/v3/pkg/release"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	yamlutil "k8s.io/apimachinery/pkg/util/yaml"
+	"k8s.io/client-go/dynamic"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 	sigyaml "sigs.k8s.io/yaml"
 )
 
@@ -923,11 +930,9 @@ func TestRender_PodMonitorEnabled(t *testing.T) {
 		t.Errorf("expected spec.selector.matchExpressions to exclude console-server via NotIn, got: %v", selector)
 	}
 
-	// Control-plane target discovery must cover kelos-system, where the
-	// controller manager always runs even when the release namespace differs.
 	nsNames := stringSliceAt(t, mapAt(t, specOf(t, pm), "namespaceSelector"), "matchNames")
-	if !containsString(nsNames, "kelos-system") {
-		t.Errorf("expected spec.namespaceSelector.matchNames to include kelos-system, got: %v", nsNames)
+	if len(nsNames) != 1 || nsNames[0] != "kelos-system" {
+		t.Errorf("expected spec.namespaceSelector.matchNames to be the release namespace [kelos-system], got: %v", nsNames)
 	}
 
 	endpoint := firstEndpoint(t, pm)
@@ -1164,4 +1169,261 @@ func TestRender_ParseableOutput(t *testing.T) {
 	if validDocs == 0 {
 		t.Fatal("expected at least one valid YAML document in rendered output")
 	}
+}
+
+func TestRender_ReleaseNamespace(t *testing.T) {
+	vals := map[string]interface{}{
+		"crds": map[string]interface{}{"install": true},
+		"webhookServer": map[string]interface{}{
+			"sources": map[string]interface{}{
+				"github": map[string]interface{}{"enabled": true},
+			},
+			"gatewayServer": map[string]interface{}{"enabled": true},
+		},
+		"consoleServer": map[string]interface{}{"enabled": true, "secretName": "console-auth"},
+		"slackServer":   map[string]interface{}{"enabled": true, "secretName": "slack"},
+		"podMonitor":    map[string]interface{}{"enabled": true},
+	}
+
+	for _, ns := range []string{"kelos-system", "kelos"} {
+		t.Run(ns, func(t *testing.T) {
+			data, err := render(manifests.ChartFS, ns, vals, nil)
+			if err != nil {
+				t.Fatalf("rendering chart: %v", err)
+			}
+			objs := decodeObjects(t, data)
+
+			for _, obj := range objs {
+				if got := obj.GetNamespace(); got != "" && got != ns {
+					t.Errorf("%s %s rendered into namespace %q, want %q", obj.GetKind(), obj.GetName(), got, ns)
+				}
+				subjects, _, _ := unstructured.NestedSlice(obj.Object, "subjects")
+				for _, s := range subjects {
+					subject := s.(map[string]interface{})
+					if subject["kind"] == "ServiceAccount" && subject["namespace"] != ns {
+						t.Errorf("%s %s binds ServiceAccount %v in namespace %v, want %q", obj.GetKind(), obj.GetName(), subject["name"], subject["namespace"], ns)
+					}
+				}
+			}
+
+			cert := findObject(t, objs, "Certificate", "kelos-serving-cert")
+			dnsNames, _, _ := unstructured.NestedStringSlice(cert.Object, "spec", "dnsNames")
+			wantDNSNames := []string{"kelos-webhook." + ns + ".svc", "kelos-webhook." + ns + ".svc.cluster.local"}
+			if !reflect.DeepEqual(dnsNames, wantDNSNames) {
+				t.Errorf("Certificate dnsNames = %v, want %v", dnsNames, wantDNSNames)
+			}
+
+			wantCA := ns + "/kelos-serving-cert"
+			vwc := findObject(t, objs, "ValidatingWebhookConfiguration", "kelos-validating-webhook-configuration")
+			if got := vwc.GetAnnotations()["cert-manager.io/inject-ca-from"]; got != wantCA {
+				t.Errorf("ValidatingWebhookConfiguration inject-ca-from = %q, want %q", got, wantCA)
+			}
+			webhooks, _, _ := unstructured.NestedSlice(vwc.Object, "webhooks")
+			if len(webhooks) == 0 {
+				t.Fatal("expected ValidatingWebhookConfiguration to define webhooks")
+			}
+			for _, w := range webhooks {
+				got, _, _ := unstructured.NestedString(w.(map[string]interface{}), "clientConfig", "service", "namespace")
+				if got != ns {
+					t.Errorf("validating webhook service namespace = %q, want %q", got, ns)
+				}
+			}
+
+			conversionCRDs := 0
+			for _, crd := range objectsOfKind(objs, "CustomResourceDefinition") {
+				got, found, _ := unstructured.NestedString(crd.Object, "spec", "conversion", "webhook", "clientConfig", "service", "namespace")
+				if !found {
+					continue
+				}
+				conversionCRDs++
+				if got != ns {
+					t.Errorf("CRD %s conversion service namespace = %q, want %q", crd.GetName(), got, ns)
+				}
+				if got := crd.GetAnnotations()["cert-manager.io/inject-ca-from"]; got != wantCA {
+					t.Errorf("CRD %s inject-ca-from = %q, want %q", crd.GetName(), got, wantCA)
+				}
+			}
+			if conversionCRDs == 0 {
+				t.Error("expected at least one CRD with a conversion webhook")
+			}
+
+			cronJob := findObject(t, objs, "CronJob", "kelos-telemetry")
+			containers, _, _ := unstructured.NestedSlice(cronJob.Object, "spec", "jobTemplate", "spec", "template", "spec", "containers")
+			args, _, _ := unstructured.NestedStringSlice(containers[0].(map[string]interface{}), "args")
+			if !containsString(args, "--telemetry-namespace="+ns) {
+				t.Errorf("expected telemetry CronJob args to include --telemetry-namespace=%s, got: %v", ns, args)
+			}
+
+			podMonitor := findObject(t, objs, "PodMonitor", "kelos-controlplane")
+			matchNames, _, _ := unstructured.NestedStringSlice(podMonitor.Object, "spec", "namespaceSelector", "matchNames")
+			if !reflect.DeepEqual(matchNames, []string{ns}) {
+				t.Errorf("PodMonitor namespaceSelector.matchNames = %v, want [%s]", matchNames, ns)
+			}
+
+			// Only kelos-system releases render their Namespace; other release
+			// namespaces are created by Helm or the user.
+			var namespaces []string
+			for _, obj := range objectsOfKind(objs, "Namespace") {
+				namespaces = append(namespaces, obj.GetName())
+			}
+			var wantNamespaces []string
+			if ns == "kelos-system" {
+				wantNamespaces = []string{"kelos-system"}
+			}
+			if !reflect.DeepEqual(namespaces, wantNamespaces) {
+				t.Errorf("rendered Namespaces = %v, want %v", namespaces, wantNamespaces)
+			}
+
+			if ns != "kelos-system" && strings.Contains(string(data), "kelos-system") {
+				t.Error("expected no kelos-system references outside the kelos-system release namespace")
+			}
+		})
+	}
+}
+
+func decodeObjects(t *testing.T, data []byte) []unstructured.Unstructured {
+	t.Helper()
+	docs, err := splitYAMLDocs(string(data))
+	if err != nil {
+		t.Fatalf("splitting rendered output: %v", err)
+	}
+	var objs []unstructured.Unstructured
+	for _, doc := range docs {
+		var obj map[string]interface{}
+		if err := sigyaml.Unmarshal([]byte(doc), &obj); err != nil {
+			t.Fatalf("decoding rendered document: %v\n%s", err, doc)
+		}
+		if obj == nil {
+			continue
+		}
+		objs = append(objs, unstructured.Unstructured{Object: obj})
+	}
+	return objs
+}
+
+func objectsOfKind(objs []unstructured.Unstructured, kind string) []unstructured.Unstructured {
+	var matches []unstructured.Unstructured
+	for _, obj := range objs {
+		if obj.GetKind() == kind {
+			matches = append(matches, obj)
+		}
+	}
+	return matches
+}
+
+func findObject(t *testing.T, objs []unstructured.Unstructured, kind, name string) unstructured.Unstructured {
+	t.Helper()
+	for _, obj := range objectsOfKind(objs, kind) {
+		if obj.GetName() == name {
+			return obj
+		}
+	}
+	t.Fatalf("%s %q not found in rendered output", kind, name)
+	return unstructured.Unstructured{}
+}
+
+func TestRender_CRDConversionNamespaceGuard(t *testing.T) {
+	tests := []struct {
+		name        string
+		namespace   string
+		installCRDs bool
+		liveCRD     *unstructured.Unstructured
+		wantErr     string
+	}{
+		{
+			name:      "no live CRD",
+			namespace: "kelos",
+		},
+		{
+			name:      "live CRD without conversion webhook",
+			namespace: "kelos",
+			liveCRD:   taskCRD(""),
+		},
+		{
+			name:      "conversion in the release namespace",
+			namespace: "kelos",
+			liveCRD:   taskCRD("kelos"),
+		},
+		{
+			name:      "kelos-system release",
+			namespace: "kelos-system",
+			liveCRD:   taskCRD("kelos-system"),
+		},
+		{
+			name:      "conversion outside the release namespace",
+			namespace: "kelos",
+			liveCRD:   taskCRD("kelos-system"),
+			wantErr:   `CRD tasks.kelos.dev sends conversion requests to the kelos-webhook Service in namespace kelos-system, but this release runs it in namespace kelos; see "Release Namespace" in the chart README`,
+		},
+		{
+			name:        "CRDs rendered by the release",
+			namespace:   "kelos",
+			installCRDs: true,
+			liveCRD:     taskCRD("kelos-system"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var objs []runtime.Object
+			if tt.liveCRD != nil {
+				objs = append(objs, tt.liveCRD)
+			}
+			provider := crdClientProvider{client: dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), objs...)}
+			vals := map[string]interface{}{
+				"crds": map[string]interface{}{"install": tt.installCRDs},
+			}
+
+			_, err := render(manifests.ChartFS, tt.namespace, vals, provider)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("rendering chart: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected render to fail with %q", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("expected error to contain %q, got: %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
+// crdClientProvider answers the chart's lookup calls for
+// CustomResourceDefinitions from an in-memory dynamic client.
+type crdClientProvider struct {
+	client dynamic.Interface
+}
+
+func (p crdClientProvider) GetClientFor(apiVersion, kind string) (dynamic.NamespaceableResourceInterface, bool, error) {
+	if apiVersion != "apiextensions.k8s.io/v1" || kind != "CustomResourceDefinition" {
+		return nil, false, fmt.Errorf("unexpected lookup of %s %s", apiVersion, kind)
+	}
+	gvr := schema.GroupVersionResource{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}
+	return p.client.Resource(gvr), false, nil
+}
+
+// taskCRD returns a tasks.kelos.dev CRD whose conversion webhook Service is in
+// conversionNamespace, or that has no conversion webhook when it is empty.
+func taskCRD(conversionNamespace string) *unstructured.Unstructured {
+	crd := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "apiextensions.k8s.io/v1",
+		"kind":       "CustomResourceDefinition",
+		"metadata":   map[string]interface{}{"name": "tasks.kelos.dev"},
+	}}
+	if conversionNamespace != "" {
+		crd.Object["spec"] = map[string]interface{}{
+			"conversion": map[string]interface{}{
+				"strategy": "Webhook",
+				"webhook": map[string]interface{}{
+					"clientConfig": map[string]interface{}{
+						"service": map[string]interface{}{"name": "kelos-webhook", "namespace": conversionNamespace},
+					},
+				},
+			},
+		}
+	}
+	return crd
 }

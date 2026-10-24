@@ -6,7 +6,8 @@ failure state.
 ## Task Stuck In Pending
 
 - Check whether the credentials Secret exists: `kubectl get secret <name>`.
-- Check controller logs: `kubectl logs deployment/kelos-controller-manager -n kelos-system`.
+- Check controller logs: `kubectl logs deployment/kelos-controller-manager -n kelos-system`,
+  or `-n <release-namespace>` for a Helm install.
 - Inspect the Task YAML for invalid references or missing required fields.
 
 ## Task Stuck In Waiting
@@ -28,7 +29,8 @@ failure state.
   `kubectl get session <name> -o yaml`.
 - Check whether the credentials Secret, Workspace, and AgentConfig resources
   referenced by `spec.worker` exist.
-- Check controller logs: `kubectl logs deployment/kelos-controller-manager -n kelos-system`.
+- Check controller logs: `kubectl logs deployment/kelos-controller-manager -n kelos-system`,
+  or `-n <release-namespace>` for a Helm install.
 - Inspect the Session Pod only after checking the status reason and referenced
   resources. Do not print Secret values.
 

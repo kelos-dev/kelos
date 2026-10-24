@@ -1,10 +1,24 @@
+{{- /*
+CRDs the chart does not render keep sending conversion requests to the
+namespace they name, so refuse to run the kelos-webhook Service elsewhere.
+Rendering them with crds.install=true moves them in the same upgrade. lookup
+finds nothing under `helm template` or `kelos install`, so only live installs
+and upgrades are checked.
+*/}}
+{{- if not .Values.crds.install }}
+{{- $crd := lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" "tasks.kelos.dev" }}
+{{- $conversionNamespace := dig "spec" "conversion" "webhook" "clientConfig" "service" "namespace" "" $crd }}
+{{- if and $conversionNamespace (ne $conversionNamespace .Release.Namespace) }}
+{{- fail (printf "CRD tasks.kelos.dev sends conversion requests to the kelos-webhook Service in namespace %s, but this release runs it in namespace %s; see \"Release Namespace\" in the chart README" $conversionNamespace .Release.Namespace) }}
+{{- end }}
+{{- end }}
 ---
 # Self-signed issuer used only to mint the webhook serving certificate.
 apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
   name: kelos-selfsigned-issuer
-  namespace: kelos-system
+  namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: kelos
     app.kubernetes.io/component: manager
@@ -19,14 +33,14 @@ apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: kelos-serving-cert
-  namespace: kelos-system
+  namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: kelos
     app.kubernetes.io/component: manager
 spec:
   dnsNames:
-    - kelos-webhook.kelos-system.svc
-    - kelos-webhook.kelos-system.svc.cluster.local
+    - kelos-webhook.{{ .Release.Namespace }}.svc
+    - kelos-webhook.{{ .Release.Namespace }}.svc.cluster.local
   issuerRef:
     kind: Issuer
     name: kelos-selfsigned-issuer
@@ -37,7 +51,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: kelos-webhook
-  namespace: kelos-system
+  namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: kelos
     app.kubernetes.io/component: manager

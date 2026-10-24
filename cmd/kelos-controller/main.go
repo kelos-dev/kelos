@@ -98,6 +98,7 @@ func main() {
 	var telemetryReport bool
 	var telemetryEndpoint string
 	var telemetryEnvironment string
+	var telemetryNamespace string
 	var codexAuthRefresherSchedule string
 	var workerRunnerImage string
 	var workerRunnerImagePullPolicy string
@@ -132,6 +133,7 @@ func main() {
 	flag.BoolVar(&telemetryReport, "telemetry-report", false, "Run a one-shot telemetry report and exit.")
 	flag.StringVar(&telemetryEndpoint, "telemetry-endpoint", telemetry.DefaultPostHogEndpoint, "The PostHog endpoint for sending telemetry reports.")
 	flag.StringVar(&telemetryEnvironment, "telemetry-environment", "production", "The environment label for telemetry reports (e.g., production, development).")
+	flag.StringVar(&telemetryNamespace, "telemetry-namespace", "", "The namespace that stores the telemetry installation ID. Required with --telemetry-report.")
 	flag.StringVar(&codexAuthRefresherSchedule, "codex-auth-refresher-schedule", controller.DefaultCodexAuthRefreshSchedule, "Cron schedule for managed Codex OAuth refresher CronJobs.")
 	flag.StringVar(&workerRunnerImage, "worker-runner-image", controller.WorkerRunnerImageRepository, "The image repository or tagged image to use for worker-runner containers in WorkerPool StatefulSets.")
 	flag.StringVar(&workerRunnerImagePullPolicy, "worker-runner-image-pull-policy", "", "The image pull policy for worker-runner containers (e.g., Always, Never, IfNotPresent).")
@@ -210,6 +212,10 @@ func main() {
 		}
 	}
 	if telemetryReport {
+		if telemetryNamespace == "" {
+			fmt.Fprintln(os.Stderr, "Error: --telemetry-namespace is required with --telemetry-report")
+			os.Exit(1)
+		}
 		log := ctrl.Log.WithName("telemetry")
 		cfg := ctrl.GetConfigOrDie()
 
@@ -233,7 +239,7 @@ func main() {
 
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
-		if err := telemetry.Run(ctx, log, c, clientset, phClient, telemetryEnvironment); err != nil {
+		if err := telemetry.Run(ctx, log, c, clientset, phClient, telemetryEnvironment, telemetryNamespace); err != nil {
 			setupLog.Error(err, "Telemetry report failed")
 			os.Exit(1)
 		}

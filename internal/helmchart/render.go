@@ -17,12 +17,18 @@ import (
 )
 
 // Render loads a Helm chart from the given embedded filesystem, merges the
-// provided values with the chart defaults, renders the templates, and returns
-// the result as a multi-document YAML byte slice suitable for parseManifests.
-// CRDs in the conditional crds subchart participate like any other template,
-// so callers that need a controller-only manifest should disable the subchart
-// via values.
+// provided values with the chart defaults, renders the templates into the
+// kelos-system release namespace, and returns the result as a multi-document
+// YAML byte slice suitable for parseManifests. CRDs in the conditional crds
+// subchart participate like any other template, so callers that need a
+// controller-only manifest should disable the subchart via values.
 func Render(chartFS fs.FS, values map[string]interface{}) ([]byte, error) {
+	return render(chartFS, "kelos-system", values, nil)
+}
+
+// render renders the chart into namespace. A nil clientProvider makes the
+// chart's lookup calls find nothing, as under `helm template`.
+func render(chartFS fs.FS, namespace string, values map[string]interface{}, clientProvider engine.ClientProvider) ([]byte, error) {
 	ch, err := loadChart(chartFS)
 	if err != nil {
 		return nil, fmt.Errorf("loading chart: %w", err)
@@ -33,14 +39,19 @@ func Render(chartFS fs.FS, values map[string]interface{}) ([]byte, error) {
 
 	releaseOpts := chartutil.ReleaseOptions{
 		Name:      "kelos",
-		Namespace: "kelos-system",
+		Namespace: namespace,
 	}
 	vals, err := chartutil.ToRenderValues(ch, values, releaseOpts, nil)
 	if err != nil {
 		return nil, fmt.Errorf("preparing render values: %w", err)
 	}
 
-	rendered, err := engine.Render(ch, vals)
+	var rendered map[string]string
+	if clientProvider == nil {
+		rendered, err = engine.Render(ch, vals)
+	} else {
+		rendered, err = engine.RenderWithClientProvider(ch, vals, clientProvider)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("rendering templates: %w", err)
 	}

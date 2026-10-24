@@ -452,6 +452,7 @@ func TestPrintTaskSpawnerDetailSlack(t *testing.T) {
 					Triggers: []kelos.SlackTrigger{
 						{Pattern: "deploy"},
 						{Pattern: "rollback"},
+						{Reaction: &kelos.SlackReactionTrigger{Name: "gear"}},
 					},
 					ExcludePatterns: []string{"^ignore"},
 				},
@@ -475,7 +476,7 @@ func TestPrintTaskSpawnerDetailSlack(t *testing.T) {
 		"Source:             Slack",
 		"Channels:           [C0123456789 C9876543210]",
 		"Exclude Filters:    1",
-		"Triggers:           [deploy rollback]",
+		"Triggers:           [deploy rollback :gear:]",
 		"Exclude Patterns:   [^ignore]",
 	} {
 		if !strings.Contains(output, expected) {

@@ -7109,8 +7109,21 @@ spec:
                 description: |-
                   Branch is the git branch this Task works on. When set, an init
                   container checks out this branch before the agent starts. The
-                  controller ensures only one Task with the same Branch value
-                  runs at a time for the same workspace.
+                  controller runs at most one lock-taking Task at a time for the same
+                  workspace and Branch. Tasks with BranchLock None are not serialized
+                  and may run alongside them.
+                type: string
+              branchLock:
+                description: |-
+                  BranchLock controls whether this Task takes the branch lock described
+                  on Branch. Exclusive waits until no other exclusive Task on the same
+                  workspace and branch is active. None still checks out the branch but
+                  never waits for the lock and never blocks other Tasks; use it for
+                  Tasks that do not push to the branch. Omit for Exclusive. Has no
+                  effect when Branch is empty.
+                enum:
+                - Exclusive
+                - None
                 type: string
               credentials:
                 description: |-
@@ -20985,7 +20998,7 @@ spec:
                   WorkerPoolRef references a WorkerPool resource for persistent execution.
                   When set, the Task is dispatched to a pre-warmed worker pod instead of
                   creating a one-shot Job. Mutually exclusive with worker, type/credentials,
-                  image, workspaceRef, agentConfigRefs, branch, dependsOn,
+                  image, workspaceRef, agentConfigRefs, branch, branchLock, dependsOn,
                   ttlSecondsAfterFinished, podFailurePolicy, and podOverrides.
                 properties:
                   name:
@@ -21041,6 +21054,8 @@ spec:
             - message: branch is not supported with workerPoolRef
               rule: '!has(self.workerPoolRef) || !has(self.branch) || size(self.branch)
                 == 0'
+            - message: branchLock is not supported with workerPoolRef
+              rule: '!has(self.workerPoolRef) || !has(self.branchLock)'
             - message: ttlSecondsAfterFinished is not supported with workerPoolRef
               rule: '!has(self.workerPoolRef) || !has(self.ttlSecondsAfterFinished)'
             - message: podFailurePolicy is not supported with workerPoolRef

@@ -97,6 +97,14 @@ spec:
                           description: Branch is the optional template rendered into
                             the child Task branch.
                           type: string
+                        branchLock:
+                          description: |-
+                            BranchLock controls whether child Tasks take the branch lock.
+                            See Task.spec.branchLock. Omit for Exclusive.
+                          enum:
+                          - Exclusive
+                          - None
+                          type: string
                         prompt:
                           description: Prompt is the template rendered into the child
                             Task prompt.
@@ -7173,6 +7181,8 @@ spec:
                       - message: branch is not supported with workerPoolRef
                         rule: '!has(self.workerPoolRef) || !has(self.branch) || size(self.branch)
                           == 0'
+                      - message: branchLock is not supported with workerPoolRef
+                        rule: '!has(self.workerPoolRef) || !has(self.branchLock)'
                   required:
                   - name
                   - taskTemplate

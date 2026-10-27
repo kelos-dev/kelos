@@ -236,10 +236,12 @@ spec:
         `flag.Parse()`. P1.
       - Flag RBAC rules, ServiceAccount token mounts, and credential
         environment variables that reach beyond the code that uses them:
-        verbs or resources the code never calls, cluster-wide Secret
-        `list`/`watch` where named `get` suffices, or a token inherited by a
-        sidecar or by a CI step that runs pull-request code. P1 when a
-        credential or Secret is exposed; P2 otherwise.
+        verbs or resources the code never calls, cluster-wide Secret access
+        (including `get`) where named `get` in the using namespace suffices,
+        or a token inherited by a sidecar or by a CI step that runs
+        pull-request code. P1 when a credential or Secret is exposed; P2
+        otherwise. Do not lower the priority because the component already
+        holds other broad access.
 
       **Documentation accuracy**:
       - Docs, READMEs, and code comments must describe what the code

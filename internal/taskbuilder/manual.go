@@ -37,6 +37,9 @@ func BuildManualTask(ctx context.Context, cl client.Client, spawner *kelos.TaskS
 	if opts.HTTPClient == nil {
 		return nil, fmt.Errorf("HTTP client is required for TaskSpawner %s", spawner.Name)
 	}
+	if spawner.Spec.PipelineTemplate != nil {
+		return nil, fmt.Errorf("TaskSpawner %s uses pipelineTemplate, which manual runs do not support", spawner.Name)
+	}
 	now := opts.Now.UTC()
 	if now.IsZero() {
 		now = time.Now().UTC()

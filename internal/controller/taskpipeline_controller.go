@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"reflect"
@@ -31,7 +32,28 @@ const (
 	taskPipelineIndexLabel = "kelos.dev/taskpipeline-index"
 	maxPipelineStageTasks  = 256
 	pipelineCollisionWait  = 2 * time.Second
+
+	// Slack reporting keys a TaskPipeline passes to its stage Tasks so the
+	// Slack reporter answers in the thread that started the pipeline. They
+	// mirror the constants in internal/reporting.
+	pipelineSlackReportingKey = "kelos.dev/slack-reporting"
+	pipelineSlackChannelKey   = "kelos.dev/slack-channel"
+	pipelineSlackThreadTSKey  = "kelos.dev/slack-thread-ts"
+	pipelineSlackUserIDKey    = "kelos.dev/slack-user-id"
 )
+
+// pipelineInheritedAnnotations are copied from a TaskPipeline to each stage Task.
+var pipelineInheritedAnnotations = []string{
+	pipelineSlackReportingKey,
+	pipelineSlackChannelKey,
+	pipelineSlackThreadTSKey,
+	pipelineSlackUserIDKey,
+}
+
+// pipelineInheritedLabels are copied from a TaskPipeline to each stage Task.
+var pipelineInheritedLabels = []string{
+	pipelineSlackReportingKey,
+}
 
 // TaskPipelineReconciler creates and observes the Tasks in a TaskPipeline.
 type TaskPipelineReconciler struct {
@@ -64,7 +86,8 @@ func (r *TaskPipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
-	stageStatuses := summarizePipelineStages(&pipeline, tasksByStage, nil)
+	skipped := skippedPipelineStages(&pipeline)
+	stageStatuses := summarizePipelineStages(&pipeline, tasksByStage, skipped, nil)
 	hasFailure := firstPipelineFailure(stageStatuses, tasksByStage, nil) != ""
 	stageErrors := make(map[string]string)
 	var requeueAfter time.Duration
@@ -72,8 +95,30 @@ func (r *TaskPipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if !hasFailure {
 		for i := range pipeline.Spec.Stages {
 			stage := &pipeline.Spec.Stages[i]
-			if i > 0 && stageStatuses[i-1].Phase != kelos.TaskPhaseSucceeded {
-				break
+			if i > 0 {
+				previous := pipeline.Spec.Stages[i-1].Name
+				if !skipped[previous] && stageStatuses[i-1].Phase != kelos.TaskPhaseSucceeded {
+					break
+				}
+			}
+			if skipped[stage.Name] {
+				continue
+			}
+			if len(stage.Conditions) > 0 && len(tasksByStage[stage.Name]) == 0 {
+				met, conditionErr := pipelineStageConditionsMet(&pipeline, stage, tasksByStage)
+				if conditionErr != nil {
+					if wait := pipelineResultRetryAfter(&pipeline, i, tasksByStage, time.Now()); wait > 0 {
+						requeueAfter = minimumPositiveDuration(requeueAfter, wait)
+						break
+					}
+					stageErrors[stage.Name] = conditionErr.Error()
+					break
+				}
+				if !met {
+					logger.Info("Skipped pipeline stage", "taskPipeline", pipeline.Name, "stage", stage.Name)
+					skipped[stage.Name] = true
+					continue
+				}
 			}
 
 			matrixItems, _ := pipelineMatrixItems(stage.Matrix)
@@ -132,7 +177,7 @@ func (r *TaskPipelineReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 	}
 
-	stageStatuses = summarizePipelineStages(&pipeline, tasksByStage, stageErrors)
+	stageStatuses = summarizePipelineStages(&pipeline, tasksByStage, skipped, stageErrors)
 	failure := firstPipelineFailure(stageStatuses, tasksByStage, stageErrors)
 	if err := r.updateTaskPipelineStatus(ctx, &pipeline, stageStatuses, failure); err != nil {
 		return ctrl.Result{}, err
@@ -203,6 +248,11 @@ func validateTaskPipeline(pipeline *kelos.TaskPipeline) error {
 		if err != nil {
 			return fmt.Errorf("stage %q: %w", stage.Name, err)
 		}
+		for j := range stage.Conditions {
+			if err := parsePipelineTemplate(stage.Name+" condition", stage.Conditions[j].Input); err != nil {
+				return fmt.Errorf("stage %q condition %d input: %w", stage.Name, j, err)
+			}
+		}
 		if err := parsePipelineTemplate(stage.Name+" prompt", stage.TaskTemplate.Prompt); err != nil {
 			return fmt.Errorf("stage %q prompt: %w", stage.Name, err)
 		}
@@ -245,15 +295,88 @@ func pipelineMatrixItems(matrix *kelos.PipelineMatrix) ([]map[string]string, err
 
 func parsePipelineTemplate(name, source string) error {
 	_, err := template.New(name).
-		Funcs(template.FuncMap{"index": strictTemplateIndex}).
+		Funcs(pipelineTemplateFuncs).
 		Option("missingkey=error").
 		Parse(source)
 	return err
 }
 
+// pipelineTemplateFuncs are the functions available to pipeline templates.
+// b64dec decodes Task results such as response, which are stored as base64.
+var pipelineTemplateFuncs = template.FuncMap{
+	"index":  strictTemplateIndex,
+	"b64dec": base64DecodeTemplateValue,
+}
+
+func base64DecodeTemplateValue(value string) (string, error) {
+	decoded, err := base64.StdEncoding.DecodeString(value)
+	if err != nil {
+		return "", fmt.Errorf("decoding base64 value: %w", err)
+	}
+	return string(decoded), nil
+}
+
+// pipelineStageConditionsMet reports whether every condition on stage is met,
+// rendering each input with the results of completed earlier stages.
+func pipelineStageConditionsMet(
+	pipeline *kelos.TaskPipeline,
+	stage *kelos.PipelineStage,
+	tasksByStage map[string][]*kelos.Task,
+) (bool, error) {
+	templateData := map[string]interface{}{
+		"Params": pipeline.Spec.Params,
+		"Stages": pipelineStageTemplateData(pipeline, stage, tasksByStage),
+	}
+	for i := range stage.Conditions {
+		condition := &stage.Conditions[i]
+		rendered, err := renderPipelineTemplate(stage.Name+" condition", condition.Input, templateData)
+		if err != nil {
+			return false, fmt.Errorf("rendering condition %d input: %w", i, err)
+		}
+		rendered = strings.TrimSpace(rendered)
+		matched := false
+		for _, value := range condition.Values {
+			if rendered == value {
+				matched = true
+				break
+			}
+		}
+		switch condition.Operator {
+		case kelos.PipelineConditionOperatorIn:
+			if !matched {
+				return false, nil
+			}
+		case kelos.PipelineConditionOperatorNotIn:
+			if matched {
+				return false, nil
+			}
+		default:
+			return false, fmt.Errorf("condition %d has unsupported operator %q", i, condition.Operator)
+		}
+	}
+	return true, nil
+}
+
+// skippedPipelineStages returns the stages already recorded as Skipped. A skip
+// is final: conditions are not re-evaluated once the decision is recorded.
+func skippedPipelineStages(pipeline *kelos.TaskPipeline) map[string]bool {
+	skipped := make(map[string]bool)
+	for _, status := range pipeline.Status.StageStatuses {
+		if status.Phase == kelos.PipelineStagePhaseSkipped {
+			skipped[status.Name] = true
+		}
+	}
+	return skipped
+}
+
+// pipelineStageDone reports whether a stage phase lets later stages start.
+func pipelineStageDone(phase kelos.TaskPhase) bool {
+	return phase == kelos.TaskPhaseSucceeded || phase == kelos.PipelineStagePhaseSkipped
+}
+
 func renderPipelineTemplate(name, source string, data map[string]interface{}) (string, error) {
 	tmpl, err := template.New(name).
-		Funcs(template.FuncMap{"index": strictTemplateIndex}).
+		Funcs(pipelineTemplateFuncs).
 		Option("missingkey=error").
 		Parse(source)
 	if err != nil {
@@ -344,6 +467,7 @@ func buildPipelineTask(
 ) (*kelos.Task, error) {
 	templateData := map[string]interface{}{
 		"Matrix": matrix,
+		"Params": pipeline.Spec.Params,
 		"Stages": pipelineStageTemplateData(pipeline, stage, tasksByStage),
 	}
 	prompt, err := renderPipelineTemplate(stage.Name+" prompt", stage.TaskTemplate.Prompt, templateData)
@@ -373,6 +497,19 @@ func buildPipelineTask(
 			Prompt: prompt,
 			Branch: branch,
 		},
+	}
+	for _, key := range pipelineInheritedLabels {
+		if value, ok := pipeline.Labels[key]; ok {
+			task.Labels[key] = value
+		}
+	}
+	for _, key := range pipelineInheritedAnnotations {
+		if value, ok := pipeline.Annotations[key]; ok {
+			if task.Annotations == nil {
+				task.Annotations = make(map[string]string)
+			}
+			task.Annotations[key] = value
+		}
 	}
 	if stage.TaskTemplate.Worker != nil {
 		task.Spec.Worker = stage.TaskTemplate.Worker.DeepCopy()
@@ -505,6 +642,7 @@ func pipelineTaskIndex(task *kelos.Task) int {
 func summarizePipelineStages(
 	pipeline *kelos.TaskPipeline,
 	tasksByStage map[string][]*kelos.Task,
+	skipped map[string]bool,
 	stageErrors map[string]string,
 ) []kelos.PipelineStageStatus {
 	statuses := make([]kelos.PipelineStageStatus, 0, len(pipeline.Spec.Stages))
@@ -517,6 +655,12 @@ func summarizePipelineStages(
 		})
 
 		status := kelos.PipelineStageStatus{Name: stage.Name, Total: int32(len(matrixItems))}
+		if skipped[stage.Name] && len(tasks) == 0 {
+			status.Total = 0
+			status.Phase = kelos.PipelineStagePhaseSkipped
+			statuses = append(statuses, status)
+			continue
+		}
 		for _, task := range tasks {
 			switch task.Status.Phase {
 			case kelos.TaskPhaseSucceeded:
@@ -537,7 +681,7 @@ func summarizePipelineStages(
 			status.Phase = kelos.TaskPhaseSucceeded
 		case len(tasks) > 0:
 			status.Phase = kelos.TaskPhaseRunning
-		case i > 0 && statuses[i-1].Phase != kelos.TaskPhaseSucceeded:
+		case i > 0 && !pipelineStageDone(statuses[i-1].Phase):
 			status.Phase = kelos.TaskPhaseWaiting
 		default:
 			status.Phase = kelos.TaskPhasePending
@@ -589,7 +733,7 @@ func (r *TaskPipelineReconciler) updateTaskPipelineStatus(
 	for _, status := range stageStatuses {
 		active += status.Active
 		observed += status.Active + status.Succeeded + status.Failed
-		if status.Phase != kelos.TaskPhaseSucceeded {
+		if !pipelineStageDone(status.Phase) {
 			allSucceeded = false
 		}
 	}

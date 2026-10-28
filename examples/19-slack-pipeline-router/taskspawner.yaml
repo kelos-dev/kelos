@@ -1,0 +1,80 @@
+apiVersion: kelos.dev/v1alpha2
+kind: TaskSpawner
+metadata:
+  name: support-front-door
+spec:
+  when:
+    slack:
+      channels: ["C0123456789"] # TODO: your Slack channel ID
+  maxConcurrency: 5
+  pipelineTemplate:
+    stages:
+      - name: route
+        taskTemplate:
+          worker:
+            type: claude-code
+            credentials:
+              type: oauth
+              secretRef:
+                name: claude-credentials
+          prompt: |
+            Classify the Slack request below. Reply with exactly one word and no other text:
+            - docs for questions about how to use or configure the product
+            - incident for reports of errors, outages, or degraded behavior
+            - none for anything else
+
+            Request:
+            {{.Params.Body}}
+
+      - name: docs
+        conditions:
+          - input: '{{index .Stages "route" 0 "Results" "response" | b64dec}}'
+            operator: In
+            values: [docs]
+        taskTemplate:
+          worker:
+            type: claude-code
+            credentials:
+              type: oauth
+              secretRef:
+                name: claude-credentials
+          prompt: |
+            Answer this question from a Slack user. Be concise and link to documentation where possible.
+
+            {{.Params.Body}}
+
+      - name: incident
+        conditions:
+          - input: '{{index .Stages "route" 0 "Results" "response" | b64dec}}'
+            operator: In
+            values: [incident]
+        taskTemplate:
+          worker:
+            type: claude-code
+            credentials:
+              type: oauth
+              secretRef:
+                name: claude-credentials
+          prompt: |
+            A Slack user reported a possible incident. Summarize what they observed, list the
+            information an on-call engineer needs that is missing, and suggest first triage steps.
+
+            {{.Params.Body}}
+
+      - name: fallback
+        conditions:
+          - input: '{{index .Stages "route" 0 "Results" "response" | b64dec}}'
+            operator: NotIn
+            values: [docs, incident]
+        taskTemplate:
+          worker:
+            type: claude-code
+            credentials:
+              type: oauth
+              secretRef:
+                name: claude-credentials
+          prompt: |
+            Politely explain that this channel handles documentation questions and incident
+            reports, and suggest where the request below might be better handled.
+
+            {{.Params.Body}}

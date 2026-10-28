@@ -196,8 +196,9 @@ the refreshed value on their next sync and are not supported.
 
 A TaskPipeline manages an ordered sequence of named stages. The first stage
 starts immediately, and each later stage starts after the preceding stage has
-succeeded. A stage can create one Task or fan out into parallel Tasks with a
-matrix. The stage list is immutable after creation.
+succeeded or been skipped. A stage can create one Task or fan out into parallel
+Tasks with a matrix, and can be skipped based on earlier stages' results. The
+stage list is immutable after creation.
 
 TaskPipeline is available only in `kelos.dev/v1alpha2`.
 
@@ -210,6 +211,11 @@ TaskPipeline is available only in `kelos.dev/v1alpha2`.
 | `spec.stages[].taskTemplate.prompt` | Go template rendered into each stage Task's prompt | Yes |
 | `spec.stages[].taskTemplate.branch` | Optional Go template rendered into each stage Task's branch. Not supported with workerPoolRef | No |
 | `spec.stages[].matrix.items` | Ordered value maps (1–256). Each item contains 1–16 string values, creates one Task, and defines the same keys as every other item | Yes when matrix is set |
+| `spec.params` | String values (up to 64) exposed to stage templates as `.Params`. Set from the work item by a TaskSpawner with `pipelineTemplate`. Immutable after creation | No |
+| `spec.stages[].conditions` | Conditions (0–8) that must all be met for the stage to run. See [Conditional Stages](#conditional-stages) | No |
+| `spec.stages[].conditions[].input` | Go template rendered with `.Params` and `.Stages`; surrounding whitespace is trimmed before comparison | Yes |
+| `spec.stages[].conditions[].operator` | `In` or `NotIn` | Yes |
+| `spec.stages[].conditions[].values` | Values (1–32) compared exactly and case-sensitively against the rendered input | Yes |
 
 Deleting a TaskPipeline deletes its owned child Tasks. A stage without a matrix
 creates one Task. A matrix stage creates one Task for each item, up to 256 Tasks
@@ -228,12 +234,21 @@ Child Tasks have these labels:
 | `kelos.dev/taskpipeline-stage` | Stage name |
 | `kelos.dev/taskpipeline-index` | Zero-based index of the Task within the stage |
 
+Child Tasks also inherit the TaskPipeline's Slack reporting metadata: the
+`kelos.dev/slack-reporting` label and the `kelos.dev/slack-reporting`,
+`kelos.dev/slack-channel`, `kelos.dev/slack-thread-ts`, and
+`kelos.dev/slack-user-id` annotations. A TaskSpawner with `pipelineTemplate`
+sets these from the Slack message, so each stage Task reports to the
+originating thread the way a spawned Task does. No other labels or annotations
+are copied.
+
 ### Pipeline Templates and Results
 
 `taskTemplate.prompt` and `taskTemplate.branch` receive these variables:
 
 | Variable | Type | Description |
 |----------|------|-------------|
+| `.Params` | `map[string]string` | Values from `spec.params` |
 | `.Matrix` | `map[string]string` | Values from the current matrix item; empty for a stage without a matrix |
 | `.Stages` | `map[string][]object` | Results from completed earlier stages, keyed by stage name |
 | `.Stages.<stage>[].Name` | string | Child Task name |
@@ -242,7 +257,9 @@ Child Tasks have these labels:
 | `.Stages.<stage>[].Outputs` | `[]string` | Raw Task outputs |
 
 Use `index` when a stage or result key contains characters that cannot be used in
-Go template dot notation. TaskPipeline's `index` is strict: a missing map key or
+Go template dot notation. Use `b64dec` to decode a base64 result such as
+`response`, for example `{{index .Stages "plan" 0 "Results" "response" | b64dec}}`;
+invalid base64 fails the stage. TaskPipeline's `index` is strict: a missing map key or
 an out-of-range list index fails the stage and records the rendering error in
 pipeline status. The controller validates every template's syntax before
 starting the pipeline. It renders a stage only after the preceding stage
@@ -287,10 +304,80 @@ spec:
 ```
 
 Agent final responses are stored in `Task.status.results.response` as base64.
-Downstream agents that consume this result should decode it before use.
+Decode them with `b64dec` in the template, or have the downstream agent decode
+them.
+
+### Conditional Stages
+
+A stage with `conditions` runs only when every condition is met. Each condition
+renders `input` with `.Params` and `.Stages` (the same values available to
+prompts; `.Matrix` is not available), trims surrounding whitespace, and compares the value exactly
+against `values`: `In` is met when the value is listed, `NotIn` when it is not.
+
+Conditions are evaluated when the stage would otherwise start, after every
+earlier stage has succeeded or been skipped. A stage whose conditions are not met
+is `Skipped`: it creates no Tasks, reports `Total: 0`, exposes an empty list
+under `.Stages.<stage>` to later stages, and counts as complete when the pipeline
+decides whether to start the next stage or succeed. A skip is final; the
+condition is not evaluated again. If an input cannot be rendered — for example, a
+referenced result key is missing — the stage fails, after the same output-capture
+grace period that applies to prompts.
+
+Stages still run one at a time in declaration order, so stages that select
+mutually exclusive branches run only the selected branch. Agent results reach
+templates through `results.response`, so a selecting stage should be prompted to
+reply with only its answer.
+
+Example — let an agent pick one branch, with a fallback for any other answer:
+
+```yaml
+apiVersion: kelos.dev/v1alpha2
+kind: TaskPipeline
+metadata:
+  name: support-request
+spec:
+  stages:
+    - name: route
+      taskTemplate:
+        workerPoolRef:
+          name: router-pool
+        prompt: |
+          Classify this request and reply with exactly one word: docs, incident, or none.
+          Request: The status page shows checkout errors for EU customers.
+    - name: incident
+      conditions:
+        - input: '{{index .Stages "route" 0 "Results" "response" | b64dec}}'
+          operator: In
+          values: [incident]
+      taskTemplate:
+        workerPoolRef:
+          name: incident-pool
+        prompt: Triage the checkout errors reported for EU customers.
+    - name: docs
+      conditions:
+        - input: '{{index .Stages "route" 0 "Results" "response" | b64dec}}'
+          operator: In
+          values: [docs]
+      taskTemplate:
+        workerPoolRef:
+          name: docs-pool
+        prompt: Answer the documentation question.
+    - name: fallback
+      conditions:
+        - input: '{{index .Stages "route" 0 "Results" "response" | b64dec}}'
+          operator: NotIn
+          values: [docs, incident]
+      taskTemplate:
+        workerPoolRef:
+          name: router-pool
+        prompt: Explain that no team handles this request.
+```
+
+Any value listed in a stage's conditions can be selected by the agent, so treat
+every conditional stage as reachable by any request the selecting stage reads.
 
 `status.stageStatuses` reports expected, active, successful, and failed Task
-counts for each stage. Child Task names, outputs, and structured results remain
+counts for each stage, and `Skipped` for stages whose conditions were not met. Child Task names, outputs, and structured results remain
 on the owned Task resources and are not copied into TaskPipeline status. The
 `Succeeded` condition reports pipeline progress and failure details. Any failed
 child Task prevents later stages from starting. Child Tasks that are already
@@ -1415,9 +1502,61 @@ bundled skills. Reading an AgentConfig through `kelos.dev/v1alpha1` omits
 | `spec.taskTemplate.metadata.annotations` | Annotations merged into spawned Tasks; values support the same Go template variables as `branch`/`promptTemplate`; source annotations (e.g. `kelos.dev/source-kind`) are applied after rendering and override conflicting user values | No |
 | `spec.taskTemplate.contextSources` | External data sources fetched in parallel before task creation; each source's value is exposed as `{{.Context.NAME}}` in `branch`, `promptTemplate`, and `metadata` templates — but not in `nameTemplate` (see [Context Sources](#context-sources) below). Maximum 8 entries; names must be unique | No |
 | `spec.taskTemplate.upstreamRepo` | Upstream repository in `owner/repo` format; injected as `KELOS_UPSTREAM_REPO` into the agent container. Typically auto-derived from `githubIssues.repo`/`githubPullRequests.repo`, but can be set explicitly for fork workflows | No |
-| `spec.maxConcurrency` | Limit max concurrent running tasks (important for cost control) | No |
+| `spec.pipelineTemplate.stages` | Creates a TaskPipeline with these stages for each work item, instead of a Task. Uses the same stage fields as `TaskPipeline.spec.stages`. Exactly one of `taskTemplate` or `pipelineTemplate` is required. See [Pipeline Templates](#taskspawner-pipeline-templates) | No |
+| `spec.maxConcurrency` | Limit max concurrent running tasks (important for cost control). With `pipelineTemplate`, each active TaskPipeline counts as one | No |
 | `spec.maxTotalTasks` | Lifetime limit on total tasks created by this spawner | No |
 | `spec.suspend` | Pause the spawner without deleting it; resume with `spec.suspend: false` (default: `false`) | No |
+
+### TaskSpawner Pipeline Templates
+
+With `spec.pipelineTemplate`, each work item creates a
+[TaskPipeline](#taskpipeline) instead of a Task. Use it with
+[conditional stages](#conditional-stages) to let a first stage decide which
+later stage handles the request.
+
+- `pipelineTemplate` is supported only with the `slack` source. It is mutually
+  exclusive with `taskTemplate` and with `spec.credentials`; each stage sets its
+  own `worker` or `workerPoolRef`.
+- The TaskPipeline is named and deduplicated the way the Task would have been,
+  carries the `kelos.dev/taskspawner` label and the same Slack reporting
+  annotations, and is owned by the TaskSpawner. Stage Tasks inherit the Slack
+  reporting annotations, so every stage that runs posts its status and result
+  to the originating thread. Skipped stages post nothing.
+- The work item's string template variables (for Slack: `ID`, `Title`, `Body`,
+  `URL`, and `Kind`) are copied to `TaskPipeline.spec.params`, and stage
+  templates read them as `{{.Params.Body}}`.
+- `status.activeTasks` and `spec.maxConcurrency` count active TaskPipelines.
+- Manual runs (`kelos run --from taskspawner/<name>` and the Console) do not
+  support `pipelineTemplate` spawners and return an error.
+
+```yaml
+apiVersion: kelos.dev/v1alpha2
+kind: TaskSpawner
+metadata:
+  name: support-front-door
+spec:
+  when:
+    slack:
+      channels: ["C0123456789"]
+  pipelineTemplate:
+    stages:
+      - name: route
+        taskTemplate:
+          workerPoolRef:
+            name: router-pool
+          prompt: |
+            Classify this request and reply with exactly one word: docs or none.
+            Request: {{.Params.Body}}
+      - name: docs
+        conditions:
+          - input: '{{index .Stages "route" 0 "Results" "response" | b64dec}}'
+            operator: In
+            values: [docs]
+        taskTemplate:
+          workerPoolRef:
+            name: docs-pool
+          prompt: "{{.Params.Body}}"
+```
 
 When `spec.credentials` is configured, omit credentials from
 `spec.taskTemplate`. Before creating each Task, the TaskSpawner selects the

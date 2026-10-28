@@ -154,4 +154,79 @@ Reply with exactly "complete".`,
 		Expect(succeeded).NotTo(BeNil())
 		Expect(succeeded.Status).To(Equal(metav1.ConditionTrue))
 	})
+
+	It("should run only the stage whose condition matches an earlier result", func() {
+		By("creating the agent credentials secret")
+		f.CreateSecret("claude-credentials", "CLAUDE_CODE_OAUTH_TOKEN="+oauthToken)
+
+		worker := func() *kelos.WorkerSpec {
+			return &kelos.WorkerSpec{
+				Type:  "claude-code",
+				Model: claudeCodeModel,
+				Credentials: &kelos.Credentials{
+					Type:      kelos.CredentialTypeOAuth,
+					SecretRef: &kelos.SecretReference{Name: "claude-credentials"},
+				},
+			}
+		}
+		route := `{{index .Stages "route" 0 "Results" "response" | b64dec}}`
+
+		By("creating a pipeline whose route stage selects one branch")
+		f.CreateTaskPipeline(&kelos.TaskPipeline{
+			ObjectMeta: metav1.ObjectMeta{Name: "routed-pipeline"},
+			Spec: kelos.TaskPipelineSpec{Stages: []kelos.PipelineStage{
+				{
+					Name: "route",
+					TaskTemplate: kelos.PipelineTaskTemplate{
+						Worker: worker(),
+						Prompt: "Reply with exactly this word and no other text: docs",
+					},
+				},
+				{
+					Name: "docs",
+					Conditions: []kelos.PipelineStageCondition{{
+						Input:    route,
+						Operator: kelos.PipelineConditionOperatorIn,
+						Values:   []string{"docs"},
+					}},
+					TaskTemplate: kelos.PipelineTaskTemplate{
+						Worker: worker(),
+						Prompt: `Reply with exactly "complete".`,
+					},
+				},
+				{
+					Name: "incident",
+					Conditions: []kelos.PipelineStageCondition{{
+						Input:    route,
+						Operator: kelos.PipelineConditionOperatorIn,
+						Values:   []string{"incident"},
+					}},
+					TaskTemplate: kelos.PipelineTaskTemplate{
+						Worker: worker(),
+						Prompt: `Reply with exactly "complete".`,
+					},
+				},
+			}},
+		})
+
+		By("waiting for the selected stage and the pipeline to succeed")
+		f.WaitForTaskPhase("routed-pipeline-route", string(kelos.TaskPhaseSucceeded))
+		f.WaitForTaskPhase("routed-pipeline-docs", string(kelos.TaskPhaseSucceeded))
+		f.WaitForTaskPipelinePhase("routed-pipeline", string(kelos.TaskPipelinePhaseSucceeded))
+
+		By("verifying the unselected stage was skipped without a Task")
+		pipeline, err := f.KelosClientset.ApiV1alpha2().TaskPipelines(f.Namespace).Get(
+			context.TODO(), "routed-pipeline", metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(pipeline.Status.StageStatuses).To(Equal([]kelos.PipelineStageStatus{
+			{Name: "route", Phase: kelos.TaskPhaseSucceeded, Total: 1, Succeeded: 1},
+			{Name: "docs", Phase: kelos.TaskPhaseSucceeded, Total: 1, Succeeded: 1},
+			{Name: "incident", Phase: kelos.PipelineStagePhaseSkipped},
+		}))
+		tasks, err := f.KelosClientset.ApiV1alpha2().Tasks(f.Namespace).List(context.TODO(), metav1.ListOptions{
+			LabelSelector: "kelos.dev/taskpipeline=routed-pipeline,kelos.dev/taskpipeline-stage=incident",
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(tasks.Items).To(BeEmpty())
+	})
 })

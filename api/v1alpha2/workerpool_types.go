@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha2
 
 import (
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -74,6 +75,16 @@ type WorkerPoolSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="volumeClaimTemplate is immutable"
 	VolumeClaimTemplate corev1.PersistentVolumeClaimSpec `json:"volumeClaimTemplate"`
+
+	// PersistentVolumeClaimRetentionPolicy controls whether the worker PVCs
+	// created from volumeClaimTemplate are deleted when the WorkerPool is
+	// deleted (whenDeleted) or scaled down (whenScaled). Each field accepts
+	// Retain or Delete. When unset, or when a field is omitted, PVCs are
+	// retained.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="!has(self.whenDeleted) || self.whenDeleted in ['Retain', 'Delete']",message="whenDeleted must be Retain or Delete"
+	// +kubebuilder:validation:XValidation:rule="!has(self.whenScaled) || self.whenScaled in ['Retain', 'Delete']",message="whenScaled must be Retain or Delete"
+	PersistentVolumeClaimRetentionPolicy *appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy `json:"persistentVolumeClaimRetentionPolicy,omitempty"`
 }
 
 // WorkerPoolStatus defines the observed state of WorkerPool.

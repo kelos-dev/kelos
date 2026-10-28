@@ -1134,6 +1134,8 @@ keep repository access without restarting (see [Workspace authentication](#works
 | `spec.worker.podOverrides` | Pod customization for worker pods | No |
 | `spec.replicas` | Number of persistent worker pods (defaults to 1) | No |
 | `spec.volumeClaimTemplate` | PersistentVolumeClaimSpec for each worker pod's storage | Yes |
+| `spec.persistentVolumeClaimRetentionPolicy.whenDeleted` | `Retain` or `Delete`. Whether worker PVCs are deleted when the WorkerPool is deleted (defaults to `Retain`) | No |
+| `spec.persistentVolumeClaimRetentionPolicy.whenScaled` | `Retain` or `Delete`. Whether the PVCs of removed worker pods are deleted when `spec.replicas` is reduced (defaults to `Retain`) | No |
 
 ## Workspace
 

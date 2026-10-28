@@ -116,4 +116,90 @@ var _ = Describe("WorkerPool Controller", func() {
 			Expect(updatedPool.Status.Phase).To(Equal(kelos.WorkerPoolPhasePending))
 		})
 	})
+
+	Context("When setting a PVC retention policy", func() {
+		newPool := func(name, namespace string, policy *appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy) *kelos.WorkerPool {
+			return &kelos.WorkerPool{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: namespace,
+				},
+				Spec: kelos.WorkerPoolSpec{
+					Worker: kelos.WorkerSpec{
+						Type: "claude-code",
+						Credentials: &kelos.Credentials{
+							Type: kelos.CredentialTypeNone,
+						},
+						WorkspaceRef: &kelos.WorkspaceReference{
+							Name: "pool-workspace",
+						},
+					},
+					Replicas: ptr.To(int32(1)),
+					VolumeClaimTemplate: corev1.PersistentVolumeClaimSpec{
+						AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+						Resources: corev1.VolumeResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceStorage: resource.MustParse("1Gi"),
+							},
+						},
+					},
+					PersistentVolumeClaimRetentionPolicy: policy,
+				},
+			}
+		}
+
+		It("Should propagate the policy to the StatefulSet and update it when changed", func() {
+			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test-workerpool-pvc-retention"}}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			ws := &kelos.Workspace{
+				ObjectMeta: metav1.ObjectMeta{Name: "pool-workspace", Namespace: ns.Name},
+				Spec:       kelos.WorkspaceSpec{Repo: "https://github.com/example/repo.git", Ref: "main"},
+			}
+			Expect(k8sClient.Create(ctx, ws)).Should(Succeed())
+
+			By("Creating a WorkerPool that deletes PVCs on scale down")
+			pool := newPool("retention-pool", ns.Name, &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{
+				WhenScaled: appsv1.DeletePersistentVolumeClaimRetentionPolicyType,
+			})
+			Expect(k8sClient.Create(ctx, pool)).Should(Succeed())
+
+			stsKey := types.NamespacedName{Name: "wp-retention-pool", Namespace: ns.Name}
+			Eventually(func(g Gomega) {
+				sts := &appsv1.StatefulSet{}
+				g.Expect(k8sClient.Get(ctx, stsKey, sts)).To(Succeed())
+				g.Expect(sts.Spec.PersistentVolumeClaimRetentionPolicy).NotTo(BeNil())
+				g.Expect(sts.Spec.PersistentVolumeClaimRetentionPolicy.WhenScaled).To(Equal(appsv1.DeletePersistentVolumeClaimRetentionPolicyType))
+			}, timeout, interval).Should(Succeed())
+
+			By("Changing the WorkerPool to also delete PVCs on deletion")
+			poolKey := types.NamespacedName{Name: "retention-pool", Namespace: ns.Name}
+			Eventually(func(g Gomega) {
+				latest := &kelos.WorkerPool{}
+				g.Expect(k8sClient.Get(ctx, poolKey, latest)).To(Succeed())
+				latest.Spec.PersistentVolumeClaimRetentionPolicy = &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{
+					WhenDeleted: appsv1.DeletePersistentVolumeClaimRetentionPolicyType,
+					WhenScaled:  appsv1.DeletePersistentVolumeClaimRetentionPolicyType,
+				}
+				g.Expect(k8sClient.Update(ctx, latest)).To(Succeed())
+			}, timeout, interval).Should(Succeed())
+
+			Eventually(func(g Gomega) {
+				sts := &appsv1.StatefulSet{}
+				g.Expect(k8sClient.Get(ctx, stsKey, sts)).To(Succeed())
+				g.Expect(sts.Spec.PersistentVolumeClaimRetentionPolicy).NotTo(BeNil())
+				g.Expect(sts.Spec.PersistentVolumeClaimRetentionPolicy.WhenDeleted).To(Equal(appsv1.DeletePersistentVolumeClaimRetentionPolicyType))
+				g.Expect(sts.Spec.PersistentVolumeClaimRetentionPolicy.WhenScaled).To(Equal(appsv1.DeletePersistentVolumeClaimRetentionPolicyType))
+			}, timeout, interval).Should(Succeed())
+		})
+
+		It("Should reject an unknown policy value", func() {
+			pool := newPool("invalid-retention-pool", "default", &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{
+				WhenScaled: "Archive",
+			})
+			err := k8sClient.Create(ctx, pool)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("whenScaled must be Retain or Delete"))
+		})
+	})
 })

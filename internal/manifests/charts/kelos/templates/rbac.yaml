@@ -533,6 +533,13 @@ rules:
   - apiGroups:
       - kelos.dev
     resources:
+      - taskpipelines
+    verbs:
+      - create
+      - get
+  - apiGroups:
+      - kelos.dev
+    resources:
       - agentconfigs
       - workspaces
     verbs:

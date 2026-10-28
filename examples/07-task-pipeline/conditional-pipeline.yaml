@@ -1,0 +1,57 @@
+apiVersion: kelos.dev/v1alpha2
+kind: TaskPipeline
+metadata:
+  name: triage-change
+spec:
+  stages:
+    - name: classify
+      taskTemplate:
+        worker:
+          type: claude-code
+          credentials:
+            type: oauth
+            secretRef:
+              name: claude-credentials
+          workspaceRef:
+            name: my-workspace
+        prompt: |
+          Read the most recent commit on the default branch. Do not modify the repository.
+          Reply with exactly one word and no other text:
+          - docs if the commit only changes documentation
+          - code if it changes anything else
+
+    - name: review-docs
+      conditions:
+        - input: '{{index .Stages "classify" 0 "Results" "response" | b64dec}}'
+          operator: In
+          values: [docs]
+      taskTemplate:
+        worker:
+          type: claude-code
+          credentials:
+            type: oauth
+            secretRef:
+              name: claude-credentials
+          workspaceRef:
+            name: my-workspace
+        prompt: |
+          Review the most recent commit's documentation changes for accuracy and broken links.
+          Do not modify the repository. Return a concise list of findings.
+
+    - name: review-code
+      conditions:
+        - input: '{{index .Stages "classify" 0 "Results" "response" | b64dec}}'
+          operator: NotIn
+          values: [docs]
+      taskTemplate:
+        worker:
+          type: claude-code
+          credentials:
+            type: oauth
+            secretRef:
+              name: claude-credentials
+          workspaceRef:
+            name: my-workspace
+        prompt: |
+          Review the most recent commit's code changes for correctness and missing tests.
+          Do not modify the repository. Return a concise list of findings.

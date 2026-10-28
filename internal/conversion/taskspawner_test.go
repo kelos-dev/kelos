@@ -1344,3 +1344,90 @@ func TestValidGitHubWebhookExcludeFilters_AcceptsEveryEnumValue(t *testing.T) {
 		}
 	}
 }
+
+func TestTaskSpawnerConvert_PipelineTemplateRoundTrip(t *testing.T) {
+	src := &v1alpha2.TaskSpawner{
+		Spec: v1alpha2.TaskSpawnerSpec{
+			When: v1alpha2.When{Slack: &v1alpha2.Slack{Channels: []string{"C0123456789"}}},
+			PipelineTemplate: &v1alpha2.TaskSpawnerPipelineTemplate{Stages: []v1alpha2.PipelineStage{
+				{
+					Name: "route",
+					TaskTemplate: v1alpha2.PipelineTaskTemplate{
+						WorkerPoolRef: &v1alpha2.WorkerPoolReference{Name: "router"},
+						Prompt:        "Route {{.Params.Body}}",
+					},
+				},
+				{
+					Name: "docs",
+					Conditions: []v1alpha2.PipelineStageCondition{{
+						Input:    `{{index .Stages "route" 0 "Results" "response" | b64dec}}`,
+						Operator: v1alpha2.PipelineConditionOperatorIn,
+						Values:   []string{"docs"},
+					}},
+					TaskTemplate: v1alpha2.PipelineTaskTemplate{
+						WorkerPoolRef: &v1alpha2.WorkerPoolReference{Name: "docs"},
+						Prompt:        "{{.Params.Body}}",
+					},
+				},
+			}},
+		},
+	}
+
+	down := &v1alpha1.TaskSpawner{}
+	if err := taskSpawnerFromHub(context.Background(), src, down); err != nil {
+		t.Fatalf("taskSpawnerFromHub() error = %v", err)
+	}
+	if _, ok := down.Annotations[preservedPipelineTemplateAnnotation]; !ok {
+		t.Fatal("pipelineTemplate preservation annotation is missing after down-conversion")
+	}
+
+	up := &v1alpha2.TaskSpawner{}
+	if err := taskSpawnerToHub(context.Background(), down, up); err != nil {
+		t.Fatalf("taskSpawnerToHub() error = %v", err)
+	}
+	if !reflect.DeepEqual(up.Spec.PipelineTemplate, src.Spec.PipelineTemplate) {
+		t.Errorf("pipelineTemplate after round-trip = %#v, want %#v", up.Spec.PipelineTemplate, src.Spec.PipelineTemplate)
+	}
+	if !reflect.DeepEqual(up.Spec.TaskTemplate, v1alpha2.TaskTemplate{}) {
+		t.Errorf("taskTemplate after round-trip = %#v, want empty", up.Spec.TaskTemplate)
+	}
+	if _, ok := up.Annotations[preservedPipelineTemplateAnnotation]; ok {
+		t.Error("preservation annotation not cleaned up after restore")
+	}
+}
+
+func TestTaskSpawnerToHub_MalformedPipelineTemplateAnnotationIgnored(t *testing.T) {
+	spoke := &v1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "chat",
+			Namespace:   "default",
+			Annotations: map[string]string{preservedPipelineTemplateAnnotation: "{not json"},
+		},
+	}
+	hub := &v1alpha2.TaskSpawner{}
+	if err := taskSpawnerToHub(context.Background(), spoke, hub); err != nil {
+		t.Fatalf("taskSpawnerToHub() error = %v", err)
+	}
+	if hub.Spec.PipelineTemplate != nil {
+		t.Errorf("pipelineTemplate = %#v, want nil for a malformed annotation", hub.Spec.PipelineTemplate)
+	}
+	if _, ok := hub.Annotations[preservedPipelineTemplateAnnotation]; ok {
+		t.Error("malformed preservation annotation leaked into the hub object")
+	}
+}
+
+func TestTaskSpawnerFromHub_NoPipelineTemplateOmitsAnnotation(t *testing.T) {
+	src := &v1alpha2.TaskSpawner{
+		Spec: v1alpha2.TaskSpawnerSpec{
+			When:         v1alpha2.When{Slack: &v1alpha2.Slack{}},
+			TaskTemplate: v1alpha2.TaskTemplate{Type: "claude-code"},
+		},
+	}
+	down := &v1alpha1.TaskSpawner{}
+	if err := taskSpawnerFromHub(context.Background(), src, down); err != nil {
+		t.Fatalf("taskSpawnerFromHub() error = %v", err)
+	}
+	if _, ok := down.Annotations[preservedPipelineTemplateAnnotation]; ok {
+		t.Error("pipelineTemplate preservation annotation set for a taskTemplate spawner")
+	}
+}

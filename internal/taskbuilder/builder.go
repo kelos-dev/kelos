@@ -255,6 +255,56 @@ func ResolveTaskName(defaultName string, taskTemplate *kelos.TaskTemplate, templ
 	return name, nil
 }
 
+// BuildTaskPipeline creates a TaskPipeline from a TaskSpawner pipeline template.
+// The work item's string template variables become the pipeline's params, which
+// stage templates read as .Params. If spawnerRef is non-nil the
+// kelos.dev/taskspawner label and a controller owner reference are set.
+func (tb *TaskBuilder) BuildTaskPipeline(
+	name, namespace string,
+	pipelineTemplate *kelos.TaskSpawnerPipelineTemplate,
+	templateVars map[string]interface{},
+	spawnerRef *SpawnerRef,
+) *kelos.TaskPipeline {
+	var params map[string]string
+	for key, value := range templateVars {
+		text, ok := value.(string)
+		if !ok {
+			continue
+		}
+		if params == nil {
+			params = make(map[string]string)
+		}
+		params[key] = text
+	}
+
+	stages := make([]kelos.PipelineStage, len(pipelineTemplate.Stages))
+	for i := range pipelineTemplate.Stages {
+		pipelineTemplate.Stages[i].DeepCopyInto(&stages[i])
+	}
+	pipeline := &kelos.TaskPipeline{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: kelos.TaskPipelineSpec{
+			Stages: stages,
+			Params: params,
+		},
+	}
+	if spawnerRef != nil {
+		pipeline.Labels = map[string]string{SpawnerLabel: spawnerRef.Name}
+		isController := true
+		pipeline.OwnerReferences = append(pipeline.OwnerReferences, metav1.OwnerReference{
+			APIVersion: spawnerRef.APIVersion,
+			Kind:       spawnerRef.Kind,
+			Name:       spawnerRef.Name,
+			UID:        types.UID(spawnerRef.UID),
+			Controller: &isController,
+		})
+	}
+	return pipeline
+}
+
 // TaskBelongsToSpawner reports whether task was created by the identified
 // TaskSpawner. When the Task carries a controller owner reference, its UID must
 // equal spawnerUID — so a Task owned by a since-deleted spawner that shared this
@@ -263,8 +313,14 @@ func ResolveTaskName(defaultName string, taskTemplate *kelos.TaskTemplate, templ
 // manually-created Tasks). Used to decide whether an AlreadyExists collision is
 // a genuine deduplication or a clash with an unrelated Task.
 func TaskBelongsToSpawner(task *kelos.Task, spawnerName string, spawnerUID types.UID) bool {
+	return ObjectBelongsToSpawner(task, spawnerName, spawnerUID)
+}
+
+// ObjectBelongsToSpawner applies the TaskBelongsToSpawner ownership rules to
+// any object a TaskSpawner creates, such as a TaskPipeline.
+func ObjectBelongsToSpawner(obj metav1.Object, spawnerName string, spawnerUID types.UID) bool {
 	hasController := false
-	for _, ref := range task.OwnerReferences {
+	for _, ref := range obj.GetOwnerReferences() {
 		if ref.Controller != nil && *ref.Controller {
 			hasController = true
 			if ref.UID == spawnerUID {
@@ -275,7 +331,7 @@ func TaskBelongsToSpawner(task *kelos.Task, spawnerName string, spawnerUID types
 	if hasController {
 		return false
 	}
-	return task.Labels[SpawnerLabel] == spawnerName
+	return obj.GetLabels()[SpawnerLabel] == spawnerName
 }
 
 // nameTemplateForbiddenKey is the template variable a nameTemplate must not

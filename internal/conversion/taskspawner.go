@@ -62,6 +62,11 @@ type preservedWebhookGatewayRefs struct {
 // why the value is preserved rather than left to fall away.
 const preservedSlackExcludeFiltersAnnotation = "kelos.dev/v1alpha2-slack-exclude-filters"
 
+// preservedPipelineTemplateAnnotation carries spec.pipelineTemplate across a
+// v1alpha1 round-trip. v1alpha1 has no pipelineTemplate; dropping it would
+// leave a v1alpha1 write-back with neither template.
+const preservedPipelineTemplateAnnotation = "kelos.dev/v1alpha2-pipeline-template"
+
 var slackFilterChannelIDPattern = regexp.MustCompile(v1alpha2.SlackFilterChannelIDPattern)
 
 type preservedGitHubCommentsReporting struct {
@@ -102,6 +107,8 @@ func taskSpawnerToHub(_ context.Context, src *v1alpha1.TaskSpawner, dst *v1alpha
 	deleteAnnotation(dst.Annotations, preservedGitHubWebhookExcludeFiltersAnnotation)
 	restorePreservedSlackExcludeFilters(src.Annotations, dst.Spec.When.Slack)
 	deleteAnnotation(dst.Annotations, preservedSlackExcludeFiltersAnnotation)
+	restorePreservedPipelineTemplate(src.Annotations, &dst.Spec)
+	deleteAnnotation(dst.Annotations, preservedPipelineTemplateAnnotation)
 	return nil
 }
 
@@ -133,7 +140,60 @@ func taskSpawnerFromHub(_ context.Context, src *v1alpha2.TaskSpawner, dst *v1alp
 	if err := setPreservedSlackExcludeFilters(dst, src.Spec.When.Slack); err != nil {
 		return err
 	}
+	if err := setPreservedPipelineTemplate(dst, src.Spec.PipelineTemplate); err != nil {
+		return err
+	}
 	return convertViaJSON(&src.Status, &dst.Status)
+}
+
+// setPreservedPipelineTemplate records spec.pipelineTemplate in an annotation
+// on the v1alpha1 object so it survives a v1alpha1 round-trip. The annotation
+// is cleared when there is nothing to preserve.
+func setPreservedPipelineTemplate(dst *v1alpha1.TaskSpawner, pipelineTemplate *v1alpha2.TaskSpawnerPipelineTemplate) error {
+	if pipelineTemplate == nil {
+		deleteAnnotation(dst.Annotations, preservedPipelineTemplateAnnotation)
+		return nil
+	}
+	data, err := json.Marshal(pipelineTemplate)
+	if err != nil {
+		return err
+	}
+	if dst.Annotations == nil {
+		dst.Annotations = map[string]string{}
+	}
+	dst.Annotations[preservedPipelineTemplateAnnotation] = string(data)
+	return nil
+}
+
+func restorePreservedPipelineTemplate(annotations map[string]string, dst *v1alpha2.TaskSpawnerSpec) {
+	if dst.PipelineTemplate != nil {
+		return
+	}
+	raw, ok := annotations[preservedPipelineTemplateAnnotation]
+	if !ok || raw == "" {
+		return
+	}
+	var pipelineTemplate v1alpha2.TaskSpawnerPipelineTemplate
+	if err := json.Unmarshal([]byte(raw), &pipelineTemplate); err != nil || len(pipelineTemplate.Stages) == 0 {
+		// The annotation is best-effort preservation data and can be set by
+		// users; malformed data must not block API version conversion. The
+		// API server still rejects a TaskSpawner left without a template.
+		return
+	}
+	dst.PipelineTemplate = &pipelineTemplate
+	// v1alpha1 always serializes taskTemplate, including its non-pointer
+	// credentials, so a pipeline spawner comes back with an empty template.
+	// Drop it so the hub object sets exactly one of the two templates.
+	if emptyTaskTemplate(dst.TaskTemplate) {
+		dst.TaskTemplate = v1alpha2.TaskTemplate{}
+	}
+}
+
+func emptyTaskTemplate(template v1alpha2.TaskTemplate) bool {
+	if template.Credentials != nil && reflect.DeepEqual(*template.Credentials, v1alpha2.Credentials{}) {
+		template.Credentials = nil
+	}
+	return reflect.DeepEqual(template, v1alpha2.TaskTemplate{})
 }
 
 // setPreservedGitHubWebhookExcludeFilters records

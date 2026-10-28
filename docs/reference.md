@@ -1259,6 +1259,7 @@ to receive refreshed credentials during long-running work.
 | `spec.mcpServers[].env[].valueFrom.configMapKeyRef` | ConfigMap key reference for an MCP env value. Set `name` and `key`; when `optional: true`, a missing ConfigMap or key omits the variable instead of failing the Task | No |
 | `spec.mcpServers[].env[].valueFrom` | Only `secretKeyRef` and `configMapKeyRef` are supported for MCP server env. Other Kubernetes `EnvVarSource` variants are rejected when a Task consumes the AgentConfig | No |
 | `spec.mcpServers[].envFrom.secretRef.name` | Secret whose data keys become stdio MCP environment variable names and values. Values from `envFrom` override inline `env` on key conflicts | No |
+| `spec.mcpServers[].alwaysLoad` | When `true`, Claude Code loads this server's tools at session start instead of deferring them behind tool search. Only Claude Code acts on it | No |
 
 ### Bundling a skill directory
 

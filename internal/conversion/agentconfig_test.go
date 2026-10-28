@@ -186,6 +186,62 @@ func TestAgentConfigRoundTrip_PreservesOptionalSkill(t *testing.T) {
 	}
 }
 
+func TestAgentConfigRoundTrip_PreservesMCPAlwaysLoad(t *testing.T) {
+	src := &v1alpha2.AgentConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: "cfg", Namespace: "default"},
+		Spec: v1alpha2.AgentConfigSpec{
+			MCPServers: []v1alpha2.MCPServerSpec{
+				{Name: "memory", Type: "stdio", Command: "mcp-server-qdrant", AlwaysLoad: true},
+				{Name: "github", Type: "http", URL: "https://api.githubcopilot.com/mcp/"},
+			},
+		},
+	}
+
+	spoke := &v1alpha1.AgentConfig{}
+	if err := agentConfigFromHub(context.Background(), src, spoke); err != nil {
+		t.Fatalf("agentConfigFromHub() error = %v", err)
+	}
+	if spoke.Annotations[preservedMCPAlwaysLoadAnnotation] == "" {
+		t.Fatalf("spoke annotation %q should carry alwaysLoad", preservedMCPAlwaysLoadAnnotation)
+	}
+	hub := &v1alpha2.AgentConfig{}
+	if err := agentConfigToHub(context.Background(), spoke, hub); err != nil {
+		t.Fatalf("agentConfigToHub() error = %v", err)
+	}
+
+	if len(hub.Spec.MCPServers) != 2 || !hub.Spec.MCPServers[0].AlwaysLoad || hub.Spec.MCPServers[1].AlwaysLoad {
+		t.Fatalf("MCPServers = %#v, want alwaysLoad on memory only", hub.Spec.MCPServers)
+	}
+	if _, ok := hub.Annotations[preservedMCPAlwaysLoadAnnotation]; ok {
+		t.Errorf("hub annotation %q should be removed after restore", preservedMCPAlwaysLoadAnnotation)
+	}
+}
+
+func TestAgentConfigRoundTrip_RestoresMCPAlwaysLoadAfterServerReorder(t *testing.T) {
+	spoke := &v1alpha1.AgentConfig{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{
+				preservedMCPAlwaysLoadAnnotation: `[{"index":0,"name":"memory"}]`,
+			},
+		},
+		Spec: v1alpha1.AgentConfigSpec{
+			MCPServers: []v1alpha1.MCPServerSpec{
+				{Name: "github", Type: "http", URL: "https://api.githubcopilot.com/mcp/"},
+				{Name: "memory", Type: "stdio", Command: "mcp-server-qdrant"},
+			},
+		},
+	}
+
+	hub := &v1alpha2.AgentConfig{}
+	if err := agentConfigToHub(context.Background(), spoke, hub); err != nil {
+		t.Fatalf("agentConfigToHub() error = %v", err)
+	}
+
+	if hub.Spec.MCPServers[0].AlwaysLoad || !hub.Spec.MCPServers[1].AlwaysLoad {
+		t.Fatalf("MCPServers = %#v, want alwaysLoad on memory only", hub.Spec.MCPServers)
+	}
+}
+
 func TestAgentConfigRoundTrip_DoesNotRestoreReorderedDuplicateOptionalSkill(t *testing.T) {
 	spoke := &v1alpha1.AgentConfig{
 		ObjectMeta: metav1.ObjectMeta{

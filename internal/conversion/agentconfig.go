@@ -13,6 +13,7 @@ import (
 
 const (
 	preservedMCPValueFromEnvAnnotation = "kelos.dev/v1alpha2-mcp-value-from-env"
+	preservedMCPAlwaysLoadAnnotation   = "kelos.dev/v1alpha2-mcp-always-load"
 	preservedSkillsSecretRefAnnotation = "kelos.dev/v1alpha2-skills-secret-ref"
 	preservedSkillsOptionalAnnotation  = "kelos.dev/v1alpha2-skills-optional"
 )
@@ -21,6 +22,11 @@ type preservedMCPValueFromEnv struct {
 	Index int             `json:"index"`
 	Name  string          `json:"name"`
 	Env   []corev1.EnvVar `json:"env"`
+}
+
+type preservedMCPAlwaysLoad struct {
+	Index int    `json:"index"`
+	Name  string `json:"name"`
 }
 
 type preservedSkillsSecretRef struct {
@@ -53,6 +59,9 @@ func agentConfigToHub(_ context.Context, src *v1alpha1.AgentConfig, dst *v1alpha
 	if err := restorePreservedMCPValueFromEnv(src.Annotations, dst.Spec.MCPServers); err != nil {
 		return err
 	}
+	if err := restorePreservedMCPAlwaysLoad(src.Annotations, dst.Spec.MCPServers); err != nil {
+		return err
+	}
 	if err := restorePreservedSkillsSecretRefs(src.Annotations, dst.Spec.Skills); err != nil {
 		return err
 	}
@@ -60,6 +69,7 @@ func agentConfigToHub(_ context.Context, src *v1alpha1.AgentConfig, dst *v1alpha
 		return err
 	}
 	deleteAnnotation(dst.Annotations, preservedMCPValueFromEnvAnnotation)
+	deleteAnnotation(dst.Annotations, preservedMCPAlwaysLoadAnnotation)
 	deleteAnnotation(dst.Annotations, preservedSkillsSecretRefAnnotation)
 	deleteAnnotation(dst.Annotations, preservedSkillsOptionalAnnotation)
 	return nil
@@ -72,6 +82,9 @@ func agentConfigFromHub(_ context.Context, src *v1alpha2.AgentConfig, dst *v1alp
 	dst.Spec.Skills = skillsFromV1alpha2(src.Spec.Skills)
 	dst.Spec.MCPServers = mcpServersFromV1alpha2(src.Spec.MCPServers)
 	if err := setPreservedMCPValueFromEnvAnnotation(dst, src.Spec.MCPServers); err != nil {
+		return err
+	}
+	if err := setPreservedMCPAlwaysLoadAnnotation(dst, src.Spec.MCPServers); err != nil {
 		return err
 	}
 	if err := setPreservedSkillsSecretRefAnnotation(dst, src.Spec.Skills); err != nil {
@@ -303,6 +316,48 @@ func restorePreservedSkillsSecretRefs(annotations map[string]string, skills []v1
 		if skills[index].SecretRef == nil {
 			ref := item.SecretRef
 			skills[index].SecretRef = &ref
+		}
+	}
+	return nil
+}
+
+func setPreservedMCPAlwaysLoadAnnotation(dst *v1alpha1.AgentConfig, servers []v1alpha2.MCPServerSpec) error {
+	var preserved []preservedMCPAlwaysLoad
+	for i, server := range servers {
+		if !server.AlwaysLoad {
+			continue
+		}
+		preserved = append(preserved, preservedMCPAlwaysLoad{Index: i, Name: server.Name})
+	}
+	if len(preserved) == 0 {
+		deleteAnnotation(dst.Annotations, preservedMCPAlwaysLoadAnnotation)
+		return nil
+	}
+	data, err := json.Marshal(preserved)
+	if err != nil {
+		return err
+	}
+	if dst.Annotations == nil {
+		dst.Annotations = map[string]string{}
+	}
+	dst.Annotations[preservedMCPAlwaysLoadAnnotation] = string(data)
+	return nil
+}
+
+func restorePreservedMCPAlwaysLoad(annotations map[string]string, servers []v1alpha2.MCPServerSpec) error {
+	raw := annotations[preservedMCPAlwaysLoadAnnotation]
+	if raw == "" {
+		return nil
+	}
+	var preserved []preservedMCPAlwaysLoad
+	if err := json.Unmarshal([]byte(raw), &preserved); err != nil {
+		// Conversion must not be blocked by malformed preservation metadata.
+		return nil
+	}
+	for _, item := range preserved {
+		index, ok := preservedServerIndex(servers, preservedMCPValueFromEnv{Index: item.Index, Name: item.Name})
+		if ok {
+			servers[index].AlwaysLoad = true
 		}
 	}
 	return nil

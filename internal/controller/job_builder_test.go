@@ -4242,6 +4242,69 @@ func TestBuildJob_AgentConfigMCPServers(t *testing.T) {
 	}
 }
 
+func TestBuildJob_AgentConfigMCPServersAlwaysLoad(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-mcp-always-load",
+			Namespace: "default",
+		},
+		Spec: kelos.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: &kelos.Credentials{
+				Type:      kelos.CredentialTypeAPIKey,
+				SecretRef: &kelos.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	agentConfig := &kelos.AgentConfigSpec{
+		MCPServers: []kelos.MCPServerSpec{
+			{
+				Name:       "memory",
+				Type:       "stdio",
+				Command:    "mcp-server-qdrant",
+				AlwaysLoad: true,
+			},
+			{
+				Name: "github",
+				Type: "http",
+				URL:  "https://api.githubcopilot.com/mcp/",
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, agentConfig, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	var mcpJSON string
+	for _, env := range job.Spec.Template.Spec.Containers[0].Env {
+		if env.Name == "KELOS_MCP_SERVERS" {
+			mcpJSON = env.Value
+		}
+	}
+	if mcpJSON == "" {
+		t.Fatal("Expected KELOS_MCP_SERVERS env var to be set")
+	}
+
+	var parsed struct {
+		MCPServers map[string]map[string]json.RawMessage `json:"mcpServers"`
+	}
+	if err := json.Unmarshal([]byte(mcpJSON), &parsed); err != nil {
+		t.Fatalf("Failed to parse KELOS_MCP_SERVERS JSON: %v", err)
+	}
+
+	if got := string(parsed.MCPServers["memory"]["alwaysLoad"]); got != "true" {
+		t.Errorf("Expected memory alwaysLoad true, got %q", got)
+	}
+	if raw, ok := parsed.MCPServers["github"]["alwaysLoad"]; ok {
+		t.Errorf("Expected github to omit alwaysLoad, got %s", raw)
+	}
+}
+
 func TestBuildJob_AgentConfigMCPServersWithHTTPHeaders(t *testing.T) {
 	builder := NewJobBuilder()
 	task := &kelos.Task{

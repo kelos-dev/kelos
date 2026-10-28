@@ -278,6 +278,11 @@ spec:
                 items:
                   description: MCPServerSpec defines an MCP server configuration.
                   properties:
+                    alwaysLoad:
+                      description: |-
+                        AlwaysLoad makes Claude Code load this server's tools at session start
+                        instead of deferring them behind tool search. Only Claude Code acts on it.
+                      type: boolean
                     args:
                       description: |-
                         Args are command-line arguments for the server process.

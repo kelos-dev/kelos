@@ -186,6 +186,11 @@ type MCPServerSpec struct {
 	// where env overrides envFrom).
 	// +optional
 	EnvFrom *SecretValuesSource `json:"envFrom,omitempty"`
+
+	// AlwaysLoad makes Claude Code load this server's tools at session start
+	// instead of deferring them behind tool search. Only Claude Code acts on it.
+	// +optional
+	AlwaysLoad bool `json:"alwaysLoad,omitempty"`
 }
 
 // SecretValuesSource selects a Secret to populate values from.

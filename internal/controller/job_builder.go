@@ -1516,12 +1516,13 @@ func envFromVar(name, valueVar string) string {
 // format used by Claude Code and other agents. Fields are omitted when
 // empty so that the resulting JSON stays minimal.
 type mcpServerJSON struct {
-	Type    string            `json:"type,omitempty"`
-	Command string            `json:"command,omitempty"`
-	Args    []string          `json:"args,omitempty"`
-	URL     string            `json:"url,omitempty"`
-	Headers map[string]string `json:"headers,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
+	Type       string            `json:"type,omitempty"`
+	Command    string            `json:"command,omitempty"`
+	Args       []string          `json:"args,omitempty"`
+	URL        string            `json:"url,omitempty"`
+	Headers    map[string]string `json:"headers,omitempty"`
+	Env        map[string]string `json:"env,omitempty"`
+	AlwaysLoad bool              `json:"alwaysLoad,omitempty"`
 }
 
 // buildMCPServersJSON converts MCPServerSpec entries into a JSON string
@@ -1545,12 +1546,13 @@ func buildMCPServersJSON(servers []kelos.MCPServerSpec) (string, error) {
 			return "", err
 		}
 		entry := mcpServerJSON{
-			Type:    s.Type,
-			Command: s.Command,
-			Args:    s.Args,
-			URL:     s.URL,
-			Headers: s.Headers,
-			Env:     envMap,
+			Type:       s.Type,
+			Command:    s.Command,
+			Args:       s.Args,
+			URL:        s.URL,
+			Headers:    s.Headers,
+			Env:        envMap,
+			AlwaysLoad: s.AlwaysLoad,
 		}
 		mcpMap[s.Name] = entry
 	}

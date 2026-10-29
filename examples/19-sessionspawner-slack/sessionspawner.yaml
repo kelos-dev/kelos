@@ -1,0 +1,32 @@
+apiVersion: kelos.dev/v1alpha2
+kind: SessionSpawner
+metadata:
+  name: slack-thread
+  namespace: default
+spec:
+  when:
+    slack:
+      # TODO: replace with the channel the experiment runs in. Leaving this
+      # empty gives every invited channel a Session per thread.
+      channels:
+        - C0123456789
+  sessionTemplate:
+    worker:
+      type: claude-code
+      credentials:
+        type: api-key
+        secretRef:
+          name: claude-credentials
+      workspaceRef:
+        name: kelos
+    volumeClaimTemplate:
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 10Gi
+    idlePolicy:
+      # Stop the runtime after 30 idle minutes; a later message in the thread
+      # resumes it. Delete the Session, and its workspace, after a day.
+      suspendAfterSeconds: 1800
+      deleteAfterSeconds: 86400

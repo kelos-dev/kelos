@@ -78,8 +78,9 @@ spec:
                     description: |-
                       SuspendAfterSeconds stops the Session runtime once it has been continuously
                       idle for the given number of seconds without changing Session.spec.suspend.
-                      Selecting the Session in the web interface or starting a terminal connection
-                      resumes it. If this field is unset, the Session is never suspended for
+                      Selecting the Session in the web interface, starting a terminal connection,
+                      or — for a Session backing a Slack thread — a later matching message in
+                      that thread, resumes it. If this field is unset, the Session is never suspended for
                       idleness. If it is set to zero, the Session is eligible for suspension as
                       soon as it goes idle. When DeleteAfterSeconds is also set,
                       SuspendAfterSeconds must be less than DeleteAfterSeconds.

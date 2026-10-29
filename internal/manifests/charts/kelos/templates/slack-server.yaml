@@ -36,6 +36,12 @@ spec:
             {{- if .Values.slackServer.denySlackConnectChannels }}
             - --deny-slack-connect-channels
             {{- end }}
+            {{- if not (kindIs "invalid" .Values.slackServer.sessionTurnTimeout) }}
+            - --session-turn-timeout={{ .Values.slackServer.sessionTurnTimeout }}
+            {{- end }}
+            {{- if not (kindIs "invalid" .Values.slackServer.sessionMaxQueuedTurns) }}
+            - --session-max-queued-turns={{ .Values.slackServer.sessionMaxQueuedTurns }}
+            {{- end }}
           env:
             - name: SLACK_BOT_TOKEN
               valueFrom:

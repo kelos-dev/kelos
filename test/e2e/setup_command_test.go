@@ -77,6 +77,59 @@ var _ = Describe("Workspace setupCommand", func() {
 		Expect(logs).To(ContainSubstring("setup-ran-from-workspace"))
 	})
 
+	It("should allow passwordless sudo in setupCommand", func() {
+		By("creating OAuth credentials secret")
+		f.CreateSecret("claude-credentials",
+			"CLAUDE_CODE_OAUTH_TOKEN="+oauthToken)
+
+		By("creating a Workspace whose setupCommand checks the normal user and sudo access")
+		f.CreateWorkspace(&kelos.Workspace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "e2e-setup-sudo-workspace",
+			},
+			Spec: kelos.WorkspaceSpec{
+				Repo: "https://github.com/kelos-dev/kelos.git",
+				Ref:  "main",
+				SetupCommand: []string{
+					"sh", "-c",
+					`test "$(id -u)" = 61100 && test "$(sudo -n id -u)" = 0`,
+				},
+			},
+		})
+
+		By("creating a Task referencing the sudo workspace")
+		f.CreateTask(&kelos.Task{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "setup-sudo-task",
+			},
+			Spec: kelos.TaskSpec{
+				Type:   "claude-code",
+				Model:  claudeCodeModel,
+				Prompt: "Print 'done'",
+				Credentials: &kelos.Credentials{
+					Type:      kelos.CredentialTypeOAuth,
+					SecretRef: &kelos.SecretReference{Name: "claude-credentials"},
+				},
+				WorkspaceRef: &kelos.WorkspaceReference{Name: "e2e-setup-sudo-workspace"},
+			},
+		})
+
+		By("waiting for Job to be created")
+		f.WaitForJobCreation("setup-sudo-task")
+
+		By("waiting for Job to complete")
+		f.WaitForJobCompletion("setup-sudo-task")
+
+		By("verifying Task status is Succeeded")
+		f.WaitForTaskPhase("setup-sudo-task", "Succeeded")
+
+		By("verifying setupCommand completed without errors")
+		logs := f.GetJobLogs("setup-sudo-task")
+		GinkgoWriter.Printf("Job logs:\n%s\n", logs)
+		Expect(logs).To(ContainSubstring("---KELOS_SETUP_COMMAND_DONE---"))
+		Expect(logs).NotTo(ContainSubstring("---KELOS_SETUP_COMMAND_FAILED---"))
+	})
+
 	It("should resolve binaries installed by setupCommand into $HOME/.local/bin from PATH", func() {
 		By("creating OAuth credentials secret")
 		f.CreateSecret("claude-credentials",

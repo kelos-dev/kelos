@@ -123,6 +123,23 @@ RUN useradd -u 61100 -m -s /bin/bash agent
 USER agent
 ```
 
+#### Passwordless sudo
+
+Bundled agent images (`claude-code`, `codex`, `gemini`, `opencode`, and
+`cursor`) include passwordless sudo. The agent starts as UID 61100 and can
+run any command as root inside the container using sudo, for example
+`sudo -n apt-get update && sudo -n apt-get install -y jq`. This also works
+in `Workspace.spec.setupCommand`. Prefer baking frequently used packages
+into the image to avoid installing them for every task.
+
+Sudo requires security settings that permit privilege escalation and the
+capabilities needed to switch users; `allowPrivilegeEscalation: false` or
+dropping all capabilities prevents it. Installing system packages also
+requires a writable root filesystem. These images cannot provide sudo in
+namespaces enforcing the Kubernetes Restricted Pod Security Standard.
+Installed packages live in the container's writable layer and must be
+installed again when the container is replaced.
+
 ### 5. Working directory
 
 When a workspace is configured, Kelos mounts the cloned repository at

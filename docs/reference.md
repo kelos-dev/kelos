@@ -1171,6 +1171,7 @@ Notes:
 - Runs after the repo has been cloned and checked out, additional remotes have been added, and any `spec.files` entries have been written.
 - Runs before the agent process starts; if it exits non-zero, the agent never runs and the Task fails.
 - Executes in `/workspace/repo` as the agent UID (61100), with access to all built-in Kelos env vars and any `Task.spec.podOverrides.env` entries from the Task that references this Workspace.
+- Bundled agent images include [passwordless sudo](agent-image-interface.md#passwordless-sudo) for installing system packages. Use `sudo -n apt-get update && sudo -n apt-get install -y <package>` with compatible Pod security settings and a writable root filesystem.
 - The default form is exec-style; for shell pipelines, environment expansion, or multi-step scripts, wrap the command with `["sh", "-c", "<script>"]`.
 
 ### Workspace Authentication

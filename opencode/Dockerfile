@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     git \
     tini \
+    sudo \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
@@ -40,10 +41,15 @@ RUN chmod +x /usr/local/bin/gh
 ARG TARGETARCH
 COPY bin/kelos-capture-linux-${TARGETARCH} /kelos/kelos-capture
 
-RUN useradd -u 61100 -m -s /bin/bash agent
+RUN useradd -u 61100 -m -s /bin/bash agent \
+    && echo 'agent ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/agent \
+    && chmod 0440 /etc/sudoers.d/agent \
+    && visudo -cf /etc/sudoers.d/agent
 RUN mkdir -p /home/agent/.opencode /home/agent/.local/bin && chown -R agent:agent /home/agent
 
 USER agent
+RUN test "$(id -u)" = 61100 \
+    && test "$(sudo -n id -u)" = 0
 
 ENV GOPATH="/home/agent/go"
 ENV PATH="/home/agent/.local/bin:${GOPATH}/bin:${PATH}"

@@ -466,12 +466,22 @@ button { color: inherit; }
 .recovery-card { padding: 12px 14px; border-color: rgba(197,138,62,.3); background: #fff9ef; color: #8a5b1f; font-size: 12px; line-height: 1.5; }
 .goal-card { padding: 12px 14px; border-color: rgba(70,116,91,.25); background: #f3faf6; color: var(--ink); font-size: 12px; line-height: 1.5; }
 .goal-card strong { display: block; margin-bottom: 3px; color: var(--accent); }
-.turn-divider { margin: 2px 0 22px 40px; color: var(--faint); font-size: 10px; line-height: 1; white-space: nowrap; }
+.turn-divider { margin: 2px 0 22px 40px; color: var(--muted); font-size: 12px; line-height: 1.4; }
 .turn-divider:empty { height: 1px; background: linear-gradient(90deg,var(--line),transparent); }
 .turn-divider:not(:empty) { display: flex; align-items: center; gap: 8px; }
 .turn-divider:not(:empty)::before, .turn-divider:not(:empty)::after { height: 1px; background: var(--line); content: ""; }
 .turn-divider:not(:empty)::before { flex: 0 0 10px; }
 .turn-divider:not(:empty)::after { flex: 1; }
+.turn-divider-label { min-width: 0; }
+.turn-timestamp { position: relative; display: inline-block; max-width: 100%; }
+.turn-timestamp > summary { display: inline-flex; align-items: center; min-height: 24px; list-style: none; cursor: pointer; text-decoration: underline dotted var(--faint); text-underline-offset: 3px; border-radius: 3px; }
+.turn-timestamp > summary::-webkit-details-marker { display: none; }
+.turn-timestamp > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.turn-timestamp-detail, .turn-timestamp > summary::after { position: absolute; z-index: 5; top: calc(100% + 4px); left: 0; width: max-content; max-width: min(320px, calc(100vw - 64px)); padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); box-shadow: var(--shadow); font-size: 12px; line-height: 1.5; white-space: normal; text-decoration: none; }
+.turn-timestamp:not([open]):not([data-dismissed]) > summary:focus-visible::after { content: attr(aria-label); }
+@media (hover: hover) {
+  .turn-timestamp:not([open]):not([data-dismissed]) > summary:hover::after { content: attr(aria-label); }
+}
 .composer-wrap { position: relative; z-index: 2; min-width: 0; grid-row: 3; padding: 12px max(24px, calc((100% - 960px) / 2)) 10px; background: linear-gradient(transparent, var(--canvas) 24%); }
 .composer-wrap.attachment-drop-target .composer { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0,0,0,.1); }
 .session-progress { display: flex; align-items: center; gap: 5px; min-height: 18px; margin: 0 4px 7px; color: var(--muted); font-size: 11px; font-weight: 650; font-variant-numeric: tabular-nums; }

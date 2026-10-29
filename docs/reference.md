@@ -510,8 +510,15 @@ accepts prompt drafts while a selected Session is still
 Pending and enables sending after the runtime connects. It shows connection
 status separately from working, waiting-for-input,
 and interrupting progress, including elapsed time for active work, and adds the
-duration to its separator after a completed turn. Duration labels are omitted
-from retained history that does not contain event timestamps and from turns
+duration to its separator after a completed turn. The console shows the turn's
+finish time before its duration in the browser's local time zone. Retained history
+shows finish times without durations. Turns from earlier days also include the
+date, with the year shown when it differs from the current year. Hover over,
+focus, or tap the finish time for the full date, seconds, and time zone. Press
+Escape to dismiss the details.
+Failed and interrupted turns are labeled accordingly. Finish times are omitted
+when the event has no timestamp or the turn was interrupted by runtime recovery.
+Duration labels are also omitted from turns
 interrupted by runtime recovery. Both clients use the same event stream and
 provider conversation. Both clients can stream agent and tool activity, answer
 user-input requests, and interrupt active work without ending the provider

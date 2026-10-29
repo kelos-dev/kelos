@@ -403,6 +403,9 @@ func runSessionPlainTerminalWithWidth(ctx context.Context, input io.Reader, outp
 				if event.Status == "interrupted" {
 					write("%s\n", formatter.warning("Turn interrupted."))
 				}
+				if pageEvent {
+					continue
+				}
 				if elapsed, ok := sessionTerminalTurnElapsed(activeTurnID, activeTurnStarted, event, time.Now(), replayingHistory, recoveredCompletion); ok {
 					write("%s\n\n", formatter.turnSeparator(elapsed, terminalWidth()))
 					activeTurnID = ""

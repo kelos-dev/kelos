@@ -149,18 +149,23 @@ func TestSessionPlainTerminalDoesNotRepeatStreamedToolOutput(t *testing.T) {
 }
 
 func TestSessionPlainTerminalIsolatesHistoryPagesFromLiveStream(t *testing.T) {
+	startedAt := time.Date(2026, time.August, 8, 12, 0, 0, 0, time.UTC)
+	earlierCompletedAt := startedAt.Add(-2 * time.Minute)
+	completedAt := startedAt.Add(5*time.Minute + 19*time.Second)
 	var events bytes.Buffer
 	encoder := json.NewEncoder(&events)
 	for _, event := range []sessionruntime.Event{
 		{Type: sessionruntime.EventHistoryStart, HistoryLimited: true, HistoryCursor: "cursor-1"},
 		{Type: sessionruntime.EventAssistantDelta, Text: "projected response"},
-		{Type: sessionruntime.EventHistoryEnd, HistoryState: &sessionruntime.HistoryState{ActiveTurnID: "turn-1"}},
+		{Type: sessionruntime.EventHistoryEnd, HistoryState: &sessionruntime.HistoryState{ActiveTurnID: "turn-1", ActiveTurnStarted: &startedAt}},
 		{Type: sessionruntime.EventAssistantMessage, Text: "projected response"},
 		{Type: sessionruntime.EventAssistantDelta, Text: "live response"},
 		{Type: sessionruntime.EventHistoryStart, RequestID: "history-1", HistoryPage: true},
 		{Type: sessionruntime.EventAssistantMessage, Text: "earlier response"},
+		{Type: sessionruntime.EventTurnCompleted, Status: "completed", Timestamp: &earlierCompletedAt},
 		{Type: sessionruntime.EventHistoryEnd, RequestID: "history-1", HistoryPage: true},
 		{Type: sessionruntime.EventAssistantMessage, Text: "live response"},
+		{Type: sessionruntime.EventTurnCompleted, TurnID: "turn-1", Status: "completed", Timestamp: &completedAt},
 	} {
 		if err := encoder.Encode(event); err != nil {
 			t.Fatal(err)
@@ -185,6 +190,10 @@ func TestSessionPlainTerminalIsolatesHistoryPagesFromLiveStream(t *testing.T) {
 	}
 	if !strings.Contains(got, "Earlier Session history is available. Use /history to load the previous page.") {
 		t.Fatalf("terminal output = %q, want limited history notice", got)
+	}
+	separator := formatSessionTurnSeparator(completedAt.Sub(startedAt), sessionTUIDefaultWidth)
+	if strings.Count(got, "Worked for") != 1 || !strings.Contains(got, separator) {
+		t.Fatalf("terminal output = %q, want only the live turn separator %q", got, separator)
 	}
 }
 

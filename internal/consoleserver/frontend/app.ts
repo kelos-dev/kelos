@@ -5048,6 +5048,9 @@ function replayOlderHistoryPage(events) {
   elements.messages = page;
   state.assistantSegmentByTurn = new Map();
   state.assistantTextByTurn = new Map();
+  state.activeTurn = false;
+  state.activeTurnID = '';
+  state.activeTurnStartedAt = 0;
   state.replayingHistory = true;
   state.pinHistoryToBottom = false;
   for (const event of events) handleEvent(event);
@@ -6313,6 +6316,16 @@ function renderRecovery(event) {
   scrollToBottom();
 }
 
+function formatTurnFinishTime(date: Date, now = new Date(Date.now())) {
+  const time = new Intl.DateTimeFormat(undefined, {timeStyle: 'short'}).format(date);
+  if (date.toDateString() === now.toDateString()) return `at ${time}`;
+  const day = new Intl.DateTimeFormat(undefined, {
+    month: 'short', day: 'numeric',
+    ...(date.getFullYear() === now.getFullYear() ? {} : {year: 'numeric'}),
+  }).format(date);
+  return `${day} at ${time}`;
+}
+
 function renderTurnEnd(event, recoveredCompletion = false) {
   const completedAt = Date.parse(event.timestamp || '');
   const matchingTurn = !event.turnId || !state.activeTurnID || event.turnId === state.activeTurnID;
@@ -6332,7 +6345,41 @@ function renderTurnEnd(event, recoveredCompletion = false) {
   const divider = document.createElement('div');
   divider.className = 'turn-divider';
   if (event.notificationId) divider.dataset.notificationId = event.notificationId;
-  if (elapsed !== null) divider.textContent = `Worked for ${formatSessionProgressElapsed(elapsed)}`;
+  const label = document.createElement('span');
+  label.className = 'turn-divider-label';
+  if (!Number.isNaN(completedAt) && !recoveredCompletion) {
+    const date = new Date(completedAt);
+    const status = event.status === 'failed' ? 'Failed' : event.status === 'interrupted' ? 'Interrupted' : 'Finished';
+    const exact = `${status} ${new Intl.DateTimeFormat(undefined, {dateStyle: 'full', timeStyle: 'long'}).format(date)}`;
+    const details = document.createElement('details');
+    details.className = 'turn-timestamp';
+    const summary = document.createElement('summary');
+    summary.setAttribute('aria-label', exact);
+    const timestamp = document.createElement('time');
+    timestamp.dateTime = date.toISOString();
+    timestamp.textContent = `${status} ${formatTurnFinishTime(date)}`;
+    summary.append(timestamp);
+    const full = document.createElement('span');
+    full.className = 'turn-timestamp-detail';
+    full.textContent = exact;
+    details.append(summary, full);
+    details.addEventListener('keydown', event => {
+      if (event.key !== 'Escape') return;
+      details.open = false;
+      details.dataset.dismissed = 'true';
+    });
+    details.addEventListener('pointerleave', () => { delete details.dataset.dismissed; });
+    details.addEventListener('focusout', () => { delete details.dataset.dismissed; });
+    label.append(details);
+  }
+  if (elapsed !== null) {
+    if (label.hasChildNodes()) label.append(document.createTextNode(' · '));
+    const duration = document.createElement('span');
+    duration.className = 'turn-duration';
+    duration.textContent = `Worked for ${formatSessionProgressElapsed(elapsed)}`;
+    label.append(duration);
+  }
+  if (label.hasChildNodes()) divider.append(label);
   elements.messages.append(divider);
   scrollToBottom();
   scheduleCompletionRead();

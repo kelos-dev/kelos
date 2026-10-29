@@ -418,7 +418,9 @@ func historyItemWireBytes(item historyItem) int {
 }
 
 func normalizedHistoryEvent(event Event) Event {
-	event.Timestamp = nil
+	if event.Type != EventTurnCompleted {
+		event.Timestamp = nil
+	}
 	event.RequestID = ""
 	event.TurnID = ""
 	event.FirstEventID = 0

@@ -179,6 +179,32 @@ func TestProjectHistoryBoundsCompletionNotices(t *testing.T) {
 	}
 }
 
+func TestProjectHistoryPreservesCompletionTimestamps(t *testing.T) {
+	completedAt := time.Date(2026, time.August, 8, 12, 5, 19, 0, time.UTC)
+	for _, status := range []string{"completed", "failed", "interrupted"} {
+		t.Run(status, func(t *testing.T) {
+			events := []Event{
+				{ID: 1, Type: EventTurnCompleted, TurnID: "turn-1", Status: status, Timestamp: &completedAt},
+				{ID: 2, Type: EventTurnCompleted, TurnID: "turn-2", Status: status},
+			}
+			items, _, _ := projectHistory(events)
+			page, cursor := historyItemsPage(items, 0, 1, DefaultHistoryByteLimit)
+			assertHistoryEventIDs(t, page, 2)
+			if page[0].Timestamp != nil {
+				t.Fatalf("untimestamped completion has timestamp %v", page[0].Timestamp)
+			}
+			page, cursor = historyItemsPage(items, cursor, 1, DefaultHistoryByteLimit)
+			assertHistoryEventIDs(t, page, 1)
+			if cursor != 0 || page[0].Timestamp == nil || !page[0].Timestamp.Equal(completedAt) {
+				t.Fatalf("completion timestamp = %v, cursor = %d, want %v and end of history", page[0].Timestamp, cursor, completedAt)
+			}
+			if events[0].Timestamp == nil || !events[0].Timestamp.Equal(completedAt) {
+				t.Fatal("history projection modified the source timestamp")
+			}
+		})
+	}
+}
+
 func TestProjectHistoryBoundsPendingMessage(t *testing.T) {
 	_, state, _ := projectHistory([]Event{{
 		ID:     1,

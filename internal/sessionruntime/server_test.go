@@ -2807,17 +2807,19 @@ func TestServerCompletionNotificationIdentity(t *testing.T) {
 func TestServerPagesProjectedHistoryItems(t *testing.T) {
 	journal := NewJournal()
 	defer journal.Close()
+	firstCompletedAt := time.Date(2026, time.August, 8, 12, 5, 19, 0, time.UTC)
+	secondCompletedAt := firstCompletedAt.Add(time.Hour)
 	for _, event := range []Event{
 		{Type: EventUserMessage, TurnID: "turn-1", Text: "first"},
 		{Type: EventTurnStarted, TurnID: "turn-1", Status: "running"},
 		{Type: EventAssistantDelta, TurnID: "turn-1", Text: "first "},
 		{Type: EventAssistantDelta, TurnID: "turn-1", Text: "answer"},
 		{Type: EventAssistantMessage, TurnID: "turn-1", Text: "first answer"},
-		{Type: EventTurnCompleted, TurnID: "turn-1", Status: "completed"},
+		{Type: EventTurnCompleted, TurnID: "turn-1", Status: "completed", Timestamp: &firstCompletedAt},
 		{Type: EventUserMessage, TurnID: "turn-2", Text: "second"},
 		{Type: EventTurnStarted, TurnID: "turn-2", Status: "running"},
 		{Type: EventAssistantMessage, TurnID: "turn-2", Text: "second answer"},
-		{Type: EventTurnCompleted, TurnID: "turn-2", Status: "completed"},
+		{Type: EventTurnCompleted, TurnID: "turn-2", Status: "completed", Timestamp: &secondCompletedAt},
 	} {
 		if err := journal.Append(event); err != nil {
 			t.Fatal(err)
@@ -2875,6 +2877,9 @@ func TestServerPagesProjectedHistoryItems(t *testing.T) {
 	if retained[2].NotificationID != journal.LatestNotification().ID {
 		t.Fatalf("completion notification ID = %q, want %q", retained[2].NotificationID, journal.LatestNotification().ID)
 	}
+	if retained[2].Timestamp == nil || !retained[2].Timestamp.Equal(secondCompletedAt) {
+		t.Fatalf("completion timestamp = %v, want %v", retained[2].Timestamp, secondCompletedAt)
+	}
 	if end.HistoryState == nil {
 		t.Fatalf("history end = %#v, want state snapshot", end)
 	}
@@ -2919,6 +2924,9 @@ func TestServerPagesProjectedHistoryItems(t *testing.T) {
 	assertEventTypes(t, retained, EventUserMessage, EventAssistantMessage, EventTurnCompleted)
 	if retained[2].NotificationID != journal.notificationID(6) {
 		t.Fatalf("older completion notification ID = %q, want %q", retained[2].NotificationID, journal.notificationID(6))
+	}
+	if retained[2].Timestamp == nil || !retained[2].Timestamp.Equal(firstCompletedAt) {
+		t.Fatalf("older completion timestamp = %v, want %v", retained[2].Timestamp, firstCompletedAt)
 	}
 }
 

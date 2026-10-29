@@ -1542,7 +1542,83 @@ function testTurnDividerShowsDuration() {
   handleEvent({type: 'turn.completed', turnId: 'turn-1', status: 'completed', timestamp: '2026-08-08T12:05:19Z'});
 
   const divider = elements.messages.querySelector('.turn-divider');
-  assert.equal(divider.textContent, 'Worked for 5m 19s');
+  const finished = formatTurnFinishTime(new Date('2026-08-08T12:05:19Z'));
+  assert.equal(divider.querySelector('summary').textContent, `Finished ${finished}`);
+  assert.equal(divider.querySelector('.turn-duration').textContent, 'Worked for 5m 19s');
+  const label = divider.querySelector('.turn-divider-label');
+  assert.equal(label.firstChild.tag, 'details');
+  assert.equal(label.children[1].textContent, ' · ');
+  assert.equal(label.lastChild.className, 'turn-duration');
+}
+
+function testTurnFinishTimeFormatting() {
+  const now = new Date(2026, 7, 8, 12, 6);
+  const today = new Date(2026, 7, 8, 12, 5, 19);
+  const yesterday = new Date(2026, 7, 7, 23, 59);
+  const lastYear = new Date(2025, 7, 8, 12, 5);
+  const shortTime = date => new Intl.DateTimeFormat(undefined, {timeStyle: 'short'}).format(date);
+  const shortDate = date => new Intl.DateTimeFormat(undefined, {month: 'short', day: 'numeric'}).format(date);
+  const fullDate = date => new Intl.DateTimeFormat(undefined, {month: 'short', day: 'numeric', year: 'numeric'}).format(date);
+  assert.equal(formatTurnFinishTime(today, now), `at ${shortTime(today)}`);
+  assert.equal(formatTurnFinishTime(yesterday, now), `${shortDate(yesterday)} at ${shortTime(yesterday)}`);
+  assert.equal(formatTurnFinishTime(lastYear, now), `${fullDate(lastYear)} at ${shortTime(lastYear)}`);
+  assert.equal(formatTurnFinishTime(yesterday, new Date(2026, 7, 8, 0, 0)), `${shortDate(yesterday)} at ${shortTime(yesterday)}`);
+}
+
+function testTurnDividerShowsFinishTimestamp() {
+  const timestamp = '2026-08-08T12:05:19Z';
+  const date = new Date(timestamp);
+  const visible = formatTurnFinishTime(date);
+  const exact = new Intl.DateTimeFormat(undefined, {dateStyle: 'full', timeStyle: 'long'}).format(date);
+  for (const replay of [false, true]) {
+    for (const [status, label] of [['completed', 'Finished'], ['failed', 'Failed'], ['interrupted', 'Interrupted']]) {
+      resetHarness();
+      if (replay) handleEvent({type: 'history.start'});
+      handleEvent({type: 'turn.completed', turnId: 'turn-1', status, timestamp, notificationId: 'completion-1'});
+
+      const divider = elements.messages.querySelector('.turn-divider');
+      const time = divider.querySelector('time');
+      assert.ok(time, `missing ${status} timestamp during ${replay ? 'replay' : 'live rendering'}`);
+      assert.equal(time.dateTime, date.toISOString());
+      const summary = divider.querySelector('summary');
+      assert.equal(summary.textContent, `${label} ${visible}`);
+      assert.equal(summary.attributes.get('aria-label'), `${label} ${exact}`);
+      assert.equal(divider.querySelector('.turn-timestamp-detail').textContent, `${label} ${exact}`);
+      assert.equal(divider.querySelector('.turn-duration'), null);
+      assert.equal(divider.dataset.notificationId, 'completion-1');
+    }
+  }
+}
+
+function testTurnTimestampDismissal() {
+  resetHarness();
+  handleEvent({type: 'turn.completed', status: 'completed', timestamp: '2026-08-08T12:05:19Z'});
+  const details = elements.messages.querySelector('.turn-timestamp');
+  details.open = true;
+  details.listeners.get('keydown')({key: 'Enter'});
+  assert.equal(details.open, true);
+  details.listeners.get('keydown')({key: 'Escape'});
+  assert.equal(details.open, false);
+  assert.equal(details.dataset.dismissed, 'true');
+  details.listeners.get('pointerleave')();
+  assert.equal(details.dataset.dismissed, undefined);
+  details.listeners.get('keydown')({key: 'Escape'});
+  details.listeners.get('focusout')();
+  assert.equal(details.dataset.dismissed, undefined);
+}
+
+function testTurnDividerOmitsUnknownFinishTimestamp() {
+  for (const replay of [false, true]) {
+    for (const timestamp of [undefined, 'invalid']) {
+      resetHarness();
+      if (replay) handleEvent({type: 'history.start'});
+      handleEvent({type: 'turn.completed', turnId: 'turn-1', status: 'completed', timestamp});
+
+      const divider = elements.messages.querySelector('.turn-divider');
+      assert.equal(divider.querySelector('time'), null);
+      assert.equal(divider.textContent, '');
+    }
+  }
 }
 
 function testUntimestampedHistoryDividerOmitsDuration() {
@@ -1573,15 +1649,18 @@ function testUntimestampedLiveTurnUsesLocalDuration() {
 }
 
 function testRuntimeRecoveryDividerOmitsDuration() {
-  resetHarness();
-  handleEvent({type: 'history.start'});
-  handleEvent({type: 'turn.started', turnId: 'turn-1', timestamp: '2026-08-08T12:00:00Z'});
-  handleEvent({type: 'runtime.recovered', text: 'Session runtime restarted'});
-  handleEvent({type: 'input.resolved', turnId: 'turn-1', inputId: 'input-1', status: 'cancelled'});
-  handleEvent({type: 'turn.completed', turnId: 'turn-1', status: 'interrupted', timestamp: '2026-08-08T13:00:00Z'});
+  for (const replay of [false, true]) {
+    resetHarness();
+    if (replay) handleEvent({type: 'history.start'});
+    handleEvent({type: 'turn.started', turnId: 'turn-1', timestamp: '2026-08-08T12:00:00Z'});
+    handleEvent({type: 'runtime.recovered', text: 'Session runtime restarted'});
+    handleEvent({type: 'input.resolved', turnId: 'turn-1', inputId: 'input-1', status: 'cancelled'});
+    handleEvent({type: 'turn.completed', turnId: 'turn-1', status: 'interrupted', timestamp: '2026-08-08T13:00:00Z'});
 
-  const divider = elements.messages.querySelector('.turn-divider');
-  assert.equal(divider.textContent, '');
+    const divider = elements.messages.querySelector('.turn-divider');
+    assert.equal(divider.textContent, '');
+    assert.equal(divider.querySelector('time'), null);
+  }
 }
 
 function testSessionResetClearsPromptDraft() {
@@ -1707,13 +1786,16 @@ function testOlderHistoryPageIsPrependedWithoutChangingLiveState() {
   const previousHeight = elements.messages.scrollHeight;
   handleEvent({type: 'user.message', id: 1, text: 'earlier request'});
   handleEvent({type: 'assistant.message', id: 2, text: 'earlier response'});
-  handleEvent({type: 'turn.completed', id: 3, status: 'interrupted'});
+  handleEvent({type: 'turn.completed', id: 3, status: 'interrupted', timestamp: '2026-08-08T11:58:00Z'});
   assert.doesNotMatch(elements.messages.textContent, /earlier response/);
   handleEvent({type: 'history.end', historyPage: true, requestId: sent[0].requestId});
 
   const text = elements.messages.textContent;
   assert.ok(text.indexOf('earlier request') < text.indexOf('recent response'));
   assert.ok(text.indexOf('earlier response') < text.indexOf('recent response'));
+  const divider = elements.messages.querySelector('.turn-divider');
+  assert.equal(divider.querySelector('time').dateTime, '2026-08-08T11:58:00.000Z');
+  assert.equal(divider.querySelector('.turn-duration'), null);
   assert.equal(state.activeTurn, true);
   assert.equal(state.activeTurnID, 'turn-live');
   assert.equal(state.activeTurnStartedAt, Date.parse('2026-08-08T12:00:00Z'));
@@ -1729,6 +1811,8 @@ function testOlderHistoryPageIsPrependedWithoutChangingLiveState() {
   requestOlderHistory();
   assert.equal(sent.length, 2);
   assert.equal(sent[1].historyCursor, 'cursor-2');
+  handleEvent({type: 'turn.completed', turnId: 'turn-live', status: 'completed', timestamp: '2026-08-08T12:05:19Z'});
+  assert.equal(elements.messages.querySelector('.turn-duration').textContent, 'Worked for 5m 19s');
 }
 
 function testReselectRefreshesStatusPlaceholder() {
@@ -2430,6 +2514,10 @@ testSessionProgressElapsedFormatting();
 testRuntimeStatusLifecycle();
 testRuntimeStatusTreatsOmittedContextTokensAsZero();
 testTurnDividerShowsDuration();
+testTurnFinishTimeFormatting();
+testTurnDividerShowsFinishTimestamp();
+testTurnTimestampDismissal();
+testTurnDividerOmitsUnknownFinishTimestamp();
 testUntimestampedHistoryDividerOmitsDuration();
 testUntimestampedLiveTurnUsesLocalDuration();
 testRuntimeRecoveryDividerOmitsDuration();

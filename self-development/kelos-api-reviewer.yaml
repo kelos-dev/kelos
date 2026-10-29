@@ -258,6 +258,11 @@ spec:
       **Defaulting and conversion**:
       - Are defaults set via kubebuilder markers or webhook defaulting?
       - If this is a multi-version API, are conversion functions updated?
+      - Do not ask to carry a new latest-only field through an older served
+        version, for example with a `kelos.dev/v1alpha2-*` annotation. Kelos
+        does not add that preservation for new fields. Instead, check that
+        the field's `docs/reference.md` entry says reads through the older
+        version omit it and writes through it remove it.
 
       ### 5. Publish the review
 

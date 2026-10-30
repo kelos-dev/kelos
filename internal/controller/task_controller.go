@@ -119,10 +119,12 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return r.handleDeletion(ctx, &task)
 	}
 
-	// Add finalizer if not present
+	// Add finalizer if not present. A metadata-only patch, never an Update:
+	// see removeTaskFinalizer.
 	if !controllerutil.ContainsFinalizer(&task, taskFinalizer) {
+		original := task.DeepCopy()
 		controllerutil.AddFinalizer(&task, taskFinalizer)
-		if err := r.Update(ctx, &task); err != nil {
+		if err := r.Patch(ctx, &task, client.MergeFrom(original)); err != nil {
 			logger.Error(err, "unable to add finalizer")
 			return ctrl.Result{}, err
 		}
@@ -296,9 +298,14 @@ func (r *TaskReconciler) handleDeletion(ctx context.Context, task *kelos.Task) (
 			}
 		}
 
-		// Remove finalizer
+		// Remove finalizer with a metadata-only patch. An Update sends the whole
+		// object back, and the spec is immutable (the CRD's self == oldSelf rule):
+		// a Task stored before a schema change does not round-trip byte for byte
+		// through the current types, so the API server refuses the Update and the
+		// Task can never finish deleting.
+		original := task.DeepCopy()
 		controllerutil.RemoveFinalizer(task, taskFinalizer)
-		if err := r.Update(ctx, task); err != nil {
+		if err := r.Patch(ctx, task, client.MergeFrom(original)); err != nil {
 			logger.Error(err, "unable to remove finalizer")
 			return ctrl.Result{}, err
 		}

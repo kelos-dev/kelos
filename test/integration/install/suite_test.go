@@ -2,10 +2,7 @@ package install
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
-	"fmt"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -26,7 +23,6 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/controller"
@@ -43,8 +39,6 @@ var (
 	managerDone      chan error
 	mockGitHubServer *httptest.Server
 
-	webhookHost    string
-	webhookPort    int
 	webhookCA      []byte
 	webhookCertDir string
 )
@@ -101,19 +95,12 @@ var _ = BeforeEach(func() {
 	// manager stops, while this suite starts a new manager for every spec.
 	skipNameValidation := true
 	webhookOpts := testEnv.WebhookInstallOptions
-	webhookHost = webhookOpts.LocalServingHost
-	webhookPort = webhookOpts.LocalServingPort
 	webhookCA = webhookOpts.LocalServingCAData
 	webhookCertDir = webhookOpts.LocalServingCertDir
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:     scheme.Scheme,
 		Metrics:    metricsserver.Options{BindAddress: "0"},
 		Controller: config.Controller{SkipNameValidation: &skipNameValidation},
-		WebhookServer: webhook.NewServer(webhook.Options{
-			Host:    webhookOpts.LocalServingHost,
-			Port:    webhookOpts.LocalServingPort,
-			CertDir: webhookOpts.LocalServingCertDir,
-		}),
 	})
 	Expect(err).NotTo(HaveOccurred())
 
@@ -159,15 +146,6 @@ var _ = BeforeEach(func() {
 	}()
 
 	Expect(mgr.GetCache().WaitForCacheSync(ctx)).To(BeTrue())
-
-	Eventually(func() error {
-		addr := net.JoinHostPort(webhookOpts.LocalServingHost, fmt.Sprintf("%d", webhookOpts.LocalServingPort))
-		conn, derr := tls.DialWithDialer(&net.Dialer{Timeout: time.Second}, "tcp", addr, &tls.Config{InsecureSkipVerify: true})
-		if derr != nil {
-			return derr
-		}
-		return conn.Close()
-	}, 30*time.Second, 100*time.Millisecond).Should(Succeed())
 
 	Eventually(func() error {
 		return k8sClient.List(ctx, &kelos.TaskList{})

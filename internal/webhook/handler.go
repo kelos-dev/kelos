@@ -521,9 +521,8 @@ func (h *WebhookHandler) getMatchingSpawners(ctx context.Context) ([]*kelos.Task
 func (h *WebhookHandler) getMatchingSessionSpawners(ctx context.Context) ([]*kelos.SessionSpawner, error) {
 	var spawnerList kelos.SessionSpawnerList
 	if err := h.client.List(ctx, &spawnerList); err != nil {
-		// Kelos installs missing CRDs after rolling out controller resources so
-		// existing conversion webhooks remain available during upgrades. Until
-		// the SessionSpawner CRD is installed, keep processing TaskSpawners.
+		// A controller rollout can precede installation of a newly introduced
+		// CRD. Until SessionSpawner is available, keep processing TaskSpawners.
 		if apiMeta.IsNoMatchError(err) || apierrors.IsNotFound(err) {
 			return nil, nil
 		}

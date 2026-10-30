@@ -46,17 +46,9 @@ var (
 	ctx              context.Context
 	cancel           context.CancelFunc
 	mockGitHubServer *httptest.Server
-
-	// Conversion webhook serving coordinates (populated by envtest) so tests
-	// can point the agentconfigs CRD conversion back at the local webhook.
-	webhookHost    string
-	webhookPort    int
-	webhookCA      []byte
-	webhookCertDir string
 )
 
-// controllerSettleTimeout bounds Eventually blocks that wait for the
-// controller to reconcile after CRD conversion has been enabled.
+// controllerSettleTimeout bounds Eventually blocks that wait for reconciliation.
 const controllerSettleTimeout = 60 * time.Second
 
 func expectedAgentProcessCommand(program string, useTini bool) []string {
@@ -83,7 +75,7 @@ var _ = BeforeSuite(func() {
 		CRDDirectoryPaths: []string{
 			filepath.Join("..", "..", "internal", "manifests"),
 			// Stub cert-manager CRDs so `kelos install` can apply the
-			// conversion-webhook Issuer/Certificate (a real cluster has
+			// webhook Issuer/Certificate (a real cluster has
 			// cert-manager installed; envtest does not).
 			filepath.Join("testdata", "certmanager-crds.yaml"),
 		},
@@ -115,13 +107,8 @@ var _ = BeforeSuite(func() {
 		})
 	}))
 
-	// Start controller manager with a webhook server backed by the certs
-	// envtest generated for the conversion webhook.
+	// Start the controller manager with a webhook server backed by envtest certs.
 	webhookOpts := testEnv.WebhookInstallOptions
-	webhookHost = webhookOpts.LocalServingHost
-	webhookPort = webhookOpts.LocalServingPort
-	webhookCA = webhookOpts.LocalServingCAData
-	webhookCertDir = webhookOpts.LocalServingCertDir
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme: scheme.Scheme,
 		Metrics: metricsserver.Options{
@@ -135,7 +122,7 @@ var _ = BeforeSuite(func() {
 	})
 	Expect(err).NotTo(HaveOccurred())
 
-	// Register the conversion webhooks for every Kelos kind.
+	// Register conversion webhooks declared by the current API versions.
 	for _, registration := range conversion.WebhookRegistrations() {
 		Expect(ctrl.NewWebhookManagedBy(mgr, registration.Object).
 			WithConverter(registration.Converter).
@@ -213,8 +200,7 @@ var _ = BeforeSuite(func() {
 	// Wait for the manager cache to sync before running any tests
 	Expect(mgr.GetCache().WaitForCacheSync(ctx)).To(BeTrue())
 
-	// Wait for the conversion webhook server to accept TLS connections so the
-	// API server can reach /convert for AgentConfig operations.
+	// Wait for the webhook server to accept TLS connections.
 	Eventually(func() error {
 		addr := net.JoinHostPort(webhookOpts.LocalServingHost, fmt.Sprintf("%d", webhookOpts.LocalServingPort))
 		conn, derr := tls.DialWithDialer(&net.Dialer{Timeout: time.Second}, "tcp", addr, &tls.Config{InsecureSkipVerify: true})
@@ -243,7 +229,6 @@ var _ = BeforeSuite(func() {
 	Eventually(func() error {
 		return k8sClient.List(ctx, &kelos.SessionList{})
 	}, 30*time.Second, 100*time.Millisecond).Should(Succeed())
-	// AgentConfig requires the conversion webhook to be reachable.
 	Eventually(func() error {
 		return k8sClient.List(ctx, &kelos.AgentConfigList{})
 	}, 30*time.Second, 100*time.Millisecond).Should(Succeed())

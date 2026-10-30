@@ -534,7 +534,7 @@ func TestWorkerPoolReconciler_AssignsTask(t *testing.T) {
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithStatusSubresource(&kelos.Task{}, &kelos.WorkerPool{}).
-		WithObjects(pool, task, pod).
+		WithObjects(pool, newTestWorkspace("default"), task, pod).
 		Build()
 
 	r := newWorkerPoolReconciler(cl, scheme)
@@ -1533,4 +1533,138 @@ func requestNames(requests []ctrl.Request) []reconcileRequestName {
 		})
 	}
 	return names
+}
+
+func TestWorkerPoolReconciler_RejectsRestrictedWorkspace(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*kelos.WorkspaceSpec)
+		wantErr string
+	}{
+		{
+			name:    "clone paths",
+			mutate:  func(ws *kelos.WorkspaceSpec) { ws.Clone = &kelos.WorkspaceClone{Paths: []string{"docs"}} },
+			wantErr: "workspace clone.paths is not supported by WorkerPools",
+		},
+		{
+			name:    "removeGitDir",
+			mutate:  func(ws *kelos.WorkspaceSpec) { ws.Clone = &kelos.WorkspaceClone{RemoveGitDir: true} },
+			wantErr: "workspace clone.removeGitDir is not supported by WorkerPools",
+		},
+		{
+			name:    "agentCredentials None",
+			mutate:  func(ws *kelos.WorkspaceSpec) { ws.AgentCredentials = kelos.WorkspaceAgentCredentialsNone },
+			wantErr: "workspace agentCredentials None is not supported by WorkerPools",
+		},
+		{
+			name:   "agentCredentials Token",
+			mutate: func(ws *kelos.WorkspaceSpec) { ws.AgentCredentials = kelos.WorkspaceAgentCredentialsToken },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scheme := newWorkerPoolTestScheme()
+			pool := newTestWorkerPool("my-pool", "default", 1)
+			ws := newTestWorkspace("default")
+			tt.mutate(&ws.Spec)
+			cl := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithStatusSubresource(&kelos.WorkerPool{}).
+				WithObjects(pool, ws).
+				Build()
+
+			r := newWorkerPoolReconciler(cl, scheme)
+			_, err := r.Reconcile(context.Background(), ctrl.Request{
+				NamespacedName: types.NamespacedName{Name: "my-pool", Namespace: "default"},
+			})
+
+			var sts appsv1.StatefulSet
+			getErr := cl.Get(context.Background(), types.NamespacedName{Name: "wp-my-pool", Namespace: "default"}, &sts)
+			// An unsupported Workspace is not retried with backoff; the
+			// Workspace watch re-enqueues the pool when it changes.
+			require.NoError(t, err)
+			if tt.wantErr == "" {
+				require.NoError(t, getErr)
+				return
+			}
+			assert.Error(t, getErr, "no StatefulSet should be created for an unsupported Workspace")
+
+			// The rejection happens before any pool resources are touched.
+			var svc corev1.Service
+			assert.Error(t, cl.Get(context.Background(), types.NamespacedName{Name: "wp-my-pool", Namespace: "default"}, &svc),
+				"no Service should be created for an unsupported Workspace")
+
+			events := r.Recorder.(*record.FakeRecorder).Events
+			require.Len(t, events, 1)
+			event := <-events
+			assert.Contains(t, event, "Warning UnsupportedWorkspace Workspace test-workspace: "+tt.wantErr)
+		})
+	}
+}
+
+func TestWorkerPoolReconciler_AssignTaskChecksWorkspaceRestrictions(t *testing.T) {
+	tests := []struct {
+		name             string
+		workspaceMissing bool
+		agentCredentials kelos.WorkspaceAgentCredentials
+		wantPhase        kelos.TaskPhase
+		wantPod          string
+		wantRequeueAfter time.Duration
+	}{
+		{name: "existing workers keep serving an unrestricted Workspace", agentCredentials: kelos.WorkspaceAgentCredentialsToken, wantPhase: kelos.TaskPhasePending, wantPod: "wp-my-pool-0", wantRequeueAfter: 10 * time.Second},
+		{name: "existing workers stop taking Tasks once the Workspace is restricted", agentCredentials: kelos.WorkspaceAgentCredentialsNone, wantPhase: kelos.TaskPhaseFailed},
+		{name: "existing workers wait while the Workspace is missing", workspaceMissing: true, wantRequeueAfter: 5 * time.Second},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scheme := newWorkerPoolTestScheme()
+			pool := newTestWorkerPool("my-pool", "default", 1)
+			ws := newTestWorkspace("default")
+			ws.Spec.AgentCredentials = tt.agentCredentials
+			task := &kelos.Task{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-task", Namespace: "default"},
+				Spec: kelos.TaskSpec{
+					Type:          AgentTypeClaudeCode,
+					Prompt:        "Do something",
+					WorkerPoolRef: &kelos.WorkerPoolReference{Name: "my-pool"},
+				},
+			}
+			// A worker pod built before the Workspace changed.
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "wp-my-pool-0", Namespace: "default", Labels: workerPoolLabelsForTest("my-pool")},
+				Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+			}
+			objects := []client.Object{pool, task, pod}
+			if !tt.workspaceMissing {
+				objects = append(objects, ws)
+			}
+			cl := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithStatusSubresource(&kelos.Task{}, &kelos.WorkerPool{}).
+				WithObjects(objects...).
+				Build()
+
+			result, err := newWorkerPoolReconciler(cl, scheme).Reconcile(context.Background(), ctrl.Request{
+				NamespacedName: types.NamespacedName{Name: "test-task", Namespace: "default"},
+			})
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantRequeueAfter, result.RequeueAfter)
+
+			var updatedTask kelos.Task
+			require.NoError(t, cl.Get(context.Background(), types.NamespacedName{Name: "test-task", Namespace: "default"}, &updatedTask))
+			assert.Equal(t, tt.wantPhase, updatedTask.Status.Phase)
+			assert.Equal(t, tt.wantPod, updatedTask.Status.PodName)
+
+			var updatedPod corev1.Pod
+			require.NoError(t, cl.Get(context.Background(), types.NamespacedName{Name: "wp-my-pool-0", Namespace: "default"}, &updatedPod))
+			wantAssignment := ""
+			if tt.wantPod != "" {
+				wantAssignment = "test-task"
+			}
+			assert.Equal(t, wantAssignment, updatedPod.Annotations[kelos.AnnotationWorkerAssignedTask])
+			if tt.wantPhase == kelos.TaskPhaseFailed {
+				assert.Equal(t, "WorkerPool my-pool cannot run Tasks: Workspace test-workspace: workspace agentCredentials None is not supported by WorkerPools", updatedTask.Status.Message)
+			}
+		})
+	}
 }

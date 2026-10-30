@@ -31,7 +31,57 @@ type WorkspaceFile struct {
 // WorkspaceGHProxy configures the workspace-scoped ghproxy.
 type WorkspaceGHProxy struct{}
 
+// WorkspaceClone configures how a Workspace repository is cloned.
+type WorkspaceClone struct {
+	// Paths limits the checkout to these repository paths. Each entry is a
+	// directory or file relative to the repository root, such as "docs" or
+	// "cmd/main.go", and is matched exactly from the root: "docs" selects
+	// the top-level docs directory and everything in it, and nothing else
+	// named docs. Only the listed paths are written to disk; files at the
+	// repository root are not included unless listed. Blobs outside the
+	// listed paths are not downloaded, but the .git directory still records
+	// the full tree, so git can fetch the rest on demand unless RemoveGitDir
+	// is set. Entries must not start with "/", end with a space (ignoring a
+	// trailing slash), or contain empty, "." or ".." segments, control
+	// characters, or any of the characters *, ?, [ or \. Up to 64 entries of
+	// at most 256 characters each.
+	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=256
+	// +kubebuilder:validation:items:Pattern=`^[^*?\[\\\x00-\x1f\x7f]+$`
+	// +kubebuilder:validation:XValidation:rule="self.all(p, !p.startsWith('/') && !p.matches(' /?$') && !p.contains('//') && !p.matches('(^|/)[.][.]?(/|$)'))",message="clone.paths entries must be relative to the repository root, must not end with a space, and must not contain empty, '.' or '..' segments"
+	Paths []string `json:"paths,omitempty"`
+
+	// RemoveGitDir deletes the repository's .git directory after the clone,
+	// leaving only the checked-out files. The agent then cannot use git in
+	// the repository. Incompatible with Remotes, and with a Task's
+	// spec.branch or a Session's spec.initialBranch, which need .git to set
+	// up the branch; a Task or Session that combines them fails.
+	//
+	// Paths and RemoveGitDir are not supported for Sessions with a
+	// volumeClaimTemplate.
+	// +optional
+	RemoveGitDir bool `json:"removeGitDir,omitempty"`
+}
+
+// WorkspaceAgentCredentials selects whether the agent container receives the
+// GitHub credential from a Workspace's secretRef.
+// +kubebuilder:validation:Enum=Token;None
+type WorkspaceAgentCredentials string
+
+const (
+	// WorkspaceAgentCredentialsToken gives the agent container the GitHub
+	// token.
+	WorkspaceAgentCredentialsToken WorkspaceAgentCredentials = "Token"
+	// WorkspaceAgentCredentialsNone keeps the GitHub token out of the agent
+	// container.
+	WorkspaceAgentCredentialsNone WorkspaceAgentCredentials = "None"
+)
+
 // WorkspaceSpec defines the desired state of Workspace.
+// +kubebuilder:validation:XValidation:rule="!has(self.clone) || !has(self.clone.removeGitDir) || !self.clone.removeGitDir || !has(self.remotes) || size(self.remotes) == 0",message="remotes cannot be set when clone.removeGitDir is true"
 type WorkspaceSpec struct {
 	// Repo is the git repository URL to clone.
 	// +kubebuilder:validation:Required
@@ -43,10 +93,23 @@ type WorkspaceSpec struct {
 	// +optional
 	Ref string `json:"ref,omitempty"`
 
+	// Clone configures how the repository is cloned.
+	// +optional
+	Clone *WorkspaceClone `json:"clone,omitempty"`
+
 	// SecretRef references a Secret containing a GITHUB_TOKEN key for git
 	// authentication and GitHub CLI (gh) operations.
 	// +optional
 	SecretRef *SecretReference `json:"secretRef,omitempty"`
+
+	// AgentCredentials selects whether the agent container receives the
+	// GitHub credential from SecretRef. Token gives it the token for git
+	// and the GitHub CLI (gh). None uses the token only to clone the
+	// repository and set up the Task or Session branch; the agent container
+	// gets no GitHub token from Kelos. None does not restrict the agent's
+	// network access. Not supported by WorkerPools. Omit to use Token.
+	// +optional
+	AgentCredentials WorkspaceAgentCredentials `json:"agentCredentials,omitempty"`
 
 	// GHProxy configures and enables the workspace-scoped ghproxy when set.
 	// +optional

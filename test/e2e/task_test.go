@@ -409,3 +409,89 @@ var _ = Describe("Task with workspace and secretRef", func() {
 		GinkgoWriter.Printf("Job logs:\n%s\n", logs)
 	})
 })
+
+var _ = Describe("Task with a restricted workspace checkout", func() {
+	f := framework.NewFramework("restricted-checkout")
+
+	BeforeEach(func() {
+		if oauthToken == "" {
+			Skip("CLAUDE_CODE_OAUTH_TOKEN not set")
+		}
+		if githubToken == "" {
+			Skip("GITHUB_TOKEN not set, skipping GitHub e2e tests")
+		}
+	})
+
+	It("should check out only clone.paths, drop .git, and keep the token out of the agent", func() {
+		By("creating OAuth credentials secret")
+		f.CreateSecret("claude-credentials",
+			"CLAUDE_CODE_OAUTH_TOKEN="+oauthToken)
+
+		By("creating workspace credentials secret")
+		f.CreateSecret("workspace-credentials",
+			"GITHUB_TOKEN="+githubToken)
+
+		By("creating a Workspace with clone.paths, clone.removeGitDir and agentCredentials None")
+		f.CreateWorkspace(&kelos.Workspace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "e2e-restricted-workspace",
+			},
+			Spec: kelos.WorkspaceSpec{
+				Repo:      "https://github.com/kelos-dev/kelos.git",
+				Ref:       "main",
+				SecretRef: &kelos.SecretReference{Name: "workspace-credentials"},
+				Clone: &kelos.WorkspaceClone{
+					Paths:        []string{"docs", "api/v1alpha2/workspace_types.go"},
+					RemoveGitDir: true,
+				},
+				AgentCredentials: kelos.WorkspaceAgentCredentialsNone,
+				// setupCommand runs in the agent container, so it sees the
+				// checkout and environment the agent gets.
+				SetupCommand: []string{
+					"sh", "-c",
+					`set -e
+test ! -e .git
+test ! -e Makefile
+test ! -e cmd
+test -f docs/reference.md
+test -f api/v1alpha2/workspace_types.go
+test "$(ls api/v1alpha2)" = workspace_types.go
+test -z "${GITHUB_TOKEN:-}${GH_TOKEN:-}${GH_ENTERPRISE_TOKEN:-}${KELOS_GITHUB_TOKEN_FILE:-}"
+test ! -e /kelos/github-token
+echo restricted-checkout-verified`,
+				},
+			},
+		})
+
+		By("creating a Task with the restricted workspace")
+		f.CreateTask(&kelos.Task{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "restricted-task",
+			},
+			Spec: kelos.TaskSpec{
+				Type:   "claude-code",
+				Model:  claudeCodeModel,
+				Prompt: "Print 'done'",
+				Credentials: &kelos.Credentials{
+					Type:      kelos.CredentialTypeOAuth,
+					SecretRef: &kelos.SecretReference{Name: "claude-credentials"},
+				},
+				WorkspaceRef: &kelos.WorkspaceReference{Name: "e2e-restricted-workspace"},
+			},
+		})
+
+		By("waiting for Job to be created")
+		f.WaitForJobCreation("restricted-task")
+
+		By("waiting for Job to complete")
+		f.WaitForJobCompletion("restricted-task")
+
+		By("verifying Task status is Succeeded")
+		f.WaitForTaskPhase("restricted-task", "Succeeded")
+
+		By("verifying the agent container saw the restricted checkout")
+		logs := f.GetJobLogs("restricted-task")
+		GinkgoWriter.Printf("Job logs:\n%s\n", logs)
+		Expect(logs).To(ContainSubstring("restricted-checkout-verified"))
+	})
+})

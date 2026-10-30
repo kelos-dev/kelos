@@ -492,7 +492,7 @@ func (r *WorkerPoolReconciler) reconcileStatefulSet(ctx context.Context, pool *k
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
-	// Update StatefulSet if replicas or pod template changed
+	// Update StatefulSet if replicas, pod template, or PVC retention policy changed
 	needsUpdate := false
 	if sts.Spec.Replicas == nil || *sts.Spec.Replicas != ptr.Deref(pool.Spec.Replicas, 1) {
 		sts.Spec.Replicas = pool.Spec.Replicas
@@ -503,6 +503,11 @@ func (r *WorkerPoolReconciler) reconcileStatefulSet(ctx context.Context, pool *k
 	// effort, credentials, workspace, agentConfig, or podOverrides.
 	if !podTemplateSpecEqual(sts.Spec.Template.Spec, desired.Spec.Template.Spec) {
 		sts.Spec.Template = desired.Spec.Template
+		needsUpdate = true
+	}
+
+	if !pvcRetentionPolicyEqual(sts.Spec.PersistentVolumeClaimRetentionPolicy, desired.Spec.PersistentVolumeClaimRetentionPolicy) {
+		sts.Spec.PersistentVolumeClaimRetentionPolicy = desired.Spec.PersistentVolumeClaimRetentionPolicy
 		needsUpdate = true
 	}
 
@@ -1036,9 +1041,10 @@ func (r *WorkerPoolReconciler) buildStatefulSet(pool *kelos.WorkerPool, stsName,
 			Labels:    labels,
 		},
 		Spec: appsv1.StatefulSetSpec{
-			Replicas:            pool.Spec.Replicas,
-			ServiceName:         svcName,
-			PodManagementPolicy: parallel,
+			Replicas:                             pool.Spec.Replicas,
+			ServiceName:                          svcName,
+			PodManagementPolicy:                  parallel,
+			PersistentVolumeClaimRetentionPolicy: pool.Spec.PersistentVolumeClaimRetentionPolicy.DeepCopy(),
 			Selector: &metav1.LabelSelector{
 				MatchLabels: labels,
 			},
@@ -1887,6 +1893,27 @@ func podTemplateSpecEqual(a, b corev1.PodSpec) bool {
 		apiequality.Semantic.DeepEqual(a.Tolerations, b.Tolerations) &&
 		apiequality.Semantic.DeepEqual(a.Affinity, b.Affinity) &&
 		apiequality.Semantic.DeepEqual(a.ImagePullSecrets, b.ImagePullSecrets)
+}
+
+// pvcRetentionPolicyEqual reports whether two StatefulSet PVC retention
+// policies are equivalent, treating a nil policy or an empty field as Retain
+// to match the API server default.
+func pvcRetentionPolicyEqual(a, b *appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy) bool {
+	effective := func(p *appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy) (appsv1.PersistentVolumeClaimRetentionPolicyType, appsv1.PersistentVolumeClaimRetentionPolicyType) {
+		whenDeleted, whenScaled := appsv1.RetainPersistentVolumeClaimRetentionPolicyType, appsv1.RetainPersistentVolumeClaimRetentionPolicyType
+		if p != nil {
+			if p.WhenDeleted != "" {
+				whenDeleted = p.WhenDeleted
+			}
+			if p.WhenScaled != "" {
+				whenScaled = p.WhenScaled
+			}
+		}
+		return whenDeleted, whenScaled
+	}
+	aDeleted, aScaled := effective(a)
+	bDeleted, bScaled := effective(b)
+	return aDeleted == bDeleted && aScaled == bScaled
 }
 
 func mergeReconcileResults(a, b ctrl.Result) ctrl.Result {

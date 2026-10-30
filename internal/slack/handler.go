@@ -2,8 +2,6 @@ package slack
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	stdlog "log"
 	"os"
@@ -40,6 +38,7 @@ type SlackHandler struct {
 	botID                    string
 	joinMessage              string
 	denySlackConnectChannels bool
+	sessionBridge            *SessionBridge
 	cancel                   context.CancelFunc
 }
 
@@ -85,6 +84,13 @@ func NewSlackHandler(ctx context.Context, cl client.Client, botToken, appToken, 
 		joinMessage:              joinMessage,
 		denySlackConnectChannels: denySlackConnectChannels,
 	}, nil
+}
+
+// SetSessionBridge enables Slack-driven Sessions. Without a bridge the handler
+// ignores SessionSpawners, so a deployment that cannot exec into Session Pods
+// keeps working for Tasks.
+func (h *SlackHandler) SetSessionBridge(bridge *SessionBridge) {
+	h.sessionBridge = bridge
 }
 
 // Start connects to Slack via Socket Mode and begins listening for events.
@@ -279,8 +285,15 @@ func (h *SlackHandler) handleSlashCommand(ctx context.Context, evt socketmode.Ev
 	h.routeMessage(ctx, msg)
 }
 
-// routeMessage finds all matching TaskSpawners and creates tasks for each.
+// routeMessage creates a Task for every matching TaskSpawner and drives a
+// Session turn for every matching SessionSpawner.
 func (h *SlackHandler) routeMessage(ctx context.Context, msg *SlackMessageData) {
+	h.routeMessageToTaskSpawners(ctx, msg)
+	h.routeMessageToSessionSpawners(ctx, msg)
+}
+
+// routeMessageToTaskSpawners finds all matching TaskSpawners and creates tasks for each.
+func (h *SlackHandler) routeMessageToTaskSpawners(ctx context.Context, msg *SlackMessageData) {
 	spawners, err := h.getMatchingSpawners(ctx)
 	if err != nil {
 		h.log.Error(err, "Failed to get matching spawners")
@@ -331,6 +344,50 @@ func (h *SlackHandler) routeMessage(ctx context.Context, msg *SlackMessageData) 
 	}
 }
 
+// routeMessageToSessionSpawners drives a Session turn for every SessionSpawner
+// whose Slack filters match. A slash command has no thread to hold a Session,
+// so it is never routed to one.
+func (h *SlackHandler) routeMessageToSessionSpawners(ctx context.Context, msg *SlackMessageData) {
+	if h.sessionBridge == nil || msg.IsSlashCommand {
+		return
+	}
+
+	spawners, err := h.getMatchingSessionSpawners(ctx)
+	if err != nil {
+		h.log.Error(err, "Failed to get matching SessionSpawners")
+		return
+	}
+
+	for _, spawner := range spawners {
+		spawnerLog := h.log.WithValues("sessionSpawner", spawner.Name, "namespace", spawner.Namespace)
+		if !MatchesSpawner(spawner.Spec.When.Slack, msg, h.botUserID) {
+			spawnerLog.V(1).Info("Message did not match SessionSpawner filters", "channel", msg.ChannelID)
+			continue
+		}
+		spawnerLog.Info("Message matches SessionSpawner — queueing Session turn",
+			"channel", msg.ChannelID, "user", msg.UserID)
+		h.sessionBridge.Enqueue(ctx, spawner, msg)
+	}
+}
+
+// getMatchingSessionSpawners returns all SessionSpawners that have a Slack source configured.
+func (h *SlackHandler) getMatchingSessionSpawners(ctx context.Context) ([]*kelos.SessionSpawner, error) {
+	var spawnerList kelos.SessionSpawnerList
+	if err := h.client.List(ctx, &spawnerList, &client.ListOptions{}); err != nil {
+		return nil, err
+	}
+
+	var matching []*kelos.SessionSpawner
+	for i := range spawnerList.Items {
+		spawner := &spawnerList.Items[i]
+		if spawner.Spec.When.Slack != nil {
+			matching = append(matching, spawner)
+		}
+	}
+
+	return matching, nil
+}
+
 // getMatchingSpawners returns all TaskSpawners that have a Slack source configured.
 func (h *SlackHandler) getMatchingSpawners(ctx context.Context) ([]*kelos.TaskSpawner, error) {
 	var spawnerList kelos.TaskSpawnerList
@@ -358,15 +415,7 @@ func (h *SlackHandler) createTask(ctx context.Context, spawner *kelos.TaskSpawne
 	if msg.IsSlashCommand {
 		hashInput = msg.SlashCommandID
 	}
-	sum := sha256.Sum256([]byte(hashInput))
-	shortHash := hex.EncodeToString(sum[:])[:12]
-	// Truncate spawner name to leave room for "-slack-" (7) + hash (12) = 19 chars
-	name := spawner.Name
-	const maxPrefix = 63 - 7 - 12 // 44
-	if len([]rune(name)) > maxPrefix {
-		name = strings.TrimRight(string([]rune(name)[:maxPrefix]), "-.")
-	}
-	taskName := fmt.Sprintf("%s-slack-%s", name, shortHash)
+	taskName := spawnResourceName(spawner.Name, hashInput)
 
 	// Resolve GVK for owner reference
 	gvks, _, err := h.client.Scheme().ObjectKinds(spawner)
@@ -465,9 +514,11 @@ func (h *SlackHandler) enrichMessage(ctx context.Context, event *slackevents.Mes
 	}
 
 	body := event.Text
+	attachmentText := ""
 	// Message is always non-nil after UnmarshalJSON (see MessageEvent docs).
 	if event.Message != nil && len(event.Message.Attachments) > 0 {
 		if attachText := formatAttachments(event.Message.Attachments); attachText != "" {
+			attachmentText = attachText
 			if body != "" {
 				body = body + "\n" + attachText
 			} else {
@@ -477,14 +528,15 @@ func (h *SlackHandler) enrichMessage(ctx context.Context, event *slackevents.Mes
 	}
 
 	return &SlackMessageData{
-		UserID:    event.User,
-		ChannelID: event.Channel,
-		UserName:  userName,
-		Text:      event.Text,
-		Body:      body,
-		ThreadTS:  event.ThreadTimeStamp,
-		Timestamp: event.TimeStamp,
-		Permalink: permalink,
+		AttachmentText: attachmentText,
+		UserID:         event.User,
+		ChannelID:      event.Channel,
+		UserName:       userName,
+		Text:           event.Text,
+		Body:           body,
+		ThreadTS:       event.ThreadTimeStamp,
+		Timestamp:      event.TimeStamp,
+		Permalink:      permalink,
 	}
 }
 

@@ -196,9 +196,12 @@ spec:
         syntax must produce an explicit error rather than being silently ignored.
       - For reporting or rerun changes, compare trigger coverage, distinct
         workflow-run and job reports, Checks-tab visibility, and GitHub UI/CLI
-        rerun controls with the official documentation. A documented alternative
-        or linked tracking issue does not close a compatibility gap introduced
-        or widened by the PR.
+        rerun controls with the official documentation.
+      - Keep a compatibility gap introduced or widened by the PR under Findings
+        in every review round until the PR removes it. Documenting the
+        divergence, pinning it with a test, offering a documented alternative,
+        linking a tracking issue, or an earlier round having reported it does
+        not close the gap or make it an optional suggestion.
 
       **Tests**:
       - Are there tests for the new/changed behavior?

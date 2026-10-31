@@ -1,11 +1,15 @@
 package integration
 
 import (
+	"os"
+	"path/filepath"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/yaml"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 )
@@ -83,6 +87,67 @@ var _ = Describe("TaskPipeline API validation", func() {
 			{"focus": "tests"},
 		}}
 		Expect(k8sClient.Create(ctx, pipeline, client.DryRunAll)).NotTo(Succeed())
+	})
+
+	It("accepts stage conditions", func() {
+		pipeline := validPipeline("conditions")
+		pipeline.Spec.Stages[1].Conditions = []kelos.PipelineStageCondition{
+			{
+				Input:    `{{index .Stages "plan" 0 "Results" "route"}}`,
+				Operator: kelos.PipelineConditionOperatorIn,
+				Values:   []string{"implement"},
+			},
+			{
+				Input:    `{{index .Stages "plan" 0 "Results" "risk"}}`,
+				Operator: kelos.PipelineConditionOperatorNotIn,
+				Values:   []string{"high"},
+			},
+		}
+		Expect(k8sClient.Create(ctx, pipeline, client.DryRunAll)).To(Succeed())
+	})
+
+	It("rejects an unknown condition operator", func() {
+		pipeline := validPipeline("unknown-condition-operator")
+		pipeline.Spec.Stages[1].Conditions = []kelos.PipelineStageCondition{{
+			Input:    "value",
+			Operator: "Equals",
+			Values:   []string{"value"},
+		}}
+		err := k8sClient.Create(ctx, pipeline, client.DryRunAll)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("spec.stages[1].conditions[0].operator"))
+	})
+
+	It("rejects a condition without values", func() {
+		pipeline := validPipeline("condition-without-values")
+		pipeline.Spec.Stages[1].Conditions = []kelos.PipelineStageCondition{{
+			Input:    "value",
+			Operator: kelos.PipelineConditionOperatorIn,
+		}}
+		err := k8sClient.Create(ctx, pipeline, client.DryRunAll)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("spec.stages[1].conditions[0].values"))
+	})
+
+	It("rejects a condition with an empty input", func() {
+		pipeline := validPipeline("condition-empty-input")
+		pipeline.Spec.Stages[1].Conditions = []kelos.PipelineStageCondition{{
+			Operator: kelos.PipelineConditionOperatorIn,
+			Values:   []string{"value"},
+		}}
+		err := k8sClient.Create(ctx, pipeline, client.DryRunAll)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("spec.stages[1].conditions[0].input"))
+	})
+
+	It("accepts the conditional pipeline example", func() {
+		data, err := os.ReadFile(filepath.Join("..", "..", "examples", "07-task-pipeline", "conditional-pipeline.yaml"))
+		Expect(err).NotTo(HaveOccurred())
+		pipeline := &kelos.TaskPipeline{}
+		Expect(yaml.UnmarshalStrict(data, pipeline)).To(Succeed())
+		pipeline.Namespace = ns
+		Expect(pipeline.Spec.Stages[1].Conditions).NotTo(BeEmpty())
+		Expect(k8sClient.Create(ctx, pipeline, client.DryRunAll)).To(Succeed())
 	})
 
 	It("rejects multiple execution sources", func() {

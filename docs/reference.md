@@ -196,8 +196,9 @@ the refreshed value on their next sync and are not supported.
 
 A TaskPipeline manages an ordered sequence of named stages. The first stage
 starts immediately, and each later stage starts after the preceding stage has
-succeeded. A stage can create one Task or fan out into parallel Tasks with a
-matrix. The stage list is immutable after creation.
+succeeded or been skipped. A stage can create one Task or fan out into parallel
+Tasks with a matrix, and can be skipped based on earlier stages' results. The
+stage list is immutable after creation.
 
 TaskPipeline is available only in `kelos.dev/v1alpha2`.
 
@@ -210,6 +211,10 @@ TaskPipeline is available only in `kelos.dev/v1alpha2`.
 | `spec.stages[].taskTemplate.prompt` | Go template rendered into each stage Task's prompt | Yes |
 | `spec.stages[].taskTemplate.branch` | Optional Go template rendered into each stage Task's branch. Not supported with workerPoolRef | No |
 | `spec.stages[].matrix.items` | Ordered value maps (1–256). Each item contains 1–16 string values, creates one Task, and defines the same keys as every other item | Yes when matrix is set |
+| `spec.stages[].conditions` | Conditions (0–8) that must all be met for the stage to run. See [Conditional Stages](#conditional-stages) | No |
+| `spec.stages[].conditions[].input` | Go template rendered with `.Stages`; surrounding whitespace is trimmed before comparison | Yes |
+| `spec.stages[].conditions[].operator` | `In` or `NotIn` | Yes |
+| `spec.stages[].conditions[].values` | Values (1–32) compared exactly and case-sensitively against the rendered input | Yes |
 
 Deleting a TaskPipeline deletes its owned child Tasks. A stage without a matrix
 creates one Task. A matrix stage creates one Task for each item, up to 256 Tasks
@@ -242,7 +247,9 @@ Child Tasks have these labels:
 | `.Stages.<stage>[].Outputs` | `[]string` | Raw Task outputs |
 
 Use `index` when a stage or result key contains characters that cannot be used in
-Go template dot notation. TaskPipeline's `index` is strict: a missing map key or
+Go template dot notation. Use `b64dec` to decode a base64 result such as
+`response`, for example `{{index .Stages "plan" 0 "Results" "response" | b64dec}}`;
+invalid base64 fails the stage. TaskPipeline's `index` is strict: a missing map key or
 an out-of-range list index fails the stage and records the rendering error in
 pipeline status. The controller validates every template's syntax before
 starting the pipeline. It renders a stage only after the preceding stage
@@ -287,10 +294,80 @@ spec:
 ```
 
 Agent final responses are stored in `Task.status.results.response` as base64.
-Downstream agents that consume this result should decode it before use.
+Decode them with `b64dec` in the template, or have the downstream agent decode
+them.
+
+### Conditional Stages
+
+A stage with `conditions` runs only when every condition is met. Each condition
+renders `input` with `.Stages` (the same results available to prompts; `.Matrix`
+is not available), trims surrounding whitespace, and compares the value exactly
+against `values`: `In` is met when the value is listed, `NotIn` when it is not.
+
+Conditions are evaluated when the stage would otherwise start, after every
+earlier stage has succeeded or been skipped. A stage whose conditions are not met
+is `Skipped`: it creates no Tasks, reports `Total: 0`, exposes an empty list
+under `.Stages.<stage>` to later stages, and counts as complete when the pipeline
+decides whether to start the next stage or succeed. A skip is final; the
+condition is not evaluated again. If an input cannot be rendered — for example, a
+referenced result key is missing — the stage fails, after the same output-capture
+grace period that applies to prompts.
+
+Stages still run one at a time in declaration order, so stages that select
+mutually exclusive branches run only the selected branch. Agent results reach
+templates through `results.response`, so a selecting stage should be prompted to
+reply with only its answer.
+
+Example — let an agent pick one branch, with a fallback for any other answer:
+
+```yaml
+apiVersion: kelos.dev/v1alpha2
+kind: TaskPipeline
+metadata:
+  name: support-request
+spec:
+  stages:
+    - name: route
+      taskTemplate:
+        workerPoolRef:
+          name: router-pool
+        prompt: |
+          Classify this request and reply with exactly one word: docs, incident, or none.
+          Request: The status page shows checkout errors for EU customers.
+    - name: incident
+      conditions:
+        - input: '{{index .Stages "route" 0 "Results" "response" | b64dec}}'
+          operator: In
+          values: [incident]
+      taskTemplate:
+        workerPoolRef:
+          name: incident-pool
+        prompt: Triage the checkout errors reported for EU customers.
+    - name: docs
+      conditions:
+        - input: '{{index .Stages "route" 0 "Results" "response" | b64dec}}'
+          operator: In
+          values: [docs]
+      taskTemplate:
+        workerPoolRef:
+          name: docs-pool
+        prompt: Answer the documentation question.
+    - name: fallback
+      conditions:
+        - input: '{{index .Stages "route" 0 "Results" "response" | b64dec}}'
+          operator: NotIn
+          values: [docs, incident]
+      taskTemplate:
+        workerPoolRef:
+          name: router-pool
+        prompt: Explain that no team handles this request.
+```
+
+Any value listed in a stage's conditions can be selected by the agent, so treat
+every conditional stage as reachable by any request the selecting stage reads.
 
 `status.stageStatuses` reports expected, active, successful, and failed Task
-counts for each stage. Child Task names, outputs, and structured results remain
+counts for each stage, and `Skipped` for stages whose conditions were not met. Child Task names, outputs, and structured results remain
 on the owned Task resources and are not copied into TaskPipeline status. The
 `Succeeded` condition reports pipeline progress and failure details. Any failed
 child Task prevents later stages from starting. Child Tasks that are already

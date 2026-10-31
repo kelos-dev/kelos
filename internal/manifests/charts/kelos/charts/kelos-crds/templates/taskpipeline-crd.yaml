@@ -57,6 +57,47 @@ spec:
                 items:
                   description: PipelineStage defines one step in a TaskPipeline.
                   properties:
+                    conditions:
+                      description: |-
+                        Conditions must all be met for the stage to run. They are evaluated when
+                        the stage would otherwise start. A stage whose conditions are not met is
+                        Skipped: it creates no Tasks, and later stages proceed as if it succeeded.
+                      items:
+                        description: PipelineStageCondition gates a stage on a value
+                          rendered from earlier stages.
+                        properties:
+                          input:
+                            description: |-
+                              Input is a Go template rendered with .Stages, the results of completed
+                              earlier stages. Leading and trailing whitespace is trimmed from the
+                              rendered value before it is compared.
+                            minLength: 1
+                            type: string
+                          operator:
+                            description: Operator compares the rendered input against
+                              values.
+                            enum:
+                            - In
+                            - NotIn
+                            type: string
+                          values:
+                            description: |-
+                              Values is the set the rendered input is compared against. Comparison is
+                              exact and case-sensitive.
+                            items:
+                              type: string
+                            maxItems: 32
+                            minItems: 1
+                            type: array
+                            x-kubernetes-list-type: atomic
+                        required:
+                        - input
+                        - operator
+                        - values
+                        type: object
+                      maxItems: 8
+                      type: array
+                      x-kubernetes-list-type: atomic
                     matrix:
                       description: Matrix expands the stage into parallel Tasks.
                       properties:
@@ -7281,8 +7322,9 @@ spec:
                       description: Name identifies the pipeline stage.
                       type: string
                     phase:
-                      description: Phase uses the Task phase vocabulary to summarize
-                        this stage's Tasks.
+                      description: |-
+                        Phase uses the Task phase vocabulary to summarize this stage's Tasks,
+                        plus Skipped when the stage's conditions were not met.
                       type: string
                     succeeded:
                       description: Succeeded is the number of successful Tasks.

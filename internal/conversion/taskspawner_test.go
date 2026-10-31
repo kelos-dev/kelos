@@ -1018,6 +1018,113 @@ func TestTaskSpawnerFromHub_NoNameTemplateOmitsAnnotation(t *testing.T) {
 	}
 }
 
+func TestTaskSpawnerConvert_RuntimeClassNameRoundTrips(t *testing.T) {
+	gvisor := "gvisor"
+	tests := []struct {
+		name     string
+		template v1alpha2.TaskTemplate
+	}{
+		{
+			name: "worker podOverrides",
+			template: v1alpha2.TaskTemplate{Worker: &v1alpha2.WorkerSpec{
+				Type: "codex",
+				PodOverrides: &v1alpha2.PodOverrides{
+					RuntimeClassName: &gvisor,
+					Env:              []corev1.EnvVar{{Name: "FOO", Value: "bar"}},
+				},
+			}},
+		},
+		{
+			name: "legacy podOverrides",
+			template: v1alpha2.TaskTemplate{
+				Type:         "codex",
+				PodOverrides: &v1alpha2.PodOverrides{RuntimeClassName: &gvisor},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hub := &v1alpha2.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{Name: "sandboxed", Namespace: "default"},
+				Spec: v1alpha2.TaskSpawnerSpec{
+					When:         v1alpha2.When{Cron: &v1alpha2.Cron{Schedule: "0 9 * * 1"}},
+					TaskTemplate: tt.template,
+				},
+			}
+
+			spoke := &v1alpha1.TaskSpawner{}
+			if err := taskSpawnerFromHub(context.Background(), hub, spoke); err != nil {
+				t.Fatalf("taskSpawnerFromHub() error = %v", err)
+			}
+			if got := spoke.Annotations[preservedRuntimeClassNameAnnotation]; got != gvisor {
+				t.Fatalf("preserved annotation = %q, want %q", got, gvisor)
+			}
+
+			back := &v1alpha2.TaskSpawner{}
+			if err := taskSpawnerToHub(context.Background(), spoke, back); err != nil {
+				t.Fatalf("taskSpawnerToHub() error = %v", err)
+			}
+			po := back.Spec.TaskTemplate.PodOverrides
+			if po == nil || po.RuntimeClassName == nil || *po.RuntimeClassName != gvisor {
+				t.Errorf("round-tripped podOverrides = %#v, want runtimeClassName %q", po, gvisor)
+			}
+			if _, ok := back.Annotations[preservedRuntimeClassNameAnnotation]; ok {
+				t.Error("internal preservation annotation leaked onto hub object")
+			}
+		})
+	}
+}
+
+func TestTaskSpawnerToHub_InvalidRuntimeClassNameAnnotationIgnored(t *testing.T) {
+	for _, invalid := range []string{"", "gVisor", "kata_qemu"} {
+		spoke := &v1alpha1.TaskSpawner{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "sandboxed",
+				Namespace:   "default",
+				Annotations: map[string]string{preservedRuntimeClassNameAnnotation: invalid},
+			},
+			Spec: v1alpha1.TaskSpawnerSpec{
+				When:         v1alpha1.When{Cron: &v1alpha1.Cron{Schedule: "0 9 * * 1"}},
+				TaskTemplate: v1alpha1.TaskTemplate{Type: "codex"},
+			},
+		}
+		hub := &v1alpha2.TaskSpawner{}
+		if err := taskSpawnerToHub(context.Background(), spoke, hub); err != nil {
+			t.Fatalf("taskSpawnerToHub(%q) error = %v", invalid, err)
+		}
+		if po := hub.Spec.TaskTemplate.PodOverrides; po != nil && po.RuntimeClassName != nil {
+			t.Errorf("annotation %q restored runtimeClassName %q, want it ignored", invalid, *po.RuntimeClassName)
+		}
+		if _, ok := hub.Annotations[preservedRuntimeClassNameAnnotation]; ok {
+			t.Errorf("annotation %q leaked onto hub object", invalid)
+		}
+	}
+}
+
+func TestTaskSpawnerFromHub_NoRuntimeClassNameOmitsAnnotation(t *testing.T) {
+	hub := &v1alpha2.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "unsandboxed",
+			Namespace:   "default",
+			Annotations: map[string]string{preservedRuntimeClassNameAnnotation: "stale"},
+		},
+		Spec: v1alpha2.TaskSpawnerSpec{
+			When: v1alpha2.When{Cron: &v1alpha2.Cron{Schedule: "0 9 * * 1"}},
+			TaskTemplate: v1alpha2.TaskTemplate{Worker: &v1alpha2.WorkerSpec{
+				Type:         "codex",
+				PodOverrides: &v1alpha2.PodOverrides{Env: []corev1.EnvVar{{Name: "FOO", Value: "bar"}}},
+			}},
+		},
+	}
+	spoke := &v1alpha1.TaskSpawner{}
+	if err := taskSpawnerFromHub(context.Background(), hub, spoke); err != nil {
+		t.Fatalf("taskSpawnerFromHub() error = %v", err)
+	}
+	if _, ok := spoke.Annotations[preservedRuntimeClassNameAnnotation]; ok {
+		t.Error("annotation should not be set when runtimeClassName is unset")
+	}
+}
+
 func TestTaskSpawnerConvert_GitHubWebhookExcludeFiltersRoundTrip(t *testing.T) {
 	src := &v1alpha2.TaskSpawner{
 		Spec: v1alpha2.TaskSpawnerSpec{

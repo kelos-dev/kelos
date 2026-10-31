@@ -5089,6 +5089,15 @@ spec:
                               More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                             type: object
                         type: object
+                      runtimeClassName:
+                        description: |-
+                          RuntimeClassName selects the RuntimeClass for the agent pod, such as
+                          a gVisor or Kata Containers sandbox. The RuntimeClass must exist in
+                          the cluster, or the pod is rejected at admission.
+                        maxLength: 253
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                        type: string
                       serviceAccountName:
                         description: |-
                           ServiceAccountName sets the pod's service account.

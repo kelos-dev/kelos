@@ -29,6 +29,7 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -326,6 +327,41 @@ func TestWorkerPoolReconciler_RejectsExtraContainerInitContainerNameCollision(t 
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "appears in both extraContainers and extraInitContainers")
+}
+
+func TestWorkerPoolReconciler_UpdatesRuntimeClassName(t *testing.T) {
+	scheme := newWorkerPoolTestScheme()
+	pool := newTestWorkerPool("my-pool", "default", 1)
+	ws := newTestWorkspace("default")
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&kelos.WorkerPool{}).
+		WithObjects(pool, ws).
+		Build()
+
+	r := newWorkerPoolReconciler(cl, scheme)
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "my-pool", Namespace: "default"}}
+	stsKey := types.NamespacedName{Name: "wp-my-pool", Namespace: "default"}
+
+	_, err := r.Reconcile(context.Background(), req)
+	require.NoError(t, err)
+
+	var sts appsv1.StatefulSet
+	require.NoError(t, cl.Get(context.Background(), stsKey, &sts))
+	assert.Nil(t, sts.Spec.Template.Spec.RuntimeClassName)
+
+	// Setting the field on a running pool must roll the StatefulSet.
+	require.NoError(t, cl.Get(context.Background(), req.NamespacedName, pool))
+	pool.Spec.Worker.PodOverrides = &kelos.PodOverrides{RuntimeClassName: ptr.To("gvisor")}
+	require.NoError(t, cl.Update(context.Background(), pool))
+
+	_, err = r.Reconcile(context.Background(), req)
+	require.NoError(t, err)
+
+	require.NoError(t, cl.Get(context.Background(), stsKey, &sts))
+	require.NotNil(t, sts.Spec.Template.Spec.RuntimeClassName)
+	assert.Equal(t, "gvisor", *sts.Spec.Template.Spec.RuntimeClassName)
 }
 
 func TestWorkerPoolReconciler_CreatesService(t *testing.T) {

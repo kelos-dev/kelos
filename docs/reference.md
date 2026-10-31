@@ -30,6 +30,7 @@ Exactly one execution source is required: `spec.worker` (preferred), `spec.worke
 | `spec.podOverrides.tolerations` | Tolerations for the agent pod; use with `nodeSelector` or `affinity` to target dedicated node pools (e.g., GPU nodes, agent-specific pools) | No |
 | `spec.podOverrides.affinity` | Node, pod, and pod-anti-affinity rules. Use for spreading agents across nodes or expressing scheduling preferences beyond `nodeSelector` | No |
 | `spec.podOverrides.imagePullSecrets` | Secrets used to pull container images from private registries. Required when the agent image or any init container image is in a private registry | No |
+| `spec.podOverrides.runtimeClassName` | RuntimeClass for the agent pod, e.g. a gVisor or Kata Containers sandbox. Must be a DNS subdomain name. The RuntimeClass must already exist in the cluster; otherwise Pod creation fails and the Job records `FailedCreate` events | No |
 | `spec.podOverrides.serviceAccountName` | Service account name for the agent pod; use with workload identity systems (IRSA, GKE Workload Identity, Azure) | No |
 | `spec.podOverrides.volumes` | Additional volumes to attach to the agent pod. Names must not be `workspace` or use the Kelos-reserved `kelos-` prefix | No |
 | `spec.podOverrides.volumeMounts` | Additional volume mounts on the agent container; names must reference either a user-supplied volume from `volumes` or a Kelos-managed volume (`workspace` or a `kelos-` volume such as `kelos-plugin` or `kelos-github-token`) | No |
@@ -317,6 +318,7 @@ the Session resource and is visible through the Kubernetes API.
 | `spec.worker.agentConfigRefs[].name` | Ordered AgentConfig resources | No |
 | `spec.worker.podOverrides` | Pod resources, scheduling, environment, volumes, and sidecars | No |
 | `spec.worker.podOverrides.serviceAccountName` | Service account for the Session Pod; omit or clear to use the Session's managed service account | No |
+| `spec.worker.podOverrides.runtimeClassName` | RuntimeClass for the Session Pod, e.g. a gVisor or Kata Containers sandbox. The RuntimeClass must already exist in the cluster; otherwise Pod creation fails and the StatefulSet records `FailedCreate` events. The Session's own agent can change or clear it (see below) | No |
 | `spec.suspend` | Stop the Session runtime without deleting the Session or its persistent workspace (defaults to `false`) | No |
 | `spec.initialBranch` | Git branch used to initialize the Session workspace. Checks out the branch from `origin` when it exists, or creates it from the Workspace ref. Requires `spec.worker.workspaceRef` | No |
 | `spec.initialPrompt` | Prompt submitted when the Session starts without retained conversation history. An `emptyDir` workspace may submit it again after Pod replacement | No |
@@ -663,8 +665,10 @@ change its own `spec.worker.podOverrides.serviceAccountName` to another existing
 account in the same namespace. This can grant that account's Kubernetes
 permissions and any configured workload identity. Kelos does not restrict this
 change to operators: Session agents must be trusted to select service accounts
-in their namespace. Deployments that require restrictions must enforce them
-through an administrator-managed admission policy.
+in their namespace. The same applies to `spec.worker.podOverrides.runtimeClassName`:
+the agent can clear it or pick another RuntimeClass, and the replacement Pod
+runs without the original sandbox. Deployments that require restrictions must
+enforce them through an administrator-managed admission policy.
 
 Some nested `spec.worker.podOverrides` field descriptions inherit Kubernetes
 wording such as "Cannot be updated". Those restrictions apply to editing an

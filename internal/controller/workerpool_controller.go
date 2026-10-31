@@ -943,6 +943,7 @@ func (r *WorkerPoolReconciler) buildStatefulSet(pool *kelos.WorkerPool, stsName,
 	var tolerations []corev1.Toleration
 	var affinity *corev1.Affinity
 	var imagePullSecrets []corev1.LocalObjectReference
+	var runtimeClassName *string
 
 	if po := pool.Spec.Worker.PodOverrides; po != nil {
 		if po.Resources != nil {
@@ -979,6 +980,10 @@ func (r *WorkerPoolReconciler) buildStatefulSet(pool *kelos.WorkerPool, stsName,
 
 		if len(po.ImagePullSecrets) > 0 {
 			imagePullSecrets = po.ImagePullSecrets
+		}
+
+		if po.RuntimeClassName != nil {
+			runtimeClassName = po.RuntimeClassName
 		}
 
 		if len(po.Volumes) > 0 {
@@ -1057,6 +1062,7 @@ func (r *WorkerPoolReconciler) buildStatefulSet(pool *kelos.WorkerPool, stsName,
 					Tolerations:        tolerations,
 					Affinity:           affinity,
 					ImagePullSecrets:   imagePullSecrets,
+					RuntimeClassName:   runtimeClassName,
 				},
 			},
 			VolumeClaimTemplates: []corev1.PersistentVolumeClaim{
@@ -1886,7 +1892,8 @@ func podTemplateSpecEqual(a, b corev1.PodSpec) bool {
 		apiequality.Semantic.DeepEqual(a.NodeSelector, b.NodeSelector) &&
 		apiequality.Semantic.DeepEqual(a.Tolerations, b.Tolerations) &&
 		apiequality.Semantic.DeepEqual(a.Affinity, b.Affinity) &&
-		apiequality.Semantic.DeepEqual(a.ImagePullSecrets, b.ImagePullSecrets)
+		apiequality.Semantic.DeepEqual(a.ImagePullSecrets, b.ImagePullSecrets) &&
+		apiequality.Semantic.DeepEqual(a.RuntimeClassName, b.RuntimeClassName)
 }
 
 func mergeReconcileResults(a, b ctrl.Result) ctrl.Result {

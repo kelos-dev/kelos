@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/controller"
@@ -3981,6 +3983,50 @@ var _ = Describe("Task Controller", func() {
 			err := k8sClient.Update(ctx, createdTask)
 			Expect(err).Should(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("immutable"))
+		})
+	})
+
+	Context("When creating a Task with an invalid runtimeClassName", func() {
+		It("Should be rejected by the CRD schema", func() {
+			By("Creating a namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-task-invalid-runtime-class",
+				},
+			}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+
+			newTask := func(name, runtimeClassName string) *kelos.Task {
+				return &kelos.Task{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      name,
+						Namespace: ns.Name,
+					},
+					Spec: kelos.TaskSpec{
+						Type:   "claude-code",
+						Prompt: "Fix issue",
+						Credentials: &kelos.Credentials{
+							Type: kelos.CredentialTypeAPIKey,
+							SecretRef: &kelos.SecretReference{
+								Name: "anthropic-api-key",
+							},
+						},
+						PodOverrides: &kelos.PodOverrides{
+							RuntimeClassName: ptr.To(runtimeClassName),
+						},
+					},
+				}
+			}
+
+			for i, invalid := range []string{"", "gVisor", "kata_qemu", "-gvisor", strings.Repeat("a", 254)} {
+				By(fmt.Sprintf("Creating a Task with runtimeClassName %q", invalid))
+				err := k8sClient.Create(ctx, newTask(fmt.Sprintf("test-task-invalid-runtime-class-%d", i), invalid))
+				Expect(err).Should(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("runtimeClassName"))
+			}
+
+			By("Creating a Task with a valid DNS subdomain runtimeClassName")
+			Expect(k8sClient.Create(ctx, newTask("test-task-valid-runtime-class", "kata.qemu-v2"))).Should(Succeed())
 		})
 	})
 

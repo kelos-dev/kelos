@@ -1715,6 +1715,21 @@ func TestSessionRuntimeUsesConfiguredServiceAccount(t *testing.T) {
 	}
 }
 
+func TestSessionRuntimeUsesConfiguredRuntimeClassName(t *testing.T) {
+	t.Parallel()
+	session := testSession("custom-runtime-class", "codex")
+	session.Spec.Worker.PodOverrides = &kelos.PodOverrides{RuntimeClassName: ptr.To("gvisor")}
+	reconciler := testSessionReconciler(nil, nil)
+	statefulSet, _, err := reconciler.buildSessionStatefulSet(session, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := statefulSet.Spec.Template.Spec.RuntimeClassName
+	if got == nil || *got != "gvisor" {
+		t.Fatalf("Session runtimeClassName = %v, want gvisor", got)
+	}
+}
+
 func TestPrepareSessionWorkspaceInitPreservesCloneCommands(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

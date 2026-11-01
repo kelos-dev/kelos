@@ -1,0 +1,28 @@
+{{- if and .Values.consoleServer.enabled .Values.consoleServer.webPush.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kelos-console-web-push
+  namespace: {{ .Values.consoleServer.webPush.storageNamespace }}
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get, list, create, update, delete]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [get, create, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kelos-console-web-push
+  namespace: {{ .Values.consoleServer.webPush.storageNamespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kelos-console-web-push
+subjects:
+  - kind: ServiceAccount
+    name: kelos-console-server
+    namespace: {{ .Release.Namespace }}
+{{- end }}

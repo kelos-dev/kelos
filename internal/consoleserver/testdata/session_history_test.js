@@ -3,6 +3,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
+global.syncPushSubscription = () => Promise.resolve();
+
 class TestNode {
   constructor(tag, value = '') {
     this.tag = tag;

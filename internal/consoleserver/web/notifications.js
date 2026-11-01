@@ -6,6 +6,11 @@ self.addEventListener('activate', event => {
   event.waitUntil(self.clients.claim());
 });
 
+self.addEventListener('push', event => {
+  const payload = event.data.json();
+  event.waitUntil(self.registration.showNotification(payload.title, payload.options));
+});
+
 self.addEventListener('notificationclick', event => {
   event.notification.close();
   const session = event.notification.data?.session;

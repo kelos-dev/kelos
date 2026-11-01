@@ -2,6 +2,17 @@
 {{- fail "sessionServer values are not supported; use consoleServer instead" }}
 {{- end }}
 {{- if .Values.consoleServer.enabled }}
+{{- if .Values.consoleServer.webPush.enabled }}
+{{- $storageNamespace := required "consoleServer.webPush.storageNamespace is required when Web Push is enabled" .Values.consoleServer.webPush.storageNamespace }}
+{{- if eq $storageNamespace .Release.Namespace }}
+{{- fail "consoleServer.webPush.storageNamespace must be a dedicated namespace, separate from the release namespace" }}
+{{- end }}
+{{- $_ := required "consoleServer.webPush.secretName is required when Web Push is enabled" .Values.consoleServer.webPush.secretName }}
+{{- $subject := required "consoleServer.webPush.subject is required when Web Push is enabled" .Values.consoleServer.webPush.subject }}
+{{- if not (or (hasPrefix "mailto:" $subject) (hasPrefix "https://" $subject)) }}
+{{- fail "consoleServer.webPush.subject must start with mailto: or https://" }}
+{{- end }}
+{{- end }}
 {{- $auth := .Values.consoleServer.auth }}
 {{- $proxyMode := or (eq $auth.mode "oidc") (eq $auth.mode "github") }}
 {{- $provider := get $auth $auth.mode | default dict }}
@@ -66,6 +77,12 @@ spec:
             - --bind-address=:8080
             - --token-file=/var/run/secrets/kelos-console/token
             {{- end }}
+            {{- if .Values.consoleServer.webPush.enabled }}
+            - --web-push-namespace={{ .Values.consoleServer.webPush.storageNamespace }}
+            - {{ printf "--web-push-subject=%s" .Values.consoleServer.webPush.subject | quote }}
+            - --web-push-public-key-file=/var/run/secrets/kelos-web-push/public-key
+            - --web-push-private-key-file=/var/run/secrets/kelos-web-push/private-key
+            {{- end }}
             - --default-namespace={{ .Values.consoleServer.defaultNamespace }}
             {{- if .Values.consoleServer.secureCookie }}
             - --secure-cookie
@@ -83,6 +100,11 @@ spec:
                 - ALL
             readOnlyRootFilesystem: true
           volumeMounts:
+            {{- if .Values.consoleServer.webPush.enabled }}
+            - name: web-push-keys
+              mountPath: /var/run/secrets/kelos-web-push
+              readOnly: true
+            {{- end }}
             {{- if $proxyMode }}
             - name: kube-api-access
               mountPath: /var/run/secrets/kubernetes.io/serviceaccount
@@ -174,6 +196,16 @@ spec:
               memory: 128Mi
         {{- end }}
       volumes:
+        {{- if .Values.consoleServer.webPush.enabled }}
+        - name: web-push-keys
+          secret:
+            secretName: {{ .Values.consoleServer.webPush.secretName }}
+            items:
+              - key: public-key
+                path: public-key
+              - key: private-key
+                path: private-key
+        {{- end }}
         {{- if $proxyMode }}
         - name: kube-api-access
           projected:

@@ -48,6 +48,7 @@ vm.runInThisContext(slice('async function loadIdentity(', 'async function loadCo
   let logout;
   global.requiredElement = () => ({addEventListener: (_event, listener) => { logout = listener; }});
   global.closeBrowserNotifications = () => {};
+  global.removePushSubscription = async () => {};
   vm.runInThisContext(slice("requiredElement('#logout').addEventListener", 'function setSidebarOpen'), {filename: 'app.js'});
   global.fetch = async (_path, options) => {
     assert.equal(options.method, 'POST');

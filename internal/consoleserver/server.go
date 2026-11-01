@@ -85,6 +85,7 @@ type Config struct {
 	HTTPClient       *http.Client
 	DefaultNamespace string
 	SecureCookie     bool
+	WebPush          *WebPushConfig
 }
 
 // Server serves the Kelos Console and its Kubernetes-backed API.
@@ -105,6 +106,7 @@ type Server struct {
 	terminalExecutor func(*rest.Config, string, *url.URL) (remotecommand.Executor, error)
 	attachments      sessionAttachmentTransfer
 	taskLogStream    func(context.Context, *kelos.Task, int64) (io.ReadCloser, error)
+	webPush          *webPushDelivery
 }
 
 type sessionAttachmentTransfer interface {
@@ -323,6 +325,12 @@ func New(config Config) (*Server, error) {
 		server.proxyAuth = &proxyAuth
 		server.upgrader.CheckOrigin = func(request *http.Request) bool { return request.Header.Get("Origin") == proxyAuth.ExternalURL }
 	}
+	if config.WebPush != nil {
+		server.webPush, err = newWebPush(*config.WebPush, config.HTTPClient)
+		if err != nil {
+			return nil, err
+		}
+	}
 	server.bridge = server.bridgeExec
 	server.terminalExecutor = remotecommand.NewSPDYExecutor
 	server.taskLogStream = server.openTaskLogStream
@@ -437,7 +445,14 @@ func (s *Server) api(writer http.ResponseWriter, request *http.Request) {
 			config["username"] = identity.username
 			config["authMode"] = s.authMode
 		}
+		if s.webPush != nil {
+			config["webPushPublicKey"] = s.webPush.config.PublicKey
+		}
 		writeJSON(writer, http.StatusOK, config)
+		return
+	}
+	if path == "push-subscription" && (request.Method == http.MethodPut || request.Method == http.MethodDelete) {
+		s.webPushSubscription(writer, request)
 		return
 	}
 	if path == "namespaces" && request.Method == http.MethodGet {

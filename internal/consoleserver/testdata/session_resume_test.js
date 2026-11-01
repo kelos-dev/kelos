@@ -3,6 +3,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
+global.syncPushSubscription = () => Promise.resolve();
+
 const application = fs.readFileSync(path.join(__dirname, '..', 'web', 'app.js'), 'utf8');
 
 function applicationSlice(start, end) {

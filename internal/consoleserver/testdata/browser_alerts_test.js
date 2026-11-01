@@ -61,6 +61,7 @@ function harness(shared = {}) {
     navigator: {serviceWorker, locks},
     window: {
       Notification, isSecureContext: true,
+      atob: value => { assert.match(value, /^[A-Za-z0-9+/=]*$/); return Buffer.from(value, 'base64').toString('binary'); },
       localStorage: {
         getItem: key => storage.get(key) ?? null,
         setItem: (key, value) => storage.set(key, value),
@@ -71,7 +72,7 @@ function harness(shared = {}) {
     elements: {
       consoleSettings: eventTarget({open: false, contains: target => target === context.elements.browserAlerts || target === context.elements.settingsButton}),
       settingsButton: {focus() { this.focused = true; }}, sessionActionsMenu: {hidden: true},
-      browserAlerts: {}, browserAlertsTest: {}, browserAlertsStatus: {}, messages: {hidden: false},
+      browserAlerts: {}, browserAlertsTest: {}, browserAlertsStatus: {}, browserAlertsDescription: {}, messages: {hidden: false},
       memberDialog: {close() {}}, memberList: {replaceChildren() {}}, memberGroups: {replaceChildren() {}}, memberError: {},
       adminEditor: {close() {}}, adminCollections: {replaceChildren() {}},
       activeNamespace: {}, namespace: {}, namespaceLabels: [], yaml: {},
@@ -415,6 +416,153 @@ async function testNamespaceSwitchPreservesOtherNotifications() {
   assert.equal(first.notifications[2].closed, false, 'A manual switch must preserve alerts from other tabs');
 }
 
+async function testPushSubscriptions() {
+  const h = harness();
+  const c = h.context;
+  c.state.webPushPublicKey = Buffer.from([4, 251, 255, 3]).toString('base64url');
+  const requests = [];
+  let subscription = null;
+  let subscribed = 0;
+  let unsubscribed = 0;
+  h.registration.pushManager = {
+    async getSubscription() { return subscription; },
+    async subscribe(options) {
+      subscribed++;
+      assert.equal(options.userVisibleOnly, true);
+      assert.deepEqual([...options.applicationServerKey], [...Buffer.from(c.state.webPushPublicKey, 'base64url')]);
+      subscription = {
+        endpoint: 'https://web.push.apple.com/device', options,
+        async unsubscribe() { unsubscribed++; subscription = null; return true; },
+        toJSON() { return {endpoint: this.endpoint, expirationTime: null, keys: {auth: 'auth', p256dh: 'key'}}; },
+      };
+      return subscription;
+    },
+  };
+  c.api = async (url, options) => {
+    requests.push({url, method: options.method, payload: JSON.parse(options.body)});
+    return {subscribed: true};
+  };
+  c.notifySessions([h.session]);
+  c.state.sessions = [{...h.session, lastNotification: event(20)}];
+  c.notifySessions(c.state.sessions);
+  await h.flush();
+  assert.equal(h.notifications.length, 1, 'Polling works until push registration succeeds');
+  await c.syncPushSubscription();
+  assert.equal(subscribed, 1);
+  assert.equal(requests[0].url, '/api/push-subscription');
+  assert.equal(requests[0].method, 'PUT');
+  assert.equal(requests[0].payload.namespace, 'team');
+  assert.equal(requests[0].payload.subscription.endpoint, 'https://web.push.apple.com/device');
+  assert.equal('expirationTime' in requests[0].payload.subscription, false);
+  await c.syncPushSubscription();
+  assert.equal(requests.length, 1, 'Polling must not continuously rewrite the subscription');
+  c.state.sessions = [{...h.session, lastNotification: event(21)}];
+  c.notifySessions(c.state.sessions);
+  await h.flush();
+  assert.equal(h.notifications.length, 1, 'Active push registration suppresses duplicate page notifications');
+  c.state.namespace = 'another';
+  await c.syncPushSubscription();
+  assert.equal(requests[1].payload.namespace, 'another');
+  assert.equal(subscribed, 1, 'A namespace switch reuses the device subscription');
+  await c.removePushSubscription();
+  assert.equal(requests[2].method, 'DELETE');
+  assert.equal(unsubscribed, 1);
+  c.api = async () => { throw new Error('Storage unavailable'); };
+  await assert.rejects(c.syncPushSubscription(), /Storage unavailable/);
+  c.api = async () => ({subscribed: true});
+  await c.syncPushSubscription();
+  assert.equal(subscribed, 2, 'Retry reuses a subscription created before a failed save');
+  c.api = async () => { throw new Error('Storage unavailable'); };
+  await assert.rejects(c.removePushSubscription(), /Storage unavailable/);
+  assert.equal(unsubscribed, 2, 'Unsubscribe on the device even if server deletion fails');
+
+  const rotated = harness();
+  rotated.context.state.webPushPublicKey = Buffer.from([4, 1]).toString('base64url');
+  let rotationUnsubscribed = false;
+  let replacementOptions;
+  rotated.registration.pushManager = {
+    async getSubscription() { return {options: {applicationServerKey: new Uint8Array([4, 0]).buffer}, async unsubscribe() { rotationUnsubscribed = true; }}; },
+    async subscribe(options) {
+      replacementOptions = options;
+      return {endpoint: 'https://web.push.apple.com/replacement', toJSON() { return {keys: {auth: 'auth', p256dh: 'key'}}; }};
+    },
+  };
+  rotated.context.api = async () => ({subscribed: true});
+  await rotated.context.syncPushSubscription();
+  assert.equal(rotationUnsubscribed, true);
+  assert.deepEqual([...replacementOptions.applicationServerKey], [4, 1]);
+
+  const coordinated = harness();
+  const sibling = harness(coordinated);
+  for (const item of [coordinated, sibling]) {
+    item.context.state.webPushPublicKey = c.state.webPushPublicKey;
+    item.registration.pushManager = h.registration.pushManager;
+  }
+  // Periodic refreshes must respect the shared namespace selection.
+  coordinated.storage.set('kelos-console-namespace', 'another');
+  sibling.context.state.namespace = 'another';
+  let saves = 0;
+  coordinated.context.api = sibling.context.api = async () => { saves++; return {subscribed: true}; };
+  await sibling.context.syncPushSubscription(true);
+  await coordinated.context.syncPushSubscription(true);
+  assert.equal(saves, 1, 'A background tab must not overwrite the most recently selected namespace');
+}
+
+async function testEnablingAlertsKeepsPollingOnPushFailure() {
+  for (const failure of ['subscribe', 'save']) {
+    const h = harness();
+    const c = h.context;
+    c.state.browserAlertsEnabled = false;
+    c.state.webPushPublicKey = Buffer.from([4, 1, 2, 3]).toString('base64url');
+    let subscription = null;
+    const pushFailure = vm.runInContext("new Error('Push unavailable')", c);
+    h.registration.pushManager = {
+      async getSubscription() { return subscription; },
+      async subscribe() {
+        if (failure === 'subscribe') throw pushFailure;
+        subscription = {
+          endpoint: 'https://web.push.apple.com/device',
+          toJSON() { return {keys: {auth: 'auth', p256dh: 'key'}}; },
+          async unsubscribe() { subscription = null; return true; },
+        };
+        return subscription;
+      },
+    };
+    c.api = async (_url, options) => {
+      if (options.method === 'PUT') throw pushFailure;
+      return undefined;
+    };
+    await c.toggleBrowserAlerts();
+    assert.equal(c.state.browserAlertsEnabled, true, failure);
+    assert.equal(h.storage.get('kelos-console-browser-alerts'), 'true');
+    assert.equal(c.state.browserAlertsMessage, 'Could not enable background notifications: Push unavailable');
+    c.notifySessions([h.session]);
+    c.state.sessions = [{...h.session, lastNotification: event(30)}];
+    c.notifySessions(c.state.sessions);
+    await h.flush();
+    assert.equal(h.notifications.length, 1, 'Polling must notify after enabling alerts when push fails');
+    assert.equal(h.notifications[0].title, 'Work completed · Fix tests');
+  }
+}
+
+async function testWorkerPushWithoutOpenPage() {
+  const displayed = [];
+  const worker = eventTarget({registration: {
+    async showNotification(title, options) { displayed.push({title, options}); },
+  }});
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../web/notifications.js'), 'utf8'), {self: worker, URL});
+  const payload = {title: 'Work completed · Fix tests', options: {
+    tag: 'kelos-session-team/worker/session-1',
+    data: {id: 'journal/1', session: {namespace: 'team', name: 'worker', uid: 'session-1'}},
+  }};
+  let pending;
+  worker.dispatch('push', {data: {json: () => payload}, waitUntil(value) { pending = value; }});
+  await pending;
+  assert.equal(displayed.length, 1);
+  assert.equal(displayed[0].title, payload.title);
+  assert.deepEqual(displayed[0].options, payload.options);
+}
+
 async function testWorkerClicks() {
   const messages = [];
   const opened = [];
@@ -463,4 +611,7 @@ async function testWorkerClicks() {
   await testNotificationTargets();
   await testNamespaceSwitchPreservesOtherNotifications();
   await testWorkerClicks();
+  await testPushSubscriptions();
+  await testEnablingAlertsKeepsPollingOnPushFailure();
+  await testWorkerPushWithoutOpenPage();
 })().catch(error => { console.error(error); process.exitCode = 1; });

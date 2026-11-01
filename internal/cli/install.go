@@ -950,8 +950,10 @@ func deleteConsoleServerRBAC(ctx context.Context, dyn dynamic.Interface) error {
 		{gvr: clusterRoleGVR, name: "kelos-console-user", kind: "ClusterRole"},
 		{gvr: clusterRoleGVR, name: "kelos-console-admin", kind: "ClusterRole"},
 		{gvr: clusterRoleGVR, name: "kelos-session-server-role", kind: "ClusterRole"},
+		{gvr: roleBindingGVR, name: "kelos-console-web-push", kind: "RoleBinding", namespaced: true},
 		{gvr: roleBindingGVR, name: "kelos-console-server-rolebinding", kind: "RoleBinding", namespaced: true},
 		{gvr: roleBindingGVR, name: "kelos-session-server-rolebinding", kind: "RoleBinding", namespaced: true},
+		{gvr: roleGVR, name: "kelos-console-web-push", kind: "Role", namespaced: true},
 		{gvr: roleGVR, name: "kelos-console-server-role", kind: "Role", namespaced: true},
 		{gvr: roleGVR, name: "kelos-session-server-role", kind: "Role", namespaced: true},
 	}

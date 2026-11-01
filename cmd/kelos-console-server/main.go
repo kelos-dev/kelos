@@ -32,6 +32,8 @@ func main() {
 	var secureCookie bool
 	var authMode string
 	var proxyAuth consoleserver.ProxyAuthConfig
+	var pushConfig consoleserver.WebPushConfig
+	var pushPublicKeyFile, pushPrivateKeyFile string
 	flag.StringVar(&address, "bind-address", ":8080", "HTTP listen address")
 	flag.StringVar(&tokenFile, "token-file", "", "Path to the static authentication token")
 	flag.StringVar(&authMode, "auth-mode", consoleserver.AuthModeStaticToken, "Authentication mode: staticToken, oidc or github")
@@ -40,6 +42,10 @@ func main() {
 	flag.StringVar(&proxyAuth.GroupsPrefix, "groups-prefix", "", "Prefix for authenticated group identities")
 	flag.StringVar(&defaultNamespace, "default-namespace", "default", "Initial namespace in the Console")
 	flag.BoolVar(&secureCookie, "secure-cookie", false, "Mark the authentication cookie as HTTPS-only")
+	flag.StringVar(&pushConfig.Namespace, "web-push-namespace", "", "Namespace for Web Push subscriptions and delivery Lease; enables Web Push")
+	flag.StringVar(&pushConfig.Subject, "web-push-subject", "", "Web Push operator contact URL (mailto: or https:)")
+	flag.StringVar(&pushPublicKeyFile, "web-push-public-key-file", "", "Path to the VAPID public key")
+	flag.StringVar(&pushPrivateKeyFile, "web-push-private-key-file", "", "Path to the VAPID private key")
 	flag.Parse()
 
 	if err := validateAuthFlags(authMode, address, tokenFile, secureCookie, proxyAuth); err != nil {
@@ -84,6 +90,17 @@ func main() {
 		DefaultNamespace: defaultNamespace,
 		SecureCookie:     secureCookie,
 	}
+	if pushConfig.Namespace != "" || pushConfig.Subject != "" || pushPublicKeyFile != "" || pushPrivateKeyFile != "" {
+		publicKey, publicErr := readToken(pushPublicKeyFile)
+		privateKey, privateErr := readToken(pushPrivateKeyFile)
+		if publicErr != nil || privateErr != nil {
+			fmt.Fprintf(os.Stderr, "Invalid Web Push configuration: public key: %v; private key: %v\n", publicErr, privateErr)
+			os.Exit(1)
+		}
+		pushConfig.PublicKey, pushConfig.PrivateKey = publicKey, privateKey
+		pushConfig.Logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
+		config.WebPush = &pushConfig
+	}
 	if authMode == consoleserver.AuthModeOIDC || authMode == consoleserver.AuthModeGitHub {
 		authorizationClient, err := newAuthorizationClient(restConfig)
 		if err != nil {
@@ -109,7 +126,20 @@ func main() {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
+	workerDone := make(chan error, 1)
+	if config.WebPush != nil {
+		go func() {
+			err := handler.RunWebPush(ctx)
+			workerDone <- err
+			if err != nil {
+				pushConfig.Logger.Error("Web Push worker stopped", "error", err)
+				cancel()
+			}
+		}()
+	}
+	shutdownDone := make(chan struct{})
 	go func() {
+		defer close(shutdownDone)
 		<-ctx.Done()
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer shutdownCancel()
@@ -119,6 +149,18 @@ func main() {
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		fmt.Fprintf(os.Stderr, "Console server failed: %v\n", err)
 		os.Exit(1)
+	}
+	<-shutdownDone
+	if config.WebPush != nil {
+		select {
+		case err := <-workerDone:
+			if err != nil {
+				os.Exit(1)
+			}
+		case <-time.After(10 * time.Second):
+			fmt.Fprintln(os.Stderr, "Web Push worker did not stop before the shutdown deadline")
+			os.Exit(1)
+		}
 	}
 }
 

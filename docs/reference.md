@@ -797,7 +797,8 @@ Open **Settings** using the gear icon in the sidebar footer, then enable
 **Browser notifications** to opt in. The Settings popover also shows permission
 or browser-support guidance when needed. Press Escape or click outside to close it.
 Alerts cover input requests and completed or failed work across the active
-namespace, including Sessions you have not selected. Each tab suppresses alerts
+namespace, including Sessions you have not selected. Without Web Push, each tab
+suppresses alerts
 for its own visible, focused conversation; another open tab can still alert for
 that Session. Tabs coordinate delivery to avoid
 repeating the same event. If browser storage is unavailable, this coordination
@@ -806,15 +807,89 @@ the Session list refreshes, normally every five seconds, and can report the late
 retained event after a connection interruption. Opening the console or switching
 namespaces establishes a baseline without notifying about existing history.
 Interrupted work does not produce an alert.
-Clicking an alert opens its Session, switching namespaces if necessary. Alerts
-are dismissed when the console detects that a Session was removed or replaced.
+Clicking an alert opens its Session, switching namespaces if necessary. When the Console is open, alerts
+are dismissed when it detects that a Session was removed or replaced.
 The setting is saved in this browser. Notifications require browser permission,
-HTTPS or localhost, service-worker notifications, and Web Locks support. On iPhone
+HTTPS or localhost, and service-worker notifications. Polling alerts also require
+Web Locks support. On iPhone
 and iPad, add the console to the Home Screen and open it there before enabling notifications.
 Use **Send test notification** to check delivery. If it does not appear, check
 browser and operating-system notification settings, including Focus or Do Not Disturb.
-Keep the console open: notification delivery stops when the page is closed or
-suspended by the browser. There is no server-side Web Push delivery.
+This test checks browser display; it does not test server-side Web Push delivery.
+Without Web Push, keep the console open: notification delivery stops when the
+page is closed or suspended by the browser.
+
+To receive notifications while the Console is closed or suspended, enable
+`consoleServer.webPush.enabled` in the Helm chart. Create a persistent VAPID
+P-256 key pair, for example with `npx web-push generate-vapid-keys --json`, and
+store its URL-safe, unpadded base64 values in an existing Kubernetes Secret in
+the release namespace. Use the Secret keys `public-key` and `private-key`.
+Keep the private key out of Helm values and preserve this Secret across upgrades.
+Create a separate, dedicated namespace for subscription data, such as
+`kubectl create namespace console-notifications`. Keep credentials and unrelated
+Secrets out of this namespace. Configure:
+
+```yaml
+consoleServer:
+  webPush:
+    enabled: true
+    storageNamespace: console-notifications
+    secretName: console-web-push
+    subject: mailto:admin@example.com
+```
+
+`subject` is the operator's contact URL (`mailto:` or `https:`). Invalid or
+mismatched keys prevent the Console from starting. The Console needs outbound
+HTTPS access to the browser's push service. Supported endpoint hosts are
+`web.push.apple.com`, `fcm.googleapis.com`,
+`updates.push.services.mozilla.com`, and subdomains of `notify.windows.com`.
+`storageNamespace` must exist and differ from the release namespace. The chart
+grants the Console full Secret access (get, list, create, update, delete) only
+within that dedicated namespace, plus delivery Lease access there. It does not
+grant Kubernetes API access to authentication, VAPID, or other Secrets in the
+release namespace.
+Subscription endpoints, encryption keys, authenticated identities, and delivery
+cursors are stored in the dedicated namespace; restrict access to these Secrets
+and back them up with the VAPID key pair. Each subscription's state is limited to
+256 KiB; registration rejects larger state with a storage-limit error.
+`kelos uninstall` removes the storage Role and RoleBinding. The operator-managed
+storage namespace and its subscription data are retained; remove them separately
+if they are no longer needed.
+
+After Web Push is enabled, open the Console with **Browser notifications**
+enabled to register that browser or Home Screen app. On iPhone and iPad, open
+it from the Home Screen. Push delivery continues while the page is suspended or
+closed, subject to browser permission, network availability, and operating-system
+notification settings. Adding the app to the Home Screen alone does not enable
+server delivery.
+
+Each browser subscription covers one namespace. Switching namespaces updates that
+subscription; when several tabs share a subscription, the most recent namespace selection
+determines the namespace. Older tabs do not overwrite that choice during
+periodic refreshes. If browser storage is unavailable, the most recent
+registration determines the namespace. Existing history is not sent when subscribing or
+switching namespaces. Push alerts also appear while viewing the conversation;
+the page suppresses polling alerts after its push subscription is registered.
+Until registration succeeds, an enabled page can still produce polling alerts.
+Disabling **Browser notifications** or signing out unregisters that device.
+
+The server checks the latest retained notification, normally every five seconds, and
+rechecks Kubernetes namespace and Session access before sending. Subscriptions
+refresh while the Console is open and expire after seven days without a refresh
+with token authentication, or eight hours with proxy authentication. Proxy
+usernames and groups come from the most recent authenticated refresh; identity
+provider membership changes take effect on that refresh or subscription expiry.
+Expired or unauthorized push endpoints (HTTP 401, 403, 404, or 410) are removed;
+reopen the Console to register again after correcting signing configuration.
+Network failures, HTTP 408/429, and server errors retry. Other rejected messages
+are logged and skipped. Other Sessions continue receiving alerts. Delivery progress survives
+Console restarts. Losing the delivery Lease exits the Console with a failure
+status for Kubernetes to restart it. A crash after a push service accepts a
+message but before progress is saved can cause a duplicate.
+Only the latest retained event can be delivered if several events occur between
+checks. Queued messages collapse per Session and expire at the push service
+after one hour.
+
 Sessions open in the **Conversation** view. Select the **Terminal** tab alongside
 **Conversation** and **Changes** on a Ready Session to start an interactive shell
 in its agent container. The shell uses the agent container's workspace and

@@ -198,6 +198,7 @@
         browserAlerts: document.querySelector('#browser-alerts'),
         browserAlertsTest: document.querySelector('#browser-alerts-test'),
         browserAlertsStatus: document.querySelector('#browser-alerts-status'),
+        browserAlertsDescription: document.querySelector('#browser-alerts-description'),
         toast: document.querySelector('#toast'),
     });
     const state = {
@@ -292,6 +293,8 @@
         browserAlertsEnabled: false,
         browserAlertsPending: false,
         browserAlertsMessage: '',
+        webPushPublicKey: '',
+        webPushConfigurationLoaded: false,
     };
     const customOption = '__custom__';
     const maxCachedSessionViews = 5;
@@ -346,6 +349,10 @@
     let browserNotificationQueue = Promise.resolve();
     let browserAlertGeneration = -1;
     const browserAlertEvents = new Map();
+    let pushSubscriptionSync = Promise.resolve();
+    let pushSubscriptionNamespace = '';
+    let pushSubscriptionRefreshed = 0;
+    let pushSubscriptionActive = false;
     function bindConsoleSettings() {
         const settings = elements.consoleSettings;
         settings.addEventListener('toggle', () => {
@@ -360,7 +367,7 @@
     function browserAlertSupportError() {
         if (!window.isSecureContext)
             return 'Browser alerts require HTTPS or localhost.';
-        if (!window.Notification || !navigator.serviceWorker || !navigator.locks) {
+        if (!window.Notification || !navigator.serviceWorker || (!state.webPushPublicKey && !navigator.locks)) {
             return 'This browser does not support notifications here. On iPhone or iPad, add the console to your Home Screen and open it there.';
         }
         return '';
@@ -376,6 +383,9 @@
             ? 'Allow notifications in your browser’s site settings to enable alerts.'
             : state.browserAlertsPending ? 'Preparing browser notifications…' : state.browserAlertsMessage);
         elements.browserAlertsStatus.hidden = !elements.browserAlertsStatus.textContent;
+        elements.browserAlertsDescription.textContent = state.webPushPublicKey
+            ? 'Notify when any Session in this namespace needs input or finishes, even when this app is closed.'
+            : 'Notify when any Session in this namespace needs input or finishes while you’re away from its conversation. Keep this tab open.';
     }
     function notificationRegistration() {
         if (!browserNotificationRegistration) {
@@ -458,8 +468,12 @@
             state.browserAlertsEnabled = false;
         }
         state.browserAlertsMessage = '';
-        if (!state.browserAlertsEnabled)
+        if (!state.browserAlertsEnabled) {
             closeBrowserNotifications();
+            if (state.webPushConfigurationLoaded) {
+                void removePushSubscription().catch(error => { state.browserAlertsMessage = errorMessage(error); renderBrowserAlerts(); });
+            }
+        }
         renderBrowserAlerts();
     }
     async function toggleBrowserAlerts() {
@@ -468,6 +482,7 @@
         state.browserAlertsMessage = '';
         if (state.browserAlertsEnabled && Notification.permission === 'granted') {
             state.browserAlertsEnabled = false;
+            await removePushSubscription().catch(error => { state.browserAlertsMessage = errorMessage(error); });
             closeBrowserNotifications();
         }
         else {
@@ -480,6 +495,14 @@
                 if (permission === 'granted') {
                     await notificationRegistration();
                     state.browserAlertsEnabled = true;
+                    try {
+                        await syncPushSubscription(true);
+                    }
+                    catch (error) {
+                        await removePushSubscription().catch(() => { });
+                        state.browserAlertsMessage = `Could not enable background notifications: ${errorMessage(error)}`;
+                        showToast(state.browserAlertsMessage);
+                    }
                 }
                 else {
                     state.browserAlertsEnabled = false;
@@ -490,6 +513,7 @@
             }
             catch (error) {
                 state.browserAlertsEnabled = false;
+                await removePushSubscription().catch(() => { });
                 state.browserAlertsMessage = `Could not enable browser notifications: ${errorMessage(error)}`;
                 showToast(state.browserAlertsMessage);
             }
@@ -505,6 +529,68 @@
         }
         renderBrowserAlerts();
     }
+    function applicationServerKey(value) {
+        const decoded = window.atob(value.replace(/-/g, '+').replace(/_/g, '/'));
+        return Uint8Array.from(decoded, character => character.charCodeAt(0));
+    }
+    function syncPushSubscription(force = false) {
+        if (!state.webPushPublicKey || !state.namespace || !browserAlertsAvailable())
+            return Promise.resolve();
+        pushSubscriptionSync = pushSubscriptionSync.catch(() => { }).then(async () => {
+            if (!browserAlertsAvailable() || !state.namespace)
+                return;
+            if (!force && pushSubscriptionNamespace === state.namespace && Date.now() - pushSubscriptionRefreshed < 300000)
+                return;
+            const namespace = state.namespace;
+            let sharedNamespace = '';
+            try {
+                sharedNamespace = window.localStorage.getItem('kelos-console-namespace') || '';
+            }
+            catch (_) { }
+            if (sharedNamespace && sharedNamespace !== namespace)
+                return;
+            const registration = await notificationRegistration();
+            if (!registration.pushManager)
+                throw new Error('This browser does not support background push notifications');
+            let subscription = await registration.pushManager.getSubscription();
+            if (!subscription)
+                pushSubscriptionActive = false;
+            const key = applicationServerKey(state.webPushPublicKey);
+            if (subscription && subscription.options.applicationServerKey
+                && !key.every((byte, index) => byte === new Uint8Array(subscription.options.applicationServerKey)[index])) {
+                pushSubscriptionActive = false;
+                await subscription.unsubscribe();
+                subscription = null;
+            }
+            subscription ||= await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+            await api('/api/push-subscription', { method: 'PUT', body: JSON.stringify({ namespace, subscription: { endpoint: subscription.endpoint, keys: subscription.toJSON().keys } }) });
+            pushSubscriptionNamespace = namespace;
+            pushSubscriptionRefreshed = Date.now();
+            pushSubscriptionActive = true;
+            state.browserAlertsMessage = '';
+            renderBrowserAlerts();
+        });
+        return pushSubscriptionSync;
+    }
+    async function removePushSubscription() {
+        pushSubscriptionActive = false;
+        await pushSubscriptionSync.catch(() => { });
+        const registration = await navigator.serviceWorker?.getRegistration();
+        const subscription = await registration?.pushManager?.getSubscription();
+        if (!subscription)
+            return;
+        try {
+            if (state.webPushPublicKey) {
+                await api('/api/push-subscription', { method: 'DELETE', body: JSON.stringify({ subscription: { endpoint: subscription.endpoint, keys: subscription.toJSON().keys } }) });
+            }
+        }
+        finally {
+            await subscription.unsubscribe();
+            pushSubscriptionNamespace = '';
+            pushSubscriptionRefreshed = 0;
+            pushSubscriptionActive = false;
+        }
+    }
     function browserAlertsAvailable() {
         return state.browserAlertsEnabled && !browserAlertSupportError() && Notification.permission === 'granted';
     }
@@ -514,6 +600,7 @@
             && state.selected && sessionViewKey(state.selected) === sessionViewKey(session);
     }
     function notifySessions(sessions) {
+        const usingPush = pushSubscriptionActive && pushSubscriptionNamespace === state.namespace;
         const initial = browserAlertGeneration !== state.namespaceGeneration;
         if (initial) {
             browserAlertGeneration = state.namespaceGeneration;
@@ -537,7 +624,7 @@
             if (!notification || seen.has(notification.id))
                 continue;
             seen.add(notification.id);
-            if (initial || !browserAlertsAvailable() || viewingSession(session))
+            if (initial || usingPush || !browserAlertsAvailable() || viewingSession(session))
                 continue;
             const generation = state.namespaceGeneration;
             queueBrowserNotification(async () => {
@@ -2937,6 +3024,13 @@ ${specs[collection.resource]}`;
             syncCompletionReads(sessions);
             pruneBrowserNotifications(sessions);
             notifySessions(sessions);
+            void syncPushSubscription().catch(error => {
+                const message = `Could not enable background notifications: ${errorMessage(error)}`;
+                if (state.browserAlertsMessage !== message)
+                    showToast(message);
+                state.browserAlertsMessage = message;
+                renderBrowserAlerts();
+            });
             renderSectionOptions();
             if (state.selected) {
                 const selected = state.selected;
@@ -2975,6 +3069,8 @@ ${specs[collection.resource]}`;
     }
     async function loadIdentity() {
         const config = await api('/api/config');
+        state.webPushPublicKey = config.webPushPublicKey || '';
+        state.webPushConfigurationLoaded = true;
         const identity = requiredElement('#console-identity');
         identity.hidden = !config.username;
         identity.textContent = config.username ? `Signed in as ${config.username}` : '';
@@ -6837,6 +6933,8 @@ spec:
         void refreshConsole();
     });
     requiredElement('#logout').addEventListener('click', async () => {
+        state.browserAlertsEnabled = false;
+        await removePushSubscription().catch(error => showToast(errorMessage(error)));
         await closeBrowserNotifications();
         const result = await api('/api/logout', { method: 'POST' }).catch(() => undefined);
         window.location.replace(result?.logoutURL || '/login');
@@ -6896,6 +6994,10 @@ spec:
             void openNotificationSession(event.data.session);
     });
     window.addEventListener('storage', event => {
+        if (event.key === 'kelos-console-namespace' || event.key === null) {
+            pushSubscriptionRefreshed = 0;
+            pushSubscriptionActive = false;
+        }
         if (event.key === browserAlertsStorageKey || event.key === null)
             loadBrowserAlertPreference();
     });
@@ -6907,6 +7009,9 @@ spec:
         return Promise.all([loadOptions(), loadSessions(), loadResources()]);
     }).then(() => {
         setConsoleView('overview');
+        if (!state.browserAlertsEnabled) {
+            void removePushSubscription().catch(error => { state.browserAlertsMessage = errorMessage(error); renderBrowserAlerts(); });
+        }
     }).catch(error => showToast(error.message));
     void consoleReady.then(() => {
         const target = new URLSearchParams(location.search);

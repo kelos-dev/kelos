@@ -1,7 +1,7 @@
 # Minimal cert-manager CRDs (Issuer, Certificate) for the integration test
 # environment. A real cluster has cert-manager installed before kelos; envtest
 # does not, so `kelos install` would fail to map the cert-manager.io/v1 kinds it
-# applies for the conversion-webhook serving certificate. These stubs let the
+# applies for its webhook serving certificate. These stubs let the
 # API server accept those resources (they are not reconciled in tests).
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition

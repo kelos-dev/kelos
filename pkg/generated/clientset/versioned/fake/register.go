@@ -19,7 +19,6 @@ limitations under the License.
 package fake
 
 import (
-	apiv1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 	apiv1alpha2 "github.com/kelos-dev/kelos/api/v1alpha2"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
@@ -32,7 +31,6 @@ var scheme = runtime.NewScheme()
 var codecs = serializer.NewCodecFactory(scheme)
 
 var localSchemeBuilder = runtime.SchemeBuilder{
-	apiv1alpha1.AddToScheme,
 	apiv1alpha2.AddToScheme,
 }
 

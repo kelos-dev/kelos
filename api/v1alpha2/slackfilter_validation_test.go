@@ -28,8 +28,7 @@ func slackFilterCELRule(t *testing.T) string {
 
 // TestSlackFilterCriteriaCoverEveryField fails when a criterion is added to
 // SlackFilter without being listed in SlackFilterMatchCriteria, which would
-// leave it unusable as a rule's only criterion and unchecked by the conversion
-// restore path.
+// leave it unusable as a rule's only criterion.
 func TestSlackFilterCriteriaCoverEveryField(t *testing.T) {
 	classified := map[string]bool{}
 	for _, criterion := range SlackFilterMatchCriteria() {
@@ -72,9 +71,8 @@ func TestSlackFilterCELRuleCountsEveryCriterion(t *testing.T) {
 	}
 }
 
-// TestSlackFilterChannelIDPatternMatchesMarker keeps the constant the conversion
-// restore path compiles in sync with the kubebuilder marker the API server
-// enforces.
+// TestSlackFilterChannelIDPatternMatchesMarker keeps the constant in sync with
+// the kubebuilder marker the API server enforces.
 func TestSlackFilterChannelIDPatternMatchesMarker(t *testing.T) {
 	source, err := os.ReadFile("taskspawner_types.go")
 	if err != nil {
@@ -83,14 +81,14 @@ func TestSlackFilterChannelIDPatternMatchesMarker(t *testing.T) {
 	needle := "// +kubebuilder:validation:items:Pattern=`" + SlackFilterChannelIDPattern + "`"
 	if !strings.Contains(string(source), needle) {
 		t.Errorf("no items:Pattern marker matches SlackFilterChannelIDPattern (%s); the constant and the "+
-			"marker have drifted, so conversion would accept channel IDs the API server rejects",
+			"marker have drifted",
 			SlackFilterChannelIDPattern)
 	}
 }
 
-// TestSlackMirroredBoundsMatchMarkers pins the numeric bounds the conversion
-// restore path mirrors against the markers themselves, so the "keep in sync"
-// intent is enforced rather than trusted.
+// TestSlackMirroredBoundsMatchMarkers pins the numeric bounds against the
+// markers themselves, so the "keep in sync" intent is enforced rather than
+// trusted.
 func TestSlackMirroredBoundsMatchMarkers(t *testing.T) {
 	source, err := os.ReadFile("taskspawner_types.go")
 	if err != nil {

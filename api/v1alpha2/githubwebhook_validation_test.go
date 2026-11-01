@@ -9,8 +9,8 @@ import (
 	"testing"
 )
 
-// The buckets under test live in githubwebhook_criteria.go so the CEL markers,
-// the conversion restore path, and these tests all read the same lists.
+// The buckets under test live in githubwebhook_criteria.go so these tests use
+// the same classification when checking every CEL marker.
 var (
 	safeUnscoped = GitHubWebhookExcludeFilterSafeUnscopedCriteria()
 	eventScoped  = GitHubWebhookExcludeFilterEventScopedCriteria()
@@ -177,8 +177,8 @@ func structTagJSONName(line string) string {
 	return strings.Split(rest[:j], ",")[0]
 }
 
-// TestFilterCriterionEnumsMatchMarkers keeps the enum values the restore path
-// checks in step with the markers the API server enforces, in both directions:
+// TestFilterCriterionEnumsMatchMarkers keeps the enum values in step with the
+// markers the API server enforces, in both directions:
 // a criterion that gains an Enum marker must be listed, and a listed criterion
 // must match its marker exactly. An unlisted enum criterion is not a cosmetic
 // gap — the matcher switches on the value and treats an unknown one as
@@ -201,8 +201,7 @@ func TestFilterCriterionEnumsMatchMarkers(t *testing.T) {
 			continue
 		}
 		if !listed {
-			t.Errorf("criterion %q declares Enum=%s but is not listed in the API package, so the "+
-				"conversion restore path would accept a value the API server rejects", tag, marker)
+			t.Errorf("criterion %q declares Enum=%s but is not listed in the API package", tag, marker)
 			continue
 		}
 		want := []string{}
@@ -215,9 +214,9 @@ func TestFilterCriterionEnumsMatchMarkers(t *testing.T) {
 	}
 }
 
-// TestMirroredBoundsMatchMarkers pins the numeric bounds the restore path
-// mirrors against the markers themselves, so the "keep these in sync" comment
-// is enforced rather than trusted.
+// TestMirroredBoundsMatchMarkers pins the numeric bounds against the markers
+// themselves, so the "keep these in sync" comment is enforced rather than
+// trusted.
 func TestMirroredBoundsMatchMarkers(t *testing.T) {
 	source, err := os.ReadFile("taskspawner_types.go")
 	if err != nil {

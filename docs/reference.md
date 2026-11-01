@@ -1299,9 +1299,7 @@ Use server-side apply or `kubectl create` for large bundles. Client-side
 `kubectl apply` copies the manifest into a last-applied annotation, which is
 subject to Kubernetes' 256 KiB total annotation limit.
 
-Supporting files require `kelos.dev/v1alpha2`. Use that API version to manage
-bundled skills. Reading an AgentConfig through `kelos.dev/v1alpha1` omits
-`files`, and writing it through that API version removes them.
+Supporting files are available through `kelos.dev/v1alpha2`.
 
 ## TaskSpawner
 
@@ -1362,8 +1360,8 @@ bundled skills. Reading an AgentConfig through `kelos.dev/v1alpha1` omits
 | `spec.when.githubWebhook.filters[].checkName` | Filter `check_run` events by the check run's name (exact match or glob, e.g. `"lint"`, `"build-*"`). Ignored for other events | No |
 | `spec.when.githubWebhook.filters[].draft` | Filter PRs by draft status | No |
 | `spec.when.githubWebhook.filters[].author` | Filter by the event sender's username | No |
-| `spec.when.githubWebhook.filters[].pullRequestAuthor` | Filter by the username that opened the pull request the event is about, using the same semantics and event coverage as `excludeFilters[].pullRequestAuthor`. Not preserved across a v1alpha1 round-trip, like `conclusion` and `checkName` | No |
-| `spec.when.githubWebhook.filters[].requestedReviewer` | Filter by `requested_reviewer.login` in the webhook payload. Matching is exact and case-sensitive; events without a requested reviewer, including team review requests, never match. Available on `pull_request` and `pull_request_target` events with action `review_requested` or `review_request_removed`. Set `action: review_requested` to match only new review requests. Max 64 characters. Also supported in `excludeFilters[]` without `event`. Like `pullRequestAuthor`, this criterion in accepting filters is not preserved across a v1alpha1 round-trip | No |
+| `spec.when.githubWebhook.filters[].pullRequestAuthor` | Filter by the username that opened the pull request the event is about, using the same semantics and event coverage as `excludeFilters[].pullRequestAuthor` | No |
+| `spec.when.githubWebhook.filters[].requestedReviewer` | Filter by `requested_reviewer.login` in the webhook payload. Matching is exact and case-sensitive; events without a requested reviewer, including team review requests, never match. Available on `pull_request` and `pull_request_target` events with action `review_requested` or `review_request_removed`. Set `action: review_requested` to match only new review requests. Max 64 characters. Also supported in `excludeFilters[]` without `event` | No |
 | `spec.when.githubWebhook.filters[].excludeAuthors` | Exclude events sent by any of these usernames | No |
 | `spec.when.githubWebhook.filters[].filePatterns.include` | Doublestar globs for changed files to include after `exclude` patterns are removed. Applies to `push` and `pull_request` webhook filters | No |
 | `spec.when.githubWebhook.filters[].filePatterns.exclude` | Doublestar globs for changed files to remove before include matching. Events with no remaining changed files are skipped | No |
@@ -1383,7 +1381,7 @@ bundled skills. Reading an AgentConfig through `kelos.dev/v1alpha1` omits
 | `spec.when.linearWebhook.filters[].excludeLabels` | Exclude issues with any of these labels | No |
 | `spec.when.linearWebhook.gatewayRef.name` | Bind this source to a [WebhookGateway](#webhookgateway) in the same namespace whose `spec.linear` field is set. The per-source webhook server ignores this spawner when the reference is present | No |
 | `spec.when.slack.channels` | Restrict which Slack channels the bot listens in (channel IDs like `"C0123456789"`); when empty, listens in all invited channels | No |
-| `spec.when.slack.excludeFilters` | Exclusion rules; a Slack event is rejected when **any** entry matches (OR across entries; the criteria within one entry are ANDed). Evaluated before `channels`, `triggers`, and `excludePatterns`, so a matching trigger cannot override an exclusion, and — unlike `excludePatterns` — it also applies to slash commands. A criterion the event does not carry never matches. Each entry must set at least one non-empty criterion. Filters after delivery, like `channels` — the bot stays in the channel. Stored only in `v1alpha2`; a client that writes the spawner through `v1alpha1` preserves the rules in an annotation, so stripping that annotation drops them. Max 20 entries | No |
+| `spec.when.slack.excludeFilters` | Exclusion rules; a Slack event is rejected when **any** entry matches (OR across entries; the criteria within one entry are ANDed). Evaluated before `channels`, `triggers`, and `excludePatterns`, so a matching trigger cannot override an exclusion, and — unlike `excludePatterns` — it also applies to slash commands. A criterion the event does not carry never matches. Each entry must set at least one non-empty criterion. Filters after delivery, like `channels` — the bot stays in the channel. Max 20 entries | No |
 | `spec.when.slack.excludeFilters[].channels` | Match events posted in any of the given channel IDs. Exclusion wins over the `channels` allowlist, so a channel listed here is rejected even when `channels` is empty (all channels) or names the same channel. Direct-message IDs (`"D0123456789"`) are accepted here even though `channels` does not accept them, so a catch-all spawner can be kept out of DMs. Max 64 entries, no duplicates | No |
 | `spec.when.slack.botMessagePolicy` | Controls whether bot-originated messages can trigger this spawner: `None` (default) rejects all bot messages, `All` allows all including self, `OthersOnly` allows other bots but rejects the bot's own output to prevent self-trigger loops | No |
 | `spec.when.slack.triggers[].pattern` | RE2 regex matched against message text (unanchored); leading `<@USER_ID>` mentions are stripped before matching; bot mention required unless `mentionOptional` is set; multiple triggers use OR semantics; when empty, every bot mention fires | No |

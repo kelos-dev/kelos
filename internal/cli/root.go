@@ -17,7 +17,7 @@ func NewRootCommand() *cobra.Command {
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			switch cmd.Name() {
-			case "init", "install", "uninstall":
+			case "init", "install", "migrate-storage", "uninstall":
 				return nil
 			}
 
@@ -49,6 +49,7 @@ func NewRootCommand() *cobra.Command {
 		newResumeCommand(cfg),
 		newInitCommand(cfg),
 		newInstallCommand(cfg),
+		newMigrateStorageCommand(cfg),
 		newUninstallCommand(cfg),
 		newVersionCommand(),
 	)

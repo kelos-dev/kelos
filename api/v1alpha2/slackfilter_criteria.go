@@ -19,11 +19,9 @@ package v1alpha2
 import "slices"
 
 // SlackFilterMatchCriteria names every SlackFilter criterion by JSON tag. It is
-// the single source of truth shared by the excludeFilters CEL rule on Slack, the
-// conversion restore path (which re-validates a user-writable preservation
-// annotation the API server never checks), and the tests that pin both. Adding
-// a criterion to SlackFilter without listing it here fails the API package's
-// validation tests.
+// the source of truth used by tests that keep SlackFilter fields and the
+// excludeFilters CEL rule in sync. Adding a criterion to SlackFilter without
+// listing it here fails the API package's validation tests.
 //
 // Every criterion must hold the property the ExcludeFilters contract documents:
 // a value the event does not carry never matches, so an exclusion rule using
@@ -42,9 +40,8 @@ func SlackFilterMatchCriteria() []string {
 	return slices.Clone(slackFilterMatchCriteria)
 }
 
-// Bounds the conversion restore path mirrors from the kubebuilder markers, kept
-// here so there is one home for everything that path re-checks. The API
-// package's validation tests assert each against its marker.
+// Bounds mirrored from the kubebuilder markers. The API package's validation
+// tests assert each against its marker.
 const (
 	// SlackExcludeFiltersMaxItems bounds spec.when.slack.excludeFilters.
 	SlackExcludeFiltersMaxItems = 20

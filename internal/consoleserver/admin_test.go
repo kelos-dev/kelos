@@ -124,7 +124,7 @@ func TestAdminRejectsInvalidManifests(t *testing.T) {
 		"unknown spec":       valid + "  unknown: true\n",
 		"unknown field":      valid + "unknown: true\n",
 		"wrong kind":         strings.Replace(valid, "Workspace", "Session", 1),
-		"wrong version":      strings.Replace(valid, "v1alpha2", "v1alpha1", 1),
+		"wrong version":      strings.Replace(valid, "v1alpha2", "v9", 1),
 		"wrong namespace":    strings.Replace(valid, "  name: repo", "  name: repo\n  namespace: other", 1),
 		"missing spec":       "apiVersion: kelos.dev/v1alpha2\nkind: Workspace\nmetadata:\n  name: repo\n",
 		"oversized":          valid + strings.Repeat(" ", requestBodyLimit),

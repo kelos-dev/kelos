@@ -642,6 +642,47 @@ var _ = Describe("Install/Uninstall", Ordered, func() {
 			Expect(root2.Execute()).To(Succeed())
 		})
 
+		It("Should provision persistent Console Web Push keys", func() {
+			args := []string{
+				"install", "--kubeconfig", kubeconfigPath,
+				"--set", "consoleServer.enabled=true,consoleServer.secretName=console-auth,consoleServer.webPush.enabled=true,consoleServer.webPush.storageNamespace=console-notifications,consoleServer.webPush.secretName=console-signing,consoleServer.webPush.subject=https://github.com/kelos-dev/kelos",
+			}
+			root := cli.NewRootCommand()
+			root.SetArgs(args)
+			Expect(root.Execute()).To(Succeed())
+
+			storage := &corev1.Namespace{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "console-notifications"}, storage)).To(Succeed())
+			secretKey := types.NamespacedName{Namespace: "kelos-system", Name: "console-signing"}
+			secret := &corev1.Secret{}
+			Expect(k8sClient.Get(ctx, secretKey, secret)).To(Succeed())
+			Expect(secret.Data["public-key"]).NotTo(BeEmpty())
+			Expect(secret.Data["private-key"]).NotTo(BeEmpty())
+			original := secret.DeepCopy()
+
+			deployment := &appsv1.Deployment{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: "kelos-system", Name: "kelos-console-server"}, deployment)).To(Succeed())
+			Expect(deployment.Spec.Template.Spec.Containers[0].Args).To(ContainElement("--web-push-namespace=console-notifications"))
+
+			By("Preserving signing keys across repeated installs")
+			reinstall := cli.NewRootCommand()
+			reinstall.SetArgs(args)
+			Expect(reinstall.Execute()).To(Succeed())
+			Expect(k8sClient.Get(ctx, secretKey, secret)).To(Succeed())
+			Expect(secret.UID).To(Equal(original.UID))
+			Expect(secret.Data).To(Equal(original.Data))
+
+			By("Rejecting invalid existing keys without replacing the Secret")
+			delete(secret.Data, "private-key")
+			Expect(k8sClient.Update(ctx, secret)).To(Succeed())
+			invalid := cli.NewRootCommand()
+			invalid.SetArgs(args)
+			Expect(invalid.Execute()).To(MatchError(ContainSubstring("Secret kelos-system/console-signing")))
+			Expect(k8sClient.Get(ctx, secretKey, secret)).To(Succeed())
+			Expect(secret.UID).To(Equal(original.UID))
+			Expect(secret.Data).NotTo(HaveKey("private-key"))
+		})
+
 		It("Should apply Helm values file overrides", func() {
 			valuesPath := filepath.Join(GinkgoT().TempDir(), "values.yaml")
 			values := `webhookServer:

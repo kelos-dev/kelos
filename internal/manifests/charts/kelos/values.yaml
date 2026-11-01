@@ -77,9 +77,11 @@ consoleServer:
     github: {}
   webPush:
     enabled: false
-    # Existing dedicated namespace for subscriptions; keep credentials elsewhere.
+    # Dedicated namespace for subscriptions; kelos install creates it if absent.
+    # Direct Helm installs must create it first. Keep credentials elsewhere.
     storageNamespace: ""
-    # Existing Secret with public-key and private-key entries containing a VAPID key pair.
+    # VAPID signing Secret with public-key and private-key entries.
+    # kelos install creates it if absent; direct Helm installs must create it first.
     secretName: ""
     # Operator contact URL, for example mailto:admin@example.com.
     subject: ""

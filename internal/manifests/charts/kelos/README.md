@@ -612,16 +612,24 @@ provider instance, use a separate cookie secret and identity prefixes.
 
 ### Console background notifications
 
-Create an existing dedicated namespace for subscription data, separate from the
-chart release namespace. Do not place credentials or unrelated Secrets there.
+Choose a dedicated namespace for subscription data, separate from the chart
+release namespace. Do not place credentials or unrelated Secrets there.
 Set `consoleServer.webPush.storageNamespace` to that namespace and
 `consoleServer.webPush.enabled: true` to deliver Session completion, failure,
 and input-request alerts while the Console is suspended or closed. Set
-`consoleServer.webPush.secretName` to an existing Secret in the release namespace
-with `public-key` and `private-key` entries containing a persistent VAPID P-256
-key pair in URL-safe, unpadded base64. Set `consoleServer.webPush.subject` to the
-operator's `mailto:` or HTTPS contact URL. Keys are mounted as files, and invalid
-configuration prevents startup. Web Push is disabled by default.
+`consoleServer.webPush.secretName` to a signing Secret name in the release
+namespace and `consoleServer.webPush.subject` to the operator's `mailto:` or
+HTTPS contact URL. Web Push is disabled by default.
+
+`kelos install` creates the storage namespace and signing Secret if absent,
+generating a persistent VAPID P-256 key pair. It validates and preserves existing
+keys across upgrades. Invalid or mismatched keys fail installation. Dry runs
+do not create resources or generate keys.
+
+For direct Helm installs, create the storage namespace and signing Secret
+before installing the chart. The Secret must contain `public-key` and
+`private-key` entries with a VAPID P-256 key pair in URL-safe, unpadded base64.
+Keys are mounted as files, and invalid configuration prevents Console startup.
 
 Users must enable **Browser notifications** and reopen the Console once to
 register. iPhone and iPad users must open the installed Home Screen web app.
@@ -629,9 +637,9 @@ Preserve the VAPID keys across upgrades. Subscription Secrets and the delivery
 Lease reside in the dedicated storage namespace. The chart grants the Console
 ServiceAccount get, list, create, update, and delete access to every Secret in
 that namespace. The VAPID keys and authentication Secrets remain in the release
-namespace and receive no additional API permissions. The storage namespace is
-operator-managed and retained on uninstall; the Console storage Role and
-RoleBinding are removed by `kelos uninstall`.
+namespace and receive no additional API permissions. The storage namespace
+and subscription data are retained on uninstall; the Console
+storage Role and RoleBinding are removed by `kelos uninstall`.
 The Console requires outbound HTTPS access to browser push services.
 See [the Console notification reference](../../../../docs/reference.md)
 for subscription scope, expiry, authorization, and delivery limitations.

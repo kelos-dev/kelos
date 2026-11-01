@@ -188,6 +188,11 @@ jobs:
             enabled: true
             secretName: kelos-console-server-auth
             secureCookie: true
+            webPush:
+              enabled: true
+              storageNamespace: kelos-console-notifications
+              secretName: kelos-console-web-push
+              subject: https://github.com/kelos-dev/kelos
             service:
               type: NodePort
           # NOTE: webhookServer.gateway is intentionally left at its disabled

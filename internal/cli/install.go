@@ -189,6 +189,10 @@ func newInstallCommand(cfg *ClientConfig) *cobra.Command {
 				return err
 			}
 
+			if err := prepareConsoleWebPush(ctx, dyn, controllerManifest); err != nil {
+				return fmt.Errorf("preparing Console Web Push: %w", err)
+			}
+
 			fmt.Fprintf(os.Stdout, "Installing kelos controller resources (version: %s)\n", installVersion)
 			if err := applyManifests(ctx, dc, dyn, controllerManifest); err != nil {
 				return fmt.Errorf("installing controller: %w", err)

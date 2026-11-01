@@ -820,14 +820,8 @@ Without Web Push, keep the console open: notification delivery stops when the
 page is closed or suspended by the browser.
 
 To receive notifications while the Console is closed or suspended, enable
-`consoleServer.webPush.enabled` in the Helm chart. Create a persistent VAPID
-P-256 key pair, for example with `npx web-push generate-vapid-keys --json`, and
-store its URL-safe, unpadded base64 values in an existing Kubernetes Secret in
-the release namespace. Use the Secret keys `public-key` and `private-key`.
-Keep the private key out of Helm values and preserve this Secret across upgrades.
-Create a separate, dedicated namespace for subscription data, such as
-`kubectl create namespace console-notifications`. Keep credentials and unrelated
-Secrets out of this namespace. Configure:
+`consoleServer.webPush.enabled` and configure a dedicated storage namespace,
+signing Secret name, and operator contact URL:
 
 ```yaml
 consoleServer:
@@ -838,12 +832,25 @@ consoleServer:
     subject: mailto:admin@example.com
 ```
 
+With `kelos install -f values.yaml`, the installer creates the storage namespace
+and generates a persistent VAPID P-256 key pair in the named Secret when they
+are absent. The signing Secret resides in the release namespace. Existing keys
+are validated and preserved across installs and upgrades; invalid or mismatched
+keys fail installation. `--dry-run` does not create resources or generate keys.
+
+For direct Helm installs, create the storage namespace and signing Secret
+before installing the chart. Generate a VAPID P-256 key pair, for example with
+`npx web-push generate-vapid-keys --json`, and store its URL-safe, unpadded base64
+values under the Secret keys `public-key` and `private-key`. Keep the private
+key out of Helm values and preserve this Secret across upgrades.
+
 `subject` is the operator's contact URL (`mailto:` or `https:`). Invalid or
 mismatched keys prevent the Console from starting. The Console needs outbound
 HTTPS access to the browser's push service. Supported endpoint hosts are
 `web.push.apple.com`, `fcm.googleapis.com`,
 `updates.push.services.mozilla.com`, and subdomains of `notify.windows.com`.
-`storageNamespace` must exist and differ from the release namespace. The chart
+`storageNamespace` must differ from the release namespace. Keep credentials and
+unrelated Secrets out of this namespace. The chart
 grants the Console full Secret access (get, list, create, update, delete) only
 within that dedicated namespace, plus delivery Lease access there. It does not
 grant Kubernetes API access to authentication, VAPID, or other Secrets in the
@@ -852,8 +859,8 @@ Subscription endpoints, encryption keys, authenticated identities, and delivery
 cursors are stored in the dedicated namespace; restrict access to these Secrets
 and back them up with the VAPID key pair. Each subscription's state is limited to
 256 KiB; registration rejects larger state with a storage-limit error.
-`kelos uninstall` removes the storage Role and RoleBinding. The operator-managed
-storage namespace and its subscription data are retained; remove them separately
+`kelos uninstall` removes the storage Role and RoleBinding. The storage namespace
+and subscription data are retained; remove them separately
 if they are no longer needed.
 
 After Web Push is enabled, open the Console with **Browser notifications**
@@ -2040,7 +2047,10 @@ The `kelos` CLI lets you manage the full lifecycle without writing YAML.
 - `--controller-resource-limits`: Resource limits for the controller container as comma-separated `name=value` pairs, for example `cpu=500m,memory=128Mi`
 
 `kelos install` renders the embedded Helm chart but still manages CRDs separately, so `crds.install` must be omitted or set to `false`.
-`kelos install --dry-run` prints the chart manifests and omits CRDs.
+When Console Web Push is enabled, it creates the configured storage namespace
+and signing Secret if absent, and validates and preserves existing signing keys.
+`kelos install --dry-run` prints the chart manifests and omits CRDs without
+accessing the cluster or generating Web Push keys.
 When the same key is set multiple ways, precedence is: chart defaults, then `--values` files, then compatibility install flags, then explicit `--set`, `--set-string`, and `--set-file` overrides.
 
 ### `kelos run` Flags

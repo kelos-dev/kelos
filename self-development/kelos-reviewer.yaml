@@ -242,6 +242,12 @@ spec:
         pull-request code. P1 when a credential or Secret is exposed; P2
         otherwise. Do not lower the priority because the component already
         holds other broad access.
+      - When a PR adds a chart resource that renders only under non-default
+        values and is cluster-scoped or lives outside `kelos-system`, or
+        makes a component create RBAC or other resources at runtime, check
+        that `kelos uninstall` removes it and that a test covers the removal.
+        Leftover RoleBindings regain effect when a later install recreates
+        their subject. P2.
 
       **Documentation accuracy**:
       - Docs, READMEs, and code comments must describe what the code

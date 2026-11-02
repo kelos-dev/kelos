@@ -13,7 +13,7 @@ function slice(start, end) {
 
 function element() {
   return {
-    append() {}, replaceChildren() {}, setAttribute() {}, removeAttribute() {},
+    append() {}, replaceChildren() {}, setAttribute() {}, removeAttribute() {}, close() {},
     classList: {remove() {}},
   };
 }
@@ -40,7 +40,7 @@ function harness(url = 'https://console.example/', sessions = []) {
     elements: Object.fromEntries([
       'overviewView', 'sessionsView', 'resourcesView', 'adminView', 'sessionSidebar',
       'overviewButton', 'sessionsButton', 'resourcesButton', 'adminButton', 'messages',
-      'pending', 'changesList', 'sidebar', 'welcome',
+      'pending', 'changesList', 'sidebar', 'welcome', 'subsessionDialog',
     ].map(key => [key, element()])),
     document: {createElement: element},
     consoleReady: Promise.resolve(),

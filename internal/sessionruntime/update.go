@@ -130,14 +130,18 @@ func (s *Server) finishTurn() {
 	if s.outstanding > 0 {
 		s.outstanding--
 	}
-	shouldReport := (s.updateRequest != nil || s.idleDrainRequest != nil) && s.outstanding == 0
+	turnsComplete := s.outstanding == 0
 	s.submitMu.Unlock()
-	if shouldReport {
+	if turnsComplete && s.drainReportPending() {
 		s.signalSessionUpdateReport()
 	}
 }
 
 func (s *Server) signalSessionUpdateReport() {
+	if s.subsessions != nil && s != s.subsessions.root {
+		s.subsessions.root.signalSessionUpdateReport()
+		return
+	}
 	select {
 	case s.updateReport <- struct{}{}:
 	default:
@@ -218,8 +222,12 @@ func (s *Server) sessionDrainReports() (updateReport, idleDrainReport *sessionup
 	s.submitMu.Lock()
 	defer s.submitMu.Unlock()
 	turnsComplete := s.outstanding == 0
-	return s.drainReportLocked(s.updateRequest, turnsComplete),
-		s.drainReportLocked(s.idleDrainRequest, turnsComplete && !s.backgroundActive.Load() && !s.hasPendingStatusPublishes())
+	updatesDrained, idleDrained := turnsComplete, turnsComplete && !s.backgroundActive.Load() && !s.hasPendingStatusPublishes()
+	if s.subsessions != nil {
+		updatesDrained = updatesDrained && s.subsessions.childrenDrained(false)
+		idleDrained = idleDrained && s.subsessions.childrenDrained(true)
+	}
+	return s.drainReportLocked(s.updateRequest, updatesDrained), s.drainReportLocked(s.idleDrainRequest, idleDrained)
 }
 
 // hasPendingStatusPublishes reports whether any observed activity status update
@@ -236,6 +244,9 @@ func (s *Server) hasPendingStatusPublishes() bool {
 // drainReportPending reports whether a drain request (runtime update or idle
 // drain) is awaiting acknowledgement.
 func (s *Server) drainReportPending() bool {
+	if s.subsessions != nil && s != s.subsessions.root {
+		return s.subsessions.root.drainReportPending()
+	}
 	s.submitMu.Lock()
 	defer s.submitMu.Unlock()
 	return s.updateRequest != nil || s.idleDrainRequest != nil

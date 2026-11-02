@@ -351,6 +351,28 @@ the active namespace. This copies the complete `Session.spec` into an editable
 form or YAML manifest and leaves the new name blank. It does not copy the source
 metadata, conversation, or persistent-volume data.
 
+In the web console, the **+** action beside a Session starts a separate
+conversation in its workspace. Expand the Session in the sidebar to switch
+between **Main conversation** and named subsessions. Each row shows its activity
+state, and the header identifies the selected conversation and shared workspace.
+Conversation details load when a Session is opened; activity updates stream for
+the currently open Session. The **+** action is available when the Session is
+`Ready`, is not resetting, and no subsession creation is pending. Each Session
+supports up to eight subsessions. Each subsession starts with fresh context,
+without the parent's messages or initial prompt, and retains its own history,
+pending messages, and draft. It uses the Session's agent, model, and configuration.
+
+All conversations share the same workspace files and Git branch. File edits,
+commits, and branch switches are visible to every conversation, including while
+other conversations are working. Switching conversations leaves their work
+running. Attachments use the Session's shared storage and quota.
+
+Subsessions follow the parent Session's lifecycle: suspension stops all its
+conversations, and reset or deletion removes their histories and workspace data.
+Activity in any conversation prevents automatic idle reclamation. Histories
+survive Pod replacement only when `Session.spec.volumeClaimTemplate` is set.
+The terminal chat client connects to the main conversation.
+
 Use `kelos session connect NAME` for terminal chat. In an interactive terminal,
 press Enter to send a message, Ctrl+J to insert a newline, and Ctrl+C or Esc to
 interrupt an active turn. Ctrl+C exits the terminal client when no turn is

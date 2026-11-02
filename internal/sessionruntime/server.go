@@ -103,6 +103,7 @@ type Server struct {
 	providerCloseOnce sync.Once
 	providerCloseErr  error
 	workspaceChanges  *workspaceChangesCollector
+	subsessions       *subsessionGroup
 
 	submitMu      sync.Mutex
 	appendMessage func(Event) error
@@ -222,41 +223,81 @@ func Run(ctx context.Context, config Config) error {
 		}
 	}
 
-	journal, err := OpenJournal(filepath.Join(config.StateDir, journalFileName))
+	groupCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	group := newSubsessionGroup(groupCtx, cancel, config.PublishSessionStatus)
+	config.PublishSessionStatus = group.publisher("")
+	server, err := openSessionServer(groupCtx, config, NewProvider, group)
 	if err != nil {
 		return err
+	}
+	defer group.close()
+	if err := group.restore(); err != nil {
+		_ = server.closeProvider()
+		server.events.close()
+		server.journal.Close()
+		return err
+	}
+	err = server.Serve(groupCtx)
+	if childErr := group.err(); childErr != nil {
+		return childErr
+	}
+	return err
+}
+
+func openSessionServer(ctx context.Context, config Config, newProvider func(context.Context, ProviderConfig) (Provider, error), group *subsessionGroup) (*Server, error) {
+	if err := os.MkdirAll(config.StateDir, 0700); err != nil {
+		return nil, fmt.Errorf("creating Session state directory: %w", err)
+	}
+	journal, err := OpenJournal(filepath.Join(config.StateDir, journalFileName))
+	if err != nil {
+		return nil, err
 	}
 	changes, err := newWorkspaceChangesCollector(config.WorkingDir, config.StateDir, config.Environment)
 	if err != nil {
 		journal.Close()
-		return err
+		return nil, err
 	}
 	recovery, err := recoverJournal(journal, config.AgentType)
 	if err != nil {
 		journal.Close()
-		return err
+		return nil, err
 	}
 	server := NewServer(config, journal, nil)
+	server.subsessions = group
+	if group != nil && group.root == nil {
+		group.root = server
+	}
 	server.workspaceChanges = changes
 	server.events.ctx = ctx
 	server.nextTurnID.Store(recovery.nextTurnID)
 	server.nextInputID.Store(recovery.nextInputID)
 	server.completedTurnID.Store(recovery.completedTurnID)
+	workspaceStateDir := config.StateDir
+	if group != nil {
+		workspaceStateDir = group.root.config.StateDir
+	}
 	publishSessionStatus := func(ctx context.Context, active, waitingForInput bool) error {
 		model := server.runtimeStatusSnapshot().Model
 		return publishObservedSessionStatus(ctx, config.PublishSessionStatus, active, waitingForInput, model, server.journal.LatestNotification(), func(ctx context.Context) (WorkspaceStatus, error) {
-			return readWorkspaceStatus(ctx, realWorkspaceStatusRunner{}, config.StateDir, config.WorkingDir)
+			return readWorkspaceStatus(ctx, realWorkspaceStatusRunner{}, workspaceStateDir, config.WorkingDir)
 		})
 	}
-	server.refreshWorkspaceStatus = func(ctx context.Context, forceDiscovery bool) (WorkspaceStatus, error) {
-		status, err := refreshWorkspaceStatus(ctx, config.StateDir, config.WorkingDir, config.Environment, forceDiscovery)
-		server.updateWorkspaceRuntimeStatus(status)
-		return status, err
+	if group == nil || group.root == server {
+		server.refreshWorkspaceStatus = func(ctx context.Context, forceDiscovery bool) (WorkspaceStatus, error) {
+			status, err := refreshWorkspaceStatus(ctx, workspaceStateDir, config.WorkingDir, config.Environment, forceDiscovery)
+			if group != nil {
+				group.updateWorkspaceStatus(status)
+			} else {
+				server.updateWorkspaceRuntimeStatus(status)
+			}
+			return status, err
+		}
 	}
 	if config.PublishSessionStatus != nil {
 		server.publishSessionStatus = publishSessionStatus
 	}
-	provider, err := NewProvider(ctx, ProviderConfig{
+	provider, err := newProvider(ctx, ProviderConfig{
 		AgentType: config.AgentType, WorkingDir: config.WorkingDir, StateDir: config.StateDir,
 		Model: config.Model, Effort: config.Effort, PluginDir: config.PluginDir,
 		Environment: config.Environment, EventSink: server.events,
@@ -264,7 +305,7 @@ func Run(ctx context.Context, config Config) error {
 	if err != nil {
 		server.events.close()
 		journal.Close()
-		return err
+		return nil, err
 	}
 	server.provider = provider
 	if status, ok := provider.(runtimeStatusProvider); ok {
@@ -273,7 +314,7 @@ func Run(ctx context.Context, config Config) error {
 	if err := server.restoreTurn(recovery.pendingTurn); err != nil {
 		_ = provider.Close()
 		journal.Close()
-		return err
+		return nil, err
 	}
 	if goalManager, ok := provider.(goalControlProvider); ok && goalManager.ActiveGoal() != nil {
 		turn := turnRequest{
@@ -292,7 +333,7 @@ func Run(ctx context.Context, config Config) error {
 		if err != nil {
 			_ = provider.Close()
 			journal.Close()
-			return err
+			return nil, err
 		}
 		server.settledTurnID.Store(settledTurnID)
 	}
@@ -305,7 +346,7 @@ func Run(ctx context.Context, config Config) error {
 	if server.publishSessionStatus != nil && recovery.hasUnsettledActivity(server.settledTurnID.Load()) {
 		server.seedRecoveredActivityPublish()
 	}
-	return server.Serve(ctx)
+	return server, nil
 }
 
 func publishObservedSessionStatus(ctx context.Context, publisher SessionStatusPublisher, active, waitingForInput bool, model string, notification *kelos.SessionNotification, readStatus func(context.Context) (WorkspaceStatus, error)) error {
@@ -503,6 +544,10 @@ func (s *Server) runTurns(ctx context.Context) {
 }
 
 func (s *Server) requestWorkspaceStatusRefresh(forceDiscovery bool) {
+	if s.subsessions != nil && s.subsessions.root != s {
+		s.subsessions.root.requestWorkspaceStatusRefresh(forceDiscovery)
+		return
+	}
 	if s.refreshWorkspaceStatus == nil {
 		return
 	}
@@ -994,16 +1039,18 @@ func (s *Server) submitParsedMessage(text, requestID string, command sessionComm
 			return errors.New("/goal is not available in this Session")
 		}
 	}
+	if s.subsessions != nil && s != s.subsessions.root {
+		root := s.subsessions.root
+		root.submitMu.Lock()
+		defer root.submitMu.Unlock()
+		if err := root.checkDrainLocked(); err != nil {
+			return err
+		}
+	}
 	s.submitMu.Lock()
 	defer s.submitMu.Unlock()
-	if s.idleDrainRequest != nil {
-		return errors.New("Session is idle and is being reclaimed")
-	}
-	if s.updateRequest != nil {
-		return errors.New("Session runtime is draining for an update; retry after it reconnects")
-	}
-	if s.providerStopping.Load() {
-		return errors.New("Session provider is restarting; retry after it reconnects")
+	if err := s.checkDrainLocked(); err != nil {
+		return err
 	}
 	if err := s.journal.Err(); err != nil {
 		return fmt.Errorf("recording Session message: %w", err)
@@ -1195,12 +1242,12 @@ func (s *Server) removePendingMessage(turnID string, expectedRevision int64, req
 	if s.outstanding > 0 {
 		s.outstanding--
 	}
-	shouldReport := (s.updateRequest != nil || s.idleDrainRequest != nil) && s.outstanding == 0
+	turnsComplete := s.outstanding == 0
 	s.submitMu.Unlock()
 
 	s.markTurnCompleted(turn.id)
 	s.requestSessionStatusPublish()
-	if shouldReport {
+	if turnsComplete && s.drainReportPending() {
 		s.signalSessionUpdateReport()
 	}
 	return nil
@@ -1533,6 +1580,31 @@ func (s *Server) closeProvider() error {
 
 func (s *Server) handleConnection(ctx context.Context, connection net.Conn) {
 	defer connection.Close()
+	decoder := json.NewDecoder(bufio.NewReader(connection))
+	var first ClientRequest
+	if err := decoder.Decode(&first); err != nil {
+		if !errors.Is(err, io.EOF) {
+			log.Printf("Session client read failed error=%v", err)
+		}
+		return
+	}
+	if first.SubsessionID != "" {
+		var err error
+		if s.subsessions == nil {
+			err = errors.New("Subsessions are unavailable")
+		} else {
+			s, err = s.subsessions.get(first.SubsessionID)
+		}
+		if err != nil {
+			_ = json.NewEncoder(connection).Encode(Event{Type: EventError, RequestID: first.RequestID, SubsessionID: first.SubsessionID, Text: err.Error(), Status: "rejected"})
+			return
+		}
+	}
+	s.handleClient(ctx, connection, decoder, &first)
+}
+
+func (s *Server) handleClient(ctx context.Context, connection net.Conn, decoder *json.Decoder, first *ClientRequest) {
+	defer connection.Close()
 	connectionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -1599,9 +1671,15 @@ func (s *Server) handleConnection(ctx context.Context, connection net.Conn) {
 			}
 		}
 		statusStream, stopStatus := s.subscribeRuntimeStatus()
+		var childrenStream <-chan []Subsession
+		stopChildren := func() {}
+		if s.subsessions != nil {
+			childrenStream, stopChildren = s.subsessions.subscribe()
+		}
 		subscriptionCancel = func() {
 			stop()
 			stopStatus()
+			stopChildren()
 		}
 		disconnect := func() {
 			cancel()
@@ -1661,6 +1739,13 @@ func (s *Server) handleConnection(ctx context.Context, connection net.Conn) {
 					if !sent {
 						return
 					}
+				case children := <-childrenStream:
+					writeMu.Lock()
+					sent := sendLiveEvent(connectionCtx, out, overflow, Event{Type: EventSubsessions, Subsessions: children}, disconnect)
+					writeMu.Unlock()
+					if !sent {
+						return
+					}
 				case status, ok := <-statusStream:
 					if !ok {
 						return
@@ -1676,10 +1761,16 @@ func (s *Server) handleConnection(ctx context.Context, connection net.Conn) {
 		}()
 	}
 
-	decoder := json.NewDecoder(bufio.NewReader(connection))
 	for {
 		var request ClientRequest
-		if err := decoder.Decode(&request); err != nil {
+		var readErr error
+		if first != nil {
+			request = *first
+			first = nil
+		} else {
+			readErr = decoder.Decode(&request)
+		}
+		if err := readErr; err != nil {
 			if !errors.Is(err, io.EOF) {
 				log.Printf("Session client read failed error=%v", err)
 			}
@@ -1688,6 +1779,17 @@ func (s *Server) handleConnection(ctx context.Context, connection net.Conn) {
 			return
 		}
 		switch request.Type {
+		case "subsession.create":
+			if s.subsessions == nil {
+				out <- Event{Type: EventError, RequestID: request.RequestID, Text: "Subsessions are unavailable", Status: "rejected"}
+				continue
+			}
+			child, err := s.subsessions.create(request.Text, request.RequestID)
+			if err != nil {
+				out <- Event{Type: EventError, RequestID: request.RequestID, Text: err.Error(), Status: "rejected"}
+			} else {
+				out <- Event{Type: EventSubsessions, RequestID: request.RequestID, SubsessionID: child.ID, Subsessions: s.subsessions.list()}
+			}
 		case "subscribe":
 			subscribe(request.Since, request.JournalID, request.HistoryBounds, request.HistoryItems, request.HistoryBytes)
 		case "workspace.changes":

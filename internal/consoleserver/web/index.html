@@ -205,12 +205,32 @@
       </form>
     </dialog>
 
+    <dialog class="session-dialog" id="subsession-dialog" aria-labelledby="subsession-dialog-title">
+      <form id="subsession-form">
+        <h2 id="subsession-dialog-title">New subsession</h2>
+        <p id="subsession-dialog-description">Start an independent conversation in this Session's workspace. Files and the Git branch are shared; conversation context starts fresh.</p>
+        <div class="form-grid">
+          <label class="form-wide"><span>Name</span><input id="subsession-name" required maxlength="64" autocomplete="off" placeholder="Side investigation"></label>
+        </div>
+        <div class="dialog-error" id="subsession-error" role="alert" hidden></div>
+        <div class="dialog-actions">
+          <button class="secondary-button" id="cancel-subsession" type="button">Cancel</button>
+          <button class="primary-button" id="create-subsession" type="submit">Create subsession</button>
+        </div>
+      </form>
+    </dialog>
+
     <main class="conversation" id="sessions-view" hidden>
       <header class="conversation-header">
         <button class="icon-button mobile-only open-sidebar-button" id="open-sidebar" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false">☰</button>
         <div class="session-heading">
+          <div class="conversation-workspace">
+            <button id="conversation-parent" type="button" hidden></button>
+            <span class="shared-workspace" id="shared-workspace" title="All conversations share the same files and Git branch" hidden>Shared workspace</span>
+          </div>
           <div class="session-title-row">
             <div class="session-title" id="session-title">Choose a session</div>
+            <span class="conversation-status" id="conversation-status" hidden></span>
             <button class="session-display-name-button" id="session-display-name" type="button" disabled hidden>Rename</button>
           </div>
           <div class="session-meta" id="session-meta">Select an existing conversation or create one.</div>

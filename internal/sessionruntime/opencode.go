@@ -151,7 +151,9 @@ func NewOpenCodeProvider(ctx context.Context, config ProviderConfig) (*OpenCodeP
 
 func newOpenCodeProviderWithClient(ctx context.Context, config ProviderConfig, client *openCodeClient) (*OpenCodeProvider, error) {
 	provider := newOpenCodeProviderState(ctx, config, client)
-	if err := provider.initialize(ctx); err != nil {
+	startupCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := provider.initialize(startupCtx); err != nil {
 		_ = provider.Close()
 		return nil, err
 	}

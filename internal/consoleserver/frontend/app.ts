@@ -40,6 +40,15 @@ type RequiredElements<T> = {
   [K in keyof T]: K extends 'messages' ? HTMLElement : T[K] extends NodeListOf<infer E> ? NodeListOf<E> : ConsoleElement;
 };
 
+interface Subsession {
+  id: string;
+  name: string;
+  notificationId?: string;
+  notificationType?: string;
+  active?: boolean;
+  waitingForInput?: boolean;
+}
+
 interface SessionChecks {
   completed: number;
   total: number;
@@ -399,6 +408,16 @@ function requireElements<T extends Record<string, Element | NodeListOf<Element> 
 }
 
 const elements = requireElements({
+  conversationParent: document.querySelector('#conversation-parent'),
+  sharedWorkspace: document.querySelector('#shared-workspace'),
+  conversationStatus: document.querySelector('#conversation-status'),
+  subsessionDialogDescription: document.querySelector('#subsession-dialog-description'),
+  subsessionDialog: document.querySelector('#subsession-dialog'),
+  subsessionForm: document.querySelector('#subsession-form'),
+  subsessionName: document.querySelector('#subsession-name'),
+  subsessionError: document.querySelector('#subsession-error'),
+  createSubsession: document.querySelector('#create-subsession'),
+  cancelSubsession: document.querySelector('#cancel-subsession'),
   list: document.querySelector('#session-list'),
   title: document.querySelector('#session-title'),
   meta: document.querySelector('#session-meta'),
@@ -596,6 +615,12 @@ const state = {
   messagesScrollPaused: false,
   jumpToLatestPending: false,
   sessionViews: new Map<string, SessionView>(),
+  subsessionSelections: new Map<string, string>(),
+  subsessions: new Map<string, Subsession[]>(),
+  subsessionRequestID: '',
+  subsessionRequestText: '',
+  collapsedSubsessions: new Set<string>(),
+  subsessionNotificationID: '',
   currentView: null as SessionView | null,
   lastEventID: 0,
   assistantSegmentByTurn: new Map<string, HTMLElement>(),
@@ -2268,6 +2293,154 @@ function sessionViewKey(session: NotificationSession) {
   return `${sessionKey(session)}/${session.uid || 'unknown'}`;
 }
 
+function selectedSubsession(session: SessionSummary | null = state.selected): string {
+  return session ? state.subsessionSelections.get(sessionViewKey(session)) || '' : '';
+}
+
+function conversationViewKey(session: SessionSummary) {
+  const child = selectedSubsession(session);
+  return sessionViewKey(session) + (child ? `/subsessions/${child}` : '');
+}
+
+function conversationDraftKey(session: SessionSummary) {
+  const child = selectedSubsession(session);
+  return sessionKey(session) + (child ? `/subsessions/${child}` : '');
+}
+
+function conversationLabel(conversation: Subsession) {
+  if (conversation.waitingForInput) return 'Waiting for input';
+  if (conversation.active) return 'Working';
+  if (conversation.notificationType === 'TurnFailed') return 'Failed';
+  return conversation.notificationType === 'TurnCompleted' ? 'Completed' : 'Idle';
+}
+
+function renderSubsessionForm() {
+  const disconnected = !state.socket || state.socket.readyState !== WebSocket.OPEN;
+  const pending = Boolean(state.subsessionRequestID);
+  elements.createSubsession.disabled = disconnected || pending;
+  elements.createSubsession.textContent = pending ? 'Creating…' : 'Create subsession';
+  elements.subsessionName.readOnly = pending;
+  elements.cancelSubsession.disabled = pending;
+}
+
+function renderConversationHeading() {
+  const session = state.selected;
+  const id = selectedSubsession();
+  const conversations = session ? state.subsessions.get(sessionViewKey(session)) || [] : [];
+  const current = conversations.find(conversation => conversation.id === id);
+  elements.conversationParent.hidden = !session || !id;
+  elements.conversationParent.textContent = sessionDisplayName(session);
+  elements.sharedWorkspace.hidden = !session || conversations.length < 2;
+  elements.conversationStatus.hidden = !session || !current;
+  const status = current && session ? (session.phase === 'Ready' && !session.resetting ? conversationLabel(current) : sessionDisplayStatus(session)) : '';
+  elements.conversationStatus.textContent = status;
+  elements.conversationStatus.dataset.state = status;
+  if (session) elements.title.textContent = id ? current?.name || 'Subsession' : sessionDisplayName(session);
+  elements.displayNameButton.hidden = !session || Boolean(id);
+}
+
+function openSubsessionDialog(session: SessionSummary) {
+  if (!state.selected || sessionViewKey(state.selected) !== sessionViewKey(session)) selectSession(session, true, {subsessionID: selectedSubsession(session)});
+  state.subsessionNotificationID = '';
+  elements.subsessionForm.reset();
+  elements.subsessionError.textContent = '';
+  elements.subsessionError.hidden = true;
+  elements.subsessionDialogDescription.textContent = `Start an independent conversation in ${sessionDisplayName(session)}. Files and the Git branch are shared; conversation context starts fresh.`;
+  renderSubsessionForm();
+  elements.subsessionDialog.showModal();
+  elements.subsessionName.focus();
+}
+
+function submitSubsession() {
+  if (!state.socket || state.socket.readyState !== WebSocket.OPEN || !state.subsessionRequestID) return;
+  state.socket.send(JSON.stringify({type: 'subsession.create', requestId: state.subsessionRequestID, text: state.subsessionRequestText}));
+}
+
+function receiveSubsessions(event: ConsoleEvent & {subsessions?: Subsession[]; subsessionId?: string}) {
+  if (!state.selected) return;
+  if (event.type === 'error') {
+    state.subsessionRequestID = '';
+    state.subsessionRequestText = '';
+    elements.subsessionError.textContent = event.text || 'Could not create subsession';
+    elements.subsessionError.hidden = false;
+    renderSubsessionForm();
+    return;
+  }
+  state.subsessions.set(sessionViewKey(state.selected), event.subsessions || []);
+  renderSessions();
+  renderConversationHeading();
+  const notification = state.subsessionNotificationID;
+  state.subsessionNotificationID = '';
+  const target = notification && event.subsessions?.find(child => child.notificationId === notification);
+  if (target && target.id !== selectedSubsession()) {
+    selectSession(state.selected, false, {subsessionID: target.id});
+    return;
+  }
+  const created = event.requestId && event.requestId === state.subsessionRequestID;
+  if (created && event.subsessionId) selectSession(state.selected, false, {subsessionID: event.subsessionId});
+}
+
+function appendSessionConversations(item: HTMLElement, session: SessionSummary, parentButton: HTMLButtonElement) {
+  const key = sessionViewKey(session);
+  const conversations = state.subsessions.get(key);
+  const selected = Boolean(state.selected && sessionViewKey(state.selected) === key);
+  const expanded = (selected || Boolean(conversations)) && !state.collapsedSubsessions.has(key);
+  if (selected && (!expanded || !conversations?.length)) parentButton.setAttribute('aria-current', 'page');
+  const toggle = document.createElement('button');
+  toggle.className = 'session-conversations-toggle';
+  toggle.type = 'button';
+  toggle.textContent = expanded ? '⌄' : '›';
+  toggle.setAttribute('aria-label', `${expanded ? 'Collapse' : 'Expand'} conversations in ${sessionDisplayName(session)}`);
+  toggle.setAttribute('aria-expanded', String(expanded));
+  toggle.addEventListener('click', () => {
+    if (expanded) state.collapsedSubsessions.add(key);
+    else {
+      state.collapsedSubsessions.delete(key);
+      if (!conversations) selectSession(session, true);
+    }
+    renderSessions();
+  });
+  item.append(toggle);
+  const create = document.createElement('button');
+  create.className = 'session-subsession-create';
+  create.type = 'button';
+  create.textContent = '＋';
+  create.title = `New subsession in ${sessionDisplayName(session)}`;
+  create.setAttribute('aria-label', create.title);
+  create.disabled = session.phase !== 'Ready' || Boolean(session.resetting) || Boolean(state.subsessionRequestID);
+  create.addEventListener('click', () => openSubsessionDialog(session));
+  item.append(create);
+  if (!expanded || !conversations) return;
+  const list = document.createElement('div');
+  list.className = 'session-conversations';
+  list.setAttribute('role', 'group');
+  list.setAttribute('aria-label', `Conversations in ${sessionDisplayName(session)}`);
+  for (const conversation of conversations) {
+    const button = document.createElement('button');
+    button.className = 'session-conversation';
+    button.type = 'button';
+    if (selected && conversation.id === selectedSubsession(session)) button.setAttribute('aria-current', 'page');
+    const status = session.phase === 'Ready' && !session.resetting ? conversationLabel(conversation) : sessionDisplayStatus(session);
+    const dot = document.createElement('span');
+    dot.className = 'conversation-dot';
+    dot.dataset.state = status;
+    dot.setAttribute('aria-hidden', 'true');
+    const text = document.createElement('span');
+    text.className = 'session-conversation-text';
+    const name = document.createElement('span');
+    name.className = 'session-conversation-name';
+    name.textContent = conversation.name;
+    const activity = document.createElement('span');
+    activity.className = 'session-conversation-activity';
+    activity.textContent = status;
+    text.append(name, activity);
+    button.append(dot, text);
+    button.addEventListener('click', () => selectSession(session, true, {subsessionID: conversation.id}));
+    list.append(button);
+  }
+  item.append(list);
+}
+
 function moveChildren(element: Element) {
   const fragment = document.createDocumentFragment();
   while (element.firstChild) fragment.append(element.firstChild);
@@ -2397,7 +2570,7 @@ function activateSessionView(view: SessionView) {
 }
 
 function cachedSessionView(session: SessionSummary) {
-  const key = sessionViewKey(session);
+  const key = conversationViewKey(session);
   let view = state.sessionViews.get(key);
   if (view) state.sessionViews.delete(key);
   else view = createSessionView();
@@ -2411,7 +2584,18 @@ function cachedSessionView(session: SessionSummary) {
 }
 
 function discardSessionView(session?: SessionSummary | null) {
-  if (session) state.sessionViews.delete(sessionViewKey(session));
+  if (!session) return;
+  const key = sessionViewKey(session);
+  for (const cached of state.sessionViews.keys()) {
+    if (cached === key || cached.startsWith(`${key}/subsessions/`)) state.sessionViews.delete(cached);
+  }
+  const prefix = `${sessionKey(session)}/subsessions/`;
+  for (const drafts of [state.promptDrafts, state.attachmentDrafts]) {
+    for (const draft of drafts.keys()) if (draft.startsWith(prefix)) drafts.delete(draft);
+  }
+  state.subsessions.delete(key);
+  state.subsessionSelections.delete(key);
+  state.collapsedSubsessions.delete(key);
 }
 
 function resetCurrentSessionView() {
@@ -2666,21 +2850,21 @@ function renderRuntimeStatus() {
 function savePromptDraft(session?: SessionSummary | null) {
   if (!session) return;
   if (elements.input.value) {
-    state.promptDrafts.set(sessionKey(session), elements.input.value);
+    state.promptDrafts.set(conversationDraftKey(session), elements.input.value);
   } else {
-    state.promptDrafts.delete(sessionKey(session));
+    state.promptDrafts.delete(conversationDraftKey(session));
   }
 }
 
 function restorePromptDraft(session?: SessionSummary | null) {
-  elements.input.value = session ? state.promptDrafts.get(sessionKey(session)) || '' : '';
+  elements.input.value = session ? state.promptDrafts.get(conversationDraftKey(session)) || '' : '';
   resizeComposer();
 }
 
 function clearPromptDraft(session?: SessionSummary | null) {
   if (!session) return;
-  state.promptDrafts.delete(sessionKey(session));
-  if (state.selected && sessionKey(state.selected) === sessionKey(session)) {
+  state.promptDrafts.delete(conversationDraftKey(session));
+  if (state.selected && conversationDraftKey(state.selected) === conversationDraftKey(session)) {
     elements.input.value = '';
     resizeComposer();
     updateComposerAction();
@@ -2689,8 +2873,8 @@ function clearPromptDraft(session?: SessionSummary | null) {
 
 function clearAttachmentDraft(session?: SessionSummary | null) {
   if (!session) return;
-  state.attachmentDrafts.delete(sessionKey(session));
-  if (state.selected && sessionKey(state.selected) === sessionKey(session)) renderPendingAttachments();
+  state.attachmentDrafts.delete(conversationDraftKey(session));
+  if (state.selected && conversationDraftKey(state.selected) === conversationDraftKey(session)) renderPendingAttachments();
 }
 
 function providerLabel(provider: string) {
@@ -2901,7 +3085,7 @@ function createSessionListItem(session: SessionSummary, draggable = false) {
   const item = document.createElement('div');
   const key = sessionKey(session);
   const assigningSection = state.sectionAssignments.has(key);
-  item.className = `session-item${state.selected && sessionKey(state.selected) === key ? ' active' : ''}${assigningSection ? ' section-saving' : ''}`;
+  item.className = `session-item has-conversations${assigningSection ? ' section-saving' : ''}`;
   const attentionLabel = sessionAttentionLabel(session);
   if (attentionLabel) item.classList.add('needs-attention');
   const button = document.createElement('button');
@@ -2990,6 +3174,7 @@ function createSessionListItem(session: SessionSummary, draggable = false) {
     item.append(link);
   }
   if (button.draggable) configureSessionDrag(item, button, session);
+  appendSessionConversations(item, session, button);
   return item;
 }
 
@@ -3936,8 +4121,11 @@ async function loadSessionSource(name: string) {
   }
 }
 
-function selectSession(session: SessionSummary | null, resumeIdle = false, {updateLocation = true} = {}) {
+function selectSession(session: SessionSummary | null, resumeIdle = false, {updateLocation = true, subsessionID}: {updateLocation?: boolean; subsessionID?: string} = {}) {
   savePromptDraft(state.selected);
+  state.subsessionRequestID = '';
+  state.subsessionRequestText = '';
+  elements.subsessionDialog.close();
   closeSessionSectionEditor();
   closeSocket();
   saveCurrentSessionView();
@@ -3945,6 +4133,11 @@ function selectSession(session: SessionSummary | null, resumeIdle = false, {upda
   state.messagesScrollPaused = false;
   state.selected = session;
   if (updateLocation && state.consoleView === 'sessions') updateConsoleLocation();
+  state.subsessionNotificationID = subsessionID === undefined ? session?.lastNotification?.id || '' : '';
+  if (session && subsessionID !== undefined) {
+    state.subsessionSelections.set(sessionViewKey(session), subsessionID);
+    state.collapsedSubsessions.delete(sessionViewKey(session));
+  }
   state.currentView = null;
   setActiveView('conversation');
   restorePromptDraft(session);
@@ -4081,26 +4274,32 @@ function createWelcome() {
 }
 
 function renderHeader() {
+  renderSubsessionForm();
   const session = state.selected;
+  const child = Boolean(selectedSubsession());
   refreshSessionProgress();
   elements.terminalTab.disabled = !sessionTerminal.available(session);
   elements.viewChoice.disabled = !session;
   elements.terminalChoice.disabled = elements.terminalTab.disabled;
   sessionTerminal.sync(session);
   if (elements.terminalTab.disabled && !elements.terminalView.hidden) setActiveView('conversation');
-  elements.displayNameButton.hidden = !session;
+  elements.displayNameButton.hidden = !session || Boolean(selectedSubsession());
   elements.displayNameButton.disabled = !session;
   renderSelectedSessionSection(session);
-  elements.suspendButton.hidden = !session || Boolean(session.userSuspended);
+  if (child) elements.sectionForm.hidden = true;
+  elements.suspendButton.hidden = !session || Boolean(session.userSuspended) || child;
   elements.suspendButton.disabled = !session || Boolean(session.userSuspended) || state.suspendingSession;
-  elements.resumeButton.hidden = !Boolean(session?.userSuspended);
+  elements.resumeButton.hidden = !Boolean(session?.userSuspended) || child;
   elements.resumeButton.disabled = !Boolean(session?.userSuspended) || state.resumingSession;
+  elements.resetButton.hidden = child;
+  elements.deleteButton.hidden = child;
   elements.resetButton.disabled = !session || Boolean(session.resetting);
   elements.deleteButton.disabled = !session;
   elements.conversationTab.disabled = !session;
   elements.changesTab.disabled = !session;
   updateComposerAction();
   if (!session) {
+    renderConversationHeading();
     elements.title.textContent = 'Choose a session';
     elements.meta.textContent = 'Select an existing conversation or create one.';
     setConnection('idle', 'Not connected');
@@ -4108,11 +4307,11 @@ function renderHeader() {
     renderRuntimeStatus();
     return;
   }
-  elements.title.textContent = sessionDisplayName(session);
+  renderConversationHeading();
   const resourceName = sessionDisplayName(session) === session.name ? session.namespace : `${session.namespace}/${session.name}`;
-  const details = [resourceName, providerLabel(session.provider)];
+  const details = child ? [providerLabel(session.provider)] : [resourceName, providerLabel(session.provider)];
   if (session.model) details.push(session.model);
-  details.push(sessionDisplayStatus(session));
+  if (!child) details.push(sessionDisplayStatus(session));
   if (session.branch) details.push(session.branch);
   const detailText = document.createElement('span');
   detailText.className = 'session-meta-details';
@@ -4125,7 +4324,7 @@ function renderHeader() {
     separator.textContent = '·';
     elements.meta.append(separator, link);
   }
-  const timestamp = createSessionTimestamp(session, false, 'session-meta-time');
+  const timestamp = child ? null : createSessionTimestamp(session, false, 'session-meta-time');
   if (timestamp) {
     const separator = document.createElement('span');
     separator.className = 'session-meta-separator';
@@ -4148,6 +4347,7 @@ function setConnection(status: string, label: string) {
 }
 
 function setComposer(enabled: boolean) {
+  renderSubsessionForm();
   elements.input.disabled = !enabled;
   elements.attachFiles.disabled = !enabled || state.sendingMessage;
   elements.input.placeholder = enabled ? 'Message the agent…' : 'Choose a ready session to start chatting';
@@ -4351,12 +4551,14 @@ function connectSocket() {
     const historyLoaded = Boolean(state.currentView?.historyLoaded);
     socket.send(JSON.stringify({
       type: 'subscribe',
+      subsessionId: selectedSubsession(),
       since: historyLoaded ? state.lastEventID : 0,
       journalId: historyLoaded ? state.currentView?.journalID || '' : '',
       historyBounds: true,
       historyItems: sessionHistoryItemLimit,
       historyBytes: sessionHistoryByteLimit,
     }));
+    submitSubsession();
     setConnection('connected', 'Connected');
     setComposer(true);
     updateComposerAction();
@@ -5414,6 +5616,15 @@ function receivePromptHistory(event: ConsoleEvent) {
 }
 
 function handleEvent(event) {
+  if (event.type === 'error' && event.subsessionId && event.subsessionId === selectedSubsession()) {
+    showToast(event.text || 'Subsession is unavailable');
+    selectSession(state.selected, false, {subsessionID: ''});
+    return;
+  }
+  if (event.type === 'subsessions' || (event.type === 'error' && event.requestId === state.subsessionRequestID && state.subsessionRequestID)) {
+    receiveSubsessions(event);
+    return;
+  }
   if (event.type === 'workspace.changes' || (event.type === 'error' && event.requestId?.startsWith('changes-'))) {
     receiveWorkspaceChanges(event);
     return;
@@ -6603,7 +6814,7 @@ function scheduleBottomAnchor() {
 
 function currentAttachmentFiles() {
   if (!state.selected) return [];
-  return state.attachmentDrafts.get(sessionKey(state.selected)) || [];
+  return state.attachmentDrafts.get(conversationDraftKey(state.selected)) || [];
 }
 
 function renderPendingAttachments() {
@@ -6620,7 +6831,7 @@ function renderPendingAttachments() {
     remove.textContent = '×';
     remove.addEventListener('click', () => {
       const remaining = currentAttachmentFiles().filter((_, fileIndex) => fileIndex !== index);
-      state.attachmentDrafts.set(sessionKey(state.selected!), remaining);
+      state.attachmentDrafts.set(conversationDraftKey(state.selected!), remaining);
       renderPendingAttachments();
       updateComposerAction();
     });
@@ -6645,7 +6856,7 @@ function stageAttachments(fileList: FileList | null) {
     }
     accepted.push(file);
   }
-  if (accepted.length) state.attachmentDrafts.set(sessionKey(state.selected), [...existing, ...accepted]);
+  if (accepted.length) state.attachmentDrafts.set(conversationDraftKey(state.selected), [...existing, ...accepted]);
   renderPendingAttachments();
   updateComposerAction();
 }
@@ -6680,18 +6891,19 @@ async function submitComposer() {
   const session = state.selected;
   const files = [...currentAttachmentFiles()];
   if (!session) return;
+  const conversation = conversationViewKey(session);
   if (!text && files.length === 0) return;
   state.sendingMessage = true;
   updateComposerAction();
   elements.attachFiles.disabled = true;
   try {
     const attachments = await Promise.all(files.map(file => uploadAttachment(session, file)));
-    if (!state.selected || sessionViewKey(state.selected) !== sessionViewKey(session) || !state.socket || state.socket.readyState !== WebSocket.OPEN) {
+    if (!state.selected || conversationViewKey(state.selected) !== conversation || !state.socket || state.socket.readyState !== WebSocket.OPEN) {
       throw new Error('Session disconnected before the message could be sent');
     }
     state.socket.send(JSON.stringify({type: 'message', text, attachmentIds: attachments.map(attachment => attachment.id)}));
     clearPromptDraft(session);
-    state.attachmentDrafts.delete(sessionKey(session));
+    state.attachmentDrafts.delete(conversationDraftKey(session));
     renderPendingAttachments();
   } catch (error) {
     showToast(errorMessage(error));
@@ -7003,7 +7215,7 @@ function closeSessionSectionEditor() {
 
 function openSessionSectionEditor(session: SessionSummary) {
   closeSessionActionsMenu();
-  if (!state.selected || sessionKey(state.selected) !== sessionKey(session)) selectSession(session);
+  if (!state.selected || sessionKey(state.selected) !== sessionKey(session) || selectedSubsession()) selectSession(session, false, {subsessionID: ''});
   elements.sectionForm.classList.add('mobile-open');
   elements.sectionChoice.focus();
   try {
@@ -7290,6 +7502,25 @@ document.addEventListener('keydown', event => {
 });
 
 bindConsoleSettings();
+elements.conversationParent.addEventListener('click', () => {
+  if (state.selected) selectSession(state.selected, false, {subsessionID: ''});
+});
+elements.cancelSubsession.addEventListener('click', () => elements.subsessionDialog.close());
+elements.subsessionDialog.addEventListener('cancel', event => {
+  if (state.subsessionRequestID) event.preventDefault();
+});
+elements.subsessionForm.addEventListener('submit', event => {
+  event.preventDefault();
+  if (!state.socket || state.socket.readyState !== WebSocket.OPEN || state.subsessionRequestID) return;
+  state.subsessionRequestID = sessionRequestID('subsession');
+  state.subsessionRequestText = elements.subsessionName.value;
+  elements.subsessionError.textContent = '';
+  elements.subsessionError.hidden = true;
+  submitSubsession();
+  renderSubsessionForm();
+  renderSessions();
+});
+
 elements.browserAlerts.addEventListener('change', toggleBrowserAlerts);
 elements.browserAlertsTest.addEventListener('click', testBrowserNotification);
 window.addEventListener('focus', renderBrowserAlerts);

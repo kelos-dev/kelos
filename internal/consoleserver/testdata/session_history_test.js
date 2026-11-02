@@ -123,6 +123,7 @@ class TestNode {
     this.listeners.set(name, listener);
   }
 
+  reset() { this.value = ''; }
   showModal() { this.open = true; }
   close() { this.open = false; }
   focus(options) { this.focused = true; this.focusOptions = options; document.activeElement = this; }
@@ -224,6 +225,17 @@ function resetHarness() {
     backgroundTasks: new TestNode('ul'),
     backgroundTaskStatus: new TestNode('div'),
     runtimeStatus: new TestNode('div'),
+    conversationParent: new TestNode('button'),
+    sharedWorkspace: new TestNode('span'),
+    conversationStatus: new TestNode('span'),
+    sectionForm: new TestNode('form'),
+    subsessionDialogDescription: new TestNode('p'),
+    subsessionName: new TestNode('input'),
+    subsessionForm: new TestNode('form'),
+    cancelSubsession: new TestNode('button'),
+    createSubsession: new TestNode('button'),
+    subsessionDialog: new TestNode('dialog'),
+    subsessionError: new TestNode('p'),
     sidebar: new TestNode('aside'),
     displayNameButton: new TestNode('button'),
     terminalTab: new TestNode('button'),
@@ -252,6 +264,12 @@ function resetHarness() {
     selected: null,
     currentView: null,
     sessionViews: new Map(),
+    subsessionSelections: new Map(),
+    subsessions: new Map(),
+    subsessionRequestID: '',
+    subsessionRequestText: '',
+    collapsedSubsessions: new Set(),
+    subsessionNotificationID: '',
     socket: null,
     socketGeneration: 0,
     bottomScrollFrame: null,
@@ -307,6 +325,12 @@ function resetHarness() {
   toasts = [];
 }
 
+global.WebSocket = {OPEN: 1};
+global.addOption = (select, value, text) => {
+  const option = new TestNode('option', value);
+  option.textContent = text;
+  select.append(option);
+};
 global.maxCachedSessionViews = 5;
 global.renderFileChanges = () => {};
 global.renderDiffBlock = () => {};
@@ -2557,6 +2581,15 @@ testPromptJumpToEditedPendingMessage();
 testPromptJumpWaitsForInitialHistory();
 testPromptJumpCancellation();
 testPromptJumpUnavailableAndPageError();
+testCreationDialogKeepsItsConversationWhenCatalogArrives();
+testSidebarParentRemainsSelectedWithoutVisibleConversations();
+testChildHeaderKeepsWorkspaceActionsOnParent();
+testSidebarConversationsShowActivityAndSelectContext();
+testSubsessionFormPreservesPendingCreationOnReconnect();
+testSubsessionsKeepContextAndDraftsSeparate();
+testSubsessionCreationSelectsItsIndependentConversation();
+testSubsessionNotificationOpensMatchingConversation();
+testUnavailableSubsessionReturnsToMainConversation();
 testReadySessionDisconnectsWhenItBecomesPending()
   .then(testSuspendSessionHidesBackgroundProgress)
   .then(testComposerIgnoresReentrantSubmission)
@@ -2570,3 +2603,181 @@ testReadySessionDisconnectsWhenItBecomesPending()
     process.stderr.write(`${error.stack}\n`);
     process.exitCode = 1;
   });
+
+function testSubsessionsKeepContextAndDraftsSeparate() {
+  resetHarness();
+  const session = {namespace: 'default', name: 'shared', uid: 'shared-id', phase: 'Ready'};
+  state.selected = session;
+  const mainView = cachedSessionView(session);
+  mainView.journalID = 'parent-history';
+  elements.input.value = 'Parent draft';
+  savePromptDraft(session);
+  state.attachmentDrafts.set(conversationDraftKey(session), [{name: 'parent.txt'}]);
+  state.subsessionSelections.set(sessionViewKey(session), 'child');
+  const childView = cachedSessionView(session);
+  assert.notEqual(childView, mainView);
+  assert.equal(childView.journalID, '');
+  restorePromptDraft(session);
+  assert.equal(elements.input.value, '');
+  assert.deepEqual(currentAttachmentFiles(), []);
+  elements.input.value = 'Child draft';
+  savePromptDraft(session);
+  state.subsessionSelections.set(sessionViewKey(session), '');
+  restorePromptDraft(session);
+  assert.equal(elements.input.value, 'Parent draft');
+  assert.equal(cachedSessionView(session), mainView);
+  state.subsessionSelections.set(sessionViewKey(session), 'child');
+  restorePromptDraft(session);
+  assert.equal(elements.input.value, 'Child draft');
+  const childDraftKey = conversationDraftKey(session);
+  state.attachmentDrafts.set(childDraftKey, [{name: 'child.txt'}]);
+  discardSessionView(session);
+  assert.equal(state.promptDrafts.has(childDraftKey), false);
+  assert.equal(state.attachmentDrafts.has(childDraftKey), false);
+  assert.equal(state.sessionViews.size, 0);
+  assert.equal(selectedSubsession(session), '');
+}
+
+function testSubsessionCreationSelectsItsIndependentConversation() {
+  resetHarness();
+  const session = {namespace: 'default', name: 'shared', uid: 'shared-id', phase: 'Ready'};
+  state.selected = session;
+  state.subsessionRequestID = 'create-child';
+  receiveSubsessions({type: 'subsessions', requestId: 'create-child', subsessionId: 'child', subsessions: [{id: 'child', name: 'Investigation'}]});
+  assert.equal(selectedSubsession(), 'child');
+  assert.equal(state.subsessionRequestID, '');
+  assert.equal(state.currentView.historyLoaded, false);
+  renderConversationHeading();
+  assert.equal(elements.title.textContent, 'Investigation');
+  assert.equal(socketConnections, 1);
+}
+
+function testSubsessionNotificationOpensMatchingConversation() {
+  resetHarness();
+  const session = {namespace: 'default', name: 'shared', uid: 'shared-id', phase: 'Ready'};
+  state.selected = session;
+  state.subsessionNotificationID = 'child-completion';
+  receiveSubsessions({type: 'subsessions', subsessions: [{id: 'child', name: 'Investigation', notificationId: 'child-completion'}]});
+  assert.equal(selectedSubsession(), 'child');
+  assert.equal(state.subsessionNotificationID, '');
+}
+
+function testUnavailableSubsessionReturnsToMainConversation() {
+  resetHarness();
+  state.selected = {namespace: 'default', name: 'shared', uid: 'shared-id', phase: 'Ready'};
+  state.subsessionSelections.set(sessionViewKey(state.selected), 'removed-child');
+  handleEvent({type: 'error', subsessionId: 'removed-child', text: 'Subsession does not exist', status: 'rejected'});
+  assert.equal(selectedSubsession(), '');
+  assert.deepEqual(toasts, ['Subsession does not exist']);
+}
+
+function testSidebarConversationsShowActivityAndSelectContext() {
+  resetHarness();
+  const session = {namespace: 'default', name: 'shared', uid: 'shared-id', phase: 'Ready'};
+  state.selected = session;
+  state.subsessions.set(sessionViewKey(session), [
+    {id: '', name: 'Main conversation'},
+    {id: 'child', name: 'Investigation', active: true},
+    {id: 'waiting', name: 'Review', active: true, waitingForInput: true},
+  ]);
+  const item = new TestNode('div');
+  const parent = new TestNode('button');
+  item.append(parent);
+  appendSessionConversations(item, session, parent);
+  const rows = item.querySelectorAll('.session-conversation');
+  assert.deepEqual(rows.map(row => row.textContent), ['Main conversationIdle', 'InvestigationWorking', 'ReviewWaiting for input']);
+  rows[1].listeners.get('click')();
+  assert.equal(selectedSubsession(), 'child');
+  renderConversationHeading();
+  assert.equal(elements.title.textContent, 'Investigation');
+  assert.equal(elements.conversationParent.textContent, 'shared');
+  assert.equal(elements.conversationStatus.textContent, 'Working');
+  assert.equal(elements.sharedWorkspace.hidden, false);
+  assert.equal(elements.displayNameButton.hidden, true);
+}
+
+function testSubsessionFormPreservesPendingCreationOnReconnect() {
+  resetHarness();
+  state.selected = {namespace: 'default', name: 'shared', uid: 'shared-id', phase: 'Ready'};
+  state.subsessionRequestID = 'stable-request';
+  state.subsessionRequestText = 'Investigation';
+  elements.subsessionDialog.showModal();
+  const close = vm.runInThisContext(`(() => {${applicationSlice('function closeSocket', 'function connectSocket')} return closeSocket;})()`);
+  state.reconnectTimer = null;
+  close();
+  assert.equal(elements.subsessionDialog.open, true);
+  assert.equal(state.subsessionRequestID, 'stable-request');
+  assert.equal(elements.createSubsession.disabled, true);
+  const requests = [];
+  state.socket = {readyState: WebSocket.OPEN, send: message => requests.push(JSON.parse(message))};
+  submitSubsession();
+  submitSubsession();
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests[0], {type: 'subsession.create', requestId: 'stable-request', text: 'Investigation'});
+  assert.deepEqual(requests[1], requests[0]);
+  selectSession(state.selected, false, {subsessionID: ''});
+  assert.equal(state.subsessionRequestID, '');
+  assert.equal(elements.subsessionDialog.open, false);
+}
+
+function testChildHeaderKeepsWorkspaceActionsOnParent() {
+  resetHarness();
+  const session = {namespace: 'default', name: 'shared', uid: 'shared-id', phase: 'Ready'};
+  state.selected = session;
+  state.subsessionSelections.set(sessionViewKey(session), 'child');
+  state.subsessions.set(sessionViewKey(session), [{id: '', name: 'Main conversation'}, {id: 'child', name: 'Investigation'}]);
+  renderSessionHeader();
+  assert.equal(elements.title.textContent, 'Investigation');
+  assert.equal(elements.sectionForm.hidden, true);
+  assert.equal(elements.resetButton.hidden, true);
+  assert.equal(elements.deleteButton.hidden, true);
+  assert.equal(elements.suspendButton.hidden, true);
+  state.subsessionSelections.set(sessionViewKey(session), '');
+  renderSessionHeader();
+  assert.equal(elements.title.textContent, 'shared');
+  assert.equal(elements.resetButton.hidden, false);
+  assert.equal(elements.deleteButton.hidden, false);
+  assert.equal(elements.suspendButton.hidden, false);
+}
+
+function testSidebarParentRemainsSelectedWithoutVisibleConversations() {
+  for (const collapsed of [false, true]) {
+    resetHarness();
+    const session = {namespace: 'default', name: 'shared', uid: 'shared-id', phase: 'Ready'};
+    state.selected = session;
+    if (collapsed) {
+      state.subsessions.set(sessionViewKey(session), [{id: '', name: 'Main conversation'}]);
+      state.collapsedSubsessions.add(sessionViewKey(session));
+    }
+    const item = new TestNode('div');
+    const parent = new TestNode('button');
+    item.append(parent);
+    appendSessionConversations(item, session, parent);
+    assert.equal(parent.attributes.get('aria-current'), 'page');
+    assert.equal(item.querySelectorAll('.session-conversation').length, 0);
+  }
+}
+
+function testCreationDialogKeepsItsConversationWhenCatalogArrives() {
+  for (const alreadySelected of [false, true]) {
+    resetHarness();
+    const target = {namespace: 'default', name: 'target', uid: 'target-id', phase: 'Ready', lastNotification: {id: 'latest-notification', type: 'TurnCompleted'}};
+    state.selected = alreadySelected ? target : {namespace: 'default', name: 'other', uid: 'other-id', phase: 'Ready'};
+    state.subsessionSelections.set(sessionViewKey(target), 'remembered');
+    if (alreadySelected) state.subsessionNotificationID = 'latest-notification';
+    openSubsessionDialog(target);
+    assert.equal(state.selected, target);
+    assert.equal(elements.subsessionDialog.open, true);
+    assert.equal(state.subsessionNotificationID, '');
+    state.subsessionRequestID = 'pending-create';
+    state.subsessionRequestText = 'Side investigation';
+    receiveSubsessions({type: 'subsessions', subsessions: [
+      {id: '', name: 'Main conversation'},
+      {id: 'remembered', name: 'Remembered conversation'},
+      {id: 'notification-target', name: 'Other conversation', notificationId: 'latest-notification'},
+    ]});
+    assert.equal(elements.subsessionDialog.open, true);
+    assert.equal(state.subsessionRequestID, 'pending-create');
+    assert.equal(selectedSubsession(), 'remembered');
+  }
+}

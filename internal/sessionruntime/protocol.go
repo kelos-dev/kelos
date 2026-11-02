@@ -9,6 +9,7 @@ const (
 	EventHistoryStart       = "history.start"
 	EventHistoryEnd         = "history.end"
 	EventPrompts            = "prompts"
+	EventSubsessions        = "subsessions"
 	EventRuntimeStatus      = "runtime.status"
 	EventRequestAccepted    = "request.accepted"
 	EventRuntimeRecovered   = "runtime.recovered"
@@ -36,8 +37,10 @@ const (
 
 // Event is one conversation event exposed through the shared Session control interface.
 type Event struct {
-	ID   int64  `json:"id,omitempty"`
-	Type string `json:"type"`
+	ID           int64        `json:"id,omitempty"`
+	Type         string       `json:"type"`
+	SubsessionID string       `json:"subsessionId,omitempty"`
+	Subsessions  []Subsession `json:"subsessions,omitempty"`
 	// NotificationID matches Session.status.lastNotification.id for completed or failed turns.
 	NotificationID string `json:"notificationId,omitempty"`
 	// Timestamp records when a durable conversation event was first appended.
@@ -148,6 +151,7 @@ type RuntimeRateLimit struct {
 
 // ClientRequest is a command sent by a web or terminal client.
 type ClientRequest struct {
+	SubsessionID     string              `json:"subsessionId,omitempty"`
 	Type             string              `json:"type"`
 	RequestID        string              `json:"requestId,omitempty"`
 	Scope            string              `json:"scope,omitempty"`

@@ -901,9 +901,9 @@ func TestSessionPageOffersUserSuspensionControls(t *testing.T) {
 		"return session?.userSuspended || session?.idleSuspended ? 'resume' : 'suspend';",
 		"elements.sessionActionLifecycle.textContent = action === 'resume' ? 'Resume' : 'Suspend';",
 		"elements.sessionActionLifecycle.addEventListener('click', event => {",
-		"elements.suspendButton.hidden = !session || Boolean(session.userSuspended);",
+		"elements.suspendButton.hidden = !session || Boolean(session.userSuspended) || child;",
 		"elements.suspendButton.addEventListener('click', suspendSelectedSession);",
-		"elements.resumeButton.hidden = !Boolean(session?.userSuspended);",
+		"elements.resumeButton.hidden = !Boolean(session?.userSuspended) || child;",
 		"elements.resumeButton.addEventListener('click', resumeSelectedSession);",
 	} {
 		if !strings.Contains(string(source), expected) {
@@ -1580,10 +1580,10 @@ func TestSessionComposerKeepsDraftsPerSession(t *testing.T) {
 	}
 	for description, expected := range map[string]string{
 		"draft storage":           `promptDrafts: new Map()`,
-		"draft save key":          `state.promptDrafts.set(sessionKey(session), elements.input.value)`,
-		"draft clear key":         `state.promptDrafts.delete(sessionKey(session))`,
-		"Session selection save":  "function selectSession(session, resumeIdle = false, { updateLocation = true } = {}) {\n        savePromptDraft(state.selected);",
-		"Session draft restore":   `state.promptDrafts.get(sessionKey(session))`,
+		"draft save key":          `state.promptDrafts.set(conversationDraftKey(session), elements.input.value)`,
+		"draft clear key":         `state.promptDrafts.delete(conversationDraftKey(session))`,
+		"Session selection save":  "function selectSession(session, resumeIdle = false, { updateLocation = true, subsessionID } = {}) {\n        savePromptDraft(state.selected);",
+		"Session draft restore":   `state.promptDrafts.get(conversationDraftKey(session))`,
 		"prompt submission clear": "state.socket.send(JSON.stringify({ type: 'message', text, attachmentIds: attachments.map(attachment => attachment.id) }));\n            clearPromptDraft(session);",
 		"Session deletion clear":  "{ method: 'DELETE' });\n            discardSessionView(session);\n            clearPromptDraft(session);\n            clearAttachmentDraft(session);",
 		"composer input save":     "elements.input.addEventListener('input', () => {\n        savePromptDraft(state.selected);",
@@ -2472,7 +2472,7 @@ func TestSessionUIDisplayNames(t *testing.T) {
 	for description, expected := range map[string]string{
 		"display name fallback": `return session?.displayName || session?.name || '';`,
 		"sidebar display name":  `name.textContent = sessionDisplayName(session);`,
-		"header display name":   `elements.title.textContent = sessionDisplayName(session);`,
+		"header display name":   `elements.title.textContent = id ? current?.name || 'Subsession' : sessionDisplayName(session);`,
 		"runtime display name":  `sessionRuntimeStatusText(state.runtimeStatus, sessionDisplayName(state.selected))`,
 		"canonical API route":   `/api/sessions/${encodeURIComponent(session.namespace)}/${encodeURIComponent(session.name)}/display-name`,
 	} {

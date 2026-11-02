@@ -131,6 +131,8 @@ global.createSessionTimestamp = () => null;
 global.providerLabel = provider => provider;
 global.createPullRequestLink = () => null;
 global.configureSessionDrag = () => {};
+global.appendSessionConversations = () => {};
+global.selectedSubsession = () => '';
 global.selectSession = () => {};
 
 function resetHarness() {

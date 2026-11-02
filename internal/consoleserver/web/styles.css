@@ -761,3 +761,44 @@ button { color: inherit; }
   .resource-row-phase[data-state="failed"] { background: #3a2020; }
   .form-grid input, .form-grid select, .form-grid textarea, .source-picker select, .section-field input, .session-section-control input, .session-section-control select { border-color: #454545; }
 }
+
+.session-item.has-conversations:hover, .session-item.has-conversations.active { background: transparent; }
+.has-conversations > .session-item-select { padding-left: 26px; padding-right: 68px; }
+.has-conversations > .session-item-select:hover, .has-conversations > .session-item-select[aria-current="page"] { background: var(--line-soft); border-radius: 9px; }
+.has-conversations .session-item-name { font-weight: 600; }
+.session-conversations-toggle, .session-subsession-create { position: absolute; top: 3px; width: 26px; height: 32px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--muted); cursor: pointer; }
+.session-conversations-toggle { left: 0; font-size: 15px; }
+.session-subsession-create { right: 34px; font-size: 18px; }
+.session-conversations-toggle:hover, .session-subsession-create:hover { background: var(--line-soft); color: var(--ink); }
+.session-subsession-create:disabled { opacity: .4; cursor: default; }
+.session-conversations { margin: 3px 3px 10px 13px; padding-left: 10px; border-left: 1px solid var(--line); }
+.session-conversation { width: 100%; min-height: 46px; display: grid; grid-template-columns: 7px minmax(0,1fr); align-items: center; gap: 9px; margin: 3px 0; padding: 8px 9px; border: 0; border-radius: 8px; background: transparent; text-align: left; cursor: pointer; }
+.session-conversation:hover, .session-conversation[aria-current="page"] { background: var(--line-soft); }
+.session-conversation-name { display: block; overflow: hidden; font-size: 12px; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
+.session-conversation[aria-current="page"] .session-conversation-name { font-weight: 600; }
+.session-conversation-activity { display: block; margin-top: 2px; color: var(--faint); font-size: 10px; }
+.conversation-dot { display: block; width: 6px; height: 6px; border-radius: 50%; background: #999; }
+.conversation-dot[data-state="Working"] { background: #2c9562; box-shadow: 0 0 0 3px #2c956212; }
+.conversation-dot[data-state="Waiting for input"], .conversation-dot[data-state="Failed"] { background: var(--danger); }
+.conversation-workspace { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+.conversation-workspace:not(:has(> :not([hidden]))) { display: none; }
+#conversation-parent { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; }
+#conversation-parent:hover { text-decoration: underline; }
+.shared-workspace { padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); font-size: 10px; white-space: nowrap; }
+.shared-workspace[hidden], .conversation-status[hidden], #conversation-parent[hidden] { display: none; }
+.conversation-status { display: inline-flex; flex: none; align-items: center; gap: 6px; color: var(--muted); font-size: 10px; white-space: nowrap; }
+.conversation-status::before { width: 6px; height: 6px; border-radius: 50%; background: #999; content: ''; }
+.conversation-status[data-state="Working"]::before { background: #2c9562; }
+.conversation-status[data-state="Waiting for input"]::before, .conversation-status[data-state="Failed"]::before { background: var(--danger); }
+@media (max-width: 700px) {
+  .has-conversations > .session-item-select { padding-left: 34px; padding-right: 83px; }
+  .session-conversations-toggle, .session-subsession-create { top: 3px; min-width: 34px; min-height: 44px; }
+  .session-subsession-create { right: 43px; }
+  .session-conversation { min-height: 54px; }
+  .session-conversation-name { font-size: 14px; }
+  .session-conversation-activity { font-size: 11px; }
+  .conversation-workspace { justify-content: center; }
+  .shared-workspace { display: none; }
+  .session-title-row:has(.conversation-status:not([hidden])) { display: block; }
+  .conversation-status { margin-top: 5px; }
+}

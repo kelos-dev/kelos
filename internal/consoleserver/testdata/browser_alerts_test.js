@@ -57,10 +57,15 @@ function harness(shared = {}) {
     constructor() { throw new TypeError('Page notifications unavailable on mobile'); }
   }
   const context = {
-    console, Map, Set, Date, Promise, URLSearchParams, Notification,
+    console, Map, Set, Date, Promise, URL, URLSearchParams, Notification,
     navigator: {serviceWorker, locks},
     window: {
       Notification, isSecureContext: true,
+      location: new URL('https://console.example/?namespace=team&session=worker'),
+      history: {
+        pushState(_state, _title, url) { context.window.location = new URL(url); },
+        replaceState(_state, _title, url) { context.window.location = new URL(url); },
+      },
       atob: value => { assert.match(value, /^[A-Za-z0-9+/=]*$/); return Buffer.from(value, 'base64').toString('binary'); },
       localStorage: {
         getItem: key => storage.get(key) ?? null,
@@ -92,6 +97,7 @@ function harness(shared = {}) {
     async loadOptions() {}, async loadResources() {},
     consoleReady: Promise.resolve(),
     async refreshNamespaces() {},
+    async loadNamespaceOptions(namespace) { return namespace; },
   };
   vm.createContext(context);
   for (const [start, end] of [
@@ -376,8 +382,8 @@ async function testNotificationTargets() {
   assert.equal(h.selected[0], h.session);
   assert.equal(h.context.state.consoleView, 'sessions');
   await h.context.openNotificationSession({...h.session, uid: 'deleted-session'});
-  assert.equal(h.selected.length, 1);
-  assert.equal(h.toasts.at(-1), 'Session worker is no longer available');
+  assert.equal(h.selected.at(-1), null);
+  assert.equal(h.toasts.at(-1), 'Session team/worker is no longer available');
   const target = {...h.session, namespace: 'another'};
   h.context.api = async () => [target];
   await h.context.openNotificationSession(target);

@@ -132,6 +132,32 @@ func TestAuthenticationProtectsApplicationAndAPI(t *testing.T) {
 	}
 }
 
+func TestSessionLinksSurviveAuthentication(t *testing.T) {
+	server := testServer(t)
+	for _, test := range []struct {
+		path          string
+		authenticated bool
+		location      string
+	}{
+		{"/?namespace=team-a&session=worker", false, "/login?namespace=team-a&session=worker"},
+		{"/?namespace=team-a&session=worker&uid=instance", false, "/login?namespace=team-a&session=worker&uid=instance"},
+		{"/login?namespace=team-a&session=worker", true, "/?namespace=team-a&session=worker"},
+		{"/?namespace=team-a&session=worker&redirect=https://example.com", false, "/login?namespace=team-a&session=worker"},
+	} {
+		t.Run(test.path, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, test.path, nil)
+			if test.authenticated {
+				request.Header.Set("Authorization", "Bearer secret-token")
+			}
+			response := httptest.NewRecorder()
+			server.ServeHTTP(response, request)
+			if response.Code != http.StatusFound || response.Header().Get("Location") != test.location {
+				t.Fatalf("status = %d location = %q, want %q", response.Code, response.Header().Get("Location"), test.location)
+			}
+		})
+	}
+}
+
 func TestConsoleApplicationIncludesResourceViews(t *testing.T) {
 	server := testServer(t)
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -1043,6 +1069,17 @@ func TestApplicationConsoleResourcesBehavior(t *testing.T) {
 	}
 }
 
+func TestApplicationSessionLinksBehavior(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node.js is not installed")
+	}
+	command := exec.Command(node, "testdata/session_links_test.js")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("running session link tests: %v\n%s", err, output)
+	}
+}
+
 func TestApplicationBrowserAlertsBehavior(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
@@ -1545,7 +1582,7 @@ func TestSessionComposerKeepsDraftsPerSession(t *testing.T) {
 		"draft storage":           `promptDrafts: new Map()`,
 		"draft save key":          `state.promptDrafts.set(sessionKey(session), elements.input.value)`,
 		"draft clear key":         `state.promptDrafts.delete(sessionKey(session))`,
-		"Session selection save":  "function selectSession(session, resumeIdle = false) {\n        savePromptDraft(state.selected);",
+		"Session selection save":  "function selectSession(session, resumeIdle = false, { updateLocation = true } = {}) {\n        savePromptDraft(state.selected);",
 		"Session draft restore":   `state.promptDrafts.get(sessionKey(session))`,
 		"prompt submission clear": "state.socket.send(JSON.stringify({ type: 'message', text, attachmentIds: attachments.map(attachment => attachment.id) }));\n            clearPromptDraft(session);",
 		"Session deletion clear":  "{ method: 'DELETE' });\n            discardSessionView(session);\n            clearPromptDraft(session);\n            clearAttachmentDraft(session);",

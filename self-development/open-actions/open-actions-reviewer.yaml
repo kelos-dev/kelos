@@ -188,12 +188,19 @@ spec:
       - Flag any documented syntax or behavior that the change rejects, ignores,
         or implements differently. Do not accept "unsupported" as justification
         for divergence from documented GitHub Actions behavior.
+      - Where the documentation does not list a keyword's accepted value forms,
+        check GitHub's published workflow schema
+        (`workflow-parser/src/workflow-v1.0.json` in `actions/languageservices`).
+        Flag parsing or validation tests that reject a form it accepts, such as
+        a single string where a list is allowed, or a number or Boolean literal
+        where a string is expected, which GitHub converts to a string.
       - Check documented defaults, evaluation order, expressions, contexts,
         matrices, dependencies, conditions, environment propagation,
         cancellation, and status behavior when they are relevant to the diff.
       - Require tests that identify the official documented behavior they cover
-        and exercise the same user-visible result. Invalid or undocumented
-        syntax must produce an explicit error rather than being silently ignored.
+        and exercise the same user-visible result. Syntax that GitHub rejects or
+        that Open Actions does not implement yet must produce an explicit error
+        rather than being silently ignored.
       - For reporting or rerun changes, compare trigger coverage, distinct
         workflow-run and job reports, Checks-tab visibility, and GitHub UI/CLI
         rerun controls with the official documentation.

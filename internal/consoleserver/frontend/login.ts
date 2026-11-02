@@ -31,7 +31,7 @@ form.addEventListener('submit', async (event) => {
       const body = await response.json().catch(() => ({})) as {error?: string};
       throw new Error(body.error || 'Sign-in failed');
     }
-    window.location.replace('/');
+    window.location.replace(`/${window.location.search}`);
   } catch (cause) {
     error.textContent = cause instanceof Error ? cause.message : String(cause);
     input.focus();

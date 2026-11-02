@@ -897,6 +897,16 @@ Only the latest retained event can be delivered if several events occur between
 checks. Queued messages collapse per Session and expire at the push service
 after one hour.
 
+To link directly to a Session, use `/?namespace=<namespace>&session=<resource-name>`
+on your Console's origin. Both `namespace` and `session` are required. Use the
+Kubernetes resource name, even when the Session has a display name. Notification
+links may also include `uid` to reject a deleted or replaced Session. After a
+link opens successfully, the address bar uses namespace and resource name.
+Selecting a Session updates the address bar so you can copy or bookmark its URL.
+Reloading the page or using browser Back and Forward restores the linked Session. The link's namespace takes priority over the remembered
+namespace, and token sign-in preserves the destination. Missing or inaccessible
+targets show an error instead of opening a different Session.
+
 Sessions open in the **Conversation** view. Select the **Terminal** tab alongside
 **Conversation** and **Changes** on a Ready Session to start an interactive shell
 in its agent container. The shell uses the agent container's workspace and
@@ -937,9 +947,10 @@ permissions. Changing or deleting configuration can affect workloads that use it
 
 The **Namespace** dropdown lists namespaces where you can list at least one
 Console resource type, including access granted through groups or custom roles.
-The Console remembers your selection in this browser. At sign-in, it checks your
-remembered namespace (or the configured default) first. If accessible, you can
-start working while the remaining namespace options load in the background.
+The Console remembers your selection in this browser. At sign-in, it first checks
+the namespace from the URL when provided, otherwise your remembered namespace
+(or the configured default). If accessible, you can start working while the
+remaining namespace options load in the background.
 Otherwise, the Console loads the full list and selects the configured default
 when accessible, or the first accessible namespace. Opening or focusing the
 dropdown refreshes the namespace choices and keeps your current selection when

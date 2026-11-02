@@ -432,7 +432,7 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 			writeError(writer, http.StatusUnauthorized, "authentication required")
 			return
 		}
-		http.Redirect(writer, request, "/login", http.StatusFound)
+		http.Redirect(writer, request, "/login"+consoleLocationQuery(request), http.StatusFound)
 	})
 }
 
@@ -2035,13 +2035,26 @@ func (s *Server) index(writer http.ResponseWriter, request *http.Request) {
 	_, _ = writer.Write(bytes.ReplaceAll(data, []byte("{{STYLE_NONCE}}"), []byte(nonce)))
 }
 
+func consoleLocationQuery(request *http.Request) string {
+	query := url.Values{}
+	for _, key := range []string{"namespace", "session", "uid"} {
+		if value := request.URL.Query().Get(key); value != "" {
+			query.Set(key, value)
+		}
+	}
+	if len(query) == 0 {
+		return ""
+	}
+	return "?" + query.Encode()
+}
+
 func (s *Server) loginPage(writer http.ResponseWriter, request *http.Request) {
 	if s.proxyAuth != nil {
-		http.Redirect(writer, request, "/", http.StatusFound)
+		http.Redirect(writer, request, "/"+consoleLocationQuery(request), http.StatusFound)
 		return
 	}
 	if s.authenticated(request) {
-		http.Redirect(writer, request, "/", http.StatusFound)
+		http.Redirect(writer, request, "/"+consoleLocationQuery(request), http.StatusFound)
 		return
 	}
 	serveEmbedded(writer, "web/login.html", "text/html; charset=utf-8")

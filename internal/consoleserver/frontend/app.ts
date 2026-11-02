@@ -692,7 +692,7 @@ async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
     headers: {'Content-Type': 'application/json', ...(options.headers || {})},
   });
   if (response.status === 401) {
-    window.location.replace('/login');
+    window.location.replace(`/login${window.location.search}`);
     throw Object.assign(new Error('Authentication required'), {status: response.status});
   }
   if (!response.ok) {
@@ -706,7 +706,7 @@ async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
 async function apiText(path: string): Promise<string> {
   const response = await fetch(path);
   if (response.status === 401) {
-    window.location.replace('/login');
+    window.location.replace(`/login${window.location.search}`);
     throw new Error('Authentication required');
   }
   const body = await response.text();
@@ -1047,22 +1047,73 @@ function testBrowserNotification() {
   });
 }
 
-async function openNotificationSession(target: NotificationSession) {
+let consoleLocationReady = false;
+let consoleNavigationID = 0;
+
+function updateConsoleLocation(replace = false) {
+  if (!consoleLocationReady) return;
+  if (!replace) consoleNavigationID += 1;
+  const url = new URL(window.location.href);
+  if (state.namespace) url.searchParams.set('namespace', state.namespace);
+  else url.searchParams.delete('namespace');
+  if (state.consoleView === 'sessions' && state.selected) url.searchParams.set('session', state.selected.name);
+  else url.searchParams.delete('session');
+  url.searchParams.delete('uid');
+  if (url.href === window.location.href) return;
+  if (replace) window.history.replaceState(null, '', url);
+  else window.history.pushState(null, '', url);
+}
+
+async function applyConsoleLocation() {
+  const navigationID = ++consoleNavigationID;
+  const url = new URL(window.location.href);
+  const namespace = url.searchParams.get('namespace');
+  const name = url.searchParams.get('session');
+  const uid = url.searchParams.get('uid');
   try {
     await consoleReady;
-    if (target.namespace !== state.namespace) {
-      await refreshNamespaces();
-      await switchNamespace(target.namespace);
-    } else {
-      await loadSessions();
+    if (navigationID !== consoleNavigationID) return;
+    consoleLocationReady = true;
+    if (name && !namespace) throw new Error('A Session link requires a namespace');
+    if (namespace && namespace !== state.namespace) {
+      const accessible = await loadNamespaceOptions(namespace);
+      if (navigationID !== consoleNavigationID) return;
+      if (accessible !== namespace) throw new Error(`Namespace ${namespace} is not accessible`);
+      await switchNamespace(namespace, {updateLocation: false});
+      if (navigationID !== consoleNavigationID) return;
     }
-    const session = state.sessions.find(item => sessionViewKey(item) === sessionViewKey(target));
-    if (!session) throw new Error(`Session ${target.name} is no longer available`);
-    selectSession(session);
-    setConsoleView('sessions');
+    if (name) {
+      let sessions: SessionSummary[] | undefined;
+      do {
+        sessions = await loadSessions({throwOnError: true, updateLocation: false});
+        if (navigationID !== consoleNavigationID) return;
+      } while (!sessions);
+      const session = sessions.find(item => item.namespace === namespace && item.name === name && (!uid || item.uid === uid));
+      if (!session) throw new Error(`Session ${namespace}/${name} is no longer available`);
+      selectSession(session, false, {updateLocation: false});
+      setConsoleView('sessions', {updateLocation: false});
+    } else {
+      selectSession(null, false, {updateLocation: false});
+      setConsoleView('overview', {updateLocation: false});
+    }
+    updateConsoleLocation(true);
   } catch (error) {
+    if (navigationID !== consoleNavigationID) return;
+    selectSession(null, false, {updateLocation: false});
+    setConsoleView(name ? 'sessions' : 'overview', {updateLocation: false});
     showToast(errorMessage(error));
   }
+}
+
+async function openNotificationSession(target: NotificationSession) {
+  await consoleReady;
+  const url = new URL(window.location.href);
+  url.searchParams.set('namespace', target.namespace);
+  url.searchParams.set('session', target.name);
+  if (target.uid) url.searchParams.set('uid', target.uid);
+  else url.searchParams.delete('uid');
+  if (url.href !== window.location.href) window.history.pushState(null, '', url);
+  await applyConsoleLocation();
 }
 
 const allResourceKind = '__all__';
@@ -1081,7 +1132,7 @@ function resourceCollections() {
   return state.resourceGroups.flatMap(group => group.resources.map(resource => ({...resource, group: group.name})));
 }
 
-function setConsoleView(view: string) {
+function setConsoleView(view: string, {updateLocation = true} = {}) {
   state.consoleView = ['overview', 'sessions', 'resources', 'admin'].includes(view) ? view : 'overview';
   elements.overviewView.hidden = state.consoleView !== 'overview';
   elements.sessionsView.hidden = state.consoleView !== 'sessions';
@@ -1097,12 +1148,13 @@ function setConsoleView(view: string) {
     if (name === state.consoleView) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
   }
-  if (state.consoleView === 'sessions' && !state.selected && state.sessions.length) selectSession(state.sessions[0]);
+  if (updateLocation && state.consoleView === 'sessions' && !state.selected && state.sessions.length) selectSession(state.sessions[0]);
   if (state.consoleView === 'sessions') {
     resizeComposer();
     updateCurrentRequest();
   }
   if (state.consoleView === 'admin') void loadAdmin();
+  if (updateLocation) updateConsoleLocation();
   updateJumpToLatest();
   setSidebarOpen(false);
   scheduleCompletionRead();
@@ -3329,7 +3381,7 @@ function resetSectionSelection() {
   elements.sectionCustom.value = '';
 }
 
-async function loadSessions({quiet = false} = {}) {
+async function loadSessions({quiet = false, throwOnError = false, updateLocation = true} = {}) {
   if (!state.namespace) return;
   const namespace = state.namespace;
   const generation = state.namespaceGeneration;
@@ -3354,7 +3406,8 @@ async function loadSessions({quiet = false} = {}) {
       if (current) {
         if (state.selected.uid && current.uid && state.selected.uid !== current.uid) {
           discardSessionView(state.selected);
-          selectSession(current);
+          selectSession(current, false, {updateLocation: false});
+          if (updateLocation) updateConsoleLocation(true);
         } else {
           const beganReset = !state.selected.resetting && current.resetting;
           const becameReady = (state.selected.phase !== 'Ready' || state.selected.resetting) && current.phase === 'Ready' && !current.resetting;
@@ -3369,12 +3422,16 @@ async function loadSessions({quiet = false} = {}) {
         }
       } else {
         discardSessionView(state.selected);
-        selectSession(null);
+        selectSession(null, false, {updateLocation: false});
+        if (updateLocation) updateConsoleLocation(true);
       }
     }
     renderSessions();
+    return sessions;
   } catch (error) {
-    if (!quiet && generation === state.namespaceGeneration && listGeneration === state.sessionListGeneration) showToast(errorMessage(error));
+    if (generation !== state.namespaceGeneration || listGeneration !== state.sessionListGeneration) return;
+    if (throwOnError) throw error;
+    if (!quiet) showToast(errorMessage(error));
   }
 }
 
@@ -3428,7 +3485,7 @@ async function loadConfig() {
   state.defaultNamespace = config.defaultNamespace;
   let discoverNamespaces = false;
   try {
-    const preferred = window.localStorage.getItem('kelos-console-namespace') || state.defaultNamespace;
+    const preferred = new URLSearchParams(window.location.search).get('namespace') || window.localStorage.getItem('kelos-console-namespace') || state.defaultNamespace;
     let namespace = await loadNamespaceOptions(preferred, {onlyPreferred: true});
     discoverNamespaces = Boolean(namespace);
     if (namespace === '') namespace = await loadNamespaceOptions(preferred);
@@ -3532,7 +3589,7 @@ function resetNamespaceReferences() {
   resetSectionSelection();
 }
 
-async function switchNamespace(namespace) {
+async function switchNamespace(namespace, {updateLocation = true} = {}) {
   namespace = namespace.trim();
   if (namespace === state.namespace) return;
   if (namespace && !state.namespaces.includes(namespace)) throw new Error('Choose an accessible namespace.');
@@ -3572,8 +3629,9 @@ async function switchNamespace(namespace) {
   renderOverview();
   renderResourceKindOptions();
   renderResources();
-  selectSession(null);
-  await Promise.all([loadSessions(), loadOptions(), loadResources()]);
+  selectSession(null, false, {updateLocation});
+  if (updateLocation) updateConsoleLocation();
+  await Promise.all([loadSessions({updateLocation}), loadOptions(), loadResources()]);
 }
 
 function addOption(select: ConsoleElement | HTMLOptGroupElement, value: string, label: string) {
@@ -3878,7 +3936,7 @@ async function loadSessionSource(name: string) {
   }
 }
 
-function selectSession(session: SessionSummary | null, resumeIdle = false) {
+function selectSession(session: SessionSummary | null, resumeIdle = false, {updateLocation = true} = {}) {
   savePromptDraft(state.selected);
   closeSessionSectionEditor();
   closeSocket();
@@ -3886,6 +3944,7 @@ function selectSession(session: SessionSummary | null, resumeIdle = false) {
   state.messagesScrollTop = 0;
   state.messagesScrollPaused = false;
   state.selected = session;
+  if (updateLocation && state.consoleView === 'sessions') updateConsoleLocation();
   state.currentView = null;
   setActiveView('conversation');
   restorePromptDraft(session);
@@ -6599,7 +6658,7 @@ async function uploadAttachment(session: SessionSummary, file: File): Promise<At
     body,
   });
   if (response.status === 401) {
-    window.location.replace('/login');
+    window.location.replace(`/login${window.location.search}`);
     throw new Error('Authentication required');
   }
   if (!response.ok) {
@@ -7259,13 +7318,8 @@ const consoleReady = configReady.then(discoverNamespaces => {
     void removePushSubscription().catch(error => { state.browserAlertsMessage = errorMessage(error); renderBrowserAlerts(); });
   }
 }).catch(error => showToast(error.message));
-void consoleReady.then(() => {
-  const target = new URLSearchParams(location.search);
-  if (target.has('session') && target.has('namespace')) {
-    void openNotificationSession({name: target.get('session')!, namespace: target.get('namespace')!, uid: target.get('uid') || undefined});
-    window.history.replaceState(null, '', location.pathname);
-  }
-});
+window.addEventListener('popstate', () => { void applyConsoleLocation(); });
+void applyConsoleLocation();
 window.setInterval(() => loadSessions({quiet: true}), 5000);
 window.setInterval(() => loadResources({quiet: true}), 10000);
 window.setInterval(() => {

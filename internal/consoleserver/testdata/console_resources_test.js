@@ -5,6 +5,7 @@ const vm = require('node:vm');
 
 global.renderSessionAttentionCount = () => false;
 global.scheduleCompletionRead = () => false;
+global.updateConsoleLocation = () => {};
 
 const application = fs.readFileSync(path.join(__dirname, '..', 'web', 'app.js'), 'utf8');
 

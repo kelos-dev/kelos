@@ -14,7 +14,7 @@ function slice(start, end) {
 
 const redirects = [];
 global.state = {};
-global.window = {location: {replace: target => redirects.push(target)}};
+global.window = {location: {search: '', replace: target => redirects.push(target)}};
 vm.runInThisContext(slice('async function api(', 'let toastTimer'), {filename: 'app.js'});
 vm.runInThisContext(slice('async function loadIdentity(', 'async function loadConfig('), {filename: 'app.js'});
 
@@ -22,6 +22,11 @@ vm.runInThisContext(slice('async function loadIdentity(', 'async function loadCo
   global.fetch = async () => ({status: 401});
   await assert.rejects(api('/api/config'), {message: 'Authentication required', status: 401});
   assert.deepEqual(redirects, ['/login']);
+  redirects.length = 0;
+  window.location.search = '?namespace=team-a&session=worker';
+  await assert.rejects(api('/api/config'), {message: 'Authentication required', status: 401});
+  assert.deepEqual(redirects, ['/login?namespace=team-a&session=worker']);
+  window.location.search = '';
   redirects.length = 0;
   global.fetch = async () => ({status: 403, ok: false, json: async () => ({error: 'access denied'})});
   await assert.rejects(api('/api/sessions'), {message: 'access denied', status: 403});
@@ -60,4 +65,29 @@ vm.runInThisContext(slice('async function loadIdentity(', 'async function loadCo
   global.fetch = async () => ({status: 200, ok: true, json: async () => ({authenticated: false})});
   await logout();
   assert.deepEqual(redirects, ['/login']);
+
+  const loginSource = fs.readFileSync(path.join(__dirname, '../web/login.js'), 'utf8');
+  for (const search of ['', '?namespace=team-a&session=worker&uid=instance']) {
+    let submit;
+    const loginRedirects = [];
+    const nodes = {
+      '#login-form': {addEventListener(_event, listener) { submit = listener; }},
+      '#token': {value: 'secret-token'},
+      '#login-error': {},
+      '#reveal': {addEventListener() {}},
+      '#login-form button[type="submit"]': {},
+    };
+    vm.runInNewContext(loginSource, {
+      document: {querySelector: selector => nodes[selector]},
+      window: {location: {search, replace: value => loginRedirects.push(value)}},
+      fetch: async (url, options) => {
+        assert.equal(url, '/api/login');
+        assert.equal(options.method, 'POST');
+        assert.deepEqual(JSON.parse(options.body), {token: 'secret-token'});
+        return {ok: true};
+      },
+    });
+    await submit({preventDefault() {}});
+    assert.deepEqual(loginRedirects, [`/${search}`]);
+  }
 })().catch(error => { console.error(error); process.exitCode = 1; });

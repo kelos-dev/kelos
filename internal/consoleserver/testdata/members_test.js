@@ -42,7 +42,7 @@ function reset() {
   global.loadAdminResources = async () => { adminRefreshes++; };
   global.loadAdmin = async () => { await Promise.all([loadMembers(), loadAdminResources()]); };
   global.switchNamespace = async namespace => { state.namespace = namespace; state.namespaceGeneration++; };
-  global.window = {confirm: () => true, setTimeout: () => {}, localStorage: new class {
+  global.window = {location: {search: ''}, confirm: () => true, setTimeout: () => {}, localStorage: new class {
     values = new Map();
     getItem(key) { return this.values.get(key) || null; }
     setItem(key, value) { this.values.set(key, value); }
@@ -161,6 +161,13 @@ async function testNamespacePicker() {
   assert.equal(state.namespace, 'team-b');
   assert.deepEqual(elements.activeNamespace.children.map(option => option.value), ['team-a', 'team-b']);
   requests.length = 0;
+  window.location.search = '?namespace=team-a&session=worker';
+  window.localStorage.setItem('kelos-console-namespace', 'team-b');
+  assert.equal(await loadConfig(), true);
+  assert.equal(state.namespace, 'team-a', 'A link must override the remembered namespace');
+  assert.deepEqual(requests, ['/api/namespaces?namespace=team-a']);
+  window.location.search = '';
+  requests.length = 0;
   window.localStorage.setItem('kelos-console-namespace', 'inaccessible');
   assert.equal(await loadConfig(), false);
   assert.equal(state.namespace, 'team-a');
@@ -184,7 +191,7 @@ function startConsole() {
   const loaded = [];
   vm.runInNewContext(app.slice(from, to), {
     loadConfig, refreshNamespaces, errorMessage, showToast,
-    URLSearchParams, location: {search: ''},
+    URLSearchParams, window: {addEventListener() {}}, applyConsoleLocation() {},
     loadOptions: async () => { loaded.push('options'); },
     loadSessions: async () => { loaded.push('sessions'); },
     loadResources: async () => { loaded.push('resources'); },

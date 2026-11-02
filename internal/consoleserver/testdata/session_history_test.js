@@ -359,6 +359,7 @@ vm.runInThisContext(applicationSlice('function sessionKey', 'function savePrompt
 vm.runInThisContext(applicationSlice('function savePromptDraft', 'function providerLabel'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function providerLabel', 'function parseSessionTimestamp'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function parseSessionTimestamp', 'function safeHTTPURL'), {filename: 'app.js'});
+global.updateConsoleLocation = () => {};
 vm.runInThisContext(applicationSlice('function selectSession', 'function renderHeader'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('async function loadSessions', 'async function loadConfig'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function setConnection', 'function usesTouchComposer'), {filename: 'app.js'});

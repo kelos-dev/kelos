@@ -18,6 +18,7 @@ function applicationSlice(start, end) {
 vm.runInThisContext(applicationSlice('function errorMessage', 'function requireElements'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function sessionLifecycleAction', 'function updateSessionActionsMenu'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('async function requestSessionLifecycleAction', 'function createWelcome'), {filename: 'app.js'});
+global.updateConsoleLocation = () => {};
 vm.runInThisContext(applicationSlice('async function loadSessions', 'async function loadConfig'), {filename: 'app.js'});
 
 async function testUserSuspendedSessionResume() {

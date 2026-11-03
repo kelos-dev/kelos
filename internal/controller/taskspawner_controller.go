@@ -48,6 +48,7 @@ type TaskSpawnerReconciler struct {
 // +kubebuilder:rbac:groups=kelos.dev,resources=taskspawners/finalizers,verbs=update
 // +kubebuilder:rbac:groups=kelos.dev,resources=workspaces,verbs=get;list;watch
 // +kubebuilder:rbac:groups=kelos.dev,resources=workerpools,verbs=get;list;watch
+// +kubebuilder:rbac:groups=kelos.dev,resources=taskpipelines,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=batch,resources=cronjobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
@@ -168,7 +169,9 @@ func (r *TaskSpawnerReconciler) reconcileWebhook(ctx context.Context, req ctrl.R
 	return ctrl.Result{}, nil
 }
 
-// countActiveTasks counts the number of active (non-terminal) Tasks for a TaskSpawner.
+// countActiveTasks counts the number of active (non-terminal) Tasks for a
+// TaskSpawner. A TaskSpawner with a pipelineTemplate counts each active
+// TaskPipeline it created as one.
 func (r *TaskSpawnerReconciler) countActiveTasks(ctx context.Context, taskSpawnerName types.NamespacedName) (int, error) {
 	var taskList kelos.TaskList
 	if err := r.List(ctx, &taskList,
@@ -183,6 +186,19 @@ func (r *TaskSpawnerReconciler) countActiveTasks(ctx context.Context, taskSpawne
 		task := &taskList.Items[i]
 		// Count tasks that are not in terminal phases
 		if task.Status.Phase != kelos.TaskPhaseSucceeded && task.Status.Phase != kelos.TaskPhaseFailed {
+			activeTasks++
+		}
+	}
+
+	var pipelineList kelos.TaskPipelineList
+	if err := r.List(ctx, &pipelineList,
+		client.InNamespace(taskSpawnerName.Namespace),
+		client.MatchingLabels{"kelos.dev/taskspawner": taskSpawnerName.Name},
+	); err != nil {
+		return 0, fmt.Errorf("listing TaskPipelines for TaskSpawner %s: %w", taskSpawnerName.Name, err)
+	}
+	for i := range pipelineList.Items {
+		if !isTerminalTaskPipelinePhase(pipelineList.Items[i].Status.Phase) {
 			activeTasks++
 		}
 	}
@@ -869,6 +885,11 @@ func (r *TaskSpawnerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				_, hasLabel := obj.GetLabels()["kelos.dev/taskspawner"]
 				return hasLabel
 			}))).
+		Watches(&kelos.TaskPipeline{}, handler.EnqueueRequestsFromMapFunc(r.findTaskSpawnersForTask),
+			builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
+				_, hasLabel := obj.GetLabels()["kelos.dev/taskspawner"]
+				return hasLabel
+			}))).
 		Complete(r)
 }
 
@@ -1004,23 +1025,19 @@ func workerPoolWorkspaceNames(ctx context.Context, cl client.Client, namespace s
 	return names
 }
 
-// findTaskSpawnersForTask maps a Task change to the TaskSpawner that owns it.
-// This allows webhook TaskSpawners to update their activeTasks count when Tasks complete/fail.
+// findTaskSpawnersForTask maps a Task or TaskPipeline change to the
+// TaskSpawner that created it. This allows webhook TaskSpawners to update
+// their activeTasks count when Tasks or TaskPipelines complete/fail.
 func (r *TaskSpawnerReconciler) findTaskSpawnersForTask(ctx context.Context, obj client.Object) []reconcile.Request {
-	task, ok := obj.(*kelos.Task)
-	if !ok {
-		return nil
-	}
-
-	// Tasks have a label that identifies their TaskSpawner
-	taskSpawnerName, ok := task.Labels["kelos.dev/taskspawner"]
+	// Spawned objects have a label that identifies their TaskSpawner
+	taskSpawnerName, ok := obj.GetLabels()["kelos.dev/taskspawner"]
 	if !ok {
 		return nil
 	}
 
 	return []reconcile.Request{{
 		NamespacedName: types.NamespacedName{
-			Namespace: task.Namespace,
+			Namespace: obj.GetNamespace(),
 			Name:      taskSpawnerName,
 		},
 	}}

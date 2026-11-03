@@ -23,6 +23,40 @@ const (
 	TaskPipelineConditionSucceeded = "Succeeded"
 )
 
+// PipelineStagePhaseSkipped means the stage's conditions were not met, so the
+// stage created no Tasks. It appears only in PipelineStageStatus.
+const PipelineStagePhaseSkipped TaskPhase = "Skipped"
+
+// PipelineConditionOperator compares a rendered condition input against a set of values.
+// +kubebuilder:validation:Enum=In;NotIn
+type PipelineConditionOperator string
+
+const (
+	// PipelineConditionOperatorIn is met when the input equals one of the values.
+	PipelineConditionOperatorIn PipelineConditionOperator = "In"
+	// PipelineConditionOperatorNotIn is met when the input equals none of the values.
+	PipelineConditionOperatorNotIn PipelineConditionOperator = "NotIn"
+)
+
+// PipelineStageCondition gates a stage on a value rendered from earlier stages.
+type PipelineStageCondition struct {
+	// Input is a Go template rendered with .Params and .Stages, the results of
+	// completed earlier stages. Leading and trailing whitespace is trimmed from the
+	// rendered value before it is compared.
+	// +kubebuilder:validation:MinLength=1
+	Input string `json:"input"`
+
+	// Operator compares the rendered input against values.
+	Operator PipelineConditionOperator `json:"operator"`
+
+	// Values is the set the rendered input is compared against. Comparison is
+	// exact and case-sensitive.
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=32
+	// +listType=atomic
+	Values []string `json:"values"`
+}
+
 // PipelineMatrix defines an ordered set of values used to create stage Tasks.
 type PipelineMatrix struct {
 	// Items contains the values exposed under .Matrix for each Task. Each item
@@ -37,8 +71,8 @@ type PipelineMatrix struct {
 }
 
 // PipelineTaskTemplate defines Tasks created for a pipeline stage.
-// Prompt and branch support Go text/template expressions. The current matrix
-// values are available as .Matrix. Results from completed stages are available
+// Prompt and branch support Go text/template expressions. The pipeline's params
+// are available as .Params, and the current matrix values as .Matrix. Results from completed stages are available
 // as .Stages, keyed by stage name. Each value lists that stage's Task results
 // in index order, with Name, Matrix, Results, and Outputs fields.
 //
@@ -80,18 +114,34 @@ type PipelineStage struct {
 	// Matrix expands the stage into parallel Tasks.
 	// +optional
 	Matrix *PipelineMatrix `json:"matrix,omitempty"`
+
+	// Conditions must all be met for the stage to run. They are evaluated when
+	// the stage would otherwise start. A stage whose conditions are not met is
+	// Skipped: it creates no Tasks, and later stages proceed as if it succeeded.
+	// +optional
+	// +kubebuilder:validation:MaxItems=8
+	// +listType=atomic
+	Conditions []PipelineStageCondition `json:"conditions,omitempty"`
 }
 
 // TaskPipelineSpec defines an ordered sequence of stages.
 //
 // +kubebuilder:validation:XValidation:rule="self.stages.all(stage, self.stages.exists_one(candidate, candidate.name == stage.name))",message="stage names must be unique"
 // +kubebuilder:validation:XValidation:rule="self.stages == oldSelf.stages",message="TaskPipeline stages are immutable after creation"
+// +kubebuilder:validation:XValidation:rule="has(self.params) == has(oldSelf.params) && (!has(self.params) || self.params == oldSelf.params)",message="TaskPipeline params are immutable after creation"
 type TaskPipelineSpec struct {
 	// Stages execute in order. Tasks within a matrix stage execute in parallel.
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=64
 	// +listType=atomic
 	Stages []PipelineStage `json:"stages"`
+
+	// Params are string values exposed to stage prompt, branch, and condition
+	// templates as .Params. A TaskSpawner with pipelineTemplate sets them from
+	// the work item's template variables.
+	// +optional
+	// +kubebuilder:validation:MaxProperties=64
+	Params map[string]string `json:"params,omitempty"`
 }
 
 // PipelineStageStatus summarizes the Tasks created for one pipeline stage.
@@ -99,7 +149,8 @@ type PipelineStageStatus struct {
 	// Name identifies the pipeline stage.
 	Name string `json:"name"`
 
-	// Phase uses the Task phase vocabulary to summarize this stage's Tasks.
+	// Phase uses the Task phase vocabulary to summarize this stage's Tasks,
+	// plus Skipped when the stage's conditions were not met.
 	// +optional
 	Phase TaskPhase `json:"phase,omitempty"`
 

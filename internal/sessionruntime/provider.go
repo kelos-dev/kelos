@@ -40,6 +40,10 @@ type Provider interface {
 	Close() error
 }
 
+type conversationDeletionProvider interface {
+	deleteConversation(context.Context) error
+}
+
 // providerStopError reads terminal diagnostics after the provider's Done closes.
 func providerStopError(provider Provider) error {
 	if source, ok := provider.(interface{ providerError() error }); ok {

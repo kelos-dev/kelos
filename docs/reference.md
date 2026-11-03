@@ -352,9 +352,10 @@ form or YAML manifest and leaves the new name blank. It does not copy the source
 metadata, conversation, or persistent-volume data.
 
 In the web console, the **+** action beside a Session starts a separate
-conversation in its workspace. Expand the Session in the sidebar to switch
-between **Main conversation** and named subsessions. Each row shows its activity
-state, and the header identifies the selected conversation and shared workspace.
+conversation in its workspace. Select the Session name in the sidebar to open
+its main conversation, or select a named subsession beneath it. Subsessions stay
+visible once loaded, and each subsession row shows its activity state. The header
+identifies the selected conversation and shared workspace.
 Conversation details load when a Session is opened; activity updates stream for
 the currently open Session. The **+** action is available when the Session is
 `Ready`, is not resetting, and no subsession creation is pending. Each Session
@@ -372,6 +373,15 @@ conversations, and reset or deletion removes their histories and workspace data.
 Activity in any conversation prevents automatic idle reclamation. Histories
 survive Pod replacement only when `Session.spec.volumeClaimTemplate` is set.
 The terminal chat client connects to the main conversation.
+
+Use the **×** action beside a subsession to delete it after confirmation. Deletion
+stops that subsession's work and permanently removes its retained Kelos history,
+pending messages, and drafts. Shared workspace files, attachments, the main
+conversation, and other subsessions are preserved. Deletion is available while
+the parent Session is `Ready` and is not resetting, and frees a subsession slot.
+Provider-managed Claude Code and Codex history is not erased by this action.
+If cleanup fails, the stopped subsession is removed from the sidebar and pending
+cleanup is retried when the Session runtime restarts.
 
 Use `kelos session connect NAME` for terminal chat. In an interactive terminal,
 press Enter to send a message, Ctrl+J to insert a newline, and Ctrl+C or Esc to

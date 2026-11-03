@@ -1171,6 +1171,32 @@ func (p *OpenCodeProvider) Close() error {
 	return nil
 }
 
+func (p *OpenCodeProvider) deleteConversation(ctx context.Context) error {
+	return deleteOpenCodeConversation(ctx, p.client, p.currentSessionID())
+}
+
+func deleteOpenCodeConversation(ctx context.Context, client *openCodeClient, sessionID string) error {
+	path := "/session/" + url.PathEscape(sessionID)
+	for _, request := range []struct{ method, path string }{
+		{http.MethodPost, path + "/abort"},
+		{http.MethodDelete, path},
+	} {
+		var completed bool
+		err := client.doJSON(ctx, request.method, request.path, true, nil, &completed)
+		var response *openCodeHTTPError
+		if errors.As(err, &response) && response.statusCode == http.StatusNotFound {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if request.method == http.MethodDelete && !completed {
+			return errors.New("OpenCode did not delete the conversation")
+		}
+	}
+	return nil
+}
+
 func openCodeCommandEnvironment(current []string, model string) []string {
 	result := append([]string(nil), current...)
 	key := processEnvironmentValue(current, "OPENCODE_API_KEY")

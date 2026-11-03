@@ -407,12 +407,14 @@ func replaceProcessEnv(current []string, name, value string) []string {
 // Serve listens for local clients and keeps provider turns alive independently of them.
 func (s *Server) Serve(ctx context.Context) error {
 	serveCtx, cancelServe := context.WithCancel(ctx)
+	var workers sync.WaitGroup
 	s.events.mu.Lock()
 	s.events.ctx = serveCtx
 	s.events.mu.Unlock()
 	defer func() {
 		cancelServe()
 		_ = s.closeProvider()
+		workers.Wait()
 		s.events.close()
 		s.journal.Close()
 		_ = os.Remove(s.config.SocketPath)
@@ -424,7 +426,7 @@ func (s *Server) Serve(ctx context.Context) error {
 		go s.runSessionUpdateWatch(serveCtx)
 		go s.runSessionUpdateReporter(serveCtx)
 	}
-	go s.runTurns(serveCtx)
+	workers.Go(func() { s.runTurns(serveCtx) })
 	if err := s.deliverInitialPrompt(); err != nil {
 		return err
 	}
@@ -445,9 +447,9 @@ func (s *Server) Serve(ctx context.Context) error {
 	}
 
 	providerDone := s.provider.Done()
-	go s.runWorkspaceStatusRefreshes(serveCtx)
+	workers.Go(func() { s.runWorkspaceStatusRefreshes(serveCtx) })
 	if s.publishSessionStatus != nil {
-		go s.runSessionStatusPublishes(serveCtx)
+		workers.Go(func() { s.runSessionStatusPublishes(serveCtx) })
 	}
 	s.requestWorkspaceStatusRefresh(true)
 	s.requestSessionStatusPublish()
@@ -1588,17 +1590,19 @@ func (s *Server) handleConnection(ctx context.Context, connection net.Conn) {
 		}
 		return
 	}
-	if first.SubsessionID != "" {
+	if first.SubsessionID != "" && first.Type != "subsession.delete" {
 		var err error
+		var child *subsessionRuntime
 		if s.subsessions == nil {
 			err = errors.New("Subsessions are unavailable")
 		} else {
-			s, err = s.subsessions.get(first.SubsessionID)
+			child, err = s.subsessions.get(first.SubsessionID)
 		}
 		if err != nil {
 			_ = json.NewEncoder(connection).Encode(Event{Type: EventError, RequestID: first.RequestID, SubsessionID: first.SubsessionID, Text: err.Error(), Status: "rejected"})
 			return
 		}
+		s, ctx = child.Server, child.ctx
 	}
 	s.handleClient(ctx, connection, decoder, &first)
 }
@@ -1607,6 +1611,8 @@ func (s *Server) handleClient(ctx context.Context, connection net.Conn, decoder 
 	defer connection.Close()
 	connectionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	stopClose := context.AfterFunc(connectionCtx, func() { _ = connection.Close() })
+	defer stopClose()
 
 	out := make(chan Event, 512)
 	var writeMu sync.Mutex
@@ -1779,6 +1785,18 @@ func (s *Server) handleClient(ctx context.Context, connection net.Conn, decoder 
 			return
 		}
 		switch request.Type {
+		case "subsession.delete":
+			var err error
+			if s.subsessions == nil {
+				err = errors.New("Subsessions are unavailable")
+			} else {
+				err = s.subsessions.remove(request.SubsessionID)
+			}
+			if err != nil {
+				out <- Event{Type: EventError, RequestID: request.RequestID, Text: err.Error(), Status: "rejected"}
+			} else {
+				out <- Event{Type: EventSubsessions, RequestID: request.RequestID, Subsessions: s.subsessions.list()}
+			}
 		case "subsession.create":
 			if s.subsessions == nil {
 				out <- Event{Type: EventError, RequestID: request.RequestID, Text: "Subsessions are unavailable", Status: "rejected"}

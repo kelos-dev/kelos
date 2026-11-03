@@ -268,7 +268,7 @@ function resetHarness() {
     subsessions: new Map(),
     subsessionRequestID: '',
     subsessionRequestText: '',
-    collapsedSubsessions: new Set(),
+    deletingSubsessions: new Set(),
     subsessionNotificationID: '',
     socket: null,
     socketGeneration: 0,
@@ -2582,7 +2582,8 @@ testPromptJumpWaitsForInitialHistory();
 testPromptJumpCancellation();
 testPromptJumpUnavailableAndPageError();
 testCreationDialogKeepsItsConversationWhenCatalogArrives();
-testSidebarParentRemainsSelectedWithoutVisibleConversations();
+testSidebarParentSelectionBeforeSubsessionsLoad();
+testSidebarHighlightsOnlySelectedConversation();
 testChildHeaderKeepsWorkspaceActionsOnParent();
 testSidebarConversationsShowActivityAndSelectContext();
 testSubsessionFormPreservesPendingCreationOnReconnect();
@@ -2597,6 +2598,9 @@ testReadySessionDisconnectsWhenItBecomesPending()
   .then(testClaudeGoalCommandSubmission)
   .then(testNativeLoopCommandSubmission)
   .then(testDiscoveredNativeCommands)
+  .then(testSubsessionDeletionPreservesOtherConversations)
+  .then(testSubsessionDeletionRequiresConfirmationAndReportsErrors)
+  .then(testSubsessionDeletionUsesIndependentConnection)
   .then(testPromptHistoryBrowseAndReuse)
   .then(() => process.stdout.write('Session history tests passed\n'))
   .catch(error => {
@@ -2685,8 +2689,14 @@ function testSidebarConversationsShowActivityAndSelectContext() {
   item.append(parent);
   appendSessionConversations(item, session, parent);
   const rows = item.querySelectorAll('.session-conversation');
-  assert.deepEqual(rows.map(row => row.textContent), ['Main conversationIdle', 'InvestigationWorking', 'ReviewWaiting for input']);
-  rows[1].listeners.get('click')();
+  assert.deepEqual(rows.map(row => row.textContent), ['InvestigationWorking', 'ReviewWaiting for input']);
+  assert.equal(item.querySelectorAll('.session-conversations-toggle').length, 0);
+  assert.equal(parent.attributes.get('aria-current'), 'page');
+  const create = item.querySelector('.session-subsession-create');
+  assert.equal(create.disabled, false);
+  create.listeners.get('click')();
+  assert.equal(elements.subsessionDialog.open, true);
+  rows[0].listeners.get('click')();
   assert.equal(selectedSubsession(), 'child');
   renderConversationHeading();
   assert.equal(elements.title.textContent, 'Investigation');
@@ -2740,21 +2750,40 @@ function testChildHeaderKeepsWorkspaceActionsOnParent() {
   assert.equal(elements.suspendButton.hidden, false);
 }
 
-function testSidebarParentRemainsSelectedWithoutVisibleConversations() {
-  for (const collapsed of [false, true]) {
+function testSidebarParentSelectionBeforeSubsessionsLoad() {
+  for (const conversations of [undefined, [{id: '', name: 'Main conversation'}]]) {
     resetHarness();
     const session = {namespace: 'default', name: 'shared', uid: 'shared-id', phase: 'Ready'};
     state.selected = session;
-    if (collapsed) {
-      state.subsessions.set(sessionViewKey(session), [{id: '', name: 'Main conversation'}]);
-      state.collapsedSubsessions.add(sessionViewKey(session));
-    }
+    if (conversations) state.subsessions.set(sessionViewKey(session), conversations);
     const item = new TestNode('div');
     const parent = new TestNode('button');
     item.append(parent);
     appendSessionConversations(item, session, parent);
     assert.equal(parent.attributes.get('aria-current'), 'page');
     assert.equal(item.querySelectorAll('.session-conversation').length, 0);
+    assert.equal(item.querySelectorAll('.session-conversations').length, 0);
+  }
+}
+
+function testSidebarHighlightsOnlySelectedConversation() {
+  for (const selected of ['main', 'child', 'other-session']) {
+    resetHarness();
+    const session = {namespace: 'default', name: 'shared', uid: 'shared-id', phase: 'Ready'};
+    state.selected = selected === 'other-session' ? {...session, uid: 'other-id'} : session;
+    state.subsessionSelections.set(sessionViewKey(session), selected === 'main' ? '' : 'child');
+    state.subsessions.set(sessionViewKey(session), [
+      {id: '', name: 'Main conversation'},
+      {id: 'child', name: 'Investigation'},
+    ]);
+    const item = new TestNode('div');
+    const parent = new TestNode('button');
+    item.append(parent);
+    appendSessionConversations(item, session, parent);
+    const rows = item.querySelectorAll('.session-conversation');
+    assert.equal(rows.length, 1);
+    assert.equal(parent.attributes.get('aria-current'), selected === 'main' ? 'page' : undefined);
+    assert.equal(rows[0].attributes.get('aria-current'), selected === 'child' ? 'page' : undefined);
   }
 }
 
@@ -2779,5 +2808,119 @@ function testCreationDialogKeepsItsConversationWhenCatalogArrives() {
     assert.equal(elements.subsessionDialog.open, true);
     assert.equal(state.subsessionRequestID, 'pending-create');
     assert.equal(selectedSubsession(), 'remembered');
+  }
+}
+
+async function testSubsessionDeletionPreservesOtherConversations() {
+  resetHarness();
+  const session = {namespace: 'default', name: 'shared', uid: 'shared-id', phase: 'Ready'};
+  const main = {id: '', name: 'Main conversation'};
+  const child = {id: 'child', name: 'Investigation'};
+  const sibling = {id: 'sibling', name: 'Review'};
+  const recent = {id: 'recent', name: 'Documentation'};
+  state.sessions = [session];
+  state.selected = session;
+  state.subsessionSelections.set(sessionViewKey(session), child.id);
+  state.subsessions.set(sessionViewKey(session), [main, child, sibling]);
+  const mainKey = sessionKey(session);
+  const childKey = conversationDraftKey(session);
+  const childViewKey = conversationViewKey(session);
+  state.promptDrafts.set(mainKey, 'Main draft');
+  state.promptDrafts.set(`${mainKey}/subsessions/sibling`, 'Review draft');
+  elements.input.value = 'Child draft';
+  state.sessionViews.set(childViewKey, createSessionView());
+  state.attachmentDrafts.set(childKey, [{name: 'child.txt'}]);
+  const request = global.requestSubsessionDeletion;
+  const requests = [];
+  let complete;
+  global.requestSubsessionDeletion = (target, conversation) => {
+    requests.push([target, conversation]);
+    return new Promise(resolve => { complete = resolve; });
+  };
+  try {
+    const pending = deleteSubsession(session, child);
+    assert.equal(state.deletingSubsessions.has(childViewKey), true);
+    await deleteSubsession(session, child);
+    assert.deepEqual(requests, [[session, child]]);
+    const refreshed = {...session, phase: 'Suspended', model: 'Updated model'};
+    state.sessions = [refreshed];
+    state.selected = refreshed;
+    state.subsessions.set(sessionViewKey(session), [main, child, sibling, recent]);
+    complete([main, sibling]);
+    await pending;
+    assert.equal(selectedSubsession(), '');
+    assert.equal(state.selected, refreshed);
+    assert.equal(state.sessionViews.has(childViewKey), false);
+    assert.equal(state.promptDrafts.has(childKey), false);
+    assert.equal(state.attachmentDrafts.has(childKey), false);
+    assert.equal(state.promptDrafts.get(mainKey), 'Main draft');
+    assert.equal(state.promptDrafts.get(`${mainKey}/subsessions/sibling`), 'Review draft');
+    assert.equal(state.deletingSubsessions.size, 0);
+    assert.deepEqual(state.subsessions.get(sessionViewKey(session)), [main, sibling, recent]);
+    assert.deepEqual(toasts, []);
+  } finally {
+    global.requestSubsessionDeletion = request;
+  }
+}
+
+async function testSubsessionDeletionRequiresConfirmationAndReportsErrors() {
+  resetHarness();
+  const session = {namespace: 'default', name: 'shared', uid: 'shared-id', phase: 'Ready'};
+  const child = {id: 'child', name: 'Investigation'};
+  state.selected = session;
+  state.subsessions.set(sessionViewKey(session), [child]);
+  const request = global.requestSubsessionDeletion;
+  const confirm = window.confirm;
+  let requests = 0;
+  global.requestSubsessionDeletion = async () => { requests++; throw new Error('Runtime unavailable'); };
+  try {
+    window.confirm = message => {
+      assert.match(message, /permanently deletes its retained Kelos history/);
+      assert.match(message, /Shared workspace files are preserved/);
+      return false;
+    };
+    await deleteSubsession(session, child);
+    await deleteSubsession(session, {id: '', name: 'Main conversation'});
+    assert.equal(requests, 0);
+    window.confirm = () => true;
+    await deleteSubsession(session, child);
+    assert.equal(requests, 1);
+    assert.equal(state.deletingSubsessions.size, 0);
+    assert.deepEqual(state.subsessions.get(sessionViewKey(session)), [child]);
+    assert.deepEqual(toasts, ['Could not delete subsession Investigation: Runtime unavailable']);
+  } finally {
+    global.requestSubsessionDeletion = request;
+    window.confirm = confirm;
+  }
+}
+
+async function testSubsessionDeletionUsesIndependentConnection() {
+  resetHarness();
+  const session = {namespace: 'team-a', name: 'shared', uid: 'shared-id', phase: 'Ready'};
+  const child = {id: 'child', name: 'Investigation'};
+  const requests = [];
+  class Socket {
+    constructor(url) { this.url = url; this.listeners = new Map(); requests.push(this); }
+    addEventListener(name, listener) { this.listeners.set(name, listener); }
+    send(value) { this.sent = JSON.parse(value); }
+    close() { this.closed = true; }
+  }
+  const request = vm.runInThisContext(`(WebSocket, location, window) => {${applicationSlice('async function requestSubsessionDeletion', 'async function deleteSubsession')} return requestSubsessionDeletion;}`)(
+    Socket, {protocol: 'https:', host: 'console.example.test'}, {setTimeout, clearTimeout},
+  );
+  for (const outcome of ['success', 'error', 'runtime-error', 'close']) {
+    const pending = request(session, child);
+    const socket = requests.at(-1);
+    assert.equal(socket.url, 'wss://console.example.test/api/sessions/team-a/shared/connect');
+    socket.listeners.get('open')();
+    assert.equal(socket.sent.type, 'subsession.delete');
+    assert.equal(socket.sent.subsessionId, 'child');
+    const response = {requestId: socket.sent.requestId, type: 'subsessions', subsessions: [{id: '', name: 'Main conversation'}]};
+    if (outcome === 'close') socket.listeners.get('close')();
+    else if (outcome === 'runtime-error') socket.listeners.get('message')({data: JSON.stringify({type: 'error', text: 'Runtime unavailable'})});
+    else socket.listeners.get('message')({data: JSON.stringify(outcome === 'error' ? {...response, type: 'error', text: 'Deletion rejected'} : response)});
+    if (outcome === 'success') assert.deepEqual(await pending, response.subsessions);
+    else await assert.rejects(pending, outcome === 'error' ? /Deletion rejected/ : outcome === 'runtime-error' ? /Runtime unavailable/ : /disconnected during deletion/);
+    assert.equal(socket.closed, true);
   }
 }

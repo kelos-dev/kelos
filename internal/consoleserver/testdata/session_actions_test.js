@@ -216,6 +216,22 @@ async function testSessionDragDoesNotCaptureActions() {
   assert.equal(elements.sessionActionsMenu.hidden, false);
 }
 
+async function testSessionRowOpensMainConversation() {
+  resetHarness();
+  const session = {namespace: 'default', name: 'review', provider: 'codex'};
+  const item = createSessionListItem(session);
+  const select = item.children.find(child => child.className === 'session-item-select');
+  const requests = [];
+  const selectSession = global.selectSession;
+  global.selectSession = (...args) => requests.push(args);
+  try {
+    await select.dispatch('click');
+    assert.deepEqual(requests, [[session, true, {subsessionID: ''}]]);
+  } finally {
+    global.selectSession = selectSession;
+  }
+}
+
 function testOpenMenuSurvivesSessionRefresh() {
   resetHarness();
   const session = {namespace: 'default', name: 'review', provider: 'codex'};
@@ -459,6 +475,7 @@ assert.match(application, /sessionActionSection\.addEventListener\('click'/);
 assert.match(application, /sessionActionsMenu\.addEventListener\('focusout'/);
 
 testEverySessionRowHasActionsMenu()
+  .then(() => testSessionRowOpensMainConversation())
   .then(() => testSessionDragDoesNotCaptureActions())
   .then(() => {
     testOpenMenuSurvivesSessionRefresh();

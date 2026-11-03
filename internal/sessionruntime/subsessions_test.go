@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -149,6 +152,351 @@ func TestSubsessionRestoresHistory(t *testing.T) {
 	}
 }
 
+func TestSubsessionDeletionStopsWorkAndPreservesSharedWorkspace(t *testing.T) {
+	dir := subsessionStateDir(t)
+	g := testSubsessionGroup(t, dir)
+	g.newProvider = func(_ context.Context, config ProviderConfig) (Provider, error) {
+		provider := &fakeProvider{resume: make(chan struct{})}
+		provider.SetEventSink(config.EventSink)
+		return provider, nil
+	}
+	child, err := g.create("Investigation", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sibling, err := g.create("Review", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, _ := g.get(child.ID)
+	provider := server.provider.(*fakeProvider)
+	if err := g.root.journal.Append(Event{Type: EventAssistantMessage, Text: "Main history"}); err != nil {
+		t.Fatal(err)
+	}
+	workspaceFile := filepath.Join(g.root.config.WorkingDir, "shared.txt")
+	if err := os.WriteFile(workspaceFile, []byte("Shared work"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.submitMessage("Active work", "active"); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		provider.mu.Lock()
+		started := len(provider.prompts) > 0
+		provider.mu.Unlock()
+		if started {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("subsession work did not start")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err := g.remove(child.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.remove(child.ID); err != nil {
+		t.Fatalf("retrying deletion: %v", err)
+	}
+	if _, err := g.get(child.ID); err == nil {
+		t.Fatal("deleted subsession is still accessible")
+	}
+	if _, err := os.Stat(server.config.StateDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("deleted history still exists: %v", err)
+	}
+	if !provider.closed || g.ctx.Err() != nil {
+		t.Fatal("deletion did not stop only the subsession provider")
+	}
+	if err := server.submitMessage("Rejected", "deleted"); err == nil {
+		t.Fatal("deleted subsession accepted a message")
+	}
+	data, err := os.ReadFile(workspaceFile)
+	if err != nil || string(data) != "Shared work" {
+		t.Fatalf("shared file = %q, error = %v", data, err)
+	}
+	if events := g.root.journal.Snapshot(); len(events) != 1 || events[0].Text != "Main history" {
+		t.Fatalf("main history = %#v", events)
+	}
+	other, err := g.get(sibling.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := other.submitMessage("Continue review", "sibling"); err != nil {
+		t.Fatal(err)
+	}
+	g.close()
+	g.root.journal.Close()
+	restarted := testSubsessionGroup(t, dir)
+	if err := restarted.restore(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restarted.get(child.ID); err == nil {
+		t.Fatal("deleted subsession was restored")
+	}
+	if _, err := restarted.get(sibling.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSubsessionDeletionProtocol(t *testing.T) {
+	g := testSubsessionGroup(t, subsessionStateDir(t))
+	child, err := g.create("Delete me", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, connection := net.Pipe()
+	t.Cleanup(func() { _ = client.Close() })
+	go g.root.handleConnection(g.ctx, connection)
+	_ = client.SetDeadline(time.Now().Add(3 * time.Second))
+	encoder, decoder := json.NewEncoder(client), json.NewDecoder(client)
+	for _, id := range []string{child.ID, "", "../parent", child.ID} {
+		if err := encoder.Encode(ClientRequest{Type: "subsession.delete", SubsessionID: id, RequestID: "delete"}); err != nil {
+			t.Fatal(err)
+		}
+		var event Event
+		if err := decoder.Decode(&event); err != nil {
+			t.Fatal(err)
+		}
+		if event.RequestID != "delete" {
+			t.Fatalf("deletion response = %#v", event)
+		}
+		if id != child.ID {
+			if event.Type != EventError || event.Status != "rejected" {
+				t.Fatalf("invalid deletion response = %#v", event)
+			}
+		} else if event.Type != EventSubsessions || len(event.Subsessions) != 1 || event.Subsessions[0].ID != "" {
+			t.Fatalf("deletion catalog = %#v", event)
+		}
+	}
+}
+
+func TestSubsessionDeletionDisconnectsRoutedClients(t *testing.T) {
+	g := testSubsessionGroup(t, subsessionStateDir(t))
+	child, err := g.create("Delete me", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, connection := net.Pipe()
+	t.Cleanup(func() { _ = client.Close() })
+	go g.root.handleConnection(g.ctx, connection)
+	_ = client.SetDeadline(time.Now().Add(3 * time.Second))
+	if err := json.NewEncoder(client).Encode(ClientRequest{Type: "subscribe", SubsessionID: child.ID}); err != nil {
+		t.Fatal(err)
+	}
+	decoder := json.NewDecoder(client)
+	for {
+		var event Event
+		if err := decoder.Decode(&event); err != nil {
+			t.Fatal(err)
+		}
+		if event.Type == EventHistoryEnd {
+			break
+		}
+	}
+	if err := g.remove(child.ID); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		var event Event
+		err := decoder.Decode(&event)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("deleted client did not disconnect: %v", err)
+		}
+	}
+}
+
+func TestSubsessionDeletionFreesCapacity(t *testing.T) {
+	g := testSubsessionGroup(t, subsessionStateDir(t))
+	var first Subsession
+	for i := range maxSubsessions {
+		child, err := g.create(fmt.Sprintf("Conversation %d", i), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			first = child
+		}
+	}
+	if err := g.remove(first.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.create("Replacement", ""); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type deletingProvider struct {
+	fakeProvider
+	deleting chan struct{}
+	release  chan struct{}
+	err      error
+	once     sync.Once
+}
+
+func (p *deletingProvider) deleteConversation(ctx context.Context) error {
+	p.once.Do(func() { close(p.deleting) })
+	if p.err != nil {
+		return p.err
+	}
+	select {
+	case <-p.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func TestSubsessionDeletionRetainsCleanupStateOnFailure(t *testing.T) {
+	dir := subsessionStateDir(t)
+	g := testSubsessionGroup(t, dir)
+	provider := &deletingProvider{deleting: make(chan struct{}), err: errors.New("Cleanup unavailable")}
+	g.newProvider = func(_ context.Context, config ProviderConfig) (Provider, error) {
+		provider.SetEventSink(config.EventSink)
+		return provider, nil
+	}
+	child, err := g.create("Delete me", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, _ := g.get(child.ID)
+	server.submitMu.Lock()
+	server.outstanding = 1
+	server.submitMu.Unlock()
+	if err := g.remove(child.ID); err == nil || !strings.Contains(err.Error(), "Cleanup unavailable") {
+		t.Fatalf("deletion error = %v", err)
+	}
+	if _, err := g.get(child.ID); err == nil || len(g.list()) != 1 {
+		t.Fatal("failed cleanup left a stopped conversation registered")
+	}
+	g.root.submitMu.Lock()
+	drained := g.childrenDrained(true)
+	g.root.submitMu.Unlock()
+	if !drained {
+		t.Fatal("failed cleanup left the drain blocked")
+	}
+	g.publishMu.Lock()
+	_, published := g.statuses[child.ID]
+	g.publishMu.Unlock()
+	if published {
+		t.Fatal("failed cleanup retained the deleted conversation's status")
+	}
+	pending := filepath.Join(g.directory(), pendingDeletionPrefix+child.ID)
+	if _, err := os.Stat(filepath.Join(pending, "subsession.json")); err != nil {
+		t.Fatalf("deletion metadata was lost: %v", err)
+	}
+	g.close()
+	g.root.journal.Close()
+	restarted := testSubsessionGroup(t, dir)
+	if err := restarted.restore(); err != nil {
+		t.Fatal(err)
+	}
+	if len(restarted.list()) != 1 {
+		t.Fatal("pending deletion was restored as a conversation")
+	}
+	if _, err := os.Stat(pending); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("pending deletion was not cleaned up: %v", err)
+	}
+}
+
+func TestSubsessionRestoreRetriesOpenCodeDeletion(t *testing.T) {
+	g := testSubsessionGroup(t, subsessionStateDir(t))
+	var mu sync.Mutex
+	var requests []string
+	allowDeletion := false
+	api := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		requests = append(requests, request.Method+" "+request.URL.Path)
+		if request.Method == http.MethodDelete && !allowDeletion {
+			response.WriteHeader(http.StatusServiceUnavailable)
+		}
+		_, _ = response.Write([]byte("true"))
+	}))
+	defer api.Close()
+	client, err := newOpenCodeClient(api.URL, g.root.config.WorkingDir, api.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := newOpenCodeProviderState(g.ctx, ProviderConfig{}, client)
+	original := g.root.provider
+	g.root.provider = parent
+	defer func() {
+		g.root.provider = original
+		_ = parent.Close()
+	}()
+	pending := filepath.Join(g.directory(), pendingDeletionPrefix+"41a48f94-e5d5-4e6d-84c1-3a990221713a")
+	if err := os.MkdirAll(pending, 0700); err != nil {
+		t.Fatal(err)
+	}
+	state := filepath.Join(pending, "opencode-session-id")
+	if err := os.WriteFile(state, []byte("ses-child\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.restore(); err == nil {
+		t.Fatal("provider cleanup failure was ignored")
+	}
+	if _, err := os.Stat(state); err != nil {
+		t.Fatalf("provider cleanup state was lost: %v", err)
+	}
+	mu.Lock()
+	allowDeletion = true
+	mu.Unlock()
+	if err := g.restore(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(pending); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("pending deletion was not removed: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	want := []string{"POST /session/ses-child/abort", "DELETE /session/ses-child", "POST /session/ses-child/abort", "DELETE /session/ses-child"}
+	if !reflect.DeepEqual(requests, want) {
+		t.Fatalf("cleanup requests = %v, want %v", requests, want)
+	}
+}
+
+func TestSubsessionDeletionBlocksDrainUntilProviderCleanupCompletes(t *testing.T) {
+	g := testSubsessionGroup(t, subsessionStateDir(t))
+	provider := &deletingProvider{deleting: make(chan struct{}), release: make(chan struct{})}
+	var release sync.Once
+	defer release.Do(func() { close(provider.release) })
+	g.newProvider = func(_ context.Context, config ProviderConfig) (Provider, error) {
+		provider.SetEventSink(config.EventSink)
+		return provider, nil
+	}
+	child, err := g.create("Delete me", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	removed := make(chan error, 1)
+	go func() { removed <- g.remove(child.ID) }()
+	select {
+	case <-provider.deleting:
+	case <-time.After(3 * time.Second):
+		t.Fatal("provider cleanup did not start")
+	}
+	g.root.submitMu.Lock()
+	drained := g.childrenDrained(false)
+	g.root.submitMu.Unlock()
+	if drained {
+		t.Fatal("drain completed while provider cleanup was pending")
+	}
+	release.Do(func() { close(provider.release) })
+	if err := <-removed; err != nil {
+		t.Fatal(err)
+	}
+	g.root.submitMu.Lock()
+	drained = g.childrenDrained(false)
+	g.root.submitMu.Unlock()
+	if !drained {
+		t.Fatal("drain remained blocked after deletion")
+	}
+}
+
 func TestSubsessionConnectionRoutesMessages(t *testing.T) {
 	g := testSubsessionGroup(t, subsessionStateDir(t))
 	parentClient, parentServer := net.Pipe()
@@ -215,7 +563,7 @@ func TestSubsessionActivityBlocksDrain(t *testing.T) {
 	child := NewServer(Config{}, NewJournal(), &fakeProvider{})
 	t.Cleanup(child.journal.Close)
 	child.subsessions = g
-	g.children["child"] = child
+	g.children["child"] = &subsessionRuntime{Server: child}
 	g.root.updateRequest = &sessionupdate.Request{ID: "update"}
 	g.root.idleDrainRequest = &sessionupdate.Request{ID: "idle"}
 	child.outstanding = 1
@@ -361,7 +709,7 @@ func TestSubsessionCatalogBroadcastsActivityAndNotifications(t *testing.T) {
 	child := NewServer(Config{}, NewJournal(), &fakeProvider{})
 	t.Cleanup(g.root.journal.Close)
 	t.Cleanup(child.journal.Close)
-	g.children["child"] = child
+	g.children["child"] = &subsessionRuntime{Server: child}
 	g.names["child"] = Subsession{ID: "child", Name: "Investigation"}
 	updates, stop := g.subscribe()
 	defer stop()
@@ -632,7 +980,7 @@ func TestSubsessionUsesSharedWorkspaceObservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	g.updateWorkspaceStatus(shared)
-	for _, conversation := range []*Server{g.root, server} {
+	for _, conversation := range []*Server{g.root, server.Server} {
 		if status := conversation.runtimeStatusSnapshot(); status.Branch != "feature" || status.PullRequestNumber != 42 {
 			t.Fatalf("conversation workspace status = %#v", status)
 		}

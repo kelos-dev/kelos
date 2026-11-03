@@ -51,7 +51,7 @@ function harness(receipts = new Map()) {
     state: {
       namespace: 'default', namespaceGeneration: 0, sessionListGeneration: 0, consoleView: 'sessions',
       sessions: [], selected: null, currentView: {historyLoaded: true}, sectionAssignments: new Set(),
-      subsessions: new Map(), subsessionSelections: new Map(), collapsedSubsessions: new Set(),
+      subsessions: new Map(), subsessionSelections: new Map(), deletingSubsessions: new Set(),
     },
     api: async (url, options) => {
       requests.push({url, ...options});

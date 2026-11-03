@@ -868,7 +868,7 @@ func TestSessionJavaScriptResumesIdleSuspension(t *testing.T) {
 	}
 	javascript := string(source)
 	for _, expected := range []string{
-		"selectSession(session, true)",
+		"selectSession(session, true, { subsessionID: '' })",
 		"if (resumeIdle && session.idleSuspended)\n            resumeIdleSession(session);",
 		"await requestSessionLifecycleAction(session, 'resume');",
 	} {

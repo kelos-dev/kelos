@@ -619,7 +619,7 @@ const state = {
   subsessions: new Map<string, Subsession[]>(),
   subsessionRequestID: '',
   subsessionRequestText: '',
-  collapsedSubsessions: new Set<string>(),
+  deletingSubsessions: new Set<string>(),
   subsessionNotificationID: '',
   currentView: null as SessionView | null,
   lastEventID: 0,
@@ -2356,6 +2356,74 @@ function submitSubsession() {
   state.socket.send(JSON.stringify({type: 'subsession.create', requestId: state.subsessionRequestID, text: state.subsessionRequestText}));
 }
 
+async function requestSubsessionDeletion(session: SessionSummary, conversation: Subsession): Promise<Subsession[]> {
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const socket = new WebSocket(`${protocol}//${location.host}/api/sessions/${encodeURIComponent(session.namespace)}/${encodeURIComponent(session.name)}/connect`);
+  const requestId = sessionRequestID('subsession-delete');
+  let timeout: number | undefined;
+  try {
+    return await new Promise<Subsession[]>((resolve, reject) => {
+      timeout = window.setTimeout(() => reject(new Error('Subsession deletion timed out')), 30000);
+      socket.addEventListener('open', () => socket.send(JSON.stringify({type: 'subsession.delete', subsessionId: conversation.id, requestId})));
+      socket.addEventListener('message', event => {
+        try {
+          const response = JSON.parse(event.data);
+          if (response.type === 'error') reject(new Error(response.text || 'Subsession deletion failed'));
+          else if (response.requestId === requestId && response.type === 'subsessions' && Array.isArray(response.subsessions)) resolve(response.subsessions);
+        } catch (error) {
+          reject(error);
+        }
+      });
+      socket.addEventListener('error', () => reject(new Error('Could not connect to the Session runtime')));
+      socket.addEventListener('close', () => reject(new Error('Session runtime disconnected during deletion')));
+    });
+  } finally {
+    window.clearTimeout(timeout);
+    socket.close();
+  }
+}
+
+async function deleteSubsession(session: SessionSummary, conversation: Subsession) {
+  const key = `${sessionViewKey(session)}/subsessions/${conversation.id}`;
+  if (!conversation.id || session.phase !== 'Ready' || session.resetting || state.deletingSubsessions.has(key)) return;
+  if (!window.confirm(`Delete subsession ${conversation.name} in ${sessionDisplayName(session)}? This stops its work and permanently deletes its retained Kelos history. Shared workspace files are preserved.`)) return;
+  state.deletingSubsessions.add(key);
+  renderSessions();
+  try {
+    await requestSubsessionDeletion(session, conversation);
+    const currentSession = state.sessions.find(current => sessionViewKey(current) === sessionViewKey(session));
+    if (!currentSession) return;
+    const current = state.subsessions.get(sessionViewKey(currentSession));
+    if (current) updateSubsessions(currentSession, current.filter(child => child.id !== conversation.id));
+  } catch (error) {
+    showToast(`Could not delete subsession ${conversation.name}: ${errorMessage(error)}`);
+  } finally {
+    state.deletingSubsessions.delete(key);
+    renderSessions();
+  }
+}
+
+function updateSubsessions(session: SessionSummary, conversations: Subsession[]) {
+  const key = sessionViewKey(session);
+  const previous = state.subsessions.get(key) || [];
+  const selected = selectedSubsession(session);
+  state.subsessions.set(key, conversations);
+  if (selected && !conversations.some(conversation => conversation.id === selected)) {
+    if (state.selected && sessionViewKey(state.selected) === key) selectSession(session, false, {subsessionID: ''});
+    else state.subsessionSelections.set(key, '');
+  }
+  const removed = new Set([...previous.map(conversation => conversation.id), selected]
+    .filter(id => id && !conversations.some(conversation => conversation.id === id)));
+  for (const id of removed) {
+    state.sessionViews.delete(`${key}/subsessions/${id}`);
+    const draftKey = `${sessionKey(session)}/subsessions/${id}`;
+    state.promptDrafts.delete(draftKey);
+    state.attachmentDrafts.delete(draftKey);
+  }
+  renderSessions();
+  if (state.selected && sessionViewKey(state.selected) === key) renderConversationHeading();
+}
+
 function receiveSubsessions(event: ConsoleEvent & {subsessions?: Subsession[]; subsessionId?: string}) {
   if (!state.selected) return;
   if (event.type === 'error') {
@@ -2366,9 +2434,7 @@ function receiveSubsessions(event: ConsoleEvent & {subsessions?: Subsession[]; s
     renderSubsessionForm();
     return;
   }
-  state.subsessions.set(sessionViewKey(state.selected), event.subsessions || []);
-  renderSessions();
-  renderConversationHeading();
+  updateSubsessions(state.selected, event.subsessions || []);
   const notification = state.subsessionNotificationID;
   state.subsessionNotificationID = '';
   const target = notification && event.subsessions?.find(child => child.notificationId === notification);
@@ -2382,25 +2448,9 @@ function receiveSubsessions(event: ConsoleEvent & {subsessions?: Subsession[]; s
 
 function appendSessionConversations(item: HTMLElement, session: SessionSummary, parentButton: HTMLButtonElement) {
   const key = sessionViewKey(session);
-  const conversations = state.subsessions.get(key);
+  const conversations = (state.subsessions.get(key) || []).filter(conversation => conversation.id);
   const selected = Boolean(state.selected && sessionViewKey(state.selected) === key);
-  const expanded = (selected || Boolean(conversations)) && !state.collapsedSubsessions.has(key);
-  if (selected && (!expanded || !conversations?.length)) parentButton.setAttribute('aria-current', 'page');
-  const toggle = document.createElement('button');
-  toggle.className = 'session-conversations-toggle';
-  toggle.type = 'button';
-  toggle.textContent = expanded ? '⌄' : '›';
-  toggle.setAttribute('aria-label', `${expanded ? 'Collapse' : 'Expand'} conversations in ${sessionDisplayName(session)}`);
-  toggle.setAttribute('aria-expanded', String(expanded));
-  toggle.addEventListener('click', () => {
-    if (expanded) state.collapsedSubsessions.add(key);
-    else {
-      state.collapsedSubsessions.delete(key);
-      if (!conversations) selectSession(session, true);
-    }
-    renderSessions();
-  });
-  item.append(toggle);
+  if (selected && !selectedSubsession(session)) parentButton.setAttribute('aria-current', 'page');
   const create = document.createElement('button');
   create.className = 'session-subsession-create';
   create.type = 'button';
@@ -2410,12 +2460,14 @@ function appendSessionConversations(item: HTMLElement, session: SessionSummary, 
   create.disabled = session.phase !== 'Ready' || Boolean(session.resetting) || Boolean(state.subsessionRequestID);
   create.addEventListener('click', () => openSubsessionDialog(session));
   item.append(create);
-  if (!expanded || !conversations) return;
+  if (!conversations.length) return;
   const list = document.createElement('div');
   list.className = 'session-conversations';
   list.setAttribute('role', 'group');
   list.setAttribute('aria-label', `Conversations in ${sessionDisplayName(session)}`);
   for (const conversation of conversations) {
+    const row = document.createElement('div');
+    row.className = 'session-conversation-row';
     const button = document.createElement('button');
     button.className = 'session-conversation';
     button.type = 'button';
@@ -2436,7 +2488,16 @@ function appendSessionConversations(item: HTMLElement, session: SessionSummary, 
     text.append(name, activity);
     button.append(dot, text);
     button.addEventListener('click', () => selectSession(session, true, {subsessionID: conversation.id}));
-    list.append(button);
+    const remove = document.createElement('button');
+    remove.className = 'session-conversation-delete';
+    remove.type = 'button';
+    remove.textContent = '×';
+    remove.title = `Delete subsession ${conversation.name}`;
+    remove.setAttribute('aria-label', remove.title);
+    remove.disabled = session.phase !== 'Ready' || Boolean(session.resetting) || state.deletingSubsessions.has(`${key}/subsessions/${conversation.id}`);
+    remove.addEventListener('click', () => { void deleteSubsession(session, conversation); });
+    row.append(button, remove);
+    list.append(row);
   }
   item.append(list);
 }
@@ -2595,7 +2656,6 @@ function discardSessionView(session?: SessionSummary | null) {
   }
   state.subsessions.delete(key);
   state.subsessionSelections.delete(key);
-  state.collapsedSubsessions.delete(key);
 }
 
 function resetCurrentSessionView() {
@@ -3148,7 +3208,7 @@ function createSessionListItem(session: SessionSummary, draggable = false) {
     text.append(branch);
   }
   button.append(dot, text);
-  button.addEventListener('click', () => selectSession(session, true));
+  button.addEventListener('click', () => selectSession(session, true, {subsessionID: ''}));
   item.append(button);
   const actions = document.createElement('button');
   actions.className = 'session-item-actions';
@@ -4136,7 +4196,6 @@ function selectSession(session: SessionSummary | null, resumeIdle = false, {upda
   state.subsessionNotificationID = subsessionID === undefined ? session?.lastNotification?.id || '' : '';
   if (session && subsessionID !== undefined) {
     state.subsessionSelections.set(sessionViewKey(session), subsessionID);
-    state.collapsedSubsessions.delete(sessionViewKey(session));
   }
   state.currentView = null;
   setActiveView('conversation');

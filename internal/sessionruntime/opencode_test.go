@@ -256,6 +256,59 @@ func TestOpenCodeProviderInterruptsActiveTurn(t *testing.T) {
 	sink.waitForCompletion(t, "interrupted")
 }
 
+func TestOpenCodeProviderDeletesConversation(t *testing.T) {
+	for _, test := range []struct {
+		abortStatus  int
+		deleteStatus int
+		deleted      bool
+	}{
+		{http.StatusOK, http.StatusOK, true},
+		{http.StatusOK, http.StatusOK, false},
+		{http.StatusNotFound, http.StatusOK, false},
+		{http.StatusInternalServerError, http.StatusOK, false},
+		{http.StatusOK, http.StatusNotFound, false},
+		{http.StatusOK, http.StatusInternalServerError, false},
+	} {
+		t.Run(fmt.Sprintf("%d/%d/%t", test.abortStatus, test.deleteStatus, test.deleted), func(t *testing.T) {
+			var mu sync.Mutex
+			var requests []string
+			server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+				mu.Lock()
+				requests = append(requests, request.Method+" "+request.URL.Path)
+				mu.Unlock()
+				status := test.abortStatus
+				if request.Method == http.MethodDelete {
+					status = test.deleteStatus
+				}
+				response.WriteHeader(status)
+				_ = json.NewEncoder(response).Encode(test.deleted)
+			}))
+			defer server.Close()
+			client, err := newOpenCodeClient(server.URL, t.TempDir(), server.Client())
+			if err != nil {
+				t.Fatal(err)
+			}
+			provider := newOpenCodeProviderState(t.Context(), ProviderConfig{}, client)
+			provider.setSessionID("ses-child")
+			provider.cancel()
+			err = provider.deleteConversation(t.Context())
+			wantError := test.abortStatus == http.StatusInternalServerError || (test.abortStatus == http.StatusOK && (test.deleteStatus == http.StatusInternalServerError || (test.deleteStatus == http.StatusOK && !test.deleted)))
+			if (err != nil) != wantError {
+				t.Fatalf("deleteConversation() error = %v", err)
+			}
+			expected := []string{"POST /session/ses-child/abort"}
+			if test.abortStatus == http.StatusOK {
+				expected = append(expected, "DELETE /session/ses-child")
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if !reflect.DeepEqual(requests, expected) {
+				t.Fatalf("deletion requests = %v, want %v", requests, expected)
+			}
+		})
+	}
+}
+
 func TestOpenCodeProviderFailsWhenSavedSessionIsMissing(t *testing.T) {
 	fake := newFakeOpenCodeServer(t)
 	fake.resumeFound = false

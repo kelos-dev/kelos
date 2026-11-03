@@ -18,6 +18,8 @@ import (
 
 const maxSubsessions = 8
 
+const pendingDeletionPrefix = ".deleting-"
+
 type notificationWatermark struct {
 	ID   string    `json:"id"`
 	Time time.Time `json:"time"`
@@ -33,15 +35,22 @@ type Subsession struct {
 	WaitingForInput  bool   `json:"waitingForInput,omitempty"`
 }
 
+type subsessionRuntime struct {
+	*Server
+	ctx    context.Context
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
 type subsessionGroup struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	root   *Server
 
-	createMu    sync.Mutex
-	creating    bool
+	mutationMu  sync.Mutex
+	mutating    bool
 	mu          sync.Mutex
-	children    map[string]*Server
+	children    map[string]*subsessionRuntime
 	names       map[string]Subsession
 	failure     error
 	workers     sync.WaitGroup
@@ -57,7 +66,7 @@ type subsessionGroup struct {
 func newSubsessionGroup(ctx context.Context, cancel context.CancelFunc, publisher SessionStatusPublisher) *subsessionGroup {
 	return &subsessionGroup{
 		ctx: ctx, cancel: cancel, publish: publisher, newProvider: NewProvider,
-		children: map[string]*Server{}, names: map[string]Subsession{},
+		children: map[string]*subsessionRuntime{}, names: map[string]Subsession{},
 		statuses: map[string]ObservedSessionStatus{}, subscribers: map[chan []Subsession]struct{}{},
 	}
 }
@@ -140,6 +149,15 @@ func (g *subsessionGroup) restore() error {
 		if !entry.IsDir() {
 			continue
 		}
+		if id, pending := strings.CutPrefix(entry.Name(), pendingDeletionPrefix); pending {
+			if _, err := uuid.Parse(id); err != nil {
+				return fmt.Errorf("invalid pending subsession deletion %q: %w", id, err)
+			}
+			if err := g.finishDeletion(filepath.Join(g.directory(), entry.Name())); err != nil {
+				return fmt.Errorf("finishing subsession %q deletion: %w", id, err)
+			}
+			continue
+		}
 		data, err := os.ReadFile(filepath.Join(g.directory(), entry.Name(), "subsession.json"))
 		if errors.Is(err, os.ErrNotExist) {
 			continue
@@ -166,8 +184,8 @@ func (g *subsessionGroup) create(name, requestID string) (Subsession, error) {
 	if name == "" || utf8.RuneCountInString(name) > 64 {
 		return Subsession{}, errors.New("Subsession name must contain between 1 and 64 characters")
 	}
-	g.createMu.Lock()
-	defer g.createMu.Unlock()
+	g.mutationMu.Lock()
+	defer g.mutationMu.Unlock()
 	id := uuid.NewString()
 	if requestID != "" {
 		id = uuid.NewSHA1(uuid.NameSpaceOID, []byte(requestID)).String()
@@ -197,16 +215,9 @@ func (g *subsessionGroup) create(name, requestID string) (Subsession, error) {
 		g.root.submitMu.Unlock()
 		return Subsession{}, fmt.Errorf("Session %q supports at most %d subsessions", g.root.config.SessionName, maxSubsessions)
 	}
-	g.creating = true
+	g.mutating = true
 	g.root.submitMu.Unlock()
-	defer func() {
-		g.root.submitMu.Lock()
-		g.creating = false
-		g.root.submitMu.Unlock()
-		if g.root.drainReportPending() {
-			g.root.signalSessionUpdateReport()
-		}
-	}()
+	defer g.finishMutation()
 	child := Subsession{ID: id, Name: name}
 	if err := g.start(child, true); err != nil {
 		return Subsession{}, err
@@ -215,6 +226,7 @@ func (g *subsessionGroup) create(name, requestID string) (Subsession, error) {
 }
 
 func (g *subsessionGroup) start(child Subsession, persist bool) error {
+	ctx, cancel := context.WithCancel(g.ctx)
 	config := g.root.config
 	config.StateDir = filepath.Join(g.directory(), child.ID)
 	config.SocketPath = filepath.Join(filepath.Dir(config.SocketPath), child.ID+".sock")
@@ -227,11 +239,14 @@ func (g *subsessionGroup) start(child Subsession, persist bool) error {
 			return newOpenCodeProviderWithClient(ctx, config, parent.client)
 		}
 	}
-	server, err := openSessionServer(g.ctx, config, factory, g)
+	server, err := openSessionServer(ctx, config, factory, g)
 	if err != nil {
+		cancel()
 		return fmt.Errorf("opening subsession %q: %w", child.Name, err)
 	}
-	if err := g.register(child, server, persist); err != nil {
+	runtime := &subsessionRuntime{Server: server, ctx: ctx, cancel: cancel, done: make(chan struct{})}
+	if err := g.register(child, runtime, persist); err != nil {
+		cancel()
 		_ = server.closeProvider()
 		server.events.close()
 		server.journal.Close()
@@ -239,7 +254,9 @@ func (g *subsessionGroup) start(child Subsession, persist bool) error {
 	}
 	go func() {
 		defer g.workers.Done()
-		if err := server.Serve(g.ctx); err != nil && g.ctx.Err() == nil {
+		defer close(runtime.done)
+		defer cancel()
+		if err := server.Serve(ctx); err != nil && ctx.Err() == nil {
 			g.mu.Lock()
 			g.failure = fmt.Errorf("subsession %q stopped: %w", child.Name, err)
 			g.mu.Unlock()
@@ -249,7 +266,7 @@ func (g *subsessionGroup) start(child Subsession, persist bool) error {
 	return nil
 }
 
-func (g *subsessionGroup) register(child Subsession, server *Server, persist bool) error {
+func (g *subsessionGroup) register(child Subsession, server *subsessionRuntime, persist bool) error {
 	g.root.submitMu.Lock()
 	defer g.root.submitMu.Unlock()
 	if err := g.ctx.Err(); err != nil {
@@ -270,6 +287,108 @@ func (g *subsessionGroup) register(child Subsession, server *Server, persist boo
 	g.workers.Add(1)
 	g.mu.Unlock()
 	return nil
+}
+
+func (g *subsessionGroup) remove(id string) error {
+	if id == "" {
+		return errors.New("The main conversation cannot be deleted individually")
+	}
+	if _, err := uuid.Parse(id); err != nil {
+		return fmt.Errorf("Invalid subsession ID %q: %w", id, err)
+	}
+	g.mutationMu.Lock()
+	defer g.mutationMu.Unlock()
+	g.root.submitMu.Lock()
+	if err := g.root.checkDrainLocked(); err != nil {
+		g.root.submitMu.Unlock()
+		return err
+	}
+	if err := g.ctx.Err(); err != nil {
+		g.root.submitMu.Unlock()
+		return err
+	}
+	g.mu.Lock()
+	child := g.children[id]
+	g.mu.Unlock()
+	if child == nil {
+		g.root.submitMu.Unlock()
+		return nil
+	}
+	child.submitMu.Lock()
+	child.providerStopping.Store(true)
+	child.submitMu.Unlock()
+	g.mutating = true
+	g.root.submitMu.Unlock()
+	defer g.finishMutation()
+	child.cancel()
+	<-child.done
+	defer g.unregister(id)
+	pending := filepath.Join(g.directory(), pendingDeletionPrefix+id)
+	// Retain deletion intent and provider identifiers across cleanup failures and restarts.
+	if err := os.Rename(child.config.StateDir, pending); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("recording subsession %q deletion: %w", id, err)
+		}
+		if _, err := os.Stat(pending); err != nil {
+			return fmt.Errorf("reading subsession %q pending deletion: %w", id, err)
+		}
+	}
+	if provider, ok := child.provider.(conversationDeletionProvider); ok {
+		ctx, cancel := context.WithTimeout(g.ctx, 10*time.Second)
+		err := provider.deleteConversation(ctx)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("deleting subsession %q provider conversation: %w", id, err)
+		}
+	}
+	if err := os.RemoveAll(pending); err != nil {
+		return fmt.Errorf("deleting subsession %q history: %w", id, err)
+	}
+	return nil
+}
+
+func (g *subsessionGroup) unregister(id string) {
+	g.publishMu.Lock()
+	g.mu.Lock()
+	delete(g.children, id)
+	delete(g.names, id)
+	delete(g.statuses, id)
+	g.broadcastLocked()
+	g.mu.Unlock()
+	g.publishMu.Unlock()
+	g.root.requestSessionStatusPublish()
+	g.root.signalSessionUpdateReport()
+}
+
+func (g *subsessionGroup) finishDeletion(directory string) error {
+	if parent, ok := g.root.provider.(*OpenCodeProvider); ok {
+		data, err := os.ReadFile(filepath.Join(directory, "opencode-session-id"))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err == nil {
+			id := strings.TrimSpace(string(data))
+			if id == "" {
+				return errors.New("Saved OpenCode session ID is empty")
+			}
+			ctx, cancel := context.WithTimeout(g.ctx, 10*time.Second)
+			err = deleteOpenCodeConversation(ctx, parent.client, id)
+			cancel()
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return os.RemoveAll(directory)
+}
+
+func (g *subsessionGroup) finishMutation() {
+	g.root.submitMu.Lock()
+	g.mutating = false
+	g.root.submitMu.Unlock()
+	if g.root.drainReportPending() {
+		g.root.signalSessionUpdateReport()
+	}
 }
 
 func writeSubsessionState(path string, value any) error {
@@ -305,7 +424,7 @@ func (g *subsessionGroup) updateWorkspaceStatus(status WorkspaceStatus) {
 	}
 }
 
-func (g *subsessionGroup) get(id string) (*Server, error) {
+func (g *subsessionGroup) get(id string) (*subsessionRuntime, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if child := g.children[id]; child != nil {
@@ -336,7 +455,7 @@ func (g *subsessionGroup) list() []Subsession {
 func (g *subsessionGroup) listLocked() []Subsession {
 	children := make([]Subsession, 0, len(g.names)+1)
 	for id, child := range g.names {
-		children = append(children, conversationSummary(child, g.children[id]))
+		children = append(children, conversationSummary(child, g.children[id].Server))
 	}
 	sort.Slice(children, func(i, j int) bool {
 		if children[i].Name == children[j].Name {
@@ -378,8 +497,8 @@ func (g *subsessionGroup) err() error {
 
 func (g *subsessionGroup) close() {
 	g.cancel()
-	g.createMu.Lock()
-	g.createMu.Unlock()
+	g.mutationMu.Lock()
+	g.mutationMu.Unlock()
 	g.workers.Wait()
 }
 
@@ -399,7 +518,7 @@ func (s *Server) checkDrainLocked() error {
 // childrenDrained is called with the root's submission lock held so accepting
 // child work cannot race with acknowledging a drain of the shared workspace.
 func (g *subsessionGroup) childrenDrained(idle bool) bool {
-	if g.creating {
+	if g.mutating {
 		return false
 	}
 	g.mu.Lock()

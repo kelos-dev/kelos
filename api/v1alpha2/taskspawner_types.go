@@ -1201,10 +1201,27 @@ type TaskTemplate struct {
 	UpstreamRepo string `json:"upstreamRepo,omitempty"`
 }
 
+// TaskSpawnerPipelineTemplate defines the TaskPipeline created for each work item.
+//
+// +kubebuilder:validation:XValidation:rule="self.stages.all(stage, self.stages.exists_one(candidate, candidate.name == stage.name))",message="stage names must be unique"
+type TaskSpawnerPipelineTemplate struct {
+	// Stages are copied into each created TaskPipeline. The work item's
+	// template variables are set as the TaskPipeline's params, so stage
+	// prompt, branch, and condition templates read them as .Params, for
+	// example .Params.Body.
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=64
+	// +listType=atomic
+	Stages []PipelineStage `json:"stages"`
+}
+
 // TaskSpawnerSpec defines the desired state of TaskSpawner.
-// +kubebuilder:validation:XValidation:rule="!(has(self.when.githubIssues) || has(self.when.githubPullRequests) || has(self.when.githubWebhook) || has(self.when.linearWebhook)) || has(self.taskTemplate.workspaceRef) || (has(self.taskTemplate.worker) && has(self.taskTemplate.worker.workspaceRef)) || has(self.taskTemplate.workerPoolRef)",message="a workspace source is required when using githubIssues, githubPullRequests, githubWebhook, or linearWebhook source (set taskTemplate.workspaceRef, taskTemplate.worker.workspaceRef, or taskTemplate.workerPoolRef — a pool satisfies this because it carries its own workspace)"
-// +kubebuilder:validation:XValidation:rule="has(self.taskTemplate.workerPoolRef) || (has(self.taskTemplate.worker) && (has(self.taskTemplate.worker.credentials) || has(self.credentials))) || (has(self.taskTemplate.type) && (has(self.taskTemplate.credentials) || has(self.credentials)))",message="inline task templates require taskTemplate credentials or spec.credentials"
-// +kubebuilder:validation:XValidation:rule="!has(self.credentials) || (!has(self.taskTemplate.workerPoolRef) && !has(self.taskTemplate.credentials) && (!has(self.taskTemplate.worker) || !has(self.taskTemplate.worker.credentials)))",message="spec.credentials is mutually exclusive with taskTemplate credentials and workerPoolRef"
+// +kubebuilder:validation:XValidation:rule="!has(self.taskTemplate) || !(has(self.when.githubIssues) || has(self.when.githubPullRequests) || has(self.when.githubWebhook) || has(self.when.linearWebhook)) || has(self.taskTemplate.workspaceRef) || (has(self.taskTemplate.worker) && has(self.taskTemplate.worker.workspaceRef)) || has(self.taskTemplate.workerPoolRef)",message="a workspace source is required when using githubIssues, githubPullRequests, githubWebhook, or linearWebhook source (set taskTemplate.workspaceRef, taskTemplate.worker.workspaceRef, or taskTemplate.workerPoolRef — a pool satisfies this because it carries its own workspace)"
+// +kubebuilder:validation:XValidation:rule="!has(self.taskTemplate) || has(self.taskTemplate.workerPoolRef) || (has(self.taskTemplate.worker) && (has(self.taskTemplate.worker.credentials) || has(self.credentials))) || (has(self.taskTemplate.type) && (has(self.taskTemplate.credentials) || has(self.credentials)))",message="inline task templates require taskTemplate credentials or spec.credentials"
+// +kubebuilder:validation:XValidation:rule="!has(self.credentials) || !has(self.taskTemplate) || (!has(self.taskTemplate.workerPoolRef) && !has(self.taskTemplate.credentials) && (!has(self.taskTemplate.worker) || !has(self.taskTemplate.worker.credentials)))",message="spec.credentials is mutually exclusive with taskTemplate credentials and workerPoolRef"
+// +kubebuilder:validation:XValidation:rule="has(self.taskTemplate) != has(self.pipelineTemplate)",message="exactly one of taskTemplate or pipelineTemplate is required"
+// +kubebuilder:validation:XValidation:rule="!has(self.pipelineTemplate) || (has(self.when.slack) && !has(self.when.githubIssues) && !has(self.when.githubPullRequests) && !has(self.when.cron) && !has(self.when.jira) && !has(self.when.githubWebhook) && !has(self.when.linearWebhook) && !has(self.when.webhook))",message="pipelineTemplate is supported only with the slack source"
+// +kubebuilder:validation:XValidation:rule="!has(self.pipelineTemplate) || !has(self.credentials)",message="spec.credentials is not supported with pipelineTemplate"
 type TaskSpawnerSpec struct {
 	// When defines the conditions that trigger task spawning.
 	// +kubebuilder:validation:Required
@@ -1212,9 +1229,16 @@ type TaskSpawnerSpec struct {
 
 	// TaskTemplate defines the template for spawned Tasks. Inline worker and
 	// legacy type templates may use TaskSpawner.spec.credentials instead of
-	// credentials nested in the template.
-	// +kubebuilder:validation:Required
-	TaskTemplate TaskTemplate `json:"taskTemplate"`
+	// credentials nested in the template. Exactly one of taskTemplate or
+	// pipelineTemplate is required.
+	// +optional
+	TaskTemplate TaskTemplate `json:"taskTemplate,omitzero"`
+
+	// PipelineTemplate creates a TaskPipeline for each work item instead of a
+	// single Task. Supported only with the slack source, and mutually exclusive
+	// with taskTemplate and spec.credentials.
+	// +optional
+	PipelineTemplate *TaskSpawnerPipelineTemplate `json:"pipelineTemplate,omitempty"`
 
 	// Credentials lists named credentials available to generated Tasks. The
 	// spawner selects one credential at random and copies it to the generated

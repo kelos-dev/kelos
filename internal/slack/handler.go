@@ -15,6 +15,7 @@ import (
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
@@ -375,17 +376,22 @@ func (h *SlackHandler) createTask(ctx context.Context, spawner *kelos.TaskSpawne
 	}
 	gvk := gvks[0]
 
+	spawnerRef := &taskbuilder.SpawnerRef{
+		Name:       spawner.Name,
+		UID:        string(spawner.UID),
+		APIVersion: gvk.GroupVersion().String(),
+		Kind:       gvk.Kind,
+	}
+	if spawner.Spec.PipelineTemplate != nil {
+		return h.createTaskPipeline(ctx, spawner, msg, taskName, templateVars, spawnerRef)
+	}
+
 	task, err := h.taskBuilder.BuildTask(
 		taskName,
 		spawner.Namespace,
 		&spawner.Spec.TaskTemplate,
 		templateVars,
-		&taskbuilder.SpawnerRef{
-			Name:       spawner.Name,
-			UID:        string(spawner.UID),
-			APIVersion: gvk.GroupVersion().String(),
-			Kind:       gvk.Kind,
-		},
+		spawnerRef,
 	)
 	if err != nil {
 		return fmt.Errorf("Building task: %w", err)
@@ -394,29 +400,7 @@ func (h *SlackHandler) createTask(ctx context.Context, spawner *kelos.TaskSpawne
 		return fmt.Errorf("Assigning TaskSpawner credential: %w", err)
 	}
 
-	// Add Slack reporting annotations
-	if task.Annotations == nil {
-		task.Annotations = make(map[string]string)
-	}
-	task.Annotations[reporting.AnnotationSlackReporting] = "enabled"
-	task.Annotations[reporting.AnnotationSlackChannel] = msg.ChannelID
-	task.Annotations[reporting.AnnotationSlackUserID] = msg.UserID
-
-	// Only enable Slack reporting label and thread_ts for real message
-	// timestamps. Slash commands have no thread to reply to, so skip the
-	// label to avoid the reporter listing them every cycle.
-	if !msg.IsSlashCommand {
-		if task.Labels == nil {
-			task.Labels = make(map[string]string)
-		}
-		task.Labels[reporting.LabelSlackReporting] = "enabled"
-
-		threadTS := msg.Timestamp
-		if msg.ThreadTS != "" {
-			threadTS = msg.ThreadTS
-		}
-		task.Annotations[reporting.AnnotationSlackThreadTS] = threadTS
-	}
+	setSlackReporting(task, msg)
 
 	if err := h.client.Create(ctx, task); err != nil {
 		// A configured nameTemplate can render a deterministic name; a collision
@@ -439,6 +423,70 @@ func (h *SlackHandler) createTask(ctx context.Context, spawner *kelos.TaskSpawne
 
 	h.log.Info("Created task from Slack message", "task", task.Name, "spawner", spawner.Name)
 	return nil
+}
+
+// createTaskPipeline creates a TaskPipeline for a TaskSpawner with a
+// pipelineTemplate. The pipeline carries the same Slack reporting metadata a
+// Task would, and a name collision is deduplication only when the existing
+// TaskPipeline belongs to this spawner.
+func (h *SlackHandler) createTaskPipeline(
+	ctx context.Context,
+	spawner *kelos.TaskSpawner,
+	msg *SlackMessageData,
+	name string,
+	templateVars map[string]interface{},
+	spawnerRef *taskbuilder.SpawnerRef,
+) error {
+	pipeline := h.taskBuilder.BuildTaskPipeline(name, spawner.Namespace, spawner.Spec.PipelineTemplate, templateVars, spawnerRef)
+	setSlackReporting(pipeline, msg)
+
+	if err := h.client.Create(ctx, pipeline); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			existing := &kelos.TaskPipeline{}
+			if getErr := h.client.Get(ctx, client.ObjectKey{Namespace: pipeline.Namespace, Name: pipeline.Name}, existing); getErr != nil {
+				return fmt.Errorf("reading existing TaskPipeline %s after create conflict: %w", pipeline.Name, getErr)
+			}
+			if taskbuilder.ObjectBelongsToSpawner(existing, spawner.Name, spawner.UID) {
+				h.log.Info("TaskPipeline already exists for spawner, skipping", "taskPipeline", pipeline.Name)
+				return nil
+			}
+			return fmt.Errorf("TaskPipeline %s name collides with an existing TaskPipeline not owned by spawner %s", pipeline.Name, spawner.Name)
+		}
+		return fmt.Errorf("Creating TaskPipeline %s: %w", pipeline.Name, err)
+	}
+
+	h.log.Info("Created task pipeline from Slack message", "taskPipeline", pipeline.Name, "spawner", spawner.Name)
+	return nil
+}
+
+// setSlackReporting records where results for obj should be reported in Slack.
+func setSlackReporting(obj metav1.Object, msg *SlackMessageData) {
+	annotations := obj.GetAnnotations()
+	if annotations == nil {
+		annotations = make(map[string]string)
+	}
+	annotations[reporting.AnnotationSlackReporting] = "enabled"
+	annotations[reporting.AnnotationSlackChannel] = msg.ChannelID
+	annotations[reporting.AnnotationSlackUserID] = msg.UserID
+
+	// Only enable Slack reporting label and thread_ts for real message
+	// timestamps. Slash commands have no thread to reply to, so skip the
+	// label to avoid the reporter listing them every cycle.
+	if !msg.IsSlashCommand {
+		labels := obj.GetLabels()
+		if labels == nil {
+			labels = make(map[string]string)
+		}
+		labels[reporting.LabelSlackReporting] = "enabled"
+		obj.SetLabels(labels)
+
+		threadTS := msg.Timestamp
+		if msg.ThreadTS != "" {
+			threadTS = msg.ThreadTS
+		}
+		annotations[reporting.AnnotationSlackThreadTS] = threadTS
+	}
+	obj.SetAnnotations(annotations)
 }
 
 // enrichMessage builds a SlackMessageData from a raw Slack message event,

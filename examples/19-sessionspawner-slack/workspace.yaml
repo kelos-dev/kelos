@@ -1,0 +1,8 @@
+apiVersion: kelos.dev/v1alpha2
+kind: Workspace
+metadata:
+  name: kelos
+  namespace: default
+spec:
+  repo: https://github.com/kelos-dev/kelos.git
+  ref: main

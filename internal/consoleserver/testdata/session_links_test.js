@@ -37,7 +37,7 @@ function harness(url = 'https://console.example/', sessions = []) {
         },
       },
     },
-    state: {namespace: 'team-a', namespaces: ['team-a', 'team-b'], namespaceGeneration: 0, sessionListGeneration: 0, consoleView: 'overview', selected: null, sessions, resourceGroups: [], resourceDetailGeneration: 0, resourceDetailLogGeneration: 0},
+    state: {namespace: 'team-a', namespaces: ['team-a', 'team-b'], namespaceGeneration: 0, sessionListGeneration: 0, consoleView: 'overview', selected: null, sessions, resourceGroups: [], resourceDetailGeneration: 0, resourceDetailLogGeneration: 0, resourceLogFormat: 'formatted'},
     elements: Object.fromEntries([
       'overviewView', 'sessionsView', 'resourcesView', 'resourceDetailPanel', 'adminView', 'sessionSidebar',
       'resourceDetailSummaryTab', 'resourceDetailRelationshipsTab', 'resourceDetailSummaryPanel', 'resourceDetailRelationshipsPanel',
@@ -257,14 +257,14 @@ async function testResourcePagesAndHistory() {
   assert.equal(h.c.elements.resourceDetailTitle.textContent, 'Task build');
   assert.equal(h.c.elements.resourceDetailYAML.textContent, 'kind: Task');
   assert.equal(h.c.elements.resourceDetailLogs.textContent, 'task logs');
-  assert.deepEqual(h.requests, ['/api/resources/tasks/team-b/build', '/api/resources/tasks/team-b/build/logs']);
+  assert.deepEqual(h.requests, ['/api/resources/tasks/team-b/build', '/api/resources/tasks/team-b/build/logs?format=formatted']);
   assert.equal(h.entries.length, 1);
   assert.equal(h.c.window.location.pathname, '/namespaces/team-b/resources/tasks/build');
   assert.equal(h.c.window.location.search, '?other=keep');
 
   await h.c.openResourceDetail({resource: 'tasks', kind: 'Task'}, {namespace: 'team-b', name: 'test'});
   assert.equal(h.c.window.location.pathname, '/namespaces/team-b/resources/tasks/test');
-  assert.deepEqual(h.requests.slice(-2), ['/api/resources/tasks/team-b/test', '/api/resources/tasks/team-b/test/logs']);
+  assert.deepEqual(h.requests.slice(-2), ['/api/resources/tasks/team-b/test', '/api/resources/tasks/team-b/test/logs?format=formatted']);
   assert.equal(h.entries.length, 2);
   await h.move(-1);
   assert.equal(h.c.elements.resourceDetailTitle.textContent, 'Task build');

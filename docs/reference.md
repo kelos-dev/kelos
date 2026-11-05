@@ -995,11 +995,13 @@ destination. The namespace resource browser is at
 `/namespaces/<namespace>/resources/sessions/<resource-name>`, independently of
 the Session conversation path.
 
-A Task's **Logs** tab shows up to the latest 2,000 lines with a 2 MiB maximum
-and can be refreshed while the Task is running. WorkerPool-backed Task views
-include only the selected Task's segment from the recent shared worker Pod log.
-The Console reports that the segment is unavailable when its markers are
-outside the bounded log window.
+A Task's **Logs** tab reads up to the latest 2,000 container log lines with a
+2 MiB maximum and can be refreshed while the Task is running. By default it
+formats agent output into turns, as `kelos logs` does; **Raw** shows the same
+log window without turn formatting, and the Console remembers the choice in the
+browser. WorkerPool-backed Task views include only the selected Task's segment
+from the recent shared worker Pod log. The Console reports that the segment is
+unavailable when its markers are outside the bounded log window.
 
 Select a TaskSpawner from either resource view and choose **Run task** in its
 **Summary** tab to create one standalone Task from its template. Supply optional

@@ -35,3 +35,5 @@ spec:
       environment variables, Kubernetes manifests, and the installable
       `skills/agora-reporting` contract unless an issue explicitly scopes a
       breaking change.
+    - When changing one of these public contracts, update the matching
+      `README.md`, `examples/`, or `skills/` documentation in the same PR.

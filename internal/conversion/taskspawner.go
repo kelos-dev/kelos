@@ -9,6 +9,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"k8s.io/apimachinery/pkg/util/validation"
+
 	v1alpha1 "github.com/kelos-dev/kelos/api/v1alpha1"
 	v1alpha2 "github.com/kelos-dev/kelos/api/v1alpha2"
 )
@@ -62,6 +64,11 @@ type preservedWebhookGatewayRefs struct {
 // why the value is preserved rather than left to fall away.
 const preservedSlackExcludeFiltersAnnotation = "kelos.dev/v1alpha2-slack-exclude-filters"
 
+// preservedRuntimeClassNameAnnotation carries the task template's
+// podOverrides.runtimeClassName across a v1alpha1 round-trip. Dropping it
+// would run every later Task outside the sandbox it selects.
+const preservedRuntimeClassNameAnnotation = "kelos.dev/v1alpha2-runtime-class-name"
+
 var slackFilterChannelIDPattern = regexp.MustCompile(v1alpha2.SlackFilterChannelIDPattern)
 
 type preservedGitHubCommentsReporting struct {
@@ -102,6 +109,8 @@ func taskSpawnerToHub(_ context.Context, src *v1alpha1.TaskSpawner, dst *v1alpha
 	deleteAnnotation(dst.Annotations, preservedGitHubWebhookExcludeFiltersAnnotation)
 	restorePreservedSlackExcludeFilters(src.Annotations, dst.Spec.When.Slack)
 	deleteAnnotation(dst.Annotations, preservedSlackExcludeFiltersAnnotation)
+	restorePreservedRuntimeClassName(src.Annotations, &dst.Spec.TaskTemplate)
+	deleteAnnotation(dst.Annotations, preservedRuntimeClassNameAnnotation)
 	return nil
 }
 
@@ -133,7 +142,42 @@ func taskSpawnerFromHub(_ context.Context, src *v1alpha2.TaskSpawner, dst *v1alp
 	if err := setPreservedSlackExcludeFilters(dst, src.Spec.When.Slack); err != nil {
 		return err
 	}
+	setPreservedRuntimeClassName(dst, src.Spec.TaskTemplate)
 	return convertViaJSON(&src.Status, &dst.Status)
+}
+
+// setPreservedRuntimeClassName records the runtimeClassName of the pod
+// overrides that backfillTaskTemplateLegacyWorkerFields copies to v1alpha1:
+// the legacy field when set, otherwise the worker's.
+func setPreservedRuntimeClassName(dst *v1alpha1.TaskSpawner, template v1alpha2.TaskTemplate) {
+	po := template.PodOverrides
+	if po == nil && template.WorkerPoolRef == nil && template.Worker != nil {
+		po = template.Worker.PodOverrides
+	}
+	if po == nil || po.RuntimeClassName == nil {
+		deleteAnnotation(dst.Annotations, preservedRuntimeClassNameAnnotation)
+		return
+	}
+	if dst.Annotations == nil {
+		dst.Annotations = map[string]string{}
+	}
+	dst.Annotations[preservedRuntimeClassNameAnnotation] = *po.RuntimeClassName
+}
+
+// restorePreservedRuntimeClassName puts the value back on the legacy pod
+// overrides, which is where the v1alpha1 pod overrides land in the hub.
+// Values the v1alpha2 schema would reject are ignored.
+func restorePreservedRuntimeClassName(annotations map[string]string, dst *v1alpha2.TaskTemplate) {
+	v, ok := annotations[preservedRuntimeClassNameAnnotation]
+	if !ok || len(validation.IsDNS1123Subdomain(v)) > 0 {
+		return
+	}
+	if dst.PodOverrides == nil {
+		dst.PodOverrides = &v1alpha2.PodOverrides{}
+	}
+	if dst.PodOverrides.RuntimeClassName == nil {
+		dst.PodOverrides.RuntimeClassName = &v
+	}
 }
 
 // setPreservedGitHubWebhookExcludeFilters records

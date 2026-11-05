@@ -22,6 +22,7 @@ import (
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/logging"
 	"github.com/kelos-dev/kelos/internal/reporting"
+	"github.com/kelos-dev/kelos/internal/sessionturn"
 	kelosslack "github.com/kelos-dev/kelos/internal/slack"
 )
 
@@ -43,6 +44,8 @@ func main() {
 		reportingInterval        time.Duration
 		activityInterval         time.Duration
 		denySlackConnectChannels bool
+		sessionTurnTimeout       time.Duration
+		sessionMaxQueuedTurns    int
 	)
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
@@ -51,6 +54,8 @@ func main() {
 	flag.DurationVar(&reportingInterval, "reporting-interval", 30*time.Second, "How often to run the Slack reporting cycle.")
 	flag.DurationVar(&activityInterval, "activity-interval", 5*time.Second, "How often to update Slack activity indicators.")
 	flag.BoolVar(&denySlackConnectChannels, "deny-slack-connect-channels", false, "Deny service to externally shared (Slack Connect) channels. The bot will leave on invite and skip processing when channel status cannot be verified.")
+	flag.DurationVar(&sessionTurnTimeout, "session-turn-timeout", sessionturn.DefaultTurnTimeout, "How long one Slack-driven Session conversation turn may run before it is abandoned.")
+	flag.IntVar(&sessionMaxQueuedTurns, "session-max-queued-turns", kelosslack.DefaultMaxQueuedTurns, "How many Slack messages may wait for one thread's Session turn before further messages are dropped.")
 
 	opts, applyVerbosity := logging.SetupZapOptions(flag.CommandLine)
 	flag.Parse()
@@ -66,6 +71,14 @@ func main() {
 	}
 	if activityInterval <= 0 {
 		fmt.Fprintf(os.Stderr, "Error: --activity-interval must be positive\n")
+		os.Exit(1)
+	}
+	if sessionTurnTimeout <= 0 {
+		fmt.Fprintf(os.Stderr, "Error: --session-turn-timeout must be positive\n")
+		os.Exit(1)
+	}
+	if sessionMaxQueuedTurns <= 0 {
+		fmt.Fprintf(os.Stderr, "Error: --session-max-queued-turns must be positive\n")
 		os.Exit(1)
 	}
 
@@ -112,6 +125,32 @@ func main() {
 	)
 	if err != nil {
 		setupLog.Error(err, "Unable to create Slack handler")
+		os.Exit(1)
+	}
+
+	// Drive Slack-matched Sessions through the Pod exec bridge the console
+	// server also uses. Without it a SessionSpawner with a Slack source would
+	// match messages it can never answer, so a failure here is fatal.
+	turnDriver, err := sessionturn.NewDriver(mgr.GetConfig())
+	if err != nil {
+		setupLog.Error(err, "Unable to create Session turn driver")
+		os.Exit(1)
+	}
+	turnDriver.Timeout = sessionTurnTimeout
+	sessionBridge := kelosslack.NewSessionBridge(
+		mgr.GetClient(),
+		turnDriver,
+		&reporting.SlackReporter{BotToken: botToken},
+		ctrl.Log.WithName("slack-session"),
+		kelosslack.SessionBridgeOptions{MaxQueuedTurns: sessionMaxQueuedTurns},
+	)
+	handler.SetSessionBridge(sessionBridge)
+
+	// Register the bridge so the manager waits for it on shutdown: it resolves
+	// the placeholders of interrupted turns instead of leaving those threads
+	// showing "Working on your request..." forever.
+	if err := mgr.Add(sessionBridge); err != nil {
+		setupLog.Error(err, "Unable to register Session bridge with manager")
 		os.Exit(1)
 	}
 

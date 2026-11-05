@@ -351,3 +351,110 @@ func continuationContextBlock(taskName string, part, total int) *slack.ContextBl
 			fmt.Sprintf("Task: `%s` · Part %d/%d", taskName, part, total), false, false),
 	)
 }
+
+// SessionWorkingMessage is the placeholder posted into a Slack thread while a
+// Session turn runs. The final reply replaces it in place.
+func SessionWorkingMessage(sessionName string) SlackMessage {
+	return SlackMessage{
+		Text: truncateFallbackText(fmt.Sprintf("Working on your request... (Session: %s)", sessionName)),
+		Blocks: []slack.Block{
+			slack.NewSectionBlock(
+				slack.NewTextBlockObject(slack.MarkdownType, ":hourglass_flowing_sand: *Working on your request...*", false, false),
+				nil, nil,
+			),
+			sessionContextBlock(sessionName, 0, 0),
+		},
+	}
+}
+
+// FormatSessionReply returns the Slack messages carrying one Session turn's
+// reply. The first message replaces the placeholder posted when the turn
+// started; any further messages are posted as additional thread replies.
+// errorText is rendered as a trailing warning when the turn did not complete,
+// and note as a trailing remark about how the turn ran.
+func FormatSessionReply(text, errorText, note, sessionName string) []SlackMessage {
+	var responseBlocks []slack.Block
+	if text != "" {
+		responseBlocks = responseToBlocks(text)
+	}
+
+	var trailingBlocks []slack.Block
+	if note != "" {
+		trailingBlocks = append(trailingBlocks, slack.NewSectionBlock(
+			slack.NewTextBlockObject(slack.MarkdownType, ":grey_question: "+truncateSectionText(note, slackSectionTextLimit-len(":grey_question: ")), false, false),
+			nil, nil,
+		))
+	}
+	if errorText != "" {
+		// A runtime or exec error can be arbitrarily long. Slack rejects the
+		// whole message when one section exceeds its text limit, which would
+		// lose the reply along with the error, so keep the error inside it.
+		errorText = truncateSectionText(errorText, slackSectionTextLimit-len(":warning: *Error:* "))
+		trailingBlocks = append(trailingBlocks, slack.NewSectionBlock(
+			slack.NewTextBlockObject(slack.MarkdownType, fmt.Sprintf(":warning: *Error:* %s", errorText), false, false),
+			nil, nil,
+		))
+	}
+
+	fallback := text
+	if note != "" {
+		if fallback != "" {
+			fallback += "\n"
+		}
+		fallback += note
+	}
+	if errorText != "" {
+		if fallback != "" {
+			fallback += "\n"
+		}
+		fallback += "Error: " + errorText
+	}
+	if fallback == "" {
+		fallback = "The agent returned no reply."
+		responseBlocks = responseToBlocks(fallback)
+	}
+	fallback = truncateFallbackText(fmt.Sprintf("%s (Session: %s)", fallback, sessionName))
+
+	// Reserve room in every chunk for its own context block, and in the last
+	// chunk for the trailing blocks as well.
+	lastReserve := len(trailingBlocks) + 1
+	chunks := splitBlocks(responseBlocks, SlackBlockLimit-lastReserve, lastReserve)
+	if len(chunks) == 0 {
+		chunks = [][]slack.Block{nil}
+	}
+
+	messages := make([]SlackMessage, 0, len(chunks))
+	for index, chunk := range chunks {
+		blocks := append([]slack.Block(nil), chunk...)
+		if index == len(chunks)-1 {
+			blocks = append(blocks, trailingBlocks...)
+		}
+		blocks = append(blocks, sessionContextBlock(sessionName, index+1, len(chunks)))
+		messageText := fallback
+		if index > 0 {
+			messageText = fmt.Sprintf("(continued, part %d/%d) (Session: %s)", index+1, len(chunks), sessionName)
+		}
+		messages = append(messages, SlackMessage{Text: messageText, Blocks: blocks})
+	}
+	return messages
+}
+
+// sessionContextBlock returns the trailing context block naming the Session.
+// A total above one appends the part number of a split reply.
+func sessionContextBlock(sessionName string, part, total int) *slack.ContextBlock {
+	text := fmt.Sprintf("Session: `%s`", sessionName)
+	if total > 1 {
+		text = fmt.Sprintf("%s · Part %d/%d", text, part, total)
+	}
+	return slack.NewContextBlock("",
+		slack.NewTextBlockObject(slack.MarkdownType, text, false, false),
+	)
+}
+
+// truncateSectionText shortens text so it fits one Slack section block.
+func truncateSectionText(text string, limit int) string {
+	if utf8.RuneCountInString(text) <= limit {
+		return text
+	}
+	return string([]rune(text)[:limit-1]) + "…"
+}

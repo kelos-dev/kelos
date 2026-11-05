@@ -40,6 +40,8 @@ type RequiredElements<T> = {
   [K in keyof T]: K extends 'messages' ? HTMLElement : T[K] extends NodeListOf<infer E> ? NodeListOf<E> : ConsoleElement;
 };
 
+type TaskLogFormat = 'formatted' | 'raw';
+
 interface Subsession {
   id: string;
   name: string;
@@ -492,6 +494,8 @@ const elements = requireElements({
   resourceDetailLogsPanel: document.querySelector('#resource-detail-logs-panel'),
   resourceDetailManifestPanel: document.querySelector('#resource-detail-manifest-panel'),
   refreshResourceLogs: document.querySelector('#refresh-resource-logs'),
+  resourceLogFormatFormatted: document.querySelector('#resource-log-format-formatted'),
+  resourceLogFormatRaw: document.querySelector('#resource-log-format-raw'),
   resourceDetailLogs: document.querySelector('#resource-detail-logs'),
   resourceDetailYAML: document.querySelector('#resource-detail-yaml'),
   taskSpawnerRunForm: document.querySelector('#taskspawner-run-form'),
@@ -686,6 +690,7 @@ const state = {
   resourceListGeneration: 0,
   resourceDetailGeneration: 0,
   resourceDetailLogGeneration: 0,
+  resourceLogFormat: 'formatted' as TaskLogFormat,
   resourceDetailTask: null as {namespace: string; name: string} | null,
   resourceDetailSpawner: null as {namespace: string; name: string; suspended?: boolean} | null,
   sourceStorageClassNamePresent: false,
@@ -757,6 +762,7 @@ function showToast(message: string) {
 }
 
 const browserAlertsStorageKey = 'kelos-console-browser-alerts';
+const taskLogFormatStorageKey = 'kelos-console-task-log-format';
 let browserNotificationRegistration: Promise<ServiceWorkerRegistration> | null = null;
 let browserNotificationQueue = Promise.resolve();
 let browserAlertGeneration = -1;
@@ -2050,12 +2056,36 @@ function handleResourceDetailTabKeydown(event: KeyboardEvent) {
   target.focus();
 }
 
+function loadTaskLogFormat() {
+  try {
+    state.resourceLogFormat = window.localStorage.getItem(taskLogFormatStorageKey) === 'raw' ? 'raw' : 'formatted';
+  } catch (_) {
+    state.resourceLogFormat = 'formatted';
+  }
+  renderTaskLogFormat();
+}
+
+function renderTaskLogFormat() {
+  elements.resourceLogFormatFormatted.setAttribute('aria-pressed', String(state.resourceLogFormat === 'formatted'));
+  elements.resourceLogFormatRaw.setAttribute('aria-pressed', String(state.resourceLogFormat === 'raw'));
+}
+
+function setTaskLogFormat(format: TaskLogFormat) {
+  if (state.resourceLogFormat === format) return;
+  state.resourceLogFormat = format;
+  try {
+    window.localStorage.setItem(taskLogFormatStorageKey, format);
+  } catch (_) {}
+  renderTaskLogFormat();
+  if (state.resourceDetailTask) void loadResourceTaskLogs(state.resourceDetailTask, state.resourceDetailGeneration);
+}
+
 async function loadResourceTaskLogs(item: ResourceSummary, detailGeneration: number) {
   const logGeneration = ++state.resourceDetailLogGeneration;
   elements.refreshResourceLogs.disabled = true;
   elements.resourceDetailLogs.textContent = 'Loading logs…';
   try {
-    const logs = await apiText(`/api/resources/tasks/${encodeURIComponent(item.namespace)}/${encodeURIComponent(item.name)}/logs`);
+    const logs = await apiText(`/api/resources/tasks/${encodeURIComponent(item.namespace)}/${encodeURIComponent(item.name)}/logs?format=${state.resourceLogFormat}`);
     if (detailGeneration !== state.resourceDetailGeneration || logGeneration !== state.resourceDetailLogGeneration) return;
     elements.resourceDetailLogs.textContent = logs || 'No logs yet.';
   } catch (error) {
@@ -7509,6 +7539,9 @@ elements.resourceDetailTabs.addEventListener('keydown', handleResourceDetailTabK
 elements.refreshResourceLogs.addEventListener('click', () => {
   if (state.resourceDetailTask) void loadResourceTaskLogs(state.resourceDetailTask, state.resourceDetailGeneration);
 });
+elements.resourceLogFormatFormatted.addEventListener('click', () => setTaskLogFormat('formatted'));
+elements.resourceLogFormatRaw.addEventListener('click', () => setTaskLogFormat('raw'));
+loadTaskLogFormat();
 requiredElement('#refresh-console').addEventListener('click', () => {
   void refreshConsole();
 });

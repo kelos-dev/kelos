@@ -2466,6 +2466,37 @@ func TestBuildJob_PodOverridesImagePullSecrets(t *testing.T) {
 	}
 }
 
+func TestBuildJob_PodOverridesRuntimeClassName(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-runtime-class",
+			Namespace: "default",
+		},
+		Spec: kelos.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix issue",
+			Credentials: &kelos.Credentials{
+				Type:      kelos.CredentialTypeAPIKey,
+				SecretRef: &kelos.SecretReference{Name: "my-secret"},
+			},
+			PodOverrides: &kelos.PodOverrides{
+				RuntimeClassName: ptr.To("gvisor"),
+			},
+		},
+	}
+
+	job, err := builder.Build(task, nil, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	got := job.Spec.Template.Spec.RuntimeClassName
+	if got == nil || *got != "gvisor" {
+		t.Errorf("RuntimeClassName = %v, want %q", got, "gvisor")
+	}
+}
+
 func TestBuildJob_PodOverridesAllFields(t *testing.T) {
 	builder := NewJobBuilder()
 	task := &kelos.Task{
@@ -2723,6 +2754,11 @@ func TestBuildJob_NoPodOverrides(t *testing.T) {
 	// No ImagePullSecrets.
 	if job.Spec.Template.Spec.ImagePullSecrets != nil {
 		t.Error("Expected no ImagePullSecrets when PodOverrides is nil")
+	}
+
+	// No RuntimeClassName.
+	if job.Spec.Template.Spec.RuntimeClassName != nil {
+		t.Error("Expected no RuntimeClassName when PodOverrides is nil")
 	}
 }
 

@@ -804,6 +804,7 @@ fi`,
 	var tolerations []corev1.Toleration
 	var affinity *corev1.Affinity
 	var imagePullSecrets []corev1.LocalObjectReference
+	var runtimeClassName *string
 
 	if po := resolveTaskPodOverrides(task); po != nil {
 		if po.Labels != nil {
@@ -854,6 +855,10 @@ fi`,
 
 		if len(po.ImagePullSecrets) > 0 {
 			imagePullSecrets = po.ImagePullSecrets
+		}
+
+		if po.RuntimeClassName != nil {
+			runtimeClassName = po.RuntimeClassName
 		}
 
 		if po.ServiceAccountName != "" {
@@ -964,6 +969,7 @@ fi`,
 					Tolerations:        tolerations,
 					Affinity:           affinity,
 					ImagePullSecrets:   imagePullSecrets,
+					RuntimeClassName:   runtimeClassName,
 				},
 			},
 		},

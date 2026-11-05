@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="1170" viewBox="0 0 560 1170" role="img" aria-labelledby="title description">
+  <title id="title">Kelos workflows with shared configuration and configurable runtimes</title>
+  <desc id="description">Tasks and Sessions reference a shared Workspace and AgentConfig. A TaskSpawner creates Tasks from events or schedules. Sessions provide interactive conversations with coding agents. Each worker has configurable compute, filesystems, tools, environment variables, and credentials, and runs on Kubernetes.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="9" refY="6" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M 2 2 L 9 6 L 2 10" fill="none" stroke="#64748b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+  <rect width="560" height="1170" rx="20" fill="#f8fafc"/>
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" fill="#0f172a">
+    <text x="20" y="42" font-size="26" font-weight="700">Your workflows. Your environment.</text>
+    <g fill="none" stroke="#64748b" stroke-width="2" stroke-linejoin="round">
+      <path d="M 520 145 H 548 V 430 H 280"/>
+      <path d="M 520 311 H 548"/>
+    </g>
+
+    <rect x="20" y="72" width="500" height="146" rx="14" fill="#eff6ff" stroke="#93c5fd" stroke-width="2"/>
+    <text x="40" y="110" font-size="26" font-weight="700" fill="#1e40af">Repository &amp; files</text>
+    <rect x="350" y="86" width="150" height="34" rx="8" fill="#dbeafe"/>
+    <text x="425" y="110" font-size="20" text-anchor="middle" fill="#1e40af">Workspace</text>
+    <text x="40" y="157" font-size="23" fill="#334155">Git repo + ref · injected files</text>
+    <text x="40" y="194" font-size="23" fill="#334155">Setup command · Git credentials</text>
+
+    <rect x="20" y="238" width="500" height="146" rx="14" fill="#f0fdf4" stroke="#86efac" stroke-width="2"/>
+    <text x="40" y="276" font-size="26" font-weight="700" fill="#166534">Skills &amp; tools</text>
+    <rect x="332" y="252" width="168" height="34" rx="8" fill="#dcfce7"/>
+    <text x="416" y="276" font-size="20" text-anchor="middle" fill="#166534">AgentConfig</text>
+    <text x="40" y="323" font-size="23" fill="#334155">Instructions · skills · plugins</text>
+    <text x="40" y="360" font-size="23" fill="#334155">MCP servers</text>
+    <path d="M 280 430 V 450" fill="none" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+
+    <rect x="12" y="452" width="536" height="608" rx="16" fill="#ffffff" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="8 6"/>
+    <text x="32" y="486" font-size="19" font-weight="700" letter-spacing="1.5" fill="#475569">RUN ON KUBERNETES</text>
+    <rect x="32" y="504" width="496" height="190" rx="12" fill="#fffbeb" stroke="#fcd34d" stroke-width="1.5"/>
+    <text x="52" y="540" font-size="25" font-weight="700" fill="#92400e">Automated Tasks</text>
+    <rect x="52" y="564" width="188" height="84" rx="10" fill="#f5f3ff" stroke="#c4b5fd" stroke-width="1.5"/>
+    <text x="146" y="596" font-size="22" font-weight="600" text-anchor="middle" fill="#5b21b6">TaskSpawner</text>
+    <text x="146" y="629" font-size="19" text-anchor="middle" fill="#475569">Events · schedules</text>
+    <g fill="none" stroke="#64748b" stroke-width="2" stroke-linejoin="round" marker-end="url(#arrow)">
+      <path d="M 240 606 H 264 V 581 H 288"/>
+      <path d="M 264 606 V 641 H 288"/>
+    </g>
+    <g fill="#ffffff" stroke="#fbbf24" stroke-width="1.5">
+      <rect x="290" y="560" width="218" height="42" rx="8"/>
+      <rect x="290" y="620" width="218" height="42" rx="8"/>
+    </g>
+    <text x="306" y="589" font-size="22">Task · Issue #3</text>
+    <text x="306" y="649" font-size="22">Task · Issue #4</text>
+
+    <rect x="32" y="714" width="496" height="168" rx="12" fill="#ecfeff" stroke="#67e8f9" stroke-width="1.5"/>
+    <text x="52" y="750" font-size="25" font-weight="700" fill="#155e75">Interactive Sessions</text>
+    <g fill="#ffffff" stroke="#67e8f9" stroke-width="1.5">
+      <rect x="52" y="766" width="218" height="64" rx="10"/>
+      <rect x="290" y="766" width="218" height="64" rx="10"/>
+    </g>
+    <text x="68" y="790" font-size="20" fill="#475569">Session</text>
+    <text x="68" y="818" font-size="23">Codex</text>
+    <text x="306" y="790" font-size="20" fill="#475569">Session</text>
+    <text x="306" y="818" font-size="23">Claude Code</text>
+    <text x="52" y="862" font-size="22" fill="#155e75">Connect from CLI or Console</text>
+
+    <rect x="32" y="902" width="496" height="134" rx="12" fill="#f1f5f9"/>
+    <text x="52" y="936" font-size="23" font-weight="600">Configure each worker</text>
+    <text x="52" y="974" font-size="23" fill="#334155">Agent + model + image</text>
+    <text x="52" y="1012" font-size="23" fill="#334155">Compute · volumes · env + secrets</text>
+    <path d="M 280 1062 V 1090" fill="none" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+    <text x="280" y="1120" font-size="23" text-anchor="middle" fill="#475569">Branches · commits · pull requests</text>
+    <text x="280" y="1152" font-size="23" text-anchor="middle" fill="#475569">Task outputs</text>
+  </g>
+</svg>

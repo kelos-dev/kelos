@@ -124,7 +124,10 @@ If template rendering fails (e.g., missing key), the raw prompt string is used a
 
 ### Task Credential Secret Format
 
-The secret referenced by `spec.credentials.secretRef.name` must contain a single key whose name depends on `spec.type` and `spec.credentials.type`:
+The Secret referenced by `Task.spec.worker.credentials.secretRef.name` must contain
+the key for `Task.spec.worker.type` and `Task.spec.worker.credentials.type` below.
+The deprecated `Task.spec.credentials.secretRef.name` field uses the same key
+format, selected by `Task.spec.type` and `Task.spec.credentials.type`.
 
 | Agent type | Credential type | Secret key |
 |------------|-----------------|------------|
@@ -150,7 +153,12 @@ kubectl create secret generic gemini-credentials \
   --from-literal=GEMINI_API_KEY=<your-api-key>
 ```
 
-When `spec.credentials.type` is `none`, no secret is required; supply credentials via `spec.podOverrides.env` (e.g., for Bedrock, Vertex AI, or Azure OpenAI). For details on how these variables are consumed by agent containers, see [Agent Image Interface](agent-image-interface.md).
+When `Task.spec.worker.credentials.type` is `none`, no Secret is required; supply
+credentials via `Task.spec.worker.podOverrides.env` (e.g., for Bedrock, Vertex AI,
+or Azure OpenAI). The deprecated `Task.spec.credentials.type` and
+`Task.spec.podOverrides.env` fields support the same behavior. For details on how
+these variables are consumed by agent containers, see
+[Agent Image Interface](agent-image-interface.md).
 
 ### Codex OAuth Token Refresh
 

@@ -1,6 +1,6 @@
 <h1 align="center">Kelos</h1>
 
-<p align="center"><strong>Run and orchestrate coding agents on Kubernetes.</strong></p>
+<p align="center"><strong>Define and run coding-agent workflows on Kubernetes.</strong></p>
 
 <p align="center">
   <a href="https://github.com/kelos-dev/kelos/actions/workflows/ci.yaml"><img src="https://github.com/kelos-dev/kelos/actions/workflows/ci.yaml/badge.svg" alt="CI"></a>
@@ -11,62 +11,86 @@
 </p>
 
 <p align="center">
-  <a href="#how-it-works">How It Works</a> &middot;
   <a href="#quick-start">Quick Start</a> &middot;
   <a href="#usage">Usage</a> &middot;
+  <a href="#how-it-works">How It Works</a> &middot;
   <a href="#documentation">Documentation</a> &middot;
   <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
-Kelos turns coding agents into Kubernetes workloads. Give an agent a goal and
-Kelos provides the repository, credentials, tools, compute, and workflow needed
-to complete it.
-
-Use Kelos for one-off tasks, persistent conversations, event-driven
-automation, pipelines, and parallel work across many repositories. It supports
-Claude Code, OpenAI Codex, Google Gemini, OpenCode, Cursor, and
-[custom agent images](docs/agent-image-interface.md).
+Kelos lets you define what coding agents do and the environments they run in:
+repositories, files, skills, tools, compute, environment variables, and secrets.
+Reuse those definitions for individual tasks, persistent sessions, and automated
+pipelines on Kubernetes.
 
 <p align="center">
-  <img alt="Browser-based Session chat showing multiple agent conversations" src="docs/images/kelos-session-web-chat.png" />
-  <br>
-  <a href="#use-the-kelos-console">Set up the Kelos Console</a>
+  <picture>
+    <source media="(max-width: 600px)" srcset="docs/images/kelos-resources-mobile.svg" />
+    <img alt="Automated Tasks and interactive Sessions reference shared Workspace and AgentConfig resources and run on Kubernetes with configurable compute, volumes, environment variables, and secrets" src="docs/images/kelos-resources.svg" />
+  </picture>
 </p>
+
+<p align="center">
+  <img alt="Kelos Console with example data showing Test coverage and Code review subsessions within one Session, with Code review selected, a shared workspace indicator, a code diff, and tool output" src="docs/images/kelos-session-web-chat.png" />
+  <br>
+  <a href="#use-the-kelos-console">Set up the Console</a>
+</p>
+
+Kelos supports Claude Code, OpenAI Codex, Google Gemini, OpenCode, Cursor, and
+[custom agent images](docs/agent-image-interface.md).
+
+## Example: a coding task with its environment
+
+Combine a shared repository and skills with compute and environment settings
+for a task that fixes tests and opens a pull request:
+
+```yaml
+apiVersion: kelos.dev/v1alpha2
+kind: Task
+metadata:
+  name: fix-tests
+spec:
+  prompt: "Fix the failing tests, run the test suite, and open a pull request."
+  worker:
+    type: codex
+    credentials:
+      type: oauth
+      secretRef:
+        name: codex-credentials
+    workspaceRef:
+      name: my-workspace
+    agentConfigRefs:
+      - name: team-config
+    podOverrides:
+      resources:
+        requests:
+          cpu: "2"
+          memory: 4Gi
+      env:
+        - name: APP_ENV
+          value: test
+```
+
+The referenced resources must already exist: a
+[Workspace](docs/reference.md#workspace) defines the repository, injected files,
+setup command, and Git credential Secret reference; an
+[AgentConfig](docs/reference.md#agentconfig) supplies your team's instructions,
+skills, and tools; and a [credential Secret](docs/reference.md#task-credential-secret-format)
+authenticates the agent. For ordered stages and parallel tasks, see the
+[pipeline examples](examples/07-task-pipeline/).
+
+For repeated runs with Codex OAuth credentials, enable
+[token refresh](docs/reference.md#codex-oauth-token-refresh) on the credential Secret.
 
 ## Why Kelos?
 
-- Run agents in isolated Kubernetes workloads instead of on developer laptops.
-- Reuse the same repositories, instructions, skills, and tools across agents.
+- Define agent compute, container images, volumes, environment variables, and
+  secret references alongside the work to run.
+- Reuse repositories, setup commands, instructions, skills, and tools across agents.
+- Keep workflow and environment definitions in Git as Kubernetes resources.
 - Keep interactive Sessions alive and reconnect from terminal or web clients.
 - Trigger work from GitHub, Jira, Linear, cron schedules, or generic webhooks.
 - Observe, limit, and operate agent workloads with familiar Kubernetes controls.
-
-## How It Works
-
-<img alt="Kelos resources for coding agent workflows and environments" src="docs/images/kelos-resources.png" />
-
-The controller turns Kelos resources into Pods, Jobs, and StatefulSets.
-
-### Core Primitives
-
-| Resource | Purpose |
-| --- | --- |
-| `Task` | Run one agent job |
-| `TaskPipeline` | Run ordered Task stages with matrix fan-out |
-| `Session` | Keep an interactive agent conversation running |
-| `Workspace` | Give agents a Git repository |
-| `AgentConfig` | Share instructions, skills, plugins, and MCP servers |
-| `TaskSpawner` | Create Tasks from events or schedules |
-| `SessionSpawner` | Create Sessions from GitHub webhooks |
-| `WorkerPool` | Maintain reusable agent workers |
-
-Task status records useful results such as branches, commits, pull requests,
-and token usage. The resources remain ordinary Kubernetes objects, so advanced
-users can review them, keep them in Git, or manage them with existing delivery
-tools.
-
-See the [API and CLI reference](docs/reference.md) for the underlying fields and
-commands.
 
 ## Quick Start
 
@@ -247,6 +271,34 @@ agents and authentication options.
 Kelos uses Kelos to develop itself. The
 [self-development setup](self-development/README.md) shows the agents and
 workflows running the project.
+
+## How It Works
+
+Tasks and Sessions reference shared Workspace and AgentConfig resources through
+their worker configuration. Each worker selects its agent, model, image, and
+Kubernetes runtime settings. The controller turns Kelos resources into Pods,
+Jobs, and StatefulSets.
+
+### Core Primitives
+
+| Resource | Purpose |
+| --- | --- |
+| `Task` | Run one agent job |
+| `TaskPipeline` | Run ordered Task stages with matrix fan-out |
+| `Session` | Keep an interactive agent conversation running |
+| `Workspace` | Give agents a Git repository, injected files, and setup commands |
+| `AgentConfig` | Share instructions, skills, plugins, and MCP servers |
+| `TaskSpawner` | Create Tasks from events or schedules |
+| `SessionSpawner` | Create Sessions from GitHub webhooks |
+| `WorkerPool` | Maintain reusable agent workers |
+
+Task status records useful results such as branches, commits, pull requests,
+and token usage. The resources remain ordinary Kubernetes objects, so advanced
+users can review them, keep them in Git, or manage them with existing delivery
+tools.
+
+See the [API and CLI reference](docs/reference.md) for the underlying fields and
+commands.
 
 ## Documentation
 

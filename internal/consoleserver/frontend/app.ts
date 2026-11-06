@@ -68,6 +68,7 @@ interface SessionSummary {
   uid?: string;
   provider: string;
   model?: string;
+  credentialName?: string;
   phase?: string;
   active?: boolean;
   waitingForInput?: boolean;
@@ -4370,6 +4371,7 @@ function renderHeader() {
   const resourceName = sessionDisplayName(session) === session.name ? session.namespace : `${session.namespace}/${session.name}`;
   const details = child ? [providerLabel(session.provider)] : [resourceName, providerLabel(session.provider)];
   if (session.model) details.push(session.model);
+  if (session.credentialName) details.push(`Credential: ${session.credentialName}`);
   if (!child) details.push(sessionDisplayStatus(session));
   if (session.branch) details.push(session.branch);
   const detailText = document.createElement('span');

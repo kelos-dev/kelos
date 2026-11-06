@@ -834,6 +834,41 @@ func TestSessionSummaryIncludesUID(t *testing.T) {
 	}
 }
 
+func TestSessionSummaryIncludesCredentialName(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		credentials *kelos.Credentials
+		want        string
+	}{
+		{name: "omitted"},
+		{name: "none", credentials: &kelos.Credentials{Type: kelos.CredentialTypeNone}},
+		{name: "without secret", credentials: &kelos.Credentials{Type: kelos.CredentialTypeOAuth}},
+		{
+			name: "oauth",
+			credentials: &kelos.Credentials{
+				Type: kelos.CredentialTypeOAuth, SecretRef: &kelos.SecretReference{Name: "codex-credentials"},
+			},
+			want: "codex-credentials",
+		},
+		{
+			name: "api key",
+			credentials: &kelos.Credentials{
+				Type: kelos.CredentialTypeAPIKey, SecretRef: &kelos.SecretReference{Name: "claude-credentials"},
+			},
+			want: "claude-credentials",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			summary := summarize(&kelos.Session{Spec: kelos.SessionSpec{
+				Worker: kelos.WorkerSpec{Credentials: tt.credentials},
+			}})
+			if summary.CredentialName != tt.want {
+				t.Fatalf("Session summary credentialName = %q, want %q", summary.CredentialName, tt.want)
+			}
+		})
+	}
+}
+
 func TestSessionSummaryReportsIdleSuspension(t *testing.T) {
 	summary := summarize(&kelos.Session{Status: kelos.SessionStatus{
 		Phase: kelos.SessionPhaseSuspended,
@@ -1196,6 +1231,17 @@ func TestApplicationSessionActionsBehavior(t *testing.T) {
 	command := exec.Command(node, "testdata/session_actions_test.js")
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("running Session actions tests: %v\n%s", err, output)
+	}
+}
+
+func TestApplicationSessionHeaderBehavior(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed")
+	}
+	command := exec.Command(node, "testdata/session_header_test.js")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("Session header behavior tests failed: %v\n%s", err, output)
 	}
 }
 
@@ -1743,8 +1789,11 @@ func TestSessionAPIHappyPath(t *testing.T) {
 		"namespace": "team-a",
 		"section":   "Planning",
 		"worker": map[string]any{
-			"type":        "codex",
-			"credentials": map[string]string{"type": "none"},
+			"type": "codex",
+			"credentials": map[string]any{
+				"type":      "oauth",
+				"secretRef": map[string]string{"name": "codex-credentials"},
+			},
 		},
 	}
 	body, _ := json.Marshal(payload)
@@ -1754,6 +1803,9 @@ func TestSessionAPIHappyPath(t *testing.T) {
 	server.ServeHTTP(response, request)
 	if response.Code != http.StatusCreated {
 		t.Fatalf("create status = %d body = %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"credentialName":"codex-credentials"`) {
+		t.Fatalf("create response missing credential name: %s", response.Body.String())
 	}
 
 	request = httptest.NewRequest(http.MethodGet, "/api/sessions?namespace=team-a", nil)
@@ -1769,6 +1821,9 @@ func TestSessionAPIHappyPath(t *testing.T) {
 	}
 	if len(sessions) != 1 || sessions[0].Name != "chat" || sessions[0].Namespace != "team-a" || sessions[0].Provider != "codex" || sessions[0].Section != "Planning" {
 		t.Fatalf("listed Sessions = %#v", sessions)
+	}
+	if sessions[0].CredentialName != "codex-credentials" {
+		t.Fatalf("listed Session credentialName = %q, want codex-credentials", sessions[0].CredentialName)
 	}
 
 	request = httptest.NewRequest(http.MethodPost, "/api/sessions/team-a/chat/reset", nil)

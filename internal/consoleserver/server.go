@@ -138,6 +138,7 @@ type sessionSummary struct {
 	UID                string                     `json:"uid,omitempty"`
 	Provider           string                     `json:"provider"`
 	Model              string                     `json:"model,omitempty"`
+	CredentialName     string                     `json:"credentialName,omitempty"`
 	Phase              kelos.SessionPhase         `json:"phase,omitempty"`
 	Active             *bool                      `json:"active,omitempty"`
 	WaitingForInput    bool                       `json:"waitingForInput,omitempty"`
@@ -1637,6 +1638,9 @@ func summarize(session *kelos.Session) sessionSummary {
 		Resetting:        session.Annotations[sessionreset.RequestAnnotation] != "",
 		UserSuspended:    session.Spec.Suspend != nil && *session.Spec.Suspend,
 		IdleSuspended:    sessionsuspend.IsIdlePolicySuspended(session),
+	}
+	if credentials := session.Spec.Worker.Credentials; credentials != nil && credentials.SecretRef != nil {
+		summary.CredentialName = credentials.SecretRef.Name
 	}
 	if !session.CreationTimestamp.IsZero() {
 		createdAt := session.CreationTimestamp

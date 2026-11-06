@@ -31,7 +31,76 @@ type WorkspaceFile struct {
 // WorkspaceGHProxy configures the workspace-scoped ghproxy.
 type WorkspaceGHProxy struct{}
 
+// WorkspaceClone configures how a Workspace repository is cloned.
+type WorkspaceClone struct {
+	// Paths limits the checkout to these repository paths. Each entry is a
+	// directory or file relative to the repository root, such as "docs" or
+	// "cmd/main.go", and is matched exactly from the root: "docs" selects
+	// the top-level docs directory and everything in it, and nothing else
+	// named docs. Only the listed paths are written to disk; files at the
+	// repository root are not included unless listed. Blobs outside the
+	// listed paths are not downloaded, but the .git directory still records
+	// the full tree, so git can fetch the rest on demand unless GitDir is
+	// Remove. Entries must be unique and must not start with "/", end with a
+	// space (ignoring a trailing slash), or contain empty, "." or ".."
+	// segments, control characters, or any of the characters *, ?, [ or \.
+	// Up to 64 entries of at most 256 characters each. Not supported for
+	// Sessions with a Session.spec.volumeClaimTemplate: such a Session fails.
+	// +optional
+	// +listType=set
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=256
+	// +kubebuilder:validation:items:Pattern=`^[^*?\[\\\x00-\x1f\x7f]+$`
+	// +kubebuilder:validation:XValidation:rule="self.all(p, !p.startsWith('/') && !p.matches(' /?$') && !p.contains('//') && !p.matches('(^|/)[.][.]?(/|$)'))",message="clone.paths entries must be relative to the repository root, must not end with a space, and must not contain empty, '.' or '..' segments"
+	Paths []string `json:"paths,omitempty"`
+
+	// GitDir selects what happens to the repository's .git directory after
+	// the clone. Keep leaves it in place. Remove deletes it, leaving only the
+	// checked-out files, so git commands no longer work in the checkout and
+	// git there cannot fetch paths outside Paths. Remove does not keep the
+	// GitHub token from the agent: with AgentGitHubToken Token the agent can
+	// still clone the full repository elsewhere, so set AgentGitHubToken to
+	// None as well to keep the rest of the repository out of reach.
+	// Remove cannot be combined with Workspace.spec.remotes, and a Task with
+	// Task.spec.branch or a Session with Session.spec.initialBranch fails,
+	// because setting up the branch needs .git. Remove is not supported for
+	// Sessions with a Session.spec.volumeClaimTemplate: such a Session fails.
+	// Omit to use Keep.
+	// +optional
+	GitDir WorkspaceGitDir `json:"gitDir,omitempty"`
+}
+
+// WorkspaceGitDir selects what happens to a Workspace repository's .git
+// directory after the clone.
+// +kubebuilder:validation:Enum=Keep;Remove
+type WorkspaceGitDir string
+
+const (
+	// WorkspaceGitDirKeep keeps the .git directory.
+	WorkspaceGitDirKeep WorkspaceGitDir = "Keep"
+	// WorkspaceGitDirRemove deletes the .git directory after the clone.
+	WorkspaceGitDirRemove WorkspaceGitDir = "Remove"
+)
+
+// WorkspaceAgentGitHubToken selects whether the agent container receives the
+// GitHub token from a Workspace's secretRef.
+// +kubebuilder:validation:Enum=Token;None
+type WorkspaceAgentGitHubToken string
+
+const (
+	// WorkspaceAgentGitHubTokenToken gives the agent container the GitHub
+	// token.
+	WorkspaceAgentGitHubTokenToken WorkspaceAgentGitHubToken = "Token"
+	// WorkspaceAgentGitHubTokenNone keeps the GitHub token out of the agent
+	// container.
+	WorkspaceAgentGitHubTokenNone WorkspaceAgentGitHubToken = "None"
+)
+
 // WorkspaceSpec defines the desired state of Workspace.
+// +kubebuilder:validation:XValidation:rule="!has(self.clone) || !has(self.clone.gitDir) || self.clone.gitDir != 'Remove' || !has(self.remotes) || size(self.remotes) == 0",message="remotes cannot be set when clone.gitDir is Remove"
+// +kubebuilder:validation:XValidation:rule="!has(self.agentGitHubToken) || self.agentGitHubToken != 'None' || !has(self.ghproxy)",message="ghproxy cannot be set when agentGitHubToken is None: the workspace ghproxy forwards agent requests with the secretRef token"
 type WorkspaceSpec struct {
 	// Repo is the git repository URL to clone.
 	// +kubebuilder:validation:Required
@@ -43,10 +112,25 @@ type WorkspaceSpec struct {
 	// +optional
 	Ref string `json:"ref,omitempty"`
 
+	// Clone configures how the repository is cloned.
+	// +optional
+	Clone *WorkspaceClone `json:"clone,omitempty"`
+
 	// SecretRef references a Secret containing a GITHUB_TOKEN key for git
 	// authentication and GitHub CLI (gh) operations.
 	// +optional
 	SecretRef *SecretReference `json:"secretRef,omitempty"`
+
+	// AgentGitHubToken selects whether the agent container receives the
+	// GitHub token from SecretRef. Token gives it the token for git and the
+	// GitHub CLI (gh). None uses the token only to clone the repository and
+	// set up the Task or Session branch; the agent container gets no GitHub
+	// token from Kelos. None cannot be combined with GHProxy, which forwards
+	// requests from agent pods with the token. None does not otherwise
+	// restrict the agent's network access. WorkerPools do not support None.
+	// Omit to use Token.
+	// +optional
+	AgentGitHubToken WorkspaceAgentGitHubToken `json:"agentGitHubToken,omitempty"`
 
 	// GHProxy configures and enables the workspace-scoped ghproxy when set.
 	// +optional

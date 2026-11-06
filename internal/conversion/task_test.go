@@ -3,6 +3,7 @@ package conversion
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -43,6 +44,120 @@ func TestTaskConvert_IdentityRoundTrip(t *testing.T) {
 	}
 	if !reflect.DeepEqual(orig.Status, back.Status) {
 		t.Errorf("status round-trip mismatch:\n orig=%#v\n back=%#v", orig.Status, back.Status)
+	}
+}
+
+func TestTaskConvert_ConcurrencyRoundTrips(t *testing.T) {
+	hub := &v1alpha2.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "reviewer",
+			Namespace:   "ns",
+			Annotations: map[string]string{"team": "review"},
+		},
+		Spec: v1alpha2.TaskSpec{
+			Type:   "claude-code",
+			Prompt: "review",
+			Credentials: &v1alpha2.Credentials{
+				Type:      v1alpha2.CredentialTypeAPIKey,
+				SecretRef: &v1alpha2.SecretReference{Name: "creds"},
+			},
+			Branch:      "feature-1",
+			Concurrency: &v1alpha2.TaskConcurrency{Group: "pr-7-review"},
+		},
+	}
+
+	// hub -> spoke: v1alpha1 has no concurrency field, so the group is
+	// preserved in an internal annotation rather than dropped.
+	spoke := &v1alpha1.Task{}
+	if err := taskFromHub(context.Background(), hub, spoke); err != nil {
+		t.Fatalf("taskFromHub() error = %v", err)
+	}
+	if got := spoke.Annotations[preservedConcurrencyGroupAnnotation]; got != "pr-7-review" {
+		t.Fatalf("preserved annotation = %q, want %q", got, "pr-7-review")
+	}
+	if _, ok := hub.Annotations[preservedConcurrencyGroupAnnotation]; ok {
+		t.Fatal("taskFromHub() mutated the hub object's annotations")
+	}
+
+	// spoke -> hub: the field is restored, so a v1alpha1 write-back leaves the
+	// immutable spec unchanged, and the internal annotation is removed.
+	back := &v1alpha2.Task{}
+	if err := taskToHub(context.Background(), spoke, back); err != nil {
+		t.Fatalf("taskToHub() error = %v", err)
+	}
+	if !reflect.DeepEqual(hub.Spec, back.Spec) {
+		t.Errorf("spec round-trip mismatch:\n orig=%#v\n back=%#v", hub.Spec, back.Spec)
+	}
+	if _, ok := back.Annotations[preservedConcurrencyGroupAnnotation]; ok {
+		t.Error("internal preservation annotation leaked onto hub object")
+	}
+	if got := back.Annotations["team"]; got != "review" {
+		t.Errorf("user annotation team = %q, want %q", got, "review")
+	}
+}
+
+func TestTaskConvert_NoConcurrencyOmitsAnnotation(t *testing.T) {
+	hub := &v1alpha2.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "writer", Namespace: "ns"},
+		Spec:       v1alpha2.TaskSpec{Type: "claude-code", Prompt: "write", Branch: "feature-1"},
+	}
+	spoke := &v1alpha1.Task{}
+	if err := taskFromHub(context.Background(), hub, spoke); err != nil {
+		t.Fatalf("taskFromHub() error = %v", err)
+	}
+	if _, ok := spoke.Annotations[preservedConcurrencyGroupAnnotation]; ok {
+		t.Error("annotation should not be set when concurrency is unset")
+	}
+}
+
+// TestTaskConvert_MultibyteConcurrencyGroupRoundTrips covers a group that is
+// within MaxLength in characters but longer than it in bytes. The schema counts
+// characters, so the group is valid and must survive the round-trip.
+func TestTaskConvert_MultibyteConcurrencyGroupRoundTrips(t *testing.T) {
+	group := strings.Repeat("é", v1alpha2.TaskConcurrencyGroupMaxLength)
+	if len(group) <= v1alpha2.TaskConcurrencyGroupMaxLength {
+		t.Fatalf("test setup: group is %d bytes, want more than %d", len(group), v1alpha2.TaskConcurrencyGroupMaxLength)
+	}
+	hub := &v1alpha2.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "reviewer", Namespace: "ns"},
+		Spec: v1alpha2.TaskSpec{
+			Type:        "claude-code",
+			Prompt:      "review",
+			Branch:      "feature-1",
+			Concurrency: &v1alpha2.TaskConcurrency{Group: group},
+		},
+	}
+	spoke := &v1alpha1.Task{}
+	if err := taskFromHub(context.Background(), hub, spoke); err != nil {
+		t.Fatalf("taskFromHub() error = %v", err)
+	}
+	back := &v1alpha2.Task{}
+	if err := taskToHub(context.Background(), spoke, back); err != nil {
+		t.Fatalf("taskToHub() error = %v", err)
+	}
+	if back.Spec.Concurrency == nil || back.Spec.Concurrency.Group != group {
+		t.Errorf("round-tripped Concurrency = %+v, want group of %d characters", back.Spec.Concurrency, v1alpha2.TaskConcurrencyGroupMaxLength)
+	}
+}
+
+func TestTaskToHub_IgnoresInvalidConcurrencyAnnotation(t *testing.T) {
+	spoke := &v1alpha1.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "reviewer",
+			Namespace:   "ns",
+			Annotations: map[string]string{preservedConcurrencyGroupAnnotation: strings.Repeat("a", v1alpha2.TaskConcurrencyGroupMaxLength+1)},
+		},
+		Spec: v1alpha1.TaskSpec{Type: "claude-code", Prompt: "review", Branch: "feature-1"},
+	}
+	hub := &v1alpha2.Task{}
+	if err := taskToHub(context.Background(), spoke, hub); err != nil {
+		t.Fatalf("taskToHub() error = %v", err)
+	}
+	if hub.Spec.Concurrency != nil {
+		t.Errorf("Concurrency = %+v, want nil for an over-long annotation value", hub.Spec.Concurrency)
+	}
+	if _, ok := hub.Annotations[preservedConcurrencyGroupAnnotation]; ok {
+		t.Error("internal preservation annotation leaked onto hub object")
 	}
 }
 

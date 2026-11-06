@@ -3132,6 +3132,155 @@ var _ = Describe("Task Controller", func() {
 		})
 	})
 
+	Context("When creating Tasks with concurrency groups", func() {
+		newGroupTask := func(name, namespace, branch, group string) *kelos.Task {
+			task := &kelos.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: namespace,
+				},
+				Spec: kelos.TaskSpec{
+					Type:   "claude-code",
+					Prompt: name,
+					Branch: branch,
+					Credentials: &kelos.Credentials{
+						Type:      kelos.CredentialTypeAPIKey,
+						SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
+					},
+				},
+			}
+			if group != "" {
+				task.Spec.Concurrency = &kelos.TaskConcurrency{Group: group}
+			}
+			return task
+		}
+
+		createNamespaceWithSecret := func(name string) *corev1.Namespace {
+			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
+			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "anthropic-api-key",
+					Namespace: ns.Name,
+				},
+				StringData: map[string]string{
+					"ANTHROPIC_API_KEY": "test-api-key",
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
+			return ns
+		}
+
+		setJobStatus := func(key types.NamespacedName, active, succeeded int32) {
+			Eventually(func() error {
+				var job batchv1.Job
+				if err := k8sClient.Get(ctx, key, &job); err != nil {
+					return err
+				}
+				job.Status.Active = active
+				job.Status.Succeeded = succeeded
+				return k8sClient.Status().Update(ctx, &job)
+			}, timeout, interval).Should(Succeed())
+		}
+
+		markJobRunning := func(key types.NamespacedName) {
+			setJobStatus(key, 1, 0)
+			Eventually(func() kelos.TaskPhase {
+				var t kelos.Task
+				if err := k8sClient.Get(ctx, key, &t); err != nil {
+					return ""
+				}
+				return t.Status.Phase
+			}, timeout, interval).Should(Equal(kelos.TaskPhaseRunning))
+		}
+
+		jobExists := func(key types.NamespacedName) func() bool {
+			return func() bool {
+				var job batchv1.Job
+				return k8sClient.Get(ctx, key, &job) == nil
+			}
+		}
+
+		waitingMessage := func(key types.NamespacedName) func() string {
+			return func() string {
+				var t kelos.Task
+				if err := k8sClient.Get(ctx, key, &t); err != nil {
+					return ""
+				}
+				if t.Status.Phase != kelos.TaskPhaseWaiting {
+					return ""
+				}
+				return t.Status.Message
+			}
+		}
+
+		It("Should run a Task in its own group while another Task holds the branch group", func() {
+			ns := createNamespaceWithSecret("test-task-concurrency-reader")
+			const branch = "concurrency-reader"
+
+			By("Creating a writer Task in the default branch group and simulating Running")
+			Expect(k8sClient.Create(ctx, newGroupTask("writer", ns.Name, branch, ""))).Should(Succeed())
+			writerKey := types.NamespacedName{Name: "writer", Namespace: ns.Name}
+			Eventually(jobExists(writerKey), timeout, interval).Should(BeTrue())
+			markJobRunning(writerKey)
+
+			By("Creating a reader Task on the same branch in its own group")
+			Expect(k8sClient.Create(ctx, newGroupTask("reader", ns.Name, branch, "pr-7-review"))).Should(Succeed())
+
+			By("Verifying the reader Job is created without waiting")
+			readerKey := types.NamespacedName{Name: "reader", Namespace: ns.Name}
+			Eventually(jobExists(readerKey), timeout, interval).Should(BeTrue())
+
+			By("Verifying a second Task in the branch group still waits behind the writer")
+			Expect(k8sClient.Create(ctx, newGroupTask("writer-2", ns.Name, branch, ""))).Should(Succeed())
+			writer2Key := types.NamespacedName{Name: "writer-2", Namespace: ns.Name}
+			Eventually(waitingMessage(writer2Key), timeout, interval).Should(
+				Equal(`Waiting for concurrency group ":concurrency-reader" (locked by writer)`))
+			Consistently(jobExists(writer2Key), 2*time.Second, interval).Should(BeFalse())
+		})
+
+		It("Should not block a branch group Task behind a running Task in its own group", func() {
+			ns := createNamespaceWithSecret("test-task-concurrency-writer")
+			const branch = "concurrency-writer"
+
+			By("Creating a reader Task in its own group and simulating Running")
+			Expect(k8sClient.Create(ctx, newGroupTask("reader", ns.Name, branch, "pr-7-review"))).Should(Succeed())
+			readerKey := types.NamespacedName{Name: "reader", Namespace: ns.Name}
+			Eventually(jobExists(readerKey), timeout, interval).Should(BeTrue())
+			markJobRunning(readerKey)
+
+			By("Creating a writer Task on the same branch in the default branch group")
+			Expect(k8sClient.Create(ctx, newGroupTask("writer", ns.Name, branch, ""))).Should(Succeed())
+
+			By("Verifying the writer Job is created while the reader is Running")
+			writerKey := types.NamespacedName{Name: "writer", Namespace: ns.Name}
+			Eventually(jobExists(writerKey), timeout, interval).Should(BeTrue())
+		})
+
+		It("Should serialize Tasks in the same group across branches", func() {
+			ns := createNamespaceWithSecret("test-task-concurrency-shared")
+
+			By("Creating a first deploy Task and simulating Running")
+			Expect(k8sClient.Create(ctx, newGroupTask("deploy-a", ns.Name, "concurrency-shared-a", "deploy"))).Should(Succeed())
+			firstKey := types.NamespacedName{Name: "deploy-a", Namespace: ns.Name}
+			Eventually(jobExists(firstKey), timeout, interval).Should(BeTrue())
+			markJobRunning(firstKey)
+
+			By("Creating a second deploy Task on a different branch")
+			Expect(k8sClient.Create(ctx, newGroupTask("deploy-b", ns.Name, "concurrency-shared-b", "deploy"))).Should(Succeed())
+			secondKey := types.NamespacedName{Name: "deploy-b", Namespace: ns.Name}
+			Eventually(waitingMessage(secondKey), timeout, interval).Should(
+				Equal(`Waiting for concurrency group "deploy" (locked by deploy-a)`))
+			Consistently(jobExists(secondKey), 2*time.Second, interval).Should(BeFalse())
+
+			By("Completing the first Task")
+			setJobStatus(firstKey, 0, 1)
+
+			By("Verifying the second Task's Job is created")
+			Eventually(jobExists(secondKey), 2*timeout, interval).Should(BeTrue())
+		})
+	})
+
 	Context("When creating a Task with branch and workspace", func() {
 		It("Should create a Job with branch-setup init container", func() {
 			By("Creating a namespace")

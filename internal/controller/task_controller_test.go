@@ -16,6 +16,7 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -967,7 +968,7 @@ func TestFailTaskBeforeJobReleasesBranchLock(t *testing.T) {
 		},
 	}
 	locker := NewBranchLocker()
-	lockKey := branchLockKey(task)
+	lockKey := concurrencyKey(task)
 	if ok, holder := locker.TryAcquire(lockKey, task.Name); !ok {
 		t.Fatalf("TryAcquire() failed, held by %q", holder)
 	}
@@ -1003,6 +1004,335 @@ func TestFailTaskBeforeJobReleasesBranchLock(t *testing.T) {
 	}
 	if updated.Status.CompletionTime == nil {
 		t.Fatal("task completionTime is nil, want set")
+	}
+}
+
+func TestConcurrencyGroup(t *testing.T) {
+	tests := []struct {
+		name      string
+		branch    string
+		workspace string
+		group     string
+		wantGroup string
+	}{
+		{name: "no branch and no group", wantGroup: ""},
+		{name: "branch uses workspace and branch", branch: "feature-1", workspace: "workspace-1", wantGroup: "workspace-1:feature-1"},
+		{name: "branch without workspace", branch: "feature-1", wantGroup: ":feature-1"},
+		{name: "group replaces branch default", branch: "feature-1", workspace: "workspace-1", group: "pr-7-review", wantGroup: "pr-7-review"},
+		{name: "group without branch", group: "deploy", wantGroup: "deploy"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := &kelos.Task{
+				ObjectMeta: metav1.ObjectMeta{Name: "task-1", Namespace: "team-a"},
+				Spec:       kelos.TaskSpec{Branch: tt.branch},
+			}
+			if tt.workspace != "" {
+				task.Spec.WorkspaceRef = &kelos.WorkspaceReference{Name: tt.workspace}
+			}
+			if tt.group != "" {
+				task.Spec.Concurrency = &kelos.TaskConcurrency{Group: tt.group}
+			}
+			if got := concurrencyGroup(task); got != tt.wantGroup {
+				t.Errorf("concurrencyGroup() = %q, want %q", got, tt.wantGroup)
+			}
+			wantKey := ""
+			if tt.wantGroup != "" {
+				wantKey = "team-a/" + tt.wantGroup
+			}
+			if got := concurrencyKey(task); got != wantKey {
+				t.Errorf("concurrencyKey() = %q, want %q", got, wantKey)
+			}
+		})
+	}
+}
+
+// newConcurrencyTestTask returns a Task on branch feature-1 of workspace-1.
+// An empty group leaves spec.concurrency unset so the Task uses the default
+// branch group.
+func newConcurrencyTestTask(name, group string, phase kelos.TaskPhase, created time.Time) *kelos.Task {
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              name,
+			Namespace:         "default",
+			CreationTimestamp: metav1.NewTime(created),
+		},
+		Spec: kelos.TaskSpec{
+			Type:         "claude-code",
+			Prompt:       "test",
+			Branch:       "feature-1",
+			WorkspaceRef: &kelos.WorkspaceReference{Name: "workspace-1"},
+		},
+		Status: kelos.TaskStatus{Phase: phase},
+	}
+	if group != "" {
+		task.Spec.Concurrency = &kelos.TaskConcurrency{Group: group}
+	}
+	return task
+}
+
+// TestFailTaskBeforeJobDoesNotReleaseOtherNamespaceLock guards against a task
+// freeing a lock held by a same-named task in another namespace. Lock owners
+// are recorded by task name only, so the namespace must be part of the key.
+func TestFailTaskBeforeJobDoesNotReleaseOtherNamespaceLock(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
+
+	holder := newConcurrencyTestTask("task-1", "", kelos.TaskPhaseRunning, time.Now())
+	holder.Namespace = "team-a"
+	other := newConcurrencyTestTask("task-1", "", "", time.Now())
+	other.Namespace = "team-b"
+
+	locker := NewBranchLocker()
+	lockKey := concurrencyKey(holder)
+	if ok, h := locker.TryAcquire(lockKey, holder.Name); !ok {
+		t.Fatalf("TryAcquire() failed, held by %q", h)
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&kelos.Task{}).
+		WithObjects(other).
+		Build()
+	r := &TaskReconciler{Client: cl, Scheme: scheme, BranchLocker: locker}
+
+	if err := r.failTaskBeforeJob(context.Background(), other, "validation failed"); err != nil {
+		t.Fatalf("failTaskBeforeJob() error = %v", err)
+	}
+	if got := locker.Holder(lockKey); got != holder.Name {
+		t.Fatalf("lock holder = %q, want %q still held", got, holder.Name)
+	}
+}
+
+// TestCheckConcurrencyLock covers the restart fallback: with an empty
+// in-memory BranchLocker, only active Tasks in the candidate's own group and
+// namespace block it.
+func TestCheckConcurrencyLock(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
+
+	base := time.Now().Add(-time.Hour)
+	otherNamespace := newConcurrencyTestTask("deployer", "deploy", kelos.TaskPhaseRunning, base)
+	otherNamespace.Namespace = "team-b"
+	otherBranch := newConcurrencyTestTask("deployer", "deploy", kelos.TaskPhaseRunning, base)
+	otherBranch.Spec.Branch = "feature-2"
+
+	tests := []struct {
+		name        string
+		group       string
+		other       *kelos.Task
+		wantLocked  bool
+		wantMessage string
+	}{
+		{
+			name:       "running task in its own group does not block branch group",
+			other:      newConcurrencyTestTask("reader", "pr-7-review", kelos.TaskPhaseRunning, base),
+			wantLocked: false,
+		},
+		{
+			name:       "pending task in its own group does not block branch group",
+			other:      newConcurrencyTestTask("reader", "pr-7-review", kelos.TaskPhasePending, base),
+			wantLocked: false,
+		},
+		{
+			name:       "earlier waiting task in its own group does not queue ahead",
+			other:      newConcurrencyTestTask("reader", "pr-7-review", kelos.TaskPhaseWaiting, base),
+			wantLocked: false,
+		},
+		{
+			name:        "running task in branch group blocks",
+			other:       newConcurrencyTestTask("writer", "", kelos.TaskPhaseRunning, base),
+			wantLocked:  true,
+			wantMessage: `Waiting for concurrency group "workspace-1:feature-1" (locked by writer)`,
+		},
+		{
+			name:        "earlier waiting task in branch group queues ahead",
+			other:       newConcurrencyTestTask("writer", "", kelos.TaskPhaseWaiting, base),
+			wantLocked:  true,
+			wantMessage: `Waiting for concurrency group "workspace-1:feature-1" (queued behind writer)`,
+		},
+		{
+			name:        "running task in same explicit group blocks across branches",
+			group:       "deploy",
+			other:       otherBranch,
+			wantLocked:  true,
+			wantMessage: `Waiting for concurrency group "deploy" (locked by deployer)`,
+		},
+		{
+			name:       "running task in same group in another namespace does not block",
+			group:      "deploy",
+			other:      otherNamespace,
+			wantLocked: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := newConcurrencyTestTask("candidate", tt.group, "", base.Add(time.Minute))
+			cl := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithStatusSubresource(&kelos.Task{}).
+				WithObjects(tt.other, task).
+				Build()
+			r := &TaskReconciler{Client: cl, Scheme: scheme, BranchLocker: NewBranchLocker()}
+
+			locked, _, err := r.checkConcurrencyLock(context.Background(), task)
+			if err != nil {
+				t.Fatalf("checkConcurrencyLock() error = %v", err)
+			}
+			if locked != tt.wantLocked {
+				t.Errorf("checkConcurrencyLock() locked = %v, want %v", locked, tt.wantLocked)
+			}
+			if tt.wantMessage != "" && task.Status.Message != tt.wantMessage {
+				t.Errorf("status message = %q, want %q", task.Status.Message, tt.wantMessage)
+			}
+		})
+	}
+}
+
+func TestReconcile_ConcurrencyGroupTaskSkipsHeldBranchGroup(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(batchv1.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
+
+	base := time.Now().Add(-time.Hour)
+	writer := newConcurrencyTestTask("writer", "", kelos.TaskPhaseRunning, base)
+	reader := newConcurrencyTestTask("reader", "pr-7-review", "", base.Add(time.Minute))
+	reader.Finalizers = []string{taskFinalizer}
+	reader.Spec.Credentials = &kelos.Credentials{
+		Type:      kelos.CredentialTypeAPIKey,
+		SecretRef: &kelos.SecretReference{Name: "anthropic-api-key"},
+	}
+	workspace := &kelos.Workspace{
+		ObjectMeta: metav1.ObjectMeta{Name: "workspace-1", Namespace: "default"},
+		Spec:       kelos.WorkspaceSpec{Repo: "https://github.com/example/repo.git"},
+	}
+
+	locker := NewBranchLocker()
+	writerKey := concurrencyKey(writer)
+	if ok, holder := locker.TryAcquire(writerKey, writer.Name); !ok {
+		t.Fatalf("TryAcquire() failed, held by %q", holder)
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&kelos.Task{}).
+		WithObjects(writer, reader, workspace).
+		Build()
+	r := &TaskReconciler{
+		Client:       cl,
+		Scheme:       scheme,
+		JobBuilder:   NewJobBuilder(),
+		BranchLocker: locker,
+	}
+
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(reader)}); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+
+	var job batchv1.Job
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(reader), &job); err != nil {
+		t.Fatalf("expected Job for reader task while writer holds the branch group: %v", err)
+	}
+	if holder := locker.Holder(writerKey); holder != writer.Name {
+		t.Errorf("branch group holder = %q, want %q", holder, writer.Name)
+	}
+	if holder := locker.Holder(concurrencyKey(reader)); holder != reader.Name {
+		t.Errorf("reader group holder = %q, want %q", holder, reader.Name)
+	}
+}
+
+func TestReconcile_SameConcurrencyGroupWaits(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(batchv1.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
+
+	base := time.Now().Add(-time.Hour)
+	holder := newConcurrencyTestTask("holder", "deploy", kelos.TaskPhaseRunning, base)
+	waiter := newConcurrencyTestTask("waiter", "deploy", "", base.Add(time.Minute))
+	waiter.Spec.Branch = "feature-2"
+	waiter.Finalizers = []string{taskFinalizer}
+
+	locker := NewBranchLocker()
+	if ok, h := locker.TryAcquire(concurrencyKey(holder), holder.Name); !ok {
+		t.Fatalf("TryAcquire() failed, held by %q", h)
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&kelos.Task{}).
+		WithObjects(holder, waiter).
+		Build()
+	r := &TaskReconciler{
+		Client:       cl,
+		Scheme:       scheme,
+		JobBuilder:   NewJobBuilder(),
+		BranchLocker: locker,
+	}
+
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(waiter)}); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+
+	var job batchv1.Job
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(waiter), &job); !apierrors.IsNotFound(err) {
+		t.Fatalf("Get(Job) error = %v, want NotFound while the group is held", err)
+	}
+	var got kelos.Task
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(waiter), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Phase != kelos.TaskPhaseWaiting {
+		t.Errorf("phase = %q, want %q", got.Status.Phase, kelos.TaskPhaseWaiting)
+	}
+	wantMessage := `Waiting for concurrency group "deploy" (locked by holder)`
+	if got.Status.Message != wantMessage {
+		t.Errorf("status message = %q, want %q", got.Status.Message, wantMessage)
+	}
+}
+
+func TestEnqueueDependentTasksUsesConcurrencyGroup(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
+
+	base := time.Now().Add(-time.Hour)
+	tests := []struct {
+		name     string
+		finished *kelos.Task
+		want     string
+	}{
+		{
+			name:     "branch group",
+			finished: newConcurrencyTestTask("finished", "", kelos.TaskPhaseSucceeded, base),
+			want:     "waiting-writer",
+		},
+		{
+			name:     "explicit group",
+			finished: newConcurrencyTestTask("finished", "pr-7-review", kelos.TaskPhaseFailed, base),
+			want:     "waiting-reader",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			waitingWriter := newConcurrencyTestTask("waiting-writer", "", kelos.TaskPhaseWaiting, base.Add(time.Minute))
+			waitingReader := newConcurrencyTestTask("waiting-reader", "pr-7-review", kelos.TaskPhaseWaiting, base.Add(2*time.Minute))
+			waitingReader.Spec.Branch = "feature-2"
+
+			cl := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(tt.finished, waitingWriter, waitingReader).
+				Build()
+			r := &TaskReconciler{Client: cl, Scheme: scheme}
+
+			requests := r.enqueueDependentTasks(context.Background(), tt.finished)
+			if len(requests) != 1 || requests[0].Name != tt.want {
+				t.Fatalf("enqueueDependentTasks() = %v, want only %q", requests, tt.want)
+			}
+		})
 	}
 }
 

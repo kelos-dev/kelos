@@ -80,6 +80,112 @@ func TestBuildTask_ForwardsEffort(t *testing.T) {
 	}
 }
 
+func TestBuildTask_RendersConcurrencyGroup(t *testing.T) {
+	tb := &TaskBuilder{}
+	template := &kelos.TaskTemplate{
+		Type: "codex",
+		Credentials: &kelos.Credentials{
+			Type: kelos.CredentialTypeAPIKey,
+			SecretRef: &kelos.SecretReference{
+				Name: "credentials",
+			},
+		},
+		Branch:         "{{.Branch}}",
+		Concurrency:    &kelos.TaskConcurrency{Group: "pr-{{.Number}}-review"},
+		PromptTemplate: "Review {{.Title}}",
+	}
+
+	task, err := tb.BuildTask("task-1", "default", template, map[string]interface{}{
+		"Title":  "the PR",
+		"Branch": "feature-1",
+		"Number": 7,
+	}, nil)
+	if err != nil {
+		t.Fatalf("BuildTask() returned error: %v", err)
+	}
+
+	if task.Spec.Branch != "feature-1" {
+		t.Fatalf("task.Spec.Branch = %q, want %q", task.Spec.Branch, "feature-1")
+	}
+	if task.Spec.Concurrency == nil || task.Spec.Concurrency.Group != "pr-7-review" {
+		t.Fatalf("task.Spec.Concurrency = %+v, want group %q", task.Spec.Concurrency, "pr-7-review")
+	}
+	if template.Concurrency.Group != "pr-{{.Number}}-review" {
+		t.Fatalf("BuildTask() mutated the template group to %q", template.Concurrency.Group)
+	}
+}
+
+func TestBuildTask_AcceptsMultibyteConcurrencyGroupAtLimit(t *testing.T) {
+	tb := &TaskBuilder{}
+	template := &kelos.TaskTemplate{
+		Type:           "codex",
+		Concurrency:    &kelos.TaskConcurrency{Group: "{{.Group}}"},
+		PromptTemplate: "Review {{.Title}}",
+	}
+	group := strings.Repeat("é", kelos.TaskConcurrencyGroupMaxLength)
+
+	task, err := tb.BuildTask("task-1", "default", template, map[string]interface{}{
+		"Title": "the PR",
+		"Group": group,
+	}, nil)
+	if err != nil {
+		t.Fatalf("BuildTask() returned error: %v", err)
+	}
+	if task.Spec.Concurrency == nil || task.Spec.Concurrency.Group != group {
+		t.Fatalf("task.Spec.Concurrency = %+v, want group of %d characters", task.Spec.Concurrency, kelos.TaskConcurrencyGroupMaxLength)
+	}
+}
+
+func TestBuildTask_OmitsConcurrencyByDefault(t *testing.T) {
+	tb := &TaskBuilder{}
+	template := &kelos.TaskTemplate{
+		Type:           "codex",
+		Branch:         "{{.Branch}}",
+		PromptTemplate: "Review {{.Title}}",
+	}
+
+	task, err := tb.BuildTask("task-1", "default", template, map[string]interface{}{
+		"Title":  "the PR",
+		"Branch": "feature-1",
+	}, nil)
+	if err != nil {
+		t.Fatalf("BuildTask() returned error: %v", err)
+	}
+	if task.Spec.Concurrency != nil {
+		t.Fatalf("task.Spec.Concurrency = %+v, want nil", task.Spec.Concurrency)
+	}
+}
+
+func TestBuildTask_RejectsConcurrencyGroupErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		group   string
+		wantErr string
+	}{
+		{name: "renders empty", group: "{{.Empty}}", wantErr: `concurrency group template "{{.Empty}}" rendered empty`},
+		{name: "missing key", group: "{{.Missing}}", wantErr: "failed to render concurrency group template"},
+		{name: "renders too long", group: "{{.Long}}", wantErr: `concurrency group template "{{.Long}}" rendered 257 characters, more than the maximum of 256`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tb := &TaskBuilder{}
+			template := &kelos.TaskTemplate{
+				Type:           "codex",
+				Concurrency:    &kelos.TaskConcurrency{Group: tt.group},
+				PromptTemplate: "Review {{.Title}}",
+			}
+			_, err := tb.BuildTask("task-1", "default", template, map[string]interface{}{
+				"Title": "the PR",
+				"Empty": "",
+				"Long":  strings.Repeat("a", kelos.TaskConcurrencyGroupMaxLength+1),
+			}, nil)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("BuildTask() error = %v, want it to contain %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestBuildTask_RendersChangedFiles(t *testing.T) {
 	tb := &TaskBuilder{}
 	template := &kelos.TaskTemplate{

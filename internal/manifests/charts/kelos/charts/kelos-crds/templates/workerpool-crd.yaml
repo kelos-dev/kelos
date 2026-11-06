@@ -66,6 +66,37 @@ spec:
           spec:
             description: WorkerPoolSpec defines the desired state of WorkerPool.
             properties:
+              persistentVolumeClaimRetentionPolicy:
+                description: |-
+                  PersistentVolumeClaimRetentionPolicy controls whether the worker PVCs
+                  created from volumeClaimTemplate are deleted when the WorkerPool is
+                  deleted (whenDeleted) or scaled down (whenScaled). Each field accepts
+                  Retain or Delete. When unset, or when a field is omitted, PVCs are
+                  retained.
+                properties:
+                  whenDeleted:
+                    description: |-
+                      WhenDeleted specifies what happens to PVCs created from StatefulSet
+                      VolumeClaimTemplates when the StatefulSet is deleted. The default policy
+                      of `Retain` causes PVCs to not be affected by StatefulSet deletion. The
+                      `Delete` policy causes those PVCs to be deleted.
+                    type: string
+                  whenScaled:
+                    description: |-
+                      WhenScaled specifies what happens to PVCs created from StatefulSet
+                      VolumeClaimTemplates when the StatefulSet is scaled down. The default
+                      policy of `Retain` causes PVCs to not be affected by a scaledown. The
+                      `Delete` policy causes the associated PVCs for any excess pods above
+                      the replica count to be deleted.
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: whenDeleted must be Retain or Delete
+                  rule: '!has(self.whenDeleted) || self.whenDeleted in [''Retain'',
+                    ''Delete'']'
+                - message: whenScaled must be Retain or Delete
+                  rule: '!has(self.whenScaled) || self.whenScaled in [''Retain'',
+                    ''Delete'']'
               replicas:
                 default: 1
                 description: |-

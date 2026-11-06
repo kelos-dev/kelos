@@ -88,6 +88,34 @@ func TestSlackFilterChannelIDPatternMatchesMarker(t *testing.T) {
 	}
 }
 
+// TestSlackReactionMarkersMatchConstants keeps the reaction bounds the
+// conversion restore path checks in sync with the markers the API server
+// enforces.
+func TestSlackReactionMarkersMatchConstants(t *testing.T) {
+	source, err := os.ReadFile("taskspawner_types.go")
+	if err != nil {
+		t.Fatalf("read types: %v", err)
+	}
+	text := string(source)
+	start := strings.Index(text, "type SlackReactionTrigger struct")
+	if start < 0 {
+		t.Fatal("could not find the SlackReactionTrigger type")
+	}
+	end := strings.Index(text[start:], "Name string")
+	if end < 0 {
+		t.Fatal("could not find the SlackReactionTrigger Name field")
+	}
+	block := text[start : start+end]
+	for _, marker := range []string{
+		"// +kubebuilder:validation:Pattern=`" + SlackReactionPattern + "`",
+		fmt.Sprintf("// +kubebuilder:validation:MaxLength=%d", SlackReactionMaxLength),
+	} {
+		if !strings.Contains(block, marker) {
+			t.Errorf("SlackReactionTrigger.Name has no %q marker; the mirrored constant has drifted", marker)
+		}
+	}
+}
+
 // TestSlackMirroredBoundsMatchMarkers pins the numeric bounds the conversion
 // restore path mirrors against the markers themselves, so the "keep in sync"
 // intent is enforced rather than trusted.
@@ -103,6 +131,7 @@ func TestSlackMirroredBoundsMatchMarkers(t *testing.T) {
 	}{
 		{"ExcludeFilters []SlackFilter", SlackExcludeFiltersMaxItems},
 		{"Channels []string `json:\"channels,omitempty\"`", SlackFilterChannelsMaxItems},
+		{"Triggers []SlackTrigger", SlackTriggersMaxItems},
 	} {
 		i := strings.LastIndex(text, tc.field)
 		if i < 0 {

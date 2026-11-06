@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -479,6 +480,166 @@ func TestTaskSpawnerFromHub_NoSlackExcludeFiltersOmitsAnnotation(t *testing.T) {
 	}
 	if _, ok := spoke.Annotations[preservedSlackExcludeFiltersAnnotation]; ok {
 		t.Error("annotation should be cleared when excludeFilters is empty")
+	}
+}
+
+// TestTaskSpawnerConvert_SlackReactionTriggersRoundTrip verifies that reaction
+// triggers (spec.when.slack.triggers[].reaction is v1alpha2-only) are removed
+// from the v1alpha1 triggers list, where they would read as empty triggers that
+// fire on every bot mention, and restored from the preservation annotation.
+func TestTaskSpawnerConvert_SlackReactionTriggersRoundTrip(t *testing.T) {
+	src := &v1alpha2.TaskSpawner{
+		Spec: v1alpha2.TaskSpawnerSpec{
+			When: v1alpha2.When{
+				Slack: &v1alpha2.Slack{
+					Channels: []string{"C0123456789"},
+					Triggers: []v1alpha2.SlackTrigger{
+						{Reaction: &v1alpha2.SlackReactionTrigger{Name: "gear"}},
+						{Pattern: "deploy"},
+						{Reaction: &v1alpha2.SlackReactionTrigger{Name: "+1"}},
+					},
+				},
+			},
+		},
+	}
+
+	down := &v1alpha1.TaskSpawner{}
+	if err := taskSpawnerFromHub(context.Background(), src, down); err != nil {
+		t.Fatalf("taskSpawnerFromHub() error = %v", err)
+	}
+	if got := down.Spec.When.Slack.Triggers; len(got) != 1 || got[0].Pattern != "deploy" {
+		t.Errorf("v1alpha1 triggers = %#v, want only the deploy pattern trigger", got)
+	}
+	if raw := down.Annotations[preservedSlackReactionTriggersAnnotation]; raw != `[{"name":"gear"},{"name":"+1"}]` {
+		t.Errorf("preservation annotation = %q, want the reaction blocks JSON", raw)
+	}
+
+	up := &v1alpha2.TaskSpawner{}
+	if err := taskSpawnerToHub(context.Background(), down, up); err != nil {
+		t.Fatalf("taskSpawnerToHub() error = %v", err)
+	}
+	want := []v1alpha2.SlackTrigger{{Pattern: "deploy"}, {Reaction: &v1alpha2.SlackReactionTrigger{Name: "gear"}}, {Reaction: &v1alpha2.SlackReactionTrigger{Name: "+1"}}}
+	if got := up.Spec.When.Slack.Triggers; !reflect.DeepEqual(got, want) {
+		t.Errorf("restored triggers = %#v, want %#v", got, want)
+	}
+	if _, ok := up.Annotations[preservedSlackReactionTriggersAnnotation]; ok {
+		t.Error("preservation annotation not cleaned up after restore")
+	}
+}
+
+// TestTaskSpawnerConvert_SlackReactionOnlyRoundTrip verifies that a spawner
+// whose only triggers are reaction triggers comes back reaction-only, rather
+// than with empty triggers that fire on every bot mention.
+func TestTaskSpawnerConvert_SlackReactionOnlyRoundTrip(t *testing.T) {
+	src := &v1alpha2.TaskSpawner{
+		Spec: v1alpha2.TaskSpawnerSpec{
+			When: v1alpha2.When{
+				Slack: &v1alpha2.Slack{Triggers: []v1alpha2.SlackTrigger{{Reaction: &v1alpha2.SlackReactionTrigger{Name: "gear"}}}},
+			},
+		},
+	}
+
+	down := &v1alpha1.TaskSpawner{}
+	if err := taskSpawnerFromHub(context.Background(), src, down); err != nil {
+		t.Fatalf("taskSpawnerFromHub() error = %v", err)
+	}
+	if got := down.Spec.When.Slack.Triggers; len(got) != 0 {
+		t.Errorf("v1alpha1 triggers = %#v, want none", got)
+	}
+
+	up := &v1alpha2.TaskSpawner{}
+	if err := taskSpawnerToHub(context.Background(), down, up); err != nil {
+		t.Fatalf("taskSpawnerToHub() error = %v", err)
+	}
+	want := []v1alpha2.SlackTrigger{{Reaction: &v1alpha2.SlackReactionTrigger{Name: "gear"}}}
+	if got := up.Spec.When.Slack.Triggers; !reflect.DeepEqual(got, want) {
+		t.Errorf("restored triggers = %#v, want %#v", got, want)
+	}
+}
+
+func TestTaskSpawnerToHub_InvalidSlackReactionTriggersAnnotationIgnored(t *testing.T) {
+	// The API server does not re-validate conversion output, so annotation data
+	// that violates the v1alpha2 constraints must not be restored.
+	tests := []struct {
+		name     string
+		raw      string
+		triggers []v1alpha1.SlackTrigger
+	}{
+		{name: "malformed json", raw: "[not valid json"},
+		{name: "name written with colons", raw: `[{"name":":gear:"}]`},
+		{name: "name with whitespace", raw: `[{"name":"gear box"}]`},
+		{name: "name with uppercase", raw: `[{"name":"Gear"}]`},
+		{name: "empty name", raw: `[{"name":""}]`},
+		{name: "missing name", raw: `[{}]`},
+		{name: "name longer than maxLength", raw: `[{"name":"` + strings.Repeat("a", v1alpha2.SlackReactionMaxLength+1) + `"}]`},
+		{name: "a bare name list rather than reaction blocks", raw: `["gear"]`},
+		{name: "an object rather than a list", raw: `{"name":"gear"}`},
+		{
+			name:     "more triggers than maxItems allows with the existing ones",
+			raw:      `[{"name":"gear"},{"name":"rocket"}]`,
+			triggers: slices.Repeat([]v1alpha1.SlackTrigger{{Pattern: "deploy"}}, v1alpha2.SlackTriggersMaxItems-1),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spoke := &v1alpha1.TaskSpawner{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "chat",
+					Namespace:   "default",
+					Annotations: map[string]string{preservedSlackReactionTriggersAnnotation: tt.raw},
+				},
+				Spec: v1alpha1.TaskSpawnerSpec{
+					When: v1alpha1.When{Slack: &v1alpha1.Slack{Channels: []string{"C0123456789"}, Triggers: tt.triggers}},
+				},
+			}
+
+			hub := &v1alpha2.TaskSpawner{}
+			if err := taskSpawnerToHub(context.Background(), spoke, hub); err != nil {
+				t.Fatalf("taskSpawnerToHub() error = %v", err)
+			}
+			if hub.Spec.When.Slack == nil {
+				t.Fatal("expected slack config after up-conversion")
+			}
+			for _, trigger := range hub.Spec.When.Slack.Triggers {
+				if trigger.Reaction != nil {
+					t.Errorf("triggers = %#v, want no reaction trigger from annotation data that violates the field constraints",
+						hub.Spec.When.Slack.Triggers)
+					break
+				}
+			}
+			if _, ok := hub.Annotations[preservedSlackReactionTriggersAnnotation]; ok {
+				t.Error("invalid preservation annotation should still be stripped from the hub object")
+			}
+		})
+	}
+}
+
+func TestTaskSpawnerFromHub_NoSlackReactionTriggersOmitsAnnotation(t *testing.T) {
+	hub := &v1alpha2.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "chat",
+			Namespace: "default",
+			Annotations: map[string]string{
+				preservedSlackReactionTriggersAnnotation: `[{"name":"gear"}]`,
+			},
+		},
+		Spec: v1alpha2.TaskSpawnerSpec{
+			When: v1alpha2.When{Slack: &v1alpha2.Slack{
+				Channels: []string{"C0123456789"},
+				Triggers: []v1alpha2.SlackTrigger{{Pattern: "deploy"}},
+			}},
+		},
+	}
+	spoke := &v1alpha1.TaskSpawner{}
+	if err := taskSpawnerFromHub(context.Background(), hub, spoke); err != nil {
+		t.Fatalf("taskSpawnerFromHub() error = %v", err)
+	}
+	if _, ok := spoke.Annotations[preservedSlackReactionTriggersAnnotation]; ok {
+		t.Error("annotation should be cleared when there are no reaction triggers")
+	}
+	if got := spoke.Spec.When.Slack.Triggers; len(got) != 1 || got[0].Pattern != "deploy" {
+		t.Errorf("v1alpha1 triggers = %#v, want the deploy pattern trigger unchanged", got)
 	}
 }
 

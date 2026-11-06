@@ -101,6 +101,8 @@
         resourceDetailLogsPanel: document.querySelector('#resource-detail-logs-panel'),
         resourceDetailManifestPanel: document.querySelector('#resource-detail-manifest-panel'),
         refreshResourceLogs: document.querySelector('#refresh-resource-logs'),
+        resourceLogFormatFormatted: document.querySelector('#resource-log-format-formatted'),
+        resourceLogFormatRaw: document.querySelector('#resource-log-format-raw'),
         resourceDetailLogs: document.querySelector('#resource-detail-logs'),
         resourceDetailYAML: document.querySelector('#resource-detail-yaml'),
         taskSpawnerRunForm: document.querySelector('#taskspawner-run-form'),
@@ -294,6 +296,7 @@
         resourceListGeneration: 0,
         resourceDetailGeneration: 0,
         resourceDetailLogGeneration: 0,
+        resourceLogFormat: 'formatted',
         resourceDetailTask: null,
         resourceDetailSpawner: null,
         sourceStorageClassNamePresent: false,
@@ -361,6 +364,7 @@
         toastTimer = window.setTimeout(() => elements.toast.classList.remove('show'), 3200);
     }
     const browserAlertsStorageKey = 'kelos-console-browser-alerts';
+    const taskLogFormatStorageKey = 'kelos-console-task-log-format';
     let browserNotificationRegistration = null;
     let browserNotificationQueue = Promise.resolve();
     let browserAlertGeneration = -1;
@@ -1715,12 +1719,37 @@ ${specs[collection.resource]}`;
         target.click();
         target.focus();
     }
+    function loadTaskLogFormat() {
+        try {
+            state.resourceLogFormat = window.localStorage.getItem(taskLogFormatStorageKey) === 'raw' ? 'raw' : 'formatted';
+        }
+        catch (_) {
+            state.resourceLogFormat = 'formatted';
+        }
+        renderTaskLogFormat();
+    }
+    function renderTaskLogFormat() {
+        elements.resourceLogFormatFormatted.setAttribute('aria-pressed', String(state.resourceLogFormat === 'formatted'));
+        elements.resourceLogFormatRaw.setAttribute('aria-pressed', String(state.resourceLogFormat === 'raw'));
+    }
+    function setTaskLogFormat(format) {
+        if (state.resourceLogFormat === format)
+            return;
+        state.resourceLogFormat = format;
+        try {
+            window.localStorage.setItem(taskLogFormatStorageKey, format);
+        }
+        catch (_) { }
+        renderTaskLogFormat();
+        if (state.resourceDetailTask)
+            void loadResourceTaskLogs(state.resourceDetailTask, state.resourceDetailGeneration);
+    }
     async function loadResourceTaskLogs(item, detailGeneration) {
         const logGeneration = ++state.resourceDetailLogGeneration;
         elements.refreshResourceLogs.disabled = true;
         elements.resourceDetailLogs.textContent = 'Loading logs…';
         try {
-            const logs = await apiText(`/api/resources/tasks/${encodeURIComponent(item.namespace)}/${encodeURIComponent(item.name)}/logs`);
+            const logs = await apiText(`/api/resources/tasks/${encodeURIComponent(item.namespace)}/${encodeURIComponent(item.name)}/logs?format=${state.resourceLogFormat}`);
             if (detailGeneration !== state.resourceDetailGeneration || logGeneration !== state.resourceDetailLogGeneration)
                 return;
             elements.resourceDetailLogs.textContent = logs || 'No logs yet.';
@@ -7291,6 +7320,9 @@ spec:
         if (state.resourceDetailTask)
             void loadResourceTaskLogs(state.resourceDetailTask, state.resourceDetailGeneration);
     });
+    elements.resourceLogFormatFormatted.addEventListener('click', () => setTaskLogFormat('formatted'));
+    elements.resourceLogFormatRaw.addEventListener('click', () => setTaskLogFormat('raw'));
+    loadTaskLogFormat();
     requiredElement('#refresh-console').addEventListener('click', () => {
         void refreshConsole();
     });

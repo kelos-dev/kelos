@@ -529,6 +529,177 @@ func TestConsoleWorkerPoolTaskLogsOnlyIncludeSelectedTask(t *testing.T) {
 	}
 }
 
+const claudeTaskLogs = `{"type":"system","subtype":"init","model":"claude-sonnet-5"}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"gh pr list"}}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"PR #19 bumps vitest."}]}}
+{"type":"result","subtype":"success","result":"done","num_turns":2,"total_cost_usd":0.0123}
+`
+
+func serveTaskLogs(t *testing.T, server *Server, path string, logs string) *httptest.ResponseRecorder {
+	t.Helper()
+	server.taskLogStream = func(context.Context, *kelos.Task, int64) (io.ReadCloser, error) {
+		return io.NopCloser(strings.NewReader(logs)), nil
+	}
+	request := httptest.NewRequest(http.MethodGet, path, nil)
+	request.Header.Set("Authorization", "Bearer secret-token")
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	return response
+}
+
+func createLogTask(t *testing.T, server *Server, name string, spec kelos.TaskSpec) {
+	t.Helper()
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "team-a"},
+		Spec:       spec,
+		Status:     kelos.TaskStatus{Phase: kelos.TaskPhaseSucceeded, PodName: name + "-pod"},
+	}
+	if err := server.client.Create(t.Context(), task); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestConsoleTaskLogsFormatted(t *testing.T) {
+	server := testServer(t)
+	createLogTask(t, server, "claude-task", kelos.TaskSpec{})
+
+	response := serveTaskLogs(t, server, "/api/resources/tasks/team-a/claude-task/logs?format=formatted", claudeTaskLogs)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("Task logs status = %d body = %s", response.Code, response.Body.String())
+	}
+	want := "[init] model=claude-sonnet-5\n" +
+		"\n--- Turn 1 ---\n" +
+		"[tool] Bash: gh pr list\n" +
+		"\n--- Turn 2 ---\n" +
+		"PR #19 bumps vitest.\n" +
+		"\n[result] completed (2 turns, $0.0123)\n"
+	if got := response.Body.String(); got != want {
+		t.Errorf("Formatted Task logs = %q, want %q", got, want)
+	}
+}
+
+func TestConsoleTaskLogsRawByDefault(t *testing.T) {
+	for _, path := range []string{
+		"/api/resources/tasks/team-a/claude-task/logs",
+		"/api/resources/tasks/team-a/claude-task/logs?format=raw",
+	} {
+		t.Run(path, func(t *testing.T) {
+			server := testServer(t)
+			createLogTask(t, server, "claude-task", kelos.TaskSpec{})
+
+			response := serveTaskLogs(t, server, path, claudeTaskLogs)
+
+			if response.Code != http.StatusOK {
+				t.Fatalf("Task logs status = %d body = %s", response.Code, response.Body.String())
+			}
+			if got := response.Body.String(); got != claudeTaskLogs {
+				t.Errorf("Raw Task logs = %q, want %q", got, claudeTaskLogs)
+			}
+		})
+	}
+}
+
+func TestConsoleTaskLogsFormattedUsesTaskAgentType(t *testing.T) {
+	server := testServer(t)
+	createLogTask(t, server, "codex-task", kelos.TaskSpec{Type: "codex"})
+	logs := `{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"bash -lc ls","status":"in_progress"}}
+`
+
+	response := serveTaskLogs(t, server, "/api/resources/tasks/team-a/codex-task/logs?format=formatted", logs)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("Task logs status = %d body = %s", response.Code, response.Body.String())
+	}
+	if got, want := response.Body.String(), "\n--- Turn 1 ---\n[command] bash -lc ls\n"; got != want {
+		t.Errorf("Formatted Codex Task logs = %q, want %q", got, want)
+	}
+}
+
+func TestConsoleWorkerPoolTaskLogsFormattedUsesPoolAgentType(t *testing.T) {
+	server := testServer(t)
+	pool := &kelos.WorkerPool{
+		ObjectMeta: metav1.ObjectMeta{Name: "pool", Namespace: "team-a"},
+		Spec:       kelos.WorkerPoolSpec{Worker: kelos.WorkerSpec{Type: "gemini"}},
+	}
+	if err := server.client.Create(t.Context(), pool); err != nil {
+		t.Fatal(err)
+	}
+	createLogTask(t, server, "task-b", kelos.TaskSpec{WorkerPoolRef: &kelos.WorkerPoolReference{Name: "pool"}})
+	logs := strings.Join([]string{
+		"---KELOS_TASK_START--- task-a",
+		`{"type":"init","model":"gemini-task-a"}`,
+		"---KELOS_TASK_END--- task-a",
+		"---KELOS_TASK_START--- task-b",
+		`{"type":"init","model":"gemini-task-b"}`,
+		"---KELOS_TASK_END--- task-b",
+	}, "\n")
+
+	response := serveTaskLogs(t, server, "/api/resources/tasks/team-a/task-b/logs?format=formatted", logs)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("Task logs status = %d body = %s", response.Code, response.Body.String())
+	}
+	if got, want := response.Body.String(), "[init] model=gemini-task-b\n"; got != want {
+		t.Errorf("Formatted WorkerPool Task logs = %q, want %q", got, want)
+	}
+}
+
+func TestConsoleWorkerPoolTaskLogsFormattedReportsMissingPool(t *testing.T) {
+	server := testServer(t)
+	createLogTask(t, server, "task-b", kelos.TaskSpec{WorkerPoolRef: &kelos.WorkerPoolReference{Name: "missing"}})
+	logs := "---KELOS_TASK_START--- task-b\ntask-b output\n---KELOS_TASK_END--- task-b\n"
+
+	formatted := serveTaskLogs(t, server, "/api/resources/tasks/team-a/task-b/logs?format=formatted", logs)
+	if formatted.Code != http.StatusNotFound {
+		t.Fatalf("Formatted Task logs status = %d, want %d", formatted.Code, http.StatusNotFound)
+	}
+	if !strings.Contains(formatted.Body.String(), `resolving agent type for Task \"task-b\"`) {
+		t.Errorf("Formatted Task logs error = %s, want it to name the Task", formatted.Body.String())
+	}
+
+	raw := serveTaskLogs(t, server, "/api/resources/tasks/team-a/task-b/logs?format=raw", logs)
+	if raw.Code != http.StatusOK {
+		t.Fatalf("Raw Task logs status = %d body = %s", raw.Code, raw.Body.String())
+	}
+	if got, want := raw.Body.String(), "task-b output\n"; got != want {
+		t.Errorf("Raw Task logs = %q, want %q", got, want)
+	}
+}
+
+func TestConsoleTaskLogsFormattedKeepsOmittedMarker(t *testing.T) {
+	server := testServer(t)
+	createLogTask(t, server, "long-task", kelos.TaskSpec{})
+	var logs strings.Builder
+	for i := 1; i <= taskLogTailLineLimit+1; i++ {
+		fmt.Fprintf(&logs, `{"type":"assistant","message":{"content":[{"type":"text","text":"line %d"}]}}`+"\n", i)
+	}
+
+	response := serveTaskLogs(t, server, "/api/resources/tasks/team-a/long-task/logs?format=formatted", logs.String())
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("Task logs status = %d body = %s", response.Code, response.Body.String())
+	}
+	if got, want := response.Body.String(), taskLogOmittedMessage+"\n--- Turn 1 ---\nline 2\n"; !strings.HasPrefix(got, want) {
+		t.Errorf("Formatted truncated Task logs start = %q, want prefix %q", got[:min(len(got), len(want)+20)], want)
+	}
+}
+
+func TestConsoleTaskLogsRejectUnknownFormat(t *testing.T) {
+	server := testServer(t)
+	createLogTask(t, server, "claude-task", kelos.TaskSpec{})
+
+	response := serveTaskLogs(t, server, "/api/resources/tasks/team-a/claude-task/logs?format=bogus", claudeTaskLogs)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("Task logs status = %d, want %d", response.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(response.Body.String(), `Task \"claude-task\" log format \"bogus\" is not supported`) {
+		t.Errorf("Task logs error = %s, want it to name the Task and format", response.Body.String())
+	}
+}
+
 func TestTaskPodLogOptionsBoundLogRetrieval(t *testing.T) {
 	task := &kelos.Task{}
 	options := taskPodLogOptions(task, taskLogTailLineLimit)

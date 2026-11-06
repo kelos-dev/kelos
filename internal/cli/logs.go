@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
+	"github.com/kelos-dev/kelos/internal/agentlog"
 )
 
 const (
@@ -111,7 +112,8 @@ func newLogsCommand(cfg *ClientConfig) *cobra.Command {
 			if follow {
 				fmt.Fprintf(os.Stderr, "Streaming container (%s) logs...\n", containerName)
 			}
-			agentType := resolveAgentType(ctx, cl, ns, task)
+			// Best effort: a failed WorkerPool lookup uses the Claude Code parser.
+			agentType, _ := agentlog.ResolveType(ctx, cl, ns, task)
 			if task.Spec.WorkerPoolRef != nil {
 				return streamWorkerPoolTaskAgentLogs(ctx, cl, cs, ns, podName, containerName, agentType, task.Name, follow)
 			}
@@ -221,7 +223,7 @@ func streamAgentLogs(ctx context.Context, cl client.Client, cs *kubernetes.Clien
 	}
 	defer stream.Close()
 
-	return parseAgentLogs(agentType, stream)
+	return agentlog.Format(agentType, stream, os.Stdout, os.Stderr)
 }
 
 func streamWorkerPoolTaskAgentLogs(ctx context.Context, cl client.Client, cs *kubernetes.Clientset, namespace, podName, container, agentType, taskName string, follow bool) error {
@@ -239,7 +241,7 @@ func streamWorkerPoolTaskAgentLogs(ctx context.Context, cl client.Client, cs *ku
 	defer stream.Close()
 
 	filtered, wait := filteredTaskLogReader(stream, taskName)
-	parseErr := parseAgentLogs(agentType, filtered)
+	parseErr := agentlog.Format(agentType, filtered, os.Stdout, os.Stderr)
 	filterErr := wait()
 	if errors.Is(parseErr, errTaskLogSegmentNotFound) || errors.Is(filterErr, errTaskLogSegmentNotFound) {
 		return fmt.Errorf("task %q logs not found in worker pod %s", taskName, podName)
@@ -248,19 +250,6 @@ func streamWorkerPoolTaskAgentLogs(ctx context.Context, cl client.Client, cs *ku
 		return parseErr
 	}
 	return filterErr
-}
-
-func parseAgentLogs(agentType string, stream io.Reader) error {
-	switch agentType {
-	case "codex":
-		return ParseAndFormatCodexLogs(stream, os.Stdout, os.Stderr)
-	case "gemini":
-		return ParseAndFormatGeminiLogs(stream, os.Stdout, os.Stderr)
-	case "opencode":
-		return ParseAndFormatOpenCodeLogs(stream, os.Stdout, os.Stderr)
-	default:
-		return ParseAndFormatLogs(stream, os.Stdout, os.Stderr)
-	}
 }
 
 func filteredTaskLogReader(stream io.Reader, taskName string) (io.Reader, func() error) {
@@ -500,22 +489,4 @@ func taskLogStreamRetryMode(ctx context.Context, cl client.Client, namespace, ta
 		return delayedLogStreamRetry, nil
 	}
 	return noLogStreamRetry, nil
-}
-
-// resolveAgentType determines the effective agent type for log parsing,
-// checking spec.worker.type, legacy spec.type, and the referenced WorkerPool.
-func resolveAgentType(ctx context.Context, cl client.Client, namespace string, task *kelos.Task) string {
-	if task.Spec.Worker != nil && task.Spec.Worker.Type != "" {
-		return task.Spec.Worker.Type
-	}
-	if task.Spec.Type != "" {
-		return task.Spec.Type
-	}
-	if task.Spec.WorkerPoolRef != nil {
-		var pool kelos.WorkerPool
-		if err := cl.Get(ctx, client.ObjectKey{Name: task.Spec.WorkerPoolRef.Name, Namespace: namespace}, &pool); err == nil {
-			return pool.Spec.Worker.Type
-		}
-	}
-	return ""
 }

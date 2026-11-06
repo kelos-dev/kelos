@@ -569,15 +569,17 @@ button { color: inherit; }
 .resource-detail-content pre { max-height: min(65vh, 680px); overflow: auto; margin: 18px 0 0; padding: 15px; border: 1px solid var(--code-border); border-radius: 11px; background: var(--code-bg); color: var(--code-ink); font: 11.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace; white-space: pre; }
 .resource-detail-tabs[hidden] { display: none; }
 .resource-detail-panel[hidden] { display: none; }
-.resource-detail-log-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 14px; color: var(--faint); font-size: 10px; }
+.resource-detail-log-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; margin-top: 14px; color: var(--faint); font-size: 10px; }
 .resource-detail-log-toolbar .quiet-button:disabled { cursor: wait; opacity: .55; }
+.resource-detail-log-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.resource-detail-log-actions .mode-switch { margin-top: 0; }
 .resource-detail-logs-panel pre { margin-top: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .dialog-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
 .dialog-header h2 { margin: 0; font-size: 21px; font-weight: 600; line-height: 1.25; letter-spacing: -.02em; }
 .dialog-header p { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
 .mode-switch { width: fit-content; display: flex; margin-top: 20px; padding: 3px; border-radius: 10px; background: var(--panel); }
 .mode-switch button { padding: 6px 13px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 11px; font-weight: 600; cursor: pointer; }
-.mode-switch button[aria-selected="true"] { background: var(--card); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.mode-switch button[aria-selected="true"], .mode-switch button[aria-pressed="true"] { background: var(--card); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
 .mode-switch button:disabled { opacity: .45; cursor: not-allowed; }
 .source-picker { margin-top: 18px; }
 .source-picker > label { display: block; margin-bottom: 7px; font-size: 11px; font-weight: 700; }

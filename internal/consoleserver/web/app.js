@@ -4107,6 +4107,8 @@ spec:
         const details = child ? [providerLabel(session.provider)] : [resourceName, providerLabel(session.provider)];
         if (session.model)
             details.push(session.model);
+        if (session.credentialName)
+            details.push(`Credential: ${session.credentialName}`);
         if (!child)
             details.push(sessionDisplayStatus(session));
         if (session.branch)

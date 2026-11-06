@@ -755,6 +755,9 @@ activity until the runtime first reports its activity state. Replacing a Session
 Pod does not change the order. The web client shows activity,
 `status.model`, `status.branch`, and the pull request with a colored,
 text-labeled state in both the Session sidebar and conversation header.
+The conversation header also shows the name of the Secret referenced by
+`Session.spec.worker.credentials.secretRef`, labeled `Credential: <name>`.
+This label is omitted when the Session has no credential Secret reference.
 
 Idle suspension and deletion use the same idle period, measured from the later
 of Session creation and `status.lastActivityTime`. Before either action, the

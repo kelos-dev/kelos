@@ -16,16 +16,20 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
@@ -2221,5 +2225,88 @@ func TestReadOutputsTimesOutOnHungLogStream(t *testing.T) {
 	}
 	if outputs != nil || results != nil {
 		t.Errorf("readOutputs = (%v, %v), want (nil, nil)", outputs, results)
+	}
+}
+
+// refuseTaskUpdates fails every Update of a Task the way the API server does when
+// the CRD's "self == oldSelf" rule rejects a spec that no longer round-trips
+// through the current types, while patches still go through.
+func refuseTaskUpdates() interceptor.Funcs {
+	return interceptor.Funcs{
+		Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+			if _, ok := obj.(*kelos.Task); ok {
+				return apierrors.NewInvalid(
+					schema.GroupKind{Group: "kelos.dev", Kind: "Task"},
+					obj.GetName(),
+					field.ErrorList{field.Invalid(field.NewPath("spec"), "", "Task spec is immutable after creation")},
+				)
+			}
+			return c.Update(ctx, obj, opts...)
+		},
+	}
+}
+
+func TestReconcile_DeletionRemovesFinalizerWithoutUpdatingSpec(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
+
+	now := metav1.Now()
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "test-task",
+			Namespace:         "default",
+			Finalizers:        []string{taskFinalizer},
+			DeletionTimestamp: &now,
+		},
+		Spec: kelos.TaskSpec{Type: AgentTypeCodex, Prompt: "test"},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(task).
+		WithInterceptorFuncs(refuseTaskUpdates()).
+		Build()
+
+	r := &TaskReconciler{Client: cl, Scheme: scheme}
+
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(task)}); err != nil {
+		t.Fatalf("Reconcile() error: %v", err)
+	}
+
+	var got kelos.Task
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &got); !apierrors.IsNotFound(err) {
+		t.Fatalf("Task still present after deletion (finalizers %v, err %v); want it gone", got.Finalizers, err)
+	}
+}
+
+func TestReconcile_AddsFinalizerWithoutUpdatingSpec(t *testing.T) {
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(kelos.AddToScheme(scheme))
+
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-task", Namespace: "default"},
+		Spec:       kelos.TaskSpec{Type: AgentTypeCodex, Prompt: "test"},
+	}
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(task).
+		WithInterceptorFuncs(refuseTaskUpdates()).
+		Build()
+
+	r := &TaskReconciler{Client: cl, Scheme: scheme}
+
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(task)}); err != nil {
+		t.Fatalf("Reconcile() error: %v", err)
+	}
+
+	var got kelos.Task
+	if err := cl.Get(context.Background(), client.ObjectKeyFromObject(task), &got); err != nil {
+		t.Fatalf("Get() error: %v", err)
+	}
+	if !controllerutil.ContainsFinalizer(&got, taskFinalizer) {
+		t.Fatalf("finalizers = %v, want %q", got.Finalizers, taskFinalizer)
 	}
 }

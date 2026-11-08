@@ -2,7 +2,8 @@
 
 Managed multi-step workflows. The sequential example scaffolds a feature,
 writes tests, and opens a pull request. The matrix example fans out a review
-across components and focus areas, then consolidates the findings.
+across components and focus areas, then consolidates the findings. The
+conditional example lets an agent choose which review stage runs.
 
 ## Use Case
 
@@ -19,6 +20,7 @@ The pipeline status summarizes progress with bounded per-stage counts.
 | `workspace.yaml` | Workspace | Git repository to clone |
 | `pipeline.yaml` | TaskPipeline | Three-stage feature development workflow |
 | `matrix-pipeline.yaml` | TaskPipeline | Matrix fan-out followed by a summary stage |
+| `conditional-pipeline.yaml` | TaskPipeline | Classification stage that selects one of two review stages |
 
 ## Sequential Pipeline
 
@@ -69,6 +71,22 @@ Task for each item, for a total of four Tasks. The
 values and captured `response` results through `.Stages`. Agent responses are
 base64-encoded in Task results, so the summary prompt tells the agent to decode
 them before producing the report.
+
+## Conditional Pipeline
+
+```text
+classify
+    │  replies "docs" or "code"
+    ▼
+review-docs   runs only when classify replied "docs"
+    ▼
+review-code   runs for any other reply
+```
+
+Each review stage has a condition that decodes the `classify` stage's
+`response` result with `b64dec` and compares it against a list of values. The
+stage whose condition is not met is `Skipped`: it creates no Task, and the
+pipeline still succeeds once the selected stage does.
 
 ## Steps
 
@@ -131,6 +149,18 @@ Watch the four review Tasks run in parallel, followed by the summary Task:
 kubectl get tasks -l kelos.dev/taskpipeline=matrix-review -w
 ```
 
+## Run the Conditional Example
+
+After applying the secrets and Workspace from step 3, apply the conditional
+pipeline:
+
+```bash
+kubectl apply -f examples/07-task-pipeline/conditional-pipeline.yaml
+kubectl get taskpipeline triage-change -o jsonpath='{range .status.stageStatuses[*]}{.name}{"\t"}{.phase}{"\n"}{end}'
+```
+
+One review stage reports `Succeeded` and the other `Skipped`.
+
 ## Cleanup
 
 Delete both examples and all owned Tasks. Resources that were not applied are
@@ -146,6 +176,8 @@ kubectl delete --ignore-not-found -f examples/07-task-pipeline/
   already active are allowed to finish before the pipeline becomes `Failed`.
 - `TaskPipeline.spec.stages` is immutable. Delete and recreate the resource to
   run a modified workflow.
+- Conditional stages are covered in the
+  [TaskPipeline reference](../../docs/reference.md#conditional-stages).
 - Matrix item order determines child Task indexes and the order exposed to later
   stages. The full matrix API and template context are covered in the
   [TaskPipeline reference](../../docs/reference.md#taskpipeline).

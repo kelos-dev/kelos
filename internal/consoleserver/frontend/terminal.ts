@@ -6,7 +6,7 @@ const sessionTerminal = (() => {
   const container = document.querySelector<HTMLElement>('#terminal-container')!;
   const status = document.querySelector<HTMLElement>('#terminal-status')!;
   const reconnect = document.querySelector<HTMLButtonElement>('#reconnect-terminal')!;
-  let active: {session: Session; focus: () => void; dispose: () => void} | null = null;
+  let active: {session: Session; loginLocation: () => string; focus: () => void; dispose: () => void} | null = null;
 
   function available(session: Session | null) {
     return Boolean(session && session.phase === 'Ready' && !session.resetting && !session.userSuspended);
@@ -24,7 +24,7 @@ const sessionTerminal = (() => {
       session?.name !== active.session.name || session?.uid !== active.session.uid)) close();
   }
 
-  function show(session: Session | null) {
+  function show(session: Session | null, loginLocation: () => string) {
     sync(session);
     if (!session || !available(session)) return;
     if (active) {
@@ -107,14 +107,14 @@ const sessionTerminal = (() => {
     });
     socket.addEventListener('error', () => {
       if (!disposed) void fetch('/api/config').then(response => {
-        if (response.status === 401) location.replace('/login');
+        if (response.status === 401) location.replace(loginLocation());
       }).catch(() => {});
       if (!disposed && !finished) finish('Could not connect to the session terminal. Reconnect to try again.');
     });
     socket.addEventListener('close', () => {
       if (!disposed && !finished) finish('Disconnected. Reconnect to start a shell.');
     });
-    active = {session, focus, dispose: () => {
+    active = {session, loginLocation, focus, dispose: () => {
       disposed = true;
       observer.disconnect();
       input.dispose();
@@ -128,9 +128,9 @@ const sessionTerminal = (() => {
 
   reconnect.addEventListener('click', () => {
     if (!active || reconnect.disabled) return;
-    const session = active.session;
+    const {session, loginLocation} = active;
     close();
-    show(session);
+    show(session, loginLocation);
   });
   return {available, show, sync, close};
 })();

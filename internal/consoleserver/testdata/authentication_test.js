@@ -12,10 +12,15 @@ function slice(start, end) {
   return source.slice(from, to);
 }
 
+class SearchParamsWithoutSize extends URLSearchParams {
+  get size() { return undefined; }
+}
+
 const redirects = [];
 global.state = {};
-global.window = {location: {search: '', replace: target => redirects.push(target)}};
+global.window = {location: {pathname: '/', search: '', replace: target => redirects.push(target)}};
 vm.runInThisContext(slice('async function api(', 'let toastTimer'), {filename: 'app.js'});
+vm.runInThisContext(slice('async function uploadAttachment(', 'async function submitComposer('), {filename: 'app.js'});
 vm.runInThisContext(slice('async function loadIdentity(', 'async function loadConfig('), {filename: 'app.js'});
 
 (async () => {
@@ -27,10 +32,57 @@ vm.runInThisContext(slice('async function loadIdentity(', 'async function loadCo
   await assert.rejects(api('/api/config'), {message: 'Authentication required', status: 401});
   assert.deepEqual(redirects, ['/login?namespace=team-a&session=worker']);
   window.location.search = '';
+  window.location.pathname = '/namespaces/team-a/resources/tasks/build';
+  redirects.length = 0;
+  await assert.rejects(api('/api/config'), {message: 'Authentication required', status: 401});
+  assert.deepEqual(redirects, ['/login?next=%2Fnamespaces%2Fteam-a%2Fresources%2Ftasks%2Fbuild']);
+  redirects.length = 0;
+  await assert.rejects(apiText('/api/resources/tasks/team-a/build/logs'), {message: 'Authentication required'});
+  assert.deepEqual(redirects, ['/login?next=%2Fnamespaces%2Fteam-a%2Fresources%2Ftasks%2Fbuild']);
+  window.location.pathname = '/namespaces/team-a/sessions/worker';
+  redirects.length = 0;
+  const uploadSession = {namespace: 'team-a', name: 'worker'};
+  const uploadFile = {name: 'notes.txt'};
+  global.FormData = class {
+    fields = [];
+    append(...field) { this.fields.push(field); }
+  };
+  const attachment = {id: 'attachment-id', name: 'notes.txt'};
+  for (const status of [200, 401]) {
+    global.fetch = async (url, options) => {
+      assert.equal(url, '/api/sessions/team-a/worker/attachments');
+      assert.equal(options.method, 'POST');
+      assert.deepEqual(options.body.fields, [['file', uploadFile, 'notes.txt']]);
+      return {status, ok: status === 200, json: async () => attachment};
+    };
+    if (status === 200) {
+      assert.deepEqual(await uploadAttachment(uploadSession, uploadFile), attachment);
+      assert.deepEqual(redirects, []);
+    } else {
+      await assert.rejects(uploadAttachment(uploadSession, uploadFile), {message: 'Authentication required'});
+      assert.deepEqual(redirects, ['/login?next=%2Fnamespaces%2Fteam-a%2Fsessions%2Fworker']);
+    }
+  }
+  window.location.pathname = '/';
   redirects.length = 0;
   global.fetch = async () => ({status: 403, ok: false, json: async () => ({error: 'access denied'})});
   await assert.rejects(api('/api/sessions'), {message: 'access denied', status: 403});
   assert.deepEqual(redirects, []);
+
+  const limitedRedirects = [];
+  const context = {
+    URLSearchParams: SearchParamsWithoutSize,
+    fetch: async () => ({status: 401}),
+    window: {location: {pathname: '/namespaces/team-a/sessions/worker', search: '?uid=instance', replace: value => limitedRedirects.push(value)}},
+  };
+  vm.createContext(context);
+  vm.runInContext(slice('async function api(', 'let toastTimer'), context);
+  await assert.rejects(context.api('/api/config'), {message: 'Authentication required'});
+  assert.deepEqual(limitedRedirects, ['/login?uid=instance&next=%2Fnamespaces%2Fteam-a%2Fsessions%2Fworker']);
+  context.window.location.pathname = '/';
+  context.window.location.search = '?namespace=team-a&session=worker&uid=instance';
+  await assert.rejects(context.api('/api/config'), {message: 'Authentication required'});
+  assert.equal(limitedRedirects[1], '/login?namespace=team-a&session=worker&uid=instance');
 
   const identity = {};
   global.requiredElement = selector => {
@@ -67,27 +119,41 @@ vm.runInThisContext(slice('async function loadIdentity(', 'async function loadCo
   assert.deepEqual(redirects, ['/login']);
 
   const loginSource = fs.readFileSync(path.join(__dirname, '../web/login.js'), 'utf8');
-  for (const search of ['', '?namespace=team-a&session=worker&uid=instance']) {
-    let submit;
-    const loginRedirects = [];
-    const nodes = {
-      '#login-form': {addEventListener(_event, listener) { submit = listener; }},
-      '#token': {value: 'secret-token'},
-      '#login-error': {},
-      '#reveal': {addEventListener() {}},
-      '#login-form button[type="submit"]': {},
-    };
-    vm.runInNewContext(loginSource, {
-      document: {querySelector: selector => nodes[selector]},
-      window: {location: {search, replace: value => loginRedirects.push(value)}},
-      fetch: async (url, options) => {
-        assert.equal(url, '/api/login');
-        assert.equal(options.method, 'POST');
-        assert.deepEqual(JSON.parse(options.body), {token: 'secret-token'});
-        return {ok: true};
-      },
-    });
-    await submit({preventDefault() {}});
-    assert.deepEqual(loginRedirects, [`/${search}`]);
+  for (const SearchParams of [URLSearchParams, SearchParamsWithoutSize]) {
+    for (const [search, destination] of [
+      ['', '/'],
+      ['?namespace=team-a&session=worker&uid=instance', '/?namespace=team-a&session=worker&uid=instance'],
+      ['?next=%2Fnamespaces%2Fteam-a%2Fresources%2Ftasks%2Fbuild', '/namespaces/team-a/resources/tasks/build'],
+      ['?next=%2Fnamespaces%2Fteam-a%2Fresources', '/namespaces/team-a/resources'],
+      ['?next=%2Fnamespaces%2Fteam-a%2Fsessions%2Fworker', '/namespaces/team-a/sessions/worker'],
+      ['?next=%2Fnamespaces%2Fteam-a%2Fsessions%2Fworker&uid=instance', '/namespaces/team-a/sessions/worker?uid=instance'],
+      ['?next=%2Fnamespaces%2Fteam-a%2Fresources%2Fsessions%2Fworker', '/namespaces/team-a/resources/sessions/worker'],
+      ['?next=https%3A%2F%2Fexample.com', '/'],
+      ['?next=%2F%2Fexample.com', '/'],
+      ['?next=%2Fnamespaces%2Fteam-a%2Fresources%2Ftasks%2Fbuild%5Cexample.com', '/'],
+    ]) {
+      let submit;
+      const loginRedirects = [];
+      const nodes = {
+        '#login-form': {addEventListener(_event, listener) { submit = listener; }},
+        '#token': {value: 'secret-token'},
+        '#login-error': {},
+        '#reveal': {addEventListener() {}},
+        '#login-form button[type="submit"]': {},
+      };
+      vm.runInNewContext(loginSource, {
+        URLSearchParams: SearchParams,
+        document: {querySelector: selector => nodes[selector]},
+        window: {location: {search, replace: value => loginRedirects.push(value)}},
+        fetch: async (url, options) => {
+          assert.equal(url, '/api/login');
+          assert.equal(options.method, 'POST');
+          assert.deepEqual(JSON.parse(options.body), {token: 'secret-token'});
+          return {ok: true};
+        },
+      });
+      await submit({preventDefault() {}});
+      assert.deepEqual(loginRedirects, [destination]);
+    }
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -18,6 +18,7 @@ function applicationSlice(start, end) {
 }
 
 vm.runInThisContext(applicationSlice('function errorMessage', 'function requireElements'), {filename: 'app.js'});
+vm.runInThisContext(applicationSlice('function resourceLocation', 'function updateConsoleLocation'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('const allResourceKind', 'async function loadResources'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('async function refreshConsole', 'async function openResourceDetail'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function setResourceDetailView', 'const pendingCompletionReads'), {filename: 'app.js'});
@@ -51,6 +52,7 @@ function testReturningToSessionsRefreshesCurrentRequest() {
     overviewView: {hidden: false},
     sessionsView: {hidden: true},
     resourcesView: {hidden: true},
+    resourceDetailPage: {hidden: true},
     adminView: {hidden: true},
     sessionSidebar: {hidden: true},
     overviewButton: navigationButton(),
@@ -92,6 +94,52 @@ function testResourceInventorySupportsAllTypesAndSearch() {
   assert.deepEqual(filterResourceEntries(allEntries, 'WORKING'), [allEntries[0]]);
   assert.deepEqual(filterResourceEntries(allEntries, 'workspace'), [allEntries[1]]);
   assert.deepEqual(filterResourceEntries(allEntries, 'missing'), []);
+}
+
+function testResourceTableLinks() {
+  const element = tag => ({
+    tag, dataset: {}, children: [], listeners: {},
+    append(...children) { this.children.push(...children); },
+    setAttribute() {},
+    addEventListener(event, listener) { this.listeners[event] = listener; },
+  });
+  global.document = {createElement: element};
+  global.state = {namespace: 'team-a'};
+  const collection = {resource: 'tasks', kind: 'Task', label: 'Tasks'};
+  const item = {namespace: 'team-a', name: 'build'};
+  const table = createResourceTable([{collection, item}]);
+  const link = table.children[1].children[0].children[0].children[0];
+  assert.equal(link.tag, 'a');
+  assert.equal(link.href, '/namespaces/team-a/resources/tasks/build');
+  assert.equal(link.textContent, 'build');
+  let prevented = false;
+  link.listeners.click({button: 0, ctrlKey: true, preventDefault() { prevented = true; }});
+  assert.equal(prevented, false, 'Modified clicks must keep native link behavior');
+  const openDetail = global.openResourceDetail;
+  let opened;
+  global.openResourceDetail = (collection, item) => { opened = {collection, item}; };
+  try {
+    link.listeners.click({button: 0, preventDefault() { prevented = true; }});
+    assert.equal(prevented, true);
+    assert.deepEqual(opened, {collection, item});
+  } finally {
+    global.openResourceDetail = openDetail;
+    delete global.document;
+  }
+}
+
+function testResourceLocations() {
+  assert.deepEqual(resourceLocation('/namespaces/team-a/resources'), {namespace: 'team-a', resource: undefined, name: undefined});
+  assert.deepEqual(resourceLocation('/namespaces/team-a/resources/tasks/build'), {namespace: 'team-a', resource: 'tasks', name: 'build'});
+  assert.deepEqual(resourceLocation('/namespaces/team-a/resources/tasks/build/'), {namespace: 'team-a', resource: 'tasks', name: 'build'});
+  assert.equal(resourceLocation('/namespaces/team-a/resources/tasks'), null);
+  assert.equal(resourceLocation('/namespaces/team-a/resources/tasks/build/extra'), null);
+  assert.deepEqual(resourceLocation('/namespaces/team-a/resources/sessions/worker'), {namespace: 'team-a', resource: 'sessions', name: 'worker'});
+  assert.equal(resourceLocation('/namespaces/team-a/sessions/worker'), null);
+  assert.deepEqual(sessionLocation('/namespaces/team-a/sessions/worker'), {namespace: 'team-a', name: 'worker'});
+  assert.deepEqual(sessionLocation('/namespaces/team-a/sessions/worker/'), {namespace: 'team-a', name: 'worker'});
+  assert.deepEqual(sessionLocation('/namespaces/team-a/sessions'), {namespace: 'team-a', name: undefined});
+  assert.equal(sessionLocation('/namespaces/team-a/resources/sessions/worker'), null);
 }
 
 function testResourceRelationshipHelpersResolveExistingAndMissingResources() {
@@ -182,7 +230,12 @@ async function testResourceDetailsIgnoreStaleResponses() {
     refreshResourceLogs: {disabled: true},
     resourceDetailLogs: {textContent: ''},
     resourceDetailYAML: {textContent: ''},
-    resourceDetailDialog: {showModal() {}},
+    ...Object.fromEntries([
+      'overviewView', 'sessionsView', 'resourcesView', 'adminView', 'sessionSidebar',
+      'overviewButton', 'sessionsButton', 'resourcesButton', 'adminButton',
+    ].map(key => [key, {setAttribute() {}, removeAttribute() {}}])),
+    backToResources: {setAttribute() {}},
+    resourceDetailPage: {hidden: true},
     taskSpawnerRunForm: {hidden: true},
     taskSpawnerRunValues: {value: ''},
     taskSpawnerRunError: {textContent: ''},
@@ -431,6 +484,8 @@ function testResourceDetailTabsSupportKeyboardNavigation() {
 testViewsWithoutNamespace();
 testReturningToSessionsRefreshesCurrentRequest();
 testResourceInventorySupportsAllTypesAndSearch();
+testResourceTableLinks();
+testResourceLocations();
 testResourceRelationshipHelpersResolveExistingAndMissingResources();
 testResourceViewTabsSupportKeyboardNavigation();
 testResourceDetailsIgnoreStaleResponses()

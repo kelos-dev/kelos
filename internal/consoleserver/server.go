@@ -18,6 +18,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -70,6 +71,8 @@ const (
 )
 
 var errTaskLogSegmentUnavailable = errors.New("Task log segment is unavailable in the recent WorkerPool log window")
+
+var consolePagePattern = regexp.MustCompile(`^/namespaces/[a-z0-9.-]+/(sessions(/[a-z0-9.-]+)?|resources(/[a-z]+/[a-z0-9.-]+)?)/?$`)
 
 //go:embed web/*
 var webFiles embed.FS
@@ -2054,6 +2057,13 @@ func consoleLocationQuery(request *http.Request) string {
 			query.Set(key, value)
 		}
 	}
+	next := request.URL.Query().Get("next")
+	if consolePagePattern.MatchString(request.URL.Path) {
+		next = request.URL.Path
+	}
+	if consolePagePattern.MatchString(next) {
+		query.Set("next", next)
+	}
 	if len(query) == 0 {
 		return ""
 	}
@@ -2061,12 +2071,15 @@ func consoleLocationQuery(request *http.Request) string {
 }
 
 func (s *Server) loginPage(writer http.ResponseWriter, request *http.Request) {
-	if s.proxyAuth != nil {
-		http.Redirect(writer, request, "/"+consoleLocationQuery(request), http.StatusFound)
-		return
-	}
-	if s.authenticated(request) {
-		http.Redirect(writer, request, "/"+consoleLocationQuery(request), http.StatusFound)
+	if s.proxyAuth != nil || s.authenticated(request) {
+		query, _ := url.ParseQuery(strings.TrimPrefix(consoleLocationQuery(request), "?"))
+		path := query.Get("next")
+		if path == "" {
+			path = "/"
+		}
+		query.Del("next")
+		target := &url.URL{Path: path, RawQuery: query.Encode()}
+		http.Redirect(writer, request, target.String(), http.StatusFound)
 		return
 	}
 	serveEmbedded(writer, "web/login.html", "text/html; charset=utf-8")

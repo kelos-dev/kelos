@@ -8,6 +8,7 @@ function extract(start, end) {
   assert.ok(from > 0 && to > from);
   vm.runInThisContext(app.slice(from, to));
 }
+extract('function resourceLocation', 'function resourcePagePath');
 extract('function memberName(', 'function adminResourcePath(');
 extract('async function loadNamespaceOptions(', 'function defaultSessionYAML(');
 extract('async function openDialog(', 'elements.newSessionButton.addEventListener(');
@@ -166,6 +167,14 @@ async function testNamespacePicker() {
   assert.equal(await loadConfig(), true);
   assert.equal(state.namespace, 'team-a', 'A link must override the remembered namespace');
   assert.deepEqual(requests, ['/api/namespaces?namespace=team-a']);
+  for (const pathname of ['/namespaces/team-b/sessions/worker', '/namespaces/team-b/resources/tasks/build']) {
+    window.location.pathname = pathname;
+    requests.length = 0;
+    assert.equal(await loadConfig(), true);
+    assert.equal(state.namespace, 'team-b', 'The path namespace must override query and remembered namespaces');
+    assert.deepEqual(requests, ['/api/namespaces?namespace=team-b']);
+  }
+  window.location.pathname = '/';
   window.location.search = '';
   requests.length = 0;
   window.localStorage.setItem('kelos-console-namespace', 'inaccessible');

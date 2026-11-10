@@ -1261,6 +1261,7 @@ function testComposerHighlightEvents() {
     closeSessionActionsMenu() {},
     scheduleCurrentRequestUpdate() {},
     sessionTerminal: {show() {}},
+    consoleLoginLocation() { return '/login'; },
   });
   vm.runInContext(applicationSlice('function syncComposerHighlight', 'function renderComposerCommand'), context);
   vm.runInContext(applicationSlice('function setActiveView', 'function handleViewTabKeydown'), context);

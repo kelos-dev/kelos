@@ -270,7 +270,7 @@ button { color: inherit; }
 .resource-table td { padding: 11px 13px; border-bottom: 1px solid var(--line-soft); vertical-align: middle; }
 .resource-table tr:last-child td { border-bottom: 0; }
 .resource-table tbody tr:hover { background: var(--accent-soft); }
-.resource-name-button { max-width: 100%; overflow: hidden; padding: 0; border: 0; background: transparent; color: var(--ink); font: 600 11.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.resource-name-button { display: block; max-width: 100%; overflow: hidden; padding: 0; border: 0; background: transparent; color: var(--ink); font: 600 11.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; text-align: left; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .resource-name-button:hover { color: var(--accent-2); text-decoration: underline; }
 .resource-name-button:focus-visible { border-radius: 3px; outline: 2px solid var(--accent-2); outline-offset: 2px; }
 .resource-row-kind, .resource-row-age, .resource-row-message { overflow: hidden; color: var(--muted); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
@@ -562,11 +562,12 @@ button { color: inherit; }
 .prompt-history-item p, #prompts-status { color: var(--muted); font-size: 12px; }
 .session-dialog > form { padding: 23px; }
 .display-name-dialog { width: min(94vw, 420px); }
-.resource-detail-dialog { width: min(94vw, 820px); }
-.resource-detail-content { padding: 23px; }
+.resource-detail-heading { min-width: 0; overflow-wrap: anywhere; }
+.resource-back-link { color: var(--muted); font-size: 11px; text-decoration: none; }
+.resource-back-link:hover { color: var(--accent-2); text-decoration: underline; }
 .taskspawner-lifecycle-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; }
 .taskspawner-lifecycle-help { margin: 8px 0 0; color: var(--faint); font-size: 11px; }
-.resource-detail-content pre { max-height: min(65vh, 680px); overflow: auto; margin: 18px 0 0; padding: 15px; border: 1px solid var(--code-border); border-radius: 11px; background: var(--code-bg); color: var(--code-ink); font: 11.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace; white-space: pre; }
+.resource-detail-content pre { overflow: auto; margin: 18px 0 0; padding: 15px; border: 1px solid var(--code-border); border-radius: 11px; background: var(--code-bg); color: var(--code-ink); font: 11.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace; white-space: pre; }
 .resource-detail-tabs[hidden] { display: none; }
 .resource-detail-panel[hidden] { display: none; }
 .resource-detail-log-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 14px; color: var(--faint); font-size: 10px; }
@@ -730,7 +731,7 @@ button { color: inherit; }
   .tool-card, .input-card, .diff-card, .error-card, .recovery-card, .goal-card { margin-left: 0; }
   .turn-divider { margin-left: 0; }
   .session-dialog { width: calc(100vw - 16px - env(safe-area-inset-left) - env(safe-area-inset-right)); max-width: none; max-height: calc(100dvh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); border-radius: 16px; }
-  .session-dialog > form, .resource-detail-content { padding: 18px 16px calc(16px + env(safe-area-inset-bottom)); }
+  .session-dialog > form { padding: 18px 16px calc(16px + env(safe-area-inset-bottom)); }
   .form-grid { grid-template-columns: 1fr; }
   .form-wide { grid-column: auto; }
   .nested-grid { grid-template-columns: 1fr; }

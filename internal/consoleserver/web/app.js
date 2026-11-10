@@ -92,7 +92,8 @@
         resourceListSummary: document.querySelector('#resource-list-summary'),
         resourceSearch: document.querySelector('#resource-search'),
         resourceList: document.querySelector('#resource-list'),
-        resourceDetailDialog: document.querySelector('#resource-detail-dialog'),
+        resourceDetailPage: document.querySelector('#resource-detail-page'),
+        backToResources: document.querySelector('#back-to-resources'),
         resourceDetailTitle: document.querySelector('#resource-detail-title'),
         resourceDetailSubtitle: document.querySelector('#resource-detail-subtitle'),
         resourceDetailTabs: document.querySelector('#resource-detail-tabs'),
@@ -299,6 +300,7 @@
         resourceRelationships: [],
         resourceListGeneration: 0,
         resourceDetailGeneration: 0,
+        resourceDetail: null,
         resourceDetailLogGeneration: 0,
         resourceDetailTask: null,
         resourceDetailSpawner: null,
@@ -329,7 +331,7 @@
             headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
         });
         if (response.status === 401) {
-            window.location.replace(`/login${window.location.search}`);
+            window.location.replace(consoleLoginLocation());
             throw Object.assign(new Error('Authentication required'), { status: response.status });
         }
         if (!response.ok) {
@@ -343,7 +345,7 @@
     async function apiText(path) {
         const response = await fetch(path);
         if (response.status === 401) {
-            window.location.replace(`/login${window.location.search}`);
+            window.location.replace(consoleLoginLocation());
             throw new Error('Authentication required');
         }
         const body = await response.text();
@@ -358,6 +360,13 @@
             throw new Error(message);
         }
         return body;
+    }
+    function consoleLoginLocation() {
+        const query = new URLSearchParams(window.location.search);
+        if (window.location.pathname.startsWith('/namespaces/'))
+            query.set('next', window.location.pathname);
+        const search = query.toString();
+        return `/login${search ? `?${search}` : ''}`;
     }
     let toastTimer;
     function showToast(message) {
@@ -710,21 +719,39 @@
     }
     let consoleLocationReady = false;
     let consoleNavigationID = 0;
+    function resourceLocation(pathname) {
+        const match = /^\/namespaces\/([a-z0-9.-]+)\/resources(?:\/([a-z]+)\/([a-z0-9.-]+))?\/?$/.exec(pathname);
+        return match ? { namespace: match[1], resource: match[2], name: match[3] } : null;
+    }
+    function sessionLocation(pathname) {
+        const match = /^\/namespaces\/([a-z0-9.-]+)\/sessions(?:\/([a-z0-9.-]+))?\/?$/.exec(pathname);
+        return match ? { namespace: match[1], name: match[2] } : null;
+    }
+    function resourcePagePath(resource, item) {
+        return `/namespaces/${encodeURIComponent(item.namespace)}/resources/${encodeURIComponent(resource)}/${encodeURIComponent(item.name)}`;
+    }
+    function sessionPagePath(session) {
+        return `/namespaces/${encodeURIComponent(session.namespace)}/sessions/${encodeURIComponent(session.name)}`;
+    }
     function updateConsoleLocation(replace = false) {
         if (!consoleLocationReady)
             return;
         if (!replace)
             consoleNavigationID += 1;
         const url = new URL(window.location.href);
+        url.pathname = state.consoleView === 'resource' && state.resourceDetail
+            ? resourcePagePath(state.resourceDetail.collection.resource, state.resourceDetail.item)
+            : state.consoleView === 'sessions' && state.selected ? sessionPagePath(state.selected)
+                : ['resources', 'sessions'].includes(state.consoleView) && state.namespace ? `/namespaces/${encodeURIComponent(state.namespace)}/${state.consoleView}` : '/';
         if (state.namespace)
             url.searchParams.set('namespace', state.namespace);
         else
             url.searchParams.delete('namespace');
-        if (state.consoleView === 'sessions' && state.selected)
-            url.searchParams.set('session', state.selected.name);
-        else
-            url.searchParams.delete('session');
+        if (url.pathname !== '/')
+            url.searchParams.delete('namespace');
+        url.searchParams.delete('session');
         url.searchParams.delete('uid');
+        url.searchParams.delete('next');
         if (url.href === window.location.href)
             return;
         if (replace)
@@ -735,14 +762,18 @@
     async function applyConsoleLocation() {
         const navigationID = ++consoleNavigationID;
         const url = new URL(window.location.href);
-        const namespace = url.searchParams.get('namespace');
-        const name = url.searchParams.get('session');
+        const resource = resourceLocation(url.pathname);
+        const sessionRoute = sessionLocation(url.pathname);
+        const namespace = sessionRoute?.namespace || resource?.namespace || url.searchParams.get('namespace');
+        const name = sessionRoute ? sessionRoute.name : resource ? null : url.searchParams.get('session');
         const uid = url.searchParams.get('uid');
         try {
             await consoleReady;
             if (navigationID !== consoleNavigationID)
                 return;
             consoleLocationReady = true;
+            if (url.pathname !== '/' && !resource && !sessionRoute)
+                throw new Error('Unknown Console page');
             if (name && !namespace)
                 throw new Error('A Session link requires a namespace');
             if (namespace && namespace !== state.namespace) {
@@ -755,7 +786,20 @@
                 if (navigationID !== consoleNavigationID)
                     return;
             }
-            if (name) {
+            if (resource) {
+                selectSession(null, false, { updateLocation: false });
+                if (resource.name) {
+                    const collection = resourceCollections().find(item => item.resource === resource.resource)
+                        || { resource: resource.resource, kind: resource.resource, label: resource.resource };
+                    await openResourceDetail(collection, { namespace: resource.namespace, name: resource.name }, { updateLocation: false });
+                    if (navigationID !== consoleNavigationID)
+                        return;
+                }
+                else {
+                    setConsoleView('resources', { updateLocation: false });
+                }
+            }
+            else if (name) {
                 let sessions;
                 do {
                     sessions = await loadSessions({ throwOnError: true, updateLocation: false });
@@ -770,7 +814,7 @@
             }
             else {
                 selectSession(null, false, { updateLocation: false });
-                setConsoleView('overview', { updateLocation: false });
+                setConsoleView(sessionRoute ? 'sessions' : 'overview', { updateLocation: false });
             }
             updateConsoleLocation(true);
         }
@@ -778,15 +822,16 @@
             if (navigationID !== consoleNavigationID)
                 return;
             selectSession(null, false, { updateLocation: false });
-            setConsoleView(name ? 'sessions' : 'overview', { updateLocation: false });
+            setConsoleView(resource ? 'resources' : name || sessionRoute ? 'sessions' : 'overview', { updateLocation: false });
             showToast(errorMessage(error));
         }
     }
     async function openNotificationSession(target) {
         await consoleReady;
         const url = new URL(window.location.href);
-        url.searchParams.set('namespace', target.namespace);
-        url.searchParams.set('session', target.name);
+        url.pathname = sessionPagePath(target);
+        url.searchParams.delete('namespace');
+        url.searchParams.delete('session');
         if (target.uid)
             url.searchParams.set('uid', target.uid);
         else
@@ -811,10 +856,18 @@
         return state.resourceGroups.flatMap(group => group.resources.map(resource => ({ ...resource, group: group.name })));
     }
     function setConsoleView(view, { updateLocation = true } = {}) {
-        state.consoleView = ['overview', 'sessions', 'resources', 'admin'].includes(view) ? view : 'overview';
+        state.consoleView = ['overview', 'sessions', 'resources', 'resource', 'admin'].includes(view) ? view : 'overview';
+        if (state.consoleView !== 'resource' && state.resourceDetail) {
+            state.resourceDetail = null;
+            state.resourceDetailGeneration++;
+            state.resourceDetailLogGeneration++;
+            state.resourceDetailTask = null;
+            state.resourceDetailSpawner = null;
+        }
         elements.overviewView.hidden = state.consoleView !== 'overview';
         elements.sessionsView.hidden = state.consoleView !== 'sessions';
         elements.resourcesView.hidden = state.consoleView !== 'resources';
+        elements.resourceDetailPage.hidden = state.consoleView !== 'resource';
         elements.adminView.hidden = state.consoleView !== 'admin';
         elements.sessionSidebar.hidden = state.consoleView !== 'sessions';
         for (const [button, name] of [
@@ -823,7 +876,7 @@
             [elements.resourcesButton, 'resources'],
             [elements.adminButton, 'admin'],
         ]) {
-            if (name === state.consoleView)
+            if (name === state.consoleView || (name === 'resources' && state.consoleView === 'resource'))
                 button.setAttribute('aria-current', 'page');
             else
                 button.removeAttribute('aria-current');
@@ -873,12 +926,17 @@
                 row.title = item.message;
             const nameCell = document.createElement('td');
             nameCell.dataset.label = 'Name';
-            const button = document.createElement('button');
+            const button = document.createElement('a');
             button.className = 'resource-name-button';
-            button.type = 'button';
+            button.href = resourcePagePath(collection.resource, item);
             button.textContent = item.name;
             button.setAttribute('aria-label', `Inspect ${collection.kind} ${item.namespace}/${item.name}`);
-            button.addEventListener('click', () => openResourceDetail(collection, item));
+            button.addEventListener('click', event => {
+                if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+                    return;
+                event.preventDefault();
+                void openResourceDetail(collection, item);
+            });
             nameCell.append(button);
             if (item.message) {
                 const message = document.createElement('div');
@@ -1742,7 +1800,10 @@ ${specs[collection.resource]}`;
             }
         }
     }
-    async function openResourceDetail(collection, item) {
+    async function openResourceDetail(collection, item, { updateLocation = true } = {}) {
+        state.resourceDetail = { collection, item };
+        elements.backToResources.setAttribute('href', `/namespaces/${encodeURIComponent(item.namespace)}/resources`);
+        setConsoleView('resource', { updateLocation });
         const generation = ++state.resourceDetailGeneration;
         const showTaskLogs = collection.resource === 'tasks';
         elements.resourceDetailTitle.textContent = `${collection.kind} ${item.name}`;
@@ -1767,12 +1828,12 @@ ${specs[collection.resource]}`;
         }
         elements.resourceDetailYAML.textContent = 'Loading manifest…';
         setResourceDetailView(showTaskLogs ? 'logs' : 'manifest');
-        elements.resourceDetailDialog.showModal();
         const manifestRequest = (async () => {
             try {
                 const detail = await api(`/api/resources/${encodeURIComponent(collection.resource)}/${encodeURIComponent(item.namespace)}/${encodeURIComponent(item.name)}`);
                 if (generation !== state.resourceDetailGeneration)
                     return;
+                elements.resourceDetailTitle.textContent = `${detail.kind || collection.kind} ${item.name}`;
                 elements.resourceDetailYAML.textContent = detail.yaml;
                 elements.taskSpawnerRunButton.disabled = !state.resourceDetailSpawner;
                 if (state.resourceDetailSpawner)
@@ -3456,7 +3517,7 @@ ${specs[collection.resource]}`;
         state.defaultNamespace = config.defaultNamespace;
         let discoverNamespaces = false;
         try {
-            const preferred = new URLSearchParams(window.location.search).get('namespace') || window.localStorage.getItem('kelos-console-namespace') || state.defaultNamespace;
+            const preferred = sessionLocation(window.location.pathname)?.namespace || resourceLocation(window.location.pathname)?.namespace || new URLSearchParams(window.location.search).get('namespace') || window.localStorage.getItem('kelos-console-namespace') || state.defaultNamespace;
             let namespace = await loadNamespaceOptions(preferred, { onlyPreferred: true });
             discoverNamespaces = Boolean(namespace);
             if (namespace === '')
@@ -3612,6 +3673,8 @@ spec:
             throw new Error('Choose an accessible namespace.');
         const hadLoadedSource = Boolean(state.loadedSource);
         state.namespace = namespace;
+        if (state.consoleView === 'resource')
+            setConsoleView('resources', { updateLocation: false });
         state.namespaceGeneration += 1;
         state.adminGeneration += 1;
         state.memberGeneration += 1;
@@ -6494,7 +6557,7 @@ spec:
             hideCurrentRequest();
         updateJumpToLatest();
         if (terminalActive)
-            sessionTerminal.show(state.selected);
+            sessionTerminal.show(state.selected, consoleLoginLocation);
         scheduleCompletionRead();
     }
     function handleViewTabKeydown(event) {
@@ -6740,7 +6803,7 @@ spec:
             body,
         });
         if (response.status === 401) {
-            window.location.replace(`/login${window.location.search}`);
+            window.location.replace(consoleLoginLocation());
             throw new Error('Authentication required');
         }
         if (!response.ok) {
@@ -7341,13 +7404,11 @@ spec:
     elements.resourceRelationshipFocus.addEventListener('change', renderResourceDiagram);
     elements.resourceKind.addEventListener('change', renderResources);
     elements.resourceSearch.addEventListener('input', renderResources);
-    document.querySelectorAll('.close-resource-detail').forEach(button => {
-        button.addEventListener('click', () => elements.resourceDetailDialog.close());
-    });
-    elements.resourceDetailDialog.addEventListener('close', () => {
-        state.resourceDetailGeneration++;
-        state.resourceDetailLogGeneration++;
-        state.resourceDetailSpawner = null;
+    elements.backToResources.addEventListener('click', event => {
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+            return;
+        event.preventDefault();
+        setConsoleView('resources');
     });
     elements.taskSpawnerRunForm.addEventListener('submit', runTaskSpawner);
     elements.taskSpawnerLifecycleButton.addEventListener('click', toggleTaskSpawnerSuspension);

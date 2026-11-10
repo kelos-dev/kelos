@@ -91,111 +91,142 @@
         <button class="icon-button mobile-only open-sidebar-button" type="button" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false">☰</button>
         <div>
           <h1>Resources</h1>
-          <p>Inspect Kelos manifests in <span class="console-namespace">default</span></p>
+          <p>Explore Kelos resources in <span class="console-namespace">default</span></p>
         </div>
       </header>
-      <section class="console-page-body">
-        <div class="mode-switch resource-view-tabs" role="tablist" aria-label="Resource view">
-          <button id="resource-diagram-tab" type="button" role="tab" aria-selected="true" aria-controls="resource-diagram-panel">Relationships</button>
-          <button id="resource-inventory-tab" type="button" role="tab" aria-selected="false" aria-controls="resource-inventory-panel" tabindex="-1">Inventory</button>
-        </div>
-        <section class="resource-diagram-panel" id="resource-diagram-panel" role="tabpanel" aria-labelledby="resource-diagram-tab">
-          <div class="resource-diagram-heading">
-            <div>
-              <h2>Resource relationships</h2>
-              <p>Follow the resources connected to one object.</p>
+      <div class="resource-workbench">
+        <section class="console-page-body">
+          <div class="mode-switch resource-view-tabs" role="tablist" aria-label="Resource view">
+            <button id="resource-inventory-tab" type="button" role="tab" aria-selected="true" aria-controls="resource-inventory-panel">Inventory</button>
+            <button id="resource-diagram-tab" type="button" role="tab" aria-selected="false" aria-controls="resource-diagram-panel" tabindex="-1">Relationships</button>
+          </div>
+          <section class="resource-diagram-panel" id="resource-diagram-panel" role="tabpanel" aria-labelledby="resource-diagram-tab" hidden>
+            <div class="resource-diagram-heading">
+              <div>
+                <h2>Resource relationships</h2>
+                <p>Follow the resources connected to one object.</p>
+              </div>
+              <label class="resource-relationship-focus" for="resource-relationship-focus">
+                <span>Focus resource</span>
+                <select id="resource-relationship-focus"></select>
+              </label>
             </div>
-            <label class="resource-relationship-focus" for="resource-relationship-focus">
-              <span>Focus resource</span>
-              <select id="resource-relationship-focus"></select>
+            <div class="resource-diagram" id="resource-diagram" aria-live="polite"></div>
+            <div class="resource-relationship-legend">
+              <span><i></i> Explicit reference</span>
+              <span><i data-inferred="true"></i> Selector or label match</span>
+            </div>
+          </section>
+          <section id="resource-inventory-panel" role="tabpanel" aria-labelledby="resource-inventory-tab">
+            <label class="resource-mobile-kind" for="resource-kind">
+              <span>Resource type</span>
+              <select id="resource-kind"></select>
             </label>
-          </div>
-          <div class="resource-diagram" id="resource-diagram" aria-live="polite"></div>
-          <div class="resource-relationship-legend">
-            <span><i></i> Explicit reference</span>
-            <span><i data-inferred="true"></i> Selector or label match</span>
-          </div>
-        </section>
-        <section id="resource-inventory-panel" role="tabpanel" aria-labelledby="resource-inventory-tab" hidden>
-          <label class="resource-mobile-kind" for="resource-kind">
-            <span>Resource type</span>
-            <select id="resource-kind"></select>
-          </label>
-          <div class="resource-browser">
-            <aside class="resource-type-panel" aria-label="Resource types">
-              <div class="resource-type-panel-heading">
-                <span>Resource types</span>
-                <span id="resource-total-count">0</span>
-              </div>
-              <nav class="resource-type-list" id="resource-type-list"></nav>
-            </aside>
-            <section class="resource-inventory" aria-labelledby="resource-list-title">
-              <div class="resource-inventory-heading">
-                <div>
-                  <div class="resource-inventory-title-row">
-                    <h2 id="resource-list-title">All resources</h2>
-                    <span id="resource-list-count">0</span>
-                  </div>
-                  <p id="resource-list-summary">Every Kelos object in this namespace.</p>
+            <div class="resource-browser">
+              <aside class="resource-type-panel" aria-label="Resource types">
+                <div class="resource-type-panel-heading">
+                  <span>Resource types</span>
+                  <span id="resource-total-count">0</span>
                 </div>
-                <label class="resource-search" for="resource-search">
-                  <span>Search resources</span>
-                  <input id="resource-search" type="search" placeholder="Name, kind, or status" autocomplete="off">
-                </label>
+                <nav class="resource-type-list" id="resource-type-list"></nav>
+              </aside>
+              <section class="resource-inventory" aria-labelledby="resource-list-title">
+                <div class="resource-inventory-heading">
+                  <div>
+                    <div class="resource-inventory-title-row">
+                      <h2 id="resource-list-title">All resources</h2>
+                      <span id="resource-list-count">0</span>
+                    </div>
+                    <p id="resource-list-summary">Every Kelos object in this namespace.</p>
+                  </div>
+                </div>
+                <div class="resource-toolbar">
+                  <label class="resource-search" for="resource-search">
+                    <span>Search resources</span>
+                    <input id="resource-search" type="search" placeholder="Name, kind, or status" autocomplete="off">
+                  </label>
+                  <label class="resource-filter" for="resource-status">
+                    <span>Status</span>
+                    <select id="resource-status"><option value="">All statuses</option></select>
+                  </label>
+                  <label class="resource-filter" for="resource-sort">
+                    <span>Sort by</span>
+                    <select id="resource-sort">
+                      <option value="created-desc">Newest first</option>
+                      <option value="created-asc">Oldest first</option>
+                      <option value="name-asc">Name A–Z</option>
+                      <option value="name-desc">Name Z–A</option>
+                      <option value="status-asc">Status A–Z</option>
+                      <option value="status-desc">Status Z–A</option>
+                    </select>
+                  </label>
+                  <button class="secondary-button" id="refresh-resources" type="button">Refresh</button>
+                </div>
+                <div class="resource-table-wrap" id="resource-list" aria-live="polite"></div>
+              </section>
+            </div>
+          </section>
+        </section>
+        <aside class="resource-inspector" id="resource-detail-panel" aria-labelledby="resource-detail-title" hidden>
+          <div class="resource-detail-content">
+            <div class="dialog-header">
+              <div>
+                <h2 id="resource-detail-title" tabindex="-1">Resource details</h2>
+                <p id="resource-detail-subtitle"></p>
               </div>
-              <div class="resource-table-wrap" id="resource-list" aria-live="polite"></div>
+              <button class="icon-button close-resource-detail" type="button" aria-label="Close">×</button>
+            </div>
+            <div class="mode-switch resource-detail-tabs" id="resource-detail-tabs" role="tablist" aria-label="Resource details">
+              <button id="resource-detail-summary-tab" type="button" role="tab" aria-selected="true" aria-controls="resource-detail-summary-panel">Summary</button>
+              <button id="resource-detail-relationships-tab" type="button" role="tab" aria-selected="false" aria-controls="resource-detail-relationships-panel" tabindex="-1">Relationships</button>
+              <button id="resource-detail-logs-tab" type="button" role="tab" aria-selected="false" aria-controls="resource-detail-logs-panel" tabindex="-1" hidden>Logs</button>
+              <button id="resource-detail-manifest-tab" type="button" role="tab" aria-selected="false" aria-controls="resource-detail-manifest-panel" tabindex="-1">YAML</button>
+            </div>
+            <section class="resource-detail-panel" id="resource-detail-summary-panel" role="tabpanel" aria-labelledby="resource-detail-summary-tab">
+              <dl class="resource-detail-summary" id="resource-detail-summary"></dl>
+              <p class="resource-detail-message" id="resource-detail-message" hidden></p>
+              <div id="taskspawner-lifecycle" hidden>
+                <div class="taskspawner-lifecycle-toolbar">
+                  <span id="taskspawner-lifecycle-status" role="status"></span>
+                  <button class="secondary-button" id="taskspawner-lifecycle-button" type="button">Suspend</button>
+                </div>
+                <p class="taskspawner-lifecycle-help">Suspension stops automatic task creation. Existing Tasks keep running.</p>
+                <div class="dialog-error" id="taskspawner-lifecycle-error" role="alert"></div>
+              </div>
+              <form id="taskspawner-run-form" hidden>
+                <div class="form-grid">
+                  <label class="form-wide">
+                    <span>Template values <em>Optional</em></span>
+                    <textarea id="taskspawner-run-values" rows="4" spellcheck="false" placeholder="Title: Manual run&#10;Body: Describe the task" aria-describedby="taskspawner-run-help"></textarea>
+                    <small id="taskspawner-run-help">Enter a YAML or JSON object for templates that need event values. Creates one standalone Task, bypassing the schedule, source filters, suspension, and spawner task limits.</small>
+                  </label>
+                </div>
+                <div class="dialog-error" id="taskspawner-run-error" role="alert"></div>
+                <div class="dialog-actions">
+                  <button class="primary-button" id="taskspawner-run-button" type="submit">Run task</button>
+                </div>
+              </form>
             </section>
+            <section class="resource-detail-panel" id="resource-detail-relationships-panel" role="tabpanel" aria-labelledby="resource-detail-relationships-tab" hidden>
+              <div id="resource-detail-relationships"></div>
+              <button class="secondary-button" id="resource-detail-show-diagram" type="button">View on relationship diagram</button>
+            </section>
+            <section class="resource-detail-panel resource-detail-logs-panel" id="resource-detail-logs-panel" role="tabpanel" aria-labelledby="resource-detail-logs-tab" hidden>
+              <div class="resource-detail-log-toolbar">
+                <span>Showing up to the latest 2,000 lines (2 MiB maximum).</span>
+                <button class="quiet-button" id="refresh-resource-logs" type="button">Refresh</button>
+              </div>
+              <pre id="resource-detail-logs"></pre>
+            </section>
+            <section class="resource-detail-panel" id="resource-detail-manifest-panel" role="tabpanel" aria-labelledby="resource-detail-manifest-tab" hidden>
+              <pre id="resource-detail-yaml"></pre>
+            </section>
+            <div class="dialog-actions">
+              <a class="secondary-button resource-back-link" id="back-to-resources" href="/">← Resources</a>
+            </div>
           </div>
-        </section>
-      </section>
-    </main>
-
-    <main class="console-page" id="resource-detail-page" aria-labelledby="resource-detail-title" hidden>
-      <header class="console-page-header">
-        <button class="icon-button mobile-only open-sidebar-button" type="button" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false">☰</button>
-        <div class="resource-detail-heading">
-          <a class="resource-back-link" id="back-to-resources" href="/">← Resources</a>
-          <h1 id="resource-detail-title">Resource</h1>
-          <p id="resource-detail-subtitle"></p>
-        </div>
-      </header>
-      <section class="console-page-body resource-detail-content">
-        <div id="taskspawner-lifecycle" hidden>
-          <div class="taskspawner-lifecycle-toolbar">
-            <span id="taskspawner-lifecycle-status" role="status"></span>
-            <button class="secondary-button" id="taskspawner-lifecycle-button" type="button">Suspend</button>
-          </div>
-          <p class="taskspawner-lifecycle-help">Suspension stops automatic task creation. Existing Tasks keep running.</p>
-          <div class="dialog-error" id="taskspawner-lifecycle-error" role="alert"></div>
-        </div>
-        <form id="taskspawner-run-form" hidden>
-          <div class="form-grid">
-            <label class="form-wide">
-              <span>Template values <em>Optional</em></span>
-              <textarea id="taskspawner-run-values" rows="4" spellcheck="false" placeholder="Title: Manual run&#10;Body: Describe the task" aria-describedby="taskspawner-run-help"></textarea>
-              <small id="taskspawner-run-help">Enter a YAML or JSON object for templates that need event values. Creates one standalone Task, bypassing the schedule, source filters, suspension, and spawner task limits.</small>
-            </label>
-          </div>
-          <div class="dialog-error" id="taskspawner-run-error" role="alert"></div>
-          <div class="dialog-actions">
-            <button class="primary-button" id="taskspawner-run-button" type="submit">Run task</button>
-          </div>
-        </form>
-        <div class="mode-switch resource-detail-tabs" id="resource-detail-tabs" role="tablist" aria-label="Task details" hidden>
-          <button id="resource-detail-logs-tab" type="button" role="tab" aria-selected="true" aria-controls="resource-detail-logs-panel">Logs</button>
-          <button id="resource-detail-manifest-tab" type="button" role="tab" aria-selected="false" aria-controls="resource-detail-manifest-panel" tabindex="-1">Manifest</button>
-        </div>
-        <section class="resource-detail-panel resource-detail-logs-panel" id="resource-detail-logs-panel" role="tabpanel" aria-labelledby="resource-detail-logs-tab" hidden>
-          <div class="resource-detail-log-toolbar">
-            <span>Showing up to the latest 2,000 lines (2 MiB maximum).</span>
-            <button class="quiet-button" id="refresh-resource-logs" type="button">Refresh</button>
-          </div>
-          <pre id="resource-detail-logs"></pre>
-        </section>
-        <section class="resource-detail-panel" id="resource-detail-manifest-panel" role="tabpanel" aria-labelledby="resource-detail-manifest-tab">
-          <pre id="resource-detail-yaml"></pre>
-        </section>
-      </section>
+        </aside>
+      </div>
     </main>
 
     <main class="console-page" id="admin-view" hidden>

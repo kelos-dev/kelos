@@ -13,7 +13,7 @@ function slice(start, end) {
 
 function element() {
   return {
-    append() {}, replaceChildren() {}, setAttribute() {}, removeAttribute() {}, close() {},
+    append() {}, replaceChildren() {}, setAttribute() {}, removeAttribute() {}, close() {}, focus() {},
     classList: {remove() {}},
   };
 }
@@ -39,7 +39,8 @@ function harness(url = 'https://console.example/', sessions = []) {
     },
     state: {namespace: 'team-a', namespaces: ['team-a', 'team-b'], namespaceGeneration: 0, sessionListGeneration: 0, consoleView: 'overview', selected: null, sessions, resourceGroups: [], resourceDetailGeneration: 0, resourceDetailLogGeneration: 0},
     elements: Object.fromEntries([
-      'overviewView', 'sessionsView', 'resourcesView', 'resourceDetailPage', 'adminView', 'sessionSidebar',
+      'overviewView', 'sessionsView', 'resourcesView', 'resourceDetailPanel', 'adminView', 'sessionSidebar',
+      'resourceDetailSummaryTab', 'resourceDetailRelationshipsTab', 'resourceDetailSummaryPanel', 'resourceDetailRelationshipsPanel',
       'backToResources', 'resourceDetailTitle', 'resourceDetailSubtitle', 'resourceDetailTabs',
       'resourceDetailLogsTab', 'resourceDetailManifestTab', 'resourceDetailLogsPanel', 'resourceDetailManifestPanel',
       'refreshResourceLogs', 'resourceDetailLogs', 'resourceDetailYAML', 'taskSpawnerLifecycle',
@@ -68,12 +69,13 @@ function harness(url = 'https://console.example/', sessions = []) {
     'renderHeader', 'resetCurrentSessionView', 'activateSessionView', 'scheduleBottomAnchor',
     'resizeComposer', 'updateCurrentRequest', 'updateJumpToLatest', 'setSidebarOpen',
     'scheduleCompletionRead', 'syncCompletionReads', 'pruneBrowserNotifications',
-    'notifySessions', 'renderSectionOptions', 'discardSessionView',
+    'notifySessions', 'renderSectionOptions', 'discardSessionView', 'renderResources',
   ]) c[name] = () => {};
   vm.createContext(c);
   vm.runInContext(slice('let consoleLocationReady', 'const allResourceKind'), c);
   vm.runInContext(slice('function setConsoleView', 'function resourceAge'), c);
-  vm.runInContext(slice('function setResourceDetailView', 'const pendingCompletionReads'), c);
+  vm.runInContext(slice('function resourceDetailTabs', 'const pendingCompletionReads'), c);
+  c.renderResourceDetailSummary = () => {};
   vm.runInContext(slice('function selectSession', 'async function resumeIdleSession'), c);
   return {
     c, toasts, entries, requests,
@@ -250,8 +252,8 @@ async function testResourcePagesAndHistory() {
   await h.c.applyConsoleLocation();
   assert.equal(h.c.state.namespace, 'team-b');
   assert.equal(h.c.state.consoleView, 'resource');
-  assert.equal(h.c.elements.resourceDetailPage.hidden, false);
-  assert.equal(h.c.elements.resourcesView.hidden, true);
+  assert.equal(h.c.elements.resourceDetailPanel.hidden, false);
+  assert.equal(h.c.elements.resourcesView.hidden, false);
   assert.equal(h.c.elements.resourceDetailTitle.textContent, 'Task build');
   assert.equal(h.c.elements.resourceDetailYAML.textContent, 'kind: Task');
   assert.equal(h.c.elements.resourceDetailLogs.textContent, 'task logs');
@@ -268,11 +270,11 @@ async function testResourcePagesAndHistory() {
   assert.equal(h.c.elements.resourceDetailTitle.textContent, 'Task build');
   await h.move(1);
   assert.equal(h.c.elements.resourceDetailTitle.textContent, 'Task test');
-  h.c.setConsoleView('resources');
+  h.c.closeResourceDetail(false);
   assert.equal(h.c.window.location.pathname, '/namespaces/team-b/resources');
   assert.equal(h.c.state.resourceDetail, null);
   assert.equal(h.c.state.resourceDetailTask, null);
-  assert.equal(h.c.elements.resourceDetailPage.hidden, true);
+  assert.equal(h.c.elements.resourceDetailPanel.hidden, true);
   await h.move(-1);
   assert.equal(h.c.elements.resourceDetailTitle.textContent, 'Task test');
   await h.move(1);
@@ -327,7 +329,7 @@ async function testSessionConversationPaths() {
   assert.equal(h.c.state.namespace, 'team-b');
   assert.equal(h.c.state.selected, target);
   assert.equal(h.c.state.consoleView, 'sessions');
-  assert.equal(h.c.elements.resourceDetailPage.hidden, true);
+  assert.equal(h.c.elements.resourceDetailPanel.hidden, true);
   assert.equal(views.at(-1), 'conversation');
   assert.deepEqual(h.requests, [], 'Conversation routes must not request resource manifests or logs');
   assert.equal(h.entries.length, 1);
@@ -367,7 +369,8 @@ async function testSessionResourcePath() {
   assert.equal(h.c.state.selected, null);
   assert.equal(h.c.elements.resourceDetailTitle.textContent, 'Session first');
   assert.equal(h.c.elements.resourceDetailYAML.textContent, 'kind: Session');
-  assert.equal(h.c.elements.resourceDetailTabs.hidden, true);
+  assert.equal(h.c.elements.resourceDetailLogsTab.hidden, true);
+  assert.equal(h.c.elements.resourceDetailSummaryPanel.hidden, false);
   assert.equal(h.c.elements.resourceDetailLogsPanel.hidden, true);
   assert.deepEqual(h.requests, ['/api/resources/sessions/team-a/first']);
   assert.equal(h.c.window.location.pathname, '/namespaces/team-a/resources/sessions/first');

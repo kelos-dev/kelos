@@ -214,7 +214,7 @@ func Run(ctx context.Context, config Config) error {
 	if err != nil {
 		return err
 	}
-	if err := runAgentSetup(ctx, config.WorkingDir, config.Environment); err != nil {
+	if err := runAgentSetup(ctx, config, "/kelos_entrypoint.sh"); err != nil {
 		return err
 	}
 	if !initialized {
@@ -377,14 +377,24 @@ func sessionInitialized(stateDir string) (bool, error) {
 	return false, fmt.Errorf("checking initialized Session workspace: %w", err)
 }
 
-func runAgentSetup(ctx context.Context, workingDir string, environment []string) error {
-	command := exec.CommandContext(ctx, "/kelos_entrypoint.sh")
-	command.Dir = workingDir
+func runAgentSetup(ctx context.Context, config Config, entrypoint string) error {
+	mountPoints, err := readProviderMountPoints()
+	if err != nil {
+		return err
+	}
+	if err := prepareProviderPaths(config.AgentType, config.Environment, mountPoints); err != nil {
+		return err
+	}
+	command := exec.CommandContext(ctx, entrypoint)
+	command.Dir = config.WorkingDir
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr
-	command.Env = sessionSetupEnvironment(environment)
+	command.Env = sessionSetupEnvironment(config.Environment)
 	if err := command.Run(); err != nil {
 		return fmt.Errorf("preparing Session agent environment: %w", err)
+	}
+	if err := finishProviderSetup(config.AgentType, config.Environment); err != nil {
+		return fmt.Errorf("persisting Session agent setup: %w", err)
 	}
 	return nil
 }

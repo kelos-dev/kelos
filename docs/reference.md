@@ -1321,6 +1321,21 @@ Notes:
 - Bundled agent images include [passwordless sudo](agent-image-interface.md#passwordless-sudo) for installing system packages. Use `sudo -n apt-get update && sudo -n apt-get install -y <package>` with compatible Pod security settings and a writable root filesystem.
 - The default form is exec-style; for shell pipelines, environment expansion, or multi-step scripts, wrap the command with `["sh", "-c", "<script>"]`.
 
+Agent configuration can use the same conventional paths in Tasks and Sessions:
+`~/.claude` and `~/.claude.json` for Claude Code, `~/.codex` for Codex, and
+`~/.config/opencode` and `~/.local/share/opencode` for OpenCode. In Sessions,
+these paths link to the Session workspace before setup runs. Configuration and
+conversation state survive Pod replacement when the Session uses a persistent
+volume. Setup commands should edit files within these directories rather than
+replace the directory links themselves.
+`Session.spec.worker.podOverrides.volumeMounts` must not target these paths or
+their children; setup fails before modifying the paths if it finds such a
+mount. Mount configuration elsewhere and copy it into these paths from the
+setup command instead. The bundled Codex Session entrypoint regenerates
+`config.toml` before setup, so apply custom Codex settings in the setup command.
+Sessions require a writable `HOME` for these links. When using a read-only root
+filesystem, provide a writable volume at `HOME` or one of its ancestors.
+
 ### Workspace Authentication
 
 The workspace secret referenced by `spec.secretRef.name` supports two authentication methods:

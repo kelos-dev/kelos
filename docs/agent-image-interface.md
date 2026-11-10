@@ -64,6 +64,33 @@ the Session workspace so configuration and the provider conversation can be
 reused by a restarted runtime. OpenCode-compatible entrypoints must honor these
 variables.
 
+Before invoking the Session entrypoint, the runtime links the conventional
+user paths to these workspace-backed locations:
+
+| Agent | User path | Session target |
+|---|---|---|
+| Claude Code | `~/.claude` | `$CLAUDE_CONFIG_DIR` |
+| Claude Code | `~/.claude.json` | `$CLAUDE_CONFIG_DIR/.claude.json` |
+| Codex | `~/.codex` | `$CODEX_HOME` |
+| OpenCode | `~/.config/opencode` | `$OPENCODE_CONFIG_DIR` |
+| OpenCode | `~/.local/share/opencode` | `$XDG_DATA_HOME/opencode` |
+
+Workspace setup commands can use these user paths in both Tasks and Sessions.
+The Session image must provide an absolute `HOME` and writable user paths.
+Files already present in those paths are copied into the retained directories
+when absent there; retained files take precedence over image defaults.
+An existing symlink to a different target fails Session setup.
+`Session.spec.worker.podOverrides.volumeMounts` must not target these user paths
+or their children: mounted files and directories cannot be replaced by links.
+The runtime checks mount points before seeding or replacing any user path and
+fails setup without modifying those paths if it finds a conflicting mount.
+Mount configuration elsewhere and copy it into these paths from the workspace
+setup command instead.
+
+The bundled Codex Session entrypoint regenerates `config.toml` on each start.
+Apply custom Codex configuration in the workspace setup command, which runs
+after this regeneration, rather than relying on an image-provided `config.toml`.
+
 ### 3. Environment variables
 
 Kelos sets the following reserved environment variables on agent containers:

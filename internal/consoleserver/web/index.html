@@ -401,8 +401,9 @@
       <div class="mode-switch" role="tablist" aria-label="Session creation mode">
         <button type="button" id="session-mode-form" role="tab" aria-selected="true">Form</button>
         <button type="button" id="session-mode-yaml" role="tab" aria-selected="false">YAML</button>
+        <button type="button" id="session-mode-spawner" role="tab" aria-selected="false">From spawner</button>
       </div>
-      <div class="source-picker">
+      <div class="source-picker" id="session-source-picker">
         <label for="session-source">Generate from Session <em>optional</em></label>
         <select name="sessionSource" id="session-source">
           <option value="">Start from scratch</option>
@@ -410,6 +411,22 @@
         <small>Copies the full Session spec, but not metadata, conversation, or volume data.</small>
         <div class="source-status" id="session-source-status" role="status" hidden></div>
       </div>
+      <fieldset class="mode-panel" id="session-spawner-fields" hidden disabled>
+        <div class="form-grid">
+          <label class="form-wide">
+            <span>SessionSpawner</span>
+            <select id="session-spawner" required>
+              <option value="">Choose a SessionSpawner…</option>
+            </select>
+            <small>Uses the spawner's Session template and credentials. A session name is generated automatically.</small>
+          </label>
+          <label class="form-wide">
+            <span>Template values <em>optional</em></span>
+            <textarea id="session-spawner-values" rows="4" spellcheck="false" placeholder="Number: 42&#10;Title: Fix login" aria-describedby="session-spawner-help"></textarea>
+            <small id="session-spawner-help">Enter a YAML or JSON object for event fields used by the initial prompt or branch. Creates one Session without a webhook delivery.</small>
+          </label>
+        </div>
+      </fieldset>
       <fieldset class="mode-panel" id="session-form-fields">
         <div class="form-grid">
         <label>

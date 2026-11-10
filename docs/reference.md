@@ -982,6 +982,13 @@ or JSON object when the template needs event fields. The Console opens the
 created Task's logs and manifest. Manual runs bypass the schedule, source filters,
 suspension, and spawner task limits; see [Manual Task Creation](#manual-task-creation).
 
+On the **Sessions** tab, choose **New session**, then **From spawner**. Select
+a SessionSpawner and supply any event fields needed by `initialPrompt` or
+`initialBranch` as a YAML or JSON object in **Template values**. Choose
+**Create session** to use the spawner's template and credentials and open the
+created Session's chat. Manual creation bypasses webhook filters and does not
+require a webhook delivery.
+
 The **Admin** page manages namespace members and lists Workspaces, AgentConfigs, and
 WorkerPools in the active namespace. Use **Create** or **Edit YAML** to save one `kelos.dev/v1alpha2` manifest,
 or **Delete** to remove a resource after confirmation. The editor supports the
@@ -1079,6 +1086,8 @@ namespace. Named reads and actions are checked against the exact resource name.
 | Resource YAML | `get` the resource |
 | Task logs | `get tasks` and `get tasks/logs` |
 | Run a TaskSpawner manually | `get` the named TaskSpawner and `create tasks` |
+| Create a Session from a SessionSpawner | `get` the named SessionSpawner and `create sessions` |
+| SessionSpawner creation picker | `list sessionspawners` |
 | Suspend a TaskSpawner | `get taskspawners` and `create taskspawners/suspend` |
 | Resume a TaskSpawner | `get taskspawners` and `create taskspawners/resume` |
 | Session list | `list sessions` |
@@ -1200,7 +1209,7 @@ values as TaskSpawner `promptTemplate` and `branch`. Templates use strict
 missing-key handling; use `{{with index . "Branch"}}{{.}}{{else}}main{{end}}`
 when an event may not provide `Branch`.
 
-Session names use the same deterministic naming behavior as webhook-driven
+Webhook-created Session names use the same deterministic naming behavior as webhook-driven
 TaskSpawners: the SessionSpawner name, event type, and delivery-ID hash are
 combined and then truncated to the Kubernetes 63-character limit. A redelivery
 therefore attempts to create the same Session and is treated as already
@@ -1212,6 +1221,21 @@ is implemented.
 Created Sessions have a `kelos.dev/sessionspawner` label whose value is the
 SessionSpawner UID, a `kelos.dev/sessionspawner-name` annotation for the
 human-readable name, and a controller owner reference to the SessionSpawner.
+
+The Console supports manual creation from **Sessions → New session → From
+spawner**. Select the spawner, enter any required **Template values**, and
+choose **Create session**. Values must be a YAML or JSON object. Manual
+creation provides `ID` (`manual-<random suffix>`), `Title` (`Manual run of
+SessionSpawner <name>`), `Kind` (`Manual`), `TriggerType` (`manual`), and
+`TriggerTime` (current UTC time in RFC 3339 format); supplied values override
+these defaults. Missing values referenced by the template cause an error.
+Each manual creation uses a distinct `<spawner-name>-manual-<random suffix>`
+name, shortening the spawner prefix when needed to stay within 63 characters.
+These Sessions have the same ownership and credential selection as webhook-created
+Sessions and contribute to `status.totalSessions`. They record
+`kelos.dev/trigger-type: manual` and `kelos.dev/trigger-time` annotations. Manual
+creation leaves `status.lastSessionName`, `status.lastDeliveryTime`, and the
+webhook delivery condition unchanged.
 
 When `spec.credentials` is configured, omit
 `spec.sessionTemplate.worker.credentials`. Before creating each Session, the

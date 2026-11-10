@@ -257,55 +257,44 @@ func testRenderConsoleProxy(t *testing.T, mode string, values map[string]interfa
 			t.Fatalf("Console server grants cluster-wide Secret access: %#v", rule)
 		}
 	}
-	if mode == "oidc" {
-		for _, userRule := range userRole.Rules {
-			found := false
-			for _, adminRule := range adminRole.Rules {
-				if reflect.DeepEqual(userRule, adminRule) {
-					found = true
-				}
-			}
-			if !found {
-				t.Fatalf("Admin role does not include user rule %#v", userRule)
+	for _, userRule := range userRole.Rules {
+		found := false
+		for _, adminRule := range adminRole.Rules {
+			if reflect.DeepEqual(userRule, adminRule) {
+				found = true
 			}
 		}
-		for _, role := range []rbacv1.ClusterRole{adminRole, serverRole} {
-			foundBind, foundBindings := false, false
-			bindVerbs := []string{"bind"}
-			if role.Name == serverRole.Name {
-				bindVerbs = []string{"get", "bind"}
+		if !found {
+			t.Fatalf("Admin role does not include user rule %#v", userRule)
+		}
+	}
+	for _, role := range []rbacv1.ClusterRole{adminRole, serverRole} {
+		foundBind, foundBindings := false, false
+		bindVerbs := []string{"bind"}
+		if role.Name == serverRole.Name {
+			bindVerbs = []string{"get", "bind"}
+		}
+		for _, rule := range role.Rules {
+			if !containsArgument(rule.APIGroups, rbacv1.GroupName) {
+				continue
 			}
-			for _, rule := range role.Rules {
-				if !containsArgument(rule.APIGroups, rbacv1.GroupName) {
-					continue
+			switch {
+			case reflect.DeepEqual(rule.Resources, []string{"clusterroles"}):
+				if foundBind || !reflect.DeepEqual(rule.APIGroups, []string{rbacv1.GroupName}) || !reflect.DeepEqual(rule.Verbs, bindVerbs) || !reflect.DeepEqual(rule.ResourceNames, []string{"kelos-console-user", "kelos-console-admin"}) {
+					t.Fatalf("unexpected ClusterRole permissions in %s: %#v", role.Name, rule)
 				}
-				switch {
-				case reflect.DeepEqual(rule.Resources, []string{"clusterroles"}):
-					if foundBind || !reflect.DeepEqual(rule.APIGroups, []string{rbacv1.GroupName}) || !reflect.DeepEqual(rule.Verbs, bindVerbs) || !reflect.DeepEqual(rule.ResourceNames, []string{"kelos-console-user", "kelos-console-admin"}) {
-						t.Fatalf("unexpected ClusterRole permissions in %s: %#v", role.Name, rule)
-					}
-					foundBind = true
-				case reflect.DeepEqual(rule.Resources, []string{"rolebindings"}):
-					if foundBindings || !reflect.DeepEqual(rule.APIGroups, []string{rbacv1.GroupName}) || !reflect.DeepEqual(rule.Verbs, []string{"list", "create", "delete"}) || len(rule.ResourceNames) != 0 {
-						t.Fatalf("unexpected RoleBinding permissions in %s: %#v", role.Name, rule)
-					}
-					foundBindings = true
-				default:
-					t.Fatalf("unexpected RBAC access in %s: %#v", role.Name, rule)
+				foundBind = true
+			case reflect.DeepEqual(rule.Resources, []string{"rolebindings"}):
+				if foundBindings || !reflect.DeepEqual(rule.APIGroups, []string{rbacv1.GroupName}) || !reflect.DeepEqual(rule.Verbs, []string{"list", "create", "delete"}) || len(rule.ResourceNames) != 0 {
+					t.Fatalf("unexpected RoleBinding permissions in %s: %#v", role.Name, rule)
 				}
-			}
-			if !foundBind || !foundBindings {
-				t.Fatalf("missing constrained role management permissions in %s", role.Name)
+				foundBindings = true
+			default:
+				t.Fatalf("unexpected RBAC access in %s: %#v", role.Name, rule)
 			}
 		}
-	} else {
-		if adminRole.Name != "" {
-			t.Fatal("GitHub authentication must not render the OIDC membership role")
-		}
-		for _, rule := range serverRole.Rules {
-			if containsArgument(rule.APIGroups, rbacv1.GroupName) {
-				t.Fatalf("GitHub server grants membership management permissions: %#v", rule)
-			}
+		if !foundBind || !foundBindings {
+			t.Fatalf("missing constrained role management permissions in %s", role.Name)
 		}
 	}
 	for _, rule := range userRole.Rules {

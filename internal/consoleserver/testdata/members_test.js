@@ -27,10 +27,10 @@ function element() {
   };
 }
 const member = {id: 'Ym9i', username: 'oidc:bob', role: 'admin', version: '3', sources: [{binding: 'binding', role: 'admin', managed: true}], canChange: true, canRemove: true};
-const inventory = {enabled: true, usernamePrefix: 'oidc:', currentUser: 'oidc:alice', roles: [{name: 'user', label: 'User', description: 'Use Sessions', canAssign: true}, {name: 'admin', label: 'Admin', description: 'Manage members', canAssign: true}], members: [member], groups: [{name: 'oidc:developers', role: 'user', binding: 'developers'}]};
+const inventory = {enabled: true, authMode: 'oidc', usernamePrefix: 'oidc:', currentUser: 'oidc:alice', roles: [{name: 'user', label: 'User', description: 'Use Sessions', canAssign: true}, {name: 'admin', label: 'Admin', description: 'Manage members', canAssign: true}], members: [member], groups: [{name: 'oidc:developers', role: 'user', binding: 'developers'}]};
 function reset() {
   global.state = {namespace: 'team-a', namespaces: [], namespaceGeneration: 0, namespaceRefresh: null, defaultNamespace: 'team-a', memberGeneration: 0, memberInventory: null, memberSaving: false, memberEditing: null};
-  global.elements = Object.fromEntries(['memberStatus', 'memberList', 'memberGroups', 'memberError', 'addMember', 'memberDialog', 'memberDialogTitle', 'memberDialogDescription', 'memberSubject', 'memberRole', 'memberHelp', 'memberDialogError', 'memberSave', 'activeNamespace', 'namespace', 'namespaceForm', 'namespaceStatus', 'newSessionButton', 'welcomeNew', 'dialog', 'dialogError'].map(key => [key, element()]));
+  global.elements = Object.fromEntries(['memberStatus', 'memberList', 'memberGroups', 'memberError', 'addMember', 'memberDialog', 'memberDialogTitle', 'memberDialogDescription', 'memberSubject', 'memberSubjectLabel', 'memberRole', 'memberHelp', 'memberDialogError', 'memberSave', 'activeNamespace', 'namespace', 'namespaceForm', 'namespaceStatus', 'newSessionButton', 'welcomeNew', 'dialog', 'dialogError'].map(key => [key, element()]));
   elements.namespaceLabels = [element()];
   global.document = {createElement: element};
   global.addOption = (select, value, label) => { const option = element(); option.value = value; option.textContent = label; select.append(option); };
@@ -67,7 +67,7 @@ async function testMembers() {
   await loadMembers();
   assert.equal(elements.addMember.hidden, true);
   assert.equal(elements.memberList.children.length, 0);
-  assert.match(elements.memberStatus.textContent, /require OIDC/);
+  assert.match(elements.memberStatus.textContent, /require OIDC or GitHub/);
   global.api = async () => { throw new Error('access denied'); };
   await loadMembers();
   assert.equal(elements.memberStatus.textContent, 'Unable to load members: access denied');
@@ -76,6 +76,8 @@ async function testAddAndChange() {
   reset(); state.memberInventory = inventory;
   openMemberDialog();
   assert.equal(elements.memberDialog.open, true);
+  assert.equal(elements.memberSubjectLabel.textContent, 'OIDC user ID');
+  assert.equal(elements.memberSubject.placeholder, 'Subject from your identity provider');
   assert.equal(elements.memberRole.value, 'user');
   assert.equal(elements.memberDialogDescription.textContent, 'Membership in team-a');
   elements.memberSubject.value = ' bob ';
@@ -99,6 +101,34 @@ async function testAddAndChange() {
   assert.equal(elements.memberSubject.value, 'bob');
   assert.equal(elements.memberDialogError.textContent, 'member already exists');
   assert.equal(elements.memberSave.disabled, false);
+}
+async function testGrantGitHubAccess() {
+  reset();
+  const githubInventory = {...inventory, authMode: 'github', usernamePrefix: 'github:company:', currentUser: 'github:company:alice', members: [], groups: []};
+  const requests = [];
+  global.api = async (url, options) => { requests.push({url, options}); return githubInventory; };
+  await loadMembers();
+  assert.equal(elements.addMember.hidden, false);
+  openMemberDialog();
+  assert.equal(elements.memberSubjectLabel.textContent, 'GitHub username');
+  assert.equal(elements.memberSubject.placeholder, 'GitHub login name');
+  assert.equal(elements.memberRole.value, 'user');
+  assert.equal(elements.memberDialogDescription.textContent, 'Membership in team-a');
+  assert.match(elements.memberHelp.textContent, /GitHub login name without @/);
+  assert.match(elements.memberHelp.textContent, /exactly as shown on their GitHub profile \(case-sensitive\)/);
+  assert.match(elements.memberHelp.textContent, /github:company:/);
+  elements.memberSubject.value = ' bob ';
+  await saveMember();
+  assert.deepEqual(requests[1], {url: '/api/admin/members?namespace=team-a', options: {method: 'POST', body: JSON.stringify({subject: 'bob', role: 'user'})}});
+  assert.equal(elements.memberDialog.open, false);
+  assert.equal(adminRefreshes, 1);
+  openMemberDialog();
+  elements.memberSubject.value = 'OctoCat';
+  elements.memberRole.value = 'admin';
+  await saveMember();
+  assert.deepEqual(requests[3], {url: '/api/admin/members?namespace=team-a', options: {method: 'POST', body: JSON.stringify({subject: 'OctoCat', role: 'admin'})}});
+  assert.equal(elements.memberDialog.open, false);
+  assert.equal(adminRefreshes, 2);
 }
 async function testRemoveAndSelfDemotion() {
   reset(); state.memberInventory = inventory;
@@ -458,6 +488,6 @@ async function testStaleNamespaceDiscovery() {
   }
 }
 (async () => {
-  await testMembers(); await testAddAndChange(); await testRemoveAndSelfDemotion(); await testStaleNamespace(); await testNamespacePicker(); await testBackgroundNamespaceDiscovery(); await testInaccessibleStartupNamespace(); await testStartupNamespaceFailure(); await testNamespacePickerInteractions(); await testNamespacePickerCoalescesRequests(); await testNamespacePickerAfterAccessGranted(); await testRoleChangeConflict(); await testRemovalAlertRefresh(); await testStaleNamespaceDiscovery();
+  await testMembers(); await testAddAndChange(); await testGrantGitHubAccess(); await testRemoveAndSelfDemotion(); await testStaleNamespace(); await testNamespacePicker(); await testBackgroundNamespaceDiscovery(); await testInaccessibleStartupNamespace(); await testStartupNamespaceFailure(); await testNamespacePickerInteractions(); await testNamespacePickerCoalescesRequests(); await testNamespacePickerAfterAccessGranted(); await testRoleChangeConflict(); await testRemovalAlertRefresh(); await testStaleNamespaceDiscovery();
   process.stdout.write('Member and namespace tests passed\n');
 })().catch(error => { console.error(error); process.exitCode = 1; });

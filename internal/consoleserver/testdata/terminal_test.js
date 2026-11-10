@@ -83,14 +83,15 @@ global.ResizeObserver = class {
 const source = fs.readFileSync(path.join(__dirname, '../web/terminal.js'), 'utf8');
 const controller = vm.runInThisContext(`${source}\nsessionTerminal;`, {filename: 'terminal.js'});
 const session = {namespace: 'team-a', name: 'chat', uid: 'uid-1', phase: 'Ready'};
+const loginLocation = () => '/login?next=%2Fnamespaces%2Fteam-a%2Fsessions%2Fchat';
 for (const unavailable of [null, {...session, phase: 'Pending'}, {...session, phase: 'Suspended'},
   {...session, phase: 'Failed'}, {...session, resetting: true}, {...session, userSuspended: true}]) {
   assert.equal(controller.available(unavailable), false);
-  controller.show(unavailable);
+  controller.show(unavailable, loginLocation);
 }
 assert.equal(sockets.length, 0);
 
-controller.show(session);
+controller.show(session, loginLocation);
 const socket = sockets[0];
 const terminal = terminals[0];
 assert.equal(terminal.style.nonce, 'test-style-nonce');
@@ -124,7 +125,7 @@ assert.equal(terminal.focused, false);
 socket.emit('message', {data: output.buffer});
 assert.deepEqual(terminal.output[1], output);
 elements['terminal-view'].hidden = false;
-controller.show(session);
+controller.show(session, loginLocation);
 assert.equal(sockets.length, 1);
 assert.equal(terminal.addon.fits, fits + 1);
 assert.equal(terminal.focused, true);
@@ -137,7 +138,7 @@ assert.equal(terminal.options.disableStdin, true);
 terminal.input('ignored');
 assert.equal(socket.sent.length, 4);
 assert.equal(sockets.length, 1);
-controller.show(session);
+controller.show(session, loginLocation);
 assert.equal(sockets.length, 1, 'Revisiting the tab must preserve exited shell output');
 assert.equal(elements['reconnect-terminal'].disabled, false);
 elements['reconnect-terminal'].emit('click');
@@ -146,7 +147,7 @@ assert.equal(terminal.disposed, true);
 assert.ok(terminal.subscriptions.every(subscription => subscription.disposed));
 assert.equal(observers[0].disconnected, true);
 
-controller.show(session);
+controller.show(session, loginLocation);
 const current = sockets[1];
 current.connect();
 socket.emit('message', {data: JSON.stringify({type: 'error', text: 'stale error'})});
@@ -160,7 +161,7 @@ controller.close();
 
 for (const changed of [null, {...session, namespace: 'team-b'}, {...session, name: 'other'},
   {...session, uid: 'replacement'}, {...session, phase: 'Suspended'}, {...session, resetting: true}, {...session, userSuspended: true}]) {
-  controller.show(session);
+  controller.show(session, loginLocation);
   const connection = sockets.at(-1);
   controller.sync(changed);
   assert.equal(connection.closed, true);
@@ -168,7 +169,7 @@ for (const changed of [null, {...session, namespace: 'team-b'}, {...session, nam
   assert.equal(elements['reconnect-terminal'].disabled, true);
 }
 
-controller.show(session);
+controller.show(session, loginLocation);
 sockets.at(-1).connect();
 const pasted = 'héllo'.repeat(20000);
 terminals.at(-1).input(pasted);
@@ -177,23 +178,29 @@ assert.ok(chunks.length > 1 && chunks.every(chunk => chunk.length <= 32 * 1024))
 assert.equal(Buffer.concat(chunks).toString('utf8'), pasted);
 controller.close();
 
-controller.show(session);
+controller.show(session, loginLocation);
 sockets.at(-1).close();
 assert.match(elements['terminal-status'].textContent, /^Disconnected/);
 controller.close();
-controller.show(session);
+controller.show(session, loginLocation);
+sockets.at(-1).close();
+elements['reconnect-terminal'].emit('click');
 global.fetch = async target => {
   assert.equal(target, '/api/config');
   return {status: 401};
 };
 sockets.at(-1).emit('error');
 assert.match(elements['terminal-status'].textContent, /^Could not connect/);
-queueMicrotask(() => assert.deepEqual(loginRedirects, ['/login']));
+queueMicrotask(() => assert.deepEqual(loginRedirects, ['/login?next=%2Fnamespaces%2Fteam-a%2Fsessions%2Fchat']));
 controller.close();
 assert.equal(sockets.at(-1).closed, true);
 
 const index = fs.readFileSync(path.join(__dirname, '../web/index.html'), 'utf8');
 const app = fs.readFileSync(path.join(__dirname, '../web/app.js'), 'utf8');
+window.location = location;
+location.pathname = '/namespaces/team-a/sessions/chat';
+location.search = '';
+vm.runInThisContext(app.slice(app.indexOf('function consoleLoginLocation('), app.indexOf('let toastTimer')), {filename: 'app.js'});
 global.scheduleCompletionRead = () => {};
 assert.match(index, /id="terminal-tab"[^>]*role="tab"[^>]*aria-controls="terminal-view"[^>]*disabled/);
 assert.match(index, /id="terminal-view"[^>]*role="tabpanel"[^>]*aria-labelledby="terminal-tab"[^>]*hidden/);

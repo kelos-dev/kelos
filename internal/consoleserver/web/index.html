@@ -150,6 +150,54 @@
       </section>
     </main>
 
+    <main class="console-page" id="resource-detail-page" aria-labelledby="resource-detail-title" hidden>
+      <header class="console-page-header">
+        <button class="icon-button mobile-only open-sidebar-button" type="button" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false">☰</button>
+        <div class="resource-detail-heading">
+          <a class="resource-back-link" id="back-to-resources" href="/">← Resources</a>
+          <h1 id="resource-detail-title">Resource</h1>
+          <p id="resource-detail-subtitle"></p>
+        </div>
+      </header>
+      <section class="console-page-body resource-detail-content">
+        <div id="taskspawner-lifecycle" hidden>
+          <div class="taskspawner-lifecycle-toolbar">
+            <span id="taskspawner-lifecycle-status" role="status"></span>
+            <button class="secondary-button" id="taskspawner-lifecycle-button" type="button">Suspend</button>
+          </div>
+          <p class="taskspawner-lifecycle-help">Suspension stops automatic task creation. Existing Tasks keep running.</p>
+          <div class="dialog-error" id="taskspawner-lifecycle-error" role="alert"></div>
+        </div>
+        <form id="taskspawner-run-form" hidden>
+          <div class="form-grid">
+            <label class="form-wide">
+              <span>Template values <em>Optional</em></span>
+              <textarea id="taskspawner-run-values" rows="4" spellcheck="false" placeholder="Title: Manual run&#10;Body: Describe the task" aria-describedby="taskspawner-run-help"></textarea>
+              <small id="taskspawner-run-help">Enter a YAML or JSON object for templates that need event values. Creates one standalone Task, bypassing the schedule, source filters, suspension, and spawner task limits.</small>
+            </label>
+          </div>
+          <div class="dialog-error" id="taskspawner-run-error" role="alert"></div>
+          <div class="dialog-actions">
+            <button class="primary-button" id="taskspawner-run-button" type="submit">Run task</button>
+          </div>
+        </form>
+        <div class="mode-switch resource-detail-tabs" id="resource-detail-tabs" role="tablist" aria-label="Task details" hidden>
+          <button id="resource-detail-logs-tab" type="button" role="tab" aria-selected="true" aria-controls="resource-detail-logs-panel">Logs</button>
+          <button id="resource-detail-manifest-tab" type="button" role="tab" aria-selected="false" aria-controls="resource-detail-manifest-panel" tabindex="-1">Manifest</button>
+        </div>
+        <section class="resource-detail-panel resource-detail-logs-panel" id="resource-detail-logs-panel" role="tabpanel" aria-labelledby="resource-detail-logs-tab" hidden>
+          <div class="resource-detail-log-toolbar">
+            <span>Showing up to the latest 2,000 lines (2 MiB maximum).</span>
+            <button class="quiet-button" id="refresh-resource-logs" type="button">Refresh</button>
+          </div>
+          <pre id="resource-detail-logs"></pre>
+        </section>
+        <section class="resource-detail-panel" id="resource-detail-manifest-panel" role="tabpanel" aria-labelledby="resource-detail-manifest-tab">
+          <pre id="resource-detail-yaml"></pre>
+        </section>
+      </section>
+    </main>
+
     <main class="console-page" id="admin-view" hidden>
       <header class="console-page-header">
         <button class="icon-button mobile-only open-sidebar-button" type="button" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false">☰</button>
@@ -552,56 +600,6 @@
         <button class="primary-button" id="save-session-display-name">Save name</button>
       </div>
     </form>
-  </dialog>
-
-  <dialog class="session-dialog resource-detail-dialog" id="resource-detail-dialog" aria-labelledby="resource-detail-title">
-    <div class="resource-detail-content">
-      <div class="dialog-header">
-        <div>
-          <h2 id="resource-detail-title">Resource manifest</h2>
-          <p id="resource-detail-subtitle"></p>
-        </div>
-        <button class="icon-button close-resource-detail" type="button" aria-label="Close">×</button>
-      </div>
-      <div id="taskspawner-lifecycle" hidden>
-        <div class="taskspawner-lifecycle-toolbar">
-          <span id="taskspawner-lifecycle-status" role="status"></span>
-          <button class="secondary-button" id="taskspawner-lifecycle-button" type="button">Suspend</button>
-        </div>
-        <p class="taskspawner-lifecycle-help">Suspension stops automatic task creation. Existing Tasks keep running.</p>
-        <div class="dialog-error" id="taskspawner-lifecycle-error" role="alert"></div>
-      </div>
-      <form id="taskspawner-run-form" hidden>
-        <div class="form-grid">
-          <label class="form-wide">
-            <span>Template values <em>Optional</em></span>
-            <textarea id="taskspawner-run-values" rows="4" spellcheck="false" placeholder="Title: Manual run&#10;Body: Describe the task" aria-describedby="taskspawner-run-help"></textarea>
-            <small id="taskspawner-run-help">Enter a YAML or JSON object for templates that need event values. Creates one standalone Task, bypassing the schedule, source filters, suspension, and spawner task limits.</small>
-          </label>
-        </div>
-        <div class="dialog-error" id="taskspawner-run-error" role="alert"></div>
-        <div class="dialog-actions">
-          <button class="primary-button" id="taskspawner-run-button" type="submit">Run task</button>
-        </div>
-      </form>
-      <div class="mode-switch resource-detail-tabs" id="resource-detail-tabs" role="tablist" aria-label="Task details" hidden>
-        <button id="resource-detail-logs-tab" type="button" role="tab" aria-selected="true" aria-controls="resource-detail-logs-panel">Logs</button>
-        <button id="resource-detail-manifest-tab" type="button" role="tab" aria-selected="false" aria-controls="resource-detail-manifest-panel" tabindex="-1">Manifest</button>
-      </div>
-      <section class="resource-detail-panel resource-detail-logs-panel" id="resource-detail-logs-panel" role="tabpanel" aria-labelledby="resource-detail-logs-tab" hidden>
-        <div class="resource-detail-log-toolbar">
-          <span>Showing up to the latest 2,000 lines (2 MiB maximum).</span>
-          <button class="quiet-button" id="refresh-resource-logs" type="button">Refresh</button>
-        </div>
-        <pre id="resource-detail-logs"></pre>
-      </section>
-      <section class="resource-detail-panel" id="resource-detail-manifest-panel" role="tabpanel" aria-labelledby="resource-detail-manifest-tab">
-        <pre id="resource-detail-yaml"></pre>
-      </section>
-      <div class="dialog-actions">
-        <button class="secondary-button close-resource-detail" type="button">Close</button>
-      </div>
-    </div>
   </dialog>
 
   <div class="session-actions-menu" id="session-actions-menu" role="menu" hidden>

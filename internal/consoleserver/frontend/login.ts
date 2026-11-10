@@ -31,7 +31,12 @@ form.addEventListener('submit', async (event) => {
       const body = await response.json().catch(() => ({})) as {error?: string};
       throw new Error(body.error || 'Sign-in failed');
     }
-    window.location.replace(`/${window.location.search}`);
+    const query = new URLSearchParams(window.location.search);
+    const next = query.get('next') || '';
+    const path = /^\/namespaces\/[a-z0-9.-]+\/(?:sessions(?:\/[a-z0-9.-]+)?|resources(?:\/[a-z]+\/[a-z0-9.-]+)?)\/?$/.test(next) ? next : '/';
+    query.delete('next');
+    const search = query.toString();
+    window.location.replace(`${path}${search ? `?${search}` : ''}`);
   } catch (cause) {
     error.textContent = cause instanceof Error ? cause.message : String(cause);
     input.focus();

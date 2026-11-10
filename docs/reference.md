@@ -944,11 +944,14 @@ Only the latest retained event can be delivered if several events occur between
 checks. Queued messages collapse per Session and expire at the push service
 after one hour.
 
-To link directly to a Session, use `/?namespace=<namespace>&session=<resource-name>`
-on your Console's origin. Both `namespace` and `session` are required. Use the
-Kubernetes resource name, even when the Session has a display name. Notification
-links may also include `uid` to reject a deleted or replaced Session. After a
-link opens successfully, the address bar uses namespace and resource name.
+To link directly to a Session conversation, use
+`/namespaces/<namespace>/sessions/<resource-name>` on your Console's origin.
+Use the Kubernetes resource name, even when the Session has a display name.
+The Sessions tab without a selected conversation is at
+`/namespaces/<namespace>/sessions`. Links using
+`/?namespace=<namespace>&session=<resource-name>` also open the conversation.
+Notification links may include `uid` to reject a deleted or replaced Session.
+After a link opens successfully, the address bar uses the Session's path.
 Selecting a Session updates the address bar so you can copy or bookmark its URL.
 Reloading the page or using browser Back and Forward restores the linked Session. The link's namespace takes priority over the remembered
 namespace, and token sign-in preserves the destination. Missing or inaccessible
@@ -970,9 +973,17 @@ disconnect or shell exit, click **Reconnect** in the Terminal tab to start
 another shell.
 The Resources page shows the incoming and outgoing relationships for one
 selected object, with a searchable inventory for inspecting the full namespace.
-Selecting a Task from either resource view shows its agent container logs and
-manifest. The Logs tab shows up to the latest 2,000 lines with a 2 MiB maximum
-and can be refreshed while the Task is running. WorkerPool-backed Task views
+Selecting a resource opens its detail page at
+`/namespaces/<namespace>/resources/<resource-type>/<resource-name>`, for example
+`/namespaces/default/resources/tasks/my-task`. Copy or bookmark the URL to reopen the page;
+reload, browser Back and Forward, and token sign-in preserve the destination.
+The namespace resource browser is at `/namespaces/<namespace>/resources`.
+Session resource manifests use
+`/namespaces/<namespace>/resources/sessions/<resource-name>`, independently of
+the Session conversation path.
+Task detail pages show the agent container logs and manifest. The Logs tab shows
+up to the latest 2,000 lines with a 2 MiB maximum and can be refreshed while the
+Task is running. WorkerPool-backed Task views
 include only the selected Task's segment from the recent shared worker Pod log.
 The Console reports that the segment is unavailable when its markers are
 outside the bounded log window.

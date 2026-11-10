@@ -18,7 +18,7 @@ const sessionTerminal = (() => {
             session?.name !== active.session.name || session?.uid !== active.session.uid))
             close();
     }
-    function show(session) {
+    function show(session, loginLocation) {
         sync(session);
         if (!session || !available(session))
             return;
@@ -116,7 +116,7 @@ const sessionTerminal = (() => {
             if (!disposed)
                 void fetch('/api/config').then(response => {
                     if (response.status === 401)
-                        location.replace('/login');
+                        location.replace(loginLocation());
                 }).catch(() => { });
             if (!disposed && !finished)
                 finish('Could not connect to the session terminal. Reconnect to try again.');
@@ -125,7 +125,7 @@ const sessionTerminal = (() => {
             if (!disposed && !finished)
                 finish('Disconnected. Reconnect to start a shell.');
         });
-        active = { session, focus, dispose: () => {
+        active = { session, loginLocation, focus, dispose: () => {
                 disposed = true;
                 observer.disconnect();
                 input.dispose();
@@ -139,9 +139,9 @@ const sessionTerminal = (() => {
     reconnect.addEventListener('click', () => {
         if (!active || reconnect.disabled)
             return;
-        const session = active.session;
+        const { session, loginLocation } = active;
         close();
-        show(session);
+        show(session, loginLocation);
     });
     return { available, show, sync, close };
 })();

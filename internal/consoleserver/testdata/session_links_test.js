@@ -22,6 +22,7 @@ function harness(url = 'https://console.example/', sessions = []) {
   const entries = [new URL(url)];
   let position = 0;
   const toasts = [];
+  const requests = [];
   const c = {
     URL, URLSearchParams,
     window: {
@@ -36,9 +37,14 @@ function harness(url = 'https://console.example/', sessions = []) {
         },
       },
     },
-    state: {namespace: 'team-a', namespaces: ['team-a', 'team-b'], namespaceGeneration: 0, sessionListGeneration: 0, consoleView: 'overview', selected: null, sessions},
+    state: {namespace: 'team-a', namespaces: ['team-a', 'team-b'], namespaceGeneration: 0, sessionListGeneration: 0, consoleView: 'overview', selected: null, sessions, resourceGroups: [], resourceDetailGeneration: 0, resourceDetailLogGeneration: 0},
     elements: Object.fromEntries([
-      'overviewView', 'sessionsView', 'resourcesView', 'adminView', 'sessionSidebar',
+      'overviewView', 'sessionsView', 'resourcesView', 'resourceDetailPage', 'adminView', 'sessionSidebar',
+      'backToResources', 'resourceDetailTitle', 'resourceDetailSubtitle', 'resourceDetailTabs',
+      'resourceDetailLogsTab', 'resourceDetailManifestTab', 'resourceDetailLogsPanel', 'resourceDetailManifestPanel',
+      'refreshResourceLogs', 'resourceDetailLogs', 'resourceDetailYAML', 'taskSpawnerLifecycle',
+      'taskSpawnerLifecycleButton', 'taskSpawnerLifecycleStatus', 'taskSpawnerLifecycleError',
+      'taskSpawnerRunForm', 'taskSpawnerRunValues', 'taskSpawnerRunError', 'taskSpawnerRunButton',
       'overviewButton', 'sessionsButton', 'resourcesButton', 'adminButton', 'messages',
       'pending', 'changesList', 'sidebar', 'welcome', 'subsessionDialog',
     ].map(key => [key, element()])),
@@ -47,6 +53,9 @@ function harness(url = 'https://console.example/', sessions = []) {
     async loadNamespaceOptions(namespace) { return namespace; },
     async switchNamespace(namespace, options) { c.state.namespace = namespace; c.selectSession(null, false, options); },
     async loadSessions() { return c.state.sessions; },
+    resourceCollections: () => c.state.resourceGroups.flatMap(group => group.resources),
+    api: async path => { requests.push(path); return {kind: 'Task', yaml: 'kind: Task'}; },
+    apiText: async path => { requests.push(path); return 'task logs'; },
     async syncPushSubscription() {},
     sessionKey: session => `${session.namespace}/${session.name}`,
     showToast: message => toasts.push(message),
@@ -64,9 +73,10 @@ function harness(url = 'https://console.example/', sessions = []) {
   vm.createContext(c);
   vm.runInContext(slice('let consoleLocationReady', 'const allResourceKind'), c);
   vm.runInContext(slice('function setConsoleView', 'function resourceAge'), c);
+  vm.runInContext(slice('function setResourceDetailView', 'const pendingCompletionReads'), c);
   vm.runInContext(slice('function selectSession', 'async function resumeIdleSession'), c);
   return {
-    c, toasts, entries,
+    c, toasts, entries, requests,
     async move(offset) {
       position += offset;
       c.window.location = entries[position];
@@ -85,11 +95,12 @@ async function testSelectionReloadAndHistory() {
   assert.equal(h.entries.length, 1, 'Initial namespace normalization must replace history');
   c.setConsoleView('sessions');
   assert.equal(c.state.selected, first);
-  assert.equal(c.window.location.search, '?other=keep&namespace=team-a&session=first');
+  assert.equal(c.window.location.pathname, '/namespaces/team-a/sessions/first');
+  assert.equal(c.window.location.search, '?other=keep');
   assert.equal(c.window.location.hash, '#anchor');
   assert.equal(h.entries.length, 2);
   c.selectSession(second);
-  assert.equal(c.window.location.searchParams.get('session'), 'second');
+  assert.equal(c.window.location.pathname, '/namespaces/team-a/sessions/second');
   assert.equal(h.entries.length, 3);
   c.selectSession(second);
   assert.equal(h.entries.length, 3, 'Selecting the same session must not add history');
@@ -120,6 +131,7 @@ async function testCrossNamespaceAndOptionalUID() {
   assert.deepEqual(c.state.namespaces, ['team-a', 'team-b'], 'Cross-namespace links must keep all namespace choices');
   assert.equal(c.state.namespace, 'team-b');
   assert.equal(c.state.selected, target);
+  assert.equal(c.window.location.pathname, '/namespaces/team-b/sessions/first');
   assert.equal(h.entries.length, 1, 'Namespace switching must not add intermediate history');
   assert.equal(h.toasts.length, 0);
   c.window.location = new URL('https://console.example/?namespace=team-b&session=first&uid=first-uid');
@@ -170,7 +182,7 @@ async function testNavigationDuringPendingRequest() {
     finish();
     await pending;
     assert.equal(h.c.state.selected, second, 'A delayed request must not overwrite a later navigation');
-    assert.equal(h.c.window.location.searchParams.get('session'), 'second');
+    assert.equal(h.c.window.location.pathname, '/namespaces/team-a/sessions/second');
     assert.equal(h.toasts.length, 0, 'A superseded request must not show an error');
   }
 
@@ -185,7 +197,7 @@ async function testNavigationDuringPendingRequest() {
   finish(h.c.state.sessions);
   await delayed;
   assert.equal(h.c.state.selected, second, 'A user selection must supersede pending URL navigation');
-  assert.equal(h.c.window.location.searchParams.get('session'), 'second');
+  assert.equal(h.c.window.location.pathname, '/namespaces/team-a/sessions/second');
 }
 
 function useSessionLoader(h) {
@@ -201,7 +213,7 @@ async function testBackgroundRefreshReplacesHistory() {
     await h.c.loadSessions({quiet: true});
     assert.equal(h.entries.length, 1, 'A background update must not push browser history');
     assert.equal(h.c.state.selected, sessions[0] || null);
-    assert.equal(h.c.window.location.searchParams.get('session'), sessions.length ? 'first' : null);
+    assert.equal(h.c.window.location.pathname, sessions.length ? '/namespaces/team-a/sessions/first' : '/namespaces/team-a/sessions');
     assert.equal(h.toasts.length, 0);
   }
 }
@@ -227,10 +239,139 @@ async function testDiscardedListIsRetried() {
     requests[2].resolve([first, second]);
     await navigation;
     assert.equal(h.c.state.selected, second);
-    assert.equal(h.c.window.location.searchParams.get('session'), 'second');
+    assert.equal(h.c.window.location.pathname, '/namespaces/team-a/sessions/second');
     assert.equal(h.entries.length, 1);
     assert.equal(h.toasts.length, 0);
   }
+}
+
+async function testResourcePagesAndHistory() {
+  const h = harness('https://console.example/namespaces/team-b/resources/tasks/build?other=keep');
+  await h.c.applyConsoleLocation();
+  assert.equal(h.c.state.namespace, 'team-b');
+  assert.equal(h.c.state.consoleView, 'resource');
+  assert.equal(h.c.elements.resourceDetailPage.hidden, false);
+  assert.equal(h.c.elements.resourcesView.hidden, true);
+  assert.equal(h.c.elements.resourceDetailTitle.textContent, 'Task build');
+  assert.equal(h.c.elements.resourceDetailYAML.textContent, 'kind: Task');
+  assert.equal(h.c.elements.resourceDetailLogs.textContent, 'task logs');
+  assert.deepEqual(h.requests, ['/api/resources/tasks/team-b/build', '/api/resources/tasks/team-b/build/logs']);
+  assert.equal(h.entries.length, 1);
+  assert.equal(h.c.window.location.pathname, '/namespaces/team-b/resources/tasks/build');
+  assert.equal(h.c.window.location.search, '?other=keep');
+
+  await h.c.openResourceDetail({resource: 'tasks', kind: 'Task'}, {namespace: 'team-b', name: 'test'});
+  assert.equal(h.c.window.location.pathname, '/namespaces/team-b/resources/tasks/test');
+  assert.deepEqual(h.requests.slice(-2), ['/api/resources/tasks/team-b/test', '/api/resources/tasks/team-b/test/logs']);
+  assert.equal(h.entries.length, 2);
+  await h.move(-1);
+  assert.equal(h.c.elements.resourceDetailTitle.textContent, 'Task build');
+  await h.move(1);
+  assert.equal(h.c.elements.resourceDetailTitle.textContent, 'Task test');
+  h.c.setConsoleView('resources');
+  assert.equal(h.c.window.location.pathname, '/namespaces/team-b/resources');
+  assert.equal(h.c.state.resourceDetail, null);
+  assert.equal(h.c.state.resourceDetailTask, null);
+  assert.equal(h.c.elements.resourceDetailPage.hidden, true);
+  await h.move(-1);
+  assert.equal(h.c.elements.resourceDetailTitle.textContent, 'Task test');
+  await h.move(1);
+  assert.equal(h.c.state.consoleView, 'resources');
+  const reload = harness(h.c.window.location.href);
+  await reload.c.applyConsoleLocation();
+  assert.equal(reload.c.state.consoleView, 'resources');
+  assert.equal(reload.c.state.namespace, 'team-b');
+  assert.deepEqual(h.toasts, []);
+}
+
+async function testResourceErrorsAndNavigation() {
+  const h = harness('https://console.example/namespaces/team-a/resources/workspaces/missing');
+  h.c.api = async () => { throw new Error('Workspace missing not found'); };
+  await h.c.applyConsoleLocation();
+  assert.equal(h.c.state.consoleView, 'resource');
+  assert.equal(h.c.elements.resourceDetailYAML.textContent, 'Workspace missing not found');
+  assert.equal(h.c.window.location.pathname, '/namespaces/team-a/resources/workspaces/missing');
+
+  let finish;
+  h.c.api = () => new Promise(resolve => { finish = resolve; });
+  const pending = h.c.openResourceDetail({resource: 'workspaces', kind: 'Workspace'}, {namespace: 'team-a', name: 'repository'});
+  h.c.setConsoleView('resources');
+  finish({kind: 'Workspace', yaml: 'stale manifest'});
+  await pending;
+  assert.equal(h.c.elements.resourceDetailYAML.textContent, 'Loading manifest…');
+  assert.equal(h.c.state.consoleView, 'resources');
+
+  const denied = harness('https://console.example/namespaces/forbidden/resources/tasks/build');
+  denied.c.loadNamespaceOptions = async () => '';
+  await denied.c.applyConsoleLocation();
+  assert.equal(denied.c.state.resourceDetail, undefined);
+  assert.equal(denied.c.state.namespace, 'team-a');
+  assert.equal(denied.c.window.location.pathname, '/namespaces/forbidden/resources/tasks/build', 'Keep the requested destination available for retry');
+  assert.deepEqual(denied.toasts, ['Namespace forbidden is not accessible']);
+
+  const notification = harness('https://console.example/namespaces/team-a/resources/tasks/build', [first]);
+  await notification.c.applyConsoleLocation();
+  await notification.c.openNotificationSession(first);
+  assert.equal(notification.c.state.consoleView, 'sessions');
+  assert.equal(notification.c.window.location.pathname, '/namespaces/team-a/sessions/first');
+  assert.equal(notification.c.window.location.searchParams.has('session'), false);
+}
+
+async function testSessionConversationPaths() {
+  const target = {...first, namespace: 'team-b'};
+  const other = {...second, namespace: 'team-b'};
+  const h = harness('https://console.example/namespaces/team-b/sessions/first', [target, other]);
+  const views = [];
+  h.c.setActiveView = view => views.push(view);
+  await h.c.applyConsoleLocation();
+  assert.equal(h.c.state.namespace, 'team-b');
+  assert.equal(h.c.state.selected, target);
+  assert.equal(h.c.state.consoleView, 'sessions');
+  assert.equal(h.c.elements.resourceDetailPage.hidden, true);
+  assert.equal(views.at(-1), 'conversation');
+  assert.deepEqual(h.requests, [], 'Conversation routes must not request resource manifests or logs');
+  assert.equal(h.entries.length, 1);
+  h.c.selectSession(other);
+  assert.equal(h.c.window.location.pathname, '/namespaces/team-b/sessions/second');
+  await h.move(-1);
+  assert.equal(h.c.state.selected, target);
+  await h.move(1);
+  assert.equal(h.c.state.selected, other);
+  const reload = harness(h.c.window.location.href, [target, other]);
+  await reload.c.applyConsoleLocation();
+  assert.equal(reload.c.state.selected, other);
+  assert.equal(reload.c.state.consoleView, 'sessions');
+
+  const list = harness('https://console.example/namespaces/team-b/sessions', [target]);
+  await list.c.applyConsoleLocation();
+  assert.equal(list.c.state.consoleView, 'sessions');
+  assert.equal(list.c.state.selected, null);
+  assert.equal(list.c.window.location.pathname, '/namespaces/team-b/sessions');
+
+  for (const suffix of ['missing', 'first?uid=replaced']) {
+    const failed = harness(`https://console.example/namespaces/team-b/sessions/${suffix}`, [target]);
+    await failed.c.applyConsoleLocation();
+    assert.equal(failed.c.state.selected, null);
+    assert.equal(failed.c.state.consoleView, 'sessions');
+    assert.equal(failed.c.window.location.href, `https://console.example/namespaces/team-b/sessions/${suffix}`);
+    assert.match(failed.toasts[0], /is no longer available/);
+  }
+}
+
+async function testSessionResourcePath() {
+  const h = harness('https://console.example/namespaces/team-a/resources/sessions/first', [first]);
+  h.c.api = async path => { h.requests.push(path); return {kind: 'Session', yaml: 'kind: Session'}; };
+  h.c.loadSessions = async () => { throw new Error('Resource routes must not open conversations'); };
+  await h.c.applyConsoleLocation();
+  assert.equal(h.c.state.consoleView, 'resource');
+  assert.equal(h.c.state.selected, null);
+  assert.equal(h.c.elements.resourceDetailTitle.textContent, 'Session first');
+  assert.equal(h.c.elements.resourceDetailYAML.textContent, 'kind: Session');
+  assert.equal(h.c.elements.resourceDetailTabs.hidden, true);
+  assert.equal(h.c.elements.resourceDetailLogsPanel.hidden, true);
+  assert.deepEqual(h.requests, ['/api/resources/sessions/team-a/first']);
+  assert.equal(h.c.window.location.pathname, '/namespaces/team-a/resources/sessions/first');
+  assert.deepEqual(h.toasts, []);
 }
 
 (async () => {
@@ -240,4 +381,8 @@ async function testDiscardedListIsRetried() {
   await testNavigationDuringPendingRequest();
   await testBackgroundRefreshReplacesHistory();
   await testDiscardedListIsRetried();
+  await testResourcePagesAndHistory();
+  await testResourceErrorsAndNavigation();
+  await testSessionConversationPaths();
+  await testSessionResourcePath();
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -140,6 +140,18 @@ func TestSessionLinksSurviveAuthentication(t *testing.T) {
 		location      string
 	}{
 		{"/?namespace=team-a&session=worker", false, "/login?namespace=team-a&session=worker"},
+		{"/namespaces/team-a/resources/tasks/build", false, "/login?next=%2Fnamespaces%2Fteam-a%2Fresources%2Ftasks%2Fbuild"},
+		{"/namespaces/team-a/resources", false, "/login?next=%2Fnamespaces%2Fteam-a%2Fresources"},
+		{"/namespaces/team-a/sessions/worker", false, "/login?next=%2Fnamespaces%2Fteam-a%2Fsessions%2Fworker"},
+		{"/namespaces/team-a/resources/sessions/worker", false, "/login?next=%2Fnamespaces%2Fteam-a%2Fresources%2Fsessions%2Fworker"},
+		{"/login?next=%2Fnamespaces%2Fteam-a%2Fsessions%2Fworker", true, "/namespaces/team-a/sessions/worker"},
+		{"/login?next=%2Fnamespaces%2Fteam-a%2Fsessions%2Fworker&uid=instance", true, "/namespaces/team-a/sessions/worker?uid=instance"},
+		{"/login?next=%2Fnamespaces%2Fteam-a%2Fresources%2Fsessions%2Fworker", true, "/namespaces/team-a/resources/sessions/worker"},
+		{"/login?next=%2Fnamespaces%2Fteam-a%2Fresources%2Ftasks%2Fbuild", true, "/namespaces/team-a/resources/tasks/build"},
+		{"/login?next=%2Fnamespaces%2Fteam-a%2Fresources", true, "/namespaces/team-a/resources"},
+		{"/login?next=https%3A%2F%2Fexample.com", true, "/"},
+		{"/login?next=%2F%2Fexample.com", true, "/"},
+		{"/login?next=%2Fnamespaces%2Fteam-a%2Fresources%2Ftasks%2Fbuild%5Cexample.com", true, "/"},
 		{"/?namespace=team-a&session=worker&uid=instance", false, "/login?namespace=team-a&session=worker&uid=instance"},
 		{"/login?namespace=team-a&session=worker", true, "/?namespace=team-a&session=worker"},
 		{"/?namespace=team-a&session=worker&redirect=https://example.com", false, "/login?namespace=team-a&session=worker"},
@@ -155,6 +167,19 @@ func TestSessionLinksSurviveAuthentication(t *testing.T) {
 				t.Fatalf("status = %d location = %q, want %q", response.Code, response.Header().Get("Location"), test.location)
 			}
 		})
+	}
+}
+
+func TestConsoleResourcePageReload(t *testing.T) {
+	server := testServer(t)
+	for _, path := range []string{"/namespaces/team-a/resources/tasks/build", "/namespaces/team-a/resources", "/namespaces/team-a/sessions/worker", "/namespaces/team-a/resources/sessions/worker"} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.Header.Set("Authorization", "Bearer secret-token")
+		response := httptest.NewRecorder()
+		server.ServeHTTP(response, request)
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `id="resource-detail-page"`) {
+			t.Fatalf("GET %s status = %d body = %s", path, response.Code, response.Body.String())
+		}
 	}
 }
 
@@ -179,7 +204,8 @@ func TestConsoleApplicationIncludesResourceViews(t *testing.T) {
 		`id="resource-inventory-panel"`,
 		`id="resource-type-list"`,
 		`id="resource-search"`,
-		`id="resource-detail-dialog"`,
+		`id="resource-detail-page"`,
+		`id="back-to-resources"`,
 		`id="resource-detail-logs-tab"`,
 		`id="refresh-resource-logs"`,
 		`id="resource-detail-logs"`,
@@ -216,7 +242,7 @@ func TestConsoleApplicationIncludesResourceViews(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{".resource-summary-grid", ".resource-summary-card", ".resource-diagram", ".resource-relationship-node", ".resource-browser", ".resource-type-list", ".resource-table", ".resource-detail-dialog", ".resource-detail-tabs[hidden]"} {
+	for _, expected := range []string{".resource-summary-grid", ".resource-summary-card", ".resource-diagram", ".resource-relationship-node", ".resource-browser", ".resource-type-list", ".resource-table", ".resource-detail-heading", ".resource-detail-tabs[hidden]"} {
 		if !strings.Contains(string(styles), expected) {
 			t.Errorf("Console styles do not contain %q", expected)
 		}

@@ -594,12 +594,23 @@ async function testWorkerClicks() {
   assert.equal(focused, true);
   assert.equal(messages[0].type, 'notification.clicked');
   assert.equal(messages[0].session, session);
+  for (const pathname of ['/namespaces/team/resources/tasks/build', '/namespaces/team/resources/sessions/worker', '/namespaces/team/resources', '/namespaces/team/sessions/worker']) {
+    windows[0].url = `https://console.example${pathname}`;
+    focused = false;
+    messages.length = 0;
+    await click();
+    assert.equal(focused, true, pathname);
+    assert.equal(messages[0].type, 'notification.clicked');
+    assert.equal(messages[0].session, session);
+    assert.equal(opened.length, 0, 'Reuse the resource page instead of opening another window');
+  }
   windows = [];
   await click();
   const url = new URL(opened[0]);
   assert.equal(url.origin, 'https://console.example');
-  assert.equal(url.searchParams.get('session'), 'worker');
-  assert.equal(url.searchParams.get('namespace'), 'team');
+  assert.equal(url.pathname, '/namespaces/team/sessions/worker');
+  assert.equal(url.searchParams.has('session'), false);
+  assert.equal(url.searchParams.has('namespace'), false);
   assert.equal(url.searchParams.get('uid'), 'session-1');
 }
 

@@ -314,7 +314,7 @@ rules:
       - create
       - update
       - delete
-  {{- if eq .Values.consoleServer.auth.mode "oidc" }}
+  {{- if or (eq .Values.consoleServer.auth.mode "oidc") (eq .Values.consoleServer.auth.mode "github") }}
   - apiGroups: [rbac.authorization.k8s.io]
     resources: [rolebindings]
     verbs: [list, create, delete]

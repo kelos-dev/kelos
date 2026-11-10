@@ -1,8 +1,5 @@
 {{- if and .Values.consoleServer.enabled (or (eq .Values.consoleServer.auth.mode "oidc") (eq .Values.consoleServer.auth.mode "github")) }}
-{{- $roles := list "kelos-console-user" }}
-{{- if eq .Values.consoleServer.auth.mode "oidc" }}
-{{- $roles = append $roles "kelos-console-admin" }}
-{{- end }}
+{{- $roles := list "kelos-console-user" "kelos-console-admin" }}
 {{- range $name := $roles }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1

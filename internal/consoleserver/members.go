@@ -53,6 +53,7 @@ type consoleGroupAccess struct {
 
 type consoleMemberInventory struct {
 	Enabled        bool                 `json:"enabled"`
+	AuthMode       string               `json:"authMode,omitempty"`
 	UsernamePrefix string               `json:"usernamePrefix,omitempty"`
 	CurrentUser    string               `json:"currentUser,omitempty"`
 	Roles          []consoleRole        `json:"roles"`
@@ -156,11 +157,11 @@ func collectMembers(bindings []rbacv1.RoleBinding, prefix, groupsPrefix string) 
 }
 
 func (s *Server) adminMembers(writer http.ResponseWriter, request *http.Request, parts []string) {
-	if s.authMode != AuthModeOIDC {
+	if s.authMode != AuthModeOIDC && s.authMode != AuthModeGitHub {
 		if len(parts) == 0 && request.Method == http.MethodGet {
 			writeJSON(writer, http.StatusOK, consoleMemberInventory{Roles: []consoleRole{}, Members: []consoleMember{}, Groups: []consoleGroupAccess{}})
 		} else {
-			writeError(writer, http.StatusForbidden, "member management requires OIDC authentication")
+			writeError(writer, http.StatusForbidden, "member management requires OIDC or GitHub authentication")
 		}
 		return
 	}
@@ -204,7 +205,7 @@ func (s *Server) listMembers(writer http.ResponseWriter, request *http.Request) 
 		return
 	}
 	identity := request.Context().Value(principalKey{}).(principal)
-	inventory := consoleMemberInventory{Enabled: true, UsernamePrefix: s.proxyAuth.UsernamePrefix, CurrentUser: identity.username, Roles: []consoleRole{}, Members: members, Groups: groups}
+	inventory := consoleMemberInventory{Enabled: true, AuthMode: s.authMode, UsernamePrefix: s.proxyAuth.UsernamePrefix, CurrentUser: identity.username, Roles: []consoleRole{}, Members: members, Groups: groups}
 	canCreate, err := s.allowed(request, rbacAccess("create", "rolebindings", namespace, ""))
 	if err != nil {
 		writeError(writer, http.StatusServiceUnavailable, "authorization service unavailable")
@@ -259,7 +260,7 @@ func (s *Server) saveMember(writer http.ResponseWriter, request *http.Request, n
 			return
 		}
 		if consoleRoleName(payload.Role) == "" || (adding && !validIdentityValue(payload.Subject, 1024)) || (!adding && payload.Subject != "") {
-			writeError(writer, http.StatusBadRequest, "a valid OIDC subject and a User or Admin role are required")
+			writeError(writer, http.StatusBadRequest, "a valid user ID and a User or Admin role are required")
 			return
 		}
 		if adding {

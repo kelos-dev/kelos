@@ -68,6 +68,7 @@
         memberDialogDescription: document.querySelector('#member-dialog-description'),
         memberForm: document.querySelector('#member-form'),
         memberSubject: document.querySelector('#member-subject'),
+        memberSubjectLabel: document.querySelector('#member-subject-label'),
         memberRole: document.querySelector('#member-role'),
         memberHelp: document.querySelector('#member-help'),
         memberDialogError: document.querySelector('#member-dialog-error'),
@@ -1264,7 +1265,7 @@
             if (generation !== state.memberGeneration || namespace !== state.namespace)
                 return;
             if (!inventory.enabled) {
-                elements.memberStatus.textContent = 'Members require OIDC sign-in. Static-token mode uses one shared identity.';
+                elements.memberStatus.textContent = 'Members require OIDC or GitHub sign-in. Static-token mode uses one shared identity.';
                 return;
             }
             state.memberInventory = inventory;
@@ -1355,6 +1356,9 @@
         state.memberEditing = { member, namespace: state.namespace };
         elements.memberDialogTitle.textContent = member ? `Change role for ${memberName(member)}` : 'Add member';
         elements.memberDialogDescription.textContent = `Membership in ${state.namespace}`;
+        const github = inventory.authMode === 'github';
+        elements.memberSubjectLabel.textContent = github ? 'GitHub username' : 'OIDC user ID';
+        elements.memberSubject.placeholder = github ? 'GitHub login name' : 'Subject from your identity provider';
         elements.memberSubject.value = member ? memberName(member) : '';
         elements.memberSubject.disabled = Boolean(member);
         elements.memberRole.disabled = false;
@@ -1362,7 +1366,9 @@
         for (const role of roles)
             addOption(elements.memberRole, role.name, role.label);
         elements.memberRole.value = member && roles.some(role => role.name === member.role) ? member.role : roles[0].name;
-        elements.memberHelp.textContent = member ? 'This changes their direct role in this namespace.' : `Enter the identity provider's subject ID. The Console adds “${inventory.usernamePrefix}” automatically. Name and email lookup is not available yet.`;
+        elements.memberHelp.textContent = member ? 'This changes their direct role in this namespace.' : github
+            ? `Enter their GitHub login name without @, exactly as shown on their GitHub profile (case-sensitive). The Console adds “${inventory.usernamePrefix}” automatically. They must be allowed to sign in to this Console.`
+            : `Enter the identity provider's subject ID. The Console adds “${inventory.usernamePrefix}” automatically. Name and email lookup is not available yet.`;
         elements.memberDialogError.hidden = true;
         elements.memberSave.textContent = member ? 'Save role' : 'Add member';
         elements.memberSave.disabled = false;

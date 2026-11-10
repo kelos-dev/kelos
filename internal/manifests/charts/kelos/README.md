@@ -368,7 +368,7 @@ Large sessions also require ingress request and response header limits that
 accommodate the proxy's session cookies.
 
 The chart creates unbound `kelos-console-user` and `kelos-console-admin`
-ClusterRoles in OIDC mode; GitHub mode creates only `kelos-console-user`.
+ClusterRoles in OIDC and GitHub modes.
 Both roles allow manual Task creation from TaskSpawners and suspending or resuming
 automatic task creation. The suspend/resume permissions do not grant general
 TaskSpawner editing. To grant Session access, manual Task creation, TaskSpawner
@@ -431,7 +431,9 @@ Explicit `bind` permission is restricted to the two Console ClusterRoles; neithe
 role grants permission to edit or escalate ClusterRoles.
 
 Choose an accessible namespace from the sidebar dropdown, then open **Admin →
-Members**. **Add member** takes an OIDC subject ID and defaults to **User**.
+Members**. **Add member** takes an OIDC subject ID or a GitHub login name
+(without `@`), depending on the sign-in mode, and defaults to **User**.
+GitHub login capitalization must match the user’s GitHub profile.
 The Console adds the configured username prefix and grants membership in the
 selected namespace. User members can use Sessions and inspect resources;
 Admin members can also manage configuration and members. The Console remembers
@@ -451,8 +453,8 @@ shown with their sources. External assignments cannot be changed here, and
 removing direct membership preserves external and group access. The Console does
 not query the identity provider for user names, email addresses, or individual
 group members. Other roles and ClusterRoleBindings remain managed separately.
-Membership management requires OIDC; it is unavailable with GitHub authentication
-or a shared static token.
+Membership management requires OIDC or GitHub sign-in; it is unavailable with
+a shared static token.
 The Console ServiceAccount lists namespaces and filters them by the signed-in
 user's permissions; human users do not need permission to list namespaces.
 Discovery runs at most eight authorization checks concurrently per request. The
@@ -574,6 +576,21 @@ kubectl -n team-frontend create rolebinding kelos-console-developers \
   --clusterrole=kelos-console-user \
   --group=github:company:my-org:frontend-developers
 ```
+
+To let an administrator grant namespace access through **Admin → Members**,
+bootstrap their Admin role in that namespace:
+
+```bash
+kubectl -n team-frontend create rolebinding kelos-console-administrators \
+  --clusterrole=kelos-console-admin \
+  --user=github:company:alice
+```
+
+The administrator can then select the namespace, choose **Add member**, enter a
+GitHub login name exactly as shown on the user’s GitHub profile (case-sensitive),
+and assign **User** or **Admin** access. The Console adds the
+configured username prefix automatically. A namespace grant does not bypass the
+configured organization or team sign-in restrictions.
 
 User identities use the prefixed GitHub login name, such as
 `github:company:alice`, rather than an immutable numeric account ID. Login

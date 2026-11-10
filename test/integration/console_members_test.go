@@ -33,6 +33,14 @@ import (
 )
 
 func TestConsoleMembership(t *testing.T) {
+	for _, mode := range []string{consoleserver.AuthModeOIDC, consoleserver.AuthModeGitHub} {
+		t.Run(mode, func(t *testing.T) { testConsoleMembership(t, mode) })
+	}
+}
+
+func testConsoleMembership(t *testing.T, mode string) {
+	prefix := mode + ":"
+
 	environment := &envtest.Environment{CRDDirectoryPaths: []string{filepath.Join("..", "..", "internal", "manifests")}, ErrorIfCRDPathMissing: true}
 	environment.ControlPlane.GetAPIServer().Configure().Set("authorization-mode", "RBAC")
 	config, err := environment.Start()
@@ -60,12 +68,20 @@ func TestConsoleMembership(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	chart, err := helmchart.Render(manifests.ChartFS, map[string]interface{}{"consoleServer": map[string]interface{}{
-		"enabled": true,
-		"auth": map[string]interface{}{"mode": "oidc", "oidc": map[string]interface{}{
+	auth := map[string]interface{}{"mode": mode}
+	if mode == consoleserver.AuthModeOIDC {
+		auth["oidc"] = map[string]interface{}{
 			"issuerURL": "https://identity.example", "clientID": "kelos-console", "redirectURL": "https://console.example/oauth2/callback",
-			"secretName": "console-oidc", "usernamePrefix": "oidc:", "groupsPrefix": "oidc:",
-		}},
+			"secretName": "console-oidc", "usernamePrefix": prefix, "groupsPrefix": prefix,
+		}
+	} else {
+		auth["github"] = map[string]interface{}{
+			"clientID": "kelos-console", "redirectURL": "https://console.example/oauth2/callback",
+			"secretName": "console-github", "usernamePrefix": prefix, "groupsPrefix": prefix,
+		}
+	}
+	chart, err := helmchart.Render(manifests.ChartFS, map[string]interface{}{"consoleServer": map[string]interface{}{
+		"enabled": true, "auth": auth,
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -88,7 +104,7 @@ func TestConsoleMembership(t *testing.T) {
 	bootstrap := &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{Name: "console-administrators", Namespace: "team-a"},
 		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "kelos-console-admin"},
-		Subjects:   []rbacv1.Subject{{Kind: "User", APIGroup: rbacv1.GroupName, Name: "oidc:alice"}},
+		Subjects:   []rbacv1.Subject{{Kind: "User", APIGroup: rbacv1.GroupName, Name: prefix + "alice"}},
 	}
 	if err := kube.Create(t.Context(), bootstrap); err != nil {
 		t.Fatal(err)
@@ -104,8 +120,8 @@ func TestConsoleMembership(t *testing.T) {
 		t.Fatal(err)
 	}
 	server, err := consoleserver.New(consoleserver.Config{
-		AuthMode:  consoleserver.AuthModeOIDC,
-		ProxyAuth: &consoleserver.ProxyAuthConfig{ExternalURL: "https://console.example", UsernamePrefix: "oidc:", GroupsPrefix: "oidc:", Reviewer: clientset.AuthorizationV1().SubjectAccessReviews(), Logger: slog.New(slog.NewJSONHandler(io.Discard, nil))},
+		AuthMode:  mode,
+		ProxyAuth: &consoleserver.ProxyAuthConfig{ExternalURL: "https://console.example", UsernamePrefix: prefix, GroupsPrefix: prefix, Reviewer: clientset.AuthorizationV1().SubjectAccessReviews(), Logger: slog.New(slog.NewJSONHandler(io.Discard, nil))},
 		Client:    serviceClient, Clientset: clientset, RESTConfig: serviceConfig, HTTPClient: http.DefaultClient, DefaultNamespace: "team-a",
 	})
 	if err != nil {
@@ -163,7 +179,7 @@ func TestConsoleMembership(t *testing.T) {
 		}
 		for _, user := range []string{"alice", "bob"} {
 			userConfig := rest.CopyConfig(config)
-			userConfig.Impersonate = rest.ImpersonationConfig{UserName: "oidc:" + user}
+			userConfig.Impersonate = rest.ImpersonationConfig{UserName: prefix + user}
 			userClient, err := client.New(userConfig, client.Options{Scheme: scheme})
 			if err != nil {
 				t.Fatal(err)
@@ -316,7 +332,7 @@ func TestConsoleMembership(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, member := range inventory.Members {
-			if member.Username == "oidc:bob" {
+			if member.Username == prefix+"bob" {
 				return member.ID, member.Version
 			}
 		}

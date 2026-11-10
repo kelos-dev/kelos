@@ -116,7 +116,7 @@ func TestConsoleMembersLifecycle(t *testing.T) {
 	}
 }
 
-func TestConsoleMembersRequireOIDCAndRBAC(t *testing.T) {
+func TestConsoleMembersRequireProxyAuthenticationAndRBAC(t *testing.T) {
 	response := adminRequest(testServer(t), http.MethodGet, "/api/admin/members", "")
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"enabled":false`) {
 		t.Fatalf("static inventory: %d %s", response.Code, response.Body.String())
@@ -168,20 +168,38 @@ func TestConsoleMembersRequireOIDCAndRBAC(t *testing.T) {
 	}
 }
 
-func TestConsoleMembersDisabledWithGitHubAuthentication(t *testing.T) {
+func TestConsoleGitHubMembersLifecycle(t *testing.T) {
 	server := memberTestServer(t, reviewFunc(allowReview))
 	server.authMode = AuthModeGitHub
-	server.proxyAuth.UsernamePrefix = "github:"
-	server.proxyAuth.GroupsPrefix = "github:"
-	response := memberRequest(server, http.MethodGet, "/api/admin/members?namespace=team-a", "")
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"enabled":false`) {
-		t.Fatalf("GitHub inventory: %d %s", response.Code, response.Body.String())
+	server.proxyAuth.UsernamePrefix = "github:company:"
+	server.proxyAuth.GroupsPrefix = "github:company:"
+	response := memberRequest(server, http.MethodPost, "/api/admin/members?namespace=team-a", `{"subject":"OctoCat","role":"user"}`)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("grant GitHub access: %d %s", response.Code, response.Body.String())
 	}
-	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete} {
-		response = memberRequest(server, method, "/api/admin/members", "")
-		if response.Code != http.StatusForbidden {
-			t.Fatalf("GitHub %s: %d %s", method, response.Code, response.Body.String())
-		}
+	inventory := memberInventory(t, server)
+	if !inventory.Enabled || inventory.AuthMode != AuthModeGitHub || inventory.UsernamePrefix != "github:company:" || inventory.CurrentUser != "github:company:alice" || len(inventory.Members) != 1 {
+		t.Fatalf("GitHub inventory = %#v", inventory)
+	}
+	member := inventory.Members[0]
+	if member.Username != "github:company:OctoCat" || member.Role != "user" || !member.CanChange || !member.CanRemove {
+		t.Fatalf("GitHub member = %#v", member)
+	}
+	response = memberRequest(server, http.MethodPut, memberURL(member), `{"role":"admin"}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("promote GitHub member: %d %s", response.Code, response.Body.String())
+	}
+	member = memberInventory(t, server).Members[0]
+	var binding rbacv1.RoleBinding
+	if err := server.client.Get(t.Context(), client.ObjectKey{Namespace: "team-a", Name: memberBindingName("github:company:OctoCat", "admin")}, &binding); err != nil {
+		t.Fatal(err)
+	}
+	if !managedMemberBinding(&binding, "github:company:OctoCat") || bindingConsoleRole(&binding) != "admin" {
+		t.Fatalf("GitHub grant = %#v", binding)
+	}
+	response = memberRequest(server, http.MethodDelete, memberURL(member), "")
+	if response.Code != http.StatusOK || len(memberInventory(t, server).Members) != 0 {
+		t.Fatalf("remove GitHub member: %d %s", response.Code, response.Body.String())
 	}
 }
 

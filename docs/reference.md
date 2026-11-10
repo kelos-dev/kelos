@@ -1004,11 +1004,14 @@ dropdown refreshes the namespace choices and keeps your current selection when
 it is still accessible. If you have no accessible namespaces, ask an administrator
 to add you as a member, then reopen the dropdown.
 
-With OIDC sign-in, **Admin → Members** shows each direct member once in the active
-namespace. Use **Add member** to enter an OIDC subject ID and choose **User**
+With OIDC or GitHub sign-in, **Admin → Members** shows each direct member once in
+the active namespace. Select the namespace from the sidebar, then use **Add member**
+to enter an OIDC subject ID or GitHub login name (without `@`) and choose **User**
 (the default) or **Admin**. User members can use Sessions and inspect resources;
 Admin members can also manage configuration and membership in that namespace.
-The configured username prefix is added automatically. The Console does not query
+For GitHub, enter the login exactly as shown on the user’s GitHub profile;
+namespace grants are case-sensitive. The configured username prefix is added
+automatically. The Console does not query
 an identity provider's directory, so name and email lookup are unavailable.
 
 **Change role** promotes or demotes a direct member in one action. **Remove
@@ -1024,8 +1027,11 @@ here. Namespace group grants to the Console roles appear under **Access through
 groups**; individual group members are not listed. Removing direct membership
 preserves external assignments and group access. Other roles and
 ClusterRoleBindings must be managed separately. Membership management requires
-OIDC. A cluster administrator must bind the first Console administrator; see the
-[Console setup guide](../internal/manifests/charts/kelos/README.md#console-oidc-authentication).
+OIDC or GitHub sign-in. Granting namespace access does not bypass the configured
+GitHub organization or team sign-in restrictions. A cluster administrator must
+bind the first Console administrator; see the
+[OIDC setup guide](../internal/manifests/charts/kelos/README.md#console-oidc-authentication)
+or [GitHub/GHES setup guide](../internal/manifests/charts/kelos/README.md#console-github-and-ghes-authentication).
 
 Selecting an existing Session as a source populates both the form fields and the
 editable YAML manifest. Settings that the form cannot represent remain editable
@@ -1646,13 +1652,13 @@ In the Console, select a TaskSpawner on the **Resources** page and choose
 **Suspend** or **Resume** to set `TaskSpawner.spec.suspend`. The action and
 automatic task creation state reflect the requested suspension setting while
 the controller applies it. Existing Tasks keep running. The `kelos-console-user`
-role and, in OIDC mode, the `kelos-console-admin` role include the required
+role and the `kelos-console-admin` role include the required
 TaskSpawner suspend/resume permissions.
 
 To run a Task manually, select a TaskSpawner on the **Resources** page, enter any
 required template values, and choose **Run task**. Console runs use the same
 defaults and standalone Task behavior as the CLI, with an automatically generated
-Task name. The `kelos-console-user` role and, in OIDC mode, `kelos-console-admin`
+Task name. The `kelos-console-user` and `kelos-console-admin` roles
 include Task creation permission. The chart does not grant the Console
 ServiceAccount access to Secrets. Context sources that use Secrets require an
 explicit namespaced grant of `get` on each referenced Secret to that

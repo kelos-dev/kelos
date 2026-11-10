@@ -757,6 +757,9 @@ func TestSessionFormUsesResourceSelectors(t *testing.T) {
 		`id="agent-config-select"`,
 		`id="selected-agent-configs"`,
 		`id="session-mode-yaml"`,
+		`id="session-mode-spawner"`,
+		`id="session-spawner" required`,
+		`id="session-spawner-values"`,
 		`id="session-yaml"`,
 		`id="volume-claim-enabled"`,
 		`<option value="opencode">OpenCode</option>`,
@@ -774,7 +777,6 @@ func TestSessionSourceJavaScriptPreservesSelectedSource(t *testing.T) {
 	}
 	javascript := string(source)
 	for description, expected := range map[string]string{
-		"shared loading and submission guard":     "function updateCreationBusyState() {\n        const busy = state.sourceLoading || state.creatingSession;\n        elements.sessionSource.disabled = busy;\n        elements.createButton.disabled = busy;\n    }",
 		"submit loading guard":                    "if (state.sourceLoading || state.creatingSession)\n            return;",
 		"namespace invalidation reset":            "state.sourceGeneration += 1;\n        setSourceLoading(false);",
 		"explicit StorageClass tracking":          "state.sourceStorageClassNamePresent = Boolean(claim && 'storageClassName' in claim);",
@@ -1101,6 +1103,17 @@ func TestApplicationConsoleResourcesBehavior(t *testing.T) {
 	command := exec.Command(node, "testdata/console_resources_test.js")
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("running Console resources tests: %v\n%s", err, output)
+	}
+}
+
+func TestApplicationSessionCreationBehavior(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node.js is not installed")
+	}
+	command := exec.Command(node, "testdata/session_creation_test.js")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("running Session creation tests: %v\n%s", err, output)
 	}
 }
 

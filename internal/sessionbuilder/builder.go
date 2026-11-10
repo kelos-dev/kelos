@@ -28,7 +28,7 @@ type SpawnerRef struct {
 	Kind       string
 }
 
-// Build creates a Session from a SessionSpawner template and webhook context.
+// Build creates a Session from a SessionSpawner template and template values.
 func Build(
 	name, namespace string,
 	sessionTemplate *kelos.SessionTemplate,

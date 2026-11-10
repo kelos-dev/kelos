@@ -464,6 +464,10 @@ func (s *Server) api(writer http.ResponseWriter, request *http.Request) {
 		s.listSessionOptions(writer, request)
 		return
 	}
+	if path == "sessionspawners" && request.Method == http.MethodGet {
+		s.listSessionSpawners(writer, request)
+		return
+	}
 	if path == "logout" && request.Method == http.MethodPost {
 		if s.proxyAuth != nil {
 			writeJSON(writer, http.StatusOK, map[string]string{"logoutURL": "/oauth2/sign_out?rd=/oauth2/sign_in"})
@@ -508,6 +512,10 @@ func (s *Server) api(writer http.ResponseWriter, request *http.Request) {
 	}
 	if len(parts) == 5 && parts[0] == "resources" && parts[1] == "taskspawners" && parts[4] == "run" && request.Method == http.MethodPost {
 		s.runTaskSpawner(writer, request, parts[2], parts[3])
+		return
+	}
+	if len(parts) == 5 && parts[0] == "resources" && parts[1] == "sessionspawners" && parts[4] == "run" && request.Method == http.MethodPost {
+		s.runSessionSpawner(writer, request, parts[2], parts[3])
 		return
 	}
 	if len(parts) == 5 && parts[0] == "resources" && parts[1] == "taskspawners" && request.Method == http.MethodPost && (parts[4] == "suspend" || parts[4] == "resume") {

@@ -567,6 +567,7 @@ const elements = requireElements({
   activeNamespace: document.querySelector('#active-namespace'),
   namespace: document.querySelector('[name="namespace"]'),
   sessionSource: document.querySelector('#session-source'),
+  sessionSourcePicker: document.querySelector('#session-source-picker'),
   sessionSourceStatus: document.querySelector('#session-source-status'),
   provider: document.querySelector('[name="provider"]'),
   credentialType: document.querySelector('#credential-type'),
@@ -581,6 +582,10 @@ const elements = requireElements({
   formFields: document.querySelector('#session-form-fields'),
   formMode: document.querySelector('#session-mode-form'),
   yamlMode: document.querySelector('#session-mode-yaml'),
+  spawnerMode: document.querySelector('#session-mode-spawner'),
+  spawnerFields: document.querySelector('#session-spawner-fields'),
+  sessionSpawner: document.querySelector('#session-spawner'),
+  sessionSpawnerValues: document.querySelector('#session-spawner-values'),
   yamlPanel: document.querySelector('#session-yaml-panel'),
   yaml: document.querySelector('#session-yaml'),
   persistentVolume: document.querySelector('#volume-claim-enabled'),
@@ -668,6 +673,7 @@ const state = {
   options: {credentials: [], workspaces: [], agentConfigs: [], sessions: []} as SessionOptions,
   selectedAgentConfigs: [] as string[],
   creationMode: 'form',
+  sessionSpawners: [] as string[],
   sourceGeneration: 0,
   sourceLoading: false,
   creatingSession: false,
@@ -3781,16 +3787,49 @@ spec:
 
 function setCreationMode(mode) {
   const yaml = mode === 'yaml';
-  state.creationMode = yaml ? 'yaml' : 'form';
-  elements.formFields.hidden = yaml;
-  elements.formFields.disabled = yaml;
+  const spawner = mode === 'spawner';
+  state.creationMode = spawner ? 'spawner' : yaml ? 'yaml' : 'form';
+  elements.formFields.hidden = yaml || spawner;
+  elements.formFields.disabled = yaml || spawner;
+  elements.sessionSourcePicker.hidden = spawner;
+  elements.spawnerFields.hidden = !spawner;
   elements.yamlPanel.hidden = !yaml;
   elements.yaml.disabled = !yaml;
   elements.yaml.required = yaml;
-  elements.formMode.setAttribute('aria-selected', String(!yaml));
+  elements.formMode.setAttribute('aria-selected', String(!yaml && !spawner));
   elements.yamlMode.setAttribute('aria-selected', String(yaml));
+  elements.spawnerMode.setAttribute('aria-selected', String(spawner));
   elements.createButton.textContent = yaml ? 'Apply YAML' : 'Create session';
   if (yaml && !elements.yaml.value.trim()) elements.yaml.value = defaultSessionYAML();
+  updateCreationBusyState();
+}
+
+function renderSessionSpawnerOptions() {
+  const selected = elements.sessionSpawner.value;
+  elements.sessionSpawner.replaceChildren();
+  addOption(elements.sessionSpawner, '', state.sessionSpawners.length ? 'Choose a SessionSpawner…' : 'No SessionSpawners available');
+  for (const name of state.sessionSpawners) addOption(elements.sessionSpawner, name, name);
+  if (state.sessionSpawners.includes(selected)) elements.sessionSpawner.value = selected;
+}
+
+async function loadSessionSpawnerOptions() {
+  const namespace = state.namespace;
+  const generation = ++state.sourceGeneration;
+  setSourceLoading(true);
+  elements.dialogError.textContent = '';
+  try {
+    const names = await api<string[]>(`/api/sessionspawners?namespace=${encodeURIComponent(namespace)}`);
+    if (generation !== state.sourceGeneration || namespace !== state.namespace) return;
+    state.sessionSpawners = names;
+    renderSessionSpawnerOptions();
+  } catch (error) {
+    if (generation !== state.sourceGeneration || namespace !== state.namespace) return;
+    state.sessionSpawners = [];
+    renderSessionSpawnerOptions();
+    elements.dialogError.textContent = errorMessage(error);
+  } finally {
+    if (generation === state.sourceGeneration) setSourceLoading(false);
+  }
 }
 
 function updateVolumeClaimFields() {
@@ -3820,6 +3859,8 @@ async function loadOptions() {
 }
 
 function resetNamespaceReferences() {
+  state.sessionSpawners = [];
+  renderSessionSpawnerOptions();
   state.selectedAgentConfigs = [];
   state.sourceGeneration += 1;
   setSourceLoading(false);
@@ -4144,7 +4185,11 @@ function resetSourceValues() {
 
 function updateCreationBusyState() {
   const busy = state.sourceLoading || state.creatingSession;
-  elements.sessionSource.disabled = busy;
+  elements.sessionSource.disabled = busy || state.creationMode === 'spawner';
+  elements.formMode.disabled = busy || state.loadedSource?.formCompatible === false;
+  elements.yamlMode.disabled = busy;
+  elements.spawnerMode.disabled = busy;
+  elements.spawnerFields.disabled = busy || state.creationMode !== 'spawner';
   elements.createButton.disabled = busy;
 }
 
@@ -7042,7 +7087,12 @@ async function openDialog() {
   setCreationMode(state.creationMode);
   elements.dialog.showModal();
   loadOptions().catch(error => { elements.dialogError.textContent = errorMessage(error); });
-  window.setTimeout(() => (state.creationMode === 'yaml' ? elements.yaml : elements.form.elements.name).focus(), 0);
+  if (state.creationMode === 'spawner') {
+    await loadSessionSpawnerOptions();
+    if (elements.dialog.open && state.creationMode === 'spawner') elements.sessionSpawner.focus();
+  } else {
+    window.setTimeout(() => (state.creationMode === 'yaml' ? elements.yaml : elements.form.elements.name).focus(), 0);
+  }
 }
 
 elements.newSessionButton.addEventListener('click', openDialog);
@@ -7097,6 +7147,10 @@ elements.addAgentConfig.addEventListener('click', () => {
 });
 elements.formMode.addEventListener('click', () => setCreationMode('form'));
 elements.yamlMode.addEventListener('click', () => setCreationMode('yaml'));
+elements.spawnerMode.addEventListener('click', () => {
+  setCreationMode('spawner');
+  void loadSessionSpawnerOptions();
+});
 elements.persistentVolume.addEventListener('change', updateVolumeClaimFields);
 renderSessionSourceOptions();
 renderSectionOptions();
@@ -7120,7 +7174,12 @@ elements.form.addEventListener('submit', async event => {
   setCreatingSession(true);
   try {
     let created: SessionSummary;
-    if (state.creationMode === 'yaml') {
+    if (state.creationMode === 'spawner') {
+      created = await api<SessionSummary>(`/api/resources/sessionspawners/${encodeURIComponent(state.namespace)}/${encodeURIComponent(elements.sessionSpawner.value)}/run`, {
+        method: 'POST',
+        body: JSON.stringify({values: elements.sessionSpawnerValues.value}),
+      });
+    } else if (state.creationMode === 'yaml') {
       created = await api<SessionSummary>(`/api/sessions/apply?namespace=${encodeURIComponent(state.namespace)}`, {
         method: 'POST',
         headers: {'Content-Type': 'application/yaml'},

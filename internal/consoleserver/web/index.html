@@ -607,8 +607,14 @@
       </div>
       <section class="resource-detail-panel resource-detail-logs-panel" id="resource-detail-logs-panel" role="tabpanel" aria-labelledby="resource-detail-logs-tab" hidden>
         <div class="resource-detail-log-toolbar">
-          <span>Showing up to the latest 2,000 lines (2 MiB maximum).</span>
-          <button class="quiet-button" id="refresh-resource-logs" type="button">Refresh</button>
+          <span>Based on the latest 2,000 container log lines (2 MiB maximum).</span>
+          <div class="resource-detail-log-actions">
+            <div class="mode-switch" role="group" aria-label="Log format">
+              <button id="resource-log-format-formatted" type="button" aria-pressed="true">Formatted</button>
+              <button id="resource-log-format-raw" type="button" aria-pressed="false">Raw</button>
+            </div>
+            <button class="quiet-button" id="refresh-resource-logs" type="button">Refresh</button>
+          </div>
         </div>
         <pre id="resource-detail-logs"></pre>
       </section>

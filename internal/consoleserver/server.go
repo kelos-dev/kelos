@@ -44,6 +44,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
+	"github.com/kelos-dev/kelos/internal/agentlog"
 	"github.com/kelos-dev/kelos/internal/sessionattachment"
 	"github.com/kelos-dev/kelos/internal/sessionreset"
 	"github.com/kelos-dev/kelos/internal/sessionruntime"
@@ -913,6 +914,11 @@ func (s *Server) getTaskLogs(writer http.ResponseWriter, request *http.Request, 
 	if !s.requireAccess(writer, request, access("get", "tasks", namespace, name), access("get", "tasks/logs", namespace, name)) {
 		return
 	}
+	format := request.URL.Query().Get("format")
+	if format != "" && format != "raw" && format != "formatted" {
+		writeError(writer, http.StatusBadRequest, fmt.Sprintf("Task %q log format %q is not supported; use raw or formatted", name, format))
+		return
+	}
 	var task kelos.Task
 	if err := s.client.Get(request.Context(), client.ObjectKey{Namespace: namespace, Name: name}, &task); err != nil {
 		writeKubernetesError(writer, fmt.Sprintf("getting Task %q", name), err)
@@ -921,6 +927,15 @@ func (s *Server) getTaskLogs(writer http.ResponseWriter, request *http.Request, 
 	if task.Status.PodName == "" {
 		writeError(writer, http.StatusConflict, fmt.Sprintf("Task %q has no pod yet", name))
 		return
+	}
+	var agentType string
+	if format == "formatted" {
+		var err error
+		agentType, err = agentlog.ResolveType(request.Context(), s.client, namespace, &task)
+		if err != nil {
+			writeKubernetesError(writer, fmt.Sprintf("resolving agent type for Task %q", name), err)
+			return
+		}
 	}
 
 	logs, err := s.readTaskLogs(request.Context(), &task)
@@ -931,6 +946,16 @@ func (s *Server) getTaskLogs(writer http.ResponseWriter, request *http.Request, 
 		}
 		writeKubernetesError(writer, fmt.Sprintf("getting logs for Task %q", name), err)
 		return
+	}
+	if format == "formatted" {
+		// Format after tailing so the line and byte limits apply to raw output.
+		// One buffer for both streams keeps status and text lines in order.
+		var formatted bytes.Buffer
+		if err := agentlog.Format(agentType, strings.NewReader(logs), &formatted, &formatted); err != nil {
+			writeError(writer, http.StatusInternalServerError, fmt.Sprintf("formatting logs for Task %q: %v", name, err))
+			return
+		}
+		logs = formatted.String()
 	}
 
 	writer.Header().Set("Content-Type", "text/plain; charset=utf-8")

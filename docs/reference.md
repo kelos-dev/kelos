@@ -971,11 +971,13 @@ another shell.
 The Resources page shows the incoming and outgoing relationships for one
 selected object, with a searchable inventory for inspecting the full namespace.
 Selecting a Task from either resource view shows its agent container logs and
-manifest. The Logs tab shows up to the latest 2,000 lines with a 2 MiB maximum
-and can be refreshed while the Task is running. WorkerPool-backed Task views
-include only the selected Task's segment from the recent shared worker Pod log.
-The Console reports that the segment is unavailable when its markers are
-outside the bounded log window.
+manifest. The Logs tab reads up to the latest 2,000 container log lines with a
+2 MiB maximum and can be refreshed while the Task is running. By default it
+formats agent output into turns, as `kelos logs` does; **Raw** shows the
+unmodified container output, and the Console remembers the choice in the
+browser. WorkerPool-backed Task views include only the selected Task's segment
+from the recent shared worker Pod log. The Console reports that the segment is
+unavailable when its markers are outside the bounded log window.
 Select a TaskSpawner from either resource view and choose **Run task** to create
 one standalone Task from its template. Supply optional template values as a YAML
 or JSON object when the template needs event fields. The Console opens the

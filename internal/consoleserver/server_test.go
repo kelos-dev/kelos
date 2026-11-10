@@ -177,7 +177,7 @@ func TestConsoleResourcePageReload(t *testing.T) {
 		request.Header.Set("Authorization", "Bearer secret-token")
 		response := httptest.NewRecorder()
 		server.ServeHTTP(response, request)
-		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `id="resource-detail-page"`) {
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `id="resource-detail-panel"`) {
 			t.Fatalf("GET %s status = %d body = %s", path, response.Code, response.Body.String())
 		}
 	}
@@ -204,8 +204,12 @@ func TestConsoleApplicationIncludesResourceViews(t *testing.T) {
 		`id="resource-inventory-panel"`,
 		`id="resource-type-list"`,
 		`id="resource-search"`,
-		`id="resource-detail-page"`,
+		`id="resource-detail-panel"`,
 		`id="back-to-resources"`,
+		`id="resource-status"`,
+		`id="resource-sort"`,
+		`id="resource-detail-summary-tab"`,
+		`id="resource-detail-relationships-tab"`,
 		`id="resource-detail-logs-tab"`,
 		`id="refresh-resource-logs"`,
 		`id="resource-detail-logs"`,
@@ -242,7 +246,7 @@ func TestConsoleApplicationIncludesResourceViews(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{".resource-summary-grid", ".resource-summary-card", ".resource-diagram", ".resource-relationship-node", ".resource-browser", ".resource-type-list", ".resource-table", ".resource-detail-heading", ".resource-detail-tabs[hidden]"} {
+	for _, expected := range []string{".resource-summary-grid", ".resource-summary-card", ".resource-diagram", ".resource-relationship-node", ".resource-browser", ".resource-type-list", ".resource-table", ".resource-inspector", ".resource-detail-panel[hidden]"} {
 		if !strings.Contains(string(styles), expected) {
 			t.Errorf("Console styles do not contain %q", expected)
 		}

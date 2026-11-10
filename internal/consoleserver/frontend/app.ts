@@ -486,12 +486,21 @@ const elements = requireElements({
   resourceListCount: document.querySelector('#resource-list-count'),
   resourceListSummary: document.querySelector('#resource-list-summary'),
   resourceSearch: document.querySelector('#resource-search'),
+  resourceStatus: document.querySelector('#resource-status'),
+  resourceSort: document.querySelector('#resource-sort'),
   resourceList: document.querySelector('#resource-list'),
-  resourceDetailPage: document.querySelector('#resource-detail-page'),
+  resourceDetailPanel: document.querySelector('#resource-detail-panel'),
   backToResources: document.querySelector('#back-to-resources'),
   resourceDetailTitle: document.querySelector('#resource-detail-title'),
   resourceDetailSubtitle: document.querySelector('#resource-detail-subtitle'),
   resourceDetailTabs: document.querySelector('#resource-detail-tabs'),
+  resourceDetailSummaryTab: document.querySelector('#resource-detail-summary-tab'),
+  resourceDetailRelationshipsTab: document.querySelector('#resource-detail-relationships-tab'),
+  resourceDetailSummaryPanel: document.querySelector('#resource-detail-summary-panel'),
+  resourceDetailRelationshipsPanel: document.querySelector('#resource-detail-relationships-panel'),
+  resourceDetailSummary: document.querySelector('#resource-detail-summary'),
+  resourceDetailMessage: document.querySelector('#resource-detail-message'),
+  resourceDetailRelationships: document.querySelector('#resource-detail-relationships'),
   resourceDetailLogsTab: document.querySelector('#resource-detail-logs-tab'),
   resourceDetailManifestTab: document.querySelector('#resource-detail-manifest-tab'),
   resourceDetailLogsPanel: document.querySelector('#resource-detail-logs-panel'),
@@ -696,7 +705,7 @@ const state = {
   resourceRelationships: [] as ResourceRelationship[],
   resourceListGeneration: 0,
   resourceDetailGeneration: 0,
-  resourceDetail: null as {collection: ResourceDescriptor; item: ResourceSummary} | null,
+  resourceDetail: null as ResourceEntry | null,
   resourceDetailLogGeneration: 0,
   resourceDetailTask: null as {namespace: string; name: string} | null,
   resourceDetailSpawner: null as {namespace: string; name: string; suspended?: boolean} | null,
@@ -1215,17 +1224,11 @@ function resourceCollections() {
 
 function setConsoleView(view: string, {updateLocation = true} = {}) {
   state.consoleView = ['overview', 'sessions', 'resources', 'resource', 'admin'].includes(view) ? view : 'overview';
-  if (state.consoleView !== 'resource' && state.resourceDetail) {
-    state.resourceDetail = null;
-    state.resourceDetailGeneration++;
-    state.resourceDetailLogGeneration++;
-    state.resourceDetailTask = null;
-    state.resourceDetailSpawner = null;
-  }
+  if (state.resourceDetail && state.consoleView !== 'resource') closeResourceDetail(false, {updateLocation: false});
   elements.overviewView.hidden = state.consoleView !== 'overview';
   elements.sessionsView.hidden = state.consoleView !== 'sessions';
-  elements.resourcesView.hidden = state.consoleView !== 'resources';
-  elements.resourceDetailPage.hidden = state.consoleView !== 'resource';
+  elements.resourcesView.hidden = !['resources', 'resource'].includes(state.consoleView);
+  elements.resourceDetailPanel.hidden = state.consoleView !== 'resource';
   elements.adminView.hidden = state.consoleView !== 'admin';
   elements.sessionSidebar.hidden = state.consoleView !== 'sessions';
   for (const [button, name] of [
@@ -1259,7 +1262,7 @@ function resourceStatus(item: ResourceSummary) {
 
 type ResourceEntry = {collection: ResourceDescriptor; item: ResourceSummary};
 
-function createResourceTable(entries: ResourceEntry[], emptyMessage = state.namespace ? `No resources in ${state.namespace}.` : 'Select a namespace to view resources.') {
+function createResourceTable(entries: ResourceEntry[], emptyMessage = state.namespace ? `No resources in ${state.namespace}.` : 'Select a namespace to view resources.', {showKind = true, sortable = false} = {}) {
   if (!entries.length) {
     const empty = document.createElement('div');
     empty.className = 'resource-empty';
@@ -1270,10 +1273,23 @@ function createResourceTable(entries: ResourceEntry[], emptyMessage = state.name
   table.className = 'resource-table';
   const head = document.createElement('thead');
   const heading = document.createElement('tr');
-  for (const label of ['Name', 'Kind', 'Status', 'Created']) {
+  table.dataset.showKind = String(showKind);
+  for (const [label, sort] of [['Name', 'name'], ...(showKind ? [['Kind', '']] : []), ['Status', 'status'], ['Created', 'created']]) {
     const cell = document.createElement('th');
     cell.scope = 'col';
-    cell.textContent = label;
+    if (sortable && sort) {
+      const [selected, direction] = elements.resourceSort.value.split('-');
+      cell.setAttribute('aria-sort', selected === sort ? (direction === 'asc' ? 'ascending' : 'descending') : 'none');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = label + (selected === sort ? (direction === 'asc' ? ' ↑' : ' ↓') : '');
+      button.addEventListener('click', () => {
+        elements.resourceSort.value = `${sort}-${selected === sort && direction === 'asc' ? 'desc' : 'asc'}`;
+        renderResources();
+        elements.resourceList.querySelectorAll<HTMLButtonElement>('th button')[['name', 'status', 'created'].indexOf(sort)]?.focus();
+      });
+      cell.append(button);
+    } else cell.textContent = label;
     heading.append(cell);
   }
   head.append(heading);
@@ -1281,6 +1297,7 @@ function createResourceTable(entries: ResourceEntry[], emptyMessage = state.name
   for (const {collection, item} of entries) {
     const row = document.createElement('tr');
     if (item.message) row.title = item.message;
+    row.dataset.selected = String(state.resourceDetail?.collection.resource === collection.resource && state.resourceDetail.item.name === item.name && state.resourceDetail.item.namespace === item.namespace);
 
     const nameCell = document.createElement('td');
     nameCell.dataset.label = 'Name';
@@ -1288,6 +1305,7 @@ function createResourceTable(entries: ResourceEntry[], emptyMessage = state.name
     button.className = 'resource-name-button';
     button.href = resourcePagePath(collection.resource, item);
     button.textContent = item.name;
+    button.dataset.resourceKey = resourceReferenceKey({resource: collection.resource, name: item.name});
     button.setAttribute('aria-label', `Inspect ${collection.kind} ${item.namespace}/${item.name}`);
     button.addEventListener('click', event => {
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -1319,7 +1337,7 @@ function createResourceTable(entries: ResourceEntry[], emptyMessage = state.name
     ageCell.className = 'resource-row-age';
     ageCell.dataset.label = 'Created';
     ageCell.textContent = resourceAge(item.createdAt);
-    row.append(nameCell, kindCell, statusCell, ageCell);
+    row.append(nameCell, ...(showKind ? [kindCell] : []), statusCell, ageCell);
     body.append(row);
   }
   table.append(head, body);
@@ -1398,7 +1416,7 @@ function setResourceView(view: string) {
 }
 
 function handleResourceViewTabKeydown(event: KeyboardEvent) {
-  const tabs = [elements.resourceDiagramTab, elements.resourceInventoryTab];
+  const tabs = [elements.resourceInventoryTab, elements.resourceDiagramTab];
   const current = tabs.indexOf(event.target as ConsoleElement);
   if (current < 0) return;
   let target;
@@ -1643,8 +1661,18 @@ function filterResourceEntries(entries: ResourceEntry[], query: string): Resourc
 }
 
 function selectResourceKind(resource: string) {
+  if (elements.resourceKind.value !== resource) elements.resourceStatus.value = '';
   elements.resourceKind.value = resource;
   renderResources();
+}
+
+function sortResourceEntries(entries: ResourceEntry[], sort: string) {
+  const [field, direction] = sort.split('-');
+  const value = ({item}: ResourceEntry) => field === 'name' ? item.name : field === 'status' ? resourceStatus(item) : item.createdAt || '';
+  return [...entries].sort((left, right) => {
+    const compared = value(left).localeCompare(value(right));
+    return (direction === 'asc' ? compared : -compared) || `${left.collection.kind}/${left.item.name}`.localeCompare(`${right.collection.kind}/${right.item.name}`);
+  });
 }
 
 function renderResources() {
@@ -1657,21 +1685,29 @@ function renderResources() {
   }
 
   const entries = resourceEntries(collections, resource);
-  const filteredEntries = filterResourceEntries(entries, elements.resourceSearch.value);
+  const selectedStatus = elements.resourceStatus.value;
+  elements.resourceStatus.replaceChildren();
+  addOption(elements.resourceStatus, '', 'All statuses');
+  const statuses = [...new Set([...entries.map(({item}) => resourceStatus(item)), ...(selectedStatus ? [selectedStatus] : [])])].sort();
+  for (const status of statuses) addOption(elements.resourceStatus, status, status);
+  elements.resourceStatus.value = selectedStatus;
+  const status = elements.resourceStatus.value;
+  const matches = filterResourceEntries(entries, elements.resourceSearch.value).filter(entry => !status || resourceStatus(entry.item) === status);
+  const filteredEntries = sortResourceEntries(matches, elements.resourceSort.value);
   const query = elements.resourceSearch.value.trim();
   elements.resourceListTitle.textContent = collection?.label || 'All resources';
   elements.resourceListCount.textContent = String(entries.length);
-  elements.resourceListSummary.textContent = query
-    ? `${filteredEntries.length} of ${entries.length} resources match “${query}”.`
+  elements.resourceListSummary.textContent = query || status
+    ? `${filteredEntries.length} of ${entries.length} resources match your filters.`
     : (collection ? resourceDescriptions[collection.resource] : undefined) || 'Every Kelos object in this namespace.';
   for (const button of elements.resourceTypeList.querySelectorAll('button')) {
     if (button.dataset.resource === resource) button.setAttribute('aria-current', 'true');
     else button.removeAttribute('aria-current');
   }
-  const emptyMessage = !state.namespace ? 'Select a namespace to view resources.' : query
-    ? `No resources match “${query}”.`
+  const emptyMessage = !state.namespace ? 'Select a namespace to view resources.' : query || status
+    ? 'No resources match your filters. Try another search or status.'
     : `No ${collection?.label.toLowerCase() || 'resources'} in ${state.namespace}.`;
-  elements.resourceList.replaceChildren(createResourceTable(filteredEntries, emptyMessage));
+  elements.resourceList.replaceChildren(createResourceTable(filteredEntries, emptyMessage, {showKind: !collection, sortable: true}));
 }
 
 function memberName(member: ConsoleMember) {
@@ -2082,6 +2118,18 @@ async function loadResources({quiet = false} = {}) {
     renderResourceKindOptions();
     renderOverview();
     renderResources();
+    if (state.resourceDetail) {
+      const {collection, item} = state.resourceDetail;
+      const current = resourceCollections().find(candidate => candidate.resource === collection.resource)?.items.find(candidate => candidate.name === item.name);
+      if (current) {
+        state.resourceDetail = {collection, item: current};
+        renderResourceDetailSummary();
+      } else {
+        const restoreFocus = elements.resourceDetailPanel.contains(document.activeElement);
+        closeResourceDetail(restoreFocus);
+        showToast(`${collection.kind} ${item.name} no longer exists`);
+      }
+    }
   } catch (error) {
     if (!quiet && generation === state.namespaceGeneration && listGeneration === state.resourceListGeneration) showToast(errorMessage(error));
   }
@@ -2096,31 +2144,123 @@ async function refreshConsole() {
   }
 }
 
+function resourceDetailTabs() {
+  return [
+    [elements.resourceDetailSummaryTab, elements.resourceDetailSummaryPanel, 'summary'],
+    [elements.resourceDetailRelationshipsTab, elements.resourceDetailRelationshipsPanel, 'relationships'],
+    [elements.resourceDetailLogsTab, elements.resourceDetailLogsPanel, 'logs'],
+    [elements.resourceDetailManifestTab, elements.resourceDetailManifestPanel, 'manifest'],
+  ] as const;
+}
+
 function setResourceDetailView(view: string) {
-  const showLogs = view === 'logs' && !elements.resourceDetailTabs.hidden;
-  elements.resourceDetailLogsPanel.hidden = !showLogs;
-  elements.resourceDetailManifestPanel.hidden = showLogs;
-  elements.resourceDetailLogsTab.setAttribute('aria-selected', String(showLogs));
-  elements.resourceDetailLogsTab.tabIndex = showLogs ? 0 : -1;
-  elements.resourceDetailManifestTab.setAttribute('aria-selected', String(!showLogs));
-  elements.resourceDetailManifestTab.tabIndex = showLogs ? -1 : 0;
+  for (const [tab, panel, name] of resourceDetailTabs()) {
+    const selected = view === name && !tab.hidden;
+    panel.hidden = !selected;
+    tab.setAttribute('aria-selected', String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+  }
 }
 
 function handleResourceDetailTabKeydown(event: KeyboardEvent) {
-  const tabs = [elements.resourceDetailLogsTab, elements.resourceDetailManifestTab];
+  const tabs = resourceDetailTabs().map(([tab]) => tab).filter(tab => !tab.hidden);
   const current = tabs.indexOf(event.target as ConsoleElement);
   if (current < 0) return;
-
   let target;
   if (event.key === 'ArrowLeft') target = tabs[(current - 1 + tabs.length) % tabs.length];
   if (event.key === 'ArrowRight') target = tabs[(current + 1) % tabs.length];
   if (event.key === 'Home') target = tabs[0];
   if (event.key === 'End') target = tabs[tabs.length - 1];
   if (!target) return;
-
   event.preventDefault();
   target.click();
   target.focus();
+}
+
+function renderResourceDetailSummary() {
+  const entry = state.resourceDetail;
+  if (!entry) return;
+  const {collection, item} = entry;
+  const focusedRelationship = elements.resourceDetailRelationships.contains(document.activeElement)
+    ? (document.activeElement as HTMLElement).dataset.relationshipKey : undefined;
+  elements.resourceDetailSummary.replaceChildren();
+  for (const [label, value] of [
+    ['Kind', collection.kind], ['Namespace', item.namespace], ['Name', item.name],
+    ['Status', resourceStatus(item)], ['Created', item.createdAt ? new Date(item.createdAt).toLocaleString() : '—'],
+  ]) {
+    const term = document.createElement('dt');
+    term.textContent = label;
+    const description = document.createElement('dd');
+    description.textContent = value;
+    if (label === 'Status') {
+      description.className = 'resource-row-phase';
+      description.dataset.state = resourceStatus(item).toLowerCase();
+    }
+    elements.resourceDetailSummary.append(term, description);
+  }
+  elements.resourceDetailMessage.textContent = item.message || '';
+  elements.resourceDetailMessage.hidden = !item.message;
+  const relationships = resourceRelationshipsForFocus(state.resourceRelationships, resourceReferenceKey({resource: collection.resource, name: item.name}));
+  elements.resourceDetailRelationships.replaceChildren();
+  for (const [title, edges, incoming] of [
+    ['Related from', relationships.incoming, true], ['Connects to', relationships.outgoing, false],
+  ] as const) {
+    const heading = document.createElement('h3');
+    heading.textContent = title;
+    elements.resourceDetailRelationships.append(heading);
+    if (!edges.length) {
+      const empty = document.createElement('p');
+      empty.textContent = 'No relationships';
+      elements.resourceDetailRelationships.append(empty);
+    }
+    for (const edge of edges) {
+      const reference = incoming ? edge.source : edge.target;
+      const related = resourceEntryForReference(reference);
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'resource-related-button';
+      button.dataset.relationshipKey = `${incoming ? 'incoming' : 'outgoing'}/${resourceReferenceKey(reference)}/${edge.relationship}`;
+      button.textContent = `${related.collection.kind}/${related.item.name} · ${edge.relationship}${edge.inferred ? ' (selector or label match)' : ''}`;
+      button.disabled = Boolean(related.item.missing);
+      if (related.item.missing) button.textContent += ' · Missing';
+      button.addEventListener('click', () => openResourceDetail(related.collection, related.item));
+      elements.resourceDetailRelationships.append(button);
+    }
+  }
+  if (focusedRelationship) {
+    const button = Array.from(elements.resourceDetailRelationships.querySelectorAll<HTMLButtonElement>('button'))
+      .find(candidate => candidate.dataset.relationshipKey === focusedRelationship && !candidate.disabled);
+    (button || elements.resourceDetailRelationshipsTab).focus();
+  }
+}
+
+function closeResourceDetail(restoreFocus = true, {updateLocation = true} = {}) {
+  const entry = state.resourceDetail;
+  state.resourceDetailGeneration++;
+  state.resourceDetailLogGeneration++;
+  state.resourceDetail = null;
+  state.resourceDetailTask = null;
+  state.resourceDetailSpawner = null;
+  elements.resourceDetailPanel.hidden = true;
+  if (state.consoleView === 'resource') state.consoleView = 'resources';
+  renderResources();
+  if (updateLocation) updateConsoleLocation();
+  if (restoreFocus) {
+    const key = entry ? resourceReferenceKey({resource: entry.collection.resource, name: entry.item.name}) : '';
+    const button = Array.from(elements.resourceList.querySelectorAll<HTMLAnchorElement>('a[data-resource-key]')).find(candidate => candidate.dataset.resourceKey === key);
+    if (!elements.resourceInventoryPanel.hidden && button) button.focus();
+    else if (!elements.resourceDiagramPanel.hidden) elements.resourceRelationshipFocus.focus();
+    else elements.resourceInventoryTab.focus();
+  }
+}
+
+function showResourceDetailDiagram() {
+  const entry = state.resourceDetail;
+  if (!entry) return;
+  closeResourceDetail(false);
+  setResourceView('diagram');
+  focusResource({resource: entry.collection.resource, name: entry.item.name});
+  elements.resourceRelationshipFocus.focus();
 }
 
 async function loadResourceTaskLogs(item: ResourceSummary, detailGeneration: number) {
@@ -2142,6 +2282,7 @@ async function loadResourceTaskLogs(item: ResourceSummary, detailGeneration: num
 }
 
 async function openResourceDetail(collection: ResourceDescriptor, item: ResourceSummary, {updateLocation = true} = {}) {
+  item = resourceCollections().find(candidate => candidate.resource === collection.resource)?.items.find(candidate => candidate.namespace === item.namespace && candidate.name === item.name) || item;
   state.resourceDetail = {collection, item};
   elements.backToResources.setAttribute('href', `/namespaces/${encodeURIComponent(item.namespace)}/resources`);
   setConsoleView('resource', {updateLocation});
@@ -2149,7 +2290,8 @@ async function openResourceDetail(collection: ResourceDescriptor, item: Resource
   const showTaskLogs = collection.resource === 'tasks';
   elements.resourceDetailTitle.textContent = `${collection.kind} ${item.name}`;
   elements.resourceDetailSubtitle.textContent = `${item.namespace}/${item.name}`;
-  elements.resourceDetailTabs.hidden = !showTaskLogs;
+  elements.resourceDetailLogsTab.hidden = !showTaskLogs;
+  renderResourceDetailSummary();
   state.resourceDetailSpawner = collection.resource === 'taskspawners' ? {namespace: item.namespace, name: item.name} : null;
   elements.taskSpawnerLifecycle.hidden = !state.resourceDetailSpawner;
   elements.taskSpawnerLifecycleButton.disabled = true;
@@ -2168,13 +2310,19 @@ async function openResourceDetail(collection: ResourceDescriptor, item: Resource
     elements.resourceDetailLogs.textContent = '';
   }
   elements.resourceDetailYAML.textContent = 'Loading manifest…';
-  setResourceDetailView(showTaskLogs ? 'logs' : 'manifest');
+  setResourceDetailView('summary');
+  elements.resourceDetailPanel.hidden = false;
+  renderResources();
+  elements.resourceDetailTitle.focus();
 
   const manifestRequest = (async () => {
     try {
       const detail = await api<ResourceDetail>(`/api/resources/${encodeURIComponent(collection.resource)}/${encodeURIComponent(item.namespace)}/${encodeURIComponent(item.name)}`);
       if (generation !== state.resourceDetailGeneration) return;
-      elements.resourceDetailTitle.textContent = `${detail.kind || collection.kind} ${item.name}`;
+      collection = {...collection, kind: detail.kind || collection.kind};
+      state.resourceDetail!.collection = collection;
+      elements.resourceDetailTitle.textContent = `${collection.kind} ${item.name}`;
+      renderResourceDetailSummary();
       elements.resourceDetailYAML.textContent = detail.yaml;
       elements.taskSpawnerRunButton.disabled = !state.resourceDetailSpawner;
       if (state.resourceDetailSpawner) updateTaskSpawnerSuspension(detail);
@@ -3950,6 +4098,7 @@ async function switchNamespace(namespace, {updateLocation = true} = {}) {
   if (namespace === state.namespace) return;
   if (namespace && !state.namespaces.includes(namespace)) throw new Error('Choose an accessible namespace.');
   const hadLoadedSource = Boolean(state.loadedSource);
+  if (state.resourceDetail) closeResourceDetail(false, {updateLocation: false});
   state.namespace = namespace;
   if (state.consoleView === 'resource') setConsoleView('resources', {updateLocation: false});
   state.namespaceGeneration += 1;
@@ -7622,13 +7771,31 @@ elements.resourceDiagramTab.addEventListener('click', () => setResourceView('dia
 elements.resourceInventoryTab.addEventListener('click', () => setResourceView('inventory'));
 requiredElement('.resource-view-tabs').addEventListener('keydown', event => handleResourceViewTabKeydown(event as KeyboardEvent));
 elements.resourceRelationshipFocus.addEventListener('change', renderResourceDiagram);
-elements.resourceKind.addEventListener('change', renderResources);
+elements.resourceKind.addEventListener('change', () => {
+  elements.resourceStatus.value = '';
+  renderResources();
+});
 elements.resourceSearch.addEventListener('input', renderResources);
 elements.backToResources.addEventListener('click', event => {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
-  setConsoleView('resources');
+  closeResourceDetail();
 });
+elements.resourceStatus.addEventListener('change', renderResources);
+elements.resourceSort.addEventListener('change', renderResources);
+requiredElement('#refresh-resources').addEventListener('click', () => { void loadResources(); });
+document.querySelectorAll('.close-resource-detail').forEach(button => {
+  button.addEventListener('click', () => closeResourceDetail());
+});
+elements.resourceDetailPanel.addEventListener('keydown', event => {
+  if ((event as KeyboardEvent).key === 'Escape') {
+    event.preventDefault();
+    closeResourceDetail();
+  }
+});
+requiredElement('#resource-detail-show-diagram').addEventListener('click', showResourceDetailDiagram);
+elements.resourceDetailSummaryTab.addEventListener('click', () => setResourceDetailView('summary'));
+elements.resourceDetailRelationshipsTab.addEventListener('click', () => setResourceDetailView('relationships'));
 elements.taskSpawnerRunForm.addEventListener('submit', runTaskSpawner);
 elements.taskSpawnerLifecycleButton.addEventListener('click', toggleTaskSpawnerSuspension);
 elements.resourceDetailLogsTab.addEventListener('click', () => setResourceDetailView('logs'));

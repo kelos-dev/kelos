@@ -971,27 +971,39 @@ disconnects the shell stream; the Session conversation continues independently.
 Suspended, resetting, and unready Sessions cannot open a terminal. After a
 disconnect or shell exit, click **Reconnect** in the Terminal tab to start
 another shell.
-The Resources page shows the incoming and outgoing relationships for one
-selected object, with a searchable inventory for inspecting the full namespace.
-Selecting a resource opens its detail page at
+The **Resources** page opens on **Inventory**, where you can search by name,
+kind, or status, filter by status, and sort by name, status, or creation time.
+Selecting a resource opens an inspector with **Summary**, **Relationships**, and
+**YAML** tabs, plus **Logs** for Tasks. On wide screens, the inspector appears
+beside the inventory; on smaller screens, it fills the content area. The
+**Relationships** view shows incoming and outgoing connections for a selected
+object. Following related resources or switching to the relationship diagram
+preserves inventory filters.
+
+The selected resource has a dedicated URL at
 `/namespaces/<namespace>/resources/<resource-type>/<resource-name>`, for example
-`/namespaces/default/resources/tasks/my-task`. Copy or bookmark the URL to reopen the page;
-reload, browser Back and Forward, and token sign-in preserve the destination.
-The namespace resource browser is at `/namespaces/<namespace>/resources`.
-Session resource manifests use
+`/namespaces/default/resources/tasks/my-task`. Copy or bookmark the URL to reopen
+the inspector; reload, browser Back and Forward, and token sign-in preserve the
+destination. The namespace resource browser is at
+`/namespaces/<namespace>/resources`. Session resource manifests use
 `/namespaces/<namespace>/resources/sessions/<resource-name>`, independently of
 the Session conversation path.
-Task detail pages show the agent container logs and manifest. The Logs tab shows
-up to the latest 2,000 lines with a 2 MiB maximum and can be refreshed while the
-Task is running. WorkerPool-backed Task views
+
+A Task's **Logs** tab shows up to the latest 2,000 lines with a 2 MiB maximum
+and can be refreshed while the Task is running. WorkerPool-backed Task views
 include only the selected Task's segment from the recent shared worker Pod log.
 The Console reports that the segment is unavailable when its markers are
 outside the bounded log window.
-Select a TaskSpawner from either resource view and choose **Run task** to create
-one standalone Task from its template. Supply optional template values as a YAML
-or JSON object when the template needs event fields. The Console opens the
-created Task's logs and manifest. Manual runs bypass the schedule, source filters,
-suspension, and spawner task limits; see [Manual Task Creation](#manual-task-creation).
+
+Select a TaskSpawner from either resource view and choose **Run task** in its
+**Summary** tab to create one standalone Task from its template. Supply optional
+template values as a YAML or JSON object when the template needs event fields.
+The Console opens the created Task's **Summary**; use its **Logs** or **YAML** tab
+to inspect execution output or the manifest. Manual runs bypass the schedule,
+source filters, suspension, and spawner task limits; see
+[Manual Task Creation](#manual-task-creation). The TaskSpawner's **Summary** tab
+also provides **Suspend** and **Resume** controls for automatic task creation.
+Suspending a TaskSpawner leaves existing Tasks running.
 
 On the **Sessions** tab, choose **New session**, then **From spawner**. Select
 a SessionSpawner and supply any event fields needed by `initialPrompt` or

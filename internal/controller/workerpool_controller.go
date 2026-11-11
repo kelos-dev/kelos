@@ -493,30 +493,30 @@ func (r *WorkerPoolReconciler) reconcileStatefulSet(ctx context.Context, pool *k
 	}
 
 	// Update StatefulSet if replicas, pod template, or PVC retention policy changed
-	needsUpdate := false
+	var changed []string
 	if sts.Spec.Replicas == nil || *sts.Spec.Replicas != ptr.Deref(pool.Spec.Replicas, 1) {
 		sts.Spec.Replicas = pool.Spec.Replicas
-		needsUpdate = true
+		changed = append(changed, fmt.Sprintf("replicas to %d", ptr.Deref(pool.Spec.Replicas, 1)))
 	}
 
 	// Sync the pod template to pick up changes to worker image, model,
 	// effort, credentials, workspace, agentConfig, or podOverrides.
 	if !podTemplateSpecEqual(sts.Spec.Template.Spec, desired.Spec.Template.Spec) {
 		sts.Spec.Template = desired.Spec.Template
-		needsUpdate = true
+		changed = append(changed, "pod template")
 	}
 
 	if !pvcRetentionPolicyEqual(sts.Spec.PersistentVolumeClaimRetentionPolicy, desired.Spec.PersistentVolumeClaimRetentionPolicy) {
 		sts.Spec.PersistentVolumeClaimRetentionPolicy = desired.Spec.PersistentVolumeClaimRetentionPolicy
-		needsUpdate = true
+		changed = append(changed, "PVC retention policy")
 	}
 
-	if needsUpdate {
+	if len(changed) > 0 {
 		if err := r.Update(ctx, &sts); err != nil {
 			return ctrl.Result{}, fmt.Errorf("workerpool %s: updating StatefulSet: %w", pool.Name, err)
 		}
-		logger.Info("Updated StatefulSet", "statefulset", stsName, "replicas", ptr.Deref(pool.Spec.Replicas, 1))
-		r.recordEvent(pool, corev1.EventTypeNormal, "StatefulSetUpdated", "Updated StatefulSet %s to %d replicas", stsName, ptr.Deref(pool.Spec.Replicas, 1))
+		logger.Info("Updated StatefulSet", "statefulset", stsName, "changed", changed)
+		r.recordEvent(pool, corev1.EventTypeNormal, "StatefulSetUpdated", "Updated StatefulSet %s: %s", stsName, strings.Join(changed, ", "))
 	}
 
 	// Update pool status from StatefulSet status

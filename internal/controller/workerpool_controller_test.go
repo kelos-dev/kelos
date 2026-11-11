@@ -480,6 +480,60 @@ func TestWorkerPoolReconciler_PVCRetentionPolicyUpdatesExistingStatefulSet(t *te
 	}, sts.Spec.PersistentVolumeClaimRetentionPolicy)
 }
 
+func TestWorkerPoolReconciler_PVCRetentionPolicyRevertsToDefaultWhenUnset(t *testing.T) {
+	pool := newTestWorkerPool("my-pool", "default", 1)
+
+	// The StatefulSet carries a Delete/Delete policy from an earlier pool spec;
+	// the pool no longer sets one, so reconcile should clear it.
+	scheme := newWorkerPoolTestScheme()
+	r := newWorkerPoolReconciler(fake.NewClientBuilder().WithScheme(scheme).Build(), scheme)
+	ws := newTestWorkspace("default")
+	existingSTS, err := r.buildStatefulSet(pool, "wp-my-pool", "wp-my-pool", &ws.Spec, nil)
+	require.NoError(t, err)
+	existingSTS.Spec.PersistentVolumeClaimRetentionPolicy = &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{
+		WhenDeleted: appsv1.DeletePersistentVolumeClaimRetentionPolicyType,
+		WhenScaled:  appsv1.DeletePersistentVolumeClaimRetentionPolicyType,
+	}
+
+	sts := reconcileWorkerPoolStatefulSet(t, pool, ws, existingSTS)
+
+	assert.Nil(t, sts.Spec.PersistentVolumeClaimRetentionPolicy)
+}
+
+func TestWorkerPoolReconciler_PVCRetentionPolicyOnlyUpdateEventNamesChange(t *testing.T) {
+	pool := newTestWorkerPool("my-pool", "default", 1)
+	pool.Spec.PersistentVolumeClaimRetentionPolicy = &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{
+		WhenDeleted: appsv1.DeletePersistentVolumeClaimRetentionPolicyType,
+		WhenScaled:  appsv1.RetainPersistentVolumeClaimRetentionPolicyType,
+	}
+
+	scheme := newWorkerPoolTestScheme()
+	builder := newWorkerPoolReconciler(fake.NewClientBuilder().WithScheme(scheme).Build(), scheme)
+	ws := newTestWorkspace("default")
+	existingSTS, err := builder.buildStatefulSet(pool, "wp-my-pool", "wp-my-pool", &ws.Spec, nil)
+	require.NoError(t, err)
+	existingSTS.Spec.PersistentVolumeClaimRetentionPolicy = nil
+
+	cl := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&kelos.WorkerPool{}).
+		WithObjects(pool, ws, existingSTS).
+		Build()
+	recorder := record.NewFakeRecorder(10)
+	r := newWorkerPoolReconciler(cl, scheme)
+	r.Recorder = recorder
+	_, err = r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Name: "my-pool", Namespace: "default"},
+	})
+	require.NoError(t, err)
+
+	var events []string
+	for len(recorder.Events) > 0 {
+		events = append(events, <-recorder.Events)
+	}
+	assert.Contains(t, events, "Normal StatefulSetUpdated Updated StatefulSet wp-my-pool: PVC retention policy")
+}
+
 func TestPVCRetentionPolicyEqual_TreatsUnsetAsRetain(t *testing.T) {
 	retainAll := &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{
 		WhenDeleted: appsv1.RetainPersistentVolumeClaimRetentionPolicyType,

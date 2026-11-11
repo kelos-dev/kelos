@@ -492,26 +492,31 @@ func (r *WorkerPoolReconciler) reconcileStatefulSet(ctx context.Context, pool *k
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
-	// Update StatefulSet if replicas or pod template changed
-	needsUpdate := false
+	// Update StatefulSet if replicas, pod template, or PVC retention policy changed
+	var changed []string
 	if sts.Spec.Replicas == nil || *sts.Spec.Replicas != ptr.Deref(pool.Spec.Replicas, 1) {
 		sts.Spec.Replicas = pool.Spec.Replicas
-		needsUpdate = true
+		changed = append(changed, fmt.Sprintf("replicas to %d", ptr.Deref(pool.Spec.Replicas, 1)))
 	}
 
 	// Sync the pod template to pick up changes to worker image, model,
 	// effort, credentials, workspace, agentConfig, or podOverrides.
 	if !podTemplateSpecEqual(sts.Spec.Template.Spec, desired.Spec.Template.Spec) {
 		sts.Spec.Template = desired.Spec.Template
-		needsUpdate = true
+		changed = append(changed, "pod template")
 	}
 
-	if needsUpdate {
+	if !pvcRetentionPolicyEqual(sts.Spec.PersistentVolumeClaimRetentionPolicy, desired.Spec.PersistentVolumeClaimRetentionPolicy) {
+		sts.Spec.PersistentVolumeClaimRetentionPolicy = desired.Spec.PersistentVolumeClaimRetentionPolicy
+		changed = append(changed, "PVC retention policy")
+	}
+
+	if len(changed) > 0 {
 		if err := r.Update(ctx, &sts); err != nil {
 			return ctrl.Result{}, fmt.Errorf("workerpool %s: updating StatefulSet: %w", pool.Name, err)
 		}
-		logger.Info("Updated StatefulSet", "statefulset", stsName, "replicas", ptr.Deref(pool.Spec.Replicas, 1))
-		r.recordEvent(pool, corev1.EventTypeNormal, "StatefulSetUpdated", "Updated StatefulSet %s to %d replicas", stsName, ptr.Deref(pool.Spec.Replicas, 1))
+		logger.Info("Updated StatefulSet", "statefulset", stsName, "changed", changed)
+		r.recordEvent(pool, corev1.EventTypeNormal, "StatefulSetUpdated", "Updated StatefulSet %s: %s", stsName, strings.Join(changed, ", "))
 	}
 
 	// Update pool status from StatefulSet status
@@ -1041,9 +1046,10 @@ func (r *WorkerPoolReconciler) buildStatefulSet(pool *kelos.WorkerPool, stsName,
 			Labels:    labels,
 		},
 		Spec: appsv1.StatefulSetSpec{
-			Replicas:            pool.Spec.Replicas,
-			ServiceName:         svcName,
-			PodManagementPolicy: parallel,
+			Replicas:                             pool.Spec.Replicas,
+			ServiceName:                          svcName,
+			PodManagementPolicy:                  parallel,
+			PersistentVolumeClaimRetentionPolicy: pool.Spec.PersistentVolumeClaimRetentionPolicy.DeepCopy(),
 			Selector: &metav1.LabelSelector{
 				MatchLabels: labels,
 			},
@@ -1894,6 +1900,27 @@ func podTemplateSpecEqual(a, b corev1.PodSpec) bool {
 		apiequality.Semantic.DeepEqual(a.Affinity, b.Affinity) &&
 		apiequality.Semantic.DeepEqual(a.ImagePullSecrets, b.ImagePullSecrets) &&
 		apiequality.Semantic.DeepEqual(a.RuntimeClassName, b.RuntimeClassName)
+}
+
+// pvcRetentionPolicyEqual reports whether two StatefulSet PVC retention
+// policies are equivalent, treating a nil policy or an empty field as Retain
+// to match the API server default.
+func pvcRetentionPolicyEqual(a, b *appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy) bool {
+	effective := func(p *appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy) (appsv1.PersistentVolumeClaimRetentionPolicyType, appsv1.PersistentVolumeClaimRetentionPolicyType) {
+		whenDeleted, whenScaled := appsv1.RetainPersistentVolumeClaimRetentionPolicyType, appsv1.RetainPersistentVolumeClaimRetentionPolicyType
+		if p != nil {
+			if p.WhenDeleted != "" {
+				whenDeleted = p.WhenDeleted
+			}
+			if p.WhenScaled != "" {
+				whenScaled = p.WhenScaled
+			}
+		}
+		return whenDeleted, whenScaled
+	}
+	aDeleted, aScaled := effective(a)
+	bDeleted, bScaled := effective(b)
+	return aDeleted == bDeleted && aScaled == bScaled
 }
 
 func mergeReconcileResults(a, b ctrl.Result) ctrl.Result {

@@ -276,18 +276,7 @@ var _ = Describe("Session remote control", func() {
 
 		connection = connectSessionWebSocket(webClient, baseURL, f.Namespace, sessionName)
 		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "subscribe"})
-		seenRecovery := false
-		seenInterruptedTurn := false
-		for {
-			event := readSessionEvent(connection)
-			seenRecovery = seenRecovery || event.Type == sessionruntime.EventRuntimeRecovered
-			seenInterruptedTurn = seenInterruptedTurn || (event.Type == sessionruntime.EventTurnCompleted && event.TurnID == "turn-8" && event.Status == "interrupted")
-			if event.Type == sessionruntime.EventHistoryEnd {
-				break
-			}
-		}
-		Expect(seenRecovery).To(BeTrue())
-		Expect(seenInterruptedTurn).To(BeTrue())
+		waitForSessionRecovery(connection, "turn-8")
 
 		By("submitting the persisted attachment through web chat")
 		status, headers, downloaded := downloadSessionAttachment(webClient, baseURL, f.Namespace, sessionName, attachment.ID)
@@ -375,9 +364,7 @@ var _ = Describe("Session remote control", func() {
 
 		connection = connectSessionWebSocket(webClient, baseURL, f.Namespace, sessionName)
 		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "subscribe"})
-		waitForSessionEvent(connection, func(event sessionruntime.Event) bool {
-			return event.Type == sessionruntime.EventHistoryEnd
-		})
+		waitForSessionHistory(connection)
 		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "message", Text: "read-state"})
 		waitForSessionEvent(connection, func(event sessionruntime.Event) bool {
 			return event.Type == sessionruntime.EventAssistantDelta && event.Text == "turn 1: state missing"
@@ -523,9 +510,7 @@ var _ = Describe("Session remote control", func() {
 		connection := connectSessionWebSocket(loginSessionWeb(baseURL, token), baseURL, f.Namespace, sessionName)
 		DeferCleanup(func() { _ = connection.Close() })
 		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "subscribe"})
-		waitForSessionEvent(connection, func(event sessionruntime.Event) bool {
-			return event.Type == sessionruntime.EventHistoryEnd
-		})
+		waitForSessionHistory(connection)
 
 		By("holding a turn open at a user-input request")
 		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "message", Text: "question"})
@@ -991,9 +976,7 @@ var _ = Describe("Session remote control", func() {
 		connection := connectSessionWebSocket(loginSessionWeb(baseURL, token), baseURL, f.Namespace, sessionName)
 		DeferCleanup(func() { _ = connection.Close() })
 		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "subscribe"})
-		waitForSessionEvent(connection, func(event sessionruntime.Event) bool {
-			return event.Type == sessionruntime.EventHistoryEnd
-		})
+		waitForSessionHistory(connection)
 		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "message", Text: "question"})
 		input := waitForSessionEvent(connection, func(event sessionruntime.Event) bool {
 			return event.Type == sessionruntime.EventInputRequested
@@ -1523,14 +1506,53 @@ func readSessionEvent(connection *websocket.Conn) sessionruntime.Event {
 	var event sessionruntime.Event
 	Expect(connection.ReadJSON(&event)).To(Succeed())
 	if event.Type == sessionruntime.EventError {
-		Fail(fmt.Sprintf("Session runtime error: %s (%s)", event.Text, event.Status))
+		fmt.Fprintf(GinkgoWriter, "Session error event: id=%d turn=%s status=%s text=%q\n", event.ID, event.TurnID, event.Status, event.Text)
 	}
 	return event
 }
 
+// Deleting a Pod can stop its provider before the active turn is interrupted.
+func waitForSessionRecovery(connection *websocket.Conn, turnID string) {
+	seenRecovery := false
+	providerStopped := false
+	turnStatus := ""
+	for {
+		event := readSessionEvent(connection)
+		if event.Type == sessionruntime.EventHistoryEnd {
+			break
+		}
+		switch event.Type {
+		case sessionruntime.EventRuntimeRecovered:
+			seenRecovery = true
+		case sessionruntime.EventError:
+			if event.TurnID == turnID && event.Text == "Session provider stopped" && event.Status == "failed" {
+				providerStopped = true
+			}
+		case sessionruntime.EventTurnCompleted:
+			if event.TurnID == turnID {
+				Expect(event.Status).To(Or(Equal("interrupted"), Equal("failed")), "Unexpected completion for terminated turn %s", turnID)
+				if event.Status == "failed" {
+					Expect(providerStopped).To(BeTrue(), "Terminated turn %s failed without a provider-stop error", turnID)
+				}
+				turnStatus = event.Status
+			}
+		}
+	}
+	Expect(seenRecovery).To(BeTrue(), "Session runtime recovery was not replayed")
+	Expect(turnStatus).NotTo(BeEmpty(), "Terminated turn %s completion was not replayed", turnID)
+	fmt.Fprintf(GinkgoWriter, "Recovered terminated Session turn: turn=%s status=%s\n", turnID, turnStatus)
+}
+
+func waitForSessionHistory(connection *websocket.Conn) {
+	for readSessionEvent(connection).Type != sessionruntime.EventHistoryEnd {
+	}
+}
+
+// Unlike history replay, waiting for a live response must reject error events.
 func waitForSessionEvent(connection *websocket.Conn, matches func(sessionruntime.Event) bool) sessionruntime.Event {
 	for {
 		event := readSessionEvent(connection)
+		Expect(event.Type).NotTo(Equal(sessionruntime.EventError), "Session runtime error: %s (%s)", event.Text, event.Status)
 		if matches(event) {
 			return event
 		}

@@ -1,4 +1,4 @@
-FROM gcr.io/distroless/static:nonroot
+FROM gcr.io/distroless/static-debian13:nonroot
 ARG TARGETARCH
 WORKDIR /
 COPY bin/kelos-controller-linux-${TARGETARCH} kelos-controller

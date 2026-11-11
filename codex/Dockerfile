@@ -1,6 +1,6 @@
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
-ARG GO_VERSION=1.25.0
+ARG GO_VERSION=1.27.4
 
 RUN apt-get update && apt-get install -y \
     bubblewrap \

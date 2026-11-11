@@ -1,4 +1,4 @@
-FROM gcr.io/distroless/static:nonroot
+FROM gcr.io/distroless/static-debian13:nonroot
 ARG TARGETARCH
 WORKDIR /
 COPY bin/kelos-worker-runner-linux-${TARGETARCH} kelos-worker-runner

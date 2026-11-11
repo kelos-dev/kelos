@@ -178,6 +178,15 @@ spec:
         the expected artifacts exist rather than only that a command exited
         zero or a directory exists? When directory contents are relocated,
         are dot-prefixed entries preserved unless explicitly unsupported?
+      - When code writes, copies, links, or removes files that hold persisted
+        or user-provided state, check that a file startup reads is replaced
+        atomically (temporary file, sync, rename) rather than written in place.
+        Also check that every precondition that can reject the operation runs
+        before its first destructive step. Check whether the step handles a
+        volume mount at or below the path, a source and target of different
+        file types, and a source and target that are the same file, whether
+        by equal paths or through a symlink in either direction. P2 when the
+        step can lose or strand that state.
 
       **Tests**:
       - Are there tests for the new/changed behavior?

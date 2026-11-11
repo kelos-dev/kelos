@@ -1,6 +1,6 @@
 module github.com/kelos-dev/kelos
 
-go 1.25.0
+go 1.27.4
 
 require (
 	github.com/PaesslerAG/jsonpath v0.1.1

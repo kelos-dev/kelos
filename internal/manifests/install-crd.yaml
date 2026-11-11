@@ -76615,6 +76615,72 @@ spec:
           spec:
             description: WorkspaceSpec defines the desired state of Workspace.
             properties:
+              agentGitHubToken:
+                description: |-
+                  AgentGitHubToken selects whether the agent container receives the
+                  GitHub token from SecretRef. Token gives it the token for git and the
+                  GitHub CLI (gh). None uses the token only to clone the repository and
+                  set up the Task or Session branch; the agent container gets no GitHub
+                  token from Kelos. None cannot be combined with GHProxy, which forwards
+                  requests from agent pods with the token. None does not otherwise
+                  restrict the agent's network access. WorkerPools do not support None.
+                  Omit to use Token.
+                enum:
+                - Token
+                - None
+                type: string
+              clone:
+                description: Clone configures how the repository is cloned.
+                properties:
+                  gitDir:
+                    description: |-
+                      GitDir selects what happens to the repository's .git directory after
+                      the clone. Keep leaves it in place. Remove deletes it, leaving only the
+                      checked-out files, so git commands no longer work in the checkout and
+                      git there cannot fetch paths outside Paths. Remove does not keep the
+                      GitHub token from the agent: with AgentGitHubToken Token the agent can
+                      still clone the full repository elsewhere, so set AgentGitHubToken to
+                      None as well to keep the rest of the repository out of reach.
+                      Remove cannot be combined with Workspace.spec.remotes, and a Task with
+                      Task.spec.branch or a Session with Session.spec.initialBranch fails,
+                      because setting up the branch needs .git. Remove is not supported for
+                      Sessions with a Session.spec.volumeClaimTemplate: such a Session fails.
+                      Omit to use Keep.
+                    enum:
+                    - Keep
+                    - Remove
+                    type: string
+                  paths:
+                    description: |-
+                      Paths limits the checkout to these repository paths. Each entry is a
+                      directory or file relative to the repository root, such as "docs" or
+                      "cmd/main.go", and is matched exactly from the root: "docs" selects
+                      the top-level docs directory and everything in it, and nothing else
+                      named docs. Only the listed paths are written to disk; files at the
+                      repository root are not included unless listed. Blobs outside the
+                      listed paths are not downloaded, but the .git directory still records
+                      the full tree, so git can fetch the rest on demand unless GitDir is
+                      Remove. Entries must be unique and must not start with "/", end with a
+                      space (ignoring a trailing slash), or contain empty, "." or ".."
+                      segments, control characters, or any of the characters *, ?, [ or \.
+                      Up to 64 entries of at most 256 characters each. Not supported for
+                      Sessions with a Session.spec.volumeClaimTemplate: such a Session fails.
+                    items:
+                      maxLength: 256
+                      minLength: 1
+                      pattern: ^[^*?\[\\\x00-\x1f\x7f]+$
+                      type: string
+                    maxItems: 64
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-type: set
+                    x-kubernetes-validations:
+                    - message: clone.paths entries must be relative to the repository
+                        root, must not end with a space, and must not contain empty,
+                        '.' or '..' segments
+                      rule: self.all(p, !p.startsWith('/') && !p.matches(' /?$') &&
+                        !p.contains('//') && !p.matches('(^|/)[.][.]?(/|$)'))
+                type: object
               files:
                 description: |-
                   Files are written into the cloned repository before the agent starts.
@@ -76716,6 +76782,14 @@ spec:
             required:
             - repo
             type: object
+            x-kubernetes-validations:
+            - message: remotes cannot be set when clone.gitDir is Remove
+              rule: '!has(self.clone) || !has(self.clone.gitDir) || self.clone.gitDir
+                != ''Remove'' || !has(self.remotes) || size(self.remotes) == 0'
+            - message: 'ghproxy cannot be set when agentGitHubToken is None: the workspace
+                ghproxy forwards agent requests with the secretRef token'
+              rule: '!has(self.agentGitHubToken) || self.agentGitHubToken != ''None''
+                || !has(self.ghproxy)'
         type: object
     served: true
     storage: true

@@ -79,3 +79,47 @@ func FetchThreadContext(ctx context.Context, api *goslack.Client, channelID, thr
 
 	return FormatThreadContext(msgs, botUserID), nil
 }
+
+// fetchMessage fetches a single message by channel and timestamp. A top-level
+// message is read from the channel history. A thread reply does not appear
+// there, so the thread is read instead and the reply picked out of it. Each
+// call gets its own timeout, so a slow history read does not starve the
+// replies fallback.
+func fetchMessage(ctx context.Context, api *goslack.Client, channelID, ts string) (*goslack.Message, error) {
+	historyCtx, cancelHistory := context.WithTimeout(ctx, threadFetchTimeout)
+	history, err := api.GetConversationHistoryContext(historyCtx, &goslack.GetConversationHistoryParameters{
+		ChannelID: channelID,
+		Latest:    ts,
+		Oldest:    ts,
+		Inclusive: true,
+		Limit:     1,
+	})
+	cancelHistory()
+	if err != nil {
+		return nil, fmt.Errorf("fetching channel history: %w", err)
+	}
+	for i := range history.Messages {
+		if history.Messages[i].Timestamp == ts {
+			return &history.Messages[i], nil
+		}
+	}
+
+	repliesCtx, cancelReplies := context.WithTimeout(ctx, threadFetchTimeout)
+	defer cancelReplies()
+	replies, _, _, err := api.GetConversationRepliesContext(repliesCtx, &goslack.GetConversationRepliesParameters{
+		ChannelID: channelID,
+		Timestamp: ts,
+		Latest:    ts,
+		Oldest:    ts,
+		Inclusive: true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("fetching thread replies: %w", err)
+	}
+	for i := range replies {
+		if replies[i].Timestamp == ts {
+			return &replies[i], nil
+		}
+	}
+	return nil, fmt.Errorf("message %s not found in channel %s", ts, channelID)
+}

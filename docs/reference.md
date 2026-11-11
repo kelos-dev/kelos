@@ -18,7 +18,8 @@ Exactly one execution source is required: `spec.worker` (preferred), `spec.worke
 | `spec.workspaceRef.name` | **(Deprecated)** Workspace reference — use `spec.worker.workspaceRef` instead | Legacy |
 | `spec.agentConfigRefs[].name` | **(Deprecated)** AgentConfig references — use `spec.worker.agentConfigRefs` instead | Legacy |
 | `spec.dependsOn` | Task names that must succeed before this Task starts (creates `Waiting` phase). Not supported with `workerPoolRef` | No |
-| `spec.branch` | Git branch to work on; only one Task with the same branch runs at a time (mutex). Not supported with `workerPoolRef` | No |
+| `spec.branch` | Git branch to work on. Unless `spec.concurrency` is set, the Task joins the concurrency group `<workspace>:<branch>`, so only one such Task with the same workspace and branch runs at a time. Not supported with `workerPoolRef` | No |
+| `spec.concurrency.group` | Concurrency group for the Task (1–256 characters). At most one Task per group runs at a time within a namespace; the others wait in the `Waiting` phase in creation order. Setting a group replaces the default `<workspace>:<branch>` group, so a Task that only reads the branch (for example a PR reviewer) can use a group of its own to neither wait for nor block Tasks that push to it. Omit `spec.concurrency` to use the default group when `spec.branch` is set, or no group when it is not. An explicit group equal to a default group, such as `my-workspace:main`, shares that branch's lock. Not supported with `workerPoolRef` | No |
 | `spec.ttlSecondsAfterFinished` | Auto-delete task after N seconds (0 for immediate) | No |
 | `spec.podFailurePolicy` | Kubernetes Job pod failure policy copied to `Job.spec.podFailurePolicy`. If omitted, Kelos leaves it unset and Kubernetes default Job failure handling applies | No |
 | `spec.podOverrides` | **(Deprecated)** Pod customization — use `spec.worker.podOverrides` instead | Legacy |
@@ -218,6 +219,7 @@ TaskPipeline is available only in `kelos.dev/v1alpha2`.
 | `spec.stages[].taskTemplate.workerPoolRef.name` | WorkerPool used for the stage's Tasks | One of worker or workerPoolRef |
 | `spec.stages[].taskTemplate.prompt` | Go template rendered into each stage Task's prompt | Yes |
 | `spec.stages[].taskTemplate.branch` | Optional Go template rendered into each stage Task's branch. Not supported with workerPoolRef | No |
+| `spec.stages[].taskTemplate.concurrency.group` | Go template rendered into each stage Task's `Task.spec.concurrency.group`, using the same data as `branch`. A group that renders empty or longer than 256 characters fails the stage. Not supported with workerPoolRef | No |
 | `spec.stages[].matrix.items` | Ordered value maps (1–256). Each item contains 1–16 string values, creates one Task, and defines the same keys as every other item | Yes when matrix is set |
 
 Deleting a TaskPipeline deletes its owned child Tasks. A stage without a matrix
@@ -1629,6 +1631,7 @@ bundled skills. Reading an AgentConfig through `kelos.dev/v1alpha1` omits
 | `spec.taskTemplate.promptTemplate` | Go text/template for prompt (see [template variables](#prompttemplate-variables) below) | No |
 | `spec.taskTemplate.dependsOn` | Task names that spawned Tasks depend on. Not supported with `workerPoolRef` | No |
 | `spec.taskTemplate.branch` | Git branch template for spawned Tasks (supports Go template variables, e.g., `kelos-task-{{.Number}}`). Not supported with `workerPoolRef` | No |
+| `spec.taskTemplate.concurrency.group` | Go template rendered into spawned Tasks' `Task.spec.concurrency.group` (same variables as `branch`, e.g., `pr-{{.Number}}-review`). Give spawners whose Tasks only read the branch (for example PR reviewers) a group of their own so they neither wait for nor block Tasks that push to it. A group that renders empty or longer than 256 characters fails Task creation. Not supported with `workerPoolRef` | No |
 | `spec.taskTemplate.nameTemplate` | Go text/template for the spawned Task's name (overrides the default naming below). The rendered value is lowercased, sanitized to a valid resource name, and truncated to 63 characters. Use a deterministic template (e.g. `{{.Number}}`) to deduplicate Tasks: work items that render to the same name reuse the existing Task instead of creating a duplicate — the recommended way to avoid duplicate Tasks from multiple GitHub webhook deliveries for the same pull request. Names must be unique across the whole namespace; a collision with a Task owned by a different TaskSpawner (or any unrelated Task) is an error, not deduplication (see [Generated Task Names](#generated-task-names)). Keep the identifying part within the first 63 characters. `.Context.NAME` is not available to `nameTemplate` on any source — a Task's identity must not depend on mutable external data | No |
 | `spec.taskTemplate.ttlSecondsAfterFinished` | Auto-delete spawned tasks after N seconds | No |
 | `spec.taskTemplate.podFailurePolicy` | Kubernetes Job pod failure policy copied to spawned Tasks as `Task.spec.podFailurePolicy` | No |

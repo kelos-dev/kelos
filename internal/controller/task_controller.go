@@ -168,24 +168,24 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			}
 		}
 
-		if task.Spec.Branch != "" {
-			if resolveTaskWorkspaceRef(&task) == nil {
-				logger.Info("Branch is set without workspaceRef, branch checkout will not happen", "task", task.Name, "branch", task.Spec.Branch)
-				r.recordEvent(&task, corev1.EventTypeWarning, "BranchWithoutWorkspace", "Branch %q is set but workspaceRef is not configured, branch checkout will be skipped", task.Spec.Branch)
-			}
-			lockKey := branchLockKey(&task)
+		if task.Spec.Branch != "" && resolveTaskWorkspaceRef(&task) == nil {
+			logger.Info("Branch is set without workspaceRef, branch checkout will not happen", "task", task.Name, "branch", task.Spec.Branch)
+			r.recordEvent(&task, corev1.EventTypeWarning, "BranchWithoutWorkspace", "Branch %q is set but workspaceRef is not configured, branch checkout will be skipped", task.Spec.Branch)
+		}
+		if lockKey := concurrencyKey(&task); lockKey != "" {
 			acquired, holder := r.BranchLocker.TryAcquire(lockKey, task.Name)
 			if !acquired {
 				// In-memory lock is held by another task.
-				logger.Info("Branch locked by another task", "branch", task.Spec.Branch, "lockedBy", holder)
-				r.setWaitingPhase(ctx, &task, fmt.Sprintf("Waiting for branch %q (locked by %s)", task.Spec.Branch, holder))
+				group := concurrencyGroup(&task)
+				logger.Info("Concurrency group locked by another task", "group", group, "lockedBy", holder)
+				r.setWaitingPhase(ctx, &task, fmt.Sprintf("Waiting for concurrency group %q (locked by %s)", group, holder))
 				return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 			}
 			// Fallback: check status-based lock for restart recovery.
 			// After a restart the in-memory map is empty, so TryAcquire
 			// always succeeds. The status check catches Running/Pending
 			// tasks whose lock was lost.
-			locked, result, err := r.checkBranchLock(ctx, &task)
+			locked, result, err := r.checkConcurrencyLock(ctx, &task)
 			if err != nil || locked {
 				r.BranchLocker.Release(lockKey, task.Name)
 				return result, err
@@ -194,9 +194,7 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 		admitted, result, err := r.checkBudgetAdmission(ctx, &task)
 		if err != nil || !admitted {
-			if task.Spec.Branch != "" {
-				r.BranchLocker.Release(branchLockKey(&task), task.Name)
-			}
+			r.releaseConcurrencyLock(&task)
 			return result, err
 		}
 
@@ -262,10 +260,8 @@ func (r *TaskReconciler) handleDeletion(ctx context.Context, task *kelos.Task) (
 	logger := log.FromContext(ctx)
 
 	if controllerutil.ContainsFinalizer(task, taskFinalizer) {
-		// Release branch lock if held.
-		if task.Spec.Branch != "" {
-			r.BranchLocker.Release(branchLockKey(task), task.Name)
-		}
+		// Release the concurrency group lock if held.
+		r.releaseConcurrencyLock(task)
 
 		if task.Spec.WorkerPoolRef != nil {
 			if task.Status.PodName != "" {
@@ -495,9 +491,7 @@ func (r *TaskReconciler) failTaskBeforeJob(ctx context.Context, task *kelos.Task
 	}); err != nil {
 		return err
 	}
-	if task.Spec.Branch != "" && r.BranchLocker != nil {
-		r.BranchLocker.Release(branchLockKey(task), task.Name)
-	}
+	r.releaseConcurrencyLock(task)
 	return nil
 }
 
@@ -968,9 +962,9 @@ func (r *TaskReconciler) updateStatus(ctx context.Context, task *kelos.Task, job
 		return ctrl.Result{}, err
 	}
 
-	// Release branch lock when task reaches a terminal phase.
-	if setCompletionTime && task.Spec.Branch != "" {
-		r.BranchLocker.Release(branchLockKey(task), task.Name)
+	// Release the concurrency group lock when task reaches a terminal phase.
+	if setCompletionTime {
+		r.releaseConcurrencyLock(task)
 	}
 
 	// Record task duration when completion time is set and we have a start time
@@ -1192,24 +1186,54 @@ func (r *TaskReconciler) walkDeps(ctx context.Context, namespace, name string, v
 	return nil
 }
 
-// branchLockKey returns the key used for branch locking. The lock is scoped
-// to (workspace, branch) so that tasks on different workspaces with the same
-// branch name do not block each other.
-func branchLockKey(task *kelos.Task) string {
+// concurrencyGroup returns the task's concurrency group: spec.concurrency.group
+// when set, otherwise "<workspace>:<branch>" when spec.branch is set, otherwise
+// "" (the task is not serialized).
+func concurrencyGroup(task *kelos.Task) string {
+	if task.Spec.Concurrency != nil {
+		return task.Spec.Concurrency.Group
+	}
+	if task.Spec.Branch == "" {
+		return ""
+	}
 	ws := ""
-	if resolveTaskWorkspaceRef(task) != nil {
-		ws = resolveTaskWorkspaceRef(task).Name
+	if ref := resolveTaskWorkspaceRef(task); ref != nil {
+		ws = ref.Name
 	}
 	return ws + ":" + task.Spec.Branch
 }
 
-// checkBranchLock checks if another task with the same workspace and branch is
+// concurrencyKey returns the lock key for the task's concurrency group, or ""
+// when the task has no group. The key includes the namespace so that groups
+// with the same name in different namespaces do not block each other, and so
+// that a task cannot release a lock held by a same-named task elsewhere.
+func concurrencyKey(task *kelos.Task) string {
+	group := concurrencyGroup(task)
+	if group == "" {
+		return ""
+	}
+	return task.Namespace + "/" + group
+}
+
+// releaseConcurrencyLock releases the task's concurrency group lock if the
+// task holds it. It is a no-op for tasks without a group.
+func (r *TaskReconciler) releaseConcurrencyLock(task *kelos.Task) {
+	if r.BranchLocker == nil {
+		return
+	}
+	if key := concurrencyKey(task); key != "" {
+		r.BranchLocker.Release(key, task.Name)
+	}
+}
+
+// checkConcurrencyLock checks if another task in the same concurrency group is
 // active. Returns (locked, result, error). locked=true means another task holds
-// the branch. A task is considered to hold the lock if it is Running, Pending,
-// or is an earlier-created Waiting task (FIFO ordering for the branch queue).
-func (r *TaskReconciler) checkBranchLock(ctx context.Context, task *kelos.Task) (bool, ctrl.Result, error) {
+// the group. A task is considered to hold the lock if it is Running, Pending,
+// or is an earlier-created Waiting task (FIFO ordering for the group queue).
+func (r *TaskReconciler) checkConcurrencyLock(ctx context.Context, task *kelos.Task) (bool, ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	key := branchLockKey(task)
+	key := concurrencyKey(task)
+	group := concurrencyGroup(task)
 
 	var taskList kelos.TaskList
 	if err := r.List(ctx, &taskList, client.InNamespace(task.Namespace)); err != nil {
@@ -1220,18 +1244,18 @@ func (r *TaskReconciler) checkBranchLock(ctx context.Context, task *kelos.Task) 
 		if t.Name == task.Name {
 			continue
 		}
-		if t.Spec.Branch == "" || branchLockKey(&t) != key {
+		if concurrencyKey(&t) != key {
 			continue
 		}
 		switch t.Status.Phase {
 		case kelos.TaskPhaseRunning, kelos.TaskPhasePending:
-			logger.Info("Branch locked by another task", "branch", task.Spec.Branch, "lockedBy", t.Name)
-			r.setWaitingPhase(ctx, task, fmt.Sprintf("Waiting for branch %q (locked by %s)", task.Spec.Branch, t.Name))
+			logger.Info("Concurrency group locked by another task", "group", group, "lockedBy", t.Name)
+			r.setWaitingPhase(ctx, task, fmt.Sprintf("Waiting for concurrency group %q (locked by %s)", group, t.Name))
 			return true, ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 		case kelos.TaskPhaseWaiting:
 			if t.CreationTimestamp.Before(&task.CreationTimestamp) {
-				logger.Info("Branch queued behind earlier task", "branch", task.Spec.Branch, "queuedBehind", t.Name)
-				r.setWaitingPhase(ctx, task, fmt.Sprintf("Waiting for branch %q (queued behind %s)", task.Spec.Branch, t.Name))
+				logger.Info("Concurrency group queued behind earlier task", "group", group, "queuedBehind", t.Name)
+				r.setWaitingPhase(ctx, task, fmt.Sprintf("Waiting for concurrency group %q (queued behind %s)", group, t.Name))
 				return true, ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 			}
 		}
@@ -1494,6 +1518,7 @@ func (r *TaskReconciler) enqueueDependentTasks(ctx context.Context, obj client.O
 		return nil
 	}
 
+	key := concurrencyKey(task)
 	seen := make(map[string]bool)
 	var requests []reconcile.Request
 	for _, t := range taskList.Items {
@@ -1510,9 +1535,8 @@ func (r *TaskReconciler) enqueueDependentTasks(ctx context.Context, obj client.O
 				break
 			}
 		}
-		// Re-enqueue tasks waiting for the same workspace+branch
-		if !seen[t.Name] && task.Spec.Branch != "" && t.Spec.Branch != "" &&
-			branchLockKey(&t) == branchLockKey(task) &&
+		// Re-enqueue tasks waiting for the same concurrency group
+		if !seen[t.Name] && key != "" && concurrencyKey(&t) == key &&
 			t.Status.Phase == kelos.TaskPhaseWaiting {
 			seen[t.Name] = true
 			requests = append(requests, reconcile.Request{

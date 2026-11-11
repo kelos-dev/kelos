@@ -8,22 +8,27 @@ import (
 )
 
 func taskToHub(_ context.Context, src *v1alpha1.Task, dst *v1alpha2.Task) error {
-	dst.ObjectMeta = src.ObjectMeta
+	src.ObjectMeta.DeepCopyInto(&dst.ObjectMeta)
 	if err := convertViaJSON(&src.Spec, &dst.Spec); err != nil {
 		return err
 	}
 	foldTaskAgentConfigRefForward(&src.Spec, &dst.Spec)
+	if dst.Spec.Concurrency == nil {
+		dst.Spec.Concurrency = preservedConcurrency(src.Annotations)
+	}
+	deleteAnnotation(dst.Annotations, preservedConcurrencyGroupAnnotation)
 	return convertViaJSON(&src.Status, &dst.Status)
 }
 
 func taskFromHub(_ context.Context, src *v1alpha2.Task, dst *v1alpha1.Task) error {
-	dst.ObjectMeta = src.ObjectMeta
+	src.ObjectMeta.DeepCopyInto(&dst.ObjectMeta)
 	if err := convertViaJSON(&src.Spec, &dst.Spec); err != nil {
 		return err
 	}
 	if err := backfillTaskLegacyWorkerFields(&src.Spec, &dst.Spec); err != nil {
 		return err
 	}
+	setPreservedConcurrencyAnnotation(&dst.ObjectMeta, src.Spec.Concurrency)
 	return convertViaJSON(&src.Status, &dst.Status)
 }
 

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"text/template"
 	"time"
+	"unicode/utf8"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apiMeta "k8s.io/apimachinery/pkg/api/meta"
@@ -211,6 +212,11 @@ func validateTaskPipeline(pipeline *kelos.TaskPipeline) error {
 				return fmt.Errorf("stage %q branch: %w", stage.Name, err)
 			}
 		}
+		if stage.TaskTemplate.Concurrency != nil {
+			if err := parsePipelineTemplate(stage.Name+" concurrency group", stage.TaskTemplate.Concurrency.Group); err != nil {
+				return fmt.Errorf("stage %q concurrency group: %w", stage.Name, err)
+			}
+		}
 	}
 	return nil
 }
@@ -357,6 +363,21 @@ func buildPipelineTask(
 			return nil, fmt.Errorf("rendering branch: %w", err)
 		}
 	}
+	var concurrency *kelos.TaskConcurrency
+	if stage.TaskTemplate.Concurrency != nil {
+		group, err := renderPipelineTemplate(stage.Name+" concurrency group", stage.TaskTemplate.Concurrency.Group, templateData)
+		if err != nil {
+			return nil, fmt.Errorf("rendering concurrency group: %w", err)
+		}
+		if group == "" {
+			return nil, fmt.Errorf("concurrency group template %q rendered empty", stage.TaskTemplate.Concurrency.Group)
+		}
+		if utf8.RuneCountInString(group) > kelos.TaskConcurrencyGroupMaxLength {
+			return nil, fmt.Errorf("concurrency group template %q rendered %d characters, more than the maximum of %d",
+				stage.TaskTemplate.Concurrency.Group, utf8.RuneCountInString(group), kelos.TaskConcurrencyGroupMaxLength)
+		}
+		concurrency = &kelos.TaskConcurrency{Group: group}
+	}
 
 	name := pipelineChildTaskName(pipeline.Name, stage.Name, index, total)
 	task := &kelos.Task{
@@ -370,8 +391,9 @@ func buildPipelineTask(
 			},
 		},
 		Spec: kelos.TaskSpec{
-			Prompt: prompt,
-			Branch: branch,
+			Prompt:      prompt,
+			Branch:      branch,
+			Concurrency: concurrency,
 		},
 	}
 	if stage.TaskTemplate.Worker != nil {

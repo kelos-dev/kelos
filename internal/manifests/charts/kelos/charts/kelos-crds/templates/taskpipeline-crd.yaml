@@ -97,6 +97,24 @@ spec:
                           description: Branch is the optional template rendered into
                             the child Task branch.
                           type: string
+                        concurrency:
+                          description: |-
+                            Concurrency is copied to child Tasks as Task.spec.concurrency.
+                            Group is a Go template rendered with the same data as Branch. A group
+                            that renders empty or longer than 256 characters fails the stage. Omit
+                            to use the default group described on Task.spec.concurrency.
+                          properties:
+                            group:
+                              description: |-
+                                Group names the concurrency group. At most one Task per group runs
+                                at a time within a namespace; other Tasks in the group wait in
+                                creation order.
+                              maxLength: 256
+                              minLength: 1
+                              type: string
+                          required:
+                          - group
+                          type: object
                         prompt:
                           description: Prompt is the template rendered into the child
                             Task prompt.
@@ -7182,6 +7200,8 @@ spec:
                       - message: branch is not supported with workerPoolRef
                         rule: '!has(self.workerPoolRef) || !has(self.branch) || size(self.branch)
                           == 0'
+                      - message: concurrency is not supported with workerPoolRef
+                        rule: '!has(self.workerPoolRef) || !has(self.concurrency)'
                   required:
                   - name
                   - taskTemplate

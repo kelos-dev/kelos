@@ -46,6 +46,7 @@ type PipelineMatrix struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.worker)",message="workerPoolRef is mutually exclusive with worker"
 // +kubebuilder:validation:XValidation:rule="!has(self.worker) || has(self.worker.credentials)",message="worker.credentials is required for inline execution"
 // +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.branch) || size(self.branch) == 0",message="branch is not supported with workerPoolRef"
+// +kubebuilder:validation:XValidation:rule="!has(self.workerPoolRef) || !has(self.concurrency)",message="concurrency is not supported with workerPoolRef"
 type PipelineTaskTemplate struct {
 	// Worker defines the execution environment for inline Task execution.
 	// +optional
@@ -62,6 +63,13 @@ type PipelineTaskTemplate struct {
 	// Branch is the optional template rendered into the child Task branch.
 	// +optional
 	Branch string `json:"branch,omitempty"`
+
+	// Concurrency is copied to child Tasks as Task.spec.concurrency.
+	// Group is a Go template rendered with the same data as Branch. A group
+	// that renders empty or longer than 256 characters fails the stage. Omit
+	// to use the default group described on Task.spec.concurrency.
+	// +optional
+	Concurrency *TaskConcurrency `json:"concurrency,omitempty"`
 }
 
 // PipelineStage defines one step in a TaskPipeline.

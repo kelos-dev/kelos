@@ -782,6 +782,86 @@ func TestTaskSpawnerConvert_NameTemplateRoundTrips(t *testing.T) {
 	}
 }
 
+func TestTaskSpawnerConvert_ConcurrencyRoundTrips(t *testing.T) {
+	hub := &v1alpha2.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{Name: "reviewer", Namespace: "default"},
+		Spec: v1alpha2.TaskSpawnerSpec{
+			When: v1alpha2.When{GitHubWebhook: &v1alpha2.GitHubWebhook{Events: []string{"pull_request"}}},
+			TaskTemplate: v1alpha2.TaskTemplate{
+				Branch:      "{{.Branch}}",
+				Concurrency: &v1alpha2.TaskConcurrency{Group: "pr-{{.Number}}-review"},
+			},
+		},
+	}
+
+	// hub -> spoke: v1alpha1 has no concurrency field, so the group is
+	// preserved in an internal annotation rather than dropped.
+	spoke := &v1alpha1.TaskSpawner{}
+	if err := taskSpawnerFromHub(context.Background(), hub, spoke); err != nil {
+		t.Fatalf("taskSpawnerFromHub() error = %v", err)
+	}
+	if got := spoke.Annotations[preservedConcurrencyGroupAnnotation]; got != "pr-{{.Number}}-review" {
+		t.Fatalf("preserved annotation = %q, want %q", got, "pr-{{.Number}}-review")
+	}
+
+	// spoke -> hub: the field is restored and the internal annotation removed.
+	back := &v1alpha2.TaskSpawner{}
+	if err := taskSpawnerToHub(context.Background(), spoke, back); err != nil {
+		t.Fatalf("taskSpawnerToHub() error = %v", err)
+	}
+	if !reflect.DeepEqual(back.Spec.TaskTemplate.Concurrency, hub.Spec.TaskTemplate.Concurrency) {
+		t.Errorf("round-tripped Concurrency = %+v, want %+v", back.Spec.TaskTemplate.Concurrency, hub.Spec.TaskTemplate.Concurrency)
+	}
+	if _, ok := back.Annotations[preservedConcurrencyGroupAnnotation]; ok {
+		t.Error("internal preservation annotation leaked onto hub object")
+	}
+}
+
+func TestTaskSpawnerConvert_MultibyteConcurrencyGroupRoundTrips(t *testing.T) {
+	group := strings.Repeat("é", v1alpha2.TaskConcurrencyGroupMaxLength)
+	hub := &v1alpha2.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{Name: "reviewer", Namespace: "default"},
+		Spec: v1alpha2.TaskSpawnerSpec{
+			When: v1alpha2.When{GitHubWebhook: &v1alpha2.GitHubWebhook{Events: []string{"pull_request"}}},
+			TaskTemplate: v1alpha2.TaskTemplate{
+				Concurrency: &v1alpha2.TaskConcurrency{Group: group},
+			},
+		},
+	}
+	spoke := &v1alpha1.TaskSpawner{}
+	if err := taskSpawnerFromHub(context.Background(), hub, spoke); err != nil {
+		t.Fatalf("taskSpawnerFromHub() error = %v", err)
+	}
+	back := &v1alpha2.TaskSpawner{}
+	if err := taskSpawnerToHub(context.Background(), spoke, back); err != nil {
+		t.Fatalf("taskSpawnerToHub() error = %v", err)
+	}
+	if c := back.Spec.TaskTemplate.Concurrency; c == nil || c.Group != group {
+		t.Errorf("round-tripped Concurrency = %+v, want group of %d characters", c, v1alpha2.TaskConcurrencyGroupMaxLength)
+	}
+}
+
+func TestTaskSpawnerToHub_IgnoresInvalidConcurrencyAnnotation(t *testing.T) {
+	spoke := &v1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "reviewer",
+			Namespace:   "default",
+			Annotations: map[string]string{preservedConcurrencyGroupAnnotation: strings.Repeat("a", v1alpha2.TaskConcurrencyGroupMaxLength+1)},
+		},
+		Spec: v1alpha1.TaskSpawnerSpec{When: v1alpha1.When{Cron: &v1alpha1.Cron{Schedule: "0 9 * * 1"}}},
+	}
+	hub := &v1alpha2.TaskSpawner{}
+	if err := taskSpawnerToHub(context.Background(), spoke, hub); err != nil {
+		t.Fatalf("taskSpawnerToHub() error = %v", err)
+	}
+	if hub.Spec.TaskTemplate.Concurrency != nil {
+		t.Errorf("Concurrency = %+v, want nil for an over-long annotation value", hub.Spec.TaskTemplate.Concurrency)
+	}
+	if _, ok := hub.Annotations[preservedConcurrencyGroupAnnotation]; ok {
+		t.Error("internal preservation annotation leaked onto hub object")
+	}
+}
+
 func TestTaskSpawnerConvert_GatewayRefRoundTrips(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -1176,6 +1256,9 @@ func TestTaskSpawnerFromHub_NoNameTemplateOmitsAnnotation(t *testing.T) {
 	}
 	if _, ok := spoke.Annotations[preservedNameTemplateAnnotation]; ok {
 		t.Error("annotation should not be set when nameTemplate is empty")
+	}
+	if _, ok := spoke.Annotations[preservedConcurrencyGroupAnnotation]; ok {
+		t.Error("annotation should not be set when concurrency is unset")
 	}
 }
 

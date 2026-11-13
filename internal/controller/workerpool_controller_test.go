@@ -211,6 +211,90 @@ func TestWorkerPoolReconciler_ReconcilesTaskWithSameNameAsWorkerPool(t *testing.
 	assert.Equal(t, "wp-shared-0", updatedTask.Status.PodName)
 }
 
+func TestWorkerPoolReconciler_WorkspaceCloneBranchPolicy(t *testing.T) {
+	tests := []struct {
+		name             string
+		clone            *kelos.WorkspaceClone
+		wantFlag         string
+		wantNoArg        string
+		wantFetchDefault bool
+	}{
+		{
+			name:      "default clones every branch",
+			clone:     nil,
+			wantFlag:  "--no-single-branch",
+			wantNoArg: "--single-branch",
+		},
+		{
+			name:      "Ref clones a single branch",
+			clone:     &kelos.WorkspaceClone{BranchPolicy: kelos.WorkspaceCloneBranchPolicyRef},
+			wantFlag:  "--single-branch",
+			wantNoArg: "--no-single-branch",
+		},
+		{
+			name:             "RefAndDefault clones a single branch and fetches the default branch",
+			clone:            &kelos.WorkspaceClone{BranchPolicy: kelos.WorkspaceCloneBranchPolicyRefAndDefault},
+			wantFlag:         "--single-branch",
+			wantNoArg:        "--no-single-branch",
+			wantFetchDefault: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scheme := newWorkerPoolTestScheme()
+			pool := newTestWorkerPool("my-pool", "default", 1)
+			ws := newTestWorkspace("default")
+			ws.Spec.Ref = "main"
+			ws.Spec.Clone = tt.clone
+
+			cl := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithStatusSubresource(&kelos.WorkerPool{}).
+				WithObjects(pool, ws).
+				Build()
+
+			r := newWorkerPoolReconciler(cl, scheme)
+
+			_, err := r.Reconcile(context.Background(), ctrl.Request{
+				NamespacedName: types.NamespacedName{Name: "my-pool", Namespace: "default"},
+			})
+			require.NoError(t, err)
+
+			var sts appsv1.StatefulSet
+			err = cl.Get(context.Background(), types.NamespacedName{Name: "wp-my-pool", Namespace: "default"}, &sts)
+			require.NoError(t, err)
+
+			var gitClone *corev1.Container
+			for i := range sts.Spec.Template.Spec.InitContainers {
+				if sts.Spec.Template.Spec.InitContainers[i].Name == "git-clone" {
+					gitClone = &sts.Spec.Template.Spec.InitContainers[i]
+					break
+				}
+			}
+			require.NotNil(t, gitClone)
+			assert.Equal(t, []string{
+				"--", "clone", "--branch", "main", tt.wantFlag, "--depth", "1",
+				"--", ws.Spec.Repo, WorkspaceMountPath + "/repo",
+			}, gitClone.Args)
+			assert.NotContains(t, gitClone.Args, tt.wantNoArg)
+
+			require.Len(t, gitClone.Command, 3)
+			script := gitClone.Command[2]
+			lsRemote := `head_ref=$(git -C /workspace/repo ls-remote --symref origin HEAD) || exit 1`
+			if tt.wantFetchDefault {
+				assert.Contains(t, script, `git "$@" && { (`+"\n"+lsRemote+"\n")
+				assert.NotContains(t, script, "set -e", "set -e has no effect on the left of ||; the lines must exit explicitly")
+				assert.Contains(t, script, `  git -C /workspace/repo remote set-branches --add origin "$default_branch" || exit 1`+"\n")
+				assert.Contains(t, script, `  git -C /workspace/repo fetch --depth 1 origin "+refs/heads/$default_branch:refs/remotes/origin/$default_branch" || exit 1`+"\n")
+				assert.Contains(t, script, "\n) || { rm -rf '/workspace/repo'; exit 1; }; }")
+			} else {
+				assert.Contains(t, script, `exec git "$@"`)
+				assert.NotContains(t, script, lsRemote)
+			}
+		})
+	}
+}
+
 func TestWorkerPoolReconciler_CommitRefWorkspaceUsesCheckoutScript(t *testing.T) {
 	scheme := newWorkerPoolTestScheme()
 	pool := newTestWorkerPool("my-pool", "default", 1)

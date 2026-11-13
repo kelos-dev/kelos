@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -257,6 +258,322 @@ func TestBuildClaudeCodeJob_WorkspaceWithRef(t *testing.T) {
 	container := job.Spec.Template.Spec.Containers[0]
 	if container.WorkingDir != WorkspaceMountPath+"/repo" {
 		t.Errorf("Expected workingDir %q, got %q", WorkspaceMountPath+"/repo", container.WorkingDir)
+	}
+}
+
+func TestBuildClaudeCodeJob_WorkspaceCloneBranchPolicyRefClonesSingleBranch(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-workspace-single-branch",
+			Namespace: "default",
+		},
+		Spec: kelos.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix the code",
+			Credentials: &kelos.Credentials{
+				Type:      kelos.CredentialTypeAPIKey,
+				SecretRef: &kelos.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &kelos.WorkspaceSpec{
+		Repo:  "https://github.com/example/repo.git",
+		Ref:   "main",
+		Clone: &kelos.WorkspaceClone{BranchPolicy: kelos.WorkspaceCloneBranchPolicyRef},
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	initContainer := job.Spec.Template.Spec.InitContainers[0]
+	expectedArgs := []string{
+		"clone",
+		"--branch", "main", "--single-branch", "--depth", "1",
+		"--", "https://github.com/example/repo.git", WorkspaceMountPath + "/repo",
+	}
+	if len(initContainer.Args) != len(expectedArgs) {
+		t.Fatalf("Expected %d clone args, got %d: %v", len(expectedArgs), len(initContainer.Args), initContainer.Args)
+	}
+	for i, arg := range expectedArgs {
+		if initContainer.Args[i] != arg {
+			t.Errorf("Clone args[%d]: expected %q, got %q", i, arg, initContainer.Args[i])
+		}
+	}
+}
+
+func TestBuildClaudeCodeJob_WorkspaceCloneBranchPolicyRefWithoutRefClonesDefaultBranch(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-workspace-single-default-branch",
+			Namespace: "default",
+		},
+		Spec: kelos.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix the code",
+			Credentials: &kelos.Credentials{
+				Type:      kelos.CredentialTypeAPIKey,
+				SecretRef: &kelos.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &kelos.WorkspaceSpec{
+		Repo:  "https://github.com/example/repo.git",
+		Clone: &kelos.WorkspaceClone{BranchPolicy: kelos.WorkspaceCloneBranchPolicyRef},
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	initContainer := job.Spec.Template.Spec.InitContainers[0]
+	expectedArgs := []string{
+		"clone", "--single-branch", "--depth", "1",
+		"--", "https://github.com/example/repo.git", WorkspaceMountPath + "/repo",
+	}
+	if len(initContainer.Args) != len(expectedArgs) {
+		t.Fatalf("Expected %d clone args, got %d: %v", len(expectedArgs), len(initContainer.Args), initContainer.Args)
+	}
+	for i, arg := range expectedArgs {
+		if initContainer.Args[i] != arg {
+			t.Errorf("Clone args[%d]: expected %q, got %q", i, arg, initContainer.Args[i])
+		}
+	}
+}
+
+func TestBuildClaudeCodeJob_WorkspaceCloneBranchPolicyAllClonesEveryBranch(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-workspace-all-branches",
+			Namespace: "default",
+		},
+		Spec: kelos.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix the code",
+			Credentials: &kelos.Credentials{
+				Type:      kelos.CredentialTypeAPIKey,
+				SecretRef: &kelos.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	workspace := &kelos.WorkspaceSpec{
+		Repo:  "https://github.com/example/repo.git",
+		Clone: &kelos.WorkspaceClone{BranchPolicy: kelos.WorkspaceCloneBranchPolicyAll},
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	initContainer := job.Spec.Template.Spec.InitContainers[0]
+	expectedArgs := []string{
+		"clone", "--no-single-branch", "--depth", "1",
+		"--", "https://github.com/example/repo.git", WorkspaceMountPath + "/repo",
+	}
+	if len(initContainer.Args) != len(expectedArgs) {
+		t.Fatalf("Expected %d clone args, got %d: %v", len(expectedArgs), len(initContainer.Args), initContainer.Args)
+	}
+	for i, arg := range expectedArgs {
+		if initContainer.Args[i] != arg {
+			t.Errorf("Clone args[%d]: expected %q, got %q", i, arg, initContainer.Args[i])
+		}
+	}
+}
+
+func TestBuildClaudeCodeJob_WorkspaceCloneBranchPolicyRefAndDefault(t *testing.T) {
+	repo := "https://github.com/example/repo.git"
+	target := WorkspaceMountPath + "/repo"
+	lsRemote := `head_ref=$(git -C ` + target + ` ls-remote --symref origin HEAD) || exit 1`
+	fetchDefault := `  git -C ` + target + ` fetch --depth 1 origin "+refs/heads/$default_branch:refs/remotes/origin/$default_branch" || exit 1`
+	credentialFlags := fmt.Sprintf(`-c credential.helper= -c credential.helper='%s' -c credential.username=%s`,
+		gitCredentialHelper(), gitCredentialDefaultUsername)
+
+	tests := []struct {
+		name      string
+		workspace kelos.WorkspaceSpec
+		check     func(t *testing.T, c corev1.Container)
+	}{
+		{
+			name: "branch ref clones the ref and fetches the default branch",
+			workspace: kelos.WorkspaceSpec{
+				Repo: repo,
+				Ref:  "feature/my-change",
+			},
+			check: func(t *testing.T, c corev1.Container) {
+				wantArgs := []string{
+					"--", "clone", "--branch", "feature/my-change", "--single-branch", "--depth", "1",
+					"--", repo, target,
+				}
+				if !reflect.DeepEqual(c.Args, wantArgs) {
+					t.Errorf("Args = %q, want %q", c.Args, wantArgs)
+				}
+				wantScript := strings.Join([]string{
+					"set -eu",
+					`git "$@"`,
+					lsRemote,
+					`default_branch=$(printf '%s\n' "$head_ref" | awk '$1 == "ref:" && $3 == "HEAD" { sub("^refs/heads/", "", $2); print $2; exit }')`,
+					`if [ -z "$default_branch" ]; then echo "Remote origin did not report a default branch, which clone.branchPolicy RefAndDefault needs" >&2; exit 1; fi`,
+					`if ! git -C ` + target + ` rev-parse --verify --quiet "refs/remotes/origin/$default_branch" >/dev/null; then`,
+					`  git -C ` + target + ` remote set-branches --add origin "$default_branch" || exit 1`,
+					fetchDefault,
+					`fi`,
+				}, "\n")
+				if len(c.Command) != 3 || c.Command[2] != wantScript {
+					t.Errorf("Command = %q, want script %q", c.Command, wantScript)
+				}
+			},
+		},
+		{
+			name: "secretRef authenticates the default branch lookup and fetch",
+			workspace: kelos.WorkspaceSpec{
+				Repo:      repo,
+				Ref:       "v1.2.3",
+				SecretRef: &kelos.SecretReference{Name: "gh"},
+			},
+			check: func(t *testing.T, c corev1.Container) {
+				script := c.Command[2]
+				for _, want := range []string{
+					`head_ref=$(git -C ` + target + ` ` + credentialFlags + ` ls-remote --symref origin HEAD) || exit 1`,
+					`  git -C ` + target + ` ` + credentialFlags + ` fetch --depth 1 origin "+refs/heads/$default_branch:refs/remotes/origin/$default_branch" || exit 1`,
+					`git -C ` + target + ` config --add credential.helper '` + gitCredentialHelper() + `'`,
+				} {
+					if !strings.Contains(script, want+"\n") && !strings.HasSuffix(script, want) {
+						t.Errorf("Expected script line %q, got %q", want, script)
+					}
+				}
+			},
+		},
+		{
+			name: "clone.paths fetches the default branch before the sparse checkout",
+			workspace: kelos.WorkspaceSpec{
+				Repo:  repo,
+				Ref:   "feature/my-change",
+				Clone: &kelos.WorkspaceClone{Paths: []string{"docs"}},
+			},
+			check: func(t *testing.T, c corev1.Container) {
+				script := c.Command[2]
+				fetchAt := strings.Index(script, fetchDefault)
+				sparseAt := strings.Index(script, "sparse-checkout set")
+				if fetchAt < 0 || sparseAt < 0 || fetchAt > sparseAt {
+					t.Errorf("Expected the default branch fetch before the sparse checkout, got %q", script)
+				}
+			},
+		},
+		{
+			name: "empty ref clones only the default branch",
+			workspace: kelos.WorkspaceSpec{
+				Repo: repo,
+			},
+			check: func(t *testing.T, c corev1.Container) {
+				wantArgs := []string{"clone", "--single-branch", "--depth", "1", "--", repo, target}
+				if !reflect.DeepEqual(c.Args, wantArgs) {
+					t.Errorf("Args = %q, want %q", c.Args, wantArgs)
+				}
+				if len(c.Command) != 0 {
+					t.Errorf("Expected a plain clone without a script, got %q", c.Command)
+				}
+			},
+		},
+		{
+			name: "commit ref is fetched on its own",
+			workspace: kelos.WorkspaceSpec{
+				Repo: repo,
+				Ref:  "c44211cb54d861d9445de16a0e8ce96d7f29637d",
+			},
+			check: func(t *testing.T, c corev1.Container) {
+				if len(c.Command) != 3 || !strings.Contains(c.Command[2], `fetch --depth 1 origin "$ref"`) {
+					t.Fatalf("Expected commit checkout script, got %q", c.Command)
+				}
+				if strings.Contains(c.Command[2], "ls-remote --symref") {
+					t.Errorf("Expected no default branch lookup for a commit ref, got %q", c.Command[2])
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := &kelos.Task{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-ref-and-default", Namespace: "default"},
+				Spec: kelos.TaskSpec{
+					Type:   AgentTypeClaudeCode,
+					Prompt: "Fix the code",
+					Credentials: &kelos.Credentials{
+						Type:      kelos.CredentialTypeAPIKey,
+						SecretRef: &kelos.SecretReference{Name: "my-secret"},
+					},
+				},
+			}
+			workspace := tt.workspace
+			if workspace.Clone == nil {
+				workspace.Clone = &kelos.WorkspaceClone{}
+			}
+			workspace.Clone.BranchPolicy = kelos.WorkspaceCloneBranchPolicyRefAndDefault
+
+			job, err := NewJobBuilder().Build(task, &workspace, nil, task.Spec.Prompt)
+			if err != nil {
+				t.Fatalf("Build() returned error: %v", err)
+			}
+			initContainer := job.Spec.Template.Spec.InitContainers[0]
+			if initContainer.Name != "git-clone" {
+				t.Fatalf("Expected git-clone first, got %q", initContainer.Name)
+			}
+			tt.check(t, initContainer)
+		})
+	}
+}
+
+func TestBuildClaudeCodeJob_WorkspaceCloneBranchPolicyRefIgnoredForCommitRef(t *testing.T) {
+	builder := NewJobBuilder()
+	task := &kelos.Task{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-workspace-commit-single-branch",
+			Namespace: "default",
+		},
+		Spec: kelos.TaskSpec{
+			Type:   AgentTypeClaudeCode,
+			Prompt: "Fix the code",
+			Credentials: &kelos.Credentials{
+				Type:      kelos.CredentialTypeAPIKey,
+				SecretRef: &kelos.SecretReference{Name: "my-secret"},
+			},
+		},
+	}
+
+	sha := "c44211cb54d861d9445de16a0e8ce96d7f29637d"
+	workspace := &kelos.WorkspaceSpec{
+		Repo:  "https://github.com/example/repo.git",
+		Ref:   sha,
+		Clone: &kelos.WorkspaceClone{BranchPolicy: kelos.WorkspaceCloneBranchPolicyRef},
+	}
+
+	job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+	if err != nil {
+		t.Fatalf("Build() returned error: %v", err)
+	}
+
+	initContainer := job.Spec.Template.Spec.InitContainers[0]
+	expectedArgs := []string{
+		"--", "https://github.com/example/repo.git", WorkspaceMountPath + "/repo", sha,
+	}
+	if len(initContainer.Args) != len(expectedArgs) {
+		t.Fatalf("Expected %d clone args, got %d: %v", len(expectedArgs), len(initContainer.Args), initContainer.Args)
+	}
+	for i, arg := range expectedArgs {
+		if initContainer.Args[i] != arg {
+			t.Errorf("Clone args[%d]: expected %q, got %q", i, arg, initContainer.Args[i])
+		}
+	}
+	if len(initContainer.Command) != 3 || !strings.Contains(initContainer.Command[2], `fetch --depth 1 origin "$ref"`) {
+		t.Errorf("Expected commit checkout script, got %v", initContainer.Command)
 	}
 }
 
@@ -3931,8 +4248,17 @@ func TestBuildJob_BranchSetupInitContainer(t *testing.T) {
 	if !strings.Contains(script, "git checkout") {
 		t.Error("Expected branch-setup script to include git checkout")
 	}
-	if !strings.Contains(script, "git fetch") {
-		t.Error("Expected branch-setup script to include git fetch")
+	if !strings.Contains(script, `  git fetch --depth 1 origin "+refs/heads/$KELOS_BRANCH:refs/remotes/origin/$KELOS_BRANCH"`+"\n") {
+		t.Errorf("Expected branch-setup script to shallow-fetch the remote branch into origin/$KELOS_BRANCH, got %q", script)
+	}
+	if !strings.Contains(script, `    git reset --hard FETCH_HEAD`+"\n") {
+		t.Errorf("Expected branch-setup script to move an existing local branch to the fetched tip, got %q", script)
+	}
+	if strings.Contains(script, "merge --ff-only") {
+		t.Error("Expected branch-setup script not to fast-forward, which fails after a shallow fetch")
+	}
+	if strings.Contains(script, "set-branches") {
+		t.Error("Expected branch-setup script not to change origin's fetch refspecs for an all-branches clone")
 	}
 	if !strings.Contains(script, `ls-remote --exit-code --heads origin "refs/heads/$KELOS_BRANCH"`) {
 		t.Error("Expected branch-setup script to check whether the remote branch exists")
@@ -4021,6 +4347,82 @@ func TestBuildJob_ConcurrencyGroupKeepsBranchSetup(t *testing.T) {
 	}
 	if !foundBranch {
 		t.Error("Expected KELOS_BRANCH=feature-x env var on branch-setup")
+	}
+}
+
+func TestBuildJob_BranchSetupSelectedBranchesTracksTaskBranch(t *testing.T) {
+	tests := []struct {
+		name      string
+		policy    kelos.WorkspaceCloneBranchPolicy
+		ref       string
+		wantTrack bool
+	}{
+		{name: "All with branch ref", policy: kelos.WorkspaceCloneBranchPolicyAll, ref: "main", wantTrack: false},
+		{name: "Ref with branch ref", policy: kelos.WorkspaceCloneBranchPolicyRef, ref: "main", wantTrack: true},
+		{name: "Ref with commit ref", policy: kelos.WorkspaceCloneBranchPolicyRef, ref: "c44211cb54d861d9445de16a0e8ce96d7f29637d", wantTrack: false},
+		{name: "RefAndDefault with branch ref", policy: kelos.WorkspaceCloneBranchPolicyRefAndDefault, ref: "feature/base", wantTrack: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			builder := NewJobBuilder()
+			task := &kelos.Task{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-branch-single",
+					Namespace: "default",
+				},
+				Spec: kelos.TaskSpec{
+					Type:   AgentTypeClaudeCode,
+					Prompt: "Work on feature",
+					Branch: "feature-x",
+					Credentials: &kelos.Credentials{
+						Type:      kelos.CredentialTypeAPIKey,
+						SecretRef: &kelos.SecretReference{Name: "my-secret"},
+					},
+				},
+			}
+			workspace := &kelos.WorkspaceSpec{
+				Repo:  "https://github.com/example/repo.git",
+				Ref:   tt.ref,
+				Clone: &kelos.WorkspaceClone{BranchPolicy: tt.policy},
+			}
+
+			job, err := builder.Build(task, workspace, nil, task.Spec.Prompt)
+			if err != nil {
+				t.Fatalf("Build() returned error: %v", err)
+			}
+
+			var branchSetup *corev1.Container
+			for i := range job.Spec.Template.Spec.InitContainers {
+				if job.Spec.Template.Spec.InitContainers[i].Name == "branch-setup" {
+					branchSetup = &job.Spec.Template.Spec.InitContainers[i]
+					break
+				}
+			}
+			if branchSetup == nil {
+				t.Fatal("Expected branch-setup init container")
+			}
+			script := branchSetup.Command[2]
+
+			// The Task branch is tracked only once it is known to exist on
+			// origin: git fetch fails on a tracked branch that is missing
+			// from the remote, so tracking a branch that is not pushed yet
+			// would break a plain git fetch.
+			setBranches := `git remote set-branches --add origin "$KELOS_BRANCH"`
+			trackWhenRemoteExists := `if [ "$remote_status" -eq 0 ]; then` + "\n  " + setBranches + "\n"
+			if got := strings.Contains(script, trackWhenRemoteExists); got != tt.wantTrack {
+				t.Errorf("Expected origin to track the Task branch when it exists on origin = %v, got script %q", tt.wantTrack, script)
+			}
+			wantCount := 0
+			if tt.wantTrack {
+				wantCount = 1
+			}
+			if got := strings.Count(script, setBranches); got != wantCount {
+				t.Errorf("Expected %d set-branches line(s), got %d in script %q", wantCount, got, script)
+			}
+			if !strings.Contains(script, `  git fetch --depth 1 origin "+refs/heads/$KELOS_BRANCH:refs/remotes/origin/$KELOS_BRANCH"`+"\n") {
+				t.Errorf("Expected branch-setup script to shallow-fetch the remote branch, got %q", script)
+			}
+		})
 	}
 }
 

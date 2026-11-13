@@ -43,6 +43,11 @@ func (p preservedWorkspaceCheckout) validate() error {
 		default:
 			return fmt.Errorf("unsupported clone.gitDir %q", p.Clone.GitDir)
 		}
+		switch p.Clone.BranchPolicy {
+		case "", v1alpha2.WorkspaceCloneBranchPolicyAll, v1alpha2.WorkspaceCloneBranchPolicyRef, v1alpha2.WorkspaceCloneBranchPolicyRefAndDefault:
+		default:
+			return fmt.Errorf("unsupported clone.branchPolicy %q", p.Clone.BranchPolicy)
+		}
 		if p.Clone.Paths != nil && len(p.Clone.Paths) == 0 {
 			return fmt.Errorf("clone.paths must have at least 1 entry when set")
 		}

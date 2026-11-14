@@ -48,7 +48,7 @@ USER agent
 RUN test "$(id -u)" = 61100 \
     && test "$(sudo -n id -u)" = 0
 
-ARG CURSOR_CLI_VERSION=2026.11.10-731fb78
+ARG CURSOR_CLI_VERSION=2026.11.13-eacade1
 RUN ARCH=$(uname -m) \
     && case "$ARCH" in x86_64) ARCH="x64" ;; aarch64) ARCH="arm64" ;; esac \
     && INSTALL_DIR="$HOME/.local/share/cursor-agent/versions/${CURSOR_CLI_VERSION}" \

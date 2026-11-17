@@ -204,6 +204,7 @@
         spawnerMode: document.querySelector('#session-mode-spawner'),
         spawnerFields: document.querySelector('#session-spawner-fields'),
         sessionSpawner: document.querySelector('#session-spawner'),
+        sessionSpawnerName: document.querySelector('#session-spawner-name'),
         sessionSpawnerValues: document.querySelector('#session-spawner-values'),
         yamlPanel: document.querySelector('#session-yaml-panel'),
         yaml: document.querySelector('#session-yaml'),
@@ -7181,7 +7182,7 @@ spec:
             if (state.creationMode === 'spawner') {
                 created = await api(`/api/resources/sessionspawners/${encodeURIComponent(state.namespace)}/${encodeURIComponent(elements.sessionSpawner.value)}/run`, {
                     method: 'POST',
-                    body: JSON.stringify({ values: elements.sessionSpawnerValues.value }),
+                    body: JSON.stringify({ name: elements.sessionSpawnerName.value.trim(), values: elements.sessionSpawnerValues.value }),
                 });
             }
             else if (state.creationMode === 'yaml') {

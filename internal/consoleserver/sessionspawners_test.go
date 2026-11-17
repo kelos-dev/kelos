@@ -222,6 +222,11 @@ func TestRunSessionSpawnerRejectsInvalidRequests(t *testing.T) {
 		{"missing", `{}`, http.StatusNotFound},
 		{"invalid request", `{`, http.StatusBadRequest},
 		{"trailing JSON", `{} {}`, http.StatusBadRequest},
+		{"uppercase name", `{"name":"Review"}`, http.StatusBadRequest},
+		{"invalid name character", `{"name":"review_task"}`, http.StatusBadRequest},
+		{"dotted name", `{"name":"review.task"}`, http.StatusBadRequest},
+		{"invalid name segment", `{"name":"review..task"}`, http.StatusBadRequest},
+		{"name too long", `{"name":"` + strings.Repeat("a", 254) + `"}`, http.StatusBadRequest},
 		{"invalid values", `{"values":"Title: ["}`, http.StatusBadRequest},
 		{"array values", `{"values":"[one, two]"}`, http.StatusBadRequest},
 		{"scalar values", `{"values":"hello"}`, http.StatusBadRequest},
@@ -253,9 +258,75 @@ func TestRunSessionSpawnerRejectsInvalidRequests(t *testing.T) {
 			if w.Code != test.status || !strings.Contains(w.Body.String(), "webhook") {
 				t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
 			}
+			if test.name == "uppercase name" {
+				var result struct {
+					Error string `json:"error"`
+				}
+				if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+					t.Fatal(err)
+				}
+				want := `running SessionSpawner "webhook": invalid Session name "Review": must be at most 253 characters of lowercase letters, numbers, or hyphens, and start and end with a letter or number`
+				if result.Error != want {
+					t.Fatalf("error = %q, want %q", result.Error, want)
+				}
+			}
 			var sessions kelos.SessionList
 			if err := s.client.List(t.Context(), &sessions); err != nil || len(sessions.Items) != 0 {
 				t.Fatalf("Sessions = %#v, error = %v", sessions.Items, err)
+			}
+		})
+	}
+}
+
+func TestRunSessionSpawnerWithName(t *testing.T) {
+	for _, name := range []string{"feature-review", strings.Repeat("a", 253)} {
+		t.Run(name, func(t *testing.T) {
+			s := testServer(t)
+			spawner := consoleTestSessionSpawner()
+			if err := s.client.Create(t.Context(), spawner); err != nil {
+				t.Fatal(err)
+			}
+			body, err := json.Marshal(map[string]string{"name": " " + name + " ", "values": "Title: Fix login"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, status := range []int{http.StatusCreated, http.StatusConflict} {
+				r := httptest.NewRequest(http.MethodPost, "/api/resources/sessionspawners/team-a/webhook/run", strings.NewReader(string(body)))
+				r.Header.Set("Authorization", "Bearer secret-token")
+				w := httptest.NewRecorder()
+				s.ServeHTTP(w, r)
+				if w.Code != status {
+					t.Fatalf("status = %d, want %d, body = %s", w.Code, status, w.Body.String())
+				}
+				if status == http.StatusCreated {
+					var result sessionSummary
+					if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+						t.Fatal(err)
+					}
+					if result.Name != name || result.Namespace != "team-a" {
+						t.Fatalf("created Session = %#v", result)
+					}
+				} else if !strings.Contains(w.Body.String(), name) {
+					t.Fatalf("conflict does not identify Session %q: %s", name, w.Body.String())
+				}
+				var sessions kelos.SessionList
+				if err := s.client.List(t.Context(), &sessions, client.InNamespace("team-a")); err != nil {
+					t.Fatal(err)
+				}
+				if len(sessions.Items) != 1 || sessions.Items[0].Name != name {
+					t.Fatalf("Sessions = %#v", sessions.Items)
+				}
+				session := &sessions.Items[0]
+				wantSpec := spawner.Spec.SessionTemplate.SessionSpec.DeepCopy()
+				wantSpec.InitialPrompt = "manual: Fix login"
+				if !equality.Semantic.DeepEqual(session.Spec, *wantSpec) || !metav1.IsControlledBy(session, spawner) {
+					t.Fatalf("Session = %#v", session)
+				}
+				// A duplicate run must not replace the existing Session's prompt.
+				body, err = json.Marshal(map[string]string{"name": name, "values": "Title: Different prompt"})
+				if err != nil {
+					t.Fatal(err)
+				}
 			}
 		})
 	}
@@ -285,7 +356,7 @@ func TestRunSessionSpawnerAuthorization(t *testing.T) {
 				t.Fatal(err)
 			}
 			w := httptest.NewRecorder()
-			s.ServeHTTP(w, oidcRequest(http.MethodPost, "/api/resources/sessionspawners/team-a/webhook/run", `{}`))
+			s.ServeHTTP(w, oidcRequest(http.MethodPost, "/api/resources/sessionspawners/team-a/webhook/run", `{"name":"feature-review"}`))
 			if w.Code != test.status {
 				t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
 			}

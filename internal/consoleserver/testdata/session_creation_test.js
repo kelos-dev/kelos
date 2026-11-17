@@ -23,7 +23,7 @@ function harness() {
   const elements = Object.fromEntries([
     'formFields', 'sessionSourcePicker', 'sessionSource', 'spawnerFields',
     'yamlPanel', 'yaml', 'formMode', 'yamlMode', 'spawnerMode', 'createButton',
-    'sessionSpawner', 'sessionSpawnerValues', 'dialogError', 'namespace',
+    'sessionSpawner', 'sessionSpawnerName', 'sessionSpawnerValues', 'dialogError', 'namespace',
     'sessionSourceStatus', 'sectionSelect', 'sectionCustom',
   ].map(key => [key, element()]));
   const state = {
@@ -36,7 +36,7 @@ function harness() {
     elements: {name: element()},
     addEventListener(type, callback) { assert.equal(type, 'submit'); calls.submit = callback; },
     reportValidity() { return elements.spawnerFields.disabled || Boolean(elements.sessionSpawner.value); },
-    reset() { calls.reset++; elements.sessionSpawner.value = ''; elements.sessionSpawnerValues.value = ''; },
+    reset() { calls.reset++; elements.sessionSpawner.value = ''; elements.sessionSpawnerName.value = ''; elements.sessionSpawnerValues.value = ''; },
   };
   elements.dialog = {
     open: false,
@@ -204,12 +204,13 @@ async function testSpawnerOptionsErrorsAndNamespaceChanges() {
   assert.equal(e.dialogError.textContent, '');
 }
 
-async function testCreateSessionFromSpawner() {
+async function testCreateSessionFromSpawner(name = '') {
   const {context: c, elements: e, state, calls} = harness();
   c.setCreationMode('spawner');
   e.sessionSpawner.value = 'review';
+  e.sessionSpawnerName.value = name;
   e.sessionSpawnerValues.value = 'Number: 42\nTitle: Fix login';
-  const created = {namespace: 'team-a', name: 'review-manual-abcde', provider: 'codex'};
+  const created = {namespace: 'team-a', name: name.trim() || 'review-manual-abcde', provider: 'codex'};
   const listed = {...created, phase: 'Ready'};
   c.loadSessions = async () => { state.sessions = [listed]; };
   let requests = 0;
@@ -218,7 +219,7 @@ async function testCreateSessionFromSpawner() {
     requests++;
     assert.equal(requestPath, '/api/resources/sessionspawners/team-a/review/run');
     assert.equal(options.method, 'POST');
-    assert.deepEqual(JSON.parse(options.body), {values: 'Number: 42\nTitle: Fix login'});
+    assert.deepEqual(JSON.parse(options.body), {name: name.trim(), values: 'Number: 42\nTitle: Fix login'});
     return new Promise(done => { resolve = done; });
   };
   let prevented = false;
@@ -235,6 +236,7 @@ async function testCreateSessionFromSpawner() {
   assert.equal(calls.selected, listed);
   assert.equal(state.creationMode, 'form');
   assert.equal(e.createButton.disabled, false);
+  assert.equal(e.sessionSpawnerName.value, '');
 }
 
 async function testCreateSessionErrors() {
@@ -246,11 +248,13 @@ async function testCreateSessionErrors() {
   await calls.submit(event);
   assert.equal(requests, 0);
   e.sessionSpawner.value = 'review';
+  e.sessionSpawnerName.value = 'feature-review';
   e.sessionSpawnerValues.value = 'Title: Fix login';
   await calls.submit(event);
   assert.equal(requests, 1);
   assert.equal(e.dialogError.textContent, 'Missing template value Number');
   assert.equal(e.sessionSpawner.value, 'review');
+  assert.equal(e.sessionSpawnerName.value, 'feature-review');
   assert.equal(e.sessionSpawnerValues.value, 'Title: Fix login');
   assert.equal(e.createButton.disabled, false);
   assert.equal(e.spawnerFields.disabled, false);
@@ -264,7 +268,9 @@ testSpawnerOptions()
   .then(testOpeningDialogRefreshesOptionsAndFocuses)
   .then(testOpeningDialogDoesNotFocusAfterClosing)
   .then(testSpawnerOptionsErrorsAndNamespaceChanges)
-  .then(testCreateSessionFromSpawner)
+  .then(() => testCreateSessionFromSpawner())
+  .then(() => testCreateSessionFromSpawner('  feature-review  '))
+  .then(() => testCreateSessionFromSpawner('   '))
   .then(testCreateSessionErrors)
   .then(() => process.stdout.write('Session creation tests passed\n'))
   .catch(error => { console.error(error); process.exitCode = 1; });

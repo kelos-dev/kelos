@@ -497,7 +497,12 @@
             <select id="session-spawner" required>
               <option value="">Choose a SessionSpawner…</option>
             </select>
-            <small>Uses the spawner's Session template and credentials. A session name is generated automatically.</small>
+            <small>Uses the spawner's Session template and credentials.</small>
+          </label>
+          <label class="form-wide">
+            <span>Name <em>optional</em></span>
+            <input id="session-spawner-name" pattern="\s*([a-z0-9]([a-z0-9\-]*[a-z0-9])?)?\s*" maxlength="253" placeholder="feature-review" autocomplete="off" aria-describedby="session-spawner-name-help">
+            <small id="session-spawner-name-help">Leave blank to generate a name automatically. Use lowercase letters, numbers, or hyphens.</small>
           </label>
           <label class="form-wide">
             <span>Template values <em>optional</em></span>

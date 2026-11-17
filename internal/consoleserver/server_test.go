@@ -789,6 +789,7 @@ func TestSessionFormUsesResourceSelectors(t *testing.T) {
 		`id="session-mode-yaml"`,
 		`id="session-mode-spawner"`,
 		`id="session-spawner" required`,
+		`id="session-spawner-name" pattern="\s*([a-z0-9]([a-z0-9\-]*[a-z0-9])?)?\s*" maxlength="253"`,
 		`id="session-spawner-values"`,
 		`id="session-yaml"`,
 		`id="volume-claim-enabled"`,

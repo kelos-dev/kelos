@@ -988,6 +988,28 @@ func TestHandleReactionAdded(t *testing.T) {
 			wantThread: "2222222222.222222",
 		},
 		{
+			// The text field is flattened to one line, so the line-anchored
+			// pattern matches only because the reply routes on its blocks.
+			name: "message pattern matches a marker line in a bot reply's block text",
+			slackCfg: &kelos.Slack{Triggers: []kelos.SlackTrigger{
+				{Reaction: &kelos.SlackReactionTrigger{Name: "gear", MessagePattern: `(?m)^gravity-goal-plan \S+`}},
+			}},
+			event:   gearEvent,
+			history: flattenedBotReplyHistory,
+			wantPrompt: "SlackReaction :gear: by UREACTOR on C1/2222222222.222222 thread=" +
+				" url=https://example.slack.com/archives/C1/p2222222222222222\n" +
+				"Plan: 5 tickets.\nReact to create them.\ngravity-goal-plan doc-1\nTask: planner-1",
+			wantThread: "2222222222.222222",
+		},
+		{
+			name: "message pattern that does not match the reacted-to message does not create a task",
+			slackCfg: &kelos.Slack{Triggers: []kelos.SlackTrigger{
+				{Reaction: &kelos.SlackReactionTrigger{Name: "gear", MessagePattern: `(?m)^gravity-goal-plan \S+`}},
+			}},
+			event:   gearEvent,
+			history: topLevelHistory,
+		},
+		{
 			name: "line-anchored exclusion matches a bot reply whose text field is flattened",
 			slackCfg: &kelos.Slack{
 				Triggers:        []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear"}}},

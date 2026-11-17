@@ -801,7 +801,7 @@ type SlackFilter struct {
 	Channels []string `json:"channels,omitempty"`
 }
 
-// +kubebuilder:validation:XValidation:rule="!has(self.reaction) || (!has(self.pattern) && !has(self.mentionOptional))",message="a reaction trigger cannot set pattern or mentionOptional"
+// +kubebuilder:validation:XValidation:rule="!has(self.reaction) || (!has(self.pattern) && !has(self.mentionOptional))",message="a reaction trigger cannot set pattern or mentionOptional; set reaction.messagePattern to match the reacted-to message's text"
 // SlackTrigger defines what fires a Slack TaskSpawner: a regex pattern matched
 // against message text, or an emoji reaction added to a message.
 type SlackTrigger struct {
@@ -822,7 +822,8 @@ type SlackTrigger struct {
 	// cannot be set with Reaction.
 	//
 	// Channels and ExcludeFilters apply as they do to messages, and
-	// ExcludePatterns is matched against the reacted-to message's text.
+	// Reaction.MessagePattern and ExcludePatterns are matched against the
+	// reacted-to message's text.
 	// BotMessagePolicy does not apply: reactions added by other bots fire the
 	// trigger, and only a reaction the bot adds itself never fires. The Slack
 	// app must subscribe to the reaction_added bot event, which needs the
@@ -843,6 +844,15 @@ type SlackReactionTrigger struct {
 	// +kubebuilder:validation:MaxLength=100
 	// +kubebuilder:validation:Pattern=`^[^:\sA-Z]+$`
 	Name string `json:"name"`
+
+	// MessagePattern is a Go RE2 regex (unanchored) that the reacted-to
+	// message's text must match for the reaction to fire the trigger. For a
+	// bot message with Block Kit blocks, the text is the blocks' text. Leading
+	// @-mentions are stripped before matching. When omitted, a reaction on any
+	// message fires the trigger. A pattern that fails to compile never matches.
+	// +optional
+	// +kubebuilder:validation:MaxLength=256
+	MessagePattern string `json:"messagePattern,omitempty"`
 }
 
 // BotMessagePolicy controls whether bot-originated messages can trigger a spawner.

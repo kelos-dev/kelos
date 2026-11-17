@@ -251,9 +251,9 @@ func (h *SlackHandler) handleMessageEvent(ctx context.Context, innerEvent *slack
 	h.routeMessage(ctx, msg)
 }
 
-// handleReactionAdded creates a Task for every TaskSpawner with a reaction
-// trigger for the added emoji. The event carries only the
-// reacted-to message's channel and timestamp, so the message is fetched from
+// handleReactionAdded creates a Task for every TaskSpawner whose reaction
+// trigger matches the added emoji and, if set, its message pattern. The event
+// carries only the reacted-to message's channel and timestamp, so the message is fetched from
 // Slack before matching.
 func (h *SlackHandler) handleReactionAdded(ctx context.Context, evt *slackevents.ReactionAddedEvent) {
 	if evt.Item.Type != "message" {

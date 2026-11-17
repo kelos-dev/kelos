@@ -496,7 +496,7 @@ func TestTaskSpawnerConvert_SlackReactionTriggersRoundTrip(t *testing.T) {
 					Triggers: []v1alpha2.SlackTrigger{
 						{Reaction: &v1alpha2.SlackReactionTrigger{Name: "gear"}},
 						{Pattern: "deploy"},
-						{Reaction: &v1alpha2.SlackReactionTrigger{Name: "+1"}},
+						{Reaction: &v1alpha2.SlackReactionTrigger{Name: "+1", MessagePattern: `(?m)^approve \S+`}},
 					},
 				},
 			},
@@ -510,7 +510,7 @@ func TestTaskSpawnerConvert_SlackReactionTriggersRoundTrip(t *testing.T) {
 	if got := down.Spec.When.Slack.Triggers; len(got) != 1 || got[0].Pattern != "deploy" {
 		t.Errorf("v1alpha1 triggers = %#v, want only the deploy pattern trigger", got)
 	}
-	if raw := down.Annotations[preservedSlackReactionTriggersAnnotation]; raw != `[{"name":"gear"},{"name":"+1"}]` {
+	if raw := down.Annotations[preservedSlackReactionTriggersAnnotation]; raw != `[{"name":"gear"},{"name":"+1","messagePattern":"(?m)^approve \\S+"}]` {
 		t.Errorf("preservation annotation = %q, want the reaction blocks JSON", raw)
 	}
 
@@ -518,7 +518,11 @@ func TestTaskSpawnerConvert_SlackReactionTriggersRoundTrip(t *testing.T) {
 	if err := taskSpawnerToHub(context.Background(), down, up); err != nil {
 		t.Fatalf("taskSpawnerToHub() error = %v", err)
 	}
-	want := []v1alpha2.SlackTrigger{{Pattern: "deploy"}, {Reaction: &v1alpha2.SlackReactionTrigger{Name: "gear"}}, {Reaction: &v1alpha2.SlackReactionTrigger{Name: "+1"}}}
+	want := []v1alpha2.SlackTrigger{
+		{Pattern: "deploy"},
+		{Reaction: &v1alpha2.SlackReactionTrigger{Name: "gear"}},
+		{Reaction: &v1alpha2.SlackReactionTrigger{Name: "+1", MessagePattern: `(?m)^approve \S+`}},
+	}
 	if got := up.Spec.When.Slack.Triggers; !reflect.DeepEqual(got, want) {
 		t.Errorf("restored triggers = %#v, want %#v", got, want)
 	}
@@ -557,6 +561,31 @@ func TestTaskSpawnerConvert_SlackReactionOnlyRoundTrip(t *testing.T) {
 	}
 }
 
+// TestTaskSpawnerToHub_SlackReactionTriggersAnnotationWithoutMessagePattern verifies
+// that an annotation written before reaction triggers had a message pattern
+// still restores, as a trigger that fires on any reacted-to message.
+func TestTaskSpawnerToHub_SlackReactionTriggersAnnotationWithoutMessagePattern(t *testing.T) {
+	spoke := &v1alpha1.TaskSpawner{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "chat",
+			Namespace:   "default",
+			Annotations: map[string]string{preservedSlackReactionTriggersAnnotation: `[{"name":"gear"}]`},
+		},
+		Spec: v1alpha1.TaskSpawnerSpec{
+			When: v1alpha1.When{Slack: &v1alpha1.Slack{Channels: []string{"C0123456789"}}},
+		},
+	}
+
+	hub := &v1alpha2.TaskSpawner{}
+	if err := taskSpawnerToHub(context.Background(), spoke, hub); err != nil {
+		t.Fatalf("taskSpawnerToHub() error = %v", err)
+	}
+	want := []v1alpha2.SlackTrigger{{Reaction: &v1alpha2.SlackReactionTrigger{Name: "gear"}}}
+	if got := hub.Spec.When.Slack.Triggers; !reflect.DeepEqual(got, want) {
+		t.Errorf("restored triggers = %#v, want %#v", got, want)
+	}
+}
+
 func TestTaskSpawnerToHub_InvalidSlackReactionTriggersAnnotationIgnored(t *testing.T) {
 	// The API server does not re-validate conversion output, so annotation data
 	// that violates the v1alpha2 constraints must not be restored.
@@ -572,6 +601,10 @@ func TestTaskSpawnerToHub_InvalidSlackReactionTriggersAnnotationIgnored(t *testi
 		{name: "empty name", raw: `[{"name":""}]`},
 		{name: "missing name", raw: `[{}]`},
 		{name: "name longer than maxLength", raw: `[{"name":"` + strings.Repeat("a", v1alpha2.SlackReactionMaxLength+1) + `"}]`},
+		{
+			name: "message pattern longer than maxLength",
+			raw:  `[{"name":"gear","messagePattern":"` + strings.Repeat("a", v1alpha2.SlackReactionMessagePatternMaxLength+1) + `"}]`,
+		},
 		{name: "a bare name list rather than reaction blocks", raw: `["gear"]`},
 		{name: "an object rather than a list", raw: `{"name":"gear"}`},
 		{

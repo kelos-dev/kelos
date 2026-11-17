@@ -342,6 +342,9 @@ func printTaskSpawnerDetail(w io.Writer, ts *kelos.TaskSpawner) {
 				patterns[i] = tr.Pattern
 				if tr.Reaction != nil {
 					patterns[i] = ":" + tr.Reaction.Name + ":"
+					if tr.Reaction.MessagePattern != "" {
+						patterns[i] += " /" + tr.Reaction.MessagePattern + "/"
+					}
 				}
 			}
 			printField(w, "Triggers", fmt.Sprintf("%v", patterns))

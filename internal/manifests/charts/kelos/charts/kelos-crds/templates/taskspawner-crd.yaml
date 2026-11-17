@@ -23694,12 +23694,22 @@ spec:
                                 cannot be set with Reaction.
 
                                 Channels and ExcludeFilters apply as they do to messages, and
-                                ExcludePatterns is matched against the reacted-to message's text.
+                                Reaction.MessagePattern and ExcludePatterns are matched against the
+                                reacted-to message's text.
                                 BotMessagePolicy does not apply: reactions added by other bots fire the
                                 trigger, and only a reaction the bot adds itself never fires. The Slack
                                 app must subscribe to the reaction_added bot event, which needs the
                                 reactions:read scope.
                               properties:
+                                messagePattern:
+                                  description: |-
+                                    MessagePattern is a Go RE2 regex (unanchored) that the reacted-to
+                                    message's text must match for the reaction to fire the trigger. For a
+                                    bot message with Block Kit blocks, the text is the blocks' text. Leading
+                                    @-mentions are stripped before matching. When omitted, a reaction on any
+                                    message fires the trigger. A pattern that fails to compile never matches.
+                                  maxLength: 256
+                                  type: string
                                 name:
                                   description: |-
                                     Name is the emoji's canonical Slack name, lowercase and without colons
@@ -23715,7 +23725,9 @@ spec:
                               type: object
                           type: object
                           x-kubernetes-validations:
-                          - message: a reaction trigger cannot set pattern or mentionOptional
+                          - message: a reaction trigger cannot set pattern or mentionOptional;
+                              set reaction.messagePattern to match the reacted-to
+                              message's text
                             rule: '!has(self.reaction) || (!has(self.pattern) && !has(self.mentionOptional))'
                         maxItems: 8
                         type: array

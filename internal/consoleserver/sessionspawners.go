@@ -6,8 +6,10 @@ import (
 	"strings"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/apimachinery/pkg/util/rand"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 
@@ -33,10 +35,16 @@ func (s *Server) runSessionSpawner(writer http.ResponseWriter, request *http.Req
 		return
 	}
 	var payload struct {
+		Name   string `json:"name"`
 		Values string `json:"values"`
 	}
 	if err := decodeJSON(request.Body, &payload); err != nil {
 		writeError(writer, http.StatusBadRequest, fmt.Sprintf("running SessionSpawner %q: %v", name, err))
+		return
+	}
+	payload.Name = strings.TrimSpace(payload.Name)
+	if payload.Name != "" && (len(validation.IsDNS1123Subdomain(payload.Name)) > 0 || strings.Contains(payload.Name, ".")) {
+		writeError(writer, http.StatusBadRequest, fmt.Sprintf("running SessionSpawner %q: invalid Session name %q: must be at most 253 characters of lowercase letters, numbers, or hyphens, and start and end with a letter or number", name, payload.Name))
 		return
 	}
 	var values map[string]interface{}
@@ -68,12 +76,16 @@ func (s *Server) runSessionSpawner(writer http.ResponseWriter, request *http.Req
 	for key, value := range values {
 		vars[key] = value
 	}
-	prefix := name
-	// Keep the random suffix within Kubernetes' 63-character name limit.
-	if len(prefix) > 50 {
-		prefix = strings.TrimRight(prefix[:50], "-.")
+	sessionName := payload.Name
+	if sessionName == "" {
+		prefix := name
+		// Reserve space for the manual marker and random suffix within 63 characters.
+		if len(prefix) > 50 {
+			prefix = strings.TrimRight(prefix[:50], "-.")
+		}
+		sessionName = prefix + "-manual-" + suffix
 	}
-	session, err := sessionbuilder.Build(prefix+"-manual-"+suffix, namespace, &spawner.Spec.SessionTemplate, vars, sessionbuilder.SpawnerRef{
+	session, err := sessionbuilder.Build(sessionName, namespace, &spawner.Spec.SessionTemplate, vars, sessionbuilder.SpawnerRef{
 		Name:       spawner.Name,
 		UID:        spawner.UID,
 		APIVersion: kelos.GroupVersion.String(),
@@ -89,6 +101,10 @@ func (s *Server) runSessionSpawner(writer http.ResponseWriter, request *http.Req
 	session.Annotations["kelos.dev/trigger-type"] = "manual"
 	session.Annotations["kelos.dev/trigger-time"] = now
 	if err := s.client.Create(request.Context(), session); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			writeError(writer, http.StatusConflict, fmt.Sprintf("creating Session %q from SessionSpawner %q: %v", session.Name, name, err))
+			return
+		}
 		writeKubernetesError(writer, fmt.Sprintf("creating Session %q from SessionSpawner %q", session.Name, name), err)
 		return
 	}

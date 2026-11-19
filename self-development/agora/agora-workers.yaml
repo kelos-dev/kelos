@@ -29,7 +29,7 @@ spec:
     worker:
       workspaceRef:
         name: agora-session-agent
-      model: gpt-6.1-sol
+      model: gpt-6.2-astra
       effort: xhigh
       type: codex
       credentials:

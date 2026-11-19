@@ -46,11 +46,11 @@ meta-maintenance spawners (`open-actions-config-update`,
 
 | Spawner | Trigger | Agent | Description |
 |---|---|---|---|
-| **open-actions-workers** | Webhook: issue comment `/kelos pick-up` | GPT-6.1 Sol | Creates a durable Session with the open issue URL and a dedicated issue branch |
+| **open-actions-workers** | Webhook: issue comment `/kelos pick-up` | GPT-6.2 Astra | Creates a durable Session with the open issue URL and a dedicated issue branch |
 | **open-actions-planner** | Webhook: issue comment `/kelos plan` | Claude Opus | Investigates an issue, establishes documented GitHub Actions behavior, and posts a structured implementation plan — advisory only, no code changes |
 | **open-actions-reviewer** | Webhook: PR comment or review `/kelos review` | Claude Opus | Reviews PRs for code quality and GitHub Actions behavioral compatibility, then updates a sticky review comment |
 | **open-actions-api-reviewer** | Webhook: issue/PR comment or review `/kelos api-review` | Claude Opus | Reviews Kubernetes API design and its preservation of documented GitHub Actions semantics |
-| **open-actions-pr-responder** | Webhook: PR review/comment with `/kelos pick-up` | GPT-6.1 Sol | Creates a durable Session with the open PR URL on its existing branch |
+| **open-actions-pr-responder** | Webhook: PR review/comment with `/kelos pick-up` | GPT-6.2 Astra | Creates a durable Session with the open PR URL on its existing branch |
 | **open-actions-triage** | Webhook: issue opened/reopened (untriaged) | Claude Opus | Classifies documented GitHub Actions gaps as bugs, detects duplicates, assesses priority, and recommends an actor |
 | **open-actions-fake-user** | Cron (daily 09:00 UTC) | Claude Sonnet | Reproduces concrete workflow behavior and tests DX while maintaining one unassigned issue slot |
 | **open-actions-fake-strategist** | Cron (every 12 hours) | Claude Opus | Prioritizes the compatibility roadmap, enabling architecture, and adoption strategy while maintaining one unassigned strategic issue slot |
@@ -86,7 +86,7 @@ the agent to find the best way to address it.
 | | |
 |---|---|
 | **Trigger** | GitHub `issue_comment` webhook with `/kelos pick-up` |
-| **Agent** | GPT-6.1 Sol via Codex |
+| **Agent** | GPT-6.2 Astra via Codex |
 | **Storage** | 10 Gi PVC |
 
 **Key features:**
@@ -187,7 +187,7 @@ find the best way to address it.
 | | |
 |---|---|
 | **Trigger** | GitHub PR comment with `/kelos pick-up`, or a PR review whose body contains `/kelos pick-up` |
-| **Agent** | GPT-6.1 Sol via Codex |
+| **Agent** | GPT-6.2 Astra via Codex |
 | **Storage** | 10 Gi PVC |
 
 **Key features:**

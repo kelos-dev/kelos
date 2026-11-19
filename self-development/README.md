@@ -17,7 +17,7 @@ repository.
 [`cs`](cs) creates persistent interactive Claude Code environments using `opus`
 and the `CLAUDE_CODE_OAUTH_TOKEN` key in the shared `kelos-credentials` Secret.
 It shares the Workspace, effort, and Git identity with the `kelos-workers`
-SessionSpawner, which uses GPT-6.1 Sol through Codex.
+SessionSpawner, which uses GPT-6.2 Astra through Codex.
 
 ## How It Works
 
@@ -55,11 +55,11 @@ discovery jobs.
 
 | Spawner | Trigger | Agent | Description |
 |---|---|---|---|
-| **kelos-workers** | Webhook: issue comment `/kelos pick-up` | GPT-6.1 Sol | Creates a durable Session with the open issue URL and a dedicated issue branch |
+| **kelos-workers** | Webhook: issue comment `/kelos pick-up` | GPT-6.2 Astra | Creates a durable Session with the open issue URL and a dedicated issue branch |
 | **kelos-planner** | Webhook: issue comment `/kelos plan` | Claude Opus | Investigates an issue and posts a structured implementation plan — advisory only, no code changes |
 | **kelos-reviewer** | Webhook: PR comment `/kelos review` | Claude Opus | Reviews PRs on demand — analyzes code, checks conventions, and updates a sticky review comment |
 | **kelos-api-reviewer** | Webhook: issue/PR comment `/kelos api-review` | Claude Opus | Reviews Kubernetes API design on issues or PRs — naming, compatibility, CRD validation |
-| **kelos-pr-responder** | Webhook: PR comment/review `/kelos pick-up` | GPT-6.1 Sol | Creates a durable Session with the open PR URL on its existing branch |
+| **kelos-pr-responder** | Webhook: PR comment/review `/kelos pick-up` | GPT-6.2 Astra | Creates a durable Session with the open PR URL on its existing branch |
 | **kelos-triage** | Webhook: issue opened/labeled/reopened (`needs-actor`) | Claude Opus | Classifies issues by kind/priority, detects duplicates, and recommends an actor |
 | **kelos-fake-user** | Cron (daily 09:00 UTC) | Claude Sonnet | Tests DX as a new user and maintains one unassigned issue slot for the highest-impact problem found |
 | **kelos-fake-strategist** | Cron (every 12 hours) | Claude Opus | Explores new use cases, integrations, and API ideas while maintaining one unassigned strategic issue slot |
@@ -78,7 +78,7 @@ terminal clients after the initial turn.
 | | |
 |---|---|
 | **Trigger** | GitHub `issue_comment` webhook with an exact `/kelos pick-up` command from `gjkim42` on an open issue |
-| **Agent** | GPT-6.1 Sol via Codex |
+| **Agent** | GPT-6.2 Astra via Codex |
 | **Storage** | 10 GiB persistent volume per created Session |
 
 **Key features:**
@@ -188,7 +188,7 @@ PR URL and asks the agent to find the best way to address it.
 | | |
 |---|---|
 | **Trigger** | GitHub PR comment or review webhook with an exact `/kelos pick-up` command from `gjkim42` on an open PR; review events also exclude drafts |
-| **Agent** | GPT-6.1 Sol via Codex |
+| **Agent** | GPT-6.2 Astra via Codex |
 | **Storage** | 10 GiB persistent volume per created Session |
 
 **Key features:**
@@ -605,7 +605,7 @@ To adapt these examples for your own repository:
          effort: xhigh
    ```
 
-   Workers and PR responders use `gpt-6.1-sol` through Codex. The other
+   Workers and PR responders use `gpt-6.2-astra` through Codex. The other
    spawners use Claude Code with `opus` for high-capability tasks and `sonnet`
    for lower-cost routine tasks.
    They set `effort` by role: `xhigh` for complex planning, coding, strategy,

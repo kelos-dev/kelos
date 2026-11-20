@@ -27,7 +27,7 @@ spec:
       - `make test` — run all unit tests
       - `make test-e2e` — run the Kind end-to-end test
       - `make build` — build the CLI, controller, and runner binaries
-    - Logging conventions: start log messages with capital letters and do not end with punctuation
+    - Logging conventions: keep messages concise and free of terminal punctuation, and put variable values and machine-readable categories in structured fields
     - Commit messages: do not include PR links in commit messages
 ---
 apiVersion: kelos.dev/v1alpha2
@@ -186,6 +186,11 @@ spec:
         GitHub Actions syntax or semantics already express the same behavior.
       - Require tests that connect the API design to the documented workflow
         behavior it enables.
+      - For reporting or rerun contracts, compare trigger coverage, distinct
+        workflow-run and job reports, Checks-tab visibility, and GitHub UI/CLI
+        rerun controls with the official documentation. Do not dismiss a
+        compatibility gap introduced or widened by the change because it is
+        intentional, documented, or tracked in an issue.
 
       **Kubernetes API conventions** (ref: https://github.com/kubernetes/community/blob/main/contributors/devel/sig-architecture/api-conventions.md):
       - Are field names camelCase in Go and camelCase in JSON tags?

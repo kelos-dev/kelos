@@ -54,6 +54,9 @@ const (
 	SlackTriggersMaxItems = 8
 	// SlackReactionMaxLength bounds spec.when.slack.triggers[].reaction.name.
 	SlackReactionMaxLength = 100
+	// SlackReactionMessagePatternMaxLength bounds
+	// spec.when.slack.triggers[].reaction.messagePattern.
+	SlackReactionMessagePatternMaxLength = 256
 )
 
 // SlackReactionPattern is the pattern applied to

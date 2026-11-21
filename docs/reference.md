@@ -1646,8 +1646,9 @@ bundled skills. Reading an AgentConfig through `kelos.dev/v1alpha1` omits
 | `spec.when.slack.triggers` | What fires the spawner: each entry is a pattern trigger (`pattern`, optionally `mentionOptional`) or a reaction trigger (`reaction`). Multiple triggers use OR semantics. When `triggers` is empty, every bot mention fires. When every trigger is a reaction trigger, bot mentions and slash commands do not fire the spawner, so adding any non-reaction trigger also makes the spawner fire on slash commands again. To fire on reactions and on every bot mention, add an empty trigger `{}` beside the reaction triggers. Max 8 entries | No |
 | `spec.when.slack.triggers[].pattern` | RE2 regex matched against message text (unanchored); leading `<@USER_ID>` mentions are stripped before matching; bot mention required unless `mentionOptional` is set | No |
 | `spec.when.slack.triggers[].mentionOptional` | When `true`, fire on pattern match alone without requiring a bot @-mention | No |
-| `spec.when.slack.triggers[].reaction` | Fire when someone adds an emoji reaction to a message, instead of on a posted message. Cannot be combined with `pattern` or `mentionOptional`. `channels` and `excludeFilters` apply as they do to messages, and `excludePatterns` is matched against the reacted-to message's text. For a bot message with Block Kit blocks, it is matched against the blocks' text instead: headings, paragraphs, context text, quotes, code, list items (as `- item` or `1. item`) and table rows (cells joined by ` | `), one per line. A bot message with a block type Kelos does not read, such as buttons, is matched against its text field. `botMessagePolicy` does not apply: reactions added by other bots fire the trigger, and only reactions the bot adds itself are ignored. Reactions on anything other than a message are ignored. Each message and emoji creates at most one Task per spawner while that Task exists, so the same emoji added by a second person does not create another (with `taskTemplate.nameTemplate` set, the rendered name decides instead). Stored only in `v1alpha2`; a client that writes the spawner through `v1alpha1` sees the triggers list without its reaction triggers and preserves them in an annotation, so stripping that annotation drops them. Through `v1alpha1`, reaction triggers cannot be removed: they are restored on every write while the annotation is present, even when the client writes empty `triggers`. If a `v1alpha1` write leaves too little room in `triggers` for the preserved reaction triggers (more than 8 entries in total), all of them are dropped. Requires the Slack app setup described under [Slack reactions](#slack-reactions) | No |
+| `spec.when.slack.triggers[].reaction` | Fire when someone adds an emoji reaction to a message, instead of on a posted message. Cannot be combined with `pattern` or `mentionOptional`; use `reaction.messagePattern` to match the reacted-to message. `channels` and `excludeFilters` apply as they do to messages, and `reaction.messagePattern` and `excludePatterns` are matched against the reacted-to message's text. For a bot message with Block Kit blocks, they are matched against the blocks' text instead: headings, paragraphs, context text, quotes, code, list items (as `- item` or `1. item`) and table rows (cells joined by ` | `), one per line. A bot message with a block type Kelos does not read, such as buttons, is matched against its text field. `botMessagePolicy` does not apply: reactions added by other bots fire the trigger, and only reactions the bot adds itself are ignored. Reactions on anything other than a message are ignored. Each message and emoji creates at most one Task per spawner while that Task exists, so the same emoji added by a second person does not create another (with `taskTemplate.nameTemplate` set, the rendered name decides instead). Stored only in `v1alpha2`; a client that writes the spawner through `v1alpha1` sees the triggers list without its reaction triggers and preserves them in an annotation, so stripping that annotation drops them. Through `v1alpha1`, reaction triggers cannot be removed: they are restored on every write while the annotation is present, even when the client writes empty `triggers`. If a `v1alpha1` write leaves too little room in `triggers` for the preserved reaction triggers (more than 8 entries in total), all of them are dropped. Requires the Slack app setup described under [Slack reactions](#slack-reactions) | No |
 | `spec.when.slack.triggers[].reaction.name` | The emoji's canonical Slack name, lowercase and without colons (e.g. `gear`, or `+1` rather than its alias `thumbsup`). Slack reports reactions by canonical name, so an alias passes validation but never fires. A skin-tone variant matches its base name. Max 100 characters | Yes (when using `reaction`) |
+| `spec.when.slack.triggers[].reaction.messagePattern` | RE2 regex (unanchored) the reacted-to message's text must match for the reaction to fire the trigger; leading `<@USER_ID>` mentions are stripped before matching, and a bot message with blocks is matched on the blocks' text (see `triggers[].reaction`). When omitted, the emoji fires the trigger on any message. Several reaction triggers for the same emoji use OR semantics, so the reaction fires when any of their patterns matches. A pattern that fails to compile never matches. `excludePatterns` still apply after a match. Max 256 characters | No |
 | `spec.when.slack.excludePatterns` | RE2 regex patterns that reject messages when any pattern matches (OR semantics); leading `<@USER_ID>` mentions are stripped before matching; for a reaction trigger, matched against the reacted-to message's text, or the text of a bot message's blocks (see `triggers[].reaction`); does not apply to slash commands | No |
 | `spec.when.webhook.source` | Short identifier for the generic webhook source (lowercase alphanumeric with optional hyphens). On the per-source server it determines the URL path (`/webhook/<source>`); that endpoint is unauthenticated (see [#1040](https://github.com/kelos-dev/kelos/issues/1040)). Set `gatewayRef` to route through a [WebhookGateway](#webhookgateway) | Yes (when using webhook) |
 | `spec.when.webhook.fieldMapping` | Map of template variable name → JSONPath expression evaluated against the request body. Each key becomes a top-level template variable. Lowercase `id`, `title`, `body`, `url` are also exposed as `{{.ID}}`, `{{.Title}}`, `{{.Body}}`, `{{.URL}}`. The `id` key is required (used for delivery deduplication and Task naming) | Yes (when using webhook) |
@@ -1839,6 +1840,18 @@ Because every trigger in this example is a reaction trigger, bot mentions and
 slash commands do not fire the spawner. Add pattern triggers, or an empty
 trigger (`{}`) for every bot mention, to fire on messages as well.
 
+To fire only when the emoji is added to certain messages, set
+`reaction.messagePattern`. The reaction is ignored, with no Task and no reply,
+unless the reacted-to message's text matches. This trigger fires on a ✅ only
+when the message carries a `deploy-request <id>` marker:
+
+```yaml
+      triggers:
+        - reaction:
+            name: white_check_mark
+            messagePattern: '(?:^|\s)deploy-request \S+'
+```
+
 The reaction event does not carry the message, so the Slack server reads it from
 the channel history, or from the thread when the message is a thread reply. If
 it cannot read the message, it creates no Task and logs the error. The Task
@@ -1857,6 +1870,10 @@ the older API types, such as an older `kelos` CLI or a GitOps controller: if it
 reads and writes back a TaskSpawner, it saves each reaction trigger as an empty
 trigger. Before downgrading Kelos, or managing these TaskSpawners with such a
 client, remove their reaction triggers.
+
+Likewise, a Kelos release or client that predates `reaction.messagePattern` drops or
+ignores the field, so the trigger fires on its emoji on any message. Upgrade both
+the TaskSpawner CRD and the Slack server before relying on it.
 
 <a id="prompttemplate-variables"></a>
 

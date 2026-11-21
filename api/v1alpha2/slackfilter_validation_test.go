@@ -116,6 +116,34 @@ func TestSlackReactionMarkersMatchConstants(t *testing.T) {
 	}
 }
 
+// TestSlackReactionMessagePatternMarkerMatchesConstant keeps the message
+// pattern length bound the conversion restore path checks in sync with the marker the
+// API server enforces.
+func TestSlackReactionMessagePatternMarkerMatchesConstant(t *testing.T) {
+	source, err := os.ReadFile("taskspawner_types.go")
+	if err != nil {
+		t.Fatalf("read types: %v", err)
+	}
+	text := string(source)
+	start := strings.Index(text, "type SlackReactionTrigger struct")
+	if start < 0 {
+		t.Fatal("could not find the SlackReactionTrigger type")
+	}
+	name := strings.Index(text[start:], "Name string")
+	if name < 0 {
+		t.Fatal("could not find the SlackReactionTrigger Name field")
+	}
+	end := strings.Index(text[start:], "MessagePattern string")
+	if end < 0 {
+		t.Fatal("could not find the SlackReactionTrigger MessagePattern field")
+	}
+	block := text[start+name : start+end]
+	marker := fmt.Sprintf("// +kubebuilder:validation:MaxLength=%d\n", SlackReactionMessagePatternMaxLength)
+	if !strings.Contains(block, marker) {
+		t.Errorf("SlackReactionTrigger.MessagePattern has no %q marker; the mirrored constant has drifted", marker)
+	}
+}
+
 // TestSlackMirroredBoundsMatchMarkers pins the numeric bounds the conversion
 // restore path mirrors against the markers themselves, so the "keep in sync"
 // intent is enforced rather than trusted.

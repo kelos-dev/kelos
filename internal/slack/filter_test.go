@@ -542,6 +542,88 @@ func TestMatchesSpawner(t *testing.T) {
 			want:      true,
 		},
 		{
+			name: "message pattern matching the reacted-to text fires",
+			slackCfg: &kelos.Slack{
+				Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear", MessagePattern: `(?:^|\s)gravity-goal-plan \S+`}}},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "Plan ready\ngravity-goal-plan doc-1", Reaction: "gear", ReactionUserID: "U2"},
+			botUserID: "UBOT1",
+			want:      true,
+		},
+		{
+			name: "message pattern not matching the reacted-to text does not fire",
+			slackCfg: &kelos.Slack{
+				Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear", MessagePattern: `(?:^|\s)gravity-goal-plan \S+`}}},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "https://github.com/acme/repo/pull/1", Reaction: "gear", ReactionUserID: "U2"},
+			botUserID: "UBOT1",
+			want:      false,
+		},
+		{
+			name: "message pattern does not fire for a different emoji",
+			slackCfg: &kelos.Slack{
+				Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear", MessagePattern: `gravity-goal-plan`}}},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "gravity-goal-plan doc-1", Reaction: "eyes", ReactionUserID: "U2"},
+			botUserID: "UBOT1",
+			want:      false,
+		},
+		{
+			name: "same emoji in two triggers fires when the second message pattern matches",
+			slackCfg: &kelos.Slack{
+				Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear", MessagePattern: `gravity-goal-plan \S+`}}, {Reaction: &kelos.SlackReactionTrigger{Name: "gear", MessagePattern: `gravity-ship-proposal \S+`}}},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "gravity-ship-proposal 42", Reaction: "gear", ReactionUserID: "U2"},
+			botUserID: "UBOT1",
+			want:      true,
+		},
+		{
+			name: "same emoji in two triggers does not fire when neither message pattern matches",
+			slackCfg: &kelos.Slack{
+				Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear", MessagePattern: `gravity-goal-plan \S+`}}, {Reaction: &kelos.SlackReactionTrigger{Name: "gear", MessagePattern: `gravity-ship-proposal \S+`}}},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "Acme went live", Reaction: "gear", ReactionUserID: "U2"},
+			botUserID: "UBOT1",
+			want:      false,
+		},
+		{
+			name: "trigger without a message pattern fires beside a non-matching one for the same emoji",
+			slackCfg: &kelos.Slack{
+				Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear", MessagePattern: `gravity-goal-plan \S+`}}, {Reaction: &kelos.SlackReactionTrigger{Name: "gear"}}},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "Acme went live", Reaction: "gear", ReactionUserID: "U2"},
+			botUserID: "UBOT1",
+			want:      true,
+		},
+		{
+			name: "leading mention is stripped before the message pattern is matched",
+			slackCfg: &kelos.Slack{
+				Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear", MessagePattern: `^gravity-goal-plan \S+`}}},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "<@UBOT1> <@U3|sam> gravity-goal-plan doc-1", Reaction: "gear", ReactionUserID: "U2"},
+			botUserID: "UBOT1",
+			want:      true,
+		},
+		{
+			name: "message pattern that fails to compile does not fire",
+			slackCfg: &kelos.Slack{
+				Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear", MessagePattern: `gravity-goal-plan (`}}},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "gravity-goal-plan (", Reaction: "gear", ReactionUserID: "U2"},
+			botUserID: "UBOT1",
+			want:      false,
+		},
+		{
+			name: "exclude pattern rejects a reaction whose message pattern matches",
+			slackCfg: &kelos.Slack{
+				Triggers:        []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear", MessagePattern: `gravity-goal-plan \S+`}}},
+				ExcludePatterns: []string{`^draft:`},
+			},
+			msg:       &SlackMessageData{UserID: "U1", ChannelID: "C1", Text: "draft: gravity-goal-plan doc-1", Reaction: "gear", ReactionUserID: "U2"},
+			botUserID: "UBOT1",
+			want:      false,
+		},
+		{
 			name: "reaction does not fire a pattern trigger",
 			slackCfg: &kelos.Slack{
 				Triggers: []kelos.SlackTrigger{{Pattern: ".*", MentionOptional: boolPtr(true)}, {Reaction: &kelos.SlackReactionTrigger{Name: "rocket"}}},
@@ -559,6 +641,23 @@ func TestMatchesSpawner(t *testing.T) {
 				t.Errorf("MatchesSpawner() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestWantsReactionIgnoresMessagePattern verifies that the pre-fetch gate lets
+// a reaction through on its name alone: the reacted-to text a trigger's message
+// pattern needs is not fetched yet, so MatchesSpawner applies the pattern
+// afterward.
+func TestWantsReactionIgnoresMessagePattern(t *testing.T) {
+	spawner := &kelos.TaskSpawner{Spec: kelos.TaskSpawnerSpec{When: kelos.When{Slack: &kelos.Slack{
+		Triggers: []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear", MessagePattern: `^never matches$`}}},
+	}}}}
+	spawners := []*kelos.TaskSpawner{spawner}
+	if !wantsReaction(spawners, "gear", "C1") {
+		t.Error("wantsReaction() = false for a listed emoji with a message pattern, want true")
+	}
+	if wantsReaction(spawners, "eyes", "C1") {
+		t.Error("wantsReaction() = true for an unlisted emoji, want false")
 	}
 }
 

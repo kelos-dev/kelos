@@ -2499,7 +2499,11 @@ var _ = Describe("TaskSpawner Controller", func() {
 			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "test-taskspawner-slack-reactions"}}
 			Expect(k8sClient.Create(ctx, ns)).Should(Succeed())
 
-			triggers := []kelos.SlackTrigger{{Reaction: &kelos.SlackReactionTrigger{Name: "gear"}}, {Reaction: &kelos.SlackReactionTrigger{Name: "+1"}}, {Pattern: "deploy"}}
+			triggers := []kelos.SlackTrigger{
+				{Reaction: &kelos.SlackReactionTrigger{Name: "gear"}},
+				{Reaction: &kelos.SlackReactionTrigger{Name: "+1", MessagePattern: `(?:^|\s)deploy-request \S+`}},
+				{Pattern: "deploy"},
+			}
 			ts := slackTriggerSpawner(ns.Name, "reactions", triggers)
 			Expect(k8sClient.Create(ctx, ts)).Should(Succeed())
 
@@ -2516,6 +2520,7 @@ var _ = Describe("TaskSpawner Controller", func() {
 				"empty-name":       {Reaction: &kelos.SlackReactionTrigger{}},
 				"colons":           {Reaction: &kelos.SlackReactionTrigger{Name: ":gear:"}},
 				"uppercase":        {Reaction: &kelos.SlackReactionTrigger{Name: "Gear"}},
+				"long-pattern":     {Reaction: &kelos.SlackReactionTrigger{Name: "gear", MessagePattern: strings.Repeat("a", kelos.SlackReactionMessagePatternMaxLength+1)}},
 				"pattern":          {Reaction: &kelos.SlackReactionTrigger{Name: "gear"}, Pattern: "deploy"},
 				"mention-optional": {Reaction: &kelos.SlackReactionTrigger{Name: "gear"}, MentionOptional: ptr.To(true)},
 			} {

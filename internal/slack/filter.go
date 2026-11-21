@@ -91,7 +91,7 @@ func MatchesSpawner(slackCfg *kelos.Slack, msg *SlackMessageData, botUserID stri
 		return false
 	}
 	if msg.Reaction != "" {
-		return matchesReaction(msg.Reaction, slackCfg.Triggers) &&
+		return matchesReaction(msg.Reaction, msg.Text, slackCfg.Triggers) &&
 			!matchesExcludePatterns(msg.Text, slackCfg.ExcludePatterns)
 	}
 	// A spawner whose triggers are all reaction triggers fires on reactions only.
@@ -173,15 +173,43 @@ func reactionName(reaction string) string {
 	return reaction
 }
 
-// matchesReaction reports whether a reaction trigger lists reaction. A spawner
-// without reaction triggers ignores every reaction event.
-func matchesReaction(reaction string, triggers []kelos.SlackTrigger) bool {
+// listsReaction reports whether a reaction trigger lists reaction, ignoring
+// the trigger's message pattern. A spawner without reaction triggers ignores every
+// reaction event.
+func listsReaction(reaction string, triggers []kelos.SlackTrigger) bool {
 	if reaction == "" {
 		return false
 	}
 	return slices.ContainsFunc(triggers, func(t kelos.SlackTrigger) bool {
 		return t.Reaction != nil && t.Reaction.Name == reaction
 	})
+}
+
+// matchesReaction reports whether a reaction trigger lists reaction and its
+// message pattern, if set, matches text, the reacted-to message's text (OR semantics
+// across triggers). Leading @-mentions are stripped before matching. A pattern
+// that fails to compile never matches.
+func matchesReaction(reaction, text string, triggers []kelos.SlackTrigger) bool {
+	if reaction == "" {
+		return false
+	}
+	stripped := stripLeadingMentions(text)
+	for _, t := range triggers {
+		if t.Reaction == nil || t.Reaction.Name != reaction {
+			continue
+		}
+		if t.Reaction.MessagePattern == "" {
+			return true
+		}
+		re, err := getOrCompileRegexp(t.Reaction.MessagePattern)
+		if err != nil {
+			continue
+		}
+		if re.MatchString(stripped) {
+			return true
+		}
+	}
+	return false
 }
 
 // reactionOnly reports whether every trigger is a reaction trigger, in which
@@ -204,12 +232,14 @@ func reactionOnly(triggers []kelos.SlackTrigger) bool {
 // Slack, so a reaction no spawner cares about costs no API calls. Exclusion
 // rules see only the channel here; a criterion the channel-only data does not
 // carry never matches, so the gate can let a reaction through that the full
-// match later rejects, but never drops one the full match would accept.
+// match later rejects, but never drops one the full match would accept. For
+// the same reason the gate checks only the reaction's name: a trigger's
+// message pattern needs the message text, which is not fetched yet.
 func wantsReaction(spawners []*kelos.TaskSpawner, reaction, channelID string) bool {
 	channelOnly := &SlackMessageData{ChannelID: channelID}
 	for _, spawner := range spawners {
 		slackCfg := spawner.Spec.When.Slack
-		if slackCfg == nil || !matchesReaction(reaction, slackCfg.Triggers) {
+		if slackCfg == nil || !listsReaction(reaction, slackCfg.Triggers) {
 			continue
 		}
 		if matchesChannel(channelID, slackCfg.Channels) &&
@@ -318,7 +348,7 @@ func matchesTriggers(text string, triggers []kelos.SlackTrigger, botUserID strin
 	mentioned := hasBotMention(text, botUserID)
 	stripped := stripLeadingMentions(text)
 	for _, t := range triggers {
-		// A reaction trigger has no pattern and never fires on a message.
+		// A reaction trigger never fires on a posted message.
 		if t.Reaction != nil {
 			continue
 		}

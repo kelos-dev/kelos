@@ -382,6 +382,10 @@ button { color: inherit; }
 .message-bubble .code-copy-button { flex: none; min-width: 51px; padding: 4px 8px; border: 1px solid var(--code-border); border-radius: 6px; background: var(--panel); color: var(--muted); font-size: 10px; font-weight: 700; cursor: pointer; }
 .message-bubble .code-copy-button:hover, .message-bubble .code-copy-button:focus-visible { border-color: var(--accent); color: var(--code-ink); }
 .message-bubble .code-copy-button:disabled { opacity: .75; cursor: default; }
+/* Match Mermaid's theme font because CSP blocks its injected styles during measurement. */
+.mermaid-render-target { position: fixed; top: 0; left: -10000px; width: 100vw; visibility: hidden; pointer-events: none; font: 16px "trebuchet ms", verdana, arial, sans-serif; }
+.message-bubble .mermaid-preview { padding: 14px; overflow-x: auto; background: #fff; color: #333; white-space: normal; }
+.message-bubble .mermaid-preview img { display: block; max-width: 100%; height: auto; margin: 0 auto; }
 .message-bubble pre { max-width: 100%; margin: 0; overflow-x: auto; border: 0; background: var(--code-bg); color: var(--code-ink); white-space: pre; overflow-wrap: normal; }
 .message-bubble pre code { display: block; min-width: max-content; padding: 12px 14px; font: 12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace; white-space: inherit; }
 .user .message-bubble { background: var(--accent-soft); }

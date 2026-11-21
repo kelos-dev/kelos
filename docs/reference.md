@@ -665,6 +665,10 @@ label, each code block has a copy control, and wide tables and long code lines
 scroll horizontally. Tables that would render more than 10,000 cells remain
 plain text.
 
+Fenced code blocks labeled `mermaid` render as diagrams after the closing fence
+arrives or the response finishes. The copy control copies the Mermaid source.
+If a diagram cannot be rendered, its source remains visible with an error message.
+
 Assistant messages render Markdown as text arrives, with a small dot marking
 the response while it is streaming. Copying a code block during streaming
 copies the text received so far. The conversation follows incoming text when

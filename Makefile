@@ -67,7 +67,7 @@ update: controller-gen yamlfmt shfmt ## Run all generators and formatters.
 	go fmt ./...
 	go mod tidy
 	$(YAMLFMT) .
-	find . -name '*.sh' -not -path './bin/*' -exec $(SHFMT) -w -i 2 -ci {} +
+	find . -name '*.sh' -not -path './bin/*' -not -path '*/node_modules/*' -exec $(SHFMT) -w -i 2 -ci {} +
 
 .PHONY: verify
 verify: controller-gen yamlfmt shfmt ## Verify everything is up-to-date and correct.

@@ -1,6 +1,7 @@
 formatter:
   retain_line_breaks: true
 exclude:
+  - internal/consoleserver/frontend/node_modules/
   - internal/manifests/install-crd.yaml
   - internal/manifests/charts/kelos/templates/
   - internal/manifests/charts/kelos/charts/kelos-crds/templates/

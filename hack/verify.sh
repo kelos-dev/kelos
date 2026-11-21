@@ -38,6 +38,8 @@ GENERATED_FILES=(
   internal/consoleserver/web/xterm-LICENSE.txt
   internal/consoleserver/web/xterm-addon-fit.js
   internal/consoleserver/web/xterm-addon-fit-LICENSE.txt
+  internal/consoleserver/web/mermaid.min.js
+  internal/consoleserver/web/mermaid-LICENSE.txt
 )
 
 TMPDIR="$(mktemp -d)"
@@ -139,9 +141,9 @@ fi
 # 7. Verify shell script formatting (shfmt -d exits non-zero if changes are
 #    needed without modifying files).
 # ---------------------------------------------------------------------------
-if ! find . -name '*.sh' -not -path './bin/*' -exec "${SHFMT}" -d -i 2 -ci {} + >/dev/null 2>&1; then
+if ! find . -name '*.sh' -not -path './bin/*' -not -path '*/node_modules/*' -exec "${SHFMT}" -d -i 2 -ci {} + >/dev/null 2>&1; then
   echo "ERROR: Shell scripts are not properly formatted:"
-  find . -name '*.sh' -not -path './bin/*' -exec "${SHFMT}" -d -i 2 -ci {} + 2>&1 || true
+  find . -name '*.sh' -not -path './bin/*' -not -path '*/node_modules/*' -exec "${SHFMT}" -d -i 2 -ci {} + 2>&1 || true
   ret=1
 fi
 

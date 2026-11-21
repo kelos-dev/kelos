@@ -1212,6 +1212,23 @@ func TestApplicationMarkdownBehavior(t *testing.T) {
 	}
 }
 
+func TestMermaidAsset(t *testing.T) {
+	server := testServer(t)
+	request := httptest.NewRequest(http.MethodGet, "/assets/mermaid.min.js", nil)
+	request.Header.Set("Authorization", "Bearer secret-token")
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET /assets/mermaid.min.js status = %d", response.Code)
+	}
+	if got := response.Header().Get("Content-Type"); got != "text/javascript; charset=utf-8" {
+		t.Fatalf("Content-Type = %q", got)
+	}
+	if !strings.Contains(response.Body.String(), `globalThis["mermaid"]`) {
+		t.Fatal("Mermaid asset does not export the browser API")
+	}
+}
+
 func TestApplicationSessionHistoryBehavior(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {

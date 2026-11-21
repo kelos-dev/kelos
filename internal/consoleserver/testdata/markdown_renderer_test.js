@@ -61,6 +61,21 @@ class TestNode {
     return null;
   }
 
+  querySelectorAll(selector) {
+    const matches = [];
+    for (const child of this.children) {
+      if (selector.startsWith('.') ? child.classList.contains(selector.slice(1)) : child.tag === selector) matches.push(child);
+      matches.push(...child.querySelectorAll(selector));
+    }
+    return matches;
+  }
+
+  get hidden() { return this.attributes.has('hidden'); }
+  set hidden(value) {
+    if (value) this.attributes.set('hidden', '');
+    else this.attributes.delete('hidden');
+  }
+
   set textContent(value) {
     this.replaceChildren(new TestNode('#text', String(value)));
   }
@@ -80,7 +95,7 @@ class TestNode {
 
   setAttribute(name, value) {
     if (name === 'class') this.className = value;
-    else if (name === 'data-language') this.dataset.language = value;
+    else if (name.startsWith('data-')) this.dataset[name.slice(5)] = value;
     else if (['href', 'target', 'rel', 'type', 'start'].includes(name)) this[name] = value;
     else if (name === 'checked' || name === 'disabled') this[name] = true;
     else this.attributes.set(name, String(value));
@@ -88,14 +103,14 @@ class TestNode {
 
   getAttribute(name) {
     if (name === 'class') return this.className || null;
-    if (name === 'data-language') return this.dataset.language || null;
+    if (name.startsWith('data-')) return this.dataset[name.slice(5)] ?? null;
     if (['href', 'target', 'rel', 'type', 'start'].includes(name)) return this[name] || null;
     if (name === 'checked' || name === 'disabled') return this[name] ? '' : null;
     return this.attributes.get(name) ?? null;
   }
 
   getAttributeNames() {
-    return [...new Set([...this.attributes.keys(), 'class', 'data-language', 'href', 'target', 'rel', 'type', 'start', 'checked', 'disabled'])]
+    return [...new Set([...this.attributes.keys(), ...Object.keys(this.dataset).map((name) => `data-${name}`), 'class', 'href', 'target', 'rel', 'type', 'start', 'checked', 'disabled'])]
       .filter((name) => this.hasAttribute(name));
   }
 
@@ -103,7 +118,7 @@ class TestNode {
 
   removeAttribute(name) {
     if (name === 'class') this.className = '';
-    else if (name === 'data-language') delete this.dataset.language;
+    else if (name.startsWith('data-')) delete this.dataset[name.slice(5)];
     else if (['href', 'target', 'rel', 'type', 'start', 'checked', 'disabled'].includes(name)) delete this[name];
     else this.attributes.delete(name);
   }
@@ -146,6 +161,7 @@ global.document = {
   createTextNode: (value) => new TestNode('#text', value),
   createDocumentFragment: () => new TestNode('#fragment'),
   body: new TestNode('body'),
+  head: new TestNode('head'),
   execCommand: () => false,
 };
 global.window = {
@@ -188,7 +204,7 @@ function serialize(node) {
   if (node.href) attributes.push(`href="${escapeHTML(node.href)}"`);
   if (node.target) attributes.push(`target="${escapeHTML(node.target)}"`);
   if (node.rel) attributes.push(`rel="${escapeHTML(node.rel)}"`);
-  if (node.dataset.language) attributes.push(`data-language="${escapeHTML(node.dataset.language)}"`);
+  for (const [name, value] of Object.entries(node.dataset)) attributes.push(`data-${name}="${escapeHTML(value)}"`);
   if (node.start) attributes.push(`start="${node.start}"`);
   if (node.type) attributes.push(`type="${escapeHTML(node.type)}"`);
   if (node.checked) attributes.push('checked');
@@ -514,7 +530,145 @@ async function testCodeBlockCopy() {
   assert.equal(copied.at(-1), 'replacement', 'copy reads the authoritative final text');
 }
 
-testCodeBlockCopy().then(
+async function testMermaidRendering() {
+  const calls = [];
+  const pending = [];
+  let configuration;
+  global.mermaid = {
+    initialize: (options) => { configuration = options; },
+    render: (id, source, container) => {
+      assert.equal(container.className, 'mermaid-render-target');
+      assert.equal(container.attributes.get('aria-hidden'), 'true');
+      assert.equal(document.body.contains(container), true);
+      calls.push({id, source});
+      return new Promise((resolve, reject) => pending.push({resolve, reject}));
+    },
+  };
+  const settle = async () => {
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+  };
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg"><text>A → B</text></svg>';
+  const source = 'flowchart LR\nA --> B';
+  const markdown = `Before\n\n\`\`\`mermaid\n${source}\n\`\`\`\n\nAfter`;
+  assert.equal(document.head.children.length, 0, 'ordinary Markdown does not load Mermaid');
+  const unavailable = new TestNode('div');
+  renderMessageMarkdown(unavailable, `\`\`\`mermaid\n${source}\n\`\`\``);
+  document.head.children[0].onerror();
+  await settle();
+  assert.equal(unavailable.querySelector('code').textContent, source);
+  assert.equal(unavailable.querySelector('pre').hidden, false, 'source remains visible when the library cannot load');
+  assert.equal(unavailable.querySelector('.mermaid-preview').textContent, 'Unable to render Mermaid diagram');
+  assert.equal(document.head.children.length, 0, 'a failed script is removed');
+  assert.equal(calls.length, 0, 'a failed load does not render a diagram');
+
+  const root = new TestNode('div');
+  renderMessageMarkdown(root, markdown);
+  assert.equal(document.head.children.length, 1, 'the next diagram retries a failed library load');
+  const script = document.head.children[0];
+  assert.equal(script.src, '/assets/mermaid.min.js');
+  script.onload();
+  await settle();
+  assert.equal(configuration.startOnLoad, false);
+  assert.equal(configuration.securityLevel, 'strict');
+  assert.equal(configuration.htmlLabels, false);
+  assert.equal(configuration.suppressErrorRendering, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].source, source);
+  const block = root.querySelector('.mermaid-block');
+  assert.equal(block.querySelector('pre').hidden, false, 'source remains visible while rendering');
+  pending.shift().resolve({svg});
+  await settle();
+  const preview = block.querySelector('.mermaid-preview');
+  const image = preview.querySelector('img');
+  assert.equal(image.alt, 'Mermaid diagram');
+  assert.equal(decodeURIComponent(image.src.split(',')[1]), svg);
+  assert.equal(preview.hidden, false);
+  assert.equal(block.querySelector('pre').hidden, true);
+  assert.equal(root.children[0].textContent, 'Before');
+  assert.equal(root.children.at(-1).textContent, 'After');
+  const copied = [];
+  navigator.clipboard.writeText = async (text) => copied.push(text);
+  await block.querySelector('button').click();
+  assert.deepEqual(copied, [source]);
+
+  renderMessageMarkdown(root, `${markdown} more text`);
+  assert.equal(root.querySelector('.mermaid-block'), block);
+  assert.equal(preview.querySelector('img'), image, 'later text preserves the rendered diagram');
+  assert.equal(block.querySelector('pre').hidden, true);
+  assert.equal(block.querySelector('button').textContent, 'Copied');
+  assert.equal(calls.length, 1, 'unchanged diagrams are rendered once');
+
+  resetStreaming();
+  const bubble = stream(`\`\`\`mermaid\n${source}`);
+  await settle();
+  assert.equal(calls.length, 1, 'an open streaming fence remains source code');
+  stream('\n```');
+  await settle();
+  assert.equal(calls.length, 2, 'closing a streaming fence renders the diagram');
+  pending.shift().resolve({svg});
+  await settle();
+  const streamingImage = bubble.querySelector('img');
+  stream('\n\nFollowing paragraph');
+  assert.equal(bubble.querySelector('img'), streamingImage);
+  endAssistantSegment('live');
+  assert.equal(calls.length, 2, 'completion reuses a closed diagram');
+
+  resetStreaming();
+  const unfinished = stream(`\`\`\`mermaid\n${source}`);
+  endAssistantSegment('live');
+  await settle();
+  assert.equal(calls.length, 3, 'completion renders an unclosed fence');
+  pending.shift().resolve({svg});
+  await settle();
+  assert.equal(unfinished.querySelector('pre').hidden, true);
+
+  const failure = new TestNode('div');
+  renderMessageMarkdown(failure, '```mermaid\ninvalid diagram\n```');
+  await settle();
+  pending.shift().reject(new Error('Syntax error'));
+  await settle();
+  assert.equal(failure.querySelector('code').textContent, 'invalid diagram');
+  assert.equal(failure.querySelector('pre').hidden, false);
+  assert.equal(failure.querySelector('.mermaid-preview').textContent, 'Unable to render Mermaid diagram');
+  const callsBeforeRetry = calls.length;
+  renderMessageMarkdown(failure, '```mermaid\ninvalid diagram\n```\n\nMore text');
+  await settle();
+  assert.equal(calls.length, callsBeforeRetry, 'unchanged invalid diagrams are not retried');
+
+  renderMessageMarkdown(failure, `~~~MERMAID\n${source}\n~~~`);
+  await settle();
+  pending.shift().resolve({svg});
+  await settle();
+  assert.equal(failure.querySelector('pre').hidden, true, 'corrected diagrams replace failures');
+
+  const racing = new TestNode('div');
+  renderMessageMarkdown(racing, '```mermaid\nflowchart LR\nA --> B\n```');
+  await settle();
+  const stale = pending.shift();
+  renderMessageMarkdown(racing, '```mermaid\nflowchart LR\nA --> C\n```');
+  await settle();
+  const current = pending.shift();
+  current.resolve({svg});
+  await settle();
+  const currentImage = racing.querySelector('img');
+  stale.resolve({svg: '<svg>stale</svg>'});
+  await settle();
+  assert.equal(racing.querySelector('img'), currentImage, 'outdated results cannot replace the current diagram');
+  assert.equal(racing.querySelector('code').textContent, 'flowchart LR\nA --> C');
+
+  const nested = new TestNode('div');
+  renderMessageMarkdown(nested, '> ```mermaid\n> flowchart LR\n> A --> B\n> ```\n\n```mermaid\nflowchart LR\nA --> B\n```');
+  await settle();
+  assert.equal(nested.querySelectorAll('.mermaid-block').length, 2);
+  for (const render of pending.splice(0)) render.resolve({svg});
+  await settle();
+  assert.equal(nested.querySelectorAll('img').length, 2);
+  assert.equal(new Set(calls.map((call) => call.id)).size, calls.length, 'diagram IDs are unique');
+  assert.equal(document.head.children.length, 1, 'Mermaid is loaded once for all messages');
+  assert.equal(document.body.children.length, 0, 'temporary render containers are removed on success and failure');
+}
+
+testCodeBlockCopy().then(testMermaidRendering).then(
   () => process.stdout.write('Markdown renderer tests passed\n'),
   (error) => {
     process.stderr.write(`${error.stack}\n`);

@@ -4779,7 +4779,7 @@ spec:
             }, 1600);
         }
     }
-    function appendCodeBlock(parent, content, info) {
+    function appendCodeBlock(parent, content, info, closed = true) {
         const block = document.createElement('div');
         block.className = 'code-block';
         const toolbar = document.createElement('div');
@@ -4805,7 +4805,97 @@ spec:
         pre.append(code);
         toolbar.append(languageLabel, copyButton);
         block.append(toolbar, pre);
+        if (language.toLowerCase() === 'mermaid') {
+            block.classList.add('mermaid-block');
+            block.dataset.closed = String(closed);
+            const preview = document.createElement('div');
+            preview.className = 'mermaid-preview';
+            preview.hidden = true;
+            block.append(preview);
+        }
         parent.append(block);
+    }
+    let mermaidLibrary = null;
+    let mermaidDiagramID = 0;
+    const mermaidRenders = new WeakMap();
+    function loadMermaid() {
+        if (!mermaidLibrary) {
+            mermaidLibrary = new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = '/assets/mermaid.min.js';
+                script.onload = () => resolve(mermaid);
+                script.onerror = () => {
+                    mermaidLibrary = null;
+                    script.remove();
+                    reject(new Error('Unable to load Mermaid'));
+                };
+                document.head.append(script);
+            }).then(library => {
+                library.initialize({ startOnLoad: false, securityLevel: 'strict', htmlLabels: false, suppressErrorRendering: true });
+                return library;
+            });
+        }
+        return mermaidLibrary;
+    }
+    function renderMermaidBlocks(element) {
+        for (const block of element.querySelectorAll('.mermaid-block')) {
+            const code = block.querySelector('code');
+            const pre = block.querySelector('pre');
+            const preview = block.querySelector('.mermaid-preview');
+            const source = code.textContent || '';
+            const previous = mermaidRenders.get(block);
+            if (previous?.source === source) {
+                pre.hidden = previous.status === 'rendered';
+                continue;
+            }
+            pre.hidden = false;
+            preview.hidden = true;
+            preview.replaceChildren();
+            mermaidRenders.delete(block);
+            if (block.dataset.closed !== 'true' && element.classList.contains('is-streaming'))
+                continue;
+            const render = { source, status: 'pending' };
+            mermaidRenders.set(block, render);
+            void (async () => {
+                try {
+                    const library = await loadMermaid();
+                    const container = document.createElement('div');
+                    container.className = 'mermaid-render-target';
+                    container.setAttribute('aria-hidden', 'true');
+                    document.body.append(container);
+                    let svg;
+                    try {
+                        ({ svg } = await library.render(`mermaid-diagram-${++mermaidDiagramID}`, source, container));
+                    }
+                    finally {
+                        container.remove();
+                    }
+                    if (mermaidRenders.get(block) !== render || !element.contains(block))
+                        return;
+                    // An SVG image isolates diagram markup and styles from the Console document.
+                    const image = document.createElement('img');
+                    const pinToBottom = elements.messages.contains(element) &&
+                        (state.replayingHistory ? state.pinHistoryToBottom : messagesNearBottom());
+                    image.alt = 'Mermaid diagram';
+                    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+                    image.addEventListener('load', () => {
+                        if (pinToBottom && elements.messages.contains(element))
+                            scheduleBottomAnchor();
+                    });
+                    preview.replaceChildren(image);
+                    preview.hidden = false;
+                    pre.hidden = true;
+                    render.status = 'rendered';
+                }
+                catch {
+                    if (mermaidRenders.get(block) !== render || !element.contains(block))
+                        return;
+                    preview.textContent = 'Unable to render Mermaid diagram';
+                    preview.hidden = false;
+                    render.status = 'failed';
+                }
+            })();
+        }
     }
     function createInlineScanBudget(value) {
         // Bound repeated delimiter and link searches; exhausted parses render the remainder as plain text.
@@ -5209,9 +5299,10 @@ spec:
                     codeLines.push(lines[index]);
                     index++;
                 }
-                if (index < lines.length)
+                const closed = index < lines.length;
+                if (closed)
                     index++;
-                appendCodeBlock(parent, codeLines.join('\n'), fence.info);
+                appendCodeBlock(parent, codeLines.join('\n'), fence.info, closed);
                 continue;
             }
             if (/^( {4}|\t)/.test(lines[index])) {
@@ -5339,6 +5430,8 @@ spec:
                 // Copy feedback and its reset timer belong to the mounted button.
                 if (current.classList.contains('code-copy-button'))
                     return;
+                if (current.classList.contains('mermaid-preview'))
+                    return;
                 if (current instanceof HTMLInputElement && next instanceof HTMLInputElement)
                     current.checked = next.checked;
                 if (current.isEqualNode(next))
@@ -5361,6 +5454,7 @@ spec:
         const fragment = document.createDocumentFragment();
         appendMarkdownBlocks(fragment, text || '');
         reconcileMarkdownChildren(element, fragment);
+        renderMermaidBlocks(element);
     }
     function completedAssistantText(eventText, streamedText) {
         return eventText || streamedText || '';

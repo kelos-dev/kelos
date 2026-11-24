@@ -187,6 +187,12 @@ spec:
         file types, and a source and target that are the same file, whether
         by equal paths or through a symlink in either direction. P2 when the
         step can lose or strand that state.
+      - When code records or displays work that has already been admitted or
+        started, such as a usage record or a Task's logs, does it read an
+        input that can change afterward, such as Task labels or a referenced
+        WorkerPool's agent type, instead of the value the work started with?
+        P1 when the change can bypass a limit or misattribute usage; P2
+        otherwise.
 
       **Tests**:
       - Are there tests for the new/changed behavior?

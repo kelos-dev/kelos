@@ -263,6 +263,12 @@ spec:
         that `kelos uninstall` removes it and that a test covers the removal.
         Leftover RoleBindings regain effect when a later install recreates
         their subject. P2.
+      - When a PR writes agent, provider, or log text to a terminal through a
+        new path, such as a placeholder, status line, or log view, check that
+        the text passes through the terminal sanitizer for that output. Check
+        that a sanitizer the PR adds or changes removes escape sequences, C0
+        and C1 controls, and bidirectional controls, and keeps line breaks and
+        tabs out of single-line fields. P2.
 
       **Documentation accuracy**:
       - Docs, READMEs, and code comments must describe what the code

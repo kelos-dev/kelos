@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"os"
 	"testing"
 
 	"k8s.io/client-go/rest"
@@ -65,6 +66,37 @@ func TestTerminalColorEnabled(t *testing.T) {
 			}
 			if got != test.want {
 				t.Fatalf("terminalColorEnabled(%q) = %t, want %t", test.mode, got, test.want)
+			}
+		})
+	}
+}
+
+func TestTerminalColorEnabledAutoFollowsNoColor(t *testing.T) {
+	// /dev/null is a character device, so auto mode treats it as a terminal.
+	devNull, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatalf("opening %s: %v", os.DevNull, err)
+	}
+	defer devNull.Close()
+
+	tests := []struct {
+		name    string
+		noColor string
+		want    bool
+	}{
+		{name: "empty NO_COLOR keeps color", noColor: "", want: true},
+		{name: "non-empty NO_COLOR disables color", noColor: "1", want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("NO_COLOR", test.noColor)
+			t.Setenv("TERM", "xterm-256color")
+			got, err := terminalColorEnabled("auto", devNull)
+			if err != nil {
+				t.Fatalf("terminalColorEnabled(auto) error = %v", err)
+			}
+			if got != test.want {
+				t.Fatalf("terminalColorEnabled(auto) with NO_COLOR=%q = %t, want %t", test.noColor, got, test.want)
 			}
 		})
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -20,13 +21,14 @@ type sessionEvents struct {
 }
 
 type sessionTurn struct {
-	sink             *turnSink
-	ctx              context.Context
-	cancel           context.CancelCauseFunc
-	done             chan struct{}
-	kind             sessionCommandKind
-	completion       *Event
-	stopCancellation func() bool
+	sink                *turnSink
+	ctx                 context.Context
+	cancel              context.CancelCauseFunc
+	done                chan struct{}
+	kind                sessionCommandKind
+	completion          *Event
+	stopCancellation    func() bool
+	suggestionContextID string
 }
 
 func (s *sessionEvents) begin(ctx context.Context, request turnRequest) (*sessionTurn, turnRequest) {
@@ -126,13 +128,8 @@ func (s *sessionEvents) emitLocked(event Event) {
 	}
 	if event.Type == EventTurnCompleted {
 		if s.turn != nil {
-			turnID := s.turn.sink.turnID
+			s.turn.suggestionContextID = event.suggestionContextID
 			s.finishLocked(s.turn, event.Status, event.Text)
-			if s.server.suggestionsEnabled() && event.providerTurnID != "" && s.suggestionTurnID == turnID && s.server.journal.hasSubscribers() {
-				if provider, ok := s.server.provider.(promptSuggestionProvider); ok {
-					go s.suggestPrompt(provider, event.providerTurnID, turnID)
-				}
-			}
 		}
 		return
 	}
@@ -143,12 +140,22 @@ func (s *sessionEvents) emitLocked(event Event) {
 	}
 }
 
-type promptSuggestionProvider interface {
-	suggestPrompt(turnID string) string
+const promptSuggestionInstruction = "Predict one short follow-up message the user is likely to type next, based on the conversation that just finished. Use the user's language and refer to the specific task. Output only the message on one line. If there is no clear next step, output NONE. Do not use tools or suggest slash or shell commands."
+
+func usablePromptSuggestion(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "NONE" || strings.ContainsAny(text, "\r\n") || strings.HasPrefix(text, "/") || strings.HasPrefix(text, "!") {
+		return ""
+	}
+	return text
 }
 
-func (s *sessionEvents) suggestPrompt(provider promptSuggestionProvider, providerTurnID, turnID string) {
-	text := provider.suggestPrompt(providerTurnID)
+type promptSuggestionProvider interface {
+	suggestPrompt(contextID string) string
+}
+
+func (s *sessionEvents) suggestPrompt(provider promptSuggestionProvider, contextID, turnID string) {
+	text := provider.suggestPrompt(contextID)
 	if text == "" {
 		return
 	}
@@ -213,6 +220,11 @@ func (s *sessionEvents) completeLocked(turn *sessionTurn, status, message string
 		turn.sink.Emit(Event{Type: EventTurnCompleted, Status: status})
 		if status == "completed" && turn.kind != sessionCommandShell {
 			s.suggestionTurnID = turn.sink.turnID
+			if turn.suggestionContextID != "" && s.server.suggestionsEnabled() && s.server.journal.hasSubscribers() {
+				if provider, ok := s.server.provider.(promptSuggestionProvider); ok {
+					go s.suggestPrompt(provider, turn.suggestionContextID, turn.sink.turnID)
+				}
+			}
 		}
 	}
 	turn.sink.stop()

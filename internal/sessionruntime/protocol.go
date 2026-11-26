@@ -38,12 +38,12 @@ const (
 
 // Event is one conversation event exposed through the shared Session control interface.
 type Event struct {
-	// providerTurnID identifies the finished turn for a contextual prompt sample.
-	providerTurnID string
-	ID             int64        `json:"id,omitempty"`
-	Type           string       `json:"type"`
-	SubsessionID   string       `json:"subsessionId,omitempty"`
-	Subsessions    []Subsession `json:"subsessions,omitempty"`
+	// suggestionContextID identifies the provider turn or session to sample for a follow-up.
+	suggestionContextID string
+	ID                  int64        `json:"id,omitempty"`
+	Type                string       `json:"type"`
+	SubsessionID        string       `json:"subsessionId,omitempty"`
+	Subsessions         []Subsession `json:"subsessions,omitempty"`
 	// NotificationID matches Session.status.lastNotification.id for completed or failed turns.
 	NotificationID string `json:"notificationId,omitempty"`
 	// Timestamp records when a durable conversation event was first appended.

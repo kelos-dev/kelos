@@ -390,15 +390,13 @@ func (p *CodexProvider) startTurn(ctx context.Context, input []map[string]any) e
 	})
 }
 
-const codexPromptSuggestionInstruction = "Predict one short follow-up message the user is likely to type next, based on the conversation that just finished. Use the user's language and refer to the specific task. Output only the message on one line. If there is no clear next step, output NONE. Do not use tools or suggest slash or shell commands."
-
 func (p *CodexProvider) suggestPrompt(turnID string) string {
 	ctx, cancel := context.WithTimeout(p.ctx, 30*time.Second)
 	defer cancel()
 	result, err := p.request(ctx, "thread/sample", map[string]any{
 		"threadId":       p.threadID,
 		"expectedTurnId": turnID,
-		"prompt":         codexPromptSuggestionInstruction,
+		"prompt":         promptSuggestionInstruction,
 		"effort":         "low",
 		"disableMcp":     true,
 	})
@@ -415,11 +413,7 @@ func (p *CodexProvider) suggestPrompt(turnID string) string {
 	if json.Unmarshal(result, &sample) != nil || sample.SourceTurnID != turnID {
 		return ""
 	}
-	text := strings.TrimSpace(sample.Text)
-	if text == "NONE" || strings.ContainsAny(text, "\r\n") || strings.HasPrefix(text, "/") || strings.HasPrefix(text, "!") {
-		return ""
-	}
-	return text
+	return usablePromptSuggestion(sample.Text)
 }
 
 func (p *CodexProvider) recordShellCommand(ctx context.Context, record shellCommandRecord) error {
@@ -518,7 +512,7 @@ func (p *CodexProvider) completeInteraction(ready chan struct{}, result codexTur
 	p.interactionCtx, p.interactionCancel = nil, nil
 	p.activeMu.Unlock()
 	if sink != nil {
-		sink.Emit(Event{Type: EventTurnCompleted, Status: result.status, Text: result.error, providerTurnID: result.id})
+		sink.Emit(Event{Type: EventTurnCompleted, Status: result.status, Text: result.error, suggestionContextID: result.id})
 	}
 }
 

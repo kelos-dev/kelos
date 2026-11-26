@@ -26,6 +26,7 @@ vm.runInThisContext(applicationSlice('const allResourceKind', 'async function lo
 vm.runInThisContext(applicationSlice('async function loadResources', 'async function refreshConsole'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('async function refreshConsole', 'async function openResourceDetail'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function resourceDetailTabs', 'const pendingCompletionReads'), {filename: 'app.js'});
+vm.runInThisContext(applicationSlice('const taskLogFormatStorageKey', 'let browserNotificationRegistration'), {filename: 'app.js'});
 
 vm.runInThisContext(applicationSlice('function addOption', 'function credentialTypeLabel'), {filename: 'app.js'});
 
@@ -265,7 +266,7 @@ function setupResourceInspector() {
   global.formatSessionRecency = () => '5m ago';
   global.state = {
     consoleView: 'resources', namespace: 'default', namespaceGeneration: 0, resourceListGeneration: 0, resourceGroups: [], resourceRelationships: [],
-    resourceDetail: null, resourceDetailGeneration: 0, resourceDetailLogGeneration: 0,
+    resourceDetail: null, resourceDetailGeneration: 0, resourceDetailLogGeneration: 0, resourceLogFormat: 'formatted',
   };
   global.elements = Object.fromEntries([
     'overviewView', 'sessionsView', 'resourcesView', 'adminView', 'sessionSidebar',
@@ -453,7 +454,7 @@ async function testResourceDetailsIgnoreStaleResponses() {
   assert.equal(elements.resourceDetailTitle.textContent, 'Task second');
   assert.equal(elements.resourceDetailSummaryPanel.hidden, false);
   assert.equal(elements.resourceDetailLogsTab.hidden, false);
-  assert.equal(logRequests[1].path, '/api/resources/tasks/default/second/logs');
+  assert.equal(logRequests[1].path, '/api/resources/tasks/default/second/logs?format=formatted');
   manifestRequests[1].resolve({yaml: 'name: second'});
   logRequests[1].resolve('second logs');
   await second;
@@ -466,6 +467,63 @@ async function testResourceDetailsIgnoreStaleResponses() {
   await first;
   assert.equal(elements.resourceDetailYAML.textContent, 'name: second');
   assert.equal(elements.resourceDetailLogs.textContent, 'second logs');
+}
+
+async function testTaskLogFormatToggle() {
+  const previous = {window: global.window, apiText: global.apiText, state: global.state, elements: global.elements};
+  const formatButton = () => ({attributes: {}, setAttribute(name, value) { this.attributes[name] = value; }});
+  const stored = {'kelos-console-task-log-format': 'raw'};
+  global.window = {localStorage: {
+    getItem(key) { return stored[key] ?? null; },
+    setItem(key, value) { stored[key] = value; },
+  }};
+  global.elements = {
+    resourceLogFormatFormatted: formatButton(),
+    resourceLogFormatRaw: formatButton(),
+    refreshResourceLogs: {disabled: false},
+    resourceDetailLogs: {textContent: ''},
+  };
+  global.state = {
+    resourceDetailGeneration: 1,
+    resourceDetailLogGeneration: 0,
+    resourceDetailTask: {namespace: 'default', name: 'task'},
+    resourceLogFormat: 'formatted',
+  };
+  const logRequests = [];
+  global.apiText = async requestPath => {
+    logRequests.push(requestPath);
+    return 'logs';
+  };
+  try {
+    loadTaskLogFormat();
+    assert.equal(state.resourceLogFormat, 'raw');
+    assert.equal(elements.resourceLogFormatRaw.attributes['aria-pressed'], 'true');
+    assert.equal(elements.resourceLogFormatFormatted.attributes['aria-pressed'], 'false');
+
+    setTaskLogFormat('formatted');
+    await Promise.resolve();
+    assert.deepEqual(logRequests, ['/api/resources/tasks/default/task/logs?format=formatted']);
+    assert.equal(stored['kelos-console-task-log-format'], 'formatted');
+    assert.equal(elements.resourceLogFormatFormatted.attributes['aria-pressed'], 'true');
+    assert.equal(elements.resourceLogFormatRaw.attributes['aria-pressed'], 'false');
+
+    setTaskLogFormat('formatted');
+    assert.equal(logRequests.length, 1, 'Selecting the active format must not reload logs');
+
+    setTaskLogFormat('raw');
+    await Promise.resolve();
+    assert.deepEqual(logRequests.slice(1), ['/api/resources/tasks/default/task/logs?format=raw']);
+    assert.equal(stored['kelos-console-task-log-format'], 'raw');
+    assert.equal(elements.resourceLogFormatRaw.attributes['aria-pressed'], 'true');
+    assert.equal(elements.resourceLogFormatFormatted.attributes['aria-pressed'], 'false');
+
+    global.window = {localStorage: {getItem() { throw new Error('storage disabled'); }}};
+    state.resourceLogFormat = 'raw';
+    loadTaskLogFormat();
+    assert.equal(state.resourceLogFormat, 'formatted');
+  } finally {
+    Object.assign(global, previous);
+  }
 }
 
 async function testTaskSpawnerRun() {
@@ -781,6 +839,7 @@ testResourceRelationshipHelpersResolveExistingAndMissingResources();
 testResourceViewTabsSupportKeyboardNavigation();
 testResourceDetailsIgnoreStaleResponses()
   .then(() => testResourceInspectorRefresh())
+  .then(() => testTaskLogFormatToggle())
   .then(() => testTaskSpawnerRun())
   .then(() => testTaskSpawnerRunIgnoresStaleResponses())
   .then(() => testTaskSpawnerSuspension())

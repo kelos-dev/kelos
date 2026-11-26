@@ -31,10 +31,7 @@ pipelines on Kubernetes.
 </p>
 
 <p align="center">
-  <picture>
-    <source media="(max-width: 600px)" srcset="docs/images/kelos-session-web-chat-mobile.png" />
-    <img alt="Kelos Console showing the Code review conversation in the Fix API pagination session, with a change to cursor.go and passing test output" src="docs/images/kelos-session-web-chat.png" />
-  </picture>
+  <img alt="Desktop and mobile views of the Kelos Console showing the same Code review conversation, with a change to cursor.go and passing test output" src="docs/images/kelos-session-web-chat.png" />
   <br>
   <a href="#use-the-kelos-console">Set up the Console</a>
 </p>

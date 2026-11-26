@@ -38,6 +38,8 @@ GENERATED_FILES=(
   internal/consoleserver/web/xterm-LICENSE.txt
   internal/consoleserver/web/xterm-addon-fit.js
   internal/consoleserver/web/xterm-addon-fit-LICENSE.txt
+  internal/consoleserver/web/dagre.min.js
+  internal/consoleserver/web/dagre.min.js.LEGAL.txt
   internal/consoleserver/web/mermaid.min.js
   internal/consoleserver/web/mermaid-LICENSE.txt
 )

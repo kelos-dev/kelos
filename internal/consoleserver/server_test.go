@@ -260,6 +260,10 @@ func TestConsoleResourcesListAndGet(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "running-task", Namespace: "team-a", CreationTimestamp: metav1.NewTime(time.Unix(20, 0))},
 			Status:     kelos.TaskStatus{Phase: kelos.TaskPhaseRunning, Message: "Agent is working"},
 		},
+		&kelos.WebhookGateway{
+			ObjectMeta: metav1.ObjectMeta{Name: "events", Namespace: "team-a"},
+			Spec:       kelos.WebhookGatewaySpec{Generic: &kelos.GenericGateway{}},
+		},
 		&kelos.Workspace{ObjectMeta: metav1.ObjectMeta{Name: "repository", Namespace: "team-a", CreationTimestamp: metav1.NewTime(time.Unix(10, 0))}},
 		&kelos.Task{ObjectMeta: metav1.ObjectMeta{Name: "other-task", Namespace: "team-b"}},
 	}
@@ -295,6 +299,9 @@ func TestConsoleResourcesListAndGet(t *testing.T) {
 	if len(collections) != len(consoleResourceDefinitions) {
 		t.Fatalf("resource collections = %d, want %d", len(collections), len(consoleResourceDefinitions))
 	}
+	if gateways := collections["webhookgateways"].Items; len(gateways) != 1 || gateways[0].Name != "events" {
+		t.Fatalf("WebhookGateway summaries = %#v", gateways)
+	}
 	tasks := collections["tasks"].Items
 	if len(tasks) != 1 || tasks[0].Name != "running-task" || tasks[0].Phase != "Running" || tasks[0].Message != "Agent is working" {
 		t.Fatalf("Task summaries = %#v", tasks)
@@ -326,10 +333,39 @@ func TestConsoleResourceRelationships(t *testing.T) {
 	server := testServer(t)
 	controller := true
 	objects := []client.Object{
+		&kelos.WebhookGateway{
+			ObjectMeta: metav1.ObjectMeta{Name: "events", Namespace: "team-a"},
+			Spec:       kelos.WebhookGatewaySpec{GitHub: &kelos.GitHubGateway{SecretRef: kelos.SecretReference{Name: "github-events"}}},
+		},
+		&kelos.WebhookGateway{
+			ObjectMeta: metav1.ObjectMeta{Name: "linear", Namespace: "team-a"},
+			Spec:       kelos.WebhookGatewaySpec{Linear: &kelos.LinearGateway{SecretRef: kelos.SecretReference{Name: "linear-events"}}},
+		},
+		&kelos.WebhookGateway{
+			ObjectMeta: metav1.ObjectMeta{Name: "generic", Namespace: "team-a"},
+			Spec:       kelos.WebhookGatewaySpec{Generic: &kelos.GenericGateway{}},
+		},
 		&kelos.TaskSpawner{
 			ObjectMeta: metav1.ObjectMeta{Name: "issues", Namespace: "team-a", UID: "spawner-uid"},
-			Spec: kelos.TaskSpawnerSpec{TaskTemplate: kelos.TaskTemplate{
-				WorkerPoolRef: &kelos.WorkerPoolReference{Name: "pool"},
+			Spec: kelos.TaskSpawnerSpec{
+				When: kelos.When{GitHubWebhook: &kelos.GitHubWebhook{Events: []string{"issues"}, GatewayRef: &kelos.GatewayReference{Name: "events"}}},
+				TaskTemplate: kelos.TaskTemplate{
+					WorkerPoolRef: &kelos.WorkerPoolReference{Name: "pool"},
+				},
+			},
+		},
+		&kelos.TaskSpawner{
+			ObjectMeta: metav1.ObjectMeta{Name: "linear-issues", Namespace: "team-a"},
+			Spec: kelos.TaskSpawnerSpec{When: kelos.When{
+				LinearWebhook: &kelos.LinearWebhook{Types: []string{"Issue"}, GatewayRef: &kelos.GatewayReference{Name: "linear"}},
+			}},
+		},
+		&kelos.TaskSpawner{
+			ObjectMeta: metav1.ObjectMeta{Name: "alerts", Namespace: "team-a"},
+			Spec: kelos.TaskSpawnerSpec{When: kelos.When{
+				GenericWebhook: &kelos.GenericWebhook{
+					Source: "alerts", GatewayRef: &kelos.GatewayReference{Name: "generic"}, FieldMapping: map[string]string{"id": "$.id"},
+				},
 			}},
 		},
 		&kelos.TaskPipeline{
@@ -355,7 +391,12 @@ func TestConsoleResourceRelationships(t *testing.T) {
 				DependsOn:       []string{"prerequisite"},
 			}},
 		},
-		&kelos.SessionSpawner{ObjectMeta: metav1.ObjectMeta{Name: "webhook", Namespace: "team-a"}},
+		&kelos.SessionSpawner{
+			ObjectMeta: metav1.ObjectMeta{Name: "webhook", Namespace: "team-a"},
+			Spec: kelos.SessionSpawnerSpec{When: kelos.SessionSpawnerWhen{
+				GitHubWebhook: &kelos.GitHubWebhook{Events: []string{"issues"}, GatewayRef: &kelos.GatewayReference{Name: "events"}},
+			}},
+		},
 		&kelos.Workspace{ObjectMeta: metav1.ObjectMeta{Name: "repository", Namespace: "team-a"}},
 		&kelos.AgentConfig{ObjectMeta: metav1.ObjectMeta{Name: "reviewer", Namespace: "team-a"}},
 		&kelos.WorkerPool{
@@ -457,6 +498,10 @@ func TestConsoleResourceRelationships(t *testing.T) {
 		actual[key] = relationship.Inferred
 	}
 	expected := map[string]bool{
+		"webhookgateways/linear routes to taskspawners/linear-issues":            false,
+		"webhookgateways/generic routes to taskspawners/alerts":                  false,
+		"webhookgateways/events routes to sessionspawners/webhook":               false,
+		"webhookgateways/events routes to taskspawners/issues":                   false,
 		"taskpipelines/release creates tasks/pipeline-task":                      false,
 		"taskpipelines/release uses agentconfigs/reviewer":                       false,
 		"taskpipelines/release uses workspaces/repository":                       false,

@@ -858,6 +858,7 @@
         sessions: 'Long-lived, interactive agent conversations.',
         tasks: 'Finite units of agent work and their current state.',
         taskrecords: 'Task lifecycle and usage records.',
+        webhookgateways: 'Inbound webhook endpoints that route deliveries to spawners.',
         taskspawners: 'Automation that creates Tasks from schedules and events.',
         sessionspawners: 'Automation that creates Sessions from events.',
         workerpools: 'Reusable execution capacity for Tasks.',
@@ -909,6 +910,21 @@
     function resourceStatus(item) {
         return item.phase || 'Configured';
     }
+    function createResourceLink(collection, item) {
+        const link = document.createElement('a');
+        link.className = 'resource-name-button';
+        link.href = resourcePagePath(collection.resource, item);
+        link.textContent = item.name;
+        link.dataset.resourceKey = resourceReferenceKey({ resource: collection.resource, name: item.name });
+        link.setAttribute('aria-label', `Inspect ${collection.kind} ${item.namespace}/${item.name}`);
+        link.addEventListener('click', event => {
+            if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+                return;
+            event.preventDefault();
+            void openResourceDetail(collection, item);
+        });
+        return link;
+    }
     function createResourceTable(entries, emptyMessage = state.namespace ? `No resources in ${state.namespace}.` : 'Select a namespace to view resources.', { showKind = true, sortable = false } = {}) {
         if (!entries.length) {
             const empty = document.createElement('div');
@@ -950,19 +966,7 @@
             row.dataset.selected = String(state.resourceDetail?.collection.resource === collection.resource && state.resourceDetail.item.name === item.name && state.resourceDetail.item.namespace === item.namespace);
             const nameCell = document.createElement('td');
             nameCell.dataset.label = 'Name';
-            const button = document.createElement('a');
-            button.className = 'resource-name-button';
-            button.href = resourcePagePath(collection.resource, item);
-            button.textContent = item.name;
-            button.dataset.resourceKey = resourceReferenceKey({ resource: collection.resource, name: item.name });
-            button.setAttribute('aria-label', `Inspect ${collection.kind} ${item.namespace}/${item.name}`);
-            button.addEventListener('click', event => {
-                if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
-                    return;
-                event.preventDefault();
-                void openResourceDetail(collection, item);
-            });
-            nameCell.append(button);
+            nameCell.append(createResourceLink(collection, item));
             if (item.message) {
                 const message = document.createElement('div');
                 message.className = 'resource-row-message';
@@ -1048,7 +1052,8 @@
         }
         renderResourceTypeNavigation();
         renderResourceRelationshipFocusOptions();
-        renderResourceDiagram();
+        if (!elements.resourceDiagramPanel.hidden)
+            renderResourceDiagram();
     }
     function setResourceView(view) {
         const showDiagram = view !== 'inventory';
@@ -1058,6 +1063,8 @@
         elements.resourceDiagramTab.tabIndex = showDiagram ? 0 : -1;
         elements.resourceInventoryTab.setAttribute('aria-selected', String(!showDiagram));
         elements.resourceInventoryTab.tabIndex = showDiagram ? -1 : 0;
+        if (showDiagram)
+            renderResourceDiagram();
     }
     function handleResourceViewTabKeydown(event) {
         const tabs = [elements.resourceInventoryTab, elements.resourceDiagramTab];
@@ -1098,7 +1105,10 @@
     }
     function renderResourceRelationshipFocusOptions() {
         const selected = elements.resourceRelationshipFocus.value;
-        elements.resourceRelationshipFocus.replaceChildren();
+        const namespaceOption = document.createElement('option');
+        namespaceOption.value = '';
+        namespaceOption.textContent = 'Entire namespace';
+        elements.resourceRelationshipFocus.replaceChildren(namespaceOption);
         for (const group of state.resourceGroups) {
             const optionGroup = document.createElement('optgroup');
             optionGroup.label = group.name;
@@ -1114,17 +1124,8 @@
                 elements.resourceRelationshipFocus.append(optionGroup);
         }
         const options = Array.from(elements.resourceRelationshipFocus.options);
-        if (options.some(option => option.value === selected)) {
-            elements.resourceRelationshipFocus.value = selected;
-        }
-        else {
-            const related = new Set(state.resourceRelationships.flatMap(relationship => [
-                resourceReferenceKey(relationship.source),
-                resourceReferenceKey(relationship.target),
-            ]));
-            elements.resourceRelationshipFocus.value = options.find(option => related.has(option.value))?.value || options[0]?.value || '';
-        }
-        elements.resourceRelationshipFocus.disabled = !options.length;
+        elements.resourceRelationshipFocus.value = options.some(option => option.value === selected) ? selected : '';
+        elements.resourceRelationshipFocus.disabled = options.length === 1;
     }
     function focusResource(reference) {
         const key = resourceReferenceKey(reference);
@@ -1223,15 +1224,179 @@
             outgoing: relationships.filter(relationship => resourceReferenceKey(relationship.source) === focusKey),
         };
     }
+    function namespaceGraph() {
+        const graph = new dagre.graphlib.Graph({ multigraph: true });
+        for (const collection of resourceCollections()) {
+            for (const item of collection.items) {
+                graph.setNode(resourceReferenceKey({ resource: collection.resource, name: item.name }), { collection, item });
+            }
+        }
+        for (const edge of state.resourceRelationships) {
+            const source = resourceReferenceKey(edge.source);
+            const target = resourceReferenceKey(edge.target);
+            for (const ref of [edge.source, edge.target]) {
+                const key = resourceReferenceKey(ref);
+                if (!graph.hasNode(key))
+                    graph.setNode(key, resourceEntryForReference(ref));
+            }
+            graph.setEdge(source, target, edge, edge.relationship);
+        }
+        return graph;
+    }
+    function graphResourceCard({ collection, item }) {
+        const card = item.missing ? document.createElement('div') : createResourceLink(collection, item);
+        card.className = 'graph-resource';
+        card.dataset.resource = collection.resource;
+        card.title = collection.kind + '/' + item.name;
+        const kind = document.createElement('span');
+        kind.className = 'graph-resource-kind';
+        kind.textContent = collection.kind;
+        const name = document.createElement('strong');
+        name.textContent = item.name;
+        const status = document.createElement('small');
+        status.textContent = resourceStatus(item);
+        status.dataset.state = status.textContent.toLowerCase();
+        card.replaceChildren(kind, name, status);
+        return card;
+    }
+    function graphSVG(tag, attributes = {}) {
+        const element = document.createElementNS('http://www.w3.org/2000/svg', tag);
+        for (const [name, value] of Object.entries(attributes))
+            element.setAttribute(name, String(value));
+        return element;
+    }
+    function renderConnectedResources(graph, keys, vertical) {
+        const layout = new dagre.graphlib.Graph({ multigraph: true });
+        layout.setGraph({ rankdir: vertical ? 'TB' : 'LR', nodesep: vertical ? 16 : 26, ranksep: 30, marginx: 6, marginy: 10 });
+        for (const key of keys) {
+            layout.setNode(key, { width: vertical ? 112 : 154, height: 76 });
+            for (const edge of graph.outEdges(key) || []) {
+                const label = graph.edge(edge).relationship;
+                layout.setEdge(edge, { width: label.length * 6.5 + 10, height: 19, labelpos: 'c' });
+            }
+        }
+        dagre.layout(layout);
+        const { width, height } = layout.graph();
+        const svg = graphSVG('svg', { width, height, viewBox: `0 0 ${width} ${height}`, role: 'group', 'aria-label': 'Connected resources' });
+        for (const edge of layout.edges()) {
+            const { points, x, y } = layout.edge(edge);
+            const relation = graph.edge(edge);
+            const group = graphSVG('g', { class: 'graph-edge', 'data-source': edge.v, 'data-target': edge.w, 'data-inferred': String(Boolean(relation.inferred)) });
+            const title = graphSVG('title');
+            title.textContent = `${edge.v} ${relation.relationship} ${edge.w}`;
+            const line = graphSVG('polyline', { points: points.map(({ x, y }) => `${x},${y}`).join(' '), 'marker-end': 'url(#namespace-arrow)' });
+            const label = graphSVG('text', { x, y, 'text-anchor': 'middle', dy: '.35em' });
+            label.textContent = relation.relationship;
+            group.append(title, line, label);
+            svg.append(group);
+        }
+        for (const key of layout.nodes()) {
+            const { x, y, width, height } = layout.node(key);
+            const node = graphSVG('foreignObject', { x: x - width / 2, y: y - height / 2, width, height, 'data-node': key });
+            node.append(graphResourceCard(graph.node(key)));
+            svg.append(node);
+        }
+        const component = document.createElement('div');
+        component.className = 'graph-component';
+        component.append(svg);
+        return component;
+    }
+    function highlightNamespaceGraph(map, key) {
+        const neighbors = new Set([key]);
+        for (const edge of map.querySelectorAll('.graph-edge')) {
+            const adjacent = edge.dataset.source === key || edge.dataset.target === key;
+            if (adjacent) {
+                neighbors.add(edge.dataset.source);
+                neighbors.add(edge.dataset.target);
+            }
+            edge.classList.toggle('graph-muted', Boolean(key && !adjacent));
+            edge.classList.toggle('graph-highlight', Boolean(key && adjacent));
+        }
+        for (const node of map.querySelectorAll('[data-node]')) {
+            node.classList.toggle('graph-muted', Boolean(key && !neighbors.has(node.dataset.node)));
+        }
+    }
+    function createNamespaceMap(vertical) {
+        const graph = namespaceGraph();
+        if (!graph.nodeCount())
+            return createResourceTable([]);
+        const map = document.createElement('div');
+        map.className = 'namespace-graph';
+        const standalone = document.createElement('section');
+        standalone.className = 'standalone-resources';
+        const heading = document.createElement('h3');
+        heading.textContent = 'Standalone resources';
+        standalone.append(heading);
+        for (const keys of dagre.graphlib.alg.components(graph)) {
+            if (keys.length === 1 && !graph.nodeEdges(keys[0])?.length) {
+                standalone.append(graphResourceCard(graph.node(keys[0])));
+            }
+            else {
+                map.append(renderConnectedResources(graph, keys, vertical));
+            }
+        }
+        if (standalone.children.length > 1)
+            map.append(standalone);
+        function highlight(element) {
+            const key = element?.closest('[data-node]')?.dataset.node;
+            const selected = state.resourceDetail;
+            highlightNamespaceGraph(map, key || (selected ? resourceReferenceKey({ resource: selected.collection.resource, name: selected.item.name }) : undefined));
+        }
+        map.addEventListener('pointerover', event => highlight(event.target));
+        map.addEventListener('pointerleave', () => highlight(document.activeElement));
+        map.addEventListener('focusin', event => highlight(event.target));
+        map.addEventListener('focusout', event => highlight(event.relatedTarget));
+        return map;
+    }
+    let graphSizeObserver;
+    function enableGraphSizing(map) {
+        const widths = Array.from(map.querySelectorAll('.graph-component > svg'), svg => svg.width.baseVal.value);
+        const widest = widths.reduce((largest, width) => Math.max(largest, width), 0);
+        if (!widest)
+            return;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'graph-scale secondary-button';
+        let fit;
+        function update() {
+            const available = map.clientWidth;
+            button.hidden = widest <= available;
+            const scaled = fit ?? (available >= widest * 0.72);
+            map.classList.toggle('graph-fit', scaled);
+            button.textContent = scaled ? 'Actual size' : 'Fit graph';
+        }
+        button.addEventListener('click', () => {
+            fit = !map.classList.contains('graph-fit');
+            update();
+        });
+        map.prepend(button);
+        update();
+        graphSizeObserver = new ResizeObserver(update);
+        graphSizeObserver.observe(map);
+    }
+    const mobileGraphQuery = '(max-width: 800px), (max-height: 500px) and (pointer: coarse)';
+    let namespaceGraphSignature = '';
     function renderResourceDiagram() {
         const focusKey = elements.resourceRelationshipFocus.value;
         if (!focusKey) {
-            const empty = document.createElement('div');
-            empty.className = 'resource-empty';
-            empty.textContent = state.namespace ? `No resources in ${state.namespace}.` : 'Select a namespace to view resources.';
-            elements.resourceDiagram.replaceChildren(empty);
+            const vertical = window.matchMedia(mobileGraphQuery).matches;
+            const signature = JSON.stringify([state.namespace, state.resourceGroups, state.resourceRelationships, vertical]);
+            if (signature === namespaceGraphSignature)
+                return;
+            namespaceGraphSignature = signature;
+            graphSizeObserver?.disconnect();
+            const key = document.activeElement?.dataset.resourceKey;
+            const map = createNamespaceMap(vertical);
+            elements.resourceDiagram.replaceChildren(map);
+            if (map.className === 'namespace-graph')
+                enableGraphSizing(map);
+            if (key && !elements.resourceDiagramPanel.hidden && document.activeElement === document.body) {
+                elements.resourceDiagram.querySelector(`a[data-resource-key="${CSS.escape(key)}"]`)?.focus();
+            }
             return;
         }
+        graphSizeObserver?.disconnect();
+        namespaceGraphSignature = '';
         const { incoming, outgoing } = resourceRelationshipsForFocus(state.resourceRelationships, focusKey);
         const [resource, name] = focusKey.split('/', 2);
         const focusEntry = resourceEntryForReference({ resource, name });
@@ -1924,8 +2089,10 @@ ${specs[collection.resource]}`;
             const button = Array.from(elements.resourceList.querySelectorAll('a[data-resource-key]')).find(candidate => candidate.dataset.resourceKey === key);
             if (!elements.resourceInventoryPanel.hidden && button)
                 button.focus();
-            else if (!elements.resourceDiagramPanel.hidden)
-                elements.resourceRelationshipFocus.focus();
+            else if (!elements.resourceDiagramPanel.hidden) {
+                const link = elements.resourceDiagram.querySelector(`a[data-resource-key="${CSS.escape(key)}"]`);
+                (link || elements.resourceRelationshipFocus).focus();
+            }
             else
                 elements.resourceInventoryTab.focus();
         }
@@ -7696,6 +7863,10 @@ spec:
     elements.resourceDiagramTab.addEventListener('click', () => setResourceView('diagram'));
     elements.resourceInventoryTab.addEventListener('click', () => setResourceView('inventory'));
     requiredElement('.resource-view-tabs').addEventListener('keydown', event => handleResourceViewTabKeydown(event));
+    window.matchMedia(mobileGraphQuery).addEventListener('change', () => {
+        if (!elements.resourceDiagramPanel.hidden)
+            renderResourceDiagram();
+    });
     elements.resourceRelationshipFocus.addEventListener('change', renderResourceDiagram);
     elements.resourceKind.addEventListener('change', () => {
         elements.resourceStatus.value = '';

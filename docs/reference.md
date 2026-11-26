@@ -1005,10 +1005,18 @@ The **Resources** page opens on **Inventory**, where you can search by name,
 kind, or status, filter by status, and sort by name, status, or creation time.
 Selecting a resource opens an inspector with **Summary**, **Relationships**, and
 **YAML** tabs, plus **Logs** for Tasks. On wide screens, the inspector appears
-beside the inventory; on smaller screens, it fills the content area. The
-**Relationships** view shows incoming and outgoing connections for a selected
-object. Following related resources or switching to the relationship diagram
-preserves inventory filters.
+beside the inventory. On smaller screens, it fills the content area.
+
+On the **Resources** page, the **Relationships** tab opens on **Entire namespace**,
+a graph of connected resources. Follow labeled arrows from source to target.
+A shared resource appears once, even when several resources reference it.
+Dashed arrows indicate selector or label matches. Separate workflows appear
+in separate diagrams, with standalone resources listed below. Graphs flow
+left to right on desktop and top to bottom on mobile. For wide workflows,
+use **Fit graph** to see the whole graph or **Actual size** to read it at full size. Hover over a node or focus it to highlight
+its connections. Select it to open the inspector, or choose one resource in
+**Scope** to explore its immediate connections.
+Following related resources or switching to the map preserves inventory filters.
 
 The selected resource has a dedicated URL at
 `/namespaces/<namespace>/resources/<resource-type>/<resource-name>`, for example

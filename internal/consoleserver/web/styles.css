@@ -199,6 +199,37 @@ button { color: inherit; }
 .console-section-heading p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
 .resource-view-tabs { width: fit-content; margin-bottom: 22px; }
 .resource-diagram-panel[hidden], #resource-inventory-panel[hidden] { display: none; }
+.graph-definitions { position: absolute; pointer-events: none; }
+.graph-definitions marker { fill: var(--muted); fill: context-stroke; }
+.namespace-graph { display: grid; min-width: 0; gap: 18px; }
+.graph-component { overflow: auto; min-width: 0; padding: 8px 0; }
+.graph-component + .graph-component { border-top: 1px solid var(--line); padding-top: 18px; }
+.graph-component > svg { display: block; margin-inline: auto; }
+.graph-fit .graph-component > svg { max-width: 100%; height: auto; }
+.graph-scale { justify-self: end; }
+.graph-scale[hidden] { display: none; }
+.graph-edge polyline { fill: none; stroke: var(--muted); stroke-width: 1.45; stroke-linejoin: round; }
+.graph-edge[data-inferred="true"] polyline { stroke-dasharray: 4 3; }
+.graph-edge text { font: 600 11px system-ui, sans-serif; fill: var(--muted); paint-order: stroke; stroke: var(--card); stroke-width: 5px; stroke-linejoin: round; }
+.graph-highlight polyline { stroke: var(--attention); stroke-width: 2; }
+.graph-highlight text { fill: var(--attention); }
+.graph-muted { opacity: .45; }
+.graph-resource { --kind-color: #77718b; box-sizing: border-box; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: 3px; min-width: 0; padding: 8px 11px; border: 1px solid color-mix(in srgb, var(--kind-color) 55%, var(--line)); border-left: 3px solid var(--kind-color); border-radius: 7px; background: var(--card); color: var(--ink); text-decoration: none; }
+.graph-resource[data-resource="tasks"], .graph-resource[data-resource="taskpipelines"] { --kind-color: #ac782a; }
+.graph-resource[data-resource="sessions"] { --kind-color: #218c86; }
+.graph-resource[data-resource="workspaces"] { --kind-color: #487cbd; }
+.graph-resource[data-resource="agentconfigs"] { --kind-color: #43855b; }
+.graph-resource[data-resource$="spawners"], .graph-resource[data-resource="webhookgateways"] { --kind-color: #8d63b2; }
+a.graph-resource:hover, a.graph-resource:focus-visible { background: color-mix(in srgb, var(--kind-color) 8%, var(--card)); outline: 2px solid var(--kind-color); outline-offset: -2px; }
+.graph-resource-kind, .graph-resource small { color: var(--muted); font-size: 10px; line-height: 1.3; }
+.graph-resource-kind { font-weight: 650; letter-spacing: .035em; }
+.graph-resource strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; line-height: 1.4; }
+.graph-resource small { display: flex; align-items: center; gap: 4px; }
+.graph-resource small::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: var(--faint); }
+.graph-resource small:is([data-state="running"], [data-state="ready"], [data-state="succeeded"])::before { background: #32906a; }
+.graph-resource small:is([data-state="failed"], [data-state="missing"])::before { background: var(--danger); }
+.standalone-resources { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 140px), 1fr)); gap: 8px; padding: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 9px; }
+.standalone-resources h3 { grid-column: 1 / -1; margin: 0 0 2px; color: var(--muted); font-size: 12px; }
 .resource-diagram-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; margin-bottom: 17px; }
 .resource-diagram-heading h2 { margin: 0; font-size: 18px; font-weight: 600; line-height: 1.3; letter-spacing: -.01em; }
 .resource-diagram-heading p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
@@ -705,6 +736,8 @@ button { color: inherit; }
   .resource-diagram-heading { align-items: flex-start; flex-direction: column; gap: 8px; }
   .resource-relationship-focus { width: 100%; }
   .resource-relationship-focus select { font-size: 16px; }
+  .graph-resource { padding-inline: 8px; }
+  .graph-resource strong { font-size: 13px; }
   .resource-diagram { min-height: 0; padding: 14px; background-size: 15px 15px; }
   .resource-relationship-graph { min-width: 0; display: flex; flex-direction: column; gap: 20px; }
   .resource-relationship-column, .resource-relationship-focus-node { width: 100%; }

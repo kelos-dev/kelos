@@ -290,6 +290,7 @@ rules:
       - taskrecords
       - tasks
       - taskspawners
+      - webhookgateways
       - workerpools
       - workspaces
     verbs:

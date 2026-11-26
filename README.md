@@ -31,7 +31,10 @@ pipelines on Kubernetes.
 </p>
 
 <p align="center">
-  <img alt="Kelos Console with example data showing Test coverage and Code review subsessions within one Session, with Code review selected, a shared workspace indicator, a code diff, and tool output" src="docs/images/kelos-session-web-chat.png" />
+  <picture>
+    <source media="(max-width: 600px)" srcset="docs/images/kelos-session-web-chat-mobile.png" />
+    <img alt="Kelos Console showing the Code review conversation in the Fix API pagination session, with a change to cursor.go and passing test output" src="docs/images/kelos-session-web-chat.png" />
+  </picture>
   <br>
   <a href="#use-the-kelos-console">Set up the Console</a>
 </p>

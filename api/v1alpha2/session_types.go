@@ -94,9 +94,9 @@ type SessionSpec struct {
 	// Worker defines the agent and execution environment for this Session.
 	Worker WorkerSpec `json:"worker"`
 
-	// PromptSuggestions enables suggested follow-up prompts in Claude Code and Codex
+	// PromptSuggestions enables suggested follow-up prompts in Session
 	// conversations, including subsessions. Defaults to false. Generating suggestions
-	// uses additional model requests. Codex applies changes to subsequent requests.
+	// uses additional model requests. Codex and OpenCode apply changes to subsequent requests.
 	// Claude Code resumes its agent processes in the same Pod with the updated setting
 	// once the Session and its subsessions are idle.
 	// +optional

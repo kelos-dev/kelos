@@ -194,7 +194,7 @@ func TestCodexSamplesCompletedTurnForConnectedClients(t *testing.T) {
 	provider.handleNotification("turn/started", json.RawMessage(`{"threadId":"root","turn":{"id":"native-1"}}`))
 	provider.handleNotification("turn/completed", json.RawMessage(`{"threadId":"root","turn":{"id":"native-1","status":"completed"}}`))
 	params := replyToCodexRequest(t, provider, stdin, "thread/sample", `{"sourceTurnId":"native-1","text":"Run the session runtime tests"}`)
-	if params["threadId"] != "root" || params["expectedTurnId"] != "native-1" || params["prompt"] != codexPromptSuggestionInstruction {
+	if params["threadId"] != "root" || params["expectedTurnId"] != "native-1" || params["prompt"] != promptSuggestionInstruction {
 		t.Fatalf("Sample params = %#v", params)
 	}
 	for _, want := range []string{EventTurnStarted, EventTurnCompleted, EventPromptSuggestion} {

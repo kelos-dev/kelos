@@ -90,7 +90,7 @@ func TestOpenCodeProviderStreamsOrderedEvents(t *testing.T) {
 		{Type: EventToolStarted, ToolID: "tool-1", ToolName: "bash", Status: "running"},
 		{Type: EventToolCompleted, ToolID: "tool-1", ToolName: "bash", Output: "ok\n", Status: "completed"},
 		{Type: EventAssistantDelta, Text: " world"},
-		{Type: EventTurnCompleted, Status: "completed"},
+		{Type: EventTurnCompleted, Status: "completed", suggestionContextID: fake.sessionID},
 	}
 	if got := sink.snapshot(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("OpenCode events = %#v, want %#v", got, want)
@@ -127,6 +127,102 @@ func TestOpenCodeProviderRecordsShellCommandWithoutReply(t *testing.T) {
 	case prompt := <-fake.prompts:
 		t.Fatalf("shell context started an OpenCode turn: %#v", prompt)
 	default:
+	}
+}
+
+func TestOpenCodePromptSuggestion(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		replyStatus int
+		modelError  bool
+	}{
+		{name: "completed turn", replyStatus: http.StatusOK},
+		{name: "request failed", replyStatus: http.StatusBadGateway},
+		{name: "model error", replyStatus: http.StatusOK, modelError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var requests []string
+			var mu sync.Mutex
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				requests = append(requests, r.Method+" "+r.URL.Path)
+				mu.Unlock()
+				switch r.Method + " " + r.URL.Path {
+				case "POST /session/ses-root/fork":
+					writeOpenCodeJSON(w, map[string]string{"id": "ses-fork"})
+				case "POST /session/ses-fork/message":
+					var req struct {
+						Parts []openCodePart
+						Tools map[string]bool
+					}
+					if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+						t.Error(err)
+					}
+					if len(req.Parts) != 1 || req.Parts[0].Type != "text" || req.Parts[0].Text != promptSuggestionInstruction || !reflect.DeepEqual(req.Tools, map[string]bool{"*": false}) {
+						t.Errorf("unexpected suggestion request: %#v", req)
+					}
+					w.WriteHeader(tc.replyStatus)
+					if tc.modelError {
+						_, _ = fmt.Fprint(w, `{"info":{"role":"assistant","error":{"data":{"message":"Model unavailable"}}},"parts":[{"type":"text","text":"Partial response"}]}`)
+						return
+					}
+					_, _ = fmt.Fprint(w, `{"info":{"role":"assistant"},"parts":[{"type":"reasoning","text":"analysis"},{"type":"text","text":"Run the tests"}]}`)
+				case "POST /session/ses-fork/abort", "DELETE /session/ses-fork":
+					writeOpenCodeJSON(w, true)
+				default:
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+					http.NotFound(w, r)
+				}
+			}))
+			defer upstream.Close()
+			dir := t.TempDir()
+			client, err := newOpenCodeClient(upstream.URL, dir, upstream.Client())
+			if err != nil {
+				t.Fatal(err)
+			}
+			provider := newOpenCodeProviderState(t.Context(), ProviderConfig{}, client)
+			defer provider.cancel()
+			provider.setSessionID("ses-root")
+			if tc.replyStatus != http.StatusOK || tc.modelError {
+				if got := provider.suggestPrompt("ses-root"); got != "" {
+					t.Fatalf("failed sample returned %q", got)
+				}
+			} else {
+				journal := NewJournal()
+				defer journal.Close()
+				NewServer(Config{AgentType: "opencode", WorkingDir: dir, PromptSuggestions: true}, journal, provider)
+				_, events, _, unsubscribe := journal.Subscribe(0)
+				defer unsubscribe()
+				provider.handleSessionStatus(json.RawMessage(`{"sessionID":"ses-root","status":{"type":"busy"}}`))
+				provider.handleSessionIdle(json.RawMessage(`{"sessionID":"ses-root"}`))
+				provider.handleSessionStatus(json.RawMessage(`{"sessionID":"ses-fork","status":{"type":"busy"}}`))
+				provider.handleSessionIdle(json.RawMessage(`{"sessionID":"ses-fork"}`))
+				for _, want := range []string{EventTurnStarted, EventTurnCompleted, EventPromptSuggestion} {
+					select {
+					case event := <-events:
+						if event.Type != want || event.TurnID != "turn-1" {
+							t.Fatalf("expected %s for turn-1, got %#v", want, event)
+						}
+						if want == EventPromptSuggestion && event.Text != "Run the tests" {
+							t.Fatalf("suggestion = %q", event.Text)
+						}
+					case <-time.After(5 * time.Second):
+						t.Fatalf("missing %s", want)
+					}
+				}
+				for _, event := range journal.Snapshot() {
+					if event.Type == EventPromptSuggestion || (event.TurnID != "" && event.TurnID != "turn-1") {
+						t.Fatalf("suggestion fork appeared in history: %#v", event)
+					}
+				}
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			want := []string{"POST /session/ses-root/fork", "POST /session/ses-fork/message", "POST /session/ses-fork/abort", "DELETE /session/ses-fork"}
+			if !reflect.DeepEqual(requests, want) {
+				t.Fatalf("requests = %v, want %v", requests, want)
+			}
+		})
 	}
 }
 

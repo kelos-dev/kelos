@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -499,6 +500,59 @@ func (p *OpenCodeProvider) startCommand(ctx context.Context, name, arguments str
 	return nil
 }
 
+func (p *OpenCodeProvider) suggestPrompt(sessionID string) string {
+	ctx, cancel := context.WithTimeout(p.ctx, 30*time.Second)
+	defer cancel()
+	var fork struct {
+		ID string `json:"id"`
+	}
+	if err := p.client.doJSON(ctx, http.MethodPost, "/session/"+url.PathEscape(sessionID)+"/fork", true, nil, &fork); err != nil {
+		if p.ctx.Err() == nil {
+			slog.Warn("Forking OpenCode session for prompt suggestion failed", "sessionID", sessionID, "error", err)
+		}
+		return ""
+	}
+	if fork.ID == "" || fork.ID == sessionID {
+		slog.Warn("OpenCode returned an invalid suggestion fork", "sessionID", sessionID, "forkID", fork.ID)
+		return ""
+	}
+	defer func() {
+		// The sample may time out while OpenCode is still generating a reply.
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := deleteOpenCodeConversation(cleanupCtx, p.client, fork.ID); err != nil {
+			slog.Warn("Cleaning up OpenCode suggestion fork failed", "forkID", fork.ID, "error", err)
+		}
+	}()
+	request := map[string]any{
+		"parts": []map[string]string{{"type": "text", "text": promptSuggestionInstruction}},
+		"tools": map[string]bool{"*": false},
+	}
+	var reply struct {
+		Info struct {
+			Role  string          `json:"role"`
+			Error json.RawMessage `json:"error"`
+		} `json:"info"`
+		Parts []openCodePart `json:"parts"`
+	}
+	if err := p.client.doJSON(ctx, http.MethodPost, "/session/"+url.PathEscape(fork.ID)+"/message", true, request, &reply); err != nil {
+		if p.ctx.Err() == nil {
+			slog.Warn("Generating OpenCode prompt suggestion failed", "forkID", fork.ID, "error", err)
+		}
+		return ""
+	}
+	if reply.Info.Role != "assistant" || openCodeErrorText(reply.Info.Error) != "" {
+		return ""
+	}
+	var parts []string
+	for _, part := range reply.Parts {
+		if part.Type == "text" {
+			parts = append(parts, part.Text)
+		}
+	}
+	return usablePromptSuggestion(strings.Join(parts, "\n"))
+}
+
 func (p *OpenCodeProvider) recordShellCommand(ctx context.Context, record shellCommandRecord) error {
 	request := map[string]any{
 		"noReply": true,
@@ -918,7 +972,7 @@ func (p *OpenCodeProvider) completeTurn(force bool, expected chan struct{}, fail
 	p.interactionCtx, p.interactionCancel = nil, nil
 	p.activeMu.Unlock()
 	if sink != nil {
-		sink.Emit(Event{Type: EventTurnCompleted, Status: status, Text: message})
+		sink.Emit(Event{Type: EventTurnCompleted, Status: status, Text: message, suggestionContextID: p.currentSessionID()})
 	}
 }
 

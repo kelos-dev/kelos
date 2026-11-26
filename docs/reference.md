@@ -330,7 +330,7 @@ the Session resource and is visible through the Kubernetes API.
 | `spec.worker.podOverrides.serviceAccountName` | Service account for the Session Pod; omit or clear to use the Session's managed service account | No |
 | `spec.worker.podOverrides.runtimeClassName` | RuntimeClass for the Session Pod, e.g. a gVisor or Kata Containers sandbox. The RuntimeClass must already exist in the cluster; otherwise Pod creation fails and the StatefulSet records `FailedCreate` events. The Session's own agent can change or clear it (see below) | No |
 | `spec.suspend` | Stop the Session runtime without deleting the Session or its persistent workspace (defaults to `false`) | No |
-| `spec.promptSuggestions` | Generate contextual follow-up prompts for Claude Code and Codex, including subsessions (defaults to `false`). Enabling suggestions allows extra model requests. | No |
+| `spec.promptSuggestions` | Generate contextual follow-up prompts for Claude Code, Codex, and OpenCode, including subsessions (defaults to `false`). Enabling suggestions allows extra model requests. | No |
 | `spec.initialBranch` | Git branch used to initialize the Session workspace. Checks out the branch from `origin` when it exists, or creates it from the Workspace ref. Requires `spec.worker.workspaceRef` | No |
 | `spec.initialPrompt` | Prompt submitted when the Session starts without retained conversation history. An `emptyDir` workspace may submit it again after Pod replacement | No |
 | `spec.volumeClaimTemplate` | PersistentVolumeClaimSpec for the Session workspace. Recommended for durable Sessions; omit to use an ephemeral `emptyDir` workspace | No |
@@ -407,7 +407,7 @@ connections, and Down to move forward and restore your unsent draft. In a
 multiline draft, move to the first displayed line before pressing Up to start
 browsing; recalled multiline prompts can be browsed with Up/Down directly.
 
-In Claude Code and Codex Sessions, the web console and interactive terminal can show a
+In Claude Code, Codex, and OpenCode Sessions, the web console and interactive terminal can show a
 suggested follow-up in the empty message input after a reply. Press Tab or Right
 Arrow to copy it into your draft, or select **Use suggestion** in the console.
 Edit and send it like any other message. A draft hides the suggestion. Clearing
@@ -415,8 +415,9 @@ the draft or reconnecting to the running conversation restores the same suggesti
 without another model request. Starting a turn, disabling suggestions, or
 restarting the Session runtime (including replacing its Pod) clears it.
 
-Claude Code chooses when to generate a suggestion. In a connected Codex Session,
+Claude Code chooses when to generate a suggestion. In a connected Codex or OpenCode Session,
 Kelos asks the session model for a short follow-up using the completed turn’s context.
+OpenCode suggestion requests cannot run tools and do not appear in the conversation history.
 These background requests count toward provider usage.
 When there is no suggestion, the empty Codex composer shows “Ask Codex to do anything”.
 
@@ -424,7 +425,7 @@ Set `Session.spec.promptSuggestions: true` to enable suggestions. Omitting the f
 or setting it to `false` disables them. A SessionSpawner can set
 `SessionSpawner.spec.sessionTemplate.promptSuggestions`.
 
-Codex uses the updated setting on the next completed turn. Claude Code applies
+Codex and OpenCode use the updated setting on the next completed turn. Claude Code applies
 either change once the Session and its subsessions are idle, when its processes
 restart in the same container and resume their conversations. If you disable
 suggestions, Kelos stops forwarding new suggestions as soon as it observes the

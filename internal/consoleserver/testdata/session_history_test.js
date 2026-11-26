@@ -811,10 +811,10 @@ function backgroundTaskRows() {
   }));
 }
 
-function testPromptSuggestion() {
+async function testPromptSuggestion() {
   resetHarness();
   state.selected = {namespace: 'default', name: 'one', provider: 'claude-code'};
-  state.socket = {readyState: WebSocket.OPEN, send() { assert.fail('Accepting a suggestion sent a message'); }};
+  state.socket = {readyState: WebSocket.OPEN, send(raw) { assert.equal(JSON.parse(raw).type, 'workspace.changes'); }};
   elements.input.value = '';
   handleEvent({type: 'prompt.suggestion', text: 'Run the tests'});
   assert.equal(elements.input.placeholder, 'Run the tests');
@@ -832,15 +832,15 @@ function testPromptSuggestion() {
     assert.equal(prevented, true);
     assert.equal(elements.input.value, 'Run the tests');
     elements.input.value = '';
-    handleEvent({type: 'prompt.suggestion', text: 'Run the tests'});
+    elements.input.listeners.get('input')();
+    assert.equal(elements.useSuggestion.hidden, false);
   }
   elements.input.value = 'My own draft';
   elements.input.listeners.get('input')();
   assert.equal(elements.useSuggestion.hidden, true);
   elements.input.value = '';
   elements.input.listeners.get('input')();
-  assert.notEqual(elements.input.placeholder, 'Run the tests');
-  handleEvent({type: 'prompt.suggestion', text: 'Run the tests'});
+  assert.equal(elements.input.placeholder, 'Run the tests');
   elements.useSuggestion.listeners.get('click')();
   assert.equal(elements.input.value, 'Run the tests');
   assert.equal(elements.useSuggestion.hidden, true);
@@ -849,8 +849,21 @@ function testPromptSuggestion() {
   assert.equal(elements.useSuggestion.hidden, true);
   elements.input.value = '';
   state.selected.provider = 'codex';
-  updateComposerAction();
+  elements.input.listeners.get('input')();
+  assert.equal(elements.input.placeholder, 'Explain the diff');
+  handleEvent({type: 'turn.started', turnId: 'next'});
+  handleEvent({type: 'turn.completed', turnId: 'next', status: 'completed'});
+  assert.equal(elements.useSuggestion.hidden, true);
   assert.equal(elements.input.placeholder, 'Ask Codex to do anything');
+
+  handleEvent({type: 'prompt.suggestion', text: 'Commit the changes'});
+  elements.useSuggestion.listeners.get('click')();
+  const sent = [];
+  state.socket.send = raw => sent.push(JSON.parse(raw));
+  await submitComposer();
+  assert.deepEqual(sent, [{type: 'message', text: 'Commit the changes', attachmentIds: []}]);
+  assert.equal(elements.input.value, '');
+  assert.equal(elements.useSuggestion.hidden, true);
 }
 
 function testBackgroundTaskProgress() {
@@ -2565,7 +2578,6 @@ testWorkspaceChangesReportsBranchListTruncation();
 testSessionViewSaveAndRestore();
 testSessionViewReset();
 testSessionProgressLifecycle();
-testPromptSuggestion();
 testBackgroundTaskProgress();
 testBackgroundTaskProgressWithoutTiming();
 testBackgroundTaskAnnouncements();
@@ -2638,6 +2650,7 @@ testSubsessionNotificationOpensMatchingConversation();
 testUnavailableSubsessionReturnsToMainConversation();
 testReadySessionDisconnectsWhenItBecomesPending()
   .then(testSuspendSessionHidesBackgroundProgress)
+  .then(testPromptSuggestion)
   .then(testComposerIgnoresReentrantSubmission)
   .then(testComposerCommandSubmission)
   .then(testClaudeGoalCommandSubmission)

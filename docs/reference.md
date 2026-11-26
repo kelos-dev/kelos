@@ -410,10 +410,14 @@ browsing; recalled multiline prompts can be browsed with Up/Down directly.
 In Claude Code and Codex Sessions, the web console and interactive terminal can show a
 suggested follow-up in the empty message input after a reply. Press Tab or Right
 Arrow to copy it into your draft, or select **Use suggestion** in the console.
-Edit and send it like any other message. Typing your own prompt dismisses the
-suggestion. Claude Code chooses when to generate a suggestion. In a connected
-Codex Session, Kelos asks the session model for a short follow-up using the
-completed turn’s context. These background requests count toward provider usage.
+Edit and send it like any other message. A draft hides the suggestion. Clearing
+the draft or reconnecting to the running conversation restores the same suggestion
+without another model request. Starting a turn, disabling suggestions, or
+restarting the Session runtime (including replacing its Pod) clears it.
+
+Claude Code chooses when to generate a suggestion. In a connected Codex Session,
+Kelos asks the session model for a short follow-up using the completed turn’s context.
+These background requests count toward provider usage.
 When there is no suggestion, the empty Codex composer shows “Ask Codex to do anything”.
 
 Set `Session.spec.promptSuggestions: true` to enable suggestions. Omitting the field

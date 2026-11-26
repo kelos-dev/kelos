@@ -35,6 +35,8 @@ type Journal struct {
 	path        string
 	file        *os.File
 	journalID   string
+
+	promptSuggestion Event
 	// unstartedTurns keeps accepted prompts durable after they leave replay history.
 	unstartedTurns map[string]Event
 	failure        chan struct{}
@@ -271,6 +273,9 @@ func (j *Journal) Append(event Event) error {
 			return err
 		}
 	}
+	if event.Type == EventTurnStarted {
+		j.promptSuggestion = Event{}
+	}
 	j.broadcastLocked(event)
 	return nil
 }
@@ -281,10 +286,14 @@ func (j *Journal) hasSubscribers() bool {
 	return len(j.subscribers) != 0
 }
 
-// broadcastLive sends transient composer events only to attached clients.
-func (j *Journal) broadcastLive(event Event) {
+// setPromptSuggestion keeps the latest suggestion outside transcript history.
+func (j *Journal) setPromptSuggestion(event Event) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	if event.Text == "" && j.promptSuggestion.Text == "" {
+		return
+	}
+	j.promptSuggestion = event
 	j.broadcastLocked(event)
 }
 
@@ -482,6 +491,9 @@ func (j *Journal) subscribe(since int64, journalID string, resetStale bool) (His
 	subscriber := &journalSubscriber{events: make(chan Event, 256), overflow: make(chan struct{})}
 	if !j.closed && j.failureErr == nil {
 		j.subscribers[id] = subscriber
+		if j.promptSuggestion.Text != "" {
+			subscriber.events <- j.promptSuggestion
+		}
 	} else {
 		close(subscriber.events)
 	}

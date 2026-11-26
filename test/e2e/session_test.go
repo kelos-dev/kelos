@@ -78,6 +78,7 @@ var _ = Describe("Session remote control", func() {
 		created := createSession(f, &kelos.Session{
 			ObjectMeta: metav1.ObjectMeta{Name: sessionName, Namespace: f.Namespace},
 			Spec: kelos.SessionSpec{
+				PromptSuggestions: ptr.To(true),
 				Worker: kelos.WorkerSpec{
 					Type:        "claude-code",
 					Credentials: &kelos.Credentials{Type: kelos.CredentialTypeNone},
@@ -299,10 +300,16 @@ var _ = Describe("Session remote control", func() {
 		waitForTurnCompletion(connection, "completed")
 
 		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "message", Text: "read-state"})
-		waitForSessionEvent(connection, func(event sessionruntime.Event) bool {
+		reply := waitForSessionEvent(connection, func(event sessionruntime.Event) bool {
 			return event.Type == sessionruntime.EventAssistantDelta && event.Text == "turn 10: state preserved"
 		})
 		waitForTurnCompletion(connection, "completed")
+
+		suggestion := waitForSessionEvent(connection, func(event sessionruntime.Event) bool {
+			return event.Type == sessionruntime.EventPromptSuggestion
+		})
+		Expect(suggestion.Text).To(Equal("Check the preserved workspace"))
+		Expect(suggestion.TurnID).To(Equal(reply.TurnID))
 
 		By("suspending and resuming the Session with its persisted workspace")
 		preservedClaim, err := f.Clientset.CoreV1().PersistentVolumeClaims(f.Namespace).Get(context.TODO(), oldClaimName, metav1.GetOptions{})
@@ -337,6 +344,10 @@ var _ = Describe("Session remote control", func() {
 			}
 		}
 		Expect(seenAttachment).To(BeTrue())
+		restoredSuggestion := waitForSessionEvent(connection, func(event sessionruntime.Event) bool {
+			return event.Type == sessionruntime.EventPromptSuggestion
+		})
+		Expect(restoredSuggestion).To(Equal(suggestion))
 		sendSessionRequest(connection, sessionruntime.ClientRequest{Type: "message", Text: "read-state"})
 		waitForSessionEvent(connection, func(event sessionruntime.Event) bool {
 			return event.Type == sessionruntime.EventAssistantDelta && event.Text == "turn 11: state preserved"

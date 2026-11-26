@@ -180,40 +180,66 @@ func TestOpenCodePromptSuggestion(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			provider := newOpenCodeProviderState(t.Context(), ProviderConfig{}, client)
+			newProvider := func(ctx context.Context, config ProviderConfig) *OpenCodeProvider {
+				p := newOpenCodeProviderState(ctx, config, client)
+				p.setSessionID("ses-root")
+				return p
+			}
+			provider := newProvider(t.Context(), ProviderConfig{})
 			defer provider.cancel()
-			provider.setSessionID("ses-root")
 			if tc.replyStatus != http.StatusOK || tc.modelError {
 				if got := provider.suggestPrompt("ses-root"); got != "" {
 					t.Fatalf("failed sample returned %q", got)
 				}
 			} else {
-				journal := NewJournal()
+				journal, err := OpenJournal(filepath.Join(dir, journalFileName))
+				if err != nil {
+					t.Fatal(err)
+				}
 				defer journal.Close()
-				NewServer(Config{AgentType: "opencode", WorkingDir: dir, PromptSuggestions: true}, journal, provider)
+				config := Config{AgentType: "opencode", StateDir: dir, WorkingDir: dir, PromptSuggestions: true}
+				initial := NewServer(config, journal, provider)
 				_, events, _, unsubscribe := journal.Subscribe(0)
 				defer unsubscribe()
 				provider.handleSessionStatus(json.RawMessage(`{"sessionID":"ses-root","status":{"type":"busy"}}`))
 				provider.handleSessionIdle(json.RawMessage(`{"sessionID":"ses-root"}`))
 				provider.handleSessionStatus(json.RawMessage(`{"sessionID":"ses-fork","status":{"type":"busy"}}`))
 				provider.handleSessionIdle(json.RawMessage(`{"sessionID":"ses-fork"}`))
+				var event Event
 				for _, want := range []string{EventTurnStarted, EventTurnCompleted, EventPromptSuggestion} {
 					select {
-					case event := <-events:
+					case event = <-events:
 						if event.Type != want || event.TurnID != "turn-1" {
 							t.Fatalf("expected %s for turn-1, got %#v", want, event)
-						}
-						if want == EventPromptSuggestion && event.Text != "Run the tests" {
-							t.Fatalf("suggestion = %q", event.Text)
 						}
 					case <-time.After(5 * time.Second):
 						t.Fatalf("missing %s", want)
 					}
 				}
-				for _, event := range journal.Snapshot() {
+				suggestion := event
+				if suggestion.Text != "Run the tests" {
+					t.Fatalf("suggestion = %q", suggestion.Text)
+				}
+				bounds, history := journal.SnapshotWithBounds()
+				for _, event := range history {
 					if event.Type == EventPromptSuggestion || (event.TurnID != "" && event.TurnID != "turn-1") {
 						t.Fatalf("suggestion fork appeared in history: %#v", event)
 					}
+				}
+				initial.events.close()
+				_ = initial.closeProvider()
+				journal.Close()
+
+				restarted, err := openSessionServer(t.Context(), config, func(ctx context.Context, cfg ProviderConfig) (Provider, error) {
+					return newProvider(ctx, cfg), nil
+				}, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer restarted.journal.Close()
+				defer restarted.closeProvider()
+				if got := readReplayedSuggestion(t, restarted, bounds.LastEventID, bounds.JournalID); !reflect.DeepEqual(got, suggestion) {
+					t.Fatalf("restored suggestion = %#v, want %#v", got, suggestion)
 				}
 			}
 			mu.Lock()

@@ -250,6 +250,9 @@ jobs:
       - name: Apply Open Actions self-development resources
         run: kubectl apply -f self-development/open-actions/ -n "${KELOS_NAMESPACE}"
 
+      - name: Apply aloop self-development resources
+        run: kubectl apply -f self-development/aloop/ -n "${KELOS_NAMESPACE}"
+
       - name: Show Cloudflare Access logs
         if: failure()
         run: cat "${RUNNER_TEMP}/cloudflared-access.log" 2>/dev/null || true

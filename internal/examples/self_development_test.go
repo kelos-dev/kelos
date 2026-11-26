@@ -82,6 +82,12 @@ func TestNestedDevelopmentGitHubSpawnersUseGateways(t *testing.T) {
 			files:      []string{"kanon-planner.yaml", "kanon-pr-responder.yaml", "kanon-reviewer.yaml", "kanon-squash-commits.yaml", "kanon-triage.yaml", "kanon-workers.yaml"},
 		},
 		{
+			dir:        "self-development/aloop",
+			gateway:    "aloop",
+			repository: "kelos-dev/aloop",
+			files:      []string{"aloop-planner.yaml", "aloop-pr-responder.yaml", "aloop-reviewer.yaml", "aloop-squash-commits.yaml", "aloop-triage.yaml", "aloop-workers.yaml"},
+		},
+		{
 			dir:        "self-development/agora",
 			gateway:    "agora",
 			repository: "kelos-dev/agora",
@@ -158,6 +164,11 @@ func TestSelfDevelopmentRoleAgentConfigsDoNotDuplicateBaseSkills(t *testing.T) {
 		{dir: "self-development/kanon", file: "kanon-fake-user.yaml"},
 		{dir: "self-development/kanon", file: "kanon-planner.yaml"},
 		{dir: "self-development/kanon", file: "kanon-reviewer.yaml"},
+		{dir: "self-development/aloop", file: "agentconfig.yaml"},
+		{dir: "self-development/aloop", file: "aloop-fake-strategist.yaml"},
+		{dir: "self-development/aloop", file: "aloop-fake-user.yaml"},
+		{dir: "self-development/aloop", file: "aloop-planner.yaml"},
+		{dir: "self-development/aloop", file: "aloop-reviewer.yaml"},
 		{dir: "self-development/open-actions", file: "agentconfig.yaml"},
 		{dir: "self-development/open-actions", file: "open-actions-api-reviewer.yaml"},
 		{dir: "self-development/open-actions", file: "open-actions-fake-strategist.yaml"},
@@ -219,6 +230,16 @@ func TestSelfDevelopmentSpawnersUseBaseAgent(t *testing.T) {
 		{dir: "self-development/kanon", file: "kanon-squash-commits.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "kanon-dev-agent"}}},
 		{dir: "self-development/kanon", file: "kanon-triage.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "kanon-dev-agent"}}},
 		{dir: "self-development/kanon", file: "kanon-workers.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}}},
+		{dir: "self-development/aloop", file: "aloop-config-update.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "kelos-dev-agent"}}},
+		{dir: "self-development/aloop", file: "aloop-fake-strategist.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "aloop-fake-strategist-agent"}}},
+		{dir: "self-development/aloop", file: "aloop-fake-user.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "aloop-fake-user-agent"}}},
+		{dir: "self-development/aloop", file: "aloop-planner.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "aloop-planner-agent"}}},
+		{dir: "self-development/aloop", file: "aloop-pr-responder.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}}},
+		{dir: "self-development/aloop", file: "aloop-reviewer.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "aloop-reviewer-agent"}}},
+		{dir: "self-development/aloop", file: "aloop-self-update.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "kelos-dev-agent"}}},
+		{dir: "self-development/aloop", file: "aloop-squash-commits.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "aloop-dev-agent"}}},
+		{dir: "self-development/aloop", file: "aloop-triage.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "aloop-dev-agent"}}},
+		{dir: "self-development/aloop", file: "aloop-workers.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}}},
 		{dir: "self-development/open-actions", file: "open-actions-api-reviewer.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "open-actions-api-reviewer-agent"}}},
 		{dir: "self-development/open-actions", file: "open-actions-config-update.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "kelos-dev-agent"}}},
 		{dir: "self-development/open-actions", file: "open-actions-fake-strategist.yaml", refs: []kelos.AgentConfigReference{{Name: "base-agent"}, {Name: "open-actions-fake-strategist-agent"}}},
@@ -275,6 +296,14 @@ func TestDevelopmentTaskSpawnersIgnoreDisruptions(t *testing.T) {
 		{dir: "self-development/kanon", file: "kanon-self-update.yaml"},
 		{dir: "self-development/kanon", file: "kanon-squash-commits.yaml"},
 		{dir: "self-development/kanon", file: "kanon-triage.yaml"},
+		{dir: "self-development/aloop", file: "aloop-config-update.yaml"},
+		{dir: "self-development/aloop", file: "aloop-fake-strategist.yaml"},
+		{dir: "self-development/aloop", file: "aloop-fake-user.yaml"},
+		{dir: "self-development/aloop", file: "aloop-planner.yaml"},
+		{dir: "self-development/aloop", file: "aloop-reviewer.yaml"},
+		{dir: "self-development/aloop", file: "aloop-self-update.yaml"},
+		{dir: "self-development/aloop", file: "aloop-squash-commits.yaml"},
+		{dir: "self-development/aloop", file: "aloop-triage.yaml"},
 		{dir: "self-development/open-actions", file: "open-actions-api-reviewer.yaml"},
 		{dir: "self-development/open-actions", file: "open-actions-config-update.yaml"},
 		{dir: "self-development/open-actions", file: "open-actions-fake-strategist.yaml"},
@@ -310,6 +339,8 @@ func TestDevelopmentSessionSpawnerTemplates(t *testing.T) {
 		{dir: "self-development/agora", file: "agora-pr-responder.yaml"},
 		{dir: "self-development/kanon", file: "kanon-workers.yaml"},
 		{dir: "self-development/kanon", file: "kanon-pr-responder.yaml"},
+		{dir: "self-development/aloop", file: "aloop-workers.yaml"},
+		{dir: "self-development/aloop", file: "aloop-pr-responder.yaml"},
 		{dir: "self-development/open-actions", file: "open-actions-workers.yaml"},
 		{dir: "self-development/open-actions", file: "open-actions-pr-responder.yaml"},
 	}
@@ -357,6 +388,7 @@ func TestDevelopmentSessionSpawnersMatchPickUpOnly(t *testing.T) {
 		{dir: "self-development", file: "kelos-workers.yaml"},
 		{dir: "self-development/agora", file: "agora-workers.yaml"},
 		{dir: "self-development/kanon", file: "kanon-workers.yaml"},
+		{dir: "self-development/aloop", file: "aloop-workers.yaml"},
 		{dir: "self-development/open-actions", file: "open-actions-workers.yaml"},
 	}
 
@@ -430,6 +462,7 @@ func TestDevelopmentSessionSpawnersUseIssueBranches(t *testing.T) {
 		{dir: "self-development", file: "kelos-workers.yaml", want: "kelos-task-42"},
 		{dir: "self-development/agora", file: "agora-workers.yaml", want: "agora-task-42"},
 		{dir: "self-development/kanon", file: "kanon-workers.yaml", want: "kanon-task-42"},
+		{dir: "self-development/aloop", file: "aloop-workers.yaml", want: "aloop-task-42"},
 		{dir: "self-development/open-actions", file: "open-actions-workers.yaml", want: "open-actions-task-42"},
 	}
 	for _, tt := range tests {
@@ -481,6 +514,7 @@ func TestDevelopmentPRResponderSessionSpawnersMatchPickUpOnPullRequests(t *testi
 		{dir: "self-development", file: "kelos-pr-responder.yaml"},
 		{dir: "self-development/agora", file: "agora-pr-responder.yaml"},
 		{dir: "self-development/kanon", file: "kanon-pr-responder.yaml"},
+		{dir: "self-development/aloop", file: "aloop-pr-responder.yaml"},
 		{dir: "self-development/open-actions", file: "open-actions-pr-responder.yaml"},
 	}
 	for _, tt := range tests {
@@ -535,6 +569,11 @@ func TestDevelopmentCommandPatternsMatchCommandLines(t *testing.T) {
 		{dir: "self-development/kanon", file: "kanon-reviewer.yaml", command: "/kelos review"},
 		{dir: "self-development/kanon", file: "kanon-pr-responder.yaml", command: "/kelos pick-up"},
 		{dir: "self-development/kanon", file: "kanon-squash-commits.yaml", command: "/kelos squash-commits"},
+		{dir: "self-development/aloop", file: "aloop-workers.yaml", command: "/kelos pick-up"},
+		{dir: "self-development/aloop", file: "aloop-planner.yaml", command: "/kelos plan"},
+		{dir: "self-development/aloop", file: "aloop-reviewer.yaml", command: "/kelos review"},
+		{dir: "self-development/aloop", file: "aloop-pr-responder.yaml", command: "/kelos pick-up"},
+		{dir: "self-development/aloop", file: "aloop-squash-commits.yaml", command: "/kelos squash-commits"},
 		{dir: "self-development/open-actions", file: "open-actions-workers.yaml", command: "/kelos pick-up"},
 		{dir: "self-development/open-actions", file: "open-actions-planner.yaml", command: "/kelos plan"},
 		{dir: "self-development/open-actions", file: "open-actions-reviewer.yaml", command: "/kelos review"},
@@ -634,6 +673,13 @@ func TestReviewersUseStickyPRComments(t *testing.T) {
 			file:           "kanon-reviewer.yaml",
 			repository:     "kelos-dev/kanon",
 			marker:         "<!-- kanon-reviewer:sticky-review -->",
+			templatePrefix: "Format the PR comment body as:",
+		},
+		{
+			dir:            "self-development/aloop",
+			file:           "aloop-reviewer.yaml",
+			repository:     "kelos-dev/aloop",
+			marker:         "<!-- aloop-reviewer:sticky-review -->",
 			templatePrefix: "Format the PR comment body as:",
 		},
 		{
@@ -833,6 +879,11 @@ func TestKanonReviewerTriggerableByBot(t *testing.T) {
 	assertReviewerTriggerableByBot(t, "self-development/kanon", "kanon-reviewer.yaml", "kelos-dev/kanon", "/kelos review")
 }
 
+func TestAloopReviewerTriggerableByBot(t *testing.T) {
+	t.Parallel()
+	assertReviewerTriggerableByBot(t, "self-development/aloop", "aloop-reviewer.yaml", "kelos-dev/aloop", "/kelos review")
+}
+
 func TestAgoraReviewerTriggerableByBot(t *testing.T) {
 	t.Parallel()
 	assertReviewerTriggerableByBot(t, "self-development/agora", "agora-reviewer.yaml", "kelos-dev/agora", "/kelos review")
@@ -871,6 +922,19 @@ func TestAgoraIssueCreatorsUseTriageAcceptedLabel(t *testing.T) {
 	}
 }
 
+func TestAloopIssueCommentsUseBodyFile(t *testing.T) {
+	t.Parallel()
+
+	for _, role := range []string{"planner", "triage"} {
+		name := "aloop-" + role
+		spawner := readTaskSpawnerFromDir(t, "self-development/aloop", name+".yaml")
+		want := "gh issue comment {{.Number}} --body-file /tmp/" + name + ".md"
+		if !strings.Contains(spawner.Spec.TaskTemplate.PromptTemplate, want) {
+			t.Errorf("%s prompt must post its Markdown comment using %q", name, want)
+		}
+	}
+}
+
 func TestStickyIssueSlotCommands(t *testing.T) {
 	t.Parallel()
 
@@ -888,6 +952,9 @@ func TestStickyIssueSlotCommands(t *testing.T) {
 		{dir: "self-development/kanon", file: "kanon-fake-strategist.yaml", marker: "kanon-fake-strategist"},
 		{dir: "self-development/kanon", file: "kanon-fake-user.yaml", marker: "kanon-fake-user"},
 		{dir: "self-development/kanon", file: "kanon-self-update.yaml", marker: "kanon-self-update"},
+		{dir: "self-development/aloop", file: "aloop-fake-strategist.yaml", marker: "aloop-fake-strategist"},
+		{dir: "self-development/aloop", file: "aloop-fake-user.yaml", marker: "aloop-fake-user"},
+		{dir: "self-development/aloop", file: "aloop-self-update.yaml", marker: "aloop-self-update"},
 		{dir: "self-development/open-actions", file: "open-actions-fake-strategist.yaml", marker: "open-actions-fake-strategist"},
 		{dir: "self-development/open-actions", file: "open-actions-fake-user.yaml", marker: "open-actions-fake-user"},
 		{dir: "self-development/open-actions", file: "open-actions-self-update.yaml", marker: "open-actions-self-update"},
@@ -1046,6 +1113,16 @@ func TestDevelopmentSpawnersSetExpectedModelAndEffort(t *testing.T) {
 		{dir: "self-development/kanon", file: "kanon-squash-commits.yaml", model: "sonnet", effort: "medium"},
 		{dir: "self-development/kanon", file: "kanon-triage.yaml", model: "opus", effort: "high"},
 		{dir: "self-development/kanon", file: "kanon-workers.yaml", model: "gpt-6.2-astra", effort: "xhigh"},
+		{dir: "self-development/aloop", file: "aloop-config-update.yaml", model: "opus", effort: "xhigh"},
+		{dir: "self-development/aloop", file: "aloop-fake-strategist.yaml", model: "opus", effort: "xhigh"},
+		{dir: "self-development/aloop", file: "aloop-fake-user.yaml", model: "sonnet", effort: "medium"},
+		{dir: "self-development/aloop", file: "aloop-planner.yaml", model: "opus", effort: "xhigh"},
+		{dir: "self-development/aloop", file: "aloop-pr-responder.yaml", model: "gpt-6.2-astra", effort: "xhigh"},
+		{dir: "self-development/aloop", file: "aloop-reviewer.yaml", model: "opus", effort: "xhigh"},
+		{dir: "self-development/aloop", file: "aloop-self-update.yaml", model: "opus", effort: "xhigh"},
+		{dir: "self-development/aloop", file: "aloop-squash-commits.yaml", model: "sonnet", effort: "medium"},
+		{dir: "self-development/aloop", file: "aloop-triage.yaml", model: "opus", effort: "high"},
+		{dir: "self-development/aloop", file: "aloop-workers.yaml", model: "gpt-6.2-astra", effort: "xhigh"},
 		{dir: "self-development/open-actions", file: "open-actions-api-reviewer.yaml", model: "opus", effort: "xhigh"},
 		{dir: "self-development/open-actions", file: "open-actions-config-update.yaml", model: "opus", effort: "xhigh"},
 		{dir: "self-development/open-actions", file: "open-actions-fake-strategist.yaml", model: "opus", effort: "xhigh"},
@@ -1167,6 +1244,7 @@ func TestDevelopmentWebhookGateways(t *testing.T) {
 	}{
 		{dir: "self-development", name: "kelos"},
 		{dir: "self-development/kanon", name: "kanon"},
+		{dir: "self-development/aloop", name: "aloop"},
 		{dir: "self-development/agora", name: "agora"},
 		{dir: "self-development/open-actions", name: "open-actions"},
 	}

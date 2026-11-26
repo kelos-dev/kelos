@@ -34,14 +34,21 @@ func TestSessionTUIPromptSuggestion(t *testing.T) {
 		if model.input.Value() != suggestion.Text || requests.Len() != 0 {
 			t.Fatalf("Accepting suggestion produced draft %q and requests %q", model.input.Value(), requests)
 		}
-		model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventPromptSuggestion, Text: "Another suggestion"})
-		if model.promptSuggestion != "" {
-			t.Fatal("Received a suggestion while a draft was present")
+		model.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+		if value := model.input.Value(); value != "" {
+			t.Fatalf("clearing accepted draft left %q", value)
+		}
+		model.Update(tea.KeyMsg{Type: key})
+		if model.input.Value() != suggestion.Text {
+			t.Fatalf("accepting again after clearing the draft = %q", model.input.Value())
 		}
 		model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 		var req sessionruntime.ClientRequest
 		if err := json.NewDecoder(requests).Decode(&req); err != nil || req.Type != "message" || req.Text != suggestion.Text {
 			t.Fatalf("Submitting draft = %#v, %v", req, err)
+		}
+		if model.visiblePromptSuggestion() != "" {
+			t.Fatal("suggestion still visible after sending the draft")
 		}
 	}
 }
@@ -61,15 +68,15 @@ func TestSessionTUIPreviewsLongSuggestion(t *testing.T) {
 	}
 }
 
-func TestSessionTUIDismissesSuggestionWhenTyping(t *testing.T) {
+func TestSessionTUIRestoresSuggestionAfterTyping(t *testing.T) {
 	model, _ := newSessionTUITestModel()
 	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventHistoryEnd})
 	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventPromptSuggestion, Text: "Run the tests"})
 	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
 	model.Update(tea.KeyMsg{Type: tea.KeyBackspace})
 	model.Update(tea.KeyMsg{Type: tea.KeyTab})
-	if model.promptSuggestion != "" || model.input.Value() != "" {
-		t.Fatal("Clearing a typed draft restored the dismissed suggestion")
+	if model.input.Value() != "Run the tests" {
+		t.Fatal("Tab did not reuse the suggestion after clearing a typed draft")
 	}
 }
 

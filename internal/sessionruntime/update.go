@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"reflect"
+	"slices"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -117,6 +119,17 @@ func (s *Server) observeSessionUpdate(session *kelos.Session) error {
 	s.submitMu.Unlock()
 	if changed {
 		s.signalSessionUpdateReport()
+	}
+	if suggestionsChanged && !enabled {
+		s.events.clearPromptSuggestion()
+		if g := s.subsessions; g != nil {
+			g.mu.Lock()
+			children := slices.Collect(maps.Values(g.children))
+			g.mu.Unlock()
+			for _, child := range children {
+				child.events.clearPromptSuggestion()
+			}
+		}
 	}
 	if suggestionsChanged && s.config.AgentType == "claude-code" {
 		s.reevaluateSessionUpdate()

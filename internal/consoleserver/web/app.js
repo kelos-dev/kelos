@@ -4570,10 +4570,9 @@ spec:
         syncComposerHighlight();
     }
     function acceptPromptSuggestion() {
-        if (!state.promptSuggestion || elements.input.disabled || elements.input.value)
+        if (elements.useSuggestion.hidden)
             return;
         elements.input.value = state.promptSuggestion;
-        state.promptSuggestion = '';
         elements.input.focus();
         savePromptDraft(state.selected);
         resizeComposer();
@@ -4582,12 +4581,11 @@ spec:
     function updateComposerAction() {
         const connected = state.socket && state.socket.readyState === WebSocket.OPEN;
         elements.promptsButton.disabled = !connected;
-        if (elements.input.disabled || elements.input.value || state.activeTurn || state.pendingMessage || state.sendingMessage || currentAttachmentFiles().length) {
-            state.promptSuggestion = '';
-        }
-        elements.useSuggestion.hidden = !state.promptSuggestion;
+        const suggestion = !elements.input.disabled && !elements.input.value && !state.activeTurn && !state.pendingMessage
+            && !state.sendingMessage && !currentAttachmentFiles().length ? state.promptSuggestion : '';
+        elements.useSuggestion.hidden = !suggestion;
         elements.input.placeholder = elements.input.disabled ? 'Choose a ready session to start chatting'
-            : state.promptSuggestion || (state.selected?.provider === 'codex' ? 'Ask Codex to do anything' : 'Message the agent…');
+            : suggestion || (state.selected?.provider === 'codex' ? 'Ask Codex to do anything' : 'Message the agent…');
         const interrupt = composerInterruptAction();
         const command = composerCommand();
         renderComposerCommand(command, interrupt);
@@ -5921,6 +5919,7 @@ spec:
                     showToast('Pending message removed');
                 break;
             case 'turn.started':
+                state.promptSuggestion = '';
                 endAssistantSegment(event.turnId);
                 if (!state.activeTurn || state.activeTurnID !== event.turnId) {
                     const timestamp = Date.parse(event.timestamp || '');
@@ -7130,6 +7129,7 @@ spec:
             }
             state.socket.send(JSON.stringify({ type: 'message', text, attachmentIds: attachments.map(attachment => attachment.id) }));
             clearPromptDraft(session);
+            state.promptSuggestion = '';
             state.attachmentDrafts.delete(conversationDraftKey(session));
             renderPendingAttachments();
         }
@@ -7177,7 +7177,7 @@ spec:
     }
     elements.useSuggestion.addEventListener('click', acceptPromptSuggestion);
     elements.input.addEventListener('keydown', event => {
-        if (state.promptSuggestion && !elements.input.value && !event.isComposing && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey && (event.key === 'Tab' || event.key === 'ArrowRight')) {
+        if (!elements.useSuggestion.hidden && !event.isComposing && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey && (event.key === 'Tab' || event.key === 'ArrowRight')) {
             event.preventDefault();
             acceptPromptSuggestion();
             return;

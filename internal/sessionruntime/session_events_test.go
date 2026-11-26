@@ -212,6 +212,54 @@ func TestCodexSamplesCompletedTurnForConnectedClients(t *testing.T) {
 	}
 }
 
+func TestSessionReplaysCurrentSuggestionAfterHistory(t *testing.T) {
+	journal := NewJournal()
+	defer journal.Close()
+	server := NewServer(Config{PromptSuggestions: true}, journal, nil)
+	server.events.Emit(Event{Type: EventTurnStarted})
+	server.events.Emit(Event{Type: EventTurnCompleted, Status: "completed"})
+	server.events.Emit(Event{Type: EventPromptSuggestion, Text: "Run the tests"})
+
+	bounds, _ := journal.SnapshotWithBounds()
+	for _, since := range []int64{0, bounds.LastEventID} {
+		t.Run(fmt.Sprintf("since-%d", since), func(t *testing.T) {
+			runtime, client := net.Pipe()
+			defer client.Close()
+			if err := client.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+				t.Fatal(err)
+			}
+			go server.handleConnection(t.Context(), runtime)
+			if err := json.NewEncoder(client).Encode(ClientRequest{Type: "subscribe", HistoryBounds: true, HistoryItems: 1, HistoryBytes: DefaultHistoryByteLimit, Since: since, JournalID: bounds.JournalID}); err != nil {
+				t.Fatal(err)
+			}
+			decoder := json.NewDecoder(client)
+			previous := ""
+			for {
+				var event Event
+				if err := decoder.Decode(&event); err != nil {
+					t.Fatal(err)
+				}
+				if event.Type == EventPromptSuggestion {
+					if previous != EventHistoryEnd || event.TurnID != "turn-1" || event.Text != "Run the tests" {
+						t.Fatalf("reconnect since %d: suggestion after %q = %#v", since, previous, event)
+					}
+					return
+				}
+				previous = event.Type
+			}
+		})
+	}
+
+	server.events.Emit(Event{Type: EventTurnStarted})
+	_, live, _, cancel := journal.Subscribe(0)
+	defer cancel()
+	select {
+	case event := <-live:
+		t.Fatalf("unexpected cached event after starting the next turn: %#v", event)
+	default:
+	}
+}
+
 type promptSampleFunc func(string) string
 
 func (f promptSampleFunc) suggestPrompt(turnID string) string { return f(turnID) }
@@ -255,6 +303,7 @@ func TestSessionDropsPromptSampleWhenDisabled(t *testing.T) {
 	defer unsubscribe()
 	runtime.events.Emit(Event{Type: EventTurnStarted})
 	runtime.events.Emit(Event{Type: EventTurnCompleted, Status: "completed"})
+	runtime.events.Emit(Event{Type: EventPromptSuggestion, Text: "Run the tests"})
 	runtime.events.suggestPrompt(promptSampleFunc(func(string) string {
 		if !runtime.suggestionsEnabled() {
 			t.Fatal("subsession did not inherit enabled suggestions")
@@ -265,10 +314,21 @@ func TestSessionDropsPromptSampleWhenDisabled(t *testing.T) {
 		}
 		return "Stale suggestion"
 	}), "native-1", "turn-1")
+	var suggestions []string
 	for len(events) > 0 {
 		if event := <-events; event.Type == EventPromptSuggestion {
-			t.Fatalf("disabled subsession received %q", event.Text)
+			suggestions = append(suggestions, event.Text)
 		}
+	}
+	if !slices.Equal(suggestions, []string{"Run the tests", ""}) {
+		t.Fatalf("suggestion updates = %q", suggestions)
+	}
+	_, live, _, cancel := runtime.journal.Subscribe(0)
+	defer cancel()
+	select {
+	case event := <-live:
+		t.Fatalf("disabled subsession replayed %#v", event)
+	default:
 	}
 }
 

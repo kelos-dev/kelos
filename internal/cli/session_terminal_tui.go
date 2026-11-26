@@ -397,10 +397,9 @@ func (m *sessionTUIModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch message.Type {
 		case tea.KeyTab, tea.KeyRight:
-			if !message.Alt && !message.Paste && m.promptSuggestion != "" && m.input.Value() == "" {
+			if !message.Alt && !message.Paste && m.visiblePromptSuggestion() != "" {
 				m.input.SetValue(m.promptSuggestion)
 				m.input.CursorEnd()
-				m.promptSuggestion = ""
 				m.resizeComposer()
 				return m, nil
 			}
@@ -452,7 +451,6 @@ func (m *sessionTUIModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	previousValue := m.input.Value()
 	m.input, cmd = m.input.Update(message)
 	if m.input.Value() != previousValue {
-		m.promptSuggestion = ""
 		m.promptRequestID = ""
 		m.historyAt = -1
 	}
@@ -537,6 +535,7 @@ func (m *sessionTUIModel) submitInput() tea.Cmd {
 		return m.quit()
 	}
 	if request.Type == "message" {
+		m.promptSuggestion = ""
 		m.pendingAttachments = nil
 	}
 	m.historyAt = -1
@@ -632,7 +631,7 @@ func (m *sessionTUIModel) applyEvent(event sessionruntime.Event) sessionTUIComma
 	}
 	switch event.Type {
 	case sessionruntime.EventPromptSuggestion:
-		if m.ready && !m.replayingHistory && m.connectionStatus == "" && !m.turnActive && m.pendingTurnID == "" && len(m.pendingAttachments) == 0 && m.input.Value() == "" {
+		if !m.replayingHistory {
 			m.promptSuggestion = sanitizeSessionTUIToolOutput(event.Text)
 		}
 		return commands
@@ -700,7 +699,6 @@ func (m *sessionTUIModel) applyEvent(event sessionruntime.Event) sessionTUIComma
 			m.connectionStatus = ""
 		}
 	case sessionruntime.EventUserMessage:
-		m.promptSuggestion = ""
 		if event.TurnID == "" {
 			m.finishStreaming()
 			m.appendBlock(sessionTUIBlockUser, sessionTerminalMessageText(event.Text, event.Attachments))
@@ -718,7 +716,6 @@ func (m *sessionTUIModel) applyEvent(event sessionruntime.Event) sessionTUIComma
 			m.appendBlock(sessionTUIBlockNotice, "Pending message removed.")
 		}
 	case sessionTerminalEventAttachmentAdded:
-		m.promptSuggestion = ""
 		m.pendingAttachments = append(m.pendingAttachments, event.Attachments...)
 		for _, attachment := range event.Attachments {
 			m.appendBlock(sessionTUIBlockNotice, fmt.Sprintf("Attached %s (%d bytes). Send a message to include it.", attachment.Name, attachment.SizeBytes))
@@ -1583,8 +1580,15 @@ func (m *sessionTUIModel) composerCommandError() string {
 	return ""
 }
 
+func (m *sessionTUIModel) visiblePromptSuggestion() string {
+	if !m.ready || m.connectionStatus != "" || m.turnActive || m.pendingTurnID != "" || len(m.pendingAttachments) > 0 || m.input.Value() != "" {
+		return ""
+	}
+	return m.promptSuggestion
+}
+
 func (m *sessionTUIModel) composerHint() string {
-	if m.promptSuggestion != "" && m.input.Value() == "" {
+	if m.visiblePromptSuggestion() != "" {
 		return "Tab or → to use suggestion"
 	}
 	text := strings.TrimSpace(m.input.Value())
@@ -1705,7 +1709,7 @@ func (m *sessionTUIModel) composerView() string {
 	focusedStyle, blurredStyle := m.input.FocusedStyle, m.input.BlurredStyle
 	style := sessionTUITextAreaStyle(inputStyle)
 	m.input.FocusedStyle, m.input.BlurredStyle = style, style
-	m.input.Placeholder = ansi.Truncate(m.promptSuggestion, max(1, m.input.Width()), "…")
+	m.input.Placeholder = ansi.Truncate(m.visiblePromptSuggestion(), max(1, m.input.Width()), "…")
 	if m.input.Placeholder == "" && m.runtimeStatus.AgentType == "codex" {
 		m.input.Placeholder = "Ask Codex to do anything"
 	}

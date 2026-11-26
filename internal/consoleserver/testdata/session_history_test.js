@@ -205,6 +205,7 @@ function resetHarness() {
     jumpToLatest: new TestNode('button'),
     sessionsView: new TestNode('main'),
     composerHint: new TestNode('span'),
+    useSuggestion: new TestNode('button'),
     composer: new TestNode('form'),
     composerWrap: new TestNode('div'),
     composerHighlight: new TestNode('div'),
@@ -808,6 +809,48 @@ function backgroundTaskRows() {
     name: item.querySelector('.background-task-name').textContent,
     elapsed: item.querySelector('.background-task-elapsed').textContent,
   }));
+}
+
+function testPromptSuggestion() {
+  resetHarness();
+  state.selected = {namespace: 'default', name: 'one', provider: 'claude-code'};
+  state.socket = {readyState: WebSocket.OPEN, send() { assert.fail('Accepting a suggestion sent a message'); }};
+  elements.input.value = '';
+  handleEvent({type: 'prompt.suggestion', text: 'Run the tests'});
+  assert.equal(elements.input.placeholder, 'Run the tests');
+  assert.equal(elements.input.value, '');
+  assert.equal(elements.useSuggestion.hidden, false);
+  replayOlderHistoryPage([
+    {type: 'turn.started', turnId: 'old'},
+    {type: 'turn.completed', turnId: 'old', status: 'completed'},
+  ]);
+  assert.equal(elements.input.placeholder, 'Run the tests');
+  vm.runInThisContext(applicationSlice("elements.useSuggestion.addEventListener('click'", "elements.input.addEventListener('scroll'"), {filename: 'app.js'});
+  for (const key of ['Tab', 'ArrowRight']) {
+    let prevented = false;
+    elements.input.listeners.get('keydown')({key, preventDefault() { prevented = true; }});
+    assert.equal(prevented, true);
+    assert.equal(elements.input.value, 'Run the tests');
+    elements.input.value = '';
+    handleEvent({type: 'prompt.suggestion', text: 'Run the tests'});
+  }
+  elements.input.value = 'My own draft';
+  elements.input.listeners.get('input')();
+  assert.equal(elements.useSuggestion.hidden, true);
+  elements.input.value = '';
+  elements.input.listeners.get('input')();
+  assert.notEqual(elements.input.placeholder, 'Run the tests');
+  handleEvent({type: 'prompt.suggestion', text: 'Run the tests'});
+  elements.useSuggestion.listeners.get('click')();
+  assert.equal(elements.input.value, 'Run the tests');
+  assert.equal(elements.useSuggestion.hidden, true);
+  handleEvent({type: 'prompt.suggestion', text: 'Explain the diff'});
+  assert.equal(elements.input.value, 'Run the tests');
+  assert.equal(elements.useSuggestion.hidden, true);
+  elements.input.value = '';
+  state.selected.provider = 'codex';
+  updateComposerAction();
+  assert.equal(elements.input.placeholder, 'Ask Codex to do anything');
 }
 
 function testBackgroundTaskProgress() {
@@ -2522,6 +2565,7 @@ testWorkspaceChangesReportsBranchListTruncation();
 testSessionViewSaveAndRestore();
 testSessionViewReset();
 testSessionProgressLifecycle();
+testPromptSuggestion();
 testBackgroundTaskProgress();
 testBackgroundTaskProgressWithoutTiming();
 testBackgroundTaskAnnouncements();

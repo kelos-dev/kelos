@@ -2634,6 +2634,94 @@ func TestServerRuntimeUpdateDrainIgnoresPendingPublishes(t *testing.T) {
 	}
 }
 
+func TestClaudeResumesConversationWhenPromptSuggestionsChange(t *testing.T) {
+	dir := subsessionStateDir(t)
+	script := `#!/bin/sh
+printf '%s\n' "$*" >> launches
+while IFS= read -r message; do
+  printf '%s\n' "$message" >> messages
+  printf '%s\n' '{"type":"assistant","session_id":"conversation-1","message":{"content":[{"type":"text","text":"Workspace inspected"}]}}'
+  printf '%s\n' '{"type":"result","subtype":"success"}'
+done
+`
+	if err := os.WriteFile(filepath.Join(dir, "claude"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	session := &kelos.Session{
+		ObjectMeta: metav1.ObjectMeta{Name: "chat", Namespace: "default"},
+		Spec:       kelos.SessionSpec{InitialPrompt: "Inspect the workspace"},
+	}
+	clientset := kelosfake.NewSimpleClientset(session)
+	client := clientset.ApiV1alpha2().Sessions(session.Namespace)
+	config := Config{
+		SessionName: session.Name, SessionClient: client, AgentType: "claude-code",
+		StateDir: dir, WorkingDir: dir, SocketPath: filepath.Join(dir, "session.sock"),
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- serveConversations(ctx, config) }()
+	defer func() { cancel(); <-done }()
+	for i, enabled := range []bool{false, true, false} {
+		if i > 0 {
+			patch := fmt.Appendf(nil, `{"spec":{"promptSuggestions":%t}}`, enabled)
+			if _, err := client.Patch(ctx, session.Name, types.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			launches, _ := os.ReadFile(filepath.Join(dir, "launches"))
+			args := strings.Split(strings.TrimSpace(string(launches)), "\n")
+			watches := 0
+			for _, action := range clientset.Actions() {
+				if action.GetVerb() == "watch" {
+					watches++
+				}
+			}
+			_, err := os.Stat(filepath.Join(dir, "claude-session-id"))
+			if err == nil && len(args) == i+1 && watches >= i+1 {
+				if !strings.Contains(args[i], fmt.Sprintf("--prompt-suggestions %t", enabled)) ||
+					(i > 0 && !strings.Contains(args[i], "--resume conversation-1")) {
+					t.Fatalf("unexpected Claude invocation %d: %s", i, args[i])
+				}
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("waiting for Claude invocation %d with suggestions=%t, launches = %q", i, enabled, launches)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if i < 2 {
+			waitForRuntime(t, config.SocketPath)
+			conn, err := net.Dial("unix", config.SocketPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close()
+			_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+			message := []string{"!printf retained-shell-output", "Continue"}[i]
+			if err := json.NewEncoder(conn).Encode(ClientRequest{Type: "message", RequestID: message, Text: message}); err != nil {
+				t.Fatal(err)
+			}
+			decoder := json.NewDecoder(conn)
+			for {
+				var event Event
+				if err := decoder.Decode(&event); err != nil {
+					t.Fatal(err)
+				}
+				if event.Type == EventTurnCompleted && event.TurnID == fmt.Sprintf("turn-%d", i+2) {
+					break
+				}
+			}
+		}
+	}
+	messages, err := os.ReadFile(filepath.Join(dir, "messages"))
+	if err != nil || !strings.Contains(string(messages), "Output:\\nretained-shell-output") {
+		t.Fatalf("resumed Claude input missing pending shell output: %s, %v", messages, err)
+	}
+}
+
 func TestServerAcknowledgesSessionRuntimeUpdate(t *testing.T) {
 	podUID := types.UID("pod-uid")
 	request := sessionupdate.NewRequest(podUID, "desired-revision")

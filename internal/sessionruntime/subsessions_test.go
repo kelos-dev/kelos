@@ -25,8 +25,7 @@ import (
 
 func testSubsessionGroup(t *testing.T, stateDir string) *subsessionGroup {
 	t.Helper()
-	ctx, cancel := context.WithCancel(t.Context())
-	g := newSubsessionGroup(ctx, cancel, nil)
+	g := newSubsessionGroup(t.Context(), nil)
 	g.newProvider = func(_ context.Context, config ProviderConfig) (Provider, error) {
 		provider := &fakeProvider{}
 		provider.SetEventSink(config.EventSink)
@@ -40,7 +39,7 @@ func testSubsessionGroup(t *testing.T, stateDir string) *subsessionGroup {
 	if err := os.MkdirAll(config.WorkingDir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	root, err := openSessionServer(ctx, config, g.newProvider, g)
+	root, err := openSessionServer(g.ctx, config, g.newProvider, g)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -599,7 +598,7 @@ func TestSubsessionActivityBlocksDrain(t *testing.T) {
 
 func TestSubsessionPublisherAggregatesActivity(t *testing.T) {
 	var published ObservedSessionStatus
-	g := newSubsessionGroup(t.Context(), func() {}, func(_ context.Context, status ObservedSessionStatus) error {
+	g := newSubsessionGroup(t.Context(), func(_ context.Context, status ObservedSessionStatus) error {
 		published = status
 		return nil
 	})
@@ -704,7 +703,7 @@ func TestSubsessionCreationRequestIsIdempotentAcrossRestart(t *testing.T) {
 }
 
 func TestSubsessionCatalogBroadcastsActivityAndNotifications(t *testing.T) {
-	g := newSubsessionGroup(t.Context(), func() {}, nil)
+	g := newSubsessionGroup(t.Context(), nil)
 	g.root = NewServer(Config{}, NewJournal(), &fakeProvider{})
 	child := NewServer(Config{}, NewJournal(), &fakeProvider{})
 	t.Cleanup(g.root.journal.Close)
@@ -747,6 +746,37 @@ func TestSubsessionCatalogBroadcastsActivityAndNotifications(t *testing.T) {
 	}
 }
 
+func TestClaudeSuggestionChangeWaitsForSubsessionWork(t *testing.T) {
+	g := newSubsessionGroup(t.Context(), nil)
+	defer g.close()
+	g.root = NewServer(Config{AgentType: "claude-code", PromptSuggestions: true}, NewJournal(), nil)
+	g.root.subsessions = g
+	child := NewServer(Config{}, NewJournal(), nil)
+	child.subsessions = g
+	defer g.root.journal.Close()
+	defer child.journal.Close()
+	g.children["tests"] = &subsessionRuntime{Server: child}
+	child.outstanding = 1
+	child.backgroundActive.Store(true)
+	if err := g.root.observeSessionUpdate(&kelos.Session{}); err != nil {
+		t.Fatal(err)
+	}
+	if g.ctx.Err() != nil {
+		t.Fatal("reloaded Claude during a subsession turn")
+	}
+	child.finishTurn()
+	if g.ctx.Err() != nil {
+		t.Fatal("reloaded Claude during background work")
+	}
+	child.updateProviderRuntimeStatus(RuntimeStatus{BackgroundTasks: new(int)})
+	if !errors.Is(context.Cause(g.ctx), errReloadClaudeSuggestions) {
+		t.Fatal("idle Session did not reload Claude")
+	}
+	if len(g.root.updateReport) != 0 {
+		t.Fatal("suggestion-only update scheduled a Kubernetes drain report")
+	}
+}
+
 func TestSubsessionFinishReportsOnlyPendingDrains(t *testing.T) {
 	g := testSubsessionGroup(t, subsessionStateDir(t))
 	child := NewServer(Config{}, NewJournal(), &fakeProvider{})
@@ -771,7 +801,7 @@ func TestSubsessionFinishReportsOnlyPendingDrains(t *testing.T) {
 
 func TestSubsessionPublisherWaitsForMainModel(t *testing.T) {
 	var published []ObservedSessionStatus
-	g := newSubsessionGroup(t.Context(), func() {}, func(_ context.Context, status ObservedSessionStatus) error {
+	g := newSubsessionGroup(t.Context(), func(_ context.Context, status ObservedSessionStatus) error {
 		published = append(published, status)
 		return nil
 	})

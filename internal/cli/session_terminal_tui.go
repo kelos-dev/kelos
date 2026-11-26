@@ -156,6 +156,7 @@ type sessionTUIModel struct {
 	history            []string
 	historyAt          int
 	draft              string
+	promptSuggestion   string
 	promptCursor       string
 	promptRequestID    string
 	err                error
@@ -395,6 +396,14 @@ func (m *sessionTUIModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		switch message.Type {
+		case tea.KeyTab, tea.KeyRight:
+			if !message.Alt && !message.Paste && m.promptSuggestion != "" && m.input.Value() == "" {
+				m.input.SetValue(m.promptSuggestion)
+				m.input.CursorEnd()
+				m.promptSuggestion = ""
+				m.resizeComposer()
+				return m, nil
+			}
 		case tea.KeyCtrlC:
 			if m.turnActive {
 				return m, m.interruptTurn()
@@ -443,6 +452,7 @@ func (m *sessionTUIModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	previousValue := m.input.Value()
 	m.input, cmd = m.input.Update(message)
 	if m.input.Value() != previousValue {
+		m.promptSuggestion = ""
 		m.promptRequestID = ""
 		m.historyAt = -1
 	}
@@ -621,6 +631,11 @@ func (m *sessionTUIModel) applyEvent(event sessionruntime.Event) sessionTUIComma
 		m.recoveryActive = false
 	}
 	switch event.Type {
+	case sessionruntime.EventPromptSuggestion:
+		if m.ready && !m.replayingHistory && m.connectionStatus == "" && !m.turnActive && m.pendingTurnID == "" && len(m.pendingAttachments) == 0 && m.input.Value() == "" {
+			m.promptSuggestion = sanitizeSessionTUIToolOutput(event.Text)
+		}
+		return commands
 	case sessionruntime.EventHistoryStart:
 		if event.HistoryPage {
 			m.historyPageLoading = true
@@ -630,6 +645,7 @@ func (m *sessionTUIModel) applyEvent(event sessionruntime.Event) sessionTUIComma
 			return commands
 		}
 		m.replayingHistory = true
+		m.promptSuggestion = ""
 		if event.Reset || !m.ready {
 			m.historyCursor = event.HistoryCursor
 			m.historyAllReported = false
@@ -672,6 +688,7 @@ func (m *sessionTUIModel) applyEvent(event sessionruntime.Event) sessionTUIComma
 		}
 		switch event.Status {
 		case sessionTerminalStatusConnecting, sessionTerminalStatusReconnecting:
+			m.promptSuggestion = ""
 			m.resetPromptHistory()
 			m.cancelOlderHistoryPage()
 			if m.connectionStatus != event.Status {
@@ -683,6 +700,7 @@ func (m *sessionTUIModel) applyEvent(event sessionruntime.Event) sessionTUIComma
 			m.connectionStatus = ""
 		}
 	case sessionruntime.EventUserMessage:
+		m.promptSuggestion = ""
 		if event.TurnID == "" {
 			m.finishStreaming()
 			m.appendBlock(sessionTUIBlockUser, sessionTerminalMessageText(event.Text, event.Attachments))
@@ -700,11 +718,13 @@ func (m *sessionTUIModel) applyEvent(event sessionruntime.Event) sessionTUIComma
 			m.appendBlock(sessionTUIBlockNotice, "Pending message removed.")
 		}
 	case sessionTerminalEventAttachmentAdded:
+		m.promptSuggestion = ""
 		m.pendingAttachments = append(m.pendingAttachments, event.Attachments...)
 		for _, attachment := range event.Attachments {
 			m.appendBlock(sessionTUIBlockNotice, fmt.Sprintf("Attached %s (%d bytes). Send a message to include it.", attachment.Name, attachment.SizeBytes))
 		}
 	case sessionruntime.EventTurnStarted:
+		m.promptSuggestion = ""
 		m.turnActive = true
 		m.acceptPendingTurn(event.TurnID)
 		if m.activeTurnID != event.TurnID {
@@ -1564,6 +1584,9 @@ func (m *sessionTUIModel) composerCommandError() string {
 }
 
 func (m *sessionTUIModel) composerHint() string {
+	if m.promptSuggestion != "" && m.input.Value() == "" {
+		return "Tab or → to use suggestion"
+	}
 	text := strings.TrimSpace(m.input.Value())
 	fields := strings.Fields(text)
 	label, action, detail := "Message", "send", ""
@@ -1682,6 +1705,10 @@ func (m *sessionTUIModel) composerView() string {
 	focusedStyle, blurredStyle := m.input.FocusedStyle, m.input.BlurredStyle
 	style := sessionTUITextAreaStyle(inputStyle)
 	m.input.FocusedStyle, m.input.BlurredStyle = style, style
+	m.input.Placeholder = ansi.Truncate(m.promptSuggestion, max(1, m.input.Width()), "…")
+	if m.input.Placeholder == "" && m.runtimeStatus.AgentType == "codex" {
+		m.input.Placeholder = "Ask Codex to do anything"
+	}
 	middle := strings.TrimSuffix(m.input.View(), "\n")
 	m.input.FocusedStyle, m.input.BlurredStyle = focusedStyle, blurredStyle
 	heading := m.renderUserRow(headingStyle.Render(ansi.Truncate("  "+m.composerHint(), max(1, m.width), "…")))

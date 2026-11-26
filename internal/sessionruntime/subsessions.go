@@ -44,7 +44,7 @@ type subsessionRuntime struct {
 
 type subsessionGroup struct {
 	ctx    context.Context
-	cancel context.CancelFunc
+	cancel context.CancelCauseFunc
 	root   *Server
 
 	mutationMu  sync.Mutex
@@ -63,7 +63,8 @@ type subsessionGroup struct {
 	notificationWatermark notificationWatermark
 }
 
-func newSubsessionGroup(ctx context.Context, cancel context.CancelFunc, publisher SessionStatusPublisher) *subsessionGroup {
+func newSubsessionGroup(ctx context.Context, publisher SessionStatusPublisher) *subsessionGroup {
+	ctx, cancel := context.WithCancelCause(ctx)
 	return &subsessionGroup{
 		ctx: ctx, cancel: cancel, publish: publisher, newProvider: NewProvider,
 		children: map[string]*subsessionRuntime{}, names: map[string]Subsession{},
@@ -260,7 +261,7 @@ func (g *subsessionGroup) start(child Subsession, persist bool) error {
 			g.mu.Lock()
 			g.failure = fmt.Errorf("subsession %q stopped: %w", child.Name, err)
 			g.mu.Unlock()
-			g.cancel()
+			g.cancel(nil)
 		}
 	}()
 	return nil
@@ -357,7 +358,7 @@ func (g *subsessionGroup) unregister(id string) {
 	g.mu.Unlock()
 	g.publishMu.Unlock()
 	g.root.requestSessionStatusPublish()
-	g.root.signalSessionUpdateReport()
+	g.root.reevaluateSessionUpdate()
 }
 
 func (g *subsessionGroup) finishDeletion(directory string) error {
@@ -386,9 +387,7 @@ func (g *subsessionGroup) finishMutation() {
 	g.root.submitMu.Lock()
 	g.mutating = false
 	g.root.submitMu.Unlock()
-	if g.root.drainReportPending() {
-		g.root.signalSessionUpdateReport()
-	}
+	g.root.reevaluateSessionUpdate()
 }
 
 func writeSubsessionState(path string, value any) error {
@@ -496,7 +495,7 @@ func (g *subsessionGroup) err() error {
 }
 
 func (g *subsessionGroup) close() {
-	g.cancel()
+	g.cancel(nil)
 	g.mutationMu.Lock()
 	g.mutationMu.Unlock()
 	g.workers.Wait()

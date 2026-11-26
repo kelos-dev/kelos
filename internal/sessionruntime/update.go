@@ -3,6 +3,7 @@ package sessionruntime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"reflect"
@@ -12,12 +13,22 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/utils/ptr"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/sessionupdate"
 )
 
 const sessionUpdateRetryInterval = 2 * time.Second
+
+var errReloadClaudeSuggestions = errors.New("reloading Claude Code prompt suggestions")
+
+func (s *Server) suggestionsEnabled() bool {
+	if s.subsessions != nil {
+		return s.subsessions.root.promptSuggestions.Load()
+	}
+	return s.promptSuggestions.Load()
+}
 
 func (s *Server) initializeSessionUpdate(ctx context.Context) error {
 	if s.config.SessionClient == nil {
@@ -96,6 +107,8 @@ func (s *Server) observeSessionUpdate(session *kelos.Session) error {
 	}
 
 	s.submitMu.Lock()
+	enabled := ptr.Deref(session.Spec.PromptSuggestions, false)
+	suggestionsChanged := s.promptSuggestions.Swap(enabled) != enabled
 	changed := !reflect.DeepEqual(s.updateRequest, request) || !reflect.DeepEqual(s.idleDrainRequest, idleDrain)
 	if changed {
 		s.updateRequest = request
@@ -104,6 +117,9 @@ func (s *Server) observeSessionUpdate(session *kelos.Session) error {
 	s.submitMu.Unlock()
 	if changed {
 		s.signalSessionUpdateReport()
+	}
+	if suggestionsChanged && s.config.AgentType == "claude-code" {
+		s.reevaluateSessionUpdate()
 	}
 	return nil
 }
@@ -132,16 +148,12 @@ func (s *Server) finishTurn() {
 	}
 	turnsComplete := s.outstanding == 0
 	s.submitMu.Unlock()
-	if turnsComplete && s.drainReportPending() {
-		s.signalSessionUpdateReport()
+	if turnsComplete {
+		s.reevaluateSessionUpdate()
 	}
 }
 
 func (s *Server) signalSessionUpdateReport() {
-	if s.subsessions != nil && s != s.subsessions.root {
-		s.subsessions.root.signalSessionUpdateReport()
-		return
-	}
 	select {
 	case s.updateReport <- struct{}{}:
 	default:
@@ -221,13 +233,35 @@ func encodeDrainReport(report *sessionupdate.Report) (any, error) {
 func (s *Server) sessionDrainReports() (updateReport, idleDrainReport *sessionupdate.Report) {
 	s.submitMu.Lock()
 	defer s.submitMu.Unlock()
-	turnsComplete := s.outstanding == 0
-	updatesDrained, idleDrained := turnsComplete, turnsComplete && !s.backgroundActive.Load() && !s.hasPendingStatusPublishes()
+	updatesDrained := s.outstanding == 0
 	if s.subsessions != nil {
 		updatesDrained = updatesDrained && s.subsessions.childrenDrained(false)
-		idleDrained = idleDrained && s.subsessions.childrenDrained(true)
 	}
-	return s.drainReportLocked(s.updateRequest, updatesDrained), s.drainReportLocked(s.idleDrainRequest, idleDrained)
+	return s.drainReportLocked(s.updateRequest, updatesDrained), s.drainReportLocked(s.idleDrainRequest, s.idleDrainedLocked())
+}
+
+func (s *Server) idleDrainedLocked() bool {
+	return s.outstanding == 0 && !s.backgroundActive.Load() && !s.hasPendingStatusPublishes() &&
+		(s.subsessions == nil || s.subsessions.childrenDrained(true))
+}
+
+func (s *Server) reevaluateSessionUpdate() {
+	if s.subsessions != nil && s != s.subsessions.root {
+		s.subsessions.root.reevaluateSessionUpdate()
+		return
+	}
+	s.submitMu.Lock()
+	defer s.submitMu.Unlock()
+	if s.updateRequest != nil || s.idleDrainRequest != nil {
+		s.signalSessionUpdateReport()
+	}
+	// Claude reads its generation flag on startup. Resume its conversations
+	// inside the same Pod once the root and all subsessions are idle.
+	if s.config.AgentType == "claude-code" && s.subsessions != nil &&
+		s.config.PromptSuggestions != s.promptSuggestions.Load() && s.idleDrainedLocked() {
+		s.providerStopping.Store(true)
+		s.subsessions.cancel(errReloadClaudeSuggestions)
+	}
 }
 
 // hasPendingStatusPublishes reports whether any observed activity status update
@@ -239,17 +273,6 @@ func (s *Server) hasPendingStatusPublishes() bool {
 	s.sessionStatusMu.Lock()
 	defer s.sessionStatusMu.Unlock()
 	return len(s.sessionStatusPublishQueue) > 0
-}
-
-// drainReportPending reports whether a drain request (runtime update or idle
-// drain) is awaiting acknowledgement.
-func (s *Server) drainReportPending() bool {
-	if s.subsessions != nil && s != s.subsessions.root {
-		return s.subsessions.root.drainReportPending()
-	}
-	s.submitMu.Lock()
-	defer s.submitMu.Unlock()
-	return s.updateRequest != nil || s.idleDrainRequest != nil
 }
 
 func (s *Server) drainReportLocked(request *sessionupdate.Request, drained bool) *sessionupdate.Report {

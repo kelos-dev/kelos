@@ -167,6 +167,7 @@
         promptsClose: document.querySelector('#prompts-close'),
         pendingAttachments: document.querySelector('#pending-attachments'),
         send: document.querySelector('#send-message'),
+        useSuggestion: document.querySelector('#use-suggestion'),
         composerHint: document.querySelector('#composer-hint'),
         composerHighlight: document.querySelector('#composer-highlight'),
         composerCommandHelp: document.querySelector('#composer-command-help'),
@@ -263,6 +264,7 @@
         promptDrafts: new Map(),
         attachmentDrafts: new Map(),
         sendingMessage: false,
+        promptSuggestion: '',
         activeTurn: false,
         activeTurnID: '',
         activeTurnStartedAt: 0,
@@ -4430,7 +4432,8 @@ spec:
         renderSubsessionForm();
         elements.input.disabled = !enabled;
         elements.attachFiles.disabled = !enabled || state.sendingMessage;
-        elements.input.placeholder = enabled ? 'Message the agent…' : 'Choose a ready session to start chatting';
+        if (!enabled)
+            state.promptSuggestion = '';
         updateComposerAction();
     }
     function usesTouchComposer() {
@@ -4566,9 +4569,25 @@ spec:
             resizeComposer();
         syncComposerHighlight();
     }
+    function acceptPromptSuggestion() {
+        if (!state.promptSuggestion || elements.input.disabled || elements.input.value)
+            return;
+        elements.input.value = state.promptSuggestion;
+        state.promptSuggestion = '';
+        elements.input.focus();
+        savePromptDraft(state.selected);
+        resizeComposer();
+        updateComposerAction();
+    }
     function updateComposerAction() {
         const connected = state.socket && state.socket.readyState === WebSocket.OPEN;
         elements.promptsButton.disabled = !connected;
+        if (elements.input.disabled || elements.input.value || state.activeTurn || state.pendingMessage || state.sendingMessage || currentAttachmentFiles().length) {
+            state.promptSuggestion = '';
+        }
+        elements.useSuggestion.hidden = !state.promptSuggestion;
+        elements.input.placeholder = elements.input.disabled ? 'Choose a ready session to start chatting'
+            : state.promptSuggestion || (state.selected?.provider === 'codex' ? 'Ask Codex to do anything' : 'Message the agent…');
         const interrupt = composerInterruptAction();
         const command = composerCommand();
         renderComposerCommand(command, interrupt);
@@ -5565,6 +5584,7 @@ spec:
         const previousTop = Number(messages.scrollTop) || 0;
         const page = document.createElement('div');
         const live = {
+            promptSuggestion: state.promptSuggestion,
             activeTurn: state.activeTurn,
             activeTurnID: state.activeTurnID,
             activeTurnStartedAt: state.activeTurnStartedAt,
@@ -5590,6 +5610,7 @@ spec:
         flushDeferredHistoryRendering();
         const rendered = moveChildren(page);
         elements.messages = messages;
+        state.promptSuggestion = live.promptSuggestion;
         state.activeTurn = live.activeTurn;
         state.activeTurnID = live.activeTurnID;
         state.activeTurnStartedAt = live.activeTurnStartedAt;
@@ -5865,6 +5886,12 @@ spec:
                 if (!event.historyPage) {
                     finishHistoryReplay(event.historyState);
                     requestWorkspaceChanges(true);
+                }
+                break;
+            case 'prompt.suggestion':
+                if (!state.replayingHistory) {
+                    state.promptSuggestion = event.text || '';
+                    updateComposerAction();
                 }
                 break;
             case 'runtime.status': {
@@ -7148,7 +7175,13 @@ spec:
             }
         });
     }
+    elements.useSuggestion.addEventListener('click', acceptPromptSuggestion);
     elements.input.addEventListener('keydown', event => {
+        if (state.promptSuggestion && !elements.input.value && !event.isComposing && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey && (event.key === 'Tab' || event.key === 'ArrowRight')) {
+            event.preventDefault();
+            acceptPromptSuggestion();
+            return;
+        }
         if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && !usesTouchComposer()) {
             event.preventDefault();
             elements.composer.requestSubmit();

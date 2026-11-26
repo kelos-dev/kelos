@@ -17,6 +17,7 @@ rules:
       - taskrecords
       - tasks
       - taskspawners
+      - webhookgateways
       - workerpools
       - workspaces
     verbs: [get, list]

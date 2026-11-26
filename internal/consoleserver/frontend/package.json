@@ -8,6 +8,7 @@
     "typescript": "7.0.2"
   },
   "dependencies": {
+    "@dagrejs/dagre": "3.1.4",
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
     "mermaid": "12.3.0"

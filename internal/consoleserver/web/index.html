@@ -104,13 +104,20 @@
             <div class="resource-diagram-heading">
               <div>
                 <h2>Resource relationships</h2>
-                <p>Follow the resources connected to one object.</p>
+                <p>Explore the namespace map or focus on one resource.</p>
               </div>
               <label class="resource-relationship-focus" for="resource-relationship-focus">
-                <span>Focus resource</span>
+                <span>Scope</span>
                 <select id="resource-relationship-focus"></select>
               </label>
             </div>
+            <svg class="graph-definitions" width="0" height="0" aria-hidden="true">
+              <defs>
+                <marker id="namespace-arrow" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="6" markerHeight="6" orient="auto">
+                  <path d="M0 0 L8 4 L0 8 Z"></path>
+                </marker>
+              </defs>
+            </svg>
             <div class="resource-diagram" id="resource-diagram" aria-live="polite"></div>
             <div class="resource-relationship-legend">
               <span><i></i> Explicit reference</span>
@@ -669,6 +676,7 @@
   <script src="/assets/xterm.js" defer></script>
   <script src="/assets/xterm-addon-fit.js" defer></script>
   <script src="/assets/terminal.js" defer></script>
+  <script src="/assets/dagre.min.js" defer></script>
   <script src="/assets/app.js" defer></script>
 </body>
 </html>

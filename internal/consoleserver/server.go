@@ -271,6 +271,7 @@ var consoleResourceDefinitions = []consoleResourceDefinition{
 	{Resource: "taskpipelines", Kind: "TaskPipeline", Label: "Task pipelines", Group: "Workloads", NewList: func() client.ObjectList { return &kelos.TaskPipelineList{} }, New: func() client.Object { return &kelos.TaskPipeline{} }},
 	{Resource: "taskrecords", Kind: "TaskRecord", Label: "Task records", Group: "Workloads", NewList: func() client.ObjectList { return &kelos.TaskRecordList{} }, New: func() client.Object { return &kelos.TaskRecord{} }},
 	{Resource: "taskspawners", Kind: "TaskSpawner", Label: "Task spawners", Group: "Automation", NewList: func() client.ObjectList { return &kelos.TaskSpawnerList{} }, New: func() client.Object { return &kelos.TaskSpawner{} }},
+	{Resource: "webhookgateways", Kind: "WebhookGateway", Label: "Webhook gateways", Group: "Automation", NewList: func() client.ObjectList { return &kelos.WebhookGatewayList{} }, New: func() client.Object { return &kelos.WebhookGateway{} }},
 	{Resource: "sessionspawners", Kind: "SessionSpawner", Label: "Session spawners", Group: "Automation", NewList: func() client.ObjectList { return &kelos.SessionSpawnerList{} }, New: func() client.Object { return &kelos.SessionSpawner{} }},
 	{Resource: "workerpools", Kind: "WorkerPool", Label: "Worker pools", Group: "Capacity", NewList: func() client.ObjectList { return &kelos.WorkerPoolList{} }, New: func() client.Object { return &kelos.WorkerPool{} }},
 	{Resource: "taskbudgets", Kind: "TaskBudget", Label: "Task budgets", Group: "Capacity", NewList: func() client.ObjectList { return &kelos.TaskBudgetList{} }, New: func() client.Object { return &kelos.TaskBudget{} }},
@@ -712,6 +713,11 @@ func consoleResourceRelationships(objects []consoleResourceObject) ([]consoleRes
 
 	for _, object := range objects {
 		source := consoleReference(object.Definition, object.Summary.Name)
+		addGateway := func(ref *kelos.GatewayReference) {
+			if ref != nil {
+				add(consoleReferenceFor("webhookgateways", ref.Name), source, "routes to", false)
+			}
+		}
 		switch value := object.Object.(type) {
 		case *kelos.Task:
 			consoleWorkerRelationships(source, value.Spec.Worker, add)
@@ -739,6 +745,16 @@ func consoleResourceRelationships(objects []consoleResourceObject) ([]consoleRes
 				add(consoleReferenceFor("sessionspawners", value.Annotations["kelos.dev/sessionspawner-name"]), source, "creates", false)
 			}
 		case *kelos.TaskSpawner:
+			when := value.Spec.When
+			if when.GitHubWebhook != nil {
+				addGateway(when.GitHubWebhook.GatewayRef)
+			}
+			if when.LinearWebhook != nil {
+				addGateway(when.LinearWebhook.GatewayRef)
+			}
+			if when.GenericWebhook != nil {
+				addGateway(when.GenericWebhook.GatewayRef)
+			}
 			consoleWorkerRelationships(source, value.Spec.TaskTemplate.Worker, add)
 			consoleLegacyWorkerRelationships(source, value.Spec.TaskTemplate.WorkspaceRef, value.Spec.TaskTemplate.AgentConfigRefs, add)
 			if value.Spec.TaskTemplate.WorkerPoolRef != nil {
@@ -755,6 +771,9 @@ func consoleResourceRelationships(objects []consoleResourceObject) ([]consoleRes
 				}
 			}
 		case *kelos.SessionSpawner:
+			if hook := value.Spec.When.GitHubWebhook; hook != nil {
+				addGateway(hook.GatewayRef)
+			}
 			consoleWorkerRelationships(source, &value.Spec.SessionTemplate.Worker, add)
 		case *kelos.WorkerPool:
 			consoleWorkerRelationships(source, &value.Spec.Worker, add)

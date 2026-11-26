@@ -7,6 +7,9 @@ global.renderSessionAttentionCount = () => false;
 global.scheduleCompletionRead = () => false;
 global.updateConsoleLocation = () => {};
 
+vm.runInThisContext(fs.readFileSync(path.join(__dirname, '..', 'web', 'dagre.min.js'), 'utf8'), {filename: 'dagre.min.js'});
+global.window = {matchMedia: () => ({matches: false})};
+
 const application = fs.readFileSync(path.join(__dirname, '..', 'web', 'app.js'), 'utf8');
 
 function applicationSlice(start, end) {
@@ -190,12 +193,16 @@ function testResourceViewTabsSupportKeyboardNavigation() {
     focus() {},
   };
   global.elements = {
+    resourceDiagram: resourceElement(),
+    resourceRelationshipFocus: resourceElement(),
     resourceDiagramTab: diagramTab,
     resourceInventoryTab: inventoryTab,
     resourceDiagramPanel: {hidden: false},
     resourceInventoryPanel: {hidden: true},
   };
 
+  global.document = {createElement: resourceElement};
+  global.state = {namespace: 'team-a', resourceGroups: [], resourceRelationships: []};
   setResourceView('inventory');
   assert.equal(elements.resourceDiagramPanel.hidden, true);
   assert.equal(elements.resourceInventoryPanel.hidden, false);
@@ -222,19 +229,30 @@ function deferred() {
 }
 
 function resourceElement(tagName = 'div') {
+  const classes = new Set();
   return {
+    classList: {
+      toggle(name, enabled) { if (enabled) classes.add(name); else classes.delete(name); },
+      contains(name) { return classes.has(name); },
+    },
     tagName, children: [], dataset: {}, attributes: {}, handlers: {}, value: '', textContent: '', hidden: false,
     append(...items) { this.children.push(...items); },
     replaceChildren(...items) { this.children = items; },
-    setAttribute(name, value) { this.attributes[name] = value; },
+    setAttribute(name, value) {
+      this.attributes[name] = value;
+      if (name.startsWith('data-')) this.dataset[name.slice(5)] = value;
+    },
     removeAttribute(name) { delete this.attributes[name]; },
     addEventListener(name, handler) { this.handlers[name] = handler; },
     focus() { document.activeElement = this; },
     click() { return this.handlers.click?.({button: 0, preventDefault() {}}); },
+    get options() { return this.querySelectorAll('option'); },
     contains(element) { return this === element || this.querySelectorAll('*').includes(element); },
     querySelectorAll(selector) {
       const descendants = this.children.flatMap(child => [child, ...child.querySelectorAll('*')]);
       if (selector === '*') return descendants;
+      if (selector === '.graph-edge') return descendants.filter(child => child.attributes.class === 'graph-edge');
+      if (selector === '[data-node]') return descendants.filter(child => child.dataset.node);
       if (selector === 'a[data-resource-key]') return descendants.filter(child => child.tagName === 'a' && child.dataset.resourceKey);
       if (selector === 'th button') return descendants.filter(child => child.tagName === 'th').flatMap(child => child.children);
       return descendants.filter(child => child.tagName === selector);
@@ -267,6 +285,90 @@ function setupResourceInspector() {
   elements.resourceDetailPanel.append(elements.resourceDetailTitle, elements.resourceDetailTabs, elements.resourceDetailRelationships, elements.refreshResourceLogs);
   elements.resourceSort.value = 'created-desc';
   elements.resourceDiagramPanel.hidden = true;
+}
+
+function testNamespaceMapScope() {
+  setupResourceInspector();
+  const scope = elements.resourceRelationshipFocus;
+  const tasks = {resource: 'tasks', kind: 'Task', items: [{name: 'build'}, {name: 'review'}]};
+  state.resourceGroups = [{name: 'Workloads', resources: [tasks]}];
+  renderResourceRelationshipFocusOptions();
+  assert.deepEqual(scope.options.map(option => option.value), ['', 'tasks/build', 'tasks/review']);
+  assert.equal(scope.options[0].textContent, 'Entire namespace');
+  assert.equal(scope.value, '');
+  assert.equal(scope.disabled, false);
+  scope.value = 'tasks/build';
+  renderResourceRelationshipFocusOptions();
+  assert.equal(scope.value, 'tasks/build');
+  tasks.items.shift();
+  renderResourceRelationshipFocusOptions();
+  assert.equal(scope.value, '');
+  tasks.items = [];
+  renderResourceRelationshipFocusOptions();
+  assert.equal(scope.disabled, true);
+}
+
+function testNamespaceMap() {
+  setupResourceInspector();
+  document.createElementNS = (_, name) => resourceElement(name);
+  const collection = (resource, kind, name) => ({resource, kind, items: [{name, namespace: 'default'}]});
+  state.resourceGroups = [{resources: [
+    collection('tasks', 'Task', 'build'), collection('workspaces', 'Workspace', 'repo'),
+    collection('sessions', 'Session', 'chat'), collection('workerpools', 'WorkerPool', 'idle'),
+    collection('webhookgateways', 'WebhookGateway', 'events'), collection('taskspawners', 'TaskSpawner', 'issues'),
+  ]}];
+  const edge = (source, target, relationship, inferred = false) => ({
+    source: {resource: source[0], name: source[1]}, target: {resource: target[0], name: target[1]}, relationship, inferred,
+  });
+  state.resourceRelationships = [
+    edge(['tasks', 'build'], ['workspaces', 'repo'], 'uses'),
+    edge(['sessions', 'chat'], ['workspaces', 'repo'], 'uses'),
+    edge(['webhookgateways', 'events'], ['taskspawners', 'issues'], 'routes to'),
+  ];
+  for (const vertical of [false, true]) {
+    const map = createNamespaceMap(vertical);
+    const workflows = map.querySelectorAll('svg');
+    assert.equal(workflows.length, 2);
+    assert.equal(map.querySelectorAll('a').length, 6);
+    const workflow = workflows.find(svg => svg.querySelectorAll('foreignObject').length === 3);
+    const nodes = workflow.querySelectorAll('foreignObject');
+    const workspace = nodes.find(node => node.attributes['data-node'] === 'workspaces/repo');
+    for (const source of nodes.filter(node => node !== workspace)) {
+      const axis = vertical ? 'y' : 'x';
+      assert.ok(Number(source.attributes[axis]) < Number(workspace.attributes[axis]));
+    }
+    const gatewayRoute = map.querySelectorAll('g').find(group => group.attributes['data-source'] === 'webhookgateways/events');
+    map.handlers.pointerover({target: {closest: () => workspace}});
+    assert.equal(gatewayRoute.classList.contains('graph-muted'), true);
+    assert.ok(workflow.querySelectorAll('g').every(group => group.classList.contains('graph-highlight')));
+    assert.ok(nodes.every(node => !node.classList.contains('graph-muted')));
+    const gatewayNode = map.querySelectorAll('[data-node]').find(node => node.dataset.node === 'webhookgateways/events');
+    assert.equal(gatewayNode.classList.contains('graph-muted'), true);
+    map.handlers.focusin({target: {closest: () => gatewayNode}});
+    assert.equal(gatewayRoute.classList.contains('graph-highlight'), true);
+    assert.equal(workspace.classList.contains('graph-muted'), true);
+    map.handlers.focusout({relatedTarget: null});
+    assert.equal(workspace.classList.contains('graph-muted'), false);
+    assert.equal(gatewayRoute.classList.contains('graph-highlight'), false);
+    assert.equal(gatewayRoute.attributes['data-target'], 'taskspawners/issues');
+    assert.equal(gatewayRoute.attributes['data-inferred'], 'false');
+    assert.equal(gatewayRoute.querySelectorAll('text')[0].textContent, 'routes to');
+    assert.equal(map.querySelectorAll('section')[0].querySelectorAll('a')[0].href, '/namespaces/default/resources/workerpools/idle');
+  }
+  state.resourceGroups[0].resources.push(collection('taskbudgets', 'TaskBudget', 'daily'));
+  state.resourceRelationships.push(edge(['taskbudgets', 'daily'], ['tasks', 'build'], 'limits', true));
+  state.resourceRelationships.push(edge(['tasks', 'build'], ['tasks', 'build'], 'depends on'));
+  state.resourceRelationships.push(edge(['tasks', 'build'], ['agentconfigs', 'absent'], 'uses'));
+  const map = createNamespaceMap(false);
+  assert.equal(map.querySelectorAll('polyline').length, 6);
+  const budgetMatch = map.querySelectorAll('g').find(group => group.attributes['data-source'] === 'taskbudgets/daily');
+  assert.equal(budgetMatch.attributes['data-inferred'], 'true');
+  const missing = map.querySelectorAll('foreignObject').find(node => node.attributes['data-node'] === 'agentconfigs/absent');
+  assert.equal(missing.querySelectorAll('small')[0].textContent, 'Missing');
+  assert.equal(missing.querySelectorAll('a').length, 0);
+  state.resourceGroups = [];
+  state.resourceRelationships = [];
+  assert.equal(createNamespaceMap(false).textContent, 'No resources in default.');
 }
 
 function testResourceInventoryFilteringSortingAndColumns() {
@@ -667,6 +769,8 @@ async function testResourceInspectorRefresh() {
   }
 }
 
+testNamespaceMapScope();
+testNamespaceMap();
 testViewsWithoutNamespace();
 testReturningToSessionsRefreshesCurrentRequest();
 testResourceInventorySupportsAllTypesAndSearch();

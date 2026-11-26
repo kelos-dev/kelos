@@ -121,7 +121,7 @@ func (s *Server) updateProviderRuntimeStatus(update RuntimeStatus) {
 	s.runtimeStatusMu.Unlock()
 	if backgroundChanged {
 		s.requestSessionStatusPublish()
-		s.signalSessionUpdateReport()
+		s.reevaluateSessionUpdate()
 	}
 }
 

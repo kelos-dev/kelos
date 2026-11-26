@@ -297,7 +297,7 @@ func TestDevelopmentTaskSpawnersIgnoreDisruptions(t *testing.T) {
 	}
 }
 
-func TestDevelopmentSessionSpawnersUsePersistentWorkspace(t *testing.T) {
+func TestDevelopmentSessionSpawnerTemplates(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -331,6 +331,9 @@ func TestDevelopmentSessionSpawnersUsePersistentWorkspace(t *testing.T) {
 			}
 			if sessionSpawner.Spec.SessionTemplate.InitialPrompt == "" {
 				t.Fatalf("%s sessionTemplate.initialPrompt is empty", tt.file)
+			}
+			if enabled := sessionSpawner.Spec.SessionTemplate.PromptSuggestions; enabled == nil || !*enabled {
+				t.Errorf("%s sessionTemplate.promptSuggestions must be true", tt.file)
 			}
 		})
 	}

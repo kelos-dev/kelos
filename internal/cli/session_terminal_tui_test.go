@@ -21,6 +21,58 @@ import (
 
 var sessionTUIANSISequence = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
 
+func TestSessionTUIPromptSuggestion(t *testing.T) {
+	for _, key := range []tea.KeyType{tea.KeyTab, tea.KeyRight} {
+		model, requests := newSessionTUITestModel()
+		model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventHistoryEnd})
+		suggestion := sessionruntime.Event{Type: sessionruntime.EventPromptSuggestion, Text: "Run the tests"}
+		model.applyEvent(sessionruntime.Event{Type: suggestion.Type, Text: "\x1b[31m" + suggestion.Text + "\x1b[0m"})
+		if !strings.Contains(stripSessionTUIANSI(model.composerView()), suggestion.Text) || model.input.Value() != "" {
+			t.Fatal("Expected a suggestion in the empty composer")
+		}
+		model.Update(tea.KeyMsg{Type: key})
+		if model.input.Value() != suggestion.Text || requests.Len() != 0 {
+			t.Fatalf("Accepting suggestion produced draft %q and requests %q", model.input.Value(), requests)
+		}
+		model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventPromptSuggestion, Text: "Another suggestion"})
+		if model.promptSuggestion != "" {
+			t.Fatal("Received a suggestion while a draft was present")
+		}
+		model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		var req sessionruntime.ClientRequest
+		if err := json.NewDecoder(requests).Decode(&req); err != nil || req.Type != "message" || req.Text != suggestion.Text {
+			t.Fatalf("Submitting draft = %#v, %v", req, err)
+		}
+	}
+}
+
+func TestSessionTUIPreviewsLongSuggestion(t *testing.T) {
+	model, _ := newSessionTUITestModel()
+	model.input.SetWidth(12)
+	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventHistoryEnd})
+	suggestion := "Inspect the session runtime tests"
+	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventPromptSuggestion, Text: suggestion})
+	if view := stripSessionTUIANSI(model.composerView()); !strings.Contains(view, "Inspect the…") {
+		t.Fatalf("narrow suggestion preview = %q", view)
+	}
+	model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if model.input.Value() != suggestion {
+		t.Fatalf("accepted draft = %q, want %q", model.input.Value(), suggestion)
+	}
+}
+
+func TestSessionTUIDismissesSuggestionWhenTyping(t *testing.T) {
+	model, _ := newSessionTUITestModel()
+	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventHistoryEnd})
+	model.applyEvent(sessionruntime.Event{Type: sessionruntime.EventPromptSuggestion, Text: "Run the tests"})
+	model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	model.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if model.promptSuggestion != "" || model.input.Value() != "" {
+		t.Fatal("Clearing a typed draft restored the dismissed suggestion")
+	}
+}
+
 func TestRunSessionTUICommitsHistoryWithoutAlternateScreen(t *testing.T) {
 	events := &bytes.Buffer{}
 	encoder := json.NewEncoder(events)

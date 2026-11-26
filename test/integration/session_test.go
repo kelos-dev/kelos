@@ -596,17 +596,19 @@ spec:
 		Expect(k8sClient.Update(ctx, session)).To(Succeed())
 	})
 
-	It("reconciles credential, model, and Pod override changes", func() {
+	It("reconciles credential, model, prompt suggestion, and Pod override changes", func() {
 		session := validSession(namespace, "mutable-worker-fields", "codex")
 		session.Spec.Suspend = ptr.To(true)
 		session.Spec.Worker.Model = "initial-model"
 		Expect(k8sClient.Create(ctx, session)).To(Succeed())
+		Expect(session.Spec.PromptSuggestions).To(Equal(ptr.To(false)))
 
 		statefulSetKey := client.ObjectKey{Namespace: namespace, Name: session.Name}
 		Eventually(func(g Gomega) {
 			var statefulSet appsv1.StatefulSet
 			g.Expect(k8sClient.Get(ctx, statefulSetKey, &statefulSet)).To(Succeed())
 			g.Expect(statefulSet.Spec.Template.Spec.Containers).NotTo(BeEmpty())
+			g.Expect(statefulSet.Spec.Template.Spec.Containers[0].Args).To(Equal([]string{"serve"}))
 			model := ""
 			for _, env := range statefulSet.Spec.Template.Spec.Containers[0].Env {
 				if env.Name == "KELOS_MODEL" {
@@ -627,6 +629,7 @@ spec:
 				SecretRef: &kelos.SecretReference{Name: "updated-credentials"},
 			}
 			current.Spec.Worker.Model = "updated-model"
+			current.Spec.PromptSuggestions = ptr.To(true)
 			current.Spec.Worker.PodOverrides = &kelos.PodOverrides{
 				ServiceAccountName: "workload-identity",
 				Labels: map[string]string{
@@ -644,6 +647,7 @@ spec:
 			g.Expect(statefulSet.Spec.Template.Spec.ServiceAccountName).To(Equal("workload-identity"))
 			g.Expect(statefulSet.Spec.Template.Spec.Containers).NotTo(BeEmpty())
 			model := ""
+			g.Expect(statefulSet.Spec.Template.Spec.Containers[0].Args).To(Equal([]string{"serve"}))
 			var credentialEnv *corev1.EnvVar
 			for i := range statefulSet.Spec.Template.Spec.Containers[0].Env {
 				env := &statefulSet.Spec.Template.Spec.Containers[0].Env[i]

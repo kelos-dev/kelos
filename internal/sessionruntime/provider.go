@@ -19,14 +19,15 @@ var (
 
 // ProviderConfig contains runtime configuration injected by the Session Pod.
 type ProviderConfig struct {
-	AgentType   string
-	WorkingDir  string
-	StateDir    string
-	Model       string
-	Effort      string
-	PluginDir   string
-	Environment []string
-	EventSink   EventSink
+	AgentType         string
+	WorkingDir        string
+	StateDir          string
+	Model             string
+	Effort            string
+	PluginDir         string
+	PromptSuggestions bool
+	Environment       []string
+	EventSink         EventSink
 }
 
 // Provider owns a conversation whose events can arrive independently of prompts.

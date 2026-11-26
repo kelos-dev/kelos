@@ -94,6 +94,15 @@ type SessionSpec struct {
 	// Worker defines the agent and execution environment for this Session.
 	Worker WorkerSpec `json:"worker"`
 
+	// PromptSuggestions enables suggested follow-up prompts in Claude Code and Codex
+	// conversations, including subsessions. Defaults to false. Generating suggestions
+	// uses additional model requests. Codex applies changes to subsequent requests.
+	// Claude Code resumes its agent processes in the same Pod with the updated setting
+	// once the Session and its subsessions are idle.
+	// +optional
+	// +kubebuilder:default=false
+	PromptSuggestions *bool `json:"promptSuggestions,omitempty"`
+
 	// Suspend stops the Session runtime without deleting the Session.
 	// Set this field back to false to resume the runtime. Defaults to false.
 	// +optional

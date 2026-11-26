@@ -26,6 +26,7 @@ type codexResponse struct {
 }
 
 type codexTurnResult struct {
+	id     string
 	status string
 	error  string
 }
@@ -389,6 +390,38 @@ func (p *CodexProvider) startTurn(ctx context.Context, input []map[string]any) e
 	})
 }
 
+const codexPromptSuggestionInstruction = "Predict one short follow-up message the user is likely to type next, based on the conversation that just finished. Use the user's language and refer to the specific task. Output only the message on one line. If there is no clear next step, output NONE. Do not use tools or suggest slash or shell commands."
+
+func (p *CodexProvider) suggestPrompt(turnID string) string {
+	ctx, cancel := context.WithTimeout(p.ctx, 30*time.Second)
+	defer cancel()
+	result, err := p.request(ctx, "thread/sample", map[string]any{
+		"threadId":       p.threadID,
+		"expectedTurnId": turnID,
+		"prompt":         codexPromptSuggestionInstruction,
+		"effort":         "low",
+		"disableMcp":     true,
+	})
+	if err != nil {
+		if p.ctx.Err() == nil {
+			log.Printf("Codex prompt suggestion failed threadID=%s turnID=%s error=%v", p.threadID, turnID, err)
+		}
+		return ""
+	}
+	var sample struct {
+		SourceTurnID string `json:"sourceTurnId"`
+		Text         string `json:"text"`
+	}
+	if json.Unmarshal(result, &sample) != nil || sample.SourceTurnID != turnID {
+		return ""
+	}
+	text := strings.TrimSpace(sample.Text)
+	if text == "NONE" || strings.ContainsAny(text, "\r\n") || strings.HasPrefix(text, "/") || strings.HasPrefix(text, "!") {
+		return ""
+	}
+	return text
+}
+
 func (p *CodexProvider) recordShellCommand(ctx context.Context, record shellCommandRecord) error {
 	item := map[string]any{
 		"type": "message",
@@ -485,7 +518,7 @@ func (p *CodexProvider) completeInteraction(ready chan struct{}, result codexTur
 	p.interactionCtx, p.interactionCancel = nil, nil
 	p.activeMu.Unlock()
 	if sink != nil {
-		sink.Emit(Event{Type: EventTurnCompleted, Status: result.status, Text: result.error})
+		sink.Emit(Event{Type: EventTurnCompleted, Status: result.status, Text: result.error, providerTurnID: result.id})
 	}
 }
 
@@ -928,7 +961,7 @@ func (p *CodexProvider) handleNotification(method string, params json.RawMessage
 			} `json:"turn"`
 		}
 		if json.Unmarshal(params, &value) == nil {
-			result := codexTurnResult{status: value.Turn.Status}
+			result := codexTurnResult{id: value.Turn.ID, status: value.Turn.Status}
 			if len(value.Turn.Error) > 0 && string(value.Turn.Error) != "null" {
 				result.error = string(value.Turn.Error)
 			}

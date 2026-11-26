@@ -9,12 +9,14 @@ import (
 	"net"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"k8s.io/utils/ptr"
 
+	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/sessionupdate"
 )
 
@@ -33,6 +35,74 @@ func waitForSessionEvent(t *testing.T, journal *Journal, match func(Event) bool)
 		case <-deadline:
 			t.Fatalf("Session event missing: %#v", journal.Snapshot())
 		case <-tick.C:
+		}
+	}
+}
+
+func TestOpenSessionServerConfiguresClaudePromptSuggestions(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		dir := t.TempDir()
+		config := Config{WorkingDir: dir, StateDir: dir, AgentType: "claude-code", PromptSuggestions: enabled}
+		server, err := openSessionServer(t.Context(), config, func(_ context.Context, cfg ProviderConfig) (Provider, error) {
+			if cfg.PromptSuggestions != enabled {
+				t.Fatalf("provider prompt suggestions = %t, want %t", cfg.PromptSuggestions, enabled)
+			}
+			return &fakeProvider{}, nil
+		}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		server.closeProvider()
+		server.events.close()
+		server.journal.Close()
+	}
+}
+
+func TestClaudePromptSuggestionFlag(t *testing.T) {
+	for _, tc := range []struct {
+		enabled bool
+		want    string
+	}{{false, "false"}, {true, "true"}} {
+		args := claudeCommandArgs(ProviderConfig{PromptSuggestions: tc.enabled}, "session-id", false)
+		index := slices.Index(args, "--prompt-suggestions")
+		if index < 0 || index+1 >= len(args) || args[index+1] != tc.want {
+			t.Fatalf("Expected --prompt-suggestions %s in %v", tc.want, args)
+		}
+	}
+}
+
+func TestClaudeSuggestsPromptToAttachedClients(t *testing.T) {
+	dir := t.TempDir()
+	provider := &ClaudeProvider{ctx: t.Context(), config: ProviderConfig{StateDir: dir}, done: make(chan struct{})}
+	journal := NewJournal()
+	defer journal.Close()
+	NewServer(Config{AgentType: "claude-code", WorkingDir: dir, PromptSuggestions: true}, journal, provider)
+	_, events, _, unsubscribe := journal.Subscribe(0)
+	defer unsubscribe()
+	provider.readLoop(strings.NewReader(`{"type":"assistant","session_id":"session-1","message":{"content":[{"type":"text","text":"Fixed the bug"}]}}
+{"type":"result","subtype":"success"}
+{"type":"prompt_suggestion","suggestion":"Run the tests","session_id":"session-1"}
+`))
+	var completed string
+	for {
+		select {
+		case event := <-events:
+			switch event.Type {
+			case EventTurnCompleted:
+				completed = event.TurnID
+			case EventPromptSuggestion:
+				if completed == "" || event.TurnID != completed || event.Text != "Run the tests" {
+					t.Fatalf("Suggestion after turn %q = %#v", completed, event)
+				}
+				for _, retained := range journal.Snapshot() {
+					if retained.Type == EventPromptSuggestion {
+						t.Fatal("Suggestion was retained in the transcript")
+					}
+				}
+				return
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("Suggestion missing from live stream")
 		}
 	}
 }
@@ -107,6 +177,148 @@ func TestServerBackgroundTasksOnlyBlockIdleDrain(t *testing.T) {
 				t.Fatalf("Drain phases = (%s, %s), want (%s, %s)", update.Phase, idle.Phase, test.updatePhase, test.idlePhase)
 			}
 		})
+	}
+}
+
+func TestCodexSamplesCompletedTurnForConnectedClients(t *testing.T) {
+	stdin := &channelWriteCloser{writes: make(chan []byte, 1)}
+	provider := &CodexProvider{ctx: t.Context(), threadID: "root", stdin: stdin, pending: map[string]chan codexResponse{}}
+	journal := NewJournal()
+	defer journal.Close()
+	server := NewServer(Config{AgentType: "codex"}, journal, provider)
+	if err := server.observeSessionUpdate(&kelos.Session{Spec: kelos.SessionSpec{PromptSuggestions: ptr.To(true)}}); err != nil {
+		t.Fatal(err)
+	}
+	_, events, _, unsubscribe := journal.Subscribe(0)
+	defer unsubscribe()
+	provider.handleNotification("turn/started", json.RawMessage(`{"threadId":"root","turn":{"id":"native-1"}}`))
+	provider.handleNotification("turn/completed", json.RawMessage(`{"threadId":"root","turn":{"id":"native-1","status":"completed"}}`))
+	params := replyToCodexRequest(t, provider, stdin, "thread/sample", `{"sourceTurnId":"native-1","text":"Run the session runtime tests"}`)
+	if params["threadId"] != "root" || params["expectedTurnId"] != "native-1" || params["prompt"] != codexPromptSuggestionInstruction {
+		t.Fatalf("Sample params = %#v", params)
+	}
+	for _, want := range []string{EventTurnStarted, EventTurnCompleted, EventPromptSuggestion} {
+		select {
+		case event := <-events:
+			if event.Type != want || event.TurnID != "turn-1" {
+				t.Fatalf("Expected %s for turn-1, got %#v", want, event)
+			}
+			if want == EventPromptSuggestion && event.Text != "Run the session runtime tests" {
+				t.Fatalf("Suggestion = %q", event.Text)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("Missing %s", want)
+		}
+	}
+}
+
+type promptSampleFunc func(string) string
+
+func (f promptSampleFunc) suggestPrompt(turnID string) string { return f(turnID) }
+
+func TestSessionDropsPromptSampleWhenAnotherTurnStarts(t *testing.T) {
+	journal := NewJournal()
+	defer journal.Close()
+	server := NewServer(Config{PromptSuggestions: true}, journal, nil)
+	_, events, _, unsubscribe := journal.Subscribe(0)
+	defer unsubscribe()
+	server.events.Emit(Event{Type: EventTurnStarted})
+	server.events.Emit(Event{Type: EventTurnCompleted, Status: "completed"})
+	server.events.suggestPrompt(promptSampleFunc(func(string) string {
+		server.events.Emit(Event{Type: EventTurnStarted})
+		return "Stale suggestion"
+	}), "native-1", "turn-1")
+	server.events.Emit(Event{Type: EventTurnCompleted, Status: "interrupted"})
+	server.events.Emit(Event{Type: EventPromptSuggestion, Text: "After interruption"})
+	for len(events) > 0 {
+		if event := <-events; event.Type == EventPromptSuggestion {
+			t.Fatalf("Unexpected suggestion %q for %s", event.Text, event.TurnID)
+		}
+	}
+}
+
+func TestSessionDropsPromptSampleWhenDisabled(t *testing.T) {
+	g := testSubsessionGroup(t, subsessionStateDir(t))
+	session := &kelos.Session{Spec: kelos.SessionSpec{PromptSuggestions: ptr.To(true)}}
+	if err := g.root.observeSessionUpdate(session); err != nil {
+		t.Fatal(err)
+	}
+	child, err := g.create("Tests", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := g.get(child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, events, _, unsubscribe := runtime.journal.Subscribe(0)
+	defer unsubscribe()
+	runtime.events.Emit(Event{Type: EventTurnStarted})
+	runtime.events.Emit(Event{Type: EventTurnCompleted, Status: "completed"})
+	runtime.events.suggestPrompt(promptSampleFunc(func(string) string {
+		if !runtime.suggestionsEnabled() {
+			t.Fatal("subsession did not inherit enabled suggestions")
+		}
+		session.Spec.PromptSuggestions = nil
+		if err := g.root.observeSessionUpdate(session); err != nil {
+			t.Fatal(err)
+		}
+		return "Stale suggestion"
+	}), "native-1", "turn-1")
+	for len(events) > 0 {
+		if event := <-events; event.Type == EventPromptSuggestion {
+			t.Fatalf("disabled subsession received %q", event.Text)
+		}
+	}
+}
+
+func TestCodexSkipsSampling(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		enabled   bool
+		connected bool
+	}{
+		{name: "unattended", enabled: true},
+		{name: "disabled with attached client", connected: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stdin := &channelWriteCloser{writes: make(chan []byte, 1)}
+			provider := &CodexProvider{ctx: t.Context(), threadID: "root", stdin: stdin, pending: map[string]chan codexResponse{}}
+			journal := NewJournal()
+			defer journal.Close()
+			NewServer(Config{PromptSuggestions: tc.enabled}, journal, provider)
+			if tc.connected {
+				_, _, _, unsubscribe := journal.Subscribe(0)
+				defer unsubscribe()
+			}
+			provider.handleNotification("turn/started", json.RawMessage(`{"threadId":"root","turn":{"id":"native-1"}}`))
+			provider.handleNotification("turn/completed", json.RawMessage(`{"threadId":"root","turn":{"id":"native-1","status":"completed"}}`))
+			select {
+			case <-stdin.writes:
+				t.Fatal("Codex turn triggered an unexpected sample request")
+			case <-time.After(100 * time.Millisecond):
+			}
+		})
+	}
+}
+
+func TestCodexSkipsUnusableSamples(t *testing.T) {
+	for _, result := range []string{
+		`{"sourceTurnId":"other","text":"Stale suggestion"}`,
+		`{"sourceTurnId":"native-1","text":null}`,
+		`{"sourceTurnId":"native-1","text":"NONE"}`,
+		`{"sourceTurnId":"native-1","text":"!make test"}`,
+		`{"sourceTurnId":"native-1","text":"/quit"}`,
+		`{"sourceTurnId":"native-1","text":"First option\nSecond option"}`,
+	} {
+		stdin := &channelWriteCloser{writes: make(chan []byte, 1)}
+		provider := &CodexProvider{ctx: t.Context(), threadID: "root", stdin: stdin, pending: map[string]chan codexResponse{}}
+		suggestion := make(chan string, 1)
+		go func() { suggestion <- provider.suggestPrompt("native-1") }()
+		replyToCodexRequest(t, provider, stdin, "thread/sample", result)
+		if text := <-suggestion; text != "" {
+			t.Fatalf("Unexpected suggestion %q for response %s", text, result)
+		}
 	}
 }
 

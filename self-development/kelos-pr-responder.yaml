@@ -27,6 +27,7 @@ spec:
           draft: false
           author: gjkim42
   sessionTemplate:
+    promptSuggestions: true
     volumeClaimTemplate:
       accessModes:
         - ReadWriteOnce

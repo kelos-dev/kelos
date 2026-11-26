@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -141,6 +142,7 @@ func claudeCommandArgs(config ProviderConfig, sessionID string, resume bool) []s
 		"--input-format", "stream-json",
 		"--output-format", "stream-json",
 		"--include-partial-messages",
+		"--prompt-suggestions", strconv.FormatBool(config.PromptSuggestions),
 		"--replay-user-messages",
 		"--dangerously-skip-permissions",
 		"--permission-prompt-tool", "stdio",
@@ -280,6 +282,15 @@ func (p *ClaudeProvider) recordShellCommand(_ context.Context, record shellComma
 	return nil
 }
 
+// Shell results stay local until the next ordinary prompt includes them in Claude's transcript.
+func (p *ClaudeProvider) retainPendingShellCommands(pending map[string][]shellCommandRecord) {
+	p.shellContextMu.Lock()
+	defer p.shellContextMu.Unlock()
+	if len(p.pendingShellCommands) > 0 {
+		pending[p.config.StateDir] = p.pendingShellCommands
+	}
+}
+
 // Interrupt stops the active Claude Code turn without closing its session.
 func (p *ClaudeProvider) Interrupt(ctx context.Context) error {
 	p.activeMu.Lock()
@@ -343,7 +354,7 @@ func (p *ClaudeProvider) readLoop(reader io.Reader) {
 		p.activeMu.Lock()
 		active := p.active
 		p.activeMu.Unlock()
-		if event.SkipTranscript || event.Ambient || (subagent && (!active || event.Type == "result")) {
+		if event.SkipTranscript || event.Ambient || (subagent && (!active || event.Type == "result" || event.Type == "prompt_suggestion")) {
 			continue
 		}
 		if !subagent {
@@ -501,6 +512,7 @@ func (p *ClaudeProvider) handleClaudeLine(line []byte, sink EventSink) (*claudeT
 		Type           string                      `json:"type"`
 		Subtype        string                      `json:"subtype"`
 		IsError        bool                        `json:"is_error"`
+		Suggestion     string                      `json:"suggestion"`
 		Result         string                      `json:"result"`
 		StopReason     string                      `json:"stop_reason"`
 		TerminalReason string                      `json:"terminal_reason"`
@@ -534,6 +546,10 @@ func (p *ClaudeProvider) handleClaudeLine(line []byte, sink EventSink) (*claudeT
 	}
 
 	switch envelope.Type {
+	case "prompt_suggestion":
+		if text := strings.TrimSpace(envelope.Suggestion); text != "" {
+			sink.Emit(Event{Type: EventPromptSuggestion, Text: text})
+		}
 	case "stream_event":
 		p.emitClaudeStreamEvent(envelope.Event, sink)
 	case "assistant", "user":

@@ -21,7 +21,9 @@ import (
 	"syscall"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 
 	kelos "github.com/kelos-dev/kelos/api/v1alpha2"
 	"github.com/kelos-dev/kelos/internal/sessionupdate"
@@ -55,6 +57,7 @@ type Config struct {
 	Effort               string
 	PluginDir            string
 	InitialPrompt        string
+	PromptSuggestions    bool
 	Environment          []string
 	PublishSessionStatus SessionStatusPublisher
 	SessionName          string
@@ -125,6 +128,7 @@ type Server struct {
 	updateRequest      *sessionupdate.Request
 	idleDrainRequest   *sessionupdate.Request
 	updateReport       chan struct{}
+	promptSuggestions  atomic.Bool
 	interruptMu        sync.Mutex
 	activeMu           sync.Mutex
 	activeTurn         string
@@ -188,6 +192,7 @@ func NewServer(config Config, journal *Journal, provider Provider) *Server {
 		sessionStatusPublishInterval:         defaultSessionStatusPublishInterval,
 		sessionStatusRetryInterval:           defaultSessionStatusRetryInterval,
 	}
+	server.promptSuggestions.Store(config.PromptSuggestions)
 	server.events = &sessionEvents{server: server, ctx: context.Background()}
 	if provider != nil {
 		provider.SetEventSink(server.events)
@@ -223,24 +228,66 @@ func Run(ctx context.Context, config Config) error {
 		}
 	}
 
-	groupCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	group := newSubsessionGroup(groupCtx, cancel, config.PublishSessionStatus)
+	return serveConversations(ctx, config)
+}
+
+func serveConversations(ctx context.Context, config Config) error {
+	pendingShell := make(map[string][]shellCommandRecord)
+	for ctx.Err() == nil {
+		if config.SessionClient != nil {
+			session, err := config.SessionClient.Get(ctx, config.SessionName, metav1.GetOptions{})
+			if err != nil {
+				return fmt.Errorf("getting Session %q settings: %w", config.SessionName, err)
+			}
+			config.InitialPrompt = session.Spec.InitialPrompt
+			config.PromptSuggestions = ptr.Deref(session.Spec.PromptSuggestions, false)
+		}
+		if err := serveSessionGroup(ctx, config, pendingShell); !errors.Is(err, errReloadClaudeSuggestions) {
+			return err
+		}
+	}
+	return nil
+}
+
+func serveSessionGroup(ctx context.Context, config Config, pendingShell map[string][]shellCommandRecord) error {
+	group := newSubsessionGroup(ctx, config.PublishSessionStatus)
+	defer group.close()
+	if len(pendingShell) > 0 {
+		group.newProvider = func(ctx context.Context, cfg ProviderConfig) (Provider, error) {
+			provider, err := NewClaudeProvider(ctx, cfg)
+			if err != nil {
+				return nil, err
+			}
+			group.mu.Lock()
+			provider.pendingShellCommands = pendingShell[cfg.StateDir]
+			delete(pendingShell, cfg.StateDir)
+			group.mu.Unlock()
+			return provider, nil
+		}
+	}
 	config.PublishSessionStatus = group.publisher("")
-	server, err := openSessionServer(groupCtx, config, NewProvider, group)
+	server, err := openSessionServer(group.ctx, config, group.newProvider, group)
 	if err != nil {
 		return err
 	}
-	defer group.close()
 	if err := group.restore(); err != nil {
 		_ = server.closeProvider()
 		server.events.close()
 		server.journal.Close()
 		return err
 	}
-	err = server.Serve(groupCtx)
+	err = server.Serve(group.ctx)
 	if childErr := group.err(); childErr != nil {
 		return childErr
+	}
+	if errors.Is(context.Cause(group.ctx), errReloadClaudeSuggestions) {
+		group.mu.Lock()
+		defer group.mu.Unlock()
+		server.provider.(*ClaudeProvider).retainPendingShellCommands(pendingShell)
+		for _, child := range group.children {
+			child.provider.(*ClaudeProvider).retainPendingShellCommands(pendingShell)
+		}
+		return errReloadClaudeSuggestions
 	}
 	return err
 }
@@ -301,6 +348,7 @@ func openSessionServer(ctx context.Context, config Config, newProvider func(cont
 		AgentType: config.AgentType, WorkingDir: config.WorkingDir, StateDir: config.StateDir,
 		Model: config.Model, Effort: config.Effort, PluginDir: config.PluginDir,
 		Environment: config.Environment, EventSink: server.events,
+		PromptSuggestions: config.PromptSuggestions,
 	})
 	if err != nil {
 		server.events.close()
@@ -433,8 +481,8 @@ func (s *Server) Serve(ctx context.Context) error {
 		return err
 	}
 	if s.config.SessionClient != nil {
-		go s.runSessionUpdateWatch(serveCtx)
-		go s.runSessionUpdateReporter(serveCtx)
+		workers.Go(func() { s.runSessionUpdateWatch(serveCtx) })
+		workers.Go(func() { s.runSessionUpdateReporter(serveCtx) })
 	}
 	workers.Go(func() { s.runTurns(serveCtx) })
 	if err := s.deliverInitialPrompt(); err != nil {
@@ -832,9 +880,7 @@ func (s *Server) runSessionStatusPublishes(ctx context.Context) {
 			s.recordSettledActivity(request)
 			// A drain report may have been withheld until in-flight activity was
 			// durably published; re-evaluate now that the queue has advanced.
-			if s.drainReportPending() {
-				s.signalSessionUpdateReport()
-			}
+			s.reevaluateSessionUpdate()
 			pending = false
 		}
 		if !timer.Stop() {
@@ -1259,8 +1305,8 @@ func (s *Server) removePendingMessage(turnID string, expectedRevision int64, req
 
 	s.markTurnCompleted(turn.id)
 	s.requestSessionStatusPublish()
-	if turnsComplete && s.drainReportPending() {
-		s.signalSessionUpdateReport()
+	if turnsComplete {
+		s.reevaluateSessionUpdate()
 	}
 	return nil
 }

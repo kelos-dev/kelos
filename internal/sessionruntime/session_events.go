@@ -10,12 +10,13 @@ import (
 // sessionEvents routes provider activity for the lifetime of the conversation.
 // A provider may start another turn without a user submission.
 type sessionEvents struct {
-	mu       sync.Mutex
-	server   *Server
-	ctx      context.Context
-	turn     *sessionTurn
-	deferred []Event
-	closed   bool
+	mu               sync.Mutex
+	server           *Server
+	ctx              context.Context
+	turn             *sessionTurn
+	deferred         []Event
+	suggestionTurnID string
+	closed           bool
 }
 
 type sessionTurn struct {
@@ -72,6 +73,7 @@ func (s *sessionEvents) beginLocked(ctx context.Context, request turnRequest, au
 	ctx, cancel := context.WithCancelCause(ctx)
 	turn := &sessionTurn{sink: &turnSink{server: s.server, turnID: request.id}, ctx: ctx, cancel: cancel, done: make(chan struct{}), kind: request.command.kind}
 	s.turn = turn
+	s.suggestionTurnID = ""
 	if autonomous {
 		turn.stopCancellation = context.AfterFunc(ctx, func() { s.finish(turn, context.Cause(ctx)) })
 	}
@@ -106,6 +108,13 @@ func (s *sessionEvents) emitLocked(event Event) {
 		s.deferred = append(s.deferred, event)
 		return
 	}
+	if event.Type == EventPromptSuggestion {
+		if s.server.suggestionsEnabled() && s.turn == nil && s.suggestionTurnID != "" {
+			event.TurnID = s.suggestionTurnID
+			s.server.journal.broadcastLive(event)
+		}
+		return
+	}
 	if event.Type == EventTurnStarted {
 		if s.turn == nil {
 			s.server.submitMu.Lock()
@@ -117,7 +126,13 @@ func (s *sessionEvents) emitLocked(event Event) {
 	}
 	if event.Type == EventTurnCompleted {
 		if s.turn != nil {
+			turnID := s.turn.sink.turnID
 			s.finishLocked(s.turn, event.Status, event.Text)
+			if s.server.suggestionsEnabled() && event.providerTurnID != "" && s.suggestionTurnID == turnID && s.server.journal.hasSubscribers() {
+				if provider, ok := s.server.provider.(promptSuggestionProvider); ok {
+					go s.suggestPrompt(provider, event.providerTurnID, turnID)
+				}
+			}
 		}
 		return
 	}
@@ -125,6 +140,22 @@ func (s *sessionEvents) emitLocked(event Event) {
 		s.turn.sink.Emit(event)
 	} else if event.Type == EventGoalUpdated {
 		_ = s.server.journal.Append(event)
+	}
+}
+
+type promptSuggestionProvider interface {
+	suggestPrompt(turnID string) string
+}
+
+func (s *sessionEvents) suggestPrompt(provider promptSuggestionProvider, providerTurnID, turnID string) {
+	text := provider.suggestPrompt(providerTurnID)
+	if text == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.closed && s.server.suggestionsEnabled() && s.suggestionTurnID == turnID {
+		s.server.journal.broadcastLive(Event{Type: EventPromptSuggestion, TurnID: turnID, Text: text})
 	}
 }
 
@@ -173,6 +204,9 @@ func (s *sessionEvents) completeLocked(turn *sessionTurn, status, message string
 			turn.sink.Emit(Event{Type: EventError, Text: message, Status: "failed"})
 		}
 		turn.sink.Emit(Event{Type: EventTurnCompleted, Status: status})
+		if status == "completed" && turn.kind != sessionCommandShell {
+			s.suggestionTurnID = turn.sink.turnID
+		}
 	}
 	turn.sink.stop()
 	if turn.stopCancellation != nil {

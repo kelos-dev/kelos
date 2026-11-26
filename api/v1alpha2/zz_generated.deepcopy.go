@@ -1413,6 +1413,11 @@ func (in *SessionSpawnerWhen) DeepCopy() *SessionSpawnerWhen {
 func (in *SessionSpec) DeepCopyInto(out *SessionSpec) {
 	*out = *in
 	in.Worker.DeepCopyInto(&out.Worker)
+	if in.PromptSuggestions != nil {
+		in, out := &in.PromptSuggestions, &out.PromptSuggestions
+		*out = new(bool)
+		**out = **in
+	}
 	if in.Suspend != nil {
 		in, out := &in.Suspend, &out.Suspend
 		*out = new(bool)

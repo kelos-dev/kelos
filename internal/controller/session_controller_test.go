@@ -2406,6 +2406,25 @@ func TestSessionPhaseForPodReportsContainerFailures(t *testing.T) {
 	}
 }
 
+func TestSessionPromptSuggestionsPreservePodTemplate(t *testing.T) {
+	session := testSession("suggestions", "claude-code")
+	reconciler := testSessionReconciler(nil, nil)
+	baseline, _, err := reconciler.buildSessionStatefulSet(session, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, enabled := range []bool{true, false} {
+		session.Spec.PromptSuggestions = &enabled
+		updated, _, err := reconciler.buildSessionStatefulSet(session, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !apiequality.Semantic.DeepEqual(updated.Spec.Template, baseline.Spec.Template) {
+			t.Fatalf("promptSuggestions=%t changed the Pod template", enabled)
+		}
+	}
+}
+
 func TestSessionWithoutVolumeClaimUsesEmptyDir(t *testing.T) {
 	t.Parallel()
 	session := testSession("ephemeral", "codex")

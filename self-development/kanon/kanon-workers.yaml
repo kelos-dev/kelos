@@ -20,6 +20,7 @@ spec:
           state: open
           author: gjkim42
   sessionTemplate:
+    promptSuggestions: true
     volumeClaimTemplate:
       accessModes:
         - ReadWriteOnce

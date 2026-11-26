@@ -271,6 +271,24 @@ func (j *Journal) Append(event Event) error {
 			return err
 		}
 	}
+	j.broadcastLocked(event)
+	return nil
+}
+
+func (j *Journal) hasSubscribers() bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return len(j.subscribers) != 0
+}
+
+// broadcastLive sends transient composer events only to attached clients.
+func (j *Journal) broadcastLive(event Event) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.broadcastLocked(event)
+}
+
+func (j *Journal) broadcastLocked(event Event) {
 	for id, subscriber := range j.subscribers {
 		select {
 		case subscriber.events <- event:
@@ -280,7 +298,6 @@ func (j *Journal) Append(event Event) error {
 			delete(j.subscribers, id)
 		}
 	}
-	return nil
 }
 
 func (j *Journal) updateUnstartedTurns(event Event) {

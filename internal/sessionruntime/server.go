@@ -315,6 +315,12 @@ func openSessionServer(ctx context.Context, config Config, newProvider func(cont
 	if group != nil && group.root == nil {
 		group.root = server
 	}
+	if !server.suggestionsEnabled() {
+		if err := journal.Append(Event{Type: EventPromptSuggestion}); err != nil {
+			journal.Close()
+			return nil, fmt.Errorf("clearing saved prompt suggestion: %w", err)
+		}
+	}
 	server.workspaceChanges = changes
 	server.events.ctx = ctx
 	server.nextTurnID.Store(recovery.nextTurnID)

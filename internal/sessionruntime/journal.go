@@ -219,15 +219,14 @@ func (j *Journal) load() (string, bool, error) {
 			event.JournalID = ""
 		}
 		j.nextID = event.ID + 1
-		j.updateUnstartedTurns(event)
-		j.appendRetained(event)
+		j.retain(event)
 		offset += int64(len(line))
 		total++
 		if errors.Is(err, io.EOF) {
 			break
 		}
 	}
-	return journalID, total > len(j.recoveryEvents()), nil
+	return journalID, total > len(j.diskRecords()), nil
 }
 
 // Append records and broadcasts one event after writing it to durable storage.
@@ -241,6 +240,9 @@ func (j *Journal) Append(event Event) error {
 		return j.failureErr
 	}
 
+	if event.Type == EventPromptSuggestion && event.Text == "" && j.promptSuggestion.Text == "" {
+		return nil
+	}
 	if event.Timestamp == nil {
 		now := time.Now().UTC()
 		event.Timestamp = &now
@@ -253,6 +255,9 @@ func (j *Journal) Append(event Event) error {
 		if err == nil {
 			encoded = append(encoded, '\n')
 			if len(encoded) > maxJournalLineSize {
+				if event.Type == EventPromptSuggestion {
+					return nil
+				}
 				err = fmt.Errorf("Session event journal record exceeds %d bytes", maxJournalLineSize)
 			} else {
 				_, err = j.file.Write(encoded)
@@ -265,16 +270,12 @@ func (j *Journal) Append(event Event) error {
 		}
 	}
 	j.nextID++
-	j.updateUnstartedTurns(event)
-	compacted := j.appendRetained(event)
+	compacted := j.retain(event)
 	if compacted && j.file != nil {
 		if err := j.rewrite(); err != nil {
 			j.fail(err)
 			return err
 		}
-	}
-	if event.Type == EventTurnStarted {
-		j.promptSuggestion = Event{}
 	}
 	j.broadcastLocked(event)
 	return nil
@@ -284,17 +285,6 @@ func (j *Journal) hasSubscribers() bool {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	return len(j.subscribers) != 0
-}
-
-// setPromptSuggestion keeps the latest suggestion outside transcript history.
-func (j *Journal) setPromptSuggestion(event Event) {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	if event.Text == "" && j.promptSuggestion.Text == "" {
-		return
-	}
-	j.promptSuggestion = event
-	j.broadcastLocked(event)
 }
 
 func (j *Journal) broadcastLocked(event Event) {
@@ -321,8 +311,16 @@ func (j *Journal) updateUnstartedTurns(event Event) {
 	}
 }
 
-func (j *Journal) recoveryEvents() []Event {
-	events := append([]Event(nil), j.events[j.firstEvent:]...)
+// diskRecords includes composer state alongside the events needed for turn recovery.
+func (j *Journal) diskRecords() []Event {
+	if j.promptSuggestion.ID != 0 {
+		return j.sortedEvents(j.promptSuggestion)
+	}
+	return j.sortedEvents()
+}
+
+func (j *Journal) sortedEvents(events ...Event) []Event {
+	events = append(events, j.events[j.firstEvent:]...)
 	retained := make(map[int64]struct{}, len(events))
 	for _, event := range events {
 		retained[event.ID] = struct{}{}
@@ -336,7 +334,16 @@ func (j *Journal) recoveryEvents() []Event {
 	return events
 }
 
-func (j *Journal) appendRetained(event Event) bool {
+// retain applies each durable record in order while keeping suggestions out of transcript history.
+func (j *Journal) retain(event Event) bool {
+	switch event.Type {
+	case EventPromptSuggestion:
+		j.promptSuggestion = event
+		return false
+	case EventTurnStarted:
+		j.promptSuggestion = Event{}
+	}
+	j.updateUnstartedTurns(event)
 	j.events = append(j.events, event)
 	if len(j.events)-j.firstEvent <= j.maxEvents {
 		return false
@@ -368,7 +375,7 @@ func (j *Journal) rewrite() error {
 		return fmt.Errorf("securing compacted Session event journal: %w", err)
 	}
 	writer := bufio.NewWriter(temporary)
-	for _, event := range j.recoveryEvents() {
+	for _, event := range j.diskRecords() {
 		persistedEvent := event
 		persistedEvent.JournalID = j.journalID
 		encoded, err := json.Marshal(persistedEvent)
@@ -421,7 +428,7 @@ func (j *Journal) Snapshot() []Event {
 func (j *Journal) snapshotForRecovery() []Event {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	return j.recoveryEvents()
+	return j.sortedEvents()
 }
 
 // SnapshotWithBounds returns the retained events and their current journal identity.

@@ -8,6 +8,8 @@ const path = require('node:path');
 const sessionID = 'kelos-e2e-session';
 const stateDirectory = process.env.CLAUDE_CONFIG_DIR || process.cwd();
 const turnPath = path.join(stateDirectory, 'kelos-e2e-turn');
+const suggestionsFlag = process.argv.indexOf('--prompt-suggestions');
+const suggestionsEnabled = suggestionsFlag !== -1 && process.argv[suggestionsFlag + 1] === 'true';
 let turn = Number.parseInt(readFile(turnPath, '0'), 10) || 0;
 let pending = null;
 
@@ -108,6 +110,9 @@ function handleUser(message) {
   if (prompt === 'read-state') {
     const state = readFile(path.join(process.cwd(), 'kelos-recovery-state'), 'missing');
     complete(`turn ${turn}: state ${state}`);
+    if (suggestionsEnabled) {
+      send({type: 'prompt_suggestion', session_id: sessionID, suggestion: 'Check the preserved workspace'});
+    }
     return;
   }
   if (prompt === 'create-git-workspace') {

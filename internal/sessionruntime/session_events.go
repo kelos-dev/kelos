@@ -113,7 +113,7 @@ func (s *sessionEvents) emitLocked(event Event) {
 	if event.Type == EventPromptSuggestion {
 		if s.server.suggestionsEnabled() && s.turn == nil && s.suggestionTurnID != "" {
 			event.TurnID = s.suggestionTurnID
-			s.server.journal.setPromptSuggestion(event)
+			_ = s.server.journal.Append(event)
 		}
 		return
 	}
@@ -162,7 +162,7 @@ func (s *sessionEvents) suggestPrompt(provider promptSuggestionProvider, context
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.closed && s.server.suggestionsEnabled() && s.suggestionTurnID == turnID {
-		s.server.journal.setPromptSuggestion(Event{Type: EventPromptSuggestion, TurnID: turnID, Text: text})
+		_ = s.server.journal.Append(Event{Type: EventPromptSuggestion, TurnID: turnID, Text: text})
 	}
 }
 
@@ -170,7 +170,7 @@ func (s *sessionEvents) clearPromptSuggestion() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.suggestionTurnID = ""
-	s.server.journal.setPromptSuggestion(Event{Type: EventPromptSuggestion})
+	_ = s.server.journal.Append(Event{Type: EventPromptSuggestion})
 }
 
 func (s *sessionEvents) finish(turn *sessionTurn, err error) {

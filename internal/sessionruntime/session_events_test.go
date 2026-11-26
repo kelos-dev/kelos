@@ -212,51 +212,92 @@ func TestCodexSamplesCompletedTurnForConnectedClients(t *testing.T) {
 	}
 }
 
-func TestSessionReplaysCurrentSuggestionAfterHistory(t *testing.T) {
-	journal := NewJournal()
-	defer journal.Close()
-	server := NewServer(Config{PromptSuggestions: true}, journal, nil)
-	server.events.Emit(Event{Type: EventTurnStarted})
-	server.events.Emit(Event{Type: EventTurnCompleted, Status: "completed"})
-	server.events.Emit(Event{Type: EventPromptSuggestion, Text: "Run the tests"})
+func TestSessionRestoresPromptSuggestionWithoutSampling(t *testing.T) {
+	dir := t.TempDir()
+	journal, err := OpenJournal(filepath.Join(dir, journalFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial := NewServer(Config{PromptSuggestions: true}, journal, nil)
+	initial.events.Emit(Event{Type: EventTurnStarted})
+	initial.events.Emit(Event{Type: EventTurnCompleted, Status: "completed"})
+	initial.events.suggestPrompt(promptSampleFunc(func(string) string { return "Run the tests" }), "native-1", "turn-1")
 
 	bounds, _ := journal.SnapshotWithBounds()
+	initial.events.close()
+	journal.Close()
+
+	type samplingProvider struct {
+		fakeProvider
+		promptSampleFunc
+	}
+	provider := func(context.Context, ProviderConfig) (Provider, error) {
+		return &samplingProvider{promptSampleFunc: func(string) string {
+			t.Error("requested another prompt sample after restart")
+			return ""
+		}}, nil
+	}
+	restart := func(enabled bool) *Server {
+		t.Helper()
+		config := Config{AgentType: "codex", WorkingDir: dir, StateDir: dir, PromptSuggestions: enabled}
+		server, err := openSessionServer(t.Context(), config, provider, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = server.closeProvider() })
+		return server
+	}
+	server := restart(true)
 	for _, since := range []int64{0, bounds.LastEventID} {
 		t.Run(fmt.Sprintf("since-%d", since), func(t *testing.T) {
-			runtime, client := net.Pipe()
-			defer client.Close()
-			if err := client.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
-				t.Fatal(err)
-			}
-			go server.handleConnection(t.Context(), runtime)
-			if err := json.NewEncoder(client).Encode(ClientRequest{Type: "subscribe", HistoryBounds: true, HistoryItems: 1, HistoryBytes: DefaultHistoryByteLimit, Since: since, JournalID: bounds.JournalID}); err != nil {
-				t.Fatal(err)
-			}
-			decoder := json.NewDecoder(client)
-			previous := ""
-			for {
-				var event Event
-				if err := decoder.Decode(&event); err != nil {
-					t.Fatal(err)
-				}
-				if event.Type == EventPromptSuggestion {
-					if previous != EventHistoryEnd || event.TurnID != "turn-1" || event.Text != "Run the tests" {
-						t.Fatalf("reconnect since %d: suggestion after %q = %#v", since, previous, event)
-					}
-					return
-				}
-				previous = event.Type
+			event := readReplayedSuggestion(t, server, since, bounds.JournalID)
+			if event.TurnID != "turn-1" || event.Text != "Run the tests" {
+				t.Fatalf("replayed suggestion = %#v", event)
 			}
 		})
 	}
 
-	server.events.Emit(Event{Type: EventTurnStarted})
-	_, live, _, cancel := journal.Subscribe(0)
-	defer cancel()
-	select {
-	case event := <-live:
-		t.Fatalf("unexpected cached event after starting the next turn: %#v", event)
-	default:
+	server.journal.Close()
+
+	// A Session can be opted out while its Pod is suspended.
+	for _, enabled := range []bool{false, true} {
+		server := restart(enabled)
+		_, live, _, cancel := server.journal.Subscribe(0)
+		select {
+		case event := <-live:
+			t.Errorf("restart with suggestions enabled=%t replayed %#v after opt-out", enabled, event)
+		default:
+		}
+		cancel()
+		server.journal.Close()
+	}
+}
+
+func readReplayedSuggestion(t *testing.T, server *Server, since int64, journalID string) Event {
+	t.Helper()
+	runtime, client := net.Pipe()
+	defer client.Close()
+	if err := client.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	go server.handleConnection(t.Context(), runtime)
+	if err := json.NewEncoder(client).Encode(ClientRequest{Type: "subscribe", HistoryBounds: true, HistoryItems: 1, HistoryBytes: DefaultHistoryByteLimit, Since: since, JournalID: journalID}); err != nil {
+		t.Fatal(err)
+	}
+	decoder := json.NewDecoder(client)
+	previous := ""
+	for {
+		var event Event
+		if err := decoder.Decode(&event); err != nil {
+			t.Fatal(err)
+		}
+		if event.Type == EventPromptSuggestion {
+			if previous != EventHistoryEnd {
+				t.Fatalf("reconnect since %d: suggestion after %q", since, previous)
+			}
+			return event
+		}
+		previous = event.Type
 	}
 }
 

@@ -411,9 +411,10 @@ In Claude Code, Codex, and OpenCode Sessions, the web console and interactive te
 suggested follow-up in the empty message input after a reply. Press Tab or Right
 Arrow to copy it into your draft, or select **Use suggestion** in the console.
 Edit and send it like any other message. A draft hides the suggestion. Clearing
-the draft or reconnecting to the running conversation restores the same suggestion
-without another model request. Starting a turn, disabling suggestions, or
-restarting the Session runtime (including replacing its Pod) clears it.
+the draft or reconnecting restores the same suggestion without another model
+request. With a persistent workspace (`Session.spec.volumeClaimTemplate`), the
+suggestion also survives Pod replacement. Starting a turn, disabling suggestions,
+or resetting the workspace clears it.
 
 Claude Code chooses when to generate a suggestion. In a connected Codex or OpenCode Session,
 Kelos asks the session model for a short follow-up using the completed turn’s context.

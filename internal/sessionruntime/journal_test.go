@@ -186,6 +186,83 @@ func TestJournalCompactionPreservesPendingTurnForRecovery(t *testing.T) {
 	}
 }
 
+func TestJournalCompactionPreservesOnlyTheCurrentSuggestion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), journalFileName)
+	open := func() *Journal {
+		t.Helper()
+		journal, err := openJournal(path, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return journal
+	}
+	journal := open()
+	for _, event := range []Event{
+		{Type: EventPromptSuggestion, TurnID: "turn-1", Text: "First suggestion"},
+		{Type: EventTurnStarted, TurnID: "turn-2"},
+		{Type: EventTurnCompleted, TurnID: "turn-2", Status: "completed"},
+		{Type: EventPromptSuggestion, TurnID: "turn-2", Text: "Current suggestion"},
+		{Type: EventRuntimeRecovered},
+	} {
+		if err := journal.Append(event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	journal.Close()
+
+	journal = open()
+	history, live, _, cancel := journal.Subscribe(0)
+	assertEventTypes(t, history, EventRuntimeRecovered)
+	assertEventTypes(t, journal.snapshotForRecovery(), EventRuntimeRecovered)
+	select {
+	case suggestion := <-live:
+		if suggestion.TurnID != "turn-2" || suggestion.Text != "Current suggestion" {
+			t.Fatalf("restored suggestion = %#v", suggestion)
+		}
+	default:
+		t.Fatal("missing suggestion after compaction")
+	}
+	cancel()
+	if err := journal.Append(Event{Type: EventTurnStarted, TurnID: "turn-3"}); err != nil {
+		t.Fatal(err)
+	}
+	journal.Close()
+
+	journal = open()
+	defer journal.Close()
+	_, live, _, cancel = journal.Subscribe(0)
+	defer cancel()
+	select {
+	case event := <-live:
+		t.Fatalf("starting the next turn left a cached suggestion: %#v", event)
+	default:
+	}
+}
+
+func TestJournalSkipsOversizedPromptSuggestion(t *testing.T) {
+	journal, err := OpenJournal(filepath.Join(t.TempDir(), journalFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer journal.Close()
+	_, events, _, cancel := journal.Subscribe(0)
+	defer cancel()
+	if err := journal.Append(Event{Type: EventPromptSuggestion, Text: strings.Repeat("x", maxJournalLineSize)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := journal.Append(Event{Type: EventTurnStarted, TurnID: "turn-1"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case event := <-events:
+		if event.Type != EventTurnStarted || event.ID != 1 {
+			t.Fatalf("first event after oversized suggestion = %s (ID %d)", event.Type, event.ID)
+		}
+	default:
+		t.Fatal("turn start was not broadcast after oversized suggestion")
+	}
+}
+
 func TestJournalRecoveryCombinesPendingTurns(t *testing.T) {
 	path := filepath.Join(t.TempDir(), journalFileName)
 	journal, err := openJournal(path, 2)

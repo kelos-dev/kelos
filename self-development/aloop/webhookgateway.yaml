@@ -1,0 +1,12 @@
+# WebhookGateway authenticates GitHub webhook deliveries for kelos-dev/aloop
+# and supplies GitHub API credentials for enrichment and reporting.
+apiVersion: kelos.dev/v1alpha2
+kind: WebhookGateway
+metadata:
+  name: aloop
+spec:
+  github:
+    secretRef:
+      name: github-webhook-secret
+    credentialsRef:
+      name: github-webhook-secret

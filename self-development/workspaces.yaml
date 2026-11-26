@@ -37,3 +37,13 @@ spec:
   ref: main
   secretRef:
     name: kelos-agent-credentials
+---
+apiVersion: kelos.dev/v1alpha2
+kind: Workspace
+metadata:
+  name: aloop-agent
+spec:
+  repo: https://github.com/kelos-dev/aloop.git
+  ref: main
+  secretRef:
+    name: kelos-agent-credentials

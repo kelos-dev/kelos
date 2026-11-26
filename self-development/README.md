@@ -14,6 +14,9 @@ for the sibling
 [`kelos-dev/open-actions`](https://github.com/kelos-dev/open-actions)
 repository.
 
+The [aloop configuration](aloop/README.md) manages self-development for
+[`kelos-dev/aloop`](https://github.com/kelos-dev/aloop).
+
 [`cs`](cs) creates persistent interactive Claude Code environments using `opus`
 and the `CLAUDE_CODE_OAUTH_TOKEN` key in the shared `kelos-credentials` Secret.
 It shares the Workspace, effort, and Git identity with the `kelos-workers`
@@ -24,13 +27,13 @@ SessionSpawner, which uses GPT-6.2 Astra through Codex.
 <img width="2694" height="1966" alt="kelos-self-development" src="https://github.com/user-attachments/assets/10719599-426e-4c3d-87a0-cde43e1b3113" />
 
 Every self-development Task, TaskSpawner, Session, and SessionSpawner in this
-directory and its nested Agora, Kanon, and Open Actions directories references
+directory and its nested Agora, Kanon, Open Actions, and aloop directories references
 [`base-agent.yaml`](base-agent.yaml), which copies
 [`gjkim42/kanon-repo`'s `instructions/AGENTS.md`](https://github.com/gjkim42/kanon-repo/blob/main/instructions/AGENTS.md)
 and installs all skills from that repository through `spec.skills`.
 Tasks and TaskSpawners add a second role-specific AgentConfig when they need
 local identity, conventions, or workflow instructions. The issue and PR
-pick-up SessionSpawners for Kelos, Agora, Kanon, and Open Actions, plus
+pick-up SessionSpawners for Kelos, Agora, Kanon, Open Actions, and aloop, plus
 Sessions created with `cs`, use only `base-agent`.
 
 Apply the shared AgentConfig before deploying any self-development resource:
@@ -401,13 +404,13 @@ Before deploying these examples, you need to create the following resources:
 ### 1. Workspace Resources
 
 [`workspaces.yaml`](workspaces.yaml) defines the `kelos-agent`, `agora-agent`,
-`kanon-agent`, and `open-actions-agent` Workspaces used by Tasks and
+`kanon-agent`, `open-actions-agent`, and `aloop-agent` Workspaces used by Tasks and
 TaskSpawners. They reference the `kelos-agent-credentials` Secret described
 below so GitHub operations use the Kelos bot identity.
 
 Sessions use dedicated Workspaces so they can authenticate with a personal
 token without changing Task credentials. The checked-in manifest includes
-Session Workspaces for Kelos, Agora, Kanon, and `kelos-dev/open-actions`.
+Session Workspaces for Kelos, Agora, Kanon, Open Actions, and aloop.
 Apply both manifests after creating their Secrets below:
 
 ```bash
@@ -618,7 +621,7 @@ The key pattern in these examples is webhook-triggered handoff with durable,
 agent-directed Sessions:
 
 1. GitHub delivers an `issue_comment`, `issues`, or `pull_request_review` webhook
-2. The matching TaskSpawner creates a Task, while the issue and PR pick-up spawners for Kelos, Agora, Kanon, and Open Actions create Sessions
+2. The matching TaskSpawner creates a Task, while the issue and PR pick-up spawners for Kelos, Agora, Kanon, Open Actions, and aloop create Sessions
 3. A pick-up Session receives the issue or PR URL and asks the agent to choose the best way to address it
 4. Issue Sessions start on a dedicated issue branch, while PR Sessions start on the existing PR branch
 5. An exact `/kelos pick-up` command creates a Session for an open issue or PR; explicit commands or relabel events retrigger the other matching automation

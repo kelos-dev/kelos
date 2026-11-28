@@ -481,6 +481,8 @@ const elements = requireElements({
   resourceDiagramPanel: document.querySelector('#resource-diagram-panel'),
   resourceInventoryPanel: document.querySelector('#resource-inventory-panel'),
   resourceDiagram: document.querySelector('#resource-diagram'),
+  graphTypeCount: document.querySelector('#graph-type-count'),
+  graphTypeOptions: document.querySelector('#graph-type-options'),
   resourceRelationshipFocus: document.querySelector('#resource-relationship-focus'),
   resourceKind: document.querySelector('#resource-kind'),
   resourceTypeList: document.querySelector('#resource-type-list'),
@@ -1412,6 +1414,7 @@ function renderResourceKindOptions() {
     elements.resourceKind.value = allResourceKind;
   }
   renderResourceTypeNavigation();
+  renderGraphTypeOptions();
   renderResourceRelationshipFocusOptions();
   if (!elements.resourceDiagramPanel.hidden) renderResourceDiagram();
 }
@@ -1461,6 +1464,49 @@ function resourceEntryForReference(reference: ResourceReference): ResourceEntry 
   };
 }
 
+const hiddenGraphTypes = new Set(['taskrecords']);
+
+function renderGraphTypeOptions() {
+  const collections = resourceCollections();
+  const options = elements.graphTypeOptions;
+  const kinds = collections.map(collection => collection.resource).join(',');
+  if (options.dataset.kinds !== kinds) {
+    options.replaceChildren();
+    for (const {resource, kind} of collections) {
+      const label = document.createElement('label');
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.value = resource;
+      const name = document.createElement('span');
+      name.textContent = kind;
+      label.append(input, name);
+      options.append(label);
+    }
+    options.dataset.kinds = kinds;
+  }
+  let visible = 0;
+  for (const input of options.querySelectorAll<HTMLInputElement>('input')) {
+    input.checked = !hiddenGraphTypes.has(input.value);
+    if (input.checked) visible++;
+  }
+  elements.graphTypeCount.textContent = `${visible} of ${collections.length}`;
+}
+
+function setGraphTypes(resources: string[], visible: boolean) {
+  for (const resource of resources) {
+    if (visible) hiddenGraphTypes.delete(resource);
+    else hiddenGraphTypes.add(resource);
+  }
+  renderGraphTypeOptions();
+  renderResourceRelationshipFocusOptions();
+  renderResourceDiagram();
+}
+
+function visibleGraphRelationships() {
+  return state.resourceRelationships.filter(({source, target}) =>
+    !hiddenGraphTypes.has(source.resource) && !hiddenGraphTypes.has(target.resource));
+}
+
 function renderResourceRelationshipFocusOptions() {
   const selected = elements.resourceRelationshipFocus.value;
   const namespaceOption = document.createElement('option');
@@ -1471,6 +1517,7 @@ function renderResourceRelationshipFocusOptions() {
     const optionGroup = document.createElement('optgroup');
     optionGroup.label = group.name;
     for (const collection of group.resources) {
+      if (hiddenGraphTypes.has(collection.resource)) continue;
       for (const item of collection.items) {
         const option = document.createElement('option');
         option.value = resourceReferenceKey({resource: collection.resource, name: item.name});
@@ -1584,11 +1631,12 @@ function resourceRelationshipsForFocus(relationships: ResourceRelationship[], fo
 function namespaceGraph() {
   const graph = new dagre.graphlib.Graph({multigraph: true});
   for (const collection of resourceCollections()) {
+    if (hiddenGraphTypes.has(collection.resource)) continue;
     for (const item of collection.items) {
       graph.setNode(resourceReferenceKey({resource: collection.resource, name: item.name}), {collection, item});
     }
   }
-  for (const edge of state.resourceRelationships) {
+  for (const edge of visibleGraphRelationships()) {
     const source = resourceReferenceKey(edge.source);
     const target = resourceReferenceKey(edge.target);
     for (const ref of [edge.source, edge.target]) {
@@ -1678,7 +1726,11 @@ function highlightNamespaceGraph(map: HTMLElement, key?: string) {
 
 function createNamespaceMap(vertical: boolean) {
   const graph = namespaceGraph();
-  if (!graph.nodeCount()) return createResourceTable([]);
+  if (!graph.nodeCount()) {
+    return resourceCollections().some(collection => collection.items.length)
+      ? createResourceTable([], 'No resources match the selected types.')
+      : createResourceTable([]);
+  }
   const map = document.createElement('div');
   map.className = 'namespace-graph';
   const standalone = document.createElement('section');
@@ -1740,7 +1792,7 @@ function renderResourceDiagram() {
   const focusKey = elements.resourceRelationshipFocus.value;
   if (!focusKey) {
     const vertical = window.matchMedia(mobileGraphQuery).matches;
-    const signature = JSON.stringify([state.namespace, state.resourceGroups, state.resourceRelationships, vertical]);
+    const signature = JSON.stringify([state.namespace, state.resourceGroups, state.resourceRelationships, [...hiddenGraphTypes], vertical]);
     if (signature === namespaceGraphSignature) return;
     namespaceGraphSignature = signature;
     graphSizeObserver?.disconnect();
@@ -1755,7 +1807,7 @@ function renderResourceDiagram() {
   }
   graphSizeObserver?.disconnect();
   namespaceGraphSignature = '';
-  const {incoming, outgoing} = resourceRelationshipsForFocus(state.resourceRelationships, focusKey);
+  const {incoming, outgoing} = resourceRelationshipsForFocus(visibleGraphRelationships(), focusKey);
   const [resource, name] = focusKey.split('/', 2);
   const focusEntry = resourceEntryForReference({resource, name});
   const center = document.createElement('section');
@@ -2433,6 +2485,10 @@ function showResourceDetailDiagram() {
   const entry = state.resourceDetail;
   if (!entry) return;
   closeResourceDetail(false);
+  if (hiddenGraphTypes.delete(entry.collection.resource)) {
+    renderGraphTypeOptions();
+    renderResourceRelationshipFocusOptions();
+  }
   setResourceView('diagram');
   focusResource({resource: entry.collection.resource, name: entry.item.name});
   elements.resourceRelationshipFocus.focus();
@@ -8073,6 +8129,12 @@ requiredElement('.resource-view-tabs').addEventListener('keydown', event => hand
 window.matchMedia(mobileGraphQuery).addEventListener('change', () => {
   if (!elements.resourceDiagramPanel.hidden) renderResourceDiagram();
 });
+elements.graphTypeOptions.addEventListener('change', event => {
+  const input = event.target as HTMLInputElement;
+  setGraphTypes([input.value], input.checked);
+});
+requiredElement('#graph-types-all').addEventListener('click', () => setGraphTypes(resourceCollections().map(c => c.resource), true));
+requiredElement('#graph-types-none').addEventListener('click', () => setGraphTypes(resourceCollections().map(c => c.resource), false));
 elements.resourceRelationshipFocus.addEventListener('change', renderResourceDiagram);
 elements.resourceKind.addEventListener('change', () => {
   elements.resourceStatus.value = '';

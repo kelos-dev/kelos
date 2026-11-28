@@ -1014,7 +1014,14 @@ Selecting a resource opens an inspector with **Summary**, **Relationships**, and
 beside the inventory. On smaller screens, it fills the content area.
 
 On the **Resources** page, the **Relationships** tab opens on **Entire namespace**,
-a graph of connected resources. Follow labeled arrows from source to target.
+a graph of connected resources. Expand **Resource types** to choose which kinds
+appear in the graph and its scope picker. TaskRecords are hidden by default.
+Hiding a kind also hides connections to and from that kind. If you hide the
+focused kind, the scope returns to **Entire namespace**. Choosing **View on
+relationship diagram** in the inspector turns the resource’s type back on and
+focuses the graph on that resource.
+
+Follow labeled arrows from source to target.
 A shared resource appears once, even when several resources reference it.
 Dashed arrows indicate selector or label matches. Separate workflows appear
 in separate diagrams, with standalone resources listed below. Graphs flow

@@ -199,6 +199,13 @@ button { color: inherit; }
 .console-section-heading p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
 .resource-view-tabs { width: fit-content; margin-bottom: 22px; }
 .resource-diagram-panel[hidden], #resource-inventory-panel[hidden] { display: none; }
+.graph-type-filter { margin: 0 0 12px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+.graph-type-filter summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+.graph-type-filter summary span { margin-left: 6px; color: var(--muted); font-size: 12px; font-weight: 400; }
+.graph-type-actions { display: flex; gap: 10px; margin: 10px 0 4px; }
+.graph-type-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(145px, 100%), 1fr)); gap: 4px 12px; }
+.graph-type-options label { display: flex; align-items: center; gap: 7px; min-height: 32px; cursor: pointer; font-size: 13px; }
+.graph-type-options input { margin: 0; accent-color: var(--accent); }
 .graph-definitions { position: absolute; pointer-events: none; }
 .graph-definitions marker { fill: var(--muted); fill: context-stroke; }
 .namespace-graph { display: grid; min-width: 0; gap: 18px; }

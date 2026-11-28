@@ -111,6 +111,14 @@
                 <select id="resource-relationship-focus"></select>
               </label>
             </div>
+            <details class="graph-type-filter">
+              <summary>Resource types <span id="graph-type-count"></span></summary>
+              <div class="graph-type-actions">
+                <button class="quiet-button" id="graph-types-all" type="button">Select all</button>
+                <button class="quiet-button" id="graph-types-none" type="button">Clear all</button>
+              </div>
+              <div class="graph-type-options" id="graph-type-options" role="group" aria-label="Visible resource types"></div>
+            </details>
             <svg class="graph-definitions" width="0" height="0" aria-hidden="true">
               <defs>
                 <marker id="namespace-arrow" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="6" markerHeight="6" orient="auto">

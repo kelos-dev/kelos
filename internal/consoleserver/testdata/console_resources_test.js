@@ -272,7 +272,8 @@ function setupResourceInspector() {
     'overviewButton', 'sessionsButton', 'resourcesButton', 'adminButton', 'backToResources',
     'resourceKind', 'resourceTypeList', 'resourceListTitle', 'resourceListCount', 'resourceListSummary',
     'resourceSearch', 'resourceStatus', 'resourceSort', 'resourceList',
-    'resourceInventoryPanel', 'resourceDiagramPanel', 'resourceInventoryTab', 'resourceRelationshipFocus',
+    'resourceInventoryPanel', 'resourceDiagramPanel', 'resourceDiagram', 'resourceInventoryTab', 'resourceDiagramTab', 'resourceRelationshipFocus',
+    'graphTypeOptions', 'graphTypeCount',
     'resourceDetailTitle', 'resourceDetailSubtitle', 'resourceDetailTabs', 'resourceDetailSummaryTab',
     'resourceDetailRelationshipsTab', 'resourceDetailLogsTab', 'resourceDetailManifestTab',
     'resourceDetailSummaryPanel', 'resourceDetailRelationshipsPanel', 'resourceDetailLogsPanel',
@@ -306,6 +307,53 @@ function testNamespaceMapScope() {
   tasks.items = [];
   renderResourceRelationshipFocusOptions();
   assert.equal(scope.disabled, true);
+}
+
+function testGraphTypeFilter() {
+  setupResourceInspector();
+  document.createElementNS = (_, name) => resourceElement(name);
+  const task = {resource: 'tasks', kind: 'Task', name: 'build'};
+  const record = {resource: 'taskrecords', kind: 'TaskRecord', name: 'result'};
+  state.resourceGroups = [{name: 'Workloads', resources: [task, record].map(ref => ({
+    resource: ref.resource, kind: ref.kind, items: [{name: ref.name, namespace: 'default'}],
+  }))}];
+  state.resourceRelationships = [{source: task, target: record, relationship: 'recorded as'}];
+  renderGraphTypeOptions();
+  renderResourceRelationshipFocusOptions();
+  const [taskInput, recordInput] = elements.graphTypeOptions.querySelectorAll('input');
+  assert.equal(taskInput.checked, true);
+  assert.equal(recordInput.checked, false);
+  assert.equal(elements.graphTypeCount.textContent, '1 of 2');
+  assert.deepEqual(namespaceGraph().nodes(), ['tasks/build']);
+  assert.equal(namespaceGraph().edgeCount(), 0);
+  assert.deepEqual(elements.resourceRelationshipFocus.options.map(o => o.value), ['', 'tasks/build']);
+
+  setGraphTypes(['taskrecords'], true);
+  assert.equal(recordInput.checked, true);
+  assert.equal(namespaceGraph().edgeCount(), 1);
+  elements.resourceRelationshipFocus.value = 'tasks/build';
+  setGraphTypes(['taskrecords'], false);
+  assert.equal(elements.resourceRelationshipFocus.value, 'tasks/build');
+  assert.equal(elements.resourceDiagram.querySelectorAll('div').some(node => node.textContent === 'No outgoing relationships'), true);
+  setGraphTypes(['tasks'], false);
+  assert.equal(elements.resourceRelationshipFocus.value, '');
+  assert.equal(elements.resourceDiagram.children[0].textContent, 'No resources match the selected types.');
+  assert.equal(elements.graphTypeCount.textContent, '0 of 2');
+  setGraphTypes(['tasks', 'taskrecords'], true);
+  assert.equal(elements.graphTypeCount.textContent, '2 of 2');
+  setGraphTypes(['tasks'], false);
+  assert.deepEqual(namespaceGraph().nodes(), ['taskrecords/result']);
+  assert.equal(namespaceGraph().edgeCount(), 0);
+  setGraphTypes(['tasks'], true);
+  setGraphTypes(['taskrecords'], false);
+
+  state.resourceDetail = resourceEntryForReference(record);
+  showResourceDetailDiagram();
+  assert.equal(elements.resourceDiagramPanel.hidden, false);
+  assert.equal(elements.resourceRelationshipFocus.value, 'taskrecords/result');
+  assert.equal(recordInput.checked, true);
+  assert.equal(elements.graphTypeCount.textContent, '2 of 2');
+  setGraphTypes(['taskrecords'], false);
 }
 
 function testNamespaceMap() {
@@ -769,6 +817,7 @@ async function testResourceInspectorRefresh() {
   }
 }
 
+testGraphTypeFilter();
 testNamespaceMapScope();
 testNamespaceMap();
 testViewsWithoutNamespace();

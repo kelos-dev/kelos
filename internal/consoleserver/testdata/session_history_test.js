@@ -350,7 +350,6 @@ global.renderHeader = () => {};
 global.renderSectionOptions = () => {};
 global.renderSelectedSessionSection = () => {};
 global.createPullRequestLink = () => null;
-global.resizeComposer = () => {};
 global.scheduleBottomAnchor = () => { bottomAnchors++; };
 global.connectSocket = () => { socketConnections++; };
 global.updateComposerAction = () => {};
@@ -389,6 +388,7 @@ vm.runInThisContext(applicationSlice('function selectSession', 'function renderH
 vm.runInThisContext(applicationSlice('async function loadSessions', 'async function loadConfig'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function setConnection', 'function usesTouchComposer'), {filename: 'app.js'});
 vm.runInThisContext(applicationSlice('function usesTouchComposer', 'function closeSocket'), {filename: 'app.js'});
+vm.runInThisContext(applicationSlice('function resizeComposer', 'async function openDialog'), {filename: 'app.js'});
 const renderSessionHeader = vm.runInThisContext(
   `(() => {${applicationSlice('function renderHeader', 'function usesTouchComposer')} return renderHeader;})()`,
   {filename: 'app.js'},
@@ -816,7 +816,16 @@ async function testPromptSuggestion() {
   state.selected = {namespace: 'default', name: 'one', provider: 'claude-code'};
   state.socket = {readyState: WebSocket.OPEN, send(raw) { assert.equal(JSON.parse(raw).type, 'workspace.changes'); }};
   elements.input.value = '';
+  const multiline = 'Review the changes\nand run the tests';
+  Object.defineProperty(elements.input, 'scrollHeight', {
+    get: () => elements.input.placeholder === multiline ? 56 : 36,
+  });
+  updateComposerAction();
+  handleEvent({type: 'prompt.suggestion', text: multiline});
+  assert.equal(elements.input.style.height, '56px');
+  assert.equal(elements.input.value, '');
   handleEvent({type: 'prompt.suggestion', text: 'Run the tests'});
+  assert.equal(elements.input.style.height, '36px');
   assert.equal(elements.input.placeholder, 'Run the tests');
   assert.equal(elements.input.value, '');
   assert.equal(elements.useSuggestion.hidden, false);

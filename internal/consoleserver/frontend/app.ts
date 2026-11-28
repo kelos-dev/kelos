@@ -4999,8 +4999,12 @@ function updateComposerAction() {
   const suggestion = !elements.input.disabled && !elements.input.value && !state.activeTurn && !state.pendingMessage
     && !state.sendingMessage && !currentAttachmentFiles().length ? state.promptSuggestion : '';
   elements.useSuggestion.hidden = !suggestion;
-  elements.input.placeholder = elements.input.disabled ? 'Choose a ready session to start chatting'
+  const placeholder = elements.input.disabled ? 'Choose a ready session to start chatting'
     : suggestion || (state.selected?.provider === 'codex' ? 'Ask Codex to do anything' : 'Message the agent…');
+  if (elements.input.placeholder !== placeholder) {
+    elements.input.placeholder = placeholder;
+    resizeComposer();
+  }
   const interrupt = composerInterruptAction();
   const command = composerCommand();
   renderComposerCommand(command, interrupt);
